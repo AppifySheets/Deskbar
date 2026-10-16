@@ -119,6 +119,46 @@ public class FloatingBarLaneShadeTests(ITestOutputHelper output)
         });
     });
 
+    // Petre: "arrange icons on the second screen to the right, push them to the right and leave a bit of
+    // space in the middle", "so the middle line is the clicking area". The first screen's icons start at
+    // the row's left edge, the second screen's end at its right edge, and the slack is in between.
+    [Fact]
+    public void The_second_screens_icons_are_pushed_to_the_right_edge() => StaThread.Run(() =>
+    {
+        using var bar = TwoScreens(busyIcons: 2);
+
+        var (left, right) = bar.LaneIcons("Busy");
+        output.WriteLine($"left icon {left.Start:0.##}..{left.End:0.##} in lane {left.LaneStart:0.##}..{left.LaneEnd:0.##}");
+        output.WriteLine($"right icon {right.Start:0.##}..{right.End:0.##} in lane {right.LaneStart:0.##}..{right.LaneEnd:0.##}");
+
+        Assert.Equal(left.LaneStart, left.Start, 1);
+        Assert.Equal(right.LaneEnd, right.End, 1);
+        // ...and between them, room to click that is not an icon.
+        Assert.True(right.Start - left.End > 24, "the middle should be wider than an icon on a row this empty");
+    });
+
+    // From the mockups, he picked the middle that lights up on hover: hovering the row (not an icon) washes
+    // the free space, never what is behind an icon, and moving onto an icon turns it off, because clicking
+    // an icon goes to that window rather than to the workspace.
+    [Fact]
+    public void Hovering_the_row_lights_its_free_space_and_an_icon_turns_it_off() => StaThread.Run(() =>
+    {
+        using var bar = TwoScreens(busyIcons: 2);
+        var row = bar.RowContainer("Busy");
+
+        Assert.Empty(bar.LitWashes(row));
+
+        row.RaiseEvent(new System.Windows.Input.MouseEventArgs(System.Windows.Input.Mouse.PrimaryDevice, 0) { RoutedEvent = UIElement.MouseEnterEvent });
+        var lit = bar.LitWashes(row);
+        // Each lane's free part plus the gap between them, and nothing holding an icon.
+        Assert.Equal(3, lit.Count);
+        Assert.All(lit, wash => Assert.Null(wash.Child));
+
+        var icon = bar.Icons(row).First();
+        icon.RaiseEvent(new System.Windows.Input.MouseEventArgs(System.Windows.Input.Mouse.PrimaryDevice, 0) { RoutedEvent = UIElement.MouseEnterEvent });
+        Assert.Empty(bar.LitWashes(row));
+    });
+
     // One display: one lane, nothing to tell apart, so nothing is shaded.
     [Fact]
     public void One_screen_shades_nothing() => StaThread.Run(() =>
@@ -223,6 +263,39 @@ public class FloatingBarLaneShadeTests(ITestOutputHelper output)
                         shade.CornerRadius.BottomRight > 0);
                 })
                 .ToList();
+
+        // The Grid a row is built around, which is what carries the row's hover handlers.
+        public Grid RowContainer(string label) =>
+            ((Panel)bar.FindName("Rows")!).Children.OfType<Border>()
+                .Select(b => b.Child).OfType<Grid>()
+                .Single(g => System.Windows.Automation.AutomationProperties.GetName(g) == label);
+
+        // The row's icon buttons: the ones inside a lane, as opposed to the caption's button above them.
+        public List<Button> Icons(DependencyObject row) =>
+            Descendants(row).OfType<DockPanel>().SelectMany(lane => Descendants(lane).OfType<Button>()).ToList();
+
+        // Free-space washes currently lit: an EMPTY Border painted the hover wash's faint white. Empty,
+        // because an active icon's own chrome is a Border with a light fill too, and it holds the icon.
+        public List<Border> LitWashes(DependencyObject row) =>
+            Descendants(row).OfType<Border>()
+                .Where(b => b.Child is null && b.Background is SolidColorBrush { Color: { R: 255, G: 255, B: 255, A: > 0 and < 0x40 } })
+                .ToList();
+
+        public sealed record Span(double Start, double End, double LaneStart, double LaneEnd);
+
+        // The only icon on each screen of a row, with the lane it sits in, as x ranges in bar coordinates.
+        public (Span Left, Span Right) LaneIcons(string label)
+        {
+            var spans = Icons(RowContainer(label))
+                .Select(icon =>
+                {
+                    var lane = Ancestor<DockPanel>(icon);
+                    return new Span(Left(icon), Left(icon) + Width(icon), Left(lane), Left(lane) + Width(lane));
+                })
+                .OrderBy(s => s.Start)
+                .ToList();
+            return (spans[0], spans[^1]);
+        }
 
         // A shade: a childless Border that does not take the mouse and paints a black, translucent fill
         // (solid for a lane, a gradient for the gap's soft edge). Found by shape, because none of the bar's

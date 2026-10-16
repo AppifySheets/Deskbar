@@ -1649,7 +1649,9 @@ public partial class FloatingBar : Window
     // screen's region sits at the same x on every row, so neither a smaller row nor an indented one
     // may move the grid: the icons inside it shrink, the icons inside it shift, and the lane
     // structure stays identical everywhere.
-    UIElement LineOf(IReadOnlyList<WindowRow> line, ISet<WindowHandle> opensGroup, string groupLabel, string groupKey, Guid? rowKey, List<UIElement> iconButtons, bool isLastLine, double scale = 1.0, double indent = 0)
+    // `washes` collects this line's FREE space (the part of each lane no icon covers, and the gap between
+    // lanes) so GroupRow can light it on hover: that is where a click switches workspace.
+    UIElement LineOf(IReadOnlyList<WindowRow> line, ISet<WindowHandle> opensGroup, string groupLabel, string groupKey, Guid? rowKey, List<UIElement> iconButtons, List<Border> washes, bool isLastLine, double scale = 1.0, double indent = 0)
     {
         // Runs of consecutive icons that share a monitor. `opensGroup` already knows where each
         // one starts -- it is the same set the wrap arithmetic budgets a marker for -- so this
@@ -1822,6 +1824,8 @@ public partial class FloatingBar : Window
             // geometry dump both read a lane's start from it.
             FrameworkElement? mark = lane.Rank > 0 && showMonitorMarkers ? LaneGap() : null;
             var firstColumn = mark is null ? -1 : AddColumn(mark, GridLength.Auto);
+            // The gap is the very middle of the middle, so it lights up with the free space either side.
+            if (mark is Border gap) washes.Add(gap);
 
             // The tone changes ACROSS the gap rather than at a hard edge, which is most of what makes this
             // the soft option: a 5 DIP gradient from the previous lane's shade to this one's.
@@ -1843,12 +1847,7 @@ public partial class FloatingBar : Window
                 // see the note on this method. The icons start further in, which is all the indent
                 // was ever meant to say, and the lane it starts in is the same width as everyone
                 // else's.
-                var stack = new StackPanel
-                {
-                    Orientation = Orientation.Horizontal,
-                    HorizontalAlignment = HorizontalAlignment.Left,
-                    Margin = firstLane ? new Thickness(indent, 0, 0, 0) : default,
-                };
+                var stack = new StackPanel { Orientation = Orientation.Horizontal };
                 run.ForEach(r =>
                 {
                     var button = IconButton(groupLabel, groupKey, r);
@@ -1863,7 +1862,42 @@ public partial class FloatingBar : Window
                         iconRings.Add(new IconRing(icon, rowKey, r.Window.Handle, r.IsActive, r.WillActivate));
                 });
 
-                var stackColumn = AddColumn(stack, new GridLength(1, GridUnitType.Star));
+                // THE FIRST SCREEN'S ICONS START AT THE LEFT AND EVERY LATER SCREEN'S ARE PUSHED RIGHT, so
+                // whatever room the lanes do not use collects in the MIDDLE of the row, and that middle is
+                // the place to click to switch workspace. Petre, once the caption left the right-hand
+                // gutter and with it the one big target on the row that was never an icon: "arrange icons
+                // on the second screen to the right, push them to the right and leave a bit of space in the
+                // middle", then "so the middle line is the clicking area", and from the mockups, the
+                // version where it lights up on hover.
+                //
+                // This reverses #58 ("the right-screen icons should sit next to the hairline, not drift
+                // right"), and knowingly: that was about keeping a screen's icons next to the mark that
+                // named them, and there is no mark any more, only the shade.
+                //
+                // Nothing is RESERVED for the middle. At Petre's width a lane is about 80 DIP and holds
+                // three 24 DIP icons, so a full row still keeps about 20 DIP in the middle; reserving more
+                // than the slack would cost every busy row an icon per line. On a third screen the middle
+                // lane is pushed right too, which puts its spare room next to the first screen's.
+                var pushRight = showMonitorMarkers && lane.Rank > 0;
+
+                // A DockPanel so the free part of the lane is an ELEMENT of its own: the icons dock to their
+                // side and `free` fills what is left, which is exactly the area that lights up on hover.
+                // A wash behind the whole lane would light up behind the icons too, and a hover that
+                // shows through an icon advertises a click the icon does not perform.
+                var free = new Border { Background = Brushes.Transparent };
+                washes.Add(free);
+                DockPanel.SetDock(stack, pushRight ? Dock.Right : Dock.Left);
+                var laneContent = new DockPanel
+                {
+                    LastChildFill = true,
+                    // A nested row's indent lives here now, on the lane rather than on the stack, for the
+                    // same reason it lived on the stack before: see the note on this method.
+                    Margin = firstLane ? new Thickness(indent, 0, 0, 0) : default,
+                };
+                laneContent.Children.Add(stack);
+                laneContent.Children.Add(free);
+
+                var stackColumn = AddColumn(laneContent, new GridLength(1, GridUnitType.Star));
                 ShadeLane(stackColumn);
                 if (firstColumn < 0) firstColumn = stackColumn;
                 // No zone without a monitor: a zone is a drop target that names a screen, and there is no
@@ -1875,7 +1909,10 @@ public partial class FloatingBar : Window
             {
                 // Nothing on this screen: an empty half that is still a drop target (#102), and with no
                 // hairline of its own beyond the divider above.
-                var empty = new Border { Margin = firstLane ? new Thickness(indent, 0, 0, 0) : default };
+                // All of it is free space, so all of it lights up on hover, the same as a busy lane's
+                // free part.
+                var empty = new Border { Margin = firstLane ? new Thickness(indent, 0, 0, 0) : default, Background = Brushes.Transparent };
+                washes.Add(empty);
                 var emptyColumn = AddColumn(empty, new GridLength(1, GridUnitType.Star));
                 // An empty screen is shaded too: it is a drop target (#102), and the shade is what shows
                 // where it is now that no hairline marks its edge.
@@ -2464,6 +2501,10 @@ public partial class FloatingBar : Window
         // an icon -- a failure with no error and no crash.
         var iconButtons = new List<UIElement>();
 
+        // The row's free space, every line's, collected the same way and for a similar reason: the hover
+        // below lights it, and it only exists once the lines have been built.
+        var washes = new List<Border>();
+
         // Petre: "sort icons in workspaces by monitors", then -- after the numbered badges that
         // first carried it were rejected -- "let's go with the hairline separator", and "let that
         // separator be not in the middle, each workspace has its own place for it".
@@ -2571,7 +2612,7 @@ public partial class FloatingBar : Window
         // isLastLine carries #102's empty tail halves, which belong to the row rather than to each of its
         // wrapped lines.
         drawnLines.Select((line, at) => (line, last: at == drawnLines.Count - 1)).ToList()
-            .ForEach(x => icons.Children.Add(LineOf(x.line, showMonitorMarkers ? opensLine : [], groupLabel, groupKey, rowKey, iconButtons, x.last,
+            .ForEach(x => icons.Children.Add(LineOf(x.line, showMonitorMarkers ? opensLine : [], groupLabel, groupKey, rowKey, iconButtons, washes, x.last,
                 scale, nested ? NestedIndent : 0)));
 
         // The parent's windows USED to be drawn here, dimmed, on every nested row -- the issue
@@ -2775,8 +2816,21 @@ public partial class FloatingBar : Window
             // Hover feedback is the LABEL brightening, never a row background: the background
             // already means "a dragged window will land here" (DropHighlight above), and one
             // channel cannot carry two meanings on a surface this small.
-            container.MouseEnter += (_, _) => setHover(true);
-            container.MouseLeave += (_, _) => { setHover(false); ClearInfo(); };
+            //
+            // ...plus a light wash over the row's FREE space, which is not the row background and
+            // does not compete with it. Petre picked it from the mockups once the middle of the row
+            // became the place to click (see LineOf): it shows the target while you aim, and only
+            // then. It is painted on the free space alone, never behind an icon, and the icons turn
+            // it off with the label below. A drag does not light it, because the OLE drag loop owns
+            // the mouse and raises no MouseEnter, so the drop highlight still has the row to itself.
+            void Hover(bool on)
+            {
+                setHover(on);
+                washes.ForEach(wash => wash.Background = on ? MiddleWash : Brushes.Transparent);
+            }
+
+            container.MouseEnter += (_, _) => Hover(true);
+            container.MouseLeave += (_, _) => { Hover(false); ClearInfo(); };
 
             // ...and the icons punch holes in that hover area. Clicking an icon jumps to a
             // WINDOW, so lighting the label there would advertise an action the click does not
@@ -2791,12 +2845,12 @@ public partial class FloatingBar : Window
             // per LINE, and hooking those would match no icon at all.
             iconButtons.ForEach(icon =>
             {
-                icon.MouseEnter += (_, _) => setHover(false);
+                icon.MouseEnter += (_, _) => Hover(false);
                 // Restores the ROW's readout, not the bar-wide default. IconButton's own
                 // MouseLeave calls ClearInfo, and this handler is added after it, so it wins --
                 // without it, sliding off an icon into the empty part of the same row would drop
                 // you back to the generic hint while still standing on the row.
-                icon.MouseLeave += (_, _) => setHover(true);
+                icon.MouseLeave += (_, _) => Hover(true);
             });
         }
 
@@ -4365,6 +4419,11 @@ public partial class FloatingBar : Window
     // The lane shade: black at 16%, laid over the row's own tint, so it darkens whatever colour the
     // workspace has rather than replacing it. The value is the one in the mockup he picked.
     static readonly Brush LaneShade = Frozen(0x29, 0x00, 0x00, 0x00);
+
+    // The hover wash over a row's free space (white at 10%, the mockup's value): light enough to read as
+    // "this is where to click" over any tint, shaded half included, and nowhere near the 75% of the
+    // current-workspace ring.
+    static readonly Brush MiddleWash = Frozen(0x1A, 0xFF, 0xFF, 0xFF);
 
     // The shade's soft edge across the 5 DIP gap: into a shaded lane, and back out of one (a third
     // screen returns to the row's own tint). Transparent BLACK at the clear end, so the gradient
