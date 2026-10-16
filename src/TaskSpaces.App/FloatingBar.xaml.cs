@@ -3905,8 +3905,9 @@ public partial class FloatingBar : Window
             // Chrome-less: WPF's stock template would paint a square hover highlight around the
             // rounded pill (see BareButton). Background stays Transparent rather than null so
             // the whole label area is still hit-testable -- a null Background is invisible to
-            // the mouse, and this is a click target first.
-            Template = BareButton,
+            // the mouse, and this is a click target first. The STRETCH variant, so the name is laid
+            // out from the left of the caption line instead of centred in it (see BareStretchButton).
+            Template = BareStretchButton,
             Padding = new Thickness(0),
             Background = Brushes.Transparent,
             BorderThickness = new Thickness(0),
@@ -4486,6 +4487,27 @@ public partial class FloatingBar : Window
         </ControlTemplate>
         """));
 
+    // The same bare chrome with its content STRETCHED instead of centred, for the row caption alone.
+    //
+    // The caption's button spans the row, so BareButton's hard-coded centring put every workspace name in
+    // the middle of its caption line, and the TextBlock's own left alignment had nothing to align within:
+    // the content was only ever as wide as its text. Petre, with a screenshot of a centred "Desktop 1",
+    // on a bar whose captions were meant to be at the top LEFT. In the 58 DIP gutter this was nearly
+    // invisible, which is how it survived. A separate template rather than binding BareButton's alignment
+    // to HorizontalContentAlignment, because the icons and colour swatches are meant to be centred and
+    // would then depend on a theme default to stay that way.
+    static readonly ControlTemplate BareStretchButton = Sealed((ControlTemplate)XamlReader.Parse(
+        """
+        <ControlTemplate TargetType="Button" xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation">
+          <Border Background="{TemplateBinding Background}"
+                  BorderBrush="{TemplateBinding BorderBrush}"
+                  BorderThickness="{TemplateBinding BorderThickness}"
+                  Padding="{TemplateBinding Padding}">
+            <ContentPresenter HorizontalAlignment="Stretch" VerticalAlignment="Center" />
+          </Border>
+        </ControlTemplate>
+        """));
+
     static ControlTemplate Sealed(ControlTemplate template)
     {
         template.Seal();
@@ -4711,7 +4733,8 @@ public partial class FloatingBar : Window
         return menu;
     }
 
-    // The unbound desktop's menu (#149), and it is deliberately one item long.
+    // The unbound desktop's menu (#149), and it is deliberately short: naming this desktop, and making a
+    // new workspace, the two things that need no workspace to act on.
     //
     // Everything else on WorkspaceMenu needs a workspace to act on: reorder positions a row in a
     // list this desktop is not in, colour paints a lane whose colour comes from that list position,
@@ -4749,6 +4772,19 @@ public partial class FloatingBar : Window
             PromptDialog.Ask("Name desktop", "Workspace name:", currentName, owner: this)
                 .Tap(chosen => Report(manager.NameDesktop(desktopId, chosen)));
         menu.Items.Add(name);
+
+        // Petre, right-clicking the only row on a bar with one unnamed desktop: "can't add in one
+        // workspace?" He could not: the insert items live on the WORKSPACE menu, so a bar with no named
+        // workspace had no way to make one except naming this desktop first, which is not what he was
+        // trying to do.
+        //
+        // This passes the rule above, which was never "one item" but "nothing that needs a workspace":
+        // creating a workspace needs no existing one to act on. It creates a NEW desktop and leaves this
+        // one alone, appended after the named workspaces (unbound desktops are not in that list, so there
+        // is no "after this row" to honour), and top level, since there is no group to join.
+        var add = new MenuItem { Header = "New workspace…", Icon = MenuGlyph("✚") };
+        add.Click += (_, _) => InsertAt(manager.State.Workspaces.Count, null);
+        menu.Items.Add(add);
 
         AddMinimizeItem(menu);
         return menu;

@@ -70,13 +70,17 @@ public class UnboundDesktopMenuTests
     // "Minimize bar" does not act on the desktop the right-click landed on, it acts on the bar. The
     // rule was never "one item", it was "nothing that needs a workspace", and every menu the bar
     // opens offers the minimize so that a right-click anywhere on it behaves the same way.
+    //
+    // And a THIRD, "New workspace…", by the same rule. Petre, on a bar holding one unnamed desktop: "can't
+    // add in one workspace?" Creating a workspace needs no existing one to act on, and without it a bar
+    // with no named workspace had no way to add one at all.
     [Fact]
     public void That_menu_offers_nothing_else_that_needs_a_workspace() => StaThread.Run(() =>
     {
         var harness = Harness.Build(withUnnamedDesktop: true);
         using var bar = harness.ShowBar();
 
-        Assert.Equal(["Name this desktop…", "Minimize bar"],
+        Assert.Equal(["Name this desktop…", "New workspace…", "Minimize bar"],
             HeadersOf(RowLabelled(bar.Rows, "Desktop 1").ContextMenu!));
     });
 

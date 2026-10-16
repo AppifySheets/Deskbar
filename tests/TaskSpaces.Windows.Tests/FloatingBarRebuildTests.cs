@@ -457,6 +457,30 @@ public class FloatingBarRebuildTests
         Assert.NotEmpty(otherRing.StrokeDashArray);
     });
 
+    // The caption sits at the top LEFT of its row. Petre sent a screenshot of "Desktop 1" centred above
+    // its icons: the caption's button spans the row, and the chrome-less template it used centred its
+    // content, so the name's own left alignment never had any room to act in. Measured rather than read
+    // off a property, because the bug was in how two correct-looking settings combined.
+    [Fact]
+    public void A_workspace_caption_starts_at_the_left_of_its_row() => StaThread.Run(() =>
+    {
+        var harness = Harness.Build();
+        using var bar = harness.ShowBar();
+
+        // A WIDTH, which is what makes the bug visible at all. Without one the bar is SizeToContent and
+        // this row is 44.7 DIP, barely wider than its name, so a centred caption also starts 2.5 DIP in
+        // and the test passed against the broken template. Petre's bar has a stored width; so does this.
+        bar.Bar.ApplyWidth(200);
+        bar.Bar.UpdateLayout();
+
+        var row = RowFor(bar.Rows, "Sparrow");
+        var caption = TextBlocks(row).Single(t => t.Text == "Sparrow");
+        var left = caption.TransformToAncestor(row).Transform(new Point(0, 0)).X;
+
+        // A few DIP of padding at most: nowhere near where a centred name would start.
+        Assert.True(left < 6, $"caption starts {left:0.##} DIP into a {row.ActualWidth:0.##} DIP row");
+    });
+
     // The current-row state lives entirely in brush ALPHA now, so "brighter" is a number these
     // tests can compare rather than something only an eye can judge.
     static byte Strength(TextBlock label) => Strength(label.Foreground);
