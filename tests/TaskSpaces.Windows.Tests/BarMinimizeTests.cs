@@ -226,8 +226,9 @@ public class BarMinimizeTests(ITestOutputHelper output)
     // Petre: "move those buttons down next to the pin icon; remove the pin icon and have those
     // buttons at the right."
     //
-    // So they sit in the PINNED ROW's caption cell, which is the rightmost column of every row and
-    // is where that row used to draw a pin glyph. Asserted through the tree rather than by
+    // So they sit in the PINNED ROW's caption cell, which is where that row used to draw a pin glyph.
+    // That cell was the right-hand gutter; it is now the caption line above the icons, with the
+    // buttons kept at its right end. Asserted through the tree rather than by
     // coordinates: a position test would pass on a bar whose strip had drifted back out into one of
     // its own.
     [Fact]
@@ -247,8 +248,11 @@ public class BarMinimizeTests(ITestOutputHelper output)
             System.Windows.Automation.AutomationProperties.GetName(g).Length > 0);
         Assert.Equal("Pinned", System.Windows.Automation.AutomationProperties.GetName(row));
 
-        // In the caption COLUMN, which is the fixed gutter on the right that every row shares.
-        Assert.Equal(1, Grid.GetColumn(strip));
+        // On the caption LINE, which is the row's first grid row (the name sits there on every other
+        // row), and at its right end: the pinned row has no name, and the right is where Petre put them.
+        Assert.Equal(2, row.RowDefinitions.Count);
+        Assert.Equal(0, Grid.GetRow(strip));
+        Assert.Equal(HorizontalAlignment.Right, ((FrameworkElement)strip).HorizontalAlignment);
 
         // ...and inside the rows panel, which is what tells the reparenting actually happened: the
         // strip is declared in XAML as a sibling of Rows and is moved in on every rebuild.

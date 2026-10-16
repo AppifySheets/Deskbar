@@ -567,9 +567,11 @@ public class FloatingBarRebuildTests
         // Six icons, no explicit width: the fixed five-per-line rule, so one break.
         Assert.Equal(2, IconLines(bar.Rows, "Sparrow"));
 
-        // Now a width that leaves room for about four. 170 = 58 caption + 4 ring + 8 padding + ~100 of
-        // icons, and the three-icon floor means the break lands after the fourth.
-        bar.Bar.ApplyWidth(170); // the same call a resize drag makes on every mouse move
+        // Now a width that leaves room for about four. At the default 0.9 scale, 108 / 0.9 = 120 DIP of
+        // content, less 4 ring and 8 padding, is 108 of icons: four 24 DIP cells, not five, and the
+        // three-icon floor means the break lands after the fourth. No caption term since the caption
+        // moved onto its own line above the icons; it was 170 with the 58 DIP gutter.
+        bar.Bar.ApplyWidth(108); // the same call a resize drag makes on every mouse move
         // SizeChanged is raised by a LAYOUT pass, not by the assignment: WPF defers layout to the
         // dispatcher, and nothing is pumping one here. The app gets that pass for free on every mouse
         // move; a test has to ask.
@@ -591,7 +593,7 @@ public class FloatingBarRebuildTests
         var queriesBefore = harness.Desktops.DesktopOfCalls;
         Assert.True(queriesBefore > 0); // precondition: the first draw DID query
 
-        bar.Bar.ApplyWidth(170); // the same call a resize drag makes on every mouse move
+        bar.Bar.ApplyWidth(108); // the same width as the test above, four icons to a line
         // SizeChanged is raised by a LAYOUT pass, not by the assignment: WPF defers layout to the
         // dispatcher, and nothing is pumping one here. The app gets that pass for free on every mouse
         // move; a test has to ask.

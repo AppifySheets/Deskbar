@@ -916,10 +916,9 @@ public partial class FloatingBar : Window
     // were being created from the bar's own menu, where the new row is the thing you are looking at.
     const double IconLineHeight = 26;
 
-    // ...and what a monitor marker adds when an icon opens a group: MonitorMarker's fixed 3px box
-    // plus its 1px margins. Constant whatever the stroke count, by the same design that keeps
-    // every marked group's icons aligned with every other's.
-    const double MonitorMarkerWidth = 5;
+    // ...and what the gap between two screens' lanes costs: LaneGap's fixed 3px box plus its 1px
+    // margins. It held the monitor hairline once; it is the space between two lane rings now.
+    const double LaneGapWidth = 5;
 
     // Root's Padding, from the XAML. Content coordinates, so it is inside the BarScale transform.
     const double RootPadding = 4;
@@ -942,18 +941,17 @@ public partial class FloatingBar : Window
     // inside a group box, or indented as a child, gives up 6 or 9 more; those are NOT subtracted here,
     // and the slack is harmless only because an icon cell is 24 wide and no lane's content can land in
     // the gap. If the cell ever shrinks, this has to learn about the group chrome too.
+    //
+    // The caption has moved again, from the fixed gutter on the right to a line of its own above the
+    // icons (top left), so the 58 DIP that gutter took is the icons' again. Nothing on the icon line is
+    // reserved for a name any more.
     double IconRoom() =>
-        Width / BarScaling.Clamp(manager.State.BarScale) - RootPadding * 2 - RowRingThickness * 2 - CaptionWidth;
+        Width / BarScaling.Clamp(manager.State.BarScale) - RootPadding * 2 - RowRingThickness * 2;
 
     // The ring drawn around every row (see the `box` Border in GroupRow), named because the icon budget
     // has to know about it: it is uniform on all four sides and on all rows, so it is a constant cost
     // rather than something the current row alone pays.
     const double RowRingThickness = 2;
-
-    // The caption gutter, the same on every row. Wide enough for most workspace names at this size and
-    // narrow enough that the icons keep the bulk of the row; anything longer wraps onto a second line inside
-    // it, which is what he asked for and what keeps the width a constant rather than a negotiation.
-    const double CaptionWidth = 58;
 
     enum ResizeSide { Left, Right }
 
@@ -1651,7 +1649,7 @@ public partial class FloatingBar : Window
     // screen's region sits at the same x on every row, so neither a smaller row nor an indented one
     // may move the grid: the icons inside it shrink, the icons inside it shift, and the lane
     // structure stays identical everywhere.
-    UIElement LineOf(IReadOnlyList<WindowRow> line, ISet<WindowHandle> opensGroup, string groupLabel, string groupKey, Guid? rowKey, List<UIElement> iconButtons, bool isLastLine, double scale = 1.0, double indent = 0)
+    UIElement LineOf(IReadOnlyList<WindowRow> line, ISet<WindowHandle> opensGroup, string groupLabel, string groupKey, Guid? rowKey, List<UIElement> iconButtons, bool isLastLine, double scale = 1.0, double indent = 0, bool isFirstLine = true)
     {
         // Runs of consecutive icons that share a monitor. `opensGroup` already knows where each
         // one starts -- it is the same set the wrap arithmetic budgets a marker for -- so this
@@ -1672,7 +1670,7 @@ public partial class FloatingBar : Window
         //   row with icons   line 23.4   mark 12.6 centred, 5.4 down from the line's top
         //   row with none    line 12.6   mark 12.6 at the top, all the slack below it
         //
-        // The stroke is a constant 14 DIP (MonitorMarker), so the ink never varied. What varied is
+        // The stroke was a constant 14 DIP (the hairline, since replaced by lane rings), so the ink never varied. What varied is
         // that a line is as tall as its tallest child: a line holding icons has room to centre the
         // mark in, and a line holding nothing but marks is exactly as tall as one, so it sat at the
         // top of the row with the row's spare height underneath. Two neighbouring rows then drew
@@ -1786,13 +1784,47 @@ public partial class FloatingBar : Window
         else
             runs.ForEach(run => lanes.Add((run[0].MonitorRank.GetValueOrDefault(0), run[0].Monitor, run)));
 
+        // RINGED LANES instead of a hairline between them. Petre: "let's also separate the two halves not
+        // by hairline but make them ringed." Each screen's lane gets an outline of its own, and the gap
+        // that used to hold the hairline is what separates two outlines.
+        //
+        // Only on the screens branch above, and only with two or more screens: one lane is the whole row,
+        // and a ring round the whole row already exists and means something else (current / previous
+        // workspace, see the row ring in GroupRow).
+        var ringLanes = showMonitorMarkers && monitorByRank.Count > 1;
+
+        // A lane that wraps is ONE ring down every line it has, not a ring per line, or Liver's three
+        // lines would stack three rings in its left half. Each line draws its slice: the first line owns
+        // the top edge and top corners, the last line the bottom ones, and a middle line only the sides.
+        // Drawn per line rather than as one overlay over the whole row, so the ring sits in the very
+        // column the icons do and cannot drift from them whatever the lane widths resolve to.
+        Border LaneRing(Thickness margin) => new()
+        {
+            BorderBrush = LaneRingBrush,
+            BorderThickness = new Thickness(1, isFirstLine ? 1 : 0, 1, isLastLine ? 1 : 0),
+            CornerRadius = new CornerRadius(isFirstLine ? 3 : 0, isFirstLine ? 3 : 0, isLastLine ? 3 : 0, isLastLine ? 3 : 0),
+            Margin = margin,
+            // Paints over the icons' edge and must not take their clicks or their drags.
+            IsHitTestVisible = false,
+        };
+
+        void AddRing(int column, Thickness margin)
+        {
+            if (!ringLanes) return;
+            var ring = LaneRing(margin);
+            Grid.SetColumn(ring, column);
+            grid.Children.Add(ring);
+        }
+
         var firstLane = true;
         lanes.ForEach(lane =>
         {
-            // The mark divides, so it belongs to the screen it precedes and never to the first one: absence
-            // is the mark for the leftmost screen ("there should be no padding in the beginning of the icons
-            // if it's on the first monitor").
-            FrameworkElement? mark = lane.Rank > 0 && showMonitorMarkers ? MonitorMarker(lane.Rank) : null;
+            // The gap divides, so it belongs to the screen it precedes and never to the first one: the
+            // leftmost lane starts at the row's edge ("there should be no padding in the beginning of the
+            // icons if it's on the first monitor"). It used to carry the hairline; now it is the empty space
+            // between two lane rings, and it stays an element because the drop targeting (#89) and the
+            // geometry dump both read a lane's start from it.
+            FrameworkElement? mark = lane.Rank > 0 && showMonitorMarkers ? LaneGap() : null;
             var firstColumn = mark is null ? -1 : AddColumn(mark, GridLength.Auto);
 
             if (lane.Run is { } run)
@@ -1822,6 +1854,9 @@ public partial class FloatingBar : Window
                 });
 
                 var stackColumn = AddColumn(stack, new GridLength(1, GridUnitType.Star));
+                // Same left margin as the icons, so on a nested row the ring starts after the spine
+                // rather than enclosing it.
+                AddRing(stackColumn, stack.Margin);
                 if (firstColumn < 0) firstColumn = stackColumn;
                 // No zone without a monitor: a zone is a drop target that names a screen, and there is no
                 // screen to name here. The icons are still drawn, which is the part that matters.
@@ -1834,6 +1869,9 @@ public partial class FloatingBar : Window
                 // hairline of its own beyond the divider above.
                 var empty = new Border { Margin = firstLane ? new Thickness(indent, 0, 0, 0) : default };
                 var emptyColumn = AddColumn(empty, new GridLength(1, GridUnitType.Star));
+                // An empty screen is ringed too: it is a drop target (#102), and the ring is what shows
+                // where it is now that no hairline marks its edge.
+                AddRing(emptyColumn, empty.Margin);
                 if (firstColumn < 0) firstColumn = emptyColumn;
                 if (lane.Monitor.HasValue)
                     zones.Add(new MonitorZone(lane.Monitor.Value, mark ?? empty, firstColumn, emptyColumn - firstColumn + 1));
@@ -2342,9 +2380,20 @@ public partial class FloatingBar : Window
         // Shared (#70) fixed that and cost the longest name's width on every row, which he called "quite
         // bad". A constant fixes it too and costs the same on every row whatever the names are -- and a name
         // that does not fit wraps inside it rather than widening anything.
+        //
+        // And now the caption goes back ABOVE the icons, but at the TOP LEFT this time. Petre: "let's
+        // redesign so that caption is not on the right, but at the top left". This is the b30a355 layout
+        // with its one rejected detail fixed: that caption was centred, and "captions in the middle are
+        // bad, move to the left" is what sent it into a gutter in the first place. Left-aligned on its own
+        // line it keeps everything the gutter bought (every row's icon area is the same width, so the lanes
+        // line up) and gives the gutter's 58 DIP back to the icons. The cost is height: one caption line
+        // per row, which he accepted when asked.
+        //
+        // So: one column, two rows. Row 0 is the caption line (Auto, as tall as the clamped name); row 1
+        // holds the icon lines. The spine and the row ring span both, so a row is still one shape.
         var container = new Grid { Background = idle };
-        container.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-        container.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(CaptionWidth) });
+        container.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        container.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
 
         // Petre: "if any one workspace grows too wide, then it's inefficient... there's an icon
         // limit, and if that's exceeded, then it's the next row that needs to be added."
@@ -2475,7 +2524,7 @@ public partial class FloatingBar : Window
         var lanes = showMonitorMarkers && monitorByRank.Count > 0 ? monitorByRank.Count : Math.Max(1, groups.Count);
         var share = lanes <= 1
             ? IconRoom()
-            : (IconRoom() - (showMonitorMarkers ? (lanes - 1) * MonitorMarkerWidth : 0)) / lanes;
+            : (IconRoom() - (showMonitorMarkers ? (lanes - 1) * LaneGapWidth : 0)) / lanes;
 
         var perGroup = groups
             .Select(g => (double.IsNaN(Width)
@@ -2512,9 +2561,11 @@ public partial class FloatingBar : Window
 
         // isLastLine carries #102's empty tail halves, which belong to the row rather than to each of its
         // wrapped lines.
-        drawnLines.Select((line, at) => (line, last: at == drawnLines.Count - 1)).ToList()
+        // isFirstLine is for the lane rings: a lane that wraps draws ONE ring down all its lines, so each
+        // line has to know whether it carries the ring's top edge, its bottom edge, both or neither.
+        drawnLines.Select((line, at) => (line, first: at == 0, last: at == drawnLines.Count - 1)).ToList()
             .ForEach(x => icons.Children.Add(LineOf(x.line, showMonitorMarkers ? opensLine : [], groupLabel, groupKey, rowKey, iconButtons, x.last,
-                scale, nested ? NestedIndent : 0)));
+                scale, nested ? NestedIndent : 0, isFirstLine: x.first)));
 
         // The parent's windows USED to be drawn here, dimmed, on every nested row -- the issue
         // asked for "everything from the main workspace pinned to the nested ones". Petre, seeing
@@ -2525,7 +2576,8 @@ public partial class FloatingBar : Window
         // what you aim at, so doubling them halves the value of every one. Belonging is a
         // relationship, and a relationship is better drawn once at the edge of the row than
         // restated by copying its contents.
-        Grid.SetColumn(icons, 0);
+        // Below the caption line.
+        Grid.SetRow(icons, 1);
         container.Children.Add(icons);
 
         // Petre: "only children but with a better representation that it's a child", then "maybe a
@@ -2540,9 +2592,9 @@ public partial class FloatingBar : Window
         //     one colour rather than as two neighbours that happen to touch;
         //   * a small indent on the icons.
         //
-        // The spine spans both columns of the row and sits at its left edge, inside the indent the
-        // icons give up -- so it lands in space that would otherwise be empty, and costs the row
-        // nothing at all.
+        // The spine spans both ROWS of the row (caption line and icons) and sits at its left edge,
+        // inside the indent the icons and the caption both give up -- so it lands in space that would
+        // otherwise be empty, and costs the row nothing at all.
         if (nested && spine is not null)
         {
             var mark = new Border
@@ -2554,11 +2606,21 @@ public partial class FloatingBar : Window
                 Margin = new Thickness(1, 1, 0, 1),
                 CornerRadius = new CornerRadius(1),
             };
-            Grid.SetColumn(mark, 0);
+            Grid.SetRowSpan(mark, container.RowDefinitions.Count);
             container.Children.Add(mark);
         }
 
-        Grid.SetColumn(label, 1);
+        // The caption line. A workspace name sits at the left, indented on a nested row by the same
+        // amount as its icons so the name starts above its first icon and clear of the spine. The pinned
+        // row's cell is the bar's two buttons instead (#173), and those stay on the RIGHT, where Petre
+        // put them ("have those buttons at the right"): the pinned row has no name, so its caption line
+        // is free on the left anyway.
+        if (label is FrameworkElement caption)
+        {
+            if (captionContent is not null) caption.HorizontalAlignment = HorizontalAlignment.Right;
+            else if (nested) caption.Margin = new Thickness(caption.Margin.Left + NestedIndent, caption.Margin.Top, caption.Margin.Right, caption.Margin.Bottom);
+        }
+        Grid.SetRow(label, 0);
         container.Children.Add(label);
 
         // THE ROW'S RING, and it is a stroked Rectangle rather than the Border's own BorderBrush for
@@ -2586,8 +2648,7 @@ public partial class FloatingBar : Window
             RadiusY = 4,
             IsHitTestVisible = false,
         };
-        Grid.SetColumn(ring, 0);
-        Grid.SetColumnSpan(ring, container.ColumnDefinitions.Count);
+        Grid.SetRowSpan(ring, container.RowDefinitions.Count);
         container.Children.Add(ring);
         PaintRing(ring, isCurrent ? CurrentRowRing : Brushes.Transparent, SolidRing);
 
@@ -3684,10 +3745,18 @@ public partial class FloatingBar : Window
 
         if (caption)
         {
-            // WRAPS inside the fixed gutter instead of widening it, which is the whole point of fixing the
-            // width: "multiline if it doesn't fit in that small space".
-            textBlock.TextWrapping = TextWrapping.Wrap;
-            textBlock.TextAlignment = TextAlignment.Right;
+            // ONE LINE at the top left, trimmed rather than wrapped. The wrap belonged to the 58 DIP gutter
+            // ("multiline if it doesn't fit in that small space"); on its own line the caption has the whole
+            // row's width, so a name that still does not fit is longer than the bar is wide, and a second
+            // caption line would cost every such row height to say what an ellipsis says.
+            //
+            // Trimming does NOT keep a name out of the width calculation: measured under infinite width (a
+            // bar that has never been resized, still SizeToContent) a TextBlock asks for its whole text.
+            // Harmless at this face, where a long name is narrower than one icon line, and once the bar has
+            // a stored width the ellipsis is what applies.
+            textBlock.TextWrapping = TextWrapping.NoWrap;
+            textBlock.TextTrimming = TextTrimming.CharacterEllipsis;
+            textBlock.TextAlignment = TextAlignment.Left;
             // The font's line box is taller than its letters, and on text this small that difference is most
             // of the height -- the same clamp the group header uses (#91), and on two lines it matters twice.
             textBlock.LineHeight = GroupHeaderFontSize + 2;
@@ -4265,102 +4334,30 @@ public partial class FloatingBar : Window
         Frozen(0xFF, 0xFF, 0xF1, 0x76), // yellow
     ];
 
-    // Which monitor the icons after it are on, drawn as a TALLY: one hairline for monitor 1, two
-    // for monitor 2, and so on.
+    // The space between two screens' lanes, which is where the hairline used to be.
     //
-    // Petre: "when all windows are on one screen, i can't tell which monitor has those windows
-    // and i need to." The plain divider this replaces could only appear at a BOUNDARY, so a row
-    // whose windows all sat on one screen showed nothing at all -- the grouping was visible but
-    // never which group.
+    // History, kept because it explains the width: this was a TALLY (one stroke for the second
+    // screen, two for the third), drawn because "when all windows are on one screen, i can't tell
+    // which monitor has those windows and i need to". Two things made it redundant. Every row is now
+    // laid out over every known screen (#99, #103), so a lane's POSITION already says which screen it
+    // is; and Petre asked for the lanes to be ringed instead ("separate the two halves not by hairline
+    // but make them ringed"), so the outline is what marks the boundary now.
     //
-    // A tally rather than the obvious alternatives, both of which were tried and rejected on
-    // this bar already. A digit is what the monitor badges were ("numbers are hard to read" at
-    // 7px on a 90%-scaled window). A colour would need a legend, and would compete with the
-    // same-app bands under the icons, which are already colour. Marks you can count need
-    // neither: two strokes means monitor two, and nothing has to be learned.
-    //
-    // It also absorbs the divider's old job. Every group that has a mark opens with it, so the
-    // boundary between two groups is visible without anything being drawn between them.
-    //
-    // ZERO-BASED, which is Petre's refinement: "no leading hairline if it's on the first one,
-    // leading hairline if it's on the second." Monitor 1 is silent and monitor 2 gets one
-    // stroke, so on two displays the ABSENCE of a mark carries the first monitor -- complete
-    // information for half the ink, on much the commoner row. It still generalises: monitor 3
-    // would take two strokes.
-    //
-    // The cost, accepted rather than solved: a window whose monitor could not be resolved also
-    // draws nothing, so at the end of a row it is indistinguishable from monitor 1. That needs
-    // MonitorFromWindow to have failed for a live window, which is rare enough not to buy a
-    // permanent mark on every primary-monitor group.
-    // Only ever called for monitor 2 and up; the first monitor draws nothing and reserves nothing
-    // (see the caller). Width is still fixed so that a monitor-2 group and a monitor-3 group
-    // indent their icons identically -- the alignment that survived is between the groups that
-    // actually carry a mark.
-    //
-    // This began as the fix for "hairline is not in the middle always", which turned out not to
-    // be about the hairline at all: a zero-stroke marker was still being added for monitor 1, so
-    // those rows got an indent of its margin alone, matching no other row's. Reserving the gutter
-    // for every group fixed the alignment and left an empty indent on the commonest row; Petre
-    // saw both and chose flush.
-    static FrameworkElement MonitorMarker(int rank)
+    // Still a real element, empty and transparent, because two readers depend on one being here: the
+    // drop targeting (#89) takes a lane's start from it, and the geometry dump prints that start.
+    // Still the same 5 DIP (3 plus a pixel each side), so the icon budget in GroupRow, which charges
+    // LaneGapWidth per seam, is unchanged and no line wraps differently because of this.
+    static FrameworkElement LaneGap() => new Border
     {
-        // CENTRED in the fixed 3px box below, and that is a fix rather than a detail. Petre: "space
-        // between the hairline and icons following on the right is not consistent across
-        // workspaces."
-        //
-        // The box is a constant 3px so that a monitor-2 group and a monitor-3 group reserve exactly
-        // the same width and no row's icons shift against another's. But the tally inside it is as
-        // wide as its STROKE COUNT -- 1px for monitor 2, 3px for monitor 3 -- and a stretched stack
-        // lays its children out from the left. So a single stroke sat hard against the left of its
-        // box with the other 2px trailing after it as dead space, which lands entirely on the right
-        // of the mark: two pixels before the hairline, five after it.
-        //
-        // Centring spends that space evenly, which is what "before and after the hairline space
-        // should be the same" asked for and what the fixed-width box has been quietly undoing ever
-        // since -- and it makes the gap identical whatever the monitor number, which is the half
-        // that varies from row to row.
-        var tally = new StackPanel
-        {
-            Orientation = Orientation.Horizontal,
-            VerticalAlignment = VerticalAlignment.Center,
-            HorizontalAlignment = HorizontalAlignment.Center,
-        };
-        // Capped at two strokes, which is also what sets the reserved width below. Past the
-        // third display the exact count matters less than "not one of the first two", and an
-        // uncapped tally would widen every row on a machine with many screens.
-        // The gap goes BEFORE each stroke but the first, so two strokes measure exactly 3px with
-        // no trailing space. A trailing margin would pad the gutter from the inside, which is
-        // half of what made it too wide.
-        Enumerable.Range(0, Math.Clamp(rank, 0, 2)).ToList().ForEach(i => tally.Children.Add(new Border
-        {
-            Width = 1,
-            Height = 14,
-            Background = MonitorMarkerBrush,
-            Margin = new Thickness(i == 0 ? 0 : 1, 0, 0, 0),
-        }));
+        Width = 3,
+        Margin = new Thickness(1, 0, 1, 0),
+        VerticalAlignment = VerticalAlignment.Stretch,
+    };
 
-        return new Border
-        {
-            Child = tally,
-            // Two 1px strokes and the 1px between them. Constant whatever the count, so a
-            // monitor-1 group reserves exactly what a monitor-3 group occupies and no row's
-            // icons shift relative to another's.
-            Width = 3,
-            // Petre: "it has too much padding", then "before and after the hairline space should
-            // be the same... before is good." Was 3 and 2 around a 4px box -- nine pixels per
-            // group, on a bar that counts them; five now.
-            //
-            // Symmetric, which reverses an earlier deliberate choice. The asymmetry was meant to
-            // tie the mark to the icons FOLLOWING it, since that is what it names -- but a
-            // one-pixel lean is not enough to read as meaning anything, and it was plainly
-            // visible as a lopsided gap. A mark that sits evenly between two clumps reads as
-            // separating them, which it also does.
-            Margin = new Thickness(1, 0, 1, 0),
-            VerticalAlignment = VerticalAlignment.Center,
-        };
-    }
-
-    static readonly Brush MonitorMarkerBrush = Frozen(0x59, 0xFF, 0xFF, 0xFF);
+    // The lane rings' stroke: the hairline's own colour, since it is the same boundary drawn another
+    // way. Faint on purpose. The ROW's ring (solid / dashed / dotted for current and the trail before
+    // it) is the loud one, and these sit inside it, so they must read as structure and not compete.
+    static readonly Brush LaneRingBrush = Frozen(0x59, 0xFF, 0xFF, 0xFF);
 
     // Petre: "when hovering, it highlights outside the circle for the selected workspace."
     //
