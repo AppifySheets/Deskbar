@@ -154,6 +154,14 @@ public class FloatingBarLaneShadeTests(ITestOutputHelper output)
         Assert.Equal(3, lit.Count);
         Assert.All(lit, wash => Assert.Null(wash.Child));
 
+        // "make the highlight with rounded edges a bit": the three pieces read as ONE rounded pill, so the
+        // two lane pieces are rounded on their outer ends and square where they meet the gap, and the gap
+        // itself is square on both sides.
+        var ordered = lit.OrderBy(w => w.TransformToAncestor(row).Transform(new Point(0, 0)).X).ToList();
+        Assert.True(ordered[0].CornerRadius is { TopLeft: > 0, BottomLeft: > 0, TopRight: 0, BottomRight: 0 }, ordered[0].CornerRadius.ToString());
+        Assert.Equal(new CornerRadius(0), ordered[1].CornerRadius);
+        Assert.True(ordered[2].CornerRadius is { TopLeft: 0, BottomLeft: 0, TopRight: > 0, BottomRight: > 0 }, ordered[2].CornerRadius.ToString());
+
         var icon = bar.Icons(row).First();
         icon.RaiseEvent(new System.Windows.Input.MouseEventArgs(System.Windows.Input.Mouse.PrimaryDevice, 0) { RoutedEvent = UIElement.MouseEnterEvent });
         Assert.Empty(bar.LitWashes(row));

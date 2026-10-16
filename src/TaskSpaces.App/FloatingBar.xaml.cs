@@ -1884,7 +1884,17 @@ public partial class FloatingBar : Window
                 // side and `free` fills what is left, which is exactly the area that lights up on hover.
                 // A wash behind the whole lane would light up behind the icons too, and a hover that
                 // shows through an icon advertises a click the icon does not perform.
-                var free = new Border { Background = Brushes.Transparent };
+                // Rounded at the ends that meet icons or the row's edge, square where it meets a gap: the
+                // two lanes' free parts and the gap between them light up together, so each line's
+                // highlight is ONE rounded pill with no notch at the seams. Petre: "make the highlight with
+                // rounded edges a bit".
+                var free = new Border
+                {
+                    Background = Brushes.Transparent,
+                    CornerRadius = pushRight
+                        ? WashCorners(left: firstLane, right: true)
+                        : WashCorners(left: true, right: lane.Rank == lastRank),
+                };
                 washes.Add(free);
                 DockPanel.SetDock(stack, pushRight ? Dock.Right : Dock.Left);
                 var laneContent = new DockPanel
@@ -1911,7 +1921,13 @@ public partial class FloatingBar : Window
                 // hairline of its own beyond the divider above.
                 // All of it is free space, so all of it lights up on hover, the same as a busy lane's
                 // free part.
-                var empty = new Border { Margin = firstLane ? new Thickness(indent, 0, 0, 0) : default, Background = Brushes.Transparent };
+                var empty = new Border
+                {
+                    Margin = firstLane ? new Thickness(indent, 0, 0, 0) : default,
+                    Background = Brushes.Transparent,
+                    // Same rule as a busy lane's free part: round only the ends no gap continues past.
+                    CornerRadius = WashCorners(left: firstLane, right: lane.Rank == lastRank),
+                };
                 washes.Add(empty);
                 var emptyColumn = AddColumn(empty, new GridLength(1, GridUnitType.Star));
                 // An empty screen is shaded too: it is a drop target (#102), and the shade is what shows
@@ -4424,6 +4440,11 @@ public partial class FloatingBar : Window
     // "this is where to click" over any tint, shaded half included, and nowhere near the 75% of the
     // current-workspace ring.
     static readonly Brush MiddleWash = Frozen(0x1A, 0xFF, 0xFF, 0xFF);
+
+    // The wash's corners: rounded on the sides asked for, 3 DIP like the row box's own corners, so the
+    // highlight sits inside the row in the same shape language rather than as a hard-edged slab.
+    static CornerRadius WashCorners(bool left, bool right) =>
+        new(left ? 3 : 0, right ? 3 : 0, right ? 3 : 0, left ? 3 : 0);
 
     // The shade's soft edge across the 5 DIP gap: into a shaded lane, and back out of one (a third
     // screen returns to the row's own tint). Transparent BLACK at the clear end, so the gradient
