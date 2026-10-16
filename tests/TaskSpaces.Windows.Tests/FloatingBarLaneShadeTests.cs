@@ -11,67 +11,75 @@ using Xunit.Abstractions;
 
 namespace TaskSpaces.Windows.Tests;
 
-// Petre: "let's also separate the two halves not by hairline but make them ringed."
+// Petre, on separating the two screens' halves of a row: rings were "too much", he asked for "softer
+// separation", and of five mockups he picked the shade step. Every other screen's lane is a shade darker
+// than the row's tint, with a 5 DIP gradient across the gap where the hairline used to be, and nothing
+// else is drawn.
 //
-// Each screen's lane in a row carries an outline of its own now, and the gap that held the hairline is
-// the space between two outlines. These tests began as the hairline's ("separator is not always uniform
-// in height", "separator on GEPHA is in a wrong place on the second line") and keep its invariants,
-// because the ring answers the same questions the hairline did: an empty row draws its boundary where a
-// busy one does, every line of a wrapped row agrees, and the boundary does not wander.
+// These tests began as the hairline's ("separator is not always uniform in height", "separator on GEPHA is
+// in a wrong place on the second line") and keep its invariants, because the shade answers the same
+// questions: an empty row marks its boundary where a busy one does, every line of a wrapped row agrees, and
+// the boundary does not wander.
 //
-// A ring is drawn PER LINE, as a slice: the first line of a row owns the top edge, the last line the
-// bottom, a middle line only the sides. So a lane that wraps reads as one ring, not a stack of them.
-//
-// Measured through TransformToAncestor, so the bar's scale and each row's own scale are part of the
-// number rather than something to argue about afterwards.
-public class FloatingBarLaneRingTests(ITestOutputHelper output)
+// The shade is painted per LINE in the lane's own column, so a wrapped row's shade is a stack of slices
+// that must meet edge to edge. Measured through TransformToAncestor, so the bar's scale and each row's own
+// scale are part of the number rather than something to argue about afterwards.
+public class FloatingBarLaneShadeTests(ITestOutputHelper output)
 {
-    // An empty workspace's rings are the same height and at the same place as a busy one's.
+    // An empty workspace's shade is the same height and at the same x as a busy one's.
     //
     // About the line FLOOR as much as anything: a line holding nothing is still one icon line tall, so an
-    // empty screen's ring (a drop target, #102) is as big as one with windows in it.
+    // empty screen's half (a drop target, #102) is shaded exactly as fully as one with windows in it.
     [Fact]
-    public void A_row_with_no_windows_rings_its_lanes_like_a_row_with_icons() => StaThread.Run(() =>
+    public void A_row_with_no_windows_is_shaded_like_a_row_with_icons() => StaThread.Run(() =>
     {
         using var bar = TwoScreens(busyIcons: 2);
 
-        var rings = bar.Rings().Where(r => r.Row is not "Pinned").ToList();
-        rings.ForEach(r => output.WriteLine(r.ToString()));
+        var lanes = bar.Shades().Where(s => s.Row is not "Pinned" && !s.IsFade).ToList();
+        lanes.ForEach(s => output.WriteLine(s.ToString()));
 
-        // Two rows, two screens each, one line each: four closed rings.
-        Assert.Equal(4, rings.Count);
-        Assert.All(rings, r => Assert.True(r.Closed, r.ToString()));
-        Assert.Single(rings.Select(r => Math.Round(r.Height, 1)).Distinct());
-        Assert.Single(rings.Select(r => Math.Round(r.InsetInRow, 1)).Distinct());
+        // Two rows, one line each, and only the second screen's half shaded in each.
+        Assert.Equal(2, lanes.Count);
+        Assert.Single(lanes.Select(s => Math.Round(s.Height, 1)).Distinct());
+        Assert.Single(lanes.Select(s => Math.Round(s.X, 1)).Distinct());
     });
 
-    // A lane that wraps is ONE ring down both lines: the first line's slice is open at the bottom, the
-    // second's at the top, and the second starts exactly where the first ends.
+    // It is the SECOND screen that is shaded, and its shade starts where the gap's soft edge ends, so the
+    // tone changes across the gap and nowhere else.
     [Fact]
-    public void A_wrapped_lane_is_one_ring_down_its_lines() => StaThread.Run(() =>
+    public void The_second_screen_is_shaded_and_the_change_is_softened_across_the_gap() => StaThread.Run(() =>
+    {
+        using var bar = TwoScreens(busyIcons: 2);
+
+        var busy = bar.Shades().Where(s => s.Row == "Busy").ToList();
+        busy.ForEach(s => output.WriteLine(s.ToString()));
+
+        var fade = Assert.Single(busy, s => s.IsFade);
+        var lane = Assert.Single(busy, s => !s.IsFade);
+        Assert.Equal(fade.X + fade.Width, lane.X, 1);
+
+        // To the right of the row's middle: the right-hand half, not the left.
+        Assert.True(lane.X > lane.RowWidth / 2 - 5, lane.ToString());
+    });
+
+    // A wrapped row is shaded down every line, the slices meeting with no gap or overlap, and only the
+    // last line's slice rounds the row's bottom-right corner.
+    [Fact]
+    public void A_wrapped_row_is_shaded_down_every_line() => StaThread.Run(() =>
     {
         // Seven windows, six of them on the first screen, so that screen's lane runs onto a second line.
         using var bar = TwoScreens(busyIcons: 7);
 
-        var wrapped = bar.Rings().Where(r => r.Row == "Busy").ToList();
-        wrapped.ForEach(r => output.WriteLine(r.ToString()));
+        var slices = bar.Shades().Where(s => s.Row == "Busy" && !s.IsFade).OrderBy(s => s.InsetInRow).ToList();
+        slices.ForEach(s => output.WriteLine(s.ToString()));
 
-        // Two screens times two lines. The second screen's lane has nothing on the second line and is
-        // still ringed down it, so both lanes stay the row's full height.
-        Assert.Equal(4, wrapped.Count);
-
-        var top = wrapped.Where(r => r.InsetInRow == wrapped.Min(x => x.InsetInRow)).ToList();
-        var bottom = wrapped.Except(top).ToList();
-        Assert.Equal(2, top.Count);
-        Assert.All(top, r => Assert.True(r.OpenBelow && !r.OpenAbove, r.ToString()));
-        Assert.All(bottom, r => Assert.True(r.OpenAbove && !r.OpenBelow, r.ToString()));
-
-        // Contiguous, lane by lane: same x, and no gap or overlap where the two slices meet.
-        top.ForEach(upper =>
-        {
-            var lower = bottom.Single(r => Math.Abs(r.X - upper.X) < 0.5);
-            Assert.Equal(upper.InsetInRow + upper.Height, lower.InsetInRow, 1);
-        });
+        // The second screen has nothing on the second line and is still shaded down it, so the half is
+        // the row's full height.
+        Assert.Equal(2, slices.Count);
+        Assert.Equal(slices[0].X, slices[1].X, 1);
+        Assert.Equal(slices[0].InsetInRow + slices[0].Height, slices[1].InsetInRow, 1);
+        Assert.False(slices[0].RoundedBottomRight);
+        Assert.True(slices[1].RoundedBottomRight);
     });
 
     // Petre, with a screenshot of a wrapped GEPHA row: "separator on GEPHA is in a wrong place on the
@@ -81,31 +89,43 @@ public class FloatingBarLaneRingTests(ITestOutputHelper output)
     //   line 1  cols=[*:50, auto:5, *:50, *:50]  zones=[screen1@5,     screen2@51]
     //
     // A THIRD lane on the second line, so the boundary moved from 73 to 51. It comes from the fallback
-    // for a window whose monitor cannot be resolved, which used to get a lane of its own. With rings the
-    // same mistake would draw a third ring on that line, so the check is that the second screen's ring
-    // starts at the same x on every line of every row.
+    // for a window whose monitor cannot be resolved, which used to get a lane of its own. With shading the
+    // same mistake would move or narrow the shade on that line, so the check is one shade per line,
+    // starting at the same x everywhere.
     [Fact]
     public void A_window_with_no_monitor_does_not_move_the_boundary() => StaThread.Run(() =>
     {
         using var bar = TwoScreens(busyIcons: 7, oneWithNoMonitor: true);
 
-        var rings = bar.Rings().Where(r => r.Row is not "Pinned").ToList();
-        rings.ForEach(r => output.WriteLine(r.ToString()));
+        var lanes = bar.Shades().Where(s => s.Row is not "Pinned" && !s.IsFade).ToList();
+        lanes.ForEach(s => output.WriteLine(s.ToString()));
 
-        // Two rings on every line, never three...
-        Assert.All(rings.GroupBy(r => r.Line), line => Assert.Equal(2, line.Count()));
-        // ...and the right-hand one starts at the same x everywhere.
-        Assert.Single(rings.GroupBy(r => r.Line).Select(line => Math.Round(line.Max(r => r.X), 1)).Distinct());
+        Assert.All(lanes.GroupBy(s => s.Line), line => Assert.Single(line));
+        Assert.Single(lanes.Select(s => Math.Round(s.X, 1)).Distinct());
     });
 
-    // One display: one lane, and a ring round it would only repeat the row's own ring, which already
-    // means something else (current / previous workspace). So nothing is drawn.
+    // The shade sits UNDER everything else in its line, #89's drop highlight included, so dragging a window
+    // over the shaded half lights it up as brightly as the other half instead of through a darkening.
     [Fact]
-    public void One_screen_draws_no_lane_rings() => StaThread.Run(() =>
+    public void The_shade_is_painted_beneath_the_drop_highlight() => StaThread.Run(() =>
+    {
+        using var bar = TwoScreens(busyIcons: 2);
+
+        Assert.All(bar.Shades(), s =>
+        {
+            var children = s.LineGrid.Children.OfType<UIElement>().ToList();
+            var shadeAt = children.IndexOf(s.Element);
+            Assert.All(children.Where(c => !Bar.IsShade(c)), other => Assert.True(children.IndexOf(other) > shadeAt));
+        });
+    });
+
+    // One display: one lane, nothing to tell apart, so nothing is shaded.
+    [Fact]
+    public void One_screen_shades_nothing() => StaThread.Run(() =>
     {
         using var bar = TwoScreens(busyIcons: 3, everythingOnOneScreen: true);
 
-        Assert.Empty(bar.Rings());
+        Assert.Empty(bar.Shades());
     });
 
     // Two displays, which is what turns the lanes on at all; one workspace holding busyIcons windows and
@@ -176,40 +196,45 @@ public class FloatingBarLaneRingTests(ITestOutputHelper output)
             frontToBack.Select((x, i) => (x.Window, i)).ToDictionary(x => x.Window, x => x.i),
             PrimaryMonitor: 1);
 
-    // One measured slice of a lane ring: where it starts, how tall it is, how far down its row it
-    // begins, and which of its horizontal edges it draws. Every number is in the bar's own coordinates,
-    // transforms included. `Line` is the line grid it sits in, to group slices by line.
-    sealed record Ring(string Row, object Line, double X, double Height, double InsetInRow, bool OpenAbove, bool OpenBelow)
+    // One measured slice of shade: a lane's (solid) or the gap's soft edge (a gradient). Every number is in
+    // the bar's own coordinates, transforms included.
+    sealed record Shade(string Row, Grid LineGrid, Border Element, bool IsFade, double X, double Width, double Height,
+        double InsetInRow, double RowWidth, bool RoundedBottomRight)
     {
-        public bool Closed => !OpenAbove && !OpenBelow;
+        public object Line => LineGrid;
 
         public override string ToString() =>
-            "row=" + Row + " x=" + X.ToString("0.##") + " height=" + Height.ToString("0.##") +
-            " insetInRow=" + InsetInRow.ToString("0.##") + " openAbove=" + OpenAbove + " openBelow=" + OpenBelow;
+            "row=" + Row + (IsFade ? " fade" : " lane") + " x=" + X.ToString("0.##") + " width=" + Width.ToString("0.##") +
+            " height=" + Height.ToString("0.##") + " insetInRow=" + InsetInRow.ToString("0.##") +
+            " rowWidth=" + RowWidth.ToString("0.##") + " rounded=" + RoundedBottomRight;
     }
 
     sealed class Bar(FloatingBar bar) : IDisposable
     {
         public void Dispose() => bar.Close();
 
-        public List<Ring> Rings() =>
-            Slices((Panel)bar.FindName("Rows")!)
-                .Select(slice =>
+        public List<Shade> Shades() =>
+            Descendants((Panel)bar.FindName("Rows")!).OfType<Border>().Where(IsShade)
+                .Select(shade =>
                 {
-                    var row = Row(slice);
-                    return new Ring(Label(row), Ancestor<Grid>(slice), Left(slice), Extent(slice), Top(slice) - Top(row),
-                        OpenAbove: slice.BorderThickness.Top == 0, OpenBelow: slice.BorderThickness.Bottom == 0);
+                    var row = Row(shade);
+                    return new Shade(Label(row), Ancestor<Grid>(shade), shade, shade.Background is LinearGradientBrush,
+                        Left(shade), Width(shade), Extent(shade), Top(shade) - Top(row), Width(row),
+                        shade.CornerRadius.BottomRight > 0);
                 })
                 .ToList();
 
-        // A ring slice: a childless Border with a stroke on both sides that does not take the mouse.
-        // Found by shape, because none of the bar's elements are named; nothing else on the bar is a
-        // hit-test-invisible, childless, side-stroked Border.
-        static List<Border> Slices(DependencyObject root) =>
-            Descendants(root).OfType<Border>()
-                .Where(b => b is { Child: null, IsHitTestVisible: false, BorderBrush: not null }
-                            && b.BorderThickness.Left > 0 && b.BorderThickness.Right > 0)
-                .ToList();
+        // A shade: a childless Border that does not take the mouse and paints a black, translucent fill
+        // (solid for a lane, a gradient for the gap's soft edge). Found by shape, because none of the bar's
+        // elements are named, and nothing else on the bar is a hit-test-invisible, childless, black fill.
+        public static bool IsShade(object node) =>
+            node is Border { Child: null, IsHitTestVisible: false } border
+            && border.Background switch
+            {
+                SolidColorBrush solid => solid.Color is { R: 0, G: 0, B: 0, A: > 0 },
+                LinearGradientBrush gradient => gradient.GradientStops.All(s => s.Color is { R: 0, G: 0, B: 0 }),
+                _ => false,
+            };
 
         static IEnumerable<DependencyObject> Descendants(DependencyObject node) =>
             Enumerable.Range(0, VisualTreeHelper.GetChildrenCount(node))
@@ -232,6 +257,9 @@ public class FloatingBarLaneRingTests(ITestOutputHelper output)
 
         double Extent(FrameworkElement element) =>
             element.TransformToAncestor(bar).TransformBounds(new Rect(0, 0, 1, element.ActualHeight)).Height;
+
+        double Width(FrameworkElement element) =>
+            element.TransformToAncestor(bar).TransformBounds(new Rect(0, 0, element.ActualWidth, 1)).Width;
 
         double Top(FrameworkElement element) => element.TransformToAncestor(bar).Transform(new Point(0, 0)).Y;
 

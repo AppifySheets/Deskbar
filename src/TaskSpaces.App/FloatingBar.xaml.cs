@@ -916,8 +916,8 @@ public partial class FloatingBar : Window
     // were being created from the bar's own menu, where the new row is the thing you are looking at.
     const double IconLineHeight = 26;
 
-    // ...and what the gap between two screens' lanes costs: LaneGap's fixed 3px box plus its 1px
-    // margins. It held the monitor hairline once; it is the space between two lane rings now.
+    // ...and what the gap between two screens' lanes costs: LaneGap's fixed box. It held the monitor
+    // hairline once; it carries the soft edge of the lane shade now.
     const double LaneGapWidth = 5;
 
     // Root's Padding, from the XAML. Content coordinates, so it is inside the BarScale transform.
@@ -1649,7 +1649,7 @@ public partial class FloatingBar : Window
     // screen's region sits at the same x on every row, so neither a smaller row nor an indented one
     // may move the grid: the icons inside it shrink, the icons inside it shift, and the lane
     // structure stays identical everywhere.
-    UIElement LineOf(IReadOnlyList<WindowRow> line, ISet<WindowHandle> opensGroup, string groupLabel, string groupKey, Guid? rowKey, List<UIElement> iconButtons, bool isLastLine, double scale = 1.0, double indent = 0, bool isFirstLine = true)
+    UIElement LineOf(IReadOnlyList<WindowRow> line, ISet<WindowHandle> opensGroup, string groupLabel, string groupKey, Guid? rowKey, List<UIElement> iconButtons, bool isLastLine, double scale = 1.0, double indent = 0)
     {
         // Runs of consecutive icons that share a monitor. `opensGroup` already knows where each
         // one starts -- it is the same set the wrap arithmetic budgets a marker for -- so this
@@ -1670,7 +1670,7 @@ public partial class FloatingBar : Window
         //   row with icons   line 23.4   mark 12.6 centred, 5.4 down from the line's top
         //   row with none    line 12.6   mark 12.6 at the top, all the slack below it
         //
-        // The stroke was a constant 14 DIP (the hairline, since replaced by lane rings), so the ink never varied. What varied is
+        // The stroke was a constant 14 DIP (the hairline, since replaced by the lane shade), so the ink never varied. What varied is
         // that a line is as tall as its tallest child: a line holding icons has room to centre the
         // mark in, and a line holding nothing but marks is exactly as tall as one, so it sat at the
         // top of the row with the row's spare height underneath. Two neighbouring rows then drew
@@ -1784,48 +1784,58 @@ public partial class FloatingBar : Window
         else
             runs.ForEach(run => lanes.Add((run[0].MonitorRank.GetValueOrDefault(0), run[0].Monitor, run)));
 
-        // RINGED LANES instead of a hairline between them. Petre: "let's also separate the two halves not
-        // by hairline but make them ringed." Each screen's lane gets an outline of its own, and the gap
-        // that used to hold the hairline is what separates two outlines.
+        // SHADED LANES instead of a hairline between them. Petre: "let's also separate the two halves not
+        // by hairline but make them ringed", then, seeing the rings, "no, rings are too much", "softer
+        // separation", and from five mockups he picked the shade step: every other screen's lane is a
+        // shade darker than the row's tint, and nothing is drawn at all. The row simply changes tone where
+        // the screen changes.
         //
-        // Only on the screens branch above, and only with two or more screens: one lane is the whole row,
-        // and a ring round the whole row already exists and means something else (current / previous
-        // workspace, see the row ring in GroupRow).
-        var ringLanes = showMonitorMarkers && monitorByRank.Count > 1;
+        // ALTERNATING by rank (1, 3, ... are shaded), so on two screens the right half is the darker one
+        // and a third screen goes back to the row's own tint rather than getting darker still.
+        //
+        // Only on the screens branch above, and only with two or more screens: one lane is the whole row
+        // and has nothing to be told apart from.
+        var shadeLanes = showMonitorMarkers && monitorByRank.Count > 1;
+        static bool Shaded(int rank) => rank % 2 == 1;
 
-        // A lane that wraps is ONE ring down every line it has, not a ring per line, or Liver's three
-        // lines would stack three rings in its left half. Each line draws its slice: the first line owns
-        // the top edge and top corners, the last line the bottom ones, and a middle line only the sides.
-        // Drawn per line rather than as one overlay over the whole row, so the ring sits in the very
-        // column the icons do and cannot drift from them whatever the lane widths resolve to.
-        Border LaneRing(Thickness margin) => new()
+        // Painted per LINE, in the lane's own column, so a wrapped row's shade runs unbroken down every
+        // line (the lines are stacked edge to edge) and cannot drift from the icons whatever the lane
+        // widths resolve to. Inserted at the BOTTOM of the line's z-order, under #89's drop `aim`, so a
+        // drag's highlight still paints over the shade instead of being darkened by it.
+        void AddShade(int column, Brush brush, CornerRadius corners = default)
         {
-            BorderBrush = LaneRingBrush,
-            BorderThickness = new Thickness(1, isFirstLine ? 1 : 0, 1, isLastLine ? 1 : 0),
-            CornerRadius = new CornerRadius(isFirstLine ? 3 : 0, isFirstLine ? 3 : 0, isLastLine ? 3 : 0, isLastLine ? 3 : 0),
-            Margin = margin,
-            // Paints over the icons' edge and must not take their clicks or their drags.
-            IsHitTestVisible = false,
-        };
-
-        void AddRing(int column, Thickness margin)
-        {
-            if (!ringLanes) return;
-            var ring = LaneRing(margin);
-            Grid.SetColumn(ring, column);
-            grid.Children.Add(ring);
+            var shade = new Border { Background = brush, CornerRadius = corners, IsHitTestVisible = false };
+            Grid.SetColumn(shade, column);
+            grid.Children.Insert(0, shade);
         }
 
         var firstLane = true;
+        var previousShaded = false;
+        // Ranks are unique on the screens branch, the only one that shades, so this names the rightmost lane.
+        var lastRank = lanes.Count > 0 ? lanes[^1].Rank : -1;
         lanes.ForEach(lane =>
         {
             // The gap divides, so it belongs to the screen it precedes and never to the first one: the
             // leftmost lane starts at the row's edge ("there should be no padding in the beginning of the
-            // icons if it's on the first monitor"). It used to carry the hairline; now it is the empty space
-            // between two lane rings, and it stays an element because the drop targeting (#89) and the
+            // icons if it's on the first monitor"). It used to carry the hairline; now it carries the shade's
+            // soft edge (see below), and it stays an element because the drop targeting (#89) and the
             // geometry dump both read a lane's start from it.
             FrameworkElement? mark = lane.Rank > 0 && showMonitorMarkers ? LaneGap() : null;
             var firstColumn = mark is null ? -1 : AddColumn(mark, GridLength.Auto);
+
+            // The tone changes ACROSS the gap rather than at a hard edge, which is most of what makes this
+            // the soft option: a 5 DIP gradient from the previous lane's shade to this one's.
+            var shaded = shadeLanes && Shaded(lane.Rank);
+            if (shadeLanes && mark is not null && shaded != previousShaded)
+                AddShade(firstColumn, shaded ? ShadeFadeIn : ShadeFadeOut);
+
+            // The lane's own shade, with the row's bottom-right corner rounded when this lane ends the row
+            // on its last line, so the shade follows the row's shape instead of squaring its corner off.
+            void ShadeLane(int column)
+            {
+                if (shaded)
+                    AddShade(column, LaneShade, new CornerRadius(0, 0, isLastLine && lane.Rank == lastRank ? 2 : 0, 0));
+            }
 
             if (lane.Run is { } run)
             {
@@ -1854,9 +1864,7 @@ public partial class FloatingBar : Window
                 });
 
                 var stackColumn = AddColumn(stack, new GridLength(1, GridUnitType.Star));
-                // Same left margin as the icons, so on a nested row the ring starts after the spine
-                // rather than enclosing it.
-                AddRing(stackColumn, stack.Margin);
+                ShadeLane(stackColumn);
                 if (firstColumn < 0) firstColumn = stackColumn;
                 // No zone without a monitor: a zone is a drop target that names a screen, and there is no
                 // screen to name here. The icons are still drawn, which is the part that matters.
@@ -1869,15 +1877,16 @@ public partial class FloatingBar : Window
                 // hairline of its own beyond the divider above.
                 var empty = new Border { Margin = firstLane ? new Thickness(indent, 0, 0, 0) : default };
                 var emptyColumn = AddColumn(empty, new GridLength(1, GridUnitType.Star));
-                // An empty screen is ringed too: it is a drop target (#102), and the ring is what shows
+                // An empty screen is shaded too: it is a drop target (#102), and the shade is what shows
                 // where it is now that no hairline marks its edge.
-                AddRing(emptyColumn, empty.Margin);
+                ShadeLane(emptyColumn);
                 if (firstColumn < 0) firstColumn = emptyColumn;
                 if (lane.Monitor.HasValue)
                     zones.Add(new MonitorZone(lane.Monitor.Value, mark ?? empty, firstColumn, emptyColumn - firstColumn + 1));
             }
 
             firstLane = false;
+            previousShaded = shaded;
         });
 
         // Registered per LINE rather than per row, because a wrapped row can hold one screen's icons
@@ -2561,11 +2570,9 @@ public partial class FloatingBar : Window
 
         // isLastLine carries #102's empty tail halves, which belong to the row rather than to each of its
         // wrapped lines.
-        // isFirstLine is for the lane rings: a lane that wraps draws ONE ring down all its lines, so each
-        // line has to know whether it carries the ring's top edge, its bottom edge, both or neither.
-        drawnLines.Select((line, at) => (line, first: at == 0, last: at == drawnLines.Count - 1)).ToList()
+        drawnLines.Select((line, at) => (line, last: at == drawnLines.Count - 1)).ToList()
             .ForEach(x => icons.Children.Add(LineOf(x.line, showMonitorMarkers ? opensLine : [], groupLabel, groupKey, rowKey, iconButtons, x.last,
-                scale, nested ? NestedIndent : 0, isFirstLine: x.first)));
+                scale, nested ? NestedIndent : 0)));
 
         // The parent's windows USED to be drawn here, dimmed, on every nested row -- the issue
         // asked for "everything from the main workspace pinned to the nested ones". Petre, seeing
@@ -4340,24 +4347,37 @@ public partial class FloatingBar : Window
     // screen, two for the third), drawn because "when all windows are on one screen, i can't tell
     // which monitor has those windows and i need to". Two things made it redundant. Every row is now
     // laid out over every known screen (#99, #103), so a lane's POSITION already says which screen it
-    // is; and Petre asked for the lanes to be ringed instead ("separate the two halves not by hairline
-    // but make them ringed"), so the outline is what marks the boundary now.
+    // is; and the screens are now told apart by tone (every other lane is shaded, see LineOf), which
+    // Petre chose over rings and over four fainter lines as the softest separation.
     //
-    // Still a real element, empty and transparent, because two readers depend on one being here: the
-    // drop targeting (#89) takes a lane's start from it, and the geometry dump prints that start.
-    // Still the same 5 DIP (3 plus a pixel each side), so the icon budget in GroupRow, which charges
-    // LaneGapWidth per seam, is unchanged and no line wraps differently because of this.
+    // Still a real element, because two readers depend on one being here: the drop targeting (#89)
+    // takes a lane's start from it, and the geometry dump prints that start. Still the same 5 DIP, so
+    // the icon budget in GroupRow, which charges LaneGapWidth per seam, is unchanged and no line wraps
+    // differently because of this. One box of 5 now rather than 3 plus a pixel of margin each side,
+    // because the shade's soft edge is painted across the gap and a margin would leave a 1 DIP seam of
+    // the row's tint on either side of it.
     static FrameworkElement LaneGap() => new Border
     {
-        Width = 3,
-        Margin = new Thickness(1, 0, 1, 0),
+        Width = LaneGapWidth,
         VerticalAlignment = VerticalAlignment.Stretch,
     };
 
-    // The lane rings' stroke: the hairline's own colour, since it is the same boundary drawn another
-    // way. Faint on purpose. The ROW's ring (solid / dashed / dotted for current and the trail before
-    // it) is the loud one, and these sit inside it, so they must read as structure and not compete.
-    static readonly Brush LaneRingBrush = Frozen(0x59, 0xFF, 0xFF, 0xFF);
+    // The lane shade: black at 16%, laid over the row's own tint, so it darkens whatever colour the
+    // workspace has rather than replacing it. The value is the one in the mockup he picked.
+    static readonly Brush LaneShade = Frozen(0x29, 0x00, 0x00, 0x00);
+
+    // The shade's soft edge across the 5 DIP gap: into a shaded lane, and back out of one (a third
+    // screen returns to the row's own tint). Transparent BLACK at the clear end, so the gradient
+    // only ever varies in alpha and never passes through a lighter colour on the way.
+    static readonly Brush ShadeFadeIn = Fade(0x00, 0x29);
+    static readonly Brush ShadeFadeOut = Fade(0x29, 0x00);
+
+    static Brush Fade(byte fromAlpha, byte toAlpha)
+    {
+        var brush = new LinearGradientBrush(Color.FromArgb(fromAlpha, 0, 0, 0), Color.FromArgb(toAlpha, 0, 0, 0), 0);
+        brush.Freeze();
+        return brush;
+    }
 
     // Petre: "when hovering, it highlights outside the circle for the selected workspace."
     //
