@@ -92,6 +92,7 @@ public partial class FloatingBar : Window
         // released when it leaves.
         MouseEnter += (_, _) =>
         {
+            if (!hoveringBar && ClickTrace.On) ClickTrace.Write("hold taken: pointer on the bar");
             hoveringBar = true;
             if (liveListTarget is { } live) heldExpanded.Add(live);
         };
@@ -4577,7 +4578,7 @@ public partial class FloatingBar : Window
     // something other than the current workspace was being held open, which is the only case where letting
     // go changes anything on screen.
     //
-    // And not at once: after a GRACE (six seconds, see releaseGrace), re-checked then. Petre, dropping a window dragged by its
+    // And not at once: after a GRACE (see releaseGrace), re-checked then. Petre, dropping a window dragged by its
     // own title bar: "it collapses expanded workspaces when i drop it", "shouldn't". To grab a title bar the
     // pointer has to leave the bar first, so an immediate release let go of everything on the way to the
     // very drag that was coming back. The grace covers that trip, and a title-bar drag in progress holds
@@ -4588,12 +4589,12 @@ public partial class FloatingBar : Window
         releaseGrace.Start();
     }
 
-    // SIX seconds, measured rather than guessed: two was too short. The log of Petre's drag of a maximized
-    // Outlook window ("workspace still collapses") had his last move on the bar at 14:24:43.9, the release
-    // at about 14:24:46.0, and the title-bar drag starting at 14:24:46.25: the trip to the title bar took
-    // about two and a half seconds. The cost is the other side of the same number: really leaving the bar
-    // collapses the rows six seconds later rather than two.
-    readonly System.Windows.Threading.DispatcherTimer releaseGrace = new() { Interval = TimeSpan.FromSeconds(6) };
+    // Two seconds. A timer alone cannot cover the trip from the bar to a window's title bar: Petre's took
+    // two and a half seconds once and eight the next time, against a six-second grace, and the rows
+    // collapsed both times ("workspace still collapses", "re collapses"). So the grace is short again, which
+    // tidies up promptly when he really leaves, and a title-bar drag that follows puts the released rows
+    // back (RestoreReleasedRows).
+    readonly System.Windows.Threading.DispatcherTimer releaseGrace = new() { Interval = TimeSpan.FromSeconds(2) };
 
     void ReleaseHeldRowsNow()
     {
@@ -4601,8 +4602,30 @@ public partial class FloatingBar : Window
         if (!hoveringBar || draggingWindow || headerDrag is not null || openMenu?.IsOpen == true || PointerOnBar()) return;
         hoveringBar = false;
         var stale = heldExpanded.Any(id => id != liveListTarget);
+        // Kept, so a title-bar drag that starts soon after can put these rows back (see RestoreReleasedRows).
+        lastReleased = (heldExpanded.ToList(), DateTime.UtcNow);
+        if (ClickTrace.On) ClickTrace.Write($"hold released rows={heldExpanded.Count} stale={stale}");
         heldExpanded.Clear();
         if (stale) Rebuild();
+    }
+
+    // The rows that were expanded when the hold was last let go, and when. Petre: "re collapses". The
+    // grace on leaving cannot be long enough for every trip from the bar to a window's title bar (the log
+    // had one of eight seconds), so a title-bar drag that starts within RestoreWindow of a release puts the
+    // released rows back, at the moment the drag starts. The pointer is on the window's title bar then, not
+    // on the bar, so the rows change while nothing is being aimed at them, and the bar is back as it was
+    // by the time the pointer arrives.
+    (IReadOnlyList<Guid> Rows, DateTime At)? lastReleased;
+    static readonly TimeSpan RestoreWindow = TimeSpan.FromSeconds(30);
+
+    void RestoreReleasedRows()
+    {
+        if (hoveringBar || lastReleased is not { } released || DateTime.UtcNow - released.At > RestoreWindow) return;
+        hoveringBar = true;
+        released.Rows.ToList().ForEach(id => heldExpanded.Add(id));
+        lastReleased = null;
+        if (ClickTrace.On) ClickTrace.Write($"hold restored for title-bar drag rows={heldExpanded.Count}");
+        Rebuild();
     }
 
     // --- dropping a window by its own title bar ----------------------------------------------------
@@ -4674,11 +4697,14 @@ public partial class FloatingBar : Window
     public void OnWindowDragStarted(WindowHandle window)
     {
         if (!IsVisible || Minimized) return;
-        if (manager.RectOfWindow(window) is not { HasValue: true } start) return;
 
         // A title-bar drag holds the expanded rows like being on the bar does: the pointer left the bar to
-        // grab the title bar, and the release that started then is called off (see ReleaseHeldRows).
+        // grab the title bar, and the release that started then is called off (see ReleaseHeldRows), or,
+        // if it has already happened, undone (see RestoreReleasedRows).
         releaseGrace.Stop();
+        RestoreReleasedRows();
+
+        if (manager.RectOfWindow(window) is not { HasValue: true } start) return;
 
         // Maximized NOW, or when last sampled as the window in front (see foregroundZoom). Windows
         // un-maximizes a window the moment it is dragged, and this event is delivered a little after

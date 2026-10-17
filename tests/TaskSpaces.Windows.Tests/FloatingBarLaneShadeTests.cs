@@ -278,6 +278,24 @@ public class FloatingBarLaneShadeTests(ITestOutputHelper output)
         Assert.Empty(Bar.TitlesIn(bar.RowContainer("Busy")));
     });
 
+    // "re collapses": a trip from the bar to a window's title bar can outlast any grace (the log had one of
+    // eight seconds), so a title-bar drag starting soon after a release puts the released rows back.
+    [Fact]
+    public void A_title_bar_drag_soon_after_leaving_puts_the_released_rows_back() => StaThread.Run(() =>
+    {
+        using var bar = TwoScreens(busyIcons: 3, standOnBusy: true, expandRow: true);
+        bar.Enter();
+        Assert.True(bar.Manager.Switch(bar.EmptyWorkspace).IsSuccess);
+        bar.Pulse();
+
+        bar.Leave(); // the grace ran out on the way to the title bar
+        Assert.Empty(Bar.TitlesIn(bar.RowContainer("Busy")));
+
+        bar.Window.OnWindowDragStarted(new WindowHandle(101));
+        bar.Window.UpdateLayout();
+        Assert.NotEmpty(Bar.TitlesIn(bar.RowContainer("Busy")));
+    });
+
     // A window dragged by its own title bar and dropped on a row (Petre: "move to another workspace by
     // dragging a window") moves there WITHOUT taking you along: "don't follow the workspace, move it out of
     // the current workspace, stay on the current workspace". The drag itself runs in Windows' move loop and
@@ -424,6 +442,8 @@ public class FloatingBarLaneShadeTests(ITestOutputHelper output)
         PulsingDesktops? desktops = null, Guid emptyDesktop = default) : IDisposable
     {
         public PulsingDesktops Desktops => desktops!;
+
+        public FloatingBar Window => bar;
 
         public Guid EmptyDesktop => emptyDesktop;
 
