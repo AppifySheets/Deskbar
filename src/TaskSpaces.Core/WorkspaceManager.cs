@@ -66,7 +66,14 @@ public sealed class WorkspaceManager(
     readonly Func<DateTimeOffset> now = clock ?? (() => DateTimeOffset.Now);
     readonly int ownProcess = ownProcessId ?? Environment.ProcessId;
     readonly Subject<Unit> stateChanged = new();
-    readonly Dictionary<WindowHandle, WindowInfo> knownWindows = [];
+    // ORDERED, and the order is the order the bar draws icons in. Petre: "rearranging icons when i
+    // activate a program makes no sense at this point", then "go with the first-seen order, with the
+    // possibility of dragging those icons". So a window takes its place when it is first seen (see
+    // Know), keeps it however often it is activated, and moves only when he drags it (see
+    // MoveWindowInOrder). A plain Dictionary could not carry this: its enumeration order is not
+    // promised, and in practice a new entry reuses the slot a removed one left, so a window opened
+    // later would turn up wherever a closed one used to be.
+    readonly OrderedDictionary<WindowHandle, WindowInfo> knownWindows = new();
     readonly Dictionary<WindowHandle, Guid> memberships = []; // window -> workspace
 
     // When each window was last activated, as an order rather than a time (#94). Live-only and
@@ -169,7 +176,7 @@ public sealed class WorkspaceManager(
                 // at this point, so every title here is the app's OWN. A moment later the rename sweep
                 // rewrites them ("VSC"), and the folder each window has open is unreadable from then on
                 // (#132).
-                monitor.Snapshot().ToList().ForEach(w => { knownWindows[w.Handle] = w; NoteContainer(w); });
+                monitor.Snapshot().ToList().ForEach(w => { Know(w); NoteContainer(w); });
                 // The windows a previous run watched open, checked against what is actually open now.
                 // Needs the list just built, and has to happen before the first sweep can learn anything.
                 ForgetOpeningsThatAreGone();
@@ -303,7 +310,7 @@ public sealed class WorkspaceManager(
 
     void OnAppeared(WindowInfo window)
     {
-        knownWindows[window.Handle] = window;
+        Know(window);
 
         // Opened while we watched, so where it sits says where Petre was standing rather than where its
         // project lives, until it is moved (see SnapshotContainerHomes).
@@ -376,7 +383,7 @@ public sealed class WorkspaceManager(
     // turning into a burst of COM sweeps.
     void OnActivated(WindowInfo window)
     {
-        knownWindows[window.Handle] = window;
+        Know(window);
         MarkActive(window.Handle);
     }
 
@@ -455,7 +462,7 @@ public sealed class WorkspaceManager(
             .Where(w => !knownWindows.ContainsKey(w.Handle) && !IsOursByProcess(w))
             .ToList();
 
-        adopted.ForEach(w => { knownWindows[w.Handle] = w; NoteContainer(w); });
+        adopted.ForEach(w => { Know(w); NoteContainer(w); });
         // Treated as windows that only opened where they are, because an adopted window may be brand new
         // (about one arrival in nine on Petre's machine comes this way) and nothing here can tell. Wrong in
         // this direction, an old window merely waits for a move before it teaches (see SnapshotContainerHomes).
@@ -593,7 +600,7 @@ public sealed class WorkspaceManager(
         // needs when the window comes back.
         if (previouslyUnknown && !monitor.IsListed(window.Handle)) return;
 
-        knownWindows[window.Handle] = window;
+        Know(window);
         if (previouslyUnknown) { OnAppeared(window); return; } // became taskbar-worthy late
 
         // The container this window has loaded, read BEFORE anything renames it: the folder is only
@@ -3085,6 +3092,86 @@ public sealed class WorkspaceManager(
         return lastKnownDesktop.TryGetValue(window, out var remembered) && live.Any(d => d.Id == remembered)
             ? Result.Success(remembered)
             : answer;
+    }
+
+    // --- icon order ------------------------------------------------------------------
+    //
+    // The bar draws a row's icons in knownWindows order (screen first, then this order), so this is the
+    // whole of how icons are arranged. Petre: "go with the first-seen order, with the possibility of
+    // dragging those icons." Activation no longer reorders anything; the active window is told apart by
+    // its highlight alone.
+
+    // Records a window, keeping its place if it is already known. A NEW window goes where the saved
+    // order (AppState.IconOrder) says its app was, or at the end if its app has no saved place: that is
+    // the first-seen order, with what he arranged by hand coming back after a restart.
+    void Know(WindowInfo window)
+    {
+        if (knownWindows.ContainsKey(window.Handle))
+        {
+            knownWindows[window.Handle] = window; // an existing key keeps its position
+            return;
+        }
+
+        knownWindows.Insert(ArrivalIndex(window), window.Handle, window);
+    }
+
+    // Before the first known window whose app is saved LATER in the order than this one's, so the saved
+    // apps come back in their saved sequence. A window whose app has no saved place goes at the end.
+    int ArrivalIndex(WindowInfo window)
+    {
+        if (SavedRankOf(window) is not { } rank) return knownWindows.Count;
+
+        var later = knownWindows.Values.ToList().FindIndex(w => SavedRankOf(w) is { } other && other > rank);
+        return later < 0 ? knownWindows.Count : later;
+    }
+
+    int? SavedRankOf(WindowInfo window) =>
+        OrderIdentityOf(window) is { } id && State.IconOrder.ToList().IndexOf(id) is var at and >= 0 ? at : null;
+
+    // The app a window belongs to, for remembering its place across restarts: exe path plus arguments,
+    // the key placement memory uses. Deliberately NOT RosterIdentity.Of(WindowInfo), which returns
+    // nothing for browsers so that placement memory leaves them alone; an icon's PLACE is a different
+    // question, and browsers are the windows most worth arranging. Windows with no readable process
+    // path (elevated ones) have no identity and simply keep their first-seen place.
+    static string? OrderIdentityOf(WindowInfo window) =>
+        window.ProcessPath is { } path ? RosterIdentity.Of(path, window.CommandLine) : null;
+
+    // Petre dragged `moved` to just before (or just after) `anchor`. The two need not be in the same row:
+    // a drop onto another row moves the window there AND puts it where it was dropped, and both are
+    // expressed as a position relative to a neighbour, which is all a single order needs.
+    //
+    // Saved as the sequence of APPS (see MergedIconOrder), because window handles do not survive a
+    // restart. Several windows of one app share one identity, so after a restart they come back
+    // together, in the order they reappear.
+    public Result MoveWindowInOrder(WindowHandle moved, WindowHandle anchor, bool after)
+    {
+        if (moved == anchor) return Result.Success();
+        if (!knownWindows.TryGetValue(moved, out var window)) return Result.Failure("That window has closed.");
+        if (!knownWindows.ContainsKey(anchor)) return Result.Failure("The window it was dropped next to has closed.");
+
+        knownWindows.Remove(moved);
+        knownWindows.Insert(knownWindows.IndexOf(anchor) + (after ? 1 : 0), moved, window);
+        Persist(State with { IconOrder = MergedIconOrder() });
+        return Result.Success();
+    }
+
+    // The saved order after a rearrangement: the apps open now, in the order they are drawn, with every
+    // app saved earlier but not open now kept just after the app it used to follow. Without that second
+    // half, arranging the bar while an app is closed would forget where that app goes.
+    IReadOnlyList<string> MergedIconOrder()
+    {
+        var open = knownWindows.Values.Select(OrderIdentityOf).OfType<string>().Distinct().ToList();
+        var openSet = open.ToHashSet();
+        var merged = new List<string>(open);
+        var saved = State.IconOrder.ToList();
+
+        saved.Select((id, at) => (id, at)).Where(x => !openSet.Contains(x.id)).ToList().ForEach(x =>
+        {
+            var predecessor = saved.Take(x.at).LastOrDefault(merged.Contains);
+            merged.Insert(predecessor is null ? 0 : merged.IndexOf(predecessor) + 1, x.id);
+        });
+
+        return merged;
     }
 
     // --- overview / switcher-facing operations -----------------------------------

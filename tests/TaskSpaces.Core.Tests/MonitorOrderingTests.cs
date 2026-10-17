@@ -71,15 +71,17 @@ public class MonitorOrderingTests
         Assert.Equal([B.Handle, C.Handle, A.Handle], rows.Select(r => r.Window.Handle));
     }
 
-    // Petre: "let's also sort those icons by z-index." Monitor first, then front-most first
-    // within each monitor -- so the two sorts compose rather than one overriding the other.
+    // Petre: "rearranging icons when i activate a program makes no sense at this point; ring / square
+    // the active program without changing its position." This used to sort front-most first within a
+    // monitor ("let's also sort those icons by z-index"); now being in front moves nothing, and a row
+    // keeps the order the manager hands it (first seen, rearranged only by dragging).
     [Fact]
-    public void Within_a_monitor_icons_are_ordered_front_most_first()
+    public void Being_in_front_does_not_move_a_window()
     {
         // B is in front of A, and both are on monitor 1; C sits alone on monitor 2.
         var rows = Rows([A, B, C], Facts([(A, 1), (B, 1), (C, 2)], frontToBack: [B, A, C]));
 
-        Assert.Equal([B.Handle, A.Handle, C.Handle], rows.Select(r => r.Window.Handle));
+        Assert.Equal([A.Handle, B.Handle, C.Handle], rows.Select(r => r.Window.Handle));
     }
 
     // Monitor still wins: a window in front on monitor 2 does not jump ahead of monitor 1.
@@ -91,15 +93,16 @@ public class MonitorOrderingTests
         Assert.Equal([B.Handle, A.Handle], rows.Select(r => r.Window.Handle));
     }
 
-    // A desktop with no z-order -- which is every desktop but the current one -- must come out
-    // exactly as it did before z-order sorting existed.
+    // ...and a window with z-order no longer jumps ahead of the ones without it. That split was the
+    // current desktop (which has z-order) against every other desktop (which does not), so a row looked
+    // different depending on whether you were standing on it.
     [Fact]
-    public void Windows_with_no_z_order_sort_last_within_their_monitor_and_keep_their_order()
+    public void Having_z_order_does_not_move_a_window_ahead_of_those_without_it()
     {
         // C is in front; A and B have no z-order at all. All three on monitor 1.
         var rows = Rows([A, B, C], Facts([(A, 1), (B, 1), (C, 1)], frontToBack: [C]));
 
-        Assert.Equal([C.Handle, A.Handle, B.Handle], rows.Select(r => r.Window.Handle));
+        Assert.Equal([A.Handle, B.Handle, C.Handle], rows.Select(r => r.Window.Handle));
     }
 
     // A window whose monitor could not be resolved must still be reachable -- same principle as
@@ -283,22 +286,20 @@ public class MonitorOrderingTests
         Assert.Equal(2, rows.Single(r => r.Window.Handle == two.Handle).Ordinal.Value);
     }
 
-    // The point of the number is to stay put while the icons move. If it were derived from
-    // position, watching "2 change places with 1" would be impossible -- the labels would just
-    // follow the sort and nothing would appear to have happened.
+    // The number stays put, and now so does the icon. Bringing the second of two windows to the front
+    // used to swap them on the row while each kept its number; now neither the order nor the numbers
+    // change, which is what "without changing its position" asks.
     [Fact]
-    public void The_number_does_not_follow_z_order()
+    public void Bringing_a_window_to_the_front_changes_neither_its_place_nor_its_number()
     {
         var edgeOne = Window(0x10, "Edge");
         var edgeTwo = Window(0x20, "Edge");
 
         var before = Rows([edgeOne, edgeTwo], Facts([(edgeOne, 1), (edgeTwo, 1)], frontToBack: [edgeOne, edgeTwo]));
-        // Now the second one is brought to the front, which reverses the ROW order.
         var after = Rows([edgeOne, edgeTwo], Facts([(edgeOne, 1), (edgeTwo, 1)], frontToBack: [edgeTwo, edgeOne]));
 
         Assert.Equal([edgeOne.Handle, edgeTwo.Handle], before.Select(r => r.Window.Handle));
-        Assert.Equal([edgeTwo.Handle, edgeOne.Handle], after.Select(r => r.Window.Handle));
-        // ...and each window kept the number it had, which is what makes the demotion visible.
+        Assert.Equal([edgeOne.Handle, edgeTwo.Handle], after.Select(r => r.Window.Handle));
         Assert.Equal(1, after.Single(r => r.Window.Handle == edgeOne.Handle).Ordinal.Value);
         Assert.Equal(2, after.Single(r => r.Window.Handle == edgeTwo.Handle).Ordinal.Value);
     }

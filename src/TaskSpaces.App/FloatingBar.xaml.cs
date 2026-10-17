@@ -792,10 +792,6 @@ public partial class FloatingBar : Window
     // both means the ring needs no second piece of hover state to drift out of step with this one.
     (string Key, Guid? RowKey, IReadOnlyList<WindowHandle> Order)? hoveredRow;
 
-    // The order to re-impose on this row, or nothing if it is not the hovered one.
-    IReadOnlyList<WindowHandle> HeldOrder(string groupKey) =>
-        hoveredRow is { } h && h.Key == groupKey ? h.Order : [];
-
     // Marks a row container for HoveredRowKey below. A dedicated type rather than the bare string:
     // icon Buttons already carry Tag = IconTag, so a walk up the tree looking for "any string Tag"
     // would stop at the icon and report "icon" as the row key -- releasing the freeze the instant
@@ -1651,7 +1647,9 @@ public partial class FloatingBar : Window
     // structure stays identical everywhere.
     // `washes` collects this line's FREE space (the part of each lane no icon covers, and the gap between
     // lanes) so GroupRow can light it on hover: that is where a click switches workspace.
-    UIElement LineOf(IReadOnlyList<WindowRow> line, ISet<WindowHandle> opensGroup, string groupLabel, string groupKey, Guid? rowKey, List<UIElement> iconButtons, List<Border> washes, bool isLastLine, double scale = 1.0, double indent = 0)
+    // `slots` collects each icon with the window it stands for, so a drop can work out which two icons
+    // it landed between (see InsertionAt).
+    UIElement LineOf(IReadOnlyList<WindowRow> line, ISet<WindowHandle> opensGroup, string groupLabel, string groupKey, Guid? rowKey, List<UIElement> iconButtons, List<Border> washes, List<IconSlot> slots, bool isLastLine, double scale = 1.0, double indent = 0)
     {
         // Runs of consecutive icons that share a monitor. `opensGroup` already knows where each
         // one starts -- it is the same set the wrap arithmetic budgets a marker for -- so this
@@ -1857,6 +1855,7 @@ public partial class FloatingBar : Window
                     if (scale is not 1.0 && button is FrameworkElement scaled)
                         scaled.LayoutTransform = new ScaleTransform(scale, scale);
                     iconButtons.Add(button);
+                    if (button is FrameworkElement placed) slots.Add(new IconSlot(placed, r));
                     stack.Children.Add(button);
                     if (button is Button icon)
                         iconRings.Add(new IconRing(icon, rowKey, r.Window.Handle, r.IsActive, r.WillActivate));
@@ -1976,6 +1975,48 @@ public partial class FloatingBar : Window
     // Held per row and rebuilt with the rows, for the reason everything else on this bar is: a
     // rebuild throws every element away, and rebuilds fire on any window event.
     sealed record MonitorZone(int Monitor, FrameworkElement? Mark, int FirstColumn, int ColumnCount);
+
+    // An icon on a row and the window it stands for, collected while the row is built so a drop can tell
+    // which icons it fell between.
+    sealed record IconSlot(FrameworkElement Icon, WindowRow Row);
+
+    // Where a drop would put the dragged window: just before or just after `Anchor`, whose icon occupies
+    // `Beside` in the row's own coordinates (which is where the marker is drawn).
+    sealed record Insertion(WindowHandle Anchor, bool After, Rect Beside);
+
+    // The icon a drop at `at` lands beside, on the half the drop is aimed at (`screen`, or the whole row
+    // when it has only one).
+    //
+    // The LINE first, as the icon line nearest the pointer vertically, so a drop in the few pixels of
+    // padding between lines still means the line beside it. Then, along that line, before the first icon
+    // whose MIDDLE the pointer has not reached, or after the last one. Midpoints rather than edges because
+    // that is the rule a slipped click needs: a few pixels of drift off an icon never passes a
+    // neighbour's middle, so it comes out as "where it already was" and stays a click (#48).
+    //
+    // Null when that half has no icons at all: the window then goes where it would have gone anyway (the
+    // end of the half), which is the only place an empty half has.
+    static Insertion? InsertionAt(IReadOnlyList<IconSlot> slots, FrameworkElement container, Point at, int? screen)
+    {
+        var placed = slots
+            .Where(s => screen is null || s.Row.Monitor.HasValue && s.Row.Monitor.Value == screen)
+            .Select(s => (s.Row, Bounds: BoundsIn(s.Icon, container)))
+            .Where(p => p.Bounds is not null)
+            .Select(p => (p.Row, Bounds: p.Bounds!.Value))
+            .ToList();
+        if (placed.Count == 0) return null;
+
+        var nearestTop = placed.MinBy(p => Math.Abs(p.Bounds.Top + p.Bounds.Height / 2 - at.Y)).Bounds.Top;
+        var line = placed.Where(p => Math.Abs(p.Bounds.Top - nearestTop) < 1).OrderBy(p => p.Bounds.Left).ToList();
+
+        var next = line.FirstOrDefault(p => at.X < p.Bounds.Left + p.Bounds.Width / 2);
+        return next.Row is not null
+            ? new Insertion(next.Row.Window.Handle, After: false, next.Bounds)
+            : new Insertion(line[^1].Row.Window.Handle, After: true, line[^1].Bounds);
+    }
+
+    // The insertion marker: near-white so it reads over any tint and either shade, brighter than the
+    // hover wash and the drop highlight because it is the one thing to look at while dragging.
+    static readonly Brush InsertMarkerBrush = Frozen(0xE6, 0xFF, 0xFF, 0xFF);
     sealed record MonitorLine(Grid Line, Border Aim, IReadOnlyList<MonitorZone> Zones);
 
     readonly Dictionary<string, List<MonitorLine>> monitorLines = [];
@@ -2399,10 +2440,12 @@ public partial class FloatingBar : Window
         // transparent, or dragging over a workspace would permanently strip its tint.
         var idle = tint ?? Brushes.Transparent;
 
-        // Held still while the pointer is inside this row (see the hover-freeze section above).
-        // Applied HERE, before anything reads the rows, so the order drawn, the order captured on
-        // enter and the order the wrap splits into lines are all the same list.
-        var ordered = RowOrderFreeze.Apply(rows.ToList(), HeldOrder(groupKey));
+        // The order the manager gives, as it is. This used to be held still while the pointer was inside
+        // the row (the hover freeze, RowOrderFreeze), because the order followed z-order and a click
+        // would otherwise move the icon you had just clicked. The order is stable now (first seen, moved
+        // only by dragging, see WorkspaceManager.MoveWindowInOrder), so there is nothing to hold, and
+        // holding would hide a rearrangement until the pointer left the row it was made in.
+        var ordered = rows.ToList();
 
         // Petre: "do you think it would make more sense if the captions for the spaces were on
         // the right and icons started from the left edge?"
@@ -2521,6 +2564,9 @@ public partial class FloatingBar : Window
         // below lights it, and it only exists once the lines have been built.
         var washes = new List<Border>();
 
+        // Every icon in the row with its window, for placing a dropped icon between two of them.
+        var slots = new List<IconSlot>();
+
         // Petre: "sort icons in workspaces by monitors", then -- after the numbered badges that
         // first carried it were rejected -- "let's go with the hairline separator", and "let that
         // separator be not in the middle, each workspace has its own place for it".
@@ -2628,7 +2674,7 @@ public partial class FloatingBar : Window
         // isLastLine carries #102's empty tail halves, which belong to the row rather than to each of its
         // wrapped lines.
         drawnLines.Select((line, at) => (line, last: at == drawnLines.Count - 1)).ToList()
-            .ForEach(x => icons.Children.Add(LineOf(x.line, showMonitorMarkers ? opensLine : [], groupLabel, groupKey, rowKey, iconButtons, washes, x.last,
+            .ForEach(x => icons.Children.Add(LineOf(x.line, showMonitorMarkers ? opensLine : [], groupLabel, groupKey, rowKey, iconButtons, washes, slots, x.last,
                 scale, nested ? NestedIndent : 0)));
 
         // The parent's windows USED to be drawn here, dimmed, on every nested row -- the issue
@@ -2872,6 +2918,58 @@ public partial class FloatingBar : Window
 
         if (onDrop is not null)
         {
+            // REARRANGING ICONS. Petre: "let's make it possible to rearrange icons in the same workspace",
+            // with "first-seen order, with the possibility of dragging those icons". A drop now also says
+            // WHERE in the row the window goes: between the two icons the pointer is between, shown while
+            // dragging by this bar. It applies to every drop, so a window dragged to another workspace or
+            // to the other screen lands where it was dropped instead of at the end.
+            var marker = new Border
+            {
+                Width = 2,
+                Background = InsertMarkerBrush,
+                CornerRadius = new CornerRadius(1),
+                HorizontalAlignment = HorizontalAlignment.Left,
+                VerticalAlignment = VerticalAlignment.Top,
+                IsHitTestVisible = false,
+                Visibility = Visibility.Collapsed,
+            };
+            Grid.SetRowSpan(marker, container.RowDefinitions.Count);
+            container.Children.Add(marker);
+
+            void ShowMarker(Insertion? insertion)
+            {
+                if (insertion is null)
+                {
+                    marker.Visibility = Visibility.Collapsed;
+                    return;
+                }
+
+                // On the seam between two icons: the left edge of the one it goes before, or the right
+                // edge of the one it goes after, centred on that edge.
+                var x = insertion.After ? insertion.Beside.Right : insertion.Beside.Left;
+                marker.Margin = new Thickness(x - marker.Width / 2, insertion.Beside.Top, 0, 0);
+                marker.Height = insertion.Beside.Height;
+                marker.Visibility = Visibility.Visible;
+            }
+
+            // What a drop at `at` would do to the window's place, and whether that is any change at all.
+            // A drop on its own half of its own row that lands back where it already is changes nothing,
+            // and that case stays the CLICK it has always been (#48, see the Drop handler below), so the
+            // marker is not shown for it either.
+            (Insertion? Insertion, bool SameHalf, bool StaysPut) Placement(DraggedWindow dragged, Point at, int? screen)
+            {
+                var insertion = InsertionAt(slots, container, at, screen);
+                var home = ordered.FindIndex(r => r.Window.Handle == dragged.Handle);
+                var ownRow = dragged.SourceGroupKey == groupKey && home >= 0;
+                var sameHalf = ownRow && (screen is null || ordered[home].Monitor.HasValue && ordered[home].Monitor.Value == screen);
+                var anchorAt = insertion is null ? -1 : ordered.FindIndex(r => r.Window.Handle == insertion.Anchor);
+                var staysPut = sameHalf && (insertion is null
+                    || insertion.Anchor == dragged.Handle
+                    || !insertion.After && anchorAt == home + 1
+                    || insertion.After && anchorAt == home - 1);
+                return (insertion, sameHalf, staysPut);
+            }
+
             container.AllowDrop = true;
             container.DragOver += (_, e) =>
             {
@@ -2883,35 +2981,52 @@ public partial class FloatingBar : Window
                 // #89: which SCREEN the pointer is over, when the row draws more than one.
                 var screen = AimedMonitor(groupKey, container, e.GetPosition(container));
                 var ownRow = e.Data.GetData(DraggedWindow.DragFormat) is DraggedWindow d && d.SourceGroupKey == groupKey;
+                var placement = e.Data.GetData(DraggedWindow.DragFormat) is DraggedWindow being
+                    ? Placement(being, e.GetPosition(container), screen)
+                    : (Insertion: (Insertion?)null, SameHalf: false, StaysPut: true);
+                ShowMarker(placement.StaysPut ? null : placement.Insertion);
 
                 // The half is highlighted, not the row, whenever a screen is being aimed at. On the
                 // window's OWN row that half-highlight is the only feedback there is -- the row is not
                 // changing, only the screen -- and on another row it answers "which half of which
                 // row", which is the question a split row raises and the plain row highlight cannot.
-                ArmAim(groupKey, container, e.GetPosition(container));
+                // On the window's own half of its own row nothing changes screen, so the half is not lit;
+                // the marker alone says where the icon will go.
+                if (placement.SameHalf) ClearAim(groupKey);
+                else ArmAim(groupKey, container, e.GetPosition(container));
                 container.Background = screen is null && !ownRow ? DropHighlight : idle;
 
                 // The reserved info line doubles as the drop-target readout: on a bar this
                 // small, "where will this land?" is otherwise pure guesswork -- rows are
                 // ~28px tall and adjacent.
-                ShowReadout((screen, ownRow) switch
-                {
-                    (null, true) => "→ drop past the hairline for the other screen",
-                    (null, false) => $"→ move to {groupLabel}",
-                    ({ } s, true) => $"→ move to screen {s}",
-                    ({ } s, false) => $"→ move to {groupLabel}, screen {s}",
-                });
+                ShowReadout(placement.SameHalf
+                    ? placement.StaysPut ? "→ drag along the row to move it" : "→ put here"
+                    : (screen, ownRow) switch
+                    {
+                        (null, true) => "→ drag along the row to move it",
+                        (null, false) => $"→ move to {groupLabel}",
+                        ({ } s, true) => $"→ move to screen {s}",
+                        ({ } s, false) => $"→ move to {groupLabel}, screen {s}",
+                    });
             };
-            container.DragLeave += (_, _) => { container.Background = idle; ClearAim(groupKey); ClearInfo(); };
+            container.DragLeave += (_, _) => { container.Background = idle; ClearAim(groupKey); ShowMarker(null); ClearInfo(); };
             container.Drop += (_, e) =>
             {
                 container.Background = idle;
                 ClearAim(groupKey);
+                ShowMarker(null);
                 ClearInfo();
                 if (e.Data.GetData(DraggedWindow.DragFormat) is not DraggedWindow dragged) return;
 
                 var at = e.GetPosition(container);
                 var screen = AimedMonitor(groupKey, container, at);
+                var placement = Placement(dragged, at, screen);
+
+                // The window's place in the row, decided before anything else happens to it: a move to
+                // another workspace or screen rebuilds the bar, and the icon should appear where it was
+                // dropped in that rebuild rather than at the end and then jump.
+                if (!placement.StaysPut && placement.Insertion is { } insertion)
+                    Report(manager.MoveWindowInOrder(dragged.Handle, insertion.Anchor, insertion.After));
 
                 // #101: the highlight said one screen and the window went to another. Both sides compute
                 // from AimedMonitor, so what they disagree about is not the code but the INPUT -- and the
@@ -2940,13 +3055,18 @@ public partial class FloatingBar : Window
                 // Raising the threshold was the other candidate and is worse: it would make deliberate
                 // short drags fail instead, and any threshold is a guess about the hand. Honouring the
                 // intent costs nothing, because a drag that ends where it began asked for nothing else.
+                //
+                // With rearranging, "short of it" splits in two. A drop that lands the icon somewhere new
+                // on its own half was a REARRANGEMENT, already done above. Only one that lands it back
+                // where it was is the click, which is exactly the slipped click #48 describes: a few
+                // pixels of drift never carries the pointer past a neighbour's midpoint.
                 if (dragged.SourceGroupKey == groupKey)
                 {
-                    if (screen is { } target)
+                    if (!placement.SameHalf && screen is { } target)
                     {
                         Report(manager.MoveWindowToMonitor(dragged.Handle, target));
                     }
-                    else
+                    else if (placement.StaysPut)
                     {
                         if (ClickTrace.On) ClickTrace.Write($"drop-as-click row={groupLabel} hwnd={dragged.Handle.Value:X}");
                         Report(manager.ToggleWindow(dragged.Handle, activator));

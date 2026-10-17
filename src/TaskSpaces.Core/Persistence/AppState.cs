@@ -140,6 +140,16 @@ public sealed record AppState(
     // container to be named after.
     public IReadOnlyList<string> NameByFolder { get; init; } = [];
 
+    // The order Petre arranged the bar's icons in, as a sequence of app identities (exe path plus
+    // arguments). Petre: "go with the first-seen order, with the possibility of dragging those icons."
+    //
+    // Identities rather than window handles because handles die with a restart, and an arrangement that
+    // vanished every time the app restarted would not be an arrangement. Written only when he drags an
+    // icon, never by the app on its own: a window with no saved place is simply drawn in the order it was
+    // first seen. See WorkspaceManager.MoveWindowInOrder. Same init-property/no-migration pattern as
+    // everything above it.
+    public IReadOnlyList<string> IconOrder { get; init; } = [];
+
     // Petre: "i want it configurable" -- the Alt+Tab-style workspace switcher's chord.
     //
     // Stored as the TEXT the user typed, not as a parsed Chord: state.json stays readable

@@ -173,18 +173,17 @@ public static class OverviewBuilder
         // same principle as the "Unplaced" group below. int.MaxValue because there is no monitor
         // number that could collide with it.
         //
-        // ...then by z-order within each monitor, front-most first. Petre: "let's also sort those
-        // icons by z-index."
+        // ...and within a monitor, in the order `windows` arrives in, which is the manager's own
+        // order: first seen, rearranged only when Petre drags an icon (WorkspaceManager.Know and
+        // MoveWindowInOrder).
         //
-        // Argued against first and then asked for anyway, so the objection is recorded rather
-        // than lost: z-order changes on every click, so the icons on the row you are looking at
-        // reshuffle as you work and a POSITION stops being a stable click target. What makes
-        // that survivable is the same limitation that shaped everything else here -- only the
-        // CURRENT desktop has z-order at all, so every other row keeps the order it had. The
-        // rows you navigate from memory are exactly the ones that hold still.
-        //
-        // Windows with no z-order sort last within their monitor and keep their relative order,
-        // so a desktop with no z-order at all comes out exactly as it did before.
+        // This USED to sort by z-order, front-most first ("let's also sort those icons by z-index").
+        // The objection recorded against it then is what ended it: z-order changes on every click, so
+        // the row you were looking at reshuffled as you worked and a position stopped being a click
+        // target. Petre, later: "rearranging icons when i activate a program makes no sense at this
+        // point; ring / square the active program without changing its position." The active window
+        // already wears its own highlight (WindowRow.IsActive), and front-most still dims the windows
+        // behind it (IsFrontmostOnMonitor below); neither moves anything.
         List<WindowRow> OnDesktop(Guid desktopId)
         {
             var here = windows
@@ -193,7 +192,6 @@ public static class OverviewBuilder
                 // order (see `ranked` above), which is what Petre navigates by. Display numbers
                 // come from enumeration order and can put the right-hand screen first.
                 .OrderBy(w => RankOf(w).GetValueOrDefault(int.MaxValue))
-                .ThenBy(w => facts.ZOrder.TryGetValue(w.Handle, out var z) ? z : int.MaxValue)
                 .ToList();
 
             // "On top" is per MONITOR, not per row: with two monitors there are two front-most
