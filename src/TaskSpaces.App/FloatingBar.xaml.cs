@@ -1324,6 +1324,7 @@ public partial class FloatingBar : Window
     void RebuildCore(bool fresh = true)
     {
         Rows.Children.Clear();
+        CurrentList.Children.Clear(); // the titled list below the rows, rebuilt with them
         // The rows these pointed at have just been thrown away, so every entry is now a Border
         // that is no longer in the tree. Repopulated as the new rows are built.
         rowRings.Clear();
@@ -1405,6 +1406,10 @@ public partial class FloatingBar : Window
             // overview than the rows being drawn from it.
             pinnedNow = overview.Pinned;
 
+            // The current workspace's lane colour, filled in while its row is built (WorkspaceRow), for
+            // the titled list at the bottom.
+            Brush? currentTint = null;
+
             groupRows.Add(GroupRow(visualLabel: "", groupLabel: "Pinned", isCurrent: false, switchTo: null,
                     groupKey: DraggedWindow.PinnedGroupKey,
                     // The screen is honoured here now, and it has to be: with #108 the pinned row draws
@@ -1470,6 +1475,10 @@ public partial class FloatingBar : Window
                 // Recorded so ApplyCandidate can restore the white ring here when the amber
                 // one moves away, without needing another overview query to ask again.
                 if (g.IsCurrent) currentRow = g.Workspace.Id;
+                // The current workspace's colour, for the titled list at the bottom of the bar (see
+                // where it is built below), which wears the colour of the row it lists.
+                if (g.IsCurrent) currentTint = LaneTint(group is not null ? group.Color : g.Workspace.Color,
+                    group is not null ? ColourSlotOf(group) : overview.Workspaces.ToList().FindIndex(w => w.Workspace.Id == g.Workspace.Id));
 
                 var ownSlot = overview.Workspaces.ToList().FindIndex(w => w.Workspace.Id == g.Workspace.Id);
                 // The slot the row's colour comes from: its group's, or its own when ungrouped.
@@ -1587,6 +1596,43 @@ public partial class FloatingBar : Window
                     // Same Guid.Empty rule a third time, and for the third reason: Unplaced is not a
                     // desktop, so there is nothing to name (#149).
                     desktopId: g.DesktopId == Guid.Empty ? null : g.DesktopId)));
+
+            // THE CURRENT WORKSPACE'S WINDOWS, WITH TITLES, AT THE BOTTOM OF THE BAR. Petre: "let's try
+            // showing the current workspace windows at the bottom, same as it is now but at the bottom",
+            // "so workspaces don't change sizes every time i click them".
+            //
+            // The titled list first replaced the current workspace's own row, which made that row grow to
+            // one line per window and shrink back to icons as you left it: every switch resized two rows
+            // and moved everything between them. Now every workspace row stays icons and keeps its height,
+            // and the list is a section of its own below the last row, the one place on the bar whose
+            // height may change on a switch without moving anything else.
+            //
+            // Built by the same GroupRow with `titledList` set, so it is the same two columns, the same
+            // pinned windows (see GroupRow), and the same click, drag and markers. It is not a row of its
+            // own workspace in any other sense: no switch (you are already there), no workspace menu and no
+            // current-workspace ring, since its row above already carries both. A drop on it sends the
+            // window to the workspace it lists, as a drop on that row does.
+            //
+            // Into its own panel below Rows (see the XAML), after a separator like the one between rows.
+            var list = overview.Workspaces.FirstOrDefault(w => w.IsCurrent) is { } here
+                ? GroupRow(here.Workspace.Name, here.Workspace.Name, isCurrent: false, switchTo: null,
+                    groupKey: CurrentListGroupKey,
+                    onDrop: (h, screen) => Report(manager.AssignWindow(h, here.Workspace.Id, screen)),
+                    here.Running,
+                    tint: currentTint,
+                    titledList: true)
+                : overview.OtherDesktops.FirstOrDefault(d => d.IsCurrent && d.DesktopId != Guid.Empty) is { } desktop
+                    ? GroupRow(desktop.Name, desktop.Name, isCurrent: false, switchTo: null,
+                        groupKey: CurrentListGroupKey,
+                        onDrop: (h, _) => Report(manager.MoveToDesktop(h, desktop.DesktopId)),
+                        desktop.Windows,
+                        titledList: true)
+                    : null;
+            if (list is not null)
+            {
+                CurrentList.Children.Add(Separator());
+                CurrentList.Children.Add(list);
+            }
 
             groupRows
                 .SelectMany((row, i) => i == 0 ? new[] { row } : new[] { Separator(), row })
@@ -2455,7 +2501,9 @@ public partial class FloatingBar : Window
     // both (#149). It exists so the row can offer to name that desktop, which is the only action an
     // unbound row has. Null on every other kind of row, including the Unplaced catch-all, which is
     // not a desktop at all.
-    UIElement GroupRow(string visualLabel, string groupLabel, bool isCurrent, Func<Result>? switchTo, string groupKey, Action<WindowHandle, int?>? onDrop, IEnumerable<WindowRow> rows, Brush? tint = null, Guid? rowKey = null, bool minimized = false, bool nested = false, Brush? spine = null, bool pinned = false, Guid? desktopId = null, UIElement? captionContent = null)
+    // `titledList` draws the current workspace's titled list at the bottom of the bar (see RebuildCore)
+    // instead of an icon row.
+    UIElement GroupRow(string visualLabel, string groupLabel, bool isCurrent, Func<Result>? switchTo, string groupKey, Action<WindowHandle, int?>? onDrop, IEnumerable<WindowRow> rows, Brush? tint = null, Guid? rowKey = null, bool minimized = false, bool nested = false, Brush? spine = null, bool pinned = false, Guid? desktopId = null, UIElement? captionContent = null, bool titledList = false)
     {
         // Background MUST be non-null for a panel to take part in hit testing at all --
         // a null Background leaves gaps between icons that swallow nothing and report no
@@ -2479,7 +2527,7 @@ public partial class FloatingBar : Window
         // puts each one at the end of its screen's column. They stay in the pinned row as well ("as
         // well"), and each is marked with a pin in its title (see Titled) so a window that follows you
         // everywhere is not mistaken for one that lives here.
-        var titled = TitledRow(isCurrent, pinned, minimized);
+        var titled = titledList;
         var own = rows.ToList();
         var ordered = titled
             ? own.Concat(pinnedNow.Where(p => own.All(r => r.Window.Handle != p.Window.Handle)))
@@ -2563,11 +2611,13 @@ public partial class FloatingBar : Window
         // to be applied.
         var scale = minimized ? MinimizedRowScale : pinned ? PinnedRowScale : 1.0;
 
-        // THE CURRENT WORKSPACE IS DRAWN AS A TASKBAR: one window per line in its screen's column, icon
-        // and TITLE. Petre: "can we try to recreate the actual taskbar in the workspace?", "with window
-        // titles, vertically arranged", "active workspace only", "so i don't have to look at the taskbar
-        // for window titles". From the mockups he picked the version that keeps the two screens as two
-        // columns, like the icon rows, over a single list and over a separate panel.
+        // THE TITLED LIST (`titledList`, the section at the bottom of the bar): one window per line in its
+        // screen's column, icon and TITLE. Petre: "can we try to recreate the actual taskbar in the
+        // workspace?", "with window titles, vertically arranged", "active workspace only", "so i don't have
+        // to look at the taskbar for window titles". From the mockups he picked the version that keeps the
+        // two screens as two columns, like the icon rows. It then moved out of the workspace's own row to
+        // the bottom of the bar (see RebuildCore), "so workspaces don't change sizes every time i click
+        // them".
         //
         // The cost he chose it with, written down: a column at his width (about 80 DIP) leaves room for
         // roughly 8 characters of title after the icon, so most titles are cut short. Widening the bar
@@ -2575,9 +2625,8 @@ public partial class FloatingBar : Window
         //
         // Everything else about an icon carries over unchanged, because each line IS the icon button with
         // a title added (see Titled): click, drag, the active fill and outline, the hover card, the
-        // landing-spot outline. Not the pinned row, which is not a workspace, and never a minimized row.
-        // (Decided at the top of this method, through TitledRow, because it also decides whether the
-        // pinned windows join the list.)
+        // landing-spot outline. (`titled` is set at the top of this method, because it also decides
+        // whether the pinned windows join the list.)
 
         var icons = new StackPanel
         {
@@ -4215,7 +4264,9 @@ public partial class FloatingBar : Window
     //
     // The title's strength says what the icon's state already says: full white for the window you are in,
     // dimmer for a window behind the front-most one on its screen, and in between otherwise.
-    static bool TitledRow(bool isCurrent, bool pinned, bool minimized) => isCurrent && !pinned && !minimized;
+    // The group key of the titled list at the bottom of the bar: distinct from its workspace's own row,
+    // so the two have separate drop halves and a drag inside the list is a drag within its own "row".
+    const string CurrentListGroupKey = "current-list";
 
     // The pinned windows as of the last rebuild, for the titled list (see GroupRow).
     IReadOnlyList<WindowRow> pinnedNow = [];

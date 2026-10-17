@@ -168,16 +168,16 @@ public class FloatingBarLaneShadeTests(ITestOutputHelper output)
     });
 
     // Petre: "can we try to recreate the actual taskbar in the workspace?", "with window titles, vertically
-    // arranged", "active workspace only". The workspace you are on lists one window per line in its
-    // screen's column, each with its title; every other row stays icons.
+    // arranged", "active workspace only", then "same as it is now but at the bottom". The workspace you
+    // are on is listed at the bottom of the bar, one window per line in its screen's column, each with its
+    // title.
     [Fact]
     public void The_current_workspace_lists_one_titled_window_per_line_in_its_screens_column() => StaThread.Run(() =>
     {
         // Three windows: two on screen 1, one on screen 2.
         using var bar = TwoScreens(busyIcons: 3, standOnBusy: true);
-        var row = bar.RowContainer("Busy");
 
-        var titles = Bar.TitlesIn(row);
+        var titles = Bar.TitlesIn(bar.TitledList());
         output.WriteLine(string.Join(" | ", titles.Select(t => $"{t.Text}@{t.X:0},{t.Y:0}")));
 
         Assert.Equal(["App 1", "App 2", "App 3"], titles.Select(t => t.Text));
@@ -197,7 +197,7 @@ public class FloatingBarLaneShadeTests(ITestOutputHelper output)
     {
         using var bar = TwoScreens(busyIcons: 3, standOnBusy: true, withPinned: true);
 
-        var titles = Bar.TitlesIn(bar.RowContainer("Busy"));
+        var titles = Bar.TitlesIn(bar.TitledList());
         output.WriteLine(string.Join(" | ", titles.Select(t => $"{t.Text}@{t.X:0},{t.Y:0}")));
 
         // Screen 1's column: the workspace's two windows, then the pinned one; screen 2's: App 3.
@@ -208,13 +208,20 @@ public class FloatingBarLaneShadeTests(ITestOutputHelper output)
             System.Windows.Automation.AutomationProperties.GetName(icon) == "Beeper");
     });
 
-    // Only the current workspace: standing elsewhere, the same row is plain icons with no titles.
+    // "so workspaces don't change sizes every time i click them": every workspace row stays icons, the one
+    // you are on included, so standing on a workspace leaves its row exactly as tall as it was.
     [Fact]
-    public void Any_other_workspace_stays_an_icon_row() => StaThread.Run(() =>
+    public void A_workspace_row_stays_icons_and_keeps_its_height_when_you_stand_on_it() => StaThread.Run(() =>
     {
-        using var bar = TwoScreens(busyIcons: 3);
+        double HeightOfBusy(bool standOnBusy)
+        {
+            using var bar = TwoScreens(busyIcons: 3, standOnBusy: standOnBusy);
+            var row = bar.RowContainer("Busy");
+            Assert.Empty(Bar.TitlesIn(row));
+            return row.ActualHeight;
+        }
 
-        Assert.Empty(Bar.TitlesIn(bar.RowContainer("Busy")));
+        Assert.Equal(HeightOfBusy(standOnBusy: false), HeightOfBusy(standOnBusy: true), 1);
     });
 
     // One display: one lane, nothing to tell apart, so nothing is shaded.
@@ -334,11 +341,18 @@ public class FloatingBarLaneShadeTests(ITestOutputHelper output)
                 })
                 .ToList();
 
-        // The Grid a row is built around, which is what carries the row's hover handlers.
+        // The Grid a row is built around, which is what carries the row's hover handlers. The FIRST one
+        // with that name: the current workspace's titled list at the bottom of the bar carries its
+        // workspace's name too (see TitledList).
         public Grid RowContainer(string label) =>
-            ((Panel)bar.FindName("Rows")!).Children.OfType<Border>()
-                .Select(b => b.Child).OfType<Grid>()
-                .Single(g => System.Windows.Automation.AutomationProperties.GetName(g) == label);
+            Containers().First(g => System.Windows.Automation.AutomationProperties.GetName(g) == label);
+
+        // The current workspace's titled list, in its own panel below every workspace row.
+        public Grid TitledList() =>
+            ((Panel)bar.FindName("CurrentList")!).Children.OfType<Border>().Select(b => b.Child).OfType<Grid>().Single();
+
+        IEnumerable<Grid> Containers() =>
+            ((Panel)bar.FindName("Rows")!).Children.OfType<Border>().Select(b => b.Child).OfType<Grid>();
 
         // The window titles drawn in a row: TextBlocks inside a lane's icon buttons (the caption's text is
         // outside every lane), with where each one starts, ordered by column and then down the column.
