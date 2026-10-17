@@ -96,6 +96,12 @@ public partial class FloatingBar : Window
             if (liveListTarget is { } live) heldExpanded.Add(live);
         };
         MouseLeave += (_, _) => ReleaseHeldRows();
+        releaseGrace.Tick += (_, _) => ReleaseHeldRowsNow();
+
+        // See foregroundZoom: what a title-bar drag needs to know about the window before the drag began.
+        foregroundZoomSampler.Tick += (_, _) => SampleForegroundZoom();
+        foregroundZoomSampler.Start();
+        Closed += (_, _) => { foregroundZoomSampler.Stop(); releaseGrace.Stop(); headerDragWatch.Stop(); };
 
         // The grace, and then the slow fade (#46). One-shot: Stop() first, so a fade that is
         // interrupted and later restarted always gets the full grace rather than whatever was left of
@@ -4570,14 +4576,34 @@ public partial class FloatingBar : Window
     // Deferred to the next dispatcher turn so a rebuild in progress has finished. Rebuilds only when
     // something other than the current workspace was being held open, which is the only case where letting
     // go changes anything on screen.
-    void ReleaseHeldRows() => Dispatcher.BeginInvoke(new Action(() =>
+    //
+    // And not at once: after a GRACE (six seconds, see releaseGrace), re-checked then. Petre, dropping a window dragged by its
+    // own title bar: "it collapses expanded workspaces when i drop it", "shouldn't". To grab a title bar the
+    // pointer has to leave the bar first, so an immediate release let go of everything on the way to the
+    // very drag that was coming back. The grace covers that trip, and a title-bar drag in progress holds
+    // like an icon drag does (see OnWindowDragStarted).
+    void ReleaseHeldRows()
     {
-        if (!hoveringBar || draggingWindow || openMenu?.IsOpen == true || PointerOnBar()) return;
+        releaseGrace.Stop();
+        releaseGrace.Start();
+    }
+
+    // SIX seconds, measured rather than guessed: two was too short. The log of Petre's drag of a maximized
+    // Outlook window ("workspace still collapses") had his last move on the bar at 14:24:43.9, the release
+    // at about 14:24:46.0, and the title-bar drag starting at 14:24:46.25: the trip to the title bar took
+    // about two and a half seconds. The cost is the other side of the same number: really leaving the bar
+    // collapses the rows six seconds later rather than two.
+    readonly System.Windows.Threading.DispatcherTimer releaseGrace = new() { Interval = TimeSpan.FromSeconds(6) };
+
+    void ReleaseHeldRowsNow()
+    {
+        releaseGrace.Stop();
+        if (!hoveringBar || draggingWindow || headerDrag is not null || openMenu?.IsOpen == true || PointerOnBar()) return;
         hoveringBar = false;
         var stale = heldExpanded.Any(id => id != liveListTarget);
         heldExpanded.Clear();
         if (stale) Rebuild();
-    }));
+    }
 
     // --- dropping a window by its own title bar ----------------------------------------------------
     //
@@ -4608,15 +4634,64 @@ public partial class FloatingBar : Window
     (WindowHandle Window, WindowRect Start, bool WasMaximized)? headerDrag;
     HeaderDropTarget? headerAim;
 
+    // Whether this drag is a RESIZE (a border drag) rather than a title-bar one, decided ONCE, at the start,
+    // from where the cursor was on the window: a title-bar drag starts near the top of the window but not on
+    // its very edge; anything else is the border.
+    //
+    // Two size-based tests came first and both were wrong, measured on Petre's drags of an Outlook PWA:
+    // judging by the size at the END read every drop as a resize, because Snap resizes the window on
+    // release, before the end event arrives ("it activates half window mode"); judging by a size change
+    // DURING the drag read dragging a snapped window as a resize, because un-snapping restores its size.
+    bool headerDragIsResize;
+
+    // The row (and screen half) the cursor was over at the last tick, which is what a release uses. NOT a
+    // fresh look at release time: the end of the drag rebuilds the bar, and the new rows have no layout yet
+    // when the end event is handled, so a fresh look found nothing even with the cursor on a row. The trace
+    // said exactly that: "over row=freight", then "end onBar=True row=none". The last tick is at most 33 ms
+    // old.
+    int? headerAimScreen;
+
     readonly System.Windows.Threading.DispatcherTimer headerDragWatch = new() { Interval = TimeSpan.FromMilliseconds(33) };
     bool headerDragWatchWired;
+
+    // Whether the window in front was maximized, sampled every 200 ms, for a drag's "was it maximized"
+    // (see OnWindowDragStarted). The window you drag by its title bar is almost always the one in front,
+    // because pressing on its title bar brings it there. Two cheap calls per sample and no hook; started
+    // with the bar and never stopped, since a drag can begin at any moment.
+    (nint Window, bool Zoomed, DateTime At)? foregroundZoom;
+
+    readonly System.Windows.Threading.DispatcherTimer foregroundZoomSampler = new() { Interval = TimeSpan.FromMilliseconds(200) };
+
+    void SampleForegroundZoom()
+    {
+        // Not while a drag is in progress: by then the window has been un-maximized, and overwriting the
+        // last sample taken before the drag is exactly the information this exists to keep.
+        if (headerDrag is not null) return;
+        var front = NativeMethods.GetForegroundWindow();
+        foregroundZoom = front == nint.Zero ? null : (front, NativeMethods.IsZoomed(front), DateTime.UtcNow);
+    }
 
     public void OnWindowDragStarted(WindowHandle window)
     {
         if (!IsVisible || Minimized) return;
         if (manager.RectOfWindow(window) is not { HasValue: true } start) return;
 
-        headerDrag = (window, start.Value, NativeMethods.IsZoomed(window.Value));
+        // A title-bar drag holds the expanded rows like being on the bar does: the pointer left the bar to
+        // grab the title bar, and the release that started then is called off (see ReleaseHeldRows).
+        releaseGrace.Stop();
+
+        // Maximized NOW, or when last sampled as the window in front (see foregroundZoom). Windows
+        // un-maximizes a window the moment it is dragged, and this event is delivered a little after
+        // that, so IsZoomed alone loses the race: Petre, "it loses fullscreen", "if i move it from
+        // fullscreen". The log showed it: maximized=False with the restored size, on a window that was
+        // maximized when he grabbed it.
+        var wasMaximized = NativeMethods.IsZoomed(window.Value)
+            || foregroundZoom is { } sampled && sampled.Window == window.Value && sampled.Zoomed
+               && DateTime.UtcNow - sampled.At < TimeSpan.FromSeconds(1);
+        headerDrag = (window, start.Value, wasMaximized);
+        headerDragIsResize = !StartedOnTitleBar(start.Value);
+        if (ClickTrace.On)
+            ClickTrace.Write($"header drag start hwnd={window.Value:X} rect={start.Value.Left},{start.Value.Top},{start.Value.Right},{start.Value.Bottom} maximized={headerDrag.Value.WasMaximized} resize={headerDragIsResize}");
         if (!headerDragWatchWired)
         {
             headerDragWatch.Tick += (_, _) => AimHeaderDrag();
@@ -4629,35 +4704,65 @@ public partial class FloatingBar : Window
     {
         if (headerDrag is not { } drag || drag.Window != window) return;
         headerDragWatch.Stop();
-        AimHeaderDrag(); // where the cursor was at the moment of release
-        var target = headerAim;
-        var screen = target is null ? null : AimedMonitor(target.GroupKey, target.Container, CursorIn(target.Container));
+        // The row from the last tick, not a fresh look (see headerAimScreen), unless the cursor has left the
+        // bar since: a release off the bar is an ordinary move.
+        var target = PointerOnBar() ? headerAim : null;
+        var screen = target is null ? null : headerAimScreen;
         DisarmHeaderAim();
         headerDrag = null;
+        if (ClickTrace.On)
+            ClickTrace.Write($"header drag end hwnd={window.Value:X} resize={headerDragIsResize} onBar={PointerOnBar()} row={target?.Label ?? "none"} screen={screen?.ToString() ?? "none"}");
+        // Ended off the bar: the hold it kept starts its countdown again. Ended on the bar: still held,
+        // like a pointer resting on it, until it leaves.
+        if (!PointerOnBar()) ReleaseHeldRows();
         if (target is null) return;
 
-        // Back to where it was first, while it is still on this desktop and its show state may change;
-        // then to the other workspace. Re-maximized after placing, so it maximizes on the screen it was on.
-        manager.PutWindowBack(window, drag.Start)
-            .Tap(() => { if (drag.WasMaximized) NativeMethods.ShowWindowAsync(window.Value, NativeMethods.SW_MAXIMIZE); })
+        _ = FinishHeaderDrop(window, drag.Start, drag.WasMaximized, target, screen);
+    }
+
+    // Back to where it was first, while the window is still on this desktop and its show state may
+    // change; then to the other workspace.
+    //
+    // TWICE, a third of a second apart, because Snap gets there too. The bar sits at a screen edge, so a
+    // drop on it is a drop at the edge, and Windows snaps the window to half the screen on release. It does
+    // not wait for us, and it can land after the first put-back, so the window is put back again once Snap
+    // has had its turn. Only then is it moved to the other workspace, re-maximized first if it was
+    // maximized, so it maximizes on the screen it was on.
+    async Task FinishHeaderDrop(WindowHandle window, WindowRect start, bool wasMaximized, HeaderDropTarget target, int? screen)
+    {
+        manager.PutWindowBack(window, start)
             .TapError(error => ClickTrace.Write($"header drop: could not put the window back: {error}"));
+        await Task.Delay(350);
+        manager.PutWindowBack(window, start)
+            .TapError(error => ClickTrace.Write($"header drop: could not put the window back after snap: {error}"));
+        if (wasMaximized) NativeMethods.ShowWindowAsync(window.Value, NativeMethods.SW_MAXIMIZE);
         if (ClickTrace.On) ClickTrace.Write($"header drop hwnd={window.Value:X} row={target.Label} screen={screen?.ToString() ?? "none"}");
         target.Drop(window, screen);
     }
 
     // Lights the row under the cursor, if this is a move rather than a resize and the cursor is on the bar.
+    // The resize check runs only DURING the drag (see headerDragIsResize).
     void AimHeaderDrag()
     {
-        var target = headerDrag is { } drag && !IsResize(drag) && PointerOnBar()
+        // A rebuild mid-drag (any window event causes one) replaces the rows, and new rows have no layout
+        // until a pass runs; looking at them before that finds nothing under the cursor.
+        if (headerDropTargets.Any(t => !t.Container.IsArrangeValid)) UpdateLayout();
+
+        var target = headerDrag is not null && !headerDragIsResize && PointerOnBar()
             ? headerDropTargets.FirstOrDefault(t => t.Container.IsVisible && Contains(t.Container, CursorIn(t.Container)))
             : null;
 
-        if (!ReferenceEquals(target, headerAim)) DisarmHeaderAim();
+        if (!ReferenceEquals(target, headerAim))
+        {
+            DisarmHeaderAim();
+            if (ClickTrace.On && target is not null) ClickTrace.Write($"header drag over row={target.Label}");
+        }
         if (target is null) return;
 
         headerAim = target;
         var at = CursorIn(target.Container);
         var screen = AimedMonitor(target.GroupKey, target.Container, at);
+        headerAimScreen = screen;
         ArmAim(target.GroupKey, target.Container, at);
         target.Container.Background = screen is null ? DropHighlight : target.Idle;
         ShowReadout(screen is { } s ? $"→ move to {target.Label}, screen {s}" : $"→ move to {target.Label}");
@@ -4672,12 +4777,18 @@ public partial class FloatingBar : Window
         headerAim = null;
     }
 
-    // A size change means the border is being dragged, not the title bar. Not for a window that started
-    // maximized: dragging one un-maximizes it first, which changes its size by design.
-    bool IsResize((WindowHandle Window, WindowRect Start, bool WasMaximized) drag) =>
-        !drag.WasMaximized
-        && manager.RectOfWindow(drag.Window) is { HasValue: true } now
-        && (Math.Abs(now.Value.Width - drag.Start.Width) > 2 || Math.Abs(now.Value.Height - drag.Start.Height) > 2);
+    // Whether the drag began with the cursor on the window's TITLE BAR rather than its border: in the top
+    // band of the window, below the resize edge and clear of the side edges. Physical pixels, like the
+    // rectangle. The band is generous (100 px) because title bars vary a lot: a browser's tab strip or a
+    // PWA's custom title bar is taller than a classic caption, and at 150% everything is half again as tall.
+    // The edges are 8 px, the size of a resize border at that scale. A maximized window's rectangle starts a
+    // few pixels above the screen (its border is off screen), so the cursor at the very top still counts.
+    static bool StartedOnTitleBar(WindowRect start)
+    {
+        if (!NativeMethods.GetCursorPos(out var cursor)) return true; // cannot tell: do not refuse the drop
+        var fromTop = cursor.Y - start.Top;
+        return fromTop > 8 && fromTop < 100 && cursor.X > start.Left + 8 && cursor.X < start.Right - 8;
+    }
 
     // The cursor in an element's own coordinates. PointFromScreen takes physical screen pixels, which is
     // what GetCursorPos gives.

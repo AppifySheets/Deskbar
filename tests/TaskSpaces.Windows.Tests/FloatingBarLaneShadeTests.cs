@@ -247,6 +247,10 @@ public class FloatingBarLaneShadeTests(ITestOutputHelper output)
         bar.Pulse();
         Assert.NotEmpty(Bar.TitlesIn(bar.RowContainer("Busy")));
 
+        // Just after leaving, within the grace (the trip to grab a window's title bar): still held.
+        bar.LeaveWithoutWaiting();
+        Assert.NotEmpty(Bar.TitlesIn(bar.RowContainer("Busy")));
+
         bar.Leave();
         Assert.Empty(Bar.TitlesIn(bar.RowContainer("Busy")));
     });
@@ -270,7 +274,6 @@ public class FloatingBarLaneShadeTests(ITestOutputHelper output)
 
         // The drag ends with the pointer off the bar (it is parked off screen), so the hold lets go.
         bar.SetField("draggingWindow", false);
-        bar.Call("ReleaseHeldRows");
         bar.Leave();
         Assert.Empty(Bar.TitlesIn(bar.RowContainer("Busy")));
     });
@@ -458,7 +461,17 @@ public class FloatingBarLaneShadeTests(ITestOutputHelper output)
         // here; the real pointer is nowhere near a bar parked off screen, so the re-check agrees it left.
         public void Enter() => bar.RaiseEvent(new System.Windows.Input.MouseEventArgs(System.Windows.Input.Mouse.PrimaryDevice, 0) { RoutedEvent = UIElement.MouseEnterEvent });
 
+        // The pointer leaving, and then the release's grace running out (called directly rather
+        // than waited for).
         public void Leave()
+        {
+            LeaveWithoutWaiting();
+            Call("ReleaseHeldRowsNow");
+            bar.UpdateLayout();
+        }
+
+        // The pointer leaving, with the grace still running.
+        public void LeaveWithoutWaiting()
         {
             bar.RaiseEvent(new System.Windows.Input.MouseEventArgs(System.Windows.Input.Mouse.PrimaryDevice, 0) { RoutedEvent = UIElement.MouseLeaveEvent });
             bar.Dispatcher.Invoke(() => { }, System.Windows.Threading.DispatcherPriority.ApplicationIdle);
