@@ -1400,6 +1400,11 @@ public partial class FloatingBar : Window
             // the pinned one to everything that matters: the icon tooltips say "Pinned · window
             // title", the drop readout says "move to Pinned", and the container carries both its
             // RowTag and an accessible name of "Pinned".
+            // Kept for the current workspace's titled list, which shows the pinned windows too (see
+            // GroupRow). Set before any row is built, every rebuild, so it can never describe an older
+            // overview than the rows being drawn from it.
+            pinnedNow = overview.Pinned;
+
             groupRows.Add(GroupRow(visualLabel: "", groupLabel: "Pinned", isCurrent: false, switchTo: null,
                     groupKey: DraggedWindow.PinnedGroupKey,
                     // The screen is honoured here now, and it has to be: with #108 the pinned row draws
@@ -2466,7 +2471,21 @@ public partial class FloatingBar : Window
         // would otherwise move the icon you had just clicked. The order is stable now (first seen, moved
         // only by dragging, see WorkspaceManager.MoveWindowInOrder), so there is nothing to hold, and
         // holding would hide a rearrangement until the pointer left the row it was made in.
-        var ordered = rows.ToList();
+        //
+        // The current workspace's titled list also shows the PINNED windows. Petre: "i want to show the
+        // pinned windows in the active taskspace as well, so the beeper." A pinned window is on every
+        // workspace, so on the one you are standing on it is as much a window you might want to read the
+        // title of as any other. Added after the workspace's own windows, and a stable sort by screen
+        // puts each one at the end of its screen's column. They stay in the pinned row as well ("as
+        // well"), and each is marked with a pin in its title (see Titled) so a window that follows you
+        // everywhere is not mistaken for one that lives here.
+        var titled = TitledRow(isCurrent, pinned, minimized);
+        var own = rows.ToList();
+        var ordered = titled
+            ? own.Concat(pinnedNow.Where(p => own.All(r => r.Window.Handle != p.Window.Handle)))
+                .OrderBy(r => r.MonitorRank.GetValueOrDefault(int.MaxValue))
+                .ToList()
+            : own;
 
         // Petre: "do you think it would make more sense if the captions for the spaces were on
         // the right and icons started from the left edge?"
@@ -2557,7 +2576,8 @@ public partial class FloatingBar : Window
         // Everything else about an icon carries over unchanged, because each line IS the icon button with
         // a title added (see Titled): click, drag, the active fill and outline, the hover card, the
         // landing-spot outline. Not the pinned row, which is not a workspace, and never a minimized row.
-        var titled = isCurrent && !pinned && !minimized;
+        // (Decided at the top of this method, through TitledRow, because it also decides whether the
+        // pinned windows join the list.)
 
         var icons = new StackPanel
         {
@@ -4195,6 +4215,11 @@ public partial class FloatingBar : Window
     //
     // The title's strength says what the icon's state already says: full white for the window you are in,
     // dimmer for a window behind the front-most one on its screen, and in between otherwise.
+    static bool TitledRow(bool isCurrent, bool pinned, bool minimized) => isCurrent && !pinned && !minimized;
+
+    // The pinned windows as of the last rebuild, for the titled list (see GroupRow).
+    IReadOnlyList<WindowRow> pinnedNow = [];
+
     void Titled(Button button, WindowRow row)
     {
         var art = (UIElement)button.Content;
@@ -4203,7 +4228,9 @@ public partial class FloatingBar : Window
 
         var title = new TextBlock
         {
-            Text = row.Window.DisplayName,
+            // A pinned window is on every workspace, so it says so; otherwise Beeper in this list would
+            // read as living here.
+            Text = (pinnedNow.Any(p => p.Window.Handle == row.Window.Handle) ? "📌 " : "") + row.Window.DisplayName,
             FontSize = 9,
             Foreground = row.IsActive ? TitleActive
                 : row.IsFrontmostOnMonitor.HasValue && !row.IsFrontmostOnMonitor.Value ? TitleBehind

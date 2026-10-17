@@ -189,6 +189,25 @@ public class FloatingBarLaneShadeTests(ITestOutputHelper output)
         Assert.Equal(titles[0].Y, titles[2].Y, 1);
     });
 
+    // Petre: "i want to show the pinned windows in the active taskspace as well, so the beeper." A pinned
+    // window joins the titled list at the end of its screen's column, marked with a pin, and stays in the
+    // pinned row too.
+    [Fact]
+    public void The_titled_list_includes_pinned_windows_marked_with_a_pin() => StaThread.Run(() =>
+    {
+        using var bar = TwoScreens(busyIcons: 3, standOnBusy: true, withPinned: true);
+
+        var titles = Bar.TitlesIn(bar.RowContainer("Busy"));
+        output.WriteLine(string.Join(" | ", titles.Select(t => $"{t.Text}@{t.X:0},{t.Y:0}")));
+
+        // Screen 1's column: the workspace's two windows, then the pinned one; screen 2's: App 3.
+        Assert.Equal(["App 1", "App 2", "📌 Beeper", "App 3"], titles.Select(t => t.Text));
+        Assert.Equal(titles[0].X, titles[2].X, 1);
+        // ...and it is still in the pinned row.
+        Assert.Contains(bar.Icons(bar.RowContainer("Pinned")), icon =>
+            System.Windows.Automation.AutomationProperties.GetName(icon) == "Beeper");
+    });
+
     // Only the current workspace: standing elsewhere, the same row is plain icons with no titles.
     [Fact]
     public void Any_other_workspace_stays_an_icon_row() => StaThread.Run(() =>
@@ -213,7 +232,8 @@ public class FloatingBarLaneShadeTests(ITestOutputHelper output)
     // `standOnBusy` makes Busy the CURRENT workspace, which draws it as the titled list rather than as an
     // icon row. Off by default: every test here but the titled ones is about icon rows, so they stand on
     // the empty workspace and leave Busy as an ordinary row.
-    static Bar TwoScreens(int busyIcons, bool oneWithNoMonitor = false, bool everythingOnOneScreen = false, bool standOnBusy = false)
+    // `withPinned` adds one window pinned to every desktop, on screen 1, named "Beeper".
+    static Bar TwoScreens(int busyIcons, bool oneWithNoMonitor = false, bool everythingOnOneScreen = false, bool standOnBusy = false, bool withPinned = false)
     {
         var busyDesktop = Guid.NewGuid();
         var emptyDesktop = Guid.NewGuid();
@@ -236,6 +256,14 @@ public class FloatingBarLaneShadeTests(ITestOutputHelper output)
             if (oneWithNoMonitor && i == busyIcons - 1) return;
             placement.Add((window.Handle, i == busyIcons && !everythingOnOneScreen ? 2 : 1));
         });
+
+        if (withPinned)
+        {
+            var beeper = new WindowInfo(new WindowHandle(0x500), 500, "Beeper", @"C:\Beeper.exe", "Beeper", null);
+            monitor.Initial.Add(beeper);
+            desktops.PinnedWindows.Add(beeper.Handle);
+            placement.Add((beeper.Handle, 1));
+        }
 
         var screens = new StubScreens { Facts = TwoDisplays(placement) };
         // A STORED WIDTH, because that is the bar Petre runs and it selects a different layout: with
