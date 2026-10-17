@@ -223,19 +223,32 @@ public class FloatingBarLaneShadeTests(ITestOutputHelper output)
         Assert.Equal(list.RowDefinitions.Count, Grid.GetRowSpan(spine));
     });
 
-    // Petre: "or maybe put the expanded current workspace AFTER the selected workspace, not at the bottom",
-    // "let's try both". With that setting the list is in the rows, directly after its workspace's row
-    // (with the usual separator between), and the bottom panel is empty.
+    // Petre: "let's attempt expanding the current workspace, instead of adding a new bar below it". With
+    // that setting the current workspace's OWN row is the titled list, and the bottom panel is empty.
     [Fact]
-    public void With_the_setting_the_list_sits_right_under_its_workspace() => StaThread.Run(() =>
+    public void With_the_setting_the_current_workspaces_own_row_expands() => StaThread.Run(() =>
     {
-        using var bar = TwoScreens(busyIcons: 3, standOnBusy: true, listUnderRow: true);
+        using var bar = TwoScreens(busyIcons: 3, standOnBusy: true, expandRow: true);
 
-        var rows = bar.RowsInOrder();
-        var busyAt = rows.FindIndex(g => System.Windows.Automation.AutomationProperties.GetName(g) == "Busy");
-        Assert.True(busyAt >= 0 && busyAt + 1 < rows.Count);
-        Assert.Equal(["App 1", "App 2", "App 3"], Bar.TitlesIn(rows[busyAt + 1]).Select(t => t.Text));
+        Assert.Equal(["App 1", "App 2", "App 3"], Bar.TitlesIn(bar.RowContainer("Busy")).Select(t => t.Text));
         Assert.Empty(bar.CurrentListPanel().Children);
+    });
+
+    // "clicking the workspace expands it below its current position but keeps the position of the top,
+    // until i leave the floating window". With the pointer on the bar, switching away leaves the row you
+    // were on expanded, so nothing above the new one shrinks; leaving the bar collapses it.
+    [Fact]
+    public void An_expanded_row_stays_expanded_until_the_pointer_leaves_the_bar() => StaThread.Run(() =>
+    {
+        using var bar = TwoScreens(busyIcons: 3, standOnBusy: true, expandRow: true);
+        bar.Enter();
+
+        Assert.True(bar.Manager.Switch(bar.EmptyWorkspace).IsSuccess);
+        bar.Pulse();
+        Assert.NotEmpty(Bar.TitlesIn(bar.RowContainer("Busy")));
+
+        bar.Leave();
+        Assert.Empty(Bar.TitlesIn(bar.RowContainer("Busy")));
     });
 
     // "so workspaces don't change sizes every time i click them": every workspace row stays icons, the one
@@ -270,9 +283,9 @@ public class FloatingBarLaneShadeTests(ITestOutputHelper output)
     // icon row. Off by default: every test here but the titled ones is about icon rows, so they stand on
     // the empty workspace and leave Busy as an ordinary row.
     // `withPinned` adds one window pinned to every desktop, on screen 1, named "Beeper".
-    // `listUnderRow` turns on AppState.TitledListAfterRow: the titled list sits right under its workspace's
-    // row instead of at the bottom of the bar.
-    static Bar TwoScreens(int busyIcons, bool oneWithNoMonitor = false, bool everythingOnOneScreen = false, bool standOnBusy = false, bool withPinned = false, bool listUnderRow = false)
+    // `expandRow` turns on AppState.ExpandCurrentWorkspace: the current workspace's own row expands into
+    // the titled list instead of the list sitting at the bottom of the bar.
+    static Bar TwoScreens(int busyIcons, bool oneWithNoMonitor = false, bool everythingOnOneScreen = false, bool standOnBusy = false, bool withPinned = false, bool expandRow = false)
     {
         var busyDesktop = Guid.NewGuid();
         var emptyDesktop = Guid.NewGuid();
@@ -325,7 +338,7 @@ public class FloatingBarLaneShadeTests(ITestOutputHelper output)
             {
                 Workspaces = [busy, empty],
                 FloatingBar = new FloatingBarState(0, 0, true) { Width = 160 },
-                TitledListAfterRow = listUnderRow,
+                ExpandCurrentWorkspace = expandRow,
             },
         };
         var manager = new WorkspaceManager(desktops, monitor, new StubTitles(), store, screenLayout: screens);
@@ -337,7 +350,9 @@ public class FloatingBarLaneShadeTests(ITestOutputHelper output)
         bar.Show();
         // SizeToContent: nothing in the tree has a height until a layout pass has run.
         bar.UpdateLayout();
-        return new Bar(bar);
+        // A rebuild the way the running app gets one after a switch: a window event. The fake desktops
+        // change the current desktop on Switch but send no notification of their own.
+        return new Bar(bar, manager, empty.Id, () => monitor.Pump.OnNext(new WindowEvent(WindowEventKind.Activated, monitor.Initial[0])));
     }
 
     static ScreenFacts TwoDisplays(IReadOnlyList<(WindowHandle Window, int Monitor)> frontToBack) =>
@@ -359,8 +374,32 @@ public class FloatingBarLaneShadeTests(ITestOutputHelper output)
             " rowWidth=" + RowWidth.ToString("0.##") + " rounded=" + RoundedBottomRight;
     }
 
-    sealed class Bar(FloatingBar bar) : IDisposable
+    sealed class Bar(FloatingBar bar, WorkspaceManager? manager = null, Guid emptyWorkspace = default, Action? pulse = null) : IDisposable
     {
+        public WorkspaceManager Manager => manager!;
+
+        public Guid EmptyWorkspace => emptyWorkspace;
+
+        // ...and a layout pass after it: rows built by a rebuild have no visual tree to search until one runs,
+        // which the app gets for free and a test has to ask for.
+        public void Pulse()
+        {
+            pulse?.Invoke();
+            bar.UpdateLayout();
+        }
+
+        // The pointer arriving on, and leaving, the bar window, as WPF raises them. Leaving is deferred in the
+        // bar (it re-checks where the pointer really is on the next dispatcher turn), so the queue is drained
+        // here; the real pointer is nowhere near a bar parked off screen, so the re-check agrees it left.
+        public void Enter() => bar.RaiseEvent(new System.Windows.Input.MouseEventArgs(System.Windows.Input.Mouse.PrimaryDevice, 0) { RoutedEvent = UIElement.MouseEnterEvent });
+
+        public void Leave()
+        {
+            bar.RaiseEvent(new System.Windows.Input.MouseEventArgs(System.Windows.Input.Mouse.PrimaryDevice, 0) { RoutedEvent = UIElement.MouseLeaveEvent });
+            bar.Dispatcher.Invoke(() => { }, System.Windows.Threading.DispatcherPriority.ApplicationIdle);
+            bar.UpdateLayout();
+        }
+
         public void Dispose() => bar.Close();
 
         public List<Shade> Shades() =>

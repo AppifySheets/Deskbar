@@ -3174,12 +3174,13 @@ public sealed class WorkspaceManager(
         return merged;
     }
 
-    // Where the current workspace's titled list sits (AppState.TitledListAfterRow). A no-op when unchanged,
-    // like the other settings, so nothing writes state.json for a value that did not move.
-    public Result SetTitledListAfterRow(bool afterRow) =>
-        State.TitledListAfterRow == afterRow
+    // Whether the current workspace's row expands into its titled list or the list sits at the bottom of
+    // the bar (AppState.ExpandCurrentWorkspace). A no-op when unchanged, like the other settings, so nothing
+    // writes state.json for a value that did not move.
+    public Result SetExpandCurrentWorkspace(bool expand) =>
+        State.ExpandCurrentWorkspace == expand
             ? Result.Success()
-            : Result.Success().Tap(() => Persist(State with { TitledListAfterRow = afterRow }));
+            : Result.Success().Tap(() => Persist(State with { ExpandCurrentWorkspace = expand }));
 
     // --- overview / switcher-facing operations -----------------------------------
 

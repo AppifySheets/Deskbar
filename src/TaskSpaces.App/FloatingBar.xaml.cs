@@ -88,6 +88,15 @@ public partial class FloatingBar : Window
         MouseEnter += (_, _) => UpdateFade();
         MouseLeave += (_, _) => UpdateFade();
 
+        // The expanded rows' hold (see RebuildCore, where it is applied): taken when the pointer arrives,
+        // released when it leaves.
+        MouseEnter += (_, _) =>
+        {
+            hoveringBar = true;
+            if (liveListTarget is { } live) heldExpanded.Add(live);
+        };
+        MouseLeave += (_, _) => ReleaseHeldRows();
+
         // The grace, and then the slow fade (#46). One-shot: Stop() first, so a fade that is
         // interrupted and later restarted always gets the full grace rather than whatever was left of
         // the last countdown.
@@ -1406,14 +1415,33 @@ public partial class FloatingBar : Window
             // overview than the rows being drawn from it.
             pinnedNow = overview.Pinned;
 
-            // The current workspace's lane colour, filled in while its row is built (WorkspaceRow), for
-            // the titled list at the bottom.
+            // The workspace (or unnamed desktop) you are on: whose windows the titled list shows.
+            var liveTarget = overview.Workspaces.FirstOrDefault(w => w.IsCurrent)?.Workspace.Id
+                ?? overview.OtherDesktops.FirstOrDefault(d => d.IsCurrent && d.DesktopId != Guid.Empty)?.DesktopId;
+            liveListTarget = liveTarget;
+
+            // WHICH ROWS ARE EXPANDED, when rows expand (AppState.ExpandCurrentWorkspace): the current one,
+            // plus, while the pointer is over the bar, every row that has been expanded since it arrived.
+            // Petre: "when i activate a workspace and the active windows show under it, i want to hold the
+            // position of everything until i leave the floating window", "so things aren't jumping under
+            // me", and then exactly how: "clicking the workspace expands it below its current position but
+            // keeps the position of the top, until i leave the floating window".
+            //
+            // So a click expands the clicked row AT ONCE, growing downward from where its top already is, and
+            // the row that was expanded before stays expanded rather than collapsing: if it is above, its
+            // collapse would pull the clicked row up under the pointer. Nothing above the pointer changes
+            // height while it is on the bar. Leaving the bar (ReleaseHeldRows) collapses everything but the
+            // current workspace in one step. A held workspace that has since gone away is simply not drawn.
+            if (hoveringBar && liveTarget is { } live) heldExpanded.Add(live);
+            var expanded = hoveringBar
+                ? heldExpanded.ToHashSet()
+                : liveTarget is { } only ? [only] : new HashSet<Guid>();
+            bool Expanded(Guid id) => manager.State.ExpandCurrentWorkspace && expanded.Contains(id);
+
+            // The current workspace's lane colour and the bright version of it, filled in while its row is
+            // built (WorkspaceRow), for the titled list at the bottom.
             Brush? currentTint = null;
             Brush? currentAccent = null;
-
-            // Which element of groupRows holds the current workspace (its own row, or the group box it is
-            // in), for putting the titled list right under it when that is the chosen place.
-            var currentAt = -1;
 
             groupRows.Add(GroupRow(visualLabel: "", groupLabel: "Pinned", isCurrent: false, switchTo: null,
                     groupKey: DraggedWindow.PinnedGroupKey,
@@ -1482,10 +1510,10 @@ public partial class FloatingBar : Window
                 if (g.IsCurrent) currentRow = g.Workspace.Id;
                 // The current workspace's colour, for the titled list at the bottom of the bar (see
                 // where it is built below), which wears the colour of the row it lists.
-                if (g.IsCurrent) currentTint = LaneTint(group is not null ? group.Color : g.Workspace.Color,
+                if (g.Workspace.Id == liveTarget) currentTint = LaneTint(group is not null ? group.Color : g.Workspace.Color,
                     group is not null ? ColourSlotOf(group) : overview.Workspaces.ToList().FindIndex(w => w.Workspace.Id == g.Workspace.Id));
-                // ...and its accent, the stronger version of that colour, for the bar down the list's side.
-                if (g.IsCurrent) currentAccent = LaneAccent(group is not null ? group.Color : g.Workspace.Color,
+                // ...and the bright version of that colour for the bar down the list's side (see ListSpine).
+                if (g.Workspace.Id == liveTarget) currentAccent = ListSpine(group is not null ? group.Color : g.Workspace.Color,
                     group is not null ? ColourSlotOf(group) : overview.Workspaces.ToList().FindIndex(w => w.Workspace.Id == g.Workspace.Id));
 
                 var ownSlot = overview.Workspaces.ToList().FindIndex(w => w.Workspace.Id == g.Workspace.Id);
@@ -1529,7 +1557,10 @@ public partial class FloatingBar : Window
                     rowKey: g.Workspace.Id,
                     minimized: g.Workspace.Minimized,
                     nested: nested,
-                    spine: spine);
+                    // An EXPANDED row (see `expanded` in RebuildCore) wears the bright spine that makes the
+                    // titled list stand out, in place of any group spine: being the list is the louder fact.
+                    spine: Expanded(g.Workspace.Id) ? ListSpine(colour, colourSlot >= 0 ? colourSlot : ownSlot) : spine,
+                    titledList: Expanded(g.Workspace.Id));
             }
 
             // Walked in list order, emitting a whole group at its first member and skipping the
@@ -1543,7 +1574,6 @@ public partial class FloatingBar : Window
                 if (entry.Workspace.GroupId is not { } id || state.Groups.FirstOrDefault(g => g.Id == id) is not { } group)
                 {
                     groupRows.Add(WorkspaceRow(entry, null));
-                    if (entry.IsCurrent) currentAt = groupRows.Count - 1;
                     return;
                 }
 
@@ -1571,8 +1601,6 @@ public partial class FloatingBar : Window
                 groupRows.Add(boxed
                     ? FamilyBox(rows, LaneAccent(group.Color, ColourSlotOf(group)), LaneTint(group.Color, ColourSlotOf(group)))
                     : rows[0]);
-                // Under the whole box, not inside it: the list is not a member of the group.
-                if (members.Any(m => m!.IsCurrent)) currentAt = groupRows.Count - 1;
             });
 
             // ...and unbound desktops with windows (OverviewBuilder already drops empty
@@ -1580,10 +1608,6 @@ public partial class FloatingBar : Window
             // switches to that raw desktop. The "Unplaced" catch-all (DesktopId ==
             // Guid.Empty, windows whose desktop the COM API can't resolve) is not a
             // real desktop -- no switch target exists, so its label stays plain text.
-            var desktopRowsStart = groupRows.Count;
-            var currentDesktopIndex = overview.OtherDesktops.ToList().FindIndex(d => d.IsCurrent);
-            if (currentAt < 0 && currentDesktopIndex >= 0) currentAt = desktopRowsStart + currentDesktopIndex;
-
             overview.OtherDesktops
                 // "Unplaced" (Guid.Empty: windows whose desktop the COM API refuses to
                 // resolve) is rendered here again, REVERSING the Task 12 decision to hide it.
@@ -1599,9 +1623,6 @@ public partial class FloatingBar : Window
                 //
                 // A row that can only be looked at beats a window that cannot be found. Its
                 // label stays non-clickable and it is still not a drop target (see below).
-                //
-                // One row per desktop, in order, so the current desktop's row sits at the index where these
-                // start plus its own index (recorded below the ForEach, for the titled list).
                 .ToList()
                 .ForEach(g => groupRows.Add(GroupRow(g.Name, g.Name, g.IsCurrent,
                     // Guid.Empty == the "Unplaced" catch-all: not a real desktop, so
@@ -1613,7 +1634,10 @@ public partial class FloatingBar : Window
                     g.Windows,
                     // Same Guid.Empty rule a third time, and for the third reason: Unplaced is not a
                     // desktop, so there is nothing to name (#149).
-                    desktopId: g.DesktopId == Guid.Empty ? null : g.DesktopId)));
+                    desktopId: g.DesktopId == Guid.Empty ? null : g.DesktopId,
+                    // Expanded into its titled list like a workspace row (see `expanded` above). An unnamed
+                    // desktop has no colour, so it has no spine.
+                    titledList: Expanded(g.DesktopId))));
 
             // THE CURRENT WORKSPACE'S WINDOWS, WITH TITLES, AT THE BOTTOM OF THE BAR. Petre: "let's try
             // showing the current workspace windows at the bottom, same as it is now but at the bottom",
@@ -1632,34 +1656,33 @@ public partial class FloatingBar : Window
             // window to the workspace it lists, as a drop on that row does.
             //
             // Into its own panel below Rows (see the XAML), after a separator like the one between rows.
-            var list = overview.Workspaces.FirstOrDefault(w => w.IsCurrent) is { } here
-                ? GroupRow(here.Workspace.Name, here.Workspace.Name, isCurrent: false, switchTo: null,
-                    groupKey: CurrentListGroupKey,
-                    onDrop: (h, screen) => Report(manager.AssignWindow(h, here.Workspace.Id, screen)),
-                    here.Running,
-                    tint: currentTint,
-                    // MADE TO STAND OUT from the rows (Petre: "make the expanded workspace stand out from the
-                    // rest", and from four mockups he picked this one): a bar in the workspace's accent colour
-                    // down the list's left edge, with the list indented beside it. It is the spine a nested row
-                    // already wears, drawn by the same code, so it says "this belongs to that workspace" in a
-                    // way the bar already uses, rather than in a new one.
-                    nested: true,
-                    spine: currentAccent,
-                    titledList: true)
-                : overview.OtherDesktops.FirstOrDefault(d => d.IsCurrent && d.DesktopId != Guid.Empty) is { } desktop
-                    ? GroupRow(desktop.Name, desktop.Name, isCurrent: false, switchTo: null,
+            //
+            // Only when rows do NOT expand (AppState.ExpandCurrentWorkspace off, the default). When they do,
+            // the current workspace's own row is the list (see `expanded` above) and there is nothing to add
+            // here. Petre has both to compare: "let's try both".
+            var list = manager.State.ExpandCurrentWorkspace
+                ? null
+                : overview.Workspaces.FirstOrDefault(w => w.Workspace.Id == liveTarget) is { } here
+                    ? GroupRow(here.Workspace.Name, here.Workspace.Name, isCurrent: false, switchTo: null,
                         groupKey: CurrentListGroupKey,
-                        onDrop: (h, _) => Report(manager.MoveToDesktop(h, desktop.DesktopId)),
-                        desktop.Windows,
+                        onDrop: (h, screen) => Report(manager.AssignWindow(h, here.Workspace.Id, screen)),
+                        here.Running,
+                        tint: currentTint,
+                        // MADE TO STAND OUT from the rows (Petre: "make the expanded workspace stand out from the
+                        // rest", and from four mockups he picked this one, then "make the left accent bar much
+                        // brighter"): a bright bar in the workspace's colour down the list's left edge (see
+                        // ListSpine), with the list indented beside it, drawn by the code that draws a nested
+                        // row's spine.
+                        spine: currentAccent,
                         titledList: true)
-                    : null;
-            // Either right under the workspace it lists, or in the panel at the bottom (AppState.
-            // TitledListAfterRow; Petre: "let's try both"). Under its workspace it joins Rows, so the rows
-            // after it move down by its height; at the bottom nothing above it moves. The top edge of the bar
-            // stays put in both (see AnchorFromPosition).
-            if (list is not null && state.TitledListAfterRow && currentAt >= 0)
-                groupRows.Insert(currentAt + 1, list);
-            else if (list is not null)
+                    : overview.OtherDesktops.FirstOrDefault(d => d.DesktopId == liveTarget && d.DesktopId != Guid.Empty) is { } desktop
+                        ? GroupRow(desktop.Name, desktop.Name, isCurrent: false, switchTo: null,
+                            groupKey: CurrentListGroupKey,
+                            onDrop: (h, _) => Report(manager.MoveToDesktop(h, desktop.DesktopId)),
+                            desktop.Windows,
+                            titledList: true)
+                        : null;
+            if (list is not null)
             {
                 CurrentList.Children.Add(Separator());
                 CurrentList.Children.Add(list);
@@ -2812,7 +2835,7 @@ public partial class FloatingBar : Window
         // wrapped lines.
         drawnLines.Select((line, at) => (line, last: at == drawnLines.Count - 1)).ToList()
             .ForEach(x => icons.Children.Add(LineOf(x.line, showMonitorMarkers ? opensLine : [], groupLabel, groupKey, rowKey, iconButtons, washes, slots, x.last,
-                scale, nested ? NestedIndent : 0, titled)));
+                scale, nested || titled ? NestedIndent : 0, titled)));
 
         // The parent's windows USED to be drawn here, dimmed, on every nested row -- the issue
         // asked for "everything from the main workspace pinned to the nested ones". Petre, seeing
@@ -2842,7 +2865,8 @@ public partial class FloatingBar : Window
         // The spine spans both ROWS of the row (caption line and icons) and sits at its left edge,
         // inside the indent the icons and the caption both give up -- so it lands in space that would
         // otherwise be empty, and costs the row nothing at all.
-        if (nested && spine is not null)
+        // A titled list wears a spine too (its bright one, see ListSpine), with the same indent beside it.
+        if ((nested || titled) && spine is not null)
         {
             var mark = new Border
             {
@@ -2865,7 +2889,7 @@ public partial class FloatingBar : Window
         if (label is FrameworkElement caption)
         {
             if (captionContent is not null) caption.HorizontalAlignment = HorizontalAlignment.Right;
-            else if (nested) caption.Margin = new Thickness(caption.Margin.Left + NestedIndent, caption.Margin.Top, caption.Margin.Right, caption.Margin.Bottom);
+            else if (nested || titled) caption.Margin = new Thickness(caption.Margin.Left + NestedIndent, caption.Margin.Top, caption.Margin.Right, caption.Margin.Bottom);
         }
         Grid.SetRow(label, 0);
         container.Children.Add(label);
@@ -3575,6 +3599,20 @@ public partial class FloatingBar : Window
     // Takes the colour override rather than the workspace because for a grouped row it comes from the
     // GROUP (#90, Group.Color), and the resolution is the same either way: the override if there is
     // one, otherwise the palette entry for the position.
+    // The window list's spine: the workspace's colour fully opaque and lifted 45% toward white. Petre: "make
+    // the left accent bar much brighter". Brighter than LaneAccent (the nested rows' spine, which stays as it
+    // was), because this one has to pull the eye to the list from anywhere on the bar, while a nested row's
+    // only has to say which row it belongs to. Lightened rather than just made opaque, since a dark palette
+    // colour at full strength is still dark against the bar.
+    static Brush? ListSpine(string? color, int index)
+    {
+        if (Lane(color, index, 0xFF) is not SolidColorBrush { Color: var c }) return null;
+        static byte Up(byte v) => (byte)(v + (255 - v) * 0.45);
+        var brush = new SolidColorBrush(Color.FromRgb(Up(c.R), Up(c.G), Up(c.B)));
+        brush.Freeze();
+        return brush;
+    }
+
     static Brush? Lane(string? color, int index, byte alpha) =>
         WorkspacePalette.IsNone(color)
             ? null
@@ -4295,6 +4333,26 @@ public partial class FloatingBar : Window
     //
     // The title's strength says what the icon's state already says: full white for the window you are in,
     // dimmer for a window behind the front-most one on its screen, and in between otherwise.
+    // The expanded rows' hold (Petre: "so things aren't jumping under me"). heldExpanded is every row that
+    // has been expanded since the pointer came onto the bar; liveListTarget is the workspace or desktop you
+    // are actually on, set in RebuildCore.
+    bool hoveringBar;
+    readonly HashSet<Guid> heldExpanded = [];
+    Guid? liveListTarget;
+
+    // Deferred to the next dispatcher turn and re-checked, for the reason LeaveRow gives: a rebuild removes
+    // elements from under a stationary pointer and WPF can raise MouseLeave for that, so the question is
+    // whether the pointer has REALLY left. Rebuilds only when something other than the current workspace
+    // was being held open, which is the only case where letting go changes anything on screen.
+    void ReleaseHeldRows() => Dispatcher.BeginInvoke(new Action(() =>
+    {
+        if (IsMouseOver || !hoveringBar) return;
+        hoveringBar = false;
+        var stale = heldExpanded.Any(id => id != liveListTarget);
+        heldExpanded.Clear();
+        if (stale) Rebuild();
+    }));
+
     // The group key of the titled list at the bottom of the bar: distinct from its workspace's own row,
     // so the two have separate drop halves and a drag inside the list is a drag within its own "row".
     const string CurrentListGroupKey = "current-list";
@@ -4959,12 +5017,12 @@ public partial class FloatingBar : Window
         Add(minimized ? "⊞" : "⊖", minimized ? "Restore row height" : "Minimize row",
             () => Report(manager.SetWorkspaceMinimized(workspaceId, !minimized)));
 
-        // Where the current workspace's titled list goes ("let's try both"): one item that flips, naming
-        // the place it would move the list TO. On every workspace's menu, since the list follows whichever
-        // workspace you are on.
-        var listAfterRow = manager.State.TitledListAfterRow;
-        Add("☰", listAfterRow ? "Window list at the bottom of the bar" : "Window list under its workspace",
-            () => Report(manager.SetTitledListAfterRow(!listAfterRow)));
+        // Where the current workspace's titled list is ("let's try both"): its own row expands into it, or
+        // it sits at the bottom of the bar. One item that flips, naming what it would switch TO. On every
+        // workspace's menu, since the list follows whichever workspace you are on.
+        var expanding = manager.State.ExpandCurrentWorkspace;
+        Add("☰", expanding ? "Window list at the bottom of the bar" : "Expand the current workspace",
+            () => Report(manager.SetExpandCurrentWorkspace(!expanding)));
 
         // Petre: "add color picker in the right click context menu" (#68).
         //
