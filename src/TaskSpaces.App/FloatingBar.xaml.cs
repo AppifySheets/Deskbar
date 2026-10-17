@@ -1533,6 +1533,7 @@ public partial class FloatingBar : Window
     {
         Rows.Children.Clear();
         CurrentList.Children.Clear(); // the titled list below the rows, rebuilt with them
+        headerDropTargets.Clear();    // re-registered by every row as it is built (see GroupRow)
         // The rows these pointed at have just been thrown away, so every entry is now a Border
         // that is no longer in the tree. Repopulated as the new rows are built.
         rowRings.Clear();
@@ -3276,6 +3277,19 @@ public partial class FloatingBar : Window
             });
         }
 
+        // A window dragged by its OWN TITLE BAR can be dropped here too (see the header-drop section). It
+        // moves the window WITHOUT following it, unlike an icon drop of the window you are in: Petre, "don't
+        // follow the workspace, move it out of the current workspace, stay on the current workspace". The
+        // pinned row pins it; an unnamed desktop's row moves it there. The titled list at the bottom is the
+        // workspace you are already on, so it takes nothing.
+        Action<WindowHandle, int?>? headerDrop =
+            rowKey is { } workspace ? (h, screen) => Report(manager.AssignWindow(h, workspace, screen, allowFollow: false))
+            : desktopId is { } desktopTarget ? (h, _) => Report(manager.MoveToDesktop(h, desktopTarget))
+            : pinned ? (h, screen) => Report(manager.PinWindow(h).Bind(() => screen is { } s ? manager.MoveWindowToMonitor(h, s) : Result.Success()))
+            : null;
+        if (headerDrop is not null)
+            headerDropTargets.Add(new HeaderDropTarget(container, groupKey, groupLabel, idle, headerDrop));
+
         if (onDrop is not null)
         {
             // REARRANGING ICONS. Petre: "let's make it possible to rearrange icons in the same workspace",
@@ -4564,6 +4578,116 @@ public partial class FloatingBar : Window
         heldExpanded.Clear();
         if (stale) Rebuild();
     }));
+
+    // --- dropping a window by its own title bar ----------------------------------------------------
+    //
+    // Petre: "can i drag and drop the current window, with its header, to the workspace?", "move to another
+    // workspace by dragging a window", "go back to where it was but in a new workspace", and "don't follow
+    // the workspace, move it out of the current workspace, stay on the current workspace".
+    //
+    // Windows runs a title-bar drag in its own move loop, so the bar sees none of it as WPF input. What it
+    // does see, through the window monitor, is the drag's start and end (EVENT_SYSTEM_MOVESIZESTART/END,
+    // handed over by App). Between the two, a short timer reads the cursor and lights the workspace row it
+    // is over, exactly as an icon drag does: the row's highlight, the screen half when the row is split, and
+    // the info line. If the drag ends over a row, the window is put back where it was when the drag began
+    // (re-maximized if it was maximized), and only then moved to that workspace, on the aimed screen, with
+    // you staying where you are. Ending anywhere else is an ordinary window move and nothing is done.
+    //
+    // RESIZING fires the same two events. A drag whose window changed size, and did not start maximized
+    // (Windows un-maximizes a maximized window as soon as it is dragged), is a resize and never drops.
+    //
+    // The timer runs only during a drag, at about 30 checks a second, and does nothing else.
+
+    // A row that takes a title-bar drop: its container, keys and resting background, and what a drop does.
+    sealed record HeaderDropTarget(Grid Container, string GroupKey, string Label, Brush Idle, Action<WindowHandle, int?> Drop);
+
+    readonly List<HeaderDropTarget> headerDropTargets = [];
+
+    // The drag in progress: which window, where it was, whether it was maximized, and the row under the
+    // cursor right now.
+    (WindowHandle Window, WindowRect Start, bool WasMaximized)? headerDrag;
+    HeaderDropTarget? headerAim;
+
+    readonly System.Windows.Threading.DispatcherTimer headerDragWatch = new() { Interval = TimeSpan.FromMilliseconds(33) };
+    bool headerDragWatchWired;
+
+    public void OnWindowDragStarted(WindowHandle window)
+    {
+        if (!IsVisible || Minimized) return;
+        if (manager.RectOfWindow(window) is not { HasValue: true } start) return;
+
+        headerDrag = (window, start.Value, NativeMethods.IsZoomed(window.Value));
+        if (!headerDragWatchWired)
+        {
+            headerDragWatch.Tick += (_, _) => AimHeaderDrag();
+            headerDragWatchWired = true;
+        }
+        headerDragWatch.Start();
+    }
+
+    public void OnWindowDragEnded(WindowHandle window)
+    {
+        if (headerDrag is not { } drag || drag.Window != window) return;
+        headerDragWatch.Stop();
+        AimHeaderDrag(); // where the cursor was at the moment of release
+        var target = headerAim;
+        var screen = target is null ? null : AimedMonitor(target.GroupKey, target.Container, CursorIn(target.Container));
+        DisarmHeaderAim();
+        headerDrag = null;
+        if (target is null) return;
+
+        // Back to where it was first, while it is still on this desktop and its show state may change;
+        // then to the other workspace. Re-maximized after placing, so it maximizes on the screen it was on.
+        manager.PutWindowBack(window, drag.Start)
+            .Tap(() => { if (drag.WasMaximized) NativeMethods.ShowWindowAsync(window.Value, NativeMethods.SW_MAXIMIZE); })
+            .TapError(error => ClickTrace.Write($"header drop: could not put the window back: {error}"));
+        if (ClickTrace.On) ClickTrace.Write($"header drop hwnd={window.Value:X} row={target.Label} screen={screen?.ToString() ?? "none"}");
+        target.Drop(window, screen);
+    }
+
+    // Lights the row under the cursor, if this is a move rather than a resize and the cursor is on the bar.
+    void AimHeaderDrag()
+    {
+        var target = headerDrag is { } drag && !IsResize(drag) && PointerOnBar()
+            ? headerDropTargets.FirstOrDefault(t => t.Container.IsVisible && Contains(t.Container, CursorIn(t.Container)))
+            : null;
+
+        if (!ReferenceEquals(target, headerAim)) DisarmHeaderAim();
+        if (target is null) return;
+
+        headerAim = target;
+        var at = CursorIn(target.Container);
+        var screen = AimedMonitor(target.GroupKey, target.Container, at);
+        ArmAim(target.GroupKey, target.Container, at);
+        target.Container.Background = screen is null ? DropHighlight : target.Idle;
+        ShowReadout(screen is { } s ? $"→ move to {target.Label}, screen {s}" : $"→ move to {target.Label}");
+    }
+
+    void DisarmHeaderAim()
+    {
+        if (headerAim is not { } aimed) return;
+        aimed.Container.Background = aimed.Idle;
+        ClearAim(aimed.GroupKey);
+        ClearInfo();
+        headerAim = null;
+    }
+
+    // A size change means the border is being dragged, not the title bar. Not for a window that started
+    // maximized: dragging one un-maximizes it first, which changes its size by design.
+    bool IsResize((WindowHandle Window, WindowRect Start, bool WasMaximized) drag) =>
+        !drag.WasMaximized
+        && manager.RectOfWindow(drag.Window) is { HasValue: true } now
+        && (Math.Abs(now.Value.Width - drag.Start.Width) > 2 || Math.Abs(now.Value.Height - drag.Start.Height) > 2);
+
+    // The cursor in an element's own coordinates. PointFromScreen takes physical screen pixels, which is
+    // what GetCursorPos gives.
+    static Point CursorIn(FrameworkElement element) =>
+        NativeMethods.GetCursorPos(out var cursor) && PresentationSource.FromVisual(element) is not null
+            ? element.PointFromScreen(new Point(cursor.X, cursor.Y))
+            : new Point(double.NaN, double.NaN);
+
+    static bool Contains(FrameworkElement element, Point at) =>
+        at.X >= 0 && at.Y >= 0 && at.X < element.ActualWidth && at.Y < element.ActualHeight;
 
     // Whether the cursor is inside the bar's window, asked of Windows rather than of WPF's input state. Both
     // in physical pixels, so no DPI conversion is involved.

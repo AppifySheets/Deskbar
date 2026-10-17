@@ -275,6 +275,24 @@ public class FloatingBarLaneShadeTests(ITestOutputHelper output)
         Assert.Empty(Bar.TitlesIn(bar.RowContainer("Busy")));
     });
 
+    // A window dragged by its own title bar and dropped on a row (Petre: "move to another workspace by
+    // dragging a window") moves there WITHOUT taking you along: "don't follow the workspace, move it out of
+    // the current workspace, stay on the current workspace". The drag itself runs in Windows' move loop and
+    // needs the real cursor, so this calls the row's drop directly, which is what the end of a drag does.
+    [Fact]
+    public void A_title_bar_drop_moves_the_window_and_does_not_follow_it() => StaThread.Run(() =>
+    {
+        using var bar = TwoScreens(busyIcons: 3, standOnBusy: true);
+        var window = new WindowHandle(101); // App 1, on Busy, the workspace you are standing on
+
+        // Made the window you are IN, which is exactly when an icon drop would take you along with it.
+        bar.Pulse();
+        bar.HeaderDrop("Empty", window);
+
+        Assert.Equal(bar.EmptyDesktop, bar.Desktops.Placements[window]);
+        Assert.Empty(bar.Desktops.Switched);
+    });
+
     // "so workspaces don't change sizes every time i click them": every workspace row stays icons, the one
     // you are on included, so standing on a workspace leaves its row exactly as tall as it was.
     [Fact]
@@ -376,7 +394,8 @@ public class FloatingBarLaneShadeTests(ITestOutputHelper output)
         bar.UpdateLayout();
         // A rebuild the way the running app gets one after a switch: a window event. The fake desktops
         // change the current desktop on Switch but send no notification of their own.
-        return new Bar(bar, manager, empty.Id, () => monitor.Pump.OnNext(new WindowEvent(WindowEventKind.Activated, monitor.Initial[0])));
+        return new Bar(bar, manager, empty.Id, () => monitor.Pump.OnNext(new WindowEvent(WindowEventKind.Activated, monitor.Initial[0])),
+            desktops, emptyDesktop);
     }
 
     static ScreenFacts TwoDisplays(IReadOnlyList<(WindowHandle Window, int Monitor)> frontToBack) =>
@@ -398,8 +417,23 @@ public class FloatingBarLaneShadeTests(ITestOutputHelper output)
             " rowWidth=" + RowWidth.ToString("0.##") + " rounded=" + RoundedBottomRight;
     }
 
-    sealed class Bar(FloatingBar bar, WorkspaceManager? manager = null, Guid emptyWorkspace = default, Action? pulse = null) : IDisposable
+    sealed class Bar(FloatingBar bar, WorkspaceManager? manager = null, Guid emptyWorkspace = default, Action? pulse = null,
+        PulsingDesktops? desktops = null, Guid emptyDesktop = default) : IDisposable
     {
+        public PulsingDesktops Desktops => desktops!;
+
+        public Guid EmptyDesktop => emptyDesktop;
+
+        // What the end of a title-bar drag over the named row does, called directly: the row's registered
+        // header drop, with no screen aimed.
+        public void HeaderDrop(string label, WindowHandle window)
+        {
+            var targets = (System.Collections.IEnumerable)typeof(FloatingBar).GetField("headerDropTargets", Private)!.GetValue(bar)!;
+            var target = targets.Cast<object>().Single(t => (string)t.GetType().GetProperty("Label")!.GetValue(t)! == label);
+            var drop = (Action<WindowHandle, int?>)target.GetType().GetProperty("Drop")!.GetValue(target)!;
+            drop(window, null);
+        }
+
         public WorkspaceManager Manager => manager!;
 
         public Guid EmptyWorkspace => emptyWorkspace;
