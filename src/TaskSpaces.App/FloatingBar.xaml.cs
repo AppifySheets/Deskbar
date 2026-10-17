@@ -1541,6 +1541,7 @@ public partial class FloatingBar : Window
         Rows.Children.Clear();
         CurrentList.Children.Clear(); // the titled list below the rows, rebuilt with them
         headerDropTargets.Clear();    // re-registered by every row as it is built (see GroupRow)
+        ghostLines.Clear();           // re-derived by HeldLines as the expanded rows are built
         // The rows these pointed at have just been thrown away, so every entry is now a Border
         // that is no longer in the tree. Repopulated as the new rows are built.
         rowRings.Clear();
@@ -1755,7 +1756,9 @@ public partial class FloatingBar : Window
                     // The screen comes from WHERE in the row it was dropped (#89), and null means
                     // the row had no split to aim at, which is the workspace-only move it always was.
                     onDrop: (h, screen) => Report(manager.AssignWindow(h, g.Workspace.Id, screen)),
-                    g.Running,
+                    // An expanded row keeps a window that has left it as a faded line while the hold lasts
+                    // (see HeldLines); an icon row shows its windows as they are.
+                    Expanded(g.Workspace.Id) ? HeldLines(g.Workspace.Id, g.Running) : g.Running,
                     // Every member wears the GROUP's lane colour rather than its own. Colour is what
                     // groups things on this bar, so giving a member a colour of its own would be the
                     // surface saying "unrelated" while the layout says "belongs to". Inside a box the
@@ -1838,7 +1841,7 @@ public partial class FloatingBar : Window
                     switchTo: g.DesktopId == Guid.Empty ? null : () => manager.SwitchToDesktop(g.DesktopId),
                     groupKey: DraggedWindow.DesktopGroupKey(g.DesktopId),
                     onDrop: g.DesktopId == Guid.Empty ? null : (h, _) => Report(manager.MoveToDesktop(h, g.DesktopId)),
-                    g.Windows,
+                    Expanded(g.DesktopId) ? HeldLines(g.DesktopId, g.Windows) : g.Windows,
                     // Same Guid.Empty rule a third time, and for the third reason: Unplaced is not a
                     // desktop, so there is nothing to name (#149).
                     desktopId: g.DesktopId == Guid.Empty ? null : g.DesktopId,
@@ -1873,7 +1876,7 @@ public partial class FloatingBar : Window
                     ? GroupRow(here.Workspace.Name, here.Workspace.Name, isCurrent: false, switchTo: null,
                         groupKey: CurrentListGroupKey,
                         onDrop: (h, screen) => Report(manager.AssignWindow(h, here.Workspace.Id, screen)),
-                        here.Running,
+                        HeldLines(here.Workspace.Id, here.Running),
                         tint: currentTint,
                         // MADE TO STAND OUT from the rows (Petre: "make the expanded workspace stand out from the
                         // rest", and from four mockups he picked this one, then "make the left accent bar much
@@ -1886,7 +1889,7 @@ public partial class FloatingBar : Window
                         ? GroupRow(desktop.Name, desktop.Name, isCurrent: false, switchTo: null,
                             groupKey: CurrentListGroupKey,
                             onDrop: (h, _) => Report(manager.MoveToDesktop(h, desktop.DesktopId)),
-                            desktop.Windows,
+                            HeldLines(desktop.DesktopId, desktop.Windows),
                             titledList: true)
                         : null;
             if (list is not null)
@@ -2164,6 +2167,14 @@ public partial class FloatingBar : Window
                 {
                     var button = IconButton(groupLabel, groupKey, r);
                     if (titled && button is Button item) Titled(item, r);
+                    // A window that has left this row while the hold lasts (see HeldLines): its line stays,
+                    // faded, so the row keeps its height, and takes no clicks or drags, since the window is
+                    // somewhere else now.
+                    if (titled && ghostLines.Contains(r.Window.Handle) && button is UIElement ghost)
+                    {
+                        ghost.Opacity = 0.3;
+                        ghost.IsHitTestVisible = false;
+                    }
                     // The row's shrink, applied per ICON. A LayoutTransform rather than a smaller
                     // icon size: the icon's own pixels come from a cache keyed by size, and asking
                     // for a second size per row would double that cache to make a row shorter.
@@ -4601,12 +4612,46 @@ public partial class FloatingBar : Window
         releaseGrace.Stop();
         if (!hoveringBar || draggingWindow || headerDrag is not null || openMenu?.IsOpen == true || PointerOnBar()) return;
         hoveringBar = false;
-        var stale = heldExpanded.Any(id => id != liveListTarget);
+        // Faded lines left by windows that went elsewhere also only go on a rebuild (see HeldLines).
+        var stale = heldExpanded.Any(id => id != liveListTarget) || ghostLines.Count > 0;
         // Kept, so a title-bar drag that starts soon after can put these rows back (see RestoreReleasedRows).
         lastReleased = (heldExpanded.ToList(), DateTime.UtcNow);
         if (ClickTrace.On) ClickTrace.Write($"hold released rows={heldExpanded.Count} stale={stale}");
         heldExpanded.Clear();
         if (stale) Rebuild();
+    }
+
+    // THE LINES of an expanded row, held while the hold lasts. Petre, after a title-bar drop moved a window
+    // out of the expanded row he was on: "re collapses". The row had lost a line, so it was one line
+    // shorter and everything below it moved up under the pointer. Nothing had been released (the log said
+    // "hold released rows=1": only the current row was ever held); the window had simply left.
+    //
+    // So while the hold lasts, a window that has left an expanded row keeps its line there, faded and inert
+    // (see LineOf), in its old place, and the row keeps its height. A window that ARRIVES is added at the end
+    // as usual. When the hold is let go, the next rebuild draws the rows as they really are, all at once.
+    //
+    // Keyed by workspace or desktop id. shownLines is what each expanded row showed at its last build, which
+    // is exactly what is on screen, so no separate snapshot is needed when the hold begins.
+    readonly Dictionary<Guid, IReadOnlyList<WindowRow>> shownLines = [];
+    readonly HashSet<WindowHandle> ghostLines = [];
+
+    IReadOnlyList<WindowRow> HeldLines(Guid rowId, IReadOnlyList<WindowRow> now)
+    {
+        var lines = hoveringBar && shownLines.TryGetValue(rowId, out var before)
+            ? Merge(before, now)
+            : now;
+        shownLines[rowId] = lines;
+        return lines;
+
+        // The lines shown before, each replaced by its live row if the window is still here and kept as a
+        // ghost if it has gone, then any window that is new to the row.
+        IReadOnlyList<WindowRow> Merge(IReadOnlyList<WindowRow> shown, IReadOnlyList<WindowRow> live)
+        {
+            var current = live.ToDictionary(r => r.Window.Handle);
+            var kept = shown.Select(r => current.GetValueOrDefault(r.Window.Handle) ?? r).ToList();
+            shown.Where(r => !current.ContainsKey(r.Window.Handle)).ToList().ForEach(r => ghostLines.Add(r.Window.Handle));
+            return kept.Concat(live.Where(r => shown.All(s => s.Window.Handle != r.Window.Handle))).ToList();
+        }
     }
 
     // The rows that were expanded when the hold was last let go, and when. Petre: "re collapses". The

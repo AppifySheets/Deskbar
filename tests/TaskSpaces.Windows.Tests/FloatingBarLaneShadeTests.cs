@@ -296,6 +296,24 @@ public class FloatingBarLaneShadeTests(ITestOutputHelper output)
         Assert.NotEmpty(Bar.TitlesIn(bar.RowContainer("Busy")));
     });
 
+    // "re collapses": a window leaving the expanded row (here by a title-bar drop) used to take its line with
+    // it, so the row shrank under the pointer. While the hold lasts its line stays, faded; leaving the bar
+    // lets the row close up.
+    [Fact]
+    public void A_window_leaving_an_expanded_row_keeps_its_line_until_the_pointer_leaves() => StaThread.Run(() =>
+    {
+        using var bar = TwoScreens(busyIcons: 3, standOnBusy: true, expandRow: true);
+        bar.Enter();
+
+        bar.HeaderDrop("Empty", new WindowHandle(101));
+        bar.Pulse();
+        Assert.Equal(["App 1", "App 2", "App 3"], Bar.TitlesIn(bar.RowContainer("Busy")).Select(t => t.Text));
+
+        bar.Leave();
+        bar.Pulse();
+        Assert.Equal(["App 2", "App 3"], Bar.TitlesIn(bar.RowContainer("Busy")).Select(t => t.Text));
+    });
+
     // A window dragged by its own title bar and dropped on a row (Petre: "move to another workspace by
     // dragging a window") moves there WITHOUT taking you along: "don't follow the workspace, move it out of
     // the current workspace, stay on the current workspace". The drag itself runs in Windows' move loop and
