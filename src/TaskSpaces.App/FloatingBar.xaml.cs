@@ -1649,7 +1649,7 @@ public partial class FloatingBar : Window
     // lanes) so GroupRow can light it on hover: that is where a click switches workspace.
     // `slots` collects each icon with the window it stands for, so a drop can work out which two icons
     // it landed between (see InsertionAt).
-    UIElement LineOf(IReadOnlyList<WindowRow> line, ISet<WindowHandle> opensGroup, string groupLabel, string groupKey, Guid? rowKey, List<UIElement> iconButtons, List<Border> washes, List<IconSlot> slots, bool isLastLine, double scale = 1.0, double indent = 0)
+    UIElement LineOf(IReadOnlyList<WindowRow> line, ISet<WindowHandle> opensGroup, string groupLabel, string groupKey, Guid? rowKey, List<UIElement> iconButtons, List<Border> washes, List<IconSlot> slots, bool isLastLine, double scale = 1.0, double indent = 0, bool titled = false)
     {
         // Runs of consecutive icons that share a monitor. `opensGroup` already knows where each
         // one starts -- it is the same set the wrap arithmetic budgets a marker for -- so this
@@ -1845,10 +1845,13 @@ public partial class FloatingBar : Window
                 // see the note on this method. The icons start further in, which is all the indent
                 // was ever meant to say, and the lane it starts in is the same width as everyone
                 // else's.
-                var stack = new StackPanel { Orientation = Orientation.Horizontal };
+                // A titled row's line holds one window that fills its column, so a Grid that stretches it;
+                // an icon row's line holds a strip of fixed-size icons, so a horizontal StackPanel.
+                Panel stack = titled ? new Grid() : new StackPanel { Orientation = Orientation.Horizontal };
                 run.ForEach(r =>
                 {
                     var button = IconButton(groupLabel, groupKey, r);
+                    if (titled && button is Button item) Titled(item, r);
                     // The row's shrink, applied per ICON. A LayoutTransform rather than a smaller
                     // icon size: the icon's own pixels come from a cache keyed by size, and asking
                     // for a second size per row would double that cache to make a row shorter.
@@ -1894,7 +1897,6 @@ public partial class FloatingBar : Window
                         ? WashCorners(left: firstLane, right: true)
                         : WashCorners(left: true, right: lane.Rank == lastRank),
                 };
-                washes.Add(free);
                 DockPanel.SetDock(stack, pushRight ? Dock.Right : Dock.Left);
                 var laneContent = new DockPanel
                 {
@@ -1904,7 +1906,14 @@ public partial class FloatingBar : Window
                     Margin = firstLane ? new Thickness(indent, 0, 0, 0) : default,
                 };
                 laneContent.Children.Add(stack);
-                laneContent.Children.Add(free);
+                // A titled line has no free space: its one window fills the column (the stack is then the
+                // last child, which LastChildFill stretches whatever its Dock says). So no wash either;
+                // the current workspace is the one row there is no point switching to.
+                if (!titled)
+                {
+                    washes.Add(free);
+                    laneContent.Children.Add(free);
+                }
 
                 var stackColumn = AddColumn(laneContent, new GridLength(1, GridUnitType.Star));
                 ShadeLane(stackColumn);
@@ -1982,7 +1991,9 @@ public partial class FloatingBar : Window
 
     // Where a drop would put the dragged window: just before or just after `Anchor`, whose icon occupies
     // `Beside` in the row's own coordinates (which is where the marker is drawn).
-    sealed record Insertion(WindowHandle Anchor, bool After, Rect Beside);
+    // `Vertical` for a titled row, where windows are listed one above another: there "before" means above
+    // and the marker is a horizontal line instead of a vertical one.
+    sealed record Insertion(WindowHandle Anchor, bool After, Rect Beside, bool Vertical = false);
 
     // The icon a drop at `at` lands beside, on the half the drop is aimed at (`screen`, or the whole row
     // when it has only one).
@@ -1995,7 +2006,10 @@ public partial class FloatingBar : Window
     //
     // Null when that half has no icons at all: the window then goes where it would have gone anyway (the
     // end of the half), which is the only place an empty half has.
-    static Insertion? InsertionAt(IReadOnlyList<IconSlot> slots, FrameworkElement container, Point at, int? screen)
+    //
+    // A titled row is a LIST, one window per line, so there the rule turns on its side: the window whose
+    // line the pointer is nearest, and above or below it by which half of that line the pointer is in.
+    static Insertion? InsertionAt(IReadOnlyList<IconSlot> slots, FrameworkElement container, Point at, int? screen, bool vertical = false)
     {
         var placed = slots
             .Where(s => screen is null || s.Row.Monitor.HasValue && s.Row.Monitor.Value == screen)
@@ -2004,6 +2018,13 @@ public partial class FloatingBar : Window
             .Select(p => (p.Row, Bounds: p.Bounds!.Value))
             .ToList();
         if (placed.Count == 0) return null;
+
+        if (vertical)
+        {
+            var nearest = placed.MinBy(p => Math.Abs(p.Bounds.Top + p.Bounds.Height / 2 - at.Y));
+            return new Insertion(nearest.Row.Window.Handle, After: at.Y > nearest.Bounds.Top + nearest.Bounds.Height / 2,
+                nearest.Bounds, Vertical: true);
+        }
 
         var nearestTop = placed.MinBy(p => Math.Abs(p.Bounds.Top + p.Bounds.Height / 2 - at.Y)).Bounds.Top;
         var line = placed.Where(p => Math.Abs(p.Bounds.Top - nearestTop) < 1).OrderBy(p => p.Bounds.Left).ToList();
@@ -2523,6 +2544,21 @@ public partial class FloatingBar : Window
         // to be applied.
         var scale = minimized ? MinimizedRowScale : pinned ? PinnedRowScale : 1.0;
 
+        // THE CURRENT WORKSPACE IS DRAWN AS A TASKBAR: one window per line in its screen's column, icon
+        // and TITLE. Petre: "can we try to recreate the actual taskbar in the workspace?", "with window
+        // titles, vertically arranged", "active workspace only", "so i don't have to look at the taskbar
+        // for window titles". From the mockups he picked the version that keeps the two screens as two
+        // columns, like the icon rows, over a single list and over a separate panel.
+        //
+        // The cost he chose it with, written down: a column at his width (about 80 DIP) leaves room for
+        // roughly 8 characters of title after the icon, so most titles are cut short. Widening the bar
+        // is what buys more.
+        //
+        // Everything else about an icon carries over unchanged, because each line IS the icon button with
+        // a title added (see Titled): click, drag, the active fill and outline, the hover card, the
+        // landing-spot outline. Not the pinned row, which is not a workspace, and never a minimized row.
+        var titled = isCurrent && !pinned && !minimized;
+
         var icons = new StackPanel
         {
             Orientation = Orientation.Vertical,
@@ -2639,7 +2675,8 @@ public partial class FloatingBar : Window
             : (IconRoom() - (showMonitorMarkers ? (lanes - 1) * LaneGapWidth : 0)) / lanes;
 
         var perGroup = groups
-            .Select(g => (double.IsNaN(Width)
+            // A titled row puts every window on a line of its own: it is a list, not a strip.
+            .Select(g => titled ? g.Select(r => new List<WindowRow> { r }).ToList() : (double.IsNaN(Width)
                     // No width of its own yet: the fixed five-per-line rule, now applied per screen rather
                     // than per row, which is the same rule doing the same job in a narrower space.
                     ? IconRowLimit.Lines(g.ToList())
@@ -2675,7 +2712,7 @@ public partial class FloatingBar : Window
         // wrapped lines.
         drawnLines.Select((line, at) => (line, last: at == drawnLines.Count - 1)).ToList()
             .ForEach(x => icons.Children.Add(LineOf(x.line, showMonitorMarkers ? opensLine : [], groupLabel, groupKey, rowKey, iconButtons, washes, slots, x.last,
-                scale, nested ? NestedIndent : 0)));
+                scale, nested ? NestedIndent : 0, titled)));
 
         // The parent's windows USED to be drawn here, dimmed, on every nested row -- the issue
         // asked for "everything from the main workspace pinned to the nested ones". Petre, seeing
@@ -2945,10 +2982,22 @@ public partial class FloatingBar : Window
                 }
 
                 // On the seam between two icons: the left edge of the one it goes before, or the right
-                // edge of the one it goes after, centred on that edge.
-                var x = insertion.After ? insertion.Beside.Right : insertion.Beside.Left;
-                marker.Margin = new Thickness(x - marker.Width / 2, insertion.Beside.Top, 0, 0);
-                marker.Height = insertion.Beside.Height;
+                // edge of the one it goes after, centred on that edge. In a titled row the seam is
+                // between two LINES, so the marker lies flat along the top or bottom of the line.
+                if (insertion.Vertical)
+                {
+                    var y = insertion.After ? insertion.Beside.Bottom : insertion.Beside.Top;
+                    marker.Width = insertion.Beside.Width;
+                    marker.Height = 2;
+                    marker.Margin = new Thickness(insertion.Beside.Left, y - 1, 0, 0);
+                }
+                else
+                {
+                    var x = insertion.After ? insertion.Beside.Right : insertion.Beside.Left;
+                    marker.Width = 2;
+                    marker.Height = insertion.Beside.Height;
+                    marker.Margin = new Thickness(x - 1, insertion.Beside.Top, 0, 0);
+                }
                 marker.Visibility = Visibility.Visible;
             }
 
@@ -2958,7 +3007,7 @@ public partial class FloatingBar : Window
             // marker is not shown for it either.
             (Insertion? Insertion, bool SameHalf, bool StaysPut) Placement(DraggedWindow dragged, Point at, int? screen)
             {
-                var insertion = InsertionAt(slots, container, at, screen);
+                var insertion = InsertionAt(slots, container, at, screen, vertical: titled);
                 var home = ordered.FindIndex(r => r.Window.Handle == dragged.Handle);
                 var ownRow = dragged.SourceGroupKey == groupKey && home >= 0;
                 var sameHalf = ownRow && (screen is null || ordered[home].Monitor.HasValue && ordered[home].Monitor.Value == screen);
@@ -4138,6 +4187,50 @@ public partial class FloatingBar : Window
     // ring". The picker standing beside the bar lists the walk in order, so anything here beyond
     // "this one, now" was the same fact told twice, in the less legible of the two places.
     static readonly Brush CandidateRowRing = Frozen(0xFF, 0xFF, 0xB7, 0x4D);
+
+    // Turns an icon button into a taskbar line for the current workspace's row: the same button, with the
+    // window's title beside the icon, stretched across its screen's column and cut short with an ellipsis
+    // where the column ends. Done to the finished button rather than as a second kind of button, so the
+    // click, the drag, the hover card and the active and landing-spot outlines are the very same code.
+    //
+    // The title's strength says what the icon's state already says: full white for the window you are in,
+    // dimmer for a window behind the front-most one on its screen, and in between otherwise.
+    void Titled(Button button, WindowRow row)
+    {
+        var art = (UIElement)button.Content;
+        button.Content = null;
+        DockPanel.SetDock(art, Dock.Left);
+
+        var title = new TextBlock
+        {
+            Text = row.Window.DisplayName,
+            FontSize = 9,
+            Foreground = row.IsActive ? TitleActive
+                : row.IsFrontmostOnMonitor.HasValue && !row.IsFrontmostOnMonitor.Value ? TitleBehind
+                : TitleResting,
+            TextTrimming = TextTrimming.CharacterEllipsis,
+            VerticalAlignment = VerticalAlignment.Center,
+            Margin = new Thickness(3, 0, 2, 0),
+            // A ceiling for a bar with no width of its own (never resized, so SizeToContent): there a
+            // title is measured at its full length and would make the whole bar as wide as the longest
+            // one. With a stored width the column is narrower than this and the ellipsis applies first.
+            MaxWidth = 140,
+        };
+
+        var line = new DockPanel { LastChildFill = true };
+        line.Children.Add(art);
+        line.Children.Add(title);
+
+        button.Content = line;
+        // The stretch variant of the bare template, so the line fills the column and the title has its
+        // width to trim against; the centring one would size the button to the whole title and clip it.
+        button.Template = BareStretchButton;
+        button.HorizontalAlignment = HorizontalAlignment.Stretch;
+    }
+
+    static readonly Brush TitleActive = Frozen(0xFF, 0xFF, 0xFF, 0xFF);
+    static readonly Brush TitleResting = Frozen(0xDB, 0xFF, 0xFF, 0xFF);
+    static readonly Brush TitleBehind = Frozen(0x8C, 0xFF, 0xFF, 0xFF);
 
     UIElement IconButton(string groupLabel, string groupKey, WindowRow row)
     {

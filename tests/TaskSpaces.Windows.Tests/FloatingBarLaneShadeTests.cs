@@ -167,6 +167,37 @@ public class FloatingBarLaneShadeTests(ITestOutputHelper output)
         Assert.Empty(bar.LitWashes(row));
     });
 
+    // Petre: "can we try to recreate the actual taskbar in the workspace?", "with window titles, vertically
+    // arranged", "active workspace only". The workspace you are on lists one window per line in its
+    // screen's column, each with its title; every other row stays icons.
+    [Fact]
+    public void The_current_workspace_lists_one_titled_window_per_line_in_its_screens_column() => StaThread.Run(() =>
+    {
+        // Three windows: two on screen 1, one on screen 2.
+        using var bar = TwoScreens(busyIcons: 3, standOnBusy: true);
+        var row = bar.RowContainer("Busy");
+
+        var titles = Bar.TitlesIn(row);
+        output.WriteLine(string.Join(" | ", titles.Select(t => $"{t.Text}@{t.X:0},{t.Y:0}")));
+
+        Assert.Equal(["App 1", "App 2", "App 3"], titles.Select(t => t.Text));
+        // Screen 1's two windows one above the other, in the same column...
+        Assert.Equal(titles[0].X, titles[1].X, 1);
+        Assert.True(titles[1].Y > titles[0].Y);
+        // ...and screen 2's in the other column, on the first line.
+        Assert.True(titles[2].X > titles[0].X + 40);
+        Assert.Equal(titles[0].Y, titles[2].Y, 1);
+    });
+
+    // Only the current workspace: standing elsewhere, the same row is plain icons with no titles.
+    [Fact]
+    public void Any_other_workspace_stays_an_icon_row() => StaThread.Run(() =>
+    {
+        using var bar = TwoScreens(busyIcons: 3);
+
+        Assert.Empty(Bar.TitlesIn(bar.RowContainer("Busy")));
+    });
+
     // One display: one lane, nothing to tell apart, so nothing is shaded.
     [Fact]
     public void One_screen_shades_nothing() => StaThread.Run(() =>
@@ -179,14 +210,17 @@ public class FloatingBarLaneShadeTests(ITestOutputHelper output)
     // Two displays, which is what turns the lanes on at all; one workspace holding busyIcons windows and
     // one holding nothing. The last window goes on the second screen so the busy row uses both lanes,
     // and the rest on the first.
-    static Bar TwoScreens(int busyIcons, bool oneWithNoMonitor = false, bool everythingOnOneScreen = false)
+    // `standOnBusy` makes Busy the CURRENT workspace, which draws it as the titled list rather than as an
+    // icon row. Off by default: every test here but the titled ones is about icon rows, so they stand on
+    // the empty workspace and leave Busy as an ordinary row.
+    static Bar TwoScreens(int busyIcons, bool oneWithNoMonitor = false, bool everythingOnOneScreen = false, bool standOnBusy = false)
     {
         var busyDesktop = Guid.NewGuid();
         var emptyDesktop = Guid.NewGuid();
         var busy = new Workspace(Guid.NewGuid(), "Busy", busyDesktop);
         var empty = new Workspace(Guid.NewGuid(), "Empty", emptyDesktop);
 
-        var desktops = new PulsingDesktops { CurrentId = busyDesktop };
+        var desktops = new PulsingDesktops { CurrentId = standOnBusy ? busyDesktop : emptyDesktop };
         desktops.Desktops.Add(new DesktopInfo(busyDesktop, "Busy"));
         desktops.Desktops.Add(new DesktopInfo(emptyDesktop, "Empty"));
 
@@ -277,6 +311,20 @@ public class FloatingBarLaneShadeTests(ITestOutputHelper output)
             ((Panel)bar.FindName("Rows")!).Children.OfType<Border>()
                 .Select(b => b.Child).OfType<Grid>()
                 .Single(g => System.Windows.Automation.AutomationProperties.GetName(g) == label);
+
+        // The window titles drawn in a row: TextBlocks inside a lane's icon buttons (the caption's text is
+        // outside every lane), with where each one starts, ordered by column and then down the column.
+        public static List<(string Text, double X, double Y)> TitlesIn(Grid row) =>
+            Descendants(row).OfType<DockPanel>()
+                .SelectMany(lane => Descendants(lane).OfType<Button>())
+                // The title is the text that trims; a window with no icon draws a one-letter placeholder,
+                // which is a TextBlock too, and does not.
+                .SelectMany(button => Descendants(button).OfType<TextBlock>().Where(t => t.TextTrimming == TextTrimming.CharacterEllipsis))
+                .Select(t => (t.Text, Origin: t.TransformToAncestor(row).Transform(new Point(0, 0))))
+                .Select(t => (t.Text, t.Origin.X, t.Origin.Y))
+                .OrderBy(t => Math.Round(t.X / 20))
+                .ThenBy(t => t.Y)
+                .ToList();
 
         // The row's icon buttons: the ones inside a lane, as opposed to the caption's button above them.
         public List<Button> Icons(DependencyObject row) =>
