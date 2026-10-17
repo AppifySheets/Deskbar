@@ -369,4 +369,14 @@ public sealed record FloatingBarState(double Left, double Top, bool Visible)
     // Window.Width on the next start. Changing the scale therefore keeps the bar the same size on
     // screen rather than rescaling a number that was chosen by eye at the old scale.
     public double? Width { get; init; }
+
+    // Docked to a screen edge as an app bar, the way the taskbar is: "left" or "right" of the screen the
+    // bar is on, or null when it floats. Petre: "can i dock the app floating window like taskbar, to the
+    // side of the screen, and have windows respect it?"
+    //
+    // While docked, Left/Top/Right/Bottom above keep the FLOATING position, not the docked one, so
+    // undocking puts the bar back where it floated before. The docked geometry is not stored at all: it
+    // is asked of the shell every time, because what the shell grants depends on what else is docked.
+    // Same init-property/no-migration pattern as the rest of this record.
+    public string? DockedEdge { get; init; }
 }

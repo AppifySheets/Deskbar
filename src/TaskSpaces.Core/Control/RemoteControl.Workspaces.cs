@@ -124,6 +124,9 @@ public sealed partial class RemoteControl
             {
                 "minimize" => Reply(setBarVisible(false), () => new { bar = "minimized" }),
                 "restore" => Reply(setBarVisible(true), () => new { bar = "restored" }),
+                "dock" or "undock" when setBarDocked is null => ControlReply.Fail("Docking cannot be controlled from here."),
+                "dock" => Reply(setBarDocked!(true), () => new { bar = "docked" }),
+                "undock" => Reply(setBarDocked!(false), () => new { bar = "undocked" }),
                 _ => ControlReply.Fail(ControlUsage.LineFor("bar")),
             };
 

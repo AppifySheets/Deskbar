@@ -389,6 +389,22 @@ public class RemoteControlMenuTests
         Assert.Equal([false, true], asked);
     }
 
+    // The menu's "Dock to screen edge" / "Undock from screen edge" twin goes through its own callback,
+    // and a caller that handed none in gets a refusal rather than a crash.
+    [Fact]
+    public void Bar_dock_and_undock_go_to_whatever_the_app_handed_in()
+    {
+        var manager = Started();
+        var asked = new List<bool>();
+        var control = new RemoteControl(manager, _ => Result.Success(), docked => { asked.Add(docked); return Result.Success(); });
+
+        Ok(control.Execute(["bar", "dock"]));
+        Ok(control.Execute(["bar", "undock"]));
+        Assert.Equal([true, false], asked);
+
+        Assert.Equal(ControlReply.Failed, new RemoteControl(manager, _ => Result.Success()).Execute(["bar", "dock"]).ExitCode);
+    }
+
     [Fact]
     public void A_known_command_with_the_wrong_arguments_prints_its_own_usage_line()
     {

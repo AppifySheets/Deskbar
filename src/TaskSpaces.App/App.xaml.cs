@@ -815,7 +815,12 @@ public partial class App : Application
                 {
                     if (visible && bar.Minimized) RestoreBar();
                     else if (!visible && !bar.Minimized) MinimizeBar();
-                }));
+                }),
+            // `bar dock|undock`: the same two methods the bar's own menu item calls.
+            docked =>
+                floatingBar is not { } dockable
+                    ? Result.Failure("There is no bar to change (compatibility mode).")
+                    : docked ? dockable.DockToEdge() : dockable.UndockFromEdge());
         controlServer = new ControlPipeServer(ControlCommandLine.PipeName,
             args => Dispatcher.InvokeAsync(() =>
             {

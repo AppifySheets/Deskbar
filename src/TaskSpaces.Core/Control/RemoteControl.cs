@@ -24,7 +24,9 @@ namespace TaskSpaces.Core.Control;
 //
 // Output is JSON for every success, because the expected caller is an agent that reads it back, and a
 // plain sentence for every failure, because the expected reader of a failure is whoever is debugging.
-public sealed partial class RemoteControl(WorkspaceManager manager, Func<bool, Result>? setBarVisible = null)
+// `setBarDocked` is the bar's "Dock to screen edge" / "Undock" twin, passed in by App for the same reason
+// `setBarVisible` is: the bar is a window, and Core knows nothing of windows.
+public sealed partial class RemoteControl(WorkspaceManager manager, Func<bool, Result>? setBarVisible = null, Func<bool, Result>? setBarDocked = null)
 {
     static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web) { WriteIndented = true };
 
