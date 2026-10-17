@@ -1409,6 +1409,7 @@ public partial class FloatingBar : Window
             // The current workspace's lane colour, filled in while its row is built (WorkspaceRow), for
             // the titled list at the bottom.
             Brush? currentTint = null;
+            Brush? currentAccent = null;
 
             // Which element of groupRows holds the current workspace (its own row, or the group box it is
             // in), for putting the titled list right under it when that is the chosen place.
@@ -1482,6 +1483,9 @@ public partial class FloatingBar : Window
                 // The current workspace's colour, for the titled list at the bottom of the bar (see
                 // where it is built below), which wears the colour of the row it lists.
                 if (g.IsCurrent) currentTint = LaneTint(group is not null ? group.Color : g.Workspace.Color,
+                    group is not null ? ColourSlotOf(group) : overview.Workspaces.ToList().FindIndex(w => w.Workspace.Id == g.Workspace.Id));
+                // ...and its accent, the stronger version of that colour, for the bar down the list's side.
+                if (g.IsCurrent) currentAccent = LaneAccent(group is not null ? group.Color : g.Workspace.Color,
                     group is not null ? ColourSlotOf(group) : overview.Workspaces.ToList().FindIndex(w => w.Workspace.Id == g.Workspace.Id));
 
                 var ownSlot = overview.Workspaces.ToList().FindIndex(w => w.Workspace.Id == g.Workspace.Id);
@@ -1634,6 +1638,13 @@ public partial class FloatingBar : Window
                     onDrop: (h, screen) => Report(manager.AssignWindow(h, here.Workspace.Id, screen)),
                     here.Running,
                     tint: currentTint,
+                    // MADE TO STAND OUT from the rows (Petre: "make the expanded workspace stand out from the
+                    // rest", and from four mockups he picked this one): a bar in the workspace's accent colour
+                    // down the list's left edge, with the list indented beside it. It is the spine a nested row
+                    // already wears, drawn by the same code, so it says "this belongs to that workspace" in a
+                    // way the bar already uses, rather than in a new one.
+                    nested: true,
+                    spine: currentAccent,
                     titledList: true)
                 : overview.OtherDesktops.FirstOrDefault(d => d.IsCurrent && d.DesktopId != Guid.Empty) is { } desktop
                     ? GroupRow(desktop.Name, desktop.Name, isCurrent: false, switchTo: null,

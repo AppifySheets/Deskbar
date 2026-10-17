@@ -208,6 +208,21 @@ public class FloatingBarLaneShadeTests(ITestOutputHelper output)
             System.Windows.Automation.AutomationProperties.GetName(icon) == "Beeper");
     });
 
+    // Petre: "make the expanded workspace stand out from the rest", and from the mockups he picked a bar in
+    // the workspace's colour down the list's left edge: the spine a nested row wears, drawn by the same code.
+    [Fact]
+    public void The_list_wears_a_spine_down_its_left_edge() => StaThread.Run(() =>
+    {
+        using var bar = TwoScreens(busyIcons: 3, standOnBusy: true);
+        var list = bar.TitledList();
+
+        // Visible: the drag marker is also a thin left-aligned Border in the same grid, hidden until a drag.
+        var spine = list.Children.OfType<Border>().SingleOrDefault(b =>
+            b is { Child: null, HorizontalAlignment: HorizontalAlignment.Left, Width: > 0 and < 5, Background: not null, Visibility: Visibility.Visible });
+        Assert.NotNull(spine);
+        Assert.Equal(list.RowDefinitions.Count, Grid.GetRowSpan(spine));
+    });
+
     // Petre: "or maybe put the expanded current workspace AFTER the selected workspace, not at the bottom",
     // "let's try both". With that setting the list is in the rows, directly after its workspace's row
     // (with the usual separator between), and the bottom panel is empty.
