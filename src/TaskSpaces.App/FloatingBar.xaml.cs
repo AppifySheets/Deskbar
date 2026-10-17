@@ -231,6 +231,9 @@ public partial class FloatingBar : Window
             // rebuilding destroys the row the menu is positioned against and WPF then closes it --
             // so this is the moment the postponed news is finally allowed through.
             FlushDeferredRebuild();
+            // A menu holds the expanded rows the way the bar itself does, so if the pointer has left the
+            // bar by the time it closes, this is when they are let go (see ReleaseHeldRows).
+            ReleaseHeldRows();
         };
     }
 
@@ -4340,18 +4343,42 @@ public partial class FloatingBar : Window
     readonly HashSet<Guid> heldExpanded = [];
     Guid? liveListTarget;
 
-    // Deferred to the next dispatcher turn and re-checked, for the reason LeaveRow gives: a rebuild removes
-    // elements from under a stationary pointer and WPF can raise MouseLeave for that, so the question is
-    // whether the pointer has REALLY left. Rebuilds only when something other than the current workspace
-    // was being held open, which is the only case where letting go changes anything on screen.
+    // Petre: "until i leave the floating window, nothing should collapse", after a drag from an expanded
+    // row to another collapsed things: "dragging and dropping a window from expanded workspace to another
+    // shouldn't collapse anything".
+    //
+    // So the hold is let go ONLY when the pointer has really left the bar, and three things are not that,
+    // although WPF reports each of them as a MouseLeave:
+    //   * a DRAG: DoDragDrop's modal loop takes the mouse away from WPF, which reads as leaving. The drag's
+    //     own finish asks again (onDragFinished), once the pointer is somewhere real;
+    //   * one of the bar's MENUS being open: a menu is its own popup window, so pointing at it is "off" the
+    //     bar to WPF, but it is the bar's menu. Its Closed handler asks again;
+    //   * a REBUILD removing elements from under a stationary pointer (the reason LeaveRow defers too).
+    // "Really left" is read from the cursor and the window's own rectangle (PointerOnBar), not from
+    // IsMouseOver, which is exactly the state the first two make stale.
+    //
+    // Deferred to the next dispatcher turn so a rebuild in progress has finished. Rebuilds only when
+    // something other than the current workspace was being held open, which is the only case where letting
+    // go changes anything on screen.
     void ReleaseHeldRows() => Dispatcher.BeginInvoke(new Action(() =>
     {
-        if (IsMouseOver || !hoveringBar) return;
+        if (!hoveringBar || draggingWindow || openMenu?.IsOpen == true || PointerOnBar()) return;
         hoveringBar = false;
         var stale = heldExpanded.Any(id => id != liveListTarget);
         heldExpanded.Clear();
         if (stale) Rebuild();
     }));
+
+    // Whether the cursor is inside the bar's window, asked of Windows rather than of WPF's input state. Both
+    // in physical pixels, so no DPI conversion is involved.
+    bool PointerOnBar()
+    {
+        var hwnd = new WindowInteropHelper(this).Handle;
+        return hwnd != nint.Zero
+               && NativeMethods.GetCursorPos(out var cursor)
+               && NativeMethods.GetWindowRect(hwnd, out var rect)
+               && cursor.X >= rect.Left && cursor.X < rect.Right && cursor.Y >= rect.Top && cursor.Y < rect.Bottom;
+    }
 
     // The group key of the titled list at the bottom of the bar: distinct from its workspace's own row,
     // so the two have separate drop halves and a drag inside the list is a drag within its own "row".
@@ -4559,6 +4586,9 @@ public partial class FloatingBar : Window
             {
                 draggingWindow = false;
                 UpdateFade();
+                // The expanded rows were held through the drag (see ReleaseHeldRows). If it ended off the
+                // bar, this is when they are let go; dropped on the bar, they stay as they were.
+                ReleaseHeldRows();
                 // #48, fourth visit. A drag swallows the press that started it -- DoDragDrop's modal
                 // loop takes the mouse-up as a native message, so the icon never raises Click -- but the
                 // ROW still receives a bubbling release afterwards, with no press of its own. The trace

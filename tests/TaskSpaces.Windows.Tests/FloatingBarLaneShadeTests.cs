@@ -251,6 +251,30 @@ public class FloatingBarLaneShadeTests(ITestOutputHelper output)
         Assert.Empty(Bar.TitlesIn(bar.RowContainer("Busy")));
     });
 
+    // "dragging and dropping a window from expanded workspace to another shouldn't collapse anything", "until
+    // i leave the floating window, nothing should collapse". A drag's modal loop reads to WPF as the pointer
+    // leaving; that must not let go. When the drag ends somewhere off the bar, it does.
+    [Fact]
+    public void A_drag_does_not_release_the_hold_until_it_ends_off_the_bar() => StaThread.Run(() =>
+    {
+        using var bar = TwoScreens(busyIcons: 3, standOnBusy: true, expandRow: true);
+        bar.Enter();
+        Assert.True(bar.Manager.Switch(bar.EmptyWorkspace).IsSuccess);
+        bar.Pulse();
+
+        // A drag in flight: the flag the drag source's own callbacks set (the real drag runs inside
+        // Windows' modal OLE loop, which a test cannot drive).
+        bar.SetField("draggingWindow", true);
+        bar.Leave();
+        Assert.NotEmpty(Bar.TitlesIn(bar.RowContainer("Busy")));
+
+        // The drag ends with the pointer off the bar (it is parked off screen), so the hold lets go.
+        bar.SetField("draggingWindow", false);
+        bar.Call("ReleaseHeldRows");
+        bar.Leave();
+        Assert.Empty(Bar.TitlesIn(bar.RowContainer("Busy")));
+    });
+
     // "so workspaces don't change sizes every time i click them": every workspace row stays icons, the one
     // you are on included, so standing on a workspace leaves its row exactly as tall as it was.
     [Fact]
@@ -387,6 +411,13 @@ public class FloatingBarLaneShadeTests(ITestOutputHelper output)
             pulse?.Invoke();
             bar.UpdateLayout();
         }
+
+        // For state only a modal loop or a private callback can set (a drag in flight, and its finish).
+        const System.Reflection.BindingFlags Private = System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance;
+
+        public void SetField(string name, object value) => typeof(FloatingBar).GetField(name, Private)!.SetValue(bar, value);
+
+        public void Call(string method) => typeof(FloatingBar).GetMethod(method, Private)!.Invoke(bar, null);
 
         // The pointer arriving on, and leaving, the bar window, as WPF raises them. Leaving is deferred in the
         // bar (it re-checks where the pointer really is on the next dispatcher turn), so the queue is drained
