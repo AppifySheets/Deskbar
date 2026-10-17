@@ -207,6 +207,16 @@ public sealed record AppState(
     // without it: no request leaves the machine, and nothing is announced.
     public bool CheckForUpdates { get; init; } = true;
 
+    // Whether the bar docks to a screen edge as an app bar, the way the taskbar does, so windows keep
+    // clear of it (see the docking section of FloatingBar). Petre, once it worked: "make this a config
+    // setting and disable by default" ("docking i mean").
+    //
+    // OFF by default, so nobody's screen loses a strip they did not ask to give up. A setting rather than
+    // a menu item: it is a choice about how the app sits on the desk, made once, not something reached
+    // for in passing. Which edge is decided when it docks (the side the bar is nearer to) and remembered
+    // in FloatingBarState.DockedEdge while docked.
+    public bool DockBar { get; init; }
+
     // The groups workspaces belong to (#42 anchored, #84 anchorless). Membership lives on the
     // workspace as GroupId; this holds the group's own name and its anchor, if it has one.
     //

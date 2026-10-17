@@ -124,6 +124,9 @@ public partial class FloatingBar : Window
             // carries no window news at all, so if this came second a rebuild would run for nothing
             // before the visible part happened.
             ApplyAppearance();
+            // The docking setting, followed here so every way of changing it (Manage, the remote
+            // command) reaches the bar the same way.
+            FollowDockSetting();
             if (IsVisible) Rebuild();
         }));
 
@@ -330,11 +333,11 @@ public partial class FloatingBar : Window
         else
         {
             PositionFromState();
-            // Docked at the last exit: dock again, from the floating position just restored, which is
+            // Docking switched on in settings: dock, from the floating position just restored, which is
             // what DockTo keeps for undocking. A dock that fails leaves the bar floating, which is a
             // working bar, so the failure is traced rather than shown.
-            if (StoredPlacement()?.DockedEdge is ("left" or "right") and var stored)
-                DockTo(stored).TapError(error => ClickTrace.Write($"dock on show failed: {error}"));
+            if (manager.State.DockBar)
+                DockToEdge().TapError(error => ClickTrace.Write($"dock on show failed: {error}"));
         }
 
         Save();
@@ -456,17 +459,31 @@ public partial class FloatingBar : Window
     // ask us to dock again.
     bool docking;
 
-    // From the menu and from `taskspaces.cmd bar dock`. Docks to whichever side of its screen the bar is
-    // nearer to, so a bar parked at the right edge docks right without being asked which.
-    public Result DockToEdge()
+    // Docking is a SETTING (AppState.DockBar, off by default; Petre: "make this a config setting and
+    // disable by default"), set in Manage or with `taskspaces.cmd bar dock|undock`. The bar follows it
+    // whenever the state pulses, and only while it is on screen: a minimized bar has given its strip back
+    // and docks again when it is restored (see ShowBar).
+    void FollowDockSetting()
+    {
+        if (!IsVisible || Minimized) return;
+        if (manager.State.DockBar && !Docked)
+            DockToEdge().TapError(error => ClickTrace.Write($"dock failed: {error}"));
+        else if (!manager.State.DockBar && Docked)
+            UndockFromEdge();
+    }
+
+    // Docks to the edge it was docked on last time, if that is remembered, otherwise to whichever side of
+    // its screen the bar is nearer to, so a bar parked at the right edge docks right without being asked.
+    Result DockToEdge()
     {
         if (Docked) return Result.Success();
+        if (StoredPlacement()?.DockedEdge is ("left" or "right") and var remembered) return DockTo(remembered);
         if (MonitorBounds(Left, Top) is not { } screen) return Result.Failure("Could not tell which screen the bar is on.");
         var middle = Left + ActualWidth / 2;
         return DockTo(middle > (screen.Left + screen.Right) / 2 ? "right" : "left");
     }
 
-    public Result UndockFromEdge()
+    Result UndockFromEdge()
     {
         if (!Docked) return Result.Success();
         appBar?.Remove();
@@ -5325,7 +5342,7 @@ public partial class FloatingBar : Window
                 : manager.DeleteWorkspaceClosingWindows(workspaceId));
         });
 
-        AddBarItems(menu);
+        AddMinimizeItem(menu);
         return menu;
     }
 
@@ -5351,19 +5368,11 @@ public partial class FloatingBar : Window
     // acts on one window. A command that made the whole bar vanish sitting under the same right
     // click as "Close window" is a mis-aim waiting to happen.
     //
-    // ...and docking, which acts on the bar for the same reason and so lives in the same place. One item
-    // that flips, like Minimize row / Restore row height: a bar is docked or it is not.
-    void AddBarItems(ContextMenu menu)
+    // Docking is NOT here: it is a setting in Manage (AppState.DockBar), chosen once rather than reached
+    // for in passing.
+    void AddMinimizeItem(ContextMenu menu)
     {
         menu.Items.Add(new Separator());
-
-        var dock = new MenuItem
-        {
-            Header = Docked ? "Undock from screen edge" : "Dock to screen edge",
-            Icon = MenuGlyph(Docked ? "⇱" : "⇥"),
-        };
-        dock.Click += (_, _) => Report(Docked ? UndockFromEdge() : DockToEdge());
-        menu.Items.Add(dock);
 
         var minimize = new MenuItem { Header = "Minimize bar", Icon = MenuGlyph("▁") };
         minimize.Click += (_, _) => MinimizeRequested?.Invoke();
@@ -5394,7 +5403,7 @@ public partial class FloatingBar : Window
         add.Click += (_, _) => InsertAt(manager.State.Workspaces.Count, null);
         menu.Items.Add(add);
 
-        AddBarItems(menu);
+        AddMinimizeItem(menu);
         return menu;
     }
 

@@ -389,20 +389,19 @@ public class RemoteControlMenuTests
         Assert.Equal([false, true], asked);
     }
 
-    // The menu's "Dock to screen edge" / "Undock from screen edge" twin goes through its own callback,
-    // and a caller that handed none in gets a refusal rather than a crash.
+    // Docking is a setting (Manage's checkbox, off by default); `bar dock|undock` flips it, and the bar
+    // follows the setting on its own.
     [Fact]
-    public void Bar_dock_and_undock_go_to_whatever_the_app_handed_in()
+    public void Bar_dock_and_undock_flip_the_docking_setting()
     {
         var manager = Started();
-        var asked = new List<bool>();
-        var control = new RemoteControl(manager, _ => Result.Success(), docked => { asked.Add(docked); return Result.Success(); });
+        Assert.False(manager.State.DockBar);
 
-        Ok(control.Execute(["bar", "dock"]));
-        Ok(control.Execute(["bar", "undock"]));
-        Assert.Equal([true, false], asked);
+        Ok(Run(manager, "bar", "dock"));
+        Assert.True(manager.State.DockBar);
 
-        Assert.Equal(ControlReply.Failed, new RemoteControl(manager, _ => Result.Success()).Execute(["bar", "dock"]).ExitCode);
+        Ok(Run(manager, "bar", "undock"));
+        Assert.False(manager.State.DockBar);
     }
 
     [Fact]
