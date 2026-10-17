@@ -5433,16 +5433,12 @@ public partial class FloatingBar : Window
             { } s => s.Left,
             null => work.Right - ActualWidth,
         };
-        // Top follows the same rule as Left, for the same reason and now with the same weight: the
-        // bar's height follows its content too, so the BOTTOM edge is what a restore has to
-        // reproduce (see FloatingBarState.Bottom). Top is still read for files written before that
-        // key existed, and still written, so nothing is lost by going back to an older build.
-        var rawTop = stored switch
-        {
-            { Bottom: { } bottom } => bottom - ActualHeight,
-            { } s => s.Top,
-            null => work.Bottom - ActualHeight,
-        };
+        // Top is restored as TOP, since the top edge is the one that stays put (see AnchorFromPosition).
+        // A stored Bottom, written while #50 pinned the bottom edge, is deliberately not read: restoring
+        // from it would put the top wherever this session's height happens to reach, and the bar's height
+        // now changes with the current workspace's list. The very first placement, with nothing stored,
+        // still starts at the bottom of the screen.
+        var rawTop = stored?.Top ?? work.Bottom - ActualHeight;
 
         (Left, Top) = WorkAreaClamp.Clamp(rawLeft, rawTop, ActualWidth, ActualHeight, work.Left, work.Top, work.Right, work.Bottom);
         AnchorFromPosition(work);
@@ -5467,10 +5463,18 @@ public partial class FloatingBar : Window
     void AnchorFromPosition((double Left, double Top, double Right, double Bottom) work)
     {
         anchorRight = EdgeSnap.GrowsLeftwards(Left, work.Left) ? Left + ActualWidth : null;
-        // The vertical twin (#50). Derived on the same pass, from the same fact -- where the bar
-        // actually is -- so the two axes cannot disagree and neither is persisted as a decision
-        // that could go stale.
-        anchorBottom = EdgeSnap.GrowsUpwards(Top, work.Top) ? Top + ActualHeight : null;
+        // The vertical axis is NOT derived any more: the TOP edge always stays put and the bar grows and
+        // shrinks at the bottom. Petre: "you should keep the top position and increase or decrease at the
+        // bottom."
+        //
+        // This reverses #50, which pinned the BOTTOM edge of a bar parked low on the screen so that it
+        // grew upwards. That was right while height changed rarely (a workspace inserted, a row wrapping).
+        // The current workspace's titled list at the bottom of the bar changes height on every switch,
+        // and with the bottom pinned every switch pushed the top edge, and every row with it, up or down:
+        // exactly the movement the list was moved to the bottom to stop. With the top pinned the rows hold
+        // still and only the list's own end moves. A bar that would grow past the bottom of the screen is
+        // still clamped onto it (OnSizeChanged), because staying on screen wins over holding the top.
+        anchorBottom = null;
     }
 
     // The screen x the bar's right edge is pinned to. Null until the bar has been positioned,
