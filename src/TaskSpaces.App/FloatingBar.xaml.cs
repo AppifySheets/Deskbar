@@ -1017,21 +1017,17 @@ public partial class FloatingBar : Window
         // is allowed to reorder a frozen row.
         if (hoveredRow is { } held && held.Key == groupKey) return;
 
-        var wasHolding = hoveredRow is not null;
         hoveredRow = (groupKey, rowKey, RowOrderFreeze.Capture(displayed));
-        // The hover ring (#41). Painted here rather than waiting for the rebuild below, because
-        // arriving from OUTSIDE the bar rebuilds nothing -- there is no previous row to re-sort --
-        // and that is the commonest way a row is entered.
+        // The hover ring (#41), painted at once.
         ApplyCandidate();
-        // A rebuild triggered by the POINTER rather than by a window event, which is new since
-        // this bug was last looked at: moving from one row to another re-sorts the row just left.
-        // If a click can be lost by arriving during that, this line will sit immediately before
-        // the press that goes missing.
-        if (ClickTrace.On && wasHolding) ClickTrace.Write($"enter-row rebuild for={groupKey}");
-        // Moving straight from one row to another: the row just left has to re-sort now, and its
-        // own MouseLeave cannot do it -- by the time that deferred check runs, the freeze belongs
-        // to this row and it will (correctly) leave it alone.
-        if (wasHolding) Rebuild();
+        // NO REBUILD any more. This used to rebuild here, so that the row just left could re-sort into the
+        // z-order it had been frozen against. Rows no longer sort by z-order (WorkspaceManager.Know: first
+        // seen, moved only by dragging), so there is nothing to re-sort, and the rebuild was pure cost: a
+        // full overview query, a few hundred milliseconds on Petre's machine, on EVERY row the pointer
+        // crossed. "i think i'm still seeing missed clicks", "maybe the ui is stuck": his trace had thirteen
+        // of these rebuilds in two and a half seconds of moving the pointer down the bar, with the UI thread
+        // busy for most of it, and a click that lands during one can be lost. The hover ring still follows
+        // the pointer through ApplyCandidate above, which needs no rebuild.
     }
 
     // Deferred to the next dispatcher turn, and that is the load-bearing part of this whole
@@ -1047,7 +1043,9 @@ public partial class FloatingBar : Window
         if (hoveredRow is not { } held || held.Key != groupKey) return; // another row already owns the freeze
         if (HoveredRowKey() == groupKey) return;                        // still inside it; the container was merely rebuilt
         hoveredRow = null;
-        Rebuild(); // the promotion the user has been waiting for, served the moment they step off
+        // No rebuild: there is no z-order promotion to serve any more (see EnterRow). The hover ring is
+        // repainted without one.
+        ApplyCandidate();
     }
 
     // The icon ring's half of the same trap (#67), deferred for exactly the reason above: a
