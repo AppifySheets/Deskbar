@@ -5342,7 +5342,7 @@ public partial class FloatingBar : Window
                 : manager.DeleteWorkspaceClosingWindows(workspaceId));
         });
 
-        AddMinimizeItem(menu);
+        AddBarItems(menu);
         return menu;
     }
 
@@ -5368,11 +5368,22 @@ public partial class FloatingBar : Window
     // acts on one window. A command that made the whole bar vanish sitting under the same right
     // click as "Close window" is a mis-aim waiting to happen.
     //
-    // Docking is NOT here: it is a setting in Manage (AppState.DockBar), chosen once rather than reached
-    // for in passing.
-    void AddMinimizeItem(ContextMenu menu)
+    // ...and docking, which acts on the bar for the same reason. Petre: "add dock as the rightclick
+    // option", after it became a setting. So it is both: this item flips the SAME setting Manage's
+    // checkbox shows (AppState.DockBar), and the bar follows the setting, so the two can never disagree.
+    // One item that flips, like Minimize row / Restore row height.
+    void AddBarItems(ContextMenu menu)
     {
         menu.Items.Add(new Separator());
+
+        var docked = manager.State.DockBar;
+        var dock = new MenuItem
+        {
+            Header = docked ? "Undock from screen edge" : "Dock to screen edge",
+            Icon = MenuGlyph(docked ? "⇱" : "⇥"),
+        };
+        dock.Click += (_, _) => Report(manager.SetDockBar(!docked));
+        menu.Items.Add(dock);
 
         var minimize = new MenuItem { Header = "Minimize bar", Icon = MenuGlyph("▁") };
         minimize.Click += (_, _) => MinimizeRequested?.Invoke();
@@ -5403,7 +5414,7 @@ public partial class FloatingBar : Window
         add.Click += (_, _) => InsertAt(manager.State.Workspaces.Count, null);
         menu.Items.Add(add);
 
-        AddMinimizeItem(menu);
+        AddBarItems(menu);
         return menu;
     }
 
