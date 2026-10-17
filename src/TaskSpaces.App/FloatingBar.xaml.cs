@@ -1410,6 +1410,10 @@ public partial class FloatingBar : Window
             // the titled list at the bottom.
             Brush? currentTint = null;
 
+            // Which element of groupRows holds the current workspace (its own row, or the group box it is
+            // in), for putting the titled list right under it when that is the chosen place.
+            var currentAt = -1;
+
             groupRows.Add(GroupRow(visualLabel: "", groupLabel: "Pinned", isCurrent: false, switchTo: null,
                     groupKey: DraggedWindow.PinnedGroupKey,
                     // The screen is honoured here now, and it has to be: with #108 the pinned row draws
@@ -1535,6 +1539,7 @@ public partial class FloatingBar : Window
                 if (entry.Workspace.GroupId is not { } id || state.Groups.FirstOrDefault(g => g.Id == id) is not { } group)
                 {
                     groupRows.Add(WorkspaceRow(entry, null));
+                    if (entry.IsCurrent) currentAt = groupRows.Count - 1;
                     return;
                 }
 
@@ -1562,6 +1567,8 @@ public partial class FloatingBar : Window
                 groupRows.Add(boxed
                     ? FamilyBox(rows, LaneAccent(group.Color, ColourSlotOf(group)), LaneTint(group.Color, ColourSlotOf(group)))
                     : rows[0]);
+                // Under the whole box, not inside it: the list is not a member of the group.
+                if (members.Any(m => m!.IsCurrent)) currentAt = groupRows.Count - 1;
             });
 
             // ...and unbound desktops with windows (OverviewBuilder already drops empty
@@ -1569,6 +1576,10 @@ public partial class FloatingBar : Window
             // switches to that raw desktop. The "Unplaced" catch-all (DesktopId ==
             // Guid.Empty, windows whose desktop the COM API can't resolve) is not a
             // real desktop -- no switch target exists, so its label stays plain text.
+            var desktopRowsStart = groupRows.Count;
+            var currentDesktopIndex = overview.OtherDesktops.ToList().FindIndex(d => d.IsCurrent);
+            if (currentAt < 0 && currentDesktopIndex >= 0) currentAt = desktopRowsStart + currentDesktopIndex;
+
             overview.OtherDesktops
                 // "Unplaced" (Guid.Empty: windows whose desktop the COM API refuses to
                 // resolve) is rendered here again, REVERSING the Task 12 decision to hide it.
@@ -1584,6 +1595,9 @@ public partial class FloatingBar : Window
                 //
                 // A row that can only be looked at beats a window that cannot be found. Its
                 // label stays non-clickable and it is still not a drop target (see below).
+                //
+                // One row per desktop, in order, so the current desktop's row sits at the index where these
+                // start plus its own index (recorded below the ForEach, for the titled list).
                 .ToList()
                 .ForEach(g => groupRows.Add(GroupRow(g.Name, g.Name, g.IsCurrent,
                     // Guid.Empty == the "Unplaced" catch-all: not a real desktop, so
@@ -1628,7 +1642,13 @@ public partial class FloatingBar : Window
                         desktop.Windows,
                         titledList: true)
                     : null;
-            if (list is not null)
+            // Either right under the workspace it lists, or in the panel at the bottom (AppState.
+            // TitledListAfterRow; Petre: "let's try both"). Under its workspace it joins Rows, so the rows
+            // after it move down by its height; at the bottom nothing above it moves. The top edge of the bar
+            // stays put in both (see AnchorFromPosition).
+            if (list is not null && state.TitledListAfterRow && currentAt >= 0)
+                groupRows.Insert(currentAt + 1, list);
+            else if (list is not null)
             {
                 CurrentList.Children.Add(Separator());
                 CurrentList.Children.Add(list);
@@ -4927,6 +4947,13 @@ public partial class FloatingBar : Window
         // rebuilt whenever state changes, so it cannot go stale in a way the user could reach.
         Add(minimized ? "⊞" : "⊖", minimized ? "Restore row height" : "Minimize row",
             () => Report(manager.SetWorkspaceMinimized(workspaceId, !minimized)));
+
+        // Where the current workspace's titled list goes ("let's try both"): one item that flips, naming
+        // the place it would move the list TO. On every workspace's menu, since the list follows whichever
+        // workspace you are on.
+        var listAfterRow = manager.State.TitledListAfterRow;
+        Add("☰", listAfterRow ? "Window list at the bottom of the bar" : "Window list under its workspace",
+            () => Report(manager.SetTitledListAfterRow(!listAfterRow)));
 
         // Petre: "add color picker in the right click context menu" (#68).
         //

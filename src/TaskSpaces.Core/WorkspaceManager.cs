@@ -3174,6 +3174,13 @@ public sealed class WorkspaceManager(
         return merged;
     }
 
+    // Where the current workspace's titled list sits (AppState.TitledListAfterRow). A no-op when unchanged,
+    // like the other settings, so nothing writes state.json for a value that did not move.
+    public Result SetTitledListAfterRow(bool afterRow) =>
+        State.TitledListAfterRow == afterRow
+            ? Result.Success()
+            : Result.Success().Tap(() => Persist(State with { TitledListAfterRow = afterRow }));
+
     // --- overview / switcher-facing operations -----------------------------------
 
     // Ground truth for "which workspace is this window in": ASK THE OS which desktop

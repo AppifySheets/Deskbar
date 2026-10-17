@@ -150,6 +150,13 @@ public sealed record AppState(
     // everything above it.
     public IReadOnlyList<string> IconOrder { get; init; } = [];
 
+    // Where the current workspace's titled list sits: right under that workspace's row (true) or at the
+    // bottom of the bar below every row (false, the default). Petre: "or maybe put the expanded current
+    // workspace AFTER the selected workspace, not at the bottom", "let's try both". Both kept so he can
+    // compare them on his own bar; the one he does not keep can go once he has. Either way the bar's top
+    // edge stays put (see FloatingBar.AnchorFromPosition). Same init-property/no-migration pattern.
+    public bool TitledListAfterRow { get; init; }
+
     // Petre: "i want it configurable" -- the Alt+Tab-style workspace switcher's chord.
     //
     // Stored as the TEXT the user typed, not as a parsed Chord: state.json stays readable

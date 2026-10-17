@@ -208,6 +208,21 @@ public class FloatingBarLaneShadeTests(ITestOutputHelper output)
             System.Windows.Automation.AutomationProperties.GetName(icon) == "Beeper");
     });
 
+    // Petre: "or maybe put the expanded current workspace AFTER the selected workspace, not at the bottom",
+    // "let's try both". With that setting the list is in the rows, directly after its workspace's row
+    // (with the usual separator between), and the bottom panel is empty.
+    [Fact]
+    public void With_the_setting_the_list_sits_right_under_its_workspace() => StaThread.Run(() =>
+    {
+        using var bar = TwoScreens(busyIcons: 3, standOnBusy: true, listUnderRow: true);
+
+        var rows = bar.RowsInOrder();
+        var busyAt = rows.FindIndex(g => System.Windows.Automation.AutomationProperties.GetName(g) == "Busy");
+        Assert.True(busyAt >= 0 && busyAt + 1 < rows.Count);
+        Assert.Equal(["App 1", "App 2", "App 3"], Bar.TitlesIn(rows[busyAt + 1]).Select(t => t.Text));
+        Assert.Empty(bar.CurrentListPanel().Children);
+    });
+
     // "so workspaces don't change sizes every time i click them": every workspace row stays icons, the one
     // you are on included, so standing on a workspace leaves its row exactly as tall as it was.
     [Fact]
@@ -240,7 +255,9 @@ public class FloatingBarLaneShadeTests(ITestOutputHelper output)
     // icon row. Off by default: every test here but the titled ones is about icon rows, so they stand on
     // the empty workspace and leave Busy as an ordinary row.
     // `withPinned` adds one window pinned to every desktop, on screen 1, named "Beeper".
-    static Bar TwoScreens(int busyIcons, bool oneWithNoMonitor = false, bool everythingOnOneScreen = false, bool standOnBusy = false, bool withPinned = false)
+    // `listUnderRow` turns on AppState.TitledListAfterRow: the titled list sits right under its workspace's
+    // row instead of at the bottom of the bar.
+    static Bar TwoScreens(int busyIcons, bool oneWithNoMonitor = false, bool everythingOnOneScreen = false, bool standOnBusy = false, bool withPinned = false, bool listUnderRow = false)
     {
         var busyDesktop = Guid.NewGuid();
         var emptyDesktop = Guid.NewGuid();
@@ -293,6 +310,7 @@ public class FloatingBarLaneShadeTests(ITestOutputHelper output)
             {
                 Workspaces = [busy, empty],
                 FloatingBar = new FloatingBarState(0, 0, true) { Width = 160 },
+                TitledListAfterRow = listUnderRow,
             },
         };
         var manager = new WorkspaceManager(desktops, monitor, new StubTitles(), store, screenLayout: screens);
@@ -346,6 +364,11 @@ public class FloatingBarLaneShadeTests(ITestOutputHelper output)
         // workspace's name too (see TitledList).
         public Grid RowContainer(string label) =>
             Containers().First(g => System.Windows.Automation.AutomationProperties.GetName(g) == label);
+
+        // Every row container in Rows, top to bottom (separators skipped).
+        public List<Grid> RowsInOrder() => Containers().ToList();
+
+        public Panel CurrentListPanel() => (Panel)bar.FindName("CurrentList")!;
 
         // The current workspace's titled list, in its own panel below every workspace row.
         public Grid TitledList() =>
