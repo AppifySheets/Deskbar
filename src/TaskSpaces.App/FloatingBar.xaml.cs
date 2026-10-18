@@ -58,6 +58,9 @@ public partial class FloatingBar : Window
         // A right-click on bare background, which docking made most of the bar (see BuildBarMenu).
         BuildBarMenu();
 
+        // Icons fade to grey as their windows go unused (FloatingBar.Aging.cs), aged in place every minute.
+        StartAging();
+
         // Petre: "my window has gotten quite too large... shrink by twenty percent."
         //
         // LayoutTransform, NOT RenderTransform, and that is the whole trick. A RenderTransform
@@ -1556,6 +1559,7 @@ public partial class FloatingBar : Window
         CurrentList.Children.Clear(); // the titled list below the rows, rebuilt with them
         headerDropTargets.Clear();    // re-registered by every row as it is built (see GroupRow)
         ghostLines.Clear();           // re-derived by HeldLines as the expanded rows are built
+        ForgetAgingIcons();           // the aging overlays belong to the rows about to be replaced
         // The rows these pointed at have just been thrown away, so every entry is now a Border
         // that is no longer in the tree. Repopulated as the new rows are built.
         rowRings.Clear();
@@ -4164,7 +4168,7 @@ public partial class FloatingBar : Window
         // one. This is the line that says which of the two a slow hover was.
         var clock = ClickTrace.On ? System.Diagnostics.Stopwatch.StartNew() : null;
 
-        hoverBody.Child = HoverCard(groupLabel, row);
+        hoverBody.Child = HoverCard(groupLabel, row, LastUsedText(row.Window.Handle));
         hoverShowing = row.Window.Handle;
         hoverMisses = 0;
 
@@ -4257,7 +4261,9 @@ public partial class FloatingBar : Window
     // The preview is a SNAPSHOT, not a live thumbnail, and WindowPreview's header carries the measurement
     // that settled it. A minimised window has no picture at all, so the card is text alone -- which is
     // also the honest answer, since there is nothing to show.
-    static StackPanel HoverCard(string groupLabel, WindowRow row)
+    // `lastUsed` is the aging icons' number ("last used 2 h ago", FloatingBar.Aging.cs), added to the line under
+    // the title when there is one.
+    static StackPanel HoverCard(string groupLabel, WindowRow row, string? lastUsed = null)
     {
         var (ceilingWidth, ceilingHeight) = PreviewCeiling();
         var picture = WindowPreview.Of(row.Window.Handle, PreviewScale, ceilingWidth, ceilingHeight);
@@ -4282,9 +4288,9 @@ public partial class FloatingBar : Window
         // before we renamed it.
         card.Children.Add(new TextBlock
         {
-            Text = row.OriginalTitle.HasValue
+            Text = (row.OriginalTitle.HasValue
                 ? $"{row.Window.ProcessName} · {groupLabel} · was: {row.OriginalTitle.Value}"
-                : $"{row.Window.ProcessName} · {groupLabel}",
+                : $"{row.Window.ProcessName} · {groupLabel}") + (lastUsed is null ? "" : $" · {lastUsed}"),
             TextWrapping = TextWrapping.Wrap,
             Foreground = DimForeground,
             Margin = new Thickness(0, 2, 0, 0),
@@ -5090,9 +5096,10 @@ public partial class FloatingBar : Window
         // outright -- WM_GETICON works whether or not we can read the file -- and this
         // placeholder covers whatever is left.
         // ...then the tab cards and the sound ring round it all (FloatingBar.Activity.cs).
+        // The artwork itself ages to grey as the window goes unused (FloatingBar.Aging.cs).
         button.Content = WithActivity(WithState(
             icon is not null
-                ? new Image { Source = icon, Width = 20, Height = 20 }
+                ? Aged(icon, row)
                 : Placeholder(row.Window),
             row), row);
         // Click -> jump, with no Hide() afterwards: unlike the switcher panel, this bar

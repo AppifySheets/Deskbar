@@ -780,6 +780,13 @@ public partial class App : Application
                         "TaskSpaces", MessageBoxButton.OK, MessageBoxImage.Error);
             }
 
+            // The aging icons' stamps from before this restart, then saved every minute (LastUsedFile).
+            var lastUsedPath = Path.Combine(stateDir, "last-used.json");
+            LastUsedFile.Restore(manager, lastUsedPath);
+            var lastUsedSave = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromMinutes(1) };
+            lastUsedSave.Tick += (_, _) => LastUsedFile.Save(manager, lastUsedPath);
+            lastUsedSave.Start();
+
             // Finding 1(b): monitor.Start() was also unchecked. A failure here means
             // WinEvent hooks never registered -- the app would run silently believing it
             // sees every window when it in fact sees none. Never fatal (v1 can limp along

@@ -57,6 +57,26 @@ public class FloatingBarActivityTests
     public void Silence_marks_nothing() =>
         Assert.Empty(FloatingBar.Sounding(All, new HashSet<int>(), Tabs()));
 
+    // The aging curve (Petre: "a", fade to grey): full colour for 15 minutes, fully aged at 8 hours, and most of
+    // the change in the first hours.
+    [Theory]
+    [InlineData(0, 0.0)]
+    [InlineData(15, 0.0)]
+    [InlineData(480, 1.0)]
+    [InlineData(1440, 1.0)]
+    public void Icons_age_from_fresh_to_fully_grey(int minutesUnused, double age) =>
+        Assert.Equal(age, FloatingBar.AgeOf(TimeSpan.FromMinutes(minutesUnused)), 6);
+
+    [Fact]
+    public void Aging_is_front_loaded()
+    {
+        var oneHour = FloatingBar.AgeOf(TimeSpan.FromHours(1));
+        var fourHours = FloatingBar.AgeOf(TimeSpan.FromHours(4));
+        Assert.InRange(oneHour, 0.1, 0.3);
+        Assert.True(fourHours > oneHour * 2, $"1 h {oneHour:F2}, 4 h {fourHours:F2}");
+        Assert.True(fourHours < 1);
+    }
+
     // Chromium names a playing tab "<title> - Audio playing"; a muted one "... - Audio muted", which is silent.
     [Theory]
     [InlineData("Lofi beats - YouTube - Audio playing", true)]

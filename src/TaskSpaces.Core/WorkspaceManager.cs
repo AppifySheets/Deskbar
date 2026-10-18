@@ -80,6 +80,36 @@ public sealed class WorkspaceManager(
     // deliberately not persisted: it answers "which window of this app were you last in", which is a
     // question about the session you are in, not about the machine's history.
     readonly Dictionary<WindowHandle, long> activations = [];
+
+    // When each window was last USED, for the bar's aging icons. Petre: "let's age icons in workspaces", then
+    // "a" from three mockups: an icon fades to grey the longer its window goes unused. A clock this time, not
+    // the counter above, because the question is "how long ago". Set when a window first becomes known (a new
+    // window is fresh, and so is one already open when the app starts, there being nothing to go on) and on
+    // every activation; forgotten when the window closes. Carried across restarts of the app (not of Windows)
+    // by the App's LastUsedFile, through the two members below, because a window outlives the app that watches it.
+    readonly Dictionary<WindowHandle, DateTimeOffset> lastUsed = [];
+
+    public DateTimeOffset? LastUsed(WindowHandle window) => lastUsed.TryGetValue(window, out var at) ? at : null;
+
+    // Every live window's stamp, with its process id, which is what lets a restart tell the same window from a
+    // new one that Windows happened to give a recycled handle.
+    public IReadOnlyList<(WindowHandle Window, int ProcessId, DateTimeOffset At)> LastUsedTimes() =>
+        lastUsed.Where(p => knownWindows.ContainsKey(p.Key))
+            .Select(p => (p.Key, knownWindows[p.Key].ProcessId, p.Value))
+            .ToList();
+
+    // A stamp from before a restart, taken only for the same window (handle AND process) and only when it is
+    // older than the one the restart gave it: anything used since is already right.
+    public void RestoreLastUsed(WindowHandle window, int processId, DateTimeOffset at)
+    {
+        if (knownWindows.TryGetValue(window, out var known) && known.ProcessId == processId
+            && lastUsed.TryGetValue(window, out var current) && at < current)
+            lastUsed[window] = at;
+    }
+
+    // The manager's own clock, so the bar measures an age against the same time it was stamped with (and a
+    // test's fake clock moves both).
+    public DateTimeOffset Now => now();
     long activation;
 
     // Windows Petre deliberately dragged OUT of every workspace onto a plain OS desktop
@@ -537,6 +567,7 @@ public sealed class WorkspaceManager(
         // A counter rather than a clock: ordering is the only thing ever asked of it, and a counter
         // cannot be disturbed by the machine's clock moving.
         activations[window] = ++activation;
+        lastUsed[window] = now();
         // Looking at a window is what answers it, so this is also where attention ends. Done
         // before the change guard below, and that ordering matters: re-activating the window you
         // are already in is a no-op for the highlight but must still clear a flash that arrived
@@ -711,6 +742,7 @@ public sealed class WorkspaceManager(
     void OnDisappeared(WindowInfo window)
     {
         knownWindows.Remove(window.Handle);
+        lastUsed.Remove(window.Handle);
         ledger = ledger.Remove(window.Handle);
         memberships.Remove(window.Handle); // roster entry stays -- ▶ Start relaunches it
         // A closed window's hwnd can be recycled by Windows for an entirely different
@@ -3152,6 +3184,7 @@ public sealed class WorkspaceManager(
         }
 
         knownWindows.Insert(ArrivalIndex(window), window.Handle, window);
+        lastUsed.TryAdd(window.Handle, now());
     }
 
     // Before the first known window whose app is saved LATER in the order than this one's, so the saved
