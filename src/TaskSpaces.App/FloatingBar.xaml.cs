@@ -55,6 +55,9 @@ public partial class FloatingBar : Window
         // here, never by a rebuild.
         BuildShellStrip();
 
+        // A right-click on bare background, which docking made most of the bar (see BuildBarMenu).
+        BuildBarMenu();
+
         // Petre: "my window has gotten quite too large... shrink by twenty percent."
         //
         // LayoutTransform, NOT RenderTransform, and that is the whole trick. A RenderTransform
@@ -5529,10 +5532,8 @@ public partial class FloatingBar : Window
     // Precedence, now that three kinds of menu overlap on this surface: ContextMenuService opens the
     // menu of the INNERMOST element that has one, so an icon gets the icon menu, the rest of a
     // workspace row gets WorkspaceMenu, and the rest of an unbound desktop's row gets DesktopMenu
-    // (#149). The bar's own background menu is gone -- it held "Hide floating bar", which went when
-    // the bar became the app's only surface -- so bare bar outside every row answers with nothing.
-    // That is correct rather than a gap: there is no action left that is about the bar itself. This
-    // comment said the opposite until #149, which is what a deleted feature leaves behind.
+    // (#149). Bare bar outside every row gets the bar's background menu (BuildBarMenu): it went once
+    // with "Hide floating bar" and came back when docking made most of the bar empty background.
     // Petre: "ability to rename existing and add new workspaces from within the floating window,
     // on top or under the current workspace, something like a insert before/after, also move
     // workspaces up or down, in the right click."
@@ -5741,6 +5742,32 @@ public partial class FloatingBar : Window
     // option", after it became a setting. So it is both: this item flips the SAME setting Manage's
     // checkbox shows (AppState.DockBar), and the bar follows the setting, so the two can never disagree.
     // One item that flips, like Minimize row / Restore row height.
+    // The bar's BACKGROUND menu. Petre: "make right-clicking possible in the empty area when docked; now it
+    // only works on existing workspaces". Docked, the bar is the screen's full height and most of it is bare
+    // background under the last row, which answered a right-click with nothing (see the precedence note above
+    // WorkspaceMenu). So the background has a menu again: a new workspace at the end of the list, then the
+    // bar's own items. Rows, icons and group headers keep their own menus, which still win, because
+    // ContextMenuService opens the innermost one.
+    //
+    // One menu on Root, refilled every time it opens, because the dock item's wording depends on the
+    // setting at that moment.
+    void BuildBarMenu()
+    {
+        var menu = new ContextMenu();
+        HoldFadeWhileOpen(menu);
+        Root.ContextMenu = menu;
+        Root.ContextMenuOpening += (_, _) => FillBarMenu(menu);
+    }
+
+    internal void FillBarMenu(ContextMenu menu)
+    {
+        menu.Items.Clear();
+        var add = new MenuItem { Header = "New workspace…", Icon = MenuGlyph("✚") };
+        add.Click += (_, _) => InsertAt(manager.State.Workspaces.Count, null);
+        menu.Items.Add(add);
+        AddBarItems(menu);
+    }
+
     void AddBarItems(ContextMenu menu)
     {
         menu.Items.Add(new Separator());

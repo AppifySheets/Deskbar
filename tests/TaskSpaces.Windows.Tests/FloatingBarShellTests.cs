@@ -198,6 +198,23 @@ public class FloatingBarShellTests(ITestOutputHelper output)
         bar.Close();
     });
 
+    // Petre: "make right-clicking possible in the empty area when docked". The bare background carries a menu
+    // of its own, with a new workspace and the bar's own items, and the dock item says what it will do NOW.
+    [Fact]
+    public void The_bare_background_has_a_menu() => StaThread.Run(() =>
+    {
+        var (bar, _) = Bar();
+        var root = (Border)bar.FindName("Root")!;
+        Assert.NotNull(root.ContextMenu);
+
+        bar.FillBarMenu(root.ContextMenu);
+        var headers = root.ContextMenu.Items.OfType<MenuItem>().Select(i => (string)i.Header).ToList();
+        output.WriteLine(string.Join(" | ", headers));
+
+        Assert.Equal(["New workspace…", "Dock to screen edge", "Minimize bar"], headers);
+        bar.Close();
+    });
+
     // The shortcuts, as measured on Petre's machine (see FloatingBar.Shell.cs). By name, because the enum is
     // internal and an xUnit theory has to be public.
     [Theory]

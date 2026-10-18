@@ -94,7 +94,7 @@ public partial class FloatingBar
         // From the right edge inwards, which is the order DockPanel takes right-docked children in: the show
         // desktop sliver at the very edge (where Windows puts it), then the clock beside it.
         var sliver = ShellButton(ShellFlyout.Desktop, "Show desktop",
-            new Border { Width = 1, Height = 18, Background = SliverLine }, width: 7);
+            new Border { Width = 1, Height = 22, Background = SliverLine }, width: 7);
         DockPanel.SetDock(sliver, Dock.Right);
         ShellStrip.Children.Add(sliver);
 
@@ -109,12 +109,14 @@ public partial class FloatingBar
         Closed += (_, _) => clockTimer.Stop();
     }
 
+    // Sizes as the taskbar's own clock (12 and 11), after Petre's "increase the size of fonts for this": the
+    // first cut at 10 and 9 matched the bar's captions and was too small to read at a glance.
     // Time over date, the way the taskbar shows them, in the user's own regional format: .NET's current
     // culture is the same "Region" setting the taskbar reads, so the two can never disagree about it.
     UIElement ClockFace()
     {
-        clockTime = new TextBlock { FontSize = 10, Foreground = ClockForeground, TextAlignment = TextAlignment.Right };
-        clockDate = new TextBlock { FontSize = 9, Foreground = ClockForeground, TextAlignment = TextAlignment.Right };
+        clockTime = new TextBlock { FontSize = 12, Foreground = ClockForeground, TextAlignment = TextAlignment.Right };
+        clockDate = new TextBlock { FontSize = 11, Foreground = ClockForeground, TextAlignment = TextAlignment.Right };
         return new StackPanel { Children = { clockTime, clockDate }, VerticalAlignment = VerticalAlignment.Center };
     }
 
@@ -131,13 +133,13 @@ public partial class FloatingBar
 
     // One button of the strip: bare chrome with a faint rounded hover, so it reads as a button without the
     // stock template's blue square (see BareButton for why the stock chrome is unwanted on this bar).
-    Button ShellButton(ShellFlyout flyout, string tip, UIElement content, double width = 22)
+    Button ShellButton(ShellFlyout flyout, string tip, UIElement content, double width = 26)
     {
         var button = new Button
         {
             Content = content,
             Width = width,
-            Height = 22,
+            Height = 28,
             Padding = new Thickness(0),
             Background = Brushes.Transparent,
             BorderThickness = new Thickness(0),
@@ -216,7 +218,7 @@ public partial class FloatingBar
     const string BatteryFill = "M2.6,6.1 L9.6,6.1 L9.6,9.9 L2.6,9.9 Z M13.6,6.5 L15.2,6.5 L15.2,9.5 L13.6,9.5 Z";
     const string StartTiles = "M1,1 L7.5,1 L7.5,7.5 L1,7.5 Z M8.5,1 L15,1 L15,7.5 L8.5,7.5 Z M1,8.5 L7.5,8.5 L7.5,15 L1,15 Z M8.5,8.5 L15,8.5 L15,15 L8.5,15 Z";
 
-    static UIElement Glyph(string stroked, string? filled = null, double size = 13, Brush? brush = null)
+    static UIElement Glyph(string stroked, string? filled = null, double size = 15, Brush? brush = null)
     {
         var canvas = new Canvas { Width = 16, Height = 16 };
         canvas.Children.Add(new Path
@@ -236,8 +238,8 @@ public partial class FloatingBar
     // also the one you find without reading.
     static UIElement StartGlyph() => new Viewbox
     {
-        Width = 13,
-        Height = 13,
+        Width = 15,
+        Height = 15,
         IsHitTestVisible = false,
         Child = new Canvas { Width = 16, Height = 16, Children = { new Path { Data = Geometry.Parse(StartTiles), Fill = StartBlue } } },
     };
@@ -247,13 +249,13 @@ public partial class FloatingBar
     static UIElement QuickSettingsGlyph()
     {
         var panel = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(4, 0, 4, 0), IsHitTestVisible = false };
-        panel.Children.Add(Glyph(WifiShape, WifiDot, size: 11));
+        panel.Children.Add(Glyph(WifiShape, WifiDot, size: 13));
         panel.Children.Add(new Border { Width = 4 });
-        panel.Children.Add(Glyph(SpeakerWaves, SpeakerShape, size: 11));
+        panel.Children.Add(Glyph(SpeakerWaves, SpeakerShape, size: 13));
         if (ShellKeys.HasBattery())
         {
             panel.Children.Add(new Border { Width = 4 });
-            panel.Children.Add(Glyph(BatteryCase, BatteryFill, size: 11));
+            panel.Children.Add(Glyph(BatteryCase, BatteryFill, size: 13));
         }
         return panel;
     }
