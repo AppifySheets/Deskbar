@@ -1581,6 +1581,10 @@ public partial class FloatingBar : Window
         {
             if (ClickTrace.On) DumpBands(overview);
 
+            // The dock line's markers: which taskbar pins have a window here, and which only elsewhere
+            // (FloatingBar.Pins.cs). Its buttons are not rebuilt, only repainted.
+            PaintPins(overview);
+
             // Decided ONCE per rebuild, across every row, so the whole bar agrees. A machine
             // with one display needs no marker at all -- there is no "which monitor" to answer
             // -- and deciding per row instead would let a workspace whose windows happen to
