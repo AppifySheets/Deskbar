@@ -213,7 +213,7 @@ public class FloatingBarShellTests(ITestOutputHelper output)
         var headers = root.ContextMenu.Items.OfType<MenuItem>().Select(i => (string)i.Header).Where(h => h != "Dock across both screens").ToList();
         output.WriteLine(string.Join(" | ", headers));
 
-        Assert.Equal(["New workspace…", "Expand the current workspace", "Dock to screen edge", "Minimize bar"], headers);
+        Assert.Equal(["New workspace…", "Window list at the bottom of the bar", "Dock to screen edge", "Minimize bar"], headers);
         bar.Close();
     });
 
@@ -238,7 +238,7 @@ public class FloatingBarShellTests(ITestOutputHelper output)
         bar.FillBarMenu(menu);
         var items = menu.Items.OfType<MenuItem>().ToList();
         output.WriteLine(string.Join(" | ", items.Select(i => (string)i.Header)));
-        Assert.Equal(["New workspace…", "Expand the current workspace", "Dock to screen edge", "Minimize bar", "Manage…", "Check for updates…", "Exit"],
+        Assert.Equal(["New workspace…", "Window list at the bottom of the bar", "Dock to screen edge", "Minimize bar", "Manage…", "Check for updates…", "Exit"],
             items.Select(i => (string)i.Header).Where(h => h != "Dock across both screens"));
 
         items.Single(i => (string)i.Header == "Manage…").RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));

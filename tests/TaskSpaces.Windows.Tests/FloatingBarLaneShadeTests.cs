@@ -423,7 +423,7 @@ public class FloatingBarLaneShadeTests(ITestOutputHelper output)
             {
                 Workspaces = [busy, empty],
                 FloatingBar = new FloatingBarState(0, 0, true) { Width = 160 },
-                ExpandCurrentWorkspace = expandRow,
+                WindowListAtBottom = !expandRow,
             },
         };
         var manager = new WorkspaceManager(desktops, monitor, new StubTitles(), store, screenLayout: screens);
