@@ -111,14 +111,15 @@ public partial class FloatingBar
         Closed += (_, _) => clockTimer.Stop();
     }
 
-    // Sizes as the taskbar's own clock (12 and 11), after Petre's "increase the size of fonts for this": the
-    // first cut at 10 and 9 matched the bar's captions and was too small to read at a glance.
+    // 14 over 12.5, after two rounds of Petre's "increase the size of fonts for this": 10 and 9 matched the
+    // bar's captions, then 12 and 11 matched the taskbar's clock on paper, but the bar draws through its own
+    // scale (BarScale) and on a docked 4K screen that still read small.
     // Time over date, the way the taskbar shows them, in the user's own regional format: .NET's current
     // culture is the same "Region" setting the taskbar reads, so the two can never disagree about it.
     UIElement ClockFace()
     {
-        clockTime = new TextBlock { FontSize = 12, Foreground = ClockForeground, TextAlignment = TextAlignment.Right };
-        clockDate = new TextBlock { FontSize = 11, Foreground = ClockForeground, TextAlignment = TextAlignment.Right };
+        clockTime = new TextBlock { FontSize = 14, Foreground = ClockForeground, TextAlignment = TextAlignment.Right };
+        clockDate = new TextBlock { FontSize = 12.5, Foreground = ClockForeground, TextAlignment = TextAlignment.Right };
         return new StackPanel { Children = { clockTime, clockDate }, VerticalAlignment = VerticalAlignment.Center };
     }
 
