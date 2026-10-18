@@ -218,9 +218,16 @@ public partial class FloatingBar
 
     // The taskbar's click: its window here if it has one (the first, which is the one the row shows first),
     // otherwise a new one, which Windows opens on the desktop you are on, so it lands in this workspace.
+    //
+    // Except a browser, which always opens a new window. Petre: "when clicking on quicklaunch icons, don't
+    // activate existing browser windows, open a new one immediately". A browser's windows are already on the
+    // rows to jump to; what the pin is for is a fresh one. An installed web app (YouTube Music, Outlook) is
+    // not a browser here even though it runs as one: its pin starts the app, never a browser window, so it
+    // keeps the taskbar's jump-or-start.
     void OpenPin(TaskbarPin pin, bool newWindow)
     {
         var here = pinWindowsHere.GetValueOrDefault(pin.ParsingName) ?? [];
+        newWindow |= IsBrowser(pin);
         var outcome = !newWindow && here.Count > 0
             ? manager.ToggleWindow(here[0], activator)
             : pins?.Launch(pin) ?? Result.Success();
@@ -228,6 +235,17 @@ public partial class FloatingBar
             ClickTrace.Write($"pins: open {pin.Name} newWindow={newWindow} here={here.Count} ok={outcome.IsSuccess}{(outcome.IsFailure ? $" error={outcome.Error}" : "")}");
         Report(outcome);
     }
+
+    // A pin that starts a browser itself, by the exe it targets. Chromium and Firefox families; a shortcut to a
+    // site or an installed web app has no browser exe of its own here (its TargetPath is null or not one of these).
+    static readonly HashSet<string> BrowserExes = new(StringComparer.OrdinalIgnoreCase)
+        { "msedge.exe", "chrome.exe", "firefox.exe", "brave.exe", "vivaldi.exe", "opera.exe", "launcher.exe" };
+
+    internal static bool IsBrowser(TaskbarPin pin) =>
+        !pin.IsInstalledApp && pin.TargetPath is { } target && BrowserExes.Contains(System.IO.Path.GetFileName(target))
+        // Opera's launcher.exe is generic, so it only counts inside an Opera folder.
+        && (!System.IO.Path.GetFileName(target).Equals("launcher.exe", StringComparison.OrdinalIgnoreCase)
+            || target.Contains("Opera", StringComparison.OrdinalIgnoreCase));
 
     Overview? lastPinOverview;
 

@@ -161,6 +161,23 @@ public class FloatingBarPinsTests
         bar.Close();
     });
 
+    // Petre: "when clicking on quicklaunch icons, don't activate existing browser windows, open a new one
+    // immediately". A browser pin is told by the exe it starts; an installed web app is not one, even though
+    // it runs as the browser.
+    [Theory]
+    [InlineData(@"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe", true)]
+    [InlineData(@"C:\Program Files\Google\Chrome\Application\chrome.exe", true)]
+    [InlineData(@"C:\Program Files\Mozilla Firefox\firefox.exe", true)]
+    [InlineData(@"C:\Program Files\Obsidian\Obsidian.exe", false)]
+    [InlineData(@"C:\Tools\Something\launcher.exe", false)]
+    [InlineData(@"C:\Users\me\AppData\Local\Programs\Opera\launcher.exe", true)]
+    public void A_browser_pin_is_told_by_its_exe(string target, bool browser) =>
+        Assert.Equal(browser, FloatingBar.IsBrowser(Shortcut("Pin", target)));
+
+    [Fact]
+    public void An_installed_web_app_is_not_a_browser_pin() =>
+        Assert.False(FloatingBar.IsBrowser(InstalledApp("YouTube Music", "music.youtube.com!App")));
+
     // --- which windows are a pin's ------------------------------------------------------------------------
 
     static readonly IReadOnlySet<string> Claimed =
