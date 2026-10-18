@@ -129,6 +129,10 @@ function Invoke-ExecutableSignature {
     if ($TimestampUrl) { $arguments += @('/tr', $TimestampUrl, '/td', 'SHA256') }
     $arguments += $Path
 
+    # Under Windows PowerShell 5.1 with a Stop preference (the driver sets one), signtool's
+    # stderr would become a NativeCommandError before the exit code check below could report
+    # it properly. Scope Continue to this function so the exit code decides.
+    $ErrorActionPreference = 'Continue'
     $output = & $signtool @arguments 2>&1 | Out-String
     if ($LASTEXITCODE -ne 0) {
         throw "signtool failed with exit code ${LASTEXITCODE}: $output"
