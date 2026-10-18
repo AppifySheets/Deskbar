@@ -33,6 +33,8 @@ public class FloatingBarPinsTests
         }
 
         public Result Reveal(TaskbarPin pin) => Result.Success();
+        public string? NameOfApp(string appId) => null;
+        public Maybe<PinImage> ImageOfApp(string appId, int size) => Maybe<PinImage>.None;
 
         // As the taskbar would: the pin goes and the change counter moves.
         public Result Unpin(TaskbarPin pin)

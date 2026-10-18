@@ -50,6 +50,10 @@
             <Border x:Name="ShellFooter" DockPanel.Dock="Bottom" BorderBrush="#14FFFFFF" BorderThickness="0,1,0,0"
                     Margin="0,3,0,0" Padding="0,3,0,0">
                 <StackPanel>
+                    <!-- What Windows is playing, with previous, play or pause, and next (Petre: "let's add audio
+                         controls", then "a", a now-playing line). Above the pins, and only while there is a media
+                         session at all. Filled in FloatingBar.Media.cs. -->
+                    <DockPanel x:Name="NowPlayingLine" Margin="0,0,0,2" Visibility="Collapsed"/>
                     <!-- The taskbar's pinned apps, in the taskbar's order, as a line above the strip (Petre: "a",
                          a dock line). Inside the strip's own border so the two read as one block at the foot of
                          the screen, under one hairline. Filled in FloatingBar.Pins.cs; collapsed with no pins. -->

@@ -55,6 +55,9 @@ public partial class FloatingBar : Window
         // here, never by a rebuild.
         BuildShellStrip();
 
+        // The now-playing line above the pins (FloatingBar.Media.cs), empty and hidden until a player appears.
+        BuildNowPlaying();
+
         // A right-click on bare background, which docking made most of the bar (see BuildBarMenu).
         BuildBarMenu();
 

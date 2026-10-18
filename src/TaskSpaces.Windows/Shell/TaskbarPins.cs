@@ -69,6 +69,11 @@ public interface ITaskbarPins
 
     // The item's own "Unpin from taskbar", exactly as its right-click menu in Explorer would run it.
     Result Unpin(TaskbarPin pin);
+
+    // An app's name and icon by its AppUserModelID, from Start's own list of apps (shell:AppsFolder). For the
+    // now-playing line, which knows the player only by the ID its media session gives.
+    string? NameOfApp(string appId);
+    Maybe<PinImage> ImageOfApp(string appId, int size);
 }
 
 public sealed class ShellTaskbarPins : ITaskbarPins
@@ -136,6 +141,27 @@ public sealed class ShellTaskbarPins : ITaskbarPins
 
     public Maybe<PinImage> ImageOf(TaskbarPin pin, int size) =>
         WithItem(pin.IdList, item => item is IShellItemImageFactory factory ? Image(factory, size) : Maybe<PinImage>.None);
+
+    public string? NameOfApp(string appId) =>
+        WithParsed($@"shell:AppsFolder\{appId}", item => DisplayName(item, SigdnNormalDisplay), null);
+
+    public Maybe<PinImage> ImageOfApp(string appId, int size) =>
+        WithParsed($@"shell:AppsFolder\{appId}", item => item is IShellItemImageFactory factory ? Image(factory, size) : Maybe<PinImage>.None, Maybe<PinImage>.None);
+
+    static T WithParsed<T>(string parsingName, Func<IShellItem2, T> use, T fallback)
+    {
+        try
+        {
+            var iid = typeof(IShellItem2).GUID;
+            if (SHCreateItemFromParsingName(parsingName, 0, ref iid, out var item) != 0 || item is null) return fallback;
+            try { return use(item); }
+            finally { Marshal.ReleaseComObject(item); }
+        }
+        catch
+        {
+            return fallback;
+        }
+    }
 
     public string? AppIdOf(WindowHandle window)
     {
@@ -393,6 +419,7 @@ public sealed class ShellTaskbarPins : ITaskbarPins
     }
 
     [DllImport("shell32.dll")] static extern int SHCreateItemFromIDList(nint idList, ref Guid iid, [MarshalAs(UnmanagedType.Interface)] out IShellItem2? item);
+    [DllImport("shell32.dll", CharSet = CharSet.Unicode)] static extern int SHCreateItemFromParsingName(string path, nint bindContext, ref Guid iid, [MarshalAs(UnmanagedType.Interface)] out IShellItem2? item);
     [DllImport("shell32.dll")] static extern int SHGetPropertyStoreForWindow(nint hwnd, ref Guid iid, [MarshalAs(UnmanagedType.Interface)] out IPropertyStore? store);
     [DllImport("ole32.dll")] static extern int PropVariantClear(ref PropVariant value);
     [DllImport("user32.dll")] static extern nint CreatePopupMenu();

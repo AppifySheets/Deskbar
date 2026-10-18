@@ -899,6 +899,8 @@ public partial class App : Application
                 Pins = new Windows.Shell.ShellTaskbarPins(),
                 Tabs = new BrowserTabs(),
                 Sound = new Windows.Audio.AudioActivity(ClickTrace.Write),
+                // ...and the now-playing line's: Windows' own media sessions (FloatingBar.Media.cs).
+                Media = new Windows.Audio.MediaControl(ClickTrace.Write),
                 // The tray's own commands, for the bar's background menu, so both menus run the same code.
                 AppActions = new FloatingBar.AppCommands(OpenManage, CheckForUpdateNow, ExitApp, () => pendingUpdate),
             };
