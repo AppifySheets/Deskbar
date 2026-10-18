@@ -1707,6 +1707,13 @@ public sealed class WorkspaceManager(
             ? Result.Success()
             : Result.Success().Tap(() => Persist(State with { DockBar = docked }));
 
+    // Across the seam between two screens, or on one screen's edge (AppState.DockAcrossScreens). Asking for the
+    // seam turns docking on as well, in the same write, since the one means nothing without the other.
+    public Result SetDockAcrossScreens(bool across) =>
+        State.DockAcrossScreens == across && (!across || State.DockBar)
+            ? Result.Success()
+            : Result.Success().Tap(() => Persist(State with { DockAcrossScreens = across, DockBar = State.DockBar || across }));
+
     // The Settings tab's four dials (#151). Petre: "make things configurable, like dimming opacity,
     // timeout, etc."
     //

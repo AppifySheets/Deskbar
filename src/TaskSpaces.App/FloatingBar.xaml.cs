@@ -176,7 +176,7 @@ public partial class FloatingBar : Window
         };
         // appBar.Remove gives the docked strip back on a normal exit. A crash is covered by the shell
         // itself, which was measured reclaiming a dead app bar's strip within a second (see AppBar).
-        Closed += (_, _) => { iconWatch.Stop(); fadeDelay.Stop(); subscription?.Dispose(); appBar?.Remove(); };
+        Closed += (_, _) => { iconWatch.Stop(); fadeDelay.Stop(); subscription?.Dispose(); appBar?.Remove(); seamBar?.Remove(); };
     }
 
     // --- fading while the pointer is elsewhere ---------------------------------------
@@ -461,8 +461,14 @@ public partial class FloatingBar : Window
     // floated before.
 
     // "left" or "right" while docked, null while floating. A string because that is what is persisted
-    // (FloatingBarState.DockedEdge) and nothing else needs it to be more.
+    // (FloatingBarState.DockedEdge) and nothing else needs it to be more. Or "seam": across the line between
+    // two screens (see DockAcrossSeam).
     string? dockedEdge;
+
+    // The second reservation of a seam dock, on the other screen. A window can register one app bar, so this
+    // half belongs to a hidden helper window of its own (seamHolder): never shown, so no window list sees it.
+    AppBar? seamBar;
+    HwndSource? seamHolder;
 
     public bool Docked => dockedEdge is not null;
 
@@ -490,6 +496,22 @@ public partial class FloatingBar : Window
             DockToEdge().TapError(error => ClickTrace.Write($"dock failed: {error}"));
         else if (!manager.State.DockBar && Docked)
             UndockFromEdge();
+        // Docked, but across the seam when the setting says one edge, or the other way round.
+        else if (Docked && (dockedEdge == "seam") != WantsSeam())
+            (WantsSeam() ? DockTo("seam") : DockOffSeam()).TapError(error => ClickTrace.Write($"dock failed: {error}"));
+    }
+
+    // The seam is wanted, and there is one: a single screen, or none beside the bar's, docks on an edge instead.
+    bool WantsSeam() =>
+        manager.State.DockAcrossScreens && new WindowInteropHelper(this).Handle is var hwnd && hwnd != 0 && SeamOf(hwnd) is not null;
+
+    // Off the seam: step onto the right-hand screen first, at the seam, then dock to that screen's left edge.
+    // Straddling it exactly, which screen Windows calls the bar's own is a coin toss, and the other answer would
+    // send it to the far side of the left screen.
+    Result DockOffSeam()
+    {
+        if (SeamOf(new WindowInteropHelper(this).Handle) is { } seam) Left = seam.Right.L / seam.RightScale;
+        return DockTo("left");
     }
 
     // Docks to the edge it was docked on last time, if that is remembered, otherwise to whichever side of
@@ -497,6 +519,7 @@ public partial class FloatingBar : Window
     Result DockToEdge()
     {
         if (Docked) return Result.Success();
+        if (WantsSeam()) return DockTo("seam");
         if (StoredPlacement()?.DockedEdge is ("left" or "right") and var remembered) return DockTo(remembered);
         if (MonitorBounds(Left, Top) is not { } screen) return Result.Failure("Could not tell which screen the bar is on.");
         var middle = Left + ActualWidth / 2;
@@ -507,6 +530,7 @@ public partial class FloatingBar : Window
     {
         if (!Docked) return Result.Success();
         appBar?.Remove();
+        seamBar?.Remove();
         dockedEdge = null;
         fullScreenAppOpen = false;
         Root.CornerRadius = new CornerRadius(8);
@@ -539,6 +563,10 @@ public partial class FloatingBar : Window
             appBar ??= new AppBar(hwnd,
                 onPositionChanged: () => Dispatcher.BeginInvoke(new Action(() => { if (dockedEdge is { } e) DockTo(e); })),
                 onFullScreen: OnFullScreenApp);
+
+            if (edge == "seam") return DockAcrossSeam(hwnd);
+            // An edge dock has one reservation; a seam dock's other half goes.
+            seamBar?.Remove();
 
             // The shell works in physical pixels, WPF in DIPs; the monitor's own DPI converts between
             // them, for the reason MonitorBounds gives (a window-scoped DPI can be stale).
@@ -573,6 +601,88 @@ public partial class FloatingBar : Window
         {
             docking = false;
         }
+    }
+
+    // ACROSS THE SEAM between two screens. Petre: "let's try docking it so that it shows in the middle of the two
+    // monitors", "so left half is on the left, right on the right, as an option". The bar's rows already split
+    // into one lane per screen, screen 1's on the left: straddling the line between the screens puts each lane
+    // on its own screen.
+    //
+    // Two reservations, half the bar's width each: the right screen's LEFT edge (this window's app bar) and the
+    // left screen's RIGHT edge (the helper's), so windows on both screens keep clear of it. The window itself
+    // spans both strips. Measured on his desk first: two 3840 x 2160 screens side by side at x = 0, both at
+    // 150%, so the window draws at one scale. Screens at different scales are not corrected for here.
+    Result DockAcrossSeam(nint hwnd)
+    {
+        if (SeamOf(hwnd) is not { } seam) return Result.Failure("There is no second screen beside this one to dock between.");
+
+        seamHolder ??= new HwndSource(new HwndSourceParameters("TaskSpaces seam")
+        {
+            WindowStyle = unchecked((int)0x80000000), // WS_POPUP, and never WS_VISIBLE
+            ExtendedWindowStyle = 0x80,               // WS_EX_TOOLWINDOW
+            Width = 0,
+            Height = 0,
+        });
+        seamBar ??= new AppBar(seamHolder.Handle,
+            onPositionChanged: () => Dispatcher.BeginInvoke(new Action(() => { if (dockedEdge is { } e) DockTo(e); })),
+            onFullScreen: OnFullScreenApp);
+
+        var widthDips = double.IsNaN(Width) ? ActualWidth : Width;
+        var right = appBar!.Dock(AppBar.Edge.Left, seam.Right, (int)Math.Round(widthDips / 2 * seam.RightScale));
+        var left = seamBar.Dock(AppBar.Edge.Right, seam.Left, (int)Math.Round(widthDips / 2 * seam.LeftScale));
+
+        dockedEdge = "seam";
+        anchorRight = null;
+        anchorBottom = null;
+        Root.CornerRadius = new CornerRadius(0);
+        SizeToContent = SizeToContent.Manual;
+
+        // From the left strip's outer edge to the right strip's, as tall as both screens allow.
+        var top = Math.Max(left.T, right.T);
+        var bottom = Math.Min(left.B, right.B);
+        var scale = seam.RightScale;
+        Left = left.L / scale;
+        Top = top / scale;
+        Width = (right.R - left.L) / scale;
+        Height = (bottom - top) / scale;
+        ClickTrace.Write($"dock: across the seam, left strip {left.L}..{left.R}, right strip {right.L}..{right.R}");
+
+        Save();
+        return Result.Success();
+    }
+
+    // The two screens meeting nearest the bar: the bar's own and the one sharing its left or right edge (with
+    // some height in common), in physical pixels, each with its scale. Null on one screen, or none beside it.
+    (AppBar.Rect Left, AppBar.Rect Right, double LeftScale, double RightScale)? SeamOf(nint hwnd)
+    {
+        var screens = new List<(nint Handle, NativeMethods.RECT Bounds)>();
+        NativeMethods.EnumDisplayMonitors(0, 0, (nint monitor, nint _, ref NativeMethods.RECT _, nint _) =>
+        {
+            var info = new NativeMethods.MONITORINFO { cbSize = Marshal.SizeOf<NativeMethods.MONITORINFO>() };
+            if (NativeMethods.GetMonitorInfo(monitor, ref info)) screens.Add((monitor, info.rcMonitor));
+            return true;
+        }, 0);
+
+        var mine = NativeMethods.MonitorFromWindow(hwnd, NativeMethods.MONITOR_DEFAULTTONEAREST);
+        if (screens.FirstOrDefault(s => s.Handle == mine) is not { Handle: not 0 } me) return null;
+        NativeMethods.GetWindowRect(hwnd, out var bar);
+        var middle = (bar.Left + bar.Right) / 2;
+
+        bool SideBySide(NativeMethods.RECT a, NativeMethods.RECT b) => a.Right == b.Left && a.Top < b.Bottom && b.Top < a.Bottom;
+        var pairs = screens.Where(s => SideBySide(s.Bounds, me.Bounds)).Select(s => (Left: s, Right: me))
+            .Concat(screens.Where(s => SideBySide(me.Bounds, s.Bounds)).Select(s => (Left: me, Right: s)))
+            .OrderBy(p => Math.Abs(p.Right.Bounds.Left - middle))
+            .ToList();
+        if (pairs.Count == 0) return null;
+
+        var (leftScreen, rightScreen) = pairs[0];
+        static double ScaleOf(nint monitor)
+        {
+            NativeMethods.GetDpiForMonitor(monitor, NativeMethods.MDT_EFFECTIVE_DPI, out var dpi, out _);
+            return dpi / 96.0;
+        }
+        static AppBar.Rect Of(NativeMethods.RECT r) => new(r.Left, r.Top, r.Right, r.Bottom);
+        return (Of(leftScreen.Bounds), Of(rightScreen.Bounds), ScaleOf(leftScreen.Handle), ScaleOf(rightScreen.Handle));
     }
 
     // Out of the topmost band while a full-screen app is up, back in when it closes. Only meaningful
@@ -632,6 +742,7 @@ public partial class FloatingBar : Window
         // A hidden bar must not keep its strip: that would be an empty band nothing can be put in. The
         // edge is remembered (dockedEdge stays set and is saved), and ShowBar docks it again.
         appBar?.Remove();
+        seamBar?.Remove();
         Hide();
         Save();
     }
@@ -5835,6 +5946,22 @@ public partial class FloatingBar : Window
         };
         dock.Click += (_, _) => Report(manager.SetDockBar(!docked));
         menu.Items.Add(dock);
+
+        // Across the line between two screens, when there is a second screen beside this one (see
+        // DockAcrossSeam). One item that flips, naming what it would switch TO.
+        var hwnd = new WindowInteropHelper(this).Handle;
+        if (hwnd != 0 && SeamOf(hwnd) is not null)
+        {
+            // Flips the SETTING (AppState.DockAcrossScreens), which the bar follows, as the dock item does.
+            var acrossNow = manager.State.DockBar && manager.State.DockAcrossScreens;
+            var across = new MenuItem
+            {
+                Header = acrossNow ? "Dock to one screen's edge" : "Dock across both screens",
+                Icon = MenuGlyph("⇹"),
+            };
+            across.Click += (_, _) => Report(manager.SetDockAcrossScreens(!acrossNow));
+            menu.Items.Add(across);
+        }
 
         var minimize = new MenuItem { Header = "Minimize bar", Icon = MenuGlyph("▁") };
         minimize.Click += (_, _) => MinimizeRequested?.Invoke();

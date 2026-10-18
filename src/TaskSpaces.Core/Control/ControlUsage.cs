@@ -56,8 +56,8 @@ public static class ControlUsage
             new("unpin", "<hwnd>", "undo pin"),
         ]),
         new("Bar", [
-            new("bar", "minimize|restore|dock|undock",
-                "Minimize bar, or bring it back; turn the Dock to screen edge setting on or off"),
+            new("bar", "minimize|restore|dock|undock|across|edge",
+                "Minimize bar, or bring it back; turn the Dock to screen edge setting on or off; dock across the line between two screens, or back to one screen's edge"),
         ]),
     ];
 

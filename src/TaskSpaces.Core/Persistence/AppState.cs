@@ -217,6 +217,11 @@ public sealed record AppState(
     // in FloatingBarState.DockedEdge while docked.
     public bool DockBar { get; init; }
 
+    // Docked ACROSS the line between two screens rather than on one screen's edge. Petre: "let's try docking it
+    // so that it shows in the middle of the two monitors", "so left half is on the left, right on the right, as
+    // an option". Off by default, and only meaningful with DockBar on and a second screen beside the bar's.
+    public bool DockAcrossScreens { get; init; }
+
     // The groups workspaces belong to (#42 anchored, #84 anchorless). Membership lives on the
     // workspace as GroupId; this holds the group's own name and its anchor, if it has one.
     //

@@ -123,6 +123,8 @@ public sealed partial class RemoteControl
     {
         "dock" => Reply(manager.SetDockBar(true), () => new { bar = "docked" }),
         "undock" => Reply(manager.SetDockBar(false), () => new { bar = "undocked" }),
+        "across" => Reply(manager.SetDockAcrossScreens(true), () => new { bar = "docked across the screens" }),
+        "edge" => Reply(manager.SetDockAcrossScreens(false), () => new { bar = "docked on one screen's edge" }),
         "minimize" or "restore" when setBarVisible is null => ControlReply.Fail("The bar cannot be controlled from here."),
         "minimize" => Reply(setBarVisible!(false), () => new { bar = "minimized" }),
         "restore" => Reply(setBarVisible!(true), () => new { bar = "restored" }),
