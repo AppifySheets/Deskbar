@@ -77,6 +77,16 @@ public class FloatingBarActivityTests
         Assert.True(fourHours < 1);
     }
 
+    // VS Code's editor tabs against the activity bar's view switchers, by the classes measured on Petre's windows.
+    [Theory]
+    [InlineData("tab tab-actions-right sizing-fit has-icon tab-border-bottom connected-tab-top-row active selected tab-border-top", true)]
+    [InlineData("tab tab-actions-right sizing-fit has-icon connected-tab-top-row", true)]
+    [InlineData("action-item icon checked", false)]
+    [InlineData("action-item icon", false)]
+    [InlineData("", false)]
+    public void A_vscode_editor_tab_is_told_by_its_class(string className, bool editorTab) =>
+        Assert.Equal(editorTab, BrowserTabs.IsEditorTab(className));
+
     // Chromium names a playing tab "<title> - Audio playing"; a muted one "... - Audio muted", which is silent.
     [Theory]
     [InlineData("Lofi beats - YouTube - Audio playing", true)]

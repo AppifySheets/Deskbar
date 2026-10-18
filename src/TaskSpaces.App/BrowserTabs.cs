@@ -20,6 +20,18 @@ namespace TaskSpaces.App;
 //     Document lies between it and the window. With that, his Edge windows read 5, 1 and 2, and the one
 //     whose title said "and 1 more page" read 2. An installed web app reads 0.
 //
+// VS CODE TOO (Petre: "can you also include vscode tab counts?"). Electron, so the same UI Automation, but its
+// editor tabs live INSIDE its page, which the browser rule above skips by design, and the page has other
+// TabItems as well. Measured on his windows:
+//
+//   Explorer (Ctrl+Shift+E)        class='action-item icon checked'   <- the activity bar's view switchers
+//   Caption position redesign      class='tab tab-actions-right ... active selected'   <- an editor tab
+//
+// So for VS Code a TabItem counts when its class has the word "tab". And its tree is built lazily: the FIRST
+// query of a window found no TabItems at all, the second (seconds later) found them, because Chromium only
+// builds the web content's accessibility tree once something asks. A VS Code reading of 0 is therefore taken
+// as "not ready" rather than as zero, and the window is simply read again on the next pass.
+//
 // Never on the UI thread: a browser busy enough to answer slowly must not stall the bar. One background
 // worker reads windows as the bar asks for them (Watch), each at most every few seconds unless its title
 // changed, and Changed fires only when a reading differs from the last one.
@@ -49,7 +61,7 @@ public sealed class BrowserTabs : IBrowserTabs, IDisposable
     readonly ConcurrentDictionary<WindowHandle, TabInfo> readings = new();
     readonly ConcurrentDictionary<WindowHandle, (string Title, DateTime At)> lastRead = new();
     readonly ConcurrentDictionary<WindowHandle, byte> queued = new();
-    readonly BlockingCollection<WindowHandle> queue = new();
+    readonly BlockingCollection<(WindowHandle Window, bool Code)> queue = new();
     readonly Subject<Unit> changed = new();
     readonly Thread worker;
 
@@ -61,6 +73,11 @@ public sealed class BrowserTabs : IBrowserTabs, IDisposable
     }
 
     public static bool IsBrowser(WindowInfo window) => Browsers.Contains(window.ProcessName);
+
+    static bool IsCode(WindowInfo window) => window.ProcessName.Equals("Code", StringComparison.OrdinalIgnoreCase);
+
+    // Every app whose tabs are counted: the browsers, and VS Code.
+    static bool HasTabs(WindowInfo window) => IsBrowser(window) || IsCode(window);
 
     public TabInfo? Of(WindowHandle window) => readings.TryGetValue(window, out var info) ? info : null;
 
@@ -76,23 +93,23 @@ public sealed class BrowserTabs : IBrowserTabs, IDisposable
         });
 
         var now = DateTime.UtcNow;
-        windows.Where(IsBrowser)
+        windows.Where(HasTabs)
             .Where(w => !lastRead.TryGetValue(w.Handle, out var last) || last.Title != w.Title || now - last.At > Fresh)
             .Where(w => queued.TryAdd(w.Handle, 0))
             .ToList()
             .ForEach(w =>
             {
                 lastRead[w.Handle] = (w.Title, now);
-                queue.Add(w.Handle);
+                queue.Add((w.Handle, IsCode(w)));
             });
     }
 
     void Work()
     {
-        foreach (var window in queue.GetConsumingEnumerable())
+        foreach (var (window, code) in queue.GetConsumingEnumerable())
         {
             queued.TryRemove(window, out _);
-            var reading = Read(window);
+            var reading = code ? ReadCode(window) : Read(window);
             if (reading is null) continue;
             if (readings.TryGetValue(window, out var before) && before == reading) continue;
             readings[window] = reading;
@@ -122,6 +139,27 @@ public sealed class BrowserTabs : IBrowserTabs, IDisposable
             return null;
         }
     }
+
+    // VS Code's editor tabs: TabItems whose class has the word "tab", in every editor group. None at all means
+    // its accessibility tree has not been built yet (see the header), so there is no reading rather than a 0.
+    internal static TabInfo? ReadCode(WindowHandle window)
+    {
+        try
+        {
+            var tabs = AutomationElement.FromHandle(window.Value)
+                .FindAll(TreeScope.Descendants, new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.TabItem))
+                .Cast<AutomationElement>()
+                .Count(tab => IsEditorTab(tab.Current.ClassName));
+            return tabs > 0 ? new TabInfo(tabs, false) : null;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    internal static bool IsEditorTab(string className) =>
+        className.Split(' ', StringSplitOptions.RemoveEmptyEntries).Contains("tab");
 
     internal static bool PlaysAudio(string tabName) =>
         tabName.Contains("audio", StringComparison.OrdinalIgnoreCase)
