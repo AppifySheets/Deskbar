@@ -472,6 +472,26 @@ public partial class FloatingBar : Window
 
     public bool Docked => dockedEdge is not null;
 
+    // Docked across the seam between two screens (see DockAcrossSeam). In this mode every row MIRRORS its left
+    // edge onto the right half, so each screen sees a whole bar of its own. Petre, on first seeing it:
+    // "captions on both sides for workspaces in split screen mode", "these accents also on both monitors". The
+    // caption, the rail, a group's line and a group's name are drawn again where the right half begins. And
+    // "no minimize button in split screen": a bar split across two screens has nowhere sensible to shrink to.
+    bool AcrossSeam => dockedEdge == "seam";
+
+    // `twin` placed where the right half of `host`'s width begins, over `rows` grid rows of it, without
+    // touching hit testing anywhere the twin itself does not reach. The halves are equal, as the lanes are.
+    static UIElement AtRightHalf(UIElement twin, int rows = 1)
+    {
+        var holder = new Grid();
+        holder.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        holder.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        Grid.SetColumn(twin, 1);
+        holder.Children.Add(twin);
+        if (rows > 1) Grid.SetRowSpan(holder, rows);
+        return holder;
+    }
+
     AppBar? appBar;
 
     // Where the bar floated before it was docked, so Save can keep persisting THAT while docked and
@@ -511,7 +531,10 @@ public partial class FloatingBar : Window
     Result DockOffSeam()
     {
         if (SeamOf(new WindowInteropHelper(this).Handle) is { } seam) Left = seam.Right.L / seam.RightScale;
-        return DockTo("left");
+        var docked = DockTo("left");
+        // ...and drawn again without the mirrored half once it ends.
+        Rebuild();
+        return docked;
     }
 
     // Docks to the edge it was docked on last time, if that is remembered, otherwise to whichever side of
@@ -531,7 +554,9 @@ public partial class FloatingBar : Window
         if (!Docked) return Result.Success();
         appBar?.Remove();
         seamBar?.Remove();
+        var wasAcross = AcrossSeam;
         dockedEdge = null;
+        if (wasAcross) Dispatcher.BeginInvoke(Rebuild);
         fullScreenAppOpen = false;
         Root.CornerRadius = new CornerRadius(8);
 
@@ -631,6 +656,7 @@ public partial class FloatingBar : Window
         var right = appBar!.Dock(AppBar.Edge.Left, seam.Right, (int)Math.Round(widthDips / 2 * seam.RightScale));
         var left = seamBar.Dock(AppBar.Edge.Right, seam.Left, (int)Math.Round(widthDips / 2 * seam.LeftScale));
 
+        var wasAcross = AcrossSeam;
         dockedEdge = "seam";
         anchorRight = null;
         anchorBottom = null;
@@ -648,6 +674,8 @@ public partial class FloatingBar : Window
         ClickTrace.Write($"dock: across the seam, left strip {left.L}..{left.R}, right strip {right.L}..{right.R}");
 
         Save();
+        // The rows mirror their left edge in this mode, so they are drawn again the first time it starts.
+        if (!wasAcross) Rebuild();
         return Result.Success();
     }
 
@@ -1669,6 +1697,7 @@ public partial class FloatingBar : Window
 
     void RebuildCore(bool fresh = true)
     {
+        MinimizeButton.Visibility = AcrossSeam ? Visibility.Collapsed : Visibility.Visible;
         Rows.Children.Clear();
         CurrentList.Children.Clear(); // the titled list below the rows, rebuilt with them
         headerDropTargets.Clear();    // re-registered by every row as it is built (see GroupRow)
@@ -1953,7 +1982,7 @@ public partial class FloatingBar : Window
                 if (!group.IsAnchored) rows.Insert(0, GroupHeader(group, ColourSlotOf(group)));
 
                 groupRows.Add(boxed
-                    ? FamilyBox(rows, LaneAccent(group.Color, ColourSlotOf(group)), LaneTint(group.Color, ColourSlotOf(group)))
+                    ? FamilyBox(rows, LaneAccent(group.Color, ColourSlotOf(group)), LaneTint(group.Color, ColourSlotOf(group)), AcrossSeam)
                     : rows[0]);
             });
 
@@ -2757,6 +2786,26 @@ public partial class FloatingBar : Window
         Grid.SetColumn(label, 0);
         header.Children.Add(label);
 
+        // Across the seam, the name heads the right half too (see AcrossSeam): the two columns become equal halves.
+        if (AcrossSeam)
+        {
+            header.ColumnDefinitions[1].Width = new GridLength(1, GridUnitType.Star);
+            var twin = new TextBlock
+            {
+                Text = label.Text,
+                FontSize = label.FontSize,
+                FontWeight = label.FontWeight,
+                Foreground = label.Foreground,
+                LineHeight = label.LineHeight,
+                LineStackingStrategy = label.LineStackingStrategy,
+                VerticalAlignment = label.VerticalAlignment,
+                HorizontalAlignment = label.HorizontalAlignment,
+                Margin = label.Margin,
+            };
+            Grid.SetColumn(twin, 1);
+            header.Children.Add(twin);
+        }
+
         // #84: "where Ungroup lives when the group has no workspace row of its own -- presumably the
         // group's header gets its own small context menu." It does, and it holds only the two things
         // that are about the GROUP rather than about a workspace.
@@ -2819,14 +2868,31 @@ public partial class FloatingBar : Window
     // together" is a thin line in the group's colour down the left, tying the rails into a tree, and the
     // members indented a little beside it. `lane` is no longer painted behind them; only the current row is
     // tinted now.
-    static UIElement FamilyBox(IReadOnlyList<UIElement> rows, Brush? outline, Brush? lane)
+    // `acrossSeam`: the line is drawn again where the right half begins (see AcrossSeam).
+    static UIElement FamilyBox(IReadOnlyList<UIElement> rows, Brush? outline, Brush? lane, bool acrossSeam = false)
     {
         _ = lane;
         var stack = new StackPanel();
         rows.ToList().ForEach(row => stack.Children.Add(row));
+        UIElement content = stack;
+        if (acrossSeam && outline is not null)
+        {
+            var both = new Grid();
+            both.Children.Add(stack);
+            both.Children.Add(AtRightHalf(new Border
+            {
+                Width = 1,
+                Background = outline,
+                HorizontalAlignment = HorizontalAlignment.Left,
+                // Back by the box's own padding and edge, so this line sits where the right half's rails do.
+                Margin = new Thickness(-4, 0, 0, 0),
+                IsHitTestVisible = false,
+            }));
+            content = both;
+        }
         return new Border
         {
-            Child = stack,
+            Child = content,
             Background = Brushes.Transparent,
             BorderBrush = outline ?? Brushes.Transparent,
             BorderThickness = new Thickness(1, 0, 0, 0),
@@ -3260,6 +3326,19 @@ public partial class FloatingBar : Window
             };
             Grid.SetRowSpan(mark, container.RowDefinitions.Count);
             container.Children.Add(mark);
+
+            // Its twin where the right half begins, across the seam.
+            if (AcrossSeam)
+                container.Children.Add(AtRightHalf(new Border
+                {
+                    Width = SpineWidth,
+                    Background = spine,
+                    HorizontalAlignment = HorizontalAlignment.Left,
+                    VerticalAlignment = VerticalAlignment.Stretch,
+                    Margin = mark.Margin,
+                    CornerRadius = mark.CornerRadius,
+                    IsHitTestVisible = false,
+                }, container.RowDefinitions.Count));
         }
 
         // The caption line. A workspace name sits at the left, indented on a nested row by the same
@@ -3276,6 +3355,24 @@ public partial class FloatingBar : Window
         }
         Grid.SetRow(label, 0);
         container.Children.Add(label);
+
+        // Its twin where the right half begins, across the seam: the same label, clickable the same way, and lit
+        // by the same hover. Only for a real caption, not the pinned row's header.
+        if (AcrossSeam && captionContent is null)
+        {
+            var (twin, twinHover) = RowLabel(visualLabel, isCurrent, switchTo, caption: true, currentColour: spine, empty: emptyRow);
+            if (twin is FrameworkElement twinCaption && label is FrameworkElement firstCaption) twinCaption.Margin = firstCaption.Margin;
+            var holder = AtRightHalf(twin);
+            Grid.SetRow(holder, 0);
+            container.Children.Add(holder);
+            var firstHover = setHover;
+            if (firstHover is not null || twinHover is not null)
+                setHover = on =>
+                {
+                    firstHover?.Invoke(on);
+                    twinHover?.Invoke(on);
+                };
+        }
 
         // THE ROW'S RING, and it is a stroked Rectangle rather than the Border's own BorderBrush for
         // one blunt reason: Petre wants the trail told apart by pattern -- "current - solid - previous
