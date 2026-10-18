@@ -33,6 +33,14 @@ public class FloatingBarPinsTests
         }
 
         public Result Reveal(TaskbarPin pin) => Result.Success();
+
+        // As the taskbar would: the pin goes and the change counter moves.
+        public Result Unpin(TaskbarPin pin)
+        {
+            Current.Remove(pin);
+            Version++;
+            return Result.Success();
+        }
     }
 
     static TaskbarPin Shortcut(string name, string target, string? appId = null) =>
@@ -52,7 +60,7 @@ public class FloatingBarPinsTests
         return bar;
     }
 
-    static WrapPanel Line(FloatingBar bar) => (WrapPanel)bar.FindName("PinLine")!;
+    static Panel Line(FloatingBar bar) => (Panel)bar.FindName("PinLine")!;
 
     static List<string> Names(FloatingBar bar) =>
         Line(bar).Children.OfType<Button>().Select(AutomationProperties.GetName).ToList();
@@ -124,6 +132,32 @@ public class FloatingBarPinsTests
         pins.Version++;
         bar.ReloadPins();
         Assert.Equal(["Obsidian", "RustDesk"], Names(bar));
+        bar.Close();
+    });
+
+    // Petre's ten fit one docked line ("as it was, just a bit larger"), and a list too long for one line splits
+    // evenly rather than leaving a short last line: twelve where ten fit come out as two lines of six.
+    [Theory]
+    [InlineData(10, 196, 10)]
+    [InlineData(3, 196, 3)]
+    [InlineData(12, 196, 6)]
+    [InlineData(21, 196, 7)]
+    [InlineData(10, 400, 10)]
+    public void Pins_split_into_even_lines(int count, double width, int columns) =>
+        Assert.Equal(columns, FloatingBar.PinColumns(count, width));
+
+    // Petre: "rightclick should have unpin option". It is on the pin's menu, and the pin leaves the line at once
+    // rather than at the next poll.
+    [Fact]
+    public void Unpinning_from_the_menu_takes_the_pin_off_the_line() => StaThread.Run(() =>
+    {
+        var pins = new FakePins(Shortcut("Obsidian", @"C:\Obsidian\Obsidian.exe"), Shortcut("RustDesk", @"C:\RustDesk\RustDesk.exe"));
+        var bar = Bar(pins);
+
+        var unpin = Pin(bar, "Obsidian").ContextMenu!.Items.OfType<MenuItem>().Single(i => (string)i.Header == "Unpin from taskbar");
+        unpin.RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
+
+        Assert.Equal(["RustDesk"], Names(bar));
         bar.Close();
     });
 

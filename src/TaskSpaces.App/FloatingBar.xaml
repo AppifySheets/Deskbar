@@ -53,7 +53,10 @@
                     <!-- The taskbar's pinned apps, in the taskbar's order, as a line above the strip (Petre: "a",
                          a dock line). Inside the strip's own border so the two read as one block at the foot of
                          the screen, under one hairline. Filled in FloatingBar.Pins.cs; collapsed with no pins. -->
-                    <WrapPanel x:Name="PinLine" Margin="0,0,0,2" Visibility="Collapsed"/>
+                    <!-- A UniformGrid rather than a WrapPanel, so the cells share the line's width evenly and a pin
+                         list too long for one line splits into even lines instead of a ragged last one (see
+                         PinColumns). -->
+                    <UniformGrid x:Name="PinLine" Margin="0,0,0,2" Visibility="Collapsed"/>
                     <DockPanel x:Name="ShellStrip" LastChildFill="False"/>
                 </StackPanel>
             </Border>

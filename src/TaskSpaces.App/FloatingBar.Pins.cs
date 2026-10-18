@@ -1,5 +1,6 @@
 ﻿using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Controls.Primitives;
 using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
@@ -19,14 +20,18 @@ namespace TaskSpaces.App;
 //            somewhere else, nothing under one that is not running
 //   click    jump to its window here, as the taskbar does; with none here, start it here
 //   middle   or Shift+click: always a new window
-//   right    its name, New window, Open file location
+//   right    its name, New window, Open file location, Unpin from taskbar
 //
-// Pinning and unpinning stay on the taskbar (Windows offers no supported way to change its pins), and the
-// line follows them: the pin list's change counter is polled every few seconds.
+// Unpinning runs the item's own shell verb (see ShellTaskbarPins.Unpin); pinning has no such verb and stays
+// on the taskbar. Either way the line follows the taskbar: the pin list's change counter is polled every
+// few seconds.
 public partial class FloatingBar
 {
-    // One pin's width: ten fit the docked bar's 200 DIP on one line, which is how many Petre has.
-    const double PinWidth = 19;
+    // How big a pin is, after three rounds. The first cut was 16 DIP icons in 19 DIP cells, ten to a line.
+    // "make them bigger, it's hard to focus on them" went to 22 in 28, two lines of five, and that was "too bad;
+    // much smaller, and no gaps please", "as it was, just a bit larger". So: one tight line again, icons 18,
+    // the cells sharing the width evenly with no more than a pixel or so between icons.
+    const double PinIconSize = 18, PinMinWidth = 19, PinHeight = 24;
 
     static readonly Brush PinHereMark = Frozen(0xC0, 0xFF, 0xFF, 0xFF);
     static readonly Brush PinElsewhereMark = Frozen(0x66, 0xFF, 0xFF, 0xFF);
@@ -57,6 +62,7 @@ public partial class FloatingBar
         {
             pins = value;
             if (pins is null) return;
+            WatchPinWidth();
             ReloadPins();
             pinWatch.Tick += (_, _) => ReloadPins();
             pinWatch.Start();
@@ -92,8 +98,27 @@ public partial class FloatingBar
             PinLine.Children.Add(button);
         });
         PinLine.Visibility = shownPins.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
+        ((UniformGrid)PinLine).Columns = PinColumns(shownPins.Count, PinLine.ActualWidth);
         if (lastPinOverview is { } overview) PaintPins(overview);
     }
+
+    // Columns for `count` pins in `width`: as few lines as fit at the minimum cell width, then the pins shared
+    // EVENLY between those lines, so ten in a line that holds seven come out as two lines of five, not 7 + 3.
+    // Before the first layout the width is unknown; the docked bar's own 196 DIP stands in until it is.
+    internal static int PinColumns(int count, double width)
+    {
+        if (count <= 0) return 1;
+        var perLine = Math.Max(1, (int)Math.Floor((width > 0 ? width : 196) / PinMinWidth));
+        var lines = (int)Math.Ceiling(count / (double)perLine);
+        return (int)Math.Ceiling(count / (double)lines);
+    }
+
+    void WatchPinWidth() => PinLine.SizeChanged += (_, e) =>
+    {
+        // Only a WIDTH change can change the columns, and a column change only changes the height, so this
+        // cannot feed itself.
+        if (e.WidthChanged) ((UniformGrid)PinLine).Columns = PinColumns(shownPins.Count, e.NewSize.Width);
+    };
 
     (Button, Border) PinButton(TaskbarPin pin)
     {
@@ -103,15 +128,14 @@ public partial class FloatingBar
             CornerRadius = new CornerRadius(1),
             HorizontalAlignment = HorizontalAlignment.Center,
             VerticalAlignment = VerticalAlignment.Bottom,
-            Margin = new Thickness(0, 0, 0, 1),
+            Margin = new Thickness(0, 0, 0, 1.5),
             Visibility = Visibility.Collapsed,
         };
         var face = new Grid { Children = { PinIcon(pin), mark } };
         var button = new Button
         {
             Content = face,
-            Width = PinWidth,
-            Height = 24,
+            Height = PinHeight,
             Padding = new Thickness(0),
             Background = Brushes.Transparent,
             BorderThickness = new Thickness(0),
@@ -119,9 +143,8 @@ public partial class FloatingBar
             Focusable = false,
             ToolTip = pin.Name,
         };
-        // Stretched, so the marker sits at the bottom of the whole button rather than under the icon's box.
-        face.Width = PinWidth;
-        face.Height = 24;
+        // Sized to the cell, so the marker sits at the bottom of the whole button rather than under the icon.
+        face.Height = PinHeight;
         System.Windows.Automation.AutomationProperties.SetName(button, pin.Name);
 
         button.Click += (_, _) =>
@@ -143,12 +166,12 @@ public partial class FloatingBar
 
     UIElement PinIcon(TaskbarPin pin)
     {
-        var image = new Image { Width = 16, Height = 16, IsHitTestVisible = false };
+        var image = new Image { Width = PinIconSize, Height = PinIconSize, IsHitTestVisible = false };
         RenderOptions.SetBitmapScalingMode(image, BitmapScalingMode.HighQuality);
         if (!pinImages.TryGetValue(pin.ParsingName, out var source) && pins is not null)
         {
-            // 32 px: the bar draws a pin at 16 DIP and Petre's screens run at 150% and 200%.
-            pins.ImageOf(pin, 32).Map(ToImageSource).Tap(found =>
+            // 48 px: the bar draws a pin at 18 DIP and Petre's screens run at 150% and 200%, so 36 at most.
+            pins.ImageOf(pin, 48).Map(ToImageSource).Tap(found =>
             {
                 pinImages[pin.ParsingName] = found;
                 source = found;
@@ -177,6 +200,19 @@ public partial class FloatingBar
         var reveal = new MenuItem { Header = "Open file location", Icon = MenuGlyph("↗"), IsEnabled = !pin.IsInstalledApp || pin.TargetPath is not null };
         reveal.Click += (_, _) => Report(pins?.Reveal(pin) ?? Result.Success());
         menu.Items.Add(reveal);
+        menu.Items.Add(new Separator());
+        // Petre: "rightclick should have unpin option". No confirmation, as on the taskbar itself: a pin is put
+        // back from the app's own taskbar button or from Start.
+        var unpin = new MenuItem { Header = "Unpin from taskbar", Icon = MenuGlyph("✕") };
+        unpin.Click += (_, _) =>
+        {
+            var outcome = pins?.Unpin(pin) ?? Result.Success();
+            if (ClickTrace.On) ClickTrace.Write($"pins: unpin {pin.Name} ok={outcome.IsSuccess}{(outcome.IsFailure ? $" error={outcome.Error}" : "")}");
+            // Re-read at once rather than at the next poll, so the pin leaves the line as the click lands.
+            if (outcome.IsSuccess) ReloadPins();
+            Report(outcome);
+        };
+        menu.Items.Add(unpin);
         return menu;
     }
 

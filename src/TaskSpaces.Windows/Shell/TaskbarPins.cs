@@ -9,8 +9,11 @@ namespace TaskSpaces.Windows.Shell;
 // THE TASKBAR'S PINNED APPS, for the bar's dock line. Petre: "can you also show pinned icons somewhere?",
 // "taskbar pinned", then "a" from three mockups: a line of them above the strip, like the Mac's dock.
 //
-// Read, never written. Windows gives other programs no supported way to pin or unpin, so the bar mirrors
-// the taskbar and pinning stays on the taskbar.
+// Read, and unpinned through the shell, but never pinned. Windows gives other programs no supported API for
+// either; what it does still offer is each item's own "Unpin from taskbar" context-menu verb (canonical name
+// "taskbarunpin"), measured as present on both kinds of pin on Petre's machine: a shortcut (Obsidian.lnk) and
+// an installed app (YouTube Music). Petre: "rightclick should have unpin option". Pinning has no such verb a
+// third party may invoke, so pinning stays on the taskbar.
 //
 // WHERE THEY LIVE, measured on Petre's machine before this was written:
 //
@@ -63,6 +66,9 @@ public interface ITaskbarPins
 
     // Explorer, with what the pin starts selected: the taskbar's "Open file location".
     Result Reveal(TaskbarPin pin);
+
+    // The item's own "Unpin from taskbar", exactly as its right-click menu in Explorer would run it.
+    Result Unpin(TaskbarPin pin);
 }
 
 public sealed class ShellTaskbarPins : ITaskbarPins
@@ -171,9 +177,40 @@ public sealed class ShellTaskbarPins : ITaskbarPins
             }, e => $"Could not open the location of {pin.Name}: {e.Message}")
             : Result.Failure($"{pin.Name} is an installed app, with no file location to open");
 
+    // Through the item's context menu, the way Explorer runs a verb: build the menu (some handlers only know
+    // their verbs once asked to fill one), then invoke by canonical name, which does not change with the
+    // display language the way "Unpin from tas&kbar" does.
+    public Result Unpin(TaskbarPin pin) =>
+        WithItem(pin.IdList, item =>
+        {
+            var bhid = BhidSfuiObject;
+            var iid = typeof(IContextMenu).GUID;
+            if (item.BindToHandler(0, ref bhid, ref iid, out var handler) != 0 || handler == 0)
+                return Result.Failure($"{pin.Name} offers no context menu to unpin it from");
+            var menu = (IContextMenu)Marshal.GetObjectForIUnknown(handler);
+            Marshal.Release(handler);
+            var popup = CreatePopupMenu();
+            var verb = Marshal.StringToHGlobalAnsi("taskbarunpin");
+            try
+            {
+                menu.QueryContextMenu(popup, 0, 1, 0x7FFF, CmfNormal);
+                var invoke = new CommandInfo { Size = Marshal.SizeOf<CommandInfo>(), Verb = verb, Show = 1 };
+                var hr = menu.InvokeCommand(ref invoke);
+                return hr == 0 ? Result.Success() : Result.Failure($"Could not unpin {pin.Name} (0x{hr:X8})");
+            }
+            finally
+            {
+                Marshal.FreeHGlobal(verb);
+                DestroyMenu(popup);
+                Marshal.ReleaseComObject(menu);
+            }
+        }, Result.Failure($"Could not unpin {pin.Name}: the shell no longer knows it"));
+
     // --- shell items ----------------------------------------------------------------------------------
 
-    static T WithItem<T>(byte[] idList, Func<IShellItem2, T> use)
+    static T WithItem<T>(byte[] idList, Func<IShellItem2, T> use) => WithItem(idList, use, default!);
+
+    static T WithItem<T>(byte[] idList, Func<IShellItem2, T> use, T fallback)
     {
         // The list is copied out with two zero bytes on the end whatever it already ends with: a list the
         // shell reads past would be a crash, and an extra terminator costs nothing.
@@ -183,7 +220,7 @@ public sealed class ShellTaskbarPins : ITaskbarPins
             Marshal.Copy(idList, 0, native, idList.Length);
             Marshal.WriteInt16(native, idList.Length, 0);
             var iid = typeof(IShellItem2).GUID;
-            if (SHCreateItemFromIDList(native, ref iid, out var item) != 0 || item is null) return default!;
+            if (SHCreateItemFromIDList(native, ref iid, out var item) != 0 || item is null) return fallback;
             try
             {
                 return use(item);
@@ -195,7 +232,7 @@ public sealed class ShellTaskbarPins : ITaskbarPins
         }
         catch
         {
-            return default!;
+            return fallback;
         }
         finally
         {
@@ -251,6 +288,26 @@ public sealed class ShellTaskbarPins : ITaskbarPins
             ReleaseDC(0, screen);
             DeleteObject(bitmap);
         }
+    }
+
+    const uint CmfNormal = 0;
+    static readonly Guid BhidSfuiObject = new("3981E225-F559-11D3-8E3A-00C04F6837D5");
+
+    // CMINVOKECOMMANDINFO, the plain (ANSI verb) form. Sequential, so the marshaller pads it to x64's layout.
+    [StructLayout(LayoutKind.Sequential)]
+    public struct CommandInfo
+    {
+        public int Size, Mask;
+        public nint Window, Verb, Parameters, Directory;
+        public int Show, HotKey;
+        public nint Icon;
+    }
+
+    [ComImport, Guid("000214E4-0000-0000-C000-000000000046"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+    public interface IContextMenu
+    {
+        [PreserveSig] int QueryContextMenu(nint menu, uint index, uint firstCommand, uint lastCommand, uint flags);
+        [PreserveSig] int InvokeCommand(ref CommandInfo info);
     }
 
     const uint SigdnNormalDisplay = 0;
@@ -338,6 +395,8 @@ public sealed class ShellTaskbarPins : ITaskbarPins
     [DllImport("shell32.dll")] static extern int SHCreateItemFromIDList(nint idList, ref Guid iid, [MarshalAs(UnmanagedType.Interface)] out IShellItem2? item);
     [DllImport("shell32.dll")] static extern int SHGetPropertyStoreForWindow(nint hwnd, ref Guid iid, [MarshalAs(UnmanagedType.Interface)] out IPropertyStore? store);
     [DllImport("ole32.dll")] static extern int PropVariantClear(ref PropVariant value);
+    [DllImport("user32.dll")] static extern nint CreatePopupMenu();
+    [DllImport("user32.dll")] static extern bool DestroyMenu(nint menu);
     [DllImport("user32.dll")] static extern nint GetDC(nint hwnd);
     [DllImport("user32.dll")] static extern int ReleaseDC(nint hwnd, nint dc);
     [DllImport("gdi32.dll")] static extern bool DeleteObject(nint obj);
