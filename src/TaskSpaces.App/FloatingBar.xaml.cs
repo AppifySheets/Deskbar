@@ -559,6 +559,7 @@ public partial class FloatingBar : Window
         if (wasAcross) Dispatcher.BeginInvoke(Rebuild);
         fullScreenAppOpen = false;
         Root.CornerRadius = new CornerRadius(8);
+        BarContent.Margin = new Thickness(0);
 
         // Back to following its content in height; the width stays the one chosen.
         SizeToContent = SizeToContent.Height;
@@ -611,6 +612,8 @@ public partial class FloatingBar : Window
             anchorRight = null;
             anchorBottom = null;
             Root.CornerRadius = new CornerRadius(0);
+            // An edge dock is one screen's height: no seam inset (see SeamSpan).
+            BarContent.Margin = new Thickness(0);
 
             // Manual in both axes: the height is the screen's now, not the content's.
             SizeToContent = SizeToContent.Manual;
@@ -663,20 +666,42 @@ public partial class FloatingBar : Window
         Root.CornerRadius = new CornerRadius(0);
         SizeToContent = SizeToContent.Manual;
 
-        // From the left strip's outer edge to the right strip's, as tall as both screens allow.
-        var top = Math.Max(left.T, right.T);
-        var bottom = Math.Min(left.B, right.B);
+        // From the left strip's outer edge to the right strip's, and as tall as BOTH strips together, with the
+        // content kept to the height they share (see SeamSpan).
+        var span = SeamSpan(left.T, left.B, right.T, right.B);
         var scale = seam.RightScale;
         Left = left.L / scale;
-        Top = top / scale;
+        Top = span.WindowTop / scale;
         Width = (right.R - left.L) / scale;
-        Height = (bottom - top) / scale;
+        Height = (span.WindowBottom - span.WindowTop) / scale;
+        BarContent.Margin = new Thickness(0, span.InsetTop / scale, 0, span.InsetBottom / scale);
         ClickTrace.Write($"dock: across the seam, left strip {left.L}..{left.R}, right strip {right.L}..{right.R}");
 
         Save();
         // The rows mirror their left edge in this mode, so they are drawn again the first time it starts.
         if (!wasAcross) Rebuild();
         return Result.Success();
+    }
+
+    // SCREENS THAT ARE NOT LEVEL. Petre: "when monitors aren't exactly aligned and i have the deskbar in the
+    // middle.. you know what needs to happen". Each screen's strip is reserved for that screen's whole height (an
+    // app bar on a left or right edge always is), so a bar only as tall as the height the screens SHARE left an
+    // empty reserved band above or below it on whichever screen reaches further. So:
+    //
+    //   * the window spans from the higher top to the lower bottom, so the bar's background fills both strips,
+    //     and no reserved space is left bare (the part of the window beside a screen that does not reach there
+    //     is simply not on any screen, and nothing draws it);
+    //   * the content (header, rows, the strip at the foot) is inset to the shared height, so Start, the rows,
+    //     the clock and the pins are on screen on BOTH screens, never half off one of them.
+    //
+    // In physical pixels. Level screens give insets of zero, which is the layout this had before.
+    internal static (int WindowTop, int WindowBottom, int InsetTop, int InsetBottom) SeamSpan(int leftTop, int leftBottom, int rightTop, int rightBottom)
+    {
+        var windowTop = Math.Min(leftTop, rightTop);
+        var windowBottom = Math.Max(leftBottom, rightBottom);
+        var sharedTop = Math.Max(leftTop, rightTop);
+        var sharedBottom = Math.Min(leftBottom, rightBottom);
+        return (windowTop, windowBottom, sharedTop - windowTop, windowBottom - sharedBottom);
     }
 
     // The two screens meeting nearest the bar: the bar's own and the one sharing its left or right edge (with

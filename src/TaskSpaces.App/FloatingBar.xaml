@@ -41,7 +41,9 @@
              sits at the foot of the screen where the taskbar was, and the clock stays put however many rows
              expand above it. Floating, the bar is only as tall as its content, so the same layout puts the
              strip straight under the last row. -->
-        <DockPanel LastChildFill="True">
+        <!-- Named so a seam dock across screens that are not level can inset it to the height they share
+             (FloatingBar.SeamSpan); zero margin everywhere else. -->
+        <DockPanel x:Name="BarContent" LastChildFill="True">
             <!-- The rest of the taskbar's own buttons: the tray chevron, quick settings and the bell from the
                  left, the clock and the show desktop sliver at the right, where Windows puts them. Filled once
                  in BuildShellStrip (FloatingBar.Shell.cs). A hairline above it, because unlike the rows it is

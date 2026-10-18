@@ -109,6 +109,18 @@ public class FloatingBarShellTests(ITestOutputHelper output)
         bar.Close();
     });
 
+    // Docked across two screens that are not level (Petre: "when monitors aren't exactly aligned and i have the
+    // deskbar in the middle"): the window fills both reserved strips, and the content is inset to the height the
+    // screens share, so nothing is half off one screen.
+    [Theory]
+    [InlineData(0, 2160, 0, 2160, 0, 2160, 0, 0)]          // level: no inset, as before
+    [InlineData(-300, 1860, 0, 2160, -300, 2160, 300, 300)] // left screen 300 px higher
+    [InlineData(0, 1440, 0, 2160, 0, 2160, 0, 720)]         // left screen shorter, tops level
+    [InlineData(200, 1640, 0, 2160, 0, 2160, 200, 520)]     // left screen shorter and lower
+    public void Across_uneven_screens_the_bar_fills_both_strips_and_keeps_to_the_shared_height(
+        int leftTop, int leftBottom, int rightTop, int rightBottom, int windowTop, int windowBottom, int insetTop, int insetBottom) =>
+        Assert.Equal((windowTop, windowBottom, insetTop, insetBottom), FloatingBar.SeamSpan(leftTop, leftBottom, rightTop, rightBottom));
+
     // The clock shows the time in the user's own short format, the one the taskbar uses. Read before and
     // after, so a minute turning over mid-test cannot fail it.
     [Fact]
