@@ -18,10 +18,12 @@ namespace TaskSpaces.App;
 //     what links an icon to the titled line it becomes, and the line back to the icon.
 //
 // Only when the set of expanded rows changed: an ordinary rebuild (a title changing, a window opening) is not
-// asked to move anything. Quick, 160 ms easing out. Nothing at all when Windows' animations are turned off.
+// asked to move anything. 320 ms easing out (see GlideTime), and whatever Windows' own animation setting says
+// (see GlideIfExpansionChanged for why).
 public partial class FloatingBar
 {
-    static readonly Duration GlideTime = new(TimeSpan.FromMilliseconds(160));
+    // 320 ms. It started at 160, and on the bar Petre asked for "increase time, double".
+    static readonly Duration GlideTime = new(TimeSpan.FromMilliseconds(320));
 
     HashSet<Guid> lastExpanded = [];
     bool expansionChanged;
@@ -51,7 +53,14 @@ public partial class FloatingBar
     {
         if (!expansionChanged) return;
         expansionChanged = false;
-        if (!SystemParameters.ClientAreaAnimation || before.Rows.Count == 0) return;
+        // NOT gated on Windows' "animation effects" (SystemParameters.ClientAreaAnimation), as it first was:
+        // Petre has that off, so the glide he asked for never ran, and his "increase time, double" was about an
+        // animation he had not seen. Asked for by name, it runs whatever the system-wide setting says.
+        if (before.Rows.Count == 0)
+        {
+            if (ClickTrace.On) ClickTrace.Write("glide: skipped, nothing was on the bar before");
+            return;
+        }
 
         // Rows first: each one's slide is also carried by everything inside it, so an icon's own slide is what
         // is left of its move once its row's is taken off.
