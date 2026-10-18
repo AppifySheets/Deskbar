@@ -60,6 +60,10 @@ public partial class FloatingBar
     // Windows key would open the Start menu on the screen of whoever runs the suite.
     internal Action<ShellFlyout> SendShellKeys { get; init; } = ShellKeys.Send;
 
+    // ...and the Space that opens the tray's hidden icons once Win+B has focused it (see OpenTrayOverflow),
+    // a seam for the same reason.
+    internal Action PressSpace { get; init; } = () => ShellKeys.Press(ShellKeys.VK_SPACE);
+
     // Ticks every second but writes only when the text changes, so the clock turns over on the minute
     // without the bar ever re-laying out between minutes.
     readonly DispatcherTimer clockTimer = new() { Interval = TimeSpan.FromSeconds(1) };
@@ -180,6 +184,11 @@ public partial class FloatingBar
     {
         SendShellKeys(flyout);
         if (flyout is ShellFlyout.Desktop) return;
+        if (flyout is ShellFlyout.Tray)
+        {
+            OpenTrayOverflow(attempt: 1);
+            return;
+        }
 
         var check = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(700) };
         check.Tick += (_, _) =>
@@ -190,6 +199,46 @@ public partial class FloatingBar
             if (front != flyout) SendShellKeys(flyout);
         };
         check.Start();
+    }
+
+    // Petre, on the chevron: "pressing this should be followed by a single space, can you do that on behalf of
+    // the clicker? so it shows immediately". Win+B only FOCUSES the tray: the auto-hidden taskbar slides up
+    // with its "show hidden icons" chevron selected, and waits for Space or Enter to open the overflow. So the
+    // bar presses Space itself, once the taskbar has actually taken the foreground; a Space sent before that
+    // would land in whatever window had focus. If the focus never arrives the shortcut is sent once more,
+    // the same single retry every other button gets.
+    void OpenTrayOverflow(int attempt)
+    {
+        var wait = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(250) };
+        wait.Tick += (_, _) =>
+        {
+            wait.Stop();
+            var front = NativeMethods.GetForegroundWindow();
+            var focused = ShellKeys.Recognise(front) == ShellFlyout.Tray;
+            if (ClickTrace.On) ClickTrace.Write($"shell: tray attempt {attempt}, in front={ShellKeys.Describe(front)}, focused={focused}");
+            if (focused)
+            {
+                PressSpace();
+                // What opened, by class and title, so the overflow can be recognised as the tray's (and a second
+                // click on the chevron then closes it rather than opening it again).
+                if (ClickTrace.On)
+                {
+                    var after = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(500) };
+                    after.Tick += (_, _) =>
+                    {
+                        after.Stop();
+                        ClickTrace.Write($"shell: tray after space, in front={ShellKeys.Describe(NativeMethods.GetForegroundWindow())}");
+                    };
+                    after.Start();
+                }
+            }
+            else if (attempt == 1)
+            {
+                SendShellKeys(ShellFlyout.Tray);
+                OpenTrayOverflow(attempt: 2);
+            }
+        };
+        wait.Start();
     }
 
     // From the composition root, on every foreground change (WindowMonitor.ForegroundChanged, which reports
@@ -289,6 +338,7 @@ public partial class FloatingBar
 static class ShellKeys
 {
     const byte VK_LWIN = 0x5B;
+    internal const byte VK_SPACE = 0x20;
     const uint KEYEVENTF_KEYUP = 0x0002;
 
     // Which keys each flyout is: the Windows key alone, or with one letter.
@@ -312,6 +362,16 @@ static class ShellKeys
         Enumerable.Reverse(keys).ToList().ForEach(k => keybd_event(k, 0, KEYEVENTF_KEYUP, 0));
     }
 
+    // One key, down and up.
+    public static void Press(byte key)
+    {
+        keybd_event(key, 0, 0, 0);
+        keybd_event(key, 0, KEYEVENTF_KEYUP, 0);
+    }
+
+    // For the trace: a window as its class and title.
+    public static string Describe(nint hwnd) => $"{ClassOf(hwnd)} '{TitleOf(hwnd)}'";
+
     // The class names measured on Petre's machine (see FloatingBar.Shell's header). Search and the
     // notification centre share a class, so those two are told apart by title, which is English on his
     // machine and may be localised elsewhere; a title that does not match just means the confirming
@@ -320,7 +380,9 @@ static class ShellKeys
     {
         ("DV2ControlHost", _) => FloatingBar.ShellFlyout.Start,
         ("ControlCenterWindow", _) => FloatingBar.ShellFlyout.QuickSettings,
-        ("Shell_TrayWnd" or "Shell_SecondaryTrayWnd", _) => FloatingBar.ShellFlyout.Tray,
+        // The overflow of hidden icons counts as the tray too, measured after the chevron's Win+B and Space,
+        // so a second click on the chevron closes it instead of opening it again.
+        ("Shell_TrayWnd" or "Shell_SecondaryTrayWnd" or "NotifyIconOverflowWindow", _) => FloatingBar.ShellFlyout.Tray,
         ("Windows.UI.Core.CoreWindow", "Search") => FloatingBar.ShellFlyout.Search,
         ("Windows.UI.Core.CoreWindow", "Notification Center") => FloatingBar.ShellFlyout.Notifications,
         _ => null,
