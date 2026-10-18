@@ -163,6 +163,25 @@ minting endpoint.
   (DigiCert says so). Consistent signing of every release builds it; the Store channel
   has no such prompt at all, which is why the Store is first class.
 
+### Store first, direct download unsigned (Petre, 2026-10-19)
+
+Petre asked whether the Store could be the only trusted download, and whether the direct
+download could point at it. Yes to both, and it changes the order below. The Microsoft
+Store signs the package itself, so no certificate is needed for the channel buyers who
+care about trust will use. The direct exe on GitHub Releases stays exactly as today,
+unsigned, for the people who want it and already click past SmartScreen; the README, the
+release notes and the update checker point at the Store first. The certificate purchase
+and the signing pipeline (already built and dormant behind the unset variable) are
+deferred until sales show the direct download matters to paying customers. If it comes
+to that, the cheapest route found on 2026-10-19 is Certum's Standard Code Signing through
+the reseller My-SSL at $99 a year, cloud-held key, individuals eligible, no token to ship;
+Microsoft's Trusted Signing is closed to Georgia for both individuals and companies.
+
+Consequences: the installer is not built yet (the direct download stays the portable
+exe); the Store packaging step moves up to directly after the rename; the order of work
+becomes rename, Store packaging and listing, free tier and key, site and checkout, then
+signing if ever needed. The sections below are kept as written for the record.
+
 ### Packaging
 
 - Direct download: a signed installer (Inno Setup, my call) that installs per user,
