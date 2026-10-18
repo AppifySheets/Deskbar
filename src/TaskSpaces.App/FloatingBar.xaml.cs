@@ -1585,6 +1585,13 @@ public partial class FloatingBar : Window
             // (FloatingBar.Pins.cs). Its buttons are not rebuilt, only repainted.
             PaintPins(overview);
 
+            // A window whose desktop cannot be found is in the Unplaced row, and the commonest reason is that it
+            // has just closed and its close event never arrived (Petre: "i closed youtube music and it kept
+            // lingering"). So ask the manager to drop the dead ones now rather than at the 5s sweep. Posted, not
+            // run inline: dropping a window pulses a rebuild, and this is the middle of one.
+            if (overview.OtherDesktops.Any(d => d.DesktopId == Guid.Empty && d.Windows.Count > 0))
+                Dispatcher.BeginInvoke(manager.DropDeadWindows);
+
             // Decided ONCE per rebuild, across every row, so the whole bar agrees. A machine
             // with one display needs no marker at all -- there is no "which monitor" to answer
             // -- and deciding per row instead would let a workspace whose windows happen to

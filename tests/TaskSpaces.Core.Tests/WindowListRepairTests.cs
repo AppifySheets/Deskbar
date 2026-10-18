@@ -95,6 +95,26 @@ public class WindowListRepairTests
         Assert.DoesNotContain(manager.KnownWindows, w => w.Handle == Obs(0x1C13F2).Handle);
     }
 
+    // The same drop, asked for early by the bar (Petre: "i closed youtube music and it kept lingering in the
+    // workspace"), and only the dead half of it: a window that is merely hidden stays, since that is the
+    // sweep's other question and has its own rules.
+    [Fact]
+    public void Dropping_dead_windows_early_drops_only_the_dead()
+    {
+        var workspace = GivenAWorkspace();
+        var manager = Started();
+        monitor.Subject.OnNext(new WindowEvent(WindowEventKind.Appeared, Obs(0x1C13F2)));
+        monitor.Subject.OnNext(new WindowEvent(WindowEventKind.Appeared, Beeper()));
+        desktops.WindowPlacements[Obs(0x1C13F2).Handle] = workspace.DesktopId!.Value;
+        desktops.WindowPlacements[Beeper().Handle] = workspace.DesktopId!.Value;
+
+        monitor.Dead.Add(Obs(0x1C13F2).Handle);
+        manager.DropDeadWindows();
+
+        Assert.DoesNotContain(manager.KnownWindows, w => w.Handle == Obs(0x1C13F2).Handle);
+        Assert.Contains(manager.KnownWindows, w => w.Handle == Beeper().Handle);
+    }
+
     // A window that is alive but no longer LISTED -- hidden, minimised to the tray -- leaves the bar.
     //
     // Petre: "what's the bell icon in the gepha workspace?" It was Outlook's reminder dialog, hidden

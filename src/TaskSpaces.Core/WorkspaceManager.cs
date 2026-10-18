@@ -456,6 +456,24 @@ public sealed class WorkspaceManager(
     // could move it: rules would fire, and #94's launched-by would look for whoever started it. A
     // repair puts the window back in the list, not back through its own history. It is the same
     // registration Start() does for the windows that are already open when the app launches.
+    // The dead half of the repair below, on its own and without the sweep's EnumWindows, for the bar to call
+    // the moment it has reason to think a window has gone. Petre: "i closed youtube music and it kept
+    // lingering in the workspace, why?" The trace answered: its close never reached the manager, the bar's
+    // next desktop lookup for it failed ("not on any desktop (closed or pinned)") at 11:48:41, and the row
+    // stayed until the 5s sweep found the handle dead at 11:48:46. The failed lookup is the earlier signal,
+    // so the bar asks for this then (see FloatingBar.RebuildCore) and the row goes at once.
+    //
+    // IsWindow per known window: microseconds for a hundred windows, so it is cheap enough to ask on every
+    // rebuild that shows an unplaced window. OnDisappeared is safe to run twice for one window, so a close
+    // event that does arrive later changes nothing.
+    public void DropDeadWindows()
+    {
+        var dead = knownWindows.Values.Where(w => !monitor.IsAlive(w.Handle)).ToList();
+        dead.ForEach(OnDisappeared);
+        if (dead.Count > 0)
+            trace?.Invoke($"dead windows dropped early: [{string.Join(", ", dead.Select(w => $"{w.Handle.Value:X}/{w.ProcessName}"))}]");
+    }
+
     public void RepairWindowList()
     {
         var adopted = monitor.Snapshot()

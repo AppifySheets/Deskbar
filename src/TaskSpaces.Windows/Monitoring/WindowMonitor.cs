@@ -246,6 +246,9 @@ public sealed class WindowMonitor : IWindowMonitor, IDisposable
                 // be queried at this point.
                 case EVENT_OBJECT_DESTROY when known.Remove(hwnd, out var gone):
                     hidden.Remove(hwnd);
+                    // Traced so a close that DID arrive can be told from one that never did: a lingering row
+                    // with no "destroy" line before it was a dropped event, one with the line was something else.
+                    trace?.Invoke($"destroy {hwnd:X} ({gone.ProcessName})");
                     events.OnNext(new WindowEvent(WindowEventKind.Disappeared, gone));
                     break;
 
