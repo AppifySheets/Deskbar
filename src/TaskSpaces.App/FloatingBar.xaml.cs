@@ -1736,12 +1736,6 @@ public partial class FloatingBar : Window
                 var isAnchor = group?.AnchorWorkspaceId == g.Workspace.Id;
                 var nested = group is not null && !isAnchor;
 
-                // The spine answers "this row is under the row above it", which is only a question an
-                // ANCHORED group raises. In an anchorless one there is no parent row to be under, and
-                // the box's bracket already says the rows belong together (#91), so a spine on every
-                // member would be the same claim twice down the same edge.
-                var spine = nested && group!.IsAnchored ? LaneAccent(colour, colourSlot) : null;
-
                 // The name, plainly. The ↳ prefix that was here first is gone: Petre asked for "a
                 // better representation that it's a child", and a glyph inside a label that already
                 // sits in a narrow gutter is the weakest place to put it. The spine, the shared
@@ -1757,17 +1751,20 @@ public partial class FloatingBar : Window
                     // An expanded row keeps a window that has left it as a faded line while the hold lasts
                     // (see HeldLines); an icon row shows its windows as they are.
                     Expanded(g.Workspace.Id) ? HeldLines(g.Workspace.Id, g.Running) : g.Running,
-                    // Every member wears the GROUP's lane colour rather than its own. Colour is what
-                    // groups things on this bar, so giving a member a colour of its own would be the
-                    // surface saying "unrelated" while the layout says "belongs to". Inside a box the
-                    // box wears it for all of them.
-                    tint: boxed ? null : LaneTint(colour, colourSlot >= 0 ? colourSlot : ownSlot),
+                    // ACCENT RAIL style ("try b"): only the workspace you are ON is tinted; every other row
+                    // sits on the bar's own dark background, and its colour is the rail down its left edge.
+                    // That keeps a bar of fifteen rows calm, and makes the current one the only coloured
+                    // block on it. Every member still wears the GROUP's colour rather than its own, since
+                    // colour is what groups things here.
+                    tint: g.IsCurrent ? LaneTint(colour, colourSlot >= 0 ? colourSlot : ownSlot) : null,
                     rowKey: g.Workspace.Id,
                     minimized: g.Workspace.Minimized,
                     nested: nested,
-                    // An EXPANDED row (see `expanded` in RebuildCore) wears the bright spine that makes the
-                    // titled list stand out, in place of any group spine: being the list is the louder fact.
-                    spine: Expanded(g.Workspace.Id) ? ListSpine(colour, colourSlot >= 0 ? colourSlot : ownSlot) : spine,
+                    // The rail: bright on the current workspace (and on an expanded row, which is the titled
+                    // list and the louder fact), the plain accent everywhere else.
+                    spine: g.IsCurrent || Expanded(g.Workspace.Id)
+                        ? ListSpine(colour, colourSlot >= 0 ? colourSlot : ownSlot)
+                        : LaneAccent(colour, colourSlot >= 0 ? colourSlot : ownSlot),
                     titledList: Expanded(g.Workspace.Id));
             }
 
@@ -2590,13 +2587,14 @@ public partial class FloatingBar : Window
         header.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         header.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
 
-        // In the right-hand gutter with the workspace names, so the group reads as belonging to the
-        // same column of labels rather than as a banner across the bar.
+        // At the LEFT and in capitals with the accent rail style ("try b"), as in the mockup: the group's line
+        // runs down the left edge, so its name heads that line, and capitals tell a group's name from a
+        // workspace's at a glance now that there is no box around the members to do it.
         var label = new TextBlock
         {
-            Text = group.Name,
-            FontSize = GroupHeaderFontSize,
-            FontWeight = FontWeights.SemiBold,
+            Text = group.Name.ToUpperInvariant(),
+            FontSize = GroupHeaderFontSize - 0.5,
+            FontWeight = FontWeights.Bold,
             Foreground = GroupHeaderForeground,
             // The font's line box is taller than its letters, and on a caption this small that
             // difference is most of the height. Clamped to the glyphs, which is why the caption ends
@@ -2604,10 +2602,10 @@ public partial class FloatingBar : Window
             LineHeight = GroupHeaderFontSize + 1,
             LineStackingStrategy = LineStackingStrategy.BlockLineHeight,
             VerticalAlignment = VerticalAlignment.Center,
-            HorizontalAlignment = HorizontalAlignment.Right,
-            Margin = new Thickness(4, 1, 4, 0),
+            HorizontalAlignment = HorizontalAlignment.Left,
+            Margin = new Thickness(4, 2, 4, 0),
         };
-        Grid.SetColumn(label, 1);
+        Grid.SetColumn(label, 0);
         header.Children.Add(label);
 
         // #84: "where Ungroup lives when the group has no workspace row of its own -- presumably the
@@ -2666,20 +2664,25 @@ public partial class FloatingBar : Window
     //
     // Petre: the members "don't read as its children... they look like ordinary neighbouring rows
     // that happen to sit under a label."
+    //
+    // With the ACCENT RAIL style ("try b") the box is gone: each member's own rail already carries the
+    // group's colour, so a box around them would be a third coat of the same claim. What says "these belong
+    // together" is a thin line in the group's colour down the left, tying the rails into a tree, and the
+    // members indented a little beside it. `lane` is no longer painted behind them; only the current row is
+    // tinted now.
     static UIElement FamilyBox(IReadOnlyList<UIElement> rows, Brush? outline, Brush? lane)
     {
+        _ = lane;
         var stack = new StackPanel();
         rows.ToList().ForEach(row => stack.Children.Add(row));
         return new Border
         {
             Child = stack,
-            Background = lane ?? Brushes.Transparent,
+            Background = Brushes.Transparent,
             BorderBrush = outline ?? Brushes.Transparent,
-            BorderThickness = new Thickness(GroupBracketWidth, 1, 1, 1),
-            CornerRadius = new CornerRadius(6),
-            Opacity = 0.999, // forces its own layer, so the 1px border cannot be swallowed by the row backgrounds beneath it
-            Padding = new Thickness(1),
-            Margin = new Thickness(0, 1, 0, 1),
+            BorderThickness = new Thickness(1, 0, 0, 0),
+            Padding = new Thickness(3, 0, 0, 0),
+            Margin = new Thickness(3, 1, 0, 1),
         };
     }
 
@@ -2691,14 +2694,14 @@ public partial class FloatingBar : Window
     // Task 11 fix round 5: a 1px, ~20%-opacity hairline between rows so adjacent
     // workspace groups read as visually distinct at a glance, without adding real
     // borders/backgrounds that would compete with the icons themselves.
+    //
+    // Accent rail style ("try b"): no hairline any more, just a little space. Each row's rail ends a pixel
+    // or two short of the row's edges, so the rails stacked down the bar already show where one row stops
+    // and the next begins; a line across the bar on top of that would be the bar's loudest element.
     static UIElement Separator() => new Border
     {
-        Height = 1,
-        // 3 -> 2 per side, so the gap between rows goes 6px to 4px. The hairline still has to
-        // read as a divider at a glance, which is why this is tightened rather than removed.
-        Margin = new Thickness(0, 2, 0, 2),
-        Background = Brushes.White,
-        Opacity = 0.2,
+        Height = 2,
+        Background = Brushes.Transparent,
     };
 
     // groupLabel is the group's full human name ("Pinned", "GEPHA", "Main") -- used in the
@@ -2744,9 +2747,11 @@ public partial class FloatingBar : Window
     // hit. A fifth off is visible without turning the bar's one pin gesture into a game of darts.
     const double PinnedRowScale = 0.8;
 
-    // The spine down the left of a nested row, in its parent's colour. Two pixels: a hairline
-    // reads as an artefact and anything wider starts competing with the icons.
-    const double SpineWidth = 2;
+    // The spine down the left of a row. It began as a nested row's mark, two pixels in its parent's colour;
+    // with the ACCENT RAIL style (Petre picked "B" from the design mockups: "try b") every workspace row
+    // wears one, in its own colour, as the row's colour now that the row itself is no longer tinted. Three
+    // pixels, as in the mockup: it has to carry the colour on its own.
+    const double SpineWidth = 3;
 
     // Petre: "maybe a little indented", then, on seeing it against the row above: "gap before the
     // beginning of the left edge and the browser icon."
@@ -2804,6 +2809,13 @@ public partial class FloatingBar : Window
                 .OrderBy(r => r.MonitorRank.GetValueOrDefault(int.MaxValue))
                 .ToList()
             : own;
+
+        // A workspace with NO windows shrinks to its name line (accent rail style, "try b"): an empty row of
+        // icon lines is a full row of nothing, and Petre's bar has several, which is a good part of why it is
+        // nearly as tall as the screen. The name carries a dim "· empty" and is still the whole row's click
+        // and drop target. Not the pinned row (it holds the bar's buttons and is the pin drop target), and
+        // not a row with a caption of its own.
+        var emptyRow = ordered.Count == 0 && !pinned && captionContent is null;
 
         // Petre: "do you think it would make more sense if the captions for the spaces were on
         // the right and icons started from the left edge?"
@@ -2926,7 +2938,7 @@ public partial class FloatingBar : Window
         // either, which changes nothing -- RowLabel already returns null for a row with no
         // destination, and the pinned row has never had one.
         var (label, setHover) = captionContent is null
-            ? RowLabel(visualLabel, isCurrent, switchTo, caption: true)
+            ? RowLabel(visualLabel, isCurrent, switchTo, caption: true, currentColour: spine, empty: emptyRow)
             : (captionContent, (Action<bool>?)null);
 
         // Collected as they are built, because the hover wiring below needs the BUTTONS and
@@ -3051,7 +3063,7 @@ public partial class FloatingBar : Window
         // wrapped lines.
         drawnLines.Select((line, at) => (line, last: at == drawnLines.Count - 1)).ToList()
             .ForEach(x => icons.Children.Add(LineOf(x.line, showMonitorMarkers ? opensLine : [], groupLabel, groupKey, rowKey, iconButtons, washes, slots, x.last,
-                scale, nested || titled ? NestedIndent : 0, titled)));
+                scale, spine is not null ? NestedIndent : 0, titled)));
 
         // The parent's windows USED to be drawn here, dimmed, on every nested row -- the issue
         // asked for "everything from the main workspace pinned to the nested ones". Petre, seeing
@@ -3062,9 +3074,9 @@ public partial class FloatingBar : Window
         // what you aim at, so doubling them halves the value of every one. Belonging is a
         // relationship, and a relationship is better drawn once at the edge of the row than
         // restated by copying its contents.
-        // Below the caption line.
+        // Below the caption line. Not drawn at all for an empty row, which is its name line alone.
         Grid.SetRow(icons, 1);
-        container.Children.Add(icons);
+        if (!emptyRow) container.Children.Add(icons);
 
         // Petre: "only children but with a better representation that it's a child", then "maybe a
         // little indented".
@@ -3082,7 +3094,9 @@ public partial class FloatingBar : Window
         // inside the indent the icons and the caption both give up -- so it lands in space that would
         // otherwise be empty, and costs the row nothing at all.
         // A titled list wears a spine too (its bright one, see ListSpine), with the same indent beside it.
-        if ((nested || titled) && spine is not null)
+        // And with the accent rail style every workspace row does: the spine IS the rail, so it is drawn
+        // whenever the row has one, nested or not.
+        if (spine is not null)
         {
             var mark = new Border
             {
@@ -3090,8 +3104,10 @@ public partial class FloatingBar : Window
                 Background = spine,
                 HorizontalAlignment = HorizontalAlignment.Left,
                 VerticalAlignment = VerticalAlignment.Stretch,
-                Margin = new Thickness(1, 1, 0, 1),
-                CornerRadius = new CornerRadius(1),
+                // Inset a little top and bottom and rounded, as in the mockup, so stacked rows read as a
+                // column of separate rails rather than one stripe.
+                Margin = new Thickness(1, 2, 0, 2),
+                CornerRadius = new CornerRadius(1.5),
             };
             Grid.SetRowSpan(mark, container.RowDefinitions.Count);
             container.Children.Add(mark);
@@ -3105,7 +3121,7 @@ public partial class FloatingBar : Window
         if (label is FrameworkElement caption)
         {
             if (captionContent is not null) caption.HorizontalAlignment = HorizontalAlignment.Right;
-            else if (nested || titled) caption.Margin = new Thickness(caption.Margin.Left + NestedIndent, caption.Margin.Top, caption.Margin.Right, caption.Margin.Bottom);
+            else if (spine is not null) caption.Margin = new Thickness(caption.Margin.Left + NestedIndent, caption.Margin.Top, caption.Margin.Right, caption.Margin.Bottom);
         }
         Grid.SetRow(label, 0);
         container.Children.Add(label);
@@ -3137,7 +3153,10 @@ public partial class FloatingBar : Window
         };
         Grid.SetRowSpan(ring, container.RowDefinitions.Count);
         container.Children.Add(ring);
-        PaintRing(ring, isCurrent ? CurrentRowRing : Brushes.Transparent, SolidRing);
+        // No white ring on the current row with the accent rail style: its tint, its bright rail and its
+        // coloured name already say "you are here", and a ring on top would be the same claim a third time.
+        // The ring itself stays on every row, for the amber "you would land here" and the history trail.
+        PaintRing(ring, Brushes.Transparent, SolidRing);
 
         // Hover freeze: hold this row's icon order while the pointer is inside it. Wired for
         // EVERY row, including the ones that can never re-sort (📌 Pinned and Unplaced have no
@@ -3648,10 +3667,13 @@ public partial class FloatingBar : Window
         //
         // Each row is painted with a STROKE and a PATTERN now, not just a brush: everything about
         // where you are or are going is a solid ring, and only the trail behind you is broken up.
+        //
+        // The CURRENT row wears no ring any more (accent rail style, "try b"): its tint, bright rail and
+        // coloured name say it. The trail behind it keeps its dashed and dotted rings.
         var hovered = candidate is null ? hoveredRow?.RowKey : null;
         rowRings.ToList().ForEach(row => PaintRing(row.Value,
             row.Key == candidate || row.Key == hovered ? CandidateRowRing
-            : row.Key == currentRow ? CurrentRowRing
+            : row.Key == currentRow ? Brushes.Transparent
             : HistoryRing(row.Key) is not null ? CurrentRowRing
             : Brushes.Transparent,
             row.Key == currentRow || row.Key == candidate || row.Key == hovered
@@ -4331,7 +4353,11 @@ public partial class FloatingBar : Window
     // line box clamped to the glyphs, which is what #91 established for the group header and is where most
     // of the height of small text otherwise goes. Same colours, so "this is the row you are on" still reads
     // the same way, and the same click target.
-    (UIElement Element, Action<bool>? SetHover) RowLabel(string text, bool isCurrent, Func<Result>? switchTo, bool caption = false)
+    // `currentColour`: the colour a CURRENT row's name is drawn in (accent rail style: its own bright colour
+    // rather than white). `empty`: the workspace has no windows, so its name carries a dim "· empty" and
+    // stands for the whole row (see GroupRow).
+    (UIElement Element, Action<bool>? SetHover) RowLabel(string text, bool isCurrent, Func<Result>? switchTo, bool caption = false,
+        Brush? currentColour = null, bool empty = false)
     {
         // Petre: "when switching workspaces, because the caption of the workspace gets bolded,
         // it increases the width of the floating window a little if that workspace is full,
@@ -4346,7 +4372,7 @@ public partial class FloatingBar : Window
         //
         // Bold for EVERY row rather than regular for every row: the bar is small, translucent
         // and read at a glance, and the labels were already the hardest thing on it to read.
-        var resting = isCurrent ? CurrentRowForeground : RestingRowForeground;
+        var resting = isCurrent ? currentColour ?? CurrentRowForeground : RestingRowForeground;
         var textBlock = new TextBlock
         {
             Text = text,
@@ -4385,9 +4411,28 @@ public partial class FloatingBar : Window
         // This Border survives as pure spacing, with no brush of its own: it carries the label's
         // padding and margin, which the ring used to justify. Collapsing it into the TextBlock
         // would work and is not worth the churn.
+        // An empty workspace's dim "· empty" sits BESIDE the name in a text of its own, not inside it: the
+        // name's Text stays exactly the name, which is what screen readers and everything that finds a row
+        // by its name read. (Built as inlines first, which left Text empty for every caption: WPF does not
+        // fill Text from inlines.)
+        UIElement content = textBlock;
+        if (empty)
+        {
+            var line = new StackPanel { Orientation = Orientation.Horizontal };
+            line.Children.Add(textBlock);
+            line.Children.Add(new TextBlock
+            {
+                Text = " · empty",
+                FontSize = textBlock.FontSize,
+                Foreground = EmptyMarkForeground,
+                VerticalAlignment = VerticalAlignment.Center,
+            });
+            content = line;
+        }
+
         var pill = new Border
         {
-            Child = textBlock,
+            Child = content,
             // Petre: "white space between the right monitor tab and the caption of the workspace
             // is too big", "narrow that whitespace", then "better, make is yet smaller".
             //
@@ -4475,7 +4520,12 @@ public partial class FloatingBar : Window
     // anything is. Alpha rather than grey values so the labels sit on the bar's translucency the
     // same way the rest of its chrome does.
     static readonly Brush CurrentRowForeground = Frozen(0xF2, 0xFF, 0xFF, 0xFF);
-    static readonly Brush RestingRowForeground = Frozen(0x80, 0xFF, 0xFF, 0xFF);
+    // 66% white, up from 50% with the accent rail style: an untinted row's name sits straight on the bar's
+    // dark background, and at half strength it read as disabled.
+    static readonly Brush RestingRowForeground = Frozen(0xA8, 0xFF, 0xFF, 0xFF);
+
+    // The "· empty" after an empty workspace's name: present, and quiet.
+    static readonly Brush EmptyMarkForeground = Frozen(0x48, 0xFF, 0xFF, 0xFF);
 
     // Petre: "current white border is quite unnoticeable."
     //

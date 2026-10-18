@@ -31,17 +31,21 @@ public class FloatingBarLaneShadeTests(ITestOutputHelper output)
     // About the line FLOOR as much as anything: a line holding nothing is still one icon line tall, so an
     // empty screen's half (a drop target, #102) is shaded exactly as fully as one with windows in it.
     [Fact]
-    public void A_row_with_no_windows_is_shaded_like_a_row_with_icons() => StaThread.Run(() =>
+    //
+    // That was true until the accent rail style ("try b"), which shrinks a workspace with no windows to its
+    // name line: it draws no icon lines, so it has no halves to shade, and it is shorter than a row with
+    // icons. The busy row's shade is unchanged.
+    public void A_row_with_no_windows_shrinks_to_its_name_line() => StaThread.Run(() =>
     {
         using var bar = TwoScreens(busyIcons: 2);
 
         var lanes = bar.Shades().Where(s => s.Row is not "Pinned" && !s.IsFade).ToList();
         lanes.ForEach(s => output.WriteLine(s.ToString()));
 
-        // Two rows, one line each, and only the second screen's half shaded in each.
-        Assert.Equal(2, lanes.Count);
-        Assert.Single(lanes.Select(s => Math.Round(s.Height, 1)).Distinct());
-        Assert.Single(lanes.Select(s => Math.Round(s.X, 1)).Distinct());
+        // Only the busy row has lines, so only it is shaded.
+        Assert.Equal("Busy", Assert.Single(lanes).Row);
+        Assert.True(bar.RowContainer("Empty").ActualHeight < bar.RowContainer("Busy").ActualHeight / 2,
+            $"empty row {bar.RowContainer("Empty").ActualHeight:0.#} vs busy {bar.RowContainer("Busy").ActualHeight:0.#}");
     });
 
     // It is the SECOND screen that is shaded, and its shade starts where the gap's soft edge ends, so the

@@ -38,12 +38,14 @@ public class RowRingPixelTests(ITestOutputHelper output)
         // Visible at all, which is the whole report. A tenth of the row's width in ink is the floor for
         // "you can see this from where Petre sits": the dotted ring at 2px dots and 4px gaps measures
         // about a third, so the floor is not tight, it just refuses nothing.
-        Assert.True(current > 0.5, $"the current row's solid ring measured {current:0.###} of its width");
+        //
+        // The CURRENT row is not measured for a ring any more: with the accent rail style ("try b") it
+        // wears none (its tint, bright rail and coloured name say it). The trail behind it still does.
+        _ = current;
         Assert.True(previous > 0.1, $"the previous row's dashed ring measured {previous:0.###}");
         Assert.True(earlier > 0.1, $"the earlier row's dotted ring measured {earlier:0.###}");
 
-        // ...and still told apart, in the order Petre asked for: solid, then dashed, then dotted.
-        Assert.True(current > previous, $"solid {current:0.###} should out-ink dashed {previous:0.###}");
+        // ...and still told apart, in the order Petre asked for: dashed, then dotted.
         Assert.True(previous > earlier, $"dashed {previous:0.###} should out-ink dotted {earlier:0.###}");
 
         // A row outside the trail wears nothing, so the marks keep meaning something.

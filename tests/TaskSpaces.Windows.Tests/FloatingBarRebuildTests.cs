@@ -376,9 +376,11 @@ public class FloatingBarRebuildTests
         row.RaiseEvent(MouseLeave());
 
         Assert.True(hovered > resting, $"hover should brighten the label; was {resting}, hovered {hovered}");
-        // Rises to exactly the strength the CURRENT row is drawn at, and no further: the two
-        // values are shared through one brush precisely so hover cannot drift past "current".
-        Assert.Equal(Strength(TextBlocks(RowFor(bar.Rows, "GEPHA")).Single(t => t.Text == "GEPHA")), hovered);
+        // Never past the strength the CURRENT row is drawn at, so hover cannot outshine "current". With the
+        // accent rail style the current name is in its own bright colour at full strength, a touch above
+        // the hover white, so this is at most rather than exactly.
+        Assert.True(hovered <= Strength(TextBlocks(RowFor(bar.Rows, "GEPHA")).Single(t => t.Text == "GEPHA")),
+            $"hover {hovered} should not outshine the current row");
         Assert.Equal(resting, Strength(label)); // restored, not left stuck bright
         // Weight never moves -- and now it never moves for ANY reason, not just hover. Petre:
         // "let's make all text bold and only change its color if it's active", because a bold
@@ -477,8 +479,9 @@ public class FloatingBarRebuildTests
         var caption = TextBlocks(row).Single(t => t.Text == "Sparrow");
         var left = caption.TransformToAncestor(row).Transform(new Point(0, 0)).X;
 
-        // A few DIP of padding at most: nowhere near where a centred name would start.
-        Assert.True(left < 6, $"caption starts {left:0.##} DIP into a {row.ActualWidth:0.##} DIP row");
+        // A few DIP of padding, plus the colour rail's width (accent rail style): nowhere near where a centred
+        // name would start, which measured 85 DIP into this row.
+        Assert.True(left < 12, $"caption starts {left:0.##} DIP into a {row.ActualWidth:0.##} DIP row");
     });
 
     // The current-row state lives entirely in brush ALPHA now, so "brighter" is a number these

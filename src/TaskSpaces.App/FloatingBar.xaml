@@ -28,7 +28,10 @@
          layout tighter at any scale. Not taken to zero, because the bar's bare background is
          what you grab to drag it, and at 0 the only draggable surface left would be the gaps
          between rows. -->
-    <Border x:Name="Root" CornerRadius="8" Background="#99202020" Padding="4">
+    <!-- Darker and more opaque with the accent rail style (Petre: "try b"): the rows are no longer tinted,
+         so the bar's own background is what they sit on, and at 60% the desktop behind showed through
+         enough to muddy the rails. -->
+    <Border x:Name="Root" CornerRadius="8" Background="#E6141518" Padding="4">
         <!-- No "Hide floating bar" menu any more. Petre: "show floating bar doesn't make
              sense anymore, it's crucial for the app's design." Once the switcher panel and the
              Windows tab were gone this bar became the only surface that lists windows and
