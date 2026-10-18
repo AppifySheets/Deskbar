@@ -5782,14 +5782,43 @@ public partial class FloatingBar : Window
         Root.ContextMenuOpening += (_, _) => FillBarMenu(menu);
     }
 
+    // Petre, with this menu open: "include all non-workspace specific options here as well". So besides New
+    // workspace and the bar's own items, it carries the one app-wide item from the workspace menu (where the
+    // titled list goes) and the tray's: Manage, Check for updates, a pending update, Exit. The tray's actions
+    // come from the composition root (AppActions), the same ones the tray calls, so the two menus cannot drift.
     internal void FillBarMenu(ContextMenu menu)
     {
         menu.Items.Clear();
-        var add = new MenuItem { Header = "New workspace…", Icon = MenuGlyph("✚") };
-        add.Click += (_, _) => InsertAt(manager.State.Workspaces.Count, null);
-        menu.Items.Add(add);
+        void Add(string glyph, string header, Action click)
+        {
+            var item = new MenuItem { Header = header, Icon = MenuGlyph(glyph) };
+            item.Click += (_, _) => click();
+            menu.Items.Add(item);
+        }
+
+        Add("✚", "New workspace…", () => InsertAt(manager.State.Workspaces.Count, null));
+
+        menu.Items.Add(new Separator());
+        var expanding = manager.State.ExpandCurrentWorkspace;
+        Add("☰", expanding ? "Window list at the bottom of the bar" : "Expand the current workspace",
+            () => Report(manager.SetExpandCurrentWorkspace(!expanding)));
+
         AddBarItems(menu);
+
+        if (AppActions is not { } app) return;
+        menu.Items.Add(new Separator());
+        if (app.PendingUpdate() is { } update) Add("⬇", update.Label, update.Open);
+        Add("⚙", "Manage…", app.OpenManage);
+        Add("↻", "Check for updates…", app.CheckForUpdates);
+        menu.Items.Add(new Separator());
+        Add("⏻", "Exit", app.Exit);
     }
+
+    // The tray's app-wide commands, for the bar's background menu. Null in the tests, which then get the bar's
+    // own items only.
+    public sealed record AppCommands(Action OpenManage, Action CheckForUpdates, Action Exit, Func<(string Label, Action Open)?> PendingUpdate);
+
+    public AppCommands? AppActions { get; init; }
 
     void AddBarItems(ContextMenu menu)
     {

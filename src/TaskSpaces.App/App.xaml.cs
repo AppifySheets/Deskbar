@@ -899,6 +899,8 @@ public partial class App : Application
                 Pins = new Windows.Shell.ShellTaskbarPins(),
                 Tabs = new BrowserTabs(),
                 Sound = new Windows.Audio.AudioActivity(ClickTrace.Write),
+                // The tray's own commands, for the bar's background menu, so both menus run the same code.
+                AppActions = new FloatingBar.AppCommands(OpenManage, CheckForUpdateNow, ExitApp, () => pendingUpdate),
             };
             // The bar's hwnd is created HERE, before it is ever shown, for two reasons that
             // both hang off the same handle:

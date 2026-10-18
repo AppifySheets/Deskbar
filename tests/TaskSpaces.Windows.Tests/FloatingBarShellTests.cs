@@ -211,7 +211,37 @@ public class FloatingBarShellTests(ITestOutputHelper output)
         var headers = root.ContextMenu.Items.OfType<MenuItem>().Select(i => (string)i.Header).ToList();
         output.WriteLine(string.Join(" | ", headers));
 
-        Assert.Equal(["New workspace…", "Dock to screen edge", "Minimize bar"], headers);
+        Assert.Equal(["New workspace…", "Expand the current workspace", "Dock to screen edge", "Minimize bar"], headers);
+        bar.Close();
+    });
+
+    // Petre: "include all non-workspace specific options here as well". With the app's commands supplied, the
+    // tray's items follow the bar's own, and each runs the action it was given.
+    [Fact]
+    public void The_background_menu_carries_the_app_wide_commands() => StaThread.Run(() =>
+    {
+        var ran = new List<string>();
+        var desktops = new PulsingDesktops { CurrentId = Guid.NewGuid() };
+        desktops.Desktops.Add(new DesktopInfo(desktops.CurrentId, "Work"));
+        var manager = new WorkspaceManager(desktops, new StubMonitor(), new StubTitles(), new StubStore());
+        Assert.True(manager.Start().IsSuccess);
+        var bar = new FloatingBar(manager)
+        {
+            Left = -32000, Top = -32000, SendShellKeys = _ => { },
+            AppActions = new FloatingBar.AppCommands(() => ran.Add("manage"), () => ran.Add("updates"), () => ran.Add("exit"), () => null),
+        };
+        bar.ShowBar();
+        var menu = ((Border)bar.FindName("Root")!).ContextMenu!;
+
+        bar.FillBarMenu(menu);
+        var items = menu.Items.OfType<MenuItem>().ToList();
+        output.WriteLine(string.Join(" | ", items.Select(i => (string)i.Header)));
+        Assert.Equal(["New workspace…", "Expand the current workspace", "Dock to screen edge", "Minimize bar", "Manage…", "Check for updates…", "Exit"],
+            items.Select(i => (string)i.Header));
+
+        items.Single(i => (string)i.Header == "Manage…").RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
+        items.Single(i => (string)i.Header == "Check for updates…").RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
+        Assert.Equal(["manage", "updates"], ran);
         bar.Close();
     });
 
