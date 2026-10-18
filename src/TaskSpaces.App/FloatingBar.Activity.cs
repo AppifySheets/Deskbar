@@ -12,7 +12,9 @@ namespace TaskSpaces.App;
 // TWO MARKS ON WINDOW ICONS, both "c" from three mockups.
 //
 //   tabs    Petre: "let's include tab counts in browsers in their icons". A browser window with two or more tabs
-//           has cards stacked behind its icon and the count small at its top. Counts come from BrowserTabs.
+//           has the count small at its top. Counts come from BrowserTabs. The mockup also stacked two card
+//           outlines behind the icon; on the bar they were "tab counts are good; but i don't want those rings",
+//           "just not browser square rings", so the count stands alone.
 //   sound   Petre: "if any window is playing sound, show it on it so i can quickly see what's the source of
 //           sound". A soft green ring pulses round the icon of every window making sound, and round its pin.
 //
@@ -20,8 +22,6 @@ namespace TaskSpaces.App;
 // readings, once per rebuild and before any icon is built.
 public partial class FloatingBar
 {
-    static readonly Brush TabCardEdge = Frozen(0x73, 0xFF, 0xFF, 0xFF);
-    static readonly Brush TabCardEdgeFar = Frozen(0x40, 0xFF, 0xFF, 0xFF);
     static readonly Brush TabCountInk = Frozen(0xE6, 0xFF, 0xFF, 0xFF);
     static readonly Brush SoundRing = Frozen(0xFF, 0x6E, 0xE7, 0xA6);
 
@@ -91,8 +91,8 @@ public partial class FloatingBar
             .Select(w => w.Handle)
             .ToHashSet();
 
-    // The two marks around an icon that WithState has already dressed. Cards BEHIND the artwork, the count and
-    // the ring on top, none of them hit-testable, all overlaying the 24 DIP cell so a row measures as before.
+    // The two marks around an icon that WithState has already dressed: the count and the ring on top, neither
+    // hit-testable, both overlaying the 24 DIP cell so a row measures as before.
     UIElement WithActivity(UIElement icon, WindowRow row)
     {
         var count = tabs?.Of(row.Window.Handle)?.Count ?? 0;
@@ -100,12 +100,6 @@ public partial class FloatingBar
         if (count < 2 && !loud) return icon;
 
         var cell = new Grid();
-        if (count >= 2)
-        {
-            // Two cards, the far one fainter, peeking up and to the right of the icon like pages behind it.
-            cell.Children.Add(TabCard(4, TabCardEdgeFar));
-            cell.Children.Add(TabCard(2, TabCardEdge));
-        }
         cell.Children.Add(icon);
         if (count >= 2)
             cell.Children.Add(new TextBlock
@@ -122,17 +116,6 @@ public partial class FloatingBar
         if (loud) cell.Children.Add(Ring(24));
         return cell;
     }
-
-    static Border TabCard(double offset, Brush edge) => new()
-    {
-        Width = 20,
-        Height = 20,
-        CornerRadius = new CornerRadius(4),
-        BorderBrush = edge,
-        BorderThickness = new Thickness(1),
-        IsHitTestVisible = false,
-        RenderTransform = new TranslateTransform(offset, -offset),
-    };
 
     // The sound ring: a circle round the icon whose opacity breathes. Still, at full strength, when Windows'
     // own animations are turned off, which is the setting a person who finds motion distracting has chosen.
