@@ -55,6 +55,30 @@ public sealed class JsonPersistenceStoreTests : IDisposable
         Assert.Equal(AppState.DefaultSwitcherShortcut, new JsonPersistenceStore(dir).Load().Value.SwitcherShortcut);
     }
 
+    // Petre: "make window list at the bottom of the bar non-default". Every file written before then holds an
+    // explicit "ExpandCurrentWorkspace": false, the bottom list, and must now load as the expanded row. That is
+    // why the setting was renamed rather than its default flipped (see AppState.WindowListAtBottom).
+    [Fact]
+    public void A_file_that_had_the_bottom_list_by_default_loads_with_the_row_expanded()
+    {
+        Directory.CreateDirectory(dir);
+        File.WriteAllText(Path.Combine(dir, "state.json"),
+            """{"Workspaces":[],"WorkspaceRules":[],"RenameRules":[],"Inventory":{},"ExpandCurrentWorkspace":false}""");
+
+        var loaded = new JsonPersistenceStore(dir).Load().Value;
+        Assert.False(loaded.WindowListAtBottom);
+        Assert.True(loaded.ExpandCurrentWorkspace);
+    }
+
+    // Choosing the bottom list is still remembered, under its new name.
+    [Fact]
+    public void The_bottom_list_roundtrips_when_chosen()
+    {
+        var store = new JsonPersistenceStore(dir);
+        Assert.True(store.Save(AppState.Empty with { WindowListAtBottom = true }).IsSuccess);
+        Assert.True(store.Load().Value.WindowListAtBottom);
+    }
+
     [Fact]
     public void Roundtrips_full_state()
     {

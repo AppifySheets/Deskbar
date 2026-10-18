@@ -3259,7 +3259,7 @@ public sealed class WorkspaceManager(
     public Result SetExpandCurrentWorkspace(bool expand) =>
         State.ExpandCurrentWorkspace == expand
             ? Result.Success()
-            : Result.Success().Tap(() => Persist(State with { ExpandCurrentWorkspace = expand }));
+            : Result.Success().Tap(() => Persist(State with { WindowListAtBottom = !expand }));
 
     // --- overview / switcher-facing operations -----------------------------------
 

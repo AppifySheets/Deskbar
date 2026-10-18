@@ -2042,7 +2042,7 @@ public partial class FloatingBar : Window
             //
             // Into its own panel below Rows (see the XAML), after a separator like the one between rows.
             //
-            // Only when rows do NOT expand (AppState.ExpandCurrentWorkspace off, the default). When they do,
+            // Only when rows do NOT expand (AppState.WindowListAtBottom, no longer the default). When they do,
             // the current workspace's own row is the list (see `expanded` above) and there is nothing to add
             // here. Petre has both to compare: "let's try both".
             var list = manager.State.ExpandCurrentWorkspace

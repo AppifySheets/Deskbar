@@ -1,4 +1,5 @@
 ﻿using TaskSpaces.Core.Domain;
+using System.Text.Json.Serialization;
 using TaskSpaces.Core.Rules;
 
 namespace TaskSpaces.Core.Persistence;
@@ -150,14 +151,25 @@ public sealed record AppState(
     // everything above it.
     public IReadOnlyList<string> IconOrder { get; init; } = [];
 
-    // Where the current workspace's titled list is: the workspace's OWN ROW expands into it (true), or it
-    // is a separate section at the bottom of the bar below every row (false, the default). Petre: "let's
-    // try both", then, of the first version of "true" (a section right under the row), "let's attempt
-    // expanding the current workspace, instead of adding a new bar below it", "but holding positions".
-    // Both kept so he can compare them on his own bar; the one he does not keep can go once he has. Either
-    // way the bar's top edge stays put (see FloatingBar.AnchorFromPosition), and an expanded row stays put
-    // while the pointer is over the bar. Same init-property/no-migration pattern.
-    public bool ExpandCurrentWorkspace { get; init; }
+    // Where the current workspace's titled list is: the workspace's OWN ROW expands into it (the default), or
+    // it is a separate section at the bottom of the bar below every row (this, when true). Petre: "let's try
+    // both", then, of the first version of the row (a section right under it), "let's attempt expanding the
+    // current workspace, instead of adding a new bar below it", "but holding positions". Either way the bar's
+    // top edge stays put (see FloatingBar.AnchorFromPosition), and an expanded row stays put while the pointer
+    // is over the bar.
+    //
+    // STORED THE OTHER WAY ROUND from how it started, and that is the migration. It was ExpandCurrentWorkspace,
+    // off by default, so the bottom list was what a new install showed, and on another of Petre's machines that
+    // read as the current workspace drawn twice. Then: "make window list at the bottom of the bar non-default".
+    // Flipping that bool's default would have changed nothing for existing installs, because every state.json
+    // already holds an explicit "ExpandCurrentWorkspace": false (the store writes every property). A NEW name
+    // with false as its default is read as false by every existing file, which has no such key, so every
+    // install lands on the expanded row; the old key is simply no longer read. The cost is that anyone who had
+    // chosen the bottom list gets the row once, and chooses again.
+    public bool WindowListAtBottom { get; init; }
+
+    // The reading every caller wants, kept under its old name so they did not all have to change. Not stored.
+    [JsonIgnore] public bool ExpandCurrentWorkspace => !WindowListAtBottom;
 
     // Petre: "i want it configurable" -- the Alt+Tab-style workspace switcher's chord.
     //
