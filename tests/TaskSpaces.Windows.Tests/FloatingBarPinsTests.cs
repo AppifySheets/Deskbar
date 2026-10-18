@@ -181,6 +181,17 @@ public class FloatingBarPinsTests
     public void An_installed_web_app_is_not_a_browser_pin() =>
         Assert.False(FloatingBar.IsBrowser(InstalledApp("YouTube Music", "music.youtube.com!App")));
 
+    // Docked across two screens the line between them is the bar's middle, so no pin may sit on it: an even
+    // number of columns. Petre: "icons at the bottom shouldn't be broken into halves". His ten become 6 + 4.
+    [Theory]
+    [InlineData(10, 184, 6)]
+    [InlineData(10, 120, 4)]
+    [InlineData(4, 184, 4)]
+    [InlineData(7, 184, 6)]
+    [InlineData(1, 184, 1)]
+    public void Across_the_seam_pins_take_an_even_number_of_columns(int count, double width, int columns) =>
+        Assert.Equal(columns, FloatingBar.PinColumns(count, width, evenColumns: true));
+
     // --- which windows are a pin's ------------------------------------------------------------------------
 
     static readonly IReadOnlySet<string> Claimed =

@@ -35,6 +35,7 @@ public partial class FloatingBar
     TextBlock? trackTitle;
     TextBlock? trackDetail;
     Button? previousButton;
+    Button? nowPlayingPlayer;
     Button? playPauseButton;
     Button? nextButton;
 
@@ -87,6 +88,8 @@ public partial class FloatingBar
             HorizontalContentAlignment = HorizontalAlignment.Stretch,
         };
         System.Windows.Automation.AutomationProperties.SetName(player, "Now playing");
+        nowPlayingPlayer = player;
+        NowPlayingLine.SizeChanged += (_, e) => { if (e.WidthChanged) FitNowPlayingToSeam(); };
         player.Click += (_, _) =>
         {
             MarkPressConsumed();
@@ -147,6 +150,15 @@ public partial class FloatingBar
         Offer(nextButton, now.CanNext);
 
         NowPlayingLine.Visibility = Visibility.Visible;
+    }
+
+    // Docked across two screens, the title stops at the line between them and the controls stay on the right
+    // half, so nothing on the line is split between the screens (see LayOutStrip).
+    void FitNowPlayingToSeam()
+    {
+        if (nowPlayingPlayer is null) return;
+        nowPlayingPlayer.MaxWidth = AcrossSeam && NowPlayingLine.ActualWidth > 0 ? NowPlayingLine.ActualWidth / 2 : double.PositiveInfinity;
+        nowPlayingPlayer.HorizontalAlignment = AcrossSeam ? HorizontalAlignment.Left : HorizontalAlignment.Stretch;
     }
 
     static void Offer(Button button, bool offered)

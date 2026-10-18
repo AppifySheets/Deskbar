@@ -1698,6 +1698,8 @@ public partial class FloatingBar : Window
     void RebuildCore(bool fresh = true)
     {
         MinimizeButton.Visibility = AcrossSeam ? Visibility.Collapsed : Visibility.Visible;
+        // The strip, the pins and the now-playing line keep everything off the seam while docked across it.
+        LayOutBottomForSeam();
         Rows.Children.Clear();
         CurrentList.Children.Clear(); // the titled list below the rows, rebuilt with them
         headerDropTargets.Clear();    // re-registered by every row as it is built (see GroupRow)

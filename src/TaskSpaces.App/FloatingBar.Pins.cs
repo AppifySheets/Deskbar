@@ -99,26 +99,34 @@ public partial class FloatingBar
             PinLine.Children.Add(button);
         });
         PinLine.Visibility = shownPins.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
-        ((UniformGrid)PinLine).Columns = PinColumns(shownPins.Count, PinLine.ActualWidth);
+        ((UniformGrid)PinLine).Columns = PinColumns(shownPins.Count, PinLine.ActualWidth, AcrossSeam);
         if (lastPinOverview is { } overview) PaintPins(overview);
     }
 
     // Columns for `count` pins in `width`: as few lines as fit at the minimum cell width, then the pins shared
     // EVENLY between those lines, so ten in a line that holds seven come out as two lines of five, not 7 + 3.
     // Before the first layout the width is unknown; the docked bar's own 196 DIP stands in until it is.
-    internal static int PinColumns(int count, double width)
+    //
+    // `evenColumns`: docked across two screens, the bar's middle is the line between them, and an odd number of
+    // columns puts the middle pin on it, half on each screen ("icons at the bottom shouldn't be broken into
+    // halves", "they should either stay or go to another monitor"). An even number puts the line between two
+    // pins: one more column if the cells still fit, one fewer otherwise. His ten at the seam become 6 + 4.
+    internal static int PinColumns(int count, double width, bool evenColumns = false)
     {
         if (count <= 0) return 1;
-        var perLine = Math.Max(1, (int)Math.Floor((width > 0 ? width : 196) / PinMinWidth));
+        var available = width > 0 ? width : 196;
+        var perLine = Math.Max(1, (int)Math.Floor(available / PinMinWidth));
         var lines = (int)Math.Ceiling(count / (double)perLine);
-        return (int)Math.Ceiling(count / (double)lines);
+        var columns = (int)Math.Ceiling(count / (double)lines);
+        if (!evenColumns || columns % 2 == 0 || count < 2) return columns;
+        return available / (columns + 1) >= PinMinWidth ? columns + 1 : Math.Max(2, columns - 1);
     }
 
     void WatchPinWidth() => PinLine.SizeChanged += (_, e) =>
     {
         // Only a WIDTH change can change the columns, and a column change only changes the height, so this
         // cannot feed itself.
-        if (e.WidthChanged) ((UniformGrid)PinLine).Columns = PinColumns(shownPins.Count, e.NewSize.Width);
+        if (e.WidthChanged) ((UniformGrid)PinLine).Columns = PinColumns(shownPins.Count, e.NewSize.Width, AcrossSeam);
     };
 
     (Button, Border, UIElement) PinButton(TaskbarPin pin)

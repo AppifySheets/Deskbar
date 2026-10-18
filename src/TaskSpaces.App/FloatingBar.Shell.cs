@@ -83,36 +83,64 @@ public partial class FloatingBar
         ShellStart.Children.Add(ShellButton(ShellFlyout.Start, "Start", StartGlyph()));
         ShellStart.Children.Add(ShellButton(ShellFlyout.Search, "Search", Glyph(SearchShape)));
 
-        // Left to right from the left edge: the tray chevron, quick settings, the volume dial
-        // (FloatingBar.Volume.cs), the bell.
-        new[]
-        {
-            ShellButton(ShellFlyout.Tray, "Show the tray icons", Glyph(ChevronShape)),
-            ShellButton(ShellFlyout.QuickSettings, "Quick settings: wifi, volume, battery", QuickSettingsGlyph(), width: double.NaN),
-            VolumeDial(),
-            ShellButton(ShellFlyout.Notifications, "Notifications", Glyph(BellShape)),
-        }.ToList().ForEach(b =>
-        {
-            DockPanel.SetDock(b, Dock.Left);
-            ShellStrip.Children.Add(b);
-        });
-
-        // From the right edge inwards, which is the order DockPanel takes right-docked children in: the show
-        // desktop sliver at the very edge (where Windows puts it), then the clock beside it.
-        var sliver = ShellButton(ShellFlyout.Desktop, "Show desktop",
+        // Built once and laid out by LayOutStrip, which decides which edge each one docks to.
+        stripTray = ShellButton(ShellFlyout.Tray, "Show the tray icons", Glyph(ChevronShape));
+        stripQuickSettings = ShellButton(ShellFlyout.QuickSettings, "Quick settings: wifi, volume, battery", QuickSettingsGlyph(), width: double.NaN);
+        stripVolume = VolumeDial();
+        stripBell = ShellButton(ShellFlyout.Notifications, "Notifications", Glyph(BellShape));
+        stripSliver = ShellButton(ShellFlyout.Desktop, "Show desktop",
             new Border { Width = 1, Height = 22, Background = SliverLine }, width: 7);
-        DockPanel.SetDock(sliver, Dock.Right);
-        ShellStrip.Children.Add(sliver);
-
         var clock = ShellButton(ShellFlyout.Notifications, "", ClockFace(), width: double.NaN);
         clock.Padding = new Thickness(4, 0, 4, 0);
-        DockPanel.SetDock(clock, Dock.Right);
-        ShellStrip.Children.Add(clock);
+        stripClock = clock;
+        LayOutStrip(acrossSeam: false);
 
         UpdateClock(clock);
         clockTimer.Tick += (_, _) => UpdateClock(clock);
         clockTimer.Start();
         Closed += (_, _) => clockTimer.Stop();
+    }
+
+    Button? stripTray, stripQuickSettings, stripVolume, stripBell, stripSliver, stripClock;
+    bool stripAcrossSeam;
+
+    // Which side each of the strip's buttons docks to. On one screen: the tray chevron, quick settings, the
+    // volume dial and the bell from the left, and from the right edge inwards (the order DockPanel takes
+    // right-docked children in) the show desktop sliver at the very edge, where Windows puts it, then the clock.
+    //
+    // Docked ACROSS two screens the bar's middle is the line between them, and the bell sat on it, half on each
+    // screen. Petre: "icons at the bottom shouldn't be broken into halves", "they should either stay or go to
+    // another monitor". So across the seam the bell joins the clock on the right half, and the left half keeps
+    // the chevron, quick settings and the dial, which fit inside it.
+    void LayOutStrip(bool acrossSeam)
+    {
+        stripAcrossSeam = acrossSeam;
+        ShellStrip.Children.Clear();
+        Button[] left = acrossSeam ? [stripTray!, stripQuickSettings!, stripVolume!] : [stripTray!, stripQuickSettings!, stripVolume!, stripBell!];
+        Button[] right = acrossSeam ? [stripSliver!, stripClock!, stripBell!] : [stripSliver!, stripClock!];
+        left.ToList().ForEach(b =>
+        {
+            DockPanel.SetDock(b, Dock.Left);
+            ShellStrip.Children.Add(b);
+        });
+        right.ToList().ForEach(b =>
+        {
+            DockPanel.SetDock(b, Dock.Right);
+            ShellStrip.Children.Add(b);
+        });
+    }
+
+    // Everything at the bottom of the bar that has to respect the seam (see LayOutStrip, PinColumns and the
+    // now-playing line), brought into line with the current docking. Called at the start of every rebuild,
+    // so it follows the bar onto the seam and off it.
+    void LayOutBottomForSeam()
+    {
+        if (stripAcrossSeam != AcrossSeam)
+        {
+            LayOutStrip(AcrossSeam);
+            ((System.Windows.Controls.Primitives.UniformGrid)PinLine).Columns = PinColumns(shownPins.Count, PinLine.ActualWidth, AcrossSeam);
+        }
+        FitNowPlayingToSeam();
     }
 
     // 14 over 12.5, after two rounds of Petre's "increase the size of fonts for this": 10 and 9 matched the
