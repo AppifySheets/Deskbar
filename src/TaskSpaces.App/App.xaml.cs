@@ -285,17 +285,35 @@ public partial class App : Application
     //
     // ONE question, not three. An earlier shape asked to download, then asked again whether to
     // restart; that is two dialogs for a decision the user already made by saying yes.
+    // The one update question on screen, so a newer version can take an older one's place (see UpdateOffer).
+    UpdateOffer? openOffer;
+
+    // A download is under way: no new question while the answer to the last one is still arriving.
+    bool updating;
+
     void OfferUpdate(ReleaseInfo release)
     {
+        if (updating)
+        {
+            ClickTrace.Write($"update {release.Version} found while another downloads, not asked");
+            return;
+        }
+
+        // Only the newest version is asked about. Petre: "when there are multiple new versions, app shows many
+        // popups with all the versions; let's close all previous versions when showing a new version".
+        if (openOffer is { IsLoaded: true } older)
+        {
+            ClickTrace.Write($"update offer replaced by {release.Version}");
+            older.Close();
+        }
+
         // A release with no exe attached can still be looked at, which is what the link is for.
         // Reached when a build was published without its artifact, or when the asset failed the
         // github.com/https checks in UpdateCheck.
         if (release.AssetName is null)
         {
-            if (MessageBox.Show(
-                    $"TaskSpaces {release.Version} is available, but this release has no downloadable executable.\n\nOpen the release page?",
-                    "TaskSpaces", MessageBoxButton.YesNo, MessageBoxImage.Information) == MessageBoxResult.Yes)
-                OpenReleasePage(release);
+            Ask($"TaskSpaces {release.Version} is available, but this release has no downloadable executable.",
+                "Open release page", () => OpenReleasePage(release));
             return;
         }
 
@@ -311,11 +329,15 @@ public partial class App : Application
         // the download lands beside it, which version is running: facts about how the update is
         // implemented, offered to somebody who is being asked one question. The progress window says what
         // happens next, which is the job it was added for, so this dialog only has to ask.
-        var answer = MessageBox.Show(
-            $"Update TaskSpaces to {release.Version}?",
-            "TaskSpaces", MessageBoxButton.YesNo, MessageBoxImage.Question);
+        Ask($"Update TaskSpaces to {release.Version}?", "Update", () => DownloadAndRestart(release));
+    }
 
-        if (answer == MessageBoxResult.Yes) DownloadAndRestart(release);
+    void Ask(string question, string accept, Action onAccept)
+    {
+        openOffer = new UpdateOffer(question, accept, onAccept);
+        openOffer.Closed += (sender, _) => { if (ReferenceEquals(openOffer, sender)) openOffer = null; };
+        openOffer.Show();
+        openOffer.Activate();
     }
 
     // Downloads, then starts the new exe and stands down.
@@ -334,6 +356,7 @@ public partial class App : Application
         // toast to and drops it. The announcement became a dialog for that reason; progress follows it.
         var progress = new UpdateProgress(release.Version);
         progress.Show();
+        updating = true;
 
         // Marshalled, because the copy loop reports from whichever thread the stream continuation lands
         // on, and these are WPF controls.
@@ -344,6 +367,7 @@ public partial class App : Application
 
         if (downloaded.IsFailure)
         {
+            updating = false;
             progress.Close();
             // Told, not swallowed: unlike the background check, the user asked for this and is
             // waiting on it. The page is the way through -- the commonest cause is a folder this

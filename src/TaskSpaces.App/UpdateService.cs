@@ -137,7 +137,7 @@ public static class UpdateService
                 // would hold all of it in memory before a byte reaches disk.
                 await using var source = await response.Content.ReadAsStreamAsync(cancel).ConfigureAwait(false);
                 await using var file = File.Create(partial);
-                await source.CopyToAsync(file, cancel).ConfigureAwait(false);
+                await CopyWithProgress(source, file, response.Content.Headers.ContentLength ?? 0, onProgress, cancel).ConfigureAwait(false);
             }
 
             // Overwrites a previous download of the same version -- someone who declined the
@@ -153,6 +153,29 @@ public static class UpdateService
             Cleanup(partial);
             return Result.Failure<string>(e.Message);
         }
+    }
+
+    // The copy, reporting as it goes. Petre: "show download progress, not just a random bar". The bar was
+    // indeterminate for the whole download because this used Stream.CopyToAsync, which reports nothing, so the
+    // progress callback the window was built around was never once called.
+    //
+    // Reported about ten times a second rather than on every 80 KB chunk, which for a 75 MB file would be a
+    // thousand dispatcher calls, and always once at the end so the bar reaches the full width.
+    internal static async Task CopyWithProgress(Stream source, Stream target, long total, Action<long, long>? onProgress, CancellationToken cancel)
+    {
+        var buffer = new byte[81920];
+        var copied = 0L;
+        var lastReport = Environment.TickCount64 - 1000;
+        int read;
+        while ((read = await source.ReadAsync(buffer, cancel).ConfigureAwait(false)) > 0)
+        {
+            await target.WriteAsync(buffer.AsMemory(0, read), cancel).ConfigureAwait(false);
+            copied += read;
+            if (Environment.TickCount64 - lastReport < 100) continue;
+            lastReport = Environment.TickCount64;
+            onProgress?.Invoke(copied, total);
+        }
+        onProgress?.Invoke(copied, total);
     }
 
     static void Cleanup(string path)
