@@ -132,20 +132,71 @@ public class FloatingBarVolumeTests(ITestOutputHelper output)
         bar.Close();
     });
 
-    [Fact]
-    public void A_click_mutes_and_a_second_unmutes() => StaThread.Run(() =>
+    sealed class FakeDevices : IAudioDevices
     {
-        var volume = new FakeVolume(0.4);
-        var bar = Bar(volume);
-        var dial = Dial(bar);
+        public List<AudioDevice> Devices { get; } =
+            [new("speakers", "Speakers", IsDefault: true), new("headset", "Headset", IsDefault: false)];
+        public List<string> MadeDefault { get; } = [];
+        public IReadOnlyList<AudioDevice> Outputs() => Devices;
+        public Result MakeDefault(AudioDevice device)
+        {
+            MadeDefault.Add(device.Id);
+            return Result.Success();
+        }
+    }
 
-        dial.RaiseEvent(new RoutedEventArgs(ButtonBase.ClickEvent));
-        Assert.True(volume.Now.Muted);
-        dial.RaiseEvent(new RoutedEventArgs(ButtonBase.ClickEvent));
-        Assert.False(volume.Now.Muted);
+    // Petre: "let's actually show it on the left click, instead of muting". The click's menu lists the playback
+    // devices with the default ticked, then mute.
+    [Fact]
+    public void The_click_menu_lists_the_devices_then_mute() => StaThread.Run(() =>
+    {
+        var devices = new FakeDevices();
+        var bar = BarWith(new FakeVolume(0.4), devices);
 
+        var items = bar.DeviceMenu().Items.OfType<MenuItem>().ToList();
+        Assert.Equal(["Speakers", "Headset", "Mute"], items.Select(i => (string)i.Header));
+        Assert.True(items[0].IsChecked);
+        Assert.False(items[1].IsChecked);
         bar.Close();
     });
+
+    [Fact]
+    public void Choosing_a_device_makes_it_the_default() => StaThread.Run(() =>
+    {
+        var devices = new FakeDevices();
+        var bar = BarWith(new FakeVolume(0.4), devices);
+
+        bar.DeviceMenu().Items.OfType<MenuItem>().Single(i => (string)i.Header == "Headset")
+            .RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
+        Assert.Equal(["headset"], devices.MadeDefault);
+        bar.Close();
+    });
+
+    // Mute is still one click into the menu, and says which way it goes.
+    [Fact]
+    public void Mute_from_the_menu_mutes_and_then_offers_unmute() => StaThread.Run(() =>
+    {
+        var volume = new FakeVolume(0.4);
+        var bar = BarWith(volume, new FakeDevices());
+
+        bar.DeviceMenu().Items.OfType<MenuItem>().Single(i => (string)i.Header == "Mute")
+            .RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
+        Assert.True(volume.Now.Muted);
+        Assert.Contains(bar.DeviceMenu().Items.OfType<MenuItem>(), i => (string)i.Header == "Unmute");
+        bar.Close();
+    });
+
+    static FloatingBar BarWith(IVolumeControl volume, IAudioDevices devices)
+    {
+        var desktops = new PulsingDesktops { CurrentId = Guid.NewGuid() };
+        desktops.Desktops.Add(new DesktopInfo(desktops.CurrentId, "Work"));
+        var manager = new WorkspaceManager(desktops, new StubMonitor(), new StubTitles(), new StubStore());
+        Assert.True(manager.Start().IsSuccess);
+        var bar = new FloatingBar(manager) { Left = -32000, Top = -32000, SendShellKeys = _ => { }, Volume = volume, AudioOutputs = devices };
+        bar.ShowBar();
+        bar.UpdateLayout();
+        return bar;
+    }
 
     // The percentage shows only while the pointer is on the dial; at rest the middle is the speaker.
     [Fact]

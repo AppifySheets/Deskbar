@@ -105,7 +105,7 @@ public partial class FloatingBar
             cell.Children.Add(new TextBlock
             {
                 Text = count > 99 ? "99+" : count.ToString(),
-                FontSize = 7.5,
+                FontSize = 8,
                 FontWeight = FontWeights.Bold,
                 Foreground = TabCountInk,
                 HorizontalAlignment = HorizontalAlignment.Right,

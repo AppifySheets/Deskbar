@@ -150,8 +150,8 @@ public partial class FloatingBar
     // culture is the same "Region" setting the taskbar reads, so the two can never disagree about it.
     UIElement ClockFace()
     {
-        clockTime = new TextBlock { FontSize = 14, Foreground = ClockForeground, TextAlignment = TextAlignment.Right };
-        clockDate = new TextBlock { FontSize = 12.5, Foreground = ClockForeground, TextAlignment = TextAlignment.Right };
+        clockTime = new TextBlock { FontSize = 14.5, Foreground = ClockForeground, TextAlignment = TextAlignment.Right };
+        clockDate = new TextBlock { FontSize = 13, Foreground = ClockForeground, TextAlignment = TextAlignment.Right };
         return new StackPanel { Children = { clockTime, clockDate }, VerticalAlignment = VerticalAlignment.Center };
     }
 

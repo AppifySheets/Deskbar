@@ -95,7 +95,7 @@ public partial class FloatingBar
         volumeMuted = Glyph(MuteCross, SpeakerShape, size: 10);
         volumePercent = new TextBlock
         {
-            FontSize = 8.5,
+            FontSize = 9,
             FontWeight = FontWeights.SemiBold,
             Foreground = ClockForeground,
             HorizontalAlignment = HorizontalAlignment.Center,
@@ -127,10 +127,13 @@ public partial class FloatingBar
             Visibility = Visibility.Collapsed,
         };
         System.Windows.Automation.AutomationProperties.SetName(volumeButton, "Volume");
+        // A click lists the playback devices, with mute at the end of the list (DeviceMenu). It used to mute
+        // outright; Petre: "let's show sound devices on the right click of the speaker", then "let's actually
+        // show it on the left click, instead of muting".
         volumeButton.Click += (_, _) =>
         {
             MarkPressConsumed();
-            ToggleMute();
+            OpenDeviceMenu();
         };
         volumeButton.MouseWheel += (_, e) =>
         {
@@ -164,6 +167,47 @@ public partial class FloatingBar
         if (result.IsFailure) return;
         shownVolume = new VolumeLevel(level, false);
         PaintVolume();
+    }
+
+    // Where the sound goes. Set by the composition root (AudioDevices); without it the click still offers mute.
+    public IAudioDevices? AudioOutputs { get; init; }
+
+    // The playback devices, the current default ticked, and choosing one makes it the default; then mute or
+    // unmute, so the click that used to mute still reaches it in one more step. Built fresh each time, because
+    // a headset plugged in a minute ago belongs on it.
+    internal ContextMenu DeviceMenu()
+    {
+        var menu = new ContextMenu();
+        HoldFadeWhileOpen(menu);
+        var outputs = AudioOutputs?.Outputs() ?? [];
+        if (ClickTrace.On) ClickTrace.Write($"volume: devices [{string.Join(", ", outputs.Select(d => d.IsDefault ? $"*{d.Name}" : d.Name))}]");
+        outputs.ToList().ForEach(device =>
+        {
+            var item = new MenuItem { Header = device.Name, IsCheckable = true, IsChecked = device.IsDefault };
+            item.Click += (_, _) =>
+            {
+                if (device.IsDefault || AudioOutputs is null) return;
+                var outcome = AudioOutputs.MakeDefault(device);
+                TraceVolume(outcome, $"default device -> {device.Name}");
+                Report(outcome);
+            };
+            menu.Items.Add(item);
+        });
+        if (outputs.Count > 0) menu.Items.Add(new Separator());
+        var muted = shownVolume?.Muted ?? false;
+        var mute = new MenuItem { Header = muted ? "Unmute" : "Mute", Icon = MenuGlyph(muted ? "♪" : "⊘") };
+        mute.Click += (_, _) => ToggleMute();
+        menu.Items.Add(mute);
+        return menu;
+    }
+
+    void OpenDeviceMenu()
+    {
+        if (volumeButton is null) return;
+        var menu = DeviceMenu();
+        menu.PlacementTarget = volumeButton;
+        menu.Placement = System.Windows.Controls.Primitives.PlacementMode.Top;
+        menu.IsOpen = true;
     }
 
     internal void ToggleMute()

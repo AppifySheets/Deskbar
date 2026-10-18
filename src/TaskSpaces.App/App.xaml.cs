@@ -896,6 +896,8 @@ public partial class App : Application
             floatingBar = new FloatingBar(manager)
             {
                 Volume = new Windows.Audio.SystemVolume(),
+                // ...and the device list its click opens (FloatingBar.Volume.cs).
+                AudioOutputs = new Windows.Audio.AudioDevices(),
                 Pins = new Windows.Shell.ShellTaskbarPins(),
                 Tabs = new BrowserTabs(),
                 Sound = new Windows.Audio.AudioActivity(ClickTrace.Write),

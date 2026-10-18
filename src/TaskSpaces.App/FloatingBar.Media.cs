@@ -55,8 +55,8 @@ public partial class FloatingBar
     {
         playerIcon = new Image { Width = 16, Height = 16, IsHitTestVisible = false };
         RenderOptions.SetBitmapScalingMode(playerIcon, BitmapScalingMode.HighQuality);
-        trackTitle = new TextBlock { FontSize = 10.5, FontWeight = FontWeights.SemiBold, Foreground = NowPlayingTitleInk, TextTrimming = TextTrimming.CharacterEllipsis };
-        trackDetail = new TextBlock { FontSize = 9.5, Foreground = NowPlayingDetailInk, TextTrimming = TextTrimming.CharacterEllipsis };
+        trackTitle = new TextBlock { FontSize = 11, FontWeight = FontWeights.SemiBold, Foreground = NowPlayingTitleInk, TextTrimming = TextTrimming.CharacterEllipsis };
+        trackDetail = new TextBlock { FontSize = 10, Foreground = NowPlayingDetailInk, TextTrimming = TextTrimming.CharacterEllipsis };
 
         previousButton = TransportButton("Previous", Glyph(PreviousBar, PreviousArrow, size: 12), () => media?.Previous());
         playPauseButton = TransportButton("Pause", Glyph(PlayShape, PlayShape, size: 12), () => media?.PlayPause());

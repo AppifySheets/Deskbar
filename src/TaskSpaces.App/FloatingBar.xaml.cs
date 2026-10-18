@@ -2853,7 +2853,9 @@ public partial class FloatingBar : Window
 
     // Smaller than a workspace label for the same reason it is dimmer, and small enough to answer
     // #91's "should cost the bar almost nothing" while still being a right-click target.
-    const double GroupHeaderFontSize = 9;
+    // Every text size on the bar went up by half a point together (Petre: "let's increase font sizes by the
+    // smallest amount"), so they keep their proportions to one another.
+    const double GroupHeaderFontSize = 9.5;
 
     // A parent and its children, drawn as one thing (#42). Petre: "make the children more
     // apparent, maybe group them together with an outline or a ring."
@@ -4212,7 +4214,7 @@ public partial class FloatingBar : Window
     // right-hand edge of the screen.
     void ShowReadout(string text)
     {
-        readoutText ??= new TextBlock { Foreground = Brushes.White, FontSize = 11 };
+        readoutText ??= new TextBlock { Foreground = Brushes.White, FontSize = 11.5 };
         readoutBody ??= new Border
         {
             Background = CardBackground,
@@ -4640,7 +4642,7 @@ public partial class FloatingBar : Window
         var textBlock = new TextBlock
         {
             Text = text,
-            FontSize = caption ? GroupHeaderFontSize : 10,
+            FontSize = caption ? GroupHeaderFontSize : 10.5,
             Foreground = resting,
             FontWeight = FontWeights.Bold,
             VerticalAlignment = VerticalAlignment.Center,
@@ -5212,7 +5214,7 @@ public partial class FloatingBar : Window
             // A pinned window is on every workspace, so it says so; otherwise Beeper in this list would
             // read as living here.
             Text = (pinnedNow.Any(p => p.Window.Handle == row.Window.Handle) ? "📌 " : "") + row.Window.DisplayName,
-            FontSize = 9,
+            FontSize = 9.5,
             Foreground = row.IsActive ? TitleActive
                 : row.IsFrontmostOnMonitor.HasValue && !row.IsFrontmostOnMonitor.Value ? TitleBehind
                 : TitleResting,
