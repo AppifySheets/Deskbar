@@ -883,7 +883,8 @@ public partial class App : Application
         // desktops to switch between.
         if (!compatibilityMode)
         {
-            floatingBar = new FloatingBar(manager);
+            // The volume dial's source, the default playback device's master volume (FloatingBar.Volume.cs).
+            floatingBar = new FloatingBar(manager) { Volume = new Windows.Audio.SystemVolume() };
             // The bar's hwnd is created HERE, before it is ever shown, for two reasons that
             // both hang off the same handle:
             //

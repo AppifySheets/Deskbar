@@ -79,11 +79,13 @@ public partial class FloatingBar
         ShellStart.Children.Add(ShellButton(ShellFlyout.Start, "Start", StartGlyph()));
         ShellStart.Children.Add(ShellButton(ShellFlyout.Search, "Search", Glyph(SearchShape)));
 
-        // Left to right from the left edge: the tray chevron, quick settings, the bell.
+        // Left to right from the left edge: the tray chevron, quick settings, the volume dial
+        // (FloatingBar.Volume.cs), the bell.
         new[]
         {
             ShellButton(ShellFlyout.Tray, "Show the tray icons", Glyph(ChevronShape)),
             ShellButton(ShellFlyout.QuickSettings, "Quick settings: wifi, volume, battery", QuickSettingsGlyph(), width: double.NaN),
+            VolumeDial(),
             ShellButton(ShellFlyout.Notifications, "Notifications", Glyph(BellShape)),
         }.ToList().ForEach(b =>
         {
@@ -244,14 +246,13 @@ public partial class FloatingBar
         Child = new Canvas { Width = 16, Height = 16, Children = { new Path { Data = Geometry.Parse(StartTiles), Fill = StartBlue } } },
     };
 
-    // Wifi, volume and, on a machine that has one, the battery: one button, as on the taskbar, because
-    // Win+A opens one panel for all three. Static glyphs for now; they do not show the real signal or level.
+    // Wifi and, on a machine that has one, the battery: one button, as on the taskbar, because Win+A opens
+    // one panel for both. The speaker that sat here moved out to its own dial beside it (FloatingBar.Volume.cs),
+    // which shows the real level; these two are still static glyphs.
     static UIElement QuickSettingsGlyph()
     {
         var panel = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(4, 0, 4, 0), IsHitTestVisible = false };
         panel.Children.Add(Glyph(WifiShape, WifiDot, size: 13));
-        panel.Children.Add(new Border { Width = 4 });
-        panel.Children.Add(Glyph(SpeakerWaves, SpeakerShape, size: 13));
         if (ShellKeys.HasBattery())
         {
             panel.Children.Add(new Border { Width = 4 });
