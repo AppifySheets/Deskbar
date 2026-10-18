@@ -674,7 +674,12 @@ public partial class FloatingBar : Window
         Top = span.WindowTop / scale;
         Width = (right.R - left.L) / scale;
         Height = (span.WindowBottom - span.WindowTop) / scale;
-        BarContent.Margin = new Thickness(0, span.InsetTop / scale, 0, span.InsetBottom / scale);
+        // Divided by the bar's own scale as well as the screen's: BarContent sits inside Root, and BarScale is a
+        // LayoutTransform on Root, so a margin set here is shrunk with everything else. Without it the inset fell
+        // short by that factor and the bottom strip ran past the shorter screen's edge, the clock's date line off
+        // the screen (Petre: "time is really misaligned", "it's not visible", "it goes beyond the screen edge").
+        var barScale = BarScaling.Clamp(manager.State.BarScale);
+        BarContent.Margin = new Thickness(0, span.InsetTop / scale / barScale, 0, span.InsetBottom / scale / barScale);
         ClickTrace.Write($"dock: across the seam, left strip {left.L}..{left.R}, right strip {right.L}..{right.R}");
 
         Save();
