@@ -36,6 +36,22 @@
              sense anymore, it's crucial for the app's design." Once the switcher panel and the
              Windows tab were gone this bar became the only surface that lists windows and
              jumps to them, so hiding it left no way to reach your own windows. Always on. -->
+        <!-- A DockPanel rather than a StackPanel for one reason: the taskbar strip at the bottom. Docked to a
+             screen edge the bar is the screen's full height, and Petre: "pin it to the bottom", so the strip
+             sits at the foot of the screen where the taskbar was, and the clock stays put however many rows
+             expand above it. Floating, the bar is only as tall as its content, so the same layout puts the
+             strip straight under the last row. -->
+        <DockPanel LastChildFill="True">
+            <!-- The rest of the taskbar's own buttons: the tray chevron, quick settings and the bell from the
+                 left, the clock and the show desktop sliver at the right, where Windows puts them. Filled once
+                 in BuildShellStrip (FloatingBar.Shell.cs). A hairline above it, because unlike the rows it is
+                 not a workspace and should not read as one more. Declared first because a DockPanel docks its
+                 children in order, and the strip has to claim the bottom before the rows take the rest. -->
+            <Border x:Name="ShellFooter" DockPanel.Dock="Bottom" BorderBrush="#14FFFFFF" BorderThickness="0,1,0,0"
+                    Margin="0,3,0,0" Padding="0,3,0,0">
+                <DockPanel x:Name="ShellStrip" LastChildFill="False"/>
+            </Border>
+
         <StackPanel>
             <!-- The bar's two commands. Petre: "move those buttons down next to the pin icon;
                  remove the pin icon and have those buttons at the right."
@@ -47,6 +63,12 @@
                  every rebuild, and only their parent changes.
                  Declared as a child of this panel so it has somewhere to be before the first
                  rebuild. Nothing flashes: ShowBar rebuilds before it shows. -->
+            <!-- The header line as a whole: Windows' Start and search on the LEFT (Petre's pick, "c", from the
+                 taskbar strip mockups; see FloatingBar.Shell.cs), the bar's own two commands on the right. One
+                 Grid moved into the pinned row's caption cell as a unit, for the reason given above. -->
+            <Grid x:Name="BarHeader">
+            <StackPanel x:Name="ShellStart" Orientation="Horizontal"
+                        HorizontalAlignment="Left" VerticalAlignment="Center"/>
             <StackPanel x:Name="BarCommands" Orientation="Horizontal"
                         HorizontalAlignment="Right" VerticalAlignment="Center">
                 <Button x:Name="BackButton" Content="↩" Width="18" FontSize="12"
@@ -75,6 +97,7 @@
                     </Button.RenderTransform>
                 </Button>
             </StackPanel>
+            </Grid>
 
             <!-- One horizontal row per group (Pinned first, then every workspace, then
                  unbound desktops with windows), populated in code-behind (Rebuild). -->
@@ -89,5 +112,6 @@
             <StackPanel x:Name="CurrentList"/>
 
         </StackPanel>
+        </DockPanel>
     </Border>
 </Window>

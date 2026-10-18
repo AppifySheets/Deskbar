@@ -51,6 +51,10 @@ public partial class FloatingBar : Window
         this.manager = manager;
         InitializeComponent();
 
+        // Start, search, the tray, quick settings, the bell and the clock (FloatingBar.Shell.cs). Built once
+        // here, never by a rebuild.
+        BuildShellStrip();
+
         // Petre: "my window has gotten quite too large... shrink by twenty percent."
         //
         // LayoutTransform, NOT RenderTransform, and that is the whole trick. A RenderTransform
@@ -633,10 +637,13 @@ public partial class FloatingBar : Window
     // their names and, in the back button's case, state that RebuildCore refreshes rather than
     // recreates. Rebuilding them per row would mean re-wiring all of that on every rebuild, and
     // rebuilds happen many times a minute on this bar.
+    //
+    // What moves is the whole header line (BarHeader): Start and search on its left (FloatingBar.Shell.cs),
+    // these two commands on its right, in one Grid so the pair can never end up in different rows.
     UIElement TakeBarCommands()
     {
-        if (BarCommands.Parent is Panel parent) parent.Children.Remove(BarCommands);
-        return BarCommands;
+        if (BarHeader.Parent is Panel parent) parent.Children.Remove(BarHeader);
+        return BarHeader;
     }
 
     // Starting up into the minimized state, which is NOT MinimizeToTaskbar with the hiding left out.
@@ -712,6 +719,10 @@ public partial class FloatingBar : Window
         // tunnelling handler (wired in GroupRow) runs a moment later, further down this route.
         pressConsumedByChild = false;
         pressedRowKey = null;
+
+        // This press takes the foreground from whatever shell flyout was open, which closes it. Noted before
+        // any Click runs, so Start's own button can tell "close it" from "open it" (FloatingBar.Shell.cs).
+        NoteBarPressed();
 
         // Set HERE, beside the trace line, and not at the end of this method: the question it answers is
         // "did this window see the button go down", and the resize branch below returns without reaching
@@ -820,7 +831,9 @@ public partial class FloatingBar : Window
     internal bool StartedOnClickTarget(object source)
     {
         for (var node = source as DependencyObject; node is not null; node = ParentOf(node))
-            if (ReferenceEquals(node, Rows) || ReferenceEquals(node, BackButton)) return true;
+            // ShellFooter too: its clock and buttons sit outside Rows, and a press on them that armed a bar
+            // drag instead would move the bar by a pixel or two on every click.
+            if (ReferenceEquals(node, Rows) || ReferenceEquals(node, BackButton) || ReferenceEquals(node, ShellFooter)) return true;
         return false;
     }
 
@@ -3120,7 +3133,9 @@ public partial class FloatingBar : Window
         // is free on the left anyway.
         if (label is FrameworkElement caption)
         {
-            if (captionContent is not null) caption.HorizontalAlignment = HorizontalAlignment.Right;
+            // Stretched, now that the header spans the line: Start and search at its left end, the bar's own
+            // commands still at its right (each placed by its own alignment inside BarHeader).
+            if (captionContent is not null) caption.HorizontalAlignment = HorizontalAlignment.Stretch;
             else if (spine is not null) caption.Margin = new Thickness(caption.Margin.Left + NestedIndent, caption.Margin.Top, caption.Margin.Right, caption.Margin.Bottom);
         }
         Grid.SetRow(label, 0);

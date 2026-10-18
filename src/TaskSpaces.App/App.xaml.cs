@@ -925,6 +925,10 @@ public partial class App : Application
             // out, and the bar has no business knowing what a WinEvent hook is.
             monitor.ForegroundChanged.Subscribe(_ => floatingBar.ReclaimTopmost());
 
+            // The same stream tells the bar's Start and tray buttons which shell flyout is open, so a click
+            // on Start while the Start menu is up closes it rather than opening it again (FloatingBar.Shell.cs).
+            monitor.ForegroundChanged.Subscribe(floatingBar.NoteForeground);
+
             // A window dragged by its own title bar, for dropping it on a workspace row (Petre: "can i drag
             // and drop the current window, with its header, to the workspace?"). The start and end of the
             // drag, handed to the bar for the same reason as above: the monitor is this root's to hand out.
