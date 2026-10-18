@@ -1,26 +1,43 @@
-# Builds TaskSpaces and attaches a ready-to-run Windows executable to a GitHub Release.
+# Builds TaskSpaces into a DRAFT GitHub Release, and guards the moment a release is published.
 #
 # WHEN THIS RUNS
-#   - When a Release is PUBLISHED (including publishing a draft). GitHub runs `release`
-#     workflows from the DEFAULT BRANCH only, so this file must be merged to main before
-#     publishing a release, or nothing will happen at all.
-#   - Manually, via the Actions tab (workflow_dispatch), to prove the pipeline works without
-#     having to publish anything. A manual run builds and uploads nothing.
+#   - Manually, via the Actions tab or `gh workflow run Release -f version=2.0.0`
+#     (workflow_dispatch). The `build` job compiles, tests and publishes the executable, then
+#     creates a draft release v<version> with it attached. The draft is where signing happens:
+#     scripts/sign-release.ps1, on Petre's machine, downloads the draft's executable, signs it,
+#     uploads it back and publishes.
+#   - When a Release is PUBLISHED (including publishing a draft). Only the `guard` job runs:
+#     it re-verifies the signature of every attached executable and turns the release back
+#     into a draft if any of them fails.
+#   GitHub runs a `release` workflow from the file as it exists at the release's TAGGED
+#   COMMIT, not from main. A release cut from a commit that has this file gets this guard; a
+#   tag on a commit from before it gets whatever release.yml that commit carried.
 name: Release
 
 on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to build, e.g. 2.0.0, no leading v'
+        required: true
+        type: string
   release:
     types: [published]
-  workflow_dispatch:
 
-# The default GITHUB_TOKEN is read-only for contents; uploading a release asset needs write.
-# Nothing else is granted -- least privilege, since this workflow builds untrusted-by-default
-# code and then writes to the repo's releases.
+# The default GITHUB_TOKEN is read-only for contents; creating a release, uploading its asset
+# and turning a bad one back into a draft all need write. Nothing else is granted -- least
+# privilege, since this workflow builds untrusted-by-default code and then writes to the
+# repo's releases.
 permissions:
   contents: write
 
 jobs:
   build:
+    # Only a manual run builds. Publishing a release must NOT rebuild: the asset on a
+    # published release is the one Petre's machine signed, and a rebuild would have nothing
+    # to sign it with.
+    if: github.event_name == 'workflow_dispatch'
+
     # MUST be Windows: this is a WPF app targeting net10.0-windows, and the test suite
     # constructs real WPF windows. It cannot build or test on Linux.
     runs-on: windows-latest
@@ -36,17 +53,54 @@ jobs:
           # newest 10.0 patch the runner offers rather than pinning a patch that may vanish.
           dotnet-version: '10.0.x'
 
-      - name: Work out the version from the release tag
+      - name: Check the version input
         id: version
         shell: pwsh
+        # Read through env rather than pasted into the script, so whatever was typed into the
+        # input cannot become PowerShell.
+        env:
+          VERSION: ${{ inputs.version }}
         run: |
-          # A published release gives us its tag (e.g. "v1.0.0"); a manual run has no tag, so
-          # fall back to the version already committed in Directory.Build.props. Stripping the
-          # leading "v" is what turns a git tag into a .NET version.
-          $tag = "${{ github.event.release.tag_name }}"
-          $version = if ($tag) { $tag.TrimStart('v') } else { '1.0.0' }
+          # The input is the .NET version itself ("2.0.0"); the "v" is added only where a git
+          # tag is made. Typing "v2.0.0" would produce a tag "vv2.0.0", so refuse it here,
+          # before ten minutes of building, rather than after.
+          # Not trimmed: later steps use the input as typed, so a stray space has to fail the
+          # shape check below rather than be quietly fixed here and then reappear in the tag.
+          $version = "$env:VERSION"
+          if (-not $version.Trim()) {
+            "::error::The version input is empty. Give the version to build, e.g. 2.0.0."
+            exit 1
+          }
+          if ($version.StartsWith('v') -or $version.StartsWith('V')) {
+            "::error::The version input '$version' starts with a 'v'. Give it without one, e.g. $($version.Substring(1)); the tag gets its 'v' added for you."
+            exit 1
+          }
+          # VersionPrefix only takes numbers, so anything else would fail the build much later
+          # with a less obvious message.
+          if ($version -notmatch '^\d+\.\d+\.\d+$') {
+            "::error::The version input '$version' is not three numbers separated by dots, e.g. 2.0.0."
+            exit 1
+          }
           "version=$version" >> $env:GITHUB_OUTPUT
           "Building version $version"
+
+      - name: Refuse a version that already has a release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: v${{ steps.version.outputs.version }}
+        run: |
+          # GitHub happily keeps two DRAFTS with the same tag name, and sign-release.ps1 would
+          # then pick one of them. A published release with that tag would make the create step
+          # fail anyway, but only after the whole build. Either way, stop now. The releases API
+          # lists drafts too, because this token can write to the repo.
+          $tags = @(gh api "repos/${{ github.repository }}/releases" --paginate --jq '.[].tag_name')
+          if ($LASTEXITCODE -ne 0) { "::error::Could not list the existing releases."; exit 1 }
+          if ($tags -contains $env:TAG) {
+            "::error::A release (draft or published) tagged $env:TAG already exists. Delete it first, or build a different version."
+            exit 1
+          }
+          "No release tagged $env:TAG yet."
 
       - name: Restore dependencies
         run: dotnet restore TaskSpaces.sln
@@ -101,8 +155,9 @@ jobs:
           "name=$name" >> $env:GITHUB_OUTPUT
           "{0} ({1:N1} MB)" -f $name, ((Get-Item "artifacts/publish/$name").Length / 1MB)
 
-      - name: Keep the build even when there is no release to attach it to
-        # So a workflow_dispatch run still leaves something downloadable to inspect.
+      - name: Keep the build as a workflow artifact too
+        # So the run still leaves something downloadable to inspect if creating the draft
+        # fails, or the draft is deleted before anyone looked at it.
         #
         # v7, up from v4, because the v1.8.0 run reported it: "Node.js 20 is deprecated. The
         # following actions target Node.js 20 but are being forced to run on Node.js 24". Forced
@@ -114,12 +169,109 @@ jobs:
           path: artifacts/publish/${{ steps.artifact.outputs.name }}
           if-no-files-found: error
 
-      - name: Attach the executable to the release
-        # Skipped on manual runs, which have no release to attach to.
-        if: github.event_name == 'release'
+      - name: Create the draft release with the executable attached
+        # Why a DRAFT and not a published release: the executable is unsigned at this point,
+        # and stays so until Petre's machine signs it (scripts/sign-release.ps1), because the
+        # signing certificate never leaves that machine. Drafts are invisible to the app's
+        # update checker, which reads releases/latest and that endpoint skips drafts, so
+        # nothing unsigned is ever announced to anyone. Publishing is the signing script's
+        # last step, and the guard job below checks its work.
+        #
+        # --target pins the tag, created only when the draft is published, to the exact commit
+        # this run built. --generate-notes fills the body from the merged PRs since the last
+        # release.
         shell: pwsh
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        # --clobber so re-running a failed job replaces the asset instead of erroring on a
-        # name that already exists.
-        run: gh release upload ${{ github.event.release.tag_name }} "artifacts/publish/${{ steps.artifact.outputs.name }}" --clobber
+        run: gh release create "v${{ inputs.version }}" --draft --target ${{ github.sha }} --title "v${{ inputs.version }}" --generate-notes "artifacts/publish/${{ steps.artifact.outputs.name }}"
+
+  # Runs when a release is published, and re-checks what was published rather than trusting
+  # how it got there. It defends against:
+  #   - a release published by hand, without running scripts/sign-release.ps1, so its
+  #     executable is still the unsigned one the build attached;
+  #   - the signing script run against the wrong certificate, so the signature is valid but
+  #     is not ours;
+  #   - a timestamp that never happened (the timestamp server failed or was skipped), so the
+  #     signature would stop validating the day the certificate expires.
+  # On any of those it turns the release back into a draft, which takes it off releases/latest
+  # and so out of the update checker's sight, and fails loudly with the reasons.
+  #
+  # The expected certificate is named by its thumbprint in the repository VARIABLE
+  # SIGNING_CERT_THUMBPRINT, not a secret: a thumbprint is public (anyone can read it off a
+  # signed exe), so there is nothing to hide, and a variable shows up readably in the logs.
+  #
+  # Once that variable is set, every publish is held to it, by design. Re-publishing an old
+  # 1.x release by hand would revert it to a draft, because its executable is not signed
+  # with this certificate (that only holds when the tag's commit carries this guard; see
+  # WHEN THIS RUNS at the top).
+  guard:
+    if: github.event_name == 'release'
+
+    # Windows, because the check is Authenticode: Get-AuthenticodeSignature and the PKCS#7
+    # parse in scripts/ReleaseSigning.psm1 are Windows APIs.
+    runs-on: windows-latest
+
+    steps:
+      - name: Check out the repository
+        # For the module: the guard uses the same scripts/ReleaseSigning.psm1 as the signing
+        # script, so the two cannot disagree about what "signed" means.
+        uses: actions/checkout@v7
+
+      - name: Download the release's executables
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Through env rather than pasted into the script, so a tag name cannot become
+          # PowerShell.
+          TAG: ${{ github.event.release.tag_name }}
+        run: |
+          New-Item -ItemType Directory -Force assets | Out-Null
+          gh release download $env:TAG --pattern '*.exe' --dir assets
+          # gh fails when no asset matches. That is not this step's verdict to give: leave the
+          # folder empty, and the next step's verdict reads "no executable attached", which
+          # reverts the release when signing is enforced. A download that failed for any other
+          # reason lands in the same place, which errs on the safe side.
+          if ($LASTEXITCODE -ne 0) {
+            "::warning::Downloading the .exe assets of $env:TAG failed; checking an empty set."
+            exit 0
+          }
+          Get-ChildItem assets -File | ForEach-Object { "{0} ({1:N1} MB)" -f $_.Name, ($_.Length / 1MB) }
+
+      - name: Verify the signatures, or turn the release back into a draft
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.event.release.tag_name }}
+          THUMBPRINT: ${{ vars.SIGNING_CERT_THUMBPRINT }}
+        run: |
+          Import-Module ./scripts/ReleaseSigning.psm1
+
+          # No variable means no certificate to hold the release to yet. Pass with a warning
+          # rather than fail: that lets this workflow merge, and keep releasing, before the
+          # certificate exists. Setting the variable is what switches enforcement on.
+          if ([string]::IsNullOrWhiteSpace($env:THUMBPRINT)) {
+            "::warning::Signing is not enforced: the SIGNING_CERT_THUMBPRINT repository variable is not set, so the executables of $env:TAG were not checked."
+            exit 0
+          }
+
+          $results = @(Get-ChildItem assets -Filter *.exe -File | ForEach-Object {
+            Test-ExecutableSignature -Path $_.FullName -Thumbprint $env:THUMBPRINT
+          })
+          $results | Format-Table Path, Status, Signed, Valid, ThumbprintMatches, Timestamped, DigestSha256, Ok -AutoSize | Out-String -Width 300
+
+          $verdict = Get-ReleaseVerdict -Results $results
+          if ($verdict.Ok) {
+            "All $($results.Count) executable(s) of $env:TAG are signed with the expected certificate and timestamped."
+            exit 0
+          }
+
+          # Revert first, then report, so the release is out of the update checker's sight
+          # even if someone only reads the red X and not the log.
+          gh release edit $env:TAG --draft
+          if ($LASTEXITCODE -ne 0) {
+            "::error::Could not turn $env:TAG back into a draft. Unpublish it by hand NOW: it is live with executables that failed the check."
+          } else {
+            "::error::$env:TAG has been turned back into a draft."
+          }
+          $verdict.Reasons | ForEach-Object { "::error::$_" }
+          exit 1
