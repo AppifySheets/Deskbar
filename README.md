@@ -555,22 +555,51 @@ them deliberately, not while you are working.
 Releases are signed with a code signing certificate whose key lives on a hardware token, so
 the last steps happen on one machine and not in CI.
 
+Before the first signed release:
+
+- `gh` is installed and authenticated with write access to the repository.
+- signtool from the Windows SDK is installed, or `$env:SIGNTOOL` points at one.
+- The certificate's USB token and its driver are set up, with the certificate in
+  `Cert:\CurrentUser\My`. The thumbprint is the certificate's Thumbprint in
+  `Get-ChildItem Cert:\CurrentUser\My -CodeSigningCert`.
+- Enforcement is switched on with `gh variable set SIGNING_CERT_THUMBPRINT --body <thumbprint>`.
+  Renewing the certificate changes the thumbprint, so update the variable before the next
+  release, or every release reverts.
+- One rehearsal on a throwaway version, for example 0.0.2. The workflow only builds the
+  version that `VersionPrefix` names, so run it from a throwaway branch with `VersionPrefix`
+  set to 0.0.2 (`gh workflow run Release --ref <branch> -f version=0.0.2`). Mark the draft a
+  prerelease (`gh release edit v0.0.2 --prerelease`) so it never becomes latest, sign and
+  publish it with the script, and confirm the guard passes. Then build a second throwaway
+  version the same way, mark it a prerelease too, publish it unsigned by hand and confirm the
+  guard reverts it. Delete both with `gh release delete vX --yes --cleanup-tag`, and the
+  branch with them.
+
 1. Bump `VersionPrefix` in `Directory.Build.props` in the pull request that earns the
    version, and merge it.
 2. In GitHub, open Actions, pick Release, choose Run workflow and enter the version as
-   `x.y.z`, with no leading `v`. A draft release `vx.y.z` appears with an unsigned exe.
+   `x.y.z`, with no leading `v`. It has to match `VersionPrefix` at that commit. A draft
+   release `vx.y.z` appears with an unsigned exe.
 3. On the signing machine, with the token plugged in, run
-   `scripts/sign-release.ps1 -Tag vx.y.z -Thumbprint <thumbprint>`. The script asks for the
-   token's PIN. It signs, verifies, uploads and publishes. `-TimestampUrl` overrides the
-   timestamp server, and `-NoPublish` uploads the signed exe and leaves the release a draft.
+   `scripts/sign-release.ps1 -Tag vx.y.z -Thumbprint <thumbprint>`. The token's driver
+   prompts for its PIN. The script signs, verifies, uploads and publishes. `-TimestampUrl`
+   overrides the timestamp server, and `-NoPublish` uploads the signed exe and leaves the
+   release a draft. If an upload or the publish fails, the script keeps the signed files and
+   prints where they are and how to finish.
 4. The guard job in the Release workflow runs when the release is published. It checks the
-   published assets and reverts the release to a draft if anything is unsigned.
+   published assets and reverts the release to a draft if anything is unsigned, or if no
+   executable is attached.
+
+After a revert the release is a draft again: fix the cause and re-run the script.
 
 Until the certificate exists, the repository variable `SIGNING_CERT_THUMBPRINT` is unset and
-the guard only warns. Setting it switches enforcement on.
+step 3 is replaced by publishing the draft by hand, `gh release edit vx.y.z --draft=false`.
+The guard then only checks that an executable is attached. Setting the variable switches
+signing enforcement on.
 
 GitHub runs a release event from the workflow file at the tag's commit, so the guard only
-covers releases cut from commits that carry it. Never re-publish a release from before 2.0
-(the pre-signing releases): the guard does not cover them.
+covers releases whose tag's commit carries this workflow. Never re-publish a release whose
+commit does not, which includes every release made before the guard existed: that commit's
+own workflow runs instead, rebuilds the exe and replaces the release's asset with an
+unsigned one, and nothing reverts it.
 
 *<sub>Collaboration by Claude</sub>*
