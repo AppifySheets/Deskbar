@@ -520,6 +520,13 @@ you do not have.
 - Everything is persisted, so your workspaces, groups, window names, colours, the bar's width,
   position and settings, and your shortcut survive both an app restart and a reboot.
 
+## Licence
+
+The source is available under the [PolyForm Strict License 1.0.0](LICENSE): you may read
+it, build it and run it for noncommercial purposes, and you may not distribute it or
+publish changed versions. Contributions are welcome under the extra permission in
+[CONTRIBUTING.md](CONTRIBUTING.md). This is source-available software, not open source.
+
 ## Tech
 
 C# / .NET 10, WPF tray application (Fluent theming, follows your system light/dark
