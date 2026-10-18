@@ -277,6 +277,10 @@ public static class NativeMethods
     public const int MDT_EFFECTIVE_DPI = 0;
 
     public const int SW_RESTORE = 9; // NEVER SW_HIDE anywhere in this codebase (spec)
+    // The window-menu equivalents of SW_RESTORE and SW_MINIMIZE, which still reach an elevated window when
+    // ShowWindowAsync is refused (see WindowActivator.Show).
+    public const uint WM_SYSCOMMAND = 0x0112;
+    public const nint SC_MINIMIZE = 0xF020, SC_RESTORE = 0xF120;
     // Puts a window down without hiding it: still on the taskbar, still on its desktop, still
     // recoverable if we crash. That last point is why SW_HIDE stays banned and this does not.
     public const int SW_MINIMIZE = 6;

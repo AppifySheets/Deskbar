@@ -53,7 +53,7 @@ public sealed class WindowActivator : IWindowActivator
     public Result Activate(WindowHandle window) =>
         Result.Try(() =>
         {
-            if (IsIconic(window.Value)) ShowWindowAsync(window.Value, SW_RESTORE);
+            if (IsIconic(window.Value)) Show(window.Value, SW_RESTORE, SC_RESTORE);
             SetForegroundWindow(window.Value);
             if (GetForegroundWindow() != window.Value) ForceForeground(window.Value);
         }, e => $"Could not activate window {window.Value}: {e.Message}");
@@ -129,8 +129,30 @@ public sealed class WindowActivator : IWindowActivator
     // No IsIconic guard. Minimizing an already-minimized window is a no-op in Windows, and the
     // one caller only reaches this for the FOCUSED window, which by definition is not minimized.
     public Result Minimize(WindowHandle window) =>
-        Result.Try(() => ShowWindowAsync(window.Value, SW_MINIMIZE),
+        Result.Try(() => Show(window.Value, SW_MINIMIZE, SC_MINIMIZE),
             e => $"Could not minimize window {window.Value}: {e.Message}");
+
+    // Restore or minimize, including a window that runs ELEVATED. Petre: "activating task manager in GEPHA
+    // doesn't show it". Task Manager runs as administrator and this app does not, and measured on his
+    // machine from an ordinary process against its minimized window:
+    //
+    //   ShowWindowAsync(SW_RESTORE)                 returned False, GetLastError 5 (access denied)
+    //   WM_SYSCOMMAND SC_RESTORE, SendMessageTimeout  restored it
+    //   ShowWindowAsync(SW_MINIMIZE)                returned False, GetLastError 5
+    //   WM_SYSCOMMAND SC_MINIMIZE                     minimized it
+    //
+    // Windows' integrity check (UIPI) refuses a lower-integrity process's ShowWindow on a higher one, while
+    // the window-menu command still gets through. So the click "succeeded" (SetForegroundWindow is allowed,
+    // and a minimized window can be the foreground) and nothing appeared.
+    //
+    // The plain call first, since it is asynchronous and cannot be held up by a hung window. Only when it
+    // is refused is the command SENT, with a short timeout that gives up on a hung window rather than
+    // freezing the bar's click.
+    static void Show(nint window, int command, nint sysCommand)
+    {
+        if (ShowWindowAsync(window, command)) return;
+        SendMessageTimeout(window, WM_SYSCOMMAND, sysCommand, 0, SMTO_ABORTIFHUNG, 200, out _);
+    }
 
     // The live answer, read at the moment somebody needs it rather than remembered from a sweep.
     // Same call Activate uses above to decide whether to restore, which is what keeps the two
