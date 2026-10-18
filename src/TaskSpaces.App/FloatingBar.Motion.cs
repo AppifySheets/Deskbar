@@ -18,12 +18,13 @@ namespace TaskSpaces.App;
 //     what links an icon to the titled line it becomes, and the line back to the icon.
 //
 // Only when the set of expanded rows changed: an ordinary rebuild (a title changing, a window opening) is not
-// asked to move anything. 320 ms easing out (see GlideTime), and whatever Windows' own animation setting says
+// asked to move anything. 220 ms easing out (see GlideTime), and whatever Windows' own animation setting says
 // (see GlideIfExpansionChanged for why).
 public partial class FloatingBar
 {
-    // 320 ms. It started at 160, and on the bar Petre asked for "increase time, double".
-    static readonly Duration GlideTime = new(TimeSpan.FromMilliseconds(320));
+    // 220 ms. Petre asked for "increase time, double" before he had seen it run (Windows' animation setting was
+    // stopping it, see GlideIfExpansionChanged); once it ran at 320, "try 160 again", "or 220".
+    static readonly Duration GlideTime = new(TimeSpan.FromMilliseconds(220));
 
     HashSet<Guid> lastExpanded = [];
     bool expansionChanged;
