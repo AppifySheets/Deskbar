@@ -550,4 +550,27 @@ The `Category=Integration` tests are excluded from that command on purpose: they
 create, switch and delete **real** virtual desktops on the machine running them. Run
 them deliberately, not while you are working.
 
+### Releasing
+
+Releases are signed with a code signing certificate whose key lives on a hardware token, so
+the last steps happen on one machine and not in CI.
+
+1. Bump `VersionPrefix` in `Directory.Build.props` in the pull request that earns the
+   version, and merge it.
+2. In GitHub, open Actions, pick Release, choose Run workflow and enter the version as
+   `x.y.z`, with no leading `v`. A draft release `vx.y.z` appears with an unsigned exe.
+3. On the signing machine, with the token plugged in, run
+   `scripts/sign-release.ps1 -Tag vx.y.z -Thumbprint <thumbprint>`. The script asks for the
+   token's PIN. It signs, verifies, uploads and publishes. `-TimestampUrl` overrides the
+   timestamp server, and `-NoPublish` uploads the signed exe and leaves the release a draft.
+4. The guard job in the Release workflow runs when the release is published. It checks the
+   published assets and reverts the release to a draft if anything is unsigned.
+
+Until the certificate exists, the repository variable `SIGNING_CERT_THUMBPRINT` is unset and
+the guard only warns. Setting it switches enforcement on.
+
+GitHub runs a release event from the workflow file at the tag's commit, so the guard only
+covers releases cut from commits that carry it. Never re-publish a release from before 2.0
+(the pre-signing releases): the guard does not cover them.
+
 *<sub>Collaboration by Claude</sub>*

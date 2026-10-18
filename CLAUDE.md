@@ -14,6 +14,10 @@ object.
 
 - **Shipped and in daily use.** Everything is on `main`; **v1.17.0** is released. One branch
   per topic, PR, merge, and no long-lived feature branch. About 180 PRs merged so far.
+- **Releases are drafted by `workflow_dispatch` and published by `scripts/sign-release.ps1`**,
+  run on Petre's machine because the signing key sits on a token. The guard job in `release.yml`
+  reverts an unsigned publish to a draft once `SIGNING_CERT_THUMBPRINT` is set. Never re-publish
+  a release from before 2.0 (the pre-signing ones): the guard does not cover them.
 - **Tests: about 980 green**, the great majority in `TaskSpaces.Core.Tests` and over a hundred
   in `TaskSpaces.Windows.Tests` (which constructs real WPF windows on an STA thread per
   test). Do not trust this number to the digit; run the suite. The routine command, and the
