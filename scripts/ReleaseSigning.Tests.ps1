@@ -57,6 +57,13 @@ Describe 'ReleaseSigning' {
             { Invoke-ExecutableSignature -Path (Join-Path $workDir 'missing.exe') -Thumbprint $thumb } | Should Throw 'signtool failed'
         }
 
+        It 'throws when the timestamp server cannot be reached' {
+            # Port 9 on loopback has nothing listening, so the connection is refused at once:
+            # no network needed and no wait. A timestamp failure has to stop the driver there,
+            # with signtool's own message, rather than surface later as "Timestamped is false".
+            { Invoke-ExecutableSignature -Path $exe -Thumbprint $thumb -TimestampUrl 'http://127.0.0.1:9' } | Should Throw 'signtool failed'
+        }
+
         It 'accepts a thumbprint with spaces and lower case' {
             $messy = ($thumb.ToLowerInvariant() -replace '(.{4})', '$1 ')
             (Invoke-ExecutableSignature -Path $exe -Thumbprint $messy).Status | Should Not Be 'NotSigned'
