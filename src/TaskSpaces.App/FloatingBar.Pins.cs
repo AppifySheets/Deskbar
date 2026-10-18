@@ -48,7 +48,7 @@ public partial class FloatingBar
 
     // The pin buttons by ParsingName, with their markers, so a rebuild repaints markers without
     // recreating buttons.
-    readonly Dictionary<string, (Button Button, Border Mark)> pinButtons = [];
+    readonly Dictionary<string, (Button Button, Border Mark, UIElement Ring)> pinButtons = [];
 
     // The windows each pin has in the current workspace, from the last overview, for its click.
     Dictionary<string, IReadOnlyList<WindowHandle>> pinWindowsHere = [];
@@ -93,8 +93,8 @@ public partial class FloatingBar
         pinButtons.Clear();
         shownPins.ToList().ForEach(pin =>
         {
-            var (button, mark) = PinButton(pin);
-            pinButtons[pin.ParsingName] = (button, mark);
+            var (button, mark, ring) = PinButton(pin);
+            pinButtons[pin.ParsingName] = (button, mark, ring);
             PinLine.Children.Add(button);
         });
         PinLine.Visibility = shownPins.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
@@ -120,8 +120,12 @@ public partial class FloatingBar
         if (e.WidthChanged) ((UniformGrid)PinLine).Columns = PinColumns(shownPins.Count, e.NewSize.Width);
     };
 
-    (Button, Border) PinButton(TaskbarPin pin)
+    (Button, Border, UIElement) PinButton(TaskbarPin pin)
     {
+        // The sound ring (FloatingBar.Activity.cs), shown while any of the pin's windows is making sound, so
+        // a playing YouTube Music lights its pin wherever its window is.
+        var ring = Ring(21);
+        ring.Visibility = Visibility.Collapsed;
         var mark = new Border
         {
             Height = 2,
@@ -131,7 +135,7 @@ public partial class FloatingBar
             Margin = new Thickness(0, 0, 0, 1.5),
             Visibility = Visibility.Collapsed,
         };
-        var face = new Grid { Children = { PinIcon(pin), mark } };
+        var face = new Grid { Children = { PinIcon(pin), mark, ring } };
         var button = new Button
         {
             Content = face,
@@ -161,7 +165,7 @@ public partial class FloatingBar
             OpenPin(pin, newWindow: true);
         };
         button.ContextMenu = PinMenu(pin);
-        return (button, mark);
+        return (button, mark, ring);
     }
 
     UIElement PinIcon(TaskbarPin pin)
@@ -284,6 +288,8 @@ public partial class FloatingBar
             shown.Mark.Visibility = isHere || isElsewhere ? Visibility.Visible : Visibility.Collapsed;
             shown.Mark.Width = isHere ? 6 : 2;
             shown.Mark.Background = isHere ? PinHereMark : PinElsewhereMark;
+            var loud = here.Concat(elsewhere).Any(w => sounding.Contains(w.Handle) && PinMatches(pin, w, AppIdOf(w), claimed));
+            shown.Ring.Visibility = loud ? Visibility.Visible : Visibility.Collapsed;
         });
     }
 

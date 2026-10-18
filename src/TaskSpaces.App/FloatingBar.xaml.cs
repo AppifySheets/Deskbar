@@ -1581,6 +1581,10 @@ public partial class FloatingBar : Window
         {
             if (ClickTrace.On) DumpBands(overview);
 
+            // Tab counts and the sound ring (FloatingBar.Activity.cs): which windows are sounding is worked out
+            // here, before any icon below is built, so every icon and pin of this rebuild agrees about it.
+            NoteActivity(overview);
+
             // The dock line's markers: which taskbar pins have a window here, and which only elsewhere
             // (FloatingBar.Pins.cs). Its buttons are not rebuilt, only repainted.
             PaintPins(overview);
@@ -5085,11 +5089,12 @@ public partial class FloatingBar : Window
         // invisible here. Asking the window itself (see IconCache) fixes most of them
         // outright -- WM_GETICON works whether or not we can read the file -- and this
         // placeholder covers whatever is left.
-        button.Content = WithState(
+        // ...then the tab cards and the sound ring round it all (FloatingBar.Activity.cs).
+        button.Content = WithActivity(WithState(
             icon is not null
                 ? new Image { Source = icon, Width = 20, Height = 20 }
                 : Placeholder(row.Window),
-            row);
+            row), row);
         // Click -> jump, with no Hide() afterwards: unlike the switcher panel, this bar
         // is a persistent surface (spec) -- it stays open across every jump so Petre can
         // click several icons in a row.

@@ -885,7 +885,14 @@ public partial class App : Application
         {
             // The volume dial's source, the default playback device's master volume (FloatingBar.Volume.cs).
             // ...and the dock line's, the taskbar's pinned apps (FloatingBar.Pins.cs).
-            floatingBar = new FloatingBar(manager) { Volume = new Windows.Audio.SystemVolume(), Pins = new Windows.Shell.ShellTaskbarPins() };
+            // ...and the tab counts and sound ring's (FloatingBar.Activity.cs).
+            floatingBar = new FloatingBar(manager)
+            {
+                Volume = new Windows.Audio.SystemVolume(),
+                Pins = new Windows.Shell.ShellTaskbarPins(),
+                Tabs = new BrowserTabs(),
+                Sound = new Windows.Audio.AudioActivity(ClickTrace.Write),
+            };
             // The bar's hwnd is created HERE, before it is ever shown, for two reasons that
             // both hang off the same handle:
             //
