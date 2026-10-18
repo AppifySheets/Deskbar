@@ -27,11 +27,12 @@ namespace TaskSpaces.App;
 // few seconds.
 public partial class FloatingBar
 {
-    // How big a pin is, after three rounds. The first cut was 16 DIP icons in 19 DIP cells, ten to a line.
+    // How big a pin is, after four rounds. The first cut was 16 DIP icons in 19 DIP cells, ten to a line.
     // "make them bigger, it's hard to focus on them" went to 22 in 28, two lines of five, and that was "too bad;
-    // much smaller, and no gaps please", "as it was, just a bit larger". So: one tight line again, icons 18,
-    // the cells sharing the width evenly with no more than a pixel or so between icons.
-    const double PinIconSize = 18, PinMinWidth = 19, PinHeight = 24;
+    // much smaller, and no gaps please", "as it was, just a bit larger": 18 in one tight line. Then, looking at
+    // that line: "distribute evenly; two rows would be fine, don't cram into one". So the icon stays 18 and a
+    // cell must be at least 24 wide, which puts his ten on two even lines of five spread across the bar.
+    const double PinIconSize = 18, PinMinWidth = 24, PinHeight = 24;
 
     static readonly Brush PinHereMark = Frozen(0xC0, 0xFF, 0xFF, 0xFF);
     static readonly Brush PinElsewhereMark = Frozen(0x66, 0xFF, 0xFF, 0xFF);

@@ -135,13 +135,14 @@ public class FloatingBarPinsTests
         bar.Close();
     });
 
-    // Petre's ten fit one docked line ("as it was, just a bit larger"), and a list too long for one line splits
-    // evenly rather than leaving a short last line: twelve where ten fit come out as two lines of six.
+    // Petre: "distribute evenly; two rows would be fine, don't cram into one". 196 DIP holds eight at the
+    // minimum cell, so his ten come out as two even lines of five rather than one crammed line or 8 + 2.
     [Theory]
-    [InlineData(10, 196, 10)]
+    [InlineData(10, 196, 5)]
+    [InlineData(8, 196, 8)]
     [InlineData(3, 196, 3)]
     [InlineData(12, 196, 6)]
-    [InlineData(21, 196, 7)]
+    [InlineData(17, 196, 6)]
     [InlineData(10, 400, 10)]
     public void Pins_split_into_even_lines(int count, double width, int columns) =>
         Assert.Equal(columns, FloatingBar.PinColumns(count, width));
