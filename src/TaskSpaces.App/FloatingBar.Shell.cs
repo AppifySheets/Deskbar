@@ -92,6 +92,10 @@ public partial class FloatingBar
             new Border { Width = 1, Height = 22, Background = SliverLine }, width: 7);
         var clock = ShellButton(ShellFlyout.Notifications, "", ClockFace(), width: double.NaN);
         clock.Padding = new Thickness(4, 0, 4, 0);
+        // As tall as its two lines need, not the strip's fixed 28: at 14.5 over 13 the lines are taller than that,
+        // and the date spilled out of the button's bottom, cut off wherever the bar met a screen edge (Petre:
+        // "but date is half cut"). The strip grows by the few pixels the clock needs.
+        clock.Height = double.NaN;
         stripClock = clock;
         LayOutStrip(acrossSeam: false);
 
@@ -150,8 +154,10 @@ public partial class FloatingBar
     // culture is the same "Region" setting the taskbar reads, so the two can never disagree about it.
     UIElement ClockFace()
     {
-        clockTime = new TextBlock { FontSize = 14.5, Foreground = ClockForeground, TextAlignment = TextAlignment.Right };
-        clockDate = new TextBlock { FontSize = 13, Foreground = ClockForeground, TextAlignment = TextAlignment.Right };
+        // Line heights set tight to the glyphs, as the taskbar's clock is, so the two lines stack close and the
+        // strip only grows by what the text really needs.
+        clockTime = new TextBlock { FontSize = 14.5, Foreground = ClockForeground, TextAlignment = TextAlignment.Right, LineHeight = 17, LineStackingStrategy = LineStackingStrategy.BlockLineHeight };
+        clockDate = new TextBlock { FontSize = 13, Foreground = ClockForeground, TextAlignment = TextAlignment.Right, LineHeight = 16, LineStackingStrategy = LineStackingStrategy.BlockLineHeight };
         return new StackPanel { Children = { clockTime, clockDate }, VerticalAlignment = VerticalAlignment.Center };
     }
 
