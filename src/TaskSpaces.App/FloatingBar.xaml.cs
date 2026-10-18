@@ -1700,6 +1700,10 @@ public partial class FloatingBar : Window
         MinimizeButton.Visibility = AcrossSeam ? Visibility.Collapsed : Visibility.Visible;
         // The strip, the pins and the now-playing line keep everything off the seam while docked across it.
         LayOutBottomForSeam();
+        // Where every row and icon is NOW, before they are thrown away, so the new ones can glide from there
+        // when this rebuild expands or collapses a row (FloatingBar.Motion.cs).
+        var before = TakeLayoutSnapshot();
+        Dispatcher.BeginInvoke(System.Windows.Threading.DispatcherPriority.Loaded, () => GlideIfExpansionChanged(before));
         Rows.Children.Clear();
         CurrentList.Children.Clear(); // the titled list below the rows, rebuilt with them
         headerDropTargets.Clear();    // re-registered by every row as it is built (see GroupRow)
@@ -1823,6 +1827,7 @@ public partial class FloatingBar : Window
                 ? heldExpanded.ToHashSet()
                 : liveTarget is { } only ? [only] : new HashSet<Guid>();
             bool Expanded(Guid id) => manager.State.ExpandCurrentWorkspace && expanded.Contains(id);
+            NoteExpansion(manager.State.ExpandCurrentWorkspace ? expanded : []);
 
             // The current workspace's lane colour and the bright version of it, filled in while its row is
             // built (WorkspaceRow), for the titled list at the bottom.
@@ -2378,7 +2383,13 @@ public partial class FloatingBar : Window
                 // three 24 DIP icons, so a full row still keeps about 20 DIP in the middle; reserving more
                 // than the slack would cost every busy row an icon per line. On a third screen the middle
                 // lane is pushed right too, which puts its spare room next to the first screen's.
-                var pushRight = showMonitorMarkers && lane.Rank > 0;
+                //
+                // EXCEPT docked across two screens (AcrossSeam), where each half is a bar of its own with its
+                // caption and rail mirrored at its left. Petre: "icons on the split aligned on the left, so
+                // expanding them doesn't mess up everything": pushed right, a row's icons on the right screen
+                // jumped from the far edge to the seam whenever the row expanded into its titled lines, which
+                // start at the left. Aligned left, an icon and its titled line begin at the same place.
+                var pushRight = showMonitorMarkers && lane.Rank > 0 && !AcrossSeam;
 
                 // A DockPanel so the free part of the lane is an ELEMENT of its own: the icons dock to their
                 // side and `free` fills what is left, which is exactly the area that lights up on hover.
@@ -2401,7 +2412,8 @@ public partial class FloatingBar : Window
                     LastChildFill = true,
                     // A nested row's indent lives here now, on the lane rather than on the stack, for the
                     // same reason it lived on the stack before: see the note on this method.
-                    Margin = firstLane ? new Thickness(indent, 0, 0, 0) : default,
+                    // ...and across the seam the right half's lane gives up the same indent, for its mirrored rail.
+                    Margin = firstLane || AcrossSeam ? new Thickness(indent, 0, 0, 0) : default,
                 };
                 laneContent.Children.Add(stack);
                 // A titled line has no free space: its one window fills the column (the stack is then the
