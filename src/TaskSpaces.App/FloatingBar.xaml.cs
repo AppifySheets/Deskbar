@@ -4768,20 +4768,26 @@ public partial class FloatingBar : Window
         // as wide as name plus marks, with the marks right after the name. When the line is too narrow, the
         // name is what shrinks and takes the ellipsis, and the time stays readable. Docked right in reverse
         // order, since the first child docked right sits outermost: time, then "empty", then the name.
+        //
+        // Only one of the two shows at a time: the time, when there is any today, otherwise "empty" (see
+        // FillTimeMark). So the "empty" mark is built first and handed to the time mark, which owns the swap.
         var marks = new List<UIElement>();
-        // LineHeight is NaN unless set, which it is on a caption (above); passed on so the time sits on the
-        // same tight line box as the name and the caption does not grow taller.
-        var lineHeight = double.IsNaN(textBlock.LineHeight) ? (double?)null : textBlock.LineHeight;
-        if (caption && WorkspaceTimeMark(timeFor, textBlock.FontSize, lineHeight) is { } time)
-            marks.Add(time);
-        if (empty)
-            marks.Add(new TextBlock
+        var emptyMark = empty
+            ? new TextBlock
             {
                 Text = " · empty",
                 FontSize = textBlock.FontSize,
                 Foreground = EmptyMarkForeground,
                 VerticalAlignment = VerticalAlignment.Center,
-            });
+            }
+            : null;
+        // LineHeight is NaN unless set, which it is on a caption (above); passed on so the time sits on the
+        // same tight line box as the name and the caption does not grow taller.
+        var lineHeight = double.IsNaN(textBlock.LineHeight) ? (double?)null : textBlock.LineHeight;
+        if (caption && WorkspaceTimeMark(timeFor, textBlock.FontSize, lineHeight, emptyMark) is { } time)
+            marks.Add(time);
+        if (emptyMark is not null)
+            marks.Add(emptyMark);
 
         UIElement content = textBlock;
         if (marks.Count > 0)
