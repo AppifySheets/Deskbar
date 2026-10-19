@@ -39,6 +39,13 @@ only the one you are standing on.
 Nothing is hidden by trickery. Quit Deskbar and your windows are still sitting on their
 desktops, reachable through Task View exactly as before.
 
+I built this for myself and it is on my screen all day, every day. It has changed on most
+working days since the first commit in August 2026, nearly four hundred commits so far, and most
+of them are small: a ring a pixel off, a fade that started too soon, a click lost under load, a
+hairline that wandered from row to row. That is deliberate. A bar you look at all day has to be
+exactly right or it grates, so the tiny details get the attention, and I fine-tune it for my own
+use first. If something here seems oddly specific, that is why.
+
 > **Windows only, by design rather than by omission.** The whole app is built on Windows'
 > virtual-desktop COM API and the taskbar's native per-desktop filtering. macOS and Linux
 > organise windows on different models, so there is no port waiting to be written. If you are
