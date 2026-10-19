@@ -89,15 +89,16 @@ public class HistoryRingTests
     // The other half of Petre's sentence: "instead of dimmed white". All three rings are one colour at
     // one strength now, so the trail's order is carried by the pattern alone. Dimming as well would say
     // the same thing twice and cost the faintest step its legibility over a lane tint.
-    [Fact]
     //
-    // Two rings now, not three: with the accent rail style ("try b") the current row wears no ring (its
-    // tint, bright rail and coloured name say it), so the white is the trail's, dashed and dotted.
+    // Three again. The accent rail style ("try b") had dropped the current row's ring, and Petre asked for
+    // it back ("bring the ring around the current workspace"), so the solid, the dashed and the dotted ring
+    // are once more one white told apart by pattern alone.
+    [Fact]
     public void All_three_rings_are_the_same_white() => StaThread.Run(() =>
     {
         using var bar = Harness.Build(extraWorkspace: true).ShowBar();
 
-        var strokes = new[] { "Sparrow", "Archive" }
+        var strokes = new[] { "GEPHA", "Sparrow", "Archive" }
             .Select(label => (SolidColorBrush)Ring(bar.Rows, label).Stroke)
             .ToList();
 
@@ -119,11 +120,11 @@ public class HistoryRingTests
 
     // The regression that would matter most: exactly one row says "you are here", and it is the only
     // unbroken ring on the bar.
-    [Fact]
     //
-    // NO row wears an unbroken ring at rest now. The current row's solid white ring was dropped with the
-    // accent rail style ("try b"): its tint, its bright rail and its coloured name already say "you are
-    // here". Solid rings remain for the amber "you would land here", which nothing is asking for here.
+    // The accent rail style ("try b") had taken this ring away, so for a while NO row wore an unbroken
+    // ring at rest. Petre asked for it back ("bring the ring around the current workspace"), and this is
+    // the test that would catch it going missing again, or a second row claiming the same thing.
+    [Fact]
     public void Only_the_current_row_wears_an_unbroken_ring() => StaThread.Run(() =>
     {
         using var bar = Harness.Build(withUnnamedDesktop: true, extraWorkspace: true).ShowBar();
@@ -133,8 +134,8 @@ public class HistoryRingTests
             .Where(ring => AlphaOf(ring) > 0 && DashesOf(ring).Count == 0)
             .ToList();
 
-        Assert.Empty(solid);
-        Assert.Equal(0, AlphaOf(Ring(bar.Rows, "GEPHA")));
+        Assert.Single(solid);
+        Assert.Same(Ring(bar.Rows, "GEPHA"), solid[0]);
     });
 
     // With one workspace there is nowhere to have come from, and the back button is disabled for the
