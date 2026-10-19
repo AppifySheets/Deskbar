@@ -2959,7 +2959,7 @@ public partial class FloatingBar : Window
                 Background = outline,
                 HorizontalAlignment = HorizontalAlignment.Left,
                 // Back by the box's own padding and edge, so this line sits where the right half's rails do.
-                Margin = new Thickness(-4, 0, 0, 0),
+                Margin = new Thickness(-(FamilyGap + 1), 0, 0, 0),
                 IsHitTestVisible = false,
             }));
             content = both;
@@ -2970,10 +2970,16 @@ public partial class FloatingBar : Window
             Background = Brushes.Transparent,
             BorderBrush = outline ?? Brushes.Transparent,
             BorderThickness = new Thickness(1, 0, 0, 0),
-            Padding = new Thickness(3, 0, 0, 0),
+            Padding = new Thickness(FamilyGap, 0, 0, 0),
             Margin = new Thickness(3, 1, 0, 1),
         };
     }
+
+    // Between the group's line and its members' rails. Petre: "bring the bars closer together", and from the
+    // mockup, "closer sideways": 3 DIP down to 1, so the line and the rails read as one bracket rather than as
+    // two marks that happen to be near each other. Not 0: touching, a 1 DIP line in the group's colour and a
+    // 3 DIP rail in the same colour would merge into one thicker rail and the group line would vanish.
+    const double FamilyGap = 1;
 
     // The bracket down the left of a group. Wide enough to read as a deliberate edge rather than as
     // the same hairline the other three sides are, narrow enough that it costs the icons almost
@@ -4165,7 +4171,11 @@ public partial class FloatingBar : Window
     // outline around a family (#42). Deriving it from the same hex rather than picking a second
     // colour is the whole point: it has to read as "this belongs to the lane above", and two
     // colours cannot say that.
-    static Brush? LaneAccent(string? color, int index) => Lane(color, index, 0xC8);
+    //
+    // Opaque since the vivid palette (2.1.1). It was 0xC8, which took the edge off colours that were muted
+    // to begin with; on a rail the colour is the whole message, and the vivid set is chosen to be seen at
+    // full strength (see WorkspacePalette).
+    static Brush? LaneAccent(string? color, int index) => Lane(color, index, 0xFF);
 
     // NULL for a row that has opted out of a lane colour (#68), which every caller already handles:
     // the tint, the spine and the family outline are all Brush? and all already have a "this row has
@@ -4180,14 +4190,12 @@ public partial class FloatingBar : Window
     // was), because this one has to pull the eye to the list from anywhere on the bar, while a nested row's
     // only has to say which row it belongs to. Lightened rather than just made opaque, since a dark palette
     // colour at full strength is still dark against the bar.
-    static Brush? ListSpine(string? color, int index)
-    {
-        if (Lane(color, index, 0xFF) is not SolidColorBrush { Color: var c }) return null;
-        static byte Up(byte v) => (byte)(v + (255 - v) * 0.45);
-        var brush = new SolidColorBrush(Color.FromRgb(Up(c.R), Up(c.G), Up(c.B)));
-        brush.Freeze();
-        return brush;
-    }
+    //
+    // NO LONGER LIFTED, since the vivid palette (2.1.1). The lift existed because "a dark palette colour at
+    // full strength is still dark against the bar"; the vivid colours are bright already, and lifting them
+    // 45% toward white washed them into pastels, which is the opposite of what was asked. The current row
+    // still stands out by its tint, its ring and its coloured name.
+    static Brush? ListSpine(string? color, int index) => Lane(color, index, 0xFF);
 
     static Brush? Lane(string? color, int index, byte alpha) =>
         WorkspacePalette.IsNone(color)
@@ -6268,13 +6276,16 @@ public partial class FloatingBar : Window
 
     // A colour in force that the palette does not offer, which is what makes the Custom… swatch worth
     // drawing: null means by-position and the sentinel means transparent, and neither is a colour.
+    // Through WorkspacePalette.Current, so a colour picked from the retired muted palette reads as the vivid
+    // swatch it became (ticked as that swatch), not as a Custom… colour.
     static bool IsCustom(string? colour) =>
         !string.IsNullOrWhiteSpace(colour)
         && !WorkspacePalette.IsNone(colour)
-        && !WorkspacePalette.Swatches.Any(s => string.Equals(s.Hex, colour, StringComparison.OrdinalIgnoreCase));
+        && !WorkspacePalette.Swatches.Any(s => string.Equals(s.Hex, WorkspacePalette.Current(colour), StringComparison.OrdinalIgnoreCase));
 
-    void AddColourPicker(ContextMenu menu, string? chosen, Func<string?, Result> choose)
+    void AddColourPicker(ContextMenu menu, string? stored, Func<string?, Result> choose)
     {
+        var chosen = WorkspacePalette.Current(stored);
         var strip = new StackPanel
         {
             Orientation = Orientation.Horizontal,

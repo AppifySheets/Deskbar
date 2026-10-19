@@ -62,22 +62,79 @@ public static class WorkspacePalette
     // and first are neighbours too and the arrangement is solved as a ring rather than a line.
     //
     // Indigo stays at slot 0 -- the one tie worth keeping, since it matches the app icon.
+    //
+    // ---- VIVID (2.1.1) -------------------------------------------------------------------------
+    //
+    // Everything above argued for MUTED colours, and it was right for what the colour was then: a tint
+    // painted behind a whole row of icons. The accent rail style ("try b") changed what the colour is.
+    // A row is no longer tinted (only the current one is, faintly); its colour is a 3 DIP rail down its
+    // left edge, and a line cannot drown an icon the way a lane could. Petre, seeing that: "now that we
+    // have just a line for the colors, make it more colorful and vivid and youthful", and from the
+    // mockup's three options (muted as now, Vivid, Candy) he picked Vivid.
+    //
+    // So: saturated, mid-light hues that hold up on the bar's near-black, with the two lessons of #68
+    // kept. Nothing from the olive and mustard band between yellow and green, which is where "terrible
+    // colors" came from; sunflower is a clean yellow and there is no green at all. And the ORDER is
+    // solved, not chosen: the same measurement as before (OKLab distance between neighbours, around the
+    // ring, as shown), except that rails are now drawn opaque, so the colours are compared as they are.
+    // Of every order with Indigo first, this one makes the most similar neighbouring pair as different
+    // as it can be: 0.327, against 0.221 for the order the mockup showed. The close pairs it keeps apart
+    // are hot pink and coral, violet and orchid, and indigo and violet (WorkspacePaletteTests pins it).
     public static readonly IReadOnlyList<Swatch> Swatches =
     [
-        new("Indigo", "#3C48BE"), // matching the app icon
-        new("Plum", "#9A3B5A"),
-        new("Steel", "#2F6FA8"),
-        new("Violet", "#8A4CD6"),
-        new("Teal", "#2E7D6B"),
-        new("Orchid", "#8A3C7E"), // was moss green -- see above
-        new("Amber", "#B06A2C"),
-        new("Slate", "#6A5ACD"),
-        new("Rust", "#A8562C"),
+        new("Indigo", "#5B6CFF"), // matching the app icon
+        new("Tangerine", "#FF8A2B"),
+        new("Violet", "#A66BFF"),
+        new("Sunflower", "#FFC935"),
+        new("Orchid", "#E45CFF"),
+        new("Aqua", "#19D3B5"),
+        new("Hot pink", "#FF4D9D"),
+        new("Sky", "#2FB4FF"),
+        new("Coral", "#FF5A5F"),
+    ];
+
+    // THE MUTED SET, RETIRED, and the colour each one becomes. A workspace or group whose colour was
+    // picked from the old palette stores that swatch's hex (Petre's EC group holds the old indigo), and
+    // a stored hex would otherwise keep the muted colour now drawn at full strength, the dullest thing on
+    // a vivid bar. Choosing a palette entry meant "that palette colour", so it follows the palette.
+    //
+    // Mapped where colours are READ (Current), not rewritten in state.json: nothing to migrate, nothing
+    // lost, and a Custom… colour that happened to match none of these is left exactly as chosen. Each old
+    // name maps to its nearest vivid relative, and the names stay accepted by the `color` command, so a
+    // script saying "teal" or "rust" keeps working.
+    static readonly IReadOnlyList<(string Name, string Hex, string Becomes)> Retired =
+    [
+        ("Indigo", "#3C48BE", "Indigo"),
+        ("Plum", "#9A3B5A", "Hot pink"),
+        ("Steel", "#2F6FA8", "Sky"),
+        ("Violet", "#8A4CD6", "Violet"),
+        ("Teal", "#2E7D6B", "Aqua"),
+        ("Orchid", "#8A3C7E", "Orchid"),
+        ("Amber", "#B06A2C", "Tangerine"),
+        ("Slate", "#6A5ACD", "Indigo"),
+        ("Rust", "#A8562C", "Coral"),
     ];
 
     // Declared AFTER Swatches on purpose: static fields initialise in declaration order, so
     // reading Swatches from above it would read a null.
     static readonly IReadOnlyList<string> Defaults = Swatches.Select(s => s.Hex).ToList();
+
+    // The vivid swatch with this name, case-insensitive, or the one a retired name became. Null when the
+    // name is neither.
+    public static Swatch? Named(string name) =>
+        Swatches.FirstOrDefault(s => s.Name.Equals(name, StringComparison.OrdinalIgnoreCase))
+        ?? Retired.Where(r => r.Name.Equals(name, StringComparison.OrdinalIgnoreCase))
+            .Select(r => Swatches.First(s => s.Name == r.Becomes))
+            .FirstOrDefault();
+
+    // A stored colour as it is drawn now: a retired swatch's hex becomes its vivid replacement, anything
+    // else (a Custom… colour, "none", null) is returned untouched.
+    public static string? Current(string? color) =>
+        color is null
+            ? null
+            : Retired.Where(r => r.Hex.Equals(color.Trim(), StringComparison.OrdinalIgnoreCase))
+                .Select(r => Swatches.First(s => s.Name == r.Becomes).Hex)
+                .FirstOrDefault() ?? color;
 
     // Petre: "add transparent as an option for color" (#68).
     //
@@ -101,7 +158,7 @@ public static class WorkspacePalette
     // the rule for resolving it is identical: an override if there is one, the position's colour
     // otherwise. Two copies of that rule would be two places for it to drift.
     public static string For(string? color, int index) =>
-        string.IsNullOrWhiteSpace(color) ? Defaults[index % Defaults.Count] : color!;
+        string.IsNullOrWhiteSpace(color) ? Defaults[index % Defaults.Count] : Current(color)!;
 
     public static string For(Workspace workspace, int index) => For(workspace.Color, index);
 }
