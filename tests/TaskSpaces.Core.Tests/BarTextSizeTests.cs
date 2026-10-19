@@ -4,9 +4,10 @@ namespace TaskSpaces.Core.Tests;
 
 // The bar's text size, as one setting. Petre: "increase font size by one more and make it configurable".
 //
-// One more is one more half-point step, the size the last bump took (every bar text up by half a point
-// together). So the default is +0.5 over the sizes written in the code, and the setting moves all of them
-// together, in half points, so they keep their proportions to one another.
+// The default started as +0.5, one half-point step. Petre then tried the slider's top: "i set text size to max
+// and it's much better. make this, max size the default, ability to up or down". So it is +4 over the sizes
+// written in the code, with room above it as well as below, and the setting still moves all of them together,
+// in half points, so they keep their proportions to one another.
 public class BarTextSizeTests
 {
     readonly FakeDesktops desktops = new();
@@ -21,10 +22,18 @@ public class BarTextSizeTests
         return manager;
     }
 
-    // Never configured is one step up from what the code says: that step is the "one more" asked for.
+    // Never configured is the old maximum, the size Petre chose by trying it.
     [Fact]
-    public void Unset_is_one_half_point_step_up() =>
-        Assert.Equal(0.5, BarText.Clamp(null));
+    public void Unset_is_four_points_up() =>
+        Assert.Equal(4, BarText.Clamp(null));
+
+    // "Ability to up or down": the default sits strictly inside the rails, so the slider moves both ways.
+    [Fact]
+    public void The_default_leaves_room_both_ways()
+    {
+        Assert.True(BarText.Default > BarText.Minimum);
+        Assert.True(BarText.Default < BarText.Maximum);
+    }
 
     [Theory]
     [InlineData(double.NaN)]

@@ -17,12 +17,28 @@ public class FloatingBarTextSizeTests
         Descendants(rows).OfType<TextBlock>().First(t => t.Text == caption).FontSize;
 
     [Fact]
-    public void By_default_captions_are_one_half_point_step_up() => StaThread.Run(() =>
+    public void By_default_captions_are_drawn_at_the_default_offset() => StaThread.Run(() =>
     {
         var harness = Harness.Build();
         using var bar = harness.ShowBar();
 
         Assert.Equal(9.5 + BarText.Default, CaptionSize(bar.Rows, "Sparrow"));
+    });
+
+    // The clock keeps its own sizes at any setting. Petre, at the +4 default: "watch and date are too big". It
+    // matches the taskbar's clock, not the bar's captions. Found by its date line, which only changes at
+    // midnight.
+    [Fact]
+    public void The_clock_ignores_the_text_size() => StaThread.Run(() =>
+    {
+        var harness = Harness.Build();
+        using var bar = harness.ShowBar();
+
+        harness.Manager.SetBarTextOffset(BarText.Maximum);
+        bar.Bar.Dispatcher.Invoke(() => { }, System.Windows.Threading.DispatcherPriority.ApplicationIdle);
+
+        var date = Descendants(bar.Bar).OfType<TextBlock>().Single(t => t.Text == DateTime.Now.ToString("d"));
+        Assert.Equal(13, date.FontSize);
     });
 
     [Fact]

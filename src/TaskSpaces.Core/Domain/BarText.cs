@@ -12,14 +12,19 @@ namespace TaskSpaces.Core.Domain;
 // Pure and in Core, like BarFading, so the clamp is testable without constructing a window.
 public static class BarText
 {
-    // One step up from the code's sizes: that step IS the "one more" that was asked for. Null in state.json
-    // means this, so changing it here still reaches anyone who never touched the slider.
-    public const double Default = 0.5;
+    // Four points up from the code's sizes. It was half a point (the "one more" first asked for) until Petre
+    // tried the slider's top: "i set text size to max and it's much better. make this, max size the default,
+    // ability to up or down". So the old maximum is the default now. Null in state.json means this, so
+    // changing it here still reaches anyone who never touched the slider.
+    public const double Default = 4;
 
-    // Rails rather than preferences. Below -2 the smallest captions fall under 7.5 pt and stop being
-    // readable on a scaled-down bar; above +4 the 58 DIP caption gutter wraps every workspace name.
+    // Rails rather than preferences, with room either side of the default. Below -2 the smallest captions
+    // fall under 7.5 pt and stop being readable on a scaled-down bar. The old ceiling of +4 was set for the
+    // 58 DIP caption gutter, which wrapped every name past it; captions have had a line of their own since,
+    // and trim rather than wrap. The clock does not follow this setting at all (see FloatingBar.TextSize.cs),
+    // so +8 only has to keep the captions and the now-playing line sane.
     public const double Minimum = -2;
-    public const double Maximum = 4;
+    public const double Maximum = 8;
 
     // Every size on the bar moves in half points, so the offset does too.
     public const double Step = 0.5;
