@@ -1774,6 +1774,15 @@ public sealed class WorkspaceManager(
         return Result.Success();
     }
 
+    // The window list's floor (see WindowListLines). Null puts it back to the default.
+    public Result SetWindowListMinimumLines(int? lines)
+    {
+        var next = lines is { } value ? WindowListLines.Clamp(value) : (int?)null;
+        if (next == State.WindowListMinimumLines) return Result.Success();
+        Persist(State with { WindowListMinimumLines = next });
+        return Result.Success();
+    }
+
     // The colour picker on the bar's right-click menu (#68). Petre: "add color picker in the right
     // click context menu."
     //

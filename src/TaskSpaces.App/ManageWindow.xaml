@@ -228,6 +228,18 @@
                                     ValueChanged="OnTextSizeChanged"/>
                             <TextBlock x:Name="TextSizeValue" Margin="8,0,0,0" VerticalAlignment="Center" MinWidth="70"/>
                         </StackPanel>
+
+                        <!-- The window list's floor (WindowListLines), with its own handler and setter like the
+                             text size, so dragging it writes only this value. -->
+                        <TextBlock Text="Window list height" FontWeight="Bold" Margin="0,16,0,0"/>
+                        <TextBlock TextWrapping="Wrap" Opacity="0.75" Margin="0,2,0,6"
+                                   Text="The fewest lines the current workspace's window list keeps, so windows can come and go without the bar changing height. With more windows than this, the list grows."/>
+                        <StackPanel Orientation="Horizontal">
+                            <Slider x:Name="ListLinesSlider" Width="260" Minimum="1" Maximum="12"
+                                    SmallChange="1" LargeChange="1" TickFrequency="1" IsSnapToTickEnabled="True"
+                                    ValueChanged="OnListLinesChanged"/>
+                            <TextBlock x:Name="ListLinesValue" Margin="8,0,0,0" VerticalAlignment="Center" MinWidth="70"/>
+                        </StackPanel>
                     </StackPanel>
                 </DockPanel>
             </TabItem>

@@ -361,6 +361,50 @@ public class FloatingBarLaneShadeTests(ITestOutputHelper output)
         Assert.Empty(bar.Shades());
     });
 
+    // Petre: "current workspace should be at least 5 slots tall, so that windows can move in and out without
+    // causing the size change for the workspace". Up to five windows a column, the list is the same height
+    // whatever it holds, nothing included; the sixth on a screen grows it, since a hidden window is worse.
+    // (TwoScreens puts the last window on screen 2 and the rest on screen 1.)
+    [Fact]
+    public void The_window_list_keeps_five_lines_however_few_windows_it_holds() => StaThread.Run(() =>
+    {
+        double Height(int windows)
+        {
+            using var bar = TwoScreens(busyIcons: windows, standOnBusy: true);
+            return bar.TitledList().ActualHeight;
+        }
+
+        var heights = new[] { 0, 1, 3, 6, 7 }.ToDictionary(n => n, Height);
+        output.WriteLine(string.Join(" | ", heights.Select(h => $"{h.Key} windows: {h.Value:0.##}")));
+
+        // Nothing, one, and five on screen 1 (six in all): the same height.
+        Assert.Equal(heights[6], heights[0], 1);
+        Assert.Equal(heights[6], heights[1], 1);
+        Assert.Equal(heights[6], heights[3], 1);
+        // Six on screen 1 is a line more than the floor.
+        Assert.True(heights[7] > heights[6] + 10, $"seven windows: {heights[7]:0.##} against six: {heights[6]:0.##}");
+    });
+
+    // "make that number 5 configurable". At one, the floor is gone and the list is a line per window again.
+    [Fact]
+    public void The_floor_is_a_setting() => StaThread.Run(() =>
+    {
+        using var bar = TwoScreens(busyIcons: 2, standOnBusy: true);
+        var atFive = bar.TitledList().ActualHeight;
+
+        Assert.True(bar.Manager.SetWindowListMinimumLines(1).IsSuccess);
+        bar.Window.UpdateLayout();
+        var atOne = bar.TitledList().ActualHeight;
+
+        Assert.True(bar.Manager.SetWindowListMinimumLines(8).IsSuccess);
+        bar.Window.UpdateLayout();
+        var atEight = bar.TitledList().ActualHeight;
+
+        output.WriteLine($"1: {atOne:0.##}  5: {atFive:0.##}  8: {atEight:0.##}");
+        Assert.True(atOne < atFive - 40, "one line should be well short of five");
+        Assert.True(atEight > atFive + 40, "eight lines should be well past five");
+    });
+
     // Two displays, which is what turns the lanes on at all; one workspace holding busyIcons windows and
     // one holding nothing. The last window goes on the second screen so the busy row uses both lanes,
     // and the rest on the first.

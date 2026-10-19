@@ -3110,7 +3110,12 @@ public partial class FloatingBar : Window
         // nearly as tall as the screen. The name carries a dim "· empty" and is still the whole row's click
         // and drop target. Not the pinned row (it holds the bar's buttons and is the pin drop target), and
         // not a row with a caption of its own.
-        var emptyRow = ordered.Count == 0 && !pinned && captionContent is null;
+        //
+        // Never the titled list, which keeps its floor of empty lines even with nothing in it (see
+        // WindowListLines): a list that collapsed to its name when its last window left would be the very resize
+        // the floor exists to stop. Its caption carries no "empty" either, measured as the same kind of jump: the
+        // mark made the caption line 2.5 DIP taller, and the empty lines already say it.
+        var emptyRow = ordered.Count == 0 && !pinned && captionContent is null && !titled;
 
         // Petre: "do you think it would make more sense if the captions for the spaces were on
         // the right and icons started from the left edge?"
@@ -3337,7 +3342,14 @@ public partial class FloatingBar : Window
         // One row line per deepest group, with each group contributing its own line at that depth. A group
         // that has run out simply adds nothing, so its half of that line is empty -- which is exactly what
         // the empty half already means everywhere else on this bar.
-        var lineCount = perGroup.Count == 0 ? 1 : perGroup.Max(g => g.Count);
+        //
+        // A titled list never draws FEWER lines than the floor (AppState.WindowListMinimumLines, WindowListLines).
+        // Petre: "current workspace should be at least 5 slots tall, so that windows can move in and out without
+        // causing the size change for the workspace". The extra lines are ordinary empty lines, so each is an
+        // empty, droppable half per screen at exactly a line's height, and a window arriving takes one over
+        // without the list or anything below it moving.
+        var drawn = perGroup.Count == 0 ? 1 : perGroup.Max(g => g.Count);
+        var lineCount = titled ? Math.Max(drawn, WindowListLines.Clamp(manager.State.WindowListMinimumLines)) : drawn;
         var drawnLines = Enumerable.Range(0, lineCount)
             .Select(i => perGroup.SelectMany(g => i < g.Count ? g[i] : []).ToList())
             .ToList();
@@ -4450,7 +4462,7 @@ public partial class FloatingBar : Window
         {
             Child = hoverBody,
             // Against the bar rather than the icon: a PlacementTarget that a rebuild deletes leaves the
-            // popup pointing at nothing. Left, because the bar lives at the right-hand edge.
+            // popup pointing at nothing. Left to start with; ShowHoverCard picks the side each time (see HoverSide).
             PlacementTarget = this,
             Placement = System.Windows.Controls.Primitives.PlacementMode.Left,
             AllowsTransparency = true,
@@ -4476,6 +4488,12 @@ public partial class FloatingBar : Window
         // Level with the icon being hovered, in the bar's own coordinates, so the card appears beside what
         // it describes rather than at the bar's top corner.
         hoverPopup.VerticalOffset = anchor.TranslatePoint(new Point(0, 0), this).Y;
+        // ...and on the SIDE of the bar nearer the icon. Petre, docked across two screens: "it should show me
+        // the preview window as close to the icon as possible; now it's showing on the left monitor, always".
+        // Left of the bar was the only side there was, which on a seam-docked bar is the left screen even
+        // for an icon on the right half. Set on every show, because the same popup serves both halves.
+        var middle = anchor.TranslatePoint(new Point(anchor.ActualWidth / 2, 0), this).X;
+        hoverPopup.Placement = HoverSide(AcrossSeam, middle, ActualWidth);
         hoverPopup.IsOpen = true;
 
         hoverWatch ??= new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromMilliseconds(120) };
@@ -4485,6 +4503,15 @@ public partial class FloatingBar : Window
             hoverWatch.Start();
         }
     }
+
+    // Which side of the bar the hover card opens on. Across the seam the bar is two halves on two screens,
+    // and an icon in the right half gets its card on the right screen, beside it. Everywhere else it stays
+    // Left, as it always was: the bar lives at a screen's right-hand edge, and docked at the left edge WPF
+    // flips a Left popup that has no room to the right on its own.
+    internal static System.Windows.Controls.Primitives.PlacementMode HoverSide(bool acrossSeam, double iconMiddle, double barWidth) =>
+        acrossSeam && iconMiddle >= barWidth / 2
+            ? System.Windows.Controls.Primitives.PlacementMode.Right
+            : System.Windows.Controls.Primitives.PlacementMode.Left;
 
     // A timer tick that cannot take the app down with it. Petre, minutes after the dwell shipped:
     // "TaskSpaces hit an unexpected error and must close: 'System.Windows.Documents.Run' is not a Visual

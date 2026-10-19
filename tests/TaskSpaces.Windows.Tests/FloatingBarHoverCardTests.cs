@@ -75,4 +75,15 @@ public class FloatingBarHoverCardTests
         Assert.Contains(Texts(card), text => text.Contains("GEPHA"));
         window.Close();
     });
+
+    // Petre, docked across two screens: "it should show me the preview window as close to the icon as
+    // possible; now it's showing on the left monitor, always". An icon in the right half gets its card on
+    // the right; everything else keeps the left, which is where it always was.
+    [Theory]
+    [InlineData(true, 40, 400, System.Windows.Controls.Primitives.PlacementMode.Left)]
+    [InlineData(true, 260, 400, System.Windows.Controls.Primitives.PlacementMode.Right)]
+    [InlineData(false, 260, 400, System.Windows.Controls.Primitives.PlacementMode.Left)]
+    public void The_card_opens_on_the_side_of_the_icons_half(bool acrossSeam, double iconMiddle, double barWidth,
+        System.Windows.Controls.Primitives.PlacementMode expected) =>
+        Assert.Equal(expected, FloatingBar.HoverSide(acrossSeam, iconMiddle, barWidth));
 }

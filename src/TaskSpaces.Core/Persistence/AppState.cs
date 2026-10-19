@@ -79,6 +79,11 @@ public sealed record AppState(
     // and null means BarText.Default rather than zero.
     public double? BarTextOffset { get; init; }
 
+    // The fewest lines the current workspace's window list is drawn with (Petre: "at least 5 slots tall", "make
+    // that number 5 configurable"). Same nullable/no-migration pattern, read through WindowListLines.Clamp, and
+    // null means WindowListLines.Default.
+    public int? WindowListMinimumLines { get; init; }
+
     // The two placements the Inventory above cannot express (Petre: "last placement IS the
     // rule"). Inventory already records identity -> workspace on every Place(), but a
     // PINNED window belongs to no single workspace and a DETACHED one belongs to none at

@@ -375,6 +375,7 @@ public partial class ManageWindow : Window
             // from what the bar is actually doing rather than jumping to some other number.
             HoverDwellSlider.Value = manager.State.HoverDwellMs ?? system;
             TextSizeSlider.Value = BarText.Clamp(manager.State.BarTextOffset);
+            ListLinesSlider.Value = WindowListLines.Clamp(manager.State.WindowListMinimumLines);
         }
         finally
         {
@@ -404,6 +405,7 @@ public partial class ManageWindow : Window
             > 0 => $"+{TextSizeSlider.Value:0.#} pt",
             _ => $"{TextSizeSlider.Value:0.#} pt",
         };
+        ListLinesValue.Text = ListLinesSlider.Value <= 1 ? "no floor" : $"{ListLinesSlider.Value:0} lines";
     }
 
     // The text size slider, applied live like the others: each step rebuilds the bar at the new size. Behind
@@ -413,6 +415,14 @@ public partial class ManageWindow : Window
         if (loading) return;
         ShowAppearanceValues();
         manager.SetBarTextOffset(TextSizeSlider.Value).TapError(err => MessageBox.Show(this, err, "Deskbar"));
+    }
+
+    // The window list's floor, the same way: applied live, each step rebuilds the bar with that many lines.
+    void OnListLinesChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
+    {
+        if (loading) return;
+        ShowAppearanceValues();
+        manager.SetWindowListMinimumLines((int)ListLinesSlider.Value).TapError(err => MessageBox.Show(this, err, "Deskbar"));
     }
 
     // Every control on the tab lands here, and it writes on every change rather than on a Save button
@@ -452,6 +462,7 @@ public partial class ManageWindow : Window
     {
         manager.SetBarAppearance(null, null, null, null).TapError(err => MessageBox.Show(this, err, "Deskbar"));
         manager.SetBarTextOffset(null).TapError(err => MessageBox.Show(this, err, "Deskbar"));
+        manager.SetWindowListMinimumLines(null).TapError(err => MessageBox.Show(this, err, "Deskbar"));
         LoadAppearance();
     }
 
