@@ -89,7 +89,9 @@ public static class UpdateService
 
             var payload = await response.Content.ReadAsStringAsync(cancel).ConfigureAwait(false);
 
-            return UpdateCheck.ReadRelease(payload)
+            // false: this build is the portable exe, so it must never be offered the installer. An
+            // installed build will pass true.
+            return UpdateCheck.ReadRelease(payload, preferSetup: false)
                 .Map(release => UpdateCheck.IsNewer(RunningVersion, release.Version)
                     ? Maybe<ReleaseInfo>.From(release)
                     : Maybe<ReleaseInfo>.None);

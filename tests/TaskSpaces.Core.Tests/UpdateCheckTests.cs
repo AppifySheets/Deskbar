@@ -178,6 +178,49 @@ public class UpdateCheckTests
         Assert.Equal("https://github.com/AppifySheets/TaskSpaces/releases/download/v1.7.0/TaskSpaces-1.7.0.exe", release.Value.AssetUrl);
     }
 
+    // A release from 2.x carries a portable exe and an installer. Which one a client takes depends on
+    // how it was installed, and a portable build must never be handed an installer, even when the
+    // installer is listed first.
+    const string TwoExeReleaseFormat = """
+        {
+          "tag_name": "v2.1.0",
+          "html_url": "https://github.com/AppifySheets/Deskbar/releases/tag/v2.1.0",
+          "assets": [ {0} ]
+        }
+        """;
+
+    static string AssetJson(string name) =>
+        $$"""{ "name": "{{name}}", "browser_download_url": "https://github.com/AppifySheets/Deskbar/releases/download/v2.1.0/{{name}}" }""";
+
+    static string TwoExeRelease(params string[] names) =>
+        TwoExeReleaseFormat.Replace("{0}", string.Join(", ", names.Select(AssetJson)));
+
+    [Fact]
+    public void A_portable_build_skips_the_installer_even_when_it_is_listed_first()
+    {
+        var release = UpdateCheck.ReadRelease(
+            TwoExeRelease("Deskbar-Setup-2.1.0-win-x64.exe", "Deskbar-2.1.0-win-x64.exe"));
+
+        Assert.Equal("Deskbar-2.1.0-win-x64.exe", release.Value.AssetName);
+    }
+
+    [Fact]
+    public void An_installed_build_prefers_the_installer()
+    {
+        var release = UpdateCheck.ReadRelease(
+            TwoExeRelease("Deskbar-2.1.0-win-x64.exe", "Deskbar-Setup-2.1.0-win-x64.exe"), preferSetup: true);
+
+        Assert.Equal("Deskbar-Setup-2.1.0-win-x64.exe", release.Value.AssetName);
+    }
+
+    [Fact]
+    public void With_only_an_installer_a_portable_build_still_takes_it()
+    {
+        var release = UpdateCheck.ReadRelease(TwoExeRelease("Deskbar-Setup-2.1.0-win-x64.exe"));
+
+        Assert.Equal("Deskbar-Setup-2.1.0-win-x64.exe", release.Value.AssetName);
+    }
+
     // The app is portable -- one exe -- so the exe IS the download. A release carrying only
     // source archives is still worth announcing, and the link still works; it just cannot offer
     // to fetch and start anything, which is what a null asset means downstream.

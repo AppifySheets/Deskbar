@@ -72,7 +72,10 @@ public static class UpdateCheck
     // out of a response with dozens, and a DTO would have to be kept in step with a shape this app
     // does not own. JsonDocument also refuses malformed input by throwing, which is exactly the
     // answer wanted for "the network returned something that is not a release".
-    public static Result<ReleaseInfo> ReadRelease(string payload)
+    //
+    // preferSetup says which exe an installed build wants (true) and which a portable one does
+    // (false, the default); see the asset choice below.
+    public static Result<ReleaseInfo> ReadRelease(string payload, bool preferSetup = false)
     {
         try
         {
@@ -95,10 +98,18 @@ public static class UpdateCheck
             // The first .exe attached, if any. First rather than best-guess: a release carrying an
             // x64 and an arm64 is a choice for a human on the release page, and being wrong about
             // WHICH binary to run is worse than not offering to run one.
-            var asset = root.TryGetProperty("assets", out var assets) && assets.ValueKind == JsonValueKind.Array
-                ? assets.EnumerateArray().FirstOrDefault(a =>
-                    Text(a, "name") is { } name && name.EndsWith(".exe", StringComparison.OrdinalIgnoreCase))
-                : default;
+            //
+            // The one thing that IS decided by name is installer versus portable (Deskbar 2.x ships
+            // both). A portable client must never be handed an installer, so it takes the first exe
+            // whose name does not contain "Setup", and an installed client takes the first that
+            // does. When no exe fits the preference the first exe wins, which is also exactly what
+            // a 1.x release with a single exe, and the 1.x checker, always did.
+            var exes = root.TryGetProperty("assets", out var assets) && assets.ValueKind == JsonValueKind.Array
+                ? assets.EnumerateArray().Where(a =>
+                    Text(a, "name") is { } name && name.EndsWith(".exe", StringComparison.OrdinalIgnoreCase)).ToList()
+                : [];
+
+            var asset = exes.FirstOrDefault(a => IsSetup(Text(a, "name")) == preferSetup, exes.FirstOrDefault());
 
             var assetName = asset.ValueKind == JsonValueKind.Object ? Text(asset, "name") : null;
             var assetUrl = asset.ValueKind == JsonValueKind.Object ? Text(asset, "browser_download_url") : null;
@@ -114,6 +125,10 @@ public static class UpdateCheck
             return Result.Failure<ReleaseInfo>($"unreadable release payload: {e.Message}");
         }
     }
+
+    // An installer is recognised by "Setup" in its file name, ordinal and case-insensitive.
+    static bool IsSetup(string? name) =>
+        name?.Contains("Setup", StringComparison.OrdinalIgnoreCase) == true;
 
     static string? Text(JsonElement element, string property) =>
         element.TryGetProperty(property, out var value) && value.ValueKind == JsonValueKind.String
