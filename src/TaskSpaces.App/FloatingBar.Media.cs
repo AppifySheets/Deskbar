@@ -80,7 +80,13 @@ public partial class FloatingBar
                     new StackPanel { Children = { trackTitle, trackDetail }, VerticalAlignment = VerticalAlignment.Center },
                 },
             },
-            Height = 30,
+            // A FLOOR, not a height. It was a fixed 30, sized for the text as it was then, and the bar's text
+            // size setting (FloatingBar.TextSize.cs) outgrew it: at the +4 default the two lines need about 39
+            // DIP, so the title rode up over the line's top and the artist was cut off by the icons below.
+            // Petre's screenshot showed it on a Georgian artist name, whose letters reach further below the
+            // line than Latin ones, but every track overflowed. 30 stays as the floor so a one-line track (no
+            // artist) does not shrink the line.
+            MinHeight = 30,
             Padding = new Thickness(0),
             Background = Brushes.Transparent,
             BorderThickness = new Thickness(0),
