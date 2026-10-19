@@ -15,7 +15,7 @@ public class RenameMigrationTests
     // the old mutex already let go of, the real root, and the app itself running. Each test changes
     // only what its scenario is about.
     static readonly RenameFacts AfterTheUpdate = new(
-        OldFolderExists: true, NewFolderExists: false,
+        OldFolderExists: true, NewStateFileExists: false,
         OldFilesPresent: ["state.json", "time.json"],
         OldShimExists: true,
         OldRunValueExists: true, NewRunValueExists: false,
@@ -45,7 +45,9 @@ public class RenameMigrationTests
             RenameMigration.Plan(AfterTheUpdate with { OldMutexHeld = true, AwaitingPrevious = false }));
 
     // The updater's own handover: 1.x started this copy and is on its way out, and that is not a
-    // second bar.
+    // second bar. A relaunch after a crash arrives with the same fact (App.OnStartup passes
+    // awaitingPrevious || afterCrash): the crashed copy was a 2.x holding the old name, so no 1.x is
+    // running, and the dying copy may let go of the new name before the old one.
     [Fact]
     public void The_updater_handshake_does_not_refuse_even_though_the_old_mutex_is_held() =>
         Assert.DoesNotContain(
@@ -55,7 +57,7 @@ public class RenameMigrationTests
     [Fact]
     public void A_fresh_machine_has_nothing_to_migrate() =>
         Assert.Empty(RenameMigration.Plan(new RenameFacts(
-            OldFolderExists: false, NewFolderExists: false,
+            OldFolderExists: false, NewStateFileExists: false,
             OldFilesPresent: [],
             OldShimExists: false,
             OldRunValueExists: false, NewRunValueExists: false,
@@ -63,12 +65,21 @@ public class RenameMigrationTests
             RootOverridden: false, IsTheApp: true)));
 
     // Once only: a copy made at the first start is never made again, so a second upgrade after a
-    // rollback to 1.x does not overwrite what 2.0 has written since.
+    // rollback to 1.x does not overwrite what 2.0 has written since. "Once" means until the new
+    // state.json exists, and the first start writes it.
     [Fact]
     public void A_second_start_copies_nothing() =>
         Assert.DoesNotContain(
-            RenameMigration.Plan(AfterTheUpdate with { NewFolderExists = true }),
+            RenameMigration.Plan(AfterTheUpdate with { NewStateFileExists = true }),
             step => step is CopyFile);
+
+    // The new folder holding nothing but trace.on, made before the first start so that start could be
+    // traced. That is not a migrated machine, and treating it as one started the app with no workspaces.
+    [Fact]
+    public void A_new_folder_with_only_the_trace_marker_still_gets_the_copies() =>
+        Assert.Equal(
+            [new CopyFile("state.json"), new CopyFile("time.json")],
+            RenameMigration.Plan(AfterTheUpdate with { NewStateFileExists = false }).OfType<CopyFile>());
 
     // Someone who already has Deskbar starting with Windows keeps the path they have.
     [Fact]

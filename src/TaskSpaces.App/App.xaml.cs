@@ -700,8 +700,10 @@ public partial class App : Application
         //
         // - beside a running 1.x, refuse to start: the control pipe exposes no Exit, so the person is
         //   asked to close it. Not on the updater's handshake, where 1.x is the one leaving.
-        // - copy (never move) state.json, time.json and last-used.json into the new folder, once, while
-        //   it does not exist yet; the old folder stays as it is for a rollback.
+        // - copy (never move) state.json, time.json and last-used.json into the new folder, once, which
+        //   means until the new state.json exists (the folder itself may already hold trace.on); the old
+        //   folder stays as it is for a rollback. A state.json that cannot be copied is said, not
+        //   refused: the app starts without the workspaces and tells the person where they still are.
         // - delete the old taskspaces.cmd shim, so it cannot start the old exe.
         // - swap the Run value TaskSpaces for Deskbar, only from the app and never under DESKBAR_APPDATA.
         //

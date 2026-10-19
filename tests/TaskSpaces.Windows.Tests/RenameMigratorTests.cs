@@ -93,7 +93,7 @@ public class RenameMigratorTests
             var facts = RenameMigrator.Gather(root, awaitingPrevious: true, oldMutexHeld: false);
 
             Assert.True(facts.OldFolderExists);
-            Assert.False(facts.NewFolderExists);
+            Assert.False(facts.NewStateFileExists);
             Assert.Equal(["state.json", "last-used.json"], facts.OldFilesPresent);
             Assert.True(facts.OldShimExists);
             Assert.True(facts.AwaitingPrevious);
@@ -102,6 +102,41 @@ public class RenameMigratorTests
             // either one alone keeps the registry out of the plan.
             Assert.True(facts.RootOverridden);
             Assert.False(facts.IsTheApp);
+        });
+
+    // The trap the whole-branch review found: the trace marker lives in the NEW folder, and the
+    // briefing tells a session to create it before restarting. Made before the first 2.0 start, it
+    // creates %APPDATA%\Deskbar with nothing else in it, and a plan gated on the folder existing would
+    // then skip the copy and start with no workspaces, with nothing to recover them later. The gate is
+    // the new state.json, so a folder holding only trace.on still gets the copy.
+    // The gate is the new state.json and nothing else in the new folder: absent with only the marker
+    // there, present once the file is.
+    [Fact]
+    public void Gather_reports_the_new_state_file_and_not_the_new_folder() =>
+        WithRoot(root =>
+        {
+            Directory.CreateDirectory(Path.Combine(root, "Deskbar"));
+            File.WriteAllText(New(root, "trace.on"), "");
+            File.WriteAllText(New(root, "time.json"), "{}");
+
+            Assert.False(RenameMigrator.Gather(root, awaitingPrevious: false, oldMutexHeld: false).NewStateFileExists);
+
+            File.WriteAllText(New(root, "state.json"), "{}");
+
+            Assert.True(RenameMigrator.Gather(root, awaitingPrevious: false, oldMutexHeld: false).NewStateFileExists);
+        });
+
+    [Fact]
+    public void A_trace_marker_made_before_the_first_start_does_not_stop_the_copy() =>
+        WithRoot(root =>
+        {
+            File.WriteAllText(Old(root, "state.json"), "state");
+            Directory.CreateDirectory(Path.Combine(root, "Deskbar"));
+            File.WriteAllText(New(root, "trace.on"), "");
+
+            var plan = RenameMigration.Plan(RenameMigrator.Gather(root, awaitingPrevious: false, oldMutexHeld: false));
+
+            Assert.Contains(new CopyFile("state.json"), plan);
         });
 
     [Fact]

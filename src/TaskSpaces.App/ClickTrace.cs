@@ -37,7 +37,9 @@ namespace TaskSpaces.App;
 //          type nul > "%APPDATA%\Deskbar\trace.on"
 //
 //      Then restart Deskbar. To turn it off, delete that file and restart. (Under DESKBAR_APPDATA
-//      the folder is the one AppPaths resolves there instead.)
+//      the folder is the one AppPaths resolves there instead.) A trace.on in the 1.x folder,
+//      %APPDATA%\TaskSpaces, also turns it on, so the start that migrates can be traced; delete
+//      that one too to turn tracing off.
 //
 //      DESKBAR_TRACE=1 in the environment also works, but PREFER THE FILE. `setx` writes the
 //      user-scope value, and a process only ever inherits its parent's environment block as
@@ -157,16 +159,25 @@ static class ClickTrace
     //
     //     to enable:   type nul > "%APPDATA%\Deskbar\trace.on"     (then restart Deskbar)
     //     to disable:  del "%APPDATA%\Deskbar\trace.on"
+    //                  and del "%APPDATA%\TaskSpaces\trace.on" if 1.x left one (see OldMarkerPath)
     //
     // Through AppPaths, so a build run under DESKBAR_APPDATA looks for its marker in the scratch
     // root like everything else it keeps, and a marker left in the real profile does not switch it on.
     static readonly string MarkerPath = Path.Combine(AppPaths.NewStateDir, "trace.on");
 
+    // The same marker in the 1.x folder, %APPDATA%\TaskSpaces\trace.on, is honoured too. The start that
+    // most needs a trace is the first start of 2.0, the one that migrates, and on that start the new
+    // folder may not exist yet: the migration is what creates it. A marker left there by 1.x, or made
+    // there on purpose before the update, therefore traces the migration itself. (A marker made in the
+    // new folder before that start works as well; the migration's gate is the new state.json, so the
+    // folder existing early does not stop the copy.)
+    static readonly string OldMarkerPath = Path.Combine(AppPaths.OldStateDir, "trace.on");
+
     // Named once, because Announce reports which of the two switches turned tracing on.
     const string EnvironmentSwitch = "DESKBAR_TRACE";
 
     static readonly bool Enabled =
-        Environment.GetEnvironmentVariable(EnvironmentSwitch) == "1" || Exists(MarkerPath);
+        Environment.GetEnvironmentVariable(EnvironmentSwitch) == "1" || Exists(MarkerPath) || Exists(OldMarkerPath);
 
     static readonly string LogPath = Path.Combine(Path.GetTempPath(), "deskbar-trace.log");
 
@@ -187,7 +198,7 @@ static class ClickTrace
     public static void Announce()
     {
         if (!Enabled) return;
-        Write($"--- trace on (marker={Exists(MarkerPath)}, env={Environment.GetEnvironmentVariable(EnvironmentSwitch) == "1"}) pid={Environment.ProcessId} ---");
+        Write($"--- trace on (marker={Exists(MarkerPath)}, old-marker={Exists(OldMarkerPath)}, env={Environment.GetEnvironmentVariable(EnvironmentSwitch) == "1"}) pid={Environment.ProcessId} ---");
     }
 
     public static void Write(string message)

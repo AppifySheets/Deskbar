@@ -27,7 +27,8 @@ static class RenameMigrator
         var oldDir = AppPaths.OldStateDirUnder(root);
         return new RenameFacts(
             OldFolderExists: Directory.Exists(oldDir),
-            NewFolderExists: Directory.Exists(AppPaths.NewStateDirUnder(root)),
+            // The new state.json, not the new folder: the folder can exist with only trace.on in it.
+            NewStateFileExists: File.Exists(Path.Combine(AppPaths.NewStateDirUnder(root), RenameMigration.StateFile)),
             OldFilesPresent: [.. RenameMigration.StateFiles.Where(name => File.Exists(Path.Combine(oldDir, name)))],
             OldShimExists: File.Exists(Path.Combine(oldDir, AppPaths.OldShimName)),
             OldRunValueExists: StartupRegistration.LegacyIsSet,
@@ -58,9 +59,10 @@ static class RenameMigrator
         var oldDir = AppPaths.OldStateDirUnder(root);
         var newDir = AppPaths.NewStateDirUnder(root);
 
-        // The new folder first, so the copies have somewhere to land. overwrite: false, because the plan
-        // copies only while the new folder did not exist: a file already there was written by Deskbar and
-        // is newer than anything in the old folder, and the copy failing loudly in the trace is right.
+        // The new folder first, so the copies have somewhere to land (it may exist already, holding only
+        // trace.on). overwrite: false, because the plan copies only while the new state.json does not
+        // exist, and any other file already there was written by Deskbar and is newer than anything in
+        // the old folder: that copy failing in the trace is right.
         var copies = steps.OfType<CopyFile>().ToList();
         if (copies.Count > 0)
             Attempt($"creating {newDir}", () => Directory.CreateDirectory(newDir), trace);
