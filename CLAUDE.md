@@ -1,9 +1,13 @@
-# TaskSpaces: session briefing
+# Deskbar: session briefing
 
-Windows tray utility. It **names Windows' own virtual desktops** and adds what they lack:
+Deskbar is a Windows tray utility, called TaskSpaces until 2.0. It **names Windows' own virtual
+desktops** and adds what they lack:
 an always-on-top floating bar showing every desktop's windows at once, `Win+Ctrl+Tab` to
 switch between them Alt+Tab style, per-desktop colours, short taskbar names for windows,
-and memory of where you last put each window. State persists across reboots.
+and memory of where you last put each window. State persists across reboots. The C# namespaces,
+projects and solution are still `TaskSpaces.*` by decision (the rename design in
+`docs/superpowers/specs/2026-10-19-deskbar-rename-design.md`), so paths and commands below keep
+that name.
 
 Terminology, and keep it straight: a **workspace** is a virtual desktop you have named.
 Unnamed ones still exist and the bar shows them separately, so the two words are not
@@ -33,7 +37,7 @@ object.
 
 - **He live-tests continuously** and reports in short fragments, often a screenshot with
   three words. Restart the app after a change so he can see it:
-  `src/TaskSpaces.App/bin/Debug/net10.0-windows10.0.19041.0/TaskSpaces.App.exe`. Stop the
+  `src/TaskSpaces.App/bin/Debug/net10.0-windows10.0.19041.0/Deskbar.exe`. Stop the
   running instance first or the build cannot overwrite it.
 - **Never push to `main`, never merge.** Branch, PR, wait to be told it merged. Pushing a
   feature branch in order to open a PR is fine; anything beyond that needs asking.
@@ -116,7 +120,7 @@ object.
   The running copy owns state.json, the desktops and the window list, so a second process
   editing them would race it. `ControlPipeServer` listens CurrentUserOnly; the same exe started
   as `ctl <command>` is the client (the release is one file, so no second exe), and
-  `%APPDATA%\TaskSpaces\taskspaces.cmd` wraps it because PowerShell does not wait for a GUI exe
+  `%APPDATA%\Deskbar\deskbar.cmd` wraps it because PowerShell does not wait for a GUI exe
   (measured: no output, no exit code). Requests run on the UI thread via the dispatcher.
   - Every menu command has a remote twin calling the same `WorkspaceManager` method.
     `ControlUsage` is the one list of them: `help` prints it and a test fails if a dispatched
@@ -125,7 +129,7 @@ object.
     only that. Following the active window stays the default; `--no-follow` is the opt-out.
   - `delete` never closes windows without `--close-windows`. The tray's Manage, updates and
     Exit are deliberately not exposed.
-  - To test it live, `taskspaces.cmd help` against the running build. Move a throwaway window
+  - To test it live, `deskbar.cmd help` against the running build. Move a throwaway window
     you opened yourself, by the hwnd that appeared, with `--no-follow`: a fresh window has
     focus, and without it the move takes Petre's screen along (it did, once).
 
@@ -133,8 +137,8 @@ object.
 
 Every wrong answer in this project has been a guess, and every right one has come from a
 measurement. Three traces exist for that reason, all behind ONE switch: create the marker
-file `%APPDATA%\TaskSpaces\trace.on` and restart. The log is
-`%TEMP%\taskspaces-trace.log`, appended across restarts, and its first line names which
+file `%APPDATA%\Deskbar\trace.on` and restart. The log is
+`%TEMP%\deskbar-trace.log`, appended across restarts, and its first line names which
 switch turned it on. An empty log, or one with no `--- trace on` line, was not recording.
 
 - **Clicks** (`ClickTrace`, #48): press, release, row-up, switch, drag-start, drop. Its own
@@ -179,6 +183,10 @@ all day. Leave them in; this is the third visit to two of these bugs.
   `Dispatcher.Invoke` runs inline, so a rebuild can re-enter itself and double every row.
   Guarded; keep it that way.
 - **Static WPF brushes must be frozen** or they take thread affinity and throw.
+- **A Debug Deskbar build can migrate the real profile.** Until 2.0 is on main, run a Debug
+  Deskbar build on this machine with `DESKBAR_APPDATA` set to a scratch folder, and with the
+  1.x app exited first. Otherwise the first start copies the real `%APPDATA%\TaskSpaces`
+  profile and swaps the autostart value, and the 1.x builds from main stop seeing later changes.
 - An **exact-title rename lapses** the moment the app rewrites its own title. Prefer
   "Rename all *app* windows", which keys on the process.
 
@@ -191,7 +199,7 @@ all day. Leave them in; this is the third visit to two of these bugs.
 - Commit `033f2bd` still carries a colleague's name in its message and is now on `main`, so
   fixing it means rewriting published history. Parked; Petre's call.
 - No UI removes a roster entry (that lived on the deleted Windows tab), so a wrong one needs
-  hand-editing `%APPDATA%\TaskSpaces\state.json`.
+  hand-editing `%APPDATA%\Deskbar\state.json`.
 - `TitleToken.cs` is written and tested but wired to nothing: the "open the editor, then
   load a folder" late-placement idea.
 - `Workspace.Color` has a picker now (#97: the palette, plus a Custom… entry opening
@@ -199,4 +207,6 @@ all day. Leave them in; this is the third visit to two of these bugs.
 - The bar's icon lanes wrap against the bar's own width, so at a narrow width busy rows grow
   TALLER rather than wider. The three-icon floor is divided by the number of screens sharing
   the line, or it clips instead of wrapping (#58 and its regression in 1.8.0).
-- Product name is still a working name.
+- The product name is settled: Deskbar, chosen on 2026-10-18 after a clearance search. The
+  former name, TaskSpaces, and the candidates Spacebar and Virtual Taskbar were rejected. Do
+  not reopen it.

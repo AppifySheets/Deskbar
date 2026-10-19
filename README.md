@@ -1,14 +1,14 @@
 ﻿<p align="center">
-  <img src="docs/branding/taskspaces-mark-256.png" width="128" alt="TaskSpaces" />
+  <img src="docs/branding/deskbar-mark-256.png" width="128" alt="Deskbar" />
 </p>
 
-<h1 align="center">TaskSpaces</h1>
+<h1 align="center">Deskbar</h1>
 
 <p align="center"><em>Group open windows, switch between groups.<br />Windows' virtual desktops, made usable.</em></p>
 
 <p align="center">
   <img src="https://img.shields.io/badge/platform-Windows%2011%20%C2%B7%20x64-0078D4" alt="Platform: Windows 11, x64" />
-  <img src="https://img.shields.io/github/v/release/AppifySheets/TaskSpaces" alt="Latest release" />
+  <img src="https://img.shields.io/github/v/release/AppifySheets/Deskbar" alt="Latest release" />
   <img src="https://img.shields.io/badge/.NET-10-512BD4" alt=".NET 10" />
 </p>
 
@@ -39,13 +39,13 @@ one ringed, the focused window outlined. Icons fade as they recede: full strengt
 dimmer when covered, dimmest when minimised. Click any icon to jump straight to that window from
 anywhere, click it again to put it away; drag it to another row to move the window there.</em></p>
 
-**TaskSpaces is a layer over Windows' own virtual desktops.** Every workspace *is* a real
+**Deskbar is a layer over Windows' own virtual desktops.** Every workspace *is* a real
 virtual desktop, so Windows keeps doing the window management it already does well and
-TaskSpaces adds the parts it never had: names, colours, one chord to switch, rules that put
+Deskbar adds the parts it never had: names, colours, one chord to switch, rules that put
 new windows where they belong, and the bar above, the thing plain virtual desktops cannot
 give you, a view of *every* desktop's windows at once instead of only the one you are on.
 
-Nothing is hidden by trickery, which is the point. Quit TaskSpaces and your windows are still
+Nothing is hidden by trickery, which is the point. Quit Deskbar and your windows are still
 sitting on their desktops, reachable through Task View exactly as before.
 
 > **Windows only, by design rather than by omission.** The whole app is built on Windows'
@@ -64,7 +64,7 @@ ones on your taskbar and the only ones `Alt+Tab` walks through. Everything else 
 still untouched, just not in front of you. Work does not bleed into Personal, a screen share of
 one shows nothing of the others, and a project you are not on today cannot clutter the one you
 are. That separation is Windows' own, not something this app fakes: the taskbar has always
-filtered per desktop, and TaskSpaces simply makes the desktops worth using.
+filtered per desktop, and Deskbar simply makes the desktops worth using.
 
 Switching does not merely filter the taskbar: you come back to a workspace with everything
 still open and still where you put it, because nothing was ever closed or minimised. And
@@ -77,41 +77,60 @@ nothing to rebuild. Workspaces survive reboots.
 **Requirements:** Windows 11 (build 22000 or newer) on x64. Nothing else: the
 download bundles the .NET runtime, so there is no framework to install first.
 
-1. Download the `TaskSpaces-…-win-x64.exe` attached to the
-   [latest release](https://github.com/AppifySheets/TaskSpaces/releases/latest). The file
+<!-- Store badge: fill in PRODUCTID when the listing exists, then take this out of the comment.
+<a href="https://apps.microsoft.com/detail/PRODUCTID"><img src="https://get.microsoft.com/images/en-us%20dark.svg" width="200" alt="Get it from Microsoft Store" /></a>
+-->
+
+1. Download the `Deskbar-…-win-x64.exe` attached to the
+   [latest release](https://github.com/AppifySheets/Deskbar/releases/latest). The file
    carries its version in the name, which is deliberate: two of them can sit side by side
    and you can always tell which one you are running.
-2. Put it somewhere permanent. `C:\Users\<you>\Programs\TaskSpaces\` is a good
+2. Put it somewhere permanent. `C:\Users\<you>\Programs\Deskbar\` is a good
    choice. **Not** your Downloads folder: see the note below.
-3. Double-click it. Nothing appears to happen, because TaskSpaces opens no window at
+3. Double-click it. Nothing appears to happen, because Deskbar opens no window at
    startup; it goes straight to the notification area (the tray). Look for the
    tiled icon there.
 4. **Left-click the tray icon** to open Manage, the main window, and create your first
    workspace. (Right-click gives you Manage, "Check for updates…" and Exit.)
-5. In Manage, tick **Start TaskSpaces with Windows** if you want it always running.
+5. In Manage, tick **Start Deskbar with Windows** if you want it always running.
    The floating bar appears on its own and stays; it is not optional, because it is the
    only surface that lists your windows.
 
-There is no installer yet, and no admin rights are needed. TaskSpaces writes
+There is no installer yet, and no admin rights are needed. Deskbar writes
 nothing outside your own user profile:
 
 | What | Where |
 |---|---|
-| Workspaces, groups, colours, rules, window names, and the bar's size, place and settings | `%APPDATA%\TaskSpaces\state.json` |
-| Time spent per workspace | `%APPDATA%\TaskSpaces\time.json` |
-| "Start with Windows", when enabled | `HKCU\Software\Microsoft\Windows\CurrentVersion\Run` |
+| Workspaces, groups, colours, rules, window names, and the bar's size, place and settings | `%APPDATA%\Deskbar\state.json` |
+| Time spent per workspace | `%APPDATA%\Deskbar\time.json` |
+| "Start with Windows", when enabled | the `Deskbar` value under `HKCU\Software\Microsoft\Windows\CurrentVersion\Run` |
 
 > **Making the bar bigger or smaller.** It draws at 90% by default. Set `"BarScale"` in
-> `state.json` to anything between `0.5` and `2.0` and restart TaskSpaces. There is no
+> `state.json` to anything between `0.5` and `2.0` and restart Deskbar. There is no
 > setting in Manage for it yet.
 
 > **Why the file's location matters.** "Start with Windows" records the *path* of the
 > exe you ran it from. If you later move or delete that file, Windows will keep
-> trying to launch it from the old place and TaskSpaces will silently stop starting.
+> trying to launch it from the old place and Deskbar will silently stop starting.
 > Pick a home for it before enabling that option.
 
 **To uninstall:** untick "Start with Windows", exit from the tray menu, delete the
-exe, and, if you want your settings gone too, delete `%APPDATA%\TaskSpaces`.
+exe, and, if you want your settings gone too, delete `%APPDATA%\Deskbar`.
+
+### Coming from TaskSpaces
+
+Deskbar is TaskSpaces under a new name, from version 2.0. Exit TaskSpaces from its tray icon
+first, then start Deskbar. The first start copies `state.json`, `time.json` and
+`last-used.json` from `%APPDATA%\TaskSpaces` into `%APPDATA%\Deskbar`, so your workspaces,
+names and rules come with you. It also swaps the autostart entry: the `TaskSpaces` value is
+removed and a `Deskbar` one takes its place, so you do not get two bars at the next login.
+The old folder is left where it is, and you can delete `%APPDATA%\TaskSpaces` by hand once you
+are happy.
+
+Rolling back to 1.x is safe because the copy leaves the old files as they were at that moment.
+The copy happens once, so changes you make in 2.0 are not carried back, and a later upgrade
+does not copy again. The autostart value now points at 2.0, so after a rollback untick and
+tick "Start with Windows" in 1.x to point it at the old exe again.
 
 ### "Windows protected your PC"
 
@@ -120,8 +139,8 @@ time you run it. Click **More info → Run anyway**. If that is not acceptable i
 environment, build it from source instead:
 
 ```powershell
-git clone https://github.com/AppifySheets/TaskSpaces.git
-cd TaskSpaces
+git clone https://github.com/AppifySheets/Deskbar.git
+cd Deskbar
 dotnet publish src/TaskSpaces.App/TaskSpaces.App.csproj -c Release -r win-x64 `
   --self-contained true -p:PublishSingleFile=true `
   -p:IncludeNativeLibrariesForSelfExtract=true -p:EnableCompressionInSingleFile=true `
@@ -227,7 +246,7 @@ single ~77 MB exe in `artifacts/publish`.
   order. **Shortcuts** rebinds the one chord. **Time** reports how long you have actually spent
   in each workspace, today, this week and over the last thirty days, by group and by workspace.
   **Rules** holds the auto-assignment and renaming patterns. Along the bottom of the window,
-  outside the tabs, sit the two machine-level settings, "Start TaskSpaces with Windows" and the
+  outside the tabs, sit the two machine-level settings, "Start Deskbar with Windows" and the
   update check, beside the version you are running.
 
   **Manage → Settings** holds the bar's four dials: how faint it goes once the pointer is
@@ -236,7 +255,7 @@ single ~77 MB exe in `artifacts/publish`.
   bar as you drag the slider, so you choose by looking rather than by guessing, and there is
   nothing to save. Fully opaque means it never dims. The hover delay follows Windows' own
   setting unless you untick the box and pick your own.
-- **Updates.** TaskSpaces checks GitHub for a newer release in the background and offers it in
+- **Updates.** Deskbar checks GitHub for a newer release in the background and offers it in
   the tray menu; **Check for updates…** asks immediately. Installing downloads the new exe next
   to the one you are running, tells you what it is doing as it goes, and restarts into it,
   keeping "Start with Windows" pointed at the newest file. Nothing is downloaded until you ask
@@ -264,8 +283,8 @@ single ~77 MB exe in `artifacts/publish`.
   `Win+Ctrl+Tab` was chosen by testing every `*+Tab` chord against Windows: it is the only
   one left unclaimed, and it neighbours `Win+Ctrl+←/→`, which Windows already uses for
   desktops. Change it on Manage → **Shortcuts** if you prefer. Whatever you pick becomes
-  **exclusive** while TaskSpaces runs, so avoid chords other apps need. `Ctrl+Tab` would
-  stop reaching browsers, editors and Explorer. It is the *only* shortcut TaskSpaces
+  **exclusive** while Deskbar runs, so avoid chords other apps need. `Ctrl+Tab` would
+  stop reaching browsers, editors and Explorer. It is the *only* shortcut Deskbar
   registers; everything else is on the bar, one click away.
 - **Renaming.** Give a window a short name so the taskbar shows `RDP` instead of
   `Remote Desktop Manager [server-01 - fhd]`. Right-click an icon for either
@@ -282,10 +301,10 @@ single ~77 MB exe in `artifacts/publish`.
   open something else. Offered for the apps whose titles say so: VS Code and its forks,
   Visual Studio, the JetBrains IDEs and Remote Desktop Manager. Browsers are deliberately
   left out, because a tab title is the page rather than a container. Anything else can take
-  a **title pattern** instead, matching `*taskspaces*` and naming it whatever you like.
+  a **title pattern** instead, matching `*deskbar*` and naming it whatever you like.
 - **Rosters.** A workspace remembers which apps belong to it even when they are closed.
   That memory is what puts a window back where you last had it, rather than wherever it
-  happens to open. TaskSpaces does not relaunch anything for you.
+  happens to open. Deskbar does not relaunch anything for you.
 
   **Folders get their own memory.** Several windows of one app are a single app as far as
   the roster is concerned, so a reboot used to pile every editor window into whichever
@@ -293,13 +312,13 @@ single ~77 MB exe in `artifacts/publish`.
   separately: open that folder again, anywhere, and the window goes to its own workspace.
   You never have to set this up. It learns from where your windows actually sit, once a
   position has held still, and from anything you drag by hand.
-- Scripts and coding agents can drive it. While TaskSpaces runs it keeps a small batch file
-  at `%APPDATA%\TaskSpaces\taskspaces.cmd` that passes a command to the running copy, so an
+- Scripts and coding agents can drive it. While Deskbar runs it keeps a small batch file
+  at `%APPDATA%\Deskbar\deskbar.cmd` that passes a command to the running copy, so an
   agent that has just set up a git worktree can give it a workspace of its own and move the
   editor there:
 
   ```powershell
-  & "$env:APPDATA\TaskSpaces\taskspaces.cmd" move wt-login --create --group EC --title wt-login --wait 20
+  & "$env:APPDATA\Deskbar\deskbar.cmd" move wt-login --create --group EC --title wt-login --wait 20
   ```
 
   Everything the bar's right-click menus do has a command too: renaming and reordering
@@ -309,7 +328,7 @@ single ~77 MB exe in `artifacts/publish`.
   matches the version you have. A few more, with `$ts` standing for the batch file:
 
   ```powershell
-  $ts = "$env:APPDATA\TaskSpaces\taskspaces.cmd"
+  $ts = "$env:APPDATA\Deskbar\deskbar.cmd"
   & $ts workspaces                          # JSON: name, group, row, colour, current
   & $ts create Review --after Services      # beside Services, inside its group
   & $ts reorder Review end                  # to the bottom of its group
@@ -325,7 +344,7 @@ single ~77 MB exe in `artifacts/publish`.
   Insert after. `create` is not an error when the workspace already exists.
 
   `move <workspace>` picks windows with `--title <text>`, which also searches the title a
-  window had before TaskSpaces shortened it, or with `--hwnd <handle>` taken from `windows`.
+  window had before Deskbar shortened it, or with `--hwnd <handle>` taken from `windows`.
   A move is all or nothing: when any selector finds no window, nothing moves and the exit
   code is 3. `--wait` keeps retrying that case, which covers an editor that is still
   opening. Moving the window you are in takes you along, as a drag on the bar does. Add
@@ -337,7 +356,7 @@ single ~77 MB exe in `artifacts/publish`.
 
   The batch file exists because PowerShell does not wait for a windowed program it calls
   directly, so it would get no output and no exit code. From Git Bash or cmd you can also
-  call the exe itself with `ctl <command>`. Exit codes are 0 done, 1 refused, 2 TaskSpaces
+  call the exe itself with `ctl <command>`. Exit codes are 0 done, 1 refused, 2 Deskbar
   is not running, and 3 no window matched.
 
 ## Why this matters
@@ -380,7 +399,7 @@ that returning to the task triggers recall.
 This is the crux of the whole argument. **A window arrangement is externalised mental
 state.** Every open window is a deliberate cue about where you were. So anything that
 scatters the arrangement destroys the cue, and anything that preserves it preserves the
-context for free. TaskSpaces does not help you rebuild context; it stops the context
+context for free. Deskbar does not help you rebuild context; it stops the context
 being demolished.
 
 Which is why it never changes a window's size or where it sits on screen. It does not
@@ -417,7 +436,7 @@ finding.
 
 ### How that maps onto what the app does
 
-| The research says | What TaskSpaces does |
+| The research says | What Deskbar does |
 |---|---|
 | Work is organised in *spheres*, not windows | Workspaces are named, first-class things you switch between |
 | Only 10% of resumptions are fast; the rest are re-finding | A switch restores an entire context at once, with nothing to re-find |
@@ -466,7 +485,7 @@ you do not have.
 
 1. **Cheaper switching is not less switching.** The research suggests *frequency* drives
    the stress. This lowers the cost per switch and may even encourage more of them.
-2. **No study measures TaskSpaces.** Everything above is adjacent research on
+2. **No study measures Deskbar.** Everything above is adjacent research on
    interruption, resumption and window management; the step from "resumption is mostly
    re-finding" to "therefore this helps" is mechanism-level reasoning, not evidence about
    this product.
@@ -514,7 +533,7 @@ you do not have.
 - **Other programs ask the running copy rather than touching anything themselves.** The app
   owns its saved state, the virtual desktops and the window list, so a second process editing
   any of them would race it. It listens on a named pipe that only your own Windows account
-  can open, and `taskspaces.cmd`, or the exe started with `ctl`, sends one command at a time
+  can open, and `deskbar.cmd`, or the exe started with `ctl`, sends one command at a time
   and prints the answer. Commands run on the app's own UI thread, through the same code the
   bar's menus use.
 - Everything is persisted, so your workspaces, groups, window names, colours, the bar's width,
@@ -550,6 +569,12 @@ The `Category=Integration` tests are excluded from that command on purpose: they
 create, switch and delete **real** virtual desktops on the machine running them. Run
 them deliberately, not while you are working.
 
+The C# namespaces, project files and `TaskSpaces.sln` keep their old names on purpose, so the
+commands above are unchanged. Until 2.0 is on main, run a Debug build on a machine that still
+runs TaskSpaces 1.x with the environment variable `DESKBAR_APPDATA` set to a scratch folder.
+Otherwise its first start migrates your real profile. With it set, Deskbar reads and writes
+under that folder instead of `%APPDATA%` and touches no registry value.
+
 ### Releasing
 
 Releases are signed with a code signing certificate whose key lives on a hardware token, so
@@ -578,9 +603,11 @@ Before the first signed release:
    version, and merge it.
 2. In GitHub, open Actions, pick Release, choose Run workflow and enter the version as
    `x.y.z`, with no leading `v`. It has to match `VersionPrefix` at that commit. A draft
-   release `vx.y.z` appears with an unsigned exe.
+   release `vx.y.z` appears with an unsigned exe, named `Deskbar-x.y.z-win-x64.exe`, so
+   `Deskbar-2.0.0-win-x64.exe` for 2.0.0.
 3. On the signing machine, with the token plugged in, run
-   `scripts/sign-release.ps1 -Tag vx.y.z -Thumbprint <thumbprint>`. The token's driver
+   `scripts/sign-release.ps1 -Tag vx.y.z -Thumbprint <thumbprint>`, for 2.0.0
+   `scripts/sign-release.ps1 -Tag v2.0.0 -Thumbprint <thumbprint>`. The token's driver
    prompts for its PIN. The script signs, verifies, uploads and publishes. `-TimestampUrl`
    overrides the timestamp server, and `-NoPublish` uploads the signed exe and leaves the
    release a draft. If an upload or the publish fails, the script keeps the signed files and

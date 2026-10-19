@@ -1,6 +1,8 @@
-# TaskSpaces manual test script (per release)
+# Deskbar manual test script (per release)
 
-Setup: build + run TaskSpaces.App; open Task View to observe desktops.
+Setup: build + run TaskSpaces.App (the project keeps its name; the exe is Deskbar.exe); open
+Task View to observe desktops. Until 2.0 is on main, set `DESKBAR_APPDATA` to a scratch folder
+first so a Debug build does not migrate the real profile.
 
 1.  Tray icon visible; menu lists workspaces + Manage… + Exit.
 2.  Add workspace "Work" -> desktop "Work" exists in Task View.
@@ -39,11 +41,11 @@ Setup: build + run TaskSpaces.App; open Task View to observe desktops.
     back in its workspace. ▶ on the header starts everything missing and switches.
 21. Add app… -> pick an exe + optional args -> appears dimmed in the group;
     Remove from workspace deletes it.
-22. Rename persistence: manually rename a window, exit TaskSpaces, relaunch ->
+22. Rename persistence: manually rename a window, exit Deskbar, relaunch ->
     within ~5s the window is renamed again (same title as before rename required).
 23. Rename sweep: rename a browser window, navigate tabs rapidly -> the short name
     reasserts within ~5s even if an occasional title flip slips through.
-24. Restart TaskSpaces with workspace apps still open -> restore prompt does NOT
+24. Restart Deskbar with workspace apps still open -> restore prompt does NOT
     offer duplicates (only genuinely-missing apps listed).
 25. Hover the tray icon for about half a second -> the switcher panel peeks open
     WITHOUT taking focus (taskbar/whatever app you were using stays highlighted as
@@ -53,7 +55,7 @@ Setup: build + run TaskSpaces.App; open Task View to observe desktops.
     Deactivate-hides when you click elsewhere).
 26. Left-click the tray icon -> the tray MENU opens (same items/behavior as
     right-click); the switcher panel does NOT open from a left-click anymore.
-27. Ctrl+Alt+Right / Ctrl+Alt+Left cycles through TaskSpaces workspaces in the order
+27. Ctrl+Alt+Right / Ctrl+Alt+Left cycles through Deskbar workspaces in the order
     they're defined (not the native Windows desktop order), wrapping from last back
     to first (and vice versa), and skipping any plain OS desktop that isn't a
     workspace.
@@ -61,7 +63,7 @@ Setup: build + run TaskSpaces.App; open Task View to observe desktops.
     workspace (by defined order); Ctrl+Alt+9 with fewer than 9 workspaces does nothing
     (no crash, no message box).
 29. If another application already owns one of these chords (e.g. some machines bind
-    Ctrl+Alt+Left/Right to a display-rotate shortcut), TaskSpaces shows exactly ONE
+    Ctrl+Alt+Left/Right to a display-rotate shortcut), Deskbar shows exactly ONE
     warning message box at startup listing the chord(s) it could not register, and
     every other hotkey it DID register still works normally.
 30. Panel/Windows tab: drag a window row onto another workspace's group -> it moves
@@ -93,7 +95,7 @@ Setup: build + run TaskSpaces.App; open Task View to observe desktops.
     appears in that workspace's row live, without reopening the bar; close it -> the
     icon disappears.
 37. Hover any bar icon -> the info line at the bottom of the bar names that window:
-    full title, then dimmed process · group (· "was: <original title>" if TaskSpaces
+    full title, then dimmed process · group (· "was: <original title>" if Deskbar
     renamed it). Move off the icon -> the line returns to its hint text. The bar must
     NOT resize or jump position while hovering different icons.
 38. Drag a bar icon onto another row -> the row highlights and the info line reads
@@ -107,6 +109,13 @@ Setup: build + run TaskSpaces.App; open Task View to observe desktops.
     not-running roster / ▶ Start list.
 40. A single CLICK on a bar icon (no movement) still jumps to that window — the new
     drag behavior must not swallow plain clicks.
+41. Update from 1.x (use a machine or profile you can afford to migrate, not a scratch
+    `DESKBAR_APPDATA` run): with TaskSpaces 1.x running and "Start with Windows" ticked, take
+    the update from its tray menu. Deskbar starts. Then check four things. The workspaces,
+    groups, colours and window renames match what 1.x showed. In regedit the `TaskSpaces` Run
+    value is gone and `Deskbar` points at the running exe, so a login starts one bar and not
+    two. `%APPDATA%\Deskbar\deskbar.cmd help` prints the command list, and `taskspaces.cmd` is
+    gone from `%APPDATA%\TaskSpaces`. The old folder's `state.json` is still there, untouched.
 
 ## Results (2026-08-01)
 
