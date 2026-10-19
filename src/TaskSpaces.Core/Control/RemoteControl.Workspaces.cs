@@ -138,8 +138,10 @@ public sealed partial class RemoteControl
             ? Result.Success<string?>(null)
             : WorkspacePalette.IsNone(colour)
                 ? Result.Success<string?>(WorkspacePalette.None)
-                : WorkspacePalette.Swatches.TryFirst(s => s.Name.Equals(colour, StringComparison.OrdinalIgnoreCase)) is { HasValue: true } swatch
-                    ? Result.Success<string?>(swatch.Value.Hex)
+                // Named also takes the retired muted names (teal, rust, steel...), as the vivid colour each
+                // became, so scripts written against the old palette keep working (WorkspacePalette.Retired).
+                : WorkspacePalette.Named(colour) is { } swatch
+                    ? Result.Success<string?>(swatch.Hex)
                     : Regex.IsMatch(colour, "^#[0-9A-Fa-f]{6}$")
                         ? Result.Success<string?>(colour.ToUpperInvariant())
                         : Result.Failure<string?>(

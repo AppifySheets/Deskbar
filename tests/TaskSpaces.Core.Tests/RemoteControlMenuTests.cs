@@ -149,7 +149,8 @@ public class RemoteControlMenuTests
     }
 
     [Theory]
-    [InlineData("teal", "#2E7D6B")]
+    [InlineData("aqua", "#19D3B5")]
+    [InlineData("teal", "#19D3B5")] // a retired name, as the vivid colour it became
     [InlineData("#a1b2c3", "#A1B2C3")]
     [InlineData("none", "none")]
     [InlineData("default", null)]
@@ -171,7 +172,7 @@ public class RemoteControlMenuTests
 
         Ok(Run(manager, "color", "Alta2PG", "rust"));
 
-        Assert.Equal("#A8562C", manager.State.Groups.Single().Color);
+        Assert.Equal("#FF5A5F", manager.State.Groups.Single().Color); // rust, retired: now coral
     }
 
     [Fact]
@@ -264,7 +265,7 @@ public class RemoteControlMenuTests
 
         var group = manager.State.Groups.Single();
         Assert.Equal("EuroCredit", group.Name);
-        Assert.Equal("#2F6FA8", group.Color);
+        Assert.Equal("#2FB4FF", group.Color); // steel, retired: now sky
     }
 
     [Fact]
