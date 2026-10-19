@@ -129,8 +129,11 @@ are happy.
 
 Rolling back to 1.x is safe because the copy leaves the old files as they were at that moment.
 The copy happens once, so changes you make in 2.0 are not carried back, and a later upgrade
-does not copy again. The autostart value now points at 2.0, so after a rollback untick and
-tick "Start with Windows" in 1.x to point it at the old exe again.
+does not copy again. The migration removed the `TaskSpaces` autostart value and set a
+`Deskbar` one, so the two need undoing by hand. Before rolling back, untick "Start Deskbar with
+Windows" in 2.0, or delete the `Deskbar` value under
+`HKCU\Software\Microsoft\Windows\CurrentVersion\Run`, or login keeps starting 2.0 beside 1.x.
+Afterwards 1.x shows "Start with Windows" unticked, and ticking it there restores it.
 
 ### "Windows protected your PC"
 
@@ -573,7 +576,9 @@ The C# namespaces, project files and `TaskSpaces.sln` keep their old names on pu
 commands above are unchanged. Until 2.0 is on main, run a Debug build on a machine that still
 runs TaskSpaces 1.x with the environment variable `DESKBAR_APPDATA` set to a scratch folder.
 Otherwise its first start migrates your real profile. With it set, Deskbar reads and writes
-under that folder instead of `%APPDATA%` and touches no registry value.
+under that folder instead of `%APPDATA%` and touches no registry value. It does not let the two
+run together: the check for a running 1.x does not follow the override, so exit TaskSpaces from
+its tray icon before starting the Debug build.
 
 ### Releasing
 

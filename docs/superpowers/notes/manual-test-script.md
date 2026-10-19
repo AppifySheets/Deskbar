@@ -2,7 +2,8 @@
 
 Setup: build + run TaskSpaces.App (the project keeps its name; the exe is Deskbar.exe); open
 Task View to observe desktops. Until 2.0 is on main, set `DESKBAR_APPDATA` to a scratch folder
-first so a Debug build does not migrate the real profile.
+first so a Debug build does not migrate the real profile. The override does not let it run
+beside 1.x: the check for a running 1.x ignores it, so exit the 1.x app from its tray icon first.
 
 1.  Tray icon visible; menu lists workspaces + Manage… + Exit.
 2.  Add workspace "Work" -> desktop "Work" exists in Task View.

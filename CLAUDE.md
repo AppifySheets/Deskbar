@@ -38,7 +38,8 @@ object.
 - **He live-tests continuously** and reports in short fragments, often a screenshot with
   three words. Restart the app after a change so he can see it:
   `src/TaskSpaces.App/bin/Debug/net10.0-windows10.0.19041.0/Deskbar.exe`. Stop the
-  running instance first or the build cannot overwrite it.
+  running instance first or the build cannot overwrite it. Until 2.0 is on main, start it with
+  `DESKBAR_APPDATA` set to a scratch folder and the 1.x app exited, see Traps.
 - **Never push to `main`, never merge.** Branch, PR, wait to be told it merged. Pushing a
   feature branch in order to open a PR is fine; anything beyond that needs asking.
 - **Measure, do not theorise.** Every wrong answer this project has produced was a guess,
@@ -184,8 +185,9 @@ all day. Leave them in; this is the third visit to two of these bugs.
   Guarded; keep it that way.
 - **Static WPF brushes must be frozen** or they take thread affinity and throw.
 - **A Debug Deskbar build can migrate the real profile.** Until 2.0 is on main, run a Debug
-  Deskbar build on this machine with `DESKBAR_APPDATA` set to a scratch folder, and with the
-  1.x app exited first. Otherwise the first start copies the real `%APPDATA%\TaskSpaces`
+  Deskbar build on this machine with `DESKBAR_APPDATA` set to a scratch folder, for example
+  `%TEMP%\deskbar-dev`, and with the 1.x app exited first (the override does not stop the
+  running-1.x check, which uses the old mutex). Otherwise the first start copies the real `%APPDATA%\TaskSpaces`
   profile and swaps the autostart value, and the 1.x builds from main stop seeing later changes.
 - An **exact-title rename lapses** the moment the app rewrites its own title. Prefer
   "Rename all *app* windows", which keys on the process.
