@@ -93,10 +93,14 @@ public partial class FloatingBar
 
     // The two marks around an icon that WithState has already dressed: the count and the ring on top, neither
     // hit-testable, both overlaying the 24 DIP cell so a row measures as before.
-    UIElement WithActivity(UIElement icon, WindowRow row)
+    UIElement WithActivity(UIElement icon, WindowRow row) =>
+        Dressed(icon, tabs?.Of(row.Window.Handle)?.Count ?? 0, sounding.Contains(row.Window.Handle));
+
+    // The dressing itself, pure so a test can measure it: the result must measure exactly what the icon alone
+    // measures, or the row grows (FloatingBarActivityLayoutTests).
+    internal static UIElement Dressed(UIElement icon, int tabCount, bool loud)
     {
-        var count = tabs?.Of(row.Window.Handle)?.Count ?? 0;
-        var loud = sounding.Contains(row.Window.Handle);
+        var count = tabCount;
         if (count < 2 && !loud) return icon;
 
         var cell = new Grid();
@@ -113,7 +117,19 @@ public partial class FloatingBar
                 Margin = new Thickness(0, -6, -3, 0),
                 IsHitTestVisible = false,
             });
-        if (loud) cell.Children.Add(Ring(24));
+        if (loud)
+        {
+            // The ring is drawn at the CELL's size (24), round the button's padding and border, but it sits in
+            // the button's CONTENT, which is the 20 DIP artwork. Left to WPF, the content would grow to the
+            // ring's 24, the button to 28, and the whole line 4 DIP taller the moment a window started
+            // playing (Petre: "when they do, workspace height grows; it has to be same height"). The negative
+            // margin takes the 2 DIP overhang back out of layout on every side, exactly as the tab count's
+            // negative margin above keeps the count from widening the icon, so the ring is painted over the
+            // padding and border without being measured there.
+            var ring = Ring(24);
+            ring.Margin = new Thickness(-2);
+            cell.Children.Add(ring);
+        }
         return cell;
     }
 
