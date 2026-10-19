@@ -23,10 +23,10 @@ public class OwnWindowTests
     readonly FakeStore store = new();
 
     static WindowInfo Ours(nint hwnd = 1) =>
-        new(new WindowHandle(hwnd), OurPid, "TaskSpaces.App", @"C:\apps\TaskSpaces.App.exe", "TaskSpaces: Manage", null);
+        new(new WindowHandle(hwnd), OurPid, "Deskbar", @"C:\apps\Deskbar.exe", "Deskbar: Manage", null);
 
     static WindowInfo Theirs(nint hwnd = 2) =>
-        new(new WindowHandle(hwnd), TheirPid, "notepad", @"C:\windows\notepad.exe", "TaskSpaces: Manage", null);
+        new(new WindowHandle(hwnd), TheirPid, "notepad", @"C:\windows\notepad.exe", "Deskbar: Manage", null);
 
     WorkspaceManager Started() =>
         new WorkspaceManager(desktops, monitor, titles, store, ownProcessId: OurPid) is var manager
@@ -54,7 +54,7 @@ public class OwnWindowTests
     [Fact]
     public void A_rule_never_moves_our_own_window_to_a_workspace()
     {
-        GivenAWorkspaceWithARuleMatching("TaskSpaces");
+        GivenAWorkspaceWithARuleMatching("Deskbar");
         var manager = Started();
 
         monitor.Subject.OnNext(new WindowEvent(WindowEventKind.Appeared, Ours()));
@@ -67,7 +67,7 @@ public class OwnWindowTests
     [Fact]
     public void The_same_rule_still_moves_someone_elses_window()
     {
-        var workspace = GivenAWorkspaceWithARuleMatching("TaskSpaces");
+        var workspace = GivenAWorkspaceWithARuleMatching("Deskbar");
         var manager = Started();
 
         monitor.Subject.OnNext(new WindowEvent(WindowEventKind.Appeared, Theirs()));
@@ -80,7 +80,7 @@ public class OwnWindowTests
     [Fact]
     public void Startup_placement_leaves_our_own_window_where_it_is()
     {
-        GivenAWorkspaceWithARuleMatching("TaskSpaces");
+        GivenAWorkspaceWithARuleMatching("Deskbar");
         monitor.InitialWindows.Add(Ours());
 
         Started();
@@ -95,7 +95,7 @@ public class OwnWindowTests
     [Fact]
     public void A_rename_rule_never_retitles_our_own_window()
     {
-        GivenAWorkspaceWithARuleMatching("TaskSpaces");
+        GivenAWorkspaceWithARuleMatching("Deskbar");
         var manager = Started();
 
         monitor.Subject.OnNext(new WindowEvent(WindowEventKind.Appeared, Ours()));
@@ -121,7 +121,7 @@ public class OwnWindowTests
 
     // --- carve-out 3: never remember ourselves as an app that belongs somewhere ----------
 
-    // Otherwise "▶ Start" would try to relaunch TaskSpaces straight into its own
+    // Otherwise "▶ Start" would try to relaunch Deskbar straight into its own
     // single-instance dialog.
     [Fact]
     public void Dragging_our_own_window_onto_a_workspace_moves_it_but_does_not_roster_it()

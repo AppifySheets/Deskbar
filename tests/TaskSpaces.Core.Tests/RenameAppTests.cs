@@ -143,12 +143,12 @@ public class RenameAppTests
         Assert.Empty(store.Stored.RenameRules);
     }
 
-    // The same carve-out every other rename path has: TaskSpaces never retitles itself, and a
+    // The same carve-out every other rename path has: Deskbar never retitles itself, and a
     // rule keyed on OUR process would otherwise fight WPF for the Manage window's Title.
     [Fact]
     public void Renaming_our_own_app_writes_no_title()
     {
-        var ours = new WindowInfo(new WindowHandle(0x1), 4242, "TaskSpaces.App", @"C:\apps\TaskSpaces.App.exe", "TaskSpaces: Manage", null);
+        var ours = new WindowInfo(new WindowHandle(0x1), 4242, "Deskbar", @"C:\apps\Deskbar.exe", "Deskbar: Manage", null);
         monitor.InitialWindows.Add(ours);
         var manager = Started();
 

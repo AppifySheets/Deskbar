@@ -414,7 +414,7 @@ public class RemoteControlMenuTests
         Assert.Equal(ControlReply.Failed, reply.ExitCode);
         // Written the way it is typed through the batch file, with no `ctl`: following it literally must
         // not send "ctl ctl".
-        Assert.Contains("usage: taskspaces.cmd rename <workspace> <new name>", reply.Output);
+        Assert.Contains("usage: deskbar.cmd rename <workspace> <new name>", reply.Output);
     }
 
     // The brief was every menu command. This pins that help lists them all, so a command added to the

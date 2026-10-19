@@ -49,7 +49,7 @@ public sealed class BarStandIn : Window
 
     public BarStandIn()
     {
-        Title = "TaskSpaces";
+        Title = "Deskbar";
         ShowInTaskbar = true;
         // NOT minimized yet: a window that has never been shown is on no virtual desktop, so it
         // cannot be pinned to all of them, and pinning is what puts this button on every workspace.
@@ -77,7 +77,7 @@ public sealed class BarStandIn : Window
             Background = new SolidColorBrush(Color.FromRgb(0x20, 0x20, 0x20)),
             Child = new TextBlock
             {
-                Text = "TaskSpaces bar is minimized.\nClick to bring it back.",
+                Text = "Deskbar bar is minimized.\nClick to bring it back.",
                 Foreground = Brushes.White,
                 FontSize = 13,
                 TextAlignment = TextAlignment.Center,
@@ -124,7 +124,7 @@ public sealed class BarStandIn : Window
     }
 
     // The X on the taskbar thumbnail. Petre chose "restore the bar" over "exit the app" for it, and
-    // the reason holds on its own: Exit lives in the tray, and a taskbar X that killed TaskSpaces
+    // the reason holds on its own: Exit lives in the tray, and a taskbar X that killed Deskbar
     // would put quitting one stray click away from a button whose whole purpose is to be clicked.
     protected override void OnClosing(System.ComponentModel.CancelEventArgs e)
     {

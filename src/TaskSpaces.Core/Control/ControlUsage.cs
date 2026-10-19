@@ -65,10 +65,10 @@ public static class ControlUsage
 
     public static bool IsVerb(string verb) => All.Any(c => c.Verb == verb);
 
-    // Written the way the usual caller types it: through taskspaces.cmd, which adds `ctl` itself. The
+    // Written the way the usual caller types it: through deskbar.cmd, which adds `ctl` itself. The
     // help used to say "TaskSpaces ctl <command>", and an agent following that literally through the
     // batch file would have sent "ctl ctl". The exe's own form is named once, in the header.
-    const string Caller = "taskspaces.cmd";
+    const string Caller = "deskbar.cmd";
 
     public static string LineFor(string verb) =>
         All.Where(c => c.Verb == verb).Select(c => $"usage: {Caller} {c.Verb} {c.Arguments}".TrimEnd()).FirstOrDefault() ?? "";
@@ -87,13 +87,13 @@ public static class ControlUsage
         named by the hwnd that `windows` prints. Colours: a palette name (indigo, plum, steel, violet,
         teal, orchid, amber, slate, rust), #RRGGBB, none (transparent) or default (by position).
 
-        exit codes: 0 done, 1 refused, 2 TaskSpaces is not running, 3 no window matched
+        exit codes: 0 done, 1 refused, 2 Deskbar is not running, 3 no window matched
         """;
 
     // A blank line between sections, so the menu headings can be found by eye in a terminal.
     public static string Text { get; } =
         $"usage: {Caller} <command> [arguments]\n"
-        + "   (%APPDATA%\\TaskSpaces\\taskspaces.cmd; the exe itself takes the same as: TaskSpaces.exe ctl <command>)\n\n"
+        + "   (%APPDATA%\\Deskbar\\deskbar.cmd; the exe itself takes the same as: Deskbar.exe ctl <command>)\n\n"
         + string.Join("\n\n", Sections.Select(s =>
             $"{s.Title}:\n" + string.Join("\n", s.Commands.Select(c => $"  {(c.Verb + " " + c.Arguments).TrimEnd()}\n      {c.Description}"))))
         + "\n\n" + Footer;

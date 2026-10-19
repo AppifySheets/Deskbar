@@ -4,7 +4,7 @@ using TaskSpaces.Core.Rules;
 
 namespace TaskSpaces.Core.Persistence;
 
-// The single unit of persistence -- everything under %APPDATA%\TaskSpaces\state.json.
+// The single unit of persistence -- everything under %APPDATA%\Deskbar\state.json.
 // Inventory maps workspace id -> the apps that belong to it. It is the workspace half of
 // placement memory: identity -> workspace, written on every placement, read to put a window
 // back where you last had it.
@@ -186,7 +186,7 @@ public sealed record AppState(
     // Petre: "i think ctrl+tab was commonly used for something, give me other something+tab".
     // He was right -- Ctrl+Tab moves between tabs in browsers, VS Code, Rider, Explorer and
     // Office, and a global hotkey is EXCLUSIVE, so binding it takes that away from all of them
-    // for as long as TaskSpaces runs.
+    // for as long as Deskbar runs.
     //
     // Win+Ctrl+Tab was chosen by MEASUREMENT, not by guessing. Every *+Tab candidate was tried
     // against RegisterHotKey on a real machine, and this was the only one whose forward AND
@@ -195,7 +195,7 @@ public sealed record AppState(
     //
     // It also turns out to be the mnemonically right answer. Win+Ctrl is Windows' OWN
     // virtual-desktop prefix -- Win+Ctrl+Left/Right switches desktop, Win+Ctrl+D creates one,
-    // Win+Ctrl+F4 closes one -- and a TaskSpaces workspace IS a virtual desktop. So
+    // Win+Ctrl+F4 closes one -- and a Deskbar workspace IS a virtual desktop. So
     // Win+Ctrl+Tab ("walk them by recent use") lands directly beside Win+Ctrl+arrows ("walk
     // them in order"), which is the association a user already has.
     //

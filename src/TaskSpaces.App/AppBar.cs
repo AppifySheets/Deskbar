@@ -42,7 +42,7 @@ sealed class AppBar
         this.hwnd = hwnd;
         this.onPositionChanged = onPositionChanged;
         this.onFullScreen = onFullScreen;
-        callbackMessage = RegisterWindowMessageW("TaskSpaces.AppBar");
+        callbackMessage = RegisterWindowMessageW("Deskbar.AppBar");
         HwndSource.FromHwnd(hwnd)?.AddHook(Hook);
     }
 

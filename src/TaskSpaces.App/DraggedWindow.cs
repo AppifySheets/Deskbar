@@ -2,7 +2,7 @@ using TaskSpaces.Core.Domain;
 
 namespace TaskSpaces.App;
 
-// ONE OLE drag payload for every TaskSpaces drag surface -- WindowGroupsView rows
+// ONE OLE drag payload for every Deskbar drag surface -- WindowGroupsView rows
 // (switcher panel + Manage Windows tab) and FloatingBar icons. Promoted out of
 // WindowGroupsView (where it started life as a private record) when the floating bar
 // gained icon drag: sharing the format string AND the group-key vocabulary means a drag
@@ -13,7 +13,7 @@ namespace TaskSpaces.App;
 // what makes that no-op guard possible without any extra desktop query at drop time.
 sealed record DraggedWindow(WindowHandle Handle, string SourceGroupKey)
 {
-    internal const string DragFormat = "TaskSpaces.DraggedWindow";
+    internal const string DragFormat = "Deskbar.DraggedWindow";
 
     // Group-key vocabulary, shared verbatim by every surface: 📌 Pinned, a workspace
     // (by workspace id), a plain OS desktop that isn't a workspace (by desktop id --

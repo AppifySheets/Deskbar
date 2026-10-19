@@ -30,7 +30,7 @@ public sealed record Placement(PlacementKind Kind, Guid WorkspaceId)
 // placed in GEPHA workspace" -- happened because Windows' pin is keyed to the HWND, and
 // Beeper is an Electron app that closes to tray, destroying and recreating its window. The
 // pin died with the old handle and the fresh window appeared on whatever desktop was
-// current. Nothing in TaskSpaces recorded the pin, because AppState had nowhere to put it.
+// current. Nothing in the app recorded the pin, because AppState had nowhere to put it.
 //
 // Pure by design (no COM, no OS calls): every fact arrives as AppState, so all the
 // precedence rules below are unit-testable. Same shape as OverviewBuilder.

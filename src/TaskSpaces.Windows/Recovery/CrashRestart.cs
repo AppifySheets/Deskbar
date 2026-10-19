@@ -13,7 +13,7 @@ namespace TaskSpaces.Windows.Recovery;
 // fresh process genuinely recovers from it.
 //
 // WHY NOT A WATCHDOG, which is the obvious shape and was the request's own wording. A loop asking "is
-// TaskSpaces running?" cannot tell a crash from the tray's Exit, so it would either resurrect an app
+// Deskbar running?" cannot tell a crash from the tray's Exit, so it would either resurrect an app
 // he has just deliberately closed or need a "he meant it" flag of its own -- a second piece of state
 // about the app's life, kept outside the app, going stale the moment either side changes. It is also
 // a second process to install, keep alive and explain.

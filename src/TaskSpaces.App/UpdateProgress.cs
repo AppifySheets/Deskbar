@@ -49,7 +49,7 @@ public sealed class UpdateProgress : Window
 
     public UpdateProgress(string version)
     {
-        Title = "TaskSpaces";
+        Title = "Deskbar";
         Width = 380;
         SizeToContent = SizeToContent.Height;
         WindowStartupLocation = WindowStartupLocation.CenterScreen;
@@ -60,7 +60,7 @@ public sealed class UpdateProgress : Window
         Topmost = true;
         Background = new SolidColorBrush(Color.FromRgb(0x1E, 0x1E, 0x1E));
 
-        headline.Text = $"Downloading TaskSpaces {version}…";
+        headline.Text = $"Downloading Deskbar {version}…";
         detail.Text = "";
 
         var body = new StackPanel { Margin = new Thickness(16) };
@@ -90,7 +90,7 @@ public sealed class UpdateProgress : Window
     public void HandingOver(string version)
     {
         bar.IsIndeterminate = true;
-        headline.Text = $"Starting TaskSpaces {version}…";
+        headline.Text = $"Starting Deskbar {version}…";
         // Nothing more to say. A sentence about these windows closing and reopening described what the
         // user is about to watch happen, which is the same note Petre made about the dialog: too much
         // information. The headline and a moving bar are the whole message.

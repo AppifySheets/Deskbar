@@ -6,7 +6,7 @@
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:local="clr-namespace:TaskSpaces.App"
-        Title="TaskSpaces: Manage" Width="720" Height="480"
+        Title="Deskbar: Manage" Width="720" Height="480"
         Icon="pack://application:,,,/Deskbar;component/Assets/deskbar.ico">
     <DockPanel>
         <TextBlock x:Name="CompatBanner" DockPanel.Dock="Top" Background="#FFF4CE" Padding="8"
@@ -35,7 +35,7 @@
                       Checked="OnCheckForUpdatesToggled" Unchecked="OnCheckForUpdatesToggled"/>
         </DockPanel>
         <CheckBox x:Name="StartWithWindows" DockPanel.Dock="Bottom" Margin="8"
-                  Content="Start TaskSpaces with Windows"
+                  Content="Start Deskbar with Windows"
                   Checked="OnStartupToggled" Unchecked="OnStartupToggled"/>
         <!-- Docking the bar as an app bar (AppState.DockBar). Off by default; Petre: "make this a config
              setting and disable by default". Beside the other choices about how the app sits on the
@@ -82,7 +82,7 @@
                         <DockPanel Grid.Column="2">
                             <!-- Petre's open thread: "No UI removes a roster entry (that lived on
                                  the deleted Windows tab), so a wrong one needs hand-editing
-                                 %APPDATA%\TaskSpaces\state.json."
+                                 %APPDATA%\Deskbar\state.json."
                                  The roster is the workspace half of placement memory, so a wrong
                                  entry keeps sending an app to the wrong workspace for as long as
                                  it stands. WorkspaceManager.RemoveRosterEntry has existed and
@@ -102,11 +102,11 @@
             <TabItem Header="Shortcuts">
                 <DockPanel Margin="8">
                     <TextBlock DockPanel.Dock="Top" TextWrapping="Wrap" Margin="0,0,0,12"
-                               Text="Global shortcuts. TaskSpaces registers these with Windows, so a chord it takes is unavailable to every other app while TaskSpaces runs. That is why only the one below is editable, and why the default avoids chords other tools already use."/>
+                               Text="Global shortcuts. Deskbar registers these with Windows, so a chord it takes is unavailable to every other app while Deskbar runs. That is why only the one below is editable, and why the default avoids chords other tools already use."/>
                     <StackPanel>
                         <TextBlock Text="Switch workspaces, Alt+Tab style" FontWeight="Bold"/>
                         <TextBlock TextWrapping="Wrap" Opacity="0.75" Margin="0,2,0,8"
-                                   Text="Hold the modifiers and tap the key to walk workspaces in most-recently-used order; release to switch. Add Shift while walking to go backwards. The default is Win+Ctrl+Tab, which sits beside Windows' own Win+Ctrl+arrows for desktops and is the only *+Tab chord left unclaimed. Whatever you pick becomes exclusive while TaskSpaces runs, so avoid chords other apps need: Ctrl+Tab would stop reaching browsers, editors and Explorer."/>
+                                   Text="Hold the modifiers and tap the key to walk workspaces in most-recently-used order; release to switch. Add Shift while walking to go backwards. The default is Win+Ctrl+Tab, which sits beside Windows' own Win+Ctrl+arrows for desktops and is the only *+Tab chord left unclaimed. Whatever you pick becomes exclusive while Deskbar runs, so avoid chords other apps need: Ctrl+Tab would stop reaching browsers, editors and Explorer."/>
                         <StackPanel Orientation="Horizontal">
                             <TextBox x:Name="SwitcherShortcutBox" Width="220" TextChanged="OnSwitcherShortcutTyped"/>
                             <Button Content="Apply" Margin="8,0,0,0" Padding="12,2" Click="OnApplySwitcherShortcut"/>
@@ -123,7 +123,7 @@
                              one above is now the app's only global chord and there is nothing
                              left to list. -->
                         <TextBlock TextWrapping="Wrap" Opacity="0.75" Margin="0,20,0,0"
-                                   Text="This is the only keyboard shortcut TaskSpaces registers. Everything else is on the floating bar: click a row label to switch to that workspace, click an icon to jump to a window, drag an icon to another row to move it."/>
+                                   Text="This is the only keyboard shortcut Deskbar registers. Everything else is on the floating bar: click a row label to switch to that workspace, click an icon to jump to a window, drag an icon to another row to move it."/>
                     </StackPanel>
                 </DockPanel>
             </TabItem>

@@ -506,7 +506,7 @@ public partial class FloatingBar : Window
     bool docking;
 
     // Docking is a SETTING (AppState.DockBar, off by default; Petre: "make this a config setting and
-    // disable by default"), set in Manage or with `taskspaces.cmd bar dock|undock`. The bar follows it
+    // disable by default"), set in Manage or with `deskbar.cmd bar dock|undock`. The bar follows it
     // whenever the state pulses, and only while it is on screen: a minimized bar has given its strip back
     // and docks again when it is restored (see ShowBar).
     void FollowDockSetting()
@@ -644,7 +644,7 @@ public partial class FloatingBar : Window
     {
         if (SeamOf(hwnd) is not { } seam) return Result.Failure("There is no second screen beside this one to dock between.");
 
-        seamHolder ??= new HwndSource(new HwndSourceParameters("TaskSpaces seam")
+        seamHolder ??= new HwndSource(new HwndSourceParameters("Deskbar seam")
         {
             WindowStyle = unchecked((int)0x80000000), // WS_POPUP, and never WS_VISIBLE
             ExtendedWindowStyle = 0x80,               // WS_EX_TOOLWINDOW
@@ -5976,7 +5976,7 @@ public partial class FloatingBar : Window
 
             // MessageBoxResult.No as the default button, which this dialog did not set while the
             // only thing it could lose was a name.
-            if (MessageBox.Show(this, prompt.Value, "TaskSpaces", MessageBoxButton.YesNo,
+            if (MessageBox.Show(this, prompt.Value, "Deskbar", MessageBoxButton.YesNo,
                     MessageBoxImage.Warning, MessageBoxResult.No) != MessageBoxResult.Yes)
                 return;
 
@@ -6774,5 +6774,5 @@ public partial class FloatingBar : Window
     // Owned by the bar for the same reason PromptDialog.Ask now takes an owner: this window
     // is Topmost, so an unowned message box can open behind it and strand the user with an
     // invisible modal.
-    Result Report(Result result) => result.TapError(err => MessageBox.Show(this, err, "TaskSpaces"));
+    Result Report(Result result) => result.TapError(err => MessageBox.Show(this, err, "Deskbar"));
 }

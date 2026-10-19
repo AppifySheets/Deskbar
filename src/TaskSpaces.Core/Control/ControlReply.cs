@@ -7,7 +7,7 @@ namespace TaskSpaces.Core.Control;
 // named here once and never renumbered:
 //   0  done
 //   1  refused: a bad command line, a missing workspace, a move Windows would not make
-//   2  no running TaskSpaces answered (decided by the client, which is the only side that can know)
+//   2  no running Deskbar answered (decided by the client, which is the only side that can know)
 //   3  a selector matched no window. Nothing was changed. The client's --wait retries on exactly this,
 //      because the usual cause is a window that has been asked for and has not opened yet.
 public sealed record ControlReply(int ExitCode, string Output)

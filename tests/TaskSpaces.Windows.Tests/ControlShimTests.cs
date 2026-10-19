@@ -3,7 +3,7 @@ using TaskSpaces.App;
 
 namespace TaskSpaces.Windows.Tests;
 
-// The batch file the running app leaves at %APPDATA%\TaskSpaces\taskspaces.cmd so other programs have
+// The batch file the running app leaves at %APPDATA%\Deskbar\deskbar.cmd so other programs have
 // one fixed path to call, whatever the exe is named this version. Measured before it was written:
 // PowerShell does not wait for a GUI exe called directly (nothing captured, $LASTEXITCODE empty), and a
 // batch file does, with output and exit code intact. See ControlCommandLine.WriteShim.
@@ -36,7 +36,7 @@ public class ControlShimTests
             ControlCommandLine.WriteShim(folder, @"C:\old\TaskSpaces.exe");
             ControlCommandLine.WriteShim(folder, @"C:\new\TaskSpaces.exe");
 
-            var written = File.ReadAllText(Path.Combine(folder, "taskspaces.cmd"));
+            var written = File.ReadAllText(Path.Combine(folder, "deskbar.cmd"));
             Assert.Contains(@"C:\new\TaskSpaces.exe", written);
             Assert.DoesNotContain(@"C:\old\TaskSpaces.exe", written);
         }

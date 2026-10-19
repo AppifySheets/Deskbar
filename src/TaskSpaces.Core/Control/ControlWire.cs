@@ -13,9 +13,9 @@ namespace TaskSpaces.Core.Control;
 public static class ControlWire
 {
     // Pipe names are machine-wide, unlike the Local\ single-instance mutex, so the login session is in
-    // the name: two users on one PC each reach their own TaskSpaces. The pipe is also created
+    // the name: two users on one PC each reach their own Deskbar. The pipe is also created
     // CurrentUserOnly, which is what actually stops one user driving another's (see ControlPipeServer).
-    public static string PipeName(int sessionId) => $"TaskSpaces.Control.{sessionId}";
+    public static string PipeName(int sessionId) => $"Deskbar.Control.{sessionId}";
 
     sealed record Request(IReadOnlyList<string> Args);
     sealed record Reply(int ExitCode, string Output);

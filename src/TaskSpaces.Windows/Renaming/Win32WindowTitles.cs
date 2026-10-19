@@ -10,7 +10,7 @@ using static NativeMethods;
 /// <summary>
 /// Win32 implementation of IWindowTitles using WM_SETTEXT with a timeout.
 /// Timeouts protect against hung applications that would otherwise block
-/// TaskSpaces indefinitely (SetWindowText would block on an unresponsive window).
+/// Deskbar indefinitely (SetWindowText would block on an unresponsive window).
 /// </summary>
 public sealed class Win32WindowTitles : IWindowTitles
 {

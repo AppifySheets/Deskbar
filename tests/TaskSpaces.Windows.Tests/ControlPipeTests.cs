@@ -7,10 +7,10 @@ using TaskSpaces.Windows.Control;
 namespace TaskSpaces.Windows.Tests;
 
 // The transport under the remote control, over a REAL named pipe: a unique name per test so nothing
-// here can reach the TaskSpaces Petre is running, and nothing touches a desktop or a window.
+// here can reach the Deskbar Petre is running, and nothing touches a desktop or a window.
 public class ControlPipeTests
 {
-    static string UniquePipe() => $"TaskSpaces.Control.Test.{Guid.NewGuid():N}";
+    static string UniquePipe() => $"Deskbar.Control.Test.{Guid.NewGuid():N}";
 
     static readonly TimeSpan Patience = TimeSpan.FromSeconds(10);
 
@@ -34,7 +34,7 @@ public class ControlPipeTests
 
     // Exit code 2 is the client's own conclusion: there is nobody to ask.
     [Fact]
-    public async Task With_no_server_the_client_says_TaskSpaces_is_not_running()
+    public async Task With_no_server_the_client_says_Deskbar_is_not_running()
     {
         var reply = await ControlClient.SendAsync(UniquePipe(), ["windows"], TimeSpan.FromSeconds(1));
 

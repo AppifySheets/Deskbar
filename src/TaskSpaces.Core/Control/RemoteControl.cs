@@ -4,7 +4,7 @@ using TaskSpaces.Core.Domain;
 
 namespace TaskSpaces.Core.Control;
 
-// Commands from OUTSIDE the app: another process asking the running TaskSpaces to do what its menus do.
+// Commands from OUTSIDE the app: another process asking the running Deskbar to do what its menus do.
 //
 // Petre: "i want you to add ability to create workspaces and move windows into them programatically, so
 // that when i have a claude session start working in a new worktree, i can tell it to move the windows

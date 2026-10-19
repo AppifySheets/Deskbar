@@ -43,7 +43,7 @@ public sealed class ShellHookAttentionMonitor : IAttentionMonitor, IDisposable
             // A 0x0 window that is never shown. NOT HWND_MESSAGE (a message-only window):
             // RegisterShellHookWindow wants a real top-level window, and a message-only one is
             // not in the window manager's tree at all.
-            listener = new HwndSource(new HwndSourceParameters("TaskSpaces shell hook listener")
+            listener = new HwndSource(new HwndSourceParameters("Deskbar shell hook listener")
             {
                 Width = 0,
                 Height = 0,

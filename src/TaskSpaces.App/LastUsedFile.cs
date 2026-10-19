@@ -9,7 +9,7 @@ namespace TaskSpaces.App;
 // it, and the app restarts often (every new build swapped in), so without this every restart would make every
 // icon fresh again and hide 15 minutes of aging each time.
 //
-// %APPDATA%\TaskSpaces\last-used.json, written once a minute (a kill skips any exit handler, which is how
+// %APPDATA%\Deskbar\last-used.json, written once a minute (a kill skips any exit handler, which is how
 // builds are swapped), read once at startup. Separate from state.json on purpose: this is volatile, rewritten
 // all day, and worthless after Windows restarts, when no handle in it can match anything.
 static class LastUsedFile

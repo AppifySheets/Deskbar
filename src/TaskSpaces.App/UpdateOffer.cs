@@ -4,7 +4,7 @@ using System.Windows.Media;
 
 namespace TaskSpaces.App;
 
-// "Update TaskSpaces to 1.27.0?", as a window of the app's own rather than a MessageBox. Petre: "when there are
+// "Update Deskbar to 2.0.1?", as a window of the app's own rather than a MessageBox. Petre: "when there are
 // multiple new versions, app shows many popups with all the versions; let's close all previous versions when
 // showing a new version".
 //
@@ -18,10 +18,12 @@ namespace TaskSpaces.App;
 public sealed class UpdateOffer : Window
 {
     // `accept` is the primary button's label ("Update", "Open release page"); `onAccept` runs when it is
-    // pressed. Closing the window any other way is the No.
-    public UpdateOffer(string question, string accept, Action onAccept)
+    // pressed. Closing the window any other way is the No. `alternative` with `onAlternative` adds a
+    // second action button beside it (the Microsoft Store link, once there is a listing); left null, the
+    // window has only the primary button and "Not now".
+    public UpdateOffer(string question, string accept, Action onAccept, string? alternative = null, Action? onAlternative = null)
     {
-        Title = "TaskSpaces";
+        Title = "Deskbar";
         Width = 380;
         SizeToContent = SizeToContent.Height;
         WindowStartupLocation = WindowStartupLocation.CenterScreen;
@@ -49,6 +51,20 @@ public sealed class UpdateOffer : Window
 
         var buttons = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right, Margin = new Thickness(0, 14, 0, 0) };
         buttons.Children.Add(yes);
+
+        // The optional second action, between the primary button and "Not now". Closes the offer first, like
+        // the primary one, so the offer never outlives the choice made in it.
+        if (alternative is not null && onAlternative is not null)
+        {
+            var other = new Button { Content = alternative, Padding = new Thickness(14, 4, 14, 4), Margin = new Thickness(8, 0, 0, 0), MinWidth = 90 };
+            other.Click += (_, _) =>
+            {
+                Close();
+                onAlternative();
+            };
+            buttons.Children.Add(other);
+        }
+
         buttons.Children.Add(no);
 
         var body = new StackPanel { Margin = new Thickness(16) };

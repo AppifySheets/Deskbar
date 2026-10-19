@@ -67,7 +67,7 @@ public sealed class BrowserTabs : IBrowserTabs, IDisposable
 
     public BrowserTabs()
     {
-        worker = new Thread(Work) { IsBackground = true, Name = "TaskSpaces tab counts" };
+        worker = new Thread(Work) { IsBackground = true, Name = "Deskbar tab counts" };
         worker.SetApartmentState(ApartmentState.MTA);
         worker.Start();
     }

@@ -221,7 +221,7 @@ public partial class ManageWindow : Window
     // --- roster (#55) ---------------------------------------------------------------------
     //
     // Petre's open thread: "No UI removes a roster entry (that lived on the deleted Windows tab),
-    // so a wrong one needs hand-editing %APPDATA%\TaskSpaces\state.json."
+    // so a wrong one needs hand-editing %APPDATA%\Deskbar\state.json."
     //
     // The roster is the workspace half of placement memory -- identity (exe path + args) ->
     // workspace, written on every placement and read to put an app back where it was last had --
@@ -304,7 +304,7 @@ public partial class ManageWindow : Window
 
     void OnNestWorkspace(object s, RoutedEventArgs e)
     {
-        if (NestParent.SelectedItem is not Workspace parent) { MessageBox.Show(this, "Pick a workspace to nest under.", "TaskSpaces"); return; }
+        if (NestParent.SelectedItem is not Workspace parent) { MessageBox.Show(this, "Pick a workspace to nest under.", "Deskbar"); return; }
         WithSelectedWorkspace(w => manager.NestWorkspace(w.Id, parent.Id));
     }
 
@@ -426,14 +426,14 @@ public partial class ManageWindow : Window
                 // Null is what "inherit Windows' hover time" means, and it is the reason the checkbox
                 // exists rather than a magic value on the slider.
                 hoverDwellMs: InheritHoverDwell.IsChecked == true ? null : HoverDwellSlider.Value)
-            .TapError(err => MessageBox.Show(this, err, "TaskSpaces"));
+            .TapError(err => MessageBox.Show(this, err, "Deskbar"));
     }
 
     // Clears the stored values rather than writing today's defaults as numbers, which is what keeps a
     // later change of default reaching anyone who pressed this.
     void OnResetAppearance(object sender, RoutedEventArgs e)
     {
-        manager.SetBarAppearance(null, null, null, null).TapError(err => MessageBox.Show(this, err, "TaskSpaces"));
+        manager.SetBarAppearance(null, null, null, null).TapError(err => MessageBox.Show(this, err, "Deskbar"));
         LoadAppearance();
     }
 

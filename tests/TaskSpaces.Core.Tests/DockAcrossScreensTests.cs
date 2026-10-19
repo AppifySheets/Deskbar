@@ -1,7 +1,7 @@
 ﻿namespace TaskSpaces.Core.Tests;
 
 // Docking across the line between two screens (Petre: "so left half is on the left, right on the right, as an
-// option"). A setting the bar follows, like docking itself, so the menu, Manage and `taskspaces.cmd bar across`
+// option"). A setting the bar follows, like docking itself, so the menu, Manage and `deskbar.cmd bar across`
 // all go through one path.
 public class DockAcrossScreensTests
 {

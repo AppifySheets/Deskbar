@@ -16,7 +16,7 @@ namespace TaskSpaces.App;
 // Every stage of a click writes a line, so a failure reads as an absence: a press with no
 // matching switch names the gap between them.
 //
-// OFF unless TASKSPACES_TRACE=1 is in the environment, and the check is a static readonly bool, so
+// OFF unless DESKBAR_TRACE=1 is in the environment, and the check is a static readonly bool, so
 // a normal run pays one branch per call and touches no disk. Left in the tree afterwards rather
 // than stripped: this is the third visit to this bug, and the next one should start with the log
 // rather than with a fresh set of guesses.
@@ -34,11 +34,12 @@ namespace TaskSpaces.App;
 //
 //   1. Turn it on permanently, once, by creating a marker file:
 //
-//          type nul > "%APPDATA%\TaskSpaces\trace.on"
+//          type nul > "%APPDATA%\Deskbar\trace.on"
 //
-//      Then restart TaskSpaces. To turn it off, delete that file and restart.
+//      Then restart Deskbar. To turn it off, delete that file and restart. (Under DESKBAR_APPDATA
+//      the folder is the one AppPaths resolves there instead.)
 //
-//      TASKSPACES_TRACE=1 in the environment also works, but PREFER THE FILE. `setx` writes the
+//      DESKBAR_TRACE=1 in the environment also works, but PREFER THE FILE. `setx` writes the
 //      user-scope value, and a process only ever inherits its parent's environment block as
 //      captured when that parent started -- so anything launched from a shell that predates the
 //      setx runs with tracing OFF while every check of the setting insists it is on. That cost a
@@ -52,7 +53,7 @@ namespace TaskSpaces.App;
 //      was and which workspace -- the log is timestamped and each line names the group, so
 //      "Sparrow, about ten past two" is enough to find it.
 //
-//   3. The log is at  %TEMP%\taskspaces-trace.log  and is appended to across restarts. It is
+//   3. The log is at  %TEMP%\deskbar-trace.log  and is appended to across restarts. It is
 //      small: a handful of lines per click, nothing while idle.
 //
 // READING IT. One click should produce this, in order:
@@ -145,7 +146,7 @@ namespace TaskSpaces.App;
 static class ClickTrace
 {
     // A MARKER FILE beside state.json, or the environment variable. Two switches because the
-    // variable alone cost a reproduction: `setx TASKSPACES_TRACE 1` writes the user-scope value,
+    // variable alone cost a reproduction: `setx DESKBAR_TRACE 1` writes the user-scope value,
     // but a process only ever inherits its PARENT's environment block, captured when that parent
     // started -- so anything launched from a shell that predates the setx runs with tracing off
     // while every check of the setting says it is on. Petre reproduced the slow dialog against a
@@ -154,15 +155,20 @@ static class ClickTrace
     // The file has no such failure mode: it is either there or it is not, and the same check
     // answers for every process on the machine whatever launched it.
     //
-    //     to enable:   type nul > "%APPDATA%\TaskSpaces\trace.on"     (then restart TaskSpaces)
-    //     to disable:  del "%APPDATA%\TaskSpaces\trace.on"
-    static readonly string MarkerPath = Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "TaskSpaces", "trace.on");
+    //     to enable:   type nul > "%APPDATA%\Deskbar\trace.on"     (then restart Deskbar)
+    //     to disable:  del "%APPDATA%\Deskbar\trace.on"
+    //
+    // Through AppPaths, so a build run under DESKBAR_APPDATA looks for its marker in the scratch
+    // root like everything else it keeps, and a marker left in the real profile does not switch it on.
+    static readonly string MarkerPath = Path.Combine(AppPaths.NewStateDir, "trace.on");
+
+    // Named once, because Announce reports which of the two switches turned tracing on.
+    const string EnvironmentSwitch = "DESKBAR_TRACE";
 
     static readonly bool Enabled =
-        Environment.GetEnvironmentVariable("TASKSPACES_TRACE") == "1" || Exists(MarkerPath);
+        Environment.GetEnvironmentVariable(EnvironmentSwitch) == "1" || Exists(MarkerPath);
 
-    static readonly string LogPath = Path.Combine(Path.GetTempPath(), "taskspaces-trace.log");
+    static readonly string LogPath = Path.Combine(Path.GetTempPath(), "deskbar-trace.log");
 
     static readonly Lock Gate = new();
 
@@ -181,7 +187,7 @@ static class ClickTrace
     public static void Announce()
     {
         if (!Enabled) return;
-        Write($"--- trace on (marker={Exists(MarkerPath)}, env={Environment.GetEnvironmentVariable("TASKSPACES_TRACE") == "1"}) pid={Environment.ProcessId} ---");
+        Write($"--- trace on (marker={Exists(MarkerPath)}, env={Environment.GetEnvironmentVariable(EnvironmentSwitch) == "1"}) pid={Environment.ProcessId} ---");
     }
 
     public static void Write(string message)

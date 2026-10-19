@@ -46,7 +46,7 @@ public sealed class HotkeyService : IDisposable
     {
         this.stepRecent = stepRecent;
 
-        source = new HwndSource(new HwndSourceParameters("TaskSpacesHotkeys")
+        source = new HwndSource(new HwndSourceParameters("DeskbarHotkeys")
         {
             WindowStyle = 0,          // no visible-window styles: this hwnd never paints
             Width = 0,

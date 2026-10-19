@@ -115,7 +115,7 @@ public static class IconCache
         // while the PWA loads. So "answers with nothing" was wrong -- it answers with an EMPTY
         // ICON, not a zero handle. Convert succeeded, a blank bitmap was cached as a success,
         // and this retry path -- which only runs when the result is null -- never executed.
-        // Hence: restarting the PWA reproduced it every time, and only restarting TaskSpaces
+        // Hence: restarting the PWA reproduced it every time, and only restarting the app
         // (which empties these dictionaries) cleared it. Convert now rejects blank bitmaps,
         // which is what routes this class of window here at all.
         //

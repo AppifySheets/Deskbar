@@ -8,7 +8,11 @@ namespace TaskSpaces.App;
 public static class StartupRegistration
 {
     const string RunKey = @"Software\Microsoft\Windows\CurrentVersion\Run";
-    const string Name = "TaskSpaces";
+    const string Name = "Deskbar";
+
+    // The value name 1.x wrote. Nothing here reads or writes it: it is named for the rename migration,
+    // which deletes it so that login does not start TaskSpaces 1.x beside Deskbar.
+    internal const string LegacyName = "TaskSpaces";
 
     public static bool IsEnabled =>
         Registry.CurrentUser.OpenSubKey(RunKey)?.GetValue(Name) is not null;
@@ -30,7 +34,7 @@ public static class StartupRegistration
 
     static Result OwnedByThisProcess() =>
         Result.SuccessIf(IsTheApp(Assembly.GetEntryAssembly()?.GetName().Name),
-            "only TaskSpaces itself registers or unregisters its start with Windows");
+            "only Deskbar itself registers or unregisters its start with Windows");
 
     public static Result Enable() =>
         OwnedByThisProcess().Tap(() =>

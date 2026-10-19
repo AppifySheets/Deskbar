@@ -7,7 +7,7 @@ using TaskSpaces.Windows.Control;
 
 namespace TaskSpaces.App;
 
-// `TaskSpaces.exe ctl <command>`: the same exe acting as a client of the copy that is already running.
+// `Deskbar.exe ctl <command>`: the same exe acting as a client of the copy that is already running.
 //
 // Petre: "i want you to add ability to create workspaces and move windows into them programatically, so
 // that when i have a claude session start working in a new worktree, i can tell it to move the windows
@@ -18,7 +18,7 @@ namespace TaskSpaces.App;
 // runtime, and a second thing to keep at the same version as the first. Whoever wants to drive the app
 // finds the exe the way anything finds a running program:
 //
-//   & (Get-Process TaskSpaces* | Select-Object -First 1).Path ctl windows
+//   & (Get-Process Deskbar* | Select-Object -First 1).Path ctl windows
 //
 // Exit codes and output are RemoteControl's; see ControlReply for what each code means.
 static class ControlCommandLine
@@ -28,7 +28,7 @@ static class ControlCommandLine
     public static bool Wants(IReadOnlyList<string> args) =>
         args.Count > 0 && args[0].Equals(Verb, StringComparison.OrdinalIgnoreCase);
 
-    // The pipe this login session's TaskSpaces listens on. One definition shared by both ends.
+    // The pipe this login session's Deskbar listens on. One definition shared by both ends.
     public static string PipeName => ControlWire.PipeName(Process.GetCurrentProcess().SessionId);
 
     // Runs the command and returns the process exit code. Called before anything else in OnStartup:
@@ -65,7 +65,8 @@ static class ControlCommandLine
         writer.WriteLine(reply.Output);
     }
 
-    // %APPDATA%\TaskSpaces\taskspaces.cmd: ONE fixed path that reaches whichever exe is running.
+    // %APPDATA%\Deskbar\deskbar.cmd: ONE fixed path that reaches whichever exe is running. (Under
+    // DESKBAR_APPDATA it is written to that root's Deskbar folder instead; see AppPaths.)
     //
     // Two problems, one file. The release exe is named after its version and can live anywhere, so a
     // caller has no stable name to type. And PowerShell does not wait for a GUI exe it calls directly:
@@ -76,12 +77,12 @@ static class ControlCommandLine
     //
     // Rewritten at every start (only when it would change), so after an update it points at the new
     // exe, and a copy run from somewhere else takes it over while it is the one running.
-    public const string ShimName = "taskspaces.cmd";
+    public const string ShimName = "deskbar.cmd";
 
     public static string ShimContent(string exePath) =>
         string.Join("\r\n",
-            "@rem Written by TaskSpaces at startup; points at the copy that last started. Do not edit.",
-            "@rem Usage: taskspaces help",
+            "@rem Written by Deskbar at startup; points at the copy that last started. Do not edit.",
+            "@rem Usage: deskbar help",
             // %* forwards the arguments exactly as typed, quotes and all. Percent signs in the path are
             // doubled because cmd expands %NAME% even inside quotes.
             $"@\"{exePath.Replace("%", "%%")}\" ctl %*",

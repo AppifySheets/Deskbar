@@ -19,7 +19,7 @@ public class StartupRegistrationTests
 {
     const string RunKey = @"Software\Microsoft\Windows\CurrentVersion\Run";
 
-    static object? RunValue() => Registry.CurrentUser.OpenSubKey(RunKey)?.GetValue("TaskSpaces");
+    static object? RunValue() => Registry.CurrentUser.OpenSubKey(RunKey)?.GetValue("Deskbar");
 
     [Theory]
     [InlineData("Deskbar", true)]

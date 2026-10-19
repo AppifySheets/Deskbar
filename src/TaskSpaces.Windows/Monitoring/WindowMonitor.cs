@@ -56,7 +56,7 @@ public sealed class WindowMonitor : IWindowMonitor, IDisposable
     // Petre: "why isn't the taskspaces window in the floating window? it's clearly open and
     // i can't see it in the floating bar." It wasn't there because Hook() below used to pass
     // WINEVENT_SKIPOWNPROCESS, which made this monitor structurally blind to every window
-    // TaskSpaces owns. That flag is gone, so our Manage window now behaves like any other
+    // the app owns. That flag is gone, so our Manage window now behaves like any other
     // app's window: it appears, it can be jumped to, it can be dragged between workspaces.
     //
     // But "see our windows" must NOT mean "see ALL our windows". The floating bar is itself
@@ -119,7 +119,7 @@ public sealed class WindowMonitor : IWindowMonitor, IDisposable
     }
 
     // WINEVENT_SKIPOWNPROCESS is deliberately NOT passed any more -- see Ignore() above for
-    // why (Petre could not see the TaskSpaces window in his own bar). Our chrome opts out by
+    // why (Petre could not see the app's own window in his own bar). Our chrome opts out by
     // hwnd instead, which is precise; the flag was a blunt instrument that also hid the one
     // window he wanted to see.
     // The window list DRIFTS, and until now nothing ever put it back.

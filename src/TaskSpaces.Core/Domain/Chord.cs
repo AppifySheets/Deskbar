@@ -124,7 +124,7 @@ public readonly record struct Chord(uint Modifiers, uint VirtualKey)
             else return Result.Failure<Chord>($"'{text}' names more than one key.");
 
         if (keyName is null) return Result.Failure<Chord>($"'{text}' is only modifiers, with no key.");
-        if (!Keys.TryGetValue(keyName, out var vk)) return Result.Failure<Chord>($"'{keyName}' is not a key TaskSpaces can bind.");
+        if (!Keys.TryGetValue(keyName, out var vk)) return Result.Failure<Chord>($"'{keyName}' is not a key Deskbar can bind.");
         // A bare key would steal that key from every app on the machine.
         if (modifiers == 0) return Result.Failure<Chord>($"'{text}' needs at least one of Ctrl, Alt, Shift or Win.");
 

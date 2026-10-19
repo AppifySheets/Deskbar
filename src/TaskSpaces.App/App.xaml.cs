@@ -28,7 +28,7 @@ public partial class App : Application
 {
     TaskbarIcon? trayIcon;
     WorkspaceManager? manager;
-    // The remote control's listening end (`TaskSpaces.exe ctl ...` from another process). See
+    // The remote control's listening end (`Deskbar.exe ctl ...` from another process). See
     // ControlCommandLine for the asking end and RemoteControl for the commands.
     ControlPipeServer? controlServer;
     WindowMonitor? monitor;
@@ -47,6 +47,17 @@ public partial class App : Application
     // Held for the whole process lifetime, in a FIELD so the GC cannot collect it and quietly
     // release the lock while we are still running. See OnStartup for why it exists.
     System.Threading.Mutex? singleInstance;
+    // The same guard under the name 1.x used, held beside singleInstance for the process lifetime. A
+    // TaskSpaces 1.x checks only `Local\TaskSpaces.SingleInstance`, so without this a 1.x started while
+    // Deskbar runs would see nobody and put a second bar on screen. Holding a handle is enough for that:
+    // 1.x decides on whether the mutex already EXISTED, not on who owns it. Released wherever
+    // singleInstance is (ReleaseInstanceMutexes).
+    System.Threading.Mutex? legacyInstance;
+    // Whether this process created the old-name mutex and so owns it. False means something else
+    // already held `Local\TaskSpaces.SingleInstance` when this copy took the new name, which, since
+    // every 2.x holds the new name too, is a TaskSpaces 1.x still running. The rename migration reads
+    // it; ReleaseInstanceMutexes reads it because releasing a mutex this thread does not own throws.
+    bool legacyInstanceOwned;
     IVirtualDesktopService? desktops; // Task 11 fix round 4: promoted from a local so PinOwnWindow (below) can reach it from the tray/hover callbacks, not just OnStartup
     bool floatingBarPinned; // Task 11 fix round 4: pin the bar's real hwnd to all desktops exactly once (see PinFloatingBar)
     BarStandIn? standIn;    // #173: the window that owns the taskbar button while the bar is minimized
@@ -186,7 +197,7 @@ public partial class App : Application
         try
         {
             trayIcon!.ShowNotification(
-                title: $"TaskSpaces {release.Version} is available",
+                title: $"Deskbar {release.Version} is available",
                 message: $"You are running {UpdateService.DisplayVersion}. Click here to update.");
             ClickTrace.Write($"update {release.Version} announced: menu item set, balloon requested");
         }
@@ -220,7 +231,7 @@ public partial class App : Application
         // uses. A menu item that closes and then says nothing for two seconds looks like a click
         // that missed.
         var wasTip = trayIcon!.ToolTipText;
-        trayIcon.ToolTipText = "TaskSpaces — checking for updates…";
+        trayIcon.ToolTipText = "Deskbar — checking for updates…";
 
         var latest = await UpdateService.NewerThanRunningAsync().ConfigureAwait(true);
 
@@ -230,7 +241,7 @@ public partial class App : Application
         {
             if (MessageBox.Show(
                     $"Could not check for updates:\n{latest.Error}\n\nOpen the releases page instead?",
-                    "TaskSpaces", MessageBoxButton.YesNo, MessageBoxImage.Warning) == MessageBoxResult.Yes)
+                    "Deskbar", MessageBoxButton.YesNo, MessageBoxImage.Warning) == MessageBoxResult.Yes)
                 OpenUrl(UpdateService.ReleasesPage);
             return;
         }
@@ -239,7 +250,7 @@ public partial class App : Application
         {
             MessageBox.Show(
                 $"You are running {UpdateService.DisplayVersion}, which is the latest version.",
-                "TaskSpaces", MessageBoxButton.OK, MessageBoxImage.Information);
+                "Deskbar", MessageBoxButton.OK, MessageBoxImage.Information);
             return;
         }
 
@@ -251,9 +262,9 @@ public partial class App : Application
         if (!UpdateCheck.CanDownload(release))
         {
             MessageBox.Show(
-                $"TaskSpaces {release.Version} has just been published, but its download is still being built.\n\n" +
-                "It is usually ready a few minutes later, and TaskSpaces will offer it on its own.",
-                "TaskSpaces", MessageBoxButton.OK, MessageBoxImage.Information);
+                $"Deskbar {release.Version} has just been published, but its download is still being built.\n\n" +
+                "It is usually ready a few minutes later, and Deskbar will offer it on its own.",
+                "Deskbar", MessageBoxButton.OK, MessageBoxImage.Information);
             return;
         }
 
@@ -312,7 +323,7 @@ public partial class App : Application
         // github.com/https checks in UpdateCheck.
         if (release.AssetName is null)
         {
-            Ask($"TaskSpaces {release.Version} is available, but this release has no downloadable executable.",
+            Ask($"Deskbar {release.Version} is available, but this release has no downloadable executable.",
                 "Open release page", () => OpenReleasePage(release));
             return;
         }
@@ -329,12 +340,22 @@ public partial class App : Application
         // the download lands beside it, which version is running: facts about how the update is
         // implemented, offered to somebody who is being asked one question. The progress window says what
         // happens next, which is the job it was added for, so this dialog only has to ask.
-        Ask($"Update TaskSpaces to {release.Version}?", "Update", () => DownloadAndRestart(release));
+        //
+        // The one addition is the Microsoft Store, and only once there is a listing to send anyone to
+        // (UpdateService.StoreProductId stays empty until then, and this dialog is exactly as it was).
+        // It is a second button beside Update that opens the listing; "Not now", Esc and the window's X
+        // still only close the offer.
+        var onStore = UpdateService.StoreProductId.Length > 0;
+        Ask($"Update Deskbar to {release.Version}?" + (onStore ? "\n\nAlso on the Microsoft Store." : ""),
+            "Update", () => DownloadAndRestart(release),
+            onStore ? "Microsoft Store" : null, onStore ? () => OpenUrl(UpdateService.StoreLink) : null);
     }
 
-    void Ask(string question, string accept, Action onAccept)
+    // `alternative`/`onAlternative`: an optional second action button between the primary one and "Not now"
+    // (the Store link above); both null, the offer has only the primary button and "Not now".
+    void Ask(string question, string accept, Action onAccept, string? alternative = null, Action? onAlternative = null)
     {
-        openOffer = new UpdateOffer(question, accept, onAccept);
+        openOffer = new UpdateOffer(question, accept, onAccept, alternative, onAlternative);
         openOffer.Closed += (sender, _) => { if (ReferenceEquals(openOffer, sender)) openOffer = null; };
         openOffer.Show();
         openOffer.Activate();
@@ -374,7 +395,7 @@ public partial class App : Application
             // process cannot write to, and downloading by hand works fine.
             if (MessageBox.Show(
                     $"Could not download {release.Version}:\n{downloaded.Error}\n\nOpen the release page instead?",
-                    "TaskSpaces", MessageBoxButton.YesNo, MessageBoxImage.Warning) == MessageBoxResult.Yes)
+                    "Deskbar", MessageBoxButton.YesNo, MessageBoxImage.Warning) == MessageBoxResult.Yes)
                 OpenReleasePage(release);
             return;
         }
@@ -382,8 +403,8 @@ public partial class App : Application
         // RELEASED BEFORE the new process starts, and this is the part that makes the handover work
         // at all. Both instances exist for a moment, and the single-instance guard is the first
         // thing the new one runs -- so a mutex still held here means the new version says
-        // "TaskSpaces is already running" and quits, leaving the user on the old one with no clue
-        // why the update did nothing.
+        // "Deskbar is already running" and quits, leaving the user on the old one with no clue
+        // why the update did nothing. The old-name mutex goes with it, for the same reason.
         //
         // Letting go here rather than relying on the switch below is deliberate: the switch only
         // helps if the version being STARTED understands it, and versions already published do not.
@@ -396,12 +417,7 @@ public partial class App : Application
         // replaced, and an app that disappears without a word looks like a crash rather than a handover.
         progress.HandingOver(release.Version);
 
-        if (singleInstance is { } held)
-        {
-            held.ReleaseMutex();
-            held.Dispose();
-            singleInstance = null;
-        }
+        ReleaseInstanceMutexes();
 
         try
         {
@@ -418,7 +434,7 @@ public partial class App : Application
         {
             MessageBox.Show(
                 $"Downloaded to:\n{downloaded.Value}\n\nbut could not start it:\n{e.Message}\n\nYou can run it yourself.",
-                "TaskSpaces", MessageBoxButton.OK, MessageBoxImage.Warning);
+                "Deskbar", MessageBoxButton.OK, MessageBoxImage.Warning);
             return;
         }
 
@@ -522,7 +538,7 @@ public partial class App : Application
             // No browser registered, or the shell refused. Worth saying, because unlike the background
             // check this one happened because the user just clicked something.
             MessageBox.Show($"Could not open the download page:\n{e.Message}\n\n{url}",
-                "TaskSpaces", MessageBoxButton.OK, MessageBoxImage.Warning);
+                "Deskbar", MessageBoxButton.OK, MessageBoxImage.Warning);
         }
     }
 
@@ -536,7 +552,7 @@ public partial class App : Application
     // DECODED AT 256, and that is the whole of this fix. Petre: "that taskbar icon when i minimize
     // the taskspaces app is kinda small, why?" Measured, rather than guessed at:
     //
-    //   frames in taskspaces.ico:  16 20 24 32 40 48 64 128 256
+    //   frames in deskbar.ico:     16 20 24 32 40 48 64 128 256
     //   what "new BitmapImage(uri)" hands back:  16 x 16
     //
     // A plain BitmapImage takes the FIRST frame of a multi-frame .ico, which is the smallest one, so
@@ -565,7 +581,7 @@ public partial class App : Application
     {
         base.OnStartup(e);
 
-        // `TaskSpaces.exe ctl <command>` is a CLIENT of the running copy, not an app start, so it is
+        // `Deskbar.exe ctl <command>` is a CLIENT of the running copy, not an app start, so it is
         // answered before everything below: before the single-instance guard (this process is a second
         // instance by definition and would be told so), before tracing announces a session, and before
         // any tray icon, hook or window could exist. It asks, prints, and exits with the reply's code.
@@ -580,7 +596,7 @@ public partial class App : Application
         // Petre hit the visible symptom: "TaskSpaces could not register these keyboard
         // shortcuts (another app already owns them)" listing ALL of them. RegisterHotKey is
         // exclusive per chord, and the only thing that would own exactly OUR set is another
-        // copy of TaskSpaces. The failed hotkeys were the least of it though. A second
+        // copy of the app. The failed hotkeys were the least of it though. A second
         // instance also means two tray icons, two rename sweeps fighting over the same
         // windows, two startup placement sweeps, and two processes writing state.json with
         // last-writer-wins -- i.e. silent loss of workspaces or renames.
@@ -598,11 +614,16 @@ public partial class App : Application
         // is what put this line here (see ClickTrace).
         ClickTrace.Announce();
 
-        singleInstance = new System.Threading.Mutex(initiallyOwned: true, @"Local\TaskSpaces.SingleInstance", out var isOnlyInstance);
+        // TWO names since the rename to Deskbar. This one, `Local\Deskbar.SingleInstance`, is the
+        // guard every 2.x checks, and the only one the wait below re-creates. The 1.x name,
+        // `Local\TaskSpaces.SingleInstance`, is taken as well once this copy has won (see
+        // legacyInstance, just after the guard), so a TaskSpaces 1.x started while Deskbar runs still
+        // finds the app already running.
+        singleInstance = new System.Threading.Mutex(initiallyOwned: true, @"Local\Deskbar.SingleInstance", out var isOnlyInstance);
 
         // The other half of "restart into the new version" (#71). The old instance starts this one
         // and then shuts down, so for a moment BOTH exist and the mutex is still held by the
-        // process on its way out -- which the guard below would report as "TaskSpaces is already
+        // process on its way out -- which the guard below would report as "Deskbar is already
         // running", leaving the user with the old version and a confusing dialog.
         //
         // So a build started by an update waits for the previous one to let go, instead of giving
@@ -632,7 +653,7 @@ public partial class App : Application
                 // abandoned-mutex exception rather than a clean acquisition.
                 singleInstance.Dispose();
                 System.Threading.Thread.Sleep(250);
-                singleInstance = new System.Threading.Mutex(initiallyOwned: true, @"Local\TaskSpaces.SingleInstance", out isOnlyInstance);
+                singleInstance = new System.Threading.Mutex(initiallyOwned: true, @"Local\Deskbar.SingleInstance", out isOnlyInstance);
             }
         }
 
@@ -641,12 +662,24 @@ public partial class App : Application
             // Told, not silently exited: a portable exe that appears to do nothing when
             // double-clicked reads as broken, and the icon is easy to miss in a full tray.
             MessageBox.Show(
-                "TaskSpaces is already running.\n\nLook for the tiled icon in the notification area, and click it to open Manage.",
-                "TaskSpaces", MessageBoxButton.OK, MessageBoxImage.Information);
+                "Deskbar is already running.\n\nLook for the tiled icon in the notification area, and click it to open Manage.",
+                "Deskbar", MessageBoxButton.OK, MessageBoxImage.Information);
             singleInstance = null; // not ours to release
             Shutdown();
             return;
         }
+
+        // The 1.x name, `Local\TaskSpaces.SingleInstance`, held for the rest of the process's life
+        // beside the new one. TaskSpaces 1.x checks only this name, and decides on whether it already
+        // EXISTS, so holding it is what makes a 1.x started while Deskbar runs say "already running"
+        // instead of putting a second bar on screen.
+        //
+        // Taken AFTER the guard above, not beside the first mutex, so its answer means one thing. By
+        // now this copy owns the new name, and any copy on its way out (an update's predecessor, a
+        // crashed copy being dumped) has let go of both, so the old name still being held can only be
+        // a TaskSpaces 1.x running right now. legacyInstanceOwned keeps that answer for the rename
+        // migration; nothing else here acts on it.
+        legacyInstance = new System.Threading.Mutex(initiallyOwned: true, @"Local\TaskSpaces.SingleInstance", out legacyInstanceOwned);
 
         // AFTER the single-instance guard, deliberately: a second copy that is about to tell the
         // user it is already running has no business rewriting where startup points. Only the
@@ -716,10 +749,10 @@ public partial class App : Application
             // waits would hold the restart hostage to someone clicking OK, and the bar disappearing
             // and coming back says what happened without one.
             if (RelaunchAfterCrash(args.Exception))
-                Environment.FailFast($"TaskSpaces crashed and started its successor: {args.Exception.Message}", args.Exception);
+                Environment.FailFast($"Deskbar crashed and started its successor: {args.Exception.Message}", args.Exception);
 
-            MessageBox.Show($"TaskSpaces hit an unexpected error and must close:\n{args.Exception.Message}",
-                "TaskSpaces", MessageBoxButton.OK, MessageBoxImage.Error);
+            MessageBox.Show($"Deskbar hit an unexpected error and must close:\n{args.Exception.Message}",
+                "Deskbar", MessageBoxButton.OK, MessageBoxImage.Error);
             args.Handled = false; // let it die -- titles are already restored
         };
 
@@ -729,7 +762,8 @@ public partial class App : Application
         // are left as they are, and the successor re-applies them.
         AppDomain.CurrentDomain.UnhandledException += (_, args) => RelaunchAfterCrash(args.ExceptionObject as Exception);
 
-        var stateDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "TaskSpaces");
+        // %APPDATA%\Deskbar, or the same folder under DESKBAR_APPDATA when that is set (see AppPaths).
+        var stateDir = AppPaths.NewStateDir;
         var statePath = Path.Combine(stateDir, "state.json");
         // The trace explains the "Unplaced" row: why a window's desktop could not be resolved.
         desktops = new VirtualDesktopService(ClickTrace.On ? ClickTrace.Write : null);
@@ -777,8 +811,8 @@ public partial class App : Application
             // tray menu and Manage window a read-only view of what's on disk.
             manager.LoadState()
                 .TapError(err => MessageBox.Show(
-                    $"TaskSpaces could not load your saved workspaces:\n{err}\n\nStarting with an empty list.",
-                    "TaskSpaces", MessageBoxButton.OK, MessageBoxImage.Warning));
+                    $"Deskbar could not load your saved workspaces:\n{err}\n\nStarting with an empty list.",
+                    "Deskbar", MessageBoxButton.OK, MessageBoxImage.Warning));
         }
         else
         {
@@ -800,8 +834,8 @@ public partial class App : Application
                 started = manager.Start();
                 if (started.IsFailure)
                     MessageBox.Show(
-                        $"TaskSpaces failed to start even after backing up state.json:\n{started.Error}",
-                        "TaskSpaces", MessageBoxButton.OK, MessageBoxImage.Error);
+                        $"Deskbar failed to start even after backing up state.json:\n{started.Error}",
+                        "Deskbar", MessageBoxButton.OK, MessageBoxImage.Error);
             }
 
             // The aging icons' stamps from before this restart, then saved every minute (LastUsedFile).
@@ -816,14 +850,14 @@ public partial class App : Application
             // sees every window when it in fact sees none. Never fatal (v1 can limp along
             // with manual "Refresh" in Manage), but never silent either.
             monitor.Start().TapError(err => MessageBox.Show(
-                $"TaskSpaces: window monitoring is unavailable:\n{err}\n\nRules, auto-renaming and the window list will not update automatically.",
-                "TaskSpaces", MessageBoxButton.OK, MessageBoxImage.Warning));
+                $"Deskbar: window monitoring is unavailable:\n{err}\n\nRules, auto-renaming and the window list will not update automatically.",
+                "Deskbar", MessageBoxButton.OK, MessageBoxImage.Warning));
 
             // Deliberately quieter than the failure above: losing the shell hook costs one
             // decoration on the icons, while losing WinEvents costs the window list itself.
             // Worth a line in the debugger, not a dialog interrupting Petre at startup.
             attentionMonitor.Start().TapError(err =>
-                System.Diagnostics.Debug.WriteLine($"TaskSpaces: notification badges unavailable: {err}"));
+                System.Diagnostics.Debug.WriteLine($"Deskbar: notification badges unavailable: {err}"));
         }
 
         // The remote control: other processes (an agent setting up a worktree, a script) asking this
@@ -836,7 +870,7 @@ public partial class App : Application
         // bar's rebuild is already guarded against one kind of re-entrancy; this adds no new kind).
         //
         // Opened in compatibility mode too: the listings still answer there, and a move that cannot be
-        // made says so, which beats "TaskSpaces is not running" while its tray icon is in plain view.
+        // made says so, which beats "Deskbar is not running" while its tray icon is in plain view.
         // `bar minimize|restore` goes through the same two methods as the tray's toggle, and asks the
         // same question first: minimizing a bar that is already minimized would raise a second stand-in.
         // Read when a command arrives, not now, because the bar does not exist yet at this point.
@@ -859,7 +893,7 @@ public partial class App : Application
 
         // ...and the fixed path callers use to reach it (see ControlCommandLine.WriteShim for why it is
         // a batch file). Traced, not surfaced: losing it costs the convenience path, not the control.
-        try { ControlCommandLine.WriteShim(stateDir, Environment.ProcessPath ?? ""); }
+        try { ControlCommandLine.WriteShim(AppPaths.NewStateDir, Environment.ProcessPath ?? ""); }
         catch (Exception ex) { ClickTrace.Write($"control shim not written: {ex.Message}"); }
 
         trayIcon = new TaskbarIcon
@@ -870,7 +904,7 @@ public partial class App : Application
             // GDI+ historically does not. Same file the exe is stamped with, so tray,
             // taskbar and window icons cannot drift apart.
             IconSource = AppIcon,
-            ToolTipText = compatibilityMode ? "TaskSpaces (compatibility mode)" : "TaskSpaces",
+            ToolTipText = compatibilityMode ? "Deskbar (compatibility mode)" : "Deskbar",
             ContextMenu = TrayMenu.Build(compatibilityMode, OpenManage, ExitApp, CheckForUpdateNow, null, BarToggle()),
             // Petre: "left click gives us the main window, right click gives exit and
             // manage". RightClick only, so a left-click is free to open Manage (wired
@@ -1083,8 +1117,8 @@ public partial class App : Application
             if (hotkeys.Failures.Count > 0)
                 MessageBox.Show(
                     string.Join("\n", hotkeys.Failures)
-                    + "\n\nTaskSpaces will keep running. Pick a different chord on Manage → Shortcuts.",
-                    "TaskSpaces", MessageBoxButton.OK, MessageBoxImage.Warning);
+                    + "\n\nDeskbar will keep running. Pick a different chord on Manage → Shortcuts.",
+                    "Deskbar", MessageBoxButton.OK, MessageBoxImage.Warning);
         }
 
         // Safety-net sweep (spec §5): event-driven handling is the fast path, this is the
@@ -1236,9 +1270,9 @@ public partial class App : Application
         }
 
         MessageBox.Show(
-            $"TaskSpaces found a corrupted state file and could not load your saved workspaces:\n{loadError}\n\n" +
+            $"Deskbar found a corrupted state file and could not load your saved workspaces:\n{loadError}\n\n" +
             "The corrupted file was backed up (state.json.bak) rather than deleted. Starting fresh.",
-            "TaskSpaces", MessageBoxButton.OK, MessageBoxImage.Warning);
+            "Deskbar", MessageBoxButton.OK, MessageBoxImage.Warning);
     }
 
     // SINGLE INSTANCE, which matters now that a left-click opens this: the old version built
@@ -1293,8 +1327,8 @@ public partial class App : Application
         floatingBarPinned = true;
         desktops!.Pin(new WindowHandle(hwnd))
             .TapError(err => MessageBox.Show(
-                $"TaskSpaces could not pin the floating bar to every workspace:\n{err}\n\nIt will only stay visible on the desktop it was shown on.",
-                "TaskSpaces", MessageBoxButton.OK, MessageBoxImage.Warning));
+                $"Deskbar could not pin the floating bar to every workspace:\n{err}\n\nIt will only stay visible on the desktop it was shown on.",
+                "Deskbar", MessageBoxButton.OK, MessageBoxImage.Warning));
     }
 
     // --- minimizing the bar to a taskbar button (#173) --------------------------------------
@@ -1417,7 +1451,7 @@ public partial class App : Application
         // A chord another app already owns is worth saying out loud: this is a change Petre
         // just made by hand, so silence would read as "applied" when nothing was.
         hotkeys!.BindSwitcher(boundSwitcher)
-            .TapError(err => MessageBox.Show(err, "TaskSpaces", MessageBoxButton.OK, MessageBoxImage.Warning));
+            .TapError(err => MessageBox.Show(err, "Deskbar", MessageBoxButton.OK, MessageBoxImage.Warning));
     }
 
     void ExitApp()
@@ -1441,12 +1475,32 @@ public partial class App : Application
         // Released explicitly on the orderly exit path so a relaunch a moment later is never
         // refused. Windows would release it at process death anyway; being deterministic here
         // costs one line and removes any doubt about ordering.
+        ReleaseInstanceMutexes();
+        Shutdown();
+    }
+
+    // Lets go of both single-instance mutexes, the new name and the old one, on the two ways this copy
+    // stands down on purpose: the tray's Exit and the handover to an update. One method so the two
+    // names can never be released on one path and forgotten on the other.
+    //
+    // ReleaseMutex only for a mutex this process OWNS. singleInstance is always owned by the time it is
+    // set (the guard in OnStartup nulls it otherwise), but the old name may have been held by a 1.x
+    // when this copy opened it, and releasing a mutex the thread does not own throws.
+    void ReleaseInstanceMutexes()
+    {
         if (singleInstance is { } held)
         {
             held.ReleaseMutex();
             held.Dispose();
             singleInstance = null;
         }
-        Shutdown();
+
+        if (legacyInstance is { } legacy)
+        {
+            if (legacyInstanceOwned) legacy.ReleaseMutex();
+            legacy.Dispose();
+            legacyInstance = null;
+            legacyInstanceOwned = false;
+        }
     }
 }

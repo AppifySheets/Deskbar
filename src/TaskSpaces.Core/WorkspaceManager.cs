@@ -14,7 +14,7 @@ using TaskSpaces.Core.Rules;
 
 namespace TaskSpaces.Core;
 
-// The heart of TaskSpaces: subscribes to window lifecycle events and applies the
+// The heart of Deskbar: subscribes to window lifecycle events and applies the
 // data-flow from the spec --
 //   Appeared      -> workspace rule -> move to desktop -> add/move roster entry
 //   Appeared      -> rename rule    -> apply short name (ledger keeps the original)
@@ -751,7 +751,7 @@ public sealed class WorkspaceManager(
         detached.Remove(window.Handle);
 
         // Both container facts are about a LIVE window, and hwnd recycling is the reason they go here
-        // rather than on Hidden: a recycled handle inheriting "this window has TaskSpaces open" would
+        // rather than on Hidden: a recycled handle inheriting "this window has Deskbar open" would
         // send an unrelated window across the machine. Hidden deliberately keeps them, because a window
         // minimised to the tray has not forgotten what it has loaded, and the persisted home is what
         // carries the answer across restarts anyway.
@@ -808,7 +808,7 @@ public sealed class WorkspaceManager(
     // says why instead of appearing to do nothing.
     Result ApplyRename(WindowInfo window, string shortName) =>
         IsOurs(window.Handle)
-            ? Result.Failure("TaskSpaces does not rename its own windows.")
+            ? Result.Failure("Deskbar does not rename its own windows.")
             : titles.Set(window.Handle, shortName)
                 .Tap(() => ledger = ledger.Apply(window.Handle, window.Title, shortName));
 
@@ -1700,7 +1700,7 @@ public sealed class WorkspaceManager(
             : Result.Success().Tap(() => Persist(State with { CheckForUpdates = enabled }));
 
     // The docking setting (AppState.DockBar). The bar follows it from the pulse Persist sends, so Manage,
-    // `taskspaces.cmd bar dock|undock` and anything else that sets it all go through one path. A no-op
+    // `deskbar.cmd bar dock|undock` and anything else that sets it all go through one path. A no-op
     // when unchanged, for the reason SetCheckForUpdates gives.
     public Result SetDockBar(bool docked) =>
         State.DockBar == docked
@@ -2456,7 +2456,7 @@ public sealed class WorkspaceManager(
                     // same reason. His file is what makes this concrete: it holds
                     // {Code, OriginalTitle "VSC", ShortName "SPS"}, a rename keyed on a title the app had
                     // already written itself. That entry can still fire, because ReapplyRenames adopts a
-                    // persisted rename for any window whose CURRENT title matches -- so after TaskSpaces
+                    // persisted rename for any window whose CURRENT title matches -- so after Deskbar
                     // is killed, leaving "VSC" on screen, the next start would put "SPS" back on windows
                     // that are supposed to be named after their folders.
                     PersistedRenames = on
@@ -2733,7 +2733,7 @@ public sealed class WorkspaceManager(
                 RememberPlacement(window, pinned: false);
             });
 
-    // TaskSpaces' own windows, now that WindowMonitor reports them (it used to hook with
+    // Deskbar's own windows, now that WindowMonitor reports them (it used to hook with
     // WINEVENT_SKIPOWNPROCESS, which is why the Manage window was missing from the bar).
     //
     // They are shown, jumped to and dragged like any other window. What they are exempt
@@ -2747,7 +2747,7 @@ public sealed class WorkspaceManager(
     //                  Title, and a ledger entry for a window we control is a loop waiting
     //                  to happen.
     //   RosterAdd /    we never remember ourselves as an app that BELONGS to a workspace.
-    //   EntryFor       Otherwise "▶ Start" would try to relaunch TaskSpaces and hit its own
+    //   EntryFor       Otherwise "▶ Start" would try to relaunch Deskbar and hit its own
     //                  single-instance guard, and PlacementMemory would try to re-place us
     //                  at every startup.
     //
@@ -2964,7 +2964,7 @@ public sealed class WorkspaceManager(
         Result.FailureIf(string.IsNullOrWhiteSpace(pattern),
                 "There is nothing to match. A pattern of \"*\" on its own would rename every window on the machine.")
             .Bind(() => Result.FailureIf(pattern.Trim() == "*",
-                "\"*\" on its own matches every window on the machine. Narrow it, as in \"*taskspaces*\"."))
+                "\"*\" on its own matches every window on the machine. Narrow it, as in \"*deskbar*\"."))
             .Bind(() => Result.FailureIf(string.IsNullOrWhiteSpace(shortName), "A name is required."))
             .Bind(() => AddRule(new RenameRule(RuleMatchKind.TitleRegex, RenamePattern.ToRegex(pattern), shortName.Trim())));
 
@@ -3408,7 +3408,7 @@ public sealed class WorkspaceManager(
         if (window.ProcessPath is null) return; // elevated/inaccessible: nothing relaunchable to remember
         // Never roster OURSELVES (see IsOurs). Dragging the Manage window onto a workspace
         // row is allowed -- it is an explicit act, and moving a window between desktops is
-        // harmless -- but recording TaskSpaces as an app that BELONGS to that workspace
+        // harmless -- but recording Deskbar as an app that BELONGS to that workspace
         // would make "▶ Start" relaunch it into its own "already running" dialog.
         if (IsOurs(window.Handle)) return;
         // The shell is not an app that lives anywhere: see RosterIdentity.IsShell. Refused on the WAY
@@ -3470,7 +3470,7 @@ public sealed class WorkspaceManager(
     // The roster-shaped record of a live window: original title where we renamed it, so
     // state.json keeps showing what Petre would recognise rather than our short name.
     //
-    // None for our OWN windows (see IsOurs), which is what keeps TaskSpaces out of
+    // None for our OWN windows (see IsOurs), which is what keeps Deskbar out of
     // PinnedApps/DetachedApps: pinning the Manage window by hand still pins it in Windows,
     // it just isn't remembered as a standing instruction to re-pin us at every launch.
     //
@@ -3498,7 +3498,7 @@ public sealed class WorkspaceManager(
         _ => Result.Success().Tap(() => detached.Add(window.Handle)),
     };
 
-    // Windows already open when TaskSpaces starts never pass through OnAppeared -- Start()
+    // Windows already open when Deskbar starts never pass through OnAppeared -- Start()
     // only recorded them into knownWindows -- so nothing had ever placed them. That was two
     // gaps at once: rules never touched pre-existing windows, and the roster (which is the
     // workspace half of placement memory) was never consulted at all. Petre: "when starting
@@ -3521,7 +3521,7 @@ public sealed class WorkspaceManager(
             //
             // This is also what keeps the snapshot in SnapshotContainerHomes honest: a pile left by a
             // reboot is corrected HERE, before any sweep has had two chances to believe it. Without the
-            // exemption, TaskSpaces restarting into a pile would learn the pile as the answer.
+            // exemption, Deskbar restarting into a pile would learn the pile as the answer.
             .ForEach(window => ContainerPlacement(window)
                 .Or(() => Remembered(window).Map(placement => new Decision(placement, Roster: true))
                     .Where(decided => SafeToRestore(window, decided.Placement)))

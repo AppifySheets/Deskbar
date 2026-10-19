@@ -5,7 +5,7 @@ using TaskSpaces.Core.Control;
 
 namespace TaskSpaces.Windows.Control;
 
-// The asking end of the remote control: what `TaskSpaces.exe ctl ...` does instead of starting the app.
+// The asking end of the remote control: what `Deskbar.exe ctl ...` does instead of starting the app.
 //
 // It forwards the command line verbatim and prints what comes back (see ControlWire for why the client
 // does not parse commands itself). The two things it does decide on its own are the two things only it
@@ -14,7 +14,7 @@ namespace TaskSpaces.Windows.Control;
 public static class ControlClient
 {
     // How long to wait for the running app to accept the connection. Short, because the usual reason for
-    // no answer is that TaskSpaces is not running, and an agent should hear that quickly.
+    // no answer is that Deskbar is not running, and an agent should hear that quickly.
     static readonly TimeSpan ConnectTimeout = TimeSpan.FromSeconds(2);
 
     // How long to wait for the reply once connected. Generous, because a move runs on the app's UI thread
@@ -48,7 +48,7 @@ public static class ControlClient
     public static async Task<ControlReply> SendAsync(string pipeName, IReadOnlyList<string> args, TimeSpan connectTimeout)
     {
         // CurrentUserOnly on the client too: it refuses a pipe of this name owned by someone else, so a
-        // process squatting on the name cannot answer in TaskSpaces' place.
+        // process squatting on the name cannot answer in Deskbar's place.
         await using var pipe = new NamedPipeClientStream(".", pipeName, PipeDirection.InOut,
             PipeOptions.Asynchronous | PipeOptions.CurrentUserOnly);
         try
@@ -58,7 +58,7 @@ public static class ControlClient
         catch (TimeoutException)
         {
             return new ControlReply(ControlReply.NotRunning,
-                "TaskSpaces is not running (nothing answered on its control pipe). Start it and try again.");
+                "Deskbar is not running (nothing answered on its control pipe). Start it and try again.");
         }
 
         try
@@ -72,15 +72,15 @@ public static class ControlClient
             var line = await reader.ReadLineAsync(timeout.Token).ConfigureAwait(false);
             return ControlWire.DecodeReply(line).Match(
                 reply => reply,
-                error => ControlReply.Fail($"TaskSpaces sent a reply that could not be read: {error}"));
+                error => ControlReply.Fail($"Deskbar sent a reply that could not be read: {error}"));
         }
         catch (OperationCanceledException)
         {
-            return ControlReply.Fail($"TaskSpaces accepted the request but did not answer within {ReplyTimeout.TotalSeconds:0} seconds.");
+            return ControlReply.Fail($"Deskbar accepted the request but did not answer within {ReplyTimeout.TotalSeconds:0} seconds.");
         }
         catch (IOException e)
         {
-            return ControlReply.Fail($"The connection to TaskSpaces broke: {e.Message}");
+            return ControlReply.Fail($"The connection to Deskbar broke: {e.Message}");
         }
     }
 }

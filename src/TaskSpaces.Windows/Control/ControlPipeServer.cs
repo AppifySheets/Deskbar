@@ -41,7 +41,7 @@ public sealed class ControlPipeServer : IDisposable
         {
             try
             {
-                // maxNumberOfServerInstances: 1, so a second TaskSpaces can never answer alongside this
+                // maxNumberOfServerInstances: 1, so a second Deskbar can never answer alongside this
                 // one. During an update restart the new instance meets the old one's pipe for a moment;
                 // creating it throws, the catch below waits a second, and it gets the name once the old
                 // process has gone.
@@ -76,7 +76,7 @@ public sealed class ControlPipeServer : IDisposable
         var line = await reader.ReadLineAsync(timeout.Token).ConfigureAwait(false);
         var reply = await ControlWire.DecodeRequest(line).Match(
             args => Invoke(handle, args),
-            error => Task.FromResult(ControlReply.Fail($"TaskSpaces could not read the request: {error}"))).ConfigureAwait(false);
+            error => Task.FromResult(ControlReply.Fail($"Deskbar could not read the request: {error}"))).ConfigureAwait(false);
 
         await writer.WriteLineAsync(ControlWire.EncodeReply(reply).AsMemory(), timeout.Token).ConfigureAwait(false);
         // Without this the reply can still be in the pipe's buffer when the stream is disposed, and the
@@ -94,7 +94,7 @@ public sealed class ControlPipeServer : IDisposable
         }
         catch (Exception e)
         {
-            return ControlReply.Fail($"TaskSpaces failed while running the command: {e.Message}");
+            return ControlReply.Fail($"Deskbar failed while running the command: {e.Message}");
         }
     }
 

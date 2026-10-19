@@ -7,7 +7,7 @@ namespace TaskSpaces.Windows.Monitoring;
 //
 //   WMI whole-table query: STILL RUNNING after 90016ms (wedged)
 //
-// Winmgmt had not recovered from the resume. TaskSpaces asks it for a process's command line on the
+// Winmgmt had not recovered from the resume. Deskbar asks it for a process's command line on the
 // DISPATCHER THREAD -- once at startup for every process, and per window whenever the fast path
 // (ProcessCommandLine, read straight out of the process's memory) is denied. A service that never
 // answers therefore freezes the bar: his log shows a 12.4-second rebuild at the moment of resume and

@@ -20,13 +20,25 @@ public static class UpdateService
     // Directory.Build.props. Hard-coded rather than read from the assembly: this is the one place
     // the app talks to the internet, and where it talks to should be visible in the source rather
     // than assembled at runtime from metadata a build could change.
-    const string LatestRelease = "https://api.github.com/repos/AppifySheets/TaskSpaces/releases/latest";
+    //
+    // The repository was renamed to Deskbar on GitHub before 2.0 shipped. GitHub redirects the old
+    // URL too, which is how the 1.x checkers still find 2.0; this one asks the new name directly.
+    const string LatestRelease = "https://api.github.com/repos/AppifySheets/Deskbar/releases/latest";
 
     // Where to send someone when the API cannot be reached at all (#110's manual check): the same
     // repo, its human-readable half. A separate constant beside the endpoint rather than derived from
     // it, because deriving one URL from another by string surgery is how a browser ends up opening
     // api.github.com.
-    public const string ReleasesPage = "https://github.com/AppifySheets/TaskSpaces/releases/latest";
+    public const string ReleasesPage = "https://github.com/AppifySheets/Deskbar/releases/latest";
+
+    // The Microsoft Store listing's product id. EMPTY until the listing exists, and set then, in a
+    // one-line change: the update notice shows its "Also on the Microsoft Store" line only when this
+    // is filled in, so an empty id simply means there is no such line yet. A constant rather than a
+    // redirect on a web site, because there is no site yet either.
+    public const string StoreProductId = "";
+
+    // The Store app's own deep link to the listing, opened through the shell like any other URL.
+    public static string StoreLink => $"ms-windows-store://pdp/?productid={StoreProductId}";
 
     // One client for the process. HttpClient is designed to be shared -- a new one per call leaks
     // sockets in TIME_WAIT -- and this one is used at most once a day.
@@ -41,15 +53,15 @@ public static class UpdateService
     static HttpClient Build()
     {
         var client = new HttpClient { Timeout = TimeSpan.FromSeconds(10) };
-        client.DefaultRequestHeaders.Add("User-Agent", $"TaskSpaces/{RunningVersion}");
+        client.DefaultRequestHeaders.Add("User-Agent", $"Deskbar/{RunningVersion}");
         client.DefaultRequestHeaders.Add("Accept", "application/vnd.github+json");
         return client;
     }
 
     // What this build calls itself. InformationalVersion rather than AssemblyVersion, because
-    // AssemblyVersion is deliberately pinned at 1.0.0.0 so servicing releases never break a
-    // reference (see Directory.Build.props) -- reading it would compare every release against
-    // 1.0.0.0 and announce an update for ever.
+    // AssemblyVersion is deliberately pinned at the major version, x.0.0.0 (2.0.0.0 now), so
+    // servicing releases never break a reference (see Directory.Build.props) -- reading it would
+    // compare every release against 2.0.0.0 and announce an update for ever.
     //
     // It can carry a "+commit" suffix when built from source; UpdateCheck.Parse drops that.
     public static string RunningVersion =>

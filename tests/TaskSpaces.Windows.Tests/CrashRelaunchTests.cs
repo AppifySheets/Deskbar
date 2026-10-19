@@ -33,7 +33,7 @@ public class CrashRelaunchTests
     // exception thrown from inside the first one's handler.
     [Fact]
     public void A_launch_that_cannot_happen_is_a_failure_rather_than_a_throw() =>
-        Assert.True(CrashRelaunch.Start(@"C:\nowhere\TaskSpaces.App.exe", TimeSpan.FromHours(1)).IsFailure);
+        Assert.True(CrashRelaunch.Start(@"C:\nowhere\Deskbar.exe", TimeSpan.FromHours(1)).IsFailure);
 
     [Fact]
     public void An_unknown_exe_path_is_a_failure() =>
