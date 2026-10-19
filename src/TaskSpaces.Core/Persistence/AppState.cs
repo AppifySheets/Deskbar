@@ -74,6 +74,11 @@ public sealed record AppState(
     // MouseHoverTime, which is what the taskbar's thumbnails wait for. See HoverDwelling.
     public double? HoverDwellMs { get; init; }
 
+    // Points added to every piece of bar text (Petre: "increase font size by one more and make it
+    // configurable"). Same nullable/no-migration pattern as the settings above, read through BarText.Clamp,
+    // and null means BarText.Default rather than zero.
+    public double? BarTextOffset { get; init; }
+
     // The two placements the Inventory above cannot express (Petre: "last placement IS the
     // rule"). Inventory already records identity -> workspace on every Place(), but a
     // PINNED window belongs to no single workspace and a DETACHED one belongs to none at

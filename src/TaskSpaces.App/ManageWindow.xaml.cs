@@ -374,6 +374,7 @@ public partial class ManageWindow : Window
             // The slider shows the effective value even while inheriting, so unticking the box starts
             // from what the bar is actually doing rather than jumping to some other number.
             HoverDwellSlider.Value = manager.State.HoverDwellMs ?? system;
+            TextSizeSlider.Value = BarText.Clamp(manager.State.BarTextOffset);
         }
         finally
         {
@@ -396,6 +397,22 @@ public partial class ManageWindow : Window
         FadeDurationValue.Text = $"{FadeDurationSlider.Value:0.0} s";
         HoverDwellSlider.IsEnabled = InheritHoverDwell.IsChecked != true;
         HoverDwellValue.Text = HoverDwellSlider.Value <= 0.001 ? "at once" : $"{HoverDwellSlider.Value:0} ms";
+        // Signed, so 0 reads as "the code's own sizes" and the default's +0.5 reads as one step up.
+        TextSizeValue.Text = TextSizeSlider.Value switch
+        {
+            0 => "as built",
+            > 0 => $"+{TextSizeSlider.Value:0.#} pt",
+            _ => $"{TextSizeSlider.Value:0.#} pt",
+        };
+    }
+
+    // The text size slider, applied live like the others: each step rebuilds the bar at the new size. Behind
+    // the same `loading` guard, so opening Manage writes nothing.
+    void OnTextSizeChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
+    {
+        if (loading) return;
+        ShowAppearanceValues();
+        manager.SetBarTextOffset(TextSizeSlider.Value).TapError(err => MessageBox.Show(this, err, "Deskbar"));
     }
 
     // Every control on the tab lands here, and it writes on every change rather than on a Save button
@@ -434,6 +451,7 @@ public partial class ManageWindow : Window
     void OnResetAppearance(object sender, RoutedEventArgs e)
     {
         manager.SetBarAppearance(null, null, null, null).TapError(err => MessageBox.Show(this, err, "Deskbar"));
+        manager.SetBarTextOffset(null).TapError(err => MessageBox.Show(this, err, "Deskbar"));
         LoadAppearance();
     }
 

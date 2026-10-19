@@ -1727,6 +1727,9 @@ public partial class FloatingBar : Window
 
     void RebuildCore(bool fresh = true)
     {
+        // The text built once and kept (clock, now playing, readout) takes the current text size here;
+        // everything rebuilt below reads it as it is drawn (FloatingBar.TextSize.cs).
+        ApplyTextSize();
         MinimizeButton.Visibility = AcrossSeam ? Visibility.Collapsed : Visibility.Visible;
         // The strip, the pins and the now-playing line keep everything off the seam while docked across it.
         LayOutBottomForSeam();
@@ -2884,8 +2887,8 @@ public partial class FloatingBar : Window
     // Smaller than a workspace label for the same reason it is dimmer, and small enough to answer
     // #91's "should cost the bar almost nothing" while still being a right-click target.
     // Every text size on the bar went up by half a point together (Petre: "let's increase font sizes by the
-    // smallest amount"), so they keep their proportions to one another.
-    const double GroupHeaderFontSize = 9.5;
+    // smallest amount"), so they keep their proportions to one another. The size itself is now
+    // GroupHeaderFontSize in FloatingBar.TextSize.cs: 9.5 plus the configurable offset.
 
     // A parent and its children, drawn as one thing (#42). Petre: "make the children more
     // apparent, maybe group them together with an outline or a ring."
@@ -4247,7 +4250,7 @@ public partial class FloatingBar : Window
     // right-hand edge of the screen.
     void ShowReadout(string text)
     {
-        readoutText ??= new TextBlock { Foreground = Brushes.White, FontSize = 11.5 };
+        readoutText ??= new TextBlock { Foreground = Brushes.White, FontSize = Text(11.5) };
         readoutBody ??= new Border
         {
             Background = CardBackground,
@@ -4685,7 +4688,7 @@ public partial class FloatingBar : Window
         var textBlock = new TextBlock
         {
             Text = text,
-            FontSize = caption ? GroupHeaderFontSize : 10.5,
+            FontSize = caption ? GroupHeaderFontSize : Text(10.5),
             Foreground = resting,
             FontWeight = FontWeights.Bold,
             VerticalAlignment = VerticalAlignment.Center,
@@ -5257,7 +5260,7 @@ public partial class FloatingBar : Window
             // A pinned window is on every workspace, so it says so; otherwise Beeper in this list would
             // read as living here.
             Text = (pinnedNow.Any(p => p.Window.Handle == row.Window.Handle) ? "📌 " : "") + row.Window.DisplayName,
-            FontSize = 9.5,
+            FontSize = Text(9.5),
             Foreground = row.IsActive ? TitleActive
                 : row.IsFrontmostOnMonitor.HasValue && !row.IsFrontmostOnMonitor.Value ? TitleBehind
                 : TitleResting,

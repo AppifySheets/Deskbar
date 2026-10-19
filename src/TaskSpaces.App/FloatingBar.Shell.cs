@@ -156,8 +156,10 @@ public partial class FloatingBar
     {
         // Line heights set tight to the glyphs, as the taskbar's clock is, so the two lines stack close and the
         // strip only grows by what the text really needs.
-        clockTime = new TextBlock { FontSize = 14.5, Foreground = ClockForeground, TextAlignment = TextAlignment.Right, LineHeight = 17, LineStackingStrategy = LineStackingStrategy.BlockLineHeight };
-        clockDate = new TextBlock { FontSize = 13, Foreground = ClockForeground, TextAlignment = TextAlignment.Right, LineHeight = 16, LineStackingStrategy = LineStackingStrategy.BlockLineHeight };
+        // Base sizes; ApplyTextSize (FloatingBar.TextSize.cs) adds the configurable offset to both the size and
+        // the line height, here and again on every rebuild.
+        clockTime = new TextBlock { FontSize = Text(14.5), Foreground = ClockForeground, TextAlignment = TextAlignment.Right, LineHeight = Text(17), LineStackingStrategy = LineStackingStrategy.BlockLineHeight };
+        clockDate = new TextBlock { FontSize = Text(13), Foreground = ClockForeground, TextAlignment = TextAlignment.Right, LineHeight = Text(16), LineStackingStrategy = LineStackingStrategy.BlockLineHeight };
         return new StackPanel { Children = { clockTime, clockDate }, VerticalAlignment = VerticalAlignment.Center };
     }
 
