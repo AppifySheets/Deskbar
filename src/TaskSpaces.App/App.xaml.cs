@@ -710,17 +710,31 @@ public partial class App : Application
         // Every step it applies is traced. The refusal releases both mutexes before it goes, like the
         // tray's Exit: this copy owns them, and leaving them to process death would be the one exit path
         // that does not.
+        //
+        // A relaunch after a crash counts as awaiting its predecessor too (afterCrash, not only the
+        // updater's switch). The copy that crashed was a 2.x, which held the old name, so no 1.x can be
+        // running; but a dying process may let go of the new name before the old one, and in that gap
+        // this copy would win the guard above, find the old name still held, and refuse to start: the
+        // crash relaunch would end in "Exit TaskSpaces first" with no TaskSpaces anywhere.
         var renamed = RenameMigrator.Apply(
             AppPaths.Root,
-            RenameMigration.Plan(RenameMigrator.Gather(AppPaths.Root, awaitingPrevious, oldMutexHeld: !legacyInstanceOwned)),
+            RenameMigration.Plan(RenameMigrator.Gather(AppPaths.Root, awaitingPrevious || afterCrash, oldMutexHeld: !legacyInstanceOwned)),
             ClickTrace.Write);
-        if (renamed.IsFailure)
+        if (renamed.IsFailure && renamed.Error is Refused refused)
         {
-            ClickTrace.Write($"rename migration: refused to start ({renamed.Error})");
-            MessageBox.Show(renamed.Error, "Deskbar", MessageBoxButton.OK, MessageBoxImage.Information);
+            ClickTrace.Write($"rename migration: refused to start ({refused.Message})");
+            MessageBox.Show(refused.Message, "Deskbar", MessageBoxButton.OK, MessageBoxImage.Information);
             ReleaseInstanceMutexes();
             Shutdown();
             return;
+        }
+
+        // The workspaces did not come across. Said, and then the start goes on: the person keeps a
+        // working app and is told where the old state.json is and how to bring it over by hand.
+        if (renamed.IsFailure && renamed.Error is StateNotCarried notCarried)
+        {
+            ClickTrace.Write("rename migration: state.json was not carried across, starting without it");
+            MessageBox.Show(notCarried.Message, "Deskbar", MessageBoxButton.OK, MessageBoxImage.Warning);
         }
 
         // AFTER the single-instance guard, deliberately: a second copy that is about to tell the

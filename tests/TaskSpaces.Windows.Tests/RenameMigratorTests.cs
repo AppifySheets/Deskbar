@@ -49,6 +49,52 @@ public class RenameMigratorTests
             Assert.True(File.Exists(Old(root, "time.json")));
         });
 
+    // state.json is the workspaces. Starting without it is allowed (a fresh file beats a startup that
+    // throws) but not silently: the person has to be told the workspaces did not come across and where
+    // they still are. The other copies are still made.
+    [Fact]
+    public void Apply_reports_a_state_file_it_could_not_copy() =>
+        WithRoot(root =>
+        {
+            File.WriteAllText(Old(root, "state.json"), "state");
+            File.WriteAllText(Old(root, "time.json"), "time");
+
+            // Held open with no sharing, so the copy cannot read it.
+            using (File.Open(Old(root, "state.json"), FileMode.Open, FileAccess.Read, FileShare.None))
+            {
+                var applied = RenameMigrator.Apply(root, [new CopyFile("state.json"), new CopyFile("time.json")], _ => { });
+
+                // A warning, not a refusal: the app shows it and goes on starting.
+                Assert.True(applied.IsFailure);
+                var warning = Assert.IsType<StateNotCarried>(applied.Error);
+                Assert.Contains(Path.Combine(root, "TaskSpaces"), warning.Message);
+                Assert.Contains("workspaces", warning.Message);
+            }
+
+            Assert.False(File.Exists(New(root, "state.json")));
+            Assert.Equal("time", File.ReadAllText(New(root, "time.json")));
+        });
+
+    // Any other file is not worth a dialog: the trace has it.
+    [Fact]
+    public void Apply_traces_but_does_not_report_another_file_it_could_not_copy() =>
+        WithRoot(root =>
+        {
+            File.WriteAllText(Old(root, "state.json"), "state");
+            File.WriteAllText(Old(root, "time.json"), "time");
+            var traced = new List<string>();
+
+            using (File.Open(Old(root, "time.json"), FileMode.Open, FileAccess.Read, FileShare.None))
+            {
+                var applied = RenameMigrator.Apply(root, [new CopyFile("state.json"), new CopyFile("time.json")], traced.Add);
+
+                Assert.True(applied.IsSuccess);
+            }
+
+            Assert.Contains(traced, line => line.Contains("copying time.json failed"));
+            Assert.Equal("state", File.ReadAllText(New(root, "state.json")));
+        });
+
     [Fact]
     public void Apply_deletes_the_old_shim() =>
         WithRoot(root =>
@@ -76,7 +122,7 @@ public class RenameMigratorTests
                 _ => { });
 
             Assert.True(applied.IsFailure);
-            Assert.Equal(RenameMigration.RefusalMessage, applied.Error);
+            Assert.Equal(new Refused(RenameMigration.RefusalMessage), applied.Error);
             Assert.False(Directory.Exists(Path.Combine(root, "Deskbar")));
             Assert.True(File.Exists(Old(root, "taskspaces.cmd")));
         });

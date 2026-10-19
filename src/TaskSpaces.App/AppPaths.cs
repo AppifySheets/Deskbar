@@ -7,7 +7,8 @@ namespace TaskSpaces.App;
 // (the state folder, the trace marker, the control shim) used to build the path by hand, and the
 // override below has to reach every one of them or it protects nothing.
 //
-// DESKBAR_APPDATA, when set and not blank, replaces %APPDATA% as the root of BOTH folders. It exists
+// DESKBAR_APPDATA, when set to a fully qualified path (a relative one is ignored, see
+// OverrideRootFrom), replaces %APPDATA% as the root of BOTH folders. It exists
 // for one situation: a Debug 2.0 build on a machine that still runs 1.x every day (Petre's, until the
 // rename is on main). Started against the real %APPDATA%, that build's first start would migrate the
 // real profile, and the 1.x builds from main would stop seeing anything that changes after it. With
@@ -25,12 +26,17 @@ static class AppPaths
     // Declared before the properties on purpose: static initializers run in textual order, and the
     // three below are computed from this one.
     //
-    // Made absolute here, once. A relative value would otherwise resolve against whatever the current
-    // directory happens to be, and for a copy started by the Run key at login that is System32: the
-    // scratch root meant to protect the real profile would land among Windows' own files instead.
-    static readonly string? overrideRoot =
-        Environment.GetEnvironmentVariable(OverrideVariable) is { } value && !string.IsNullOrWhiteSpace(value)
-            ? Path.GetFullPath(value.Trim())
+    static readonly string? overrideRoot = OverrideRootFrom(Environment.GetEnvironmentVariable(OverrideVariable));
+
+    // Only a FULLY QUALIFIED value counts; anything else is ignored and the real %APPDATA% is used. A
+    // relative value cannot be made safe: Path.GetFullPath resolves it against the current directory,
+    // and for a copy started by the Run key at login that is System32, so the scratch root meant to
+    // protect the real profile would land among Windows' own files instead. IsPathFullyQualified rather
+    // than IsPathRooted, because "C:scratch" and "\scratch" are rooted yet still lean on a current
+    // directory or drive. GetFullPath then only normalises (".." segments, trailing separators).
+    public static string? OverrideRootFrom(string? value) =>
+        value?.Trim() is { Length: > 0 } trimmed && Path.IsPathFullyQualified(trimmed)
+            ? Path.GetFullPath(trimmed)
             : null;
 
     public static bool RootOverridden { get; } = overrideRoot is not null;

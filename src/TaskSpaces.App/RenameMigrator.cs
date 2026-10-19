@@ -8,6 +8,15 @@ using TaskSpaces.Core.Migration;
 
 namespace TaskSpaces.App;
 
+// What RenameMigrator.Apply can come back with instead of success, each carrying the message to show.
+// Two types rather than one message because the app does opposite things with them: a refusal ends
+// the start, a state file that did not come across is a warning and the start goes on.
+abstract record RenameProblem(string Message);
+
+sealed record Refused(string Message) : RenameProblem(Message);
+
+sealed record StateNotCarried(string Message) : RenameProblem(Message);
+
 // The Windows half of the rename migration: it gathers the facts RenameMigration.Plan decides on, and
 // applies the steps that plan returns. Every rule lives in the plan (TaskSpaces.Core), so nothing here
 // decides anything; it looks, and it does what it is told.
@@ -46,15 +55,23 @@ static class RenameMigrator
             Path.TrimEndingDirectorySeparator(Path.GetFullPath(b)),
             StringComparison.OrdinalIgnoreCase);
 
-    // A failure only for a refusal, carrying the message to show, and then NOTHING else is done, even if
-    // the list holds other steps. Every other step is attempted, traced, and allowed to fail on its own:
-    // a state file that could not be copied, a shim that could not be deleted or a Run value that could
-    // not be swapped is no reason not to start, and the app starting with a fresh file beats a startup
-    // that throws. The old folder is never written to except for the shim, and never deleted.
-    public static Result Apply(string root, IReadOnlyList<RenameStep> steps, Action<string> trace)
+    // Two kinds of failure, and the caller treats them differently (App.OnStartup):
+    //
+    // - Refused: the plan said not to start. NOTHING else is done, even if the list holds other steps,
+    //   and the app shows the message and exits.
+    // - StateNotCarried: state.json, the workspaces, could not be copied. Every other step has still
+    //   been attempted, and the app shows the message as a warning and STARTS: a fresh file beats a
+    //   startup that throws, but starting with no workspaces must not happen silently, because once the
+    //   app has saved a state.json of its own nothing tries the copy again.
+    //
+    // Every other failure is traced and nothing more: a time.json or last-used.json that could not be
+    // copied, a shim that could not be deleted or a Run value that could not be swapped is no reason to
+    // stop or to interrupt anyone. The old folder is never written to except for the shim, and never
+    // deleted.
+    public static UnitResult<RenameProblem> Apply(string root, IReadOnlyList<RenameStep> steps, Action<string> trace)
     {
         if (steps.OfType<RefuseToStart>().FirstOrDefault() is { } refusal)
-            return Result.Failure(refusal.Message);
+            return UnitResult.Failure<RenameProblem>(new Refused(refusal.Message));
 
         var oldDir = AppPaths.OldStateDirUnder(root);
         var newDir = AppPaths.NewStateDirUnder(root);
@@ -66,8 +83,11 @@ static class RenameMigrator
         var copies = steps.OfType<CopyFile>().ToList();
         if (copies.Count > 0)
             Attempt($"creating {newDir}", () => Directory.CreateDirectory(newDir), trace);
-        copies.ForEach(copy => Attempt($"copying {copy.Name}",
-            () => File.Copy(Path.Combine(oldDir, copy.Name), Path.Combine(newDir, copy.Name), overwrite: false), trace));
+        var stateNotCopied = copies
+            .Select(copy => (copy.Name, Copied: Attempt($"copying {copy.Name}",
+                () => File.Copy(Path.Combine(oldDir, copy.Name), Path.Combine(newDir, copy.Name), overwrite: false), trace)))
+            .ToList()
+            .Any(copy => copy.Name == RenameMigration.StateFile && copy.Copied.IsFailure);
 
         if (steps.OfType<DeleteOldShim>().Any())
             Attempt($"deleting the old shim {AppPaths.OldShimName}",
@@ -82,12 +102,25 @@ static class RenameMigrator
                 () => trace($"rename migration: start with Windows moved (old value deleted: {deleteOld}, new value set: {setNew})"),
                 error => trace($"rename migration: {error}"));
 
-        return Result.Success();
+        return stateNotCopied
+            ? UnitResult.Failure<RenameProblem>(new StateNotCarried(StateNotCarriedMessage(oldDir, newDir)))
+            : UnitResult.Success<RenameProblem>();
     }
 
-    static void Attempt(string what, Action action, Action<string> trace) =>
+    // Says what happened, where the workspaces still are, and how to bring them across by hand. The
+    // folder is named in full rather than as %APPDATA%\TaskSpaces so it is right under DESKBAR_APPDATA
+    // too, and can be pasted into Explorer as it stands.
+    static string StateNotCarriedMessage(string oldDir, string newDir) =>
+        $"Deskbar could not copy your workspaces from TaskSpaces, so it is starting without them.\n\n" +
+        $"They are still in {oldDir}. To bring them across, exit Deskbar from its tray icon, copy " +
+        $"{RenameMigration.StateFile} from that folder into {newDir}, and start Deskbar again.";
+
+    // The step's outcome is returned as well as traced, so Apply can tell a state.json that did not
+    // copy from everything else.
+    static Result Attempt(string what, Action action, Action<string> trace) =>
         Result.Try(action, error => $"rename migration: {what} failed: {error.Message}")
-            .Match(() => trace($"rename migration: {what}"), trace);
+            .Tap(() => trace($"rename migration: {what}"))
+            .TapError(trace);
 
     // --- the handshake with the copy that started this one -----------------------------------------
     //
