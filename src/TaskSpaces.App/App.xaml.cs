@@ -656,7 +656,7 @@ public partial class App : Application
         var awaitingPrevious = e.Args.Contains(AwaitPreviousSwitch);
         if (awaitingPrevious)
             RenameMigrator.ParentProcessId(ClickTrace.Write)
-                .Execute(parent => RenameMigrator.AwaitParentExit(parent, TimeSpan.FromSeconds(15), ClickTrace.Write));
+                .Tap(parent => RenameMigrator.AwaitParentExit(parent, TimeSpan.FromSeconds(15), ClickTrace.Write));
 
         if (!isOnlyInstance && (awaitingPrevious || afterCrash))
         {
