@@ -83,6 +83,23 @@ public partial class FloatingBar
         ShellStart.Children.Add(ShellButton(ShellFlyout.Start, "Start", StartGlyph()));
         ShellStart.Children.Add(ShellButton(ShellFlyout.Search, "Search", Glyph(SearchShape)));
 
+        // The same pair again, where the right half of the header begins, shown only across the seam (see
+        // LayOutHeader). Their own buttons, wired to the same OnShellClick, so a press on either pair behaves
+        // identically, including closing a flyout that is already open.
+        shellStartTwin = new StackPanel
+        {
+            Orientation = Orientation.Horizontal,
+            HorizontalAlignment = HorizontalAlignment.Left,
+            VerticalAlignment = VerticalAlignment.Center,
+            Children =
+            {
+                ShellButton(ShellFlyout.Start, "Start", StartGlyph()),
+                ShellButton(ShellFlyout.Search, "Search", Glyph(SearchShape)),
+            },
+        };
+        BarHeader.Children.Add(AtRightHalf(shellStartTwin));
+        LayOutHeader(acrossSeam: false);
+
         // Built once and laid out by LayOutStrip, which decides which edge each one docks to.
         stripTray = ShellButton(ShellFlyout.Tray, "Show the tray icons", Glyph(ChevronShape));
         stripQuickSettings = ShellButton(ShellFlyout.QuickSettings, "Quick settings: wifi, volume, battery", QuickSettingsGlyph(), width: double.NaN);
@@ -107,6 +124,22 @@ public partial class FloatingBar
 
     Button? stripTray, stripQuickSettings, stripVolume, stripBell, stripSliver, stripClock;
     bool stripAcrossSeam;
+    StackPanel? shellStartTwin;
+
+    // START AND SEARCH ON BOTH HALVES, docked across the seam. Petre: "start and search buttons on both sides of
+    // the bar, if docked in between screens". The header line is the one row that did not mirror: the captions,
+    // rails and group lines are drawn again where the right half begins, but Start and search sat only at the
+    // far left, on the left screen. So across the seam the pair appears a second time at the right half's left
+    // edge, in the same place the right half's captions start.
+    //
+    // Where the menus OPEN does not change, and cannot from here: Windows anchors Start and search to the
+    // screen that has the taskbar, wherever the press came from (the probe in this file's header). With one
+    // taskbar, both pairs open them on that screen. What the second pair saves is the reach across the bar.
+    internal void LayOutHeader(bool acrossSeam)
+    {
+        if (shellStartTwin is not null)
+            shellStartTwin.Visibility = acrossSeam ? Visibility.Visible : Visibility.Collapsed;
+    }
 
     // Which side each of the strip's buttons docks to. On one screen: the tray chevron, quick settings, the
     // volume dial and the bell from the left, and from the right edge inwards (the order DockPanel takes
@@ -139,6 +172,8 @@ public partial class FloatingBar
     // so it follows the bar onto the seam and off it.
     void LayOutBottomForSeam()
     {
+        // ...and the header's second Start and search, which follow the same switch.
+        LayOutHeader(AcrossSeam);
         if (stripAcrossSeam != AcrossSeam)
         {
             LayOutStrip(AcrossSeam);
