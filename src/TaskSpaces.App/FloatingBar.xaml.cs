@@ -2375,7 +2375,7 @@ public partial class FloatingBar : Window
                 Panel stack = titled ? new Grid() : new StackPanel { Orientation = Orientation.Horizontal };
                 run.ForEach(r =>
                 {
-                    var button = IconButton(groupLabel, groupKey, r);
+                    var button = IconButton(groupLabel, groupKey, r, rowKey);
                     if (titled && button is Button item) Titled(item, r);
                     // A window that has left this row while the hold lasts (see HeldLines): its line stays,
                     // faded, so the row keeps its height, and takes no clicks or drags, since the window is
@@ -3447,10 +3447,11 @@ public partial class FloatingBar : Window
         };
         Grid.SetRowSpan(ring, container.RowDefinitions.Count);
         container.Children.Add(ring);
-        // No white ring on the current row with the accent rail style: its tint, its bright rail and its
-        // coloured name already say "you are here", and a ring on top would be the same claim a third time.
-        // The ring itself stays on every row, for the amber "you would land here" and the history trail.
-        PaintRing(ring, Brushes.Transparent, SolidRing);
+        // The current row's solid white ring. It was dropped with the accent rail style (1.23.0, "try b") on
+        // the argument that the tint, the bright rail and the coloured name already said "you are here" and a
+        // ring would be the same claim a third time. Petre, after living with it: "bring the ring around the
+        // current workspace". So it is back, and ApplyCandidate repaints it the same way on every gesture.
+        PaintRing(ring, isCurrent ? CurrentRowRing : Brushes.Transparent, SolidRing);
 
         // Hover freeze: hold this row's icon order while the pointer is inside it. Wired for
         // EVERY row, including the ones that can never re-sort (📌 Pinned and Unplaced have no
@@ -3962,12 +3963,14 @@ public partial class FloatingBar : Window
         // Each row is painted with a STROKE and a PATTERN now, not just a brush: everything about
         // where you are or are going is a solid ring, and only the trail behind you is broken up.
         //
-        // The CURRENT row wears no ring any more (accent rail style, "try b"): its tint, bright rail and
-        // coloured name say it. The trail behind it keeps its dashed and dotted rings.
+        // The CURRENT row wears the solid white ring again. The accent rail style ("try b") had dropped it,
+        // reasoning that the tint, bright rail and coloured name already said it; Petre asked for it back
+        // ("bring the ring around the current workspace"). The trail behind it keeps its dashed and dotted
+        // rings, so "current - solid - previous - dashed - before that - dotted" holds once more.
         var hovered = candidate is null ? hoveredRow?.RowKey : null;
         rowRings.ToList().ForEach(row => PaintRing(row.Value,
             row.Key == candidate || row.Key == hovered ? CandidateRowRing
-            : row.Key == currentRow ? Brushes.Transparent
+            : row.Key == currentRow ? CurrentRowRing
             : HistoryRing(row.Key) is not null ? CurrentRowRing
             : Brushes.Transparent,
             row.Key == currentRow || row.Key == candidate || row.Key == hovered
@@ -4352,10 +4355,12 @@ public partial class FloatingBar : Window
 
     System.Windows.Threading.DispatcherTimer? hoverDwell;
     WindowHandle dwellFor;
-    (string Label, WindowRow Row, FrameworkElement Anchor)? dwelling;
+    (string Label, WindowRow Row, FrameworkElement Anchor, bool Here)? dwelling;
 
     // What MouseEnter calls. Nothing is captured and nothing is shown until the pointer has held still.
-    void ArmHoverCard(string groupLabel, WindowRow row, FrameworkElement anchor)
+    // `here` says the icon sits in the CURRENT workspace's row, decided by the caller at the moment the
+    // pointer arrives: the card then carries no picture, since the window is already on screen (see HoverCard).
+    void ArmHoverCard(string groupLabel, WindowRow row, FrameworkElement anchor, bool here)
     {
         // Already showing this window, or already waiting on it: leave both alone. Both guards exist for
         // the same reason -- a rebuild re-runs MouseEnter for the icon under an unmoved pointer -- and the
@@ -4365,7 +4370,7 @@ public partial class FloatingBar : Window
         if (hoverDwell is { IsEnabled: true } && dwellFor.Equals(row.Window.Handle)) return;
 
         dwellFor = row.Window.Handle;
-        dwelling = (groupLabel, row, anchor);
+        dwelling = (groupLabel, row, anchor, here);
 
         hoverDwell ??= new System.Windows.Threading.DispatcherTimer();
         hoverDwell.Stop(); // moving to another icon restarts the wait, so a sweep never completes one
@@ -4388,10 +4393,10 @@ public partial class FloatingBar : Window
 
         var stillThere = Mouse.DirectlyOver is DependencyObject over && IconAncestorOf(over) is { } icon
                          && icon.DataContext is WindowRow row && row.Window.Handle.Equals(dwellFor);
-        if (stillThere) ShowHoverCard(waiting.Label, waiting.Row, waiting.Anchor);
+        if (stillThere) ShowHoverCard(waiting.Label, waiting.Row, waiting.Anchor, waiting.Here);
     }
 
-    void ShowHoverCard(string groupLabel, WindowRow row, FrameworkElement anchor)
+    void ShowHoverCard(string groupLabel, WindowRow row, FrameworkElement anchor, bool here)
     {
         // Already showing this window: do NOTHING. This is the line that stops the blinking, because a
         // rebuild re-runs MouseEnter for the icon under the pointer and re-capturing would rebuild the
@@ -4425,7 +4430,7 @@ public partial class FloatingBar : Window
         // one. This is the line that says which of the two a slow hover was.
         var clock = ClickTrace.On ? System.Diagnostics.Stopwatch.StartNew() : null;
 
-        hoverBody.Child = HoverCard(groupLabel, row, LastUsedText(row.Window.Handle));
+        hoverBody.Child = HoverCard(groupLabel, row, LastUsedText(row.Window.Handle), withPicture: !here);
         hoverShowing = row.Window.Handle;
         hoverMisses = 0;
 
@@ -4520,10 +4525,18 @@ public partial class FloatingBar : Window
     // also the honest answer, since there is nothing to show.
     // `lastUsed` is the aging icons' number ("last used 2 h ago", FloatingBar.Aging.cs), added to the line under
     // the title when there is one.
-    static StackPanel HoverCard(string groupLabel, WindowRow row, string? lastUsed = null)
+    //
+    // `withPicture` is false for an icon in the CURRENT workspace's row. Petre: "preview when hovering over
+    // icons should only work for non-current workspace", and the original ask was already worded that way
+    // ("a large preview of the window in ANOTHER workspace"). The picture exists to show a window you cannot
+    // see; one on the desktop you are looking at is already in front of you, so the card is its text alone,
+    // and the capture, which is the expensive half of the card, is not made at all.
+    internal static StackPanel HoverCard(string groupLabel, WindowRow row, string? lastUsed = null, bool withPicture = true)
     {
         var (ceilingWidth, ceilingHeight) = PreviewCeiling();
-        var picture = WindowPreview.Of(row.Window.Handle, PreviewScale, ceilingWidth, ceilingHeight);
+        var picture = withPicture
+            ? WindowPreview.Of(row.Window.Handle, PreviewScale, ceilingWidth, ceilingHeight)
+            : Maybe<System.Windows.Media.Imaging.BitmapSource>.None;
 
         // The card is as wide as the picture it holds, so the text wraps to the preview rather than the
         // preview sitting in a column sized for the text. Text-only cards (a minimised window) keep a
@@ -5272,7 +5285,10 @@ public partial class FloatingBar : Window
     static readonly Brush TitleResting = Frozen(0xDB, 0xFF, 0xFF, 0xFF);
     static readonly Brush TitleBehind = Frozen(0x8C, 0xFF, 0xFF, 0xFF);
 
-    UIElement IconButton(string groupLabel, string groupKey, WindowRow row)
+    // `rowKey` is the workspace the row stands for (null for the pinned, unplaced and other-desktop rows),
+    // so the hover card can tell, at the moment the pointer arrives, whether this icon is in the workspace
+    // you are standing in and therefore needs no picture.
+    UIElement IconButton(string groupLabel, string groupKey, WindowRow row, Guid? rowKey = null)
     {
         var button = new Button
         {
@@ -5321,7 +5337,9 @@ public partial class FloatingBar : Window
         button.DataContext = row;
 
         // Hover -> the card, and the footer no longer carries the title (#135).
-        button.MouseEnter += (_, _) => ArmHoverCard(groupLabel, row, button);
+        // Whether this is the current workspace's row is read when the pointer ARRIVES, not when the button
+        // is built: currentRow is settled by the same rebuild, and reading it late costs nothing.
+        button.MouseEnter += (_, _) => ArmHoverCard(groupLabel, row, button, here: rowKey is not null && rowKey == currentRow);
         button.MouseLeave += (_, _) => ClearInfo();
 
         // ...and hover -> ring (#67). The pointer resting on an icon makes THAT window the thing a
