@@ -19,18 +19,16 @@
        and nothing else for exactly that reason. Keep comments in one unbroken run of lines.
        .
        No width attribute, deliberately: the browser would scale the capture and soften every
-       edge. Left intrinsic, it draws pixel for pixel. The PNG's corners are alpha-transparent,
-       because the bar is a translucent window with rounded corners and a plain capture bakes
-       the desktop behind them into four dark notches. Any recapture must be masked the same
-       way: 8 DIP radius, which is 12 px at 150% scaling. -->
-  <img src="docs/images/floating-bar-1.10.5.png" alt="The floating bar: one row per workspace, the icons of every window in it from the left edge, a pinned row at the top, three workspaces bracketed together as a group, and the current workspace's row ringed in white. This capture is from version 1.10; the bar has since moved the workspace name to its own line above the icons, added a clock, taskbar pins and media controls along the bottom, and tints only the current row." />
+       edge. Left intrinsic, it draws pixel for pixel. The images in this file are PrintWindow
+       renders of the live bar (a plain screen copy skips its layered window), so the corners
+       keep their real alpha and the page shows through them. The bar's own windows are the
+       only thing captured; nothing of the desktop behind it is. -->
+  <img src="docs/images/bar-floating.png" alt="The floating bar: one row per workspace, each with its name on a line above the icons of every window in it. A pinned row at the top carries the Start and Search buttons and the back and minimise buttons. The current workspace's row is tinted and ringed, and expands into a list of its windows with their titles; the row you came from is ringed in dashes. Some icons carry small tab counts. Groups of workspaces are drawn with a line down their left edge. Along the bottom run the taskbar's pinned apps, a tray chevron, quick settings, a volume dial, a bell, the clock and a show-desktop sliver." />
 </p>
 
 <p align="center"><em>Everything you have open, one row per workspace, every desktop at once. Click an
 icon to jump to that window from anywhere, click it again to put it away, drag it to another row
-to move the window there.<br />(The picture is from 1.10. The bar has grown since: the
-workspace name now sits above its icons, and a clock, your taskbar pins and media controls run
-along the bottom. A fresh capture is owed.)</em></p>
+to move the window there. Floating here; it also docks to a screen edge, or across two.</em></p>
 
 **Deskbar is a layer over Windows' own virtual desktops.** Every workspace *is* a real
 virtual desktop. Windows keeps doing the window management it already does well, and
@@ -172,6 +170,17 @@ rather keep the rows uniform, **Window list at the bottom of the bar** (on any r
 bar's background menu) moves the list to a strip under the rows instead. Titles are cut to fit;
 widen the bar to see more of them.
 
+<table align="center">
+  <tr>
+    <td align="center"><img src="docs/images/list-expanded.png" alt="The current workspace's row expanded in place into a list of its windows, one per line with icon and title, the other rows unchanged below it." /></td>
+    <td align="center"><img src="docs/images/list-bottom.png" alt="The same bar with the current workspace's row at normal height and its window list in a strip under the last row instead." /></td>
+  </tr>
+  <tr>
+    <td align="center"><em>Expand the current workspace</em></td>
+    <td align="center"><em>Window list at the bottom of the bar</em></td>
+  </tr>
+</table>
+
 **What each icon tells you.**
 
 - The focused window is outlined and filled. A fainter amber outline on another row marks the
@@ -197,6 +206,10 @@ workspace you are on is already in front of you, so its card is text alone. The
 card waits for the pointer to settle first, using the same delay Windows' own taskbar thumbnails
 use, so crossing the bar on the way somewhere else shows nothing. A minimised window has no picture
 to show, so its card is text alone.
+
+<p align="center">
+  <img src="docs/images/hover-card.png" alt="The pointer resting on a Notepad icon in the HRIS row, which is ringed in amber. Beside the bar a card reads Untitled - Notepad, then Notepad, HRIS, last used 5 h ago, above a quarter-size picture of the empty Notepad window, which lives on another desktop." />
+</p>
 
 **Icons keep their order.** Within a row, icons sit in the order their windows were first seen, so
 nothing jumps out from under the pointer. Drag an icon along its row to put it where you want; a
@@ -240,6 +253,10 @@ here would do: "move to Work, screen 2".
   about that workspace. **Right-click empty bar** for the app-wide items: New workspace, docking,
   the window-list toggle, Minimize bar, Manage, Check for updates, any waiting update, and Exit.
 
+<p align="center">
+  <img src="docs/images/menu-background.png" alt="The menu from right-clicking empty bar: New workspace, Window list at the bottom of the bar, Undock from screen edge, Dock across both screens, Minimize bar, Manage, Check for updates, Exit." />
+</p>
+
 The bar does not appear in `Alt+Tab` or on the taskbar. It stays bright while you hold the chord,
 drag an icon or have one of its menus open; otherwise it holds full strength for ten seconds after
 the pointer leaves and then dims over four seconds to 35%. All four of those numbers are sliders
@@ -253,6 +270,10 @@ everything still working, for the workspaces you keep but rarely touch, and flip
 height**; the window-list toggle; the colour strip; **Move up**, **Move down**, **Move to top**
 and **Move to end**, which work within the row's group; **Delete workspace…**; and the bar items,
 **Dock to screen edge**, **Dock across both screens** and **Minimize bar**.
+
+<p align="center">
+  <img src="docs/images/menu-row.png" alt="The row menu beside the bar: Rename, Insert before, Insert after, Add child, New group, Move into group, Minimize row, Window list at the bottom of the bar, a strip of nine colour swatches, Custom, Transparent, By position, Move up, Move down, Move to top, Move to end, Delete workspace, Undock from screen edge, Dock across both screens, Minimize bar." />
+</p>
 
 **Colour.** Nine swatches sit in one strip inside the menu, with the current choice ringed. Below
 them, **Custom…** opens Windows' own colour dialog starting on the row's current colour;
@@ -322,7 +343,22 @@ topmost band while it runs. Minimising the bar gives the strip back.
 **Dock across both screens** straddles the seam between two side-by-side screens: the first
 screen's lane sits on the left screen, the second's on the right, each half reserving half the
 bar's width, and each half repeating the row's caption and group line so either side reads on its
-own. Screens that are not level are handled. Screens with different scaling are not.
+own. Screens that are not level are handled: the bar spans both strips and its content is inset to
+the height the two screens share. Screens with different scaling are not.
+
+<table align="center">
+  <tr>
+    <td align="center" valign="top"><img src="docs/images/bar-docked-edge.png" alt="The bar docked to the left edge of a screen: full height with square corners, the workspace rows at the top and the taskbar pieces at the foot of the screen, shown at about half size." /></td>
+    <td align="center" valign="top"><img src="docs/images/bar-docked-across.png" alt="Two screen outlines side by side, the left one sitting 246 pixels lower than the right. The bar straddles the seam between them, one lane on each screen, with its rows starting at the height both screens share and the taskbar pieces at the bottom of the shorter overlap." /></td>
+  </tr>
+  <tr>
+    <td align="center"><em>Docked to one screen's edge</em></td>
+    <td align="center"><em>Docked across both screens, which are not level</em></td>
+  </tr>
+</table>
+
+Compare the floating bar at the top of this page: the same rows, but only as tall as its content,
+with rounded corners, wherever you dropped it.
 
 ### Taskbar pieces
 
@@ -346,6 +382,17 @@ Docked or not, the bar carries enough of the taskbar that you can leave Windows'
   wheel moves it 2% a notch and unmutes. Click it to list your playback devices with the default
   ticked, and **Mute** at the end; choosing a device makes it Windows' default.
 
+<table align="center">
+  <tr>
+    <td align="center" valign="bottom"><img src="docs/images/menu-volume.png" alt="The volume dial clicked: a menu listing Speakers and Headphones with the default ticked, then Mute, above the bottom strip with its tray chevron, wifi, volume dial, bell and clock." /></td>
+    <td align="center" valign="bottom"><img src="docs/images/menu-pin.png" alt="A taskbar pin right-clicked: the app's name greyed out, then New window, Open file location and Unpin from taskbar, above the two lines of pins and the strip." /></td>
+  </tr>
+  <tr>
+    <td align="center"><em>The volume dial's device menu</em></td>
+    <td align="center"><em>A pin's menu</em></td>
+  </tr>
+</table>
+
 Tray icons are not copied onto the bar, because apps hand them only to Explorer.
 
 ## Switching workspaces
@@ -358,6 +405,10 @@ While you hold the chord, a short list appears beside the bar showing the walk i
 the bar itself the row you would land on is ringed in amber, with the window that would take
 focus there outlined. Nothing switches until you let go, so walking past three workspaces does
 not animate three desktop switches.
+
+<p align="center">
+  <img src="docs/images/switcher.png" alt="The chord held: a list beside the bar headed hold Win+Ctrl, tap Tab, with every workspace in most-recently-used order and its colour swatch, grouped ones shown as group then name, and the second entry highlighted. On the bar the matching row is ringed in amber and the window that would take focus there is outlined." />
+</p>
 
 **You arrive in the window you left.** Landing on a workspace puts focus back on whichever window
 had it last time you were there. Somewhere you have not been yet this session gets the front-most
@@ -389,6 +440,10 @@ Give a window a short name so the taskbar shows `RDP` instead of
   IDEs and Remote Desktop Manager. Browsers are left out, because a tab title is the page rather
   than a container.
 - **Restore title**, to take a name back.
+
+<p align="center">
+  <img src="docs/images/menu-icon.png" alt="The icon menu over a browser icon: Rename this window, Rename by title pattern, Rename all msedge windows, and a greyed-out Restore title." />
+</p>
 
 Names persist across restarts. A titleless window that still wants a taskbar button is shown under
 its process name rather than "(untitled)".
@@ -459,6 +514,13 @@ Left-click the tray icon. Five tabs:
 Below the tabs sit the three machine-level settings: **Dock the bar to the edge of its screen**,
 **Start Deskbar with Windows**, and **Check GitHub for new versions**, with the version you are
 running at the bottom right.
+
+<p align="center">
+  <img src="docs/images/manage-settings.png" alt="Manage on the Settings tab: an explanation that every change applies at once, the Dimming slider at 75 percent with its description, the start of the Before it starts dimming section, Reset to defaults, and below the tabs the three checkboxes for docking, starting with Windows and checking GitHub, with the version at bottom right." />
+</p>
+<p align="center">
+  <img src="docs/images/manage-shortcuts.png" alt="Manage on the Shortcuts tab: a paragraph on global shortcuts being exclusive, the Switch workspaces section with the chord box reading Win+Ctrl+Tab, Apply and Reset to default, and the hint hold Win+Ctrl, tap Tab to walk forwards, add Shift to walk backwards." />
+</p>
 
 ## Updates
 
