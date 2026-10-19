@@ -216,6 +216,18 @@
                                     ValueChanged="OnAppearanceChanged"/>
                             <TextBlock x:Name="HoverDwellValue" Margin="8,0,0,0" VerticalAlignment="Center" MinWidth="70"/>
                         </StackPanel>
+
+                        <!-- One offset for every piece of bar text, in half points (BarText). It has its own
+                             handler and its own setter, so dragging it writes only this value. -->
+                        <TextBlock Text="Text size" FontWeight="Bold" Margin="0,16,0,0"/>
+                        <TextBlock TextWrapping="Wrap" Opacity="0.75" Margin="0,2,0,6"
+                                   Text="Added to every piece of text on the bar, in half points, so the captions, the clock and the now-playing line all grow or shrink together. Larger text wraps workspace names sooner."/>
+                        <StackPanel Orientation="Horizontal">
+                            <Slider x:Name="TextSizeSlider" Width="260" Minimum="-2" Maximum="4"
+                                    SmallChange="0.5" LargeChange="1" TickFrequency="0.5" IsSnapToTickEnabled="True"
+                                    ValueChanged="OnTextSizeChanged"/>
+                            <TextBlock x:Name="TextSizeValue" Margin="8,0,0,0" VerticalAlignment="Center" MinWidth="70"/>
+                        </StackPanel>
                     </StackPanel>
                 </DockPanel>
             </TabItem>

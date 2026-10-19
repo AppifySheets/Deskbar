@@ -1759,6 +1759,21 @@ public sealed class WorkspaceManager(
         return Result.Success();
     }
 
+    // The bar's text size (see BarText). Its own setter rather than a fifth argument to SetBarAppearance:
+    // it has its own slider, so the one-write-per-drag argument for bundling does not reach it, and keeping
+    // it apart leaves every existing caller of SetBarAppearance untouched.
+    //
+    // Same three rules as SetBarAppearance: null means back to the default, the value is clamped (and
+    // snapped to half points) on the way in, and an unchanged value writes nothing, so opening Manage,
+    // which sets the slider from state, neither rewrites state.json nor rebuilds the bar.
+    public Result SetBarTextOffset(double? offset)
+    {
+        var next = offset is { } value ? BarText.Clamp(value) : (double?)null;
+        if (next == State.BarTextOffset) return Result.Success();
+        Persist(State with { BarTextOffset = next });
+        return Result.Success();
+    }
+
     // The colour picker on the bar's right-click menu (#68). Petre: "add color picker in the right
     // click context menu."
     //
