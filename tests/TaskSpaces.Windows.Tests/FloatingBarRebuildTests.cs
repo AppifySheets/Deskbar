@@ -875,9 +875,11 @@ sealed class Harness
     // Parked far off the virtual screen so the suite never flashes a translucent topmost
     // bar at whoever is running it; WPF still reports it visible, which the bar's
     // live-refresh subscription requires.
-    public BarUnderTest ShowBar()
+    // timeToday: what the bar's workspace captions read as today's time (FloatingBar.WorkspaceTime.cs). Left
+    // null, as every test but those leaves it, the captions carry no time at all.
+    public BarUnderTest ShowBar(Func<Guid, TimeSpan>? timeToday = null)
     {
-        var bar = new FloatingBar(Manager) { Left = -32000, Top = -32000 };
+        var bar = new FloatingBar(Manager) { Left = -32000, Top = -32000, TimeToday = timeToday };
         bar.Show();
         return new BarUnderTest(bar);
     }
