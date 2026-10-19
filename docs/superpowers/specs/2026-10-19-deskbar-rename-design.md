@@ -75,8 +75,11 @@ its own on a quiet day, and CLAUDE.md says so.
 Runs once, in `App.OnStartup` before the state store is opened, inside the app that
 owns the state (the frame design's constraint: nothing outside the app edits it).
 
-1. If `%APPDATA%\Deskbar` does not exist and `%APPDATA%\TaskSpaces` does: create the
-   new folder and copy `state.json`, `time.json` and `last-used.json` when present.
+1. If `%APPDATA%\Deskbar\state.json` does not exist and `%APPDATA%\TaskSpaces` does:
+   create the new folder if needed and copy `state.json`, `time.json` and `last-used.json`
+   when present, never overwriting a file already there. (Amended after the whole-branch
+   review: the gate was the folder, and a `trace.on` made there before the first start
+   skipped the copy for good.)
    Copy, not move: a rollback to 1.x or a second machine syncing the old folder keeps
    working. `trace.on` and the old shim are not copied. The old folder is left as it
    is, forever; the README says it may be deleted by hand.

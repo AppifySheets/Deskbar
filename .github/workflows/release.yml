@@ -1,4 +1,4 @@
-# Builds TaskSpaces into a DRAFT GitHub Release, and guards the moment a release is published.
+# Builds Deskbar into a DRAFT GitHub Release, and guards the moment a release is published.
 #
 # WHEN THIS RUNS
 #   - Manually, via the Actions tab or `gh workflow run Release -f version=2.0.0`

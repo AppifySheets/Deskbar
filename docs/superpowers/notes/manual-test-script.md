@@ -111,12 +111,18 @@ beside 1.x: the check for a running 1.x ignores it, so exit the 1.x app from its
 40. A single CLICK on a bar icon (no movement) still jumps to that window — the new
     drag behavior must not swallow plain clicks.
 41. Update from 1.x (use a machine or profile you can afford to migrate, not a scratch
-    `DESKBAR_APPDATA` run): with TaskSpaces 1.x running and "Start with Windows" ticked, take
-    the update from its tray menu. Deskbar starts. Then check four things. The workspaces,
-    groups, colours and window renames match what 1.x showed. In regedit the `TaskSpaces` Run
-    value is gone and `Deskbar` points at the running exe, so a login starts one bar and not
-    two. `%APPDATA%\Deskbar\deskbar.cmd help` prints the command list, and `taskspaces.cmd` is
-    gone from `%APPDATA%\TaskSpaces`. The old folder's `state.json` is still there, untouched.
+    `DESKBAR_APPDATA` run). First the refusal: with TaskSpaces 1.x running, double-click a
+    downloaded `Deskbar.exe`. A "Deskbar" message says to exit TaskSpaces from its tray icon
+    first, and after OK nothing else happens: no second bar, no `%APPDATA%\Deskbar\state.json`,
+    and `taskspaces.cmd` still in `%APPDATA%\TaskSpaces`. Then the update itself: with 1.x still
+    running and "Start with Windows" ticked, take the update from its tray menu. Deskbar starts.
+    Then check five things. The workspaces, groups, colours and window renames match what 1.x
+    showed. `time.json` and `last-used.json` are in `%APPDATA%\Deskbar` as well, so Manage's
+    Time tab shows the hours 1.x counted and the bar's icons keep the aging 1.x gave them. In
+    regedit the `TaskSpaces` Run value is gone and `Deskbar` points at the running exe, so a
+    login starts one bar and not two. `%APPDATA%\Deskbar\deskbar.cmd help` prints the command
+    list, and `taskspaces.cmd` is gone from `%APPDATA%\TaskSpaces`. The old folder's
+    `state.json` is still there, untouched.
 
 ## Results (2026-08-01)
 

@@ -119,8 +119,10 @@ exe, and, if you want your settings gone too, delete `%APPDATA%\Deskbar`.
 
 ### Coming from TaskSpaces
 
-Deskbar is TaskSpaces under a new name, from version 2.0. Exit TaskSpaces from its tray icon
-first, then start Deskbar. The first start copies `state.json`, `time.json` and
+Deskbar is TaskSpaces under a new name, from version 2.0. The usual route is to accept the
+update when TaskSpaces offers it (or pick Check for updates from its tray menu), and that does
+everything below on its own. To do it by hand, exit TaskSpaces from its tray icon first, then
+start Deskbar. The first start copies `state.json`, `time.json` and
 `last-used.json` from `%APPDATA%\TaskSpaces` into `%APPDATA%\Deskbar`, so your workspaces,
 names and rules come with you. It also swaps the autostart entry: the `TaskSpaces` value is
 removed and a `Deskbar` one takes its place, so you do not get two bars at the next login.
@@ -574,11 +576,16 @@ them deliberately, not while you are working.
 
 The C# namespaces, project files and `TaskSpaces.sln` keep their old names on purpose, so the
 commands above are unchanged. Until 2.0 is on main, run a Debug build on a machine that still
-runs TaskSpaces 1.x with the environment variable `DESKBAR_APPDATA` set to a scratch folder.
-Otherwise its first start migrates your real profile. With it set, Deskbar reads and writes
-under that folder instead of `%APPDATA%` and touches no registry value. It does not let the two
-run together: the check for a running 1.x does not follow the override, so exit TaskSpaces from
-its tray icon before starting the Debug build.
+runs TaskSpaces 1.x with the environment variable `DESKBAR_APPDATA` set to a scratch folder,
+given as a full path (a relative one is ignored). Otherwise its first start migrates your real
+profile. With it set, Deskbar reads and writes under that folder instead of `%APPDATA%`, and the
+migration touches no registry value. Leave "Start with Windows" alone in a Debug build run under
+the override, since that checkbox still writes the real value. Set the variable in the shell you
+start the build from (`$env:DESKBAR_APPDATA = 'C:\scratch\deskbar'` in PowerShell), not with
+`setx`: setx makes it permanent for every Deskbar started afterwards, a real one at login
+included, and does not reach a shell that is already open. The override does not let the two
+run together either: the check for a running 1.x does not follow it, so exit TaskSpaces from its
+tray icon before starting the Debug build.
 
 ### Releasing
 
