@@ -80,6 +80,32 @@ public class FloatingBarMediaTests
         bar.Close();
     });
 
+    // The two lines fit the line they sit on, at the bar's text size. Petre's screenshot at the +4 default: the
+    // title rode up over the line's top and the artist (Georgian, whose letters reach further below the line)
+    // was cut off by the icons under it, because the player button was a fixed 30 DIP and the two lines needed
+    // about 39. Measured on the bar: a 40 px button holding 58 px of text.
+    [Fact]
+    public void The_title_and_artist_fit_inside_the_line() => StaThread.Run(() =>
+    {
+        var bar = Bar(new FakeMedia { Now = Song with { Artist = "თემურ თათარაშვილი" } });
+        bar.UpdateLayout();
+
+        var player = Named(bar, "Now playing");
+        var text = Descendants(player).OfType<StackPanel>().First();
+        // Measured UNCONSTRAINED: WPF clamps a child's DesiredSize to the space it was offered, so read inside a
+        // 30 DIP button it says 30 and the overflow is invisible. That is how a first version of this test
+        // passed against the bug.
+        var tall = player.ActualHeight;
+        text.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
+        Assert.True(tall >= text.DesiredSize.Height,
+            $"the button is {tall:F1} DIP tall and its two lines need {text.DesiredSize.Height:F1}");
+        bar.Close();
+    });
+
+    static IEnumerable<DependencyObject> Descendants(DependencyObject node) =>
+        LogicalTreeHelper.GetChildren(node).OfType<DependencyObject>()
+            .SelectMany(child => new[] { child }.Concat(Descendants(child)));
+
     // The middle button says what a press will do: pause while playing, play while paused.
     [Fact]
     public void The_middle_button_pauses_a_playing_track_and_plays_a_paused_one() => StaThread.Run(() =>
