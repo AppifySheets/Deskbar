@@ -39,7 +39,7 @@ only the one you are standing on.
 Nothing is hidden by trickery. Quit Deskbar and your windows are still sitting on their
 desktops, reachable through Task View exactly as before.
 
-This is a product of love and refinement. I built it for myself and it is on my screen all day,
+This is a product of love, refinement and sophistication. I built it for myself and it is on my screen all day,
 every day. It has changed on most working days since the first commit in August 2026, nearly four
 hundred commits so far, and most of them are small: a ring a pixel off, a fade that started too
 soon, a click lost under load, a hairline that wandered from row to row. That is deliberate. A bar
