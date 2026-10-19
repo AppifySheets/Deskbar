@@ -91,6 +91,10 @@ public partial class FloatingBar
             Orientation = Orientation.Horizontal,
             HorizontalAlignment = HorizontalAlignment.Left,
             VerticalAlignment = VerticalAlignment.Center,
+            // In from the seam by what the left pair sits in from the bar's edge (the bar's padding and the
+            // row's ring), so each screen's pair has the same breathing room. Measured without it: the left
+            // pair 8 px from its edge, this one at 0, pressed against the left screen.
+            Margin = new Thickness(RootPadding + RowRingThickness, 0, 0, 0),
             Children =
             {
                 ShellButton(ShellFlyout.Start, "Start", StartGlyph()),
