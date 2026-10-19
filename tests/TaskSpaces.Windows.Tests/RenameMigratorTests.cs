@@ -1,0 +1,116 @@
+using System.IO;
+using Microsoft.Win32;
+using TaskSpaces.App;
+using TaskSpaces.Core.Migration;
+
+namespace TaskSpaces.Windows.Tests;
+
+// The thin layer under the rename migration: it gathers the facts RenameMigration.Plan decides on and
+// applies the steps it returns. The rules themselves are tested in TaskSpaces.Core.Tests; these check
+// that the files land where they should and that the registry is left alone under a test host.
+//
+// Each test hands RenameMigrator its own temporary root rather than setting DESKBAR_APPDATA. AppPaths
+// reads that variable once, when the type is first touched, so setting it inside one test would either
+// be ignored or, worse, fix the root for every other test running in the same process.
+public class RenameMigratorTests
+{
+    const string RunKey = @"Software\Microsoft\Windows\CurrentVersion\Run";
+
+    static (object? Old, object? New) RunValues()
+    {
+        using var key = Registry.CurrentUser.OpenSubKey(RunKey);
+        return (key?.GetValue("TaskSpaces"), key?.GetValue("Deskbar"));
+    }
+
+    static void WithRoot(Action<string> test)
+    {
+        var root = Path.Combine(Path.GetTempPath(), $"ts-rename-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(Path.Combine(root, "TaskSpaces"));
+        try { test(root); }
+        finally { if (Directory.Exists(root)) Directory.Delete(root, recursive: true); }
+    }
+
+    static string Old(string root, string name) => Path.Combine(root, "TaskSpaces", name);
+    static string New(string root, string name) => Path.Combine(root, "Deskbar", name);
+
+    [Fact]
+    public void Apply_copies_the_old_state_files_into_the_new_folder_and_leaves_the_old_folder() =>
+        WithRoot(root =>
+        {
+            File.WriteAllText(Old(root, "state.json"), "state");
+            File.WriteAllText(Old(root, "time.json"), "time");
+
+            var applied = RenameMigrator.Apply(root, [new CopyFile("state.json"), new CopyFile("time.json")], _ => { });
+
+            Assert.True(applied.IsSuccess);
+            Assert.Equal("state", File.ReadAllText(New(root, "state.json")));
+            Assert.Equal("time", File.ReadAllText(New(root, "time.json")));
+            Assert.True(File.Exists(Old(root, "state.json")));
+            Assert.True(File.Exists(Old(root, "time.json")));
+        });
+
+    [Fact]
+    public void Apply_deletes_the_old_shim() =>
+        WithRoot(root =>
+        {
+            File.WriteAllText(Old(root, "taskspaces.cmd"), "@echo off");
+
+            var applied = RenameMigrator.Apply(root, [new DeleteOldShim()], _ => { });
+
+            Assert.True(applied.IsSuccess);
+            Assert.False(File.Exists(Old(root, "taskspaces.cmd")));
+            Assert.True(Directory.Exists(Path.Combine(root, "TaskSpaces")));
+        });
+
+    // A plan never pairs a refusal with other steps, but Apply does not rely on that: a refusal anywhere
+    // in the list means nothing is done.
+    [Fact]
+    public void Apply_refuses_when_the_plan_says_so_and_touches_nothing() =>
+        WithRoot(root =>
+        {
+            File.WriteAllText(Old(root, "state.json"), "state");
+            File.WriteAllText(Old(root, "taskspaces.cmd"), "@echo off");
+
+            var applied = RenameMigrator.Apply(root,
+                [new CopyFile("state.json"), new DeleteOldShim(), new RefuseToStart(RenameMigration.RefusalMessage)],
+                _ => { });
+
+            Assert.True(applied.IsFailure);
+            Assert.Equal(RenameMigration.RefusalMessage, applied.Error);
+            Assert.False(Directory.Exists(Path.Combine(root, "Deskbar")));
+            Assert.True(File.Exists(Old(root, "taskspaces.cmd")));
+        });
+
+    [Fact]
+    public void Gather_sees_the_old_folder_and_its_files_under_the_override_root() =>
+        WithRoot(root =>
+        {
+            File.WriteAllText(Old(root, "state.json"), "state");
+            File.WriteAllText(Old(root, "last-used.json"), "{}");
+            File.WriteAllText(Old(root, "taskspaces.cmd"), "@echo off");
+            File.WriteAllText(Old(root, "trace.on"), "");
+
+            var facts = RenameMigrator.Gather(root, awaitingPrevious: true, oldMutexHeld: false);
+
+            Assert.True(facts.OldFolderExists);
+            Assert.False(facts.NewFolderExists);
+            Assert.Equal(["state.json", "last-used.json"], facts.OldFilesPresent);
+            Assert.True(facts.OldShimExists);
+            Assert.True(facts.AwaitingPrevious);
+            Assert.False(facts.OldMutexHeld);
+            // A root that is not the real %APPDATA% counts as overridden, and the test host is not the app:
+            // either one alone keeps the registry out of the plan.
+            Assert.True(facts.RootOverridden);
+            Assert.False(facts.IsTheApp);
+        });
+
+    [Fact]
+    public void Registry_steps_are_refused_under_the_test_host()
+    {
+        var before = RunValues();
+
+        Assert.True(StartupRegistration.MigrateFromTaskSpaces(deleteOld: true, setNew: true).IsFailure);
+
+        Assert.Equal(before, RunValues());
+    }
+}

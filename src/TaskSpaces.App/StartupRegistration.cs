@@ -10,12 +10,16 @@ public static class StartupRegistration
     const string RunKey = @"Software\Microsoft\Windows\CurrentVersion\Run";
     const string Name = "Deskbar";
 
-    // The value name 1.x wrote. Nothing here reads or writes it: it is named for the rename migration,
-    // which deletes it so that login does not start TaskSpaces 1.x beside Deskbar.
+    // The value name 1.x wrote. Only the rename migration touches it (LegacyIsSet, MigrateFromTaskSpaces):
+    // it is deleted so that login does not start TaskSpaces 1.x beside Deskbar.
     internal const string LegacyName = "TaskSpaces";
 
     public static bool IsEnabled =>
         Registry.CurrentUser.OpenSubKey(RunKey)?.GetValue(Name) is not null;
+
+    // Read-only, so the test host may ask it: RenameMigrator.Gather does, for the plan's facts.
+    internal static bool LegacyIsSet =>
+        Registry.CurrentUser.OpenSubKey(RunKey)?.GetValue(LegacyName) is not null;
 
     // Petre: "taskspaces didn't start with windows". The entry pointed at the TEST HOST. ManageWindow
     // ticks its "Start with Windows" box from the registry when it is built, that raises Checked, and
@@ -66,4 +70,21 @@ public static class StartupRegistration
     public static Result Disable() =>
         OwnedByThisProcess().Tap(() =>
             Registry.CurrentUser.CreateSubKey(RunKey).DeleteValue(Name, throwOnMissingValue: false));
+
+    // The rename migration's half of autostart, on Deskbar's first start after TaskSpaces 1.x: the old
+    // value goes, so login does not start 1.x beside Deskbar, and the new one points at this exe, which
+    // is what keeps "start with Windows" true for the copy a 1.x updater has just started. Without it,
+    // two bars would start at the next login. Which of the two to do is decided by RenameMigration.Plan
+    // (setNew only when Deskbar is not already set, so a chosen path is never overwritten).
+    //
+    // Guarded exactly like Enable and Disable, for the same reason: the test host must never touch the
+    // real login entry. A registry failure comes back as a failure rather than an exception, because
+    // this runs during startup and an autostart that could not be swapped is no reason not to start.
+    public static Result MigrateFromTaskSpaces(bool deleteOld, bool setNew) =>
+        OwnedByThisProcess().Bind(() => Result.Try(() =>
+        {
+            using var key = Registry.CurrentUser.CreateSubKey(RunKey);
+            if (deleteOld) key.DeleteValue(LegacyName, throwOnMissingValue: false);
+            if (setNew) key.SetValue(Name, $"\"{Environment.ProcessPath}\"");
+        }, error => $"could not move start with Windows from TaskSpaces to Deskbar: {error.Message}"));
 }

@@ -24,20 +24,37 @@ static class AppPaths
 
     // Declared before the properties on purpose: static initializers run in textual order, and the
     // three below are computed from this one.
+    //
+    // Made absolute here, once. A relative value would otherwise resolve against whatever the current
+    // directory happens to be, and for a copy started by the Run key at login that is System32: the
+    // scratch root meant to protect the real profile would land among Windows' own files instead.
     static readonly string? overrideRoot =
         Environment.GetEnvironmentVariable(OverrideVariable) is { } value && !string.IsNullOrWhiteSpace(value)
-            ? value.Trim()
+            ? Path.GetFullPath(value.Trim())
             : null;
 
     public static bool RootOverridden { get; } = overrideRoot is not null;
 
-    public static string Root { get; } =
-        overrideRoot ?? Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
+    // The real %APPDATA%, whatever the override says. The rename migration compares against it, so a
+    // root handed to it that is anything else is treated as a rehearsal and kept out of the registry.
+    public static string RealRoot { get; } = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
+
+    public static string Root { get; } = overrideRoot ?? RealRoot;
 
     // state.json, time.json, last-used.json, the control shim and the trace marker all live here.
-    public static string NewStateDir { get; } = Path.Combine(Root, "Deskbar");
+    public static string NewStateDir { get; } = NewStateDirUnder(Root);
 
     // The 1.x folder, kept by its old name deliberately: the migration copies from it once and leaves
     // it as it is, so a rollback to 1.x finds its files where it left them.
-    public static string OldStateDir { get; } = Path.Combine(Root, "TaskSpaces");
+    public static string OldStateDir { get; } = OldStateDirUnder(Root);
+
+    // The same two folders under a root given explicitly. The rename migration takes its root as an
+    // argument through these, so its tests can point it at a temporary folder without setting
+    // DESKBAR_APPDATA, which is read once per process and would fix the root for every other test.
+    public static string NewStateDirUnder(string root) => Path.Combine(root, "Deskbar");
+
+    public static string OldStateDirUnder(string root) => Path.Combine(root, "TaskSpaces");
+
+    // The control shim 1.x wrote into its folder. The migration deletes it so it cannot start the old exe.
+    public const string OldShimName = "taskspaces.cmd";
 }

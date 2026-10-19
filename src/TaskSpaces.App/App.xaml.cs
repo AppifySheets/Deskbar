@@ -9,6 +9,7 @@ using H.NotifyIcon.Core;
 using TaskSpaces.Core;
 using TaskSpaces.Core.Abstractions;
 using TaskSpaces.Core.Domain;
+using TaskSpaces.Core.Migration;
 using TaskSpaces.Core.Persistence;
 using TaskSpaces.Core.Time;
 using TaskSpaces.Core.Updates;
@@ -643,7 +644,17 @@ public partial class App : Application
         if (afterCrash)
             ClickTrace.Write("started after a crash: waiting for the previous copy to be gone");
 
-        if (!isOnlyInstance && (e.Args.Contains(AwaitPreviousSwitch) || afterCrash))
+        // The handover from 1.x, before the mutex wait below. That wait no longer covers it: 1.x holds
+        // the OLD name and releases it before starting this exe, so the new name is free at once and
+        // this copy would migrate the state while 1.x's exit handler is still writing time.json. So a
+        // copy started by an update first waits for the process that started it to be gone, bounded
+        // at fifteen seconds (RenameMigrator.AwaitParentExit). A 2.x predecessor is waited for the same
+        // way, and the mutex loop after it then finds the new name free.
+        var awaitingPrevious = e.Args.Contains(AwaitPreviousSwitch);
+        if (awaitingPrevious)
+            ClickTrace.Write(RenameMigrator.AwaitParentExit(TimeSpan.FromSeconds(15)));
+
+        if (!isOnlyInstance && (awaitingPrevious || afterCrash))
         {
             var deadline = DateTime.UtcNow.AddSeconds(afterCrash ? 60 : 10);
             while (!isOnlyInstance && DateTime.UtcNow < deadline)
@@ -680,6 +691,35 @@ public partial class App : Application
         // a TaskSpaces 1.x running right now. legacyInstanceOwned keeps that answer for the rename
         // migration; nothing else here acts on it.
         legacyInstance = new System.Threading.Mutex(initiallyOwned: true, @"Local\TaskSpaces.SingleInstance", out legacyInstanceOwned);
+
+        // The rename migration, on the first start of Deskbar after TaskSpaces 1.x (RenameMigration has
+        // every rule and its reason). Here, because this is the first moment both of its inputs mean
+        // something: this copy owns the new name, so the old name still being held can only be a 1.x
+        // running right now; and the parent wait above is over. And before the state store is opened
+        // below, because it fills the folder that store reads. In short:
+        //
+        // - beside a running 1.x, refuse to start: the control pipe exposes no Exit, so the person is
+        //   asked to close it. Not on the updater's handshake, where 1.x is the one leaving.
+        // - copy (never move) state.json, time.json and last-used.json into the new folder, once, while
+        //   it does not exist yet; the old folder stays as it is for a rollback.
+        // - delete the old taskspaces.cmd shim, so it cannot start the old exe.
+        // - swap the Run value TaskSpaces for Deskbar, only from the app and never under DESKBAR_APPDATA.
+        //
+        // Every step it applies is traced. The refusal releases both mutexes before it goes, like the
+        // tray's Exit: this copy owns them, and leaving them to process death would be the one exit path
+        // that does not.
+        var renamed = RenameMigrator.Apply(
+            AppPaths.Root,
+            RenameMigration.Plan(RenameMigrator.Gather(AppPaths.Root, awaitingPrevious, oldMutexHeld: !legacyInstanceOwned)),
+            ClickTrace.Write);
+        if (renamed.IsFailure)
+        {
+            ClickTrace.Write($"rename migration: refused to start ({renamed.Error})");
+            MessageBox.Show(renamed.Error, "Deskbar", MessageBoxButton.OK, MessageBoxImage.Information);
+            ReleaseInstanceMutexes();
+            Shutdown();
+            return;
+        }
 
         // AFTER the single-instance guard, deliberately: a second copy that is about to tell the
         // user it is already running has no business rewriting where startup points. Only the
