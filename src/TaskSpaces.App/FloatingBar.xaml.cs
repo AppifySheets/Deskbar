@@ -5338,15 +5338,17 @@ public partial class FloatingBar : Window
 
     void Titled(Button button, WindowRow row)
     {
-        var art = (UIElement)button.Content;
+        // A pinned window is on every workspace, so it says so; otherwise Beeper in this list would read as
+        // living here. With a badge on the icon (see WithPinBadge), no longer a pin in front of the title.
+        var pinned = pinnedNow.Any(p => p.Window.Handle == row.Window.Handle);
+        var bare = (UIElement)button.Content;
         button.Content = null;
+        var art = pinned ? WithPinBadge(bare) : bare;
         DockPanel.SetDock(art, Dock.Left);
 
         var title = new TextBlock
         {
-            // A pinned window is on every workspace, so it says so; otherwise Beeper in this list would
-            // read as living here.
-            Text = (pinnedNow.Any(p => p.Window.Handle == row.Window.Handle) ? "📌 " : "") + row.Window.DisplayName,
+            Text = row.Window.DisplayName,
             FontSize = Text(9.5),
             Foreground = row.IsActive ? TitleActive
                 : row.IsFrontmostOnMonitor.HasValue && !row.IsFrontmostOnMonitor.Value ? TitleBehind
@@ -5369,6 +5371,62 @@ public partial class FloatingBar : Window
         // width to trim against; the centring one would size the button to the whole title and clip it.
         button.Template = BareStretchButton;
         button.HorizontalAlignment = HorizontalAlignment.Stretch;
+    }
+
+    // The pin on a pinned window's icon in the titled list. Petre, of the pin that used to lead the title: "add
+    // that pin, small, on the icon. show me first", and from the mockup, "a, pin badge": a small dark disc with a
+    // white pin, on the icon's TOP-LEFT corner. That is the one corner nothing else uses: the tab count and the
+    // attention dot sit top-right and the family band runs along the bottom. The disc is dark for the reason
+    // the attention dot has a dark rim, so the pin holds on light artwork. The title gets back the three
+    // characters the glyph took, in a column that holds about eight.
+    //
+    // Overlaid, never laid out: the badge hangs 3 DIP past the corner on a negative margin, so the cell
+    // measures what the icon alone measures and the line does not grow (the sound ring's lesson, see
+    // FloatingBar.Activity.Dressed).
+    internal const string PinBadgeTag = "pin-badge";
+
+    internal static UIElement WithPinBadge(UIElement icon)
+    {
+        var cell = new Grid();
+        cell.Children.Add(icon);
+
+        var badge = new Grid
+        {
+            Tag = PinBadgeTag,
+            Width = 10,
+            Height = 10,
+            HorizontalAlignment = HorizontalAlignment.Left,
+            VerticalAlignment = VerticalAlignment.Top,
+            Margin = new Thickness(-3, -3, 0, 0),
+            IsHitTestVisible = false,
+        };
+        badge.Children.Add(new Ellipse { Fill = PinBadgeFill });
+        // The pin itself, on the disc's 10 unit square: a head tilted to the upper right and a short needle
+        // to the lower left.
+        badge.Children.Add(new Path
+        {
+            Data = PinBadgeShape,
+            Fill = PinBadgeInk,
+            Stroke = PinBadgeInk,
+            StrokeThickness = 0.7,
+            StrokeStartLineCap = PenLineCap.Round,
+            StrokeEndLineCap = PenLineCap.Round,
+            StrokeLineJoin = PenLineJoin.Round,
+        });
+        cell.Children.Add(badge);
+        return cell;
+    }
+
+    static readonly Geometry PinBadgeShape = FrozenGeometry("M5.9,2.2 L7.8,4.1 L6.7,4.5 L5.6,6.1 L5.7,7 L3,4.3 L3.9,4.4 L5.5,3.3 Z M4.1,5.9 L2.6,7.4");
+    static readonly Brush PinBadgeFill = Frozen(0xF0, 0x15, 0x17, 0x1F);
+    static readonly Brush PinBadgeInk = Frozen(0xFF, 0xFF, 0xFF, 0xFF);
+
+    // Static geometry is shared across rebuilds, so frozen like the static brushes, for the same reason.
+    static Geometry FrozenGeometry(string data)
+    {
+        var geometry = Geometry.Parse(data);
+        geometry.Freeze();
+        return geometry;
     }
 
     static readonly Brush TitleActive = Frozen(0xFF, 0xFF, 0xFF, 0xFF);

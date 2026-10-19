@@ -29,4 +29,9 @@ public class FloatingBarActivityLayoutTests
     [Fact]
     public void Both_marks_together_do_not_change_what_the_icon_measures() => StaThread.Run(() =>
         Assert.Equal(Measured(Artwork()), Measured(FloatingBar.Dressed(Artwork(), tabCount: 7, loud: true))));
+
+    // The pin badge on a pinned window in the window list ("a, pin badge") hangs past the corner, never into layout.
+    [Fact]
+    public void A_pin_badge_does_not_change_what_the_icon_measures() => StaThread.Run(() =>
+        Assert.Equal(Measured(Artwork()), Measured(FloatingBar.WithPinBadge(Artwork()))));
 }

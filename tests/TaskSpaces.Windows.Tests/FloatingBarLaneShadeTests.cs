@@ -195,7 +195,7 @@ public class FloatingBarLaneShadeTests(ITestOutputHelper output)
 
     // Petre: "i want to show the pinned windows in the active taskspace as well, so the beeper." A pinned
     // window joins the titled list at the end of its screen's column, marked with a pin, and stays in the
-    // pinned row too.
+    // pinned row too. The pin is a badge on its icon ("a, pin badge"), so the title is the window's own.
     [Fact]
     public void The_titled_list_includes_pinned_windows_marked_with_a_pin() => StaThread.Run(() =>
     {
@@ -205,8 +205,13 @@ public class FloatingBarLaneShadeTests(ITestOutputHelper output)
         output.WriteLine(string.Join(" | ", titles.Select(t => $"{t.Text}@{t.X:0},{t.Y:0}")));
 
         // Screen 1's column: the workspace's two windows, then the pinned one; screen 2's: App 3.
-        Assert.Equal(["App 1", "App 2", "📌 Beeper", "App 3"], titles.Select(t => t.Text));
+        Assert.Equal(["App 1", "App 2", "Beeper", "App 3"], titles.Select(t => t.Text));
         Assert.Equal(titles[0].X, titles[2].X, 1);
+        // Exactly one badge in the list, and it is on Beeper's line.
+        var badges = Bar.Descendants(bar.TitledList()).OfType<FrameworkElement>().Where(e => Equals(e.Tag, FloatingBar.PinBadgeTag)).ToList();
+        var beeper = bar.Icons(bar.TitledList()).Single(icon => System.Windows.Automation.AutomationProperties.GetName(icon) == "Beeper");
+        Assert.Single(badges);
+        Assert.Contains(badges[0], Bar.Descendants(beeper));
         // ...and it is still in the pinned row.
         Assert.Contains(bar.Icons(bar.RowContainer("Pinned")), icon =>
             System.Windows.Automation.AutomationProperties.GetName(icon) == "Beeper");
@@ -648,7 +653,7 @@ public class FloatingBarLaneShadeTests(ITestOutputHelper output)
                 _ => false,
             };
 
-        static IEnumerable<DependencyObject> Descendants(DependencyObject node) =>
+        public static IEnumerable<DependencyObject> Descendants(DependencyObject node) =>
             Enumerable.Range(0, VisualTreeHelper.GetChildrenCount(node))
                 .Select(i => VisualTreeHelper.GetChild(node, i))
                 .SelectMany(child => new[] { child }.Concat(Descendants(child)));
