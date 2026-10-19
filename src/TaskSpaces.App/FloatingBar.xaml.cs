@@ -63,6 +63,7 @@ public partial class FloatingBar : Window
 
         // Icons fade to grey as their windows go unused (FloatingBar.Aging.cs), aged in place every minute.
         StartAging();
+        StartWorkspaceTimes();
 
         // Petre: "my window has gotten quite too large... shrink by twenty percent."
         //
@@ -1742,6 +1743,7 @@ public partial class FloatingBar : Window
         headerDropTargets.Clear();    // re-registered by every row as it is built (see GroupRow)
         ghostLines.Clear();           // re-derived by HeldLines as the expanded rows are built
         ForgetAgingIcons();           // the aging overlays belong to the rows about to be replaced
+        ForgetWorkspaceTimes();       // ...and so do the captions' time marks
         // The rows these pointed at have just been thrown away, so every entry is now a Border
         // that is no longer in the tree. Repopulated as the new rows are built.
         rowRings.Clear();
@@ -3202,7 +3204,7 @@ public partial class FloatingBar : Window
         // either, which changes nothing -- RowLabel already returns null for a row with no
         // destination, and the pinned row has never had one.
         var (label, setHover) = captionContent is null
-            ? RowLabel(visualLabel, isCurrent, switchTo, caption: true, currentColour: spine, empty: emptyRow)
+            ? RowLabel(visualLabel, isCurrent, switchTo, caption: true, currentColour: spine, empty: emptyRow, timeFor: rowKey)
             : (captionContent, (Action<bool>?)null);
 
         // Collected as they are built, because the hover wiring below needs the BUTTONS and
@@ -3409,7 +3411,7 @@ public partial class FloatingBar : Window
         // by the same hover. Only for a real caption, not the pinned row's header.
         if (AcrossSeam && captionContent is null)
         {
-            var (twin, twinHover) = RowLabel(visualLabel, isCurrent, switchTo, caption: true, currentColour: spine, empty: emptyRow);
+            var (twin, twinHover) = RowLabel(visualLabel, isCurrent, switchTo, caption: true, currentColour: spine, empty: emptyRow, timeFor: rowKey);
             if (twin is FrameworkElement twinCaption && label is FrameworkElement firstCaption) twinCaption.Margin = firstCaption.Margin;
             var holder = AtRightHalf(twin);
             Grid.SetRow(holder, 0);
@@ -4668,8 +4670,10 @@ public partial class FloatingBar : Window
     // `currentColour`: the colour a CURRENT row's name is drawn in (accent rail style: its own bright colour
     // rather than white). `empty`: the workspace has no windows, so its name carries a dim "· empty" and
     // stands for the whole row (see GroupRow).
+    // `timeFor`: the workspace whose time today follows the name (FloatingBar.WorkspaceTime.cs); null for rows
+    // that are not workspaces.
     (UIElement Element, Action<bool>? SetHover) RowLabel(string text, bool isCurrent, Func<Result>? switchTo, bool caption = false,
-        Brush? currentColour = null, bool empty = false)
+        Brush? currentColour = null, bool empty = false, Guid? timeFor = null)
     {
         // Petre: "when switching workspaces, because the caption of the workspace gets bolded,
         // it increases the width of the floating window a little if that workspace is full,
@@ -4727,18 +4731,37 @@ public partial class FloatingBar : Window
         // name's Text stays exactly the name, which is what screen readers and everything that finds a row
         // by its name read. (Built as inlines first, which left Text empty for every caption: WPF does not
         // fill Text from inlines.)
-        UIElement content = textBlock;
+        //
+        // Today's time joins it the same way (" · 2 h 11 min", FloatingBar.WorkspaceTime.cs). The marks are
+        // DOCKED to the right of a left-aligned panel and the name fills what is left, so the panel is exactly
+        // as wide as name plus marks, with the marks right after the name. When the line is too narrow, the
+        // name is what shrinks and takes the ellipsis, and the time stays readable. Docked right in reverse
+        // order, since the first child docked right sits outermost: time, then "empty", then the name.
+        var marks = new List<UIElement>();
+        // LineHeight is NaN unless set, which it is on a caption (above); passed on so the time sits on the
+        // same tight line box as the name and the caption does not grow taller.
+        var lineHeight = double.IsNaN(textBlock.LineHeight) ? (double?)null : textBlock.LineHeight;
+        if (caption && WorkspaceTimeMark(timeFor, textBlock.FontSize, lineHeight) is { } time)
+            marks.Add(time);
         if (empty)
-        {
-            var line = new StackPanel { Orientation = Orientation.Horizontal };
-            line.Children.Add(textBlock);
-            line.Children.Add(new TextBlock
+            marks.Add(new TextBlock
             {
                 Text = " · empty",
                 FontSize = textBlock.FontSize,
                 Foreground = EmptyMarkForeground,
                 VerticalAlignment = VerticalAlignment.Center,
             });
+
+        UIElement content = textBlock;
+        if (marks.Count > 0)
+        {
+            var line = new DockPanel { LastChildFill = true, HorizontalAlignment = HorizontalAlignment.Left };
+            marks.ForEach(mark =>
+            {
+                DockPanel.SetDock(mark, Dock.Right);
+                line.Children.Add(mark);
+            });
+            line.Children.Add(textBlock);
             content = line;
         }
 
