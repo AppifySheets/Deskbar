@@ -650,9 +650,13 @@ public partial class App : Application
         // copy started by an update first waits for the process that started it to be gone, bounded
         // at fifteen seconds (RenameMigrator.AwaitParentExit). A 2.x predecessor is waited for the same
         // way, and the mutex loop after it then finds the new name free.
+        // The parent's id is resolved here and handed to the wait, so the wait itself can be tested on a
+        // process a test starts; ParentProcessId already refuses an id that now names a newer process.
+        // Both trace what they found.
         var awaitingPrevious = e.Args.Contains(AwaitPreviousSwitch);
         if (awaitingPrevious)
-            ClickTrace.Write(RenameMigrator.AwaitParentExit(TimeSpan.FromSeconds(15)));
+            RenameMigrator.ParentProcessId(ClickTrace.Write)
+                .Execute(parent => RenameMigrator.AwaitParentExit(parent, TimeSpan.FromSeconds(15), ClickTrace.Write));
 
         if (!isOnlyInstance && (awaitingPrevious || afterCrash))
         {

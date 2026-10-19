@@ -17,6 +17,10 @@ sealed record Refused(string Message) : RenameProblem(Message);
 
 sealed record StateNotCarried(string Message) : RenameProblem(Message);
 
+// How RenameMigrator.AwaitParentExit's wait ended. NotVisible: the process exists but this one is not
+// allowed to look at it, so there is nothing to wait on.
+enum ParentWait { Exited, AlreadyGone, TimedOut, NotVisible }
+
 // The Windows half of the rename migration: it gathers the facts RenameMigration.Plan decides on, and
 // applies the steps that plan returns. Every rule lives in the plan (TaskSpaces.Core), so nothing here
 // decides anything; it looks, and it does what it is told.
@@ -132,35 +136,75 @@ static class RenameMigrator
     // fifteen seconds rather than a start. A 2.x predecessor is waited for the same way, harmlessly: it
     // is on its way out too.
     //
-    // Returns what happened, in words, for the trace.
-    public static string AwaitParentExit(TimeSpan timeout) =>
-        ParentProcessId().Match(
-            parent => WaitForExit(parent, timeout),
-            () => "parent wait: the parent process id could not be read, not waiting");
-
-    static string WaitForExit(int parentId, TimeSpan timeout)
+    // Split in two so the wait can be tested on a process the test starts itself: OnStartup resolves the
+    // parent's id (ParentProcessId) and hands it to AwaitParentExit. Each traces what it found, and the
+    // wait also returns it, which is what the tests read.
+    public static ParentWait AwaitParentExit(int parentPid, TimeSpan timeout, Action<string> trace)
     {
         try
         {
-            using var parent = Process.GetProcessById(parentId);
-            using var self = Process.GetCurrentProcess();
+            using var parent = Process.GetProcessById(parentPid);
 
-            // A parent that died before this line may have had its id reused by an unrelated process,
-            // which would then be waited on for nothing. A process started after this one cannot be its
-            // parent.
-            if (parent.StartTime > self.StartTime)
-                return $"parent wait: {parentId} is a newer process reusing the parent's id, not waiting";
-
-            return parent.WaitForExit(timeout)
-                ? $"parent wait: {parentId} ({parent.ProcessName}) exited"
-                : $"parent wait: {parentId} still running after {timeout.TotalSeconds:0} s, going on without it";
+            // Named BEFORE the wait. Once the process has exited ProcessName throws
+            // InvalidOperationException, so read afterwards it sent every successful wait into the
+            // "already gone" catch below and the "exited" line could never be written.
+            var name = parent.ProcessName;
+            var exited = parent.WaitForExit(timeout);
+            trace(exited
+                ? $"parent wait: {parentPid} ({name}) exited"
+                : $"parent wait: {parentPid} still running after {timeout.TotalSeconds:0} s, going on without it");
+            return exited ? ParentWait.Exited : ParentWait.TimedOut;
         }
         // Gone already, which is the wait over: GetProcessById throws ArgumentException for an id with no
         // process, and the other members InvalidOperationException once it has exited in between.
-        catch (ArgumentException) { return $"parent wait: {parentId} already gone"; }
-        catch (InvalidOperationException) { return $"parent wait: {parentId} already gone"; }
+        catch (ArgumentException) { return AlreadyGone(parentPid, trace); }
+        catch (InvalidOperationException) { return AlreadyGone(parentPid, trace); }
         // Not allowed to look at it. Nothing to wait on that can be seen, so go on rather than fail.
-        catch (Win32Exception error) { return $"parent wait: {parentId} could not be read ({error.Message}), not waiting"; }
+        catch (Win32Exception error)
+        {
+            trace($"parent wait: {parentPid} could not be read ({error.Message}), not waiting");
+            return ParentWait.NotVisible;
+        }
+    }
+
+    static ParentWait AlreadyGone(int parentPid, Action<string> trace)
+    {
+        trace($"parent wait: {parentPid} already gone");
+        return ParentWait.AlreadyGone;
+    }
+
+    // The id of the process that started this one, when there is one worth waiting for. None, traced,
+    // when the id cannot be read, and when it now names a process NEWER than this one: a parent that
+    // died before this line may have had its id reused by an unrelated process, which would then be
+    // waited on for nothing, and a process started after this one cannot be its parent. (The check lives
+    // here rather than in the wait so the wait can be tested against a child the test starts, which is
+    // necessarily newer than the test.)
+    public static Maybe<int> ParentProcessId(Action<string> trace)
+    {
+        var parentId = ReadParentId();
+        if (parentId.HasNoValue)
+        {
+            trace("parent wait: the parent process id could not be read, not waiting");
+            return Maybe<int>.None;
+        }
+
+        try
+        {
+            using var parent = Process.GetProcessById(parentId.Value);
+            using var self = Process.GetCurrentProcess();
+            if (parent.StartTime <= self.StartTime)
+                return parentId;
+
+            trace($"parent wait: {parentId.Value} is a newer process reusing the parent's id, not waiting");
+            return Maybe<int>.None;
+        }
+        catch (ArgumentException) { AlreadyGone(parentId.Value, trace); return Maybe<int>.None; }
+        catch (InvalidOperationException) { AlreadyGone(parentId.Value, trace); return Maybe<int>.None; }
+        catch (Win32Exception error)
+        {
+            trace($"parent wait: {parentId.Value} could not be read ({error.Message}), not waiting");
+            return Maybe<int>.None;
+        }
     }
 
     // ProcessBasicInformation (class 0) of this process. Only InheritedFromUniqueProcessId is read; the
@@ -185,7 +229,7 @@ static class RenameMigrator
     [DllImport("ntdll.dll")]
     static extern int NtQueryInformationProcess(nint process, int infoClass, ref ProcessBasicInformation info, int length, out int returned);
 
-    static Maybe<int> ParentProcessId()
+    static Maybe<int> ReadParentId()
     {
         var info = new ProcessBasicInformation();
         return NtQueryInformationProcess(CurrentProcess, ProcessBasicInformationClass, ref info,
