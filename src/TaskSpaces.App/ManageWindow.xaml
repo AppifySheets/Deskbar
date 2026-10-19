@@ -174,7 +174,7 @@
                     <StackPanel>
                         <TextBlock Text="Dimming" FontWeight="Bold"/>
                         <TextBlock TextWrapping="Wrap" Opacity="0.75" Margin="0,2,0,6"
-                                   Text="How faint the bar goes once the pointer is elsewhere. Fully opaque means it never dims. It never goes fully invisible: an unseeable bar still swallows the clicks aimed at whatever is behind it."/>
+                                   Text="How faint the bar goes once the pointer is elsewhere. Fully opaque means it never dims. It never goes fully invisible: an unseeable bar still swallows the clicks aimed at whatever is behind it. A docked bar never dims, since nothing sits under it."/>
                         <StackPanel Orientation="Horizontal">
                             <Slider x:Name="IdleOpacitySlider" Width="260" Minimum="0.05" Maximum="1"
                                     SmallChange="0.05" LargeChange="0.1" TickFrequency="0.05" IsSnapToTickEnabled="True"

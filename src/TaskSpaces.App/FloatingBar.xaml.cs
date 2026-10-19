@@ -199,7 +199,19 @@ public partial class FloatingBar : Window
     // Costs a dictionary-free property read on a path that runs a few times a second at most. The
     // alternative -- caching it and invalidating on StateChanged -- is a second copy of a value that
     // has one home, for no measurable gain.
-    double IdleOpacity => BarFading.Clamp(manager.State.BarIdleOpacity);
+    double IdleOpacity => RestingOpacity(manager.State.DockBar, manager.State.BarIdleOpacity);
+
+    // DOCKED, the bar never dims. Petre: "dimming should turn off in docked mode". Dimming exists so you can
+    // see what a floating bar covers, and a docked bar covers nothing: the shell has reserved its strip, so
+    // windows are laid out beside it, never under it. Fading it would only make a taskbar harder to read.
+    //
+    // Done by making the resting strength 1.0 rather than by a check in the fade logic: UpdateFade already
+    // treats "at or below the resting strength" as nothing to do, and ApplyAppearance, which runs on every
+    // state pulse, moves a settled bar to the new resting strength. So docking brightens the bar and
+    // undocking lets it dim again, with no second path. Keyed on the SETTING rather than on the appbar being
+    // registered, so it follows the checkbox even in the moment before the dock itself lands.
+    internal static double RestingOpacity(bool docked, double? configured) =>
+        docked ? 1.0 : BarFading.Clamp(configured);
 
     // Instant on the way in, gentle on the way out. Reaching for the bar should feel like it was
     // already there; leaving should not flicker as the pointer clips a corner on its way past.
@@ -291,6 +303,17 @@ public partial class FloatingBar : Window
     // own. Brightening speed for the move, because this is a preview and it has to answer at once.
     void ApplyAppearance()
     {
+        // Docked means full strength, whatever the fade was doing. The usual guard below would leave a fade
+        // already under way to land at its OLD target, and docking from Manage happens with the pointer off
+        // the bar, which is exactly when a fade is likely to be running (see RestingOpacity).
+        if (manager.State.DockBar && (fading || fadeDelay.IsEnabled || Opacity < 1.0 - 0.001))
+        {
+            fadeDelay.Stop();
+            fading = false;
+            Animate(1.0, BrightenMs);
+            return;
+        }
+
         if (fading || IsMouseOver || HoldsFullStrength || fadeDelay.IsEnabled) return;
         if (Math.Abs(Opacity - IdleOpacity) < 0.001) return;
         Animate(IdleOpacity, BrightenMs);
