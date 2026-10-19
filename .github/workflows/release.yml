@@ -166,10 +166,10 @@ jobs:
         id: artifact
         shell: pwsh
         run: |
-          # A download called "TaskSpaces.App.exe" tells nobody which build they have; one
-          # called "TaskSpaces-1.0.0-win-x64.exe" survives being sitting in a Downloads folder.
-          $name = "TaskSpaces-${{ steps.version.outputs.version }}-win-x64.exe"
-          Move-Item artifacts/publish/TaskSpaces.App.exe "artifacts/publish/$name"
+          # A download called "Deskbar.exe" tells nobody which build they have; one
+          # called "Deskbar-2.0.0-win-x64.exe" survives being sitting in a Downloads folder.
+          $name = "Deskbar-${{ steps.version.outputs.version }}-win-x64.exe"
+          Move-Item artifacts/publish/Deskbar.exe "artifacts/publish/$name"
           "name=$name" >> $env:GITHUB_OUTPUT
           "{0} ({1:N1} MB)" -f $name, ((Get-Item "artifacts/publish/$name").Length / 1MB)
 

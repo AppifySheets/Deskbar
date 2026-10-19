@@ -554,7 +554,7 @@ public partial class App : Application
     {
         var icon = new System.Windows.Media.Imaging.BitmapImage();
         icon.BeginInit();
-        icon.UriSource = new Uri("pack://application:,,,/TaskSpaces.App;component/Assets/taskspaces.ico");
+        icon.UriSource = new Uri("pack://application:,,,/Deskbar;component/Assets/deskbar.ico");
         icon.DecodePixelWidth = 256;
         icon.EndInit();
         icon.Freeze(); // shared by every window, and a thawed shared bitmap takes thread affinity

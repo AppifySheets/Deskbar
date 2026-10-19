@@ -7,7 +7,7 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:local="clr-namespace:TaskSpaces.App"
         Title="TaskSpaces: Manage" Width="720" Height="480"
-        Icon="pack://application:,,,/TaskSpaces.App;component/Assets/taskspaces.ico">
+        Icon="pack://application:,,,/Deskbar;component/Assets/deskbar.ico">
     <DockPanel>
         <TextBlock x:Name="CompatBanner" DockPanel.Dock="Top" Background="#FFF4CE" Padding="8"
                    Text="⚠ Virtual desktops are unavailable on this Windows build. Workspaces are listed but windows will not be moved."

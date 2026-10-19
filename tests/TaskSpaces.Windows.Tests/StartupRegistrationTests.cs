@@ -22,7 +22,9 @@ public class StartupRegistrationTests
     static object? RunValue() => Registry.CurrentUser.OpenSubKey(RunKey)?.GetValue("TaskSpaces");
 
     [Theory]
-    [InlineData("TaskSpaces.App", true)]
+    [InlineData("Deskbar", true)]
+    // The old entry assembly name is refused on purpose, so a 1.x build never registers under the new value.
+    [InlineData("TaskSpaces.App", false)]
     [InlineData("testhost", false)]
     [InlineData("ReSharperTestRunner", false)]
     [InlineData(null, false)]

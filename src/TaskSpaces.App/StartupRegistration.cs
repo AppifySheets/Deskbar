@@ -21,11 +21,12 @@ public static class StartupRegistration
     // start. Measured: one run of ManageSettingsTabTests turned the value into testhost.exe.
     //
     // So only the app itself writes or removes the entry, decided by the entry assembly rather than by
-    // the exe's file name: the release exe is called TaskSpaces-1.17.1-win-x64.exe and the debug build
-    // TaskSpaces.App.exe, but both have TaskSpaces.App as their entry assembly, single-file included.
+    // the exe's file name: the release exe is called Deskbar-2.0.0-win-x64.exe and the debug build
+    // Deskbar.exe, but both have Deskbar as their entry assembly, single-file included. The old
+    // TaskSpaces.App name is refused on purpose, so a 1.x build never registers under the new value.
     // A test host refuses Disable as well as Enable, because a test that unticks the box would
     // otherwise delete the real registration outright.
-    public static bool IsTheApp(string? entryAssembly) => entryAssembly == "TaskSpaces.App";
+    public static bool IsTheApp(string? entryAssembly) => entryAssembly == "Deskbar";
 
     static Result OwnedByThisProcess() =>
         Result.SuccessIf(IsTheApp(Assembly.GetEntryAssembly()?.GetName().Name),

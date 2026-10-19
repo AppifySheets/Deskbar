@@ -11,23 +11,23 @@
 
        Three version properties exist because Windows and .NET read different ones:
          Version                - the NuGet/semantic version (3 parts, what humans quote)
-         AssemblyVersion        - what assembly binding uses; kept at x.0.0.0 so servicing
-                                  releases never break a reference
+         AssemblyVersion        - what assembly binding uses; kept at the major version with zeros
+                                  (2.0.0.0 for 2.x) so servicing releases never break a reference
          FileVersion            - what Explorer's Details tab shows (4 parts, must be numeric)
          InformationalVersion   - free-form; the one place a suffix like -beta could go
        Bumping a release means editing VersionPrefix here and nothing else. -->
   <PropertyGroup>
-    <VersionPrefix>1.27.3</VersionPrefix>
+    <VersionPrefix>2.0.0</VersionPrefix>
     <Version>$(VersionPrefix)</Version>
-    <AssemblyVersion>1.0.0.0</AssemblyVersion>
+    <AssemblyVersion>2.0.0.0</AssemblyVersion>
     <FileVersion>$(VersionPrefix).0</FileVersion>
     <InformationalVersion>$(VersionPrefix)</InformationalVersion>
 
-    <Product>TaskSpaces</Product>
+    <Product>Deskbar</Product>
     <Company>AppifySheets</Company>
     <Authors>Petre Chitashvili</Authors>
     <Copyright>Copyright © AppifySheets 2026</Copyright>
-    <Description>Named workspaces for the Windows taskbar, backed by Windows virtual desktops.</Description>
-    <RepositoryUrl>https://github.com/AppifySheets/TaskSpaces</RepositoryUrl>
+    <Description>The taskbar for your virtual desktops: name them, see every window on one bar.</Description>
+    <RepositoryUrl>https://github.com/AppifySheets/Deskbar</RepositoryUrl>
   </PropertyGroup>
 </Project>

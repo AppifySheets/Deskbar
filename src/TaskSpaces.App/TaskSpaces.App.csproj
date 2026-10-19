@@ -30,12 +30,17 @@
          source of truth for the app's identity. Generated as a 9-resolution ico
          (16..256) so Windows never has to rescale, which is what makes small sizes look
          crisp rather than smudged. -->
-    <Resource Include="Assets\taskspaces.ico" />
+    <Resource Include="Assets\deskbar.ico" />
   </ItemGroup>
 
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
-    <ApplicationIcon>Assets\taskspaces.ico</ApplicationIcon>
+    <!-- The product is Deskbar, so the exe and the entry assembly are Deskbar. The project, its
+         namespaces and the solution keep the TaskSpaces name by decision (see the rename design),
+         which is why this file does not match the output. The pack:// URIs and
+         StartupRegistration.IsTheApp both key on this name. -->
+    <AssemblyName>Deskbar</AssemblyName>
+    <ApplicationIcon>Assets\deskbar.ico</ApplicationIcon>
     <!-- Must match TaskSpaces.Windows' TFM exactly (net10.0-windows alone is a different,
          incompatible target from the project-reference resolver's point of view). -->
     <TargetFramework>net10.0-windows10.0.19041.0</TargetFramework>
