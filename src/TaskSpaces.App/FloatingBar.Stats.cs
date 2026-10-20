@@ -50,8 +50,19 @@ public partial class FloatingBar
     {
         public string Label { get; } = label;
         public Color Hue { get; } = hue;
-        public TextBlock Name { get; } = new() { Text = label, FontWeight = FontWeights.SemiBold, Foreground = StatLabelInk };
-        public TextBlock Value { get; } = new() { Foreground = StatValueInk, HorizontalAlignment = HorizontalAlignment.Right };
+        // The stat's name, drawn INSIDE its graph at the top left, over the sparkline; not hit-testable, so a
+        // click on it is a click on the line.
+        public TextBlock Name { get; } = new()
+        {
+            Text = label,
+            FontWeight = FontWeights.SemiBold,
+            Foreground = StatLabelInk,
+            HorizontalAlignment = HorizontalAlignment.Left,
+            VerticalAlignment = VerticalAlignment.Top,
+            Margin = new Thickness(2, 0, 0, 0),
+            IsHitTestVisible = false,
+        };
+        public TextBlock Value { get; } = new() { Foreground = StatValueInk };
         public Canvas Spark { get; } = new() { Height = SparkHeight, ClipToBounds = true };
         public Polygon Fill { get; } = new() { Fill = FrozenBrush(Color.FromArgb(0x38, hue.R, hue.G, hue.B)) };
         public Polyline Line { get; } = new() { Stroke = FrozenBrush(hue), StrokeThickness = 1.4, StrokeLineJoin = PenLineJoin.Round };
@@ -95,11 +106,25 @@ public partial class FloatingBar
             // The sparkline is laid out against the canvas's real width, so a resize (the bar's width, the seam)
             // redraws it rather than stretching the stroke.
             cell.Spark.SizeChanged += (_, e) => { if (e.WidthChanged) PaintSpark(cell); };
-            var head = new DockPanel { LastChildFill = true };
-            DockPanel.SetDock(cell.Name, Dock.Left);
-            head.Children.Add(cell.Name);
-            head.Children.Add(cell.Value);
-            statsGrid.Children.Add(new StackPanel { Margin = new Thickness(3, 0, 3, 0), Children = { head, cell.Spark } });
+            // THE PERCENTAGE ALONE ON THE TOP LINE, THE NAME INSIDE THE GRAPH. Petre, on a narrower bar reading
+            // "MEM8%" while Task Manager said 98%: name and value shared the top line, and when they did not
+            // both fit, the value, right-aligned in what was left, was shifted past its slot and lost its first
+            // digit to the clip. Hiding names that did not fit was tried next and left one cell unlabelled by
+            // 0.1 DIP; his answer: "show titles inside the graph", "percentage only at the top". So the value
+            // has the whole width of the cell to itself, and the name sits over the sparkline's top left.
+            //
+            // And in a cell too narrow even for the value alone ("100%" in a 26 DIP cell, measured in
+            // FloatingBarStatsTests), the value SHRINKS rather than being clipped: a smaller "100%" is still
+            // true, where "00%" would be another wrong number. DownOnly, so it never grows past its size.
+            var value = new Viewbox
+            {
+                Child = cell.Value,
+                Stretch = Stretch.Uniform,
+                StretchDirection = StretchDirection.DownOnly,
+                HorizontalAlignment = HorizontalAlignment.Right,
+            };
+            var graph = new Grid { Children = { cell.Spark, cell.Name } };
+            statsGrid.Children.Add(new StackPanel { Margin = new Thickness(3, 0, 3, 0), Children = { value, graph } });
         });
 
         statsTip = new TextBlock();
@@ -174,7 +199,12 @@ public partial class FloatingBar
     void TraceStatsGeometry()
     {
         if (!ClickTrace.On || statsButton is null || statsGrid is null) return;
+        // Per cell: its width, and each value's natural width against the room its shrink-only box was given,
+        // so a value that had to shrink shows up as box < value.
         var cells = string.Join(",", statsGrid.Children.OfType<FrameworkElement>().Select(c => $"{c.ActualWidth:0}"));
+        var values = string.Join(" ", new[] { cpuCell, memoryCell, diskCell, gpuCell }.OfType<StatCell>().Select(c =>
+            $"{c.Label}='{c.Value.Text}' value={c.Value.ActualWidth:0.0} box={((FrameworkElement)c.Value.Parent).ActualWidth:0.0}"));
+        cells = $"{cells} values=[{values}]";
         var line = $"stats geometry: seam={AcrossSeam} footer={((FrameworkElement)StatsLine.Parent).ActualWidth:0} line={StatsLine.ActualWidth:0} " +
                    $"button={statsButton.ActualWidth:0} grid={statsGrid.ActualWidth:0} cols={statsGrid.Columns} cells={cells} " +
                    $"nowplaying={NowPlayingLine.ActualWidth:0} pins={PinLine.ActualWidth:0}";

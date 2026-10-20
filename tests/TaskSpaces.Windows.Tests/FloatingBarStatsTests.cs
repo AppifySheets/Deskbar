@@ -59,10 +59,14 @@ public class FloatingBarStatsTests(ITestOutputHelper output)
         bar.UpdateLayout();
     }
 
-    static IEnumerable<string> Values(FloatingBar bar) =>
+    // Each cell: the value alone on top, in a shrink-only Viewbox, then the graph with the label inside it.
+    static IEnumerable<(TextBlock Label, Viewbox Box, TextBlock Value)> Heads(FloatingBar bar) =>
         Grid(bar).Children.OfType<StackPanel>()
             .Where(cell => cell.Visibility == Visibility.Visible)
-            .Select(cell => ((DockPanel)cell.Children[0]).Children.OfType<TextBlock>().Last().Text);
+            .Select(cell => (Box: (Viewbox)cell.Children[0], Graph: (System.Windows.Controls.Grid)cell.Children[1]))
+            .Select(c => (Label: c.Graph.Children.OfType<TextBlock>().Single(), c.Box, Value: (TextBlock)c.Box.Child));
+
+    static IEnumerable<string> Values(FloatingBar bar) => Heads(bar).Select(h => h.Value.Text);
 
     [Fact]
     public void Without_a_stats_source_there_is_no_line() => StaThread.Run(() =>
@@ -85,6 +89,34 @@ public class FloatingBarStatsTests(ITestOutputHelper output)
 
         Assert.Equal(Visibility.Visible, Line(bar).Visibility);
         Assert.Equal(["23%", "61%", "4%", "12%"], Values(bar));
+        bar.Close();
+    });
+
+    // Petre, on a narrower bar: "MEM8%" while Task Manager said 98%, the value's first digit lost to the
+    // clip. The value now has the top line to itself ("show titles inside the graph", "percentage only at
+    // the top"), so at any width it stays whole (at 130 DIP even "100%" alone does not fit its cell, so it
+    // shrinks instead), and every label shows, inside its graph.
+    [Theory]
+    [InlineData(273)]
+    [InlineData(233)]
+    [InlineData(180)]
+    [InlineData(130)]
+    public void At_any_width_every_value_is_whole_and_every_label_shows(double width) => StaThread.Run(() =>
+    {
+        var stats = new FakeStats();
+        var bar = Bar(stats);
+        Push(bar, stats, Sample(cpu: 62, memory: 98, disk: 100, gpu: 100));
+
+        Line(bar).Width = width;
+        bar.UpdateLayout();
+        Heads(bar).ToList().ForEach(h =>
+        {
+            output.WriteLine($"{width}: {h.Label.Text} {h.Label.Visibility} value '{h.Value.Text}' box {h.Box.ActualWidth:0.0} of {h.Value.ActualWidth:0.0} clip {LayoutInformation.GetLayoutClip(h.Box)?.Bounds.ToString() ?? "none"}");
+            Assert.Equal(Visibility.Visible, h.Label.Visibility);
+            Assert.Null(LayoutInformation.GetLayoutClip(h.Box));
+            Assert.Null(LayoutInformation.GetLayoutClip(h.Value));
+        });
+        Assert.Equal(["62%", "98%", "100%", "100%"], Values(bar));
         bar.Close();
     });
 
