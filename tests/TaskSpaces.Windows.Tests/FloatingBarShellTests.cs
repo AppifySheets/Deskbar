@@ -225,7 +225,7 @@ public class FloatingBarShellTests(ITestOutputHelper output)
         var headers = root.ContextMenu.Items.OfType<MenuItem>().Select(i => (string)i.Header).Where(h => h != "Dock across both screens").ToList();
         output.WriteLine(string.Join(" | ", headers));
 
-        Assert.Equal(["New workspace…", "Window list at the bottom of the bar", "Dock to screen edge", "Minimize bar"], headers);
+        Assert.Equal(["New workspace…", "Window list at the bottom of the bar", "Dock to screen edge", "Minimize bar", "Task Manager"], headers);
         bar.Close();
     });
 
@@ -243,6 +243,7 @@ public class FloatingBarShellTests(ITestOutputHelper output)
         {
             Left = -32000, Top = -32000, SendShellKeys = _ => { },
             AppActions = new FloatingBar.AppCommands(() => ran.Add("manage"), () => ran.Add("updates"), () => ran.Add("exit"), () => null),
+            OpenTaskManager = () => ran.Add("taskmgr"),
         };
         bar.ShowBar();
         var menu = ((Border)bar.FindName("Root")!).ContextMenu!;
@@ -250,12 +251,13 @@ public class FloatingBarShellTests(ITestOutputHelper output)
         bar.FillBarMenu(menu);
         var items = menu.Items.OfType<MenuItem>().ToList();
         output.WriteLine(string.Join(" | ", items.Select(i => (string)i.Header)));
-        Assert.Equal(["New workspace…", "Window list at the bottom of the bar", "Dock to screen edge", "Minimize bar", "Manage…", "Check for updates…", "Exit"],
+        Assert.Equal(["New workspace…", "Window list at the bottom of the bar", "Dock to screen edge", "Minimize bar", "Task Manager", "Manage…", "Check for updates…", "Exit"],
             items.Select(i => (string)i.Header).Where(h => h != "Dock across both screens"));
 
+        items.Single(i => (string)i.Header == "Task Manager").RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
         items.Single(i => (string)i.Header == "Manage…").RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
         items.Single(i => (string)i.Header == "Check for updates…").RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
-        Assert.Equal(["manage", "updates"], ran);
+        Assert.Equal(["taskmgr", "manage", "updates"], ran);
         bar.Close();
     });
 

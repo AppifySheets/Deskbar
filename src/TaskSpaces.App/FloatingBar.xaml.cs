@@ -6231,6 +6231,13 @@ public partial class FloatingBar : Window
 
         AddBarItems(menu);
 
+        // Task Manager, the same launch the stats line's click does (FloatingBar.Stats.cs). Petre: "i want a task
+        // manager to be on the right click menu of the bar". Outside AppActions because it is not one of the
+        // tray's commands, and so the tests see it too. No control pipe twin, like Manage and Exit: anything that
+        // can talk to the pipe can start taskmgr.exe itself.
+        menu.Items.Add(new Separator());
+        Add("▤", "Task Manager", () => OpenTaskManager());
+
         if (AppActions is not { } app) return;
         menu.Items.Add(new Separator());
         if (app.PendingUpdate() is { } update) Add("⬇", update.Label, update.Open);

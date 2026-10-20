@@ -177,6 +177,15 @@ public class FloatingBarPinsTests
     public void A_browser_pin_is_told_by_its_exe(string target, bool browser) =>
         Assert.Equal(browser, FloatingBar.IsBrowser(Shortcut("Pin", target)));
 
+    // VS Code's pin opens a new window like a browser's (Petre: "clicking vscode doesn't open a new window, it
+    // minimizes the current vscode window").
+    [Theory]
+    [InlineData(@"C:\Users\me\AppData\Local\Programs\Microsoft VS Code\Code.exe", true)]
+    [InlineData(@"C:\Users\me\AppData\Local\Programs\Microsoft VS Code Insiders\Code - Insiders.exe", true)]
+    [InlineData(@"C:\Windows\explorer.exe", false)]
+    public void A_vs_code_pin_is_told_by_its_exe(string target, bool editor) =>
+        Assert.Equal(editor, FloatingBar.IsEditor(Shortcut("Pin", target)));
+
     [Fact]
     public void An_installed_web_app_is_not_a_browser_pin() =>
         Assert.False(FloatingBar.IsBrowser(InstalledApp("YouTube Music", "music.youtube.com!App")));

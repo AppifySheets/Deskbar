@@ -63,10 +63,8 @@
                     <!-- The taskbar's pinned apps, in the taskbar's order, as a line above the strip (Petre: "a",
                          a dock line). Inside the strip's own border so the two read as one block at the foot of
                          the screen, under one hairline. Filled in FloatingBar.Pins.cs; collapsed with no pins. -->
-                    <!-- A UniformGrid rather than a WrapPanel, so the cells share the line's width evenly and a pin
-                         list too long for one line splits into even lines instead of a ragged last one (see
-                         PinColumns). -->
-                    <UniformGrid x:Name="PinLine" Margin="0,0,0,2" Visibility="Collapsed"/>
+                    <!-- The taskbar's pinned apps used to sit here, between the now-playing line and the strip.
+                         They moved to the top, under Start (see PinLine in BarHeader below). -->
                     <DockPanel x:Name="ShellStrip" LastChildFill="False"/>
                 </StackPanel>
             </Border>
@@ -86,6 +84,19 @@
                  taskbar strip mockups; see FloatingBar.Shell.cs), the bar's own two commands on the right. One
                  Grid moved into the pinned row's caption cell as a unit, for the reason given above. -->
             <Grid x:Name="BarHeader">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="Auto"/>
+            </Grid.RowDefinitions>
+            <!-- The taskbar's pinned apps, in the taskbar's order (Petre: "a", a dock line), on the header's
+                 second line, straight under Start and search. Petre: "move pinned apps to the top, below start
+                 button"; until then they sat in the footer above the strip. Inside BarHeader so they travel
+                 with it into the pinned row's caption cell (TakeBarCommands), and so stay under Start whatever
+                 the rows do. Filled in FloatingBar.Pins.cs; collapsed with no pins.
+                 A UniformGrid rather than a WrapPanel, so the cells share the line's width evenly and a pin
+                 list too long for one line splits into even lines instead of a ragged last one (see
+                 PinColumns). -->
+            <UniformGrid x:Name="PinLine" Grid.Row="1" Margin="0,2,0,1" Visibility="Collapsed"/>
             <StackPanel x:Name="ShellStart" Orientation="Horizontal"
                         HorizontalAlignment="Left" VerticalAlignment="Center"/>
             <StackPanel x:Name="BarCommands" Orientation="Horizontal"

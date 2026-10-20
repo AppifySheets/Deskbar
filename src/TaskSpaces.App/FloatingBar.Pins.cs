@@ -237,10 +237,16 @@ public partial class FloatingBar
     // rows to jump to; what the pin is for is a fresh one. An installed web app (YouTube Music, Outlook) is
     // not a browser here even though it runs as one: its pin starts the app, never a browser window, so it
     // keeps the taskbar's jump-or-start.
+    //
+    // VS Code too. Petre: "clicking vscode doesn't open a new window, it minimizes the current vscode window":
+    // the jump half of jump-or-start, on the window that already had focus, is the taskbar's minimize. Same
+    // reasoning as the browser: its windows are on the rows, and the pin is for a fresh one. Starting Code.exe
+    // again with no arguments opens a new empty window, VS Code's window.openWithoutArgumentsInNewWindow
+    // default on Windows (not overridden in Petre's settings.json).
     void OpenPin(TaskbarPin pin, bool newWindow)
     {
         var here = pinWindowsHere.GetValueOrDefault(pin.ParsingName) ?? [];
-        newWindow |= IsBrowser(pin);
+        newWindow |= IsBrowser(pin) || IsEditor(pin);
         var outcome = !newWindow && here.Count > 0
             ? manager.ToggleWindow(here[0], activator)
             : pins?.Launch(pin) ?? Result.Success();
@@ -253,6 +259,12 @@ public partial class FloatingBar
     // site or an installed web app has no browser exe of its own here (its TargetPath is null or not one of these).
     static readonly HashSet<string> BrowserExes = new(StringComparer.OrdinalIgnoreCase)
         { "msedge.exe", "chrome.exe", "firefox.exe", "brave.exe", "vivaldi.exe", "opera.exe", "launcher.exe" };
+
+    // VS Code and its Insiders build, whose second start opens a new window rather than raising the old one.
+    static readonly HashSet<string> EditorExes = new(StringComparer.OrdinalIgnoreCase) { "Code.exe", "Code - Insiders.exe" };
+
+    internal static bool IsEditor(TaskbarPin pin) =>
+        !pin.IsInstalledApp && pin.TargetPath is { } target && EditorExes.Contains(System.IO.Path.GetFileName(target));
 
     internal static bool IsBrowser(TaskbarPin pin) =>
         !pin.IsInstalledApp && pin.TargetPath is { } target && BrowserExes.Contains(System.IO.Path.GetFileName(target))

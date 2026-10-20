@@ -65,7 +65,10 @@ public partial class FloatingBar
             .ToList();
         tabs?.Watch(windows);
         var before = sounding;
-        sounding = Sounding(windows, sound?.Playing ?? new HashSet<int>(), h => tabs?.Of(h));
+        // The app Windows says is playing media, when one is (the now-playing line's session), so a browser's web
+        // apps can be told apart by it (see Sounding, step 2).
+        var playingApp = media?.Current is { HasValue: true } session && session.Value.Playing ? session.Value.AppId : null;
+        sounding = Sounding(windows, sound?.Playing ?? new HashSet<int>(), h => tabs?.Of(h), AppIdOf, playingApp);
         if (ClickTrace.On && !sounding.SetEquals(before))
             ClickTrace.Write($"sound: playing pids=[{string.Join(",", sound?.Playing ?? new HashSet<int>())}] " +
                              $"windows=[{string.Join(", ", windows.Where(w => sounding.Contains(w.Handle)).Select(w => $"{w.Handle.Value:X}/{w.ProcessName}"))}]");
@@ -75,9 +78,17 @@ public partial class FloatingBar
     // plays all its sound through one helper, so its windows are narrowed down:
     //
     //   1. the windows with a tab marked as playing audio, when there are any;
-    //   2. otherwise its windows with no tab strip, the installed web apps (YouTube Music today), when there are any;
-    //   3. otherwise every window of it, because showing the browser beats showing nothing.
-    internal static HashSet<WindowHandle> Sounding(IReadOnlyList<WindowInfo> windows, IReadOnlySet<int> playing, Func<WindowHandle, TabInfo?> tabsOf) =>
+    //   2. otherwise the installed web app whose AppUserModelID is the app Windows' media session says is playing,
+    //      when one matches. Petre: "yt music is playing and outlook is also ringed", "both pwa". Every PWA of a
+    //      browser runs in its one process, so step 3 alone lit them all. Measured on his machine: the session's
+    //      app is music.youtube.com-5929F88E_vezhnr0wkvrcy!App, the YouTube Music window's own ID is the same,
+    //      and Outlook's is outlook.cloud.microsoft-6A7975FB_3y1e9vxbwqkga!App;
+    //   3. otherwise its windows with no tab strip, the installed web apps, when there are any;
+    //   4. otherwise every window of it, because showing the browser beats showing nothing.
+    // Step 2 only narrows: a web app making sound with no media session (a call, a notification chime) still
+    // falls through to step 3.
+    internal static HashSet<WindowHandle> Sounding(IReadOnlyList<WindowInfo> windows, IReadOnlySet<int> playing, Func<WindowHandle, TabInfo?> tabsOf,
+        Func<WindowInfo, string?>? appIdOf = null, string? playingApp = null) =>
         windows.Where(w => playing.Contains(w.ProcessId))
             .GroupBy(w => w.ProcessId)
             .SelectMany(process =>
@@ -86,7 +97,10 @@ public partial class FloatingBar
                 var marked = process.Where(w => tabsOf(w.Handle)?.PlayingAudio == true).ToList();
                 if (marked.Count > 0) return marked;
                 var apps = process.Where(w => tabsOf(w.Handle) is { Count: 0 }).ToList();
-                return apps.Count > 0 ? apps : process.AsEnumerable();
+                var player = playingApp is null || appIdOf is null
+                    ? []
+                    : apps.Where(w => string.Equals(appIdOf(w), playingApp, StringComparison.OrdinalIgnoreCase)).ToList();
+                return player.Count > 0 ? player : apps.Count > 0 ? apps : process.AsEnumerable();
             })
             .Select(w => w.Handle)
             .ToHashSet();

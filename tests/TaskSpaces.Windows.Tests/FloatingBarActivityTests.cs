@@ -47,6 +47,28 @@ public class FloatingBarActivityTests
             FloatingBar.Sounding(All, new HashSet<int> { 100 },
                 Tabs((EdgeWork, new TabInfo(5, false)), (EdgeHome, new TabInfo(2, false)), (YouTubeMusic, new TabInfo(0, false)))));
 
+    // Two installed web apps in one browser process, YouTube Music playing and Outlook not (Petre: "yt music is
+    // playing and outlook is also ringed", "both pwa"). Windows' media session names the playing app by the same
+    // AppUserModelID the YouTube Music window carries, so only that one is ringed.
+    [Fact]
+    public void Of_two_web_apps_the_one_the_media_session_names_carries_the_sound()
+    {
+        var outlook = Window(7, 100, "msedge");
+        var ids = new Dictionary<WindowHandle, string>
+        {
+            [YouTubeMusic.Handle] = "music.youtube.com-5929F88E_vezhnr0wkvrcy!App",
+            [outlook.Handle] = "outlook.cloud.microsoft-6A7975FB_3y1e9vxbwqkga!App",
+        };
+        var tabs = Tabs((EdgeWork, new TabInfo(5, false)), (YouTubeMusic, new TabInfo(0, false)), (outlook, new TabInfo(0, false)));
+        string? AppIdOf(WindowInfo w) => ids.GetValueOrDefault(w.Handle);
+
+        Assert.Equal([YouTubeMusic.Handle],
+            FloatingBar.Sounding([.. All, outlook], new HashSet<int> { 100 }, tabs, AppIdOf, "music.youtube.com-5929F88E_vezhnr0wkvrcy!App"));
+        // A session for an app with no window here narrows nothing: both web apps, as before.
+        Assert.Equal([YouTubeMusic.Handle, outlook.Handle],
+            FloatingBar.Sounding([.. All, outlook], new HashSet<int> { 100 }, tabs, AppIdOf, "Spotify.exe").OrderBy(h => h.Value));
+    }
+
     // Nothing narrows it: every window of the browser, since showing the browser beats showing nothing.
     [Fact]
     public void With_nothing_to_narrow_it_every_browser_window_carries_it() =>
