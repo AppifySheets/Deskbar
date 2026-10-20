@@ -58,6 +58,9 @@ public partial class FloatingBar : Window
         // The now-playing line above the pins (FloatingBar.Media.cs), empty and hidden until a player appears.
         BuildNowPlaying();
 
+        // ...and the stats line above it (FloatingBar.Stats.cs), hidden until the first sample.
+        BuildStats();
+
         // A right-click on bare background, which docking made most of the bar (see BuildBarMenu).
         BuildBarMenu();
 

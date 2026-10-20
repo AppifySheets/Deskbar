@@ -35,6 +35,7 @@ public partial class FloatingBar
         Sized(trackTitle, 11);
         Sized(trackDetail, 10);
         Sized(readoutText, 11.5);
+        ApplyStatsTextSize();
     }
 
     void Sized(TextBlock? text, double baseSize, double? lineHeight = null)

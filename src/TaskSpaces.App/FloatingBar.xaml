@@ -52,6 +52,10 @@
             <Border x:Name="ShellFooter" DockPanel.Dock="Bottom" BorderBrush="#14FFFFFF" BorderThickness="0,1,0,0"
                     Margin="0,3,0,0" Padding="0,3,0,0">
                 <StackPanel>
+                    <!-- CPU, memory, disk and GPU, a sparkline each, and a click for Task Manager (Petre: "let's
+                         show system stats ... above the music player", then "b"). Filled in FloatingBar.Stats.cs;
+                         collapsed until the first sample, and for good with no stats source. -->
+                    <Border x:Name="StatsLine" Margin="0,0,0,2" Visibility="Collapsed"/>
                     <!-- What Windows is playing, with previous, play or pause, and next (Petre: "let's add audio
                          controls", then "a", a now-playing line). Above the pins, and only while there is a media
                          session at all. Filled in FloatingBar.Media.cs. -->

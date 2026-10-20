@@ -194,6 +194,7 @@ public partial class FloatingBar
             ((System.Windows.Controls.Primitives.UniformGrid)PinLine).Columns = PinColumns(shownPins.Count, PinLine.ActualWidth, AcrossSeam);
         }
         FitNowPlayingToSeam();
+        FitStatsToSeam();
     }
 
     // 14 over 12.5, after two rounds of Petre's "increase the size of fonts for this": 10 and 9 matched the

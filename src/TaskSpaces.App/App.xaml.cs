@@ -1022,6 +1022,8 @@ public partial class App : Application
                 Sound = new Windows.Audio.AudioActivity(ClickTrace.Write),
                 // ...and the now-playing line's: Windows' own media sessions (FloatingBar.Media.cs).
                 Media = new Windows.Audio.MediaControl(ClickTrace.Write),
+                // ...and the stats line's above it: the counters Task Manager reads (FloatingBar.Stats.cs).
+                Stats = new Windows.Performance.SystemStats(),
                 // The tray's own commands, for the bar's background menu, so both menus run the same code.
                 AppActions = new FloatingBar.AppCommands(OpenManage, CheckForUpdateNow, ExitApp, () => pendingUpdate),
                 // ...and the captions' time today (FloatingBar.WorkspaceTime.cs): the Time tab's own reading
