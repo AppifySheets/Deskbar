@@ -287,9 +287,14 @@ jobs:
           ASSET: artifacts/publish/${{ steps.artifact.outputs.name }}
         run: |
           # The PRs this commit belongs to. A squash, merge or rebase merge all keep the link.
-          $body = gh api "repos/${{ github.repository }}/commits/${{ github.sha }}/pulls" --jq '.[0].body // ""'
+          #
+          # JOINED WITH NEWLINES, on purpose: PowerShell hands a native command's output back as an
+          # array of lines, and "$body" would join them with SPACES, leaving one long line on which
+          # the multiline ^## below never matches. That is exactly how 2.1.9, the first release this
+          # cut on a merge, fell back to generated notes though its PR had a Release notes section.
+          $body = @(gh api "repos/${{ github.repository }}/commits/${{ github.sha }}/pulls" --jq '.[0].body // ""') -join "`n"
           if ($LASTEXITCODE -ne 0) { $body = '' }
-          $section = [regex]::Match("$body", '(?ms)^##\s+Release notes\s*$\r?\n(.*?)(?=^##\s|\z)')
+          $section = [regex]::Match($body, '(?ms)^##\s+Release notes\s*$\r?\n(.*?)(?=^##\s|\z)')
           if ($section.Success -and $section.Groups[1].Value.Trim()) {
             Set-Content -LiteralPath release-notes.md -Value $section.Groups[1].Value.Trim() -Encoding utf8
             "Notes: the merged PR's Release notes section."
