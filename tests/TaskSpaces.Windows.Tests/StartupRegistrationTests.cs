@@ -1,3 +1,4 @@
+using System.IO;
 using Microsoft.Win32;
 using TaskSpaces.App;
 
@@ -48,6 +49,29 @@ public class StartupRegistrationTests
         var before = RunValue();
         StartupRegistration.ReassertIfEnabled();
         Assert.Equal(before, RunValue());
+    }
+
+    // The Start menu shortcut (Petre: "add deskbar to start, so if it stops i have a way to start it
+    // manually") is rewritten only when missing or starting another exe, such as the version before an update.
+    [Theory]
+    [InlineData(null, true)]
+    [InlineData("", true)]
+    [InlineData(@"C:\Apps\Deskbar\Deskbar-2.1.5-win-x64.exe", true)]
+    [InlineData(@"C:\Apps\Deskbar\Deskbar-2.1.8-win-x64.exe", false)]
+    [InlineData(@"c:\apps\deskbar\DESKBAR-2.1.8-WIN-X64.EXE", false)]
+    public void The_start_menu_shortcut_is_rewritten_only_when_it_is_missing_or_stale(string? current, bool rewrite) =>
+        Assert.Equal(rewrite, StartMenuShortcut.NeedsWriting(current, @"C:\Apps\Deskbar\Deskbar-2.1.8-win-x64.exe"));
+
+    // From the test host it writes nothing: the shortcut (or its absence) is exactly as it was.
+    [Fact]
+    public void The_start_menu_shortcut_is_left_alone_from_a_test_host()
+    {
+        var link = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Programs), "Deskbar.lnk");
+        var before = File.Exists(link) ? File.GetLastWriteTimeUtc(link) : (DateTime?)null;
+
+        Assert.True(StartMenuShortcut.Ensure().IsSuccess);
+
+        Assert.Equal(before, File.Exists(link) ? File.GetLastWriteTimeUtc(link) : null);
     }
 
     [Fact]
