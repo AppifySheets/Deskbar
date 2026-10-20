@@ -306,18 +306,17 @@ public partial class FloatingBar
             if (focused)
             {
                 PressSpace();
-                // What opened, by class and title, so the overflow can be recognised as the tray's (and a second
-                // click on the chevron then closes it rather than opening it again).
-                if (ClickTrace.On)
+                // What opened is remembered as the tray's overflow, whatever its class, so a second click on the
+                // chevron closes it rather than opening it again (see RememberTrayOverflow).
+                var after = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(500) };
+                after.Tick += (_, _) =>
                 {
-                    var after = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(500) };
-                    after.Tick += (_, _) =>
-                    {
-                        after.Stop();
-                        ClickTrace.Write($"shell: tray after space, in front={ShellKeys.Describe(NativeMethods.GetForegroundWindow())}");
-                    };
-                    after.Start();
-                }
+                    after.Stop();
+                    var opened = NativeMethods.GetForegroundWindow();
+                    if (ClickTrace.On) ClickTrace.Write($"shell: tray after space, in front={ShellKeys.Describe(opened)}");
+                    RememberTrayOverflow(opened);
+                };
+                after.Start();
             }
             else if (attempt == 1)
             {
@@ -330,7 +329,33 @@ public partial class FloatingBar
 
     // From the composition root, on every foreground change (WindowMonitor.ForegroundChanged, which reports
     // the shell's own windows but never this bar's). Keeps track of which flyout, if any, is in front.
-    public void NoteForeground(nint hwnd) => NoteFlyoutInFront(ShellKeys.Recognise(hwnd));
+    //
+    // A window the bar saw open after its own Space counts as the tray too, whatever class it has (see
+    // RememberTrayOverflow).
+    public void NoteForeground(nint hwnd) =>
+        NoteFlyoutInFront(ShellKeys.Recognise(hwnd) ?? (hwnd != 0 && hwnd == trayOverflow ? ShellFlyout.Tray : null));
+
+    // THE TRAY'S OVERFLOW, as it actually appeared. Issue #227: "When I press system tray arrow from deskbar it
+    // will only pops them out but never pops down". The second press does close the overflow, by taking the
+    // foreground from it, and the chevron is meant to stand down then, as every button does for its own open
+    // flyout. That depends on recognising the overflow as the tray's, and the class list only knew
+    // NotifyIconOverflowWindow, measured on Petre's machine. The reporter's screenshot shows Windows 11's newer
+    // overflow, a XAML flyout over a visible taskbar, with a different class. Not recognised, the press read as
+    // "nothing open", and the chevron sent Win+B and Space again, reopening at once what the press had closed.
+    //
+    // So the class does not have to be known in advance: whatever came to the front just after the bar
+    // pressed Space IS the overflow, on any build of Windows. Remembered by handle, and marked as in front now,
+    // because its foreground event has usually come and gone before this runs. Not the bar itself, and not a
+    // flyout recognised as something else, in case the Space landed somewhere unexpected.
+    nint trayOverflow;
+
+    internal void RememberTrayOverflow(nint opened)
+    {
+        if (opened == 0 || opened == new System.Windows.Interop.WindowInteropHelper(this).Handle) return;
+        if (ShellKeys.Recognise(opened) is { } known && known != ShellFlyout.Tray) return;
+        trayOverflow = opened;
+        NoteFlyoutInFront(ShellFlyout.Tray);
+    }
 
     internal void NoteFlyoutInFront(ShellFlyout? flyout) => flyoutInFront = flyout;
 
@@ -468,8 +493,12 @@ static class ShellKeys
         ("DV2ControlHost", _) => FloatingBar.ShellFlyout.Start,
         ("ControlCenterWindow", _) => FloatingBar.ShellFlyout.QuickSettings,
         // The overflow of hidden icons counts as the tray too, measured after the chevron's Win+B and Space,
-        // so a second click on the chevron closes it instead of opening it again.
-        ("Shell_TrayWnd" or "Shell_SecondaryTrayWnd" or "NotifyIconOverflowWindow", _) => FloatingBar.ShellFlyout.Tray,
+        // so a second click on the chevron closes it instead of opening it again. NotifyIconOverflowWindow is
+        // the classic overflow (Petre's machine); TopLevelWindowForOverflowXamlIsland is Windows 11's newer
+        // XAML one (#227), named from the shell, not measured here. The bar also remembers whatever window
+        // its Space opened (FloatingBar.RememberTrayOverflow), so a class missing from this list still works.
+        ("Shell_TrayWnd" or "Shell_SecondaryTrayWnd" or "NotifyIconOverflowWindow" or "TopLevelWindowForOverflowXamlIsland", _) =>
+            FloatingBar.ShellFlyout.Tray,
         ("Windows.UI.Core.CoreWindow", "Search") => FloatingBar.ShellFlyout.Search,
         ("Windows.UI.Core.CoreWindow", "Notification Center") => FloatingBar.ShellFlyout.Notifications,
         _ => null,

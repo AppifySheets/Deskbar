@@ -25,7 +25,8 @@ public class FloatingBarShellTests(ITestOutputHelper output)
         Assert.True(manager.Start().IsSuccess);
         var sent = new List<FloatingBar.ShellFlyout>();
         // Parked off the virtual screen like every other bar test, so nothing flashes at whoever runs this.
-        var bar = new FloatingBar(manager) { Left = -32000, Top = -32000, SendShellKeys = sent.Add };
+        // ...and PressSpace a no-op, so the chevron's follow-up Space never reaches a real window either.
+        var bar = new FloatingBar(manager) { Left = -32000, Top = -32000, SendShellKeys = sent.Add, PressSpace = () => { } };
         bar.ShowBar();
         bar.UpdateLayout();
         return (bar, sent);
@@ -171,6 +172,37 @@ public class FloatingBarShellTests(ITestOutputHelper output)
         Click(start);
         Assert.Equal([FloatingBar.ShellFlyout.Start], sent);
 
+        bar.Close();
+    });
+
+    // Issue #227: on Windows 11's newer tray the chevron opened the hidden icons but never closed them. The
+    // overflow there has a class the bar did not know, so the second press read as "nothing open" and sent the
+    // shortcut again. Now the window that appeared after the bar's own Space is remembered as the tray: with it
+    // in front, the chevron's next click stands down (the press already closed it), and the click after opens
+    // it again. A window that never came from the chevron is not mistaken for it.
+    [Fact]
+    public void The_chevron_closes_an_overflow_whose_class_it_does_not_know() => StaThread.Run(() =>
+    {
+        var (bar, sent) = Bar();
+        var chevron = Named(bar, "ShellStrip", "Show the tray icons");
+        var overflow = (nint)0x7E57;
+
+        bar.RememberTrayOverflow(overflow);
+        bar.NoteForeground(overflow);
+        bar.NoteBarPressed();
+        Click(chevron);
+        Assert.Empty(sent);
+
+        bar.NoteForeground(0);
+        bar.NoteBarPressed();
+        Click(chevron);
+        Assert.Equal([FloatingBar.ShellFlyout.Tray], sent);
+
+        sent.Clear();
+        bar.NoteForeground(0x0BAD);
+        bar.NoteBarPressed();
+        Click(chevron);
+        Assert.Equal([FloatingBar.ShellFlyout.Tray], sent);
         bar.Close();
     });
 
