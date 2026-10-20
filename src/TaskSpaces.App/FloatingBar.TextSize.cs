@@ -10,7 +10,7 @@ namespace TaskSpaces.App;
 //
 // Deliberately NOT scaled: text that sits inside a fixed-size chip, because growing it would break the chip
 // or the row height the icon cell guarantees. The tab count on an icon, the placeholder letter in its 20 DIP
-// square, the volume percent inside its 24 DIP dial, and the glyph buttons.
+// square, the volume percent inside its 32 DIP dial, and the glyph buttons.
 //
 // Nor THE CLOCK. Its 14.5 over 13 was tuned on its own, in rounds, to match the taskbar's clock, and it rode
 // the offset only briefly: at the +4 default Petre's verdict was "watch and date are too big". It answers to

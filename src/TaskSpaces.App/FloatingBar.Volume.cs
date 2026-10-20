@@ -22,9 +22,16 @@ namespace TaskSpaces.App;
 // elsewhere: the volume keys, Windows' flyout, an app, a headset taking over as the default device.
 public partial class FloatingBar
 {
-    // The dial's scale: 270 degrees, from bottom left round the top to bottom right, on a 24 DIP square.
+    // The dial's scale: 270 degrees, from bottom left round the top to bottom right, on a 32 DIP square.
     // Angles are clockwise from three o'clock, screen style, so 135 is bottom left.
-    const double DialStart = 135, DialSweep = 270, DialRadius = 10, DialCentre = 12;
+    //
+    // 32 rather than the first 24, and the radius with it (10 of 24, the same share of 32). Petre, on the strip:
+    // "these are kinda small", then "c" from three mockups, the size closest to Windows' own tray. The stroke
+    // stays 2 DIP (3.2 hovered) at the new size, so the ring gets bigger without getting heavier.
+    internal const double DialSize = 32, DialCentre = DialSize / 2, DialRadius = DialSize * 10 / 24;
+    const double DialStart = 135, DialSweep = 270;
+    // The speaker in the middle, and the percent that replaces it on hover, both grown in step with the ring.
+    const double DialSpeakerSize = 15, DialPercentSize = 11;
     // One wheel notch, as a fraction of the scale.
     const double VolumeStep = 0.02;
 
@@ -91,23 +98,23 @@ public partial class FloatingBar
         volumeTrack = new Path { Stroke = DialTrack, StrokeStartLineCap = PenLineCap.Round, StrokeEndLineCap = PenLineCap.Round, Data = DialArc(1) };
         volumeArc = new Path { StrokeStartLineCap = PenLineCap.Round, StrokeEndLineCap = PenLineCap.Round };
         volumeKnob = new Ellipse { Fill = DialKnob, Stroke = DialKnobRim, StrokeThickness = 1.5 };
-        volumeSpeaker = Glyph(SpeakerWaves, SpeakerShape, size: 10);
-        volumeMuted = Glyph(MuteCross, SpeakerShape, size: 10);
+        volumeSpeaker = Glyph(SpeakerWaves, SpeakerShape, size: DialSpeakerSize);
+        volumeMuted = Glyph(MuteCross, SpeakerShape, size: DialSpeakerSize);
         volumePercent = new TextBlock
         {
-            FontSize = 9,
+            FontSize = DialPercentSize,
             FontWeight = FontWeights.SemiBold,
             Foreground = ClockForeground,
             HorizontalAlignment = HorizontalAlignment.Center,
             VerticalAlignment = VerticalAlignment.Center,
         };
 
-        var scale = new Canvas { Width = 24, Height = 24, Children = { volumeTrack, volumeArc, volumeKnob } };
-        volumeGrow = new ScaleTransform(1, 1, 12, 12);
+        var scale = new Canvas { Width = DialSize, Height = DialSize, Children = { volumeTrack, volumeArc, volumeKnob } };
+        volumeGrow = new ScaleTransform(1, 1, DialCentre, DialCentre);
         var face = new Grid
         {
-            Width = 24,
-            Height = 24,
+            Width = DialSize,
+            Height = DialSize,
             RenderTransform = volumeGrow,
             IsHitTestVisible = false,
             Children = { scale, Centred(volumeSpeaker), Centred(volumeMuted), volumePercent },
@@ -116,8 +123,9 @@ public partial class FloatingBar
         volumeButton = new Button
         {
             Content = face,
-            Width = 30,
-            Height = 28,
+            // The ring plus 3 DIP either side, as the 24 DIP ring had in its 30 DIP button, and the strip's height.
+            Width = DialSize + 6,
+            Height = StripButtonHeight,
             Padding = new Thickness(0),
             Background = Brushes.Transparent,
             BorderThickness = new Thickness(0),

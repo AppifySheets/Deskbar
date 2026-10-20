@@ -104,16 +104,18 @@ public partial class FloatingBar
         BarHeader.Children.Add(AtRightHalf(shellStartTwin));
         LayOutHeader(acrossSeam: false);
 
-        // Built once and laid out by LayOutStrip, which decides which edge each one docks to.
-        stripTray = ShellButton(ShellFlyout.Tray, "Show the tray icons", Glyph(ChevronShape));
-        stripQuickSettings = ShellButton(ShellFlyout.QuickSettings, "Quick settings: wifi, volume, battery", QuickSettingsGlyph(), width: double.NaN);
+        // Built once and laid out by LayOutStrip, which decides which edge each one docks to. At the strip's own
+        // sizes (StripGlyphSize and friends), which are larger than the header's Start and search.
+        stripTray = ShellButton(ShellFlyout.Tray, "Show the tray icons", Glyph(ChevronShape, size: StripGlyphSize), StripButtonWidth, StripButtonHeight);
+        stripQuickSettings = ShellButton(ShellFlyout.QuickSettings, "Quick settings: wifi, volume, battery", QuickSettingsGlyph(), double.NaN, StripButtonHeight);
         stripVolume = VolumeDial();
-        stripBell = ShellButton(ShellFlyout.Notifications, "Notifications", Glyph(BellShape));
+        stripBell = ShellButton(ShellFlyout.Notifications, "Notifications", Glyph(BellShape, size: StripGlyphSize), StripButtonWidth, StripButtonHeight);
+        // The sliver's line keeps the share of the button it had at the old height (22 of 28).
         stripSliver = ShellButton(ShellFlyout.Desktop, "Show desktop",
-            new Border { Width = 1, Height = 22, Background = SliverLine }, width: 7);
+            new Border { Width = 1, Height = StripButtonHeight * 22 / 28, Background = SliverLine }, 7, StripButtonHeight);
         var clock = ShellButton(ShellFlyout.Notifications, "", ClockFace(), width: double.NaN);
         clock.Padding = new Thickness(4, 0, 4, 0);
-        // As tall as its two lines need, not the strip's fixed 28: at 14.5 over 13 the lines are taller than that,
+        // As tall as its two lines need, not the 28 the strip's buttons had then: at 14.5 over 13 the lines are taller than that,
         // and the date spilled out of the button's bottom, cut off wherever the bar met a screen edge (Petre:
         // "but date is half cut"). The strip grows by the few pixels the clock needs.
         clock.Height = double.NaN;
@@ -125,6 +127,14 @@ public partial class FloatingBar
         clockTimer.Start();
         Closed += (_, _) => clockTimer.Stop();
     }
+
+    // THE STRIP'S SIZES. Petre, on the chevron, wifi and volume dial: "these are kinda small", then "c" from three
+    // mockups, the size closest to Windows' own tray. They were 15 DIP glyphs (wifi 13) in 26 by 28 buttons, the
+    // same as Start and search in the header; now the strip has its own, and the header keeps the old ones.
+    // 36 tall is a little more than the clock's two lines need (about 32), so the strip grows by about 4 DIP.
+    // Wifi stays one DIP under the rest because its arcs fill the 16 unit square edge to edge, where the
+    // chevron and bell leave a margin, so at 19 it reads the same size as they do at 20.
+    const double StripGlyphSize = 20, StripWifiSize = 19, StripButtonWidth = 34, StripButtonHeight = 36;
 
     Button? stripTray, stripQuickSettings, stripVolume, stripBell, stripSliver, stripClock;
     bool stripAcrossSeam;
@@ -215,13 +225,14 @@ public partial class FloatingBar
 
     // One button of the strip: bare chrome with a faint rounded hover, so it reads as a button without the
     // stock template's blue square (see BareButton for why the stock chrome is unwanted on this bar).
-    Button ShellButton(ShellFlyout flyout, string tip, UIElement content, double width = 26)
+    // 26 by 28 is the header's size (Start and search); the strip passes its own (StripButtonWidth, -Height).
+    Button ShellButton(ShellFlyout flyout, string tip, UIElement content, double width = 26, double height = 28)
     {
         var button = new Button
         {
             Content = content,
             Width = width,
-            Height = 28,
+            Height = height,
             Padding = new Thickness(0),
             Background = Brushes.Transparent,
             BorderThickness = new Thickness(0),
@@ -377,11 +388,11 @@ public partial class FloatingBar
     static UIElement QuickSettingsGlyph()
     {
         var panel = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(4, 0, 4, 0), IsHitTestVisible = false };
-        panel.Children.Add(Glyph(WifiShape, WifiDot, size: 13));
+        panel.Children.Add(Glyph(WifiShape, WifiDot, size: StripWifiSize));
         if (ShellKeys.HasBattery())
         {
             panel.Children.Add(new Border { Width = 4 });
-            panel.Children.Add(Glyph(BatteryCase, BatteryFill, size: 13));
+            panel.Children.Add(Glyph(BatteryCase, BatteryFill, size: StripWifiSize));
         }
         return panel;
     }

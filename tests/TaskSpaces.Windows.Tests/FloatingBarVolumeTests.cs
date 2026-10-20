@@ -243,10 +243,12 @@ public class FloatingBarVolumeTests(ITestOutputHelper output)
         var full = FloatingBar.DialPoint(1);
         output.WriteLine($"silence={silence} half={half} full={full}");
 
-        Assert.True(silence.X < 12 && silence.Y > 12);
-        Assert.Equal(12, half.X, 6);
-        Assert.Equal(2, half.Y, 6);
-        Assert.True(full.X > 12);
+        // Against the dial's own centre and radius, so the test holds whatever size the dial is drawn at.
+        var centre = FloatingBar.DialCentre;
+        Assert.True(silence.X < centre && silence.Y > centre);
+        Assert.Equal(centre, half.X, 6);
+        Assert.Equal(centre - FloatingBar.DialRadius, half.Y, 6);
+        Assert.True(full.X > centre);
         Assert.Equal(silence.Y, full.Y, 6);
     }
 }
