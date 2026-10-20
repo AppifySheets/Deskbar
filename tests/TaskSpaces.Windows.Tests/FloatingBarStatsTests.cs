@@ -198,6 +198,6 @@ public class FloatingBarStatsTests(ITestOutputHelper output)
         Assert.InRange(sample.Disk, 0, 100);
         Assert.True(sample.MemoryTotal > 0);
         Assert.True(sample.SystemDriveSize > 0);
-        sample.Gpu.Execute(gpu => Assert.InRange(gpu, 0, 100));
+        sample.Gpu.Tap(gpu => Assert.InRange(gpu, 0, 100));
     }
 }

@@ -145,7 +145,7 @@ public partial class FloatingBar
         Record(cpuCell, sample.Cpu);
         Record(memoryCell, sample.Memory);
         Record(diskCell, sample.Disk);
-        sample.Gpu.Execute(gpu => Record(gpuCell, gpu));
+        sample.Gpu.Tap(gpu => Record(gpuCell, gpu));
 
         // No GPU counters: three cells, so the others share the width rather than leaving a dead quarter (and
         // across the seam, four columns with the last one empty; see FitStatsToSeam).

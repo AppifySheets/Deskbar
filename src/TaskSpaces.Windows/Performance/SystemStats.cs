@@ -51,7 +51,7 @@ public sealed class SystemStats : ISystemStats, IDisposable
         disk = pdh.Bind(p => p.Add(@"\PhysicalDisk(*)\% Idle Time"));
         gpu = pdh.Bind(p => p.Add(@"\GPU Engine(*)\Utilization Percentage"));
         // The first collection, so the first tick's rates have something to be the difference from.
-        pdh.Execute(p => p.Collect());
+        pdh.Tap(p => p.Collect());
 
         // Interval serialises its ticks, so Read never runs twice at once; Publish and RefCount share one
         // timer between subscribers and stop it when the last one leaves.
@@ -108,7 +108,7 @@ public sealed class SystemStats : ISystemStats, IDisposable
         lock (gate)
         {
             disposed = true;
-            pdh.Execute(p => p.Dispose());
+            pdh.Tap(p => p.Dispose());
         }
     }
 
