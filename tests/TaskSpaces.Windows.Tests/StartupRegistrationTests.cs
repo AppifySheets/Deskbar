@@ -31,6 +31,25 @@ public class StartupRegistrationTests
     public void Only_the_app_itself_owns_the_entry(string? entryAssembly, bool expected) =>
         Assert.Equal(expected, StartupRegistration.IsTheApp(entryAssembly));
 
+    // Only a published, single-file build re-asserts the entry on start; a development copy, an exe beside
+    // its dlls, leaves it alone (Petre: "fix autostart only", after dev copies had taken the entry over).
+    [Theory]
+    [InlineData("", true)]
+    [InlineData(@"C:\repos\TaskSpaces\src\TaskSpaces.App\bin\Debug\net10.0-windows10.0.19041.0\Deskbar.dll", false)]
+    [InlineData(@"C:\Users\me\AppData\Local\Temp\claude\scratchpad\live-stats\Deskbar.dll", false)]
+    public void Only_a_published_build_counts_as_installed(string assemblyLocation, bool published) =>
+        Assert.Equal(published, StartupRegistration.IsPublished(assemblyLocation));
+
+    // This suite runs as a multi-file build, so re-asserting from here must leave the entry as it was even if
+    // the entry-assembly guard were ever loosened.
+    [Fact]
+    public void Reasserting_from_a_development_build_leaves_the_entry_alone()
+    {
+        var before = RunValue();
+        StartupRegistration.ReassertIfEnabled();
+        Assert.Equal(before, RunValue());
+    }
+
     [Fact]
     public void Enabling_from_a_test_host_refuses_and_leaves_the_entry_alone()
     {

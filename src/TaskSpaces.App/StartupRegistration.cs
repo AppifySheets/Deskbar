@@ -62,10 +62,26 @@ public static class StartupRegistration
     // The value name is fixed, so this overwrites rather than accumulating entries -- which also
     // means whichever version runs last owns startup, and that is the intended rule for a folder
     // holding several versions side by side. Latest one started wins.
+    //
+    // ...but only from a PUBLISHED build. "Latest one started wins" was written for release versions sitting
+    // side by side in one folder, and it let every DEVELOPMENT copy win too: each build a session started to
+    // show Petre a change (from bin\Debug, or copied to a scratch folder so the build could overwrite bin)
+    // repointed his login entry at itself. Measured on 2026-10-20: the entry named a session's temporary
+    // scratch folder, the one before it another session's, and no installed copy existed at all, so the next
+    // cleanup of that folder would have left Deskbar not starting at login. His answer: "fix autostart only".
     public static void ReassertIfEnabled()
     {
-        if (IsEnabled) Enable();
+        if (IsEnabled && RunsAsPublished) Enable();
     }
+
+    // A release is published as ONE file (release.yml: PublishSingleFile), and a development build never is:
+    // bin\Debug and every copy of it are an exe beside a folder of dlls. In a single-file app the assembly
+    // has no file of its own, so its Location is empty, which is the documented way to tell the two apart.
+    internal static bool IsPublished(string assemblyLocation) => assemblyLocation.Length == 0;
+
+#pragma warning disable IL3000 // Location is empty in a single-file app, and that emptiness is the point here.
+    static bool RunsAsPublished => IsPublished(typeof(StartupRegistration).Assembly.Location);
+#pragma warning restore IL3000
 
     public static Result Disable() =>
         OwnedByThisProcess().Tap(() =>
@@ -80,11 +96,14 @@ public static class StartupRegistration
     // Guarded exactly like Enable and Disable, for the same reason: the test host must never touch the
     // real login entry. A registry failure comes back as a failure rather than an exception, because
     // this runs during startup and an autostart that could not be swapped is no reason not to start.
+    //
+    // The new value is written only by a published build, for the reason ReassertIfEnabled gives: a
+    // development copy pointing the login entry at itself is the bug that guard exists for.
     public static Result MigrateFromTaskSpaces(bool deleteOld, bool setNew) =>
         OwnedByThisProcess().Bind(() => Result.Try(() =>
         {
             using var key = Registry.CurrentUser.CreateSubKey(RunKey);
             if (deleteOld) key.DeleteValue(LegacyName, throwOnMissingValue: false);
-            if (setNew) key.SetValue(Name, $"\"{Environment.ProcessPath}\"");
+            if (setNew && RunsAsPublished) key.SetValue(Name, $"\"{Environment.ProcessPath}\"");
         }, error => $"could not move start with Windows from TaskSpaces to Deskbar: {error.Message}"));
 }
