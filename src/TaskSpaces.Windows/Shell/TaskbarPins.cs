@@ -62,7 +62,9 @@ public interface ITaskbarPins
     // The AppUserModelID a window is grouped under on the taskbar, if it declares one.
     string? AppIdOf(WindowHandle window);
 
-    Result Launch(TaskbarPin pin);
+    // `arguments`, when given, start the pin's TARGET exe with them rather than the shortcut as it is: VS Code's
+    // "--new-window" (FloatingBar.OpenPin). Ignored for an installed app, which has no exe to pass them to.
+    Result Launch(TaskbarPin pin, string? arguments = null);
 
     // Explorer, with what the pin starts selected: the taskbar's "Open file location".
     Result Reveal(TaskbarPin pin);
@@ -186,13 +188,21 @@ public sealed class ShellTaskbarPins : ITaskbarPins
     }
 
     // A shortcut through the shell, the way a double-click on it would; an installed app through
-    // shell:AppsFolder, which is how Start launches one.
-    public Result Launch(TaskbarPin pin) =>
+    // shell:AppsFolder, which is how Start launches one. With arguments, the shortcut's target exe directly, in
+    // its own folder, since a shortcut cannot be handed extra arguments through the shell.
+    public Result Launch(TaskbarPin pin, string? arguments = null) =>
         Result.Try(() =>
         {
-            using var started = pin.IsInstalledApp
-                ? Process.Start(new ProcessStartInfo("explorer.exe", $"shell:AppsFolder\\{pin.ParsingName}") { UseShellExecute = true })
-                : Process.Start(new ProcessStartInfo(pin.ParsingName) { UseShellExecute = true });
+            using var started = (pin.IsInstalledApp, arguments, pin.TargetPath) switch
+            {
+                (true, _, _) => Process.Start(new ProcessStartInfo("explorer.exe", $"shell:AppsFolder\\{pin.ParsingName}") { UseShellExecute = true }),
+                (false, { } args, { } target) => Process.Start(new ProcessStartInfo(target, args)
+                {
+                    UseShellExecute = true,
+                    WorkingDirectory = Path.GetDirectoryName(target) ?? "",
+                }),
+                _ => Process.Start(new ProcessStartInfo(pin.ParsingName) { UseShellExecute = true }),
+            };
         }, e => $"Could not start {pin.Name}: {e.Message}");
 
     public Result Reveal(TaskbarPin pin) =>
