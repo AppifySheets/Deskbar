@@ -18,11 +18,16 @@ object.
 
 - **Shipped and in daily use.** Everything is on `main`; **v1.17.0** is released. One branch
   per topic, PR, merge, and no long-lived feature branch. About 180 PRs merged so far.
-- **Releases are drafted by `workflow_dispatch` and published by `scripts/sign-release.ps1`**,
-  run on Petre's machine because the signing key sits on a token. The guard job in `release.yml`
-  reverts an unsigned publish to a draft once `SIGNING_CERT_THUMBPRINT` is set. Never re-publish
-  a release whose tag's commit does not carry this workflow: the guard does not cover it, and
-  that commit's own workflow rebuilds the exe and replaces it unsigned.
+- **A merge that bumps `VersionPrefix` releases itself** (Petre: "release on merge so"). The
+  push to main runs `release.yml`, which builds that version and, while `SIGNING_CERT_THUMBPRINT`
+  is unset, publishes it unsigned with the notes from the PR's `## Release notes` section. So
+  write that section for users in every PR that bumps the version, and do not start a release by
+  hand after a merge; check the run instead (`gh run list --workflow Release`). Once the variable
+  is set, a merge only drafts, and `scripts/sign-release.ps1` on Petre's machine signs and
+  publishes, because the signing key sits on a token. `workflow_dispatch` still builds a draft by
+  hand, for a retry. The guard job reverts an unsigned publish to a draft once the variable is
+  set. Never re-publish a release whose tag's commit does not carry this workflow: the guard does
+  not cover it, and that commit's own workflow rebuilds the exe and replaces it unsigned.
 - **Tests: about 980 green**, the great majority in `TaskSpaces.Core.Tests` and over a hundred
   in `TaskSpaces.Windows.Tests` (which constructs real WPF windows on an STA thread per
   test). Do not trust this number to the digit; run the suite. The routine command, and the
@@ -69,11 +74,11 @@ object.
   `Directory.Build.props`, and that habit was copied forward without anyone asking what it
   bought: it costs a second merge before anything can ship, and there has never been a case
   here where the fixes land and the version should not follow them. So bump `VersionPrefix`
-  in the same branch as the work, title the PR after the version it ships, and once it is
-  merged release it as the Releasing section of `README.md` and the Current state bullet
-  above describe: the Release workflow drafts it and `scripts/sign-release.ps1` publishes it,
-  never a release created by hand. Petre, ending it: "change that convention, include
-  version bump with prs".
+  in the same branch as the work, title the PR after the version it ships, and give it a
+  `## Release notes` section: the merge releases it, as the Releasing section of `README.md`
+  and the Current state bullet above describe, never a release created by hand. Petre, ending
+  it: "change that convention, include version bump with prs". A bump that must NOT ship yet
+  must not be merged yet: every merged bump is a release.
 - **Built on Windows' virtual desktops**, never `ShowWindow(SW_HIDE)`. Hidden windows can be
   orphaned by a crash; a virtual desktop cannot lose one. This is also why the app is
   Windows-only by design rather than by omission.

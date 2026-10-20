@@ -1,11 +1,19 @@
 # Builds Deskbar into a DRAFT GitHub Release, and guards the moment a release is published.
 #
 # WHEN THIS RUNS
+#   - On a MERGE to main that bumps the version (push to main touching Directory.Build.props).
+#     Petre: "release on merge so". Every PR that earns a release bumps VersionPrefix in the same
+#     PR (see CLAUDE.md), so a merge that changes it IS the release; making someone come back
+#     and press a button afterwards only added a step that could be forgotten or done too early.
+#     The `decide` job reads the version from the file and skips quietly when that tag already
+#     has a release (the file changed, the version did not). The `build` job then builds the
+#     release exactly as a manual run does, and, while signing is not enforced, publishes it.
+#     Once SIGNING_CERT_THUMBPRINT is set it stops at the draft, as a manual run always does.
 #   - Manually, via the Actions tab or `gh workflow run Release -f version=2.0.0`
 #     (workflow_dispatch). The `build` job compiles, tests and publishes the executable, then
 #     creates a draft release v<version> with it attached. The draft is where signing happens:
 #     scripts/sign-release.ps1, on Petre's machine, downloads the draft's executable, signs it,
-#     uploads it back and publishes.
+#     uploads it back and publishes. Still the way to retry a merge's release that failed.
 #   - When a Release is PUBLISHED (including publishing a draft). Only the `guard` job runs:
 #     it re-verifies the signature of every attached executable and turns the release back
 #     into a draft if any of them fails, or if no executable is attached at all.
@@ -16,6 +24,12 @@
 name: Release
 
 on:
+  # A merge to main. Only pushes that touch Directory.Build.props, where VersionPrefix lives, so an
+  # ordinary merge that bumps nothing does not even start a runner. Whether the version actually
+  # changed is decided by the `decide` job, from the tags that already have releases.
+  push:
+    branches: [main]
+    paths: [Directory.Build.props]
   workflow_dispatch:
     inputs:
       version:
@@ -33,35 +47,46 @@ permissions:
   contents: write
 
 jobs:
-  build:
-    # Only a manual run builds. Publishing a release must NOT rebuild: the asset on a
-    # published release is the one Petre's machine signed, and a rebuild would have nothing
-    # to sign it with.
-    if: github.event_name == 'workflow_dispatch'
-
-    # MUST be Windows: this is a WPF app targeting net10.0-windows, and the test suite
-    # constructs real WPF windows. It cannot build or test on Linux.
-    runs-on: windows-latest
+  # WHICH VERSION, AND WHETHER TO BUILD IT AT ALL. Its own job, on a cheap Linux runner, so a merge
+  # that touched Directory.Build.props without bumping the version costs seconds, not a Windows
+  # build. Outputs:
+  #   version  the version to build, "2.1.8", no leading v
+  #   go       'true' when the build job should run
+  decide:
+    # Publishing a release must NOT rebuild: the asset on a published release is the one Petre's
+    # machine signed, and a rebuild would have nothing to sign it with. So only a merge or a
+    # manual run decides anything.
+    if: github.event_name == 'workflow_dispatch' || github.event_name == 'push'
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      go: ${{ steps.existing.outputs.go }}
 
     steps:
       - name: Check out the repository
         uses: actions/checkout@v7
 
-      - name: Install the .NET SDK
-        uses: actions/setup-dotnet@v6
-        with:
-          # Matches the TargetFramework (net10.0-windows10.0.19041.0). The wildcard takes the
-          # newest 10.0 patch the runner offers rather than pinning a patch that may vanish.
-          dotnet-version: '10.0.x'
-
-      - name: Check the version input
+      - name: Check the version
         id: version
         shell: pwsh
         # Read through env rather than pasted into the script, so whatever was typed into the
         # input cannot become PowerShell.
         env:
           VERSION: ${{ inputs.version }}
+          EVENT: ${{ github.event_name }}
         run: |
+          # A merge names no version: it releases whatever VersionPrefix the merged commit carries,
+          # read here the same way the check below reads it. A manual run names one, which must
+          # match the file (checked below), so a typo cannot ship a version no commit ever had.
+          if ($env:EVENT -eq 'push') {
+            $props = Get-Content -LiteralPath Directory.Build.props -Raw
+            $found = [regex]::Match($props, '<VersionPrefix>\s*([^<]*?)\s*</VersionPrefix>')
+            if (-not $found.Success) {
+              "::error::Could not find <VersionPrefix> in Directory.Build.props."
+              exit 1
+            }
+            $env:VERSION = $found.Groups[1].Value
+          }
           # The input is the .NET version itself ("2.0.0"); the "v" is added only where a git
           # tag is made. Typing "v2.0.0" would produce a tag "vv2.0.0", so refuse it here,
           # before ten minutes of building, rather than after.
@@ -103,10 +128,12 @@ jobs:
           "Building version $version"
 
       - name: Refuse a version that already has a release
+        id: existing
         shell: pwsh
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: v${{ steps.version.outputs.version }}
+          EVENT: ${{ github.event_name }}
         run: |
           # GitHub happily keeps two DRAFTS with the same tag name, and sign-release.ps1 would
           # then pick one of them. A published release with that tag would make the create step
@@ -115,10 +142,55 @@ jobs:
           $tags = @(gh api "repos/${{ github.repository }}/releases" --paginate --jq '.[].tag_name')
           if ($LASTEXITCODE -ne 0) { "::error::Could not list the existing releases."; exit 1 }
           if ($tags -contains $env:TAG) {
+            # On a merge this is the ordinary case of a Directory.Build.props change that did not
+            # bump the version (or a merge whose release was already cut by hand): nothing to do,
+            # and not a failure. A manual run asked for this version specifically, so it fails.
+            if ($env:EVENT -eq 'push') {
+              "::notice::$env:TAG already has a release, so this merge did not bump the version. Nothing to release."
+              "go=false" >> $env:GITHUB_OUTPUT
+              exit 0
+            }
             "::error::A release (draft or published) tagged $env:TAG already exists. Delete it first, or build a different version."
             exit 1
           }
+          "go=true" >> $env:GITHUB_OUTPUT
           "No release tagged $env:TAG yet."
+
+  build:
+    # Only when `decide` found a version with no release yet.
+    needs: decide
+    if: needs.decide.outputs.go == 'true'
+
+    # One release build at a time: two merges in quick succession would otherwise race to create
+    # releases, and the second could finish first. Queued, never cancelled, so neither is lost.
+    concurrency:
+      group: release-build
+      cancel-in-progress: false
+
+    # MUST be Windows: this is a WPF app targeting net10.0-windows, and the test suite
+    # constructs real WPF windows. It cannot build or test on Linux.
+    runs-on: windows-latest
+
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v7
+
+      - name: Install the .NET SDK
+        uses: actions/setup-dotnet@v6
+        with:
+          # Matches the TargetFramework (net10.0-windows10.0.19041.0). The wildcard takes the
+          # newest 10.0 patch the runner offers rather than pinning a patch that may vanish.
+          dotnet-version: '10.0.x'
+
+      - name: Carry the version over from the decide job
+        id: version
+        shell: pwsh
+        # Under the same step id the steps below have always read it from, so they are unchanged.
+        env:
+          VERSION: ${{ needs.decide.outputs.version }}
+        run: |
+          "version=$env:VERSION" >> $env:GITHUB_OUTPUT
+          "Building version $env:VERSION"
 
       - name: Restore dependencies
         run: dotnet restore TaskSpaces.sln
@@ -196,17 +268,63 @@ jobs:
         # last step, and the guard job below checks its work.
         #
         # --target pins the tag, created only when the draft is published, to the exact commit
-        # this run built. --generate-notes fills the body from the merged PRs since the last
-        # release.
+        # this run built.
+        #
+        # THE NOTES are what the people updating read, so they come from the merged PR that
+        # carried the version bump: its "## Release notes" section, written for them, up to the
+        # next "## " heading. The rest of a PR description (tests, measurements, review notes) is
+        # for reviewers and stays out. A PR without that section, or a commit no PR is associated
+        # with, falls back to --generate-notes, the list of merged PRs since the last release.
         #
         # The version comes from the checked step's output and reaches the script through env,
-        # like the other steps, rather than pasting the raw input into the command line.
+        # like the other steps, rather than pasting the raw input into the command line. The PR
+        # body is written to a file and passed with --notes-file, never interpolated, for the same
+        # reason.
         shell: pwsh
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           VERSION: ${{ steps.version.outputs.version }}
           ASSET: artifacts/publish/${{ steps.artifact.outputs.name }}
-        run: gh release create "v$env:VERSION" --draft --target ${{ github.sha }} --title "v$env:VERSION" --generate-notes $env:ASSET
+        run: |
+          # The PRs this commit belongs to. A squash, merge or rebase merge all keep the link.
+          $body = gh api "repos/${{ github.repository }}/commits/${{ github.sha }}/pulls" --jq '.[0].body // ""'
+          if ($LASTEXITCODE -ne 0) { $body = '' }
+          $section = [regex]::Match("$body", '(?ms)^##\s+Release notes\s*$\r?\n(.*?)(?=^##\s|\z)')
+          if ($section.Success -and $section.Groups[1].Value.Trim()) {
+            Set-Content -LiteralPath release-notes.md -Value $section.Groups[1].Value.Trim() -Encoding utf8
+            "Notes: the merged PR's Release notes section."
+            gh release create "v$env:VERSION" --draft --target ${{ github.sha }} --title "v$env:VERSION" --notes-file release-notes.md $env:ASSET
+          } else {
+            "Notes: generated, since no merged PR with a Release notes section was found."
+            gh release create "v$env:VERSION" --draft --target ${{ github.sha }} --title "v$env:VERSION" --generate-notes $env:ASSET
+          }
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+
+      - name: Publish it, on a merge, while signing is not enforced
+        # Petre: "release on merge so". A merge's release goes out at once, unless signing is
+        # enforced (the SIGNING_CERT_THUMBPRINT variable is set): then the draft waits for
+        # scripts/sign-release.ps1 on Petre's machine, exactly as a manual run's always does,
+        # because the certificate never leaves that machine. A manual run always stops at the draft.
+        #
+        # This step does the guard's job itself, because the guard will NOT run for it: a release
+        # published with the workflow's own GITHUB_TOKEN raises no `release: published` event
+        # (GitHub does not start workflows from that token's events). With signing not enforced
+        # the guard's only check is that an executable is attached, so that is checked here,
+        # against the release as GitHub now holds it, before publishing.
+        if: github.event_name == 'push' && vars.SIGNING_CERT_THUMBPRINT == ''
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: v${{ steps.version.outputs.version }}
+        run: |
+          $exes = @(gh release view $env:TAG --json assets --jq '.assets[].name' | Where-Object { $_ -like '*.exe' })
+          if ($exes.Count -eq 0) {
+            "::error::$env:TAG has no executable attached, so it stays a draft."
+            exit 1
+          }
+          gh release edit $env:TAG --draft=false --latest
+          if ($LASTEXITCODE -ne 0) { "::error::Could not publish $env:TAG; it is still a draft."; exit 1 }
+          "::warning::Published $env:TAG with $($exes -join ', '), unsigned: signing is not enforced (SIGNING_CERT_THUMBPRINT is not set)."
 
   # Runs when a release is published, and re-checks what was published rather than trusting
   # how it got there. It defends against:

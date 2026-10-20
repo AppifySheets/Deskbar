@@ -858,11 +858,15 @@ Before the first signed release:
   branch with them.
 
 1. Bump `VersionPrefix` in `Directory.Build.props` in the pull request that earns the
-   version, and merge it.
-2. In GitHub, open Actions, pick Release, choose Run workflow and enter the version as
-   `x.y.z`, with no leading `v`. It has to match `VersionPrefix` at that commit. A draft
-   release `vx.y.z` appears with an unsigned exe, named `Deskbar-x.y.z-win-x64.exe`, so
-   `Deskbar-2.0.0-win-x64.exe` for 2.0.0.
+   version. Give the PR description a `## Release notes` section written for the people
+   updating: the release takes its notes from that section, up to the next `##` heading.
+2. Merge it. The merge starts the Release workflow by itself: it builds the version
+   `VersionPrefix` now names and creates release `vx.y.z` with an unsigned exe, named
+   `Deskbar-x.y.z-win-x64.exe`, so `Deskbar-2.0.0-win-x64.exe` for 2.0.0. A merge that
+   touches `Directory.Build.props` without bumping the version releases nothing. To build a
+   version by hand instead, for example to retry a failed run, open Actions, pick Release,
+   choose Run workflow and enter the version as `x.y.z`, with no leading `v`; it has to match
+   `VersionPrefix` at that commit, and it always stops at a draft.
 3. On the signing machine, with the token plugged in, run
    `scripts/sign-release.ps1 -Tag vx.y.z -Thumbprint <thumbprint>`, for 2.0.0
    `scripts/sign-release.ps1 -Tag v2.0.0 -Thumbprint <thumbprint>`. The token's driver
@@ -877,9 +881,12 @@ Before the first signed release:
 After a revert the release is a draft again: fix the cause and re-run the script.
 
 Until the certificate exists, the repository variable `SIGNING_CERT_THUMBPRINT` is unset and
-step 3 is replaced by publishing the draft by hand, `gh release edit vx.y.z --draft=false`.
-The guard then only checks that an executable is attached. Setting the variable switches
-signing enforcement on.
+step 3 does not happen: the workflow run that the merge started publishes the release itself,
+after checking that an executable is attached (the guard does not run for a release the
+workflow publishes with its own token, so that check is made there instead). A draft built by
+hand is published with `gh release edit vx.y.z --draft=false`, and the guard then only checks
+that an executable is attached. Setting the variable switches signing enforcement on, and a
+merge's release then waits as a draft for step 3.
 
 GitHub runs a release event from the workflow file at the tag's commit, so the guard only
 covers releases whose tag's commit carries this workflow. Never re-publish a release whose
