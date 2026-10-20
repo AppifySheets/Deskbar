@@ -6600,7 +6600,42 @@ public partial class FloatingBar : Window
         restore.Click += (_, _) => Report(manager.RestoreTitle(row.Window.Handle));
         menu.Items.Add(restore);
 
+        // CLOSING, at the bottom and behind a separator, away from the renames above. Petre: "right clicking an
+        // app should have close and force close", then "also, close all", "so i can kill all vscode or edge
+        // processes". Gentlest first:
+        //   Close        the X's request; unsaved work still gets its prompt
+        //   Force close  ends the process owning this window. For a browser or VS Code that is the main
+        //                process, so every window of it goes, which the label says by naming the process
+        //   Close all    ends every process running that exe, the dozen helpers with no window included
+        // No confirmation, like Task Manager's End task; the labels carry the warning instead. The process
+        // count is read when the menu OPENS, not when it is built: the menu is built for every icon on every
+        // rebuild, and enumerating processes that often for a number nobody looks at would be waste.
+        var process = row.Window.ProcessName;
+        menu.Items.Add(new Separator());
+        var close = new MenuItem { Header = "Close", Icon = MenuGlyph("✕") };
+        close.Click += (_, _) => Report(manager.CloseWindow(row.Window.Handle));
+        menu.Items.Add(close);
+        var force = new MenuItem { Header = $"Force close ({process})", Icon = MenuGlyph("⊗") };
+        force.Click += (_, _) => Report(manager.ForceCloseWindow(row.Window.Handle));
+        menu.Items.Add(force);
+        var all = new MenuItem { Header = $"Close all {process} processes", Icon = MenuGlyph("⊘") };
+        all.Click += (_, _) => Report(manager.CloseAllOfApp(row.Window.Handle));
+        menu.Items.Add(all);
+        menu.Opened += (_, _) =>
+        {
+            var count = ProcessCount(process);
+            all.Header = count > 0 ? $"Close all {process} processes ({count})" : $"Close all {process} processes";
+        };
+
         return menu;
+    }
+
+    // How many processes run an exe, for the Close all label.
+    static int ProcessCount(string processName)
+    {
+        var found = System.Diagnostics.Process.GetProcessesByName(processName);
+        found.ToList().ForEach(p => p.Dispose());
+        return found.Length;
     }
 
     // Restores Left/Top from persisted state (or computes the bottom-right work-area

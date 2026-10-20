@@ -2963,6 +2963,19 @@ public sealed class WorkspaceManager(
     // renaming, so it lapses as soon as the app rewrites its title (Beeper carries the current
     // chat, RDM the session), whereas a rule keeps matching. Everything downstream already
     // applies rename rules on Appeared and on TitleChanged, so nothing else needed changing.
+    // The window icon menu's Close, Force close and Close all (Petre: "right clicking an app should have close
+    // and force close", "also, close all", "so i can kill all vscode or edge processes"). Here, not in the
+    // bar, so the control pipe's twins (close-window, force-close, close-all) run the same code as the menu.
+    // Compatibility mode has no activator, the same refusal the delete-with-windows path gives.
+    public Result CloseWindow(WindowHandle window) => WithActivator(a => a.Close(window));
+
+    public Result ForceCloseWindow(WindowHandle window) => WithActivator(a => a.EndProcess(window, everyInstance: false));
+
+    public Result CloseAllOfApp(WindowHandle window) => WithActivator(a => a.EndProcess(window, everyInstance: true));
+
+    Result WithActivator(Func<IWindowActivator, Result> act) =>
+        activator is null ? Result.Failure("This build cannot close windows.") : act(activator);
+
     public Result RenameWindow(WindowHandle window, string input) =>
         RenamePattern.IsWildcard(input)
             ? AddRenameRule(input)

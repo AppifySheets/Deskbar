@@ -93,6 +93,64 @@ public sealed class WindowActivator : IWindowActivator
 
     const int CloseBudgetMs = 2000, CloseStepMs = 25;
 
+    // One window, the X's request, no wait (see IWindowActivator.Close). A post that fails means the window is
+    // already gone, which is what the caller wanted.
+    public Result Close(WindowHandle window)
+    {
+        PostMessage(window.Value, WM_CLOSE, 0, 0);
+        return Result.Success();
+    }
+
+    // Force close and Close all (see IWindowActivator.EndProcess). Kill() WITHOUT the process tree, on
+    // purpose: a File Explorer window belongs to explorer.exe, and its "tree" is every app started from the
+    // shell. Chromium and Electron helpers notice their browser process has gone and exit on their own; Close
+    // all takes care of the rest by exe name.
+    public Result EndProcess(WindowHandle window, bool everyInstance)
+    {
+        GetWindowThreadProcessId(window.Value, out var pid);
+        if (pid == 0) return Result.Failure("That window has already closed.");
+        if (pid == Environment.ProcessId) return Result.Failure("Deskbar does not end its own process; use Exit.");
+
+        System.Diagnostics.Process owner;
+        try
+        {
+            owner = System.Diagnostics.Process.GetProcessById((int)pid);
+        }
+        catch (ArgumentException)
+        {
+            return Result.Success(); // ended between the click and here
+        }
+
+        var name = owner.ProcessName;
+        var targets = (everyInstance ? System.Diagnostics.Process.GetProcessesByName(name) : [owner])
+            .Where(p => p.Id != Environment.ProcessId)
+            .ToList();
+        var refused = targets.Count(p => !TryKill(p));
+        targets.ForEach(p => p.Dispose());
+        if (everyInstance) owner.Dispose();
+        return refused == 0
+            ? Result.Success()
+            : Result.Failure($"{refused} of {targets.Count} {name} processes could not be ended. They may be running as administrator.");
+    }
+
+    // True when the process is gone afterwards, including when it had already exited.
+    static bool TryKill(System.Diagnostics.Process process)
+    {
+        try
+        {
+            process.Kill();
+            return true;
+        }
+        catch (InvalidOperationException)
+        {
+            return true; // already exited
+        }
+        catch (System.ComponentModel.Win32Exception)
+        {
+            return false; // access denied: elevated, or a protected process
+        }
+    }
+
     static void ForceForeground(nint window)
     {
         var incumbent = GetForegroundWindow();

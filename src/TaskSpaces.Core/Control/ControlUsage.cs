@@ -54,6 +54,9 @@ public static class ControlUsage
             new("restore-title", "<hwnd>", "Restore title"),
             new("pin", "<hwnd>", "show the window on every workspace, as dropping it on the pin row does"),
             new("unpin", "<hwnd>", "undo pin"),
+            new("close-window", "<hwnd>", "Close (asks the window to close, as its X does)"),
+            new("force-close", "<hwnd>", "Force close (ends the process that owns the window)"),
+            new("close-all", "<hwnd>", "Close all <app> processes (ends every process running the window's exe)"),
         ]),
         new("Bar", [
             new("bar", "minimize|restore|dock|undock|across|edge",

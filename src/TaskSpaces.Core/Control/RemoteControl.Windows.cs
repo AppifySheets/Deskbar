@@ -83,6 +83,14 @@ public sealed partial class RemoteControl
 
     ControlReply RestoreTitle(string hwnd) => OnWindow(hwnd, w => manager.RestoreTitle(w.Handle));
 
+    // Close, Force close and Close all. The reply is the window as it reads afterwards, which right after a
+    // close is usually still the window: closing is the app's to finish, and the window list catches up.
+    ControlReply CloseWindow(string hwnd) => OnWindow(hwnd, w => manager.CloseWindow(w.Handle));
+
+    ControlReply ForceClose(string hwnd) => OnWindow(hwnd, w => manager.ForceCloseWindow(w.Handle));
+
+    ControlReply CloseAll(string hwnd) => OnWindow(hwnd, w => manager.CloseAllOfApp(w.Handle));
+
     ControlReply Pin(string hwnd, bool pin) =>
         OnWindow(hwnd, w => pin ? manager.PinWindow(w.Handle) : manager.UnpinWindow(w.Handle));
 

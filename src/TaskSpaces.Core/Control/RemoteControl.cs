@@ -70,6 +70,9 @@ public sealed partial class RemoteControl(WorkspaceManager manager, Func<bool, R
         ("restore-title", [var hwnd]) => RestoreTitle(hwnd),
         ("pin", [var hwnd]) => Pin(hwnd, pin: true),
         ("unpin", [var hwnd]) => Pin(hwnd, pin: false),
+        ("close-window", [var hwnd]) => CloseWindow(hwnd),
+        ("force-close", [var hwnd]) => ForceClose(hwnd),
+        ("close-all", [var hwnd]) => CloseAll(hwnd),
 
         ("bar", [var state]) => Bar(state),
 

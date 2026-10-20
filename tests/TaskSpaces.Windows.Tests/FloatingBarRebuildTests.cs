@@ -167,8 +167,12 @@ public class FloatingBarRebuildTests
     // "Name <app> windows by folder" is deliberately absent HERE and its own test covers why: the
     // harness window's process is "rdm", which is not a name TitleToken knows, and an app whose
     // title shape cannot be read has no folder to be named after.
+    //
+    // The menu was naming ONLY until Petre: "right clicking an app should have close and force close",
+    // "also, close all", "so i can kill all vscode or edge processes". So naming, then closing below a
+    // separator; drag still expresses movement and pinning.
     [Fact]
-    public void Icon_right_click_menu_offers_naming_only() => StaThread.Run(() =>
+    public void Icon_right_click_menu_offers_naming_then_closing() => StaThread.Run(() =>
     {
         var harness = Harness.Build();
         using var bar = harness.ShowBar();
@@ -177,12 +181,13 @@ public class FloatingBarRebuildTests
 
         Assert.NotNull(menu);
         Assert.Equal(
-            ["Rename this window…", "Rename by title pattern…", "Rename all rdm windows…", "Restore title"],
+            ["Rename this window…", "Rename by title pattern…", "Rename all rdm windows…", "Restore title",
+             "Close", "Force close (rdm)", "Close all rdm processes"],
             menu.Items.OfType<MenuItem>().Select(item => (string)item.Header));
         // Never renamed, so Restore title is visible-but-unavailable rather than absent
         // (mirrors WindowGroupsView.RunningMenu; a menu whose shape shifts per icon is
         // harder to learn than one with a greyed entry).
-        Assert.False(menu.Items.OfType<MenuItem>().Last().IsEnabled);
+        Assert.False(menu.Items.OfType<MenuItem>().Single(item => (string)item.Header == "Restore title").IsEnabled);
     });
 
     // Petre: "active window should be highlighted in the floating window". Asserts the fact
