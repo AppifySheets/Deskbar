@@ -111,6 +111,10 @@ public partial class FloatingBar
             BorderThickness = new Thickness(0),
             Template = StatsButtonTemplate,
             Focusable = false,
+            // Stretch said outright: without it the button sized to its cells (222 of the line's 273 DIP,
+            // measured with TraceStatsGeometry), which across the seam put the disk cell on the line between
+            // the screens.
+            HorizontalAlignment = HorizontalAlignment.Stretch,
             HorizontalContentAlignment = HorizontalAlignment.Stretch,
             ToolTip = statsTip,
         };
@@ -122,7 +126,6 @@ public partial class FloatingBar
             OpenTaskManager();
         };
         StatsLine.Child = statsButton;
-        StatsLine.SizeChanged += (_, e) => { if (e.WidthChanged) FitStatsToSeam(); };
         ApplyStatsTextSize();
     }
 
@@ -144,10 +147,9 @@ public partial class FloatingBar
         Record(diskCell, sample.Disk);
         sample.Gpu.Execute(gpu => Record(gpuCell, gpu));
 
-        // No GPU counters: three cells, so the others share the width rather than leaving a dead quarter.
-        var hasGpu = sample.Gpu.HasValue;
-        statsGrid.Children[3].Visibility = hasGpu ? Visibility.Visible : Visibility.Collapsed;
-        statsGrid.Columns = hasGpu ? 4 : 3;
+        // No GPU counters: three cells, so the others share the width rather than leaving a dead quarter (and
+        // across the seam, four columns with the last one empty; see FitStatsToSeam).
+        FitStatsToSeam();
 
         statsTip.Text = string.Join("\n", new[]
         {
@@ -162,6 +164,23 @@ public partial class FloatingBar
         }.Where(line => line.Length > 0));
 
         StatsLine.Visibility = Visibility.Visible;
+        TraceStatsGeometry();
+    }
+
+    // The line's widths, written to the trace only when they change (like FloatingBar.DumpRowGeometry), so it can
+    // say what width the cells were actually given on the seam and off it.
+    string? lastStatsGeometry;
+
+    void TraceStatsGeometry()
+    {
+        if (!ClickTrace.On || statsButton is null || statsGrid is null) return;
+        var cells = string.Join(",", statsGrid.Children.OfType<FrameworkElement>().Select(c => $"{c.ActualWidth:0}"));
+        var line = $"stats geometry: seam={AcrossSeam} footer={((FrameworkElement)StatsLine.Parent).ActualWidth:0} line={StatsLine.ActualWidth:0} " +
+                   $"button={statsButton.ActualWidth:0} grid={statsGrid.ActualWidth:0} cols={statsGrid.Columns} cells={cells} " +
+                   $"nowplaying={NowPlayingLine.ActualWidth:0} pins={PinLine.ActualWidth:0}";
+        if (line == lastStatsGeometry) return;
+        lastStatsGeometry = line;
+        ClickTrace.Write(line);
     }
 
     void Record(StatCell cell, double value)
@@ -204,13 +223,21 @@ public partial class FloatingBar
     // Gigabytes as Task Manager counts them (1024^3), to one decimal.
     static string Gigabytes(ulong bytes) => (bytes / (1024.0 * 1024 * 1024)).ToString("0.0");
 
-    // Across the seam the line keeps to the left half, like the now-playing line beside it (FitNowPlayingToSeam),
-    // so no cell is split between two screens.
+    // ACROSS THE SEAM the line splits, two cells a screen: CPU and memory on the left, disk and GPU on the right.
+    // Petre, when it first kept to the left half like the now-playing line: "when split across monitors, half
+    // there half here". Four equal columns over the full width already put the seam exactly between the second
+    // and third cell (the bar is centred on it), so the split is just the line left at full width. Squeezed into
+    // one half, the four cells were too narrow for their labels and values.
+    //
+    // The one thing that would break it is a machine with no GPU reading, whose three columns would put the
+    // middle cell on the seam. So across the seam the grid keeps four columns and the GPU cell is HIDDEN, still
+    // holding its quarter, rather than collapsed.
     void FitStatsToSeam()
     {
-        if (statsButton is null) return;
-        statsButton.MaxWidth = AcrossSeam && StatsLine.ActualWidth > 0 ? StatsLine.ActualWidth / 2 : double.PositiveInfinity;
-        statsButton.HorizontalAlignment = AcrossSeam ? HorizontalAlignment.Left : HorizontalAlignment.Stretch;
+        if (statsGrid is null || gpuCell is null) return;
+        var hasGpu = gpuCell.History.Count > 0;
+        statsGrid.Children[3].Visibility = hasGpu ? Visibility.Visible : AcrossSeam ? Visibility.Hidden : Visibility.Collapsed;
+        statsGrid.Columns = hasGpu || AcrossSeam ? 4 : 3;
     }
 
     static Brush FrozenBrush(Color color)
