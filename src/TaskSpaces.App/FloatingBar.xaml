@@ -1,6 +1,7 @@
 <Window x:Class="TaskSpaces.App.FloatingBar"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:app="clr-namespace:TaskSpaces.App"
         Title="Deskbar"
         WindowStyle="None" AllowsTransparency="True" Background="Transparent"
         Topmost="True" ShowInTaskbar="False" ResizeMode="NoResize"
@@ -93,10 +94,11 @@
                  button"; until then they sat in the footer above the strip. Inside BarHeader so they travel
                  with it into the pinned row's caption cell (TakeBarCommands), and so stay under Start whatever
                  the rows do. Filled in FloatingBar.Pins.cs; collapsed with no pins.
-                 A UniformGrid rather than a WrapPanel, so the cells share the line's width evenly and a pin
-                 list too long for one line splits into even lines instead of a ragged last one (see
-                 PinColumns). -->
-            <UniformGrid x:Name="PinLine" Grid.Row="1" Margin="0,2,0,1" Visibility="Collapsed"/>
+                 Packed from the left in fixed cells, wrapping, and never across the seam (PackedPinPanel). It was
+                 a UniformGrid spreading the pins evenly over two lines; Petre: "i don't really like this
+                 distribution", then "b": one size with Start and search, packed like the bottom strip. -->
+
+            <app:PackedPinPanel x:Name="PinLine" Grid.Row="1" Margin="0,2,0,1" Visibility="Collapsed"/>
             <StackPanel x:Name="ShellStart" Orientation="Horizontal"
                         HorizontalAlignment="Left" VerticalAlignment="Center"/>
             <StackPanel x:Name="BarCommands" Orientation="Horizontal"

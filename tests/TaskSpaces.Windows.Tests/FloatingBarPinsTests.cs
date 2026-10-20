@@ -186,17 +186,41 @@ public class FloatingBarPinsTests
         bar.Close();
     });
 
-    // Petre: "distribute evenly; two rows would be fine, don't cram into one". 196 DIP holds eight at the
-    // minimum cell, so his ten come out as two even lines of five rather than one crammed line or 8 + 2.
-    [Theory]
-    [InlineData(10, 196, 5)]
-    [InlineData(8, 196, 8)]
-    [InlineData(3, 196, 3)]
-    [InlineData(12, 196, 6)]
-    [InlineData(17, 196, 6)]
-    [InlineData(10, 400, 10)]
-    public void Pins_split_into_even_lines(int count, double width, int columns) =>
-        Assert.Equal(columns, FloatingBar.PinColumns(count, width));
+    // Petre: "i don't really like this distribution", then "b": the pins packed from the left in 26 DIP cells.
+    // His ten fit one line of his 273 DIP bar, each cell straight after the last, no gaps.
+    [Fact]
+    public void Pins_pack_from_the_left_on_one_line_when_they_fit()
+    {
+        var points = PackedPinPanel.Layout(10, 273, 26, 26, seam: null);
+        Assert.All(points, p => Assert.Equal(0, p.Y));
+        Assert.Equal(Enumerable.Range(0, 10).Select(i => i * 26.0), points.Select(p => p.X));
+    }
+
+    // "will b move to the next line if it's more icons?" Yes: the eleventh starts a second line at the left
+    // edge, still packed, rather than the pins spreading out to share the width.
+    [Fact]
+    public void More_pins_than_fit_wrap_onto_a_new_line_still_packed()
+    {
+        var points = PackedPinPanel.Layout(12, 273, 26, 26, seam: null);
+        Assert.Equal(new System.Windows.Point(0, 26), points[10]);
+        Assert.Equal(new System.Windows.Point(26, 26), points[11]);
+        // However narrow, the first cell of a line always goes, so a pin is never lost.
+        Assert.Equal(new System.Windows.Point(0, 26), PackedPinPanel.Layout(2, 10, 26, 26, seam: null)[1]);
+    }
+
+    // Docked across two screens: no cell may straddle the line between them ("icons at the bottom shouldn't be
+    // broken into halves"). A pin that would start before the seam and end after it starts AT the seam, so the
+    // left screen's half fills and the line carries on in the right half.
+    [Fact]
+    public void Across_the_seam_no_pin_sits_on_the_line_between_the_screens()
+    {
+        const double seam = 273;
+        var points = PackedPinPanel.Layout(20, 546, 26, 26, seam);
+        Assert.DoesNotContain(points, p => p.X < seam && p.X + 26 > seam);
+        // Ten fit before the seam (260), the eleventh starts on it, and the right half takes ten more.
+        Assert.Equal(seam, points[10].X);
+        Assert.All(points, p => Assert.Equal(0, p.Y));
+    }
 
     // Petre: "rightclick should have unpin option". It is on the pin's menu, and the pin leaves the line at once
     // rather than at the next poll.
@@ -238,17 +262,6 @@ public class FloatingBarPinsTests
     [Fact]
     public void An_installed_web_app_is_not_a_browser_pin() =>
         Assert.False(FloatingBar.IsBrowser(InstalledApp("YouTube Music", "music.youtube.com!App")));
-
-    // Docked across two screens the line between them is the bar's middle, so no pin may sit on it: an even
-    // number of columns. Petre: "icons at the bottom shouldn't be broken into halves". His ten become 6 + 4.
-    [Theory]
-    [InlineData(10, 184, 6)]
-    [InlineData(10, 120, 4)]
-    [InlineData(4, 184, 4)]
-    [InlineData(7, 184, 6)]
-    [InlineData(1, 184, 1)]
-    public void Across_the_seam_pins_take_an_even_number_of_columns(int count, double width, int columns) =>
-        Assert.Equal(columns, FloatingBar.PinColumns(count, width, evenColumns: true));
 
     // --- which windows are a pin's ------------------------------------------------------------------------
 

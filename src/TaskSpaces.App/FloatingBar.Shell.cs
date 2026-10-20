@@ -81,7 +81,7 @@ public partial class FloatingBar
     void BuildShellStrip()
     {
         ShellStart.Children.Add(ShellButton(ShellFlyout.Start, "Start", StartGlyph()));
-        ShellStart.Children.Add(ShellButton(ShellFlyout.Search, "Search", Glyph(SearchShape)));
+        ShellStart.Children.Add(ShellButton(ShellFlyout.Search, "Search", Glyph(SearchShape, size: HeaderGlyphSize)));
 
         // The same pair again, where the right half of the header begins, shown only across the seam (see
         // LayOutHeader). Their own buttons, wired to the same OnShellClick, so a press on either pair behaves
@@ -98,7 +98,7 @@ public partial class FloatingBar
             Children =
             {
                 ShellButton(ShellFlyout.Start, "Start", StartGlyph()),
-                ShellButton(ShellFlyout.Search, "Search", Glyph(SearchShape)),
+                ShellButton(ShellFlyout.Search, "Search", Glyph(SearchShape, size: HeaderGlyphSize)),
             },
         };
         BarHeader.Children.Add(AtRightHalf(shellStartTwin));
@@ -185,18 +185,15 @@ public partial class FloatingBar
         FitClock();
     }
 
-    // Everything at the bottom of the bar that has to respect the seam (see LayOutStrip, PinColumns and the
-    // now-playing line), brought into line with the current docking. Called at the start of every rebuild,
-    // so it follows the bar onto the seam and off it.
+    // Everything that has to respect the seam (see LayOutStrip, the pins' PackedPinPanel and the now-playing
+    // line), brought into line with the current docking. Called at the start of every rebuild, so it follows
+    // the bar onto the seam and off it.
     void LayOutBottomForSeam()
     {
         // ...and the header's second Start and search, which follow the same switch.
         LayOutHeader(AcrossSeam);
-        if (stripAcrossSeam != AcrossSeam)
-        {
-            LayOutStrip(AcrossSeam);
-            ((System.Windows.Controls.Primitives.UniformGrid)PinLine).Columns = PinColumns(shownPins.Count, PinLine.ActualWidth, AcrossSeam);
-        }
+        if (stripAcrossSeam != AcrossSeam) LayOutStrip(AcrossSeam);
+        FitPinsToSeam();
         FitNowPlayingToSeam();
         FitStatsToSeam();
     }
@@ -447,12 +444,16 @@ public partial class FloatingBar
         return new Viewbox { Width = size, Height = size, Child = canvas, IsHitTestVisible = false };
     }
 
+    // Start and search at the pins' size, 18 DIP, since they share the top of the bar with them: Petre, on the
+    // header, "sizes of those icons against start and search", then "b", one size for all of them. They were 15.
+    const double HeaderGlyphSize = 18;
+
     // Windows' four tiles, in the blue the taskbar draws them in, so the one button you reach for most is
     // also the one you find without reading.
     static UIElement StartGlyph() => new Viewbox
     {
-        Width = 15,
-        Height = 15,
+        Width = HeaderGlyphSize,
+        Height = HeaderGlyphSize,
         IsHitTestVisible = false,
         Child = new Canvas { Width = 16, Height = 16, Children = { new Path { Data = Geometry.Parse(StartTiles), Fill = StartBlue } } },
     };

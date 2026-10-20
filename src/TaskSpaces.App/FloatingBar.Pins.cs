@@ -30,9 +30,12 @@ public partial class FloatingBar
     // How big a pin is, after four rounds. The first cut was 16 DIP icons in 19 DIP cells, ten to a line.
     // "make them bigger, it's hard to focus on them" went to 22 in 28, two lines of five, and that was "too bad;
     // much smaller, and no gaps please", "as it was, just a bit larger": 18 in one tight line. Then, looking at
-    // that line: "distribute evenly; two rows would be fine, don't cram into one". So the icon stays 18 and a
-    // cell must be at least 24 wide, which puts his ten on two even lines of five spread across the bar.
-    const double PinIconSize = 18, PinMinWidth = 24, PinHeight = 24;
+    // that line: "distribute evenly; two rows would be fine, don't cram into one", which spread his ten over two
+    // even lines of five. Then, with the pins moved under Start: "i don't really like this distribution, also
+    // sizes of those icons against start and search", and "b" from four mockups: the pins PACKED from the left
+    // in 26 DIP cells, the same cells and 18 DIP size as Start and search beside them (PackedPinPanel), which
+    // fits his ten on one line of a 273 DIP bar and wraps, still packed, when more do not fit.
+    const double PinIconSize = 18, PinCellWidth = 26, PinHeight = 26;
 
     static readonly Brush PinHereMark = Frozen(0xC0, 0xFF, 0xFF, 0xFF);
     static readonly Brush PinElsewhereMark = Frozen(0x66, 0xFF, 0xFF, 0xFF);
@@ -99,35 +102,26 @@ public partial class FloatingBar
             PinLine.Children.Add(button);
         });
         PinLine.Visibility = shownPins.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
-        ((UniformGrid)PinLine).Columns = PinColumns(shownPins.Count, PinLine.ActualWidth, AcrossSeam);
+        FitPinsToSeam();
         if (lastPinOverview is { } overview) PaintPins(overview);
     }
 
-    // Columns for `count` pins in `width`: as few lines as fit at the minimum cell width, then the pins shared
-    // EVENLY between those lines, so ten in a line that holds seven come out as two lines of five, not 7 + 3.
-    // Before the first layout the width is unknown; the docked bar's own 196 DIP stands in until it is.
-    //
-    // `evenColumns`: docked across two screens, the bar's middle is the line between them, and an odd number of
-    // columns puts the middle pin on it, half on each screen ("icons at the bottom shouldn't be broken into
-    // halves", "they should either stay or go to another monitor"). An even number puts the line between two
-    // pins: one more column if the cells still fit, one fewer otherwise. His ten at the seam become 6 + 4.
-    internal static int PinColumns(int count, double width, bool evenColumns = false)
+    // Docked across two screens, tells the pins' panel where the line between them crosses it, so no pin sits on
+    // it (see PackedPinPanel); on one screen, that there is none. The line is the middle of the bar's content,
+    // translated into the panel's own coordinates, because the panel sits inside the pinned row's caption cell
+    // and does not start at the bar's edge. Called on every rebuild and whenever the panel's width changes;
+    // the panel ignores a value it already has, so this cannot feed a layout loop.
+    void FitPinsToSeam()
     {
-        if (count <= 0) return 1;
-        var available = width > 0 ? width : 196;
-        var perLine = Math.Max(1, (int)Math.Floor(available / PinMinWidth));
-        var lines = (int)Math.Ceiling(count / (double)perLine);
-        var columns = (int)Math.Ceiling(count / (double)lines);
-        if (!evenColumns || columns % 2 == 0 || count < 2) return columns;
-        return available / (columns + 1) >= PinMinWidth ? columns + 1 : Math.Max(2, columns - 1);
+        if (!AcrossSeam || BarContent.ActualWidth <= 0 || !PinLine.IsVisible)
+        {
+            PinLine.Seam = null;
+            return;
+        }
+        PinLine.Seam = BarContent.TranslatePoint(new Point(BarContent.ActualWidth / 2, 0), PinLine).X;
     }
 
-    void WatchPinWidth() => PinLine.SizeChanged += (_, e) =>
-    {
-        // Only a WIDTH change can change the columns, and a column change only changes the height, so this
-        // cannot feed itself.
-        if (e.WidthChanged) ((UniformGrid)PinLine).Columns = PinColumns(shownPins.Count, e.NewSize.Width, AcrossSeam);
-    };
+    void WatchPinWidth() => PinLine.SizeChanged += (_, e) => { if (e.WidthChanged) FitPinsToSeam(); };
 
     (Button, Border, UIElement) PinButton(TaskbarPin pin)
     {
