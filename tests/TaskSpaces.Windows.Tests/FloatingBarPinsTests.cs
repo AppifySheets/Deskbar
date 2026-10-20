@@ -26,9 +26,13 @@ public class FloatingBarPinsTests
         public Maybe<PinImage> ImageOf(TaskbarPin pin, int size) => Maybe<PinImage>.None;
         public string? AppIdOf(WindowHandle window) => null;
 
-        public Result Launch(TaskbarPin pin)
+        // ...and the arguments each launch was given, in the same order.
+        public List<string?> LaunchedWith { get; } = [];
+
+        public Result Launch(TaskbarPin pin, string? arguments = null)
         {
             Launched.Add(pin.Name);
+            LaunchedWith.Add(arguments);
             return Result.Success();
         }
 
@@ -107,6 +111,51 @@ public class FloatingBarPinsTests
         Assert.Equal(["Obsidian"], pins.Launched);
         bar.Close();
     });
+
+    // Petre: "i want it to always open a new window". The VS Code pin starts VS Code with --new-window, so a new
+    // window opens whatever VS Code's own setting says; any other pin starts as its shortcut stands.
+    [Fact]
+    public void The_vs_code_pin_always_asks_for_a_new_window() => StaThread.Run(() =>
+    {
+        var pins = new FakePins(
+            Shortcut("Visual Studio Code", @"C:\Users\me\AppData\Local\Programs\Microsoft VS Code\Code.exe"),
+            Shortcut("Obsidian", @"C:\Obsidian\Obsidian.exe", "md.obsidian"));
+        var bar = Bar(pins);
+
+        Pin(bar, "Visual Studio Code").RaiseEvent(new RoutedEventArgs(ButtonBase.ClickEvent));
+        Pin(bar, "Obsidian").RaiseEvent(new RoutedEventArgs(ButtonBase.ClickEvent));
+
+        Assert.Equal(["Visual Studio Code", "Obsidian"], pins.Launched);
+        Assert.Equal(["--new-window", null], pins.LaunchedWith);
+        bar.Close();
+    });
+
+    // Petre: "clicking vscode in quick launch doesn't open it". A Deskbar started from a VS Code terminal carried
+    // ELECTRON_RUN_AS_NODE=1 (and VSCODE_*), so every Electron app it started ran as bare Node and exited.
+    // Those are dropped at startup; anything else stays.
+    [Theory]
+    [InlineData("ELECTRON_RUN_AS_NODE", true)]
+    [InlineData("VSCODE_IPC_HOOK", true)]
+    [InlineData("VSCODE_PID", true)]
+    [InlineData("PATH", false)]
+    [InlineData("ELECTRON_ENABLE_LOGGING", false)]
+    [InlineData("DESKBAR_APPDATA", false)]
+    public void Only_the_editor_hosts_variables_are_dropped(string name, bool dropped) =>
+        Assert.Equal(dropped, LaunchEnvironment.IsHostOnly(name));
+
+    [Fact]
+    public void Cleaning_removes_them_from_the_process_environment()
+    {
+        Environment.SetEnvironmentVariable("VSCODE_DESKBAR_TEST_PROBE", "1");
+        Environment.SetEnvironmentVariable("DESKBAR_TEST_KEEP", "1");
+
+        LaunchEnvironment.Clean();
+
+        Assert.Null(Environment.GetEnvironmentVariable("VSCODE_DESKBAR_TEST_PROBE"));
+        Assert.Null(Environment.GetEnvironmentVariable("ELECTRON_RUN_AS_NODE"));
+        Assert.Equal("1", Environment.GetEnvironmentVariable("DESKBAR_TEST_KEEP"));
+        Environment.SetEnvironmentVariable("DESKBAR_TEST_KEEP", null);
+    }
 
     // Middle-click is always a new window, as on the taskbar.
     [Fact]

@@ -240,16 +240,18 @@ public partial class FloatingBar
     //
     // VS Code too. Petre: "clicking vscode doesn't open a new window, it minimizes the current vscode window":
     // the jump half of jump-or-start, on the window that already had focus, is the taskbar's minimize. Same
-    // reasoning as the browser: its windows are on the rows, and the pin is for a fresh one. Starting Code.exe
-    // again with no arguments opens a new empty window, VS Code's window.openWithoutArgumentsInNewWindow
-    // default on Windows (not overridden in Petre's settings.json).
+    // reasoning as the browser: its windows are on the rows, and the pin is for a fresh one. Then "i want it to
+    // always open a new window", so VS Code is started with --new-window rather than as the shortcut stands: a
+    // second start with no arguments opens a window only while VS Code's window.openWithoutArgumentsInNewWindow
+    // says so (measured: with it at its default, a plain start and --new-window each opened one), and the flag
+    // makes that independent of the setting.
     void OpenPin(TaskbarPin pin, bool newWindow)
     {
         var here = pinWindowsHere.GetValueOrDefault(pin.ParsingName) ?? [];
         newWindow |= IsBrowser(pin) || IsEditor(pin);
         var outcome = !newWindow && here.Count > 0
             ? manager.ToggleWindow(here[0], activator)
-            : pins?.Launch(pin) ?? Result.Success();
+            : pins?.Launch(pin, IsEditor(pin) ? "--new-window" : null) ?? Result.Success();
         if (ClickTrace.On)
             ClickTrace.Write($"pins: open {pin.Name} newWindow={newWindow} here={here.Count} ok={outcome.IsSuccess}{(outcome.IsFailure ? $" error={outcome.Error}" : "")}");
         Report(outcome);

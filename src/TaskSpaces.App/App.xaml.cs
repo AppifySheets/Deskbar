@@ -582,6 +582,10 @@ public partial class App : Application
     {
         base.OnStartup(e);
 
+        // Before anything can start a process: whatever Deskbar starts (a pin, Task Manager, an update) gets
+        // the environment of a normal desktop start, not one leaked into Deskbar by whatever started IT.
+        LaunchEnvironment.Clean();
+
         // `Deskbar.exe ctl <command>` is a CLIENT of the running copy, not an app start, so it is
         // answered before everything below: before the single-instance guard (this process is a second
         // instance by definition and would be told so), before tracing announces a session, and before
