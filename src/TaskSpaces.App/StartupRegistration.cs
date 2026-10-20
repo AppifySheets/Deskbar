@@ -80,7 +80,7 @@ public static class StartupRegistration
     internal static bool IsPublished(string assemblyLocation) => assemblyLocation.Length == 0;
 
 #pragma warning disable IL3000 // Location is empty in a single-file app, and that emptiness is the point here.
-    static bool RunsAsPublished => IsPublished(typeof(StartupRegistration).Assembly.Location);
+    internal static bool RunsAsPublished => IsPublished(typeof(StartupRegistration).Assembly.Location);
 #pragma warning restore IL3000
 
     public static Result Disable() =>

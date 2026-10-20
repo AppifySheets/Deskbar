@@ -747,6 +747,10 @@ public partial class App : Application
         // instance that actually takes ownership gets to claim it.
         StartupRegistration.ReassertIfEnabled();
 
+        // ...and keep Deskbar in Start, pointing at this exe, so it can be started by hand after it stops
+        // (StartMenuShortcut). Same owner rule as the Run entry. A failure only costs the shortcut.
+        StartMenuShortcut.Ensure().TapError(error => ClickTrace.Write($"start menu: {error}"));
+
         // ...and in the same breath, ask Windows to bring the app back if it DIES. Petre: "maybe you
         // could add a simple monitor job which will start the taskspaces when it dies", and, on the
         // cause, "it usually dies because of memory problems, i guess, but restarting is good" -- which
