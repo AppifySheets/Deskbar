@@ -41,4 +41,16 @@ public interface IWindowActivator
     // is a success, and a window that refuses to go is the one interesting outcome, which is what
     // the list carries.
     IReadOnlyList<WindowHandle> CloseAll(IReadOnlyList<WindowHandle> windows);
+
+    // The window icon menu's Close (Petre: "right clicking an app should have close and force close").
+    // The title bar X's request, posted, with no wait: one window, and the menu has nothing to do after it.
+    // An app with unsaved work asks its question and stays, exactly as with the X.
+    Result Close(WindowHandle window);
+
+    // ...and Force close: END the process that owns the window, without asking it. With `everyInstance`,
+    // every process running the same exe, the menu's "Close all" (Petre: "also, close all", "so i can kill
+    // all vscode or edge processes"): an app like VS Code or Edge runs as a dozen processes, most with no
+    // window, and ending only the windowed ones leaves the rest. Never this app's own process. A Result,
+    // because a process running as administrator refuses a normal-level caller, and that is worth saying.
+    Result EndProcess(WindowHandle window, bool everyInstance);
 }

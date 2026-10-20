@@ -367,6 +367,36 @@ public class RemoteControlMenuTests
         Assert.DoesNotContain(Code.Handle, desktops.PinnedWindows);
     }
 
+    // Close asks the window; Force close ends its process; Close all ends every process of its exe (Petre:
+    // "right clicking an app should have close and force close", "so i can kill all vscode or edge processes").
+    [Fact]
+    public void Close_force_close_and_close_all()
+    {
+        var manager = Started();
+
+        Ok(Run(manager, "close-window", "0x10"));
+        Assert.Equal([Code.Handle], activator.Closed);
+        Assert.Empty(activator.Ended);
+
+        Ok(Run(manager, "force-close", "0x10"));
+        Ok(Run(manager, "close-all", "0x10"));
+        Assert.Equal([(Code.Handle, false), (Code.Handle, true)], activator.Ended);
+    }
+
+    // Compatibility mode has no activator: the menu's close items are refused rather than doing nothing.
+    [Fact]
+    public void Without_an_activator_closing_is_refused()
+    {
+        desktops.Desktops.Add(new DesktopInfo(Guid.NewGuid(), "Main"));
+        monitor.InitialWindows.Add(Code);
+        var manager = new WorkspaceManager(desktops, monitor, titles, store, ownProcessId: 4242);
+        Assert.True(manager.Start().IsSuccess);
+
+        Assert.True(manager.CloseWindow(Code.Handle).IsFailure);
+        Assert.True(manager.ForceCloseWindow(Code.Handle).IsFailure);
+        Assert.True(manager.CloseAllOfApp(Code.Handle).IsFailure);
+    }
+
     [Fact]
     public void A_handle_no_window_has_is_refused()
     {
@@ -429,7 +459,7 @@ public class RemoteControlMenuTests
             ["workspaces", "windows", "desktops", "create", "move", "rename", "add-child", "reorder", "minimize-row",
              "restore-row", "color", "delete", "switch", "group-create", "group-join", "group-leave", "group-rename",
              "group-color", "ungroup", "name-desktop", "rename-window", "rename-app", "rename-pattern",
-             "name-by-folder", "restore-title", "pin", "unpin", "bar"],
+             "name-by-folder", "restore-title", "pin", "unpin", "close-window", "force-close", "close-all", "bar"],
             verb => Assert.Contains($"\n  {verb}", help));
     }
 }

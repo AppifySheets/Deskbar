@@ -133,6 +133,21 @@ public sealed class FakeActivator : IWindowActivator
         Closed.AddRange(windows);
         return windows.Where(Stubborn.Contains).ToList();
     }
+
+    public Result Close(WindowHandle window)
+    {
+        Closed.Add(window);
+        return Result.Success();
+    }
+
+    // Every EndProcess call, with whether it was asked for every instance of the exe.
+    public List<(WindowHandle Window, bool EveryInstance)> Ended { get; } = [];
+
+    public Result EndProcess(WindowHandle window, bool everyInstance)
+    {
+        Ended.Add((window, everyInstance));
+        return Result.Success();
+    }
 }
 
 // Flashing taskbar buttons. Tests push handles through Subject to mean "this window's button
