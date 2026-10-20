@@ -123,6 +123,8 @@ public partial class FloatingBar
         LayOutStrip(acrossSeam: false);
 
         UpdateClock(clock);
+        // ...and the date line follows the strip's width (FitClock).
+        ShellStrip.SizeChanged += (_, e) => { if (e.WidthChanged) FitClock(); };
         clockTimer.Tick += (_, _) => UpdateClock(clock);
         clockTimer.Start();
         Closed += (_, _) => clockTimer.Stop();
@@ -179,6 +181,8 @@ public partial class FloatingBar
             DockPanel.SetDock(b, Dock.Right);
             ShellStrip.Children.Add(b);
         });
+        // Which buttons share the strip with the clock just changed, so whether its date fits may have too.
+        FitClock();
     }
 
     // Everything at the bottom of the bar that has to respect the seam (see LayOutStrip, PinColumns and the
@@ -220,9 +224,54 @@ public partial class FloatingBar
         if (clockTime is null || clockDate is null || clockTime.Text == time) return;
         clockTime.Text = time;
         clockDate.Text = now.ToString("d");
-        // The long date on hover, which the two short lines leave out.
+        // The long date on hover, which the two short lines leave out (and which still carries the date when
+        // FitClock has had to drop its line).
         clock.ToolTip = now.ToString("D");
+        FitClock();
     }
+
+    // NO DATE RATHER THAN HALF A DATE. Petre, with a narrow bar whose strip ran out of room: the clock was cut at
+    // the right edge, "13:" over "20", and "date. don't show it if it's like that". The strip is a DockPanel, so
+    // when its buttons and the clock need more than its width, whatever docks last is clipped, and that was the
+    // clock. So when everything with the date's line does not fit, the date line goes, and the clock shrinks
+    // to the time's width, which is the narrower of the two lines in every regional format worth worrying
+    // about. The time stays, the tooltip keeps the full date. Measured at natural widths, every time the
+    // strip's width or the clock's text changes.
+    void FitClock()
+    {
+        if (clockTime is null || clockDate is null || stripClock is null || ShellStrip.ActualWidth <= 0) return;
+        var infinite = new Size(double.PositiveInfinity, double.PositiveInfinity);
+        double Natural(UIElement element)
+        {
+            element.Measure(infinite);
+            return element.DesiredSize.Width;
+        }
+        var others = ShellStrip.Children.OfType<FrameworkElement>()
+            .Where(b => b != stripClock && b.Visibility != Visibility.Collapsed)
+            .Sum(b => double.IsNaN(b.Width) ? Natural(b) : b.Width + b.Margin.Left + b.Margin.Right);
+        // The clock's lines by their TEXT, not by measuring the elements: a collapsed date measures 0 wide, so
+        // measuring it would make the next check think the date fits, show it, and hide it again, every minute.
+        var withDate = stripClock.Padding.Left + stripClock.Padding.Right + Math.Max(TextWidth(clockTime), TextWidth(clockDate));
+        var fits = others + withDate <= ShellStrip.ActualWidth;
+        lastClockFit = (ShellStrip.ActualWidth, others, withDate);
+        clockDate.Visibility = fits ? Visibility.Visible : Visibility.Collapsed;
+        if (ClickTrace.On && clockDateShown != fits)
+            ClickTrace.Write($"clock: date {(fits ? "shown" : "hidden")}, strip={ShellStrip.ActualWidth:0.0} others={others:0.0} clock with date={withDate:0.0}");
+        clockDateShown = fits;
+    }
+
+    // Last FitClock verdict, so the trace says only when it changes.
+    bool? clockDateShown;
+
+    // ...and the numbers behind it, for the tests.
+    internal (double Strip, double Others, double ClockWithDate) lastClockFit;
+
+    // How wide a line's text is in its own font, whether or not the line is showing.
+    static double TextWidth(TextBlock line) =>
+        new FormattedText(line.Text, System.Globalization.CultureInfo.CurrentCulture, line.FlowDirection,
+                new Typeface(line.FontFamily, line.FontStyle, line.FontWeight, line.FontStretch), line.FontSize, Brushes.White,
+                VisualTreeHelper.GetDpi(line).PixelsPerDip)
+            .WidthIncludingTrailingWhitespace;
 
     // One button of the strip: bare chrome with a faint rounded hover, so it reads as a button without the
     // stock template's blue square (see BareButton for why the stock chrome is unwanted on this bar).

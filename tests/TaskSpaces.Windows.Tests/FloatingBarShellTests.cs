@@ -206,6 +206,47 @@ public class FloatingBarShellTests(ITestOutputHelper output)
         bar.Close();
     });
 
+    // Petre, with a narrow bar cutting the clock to "13:" over "20": "date. don't show it if it's like that".
+    // A strip too narrow for its buttons and both clock lines drops the date line, and the time then fits;
+    // given room again, the date comes back.
+    [Fact]
+    public void A_strip_too_narrow_for_the_date_shows_only_the_time() => StaThread.Run(() =>
+    {
+        var (bar, _) = Bar();
+        var strip = (DockPanel)bar.FindName("ShellStrip")!;
+        var clock = strip.Children.OfType<Button>().Single(b => AutomationProperties.GetName(b) == "Clock");
+        var lines = ((StackPanel)clock.Content).Children.OfType<TextBlock>().ToList();
+
+        strip.Width = 600;
+        bar.UpdateLayout();
+        Assert.Equal(Visibility.Visible, lines[1].Visibility);
+
+        // What the strip needs WITH the date line, as the check itself reckons it. Widths come from that rather
+        // than from the two lines' sizes, because how much wider the date is than the time depends on the
+        // regional format the suite runs under (half a DIP on one machine, measured).
+        var (_, others, clockWithDate) = bar.lastClockFit;
+        var needed = others + clockWithDate;
+        output.WriteLine($"others {others:0.00}, clock with date {clockWithDate:0.00}, needed {needed:0.00}");
+
+        // A hair short of that: the date goes, the time stays.
+        strip.Width = needed - 0.5;
+        bar.UpdateLayout();
+        Assert.Equal(Visibility.Collapsed, lines[1].Visibility);
+        Assert.Equal(Visibility.Visible, lines[0].Visibility);
+
+        // And it STAYS hidden on the next check: a collapsed date measures 0 wide, and a check that measured the
+        // element would read that as "fits" and show it again, flickering every minute.
+        strip.Width = needed - 0.25;
+        bar.UpdateLayout();
+        Assert.Equal(Visibility.Collapsed, lines[1].Visibility);
+
+        // Room for it again: back it comes.
+        strip.Width = needed + 0.5;
+        bar.UpdateLayout();
+        Assert.Equal(Visibility.Visible, lines[1].Visibility);
+        bar.Close();
+    });
+
     // Only the button for the flyout that was open stands down: with the Start menu up, a click on search
     // still opens search.
     [Fact]
