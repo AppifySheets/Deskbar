@@ -3631,28 +3631,49 @@ public partial class FloatingBar : Window
                 washes.ForEach(wash => wash.Background = on ? MiddleWash : Brushes.Transparent);
             }
 
-            container.MouseEnter += (_, _) => Hover(true);
-            container.MouseLeave += (_, _) => { Hover(false); ClearInfo(); };
-
             // ...and the icons punch holes in that hover area. Clicking an icon jumps to a
             // WINDOW, so lighting the label there would advertise an action the click does not
             // perform. The info line already says which group an icon belongs to, which is the
             // information the highlight would have carried anyway.
             //
-            // Wired here rather than inside IconButton: IconButton has no business knowing
-            // about the row it happens to sit in. Note the deliberate inversion -- entering an
-            // icon CLEARS the highlight, because the container's own MouseEnter has already
-            // set it (entering a child counts as entering the parent).
-            // iconButtons, NOT icons.Children: since rows wrap, icons.Children holds one panel
-            // per LINE, and hooking those would match no icon at all.
+            // So the rule is "in the row, and on no icon", and it is RECOMPUTED from two facts on every
+            // enter and leave rather than set by whichever event fired last. It used to be the latter
+            // (the row's MouseEnter lit it, an icon's MouseEnter put it out), which assumed the row's
+            // event always comes first. It does not. When the row and an icon appear under the pointer
+            // in the same instant, WPF raises the ICON's MouseEnter first and the row's second, so the
+            // row lit the wash last and it stayed on with the pointer on an app. Measured with a
+            // throwaway WPF probe: "ICON enter", then "ROW enter", every time. That instant is common:
+            // entering a row straight onto an icon, and every rebuild under a still pointer, which the
+            // current workspace's row gets whenever one of its titles changes. Petre: "that wash should
+            // only light up if i'm in the section that's not an icon".
+            //
+            // Each element's enter and leave still pair up correctly whatever the order BETWEEN
+            // elements, so each event only updates its own fact and the answer is read from both. The
+            // facts are kept from the events rather than read from IsMouseOver, which would also be
+            // right (the probe saw it settled in every handler) but cannot be driven by a test: only a
+            // real pointer sets it.
+            //
+            // A set rather than a flag for the icons, because sliding from one icon onto the next may
+            // raise the next one's enter before the first one's leave.
+            //
+            // iconButtons, NOT icons.Children: since rows wrap, icons.Children holds one panel per
+            // LINE, and hooking those would match no icon at all.
+            var inRow = false;
+            var onIcons = new HashSet<UIElement>();
+            void SyncHover() => Hover(inRow && onIcons.Count == 0);
+
+            container.MouseEnter += (_, _) => { inRow = true; SyncHover(); };
+            container.MouseLeave += (_, _) => { inRow = false; SyncHover(); ClearInfo(); };
+
+            // Wired here rather than inside IconButton: IconButton has no business knowing about the
+            // row it happens to sit in. The leave handler also restores the ROW's readout, not the
+            // bar-wide default: IconButton's own MouseLeave calls ClearInfo, and this handler is added
+            // after it, so sliding off an icon into the empty part of the same row lights the row
+            // again instead of dropping you back to the generic hint while still standing on it.
             iconButtons.ForEach(icon =>
             {
-                icon.MouseEnter += (_, _) => Hover(false);
-                // Restores the ROW's readout, not the bar-wide default. IconButton's own
-                // MouseLeave calls ClearInfo, and this handler is added after it, so it wins --
-                // without it, sliding off an icon into the empty part of the same row would drop
-                // you back to the generic hint while still standing on the row.
-                icon.MouseLeave += (_, _) => Hover(true);
+                icon.MouseEnter += (_, _) => { onIcons.Add(icon); SyncHover(); };
+                icon.MouseLeave += (_, _) => { onIcons.Remove(icon); SyncHover(); };
             });
         }
 

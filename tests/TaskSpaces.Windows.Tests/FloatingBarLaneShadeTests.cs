@@ -171,6 +171,32 @@ public class FloatingBarLaneShadeTests(ITestOutputHelper output)
         Assert.Empty(bar.LitWashes(row));
     });
 
+    // Petre: "that wash should only light up if i'm in the section that's not an icon". It lit with the
+    // pointer on an app whenever the row and the icon appeared under it at once (entering the row straight
+    // onto an icon, or a rebuild under a still pointer), because WPF then raises the ICON's MouseEnter
+    // BEFORE the row's. Measured with a WPF probe. This replays that order, then the two ways out of it.
+    [Fact]
+    public void The_wash_stays_off_when_the_icon_hears_the_pointer_before_its_row() => StaThread.Run(() =>
+    {
+        using var bar = TwoScreens(busyIcons: 2);
+        var row = bar.RowContainer("Busy");
+        var icon = bar.Icons(row).First();
+        static void Raise(UIElement target, RoutedEvent e) =>
+            target.RaiseEvent(new System.Windows.Input.MouseEventArgs(System.Windows.Input.Mouse.PrimaryDevice, 0) { RoutedEvent = e });
+
+        Raise(icon, UIElement.MouseEnterEvent);
+        Raise(row, UIElement.MouseEnterEvent);
+        Assert.Empty(bar.LitWashes(row));
+
+        // Off the icon into the free space of the same row: now it lights.
+        Raise(icon, UIElement.MouseLeaveEvent);
+        Assert.Equal(3, bar.LitWashes(row).Count);
+
+        // And out of the row altogether: off again.
+        Raise(row, UIElement.MouseLeaveEvent);
+        Assert.Empty(bar.LitWashes(row));
+    });
+
     // Petre: "can we try to recreate the actual taskbar in the workspace?", "with window titles, vertically
     // arranged", "active workspace only", then "same as it is now but at the bottom". The workspace you
     // are on is listed at the bottom of the bar, one window per line in its screen's column, each with its
