@@ -28,10 +28,13 @@ public partial class FloatingBar
     // 32 rather than the first 24, and the radius with it (10 of 24, the same share of 32). Petre, on the strip:
     // "these are kinda small", then "c" from three mockups, the size closest to Windows' own tray. The stroke
     // stays 2 DIP (3.2 hovered) at the new size, so the ring gets bigger without getting heavier.
-    internal const double DialSize = 32, DialCentre = DialSize / 2, DialRadius = DialSize * 10 / 24;
+    //
+    // Then 28, with the rest of the strip, to make room for the language switcher: "make those icons a bit
+    // smaller", "so it fits in this" (see StripGlyphSize). The radius keeps its share of the square.
+    internal const double DialSize = 28, DialCentre = DialSize / 2, DialRadius = DialSize * 10 / 24;
     const double DialStart = 135, DialSweep = 270;
-    // The speaker in the middle, and the percent that replaces it on hover, both grown in step with the ring.
-    const double DialSpeakerSize = 15, DialPercentSize = 11;
+    // The speaker in the middle, and the percent that replaces it on hover, both sized in step with the ring.
+    const double DialSpeakerSize = 13, DialPercentSize = 10;
     // One wheel notch, as a fraction of the scale.
     const double VolumeStep = 0.02;
 
@@ -123,8 +126,9 @@ public partial class FloatingBar
         volumeButton = new Button
         {
             Content = face,
-            // The ring plus 3 DIP either side, as the 24 DIP ring had in its 30 DIP button, and the strip's height.
-            Width = DialSize + 6,
+            // The ring plus 2 DIP either side (3 before the strip shrank for the language switcher), and the
+            // strip's height.
+            Width = DialSize + 4,
             Height = StripButtonHeight,
             Padding = new Thickness(0),
             Background = Brushes.Transparent,

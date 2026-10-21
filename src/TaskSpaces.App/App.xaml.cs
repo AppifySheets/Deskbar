@@ -1025,7 +1025,9 @@ public partial class App : Application
                 Volume = new Windows.Audio.SystemVolume(),
                 // ...and the device list its click opens (FloatingBar.Volume.cs).
                 AudioOutputs = new Windows.Audio.AudioDevices(),
-                Pins = new Windows.Shell.ShellTaskbarPins(),
+                // ...and the language switcher's, the keyboard input languages (FloatingBar.Language.cs).
+                InputLanguages = new Windows.Input.InputLanguages(),
+                Pins =new Windows.Shell.ShellTaskbarPins(),
                 Tabs = new BrowserTabs(),
                 Sound = new Windows.Audio.AudioActivity(ClickTrace.Write),
                 // ...and the now-playing line's: Windows' own media sessions (FloatingBar.Media.cs).

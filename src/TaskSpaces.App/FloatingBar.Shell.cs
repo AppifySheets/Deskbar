@@ -120,6 +120,8 @@ public partial class FloatingBar
         // "but date is half cut"). The strip grows by the few pixels the clock needs.
         clock.Height = double.NaN;
         stripClock = clock;
+        // Hidden until there is more than one input language to switch between (FloatingBar.Language.cs).
+        stripLanguage = LanguageButton();
         LayOutStrip(acrossSeam: false);
 
         UpdateClock(clock);
@@ -136,9 +138,15 @@ public partial class FloatingBar
     // 36 tall is a little more than the clock's two lines need (about 32), so the strip grows by about 4 DIP.
     // Wifi stays one DIP under the rest because its arcs fill the 16 unit square edge to edge, where the
     // chevron and bell leave a margin, so at 19 it reads the same size as they do at 20.
-    const double StripGlyphSize = 20, StripWifiSize = 19, StripButtonWidth = 34, StripButtonHeight = 36;
+    //
+    // Then a step back down, for the language switcher (FloatingBar.Language.cs): Petre, "make those icons a bit
+    // smaller", "so it fits in this". On his bar the strip is about 216 DIP wide, and at 20 DIP glyphs in 34 DIP
+    // buttons the left group, the sliver and the clock with its date already took about 200 of it, so the
+    // language code arrived clipped to one letter and pushed the date out. 17 (wifi 16) in 28 DIP buttons frees
+    // about 24 DIP, which is what the code needs. The height stays, since the clock's two lines set it.
+    const double StripGlyphSize = 17, StripWifiSize = 16, StripButtonWidth = 28, StripButtonHeight = 36;
 
-    Button? stripTray, stripQuickSettings, stripVolume, stripBell, stripSliver, stripClock;
+    Button? stripTray, stripQuickSettings, stripVolume, stripBell, stripSliver, stripClock, stripLanguage;
     bool stripAcrossSeam;
     StackPanel? shellStartTwin;
 
@@ -165,12 +173,15 @@ public partial class FloatingBar
     // screen. Petre: "icons at the bottom shouldn't be broken into halves", "they should either stay or go to
     // another monitor". So across the seam the bell joins the clock on the right half, and the left half keeps
     // the chevron, quick settings and the dial, which fit inside it.
+    //
+    // The language switcher sits just inside the clock, where Windows puts its own language indicator, on
+    // either layout. It is collapsed with a single input language, and a collapsed child takes no room.
     void LayOutStrip(bool acrossSeam)
     {
         stripAcrossSeam = acrossSeam;
         ShellStrip.Children.Clear();
         Button[] left = acrossSeam ? [stripTray!, stripQuickSettings!, stripVolume!] : [stripTray!, stripQuickSettings!, stripVolume!, stripBell!];
-        Button[] right = acrossSeam ? [stripSliver!, stripClock!, stripBell!] : [stripSliver!, stripClock!];
+        Button[] right = acrossSeam ? [stripSliver!, stripClock!, stripLanguage!, stripBell!] : [stripSliver!, stripClock!, stripLanguage!];
         left.ToList().ForEach(b =>
         {
             DockPanel.SetDock(b, Dock.Left);
@@ -378,8 +389,15 @@ public partial class FloatingBar
     //
     // A window the bar saw open after its own Space counts as the tray too, whatever class it has (see
     // RememberTrayOverflow).
-    public void NoteForeground(nint hwnd) =>
-        NoteFlyoutInFront(ShellKeys.Recognise(hwnd) ?? (hwnd != 0 && hwnd == trayOverflow ? ShellFlyout.Tray : null));
+    //
+    // It is also how the language switcher knows which window you were typing in (FloatingBar.Language.cs):
+    // every foreground window that is not a flyout.
+    public void NoteForeground(nint hwnd)
+    {
+        var flyout = ShellKeys.Recognise(hwnd) ?? (hwnd != 0 && hwnd == trayOverflow ? ShellFlyout.Tray : null);
+        NoteFlyoutInFront(flyout);
+        NoteLanguageTarget(hwnd, isFlyout: flyout is not null);
+    }
 
     // THE TRAY'S OVERFLOW, as it actually appeared. Issue #227: "When I press system tray arrow from deskbar it
     // will only pops them out but never pops down". The second press does close the overflow, by taking the
