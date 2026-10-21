@@ -186,6 +186,23 @@ public class FloatingBarVolumeTests(ITestOutputHelper output)
         bar.Close();
     });
 
+    // Petre: "if there's only one sound output device, mute it, don't show just one". A menu of one ticked
+    // device above Mute has nothing to choose, so with one device the click mutes, and a second click unmutes.
+    [Fact]
+    public void With_one_device_the_click_mutes_instead_of_listing_it() => StaThread.Run(() =>
+    {
+        var devices = new FakeDevices();
+        devices.Devices.RemoveAt(1);
+        var volume = new FakeVolume(0.4);
+        var bar = BarWith(volume, devices);
+
+        bar.ClickSpeaker();
+        Assert.True(volume.Now.Muted);
+        bar.ClickSpeaker();
+        Assert.False(volume.Now.Muted);
+        bar.Close();
+    });
+
     static FloatingBar BarWith(IVolumeControl volume, IAudioDevices devices)
     {
         var desktops = new PulsingDesktops { CurrentId = Guid.NewGuid() };

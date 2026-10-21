@@ -138,10 +138,16 @@ public partial class FloatingBar
         // A click lists the playback devices, with mute at the end of the list (DeviceMenu). It used to mute
         // outright; Petre: "let's show sound devices on the right click of the speaker", then "let's actually
         // show it on the left click, instead of muting".
+        //
+        // ...but only when there is a CHOICE to make. With one playback device (or none the bar can list) the
+        // menu was that one device, already ticked, above Mute: a list with nothing to pick from, one extra
+        // click in the way of the only thing left to do. So then the click mutes and unmutes outright, as it
+        // did before the menu. Petre: "if there's only one sound output device, mute it, don't show just one".
+        // Counted at click time, like the menu is built, so a headset plugged in a minute ago brings it back.
         volumeButton.Click += (_, _) =>
         {
             MarkPressConsumed();
-            OpenDeviceMenu();
+            ClickSpeaker();
         };
         volumeButton.MouseWheel += (_, e) =>
         {
@@ -207,6 +213,13 @@ public partial class FloatingBar
         mute.Click += (_, _) => ToggleMute();
         menu.Items.Add(mute);
         return menu;
+    }
+
+    // The speaker's click: the device menu when there is more than one device to choose from, otherwise mute.
+    internal void ClickSpeaker()
+    {
+        if ((AudioOutputs?.Outputs().Count ?? 0) > 1) OpenDeviceMenu();
+        else ToggleMute();
     }
 
     void OpenDeviceMenu()
