@@ -1767,7 +1767,6 @@ public partial class FloatingBar : Window
         Rows.Children.Clear();
         CurrentList.Children.Clear(); // the titled list below the rows, rebuilt with them
         headerDropTargets.Clear();    // re-registered by every row as it is built (see GroupRow)
-        ghostLines.Clear();           // re-derived by HeldLines as the expanded rows are built
         ForgetAgingIcons();           // the aging overlays belong to the rows about to be replaced
         ForgetWorkspaceTimes();       // ...and so do the captions' time marks
         // The rows these pointed at have just been thrown away, so every entry is now a Border
@@ -2408,14 +2407,6 @@ public partial class FloatingBar : Window
                 {
                     var button = IconButton(groupLabel, groupKey, r, rowKey);
                     if (titled && button is Button item) Titled(item, r);
-                    // A window that has left this row while the hold lasts (see HeldLines): its line stays,
-                    // faded, so the row keeps its height, and takes no clicks or drags, since the window is
-                    // somewhere else now.
-                    if (titled && ghostLines.Contains(r.Window.Handle) && button is UIElement ghost)
-                    {
-                        ghost.Opacity = 0.3;
-                        ghost.IsHitTestVisible = false;
-                    }
                     // The row's shrink, applied per ICON. A LayoutTransform rather than a smaller
                     // icon size: the icon's own pixels come from a cache keyed by size, and asking
                     // for a second size per row would double that cache to make a row shorter.
@@ -5099,8 +5090,9 @@ public partial class FloatingBar : Window
         releaseGrace.Stop();
         if (!hoveringBar || draggingWindow || headerDrag is not null || openMenu?.IsOpen == true || PointerOnBar()) return;
         hoveringBar = false;
-        // Faded lines left by windows that went elsewhere also only go on a rebuild (see HeldLines).
-        var stale = heldExpanded.Any(id => id != liveListTarget) || ghostLines.Count > 0;
+        // (Faded lines left by windows that went elsewhere used to make the bar stale here too. There are none
+        // now: a window that leaves loses its line at once, see HeldLines.)
+        var stale = heldExpanded.Any(id => id != liveListTarget);
         // Kept, so a title-bar drag that starts soon after can put these rows back (see RestoreReleasedRows).
         lastReleased = (heldExpanded.ToList(), DateTime.UtcNow);
         if (ClickTrace.On) ClickTrace.Write($"hold released rows={heldExpanded.Count} stale={stale}");
@@ -5113,14 +5105,22 @@ public partial class FloatingBar : Window
     // shorter and everything below it moved up under the pointer. Nothing had been released (the log said
     // "hold released rows=1": only the current row was ever held); the window had simply left.
     //
-    // So while the hold lasts, a window that has left an expanded row keeps its line there, faded and inert
-    // (see LineOf), in its old place, and the row keeps its height. A window that ARRIVES is added at the end
-    // as usual. When the hold is let go, the next rebuild draws the rows as they really are, all at once.
+    // So for a while, a window that had left an expanded row kept its line there, faded and inert, in its old
+    // place, until the pointer left the bar, so the row kept its height. Petre then saw what that costs: a
+    // window moved between workspaces sat in BOTH rows, live in one and faded in the other, and a closed
+    // program stayed on its row ("and i don't want closed programs to still linger in the workspace", "why
+    // was chat dim there?", "and this lingering is bad", "chat shouldn't be in two bars", "it should move
+    // immediately"). Offered the choice between dropping the line and keeping its space empty, he chose to
+    // drop it. So a window that has left, or closed, loses its line at once, and the row may close up under
+    // the pointer; that is the price he picked.
+    //
+    // What the hold still does here is keep the ORDER: the lines that remain stay where they were, and a
+    // window that ARRIVES is added at the end, rather than the row re-sorting while you aim at it. When the
+    // hold is let go, the next rebuild draws the rows in their real order.
     //
     // Keyed by workspace or desktop id. shownLines is what each expanded row showed at its last build, which
     // is exactly what is on screen, so no separate snapshot is needed when the hold begins.
     readonly Dictionary<Guid, IReadOnlyList<WindowRow>> shownLines = [];
-    readonly HashSet<WindowHandle> ghostLines = [];
 
     IReadOnlyList<WindowRow> HeldLines(Guid rowId, IReadOnlyList<WindowRow> now)
     {
@@ -5130,13 +5130,12 @@ public partial class FloatingBar : Window
         shownLines[rowId] = lines;
         return lines;
 
-        // The lines shown before, each replaced by its live row if the window is still here and kept as a
-        // ghost if it has gone, then any window that is new to the row.
+        // The lines shown before that are still in the row, each with its live data, in the order they had,
+        // then any window that is new to the row. A line whose window has gone is simply not there.
         IReadOnlyList<WindowRow> Merge(IReadOnlyList<WindowRow> shown, IReadOnlyList<WindowRow> live)
         {
             var current = live.ToDictionary(r => r.Window.Handle);
-            var kept = shown.Select(r => current.GetValueOrDefault(r.Window.Handle) ?? r).ToList();
-            shown.Where(r => !current.ContainsKey(r.Window.Handle)).ToList().ForEach(r => ghostLines.Add(r.Window.Handle));
+            var kept = shown.Where(r => current.ContainsKey(r.Window.Handle)).Select(r => current[r.Window.Handle]).ToList();
             return kept.Concat(live.Where(r => shown.All(s => s.Window.Handle != r.Window.Handle))).ToList();
         }
     }

@@ -357,20 +357,17 @@ public class FloatingBarLaneShadeTests(ITestOutputHelper output)
         Assert.NotEmpty(Bar.TitlesIn(bar.RowContainer("Busy")));
     });
 
-    // "re collapses": a window leaving the expanded row (here by a title-bar drop) used to take its line with
-    // it, so the row shrank under the pointer. While the hold lasts its line stays, faded; leaving the bar
-    // lets the row close up.
+    // A window leaving an expanded row (here by a title-bar drop) takes its line with it AT ONCE, with the
+    // pointer still on the bar. It used to leave a faded line behind until the pointer left, so the row kept
+    // its height ("re collapses"), and Petre reversed that once he saw a moved window in two rows: "chat
+    // shouldn't be in two bars", "it should move immediately".
     [Fact]
-    public void A_window_leaving_an_expanded_row_keeps_its_line_until_the_pointer_leaves() => StaThread.Run(() =>
+    public void A_window_leaving_an_expanded_row_loses_its_line_at_once() => StaThread.Run(() =>
     {
         using var bar = TwoScreens(busyIcons: 3, standOnBusy: true, expandRow: true);
         bar.Enter();
 
         bar.HeaderDrop("Empty", new WindowHandle(101));
-        bar.Pulse();
-        Assert.Equal(["App 1", "App 2", "App 3"], Bar.TitlesIn(bar.RowContainer("Busy")).Select(t => t.Text));
-
-        bar.Leave();
         bar.Pulse();
         Assert.Equal(["App 2", "App 3"], Bar.TitlesIn(bar.RowContainer("Busy")).Select(t => t.Text));
     });
