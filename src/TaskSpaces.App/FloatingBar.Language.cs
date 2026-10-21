@@ -10,8 +10,8 @@ namespace TaskSpaces.App;
 // than one language is present", then, on the speaker, the same rule from the other side: "if there's only one
 // sound output device, mute it, don't show just one".
 //
-//   shows      the keyboard input language as Windows' own indicator does ("ENG"), just left of the clock, where
-//              Windows puts it
+//   shows      the keyboard input language by its two letter code ("KA", "EN"; see InputLanguages.Describe),
+//              just left of the clock, where Windows puts its own indicator
 //   hidden     with one input language or none, because there is nothing to switch to
 //   click      the next language, in Windows' order, wrapping round
 //   wheel      steps through them either way

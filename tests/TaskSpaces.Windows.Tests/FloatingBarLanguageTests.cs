@@ -14,9 +14,9 @@ namespace TaskSpaces.Windows.Tests;
 // keyboard of whoever runs the suite.
 public class FloatingBarLanguageTests
 {
-    static readonly InputLanguage English = new(0x04090409, "ENG", "English (United States)");
-    static readonly InputLanguage Georgian = new(0x04370437, "KAT", "Georgian (Georgia)");
-    static readonly InputLanguage Russian = new(0x04190419, "RUS", "Russian (Russia)");
+    static readonly InputLanguage English = new(0x04090409, "EN", "English (United States)");
+    static readonly InputLanguage Georgian = new(0x04370437, "KA", "Georgian (Georgia)");
+    static readonly InputLanguage Russian = new(0x04190419, "RU", "Russian (Russia)");
 
     // A window the bar is told came to the front, standing in for the app you were typing in.
     const nint Editor = 0x5150;
@@ -56,7 +56,7 @@ public class FloatingBarLanguageTests
         var bar = BarWith(languages);
 
         Assert.Equal(Visibility.Visible, Switcher(bar).Visibility);
-        Assert.Equal("KAT", Code(bar));
+        Assert.Equal("KA", Code(bar));
         bar.Close();
     });
 
@@ -70,13 +70,13 @@ public class FloatingBarLanguageTests
         var bar = BarWith(languages);
 
         bar.StepLanguage(+1);
-        Assert.Equal("RUS", Code(bar));
+        Assert.Equal("RU", Code(bar));
         bar.StepLanguage(+1);
-        Assert.Equal("ENG", Code(bar));
+        Assert.Equal("EN", Code(bar));
         bar.StepLanguage(-1);
-        Assert.Equal("RUS", Code(bar));
+        Assert.Equal("RU", Code(bar));
 
-        Assert.Equal([(Editor, "RUS"), (Editor, "ENG"), (Editor, "RUS")], languages.Switches);
+        Assert.Equal([(Editor, "RU"), (Editor, "EN"), (Editor, "RU")], languages.Switches);
         bar.Close();
     });
 
@@ -94,6 +94,16 @@ public class FloatingBarLanguageTests
         Assert.Equal(Visibility.Collapsed, Switcher(bar).Visibility);
         bar.Close();
     });
+
+    // Petre: "it's not kat, it's ka". The two letter code, for every language. The layouts are the real ones
+    // from his machine, Georgian's with the high word Windows gives it (0xF0AB) and sign extended, as it comes.
+    [Fact]
+    public void Languages_are_named_by_their_two_letter_code()
+    {
+        Assert.Equal("KA", InputLanguages.Describe(unchecked((nint)0xFFFFFFFFF0AB0437)).Code);
+        Assert.Equal("EN", InputLanguages.Describe(0x04090409).Code);
+        Assert.Equal("RU", InputLanguages.Describe(0x04190419).Code);
+    }
 
     static Button Switcher(FloatingBar bar) =>
         bar.ShellStrip.Children.OfType<Button>().Single(b => AutomationProperties.GetName(b) == "Input language");

@@ -68,15 +68,18 @@ public sealed class InputLanguages : IInputLanguages
         return Result.Success();
     }
 
-    // The code is the three letter ISO name, upper case, which is what Windows' own indicator shows ("ENG"). A
-    // language .NET cannot name gets its hex id rather than nothing, so the button never goes blank.
-    static InputLanguage Describe(nint layout)
+    // The code is the TWO letter ISO name, upper case: "KA", "EN", "RU". It was the three letter one first,
+    // which is what Windows' indicator shows for English ("ENG"), and for Georgian that is "KAT", from the
+    // standard but not what anyone writes. Petre: "it's not kat, it's ka". One rule for every language, so
+    // English is "EN" rather than "ENG" beside a "KA". A language .NET cannot name gets its hex id rather than
+    // nothing, so the button never goes blank.
+    internal static InputLanguage Describe(nint layout)
     {
         var languageId = (int)(layout & 0xFFFF);
         try
         {
             var culture = CultureInfo.GetCultureInfo(languageId);
-            return new InputLanguage(layout, culture.ThreeLetterISOLanguageName.ToUpperInvariant(), culture.DisplayName);
+            return new InputLanguage(layout, culture.TwoLetterISOLanguageName.ToUpperInvariant(), culture.DisplayName);
         }
         catch (CultureNotFoundException)
         {
