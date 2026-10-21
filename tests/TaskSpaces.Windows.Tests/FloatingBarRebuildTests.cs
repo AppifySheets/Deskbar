@@ -393,24 +393,33 @@ public class FloatingBarRebuildTests
         Assert.Equal(FontWeights.Bold, label.FontWeight);
     });
 
-    // Clicking an icon jumps to a WINDOW, not to a workspace, so the icons punch holes in the
-    // row's hover area -- lighting the label there would advertise an action the click does
-    // not perform. Note the inversion this pins: entering an icon CLEARS a highlight the
-    // container's own MouseEnter has already set, because entering a child counts as entering
-    // the parent.
+    // Clicking an icon in another workspace activates a window that lives there, so it lands you in
+    // that workspace just as a click on the empty part does, and the label says so either way. This
+    // used to pin the opposite (the icons punched holes in the label's hover), until Petre: "highlighting
+    // an empty area lights up the caption, but not hovering over an icon", "both should light it up".
+    // Both orders are replayed, since WPF raises the icon's MouseEnter FIRST when the row and the icon
+    // appear under the pointer together.
     [Fact]
-    public void Hovering_an_icon_does_not_brighten_its_rows_label() => StaThread.Run(() =>
+    public void Hovering_an_icon_brightens_its_rows_label_too() => StaThread.Run(() =>
     {
         var harness = Harness.Build();
         using var bar = harness.ShowBar();
         var row = RowFor(bar.Rows, "Sparrow");
         var label = TextBlocks(row).Single(t => t.Text == "Sparrow");
+        var icon = IconButtons(row).Single();
         var resting = Strength(label);
 
         row.RaiseEvent(MouseEnter());                              // into the row: bright
-        IconButtons(row).Single().RaiseEvent(MouseEnter());         // onto its icon: back to rest
+        icon.RaiseEvent(MouseEnter());                             // onto its icon: still bright
+        Assert.True(Strength(label) > resting, "the label should stay bright with the pointer on an icon");
 
+        icon.RaiseEvent(MouseLeave());
+        row.RaiseEvent(MouseLeave());                              // out of the row: back to rest
         Assert.Equal(resting, Strength(label));
+
+        icon.RaiseEvent(MouseEnter());                             // the icon hears the pointer first
+        row.RaiseEvent(MouseEnter());
+        Assert.True(Strength(label) > resting, "the label should be bright whichever element hears the pointer first");
     });
 
     // Petre: "when switching workspaces, because the caption of the workspace gets bolded, it

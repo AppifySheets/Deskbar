@@ -3622,30 +3622,36 @@ public partial class FloatingBar : Window
             // ...plus a light wash over the row's FREE space, which is not the row background and
             // does not compete with it. Petre picked it from the mockups once the middle of the row
             // became the place to click (see LineOf): it shows the target while you aim, and only
-            // then. It is painted on the free space alone, never behind an icon, and the icons turn
-            // it off with the label below. A drag does not light it, because the OLE drag loop owns
-            // the mouse and raises no MouseEnter, so the drop highlight still has the row to itself.
-            void Hover(bool on)
+            // then. It is painted on the free space alone, never behind an icon. A drag does not light
+            // it, because the OLE drag loop owns the mouse and raises no MouseEnter, so the drop
+            // highlight still has the row to itself.
+            //
+            // The two now answer DIFFERENT questions, so they take separate switches:
+            //
+            //   * The LABEL lights anywhere in the row, icons included: "you would land in this
+            //     workspace". Clicking an icon here activates a window that lives in this workspace, so
+            //     it lands you here too, the same claim the amber row ring makes for an icon (see
+            //     ApplyCandidate). It used to go dark over icons, on the reasoning that an icon click jumps
+            //     to a WINDOW rather than to the workspace, and Petre ruled the other way: "highlighting an
+            //     empty area lights up the caption, but not hovering over an icon", "both should light
+            //     it up".
+            //   * The WASH lights only the free space with the pointer on no icon: "click HERE to switch".
+            //     Petre: "that wash should only light up if i'm in the section that's not an icon".
+            void Hover(bool label, bool wash)
             {
-                setHover(on);
-                washes.ForEach(wash => wash.Background = on ? MiddleWash : Brushes.Transparent);
+                setHover(label);
+                washes.ForEach(w => w.Background = wash ? MiddleWash : Brushes.Transparent);
             }
 
-            // ...and the icons punch holes in that hover area. Clicking an icon jumps to a
-            // WINDOW, so lighting the label there would advertise an action the click does not
-            // perform. The info line already says which group an icon belongs to, which is the
-            // information the highlight would have carried anyway.
-            //
-            // So the rule is "in the row, and on no icon", and it is RECOMPUTED from two facts on every
-            // enter and leave rather than set by whichever event fired last. It used to be the latter
-            // (the row's MouseEnter lit it, an icon's MouseEnter put it out), which assumed the row's
-            // event always comes first. It does not. When the row and an icon appear under the pointer
-            // in the same instant, WPF raises the ICON's MouseEnter first and the row's second, so the
-            // row lit the wash last and it stayed on with the pointer on an app. Measured with a
-            // throwaway WPF probe: "ICON enter", then "ROW enter", every time. That instant is common:
-            // entering a row straight onto an icon, and every rebuild under a still pointer, which the
-            // current workspace's row gets whenever one of its titles changes. Petre: "that wash should
-            // only light up if i'm in the section that's not an icon".
+            // Both are RECOMPUTED from two facts on every enter and leave rather than set by whichever
+            // event fired last. It used to be the latter (the row's MouseEnter lit the wash, an icon's
+            // MouseEnter put it out), which assumed the row's event always comes first. It does not. When
+            // the row and an icon appear under the pointer in the same instant, WPF raises the ICON's
+            // MouseEnter first and the row's second, so the row lit the wash last and it stayed on with
+            // the pointer on an app. Measured with a throwaway WPF probe: "ICON enter", then "ROW enter",
+            // every time. That instant is common: entering a row straight onto an icon, and every rebuild
+            // under a still pointer, which the current workspace's row gets whenever one of its titles
+            // changes.
             //
             // Each element's enter and leave still pair up correctly whatever the order BETWEEN
             // elements, so each event only updates its own fact and the answer is read from both. The
@@ -3670,7 +3676,7 @@ public partial class FloatingBar : Window
             // desktops too, since their rows pass IsCurrent the same way.
             var inRow = false;
             var onIcons = new HashSet<UIElement>();
-            void SyncHover() => Hover(!isCurrent && inRow && onIcons.Count == 0);
+            void SyncHover() => Hover(label: !isCurrent && inRow, wash: !isCurrent && inRow && onIcons.Count == 0);
 
             container.MouseEnter += (_, _) => { inRow = true; SyncHover(); };
             container.MouseLeave += (_, _) => { inRow = false; SyncHover(); ClearInfo(); };
