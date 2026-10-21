@@ -372,6 +372,23 @@ public class FloatingBarLaneShadeTests(ITestOutputHelper output)
         Assert.Equal(["App 2", "App 3"], Bar.TitlesIn(bar.RowContainer("Busy")).Select(t => t.Text));
     });
 
+    // Petre: "dragging up or down should work here". A line dragged up or down an expanded row is reordered
+    // (MoveWindowInOrder, what the row's drop calls), and the row has to SHOW the new order straight away,
+    // with the pointer still on the bar. It used to keep drawing the old order until the pointer left.
+    [Fact]
+    public void A_line_dragged_up_an_expanded_row_shows_in_its_new_place_at_once() => StaThread.Run(() =>
+    {
+        // One screen, so the three lines are one list and "before App 1" means above it.
+        using var bar = TwoScreens(busyIcons: 3, standOnBusy: true, expandRow: true, everythingOnOneScreen: true);
+        bar.Enter();
+        Assert.Equal(["App 1", "App 2", "App 3"], Bar.TitlesIn(bar.RowContainer("Busy")).Select(t => t.Text));
+
+        Assert.True(bar.Manager.MoveWindowInOrder(new WindowHandle(103), new WindowHandle(101), after: false).IsSuccess);
+        bar.Pulse();
+
+        Assert.Equal(["App 3", "App 1", "App 2"], Bar.TitlesIn(bar.RowContainer("Busy")).Select(t => t.Text));
+    });
+
     // A window dragged by its own title bar and dropped on a row (Petre: "move to another workspace by
     // dragging a window") moves there WITHOUT taking you along: "don't follow the workspace, move it out of
     // the current workspace, stay on the current workspace". The drag itself runs in Windows' move loop and

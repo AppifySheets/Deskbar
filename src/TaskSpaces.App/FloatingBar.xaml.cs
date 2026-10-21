@@ -1993,9 +1993,8 @@ public partial class FloatingBar : Window
                     // The screen comes from WHERE in the row it was dropped (#89), and null means
                     // the row had no split to aim at, which is the workspace-only move it always was.
                     onDrop: (h, screen) => Report(manager.AssignWindow(h, g.Workspace.Id, screen)),
-                    // An expanded row keeps a window that has left it as a faded line while the hold lasts
-                    // (see HeldLines); an icon row shows its windows as they are.
-                    Expanded(g.Workspace.Id) ? HeldLines(g.Workspace.Id, g.Running) : g.Running,
+                    // As they are, expanded or not (see "THE LINES of an expanded row").
+                    g.Running,
                     // ACCENT RAIL style ("try b"): only the workspace you are ON is tinted; every other row
                     // sits on the bar's own dark background, and its colour is the rail down its left edge.
                     // That keeps a bar of fifteen rows calm, and makes the current one the only coloured
@@ -2081,7 +2080,7 @@ public partial class FloatingBar : Window
                     switchTo: g.DesktopId == Guid.Empty ? null : () => manager.SwitchToDesktop(g.DesktopId),
                     groupKey: DraggedWindow.DesktopGroupKey(g.DesktopId),
                     onDrop: g.DesktopId == Guid.Empty ? null : (h, _) => Report(manager.MoveToDesktop(h, g.DesktopId)),
-                    Expanded(g.DesktopId) ? HeldLines(g.DesktopId, g.Windows) : g.Windows,
+                    g.Windows,
                     // Same Guid.Empty rule a third time, and for the third reason: Unplaced is not a
                     // desktop, so there is nothing to name (#149).
                     desktopId: g.DesktopId == Guid.Empty ? null : g.DesktopId,
@@ -2116,7 +2115,7 @@ public partial class FloatingBar : Window
                     ? GroupRow(here.Workspace.Name, here.Workspace.Name, isCurrent: false, switchTo: null,
                         groupKey: CurrentListGroupKey,
                         onDrop: (h, screen) => Report(manager.AssignWindow(h, here.Workspace.Id, screen)),
-                        HeldLines(here.Workspace.Id, here.Running),
+                        here.Running,
                         tint: currentTint,
                         // MADE TO STAND OUT from the rows (Petre: "make the expanded workspace stand out from the
                         // rest", and from four mockups he picked this one, then "make the left accent bar much
@@ -2129,7 +2128,7 @@ public partial class FloatingBar : Window
                         ? GroupRow(desktop.Name, desktop.Name, isCurrent: false, switchTo: null,
                             groupKey: CurrentListGroupKey,
                             onDrop: (h, _) => Report(manager.MoveToDesktop(h, desktop.DesktopId)),
-                            HeldLines(desktop.DesktopId, desktop.Windows),
+                            desktop.Windows,
                             titledList: true)
                         : null;
             if (list is not null)
@@ -5091,7 +5090,7 @@ public partial class FloatingBar : Window
         if (!hoveringBar || draggingWindow || headerDrag is not null || openMenu?.IsOpen == true || PointerOnBar()) return;
         hoveringBar = false;
         // (Faded lines left by windows that went elsewhere used to make the bar stale here too. There are none
-        // now: a window that leaves loses its line at once, see HeldLines.)
+        // now: a window that leaves loses its line at once, see "THE LINES of an expanded row".)
         var stale = heldExpanded.Any(id => id != liveListTarget);
         // Kept, so a title-bar drag that starts soon after can put these rows back (see RestoreReleasedRows).
         lastReleased = (heldExpanded.ToList(), DateTime.UtcNow);
@@ -5100,45 +5099,22 @@ public partial class FloatingBar : Window
         if (stale) Rebuild();
     }
 
-    // THE LINES of an expanded row, held while the hold lasts. Petre, after a title-bar drop moved a window
-    // out of the expanded row he was on: "re collapses". The row had lost a line, so it was one line
-    // shorter and everything below it moved up under the pointer. Nothing had been released (the log said
-    // "hold released rows=1": only the current row was ever held); the window had simply left.
+    // THE LINES of an expanded row are drawn as they really are, always. There used to be a HeldLines here
+    // that held them while the pointer was on the bar, and it is gone in two steps, both Petre's.
     //
-    // So for a while, a window that had left an expanded row kept its line there, faded and inert, in its old
-    // place, until the pointer left the bar, so the row kept its height. Petre then saw what that costs: a
-    // window moved between workspaces sat in BOTH rows, live in one and faded in the other, and a closed
-    // program stayed on its row ("and i don't want closed programs to still linger in the workspace", "why
-    // was chat dim there?", "and this lingering is bad", "chat shouldn't be in two bars", "it should move
-    // immediately"). Offered the choice between dropping the line and keeping its space empty, he chose to
-    // drop it. So a window that has left, or closed, loses its line at once, and the row may close up under
-    // the pointer; that is the price he picked.
+    // It began with "re collapses": a title-bar drop moved a window out of the expanded row he was on, the
+    // row lost a line, and everything below it moved up under the pointer. So a window that had left kept
+    // its line, faded and inert, until the pointer left the bar. That put a moved window in BOTH rows, live
+    // in one and faded in the other, and kept a closed program on its row ("and i don't want closed programs
+    // to still linger in the workspace", "why was chat dim there?", "chat shouldn't be in two bars", "it
+    // should move immediately"). Offered dropping the line or keeping its space empty, he chose dropping it,
+    // and accepted that a row may close up under the pointer.
     //
-    // What the hold still does here is keep the ORDER: the lines that remain stay where they were, and a
-    // window that ARRIVES is added at the end, rather than the row re-sorting while you aim at it. When the
-    // hold is let go, the next rebuild draws the rows in their real order.
-    //
-    // Keyed by workspace or desktop id. shownLines is what each expanded row showed at its last build, which
-    // is exactly what is on screen, so no separate snapshot is needed when the hold begins.
-    readonly Dictionary<Guid, IReadOnlyList<WindowRow>> shownLines = [];
-
-    IReadOnlyList<WindowRow> HeldLines(Guid rowId, IReadOnlyList<WindowRow> now)
-    {
-        var lines = hoveringBar && shownLines.TryGetValue(rowId, out var before)
-            ? Merge(before, now)
-            : now;
-        shownLines[rowId] = lines;
-        return lines;
-
-        // The lines shown before that are still in the row, each with its live data, in the order they had,
-        // then any window that is new to the row. A line whose window has gone is simply not there.
-        IReadOnlyList<WindowRow> Merge(IReadOnlyList<WindowRow> shown, IReadOnlyList<WindowRow> live)
-        {
-            var current = live.ToDictionary(r => r.Window.Handle);
-            var kept = shown.Where(r => current.ContainsKey(r.Window.Handle)).Select(r => current[r.Window.Handle]).ToList();
-            return kept.Concat(live.Where(r => shown.All(s => s.Window.Handle != r.Window.Handle))).ToList();
-        }
-    }
+    // What was left of it held the ORDER of the remaining lines, and that turned out to hide his own drags:
+    // dragging a line up or down reordered the window (MoveWindowInOrder) while the row kept drawing the old
+    // order until the pointer left the bar ("dragging up or down should work here"). The live order only ever
+    // changes by such a drag, since windows keep their first-seen order and a new one goes at the end
+    // (WorkspaceManager.Know), so there was nothing else for the hold to protect, and it went too.
 
     // The rows that were expanded when the hold was last let go, and when. Petre: "re collapses". The
     // grace on leaving cannot be long enough for every trip from the bar to a window's title bar (the log
