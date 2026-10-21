@@ -197,6 +197,19 @@ public class FloatingBarLaneShadeTests(ITestOutputHelper output)
         Assert.Empty(bar.LitWashes(row));
     });
 
+    // Petre: "the wash shouldn't show in the currently active workspace", "there's no point, it is already
+    // active". Clicking the current row switches to where you already are, so nothing marks it as a target.
+    [Fact]
+    public void Hovering_the_current_workspaces_row_lights_no_wash() => StaThread.Run(() =>
+    {
+        using var bar = TwoScreens(busyIcons: 2, standOnBusy: true);
+        var row = bar.RowContainer("Busy");
+
+        row.RaiseEvent(new System.Windows.Input.MouseEventArgs(System.Windows.Input.Mouse.PrimaryDevice, 0) { RoutedEvent = UIElement.MouseEnterEvent });
+
+        Assert.Empty(bar.LitWashes(row));
+    });
+
     // Petre: "can we try to recreate the actual taskbar in the workspace?", "with window titles, vertically
     // arranged", "active workspace only", then "same as it is now but at the bottom". The workspace you
     // are on is listed at the bottom of the bar, one window per line in its screen's column, each with its
