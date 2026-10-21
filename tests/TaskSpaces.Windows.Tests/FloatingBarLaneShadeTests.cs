@@ -198,16 +198,29 @@ public class FloatingBarLaneShadeTests(ITestOutputHelper output)
     });
 
     // Petre: "the wash shouldn't show in the currently active workspace", "there's no point, it is already
-    // active". Clicking the current row switches to where you already are, so nothing marks it as a target.
+    // active". Clicking the current row switches to where you already are, so nothing marks it as a target:
+    // no wash, and no caption change either ("title keeps blinking when hovering over icons", "that's also
+    // not needed"), because the current caption rests in the workspace's colour and used to hover in white.
     [Fact]
-    public void Hovering_the_current_workspaces_row_lights_no_wash() => StaThread.Run(() =>
+    public void Hovering_the_current_workspaces_row_changes_nothing() => StaThread.Run(() =>
     {
         using var bar = TwoScreens(busyIcons: 2, standOnBusy: true);
         var row = bar.RowContainer("Busy");
+        var caption = Bar.Descendants(row).OfType<TextBlock>().First(t => t.Text == "Busy");
+        var resting = caption.Foreground;
+        static void Raise(UIElement target, RoutedEvent e) =>
+            target.RaiseEvent(new System.Windows.Input.MouseEventArgs(System.Windows.Input.Mouse.PrimaryDevice, 0) { RoutedEvent = e });
 
-        row.RaiseEvent(new System.Windows.Input.MouseEventArgs(System.Windows.Input.Mouse.PrimaryDevice, 0) { RoutedEvent = UIElement.MouseEnterEvent });
-
+        Raise(row, UIElement.MouseEnterEvent);
         Assert.Empty(bar.LitWashes(row));
+        Assert.Same(resting, caption.Foreground);
+
+        // Across an icon and back off it, the move that made the caption blink.
+        var icon = bar.Icons(row).First();
+        Raise(icon, UIElement.MouseEnterEvent);
+        Raise(icon, UIElement.MouseLeaveEvent);
+        Assert.Empty(bar.LitWashes(row));
+        Assert.Same(resting, caption.Foreground);
     });
 
     // Petre: "can we try to recreate the actual taskbar in the workspace?", "with window titles, vertically

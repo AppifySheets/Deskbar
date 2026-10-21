@@ -3625,18 +3625,10 @@ public partial class FloatingBar : Window
             // then. It is painted on the free space alone, never behind an icon, and the icons turn
             // it off with the label below. A drag does not light it, because the OLE drag loop owns
             // the mouse and raises no MouseEnter, so the drop highlight still has the row to itself.
-            //
-            // Never on the CURRENT row, though. Clicking it switches to the desktop you are already on,
-            // which does nothing, so a wash there marks a click target with no effect. Petre: "the wash
-            // shouldn't show in the currently active workspace", "it's distracting", "there's no point,
-            // it is already active". Same reasoning as the amber hover ring, which already skips this row
-            // (see ApplyCandidate). The label needs no guard: on the current row its hovered and resting
-            // colours are the same (see RowLabel). isCurrent covers unnamed desktops as well, since
-            // their rows pass IsCurrent the same way.
             void Hover(bool on)
             {
                 setHover(on);
-                washes.ForEach(wash => wash.Background = on && !isCurrent ? MiddleWash : Brushes.Transparent);
+                washes.ForEach(wash => wash.Background = on ? MiddleWash : Brushes.Transparent);
             }
 
             // ...and the icons punch holes in that hover area. Clicking an icon jumps to a
@@ -3666,9 +3658,19 @@ public partial class FloatingBar : Window
             //
             // iconButtons, NOT icons.Children: since rows wrap, icons.Children holds one panel per
             // LINE, and hooking those would match no icon at all.
+            //
+            // And NOTHING on the CURRENT row, neither the wash nor the label. Clicking it switches to the
+            // desktop you are already on, which does nothing, so any hover there marks a click target with
+            // no effect. Petre: "the wash shouldn't show in the currently active workspace", "it's
+            // distracting", "there's no point, it is already active". The label was worse than pointless
+            // there: the current row's caption rests in the workspace's own colour and hovers in white (see
+            // RowLabel), so it flipped every time the pointer crossed from an icon to a gap ("title keeps
+            // blinking when hovering over icons", "that's also not needed"). Same reasoning as the amber
+            // hover ring, which already skips this row (see ApplyCandidate). isCurrent covers unnamed
+            // desktops too, since their rows pass IsCurrent the same way.
             var inRow = false;
             var onIcons = new HashSet<UIElement>();
-            void SyncHover() => Hover(inRow && onIcons.Count == 0);
+            void SyncHover() => Hover(!isCurrent && inRow && onIcons.Count == 0);
 
             container.MouseEnter += (_, _) => { inRow = true; SyncHover(); };
             container.MouseLeave += (_, _) => { inRow = false; SyncHover(); ClearInfo(); };
