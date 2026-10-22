@@ -651,6 +651,12 @@ static class ShellKeys
         _ => null,
     };
 
+    // Explorer's Alt+Tab machinery, measured with a foreground hook on Petre's machine (Windows 11): each Alt+Tab
+    // brings a ForegroundStaging window and then the XAML switcher, an XamlExplorerHostIslandWindow titled "Task
+    // Switching", to the front, and the switcher's event often arrives after the window you switched to. Neither
+    // is a window anyone types in, so the language switcher looks past them (FloatingBar.FollowForeground).
+    public static bool IsTaskSwitching(nint hwnd) => ClassOf(hwnd) is "ForegroundStaging" or "XamlExplorerHostIslandWindow";
+
     // 128 is "no system battery" and 255 "unknown"; anything else is a battery worth drawing.
     public static bool HasBattery() => GetSystemPowerStatus(out var status) && status.BatteryFlag is not (128 or 255);
 
