@@ -15,9 +15,7 @@
 *The taskbar for your virtual desktops.*
 *Name them, colour them, see every desktop's windows at once, and switch with one chord.*
 
-<img src="https://img.shields.io/badge/platform-Windows%2011%20%C2%B7%20x64-0078D4" alt="Platform: Windows 11, x64" />
-<img src="https://img.shields.io/github/v/release/AppifySheets/Deskbar" alt="Latest release" />
-<img src="https://img.shields.io/badge/.NET-10-512BD4" alt=".NET 10" />
+<p><img src="https://img.shields.io/badge/platform-Windows%2011%20%C2%B7%20x64-0078D4" alt="Platform: Windows 11, x64" /> <img src="https://img.shields.io/github/v/release/AppifySheets/Deskbar" alt="Latest release" /> <img src="https://img.shields.io/badge/.NET-10-512BD4" alt=".NET 10" /></p>
 
 <p><em>Everything you have open, one row per workspace, every desktop at once. Click an
 icon to jump to that window from anywhere, click it again to put it away, drag it to another row
