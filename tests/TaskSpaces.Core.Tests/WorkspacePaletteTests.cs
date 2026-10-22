@@ -67,4 +67,31 @@ public class WorkspacePaletteTests
     [Fact]
     public void An_unknown_name_finds_nothing() =>
         Assert.Null(WorkspacePalette.Named("chartreuse"));
+
+    // Group members' shades. Petre: "when a group, both subbands are of the same color, it's kinda confusing",
+    // "let them be different shades of that color". The first member wears the group's colour itself; the next
+    // ones alternate lighter and darker, further each pair, capped so they stay the same colour.
+    [Fact]
+    public void The_first_member_keeps_the_groups_colour() =>
+        Assert.Equal("#FF4D9D", WorkspacePalette.Shade("#FF4D9D", 0));
+
+    [Theory]
+    [InlineData(1, "#FF8484")]  // 30% toward white: 80 + 175 x 0.3 = 132.5, rounded to even, 132 = 0x84
+    [InlineData(2, "#B23838")]  // 30% toward black: 255 x 0.7 = 178.5 -> 178 = 0xB2, 80 x 0.7 = 56 = 0x38
+    [InlineData(3, "#FFB9B9")]  // 60% toward white: 80 + 175 x 0.6 = 185 = 0xB9
+    [InlineData(4, "#662020")]  // 60% toward black: 255 x 0.4 = 102 = 0x66, 80 x 0.4 = 32 = 0x20
+    [InlineData(5, "#FFB9B9")]  // capped at 60%
+    public void Later_members_alternate_lighter_and_darker(int step, string expected) =>
+        Assert.Equal(expected, WorkspacePalette.Shade("#FF5050", step));
+
+    [Fact]
+    public void Every_member_of_a_group_of_four_is_a_different_shade() =>
+        Assert.Equal(4, Enumerable.Range(0, 4).Select(i => WorkspacePalette.Shade("#5B6CFF", i)).Distinct().Count());
+
+    [Theory]
+    [InlineData("none")]
+    [InlineData("#FFF")]
+    [InlineData("red")]
+    public void Anything_but_a_six_digit_hex_is_left_alone(string colour) =>
+        Assert.Equal(colour, WorkspacePalette.Shade(colour, 2));
 }

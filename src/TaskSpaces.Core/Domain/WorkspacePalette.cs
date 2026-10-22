@@ -161,4 +161,31 @@ public static class WorkspacePalette
         string.IsNullOrWhiteSpace(color) ? Defaults[index % Defaults.Count] : Current(color)!;
 
     public static string For(Workspace workspace, int index) => For(workspace.Color, index);
+
+    // A MEMBER'S SHADE of its group's colour. Petre, on a group whose two rows had identical red rails: "when a
+    // group, both subbands are of the same color, it's kinda confusing", then "let them be different shades of
+    // that color". The group stays one colour family, which is what says "these belong together", and each row
+    // in it gets its own step of that colour, which says "and these are different workspaces".
+    //
+    // Step 0 is the colour itself, so the first member (the anchor, in an anchored group) wears exactly the
+    // group's colour, like the group's caption and outline. After that the steps alternate a shade LIGHTER and a
+    // shade DARKER, each pair a further 30% from the base: 1 lighter, 2 darker, 3 lighter still, 4 darker still.
+    // Alternating rather than one direction, so neighbours differ in both directions from the base and a group
+    // of four does not run out into near-white or near-black. Capped at 60%, past which the shade stops reading
+    // as the same colour. Anything that is not #RRGGBB is returned untouched.
+    public static string Shade(string hex, int step)
+    {
+        var colour = hex.Trim();
+        if (step <= 0 || colour.Length != 7 || colour[0] != '#'
+            || !int.TryParse(colour[1..], System.Globalization.NumberStyles.HexNumber, null, out var rgb))
+            return hex;
+        var amount = Math.Min(0.6, 0.3 * ((step + 1) / 2));
+        var lighter = step % 2 == 1;
+        int Channel(int shift)
+        {
+            var c = (rgb >> shift) & 0xFF;
+            return (int)Math.Round(lighter ? c + (255 - c) * amount : c * (1 - amount));
+        }
+        return $"#{Channel(16):X2}{Channel(8):X2}{Channel(0):X2}";
+    }
 }

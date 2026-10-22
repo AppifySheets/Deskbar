@@ -1969,21 +1969,29 @@ public partial class FloatingBar : Window
                 // Recorded so ApplyCandidate can restore the white ring here when the amber
                 // one moves away, without needing another overview query to ask again.
                 if (g.IsCurrent) currentRow = g.Workspace.Id;
-                // The current workspace's colour, for the titled list at the bottom of the bar (see
-                // where it is built below), which wears the colour of the row it lists.
-                if (g.Workspace.Id == liveTarget) currentTint = LaneTint(group is not null ? group.Color : g.Workspace.Color,
-                    group is not null ? ColourSlotOf(group) : overview.Workspaces.ToList().FindIndex(w => w.Workspace.Id == g.Workspace.Id));
-                // ...and the bright version of that colour for the bar down the list's side (see ListSpine).
-                if (g.Workspace.Id == liveTarget) currentAccent = ListSpine(group is not null ? group.Color : g.Workspace.Color,
-                    group is not null ? ColourSlotOf(group) : overview.Workspaces.ToList().FindIndex(w => w.Workspace.Id == g.Workspace.Id));
 
                 var ownSlot = overview.Workspaces.ToList().FindIndex(w => w.Workspace.Id == g.Workspace.Id);
                 // The slot the row's colour comes from: its group's, or its own when ungrouped.
                 var colourSlot = group is not null ? ColourSlotOf(group) : ownSlot;
-                // And the override in force, which for a member is the GROUP's (#90): a group is one
-                // colour whichever row set it, so a member's own Workspace.Color is ignored while it
-                // is inside a box and waiting for it if it ever leaves.
-                var colour = group is not null ? group.Color : g.Workspace.Color;
+                // And the colour in force, which for a member comes from the GROUP (#90): a group is one
+                // colour whichever row set it, so a member's own Workspace.Color is ignored while it is inside
+                // a box and waiting for it if it ever leaves.
+                //
+                // ...in the member's own SHADE of it (WorkspacePalette.Shade), by its place in the group: "let
+                // them be different shades of that color". The first member keeps the group's colour exactly,
+                // and the group's caption, bracket and outline stay on that colour too, so the family still
+                // reads as one. Resolved to a hex here, so everything below (tint, rail, the current name)
+                // takes the shade without knowing about it. A group set to "none" stays none.
+                var memberStep = group is null ? 0 : Math.Max(0, manager.State.MembersOf(group.Id).ToList().FindIndex(m => m.Id == g.Workspace.Id));
+                var colour = group is null ? g.Workspace.Color
+                    : WorkspacePalette.IsNone(group.Color) ? group.Color
+                    : WorkspacePalette.Shade(WorkspacePalette.For(group.Color, colourSlot), memberStep);
+
+                // The current workspace's colour, for the titled list at the bottom of the bar (see where it is
+                // built below), which wears the colour of the row it lists, shade included.
+                if (g.Workspace.Id == liveTarget) currentTint = LaneTint(colour, colourSlot);
+                // ...and the bright version of that colour for the bar down the list's side (see ListSpine).
+                if (g.Workspace.Id == liveTarget) currentAccent = ListSpine(colour, colourSlot);
 
                 // A member is drawn as nested unless it is the anchor. In an ANCHORLESS group every
                 // member is nested, because none of them is the parent: the group's name carries
