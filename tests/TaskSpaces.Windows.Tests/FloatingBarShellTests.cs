@@ -63,6 +63,32 @@ public class FloatingBarShellTests(ITestOutputHelper output)
         bar.Close();
     });
 
+    // "including icons at the bottom": the strip's icon buttons follow the icon size setting, and the clock, which
+    // is text, does not.
+    [Fact]
+    public void The_strips_icons_follow_the_icon_size_and_the_clock_does_not() => StaThread.Run(() =>
+    {
+        var desktops = new PulsingDesktops { CurrentId = Guid.NewGuid() };
+        desktops.Desktops.Add(new DesktopInfo(desktops.CurrentId, "Work"));
+        var manager = new WorkspaceManager(desktops, new StubMonitor(), new StubTitles(), new StubStore());
+        Assert.True(manager.Start().IsSuccess);
+        var bar = new FloatingBar(manager) { Left = -32000, Top = -32000, SendShellKeys = _ => { }, PressSpace = () => { } };
+        bar.ShowBar();
+        bar.UpdateLayout();
+        var strip = (DockPanel)bar.FindName("ShellStrip")!;
+        Button Named(string name) => strip.Children.OfType<Button>().Single(b => AutomationProperties.GetName(b) == name);
+        // DesiredSize, which includes a LayoutTransform; ActualWidth is the size before it.
+        var before = Named("Notifications").DesiredSize.Width;
+
+        Assert.True(manager.SetIconScale(1.5).IsSuccess);
+        bar.UpdateLayout();
+
+        Assert.Equal(before * 1.5, Named("Notifications").DesiredSize.Width, 1);
+        Assert.Equal(1.5, ((ScaleTransform)Named("Show the tray icons").LayoutTransform).ScaleX, 3);
+        Assert.True(Named("Clock").LayoutTransform is null || Named("Clock").LayoutTransform == Transform.Identity);
+        bar.Close();
+    });
+
     // Petre, on a laptop strip with the clock cut to "12:(" and no room left for the language switcher: "i want
     // language as a priority". When not even the time fits beside everything else, the clock goes, rather than
     // the switcher being squeezed out.

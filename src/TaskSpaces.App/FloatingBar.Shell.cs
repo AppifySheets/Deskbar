@@ -232,7 +232,44 @@ public partial class FloatingBar
         FitPinsToSeam();
         FitNowPlayingToSeam();
         FitStatsToSeam();
+        // ...and the icon size setting on the bar's own buttons, which a rebuild does not recreate.
+        ScaleChromeIcons();
     }
+
+    // THE ICON SIZE SETTING ON THE BAR'S OWN BUTTONS (IconScaling). Petre: "let's also make icon sizes
+    // configurable", "as a separate setting", "including icons at the bottom". The rows' icons are scaled as
+    // they are built (IconButton); these are built once and kept, so they are scaled here instead, whenever
+    // the setting has changed since the last time:
+    //
+    //   the strip    the tray chevron, wifi and battery, the volume dial and the bell. Not the clock and not
+    //                the language code: they are TEXT, and the icon setting leaves text alone.
+    //   Start, search and the pinned apps, together, because the pins were sized to match Start and search
+    //                ("one size with Start and search") and a setting that split them would undo that.
+    //
+    // The whole BUTTON is scaled, not just its glyph, because the buttons have fixed sizes chosen around their
+    // glyphs, and a bigger glyph in the same button would be clipped. A LayoutTransform, so the strip and the
+    // pin line make room for what they hold.
+    void ScaleChromeIcons()
+    {
+        if (Math.Abs(IconScale - chromeIconScale) < 0.001) return;
+        chromeIconScale = IconScale;
+        new FrameworkElement?[] { stripTray, stripQuickSettings, stripVolume, stripBell }
+            .Concat(ShellStart.Children.OfType<FrameworkElement>())
+            .Concat(shellStartTwin?.Children.OfType<FrameworkElement>() ?? [])
+            .Concat(pinButtons.Values.Select(pin => pin.Button))
+            .OfType<FrameworkElement>()
+            .ToList()
+            .ForEach(ScaleAsIcon);
+        // The strip's buttons just changed width, so whether the clock and its date fit may have too.
+        FitClock();
+    }
+
+    // The scale the bar's own buttons were last given; they are built at 1.
+    double chromeIconScale = 1.0;
+
+    // One button at the current icon size; also how a pin created after the setting changed gets it.
+    void ScaleAsIcon(FrameworkElement element) =>
+        element.LayoutTransform = Math.Abs(IconScale - 1) < 0.001 ? Transform.Identity : new ScaleTransform(IconScale, IconScale);
 
     // 14 over 12.5, after two rounds of Petre's "increase the size of fonts for this": 10 and 9 matched the
     // bar's captions, then 12 and 11 matched the taskbar's clock on paper, but the bar draws through its own
@@ -289,9 +326,12 @@ public partial class FloatingBar
             element.Measure(infinite);
             return element.DesiredSize.Width;
         }
+        // Every button by its MEASURED width, which includes the icon size setting's LayoutTransform (see
+        // ScaleChromeIcons); its Width property is the size before that scale, so reading it would be wrong at
+        // any icon size but 100%.
         var others = ShellStrip.Children.OfType<FrameworkElement>()
             .Where(b => b != stripClock && b.Visibility != Visibility.Collapsed)
-            .Sum(b => double.IsNaN(b.Width) ? Natural(b) : b.Width + b.Margin.Left + b.Margin.Right);
+            .Sum(Natural);
         // The clock's lines by their TEXT, not by measuring the elements: a collapsed date measures 0 wide, so
         // measuring it would make the next check think the date fits, show it, and hide it again, every minute.
         var withDate = stripClock.Padding.Left + stripClock.Padding.Right + Math.Max(TextWidth(clockTime), TextWidth(clockDate));

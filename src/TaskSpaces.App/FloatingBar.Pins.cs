@@ -168,6 +168,8 @@ public partial class FloatingBar
             OpenPin(pin, newWindow: true);
         };
         button.ContextMenu = PinMenu(pin);
+        // At the icon size setting from the start, like Start and search beside it (see ScaleChromeIcons).
+        ScaleAsIcon(button);
         return (button, mark, ring);
     }
 

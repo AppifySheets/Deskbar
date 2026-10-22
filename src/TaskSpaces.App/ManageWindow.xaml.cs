@@ -375,6 +375,8 @@ public partial class ManageWindow : Window
             // from what the bar is actually doing rather than jumping to some other number.
             HoverDwellSlider.Value = manager.State.HoverDwellMs ?? system;
             TextSizeSlider.Value = BarText.Clamp(manager.State.BarTextOffset);
+            // Shown in percent and stored as a factor, the way opacity is.
+            IconSizeSlider.Value = IconScaling.Clamp(manager.State.IconScale) * 100;
             ListLinesSlider.Value = WindowListLines.Clamp(manager.State.WindowListMinimumLines);
             // Ticked from state like the sliders, under the same guard, so opening Manage writes nothing.
             StripItemBoxes().ForEach(box => box.IsChecked = !manager.State.HiddenStripItems.Contains((StripItem)box.Tag));
@@ -408,6 +410,15 @@ public partial class ManageWindow : Window
             _ => $"{TextSizeSlider.Value:0.#} pt",
         };
         ListLinesValue.Text = ListLinesSlider.Value <= 1 ? "no floor" : $"{ListLinesSlider.Value:0} lines";
+        IconSizeValue.Text = Math.Abs(IconSizeSlider.Value - 100) < 0.5 ? "as built" : $"{IconSizeSlider.Value:0}%";
+    }
+
+    // The icon size, applied live like the text size: each step rebuilds the bar with its icons at the new size.
+    void OnIconSizeChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
+    {
+        if (loading) return;
+        ShowAppearanceValues();
+        manager.SetIconScale(IconSizeSlider.Value / 100).TapError(err => MessageBox.Show(this, err, "Deskbar"));
     }
 
     // The text size slider, applied live like the others: each step rebuilds the bar at the new size. Behind
@@ -502,8 +513,9 @@ public partial class ManageWindow : Window
         manager.SetBarAppearance(null, null, null, null).TapError(err => MessageBox.Show(this, err, "Deskbar"));
         manager.SetBarTextOffset(null).TapError(err => MessageBox.Show(this, err, "Deskbar"));
         manager.SetWindowListMinimumLines(null).TapError(err => MessageBox.Show(this, err, "Deskbar"));
-        // Everything back on the strip.
+        // Everything back on the strip, and every icon back to its built size.
         manager.SetHiddenStripItems([]).TapError(err => MessageBox.Show(this, err, "Deskbar"));
+        manager.SetIconScale(null).TapError(err => MessageBox.Show(this, err, "Deskbar"));
         LoadAppearance();
     }
 

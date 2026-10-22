@@ -1320,7 +1320,15 @@ public partial class FloatingBar : Window
     // What one icon occupies along a row: the 20x20 artwork, plus IconButton's 1px padding and
     // 1px border on each side. Its horizontal margin is deliberately zero (Petre: "the separation
     // between icons should be much smaller"), so this is the whole cell.
-    const double IconCellWidth = 24;
+    //
+    // The artwork part follows the icon size setting (IconScaling), and the 4 DIP of padding and border do not,
+    // because they belong to the button, which is not scaled (see IconButton). So the wrap arithmetic
+    // budgets the cells as they are actually drawn at any size. 24 at the default.
+    double IconCellWidth => 20 * IconScale + 4;
+
+    // The icon size setting, read through its clamp: 1.0 when never set. Petre: "let's also make icon sizes
+    // configurable", "as a separate setting", "including icons at the bottom".
+    double IconScale => IconScaling.Clamp(manager.State.IconScale);
 
     // ...and what one LINE of icons occupies down the row: the same 24 the cell is wide, plus
     // IconButton's 1px top and bottom margins.
@@ -1336,7 +1344,9 @@ public partial class FloatingBar : Window
     // Not a regression: empty workspace rows have been drawn since they became legitimate switch
     // and drop targets, and they have always been short. It only became obvious once workspaces
     // were being created from the bar's own menu, where the new row is the thing you are looking at.
-    const double IconLineHeight = 26;
+    //
+    // Follows the icon size setting the way the cell does: the artwork scales, the 6 DIP around it do not.
+    double IconLineHeight => 20 * IconScale + 6;
 
     // ...and what the gap between two screens' lanes costs: LaneGap's fixed box. It held the monitor
     // hairline once; it carries the soft edge of the lane shade now.
@@ -5540,6 +5550,13 @@ public partial class FloatingBar : Window
                 ? Aged(icon, row)
                 : Placeholder(row.Window),
             row), row);
+        // The icon size setting (IconScaling): the ARTWORK is scaled, overlays and all, and not the button. On an
+        // icon row that is the whole button anyway, and on a titled line (Titled wraps this same content) it
+        // keeps the window's title at its own size, which belongs to the text size setting instead. A
+        // LayoutTransform rather than a bigger Image, for the reason the row's own shrink gives (see LineOf):
+        // the icon's pixels come from a cache keyed by size.
+        if (Math.Abs(IconScale - 1) > 0.001 && button.Content is FrameworkElement art)
+            art.LayoutTransform = new ScaleTransform(IconScale, IconScale);
         // Click -> jump, with no Hide() afterwards: unlike the switcher panel, this bar
         // is a persistent surface (spec) -- it stays open across every jump so Petre can
         // click several icons in a row.

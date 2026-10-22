@@ -1783,6 +1783,16 @@ public sealed class WorkspaceManager(
         return Result.Success();
     }
 
+    // How big the bar draws its icons (see IconScaling). Same three rules as SetBarTextOffset: null means back to
+    // the default, the value is clamped and snapped on the way in, and an unchanged value writes nothing.
+    public Result SetIconScale(double? scale)
+    {
+        var next = scale is { } value ? IconScaling.Clamp(value) : (double?)null;
+        if (next == State.IconScale) return Result.Success();
+        Persist(State with { IconScale = next });
+        return Result.Success();
+    }
+
     // Which of the bottom strip's items are hidden (see StripItem). Same rule as the settings above: an unchanged
     // set writes nothing, so opening Manage, which ticks the boxes from state, neither rewrites state.json nor
     // rebuilds the bar. Kept in StripItem's order and without duplicates, so the same choice always saves the

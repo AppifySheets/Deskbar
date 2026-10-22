@@ -372,6 +372,30 @@ public class FloatingBarLaneShadeTests(ITestOutputHelper output)
         Assert.Equal(["App 2", "App 3"], Bar.TitlesIn(bar.RowContainer("Busy")).Select(t => t.Text));
     });
 
+    // Petre: "let's also make icon sizes configurable". The row icons' artwork is drawn at the setting, and the
+    // wrap budgets the bigger cells, so a row that fits one line at the built size goes to two at 150% instead of
+    // clipping its last icons.
+    [Fact]
+    public void A_bigger_icon_size_scales_the_row_icons_and_wraps_them_sooner() => StaThread.Run(() =>
+    {
+        using var bar = TwoScreens(busyIcons: 6, everythingOnOneScreen: true);
+        int Lines()
+        {
+            var row = bar.RowContainer("Busy");
+            var at = bar.Icons(row).Select(icon => icon.TranslatePoint(new Point(0, 0), row)).ToList();
+            output.WriteLine($"row {row.ActualWidth:0.#} wide, icons at " + string.Join(" ", at.Select(p => $"({p.X:0},{p.Y:0})")));
+            return at.Select(p => Math.Round(p.Y)).Distinct().Count();
+        }
+        Assert.Equal(1, Lines());
+
+        Assert.True(bar.Manager.SetIconScale(1.5).IsSuccess);
+        bar.Pulse();
+
+        var art = (FrameworkElement)bar.Icons(bar.RowContainer("Busy")).First().Content;
+        Assert.Equal(1.5, ((ScaleTransform)art.LayoutTransform).ScaleX, 3);
+        Assert.Equal(2, Lines());
+    });
+
     // Petre: "dragging up or down should work here". A line dragged up or down an expanded row is reordered
     // (MoveWindowInOrder, what the row's drop calls), and the row has to SHOW the new order straight away,
     // with the pointer still on the bar. It used to keep drawing the old order until the pointer left.

@@ -36,6 +36,37 @@ public class StripItemsSettingTests
         Assert.Equal([StripItem.QuickSettings, StripItem.Notifications], store.Stored.HiddenStripItems);
     }
 
+    // THE ICON SIZE, the other setting the bottom strip round brought (IconScaling). Petre: "let's also make icon
+    // sizes configurable", "as a separate setting", "including icons at the bottom".
+    [Fact]
+    public void Icon_size_is_built_size_until_set() =>
+        Assert.Equal(1.0, Domain.IconScaling.Clamp(Started().State.IconScale));
+
+    [Theory]
+    [InlineData(0.1, 0.6)]
+    [InlineData(9.0, 1.6)]
+    [InlineData(1.23, 1.25)]
+    [InlineData(double.NaN, 1.0)]
+    public void Icon_size_is_held_to_its_rails_and_steps(double value, double expected) =>
+        Assert.Equal(expected, Domain.IconScaling.Clamp(value), 6);
+
+    [Fact]
+    public void Icon_size_is_saved_and_the_same_value_again_writes_nothing()
+    {
+        var manager = Started();
+        Assert.True(manager.SetIconScale(1.5).IsSuccess);
+        Assert.Equal(1.5, store.Stored.IconScale);
+
+        var pulses = 0;
+        using var _ = manager.StateChanged.Subscribe(_ => pulses++);
+        manager.SetIconScale(1.5);
+        Assert.Equal(0, pulses);
+
+        // Null is "back to the built size", not a value.
+        manager.SetIconScale(null);
+        Assert.Null(manager.State.IconScale);
+    }
+
     // The same set again is not a change, so ticking boxes from state when Manage opens rebuilds nothing.
     [Fact]
     public void The_same_set_again_writes_nothing()

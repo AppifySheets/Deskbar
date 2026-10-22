@@ -107,6 +107,25 @@ public class ManageSettingsTabTests
         window.Close();
     });
 
+    // The icon size slider: in percent, from state, saved as a factor, and cleared by Reset.
+    [Fact]
+    public void The_icon_size_slider_shows_and_saves_the_size() => StaThread.Run(() =>
+    {
+        var manager = Built(AppState.Empty with { IconScale = 1.25 });
+        var window = new ManageWindow(manager, compatibilityMode: false);
+        var slider = SliderNamed(window, "IconSizeSlider");
+        Assert.Equal(125, slider.Value);
+
+        slider.Value = 80;
+        Assert.Equal(0.8, manager.State.IconScale!.Value, 3);
+
+        ((Button)window.FindName("ResetAppearanceButton")!).RaiseEvent(new RoutedEventArgs(ButtonBase.ClickEvent));
+        Assert.Null(manager.State.IconScale);
+        Assert.Equal(100, SliderNamed(window, "IconSizeSlider").Value);
+
+        window.Close();
+    });
+
     // Petre: "settings page can't be scrolled and it doesn't fit on a page in smaller res screens".
     [Fact]
     public void The_settings_scroll() => StaThread.Run(() =>

@@ -89,6 +89,9 @@ public sealed record AppState(
     // this setting existed has no such field and reads as empty, so nothing needs migrating.
     public IReadOnlyList<StripItem> HiddenStripItems { get; init; } = [];
 
+    // How big the bar draws its icons, read through IconScaling.Clamp; null means 100%.
+    public double? IconScale { get; init; }
+
     // The two placements the Inventory above cannot express (Petre: "last placement IS the
     // rule"). Inventory already records identity -> workspace on every Place(), but a
     // PINNED window belongs to no single workspace and a DETACHED one belongs to none at

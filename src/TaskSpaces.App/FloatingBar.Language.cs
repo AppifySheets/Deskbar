@@ -29,7 +29,21 @@ public partial class FloatingBar
 {
     // Where the languages come from. Set by the composition root (InputLanguages); left unset, as every test but
     // the language ones leaves it, the switcher stays hidden and nothing reaches the machine's real keyboard.
-    public IInputLanguages? InputLanguages { get; init; }
+    //
+    // Painted the moment it is set, not at the clock's next tick. The button is built in the constructor, before
+    // an object initializer can set this, and waiting for the tick left the switcher missing for the first five
+    // seconds after a start, measured in the trace, which is exactly when a restarted bar gets looked at.
+    public IInputLanguages? InputLanguages
+    {
+        get => inputLanguages;
+        init
+        {
+            inputLanguages = value;
+            PaintLanguage();
+        }
+    }
+
+    readonly IInputLanguages? inputLanguages;
 
     Button? languageButton;
     TextBlock? languageCode;

@@ -242,6 +242,19 @@
                             <TextBlock x:Name="TextSizeValue" Margin="8,0,0,0" VerticalAlignment="Center" MinWidth="70"/>
                         </StackPanel>
 
+                        <!-- The icon size (IconScaling), in percent, with its own handler and setter like the text
+                             size. Petre: "let's also make icon sizes configurable", "as a separate setting",
+                             "including icons at the bottom". -->
+                        <TextBlock Text="Icon size" FontWeight="Bold" Margin="0,16,0,0"/>
+                        <TextBlock TextWrapping="Wrap" Opacity="0.75" Margin="0,2,0,6"
+                                   Text="How big the bar draws its icons: the apps in the rows, the pinned apps with Start and search, and the icons in the bottom strip. Text keeps its own size. Bigger icons fit fewer to a line, so busy rows grow taller."/>
+                        <StackPanel Orientation="Horizontal">
+                            <Slider x:Name="IconSizeSlider" Width="260" Minimum="60" Maximum="160"
+                                    SmallChange="5" LargeChange="10" TickFrequency="5" IsSnapToTickEnabled="True"
+                                    ValueChanged="OnIconSizeChanged"/>
+                            <TextBlock x:Name="IconSizeValue" Margin="8,0,0,0" VerticalAlignment="Center" MinWidth="70"/>
+                        </StackPanel>
+
                         <!-- The window list's floor (WindowListLines), with its own handler and setter like the
                              text size, so dragging it writes only this value. -->
                         <TextBlock Text="Window list height" FontWeight="Bold" Margin="0,16,0,0"/>
