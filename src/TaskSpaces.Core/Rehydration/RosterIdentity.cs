@@ -126,6 +126,13 @@ public static class RosterIdentity
     //              sign-in prompt). The system starts these, not the app that asked, so not even the
     //              launched-by walk can connect them; staying put keeps them in front of the asker.
     //   Taskmgr    a tool you open to look at the machine from wherever you are.
+    //   SnippingTool  the same kind of tool, summoned by a key (Win+Shift+S, PrtScn) to capture whatever
+    //              is in front of you. Petre: "snipping tool opened in another workspace, why?", then
+    //              "snipping tool should have no memory of where it was before". It had been placed in
+    //              Personal once, so memory sent it there on every capture; the trace showed it appear
+    //              on the workspace he was on and land in Personal 200 ms later. Its exe lives under a
+    //              versioned Microsoft.ScreenSketch_... folder, which is why the list keys on the file
+    //              name and not the path.
     //
     // Deliberately NOT included: Settings and other Store apps, because they report through
     // ApplicationFrameHost and nobody has measured what their windows say (see the note on the Shell
@@ -135,7 +142,7 @@ public static class RosterIdentity
         "chrome", "msedge", "brave", "vivaldi", "opera", "firefox",
         "WindowsTerminal", "OpenConsole", "conhost", "cmd", "powershell", "pwsh",
         "PickerHost", "CredentialUIBroker",
-        "Taskmgr",
+        "Taskmgr", "SnippingTool",
     };
 
     // An installed web app is the exception, and the reason a command line is needed at all. A PWA

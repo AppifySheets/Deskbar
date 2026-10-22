@@ -85,6 +85,8 @@ public class StayWhereOpenedTests(ITestOutputHelper output)
     [InlineData(@"C:\WINDOWS\system32\PickerHost.exe")]
     [InlineData(@"C:\Windows\System32\CredentialUIBroker.exe")]
     [InlineData(@"C:\WINDOWS\system32\Taskmgr.exe")]
+    // The path as Petre's state.json recorded it; the hotkey's own command line is covered below.
+    [InlineData(@"C:\Program Files\WindowsApps\Microsoft.ScreenSketch_11.2608.41.0_x64__8wekyb3d8bbwe\SnippingTool\SnippingTool.exe")]
     public void These_apps_stay_where_they_were_opened(string path) =>
         Assert.True(RosterIdentity.StaysWhereOpened(path, $"\"{path}\""));
 
@@ -125,6 +127,32 @@ public class StayWhereOpenedTests(ITestOutputHelper output)
 
         Log();
         Assert.DoesNotContain(new WindowHandle(0xB1354), desktops.WindowPlacements.Keys);
+    }
+
+    // Petre: "snipping tool opened in another workspace, why?", "snipping tool should have no memory of
+    // where it was before". His state.json had Snipping Tool in Personal's roster, with the command line
+    // the capture hotkey starts it with; that entry is replayed here, and the window must stay on the
+    // desktop it opened on.
+    [Fact]
+    public void A_rostered_snipping_tool_opens_where_it_was_summoned()
+    {
+        const string snipPath = @"C:\Program Files\WindowsApps\Microsoft.ScreenSketch_11.2608.41.0_x64__8wekyb3d8bbwe\SnippingTool\SnippingTool.exe";
+        const string snipCmd = "\"" + snipPath + "\" ms-screenclip:///?source=HotKey";
+        var personal = new Workspace(Guid.NewGuid(), "Personal", null);
+        Started(AppState.Empty with
+        {
+            Workspaces = [personal],
+            Inventory = new Dictionary<Guid, IReadOnlyList<InventoryEntry>>
+            {
+                [personal.Id] = [new InventoryEntry(snipPath, snipCmd, "Snipping Tool")],
+            },
+        });
+
+        monitor.Subject.OnNext(new WindowEvent(WindowEventKind.Appeared,
+            new WindowInfo(new WindowHandle(0x59069E), 56884, "SnippingTool", snipPath, "Snipping Tool", snipCmd)));
+
+        Log();
+        Assert.DoesNotContain(new WindowHandle(0x59069E), desktops.WindowPlacements.Keys);
     }
 
     // Same state, same moment: the web app and Beeper still go home.
