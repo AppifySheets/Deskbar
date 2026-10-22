@@ -24,6 +24,10 @@ public static class ControlUsage
             new("move", "<workspace> [--create [placement]] [--no-follow] (--title <text> | --hwnd <handle>)...",
                 "move windows; every selector must match or nothing moves (exit 3). Moving the window you are\n"
                 + "      in takes you along, as a drag does; --no-follow leaves you where you are"),
+            new("start", "<workspace> [--create [placement]] [--cwd <folder>] -- <program> [arguments...]",
+                "start a program and put its window in that workspace as it opens, without taking you along.\n"
+                + "      Its windows for the next 30 s go there, and the first new window of the same exe (a browser or\n"
+                + "      editor that hands the request to a copy already running). Deskbar starts nothing on its own"),
         ]),
         new("Workspace row menu", [
             new("rename", "<workspace> <new name>", "Rename…"),
@@ -78,7 +82,7 @@ public static class ControlUsage
 
     const string Footer =
         """
-        placement, for create and move --create (at most one; none means the end of the bar):
+        placement, for create, move --create and start --create (at most one; none means the end of the bar):
           --group <group>         the bottom of that group
           --position <n>          top-level row n of the bar, a whole group counting as one row
           --before <workspace>    just before it, joining its group if it has one

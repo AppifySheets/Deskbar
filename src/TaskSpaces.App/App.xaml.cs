@@ -943,6 +943,7 @@ public partial class App : Application
         // `bar minimize|restore` goes through the same two methods as the tray's toggle, and asks the
         // same question first: minimizing a bar that is already minimized would raise a second stand-in.
         // Read when a command arrives, not now, because the bar does not exist yet at this point.
+        // `start` launches through ProgramStarter, the only place Deskbar starts a program at a caller's request.
         var control = new Core.Control.RemoteControl(manager, visible =>
             floatingBar is not { } bar
                 ? Result.Failure("There is no bar to change (compatibility mode).")
@@ -950,7 +951,8 @@ public partial class App : Application
                 {
                     if (visible && bar.Minimized) RestoreBar();
                     else if (!visible && !bar.Minimized) MinimizeBar();
-                }));
+                }),
+            ProgramStarter.Start);
         controlServer = new ControlPipeServer(ControlCommandLine.PipeName,
             args => Dispatcher.InvokeAsync(() =>
             {

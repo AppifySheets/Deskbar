@@ -571,6 +571,7 @@ Everything the bar's menus do has a command, and each one runs the same code as 
 | Workspaces | `create <name> [placement]`, `rename`, `add-child`, `reorder <ws> up\|down\|top\|end\|<n>`, `minimize-row`, `restore-row`, `color <ws> <colour>`, `delete <ws> [--close-windows]`, `switch` |
 | Groups | `group-create`, `group-join`, `group-leave`, `group-rename`, `group-color`, `ungroup` |
 | Desktops | `name-desktop <id or number> <name>` |
+| Starting | `start <ws> [--create [placement]] [--cwd <folder>] -- <program> [arguments...]` |
 | Windows | `move <ws> [--create [placement]] [--no-follow] (--title <text> \| --hwnd <h>)...`, `rename-window`, `rename-app`, `rename-pattern`, `name-by-folder <hwnd> on\|off`, `restore-title`, `pin`, `unpin` |
 | Bar | `bar minimize\|restore\|dock\|undock\|across\|edge` |
 
@@ -599,6 +600,20 @@ nothing: when any selector finds no window, nothing moves and the exit code is 3
 keeps retrying that case, which covers an editor that is still opening. Moving the window you are
 in takes you along, as a drag on the bar does; add `--no-follow` to stay put, which you want for a
 window a script has just opened, because that window has focus.
+
+`start <workspace> -- <program> [arguments...]` starts a program and puts its window in that workspace as it
+opens, without taking you along. Windows opens every new window on the desktop in front, so this is not a
+move you have to make afterwards, but it is still a move: Deskbar claims the window the moment it appears,
+which on a measured run was half a second after the command, with the window on your current workspace for
+part of that. It claims every window of the started process and the processes it starts for 30 seconds, plus
+the first new window with the same exe name, which covers a browser or editor that hands the request to a
+copy already running. Everything after `--` is the program's own command line. `--cwd <folder>` sets the
+folder it starts in, since the running app cannot see yours. Deskbar never starts anything on its own.
+
+```powershell
+& $ts start wt-login --create --group EC --cwd C:\src\login -- code .
+& $ts start Research -- chrome --new-window https://example.com
+```
 
 `delete` closes nothing unless you add `--close-windows`. The menu asks before closing; a command
 cannot ask, so you have to say it. Manage, Check for updates and Exit deliberately have no

@@ -61,6 +61,46 @@ public sealed partial class RemoteControl
             ControlReply.Fail);
     }
 
+    // START A PROGRAM THERE (see WorkspaceManager.StartedFor for how its window is recognised and why).
+    //
+    // In this order, and each step is load-bearing:
+    //   1. the workspace, created if asked, BEFORE anything starts, so a refused name starts nothing;
+    //   2. the expectation, by program name, BEFORE the launch, so a window that appears while the shell is
+    //      still starting the program (it can pump messages) is already expected;
+    //   3. the launch, and then the process id, which also claims every window of the processes below it;
+    //   4. a failed launch withdraws the expectation, so nothing of that name is claimed for a launch that
+    //      never happened.
+    //
+    // The reply comes back as soon as the program has started, not when its window appears: the window is the
+    // program's to open, which can take seconds, and the pipe answers on the UI thread.
+    ControlReply Start(StartRequest request) =>
+        launch is not { } starter
+            ? ControlReply.Fail("This copy of Deskbar cannot start programs.")
+            : Ensure(request.Workspace, request.Create, request.Placement).Match(
+                found =>
+                {
+                    var expectation = manager.ExpectWindow(request.Launch.Program, found.Workspace.Id);
+                    return starter(request.Launch).Match(
+                        processId =>
+                        {
+                            if (processId is { } started) manager.NoteExpectedProcess(expectation, started);
+                            return Success(new
+                            {
+                                created = found.Created,
+                                workspace = Describe(found.Workspace.Id),
+                                started = request.Launch.Program,
+                                pid = processId,
+                                expectingFor = $"{WorkspaceManager.ExpectationLifetime.TotalSeconds:0} s",
+                            });
+                        },
+                        error =>
+                        {
+                            manager.CancelExpectation(expectation);
+                            return ControlReply.Fail(error);
+                        });
+                },
+                ControlReply.Fail);
+
     // Matched case-insensitively against what the window says now AND what it said before a rename
     // rule shortened it: the folder name an agent knows is usually only in the latter.
     bool TitleContains(WindowInfo window, string text) =>

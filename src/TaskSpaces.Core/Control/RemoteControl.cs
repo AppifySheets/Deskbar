@@ -24,7 +24,12 @@ namespace TaskSpaces.Core.Control;
 //
 // Output is JSON for every success, because the expected caller is an agent that reads it back, and a
 // plain sentence for every failure, because the expected reader of a failure is whoever is debugging.
-public sealed partial class RemoteControl(WorkspaceManager manager, Func<bool, Result>? setBarVisible = null)
+//
+// `launch` is how `start` starts a program, handed in by the composition root (ProgramStarter) because
+// starting a process is the Windows side's business. It answers the new process's id, or null when the shell
+// handed the request to something already running. Left null, as the tests that do not exercise `start`
+// leave it, `start` refuses.
+public sealed partial class RemoteControl(WorkspaceManager manager, Func<bool, Result>? setBarVisible = null, Func<ProgramLaunch, Result<int?>>? launch = null)
 {
     static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web) { WriteIndented = true };
 
@@ -43,6 +48,7 @@ public sealed partial class RemoteControl(WorkspaceManager manager, Func<bool, R
 
         ("create", _) => ControlArguments.ParseCreate(rest).Match(Create, ControlReply.Fail),
         ("move", _) => ControlArguments.ParseMove(rest).Match(Move, ControlReply.Fail),
+        ("start", _) => ControlArguments.ParseStart(rest).Match(Start, ControlReply.Fail),
 
         ("rename", [var workspace, var name]) => Rename(workspace, name),
         ("add-child", [var parent, var name]) => AddChild(parent, name),

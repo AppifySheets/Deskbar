@@ -381,8 +381,13 @@ public sealed class WorkspaceManager(
         // workspace W, expect its window"). It went with the restore prompt, the only thing
         // that ever launched anything. Note the difference from #94's tier, which is the opposite
         // direction: nothing here launches anything, it recognises that something else did.
+        //
+        // ...and above all of them, a window someone ASKED for: `deskbar.cmd start <workspace> -- <program>`
+        // (see StartedFor). That is an explicit instruction about this very launch, made seconds ago, so
+        // nothing standing or inferred outranks it.
         if (AutoPlaceable(window.Handle))
-            ContainerPlacement(window)
+            StartedFor(window)
+                .Or(() => ContainerPlacement(window))
                 .Or(() => LaunchedByWorkspace(window))
                 .Or(() => Remembered(window).Map(placement => new Decision(placement, Roster: true)))
                 .Or(() => RulesEngine.MatchWorkspace(window, State.WorkspaceRules).Map(id => new Decision(Placement.In(id), Roster: true)))
@@ -2843,6 +2848,79 @@ public sealed class WorkspaceManager(
     //     immediately goes to personal". An inference about one window must not overwrite what Petre
     //     taught the app by hand. So this moves the window and remembers the membership, and leaves
     //     memory to say where the app lives.
+    // STARTED FOR A WORKSPACE. Petre: "can claude session start a window in another deskbar?", then "can we
+    // start there, not move?", then "yes, let's do it". Windows has no way to open a window on a chosen
+    // virtual desktop: every new window appears on the one in front. So `deskbar.cmd start` starts the program
+    // and says what it expects, and this claims the window the moment it appears, before any other tier, and
+    // moves it there without switching (a placement never follows; only AssignWindow does).
+    //
+    // Deskbar used to launch apps on its own (the restore prompt, AppLauncher, pending placements) and Petre
+    // had all of it removed: "no, bad, don't want this". This is narrower by design. Nothing here launches;
+    // the Windows side starts a program only when a caller asks, and this only remembers the request for
+    // ExpectationLifetime.
+    //
+    // Two ways a window answers an expectation, because programs open windows in two ways:
+    //
+    //   by process  the started process, or any process below it (a launcher that starts the real app, a
+    //               .cmd shim that runs an exe), within the lifetime. Every such window is claimed, so a splash
+    //               screen and the main window that follows it both land there.
+    //   by name     the FIRST new window of a process with the same exe name, within the lifetime. This is the
+    //               single-instance case: `chrome --new-window` and `code <folder>` hand the request to the
+    //               copy already running and exit, so the window belongs to a process that is not below the
+    //               one started. Only the first, so a window of that app opened by hand a moment later stays
+    //               where it is.
+    //
+    // Registered by NAME before the launch and given its process id after (NoteExpectedProcess): starting a
+    // program through the shell can pump messages, so a quick window could otherwise appear before the
+    // expectation exists.
+    sealed record Expectation(Guid Id, string ProcessName, Guid WorkspaceId, DateTimeOffset Until, int? ProcessId = null, bool NameSpent = false);
+
+    readonly List<Expectation> expectations = [];
+
+    // Long enough for an editor or a browser to open cold on a busy machine, short enough that a stale
+    // expectation is gone before anything unrelated could match it by name.
+    internal static readonly TimeSpan ExpectationLifetime = TimeSpan.FromSeconds(30);
+
+    public Guid ExpectWindow(string program, Guid workspaceId)
+    {
+        var expectation = new Expectation(Guid.NewGuid(), Path.GetFileNameWithoutExtension(program.Trim()), workspaceId, now() + ExpectationLifetime);
+        expectations.Add(expectation);
+        trace?.Invoke($"start: expecting {expectation.ProcessName} for {NameOf(workspaceId)}");
+        return expectation.Id;
+    }
+
+    public void NoteExpectedProcess(Guid expectation, int processId)
+    {
+        var at = expectations.FindIndex(e => e.Id == expectation);
+        if (at >= 0) expectations[at] = expectations[at] with { ProcessId = processId };
+    }
+
+    public void CancelExpectation(Guid expectation) => expectations.RemoveAll(e => e.Id == expectation);
+
+    Maybe<Decision> StartedFor(WindowInfo window)
+    {
+        expectations.RemoveAll(e => e.Until < now());
+        var byProcess = expectations.FirstOrDefault(e => e.ProcessId is { } started && Descends(window.ProcessId, started, hops: 16));
+        var byName = byProcess is null
+            ? expectations.FirstOrDefault(e => !e.NameSpent && e.ProcessName.Equals(window.ProcessName, StringComparison.OrdinalIgnoreCase))
+            : null;
+        if ((byProcess ?? byName) is not { } match) return Maybe<Decision>.None;
+
+        if (byName is not null) expectations[expectations.IndexOf(byName)] = byName with { NameSpent = true };
+        trace?.Invoke($"start: {window.ProcessName}({window.ProcessId}) 0x{window.Handle.Value:X} -> {NameOf(match.WorkspaceId)} " +
+                      $"by {(byProcess is not null ? "process" : "name")}");
+        return new Decision(Placement.In(match.WorkspaceId), Roster: false);
+    }
+
+    // Whether `processId` is `ancestor` or below it, walking up the parent chain at most `hops` times. Without a
+    // process tree (tests, compatibility) only the process itself counts.
+    bool Descends(int processId, int ancestor, int hops) =>
+        processId == ancestor
+        || hops > 0 && processes is not null && processId > 0
+           && processes.Of(processId).Map(p => p.ParentProcessId != processId && Descends(p.ParentProcessId, ancestor, hops - 1)).GetValueOrDefault(false);
+
+    string NameOf(Guid workspaceId) => Workspace(workspaceId).Map(w => w.Name).GetValueOrDefault(workspaceId.ToString());
+
     Maybe<Decision> LaunchedByWorkspace(WindowInfo window)
     {
         if (processes is null) return Maybe<Decision>.None;

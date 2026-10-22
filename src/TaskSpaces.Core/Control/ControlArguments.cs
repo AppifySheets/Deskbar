@@ -34,6 +34,14 @@ public sealed record MoveRequest(string Workspace, bool Create, Placement Placem
     public bool NamesNoWindow => Handles.Count == 0 && Titles.Count == 0;
 }
 
+// The `start` command, parsed: which workspace the program's window belongs in, and the program itself, taken
+// verbatim from after the `--` so its own arguments can never be mistaken for Deskbar's options.
+public sealed record StartRequest(string Workspace, bool Create, Placement Placement, ProgramLaunch Launch);
+
+// A program to start, as the Windows side needs it: the program (an exe, a path, or anything the shell can
+// start by name, like `code`), its arguments one by one, and the folder to start it in, if any.
+public sealed record ProgramLaunch(string Program, IReadOnlyList<string> Arguments, string? WorkingDirectory);
+
 // The command line after `ctl`, with the parsing kept apart from the doing so both halves can be tested
 // without a pipe or a running app.
 public static class ControlArguments
@@ -41,8 +49,11 @@ public static class ControlArguments
     // --wait belongs to the CLIENT: it is how long the calling process keeps re-asking while the answer
     // is "nothing matched yet". So it is taken off here, before the rest is sent, and the running app
     // never sees it. That also keeps the app's message loop from ever being parked on a wait.
+    //
+    // Only BEFORE a bare `--`: what follows it is the command line of a program `start` launches, and a
+    // `--wait` there is that program's own argument, not this client's.
     public static Result<(IReadOnlyList<string> Forwarded, TimeSpan Wait)> SplitWait(IReadOnlyList<string> args) =>
-        args.ToList().IndexOf("--wait") is var at && at < 0
+        args.ToList().IndexOf("--wait") is var at && (at < 0 || args.ToList().IndexOf("--") is var separator && separator >= 0 && separator < at)
             ? (args, TimeSpan.Zero)
             : at + 1 < args.Count
               && double.TryParse(args[at + 1], NumberStyles.Float, CultureInfo.InvariantCulture, out var seconds)
@@ -52,15 +63,39 @@ public static class ControlArguments
 
     // Everything `create` and `move` accept after their first argument, gathered before it is judged,
     // so each refusal can name the actual conflict rather than the first option that happened to be odd.
-    sealed record Options(bool Create, IReadOnlyList<Placement> Placements, IReadOnlyList<WindowHandle> Handles, IReadOnlyList<string> Titles, bool NoFollow = false)
+    sealed record Options(bool Create, IReadOnlyList<Placement> Placements, IReadOnlyList<WindowHandle> Handles, IReadOnlyList<string> Titles, bool NoFollow = false, string? WorkingDirectory = null)
     {
         public static Options None { get; } = new(false, [], [], []);
+    }
+
+    // `start <workspace> [--create [placement]] [--cwd <folder>] -- <program> [arguments...]`
+    //
+    // The `--` is required rather than guessed at: everything after it is the program's, verbatim, so a program
+    // that takes its own --title or --create cannot have them read as Deskbar's. Before it, only what makes
+    // sense for a window that does not exist yet: no --hwnd or --title (there is nothing to select), and no
+    // --no-follow, because a started window is never followed anyway.
+    public static Result<StartRequest> ParseStart(IReadOnlyList<string> args)
+    {
+        var separator = args.ToList().IndexOf("--");
+        const string usage = "start needs a workspace, then -- and the program, e.g. start wt-login --create -- code C:\\src\\login";
+        if (separator < 0 || separator + 1 >= args.Count || string.IsNullOrWhiteSpace(args[separator + 1]))
+            return Result.Failure<StartRequest>(usage);
+        var program = args.Skip(separator + 1).ToList();
+        return FirstArgument(args.Take(separator).ToList(), usage)
+            .Bind(name => Gather(Options.None, args.Skip(1).Take(separator - 1).ToArray())
+                .Ensure(o => o.Handles.Count == 0 && o.Titles.Count == 0 && !o.NoFollow,
+                    "start takes no --hwnd, --title or --no-follow: the window does not exist yet, and a started window never takes you along.")
+                .Ensure(o => o.Create || o.Placements.Count == 0,
+                    "--group, --position, --before and --after only apply with --create.")
+                .Bind(o => OnePlacement(o).Map(placement =>
+                    new StartRequest(name, o.Create, placement, new ProgramLaunch(program[0], program.Skip(1).ToList(), o.WorkingDirectory)))));
     }
 
     // `create <name> [--group <g> | --position <n> | --before <ws> | --after <ws>]`
     public static Result<CreateRequest> ParseCreate(IReadOnlyList<string> args) =>
         FirstArgument(args, "create needs a workspace name, e.g. create wt-login --group EC")
             .Bind(name => Gather(Options.None, args.Skip(1).ToArray())
+                .Ensure(o => o.WorkingDirectory is null, "--cwd only applies to start.")
                 .Ensure(o => !o.Create && !o.NoFollow && o.Handles.Count == 0 && o.Titles.Count == 0,
                     "create only takes a placement (--group, --position, --before or --after); use move to move windows.")
                 .Bind(OnePlacement)
@@ -70,6 +105,7 @@ public static class ControlArguments
     public static Result<MoveRequest> ParseMove(IReadOnlyList<string> args) =>
         FirstArgument(args, "move needs a workspace name first, e.g. move wt-login --create --title wt-login")
             .Bind(name => Gather(Options.None, args.Skip(1).ToArray())
+                .Ensure(o => o.WorkingDirectory is null, "--cwd only applies to start.")
                 .Ensure(o => o.Handles.Count > 0 || o.Titles.Count > 0, "move needs at least one --hwnd or --title to say which windows")
                 // Placement only means something for a workspace being made. Accepting it for one that
                 // exists would leave the caller believing the row had moved; `reorder` does that.
@@ -101,6 +137,9 @@ public static class ControlArguments
         // Leave the caller where they are even when the window being moved is the one they are in. See
         // WorkspaceManager.AssignWindow for the rule this switches off.
         ["--no-follow", .. var tail] => Gather(so with { NoFollow = true }, tail),
+        // The folder a started program runs in (start only). Given by the caller, because the running app
+        // cannot see the caller's current folder: the pipe carries only the arguments.
+        ["--cwd", var folder, .. var tail] when Named(folder) => Gather(so with { WorkingDirectory = folder }, tail),
         ["--title", var text, .. var tail] when Named(text) => Gather(so with { Titles = [.. so.Titles, text] }, tail),
         ["--hwnd", var raw, .. var tail] => Handle(raw).Bind(handle => Gather(so with { Handles = [.. so.Handles, handle] }, tail)),
         ["--group", var group, .. var tail] when Named(group) => Gather(With(so, new Placement.InGroup(group.Trim())), tail),
