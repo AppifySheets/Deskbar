@@ -4,10 +4,13 @@ Deskbar is a Windows tray utility, called TaskSpaces until 2.0. It **names Windo
 desktops** and adds what they lack:
 an always-on-top floating bar showing every desktop's windows at once, `Win+Ctrl+Tab` to
 switch between them Alt+Tab style, per-desktop colours, short taskbar names for windows,
-and memory of where you last put each window. State persists across reboots. The C# namespaces,
-projects and solution are still `TaskSpaces.*` by decision (the rename design in
-`docs/superpowers/specs/2026-10-19-deskbar-rename-design.md`), so paths and commands below keep
-that name.
+and memory of where you last put each window. State persists across reboots. The solution,
+projects, folders and C# namespaces are `Deskbar.*` too, renamed in their own mechanical PR after
+2.0 (the rename design in `docs/superpowers/specs/2026-10-19-deskbar-rename-design.md` had left
+them as `TaskSpaces.*` until a quiet day). `TaskSpaces` still appears on purpose in two places:
+the 1.x migration's literals (the old AppData folder, mutex, Run value and shim, which must match
+what 1.x wrote), and the dated specs, plans and notes under `docs/superpowers`, which describe the
+code as it was.
 
 Terminology, and keep it straight: a **workspace** is a virtual desktop you have named.
 Unnamed ones still exist and the bar shows them separately, so the two words are not
@@ -28,10 +31,10 @@ object.
   hand, for a retry. The guard job reverts an unsigned publish to a draft once the variable is
   set. Never re-publish a release whose tag's commit does not carry this workflow: the guard does
   not cover it, and that commit's own workflow rebuilds the exe and replaces it unsigned.
-- **Tests: about 980 green**, the great majority in `TaskSpaces.Core.Tests` and over a hundred
-  in `TaskSpaces.Windows.Tests` (which constructs real WPF windows on an STA thread per
+- **Tests: about 980 green**, the great majority in `Deskbar.Core.Tests` and over a hundred
+  in `Deskbar.Windows.Tests` (which constructs real WPF windows on an STA thread per
   test). Do not trust this number to the digit; run the suite. The routine command, and the
-  default: `dotnet test TaskSpaces.sln --filter "Category!=Integration"`
+  default: `dotnet test Deskbar.sln --filter "Category!=Integration"`
 - **Integration tests mutate the real machine**. They create/switch/delete real virtual
   desktops, and one spawns `winver`. Run them deliberately, never as a routine check while
   Petre is working.
@@ -42,7 +45,7 @@ object.
 
 - **He live-tests continuously** and reports in short fragments, often a screenshot with
   three words. Restart the app after a change so he can see it:
-  `src/TaskSpaces.App/bin/Debug/net10.0-windows10.0.19041.0/Deskbar.exe`. Stop the
+  `src/Deskbar.App/bin/Debug/net10.0-windows10.0.19041.0/Deskbar.exe`. Stop the
   running instance first or the build cannot overwrite it. Until 2.0 is on main, start it with
   `DESKBAR_APPDATA` set to a scratch folder and the 1.x app exited, see Traps.
 - **Never push to `main`, never merge.** Branch, PR, wait to be told it merged. Pushing a

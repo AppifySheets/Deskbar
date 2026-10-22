@@ -193,19 +193,19 @@ jobs:
           "Building version $env:VERSION"
 
       - name: Restore dependencies
-        run: dotnet restore TaskSpaces.sln
+        run: dotnet restore Deskbar.sln
 
       - name: Build
         # -warnaserror: the branch builds clean today, and a release is exactly the wrong
         # moment to let a new warning slide by unnoticed.
-        run: dotnet build TaskSpaces.sln -c Release --no-restore -warnaserror -p:VersionPrefix=${{ steps.version.outputs.version }}
+        run: dotnet build Deskbar.sln -c Release --no-restore -warnaserror -p:VersionPrefix=${{ steps.version.outputs.version }}
 
       - name: Test
         # Category=Integration is EXCLUDED deliberately: those tests create, switch and delete
         # REAL Windows virtual desktops. On a CI runner that is at best meaningless and at
         # worst hangs the agent. Everything else -- the whole domain, rules engine, roster,
         # placement memory, title tokens and the WPF surfaces -- does run here.
-        run: dotnet test TaskSpaces.sln -c Release --no-build --filter "Category!=Integration" --verbosity normal
+        run: dotnet test Deskbar.sln -c Release --no-build --filter "Category!=Integration" --verbosity normal
 
       - name: Publish a self-contained executable
         # Choices here, and why:
@@ -223,7 +223,7 @@ jobs:
         #                           builds and then fails at runtime on missing reflection
         #                           targets. Do not add it.
         run: >
-          dotnet publish src/TaskSpaces.App/TaskSpaces.App.csproj
+          dotnet publish src/Deskbar.App/Deskbar.App.csproj
           -c Release
           -r win-x64
           --self-contained true

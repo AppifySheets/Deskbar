@@ -1,0 +1,300 @@
+﻿<!-- Icon uses an ABSOLUTE pack URI naming the assembly, not the short "/Assets/..." form:
+     the short form resolves against Application.ResourceAssembly, which a WPF exe's generated
+     Main sets but a test host does not, so it made this window unconstructable under test
+     with "Cannot locate resource". Same form in PromptDialog and App.AppIcon. -->
+<Window x:Class="Deskbar.App.ManageWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:local="clr-namespace:Deskbar.App"
+        Title="Deskbar: Manage" Width="720" Height="480"
+        Icon="pack://application:,,,/Deskbar;component/Assets/deskbar.ico">
+    <DockPanel>
+        <TextBlock x:Name="CompatBanner" DockPanel.Dock="Top" Background="#FFF4CE" Padding="8"
+                   Text="⚠ Virtual desktops are unavailable on this Windows build. Workspaces are listed but windows will not be moved."
+                   Visibility="Collapsed"/>
+        <!-- There is deliberately no "Show floating bar" checkbox. Petre: "show floating bar
+             doesn't make sense anymore, it's crucial for the app's design." Correct: once the
+             switcher panel and the Windows tab were removed, the bar became the ONLY surface
+             that shows windows and jumps to them, so offering to switch it off is like
+             offering to switch off the taskbar. It also left a trap, since hiding it removed
+             the only way to reach your own windows. The bar is now always on. -->
+        <!-- #71. The opt-out for the app's only phone-home behaviour, so it sits where the other
+             machine-level setting already does rather than somewhere it would have to be hunted
+             for. Wording says what actually happens: it checks and tells you, and that is all.
+             Nothing is downloaded and the running exe is never replaced. -->
+        <DockPanel DockPanel.Dock="Bottom" Margin="8,0,8,8">
+            <!-- #82: the running version, small and out of the way. It shares the row with the
+                 update checkbox on purpose, because that is the only other thing in this window
+                 that is about the app rather than about workspaces, and the two questions come up
+                 together: "what am I running" and "is there anything newer". Dim, because it is an
+                 answer to a question asked rarely, not a control. -->
+            <TextBlock x:Name="AppVersion" DockPanel.Dock="Right" Opacity="0.55"
+                       VerticalAlignment="Center" Margin="8,0,0,0"/>
+            <CheckBox x:Name="CheckForUpdates"
+                      Content="Check GitHub for new versions (tells you; never installs anything)"
+                      Checked="OnCheckForUpdatesToggled" Unchecked="OnCheckForUpdatesToggled"/>
+        </DockPanel>
+        <CheckBox x:Name="StartWithWindows" DockPanel.Dock="Bottom" Margin="8"
+                  Content="Start Deskbar with Windows"
+                  Checked="OnStartupToggled" Unchecked="OnStartupToggled"/>
+        <!-- Docking the bar as an app bar (AppState.DockBar). Off by default; Petre: "make this a config
+             setting and disable by default". Beside the other choices about how the app sits on the
+             desk rather than in a tab, because it is one of those. -->
+        <CheckBox x:Name="DockBar" DockPanel.Dock="Bottom" Margin="8,0,8,0"
+                  Content="Dock the bar to the edge of its screen, like the taskbar (windows keep clear of it)"
+                  Checked="OnDockBarToggled" Unchecked="OnDockBarToggled"/>
+        <TabControl>
+            <TabItem Header="Workspaces">
+                <DockPanel Margin="8">
+                    <!-- Order is not cosmetic, so it is worth saying so where it is edited:
+                         this one list drives the floating bar's row order and each workspace's
+                         lane colour. It no longer decides what any shortcut does, because
+                         Ctrl+Alt+1…9 bound by position and is gone, so reordering is now purely
+                         visual. Worth stating: it used to have a hidden consequence. -->
+                    <TextBlock DockPanel.Dock="Top" TextWrapping="Wrap" Margin="0,0,0,8"
+                               Text="Order sets the floating bar's rows and each workspace's lane colour. Select a workspace and use ↑ / ↓ to reorder."/>
+                    <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" Margin="0,8,0,0">
+                        <TextBox x:Name="NewWorkspaceName" Width="200"/>
+                        <Button Content="Add" Margin="8,0,0,0" Padding="12,2" Click="OnAddWorkspace"/>
+                        <Button Content="Rename" Margin="8,0,0,0" Padding="12,2" Click="OnRenameWorkspace"/>
+                        <Button Content="Remove" Margin="8,0,0,0" Padding="12,2" Click="OnRemoveWorkspace"/>
+                        <Button Content="↑ Up" Margin="16,0,0,0" Padding="12,2" Click="OnMoveWorkspaceUp"/>
+                        <Button Content="↓ Down" Margin="4,0,0,0" Padding="12,2" Click="OnMoveWorkspaceDown"/>
+                        <!-- Nesting (#42). Beside the reorder buttons because it is the same kind
+                             of act: it changes where a workspace sits in the list, not what it
+                             contains. The parent is chosen from the list on the left, so the
+                             gesture is "select the child, pick the parent, press Nest". -->
+                        <ComboBox x:Name="NestParent" Width="140" Margin="16,0,0,0" DisplayMemberPath="Name"/>
+                        <Button Content="Nest under" Margin="4,0,0,0" Padding="12,2" Click="OnNestWorkspace"/>
+                        <Button Content="Un-nest" Margin="4,0,0,0" Padding="12,2" Click="OnUnnestWorkspace"/>
+                    </StackPanel>
+                    <!-- The roster beside the workspaces rather than under them: it is a
+                         property OF the selected workspace, and putting it alongside makes the
+                         selection the thing that links the two lists. -->
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="Auto"/>
+                            <ColumnDefinition Width="*"/>
+                        </Grid.ColumnDefinitions>
+                        <ListBox x:Name="WorkspaceList" DisplayMemberPath="Name" SelectionChanged="OnWorkspaceSelected"/>
+                        <GridSplitter Grid.Column="1" Width="6" HorizontalAlignment="Stretch" Background="Transparent"/>
+                        <DockPanel Grid.Column="2">
+                            <!-- Petre's open thread: "No UI removes a roster entry (that lived on
+                                 the deleted Windows tab), so a wrong one needs hand-editing
+                                 %APPDATA%\Deskbar\state.json."
+                                 The roster is the workspace half of placement memory, so a wrong
+                                 entry keeps sending an app to the wrong workspace for as long as
+                                 it stands. WorkspaceManager.RemoveRosterEntry has existed and
+                                 been tested all along; nothing called it. -->
+                            <TextBlock DockPanel.Dock="Top" Text="Apps that belong to this workspace" FontWeight="Bold"/>
+                            <TextBlock DockPanel.Dock="Top" TextWrapping="Wrap" Opacity="0.75" Margin="0,2,0,6"
+                                       Text="Remembered from where you last put each app, and used to send it back there when it opens again. Remove an entry if it is sending an app somewhere you no longer want it; this forgets the placement only, and never touches a running window."/>
+                            <Button x:Name="RemoveRosterButton" DockPanel.Dock="Bottom" Content="Remove from this workspace"
+                                    Margin="0,8,0,0" Padding="12,2" HorizontalAlignment="Left"
+                                    IsEnabled="False" Click="OnRemoveRosterEntry"/>
+                            <ListBox x:Name="RosterList" DisplayMemberPath="Display"
+                                     SelectionChanged="OnRosterSelected"/>
+                        </DockPanel>
+                    </Grid>
+                </DockPanel>
+            </TabItem>
+            <TabItem Header="Shortcuts">
+                <DockPanel Margin="8">
+                    <TextBlock DockPanel.Dock="Top" TextWrapping="Wrap" Margin="0,0,0,12"
+                               Text="Global shortcuts. Deskbar registers these with Windows, so a chord it takes is unavailable to every other app while Deskbar runs. That is why only the one below is editable, and why the default avoids chords other tools already use."/>
+                    <StackPanel>
+                        <TextBlock Text="Switch workspaces, Alt+Tab style" FontWeight="Bold"/>
+                        <TextBlock TextWrapping="Wrap" Opacity="0.75" Margin="0,2,0,8"
+                                   Text="Hold the modifiers and tap the key to walk workspaces in most-recently-used order; release to switch. Add Shift while walking to go backwards. The default is Win+Ctrl+Tab, which sits beside Windows' own Win+Ctrl+arrows for desktops and is the only *+Tab chord left unclaimed. Whatever you pick becomes exclusive while Deskbar runs, so avoid chords other apps need: Ctrl+Tab would stop reaching browsers, editors and Explorer."/>
+                        <StackPanel Orientation="Horizontal">
+                            <TextBox x:Name="SwitcherShortcutBox" Width="220" TextChanged="OnSwitcherShortcutTyped"/>
+                            <Button Content="Apply" Margin="8,0,0,0" Padding="12,2" Click="OnApplySwitcherShortcut"/>
+                            <Button Content="Reset to default" Margin="8,0,0,0" Padding="12,2" Click="OnResetSwitcherShortcut"/>
+                        </StackPanel>
+                        <!-- Live validation, which is the reason Chord.Parse returns a Result
+                             instead of throwing: the reason a chord is rejected is shown as it
+                             is typed, before anything tries to register it. -->
+                        <TextBlock x:Name="SwitcherShortcutStatus" TextWrapping="Wrap" Margin="0,6,0,0"/>
+
+                        <!-- There used to be a "Fixed shortcuts" section here listing
+                             Ctrl+Alt+←/→ and Ctrl+Alt+1…9. Both are gone (Petre: "i don't
+                             think we need ctrl+alt and those, ctrl+tab is good enough"), so the
+                             one above is now the app's only global chord and there is nothing
+                             left to list. -->
+                        <TextBlock TextWrapping="Wrap" Opacity="0.75" Margin="0,20,0,0"
+                                   Text="This is the only keyboard shortcut Deskbar registers. Everything else is on the floating bar: click a row label to switch to that workspace, click an icon to jump to a window, drag an icon to another row to move it."/>
+                    </StackPanel>
+                </DockPanel>
+            </TabItem>
+            <!-- #53. Petre's ruling on what counts: active means keyboard or mouse activity, and
+                 pure wall-clock presence does not. The wording below says so plainly, because a
+                 number labelled just "time" would be read as wall-clock and quietly disbelieved
+                 the first time it disagreed with the clock on the wall. -->
+            <TabItem Header="Time">
+                <DockPanel Margin="8">
+                    <TextBlock DockPanel.Dock="Top" TextWrapping="Wrap" Margin="0,0,0,8"
+                               Text="Active time per workspace — counted only while you are actually typing or moving the mouse, so a workspace left on screen overnight accrues nothing. Watching something without touching anything reads as idle, which is the honest consequence of counting input."/>
+                    <TextBlock x:Name="TimeStatus" DockPanel.Dock="Bottom" Opacity="0.75" Margin="0,8,0,0" TextWrapping="Wrap"/>
+                    <DataGrid x:Name="TimeGrid" AutoGenerateColumns="False" IsReadOnly="True" HeadersVisibility="Column">
+                        <DataGrid.Columns>
+                            <!-- Group first, so a group's workspaces read as belonging to it and sorting
+                                 by this column brings them together. Empty for a workspace in no group. -->
+                            <DataGridTextColumn Header="Group" Binding="{Binding Group}" Width="140"/>
+                            <DataGridTextColumn Header="Workspace" Binding="{Binding Workspace}" Width="*"/>
+                            <!-- SortMemberPath, and it is the whole point of these three columns having two
+                                 properties each: the cell shows "1h 45m" and the sort compares a TimeSpan.
+                                 Bound to the text alone, the grid sorted "1h 45m" above "47m". -->
+                            <DataGridTextColumn Header="Today" Binding="{Binding Today}" SortMemberPath="TodayTime" Width="110"/>
+                            <DataGridTextColumn Header="This week" Binding="{Binding ThisWeek}" SortMemberPath="ThisWeekTime" Width="110"/>
+                            <DataGridTextColumn Header="Last 30 days" Binding="{Binding LastMonth}" SortMemberPath="LastMonthTime" Width="110"/>
+                        </DataGrid.Columns>
+                    </DataGrid>
+                </DockPanel>
+            </TabItem>
+            <!-- #151. Petre: "make things configurable, like dimming opacity, timeout, etc."
+                 Sliders rather than number boxes, and that is not a style choice: every value
+                 here is something you LOOK at rather than a number you know, so the control has
+                 to show you the answer while you are choosing it. Each one applies to the live
+                 bar as it moves, which is why nothing on this tab has a Save button.
+                 Four controls, and deliberately only four. The tab earns a control when a
+                 tuning need actually shows up, the way each of these did; a wall of options
+                 nobody asked for is its own bug. -->
+            <TabItem Header="Settings">
+                <DockPanel Margin="8">
+                    <TextBlock DockPanel.Dock="Top" TextWrapping="Wrap" Margin="0,0,0,12"
+                               Text="The floating bar's appearance and timing. Every change applies at once, to the bar as it sits on screen — there is nothing to save and nothing to restart."/>
+                    <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" Margin="0,12,0,0">
+                        <!-- The only way back from a number once chosen, which is why it is not
+                             optional: without it the tab is a one-way door. It clears the stored
+                             values rather than writing the defaults as numbers, so a default
+                             changed in a later build still reaches anyone who pressed this. -->
+                        <Button x:Name="ResetAppearanceButton" Content="Reset to defaults" Padding="12,2" Click="OnResetAppearance"/>
+                    </StackPanel>
+                    <!-- Scrolls, because the tab outgrew the window. Petre: "settings page can't be scrolled and it
+                         doesn't fit on a page in smaller res screens". Only the controls scroll: the explanation
+                         above and the reset button below stay put, so the way back is always in view. -->
+                    <ScrollViewer x:Name="SettingsScroll" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                    <StackPanel Margin="0,0,8,0">
+                        <!-- What the bar's bottom strip shows (AppState.HiddenStripItems, StripItem). Petre: "i
+                             don't want wifi there", "and i don't think i want notifications either", "make it a
+                             setting, what to show". One box per item, built in code from StripItem so a new item
+                             cannot be forgotten here. -->
+                        <TextBlock Text="Bottom strip" FontWeight="Bold"/>
+                        <TextBlock TextWrapping="Wrap" Opacity="0.75" Margin="0,2,0,6"
+                                   Text="What the strip at the bottom of the bar shows. Untick what you do not use, and the rest close up. When the strip is still too narrow, the clock's date goes first and then the clock, so the language switcher always keeps its place."/>
+                        <WrapPanel x:Name="StripItemsPanel" Orientation="Horizontal" Margin="0,0,0,16"/>
+
+                        <TextBlock Text="Dimming" FontWeight="Bold"/>
+                        <TextBlock TextWrapping="Wrap" Opacity="0.75" Margin="0,2,0,6"
+                                   Text="How faint the bar goes once the pointer is elsewhere. Fully opaque means it never dims. It never goes fully invisible: an unseeable bar still swallows the clicks aimed at whatever is behind it. A docked bar never dims, since nothing sits under it."/>
+                        <StackPanel Orientation="Horizontal">
+                            <Slider x:Name="IdleOpacitySlider" Width="260" Minimum="0.05" Maximum="1"
+                                    SmallChange="0.05" LargeChange="0.1" TickFrequency="0.05" IsSnapToTickEnabled="True"
+                                    ValueChanged="OnAppearanceChanged"/>
+                            <TextBlock x:Name="IdleOpacityValue" Margin="8,0,0,0" VerticalAlignment="Center" MinWidth="70"/>
+                        </StackPanel>
+
+                        <TextBlock Text="Before it starts dimming" FontWeight="Bold" Margin="0,16,0,0"/>
+                        <TextBlock TextWrapping="Wrap" Opacity="0.75" Margin="0,2,0,6"
+                                   Text="The bar holds full strength for this long after the pointer leaves, because the moment just after you stop pointing at it is when you are still reading it. Zero starts the fade immediately."/>
+                        <StackPanel Orientation="Horizontal">
+                            <Slider x:Name="FadeGraceSlider" Width="260" Minimum="0" Maximum="120"
+                                    SmallChange="1" LargeChange="5" TickFrequency="1" IsSnapToTickEnabled="True"
+                                    ValueChanged="OnAppearanceChanged"/>
+                            <TextBlock x:Name="FadeGraceValue" Margin="8,0,0,0" VerticalAlignment="Center" MinWidth="70"/>
+                        </StackPanel>
+
+                        <TextBlock Text="How long the dimming takes" FontWeight="Bold" Margin="0,16,0,0"/>
+                        <TextBlock TextWrapping="Wrap" Opacity="0.75" Margin="0,2,0,6"
+                                   Text="Slow enough that the change is never what catches your eye. Brightening stays instant either way: reaching for the bar should feel like it was already there."/>
+                        <StackPanel Orientation="Horizontal">
+                            <Slider x:Name="FadeDurationSlider" Width="260" Minimum="0.1" Maximum="20"
+                                    SmallChange="0.1" LargeChange="1" TickFrequency="0.1" IsSnapToTickEnabled="True"
+                                    ValueChanged="OnAppearanceChanged"/>
+                            <TextBlock x:Name="FadeDurationValue" Margin="8,0,0,0" VerticalAlignment="Center" MinWidth="70"/>
+                        </StackPanel>
+
+                        <TextBlock Text="Hover card delay" FontWeight="Bold" Margin="0,16,0,0"/>
+                        <TextBlock TextWrapping="Wrap" Opacity="0.75" Margin="0,2,0,6"
+                                   Text="How long the pointer has to rest on an icon before its preview appears. The card carries a picture of the window, so it is asked for rather than triggered by a pointer passing through on its way somewhere else."/>
+                        <!-- The checkbox is how "inherit" is expressed, and inheriting is the default
+                             rather than a fallback: MouseHoverTime is what the taskbar's own thumbnails
+                             wait for, so the bar behaves like the rest of the desktop until told not to. -->
+                        <CheckBox x:Name="InheritHoverDwell" Margin="0,0,0,6"
+                                  Checked="OnAppearanceChanged" Unchecked="OnAppearanceChanged"/>
+                        <StackPanel Orientation="Horizontal">
+                            <Slider x:Name="HoverDwellSlider" Width="260" Minimum="0" Maximum="1500"
+                                    SmallChange="50" LargeChange="100" TickFrequency="50" IsSnapToTickEnabled="True"
+                                    ValueChanged="OnAppearanceChanged"/>
+                            <TextBlock x:Name="HoverDwellValue" Margin="8,0,0,0" VerticalAlignment="Center" MinWidth="70"/>
+                        </StackPanel>
+
+                        <!-- One offset for every piece of bar text, in half points (BarText). It has its own
+                             handler and its own setter, so dragging it writes only this value. -->
+                        <TextBlock Text="Text size" FontWeight="Bold" Margin="0,16,0,0"/>
+                        <TextBlock TextWrapping="Wrap" Opacity="0.75" Margin="0,2,0,6"
+                                   Text="Added to every piece of text on the bar, in half points, so the captions, the clock and the now-playing line all grow or shrink together. Larger text wraps workspace names sooner."/>
+                        <StackPanel Orientation="Horizontal">
+                            <Slider x:Name="TextSizeSlider" Width="260" Minimum="-2" Maximum="8"
+                                    SmallChange="0.5" LargeChange="1" TickFrequency="0.5" IsSnapToTickEnabled="True"
+                                    ValueChanged="OnTextSizeChanged"/>
+                            <TextBlock x:Name="TextSizeValue" Margin="8,0,0,0" VerticalAlignment="Center" MinWidth="70"/>
+                        </StackPanel>
+
+                        <!-- The icon size (IconScaling), in percent, with its own handler and setter like the text
+                             size. Petre: "let's also make icon sizes configurable", "as a separate setting",
+                             "including icons at the bottom". -->
+                        <TextBlock Text="Icon size" FontWeight="Bold" Margin="0,16,0,0"/>
+                        <TextBlock TextWrapping="Wrap" Opacity="0.75" Margin="0,2,0,6"
+                                   Text="How big the bar draws its icons: the apps in the rows, the pinned apps with Start and search, and the icons in the bottom strip. Text keeps its own size. Bigger icons fit fewer to a line, so busy rows grow taller."/>
+                        <StackPanel Orientation="Horizontal">
+                            <Slider x:Name="IconSizeSlider" Width="260" Minimum="60" Maximum="160"
+                                    SmallChange="5" LargeChange="10" TickFrequency="5" IsSnapToTickEnabled="True"
+                                    ValueChanged="OnIconSizeChanged"/>
+                            <TextBlock x:Name="IconSizeValue" Margin="8,0,0,0" VerticalAlignment="Center" MinWidth="70"/>
+                        </StackPanel>
+
+                        <!-- The window list's floor (WindowListLines), with its own handler and setter like the
+                             text size, so dragging it writes only this value. -->
+                        <TextBlock Text="Window list height" FontWeight="Bold" Margin="0,16,0,0"/>
+                        <TextBlock TextWrapping="Wrap" Opacity="0.75" Margin="0,2,0,6"
+                                   Text="The fewest lines the current workspace's window list keeps, so windows can come and go without the bar changing height. With more windows than this, the list grows."/>
+                        <StackPanel Orientation="Horizontal">
+                            <Slider x:Name="ListLinesSlider" Width="260" Minimum="1" Maximum="12"
+                                    SmallChange="1" LargeChange="1" TickFrequency="1" IsSnapToTickEnabled="True"
+                                    ValueChanged="OnListLinesChanged"/>
+                            <TextBlock x:Name="ListLinesValue" Margin="8,0,0,0" VerticalAlignment="Center" MinWidth="70"/>
+                        </StackPanel>
+                    </StackPanel>
+                    </ScrollViewer>
+                </DockPanel>
+            </TabItem>
+            <TabItem Header="Rules">
+                <DockPanel Margin="8">
+                    <TextBlock DockPanel.Dock="Top" TextWrapping="Wrap" Margin="0,0,0,8"
+                               Text="Rules run top-to-bottom; first match wins. Kinds: ProcessName (exact, e.g. chrome), TitleRegex (.NET regex on the title), BrowserProfile (Chrome/Edge --profile-directory name)."/>
+                    <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" Margin="0,8,0,0">
+                        <Button Content="Save rules" Padding="12,2" Click="OnSaveRules"/>
+                    </StackPanel>
+                    <StackPanel>
+                        <TextBlock Text="Workspace rules" FontWeight="Bold"/>
+                        <DataGrid x:Name="WorkspaceRulesGrid" AutoGenerateColumns="True" Height="140" CanUserAddRows="True"/>
+                        <TextBlock Text="Rename rules" FontWeight="Bold" Margin="0,8,0,0"/>
+                        <DataGrid x:Name="RenameRulesGrid" AutoGenerateColumns="True" Height="140" CanUserAddRows="True"/>
+                    </StackPanel>
+                </DockPanel>
+            </TabItem>
+            <!-- The "Windows" tab is deliberately gone. Petre: "no need for that window tab",
+                 "what's the point of it? we already have floating window manager doing just
+                 that". The floating bar covers jumping to a window and dragging windows
+                 between workspaces, which is what the tab was mostly used for.
+                 What went with it, so the loss is on the record rather than discovered later:
+                 ▶ Start (relaunch a workspace's apps), Add app… / Remove from workspace, and
+                 the dimmed not-running roster rows. The roster DATA is untouched and still
+                 drives placement memory and the post-reboot restore prompt; only its editing
+                 UI is gone. If ▶ Start is wanted back it belongs on the Workspaces tab, next
+                 to the workspace it starts. -->
+        </TabControl>
+    </DockPanel>
+</Window>

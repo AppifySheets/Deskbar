@@ -1,0 +1,207 @@
+using Deskbar.Core.Domain;
+using Deskbar.Core.Persistence;
+using Deskbar.Core.Rehydration;
+
+namespace Deskbar.Core.Tests;
+
+// Petre: "i'm starting the edge browser and it immediately goes to personal, i'm starting it
+// in messaging, why?"
+//
+// Because membership identity for a Chromium browser is the PROFILE, so every Default-profile
+// Edge window shares one identity. One of his had been dragged to Personal; AddEntry strips an
+// identity from every other workspace so exactly one can claim it; and from then on Personal
+// owned every Edge window he would ever open. His state.json showed exactly that -- Personal
+// holding one msedge entry with "--profile-directory=Default --restart --restore-last-session".
+//
+// The rule these tests pin: placement memory restores where an app lives when it comes BACK,
+// so it must not herd additional windows of an app that is already open.
+public class SharedIdentityPlacementTests
+{
+    const string EdgePath = @"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe";
+    const string BeeperPath = @"C:\apps\Beeper.exe";
+
+    readonly FakeDesktops desktops = new();
+    readonly FakeMonitor monitor = new();
+    readonly FakeStore store = new();
+
+    Workspace personal = null!;
+    Workspace messaging = null!;
+
+    static WindowInfo Edge(nint hwnd, string args = "--profile-directory=Default") =>
+        new(new WindowHandle(hwnd), 900, "msedge", EdgePath, "Edge", $"\"{EdgePath}\" {args}");
+
+    static WindowInfo Beeper(nint hwnd) =>
+        new(new WindowHandle(hwnd), 950, "Beeper", BeeperPath, "Beeper", $"\"{BeeperPath}\" ");
+
+    WorkspaceManager Started(params WindowInfo[] alreadyOpen)
+    {
+        personal = new Workspace(Guid.NewGuid(), "Personal", Guid.NewGuid());
+        messaging = new Workspace(Guid.NewGuid(), "Messaging", Guid.NewGuid());
+        desktops.Desktops.Add(new Abstractions.DesktopInfo(personal.DesktopId!.Value, "Personal"));
+        desktops.Desktops.Add(new Abstractions.DesktopInfo(messaging.DesktopId!.Value, "Messaging"));
+        desktops.CurrentDesktopId = messaging.DesktopId!.Value; // Petre is IN Messaging
+        store.Stored = AppState.Empty with { Workspaces = [personal, messaging] };
+        monitor.InitialWindows.AddRange(alreadyOpen);
+
+        var manager = new WorkspaceManager(desktops, monitor, new FakeTitles(), store, ownProcessId: 4242);
+        Assert.True(manager.Start().IsSuccess);
+        return manager;
+    }
+
+    // Personal claims the shared Edge identity, exactly as his file did.
+    void GivenPersonalOwnsEdge(WorkspaceManager manager, WindowInfo edge)
+    {
+        Assert.True(manager.AssignWindow(edge.Handle, personal.Id).IsSuccess);
+        Assert.Equal(personal.DesktopId, desktops.WindowPlacements[edge.Handle]);
+    }
+
+    // The reported defect. A second Edge window opened while in Messaging must stay there.
+    [Fact]
+    public void A_new_browser_window_is_not_dragged_to_where_another_one_lives()
+    {
+        var manager = Started(Edge(0x701));
+        GivenPersonalOwnsEdge(manager, Edge(0x701));
+
+        monitor.Subject.OnNext(new WindowEvent(WindowEventKind.Appeared, Edge(0x702)));
+
+        Assert.False(desktops.WindowPlacements.ContainsKey(Edge(0x702).Handle));
+    }
+
+    // The other half of the same rule: with no other window of that identity live, memory is
+    // unambiguous and MUST still place it. This is the Beeper case -- it closes to tray,
+    // destroying its window, so the replacement is the only one of its identity.
+    [Fact]
+    public void An_app_coming_back_alone_is_still_placed_from_memory()
+    {
+        var manager = Started(Beeper(0x801));
+        Assert.True(manager.AssignWindow(Beeper(0x801).Handle, personal.Id).IsSuccess);
+
+        // Closed to tray: gone from the live list, roster entry survives (that is the point).
+        monitor.Subject.OnNext(new WindowEvent(WindowEventKind.Disappeared, Beeper(0x801)));
+        desktops.WindowPlacements.Clear();
+
+        monitor.Subject.OnNext(new WindowEvent(WindowEventKind.Appeared, Beeper(0x802)));
+
+        Assert.Equal(personal.DesktopId, desktops.WindowPlacements[Beeper(0x802).Handle]);
+    }
+
+    // Startup redistribution has the same problem in bulk: after a reboot Edge restores
+    // several windows at once and memory knows ONE workspace for all of them, so applying it
+    // would herd the lot.
+    [Fact]
+    public void Startup_does_not_herd_every_window_of_one_identity_into_one_workspace()
+    {
+        var manager = Started(Edge(0x701));
+        GivenPersonalOwnsEdge(manager, Edge(0x701));
+
+        // Restart with three Edge windows live, none of them on a workspace desktop.
+        desktops.WindowPlacements.Clear();
+        var reopened = new FakeMonitor();
+        reopened.InitialWindows.AddRange([Edge(0x711), Edge(0x712), Edge(0x713)]);
+        var restarted = new WorkspaceManager(desktops, reopened, new FakeTitles(), store, ownProcessId: 4242);
+        Assert.True(restarted.Start().IsSuccess);
+
+        Assert.Empty(desktops.WindowPlacements);
+    }
+
+    // --- identity: a PWA is not the browser -----------------------------------------------
+
+    // Petre's YouTube Music runs as msedge on the Default profile, so on profile alone it was
+    // the SAME identity as his ordinary Edge windows -- meaning it could never be remembered
+    // anywhere of its own. The app id separates them.
+    [Fact]
+    public void An_installed_web_app_has_its_own_identity()
+    {
+        var browser = RosterIdentity.Of(EdgePath, $"\"{EdgePath}\" --profile-directory=Default");
+        var youTubeMusic = RosterIdentity.Of(EdgePath, $"\"{EdgePath}\" --profile-directory=Default --app-id=cinhimbnkkaeohfgghhklpknlkffjgod");
+
+        Assert.NotEqual(browser, youTubeMusic);
+    }
+
+    [Fact]
+    public void Two_windows_of_the_same_web_app_are_still_one_identity()
+    {
+        var first = RosterIdentity.Of(EdgePath, $"\"{EdgePath}\" --profile-directory=Default --app-id=abc");
+        var second = RosterIdentity.Of(EdgePath, $"\"{EdgePath}\" --app-id=abc --profile-directory=Default --restore-last-session");
+
+        Assert.Equal(first, second);
+    }
+
+    // A URL shortcut rather than an installed PWA: same idea, --app= instead of --app-id=.
+    [Fact]
+    public void A_url_shortcut_window_also_gets_its_own_identity()
+    {
+        var browser = RosterIdentity.Of(EdgePath, $"\"{EdgePath}\" --profile-directory=Default");
+        var shortcut = RosterIdentity.Of(EdgePath, $"\"{EdgePath}\" --profile-directory=Default --app=https://music.youtube.com/");
+
+        Assert.NotEqual(browser, shortcut);
+    }
+
+    // Different profiles must remain different, as they always were.
+    [Fact]
+    public void Different_profiles_are_still_different_identities() =>
+        Assert.NotEqual(
+            RosterIdentity.Of(EdgePath, $"\"{EdgePath}\" --profile-directory=Default"),
+            RosterIdentity.Of(EdgePath, $"\"{EdgePath}\" --profile-directory=\"Profile 2\""));
+
+    // --- an automated browser is a different app (Petre's Chrome report) ------------------------
+    //
+    // "Opening chrome in a workspace, i think claude opened it, opened up in my current workspace, not
+    // its own workspace... but it has worked correctly in the past."
+    //
+    // The trace named both halves. The launched-by tier declined because the launcher's most recent
+    // window was in the workspace he was already standing in, so there was nothing to move. And memory
+    // declined because another live Chrome shared the identity -- which on his machine every Chrome
+    // does, since not one of them passes --profile-directory. The past successes were the launched-by
+    // tier catching it whenever he happened to be standing somewhere else.
+    //
+    // That fix gave the automated browser an identity of its own so memory could send it to the
+    // workspace it had been dragged to. It is reversed now, and on purpose: "if claude starts a browser
+    // window, it needs to stay in the same workspace as the claude code is in." Memory knew ONE
+    // workspace for every automated session, so with sessions in several workspaces it sent all of
+    // them to whichever row the last one was dragged to. Browser windows now stay where they were
+    // opened (see RosterIdentity.StaysWhereOpened), and the launched-by tier is what sends a browser
+    // to the workspace of the session that started it.
+    //
+    // So the test below now pins the opposite of what it used to: memory leaves an automated window
+    // alone too. BrowserContent still reads --user-data-dir and RosterIdentityTests still cover it, but
+    // the only live windows that reach it now are installed web apps, which keep an identity.
+    const string ChromePath = @"C:\Program Files\Google\Chrome\Application\chrome.exe";
+
+    static WindowInfo Chrome(nint hwnd, string args) =>
+        new(new WindowHandle(hwnd), 960, "chrome", ChromePath, "Chrome", $"\"{ChromePath}\" {args}");
+
+    static WindowInfo Automated(nint hwnd, string session) =>
+        Chrome(hwnd, $@"--user-data-dir=C:\x\ms-playwright-mcp\mcp-chrome-{session} --enable-automation");
+
+    [Fact]
+    public void An_automated_browser_window_is_left_where_it_opened_like_any_browser_window()
+    {
+        // Two ordinary Chrome windows are live, and one automated one has been taught to live in
+        // Personal, exactly as his roster records it ("dice to seed - Google Chrome").
+        var manager = Started(Chrome(0x901, "--restore-session"), Chrome(0x902, ""), Automated(0x903, "829010e"));
+        Assert.True(manager.AssignWindow(Automated(0x903, "829010e").Handle, personal.Id).IsSuccess);
+
+        // That session ends and a new one starts, with a directory named differently.
+        monitor.Subject.OnNext(new WindowEvent(WindowEventKind.Disappeared, Automated(0x903, "829010e")));
+        desktops.WindowPlacements.Clear();
+
+        monitor.Subject.OnNext(new WindowEvent(WindowEventKind.Appeared, Automated(0x904, "5adf218")));
+
+        Assert.False(desktops.WindowPlacements.ContainsKey(Automated(0x904, "5adf218").Handle));
+    }
+
+    [Fact]
+    public void An_ordinary_browser_window_is_still_left_where_it_opened()
+    {
+        var manager = Started(Chrome(0x901, "--restore-session"), Automated(0x903, "829010e"));
+        Assert.True(manager.AssignWindow(Automated(0x903, "829010e").Handle, personal.Id).IsSuccess);
+        desktops.WindowPlacements.Clear();
+
+        // A Chrome window he opens himself is not the automated app coming back, and must not be
+        // dragged to where that one lives.
+        monitor.Subject.OnNext(new WindowEvent(WindowEventKind.Appeared, Chrome(0x905, "")));
+
+        Assert.False(desktops.WindowPlacements.ContainsKey(Chrome(0x905, "").Handle));
+    }
+}

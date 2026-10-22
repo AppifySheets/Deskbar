@@ -138,7 +138,7 @@ instead:
 ```powershell
 git clone https://github.com/AppifySheets/Deskbar.git
 cd Deskbar
-dotnet publish src/TaskSpaces.App/TaskSpaces.App.csproj -c Release -r win-x64 `
+dotnet publish src/Deskbar.App/Deskbar.App.csproj -c Release -r win-x64 `
   --self-contained true -p:PublishSingleFile=true `
   -p:IncludeNativeLibrariesForSelfExtract=true -p:EnableCompressionInSingleFile=true `
   -o artifacts/publish
@@ -822,7 +822,7 @@ volume dial, WinRT `Windows.Media.Control` for now-playing, and CSharpFunctional
 railway-style error handling.
 
 The domain is deliberately COM-free and heavily unit-tested: about a thousand test methods across
-two projects, the great majority in `TaskSpaces.Core.Tests` and running without touching Windows
+two projects, the great majority in `Deskbar.Core.Tests` and running without touching Windows
 at all. Most of the rest construct real WPF windows on an STA thread per test. Nine carry
 `Category=Integration`: they create, switch and delete real virtual desktops, activate real
 windows, or call github.com, and they are excluded from the routine run below.
@@ -830,15 +830,15 @@ windows, or call github.com, and they are excluded from the routine run below.
 ## Development
 
 ```powershell
-dotnet build TaskSpaces.sln
-dotnet test TaskSpaces.sln --filter "Category!=Integration"
+dotnet build Deskbar.sln
+dotnet test Deskbar.sln --filter "Category!=Integration"
 ```
 
 The `Category=Integration` tests are excluded from that command on purpose: they create, switch
 and delete **real** virtual desktops on the machine running them. Run them deliberately, not
 while you are working.
 
-The C# namespaces, project files and `TaskSpaces.sln` keep their old names on purpose, so the
+The C# namespaces, project files and `Deskbar.sln` keep their old names on purpose, so the
 commands above are unchanged. Until 2.0 is on main, run a Debug build on a machine that still
 runs TaskSpaces 1.x with the environment variable `DESKBAR_APPDATA` set to a scratch folder,
 given as a full path (a relative one is ignored). Otherwise its first start migrates your real

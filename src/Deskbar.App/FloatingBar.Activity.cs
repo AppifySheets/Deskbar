@@ -1,0 +1,173 @@
+﻿using System.Windows;
+using System.Windows.Controls;
+using System.Windows.Media;
+using System.Windows.Media.Animation;
+using System.Windows.Shapes;
+using Deskbar.Core.Domain;
+using Deskbar.Core.Overview;
+using Deskbar.Windows.Audio;
+
+namespace Deskbar.App;
+
+// TWO MARKS ON WINDOW ICONS, both "c" from three mockups.
+//
+//   tabs    Petre: "let's include tab counts in browsers in their icons". A browser window with two or more tabs
+//           has the count small at its top. Counts come from BrowserTabs. The mockup also stacked two card
+//           outlines behind the icon; on the bar they were "tab counts are good; but i don't want those rings",
+//           "just not browser square rings", so the count stands alone.
+//   sound   Petre: "if any window is playing sound, show it on it so i can quickly see what's the source of
+//           sound". A soft green ring pulses round the icon of every window making sound, and round its pin.
+//
+// Which window is sounding is decided here (see Sounding), from AudioActivity's processes and BrowserTabs'
+// readings, once per rebuild and before any icon is built.
+public partial class FloatingBar
+{
+    static readonly Brush TabCountInk = Frozen(0xE6, 0xFF, 0xFF, 0xFF);
+    static readonly Brush SoundRing = Frozen(0xFF, 0x6E, 0xE7, 0xA6);
+
+    IBrowserTabs? tabs;
+    IAudioActivity? sound;
+    HashSet<WindowHandle> sounding = [];
+
+    // Where the readings come from. Set by the composition root; left unset, as the tests but these leave them,
+    // no window has a count or a ring.
+    public IBrowserTabs? Tabs
+    {
+        get => tabs;
+        init
+        {
+            tabs = value;
+            var subscription = value?.Changed.Subscribe(_ => Dispatcher.BeginInvoke(Rebuild));
+            Closed += (_, _) => subscription?.Dispose();
+        }
+    }
+
+    public IAudioActivity? Sound
+    {
+        get => sound;
+        init
+        {
+            sound = value;
+            var subscription = value?.Changed.Subscribe(_ => Dispatcher.BeginInvoke(Rebuild));
+            Closed += (_, _) => subscription?.Dispose();
+        }
+    }
+
+    // Every rebuild, before its icons: tell BrowserTabs which windows are on show, and work out which of them
+    // are sounding.
+    void NoteActivity(Overview overview)
+    {
+        var windows = overview.Pinned
+            .Concat(overview.Workspaces.SelectMany(w => w.Running))
+            .Concat(overview.OtherDesktops.SelectMany(d => d.Windows))
+            .Select(r => r.Window)
+            .DistinctBy(w => w.Handle)
+            .ToList();
+        tabs?.Watch(windows);
+        var before = sounding;
+        // The app Windows says is playing media, when one is (the now-playing line's session), so a browser's web
+        // apps can be told apart by it (see Sounding, step 2).
+        var playingApp = media?.Current is { HasValue: true } session && session.Value.Playing ? session.Value.AppId : null;
+        sounding = Sounding(windows, sound?.Playing ?? new HashSet<int>(), h => tabs?.Of(h), AppIdOf, playingApp);
+        if (ClickTrace.On && !sounding.SetEquals(before))
+            ClickTrace.Write($"sound: playing pids=[{string.Join(",", sound?.Playing ?? new HashSet<int>())}] " +
+                             $"windows=[{string.Join(", ", windows.Where(w => sounding.Contains(w.Handle)).Select(w => $"{w.Handle.Value:X}/{w.ProcessName}"))}]");
+    }
+
+    // Which windows the sound is coming from. An ordinary app: every window of a playing process. A browser
+    // plays all its sound through one helper, so its windows are narrowed down:
+    //
+    //   1. the windows with a tab marked as playing audio, when there are any;
+    //   2. otherwise the installed web app whose AppUserModelID is the app Windows' media session says is playing,
+    //      when one matches. Petre: "yt music is playing and outlook is also ringed", "both pwa". Every PWA of a
+    //      browser runs in its one process, so step 3 alone lit them all. Measured on his machine: the session's
+    //      app is music.youtube.com-5929F88E_vezhnr0wkvrcy!App, the YouTube Music window's own ID is the same,
+    //      and Outlook's is outlook.cloud.microsoft-6A7975FB_3y1e9vxbwqkga!App;
+    //   3. otherwise its windows with no tab strip, the installed web apps, when there are any;
+    //   4. otherwise every window of it, because showing the browser beats showing nothing.
+    // Step 2 only narrows: a web app making sound with no media session (a call, a notification chime) still
+    // falls through to step 3.
+    internal static HashSet<WindowHandle> Sounding(IReadOnlyList<WindowInfo> windows, IReadOnlySet<int> playing, Func<WindowHandle, TabInfo?> tabsOf,
+        Func<WindowInfo, string?>? appIdOf = null, string? playingApp = null) =>
+        windows.Where(w => playing.Contains(w.ProcessId))
+            .GroupBy(w => w.ProcessId)
+            .SelectMany(process =>
+            {
+                if (!BrowserTabs.IsBrowser(process.First())) return process.AsEnumerable();
+                var marked = process.Where(w => tabsOf(w.Handle)?.PlayingAudio == true).ToList();
+                if (marked.Count > 0) return marked;
+                var apps = process.Where(w => tabsOf(w.Handle) is { Count: 0 }).ToList();
+                var player = playingApp is null || appIdOf is null
+                    ? []
+                    : apps.Where(w => string.Equals(appIdOf(w), playingApp, StringComparison.OrdinalIgnoreCase)).ToList();
+                return player.Count > 0 ? player : apps.Count > 0 ? apps : process.AsEnumerable();
+            })
+            .Select(w => w.Handle)
+            .ToHashSet();
+
+    // The two marks around an icon that WithState has already dressed: the count and the ring on top, neither
+    // hit-testable, both overlaying the 24 DIP cell so a row measures as before.
+    UIElement WithActivity(UIElement icon, WindowRow row) =>
+        Dressed(icon, tabs?.Of(row.Window.Handle)?.Count ?? 0, sounding.Contains(row.Window.Handle));
+
+    // The dressing itself, pure so a test can measure it: the result must measure exactly what the icon alone
+    // measures, or the row grows (FloatingBarActivityLayoutTests).
+    internal static UIElement Dressed(UIElement icon, int tabCount, bool loud)
+    {
+        var count = tabCount;
+        if (count < 2 && !loud) return icon;
+
+        var cell = new Grid();
+        cell.Children.Add(icon);
+        if (count >= 2)
+            cell.Children.Add(new TextBlock
+            {
+                Text = count > 99 ? "99+" : count.ToString(),
+                FontSize = 8,
+                FontWeight = FontWeights.Bold,
+                Foreground = TabCountInk,
+                HorizontalAlignment = HorizontalAlignment.Right,
+                VerticalAlignment = VerticalAlignment.Top,
+                Margin = new Thickness(0, -6, -3, 0),
+                IsHitTestVisible = false,
+            });
+        if (loud)
+        {
+            // The ring is drawn at the CELL's size (24), round the button's padding and border, but it sits in
+            // the button's CONTENT, which is the 20 DIP artwork. Left to WPF, the content would grow to the
+            // ring's 24, the button to 28, and the whole line 4 DIP taller the moment a window started
+            // playing (Petre: "when they do, workspace height grows; it has to be same height"). The negative
+            // margin takes the 2 DIP overhang back out of layout on every side, exactly as the tab count's
+            // negative margin above keeps the count from widening the icon, so the ring is painted over the
+            // padding and border without being measured there.
+            var ring = Ring(24);
+            ring.Margin = new Thickness(-2);
+            cell.Children.Add(ring);
+        }
+        return cell;
+    }
+
+    // The sound ring: a circle round the icon whose opacity breathes. Still, at full strength, when Windows'
+    // own animations are turned off, which is the setting a person who finds motion distracting has chosen.
+    static Ellipse Ring(double size)
+    {
+        var ring = new Ellipse
+        {
+            Width = size,
+            Height = size,
+            Stroke = SoundRing,
+            StrokeThickness = 1.5,
+            IsHitTestVisible = false,
+            HorizontalAlignment = HorizontalAlignment.Center,
+            VerticalAlignment = VerticalAlignment.Center,
+        };
+        if (SystemParameters.ClientAreaAnimation)
+            ring.BeginAnimation(UIElement.OpacityProperty, new DoubleAnimation(0.95, 0.35, TimeSpan.FromMilliseconds(800))
+            {
+                AutoReverse = true,
+                RepeatBehavior = RepeatBehavior.Forever,
+                EasingFunction = new SineEase { EasingMode = EasingMode.EaseInOut },
+            });
+        return ring;
+    }
+}

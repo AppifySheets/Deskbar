@@ -1,0 +1,328 @@
+using CSharpFunctionalExtensions;
+using Deskbar.Core.Abstractions;
+using Deskbar.Core.Domain;
+using Deskbar.Core.Overview;
+
+namespace Deskbar.Core.Tests;
+
+// Petre: "when switching workspaces, i want you to activate the window which was last active
+// last time this workspace was active", and -- for the marker -- "make the last active window
+// in that workspace look a bit different... so i know what i'm going to have activated when i
+// land on that workspace".
+//
+// One map drives both, so the restore and the marker cannot disagree; these tests hold both
+// ends of that to the same facts.
+public class LastActiveWindowTests
+{
+    readonly FakeDesktops desktops = new();
+    readonly FakeMonitor monitor = new();
+    readonly FakeTitles titles = new();
+    readonly FakeStore store = new();
+    readonly FakeActivator activator = new();
+    readonly FakeScreenLayout screen = new();
+
+    static WindowInfo Window(nint handle, string process) =>
+        new(new WindowHandle(handle), (int)handle, process, $@"C:\{process}.exe", $"{process} window", $@"""C:\{process}.exe""");
+
+    readonly WindowInfo code = Window(0x1, "Code");
+    readonly WindowInfo browser = Window(0x2, "Browser");
+    readonly WindowInfo mail = Window(0x3, "Mail");
+
+    Guid work;
+    Guid personal;
+
+    // As Started(), but with screen information available -- which is what switches the
+    // main-monitor fallback on.
+    WorkspaceManager StartedWithScreen() => Started(withScreen: true);
+
+    // Two desktops: Work holds Code + Browser, Personal holds Mail. We start on Work.
+    WorkspaceManager Started(bool withScreen = false)
+    {
+        work = desktops.Create("Work").Value.Id;
+        personal = desktops.Create("Personal").Value.Id;
+        desktops.CurrentDesktopId = work;
+
+        monitor.InitialWindows.AddRange([code, browser, mail]);
+        desktops.WindowPlacements[code.Handle] = work;
+        desktops.WindowPlacements[browser.Handle] = work;
+        desktops.WindowPlacements[mail.Handle] = personal;
+
+        var manager = new WorkspaceManager(desktops, monitor, titles, store,
+            activator: activator, screenLayout: withScreen ? screen : null);
+        Assert.True(manager.Start().IsSuccess);
+        return manager;
+    }
+
+    // FakeDesktops.Switch records the call but raises nothing, exactly like the real service:
+    // CurrentChanged comes back from the OS separately. Driven explicitly here so a test can be
+    // precise about the order the two arrive in.
+    void SwitchTo(Guid desktopId)
+    {
+        desktops.CurrentDesktopId = desktopId;
+        desktops.CurrentChangedSubject.OnNext(desktopId);
+    }
+
+    static IReadOnlyList<WindowRow> RowsOn(WorkspaceManager manager, Guid desktopId) =>
+        manager.WindowsByWorkspace().Value.OtherDesktops.Single(g => g.DesktopId == desktopId).Windows;
+
+    [Fact]
+    public void Landing_on_a_desktop_activates_the_window_that_had_focus_when_we_left_it()
+    {
+        var manager = Started();
+        monitor.Subject.OnNext(new WindowEvent(WindowEventKind.Activated, browser));
+
+        SwitchTo(personal);
+        activator.Activated.Clear(); // whatever Personal did on arrival is not what we assert
+        SwitchTo(work);
+
+        Assert.Equal(browser.Handle, Assert.Single(activator.Activated));
+    }
+
+    // Petre: "i had teams active there, when i leave the workspace teams isn't mentioned as
+    // selected in that one anymore", and "activates a second window".
+    //
+    // MEASURED from a trace of the real app, not reasoned about. Teams was stamped onto a
+    // workspace it does not live on, and the entry then vanished on the next arrival.
+    //
+    // The mechanism: activeWindow deliberately NEVER clears on None (Foreground() reports None
+    // for the taskbar, the Start menu and our own bar, and blinking the highlight off every time
+    // Petre touches one of those would be worse). So landing somewhere that gives nothing focus
+    // -- an empty workspace, a restore that found nothing, a foreground window we do not track --
+    // leaves activeWindow holding the PREVIOUS desktop's window. Leaving then stamped that
+    // foreign window over the departing desktop's perfectly good memory.
+    //
+    // The corruption is self-erasing, which is why it looked like forgetting rather than like a
+    // wrong answer: Remembered() validates with DesktopOf on the way back in, sees the window
+    // does not belong, and drops the entry. The marker disappears. And with the entry gone the
+    // restore falls through to FrontmostOnMainMonitor -- "activates a second window".
+    //
+    // So the write path now validates exactly as the read path already did. When the active
+    // window is not on the desktop being left, we have learned NOTHING about that desktop, and
+    // the right move is to leave what we already knew alone.
+    // The damage is an OVERWRITE, which is what makes it look like forgetting: the bogus entry
+    // names a window on another desktop, so it can never light up a row here -- it just destroys
+    // the good answer that was there, and then erases itself on the next arrival.
+    [Fact]
+    public void Leaving_a_desktop_does_not_overwrite_its_memory_with_a_window_that_lives_elsewhere()
+    {
+        var manager = Started();
+        // Work correctly remembers Browser: focus it, then leave.
+        monitor.Subject.OnNext(new WindowEvent(WindowEventKind.Activated, browser));
+        SwitchTo(personal);
+        SwitchTo(work);
+
+        // Now the stale case, exactly as traced in the running app: activeWindow names Mail,
+        // which lives on PERSONAL, while we are standing on Work. In the app this is simply what
+        // is left over after landing somewhere that gave nothing focus. Leaving Work must not
+        // claim Mail for Work.
+        monitor.Subject.OnNext(new WindowEvent(WindowEventKind.Activated, mail));
+        SwitchTo(personal);
+
+        // Work still names Browser. Before the fix its memory was replaced by Mail -- a window
+        // with no row on Work, so NOTHING was marked -- and the entry was then dropped by the
+        // DesktopOf check on the next arrival.
+        Assert.Equal(browser.Handle, RowsOn(manager, work).Single(r => r.WillActivate).Window.Handle);
+    }
+
+    // The stamp happens on the way OUT, so a desktop never visited this session has nothing
+    // remembered. With no screen information to fall back on either, there is nothing to do.
+    [Fact]
+    public void Landing_on_a_desktop_we_have_never_left_activates_nothing_without_screen_facts()
+    {
+        var manager = Started();
+        monitor.Subject.OnNext(new WindowEvent(WindowEventKind.Activated, browser));
+
+        SwitchTo(personal);
+
+        Assert.Empty(activator.Activated);
+    }
+
+    // Petre: "if we don't have the information about what was the last active window on that
+    // monitor, activate the foreground window on the main monitor... rather than not focus any
+    // window." So the first visit of a session no longer leaves focus wherever Windows put it.
+    [Fact]
+    public void Landing_somewhere_unremembered_falls_back_to_the_front_window_on_the_main_monitor()
+    {
+        var manager = StartedWithScreen();
+        desktops.WindowPlacements[browser.Handle] = personal; // two windows on Personal to choose between
+        // Browser is in front on monitor 1; mail is in front on monitor 2, which is PRIMARY --
+        // so the main monitor's front window is mail, even though browser is further forward.
+        screen.Facts = FakeScreenLayout.On(primary: 2, (browser.Handle, 1), (mail.Handle, 2));
+
+        SwitchTo(personal);
+
+        Assert.Equal(mail.Handle, Assert.Single(activator.Activated));
+    }
+
+    // ScreenLayout enumerates windows directly, so it has never heard of WindowMonitor's ignore
+    // list -- our own floating bar is in that snapshot, and being permanently topmost it sits at
+    // the very front of it. Without narrowing to windows the manager knows, the fallback would
+    // hand focus to our own bar on every unremembered landing.
+    [Fact]
+    public void The_fallback_never_picks_a_window_the_manager_does_not_know_about()
+    {
+        var manager = StartedWithScreen();
+        var ourBar = new WindowHandle(0xBA5);
+        // Placed on Personal deliberately, so it would pass the desktop check and be activated
+        // if knownWindows were not doing the excluding. The bar really is topmost, so it really
+        // would head this list.
+        desktops.WindowPlacements[ourBar] = personal;
+        screen.Facts = FakeScreenLayout.On(primary: 2, (ourBar, 2), (mail.Handle, 2));
+
+        SwitchTo(personal);
+
+        Assert.Equal(mail.Handle, Assert.Single(activator.Activated));
+    }
+
+    // Petre: "i can't switch workspaces anymore... it pushes me back to the current workspace."
+    //
+    // The first version of the fallback took no DesktopOf calls, reasoning that we have already
+    // ARRIVED when it runs, so the un-cloaked windows in a screen snapshot must be this
+    // desktop's. Cloaking is not synchronous with the desktop-change notification: the snapshot
+    // still described the desktop just LEFT, the fallback activated a window over there, and
+    // activating a window on another virtual desktop makes Windows follow it. Every switch
+    // bounced back, which looks exactly like switching being broken.
+    //
+    // Modelled here by handing the fallback a snapshot full of windows that are NOT on the
+    // desktop being arrived at -- which is precisely what a stale snapshot is.
+    [Fact]
+    public void The_fallback_never_activates_a_window_on_another_desktop()
+    {
+        var manager = StartedWithScreen();
+        // A stale snapshot: code and browser both live on Work, but we are landing on Personal.
+        screen.Facts = FakeScreenLayout.On(primary: 2, (code.Handle, 2), (browser.Handle, 2));
+
+        SwitchTo(personal);
+
+        Assert.Empty(activator.Activated);
+    }
+
+    // ...and it must still find the right window when the snapshot has a mix, rather than giving
+    // up at the first candidate that fails the check.
+    [Fact]
+    public void The_fallback_skips_past_stale_candidates_to_one_actually_on_this_desktop()
+    {
+        var manager = StartedWithScreen();
+        desktops.WindowPlacements[mail.Handle] = personal;
+        // Front to back: code (Work -- stale), then mail (Personal -- the real answer).
+        screen.Facts = FakeScreenLayout.On(primary: 2, (code.Handle, 2), (mail.Handle, 2));
+
+        SwitchTo(personal);
+
+        Assert.Equal(mail.Handle, Assert.Single(activator.Activated));
+    }
+
+    // A remembered window always beats the fallback -- the fallback exists for the case where
+    // there is nothing to remember, not as a second opinion.
+    [Fact]
+    public void A_remembered_window_wins_over_the_main_monitor_fallback()
+    {
+        var manager = StartedWithScreen();
+        screen.Facts = FakeScreenLayout.On(primary: 2, (code.Handle, 2), (browser.Handle, 2));
+        monitor.Subject.OnNext(new WindowEvent(WindowEventKind.Activated, browser));
+
+        SwitchTo(personal);
+        activator.Activated.Clear();
+        SwitchTo(work);
+
+        Assert.Equal(browser.Handle, Assert.Single(activator.Activated));
+    }
+
+    // A remembered window that has since been closed or dragged elsewhere must not be dragged
+    // back. DesktopOf answers both cases at once -- it fails outright for a dead hwnd.
+    [Fact]
+    public void A_remembered_window_that_moved_desktops_is_not_restored()
+    {
+        var manager = Started();
+        monitor.Subject.OnNext(new WindowEvent(WindowEventKind.Activated, browser));
+        SwitchTo(personal);
+        activator.Activated.Clear();
+
+        desktops.WindowPlacements[browser.Handle] = personal; // dragged away while we were gone
+        SwitchTo(work);
+
+        Assert.Empty(activator.Activated);
+    }
+
+    // The marker cannot outlive the window's presence on that desktop, and it gets that for
+    // free rather than by bookkeeping: a marker is only ever drawn on a row, and a row only
+    // exists on the desktop the window is actually on. So a window that leaves takes its marker
+    // with it, without anything having to notice.
+    [Fact]
+    public void A_window_that_left_the_desktop_stops_being_marked_there()
+    {
+        var manager = Started();
+        monitor.Subject.OnNext(new WindowEvent(WindowEventKind.Activated, browser));
+        SwitchTo(personal);
+        Assert.True(RowsOn(manager, work).Single(r => r.Window.Handle == browser.Handle).WillActivate);
+
+        desktops.WindowPlacements[browser.Handle] = personal; // dragged to where we now stand
+
+        Assert.DoesNotContain(RowsOn(manager, work), r => r.WillActivate);
+    }
+
+    // A pinned window is on every desktop already, so restoring it says nothing and marking it
+    // would claim a landing spot that was never in question.
+    [Fact]
+    public void A_pinned_window_is_never_remembered_as_a_desktops_landing_spot()
+    {
+        var manager = Started();
+        desktops.PinnedWindows.Add(browser.Handle);
+        monitor.Subject.OnNext(new WindowEvent(WindowEventKind.Activated, browser));
+
+        SwitchTo(personal);
+        activator.Activated.Clear();
+        SwitchTo(work);
+
+        Assert.Empty(activator.Activated);
+    }
+
+    [Fact]
+    public void The_window_we_will_land_on_is_marked_on_the_desktop_we_are_not_on()
+    {
+        var manager = Started();
+        monitor.Subject.OnNext(new WindowEvent(WindowEventKind.Activated, browser));
+        SwitchTo(personal);
+
+        var workRows = RowsOn(manager, work);
+        Assert.True(workRows.Single(r => r.Window.Handle == browser.Handle).WillActivate);
+        Assert.False(workRows.Single(r => r.Window.Handle == code.Handle).WillActivate);
+    }
+
+    // The map is stamped on the way OUT, so while you stand on a desktop its entry still names
+    // whatever you were looking at when you last LEFT. Rendering that would put a "you will land
+    // here" marker on one icon while a different icon on the same row wears the live IsActive
+    // highlight -- two contradictory claims about one row.
+    [Fact]
+    public void Nothing_is_marked_on_the_desktop_we_are_already_standing_on()
+    {
+        var manager = Started();
+        monitor.Subject.OnNext(new WindowEvent(WindowEventKind.Activated, browser));
+        SwitchTo(personal);
+        SwitchTo(work); // back, with browser remembered and now re-activated
+
+        Assert.DoesNotContain(RowsOn(manager, work), r => r.WillActivate);
+    }
+
+    // JumpTo switches the desktop and THEN activates its target, so the CurrentChanged that the
+    // switch raises could otherwise restore the previous visit's window and race the jump for
+    // the same foreground. Claiming the target up front makes the two agree instead of compete.
+    [Fact]
+    public void Jumping_to_a_window_makes_it_that_desktops_landing_spot_rather_than_racing_it()
+    {
+        var manager = Started();
+        monitor.Subject.OnNext(new WindowEvent(WindowEventKind.Activated, browser));
+        SwitchTo(personal);
+        activator.Activated.Clear();
+
+        // Jump back to Work, but at CODE -- not the remembered browser.
+        var jump = new FakeActivator();
+        Assert.True(manager.JumpTo(code.Handle, jump).IsSuccess);
+        // The switch JumpTo just performed comes back from the OS as CurrentChanged. Landing
+        // must now restore the jump's own target, not the browser left over from last visit.
+        SwitchTo(work);
+
+        Assert.Contains(code.Handle, jump.Activated);
+        Assert.Equal(code.Handle, Assert.Single(activator.Activated));
+    }
+}

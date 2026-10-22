@@ -1,0 +1,3742 @@
+﻿using System.IO;
+using System.Reactive;
+using System.Reactive.Linq;
+using System.Reactive.Subjects;
+using CSharpFunctionalExtensions;
+using Deskbar.Core.Abstractions;
+using Deskbar.Core.Domain;
+using Deskbar.Core.Geometry;
+using Deskbar.Core.Overview;
+using Deskbar.Core.Persistence;
+using Deskbar.Core.Rehydration;
+using Deskbar.Core.Renaming;
+using Deskbar.Core.Rules;
+
+namespace Deskbar.Core;
+
+// The heart of Deskbar: subscribes to window lifecycle events and applies the
+// data-flow from the spec --
+//   Appeared      -> workspace rule -> move to desktop -> add/move roster entry
+//   Appeared      -> rename rule    -> apply short name (ledger keeps the original)
+//   TitleChanged  -> renamed window -> re-apply short name (apps rewrite their titles)
+//   TitleChanged  -> unplaced window -> late placement (rules re-run once the title
+//                    reveals what the window actually is)
+//   Disappeared   -> drop from live bookkeeping + ledger; roster entry SURVIVES (spec:
+//                    a workspace lists what belongs to it even when nothing is running)
+// Single-threaded by design: all events arrive on the UI dispatcher thread (WinEvent
+// hooks deliver there), and all UI calls originate there too. No locks needed.
+public sealed class WorkspaceManager(
+    IVirtualDesktopService desktops,
+    IWindowMonitor monitor,
+    IWindowTitles titles,
+    IPersistenceStore store,
+    Func<DateTimeOffset>? clock = null,
+    // Petre: "why isn't the taskspaces window in the floating window?" -- so WindowMonitor
+    // stopped passing WINEVENT_SKIPOWNPROCESS and our own Manage window now flows through
+    // this pipeline like anyone else's. Which means this class has to know which windows
+    // are OURS, because three things it does to every other window must never happen to
+    // one of ours. See IsOurs below. Injectable purely so tests can name a pid.
+    int? ownProcessId = null,
+    // Petre: "when switching workspaces, i want you to activate the window which was last
+    // active last time this workspace was active." Optional and last so every pre-existing
+    // caller and test compiles unchanged; null simply means "restore nothing", which is what
+    // compatibility mode wants anyway (no desktops to switch between).
+    IWindowActivator? activator = null,
+    // Monitor number, minimised state and z-order for the bar. Optional and last for the usual
+    // reason; null leaves every row's screen facts blank, which is what compatibility mode and
+    // the pre-existing tests want.
+    IScreenLayout? screenLayout = null,
+    // Flashing taskbar buttons -- "somebody messaged me". Optional and last, as ever; null means
+    // no window ever asks for attention, which is what compatibility mode and the existing tests
+    // want.
+    IAttentionMonitor? attention = null,
+    // Who started whom (#94). Optional and last, as ever; null means no window is ever recognised as
+    // having been started by another app, which leaves placement exactly as it was.
+    IProcessTree? processes = null,
+    // A line of diagnostics, or nothing. The launched-by decision (#94) is the first thing in this
+    // class with no visible output when it declines: a window that stays put looks identical whether
+    // the walk found no launcher, found two workspaces, or was never asked. The app passes
+    // ClickTrace.Write, which is off unless the marker file exists.
+    Action<string>? trace = null,
+    // What each window is DRAWN with (#105), for the ordinal colour band's grouping. Optional and last,
+    // as everything here is; null leaves the band grouping on its exe-path fallback. The app passes
+    // IconCache.ArtworkKeyOf, which is a read of its icon cache and nothing more.
+    Func<WindowInfo, Maybe<string>>? artworkOf = null)
+{
+    readonly Func<DateTimeOffset> now = clock ?? (() => DateTimeOffset.Now);
+    readonly int ownProcess = ownProcessId ?? Environment.ProcessId;
+    readonly Subject<Unit> stateChanged = new();
+    // ORDERED, and the order is the order the bar draws icons in. Petre: "rearranging icons when i
+    // activate a program makes no sense at this point", then "go with the first-seen order, with the
+    // possibility of dragging those icons". So a window takes its place when it is first seen (see
+    // Know), keeps it however often it is activated, and moves only when he drags it (see
+    // MoveWindowInOrder). A plain Dictionary could not carry this: its enumeration order is not
+    // promised, and in practice a new entry reuses the slot a removed one left, so a window opened
+    // later would turn up wherever a closed one used to be.
+    readonly OrderedDictionary<WindowHandle, WindowInfo> knownWindows = new();
+    readonly Dictionary<WindowHandle, Guid> memberships = []; // window -> workspace
+
+    // When each window was last activated, as an order rather than a time (#94). Live-only and
+    // deliberately not persisted: it answers "which window of this app were you last in", which is a
+    // question about the session you are in, not about the machine's history.
+    readonly Dictionary<WindowHandle, long> activations = [];
+
+    // When each window was last USED, for the bar's aging icons. Petre: "let's age icons in workspaces", then
+    // "a" from three mockups: an icon fades to grey the longer its window goes unused. A clock this time, not
+    // the counter above, because the question is "how long ago". Set when a window first becomes known (a new
+    // window is fresh, and so is one already open when the app starts, there being nothing to go on) and on
+    // every activation; forgotten when the window closes. Carried across restarts of the app (not of Windows)
+    // by the App's LastUsedFile, through the two members below, because a window outlives the app that watches it.
+    readonly Dictionary<WindowHandle, DateTimeOffset> lastUsed = [];
+
+    public DateTimeOffset? LastUsed(WindowHandle window) => lastUsed.TryGetValue(window, out var at) ? at : null;
+
+    // Every live window's stamp, with its process id, which is what lets a restart tell the same window from a
+    // new one that Windows happened to give a recycled handle.
+    public IReadOnlyList<(WindowHandle Window, int ProcessId, DateTimeOffset At)> LastUsedTimes() =>
+        lastUsed.Where(p => knownWindows.ContainsKey(p.Key))
+            .Select(p => (p.Key, knownWindows[p.Key].ProcessId, p.Value))
+            .ToList();
+
+    // A stamp from before a restart, taken only for the same window (handle AND process) and only when it is
+    // older than the one the restart gave it: anything used since is already right.
+    public void RestoreLastUsed(WindowHandle window, int processId, DateTimeOffset at)
+    {
+        if (knownWindows.TryGetValue(window, out var known) && known.ProcessId == processId
+            && lastUsed.TryGetValue(window, out var current) && at < current)
+            lastUsed[window] = at;
+    }
+
+    // The manager's own clock, so the bar measures an age against the same time it was stamped with (and a
+    // test's fake clock moves both).
+    public DateTimeOffset Now => now();
+    long activation;
+
+    // Windows Petre deliberately dragged OUT of every workspace onto a plain OS desktop
+    // (MoveToDesktop). Without this, removing the membership alone would make the window
+    // auto-placeable again, so the very next rule evaluation -- for a browser, its next
+    // title change, i.e. seconds later -- would yank it straight back to the workspace he
+    // just dragged it out of. Live-only, exactly like `memberships`: a restart re-derives
+    // placement from the OS, and rules legitimately own a window again next launch.
+    readonly HashSet<WindowHandle> detached = [];
+    // The focused window, for the active-row highlight. Live-only: focus is a fact about
+    // right now, so there is nothing to persist or reconcile.
+    Maybe<WindowHandle> activeWindow = Maybe<WindowHandle>.None;
+
+    // A window a drop sent to another workspace while you were IN it, waiting for the arrival it
+    // caused. One-shot: taken on the next desktop change and never carried past it, so a switch this
+    // did not ask for cannot inherit it. See Follow.
+    Maybe<WindowHandle> followed = Maybe<WindowHandle>.None;
+
+    // Petre: "when switching workspaces, i want you to activate the window which was last
+    // active last time this workspace was active", and "so i know what i'm going to have
+    // activated when i land on that workspace" -- the bar marks the same window, so this map
+    // drives BOTH the restore and the marker, and they therefore cannot disagree.
+    //
+    // Keyed by DESKTOP id, not workspace id: Petre's own windows largely live on the unbound
+    // "Main" desktop, so a workspaces-only version would not cover the desktop he uses most.
+    //
+    // Live-only, like `activeWindow` and the MRU above: which window you were last looking at
+    // is a fact about this session, and a handle does not survive a restart anyway.
+    readonly Dictionary<Guid, WindowHandle> lastActiveByDesktop = [];
+
+    // Where we are RIGHT NOW, so a desktop change can stamp the desktop being LEFT. Kept here
+    // rather than asked of the OS at switch time because by the time CurrentChanged fires,
+    // CurrentDesktop() already reports the new one -- the outgoing id is only knowable if we
+    // were already holding it.
+    Maybe<Guid> currentDesktopId = Maybe<Guid>.None;
+
+    // Windows whose taskbar button has flashed and that you have not looked at since. Petre:
+    // "can you also identify if an app has something to say, a notification, and say it on the
+    // icon?"
+    //
+    // Live-only, like everything else about the present moment. And a SET rather than a
+    // timestamp, because Windows never says a flash has stopped (measured -- see
+    // IAttentionMonitor): the end of attention is our rule, not an event, and the rule is that
+    // looking at the window clears it.
+    readonly HashSet<WindowHandle> wantsAttention = [];
+    IDisposable? attentionSubscription;
+    // Alt+Tab-style switching order. Live-only for the reason WorkspaceMru documents:
+    // "where I was a moment ago" is a fact about this session.
+    WorkspaceMru mru = WorkspaceMru.Empty;
+    RenameLedger ledger = RenameLedger.Empty;
+    IDisposable? subscription;
+    // Separate from `subscription` above: window events and desktop-change events are two
+    // different sources, and one must be disposable without the other.
+    IDisposable? currentDesktop;
+
+    public AppState State { get; private set; } = AppState.Empty;
+
+    // Which WORKSPACE the user is standing in, or None (#53). None is a real, ordinary state
+    // rather than an error: most of Petre's windows live on a desktop he never named, and time
+    // spent there is attributed to nothing rather than being guessed onto a neighbour.
+    //
+    // Derived from currentDesktopId rather than asked of the OS, because those two can disagree
+    // for exactly one moment -- during a switch -- and this is read by a timer that does not care
+    // to know about that race (see the comment on currentDesktopId).
+    public Maybe<Guid> CurrentWorkspaceId =>
+        currentDesktopId.Bind(desktop => State.Workspaces.TryFirst(w => w.DesktopId == desktop).Map(w => w.Id));
+
+    public IObservable<Unit> StateChanged => stateChanged.AsObservable();
+    public IReadOnlyList<WindowInfo> KnownWindows => knownWindows.Values.ToList();
+
+    // The title a window had before this app shortened it, or None when it was never renamed.
+    //
+    // For the remote control (Control/RemoteControl): an agent asking to move "the window on the
+    // wt-login worktree" searches for the folder name, and once a rename rule has turned a VS Code
+    // title into "VS" the folder name only survives here.
+    public Maybe<string> OriginalTitle(WindowHandle window) => ledger.OriginalTitle(window);
+
+    // The workspace a window LIVES in, or None for a window on an unnamed desktop, a pinned one, or one
+    // that closed mid-question. Answered the way the bar answers it: a window borrowed for a nested
+    // workspace still belongs to the desktop it came from (see WindowsByWorkspace).
+    public Maybe<Workspace> WorkspaceOf(WindowHandle window) =>
+        desktops.IsPinned(window).GetValueOrDefault(false) && !borrowed.ContainsKey(window)
+            ? Maybe<Workspace>.None
+            : (borrowed.TryGetValue(window, out var home) ? Result.Success(home) : desktops.DesktopOf(window))
+                .Map(desktop => State.Workspaces.TryFirst(w => w.DesktopId == desktop))
+                .GetValueOrDefault(Maybe<Workspace>.None);
+
+    public Result Start() =>
+        LoadState()
+            .Bind(Reconcile)
+            .Tap(() =>
+            {
+                // NoteContainer as well as knownWindows, and the ordering matters: the ledger is empty
+                // at this point, so every title here is the app's OWN. A moment later the rename sweep
+                // rewrites them ("VSC"), and the folder each window has open is unreadable from then on
+                // (#132).
+                monitor.Snapshot().ToList().ForEach(w => { Know(w); NoteContainer(w); });
+                // The windows a previous run watched open, checked against what is actually open now.
+                // Needs the list just built, and has to happen before the first sweep can learn anything.
+                ForgetOpeningsThatAreGone();
+                // A file written before folder naming existed can hold exact-title renames for an app that
+                // is now named by its folder, and those two records can only argue (#136). Dropped once, on
+                // load, so state.json stops carrying the contradiction rather than the app having to skip
+                // past it for ever. NameWindowsByFolder does the same at the moment the setting is turned
+                // on; this is for the files where the setting was turned on first.
+                ForgetRenamesSupersededByFolders();
+                // Before anything else looks at where windows are: a crash while standing inside a
+                // nested workspace leaves the parent's windows pinned to every desktop, and every
+                // sweep and overview after that would be reading a machine we left in a borrowed
+                // state (#42).
+                RepairInheritedPins();
+                // Seeded before the first UI build: foreground events only report CHANGES, so
+                // without this the active-window highlight would stay blank from launch until
+                // Petre next switched windows -- indistinguishable from the feature not working.
+                activeWindow = monitor.Foreground();
+                subscription = monitor.Events.Subscribe(OnWindowEvent);
+
+                // Petre: "when i press the shortcut, it shows me the previous workspace which
+                // was active." The switch was working; the UI was stale. Switch() changes the
+                // desktop and pulses NOTHING, so every surface kept rendering the overview it
+                // last built -- old workspace still bold as current, windows still grouped by
+                // where they were before -- until some unrelated window event happened to pulse.
+                //
+                // Subscribed HERE rather than adding a pulse inside Switch() because that would
+                // only cover switches WE perform. CurrentChanged fires for any means at all:
+                // this app, Win+Ctrl+arrows, Task View. That is what the observable was declared
+                // for, and until now nothing in the app consumed it.
+                //
+                // The same subscription also feeds the MRU, and that is the RIGHT place for
+                // it: switching by Task View or Win+Ctrl+arrows is just as much a visit as
+                // one we performed, and an Alt+Tab-style list that ignored those would send
+                // the first tap somewhere Petre did not expect.
+                currentDesktop = desktops.CurrentChanged.Subscribe(desktopId =>
+                {
+                    OnDesktopChanged(desktopId);
+                    RememberVisit(desktopId);
+                    stateChanged.OnNext(Unit.Default);
+                });
+                // Seed it with wherever we started, so the very first switcher tap of a session
+                // already knows which workspace it is leaving.
+                desktops.CurrentDesktop().Tap(id =>
+                {
+                    RememberVisit(id);
+                    // Seeded for the same reason RememberVisit is: the FIRST switch away from
+                    // wherever we launched must be able to stamp that desktop, and it can only
+                    // do that if we were already holding its id.
+                    currentDesktopId = id;
+                });
+                // Filtered to windows we actually track, so our own chrome and the shell's
+                // helper windows can never light up a row -- and a flash for something with no
+                // row would pulse every open surface for nothing.
+                attentionSubscription = attention?.Flashed
+                    .Where(w => knownWindows.ContainsKey(w))
+                    .Subscribe(OnFlashed);
+
+                ReapplyRenames();
+                RestorePlacements();
+            });
+
+    // Finding 1 (reviewer, Critical): split out of Start() so the composition root can
+    // load persisted state WITHOUT reconciling desktops or subscribing to the monitor --
+    // needed for compatibility mode (Finding 2: still list workspaces read-only, no
+    // desktop operations) and so a failed load can be distinguished from a failed
+    // reconcile/subscribe. Deliberately does NOT touch `State` on failure -- a corrupt
+    // store must never quietly become "empty workspace list" in the field the UI reads;
+    // the caller (App) decides what to do (back up the corrupt file, inform the user,
+    // retry) before anything gets a chance to persist over it.
+    public Result LoadState() =>
+        store.Load().Bind(s =>
+        {
+            // Migrated on the way in, before anything reads it. A state.json written while #42
+            // shipped records nesting as ParentId on the child, and everything since groups reads
+            // GroupId, so a file that skipped this would come up with every group dissolved.
+            //
+            // NOT persisted here. The next thing that changes anything writes the migrated shape,
+            // and until then the file on disk stays readable by the build the user just upgraded
+            // from. Migrated() is idempotent, so loading twice cannot double the groups.
+            State = s.Migrated();
+            stateChanged.OnNext(Unit.Default);
+            return Result.Success();
+        });
+
+    // --- workspace <-> desktop reconciliation -------------------------------------
+    // Desktops don't survive reboots and ids go stale across app restarts. For each
+    // workspace: keep a still-valid DesktopId; else adopt a live desktop with the same
+    // name; else create one. Runs once at startup.
+    Result Reconcile() =>
+        desktops.GetDesktops().Bind(live =>
+        {
+            var reconciled = State.Workspaces
+                .Select(w => BindDesktop(w, live))
+                .ToList();
+            return reconciled.Combine()
+                .Tap(workspaces => Persist(State with { Workspaces = workspaces.ToList() }));
+        });
+
+    Result<Workspace> BindDesktop(Workspace workspace, IReadOnlyList<DesktopInfo> live) =>
+        live.Any(d => d.Id == workspace.DesktopId)
+            ? workspace
+            : live.TryFirst(d => d.Name.Equals(workspace.Name, StringComparison.OrdinalIgnoreCase))
+                .Match(
+                    adopted => Result.Success(workspace with { DesktopId = adopted.Id }),
+                    () => desktops.Create(workspace.Name).Map(created => workspace with { DesktopId = created.Id }));
+
+    // --- event pipeline -------------------------------------------------------------
+    void OnWindowEvent(WindowEvent e)
+    {
+        switch (e.Kind)
+        {
+            case WindowEventKind.Appeared: OnAppeared(e.Window); break;
+            case WindowEventKind.TitleChanged: OnTitleChanged(e.Window); break;
+            case WindowEventKind.Hidden: OnHidden(e.Window); break;
+            case WindowEventKind.Disappeared: OnDisappeared(e.Window); break;
+            case WindowEventKind.Activated: OnActivated(e.Window); break;
+            // Purely a redraw trigger, which is why it has no OnMoved of its own: a window
+            // finishing a drag changes nothing this class owns -- not membership, not placement
+            // memory, not the rename ledger. What it can change is which MONITOR the window is
+            // on, and that is read fresh from the OS on every overview build, so the only thing
+            // ever missing was a reason to build one.
+            case WindowEventKind.Moved: stateChanged.OnNext(Unit.Default); break;
+            // Same deal, same reason: a window going down or coming back up changes nothing this
+            // class owns, and whether it is iconic is read fresh from the OS on every overview
+            // build. All that was missing was a reason to build one -- without it the icon kept
+            // whatever brightness it had when something unrelated last pulsed.
+            case WindowEventKind.MinimizeChanged: stateChanged.OnNext(Unit.Default); break;
+        }
+    }
+
+    void OnAppeared(WindowInfo window)
+    {
+        Know(window);
+
+        // Opened while we watched, so where it sits says where Petre was standing rather than where its
+        // project lives, until it is moved (see SnapshotContainerHomes).
+        RecordOpening(window);
+
+        // Before any tier runs: a window that arrives with a folder already loaded (an editor
+        // relaunched by hand, a window that became taskbar-worthy late) has its container read now.
+        NoteContainer(window);
+
+        // Fire-and-forget: the event pipeline has no caller waiting on a Result, and a
+        // failed auto-placement (e.g. stale workspace, desktop move rejected) has
+        // nowhere to surface here -- it's silently skipped, unlike the UI-facing
+        // AssignWindow, which must propagate the same failure to the caller.
+        // Precedence (Petre: "last placement beats rules, last placement IS the rule"):
+        //   0. container       -- this window has a FOLDER open, and he has told the app by hand where
+        //                        that folder lives (#132). Top of the list because it is the most
+        //                        specific answer available: it names this window's content, where the
+        //                        tiers below it name the app or the process that started it. It is
+        //                        also the only tier that can distinguish seven windows of one
+        //                        argument-less process, which is the whole reason it exists.
+        //   1. launched by     -- another app started this one and its window lives in a workspace
+        //                        (#94). Above memory, and the issue guessed why: it is the fresher
+        //                        intent, and it is about THIS window rather than about the app in
+        //                        general. It is also the case memory gets wrong in the way Petre
+        //                        already complained about once -- "i'm starting the edge browser and
+        //                        it immediately goes to personal, i'm starting it in messaging, why?"
+        //                        Deliberately does not write the roster, so it never rewrites what he
+        //                        taught the app: see LaunchedByWorkspace.
+        //   2. last placement  -- an explicit act by Petre, keyed by identity. Beats rules:
+        //                        a standing guess must never yank back a window he moved
+        //                        by hand. This is also what re-pins an app whose window
+        //                        was destroyed and recreated (Electron closing to tray),
+        //                        which the OS pin cannot survive since it is HWND-keyed.
+        //   3. rule            -- first sight only: the one case memory cannot cover, since
+        //                        a never-seen window has no placement to remember.
+        //
+        // There used to be a tier above all three: a pending LAUNCH ("we started this app for
+        // workspace W, expect its window"). It went with the restore prompt, the only thing
+        // that ever launched anything. Note the difference from #94's tier, which is the opposite
+        // direction: nothing here launches anything, it recognises that something else did.
+        //
+        // ...and above all of them, a window someone ASKED for: `deskbar.cmd start <workspace> -- <program>`
+        // (see StartedFor). That is an explicit instruction about this very launch, made seconds ago, so
+        // nothing standing or inferred outranks it.
+        if (AutoPlaceable(window.Handle))
+            StartedFor(window)
+                .Or(() => ContainerPlacement(window))
+                .Or(() => LaunchedByWorkspace(window))
+                .Or(() => Remembered(window).Map(placement => new Decision(placement, Roster: true)))
+                .Or(() => RulesEngine.MatchWorkspace(window, State.WorkspaceRules).Map(id => new Decision(Placement.In(id), Roster: true)))
+                .Tap(decided => ApplyPlacement(window, decided.Placement, decided.Roster));
+
+        // Fire-and-forget for the same reason as above. WantedName rather than the rules directly, so an
+        // app named by its folder (#136) gets that name here too -- which for a window that opens with a
+        // folder already loaded is the only chance before it is on screen.
+        WantedName(window)
+            .Tap(shortName => { ApplyRename(window, shortName); });
+
+        // Fix wave (reviewer, Important): pulse unconditionally, even when neither branch
+        // above ran (no placement rule, no rename rule). Persist() above already pulses
+        // when it fires, so this can double-pulse -- harmless, a tray-menu/panel rebuild
+        // triggered by StateChanged is a cheap, idempotent re-read of current state. What
+        // it fixes: an open panel/Windows tab must learn a new window appeared even when
+        // nothing about it was auto-placed or renamed, or its row never shows up.
+        stateChanged.OnNext(Unit.Default);
+    }
+
+    // Purely presentational: remember which window has focus so WindowsByWorkspace can mark
+    // its row active. Deliberately does NOT place, rename or inventory anything -- focus
+    // moving is not a statement about where a window belongs.
+    //
+    // Guarded on CHANGE: alt-tabbing fires foreground events continuously, and every pulse
+    // makes each open surface rebuild, which costs one DesktopOf COM call per known window.
+    // Pulsing only when the active window actually differs keeps a burst of alt-tabs from
+    // turning into a burst of COM sweeps.
+    void OnActivated(WindowInfo window)
+    {
+        Know(window);
+        MarkActive(window.Handle);
+    }
+
+    // Petre: "sometimes, active window is not being updated... right now, vscode is active but
+    // i am seeing a browser is active in the floating window. i want to always refresh what's
+    // the active window, i can't afford to think that one window is active and another being
+    // highlighted."
+    //
+    // The highlight used to hang off the Activated event ALONE, and that event cannot be
+    // trusted to arrive: EVENT_SYSTEM_FOREGROUND is delivered WINEVENT_OUTOFCONTEXT through the
+    // dispatcher's message queue, so a busy queue simply drops it (the identical lossiness that
+    // made WindowMonitor.Resync necessary for the window list itself). One drop was permanent
+    // damage rather than a blip, because the window that really has focus will not be activated
+    // AGAIN while it already has focus -- so no future event was ever going to correct it.
+    //
+    // So the OS gets asked directly, on a timer. Same division of labour as everywhere else
+    // here: the event is the fast path, the periodic re-read is the truth.
+    //
+    // Two properties this must preserve, both of them load-bearing:
+    //
+    //   * NEVER clear on None. Foreground() reports None for anything untracked -- the taskbar,
+    //     the Start menu, and the floating bar itself (opted out by hwnd in WindowMonitor.
+    //     Ignore). Those are precisely what Petre clicks while looking at the bar, so treating
+    //     None as "nothing is active" would blink the highlight off every tick he touched it.
+    //     Staying put matches the deliberate choice the event path already makes.
+    //   * Pulse only on CHANGE, for the same reason OnActivated does: a pulse rebuilds every
+    //     open surface, and each rebuild costs one DesktopOf COM call per known window. In the
+    //     steady state -- which is almost always -- this is a GetForegroundWindow and a
+    //     dictionary lookup, and nothing else happens at all.
+    public void ResyncActiveWindow()
+    {
+        monitor.Foreground().Tap(MarkActive);
+        // Free when there is nothing queued, which is almost always: one dictionary count. It rides
+        // this timer rather than owning one because what it waits for -- a window becoming reachable --
+        // is exactly the kind of OS state this method already exists to re-read (#89).
+        ApplyPendingMonitorMoves();
+    }
+
+    // The window list, reconciled against the OS. Rides the same 5s sweep ResyncActiveWindow does.
+    //
+    // Petre: "i also don't see obs in the notary workspace." OBS was running, on that desktop, and the
+    // bar had never heard of it -- while still drawing a row for a handle Windows said was destroyed.
+    //
+    // The cause is that there are TWO window lists and only one of them was ever repaired.
+    // WindowMonitor.Resync reconciles the monitor's list every five seconds, but its adopt half
+    // returns immediately for anything already in `known`, and this class's list is fed purely by the
+    // monitor's events. So a window the manager missed -- a dropped WinEvent, an announcement made
+    // before it was listening -- can never be re-offered: to the monitor, that window was announced
+    // long ago. Measured on his machine, with the app's own code:
+    //
+    //   probe: obs 0xF11DA is a candidate: True, FromHwnd(obs).HasValue = True
+    //   bar:   band notary: msedge, Code, Docker Desktop, StartAllBackCfg   (no obs, and a dead 1C13F2)
+    //
+    // Nineteen hours of sweeps could not fix that, and restarting the app fixed it instantly. This is
+    // that restart, done every five seconds and without the restart.
+    //
+    // Three rules, and each one is load-bearing:
+    //
+    //   * ADOPT what the OS lists and we lack. Snapshot() is the taskbar-candidate list, which is the
+    //     same question the bar is answering, so anything in it belongs in a row.
+    //   * DROP only what is DEAD, asked as IsAlive and never as "absent from Snapshot". A window
+    //     minimised to the tray leaves the candidate list while its hwnd stays valid, and dropping it
+    //     would forget its rename ledger entry -- the defect OnHidden was written to avoid.
+    //   * PULSE only on a CHANGE, for the reason ResyncActiveWindow gives above: a pulse rebuilds
+    //     every open surface, and each rebuild costs a DesktopOf COM call per known window. In the
+    //     steady state this is one list comparison and nothing else.
+    //
+    // Adoption goes through neither OnAppeared nor the placement tiers, and that is deliberate. This is
+    // a window that has been open for hours where its owner left it, so re-living its first moment
+    // could move it: rules would fire, and #94's launched-by would look for whoever started it. A
+    // repair puts the window back in the list, not back through its own history. It is the same
+    // registration Start() does for the windows that are already open when the app launches.
+    // The dead half of the repair below, on its own and without the sweep's EnumWindows, for the bar to call
+    // the moment it has reason to think a window has gone. Petre: "i closed youtube music and it kept
+    // lingering in the workspace, why?" The trace answered: its close never reached the manager, the bar's
+    // next desktop lookup for it failed ("not on any desktop (closed or pinned)") at 11:48:41, and the row
+    // stayed until the 5s sweep found the handle dead at 11:48:46. The failed lookup is the earlier signal,
+    // so the bar asks for this then (see FloatingBar.RebuildCore) and the row goes at once.
+    //
+    // IsWindow per known window: microseconds for a hundred windows, so it is cheap enough to ask on every
+    // rebuild that shows an unplaced window. OnDisappeared is safe to run twice for one window, so a close
+    // event that does arrive later changes nothing.
+    public void DropDeadWindows()
+    {
+        var dead = knownWindows.Values.Where(w => !monitor.IsAlive(w.Handle)).ToList();
+        dead.ForEach(OnDisappeared);
+        if (dead.Count > 0)
+            trace?.Invoke($"dead windows dropped early: [{string.Join(", ", dead.Select(w => $"{w.Handle.Value:X}/{w.ProcessName}"))}]");
+    }
+
+    public void RepairWindowList()
+    {
+        var adopted = monitor.Snapshot()
+            .Where(w => !knownWindows.ContainsKey(w.Handle) && !IsOursByProcess(w))
+            .ToList();
+
+        adopted.ForEach(w => { Know(w); NoteContainer(w); });
+        // Treated as windows that only opened where they are, because an adopted window may be brand new
+        // (about one arrival in nine on Petre's machine comes this way) and nothing here can tell. Wrong in
+        // this direction, an old window merely waits for a move before it teaches (see SnapshotContainerHomes).
+        var recorded = RecordOpenings(adopted);
+
+        // Materialised before removing anything, because OnDisappeared writes to the dictionary this
+        // reads. It also does the rest of a close: the ledger, memberships and the detached set all
+        // have to forget a handle Windows may hand to an unrelated window tomorrow.
+        var dead = knownWindows.Values.Where(w => !monitor.IsAlive(w.Handle)).ToList();
+        dead.ForEach(OnDisappeared);
+
+        // ...and the ones that are alive but no longer LISTED: hidden, or closed to the tray. Petre,
+        // of Outlook's dismissed reminder dialog sitting in a row: "what's the bell icon in the gepha
+        // workspace?", and then "yes, hide what's hidden."
+        //
+        // Through OnHidden rather than OnDisappeared, and the difference is the whole reason there are
+        // two questions here instead of one. Hidden means the row goes and the RENAME LEDGER STAYS, so
+        // nothing forgets the window's original title; reporting it as gone would forget it, and a
+        // later re-show would then record our own short name as the original. The roster stays too, so
+        // a window that comes back out of the tray still knows where it belongs.
+        //
+        // Only for windows already dropped from `dead`, since a destroyed handle is not listed either
+        // and must go the whole way rather than half of it.
+        var hidden = knownWindows.Values.Where(w => !monitor.IsListed(w.Handle)).ToList();
+        hidden.ForEach(OnHidden);
+
+        // Only when it did something, which is the same rule the pulse follows: a line every five
+        // seconds saying "nothing was wrong" would bury the one that matters.
+        if (adopted.Count + dead.Count + hidden.Count > 0)
+            trace?.Invoke($"repair: adopted [{string.Join(", ", adopted.Select(w => $"{w.Handle.Value:X}/{w.ProcessName}"))}] " +
+                          $"dropped [{string.Join(", ", dead.Select(w => $"{w.Handle.Value:X}/{w.ProcessName}"))}] " +
+                          $"hidden [{string.Join(", ", hidden.Select(w => $"{w.Handle.Value:X}/{w.ProcessName}"))}]");
+
+        // OnDisappeared pulses for itself, so an adoption is the only change left to announce, and
+        // recording its openings above has already announced it through Persist when it wrote anything.
+        if (adopted.Count > 0 && !recorded) stateChanged.OnNext(Unit.Default);
+    }
+
+    // Our own windows never enter the list through the event path (see IsOurs), and a repair must not
+    // be the back door that puts them there. IsOurs cannot answer before the window is in the
+    // dictionary, which is exactly the moment this is asked, so the question is asked of the snapshot.
+    bool IsOursByProcess(WindowInfo window) => window.ProcessId == ownProcess;
+
+    // The one place activeWindow is written after startup, so the event path and the sweep can
+    // never disagree about what "became active" means.
+    void MarkActive(WindowHandle window)
+    {
+        // #94 needs to know WHICH window of an app you were last in, not just which app: a single VS
+        // Code process holds a window on nearly every workspace (measured on Petre's machine: seven of
+        // them), so "the app that started this" only becomes an answer once you can say which of its
+        // windows did. Recorded before the change guard below, so the window that is already active
+        // when the app starts is recorded too.
+        //
+        // A counter rather than a clock: ordering is the only thing ever asked of it, and a counter
+        // cannot be disturbed by the machine's clock moving.
+        activations[window] = ++activation;
+        lastUsed[window] = now();
+        // Looking at a window is what answers it, so this is also where attention ends. Done
+        // before the change guard below, and that ordering matters: re-activating the window you
+        // are already in is a no-op for the highlight but must still clear a flash that arrived
+        // while you sat there.
+        var settled = wantsAttention.Remove(window);
+        if (activeWindow.Equals(Maybe<WindowHandle>.From(window)))
+        {
+            if (settled) stateChanged.OnNext(Unit.Default);
+            return;
+        }
+        activeWindow = window;
+        RememberActiveOn(window);
+        stateChanged.OnNext(Unit.Default);
+    }
+
+    // Petre: "ctrl+win+tab now lands on the first window on the left screen", "that workspace
+    // lost the active window".
+    //
+    // Recorded HERE, when a window becomes active, and NOT on the way out of a desktop, which is
+    // what this replaces. The old placement was chosen to be cheap -- one stamp per switch rather
+    // than a DesktopOf call per focus change -- and it raced the very event it depended on.
+    //
+    // From the probe log, leaving f69c9222 for f60a8bea:
+    //
+    //   record active=1045C desktopOf=f60a8bea leaving=f69c9222 match=False
+    //
+    // activeWindow ALREADY named a window on the destination. CurrentChanged comes from a
+    // virtual-desktop COM event while foreground changes come from a WinEvent hook, and the
+    // WinEvent wins: by the time we are told the desktop changed, Windows has moved focus to the
+    // new desktop and we have seen it. So "whatever was active as we left" read the window we
+    // were arriving AT. That is why match=False on nearly every switch, and it is not something a
+    // stricter guard could rescue -- the fact was simply gone by the time it was asked for.
+    //
+    // A window's desktop is knowable exactly when it becomes active, so that is when to ask. Each
+    // desktop's entry is then correct by construction and no ordering between the two event
+    // sources can disturb it.
+    //
+    // The cost this was avoiding is not real at this scale: two COM calls on a CHANGE of
+    // foreground, next to the stateChanged pulse on the very next line, which rebuilds every open
+    // surface at one DesktopOf per known window.
+    //
+    // Pinned windows are skipped for the reason they always were: a pinned window is on every
+    // desktop, so it is already wherever you land, and claiming it as one desktop's last-active
+    // would promise a landing spot that was never in question.
+    void RememberActiveOn(WindowHandle window)
+    {
+        if (desktops.IsPinned(window).GetValueOrDefault(false)) return;
+        desktops.DesktopOf(window).Tap(desktop => lastActiveByDesktop[desktop] = window);
+    }
+
+    // A taskbar button flashed. Petre: "let's say somebody has messaged me, or vscode is asking
+    // for my attention somewhere."
+    //
+    // HSHELL_FLASH repeats for as long as the window keeps flashing, so this is called many
+    // times per notification. Pulsing only on the FIRST one keeps a flashing window from
+    // rebuilding every open surface several times a second -- each rebuild costs a DesktopOf COM
+    // call per known window.
+    //
+    // A window you are already looking at is ignored outright. Some apps flash regardless of
+    // focus, and a dot on the icon you are currently in would be telling you to go somewhere you
+    // already are.
+    void OnFlashed(WindowHandle window)
+    {
+        if (activeWindow.Equals(Maybe<WindowHandle>.From(window))) return;
+        if (wantsAttention.Add(window)) stateChanged.OnNext(Unit.Default);
+    }
+
+    void OnTitleChanged(WindowInfo window)
+    {
+        var previouslyUnknown = !knownWindows.ContainsKey(window.Handle);
+
+        // A title change on a window we do not have is only an arrival if the shell LISTS it. That
+        // guard is the route Petre's bell came back by: Outlook rewrites its reminder dialog's title as
+        // reminders accumulate ("1 Reminder(s)", "2 Reminder(s)"), and every one of those was read as
+        // "became taskbar-worthy late" and re-adopted -- so the row returned seconds after each sweep
+        // dropped it. A hidden window is not becoming taskbar-worthy; it is talking to itself.
+        //
+        // The monitor keeps its own copy of the title either way, so the ledger still has what it
+        // needs when the window comes back.
+        if (previouslyUnknown && !monitor.IsListed(window.Handle)) return;
+
+        Know(window);
+        if (previouslyUnknown) { OnAppeared(window); return; } // became taskbar-worthy late
+
+        // The container this window has loaded, read BEFORE anything renames it: the folder is only
+        // visible in the title the app itself just wrote, and the next few lines overwrite that title.
+        NoteContainer(window);
+
+        // Fire-and-forget: same rationale as OnAppeared -- no caller awaits this path.
+        //
+        // The folder branch comes first and is not conditioned on the ledger, unlike the two below it,
+        // because a folder name is not fixed: opening another folder in the same window is a DIFFERENT
+        // name, so "we already renamed this window" is not a reason to leave it alone (#136). Comparing
+        // against the observed title covers both cases at once -- the app rewrote our name, or the name
+        // we want has changed -- and it is what stops our own echo from looping, since after we set the
+        // title the observed title IS the wanted name.
+        if (FolderName(window) is { HasValue: true } wanted)
+        {
+            if (window.Title != wanted.Value) ApplyRename(window, wanted.Value);
+        }
+        else if (ledger.NeedsReapply(window.Handle, window.Title))
+            ledger.AppliedName(window.Handle).Tap(name => { titles.Set(window.Handle, name); });
+        else if (ledger.AppliedName(window.Handle).HasNoValue)
+            // Not renamed yet -- but the new title may now match a rename rule.
+            RulesEngine.MatchRename(window, State.RenameRules)
+                .Tap(shortName => { ApplyRename(window, shortName); });
+
+        // Late placement (spec): a window that appeared bare may only now reveal what it
+        // is showing -- Rider loading a solution rewrites its title. Only UNPLACED windows
+        // are eligible: once placed (rule, launch, or hand), a title change must never
+        // teleport a window between workspaces (browsers rewrite titles every tab switch).
+        //
+        // Fix round 1 (reviewer, Important): ApplyRename's titles.Set produces a genuine
+        // NAMECHANGE, which re-enters here as an "echo" carrying OUR OWN short name as
+        // window.Title. A still-unplaced window must not have workspace rules run
+        // against that synthetic title -- only titles the APP itself wrote are legitimate
+        // placement signals. `ledger.AppliedName(...) != window.Title` guards this: if we
+        // renamed this window and the observed title IS our applied name, skip late
+        // placement entirely (no rename recorded, or observed title differs from what we
+        // set, both fall through to the normal rule match).
+        // Only titles the APP wrote are legitimate signals, for either tier below.
+        var appsOwnTitle = ledger.AppliedName(window.Handle).Map(applied => applied != window.Title).GetValueOrDefault(true);
+
+        // #132, and Petre's original ask for TitleToken: "so i open vscode, then i load a folder in it,
+        // that should take it to the correct workspace."
+        //
+        // This tier IGNORES AN EXISTING MEMBERSHIP, which every other tier here refuses to do, and the
+        // difference is the point rather than an oversight. His sequence is: open the editor, which has
+        // no folder yet, so the ROSTER places it (VS Code lives in framework); load the folder a second
+        // later, which is when the app first learns what the window actually is. If a membership blocked
+        // this, the answer would always arrive too late to be used, and the feature would only ever work
+        // for a window that opened with its folder already loaded.
+        //
+        // What keeps that from becoming a window that gets dragged around: the tier gets ONE look per
+        // window-and-container pair, and a by-hand move both teaches the home and spends that look (see
+        // LearnContainer). So the app can correct its own guess, and cannot argue with Petre.
+        if (appsOwnTitle && !IsOurs(window.Handle) && !detached.Contains(window.Handle)
+            && !desktops.IsPinned(window.Handle).GetValueOrDefault(false))
+            ContainerPlacement(window)
+                .Tap(decided => { ApplyPlacement(window, decided.Placement, decided.Roster); }); // fire-and-forget, as above
+
+        // Rules keep the eligibility they always had: a placed window is never re-placed by a rule,
+        // because browsers rewrite their titles on every tab switch.
+        if (appsOwnTitle && AutoPlaceable(window.Handle))
+            RulesEngine.MatchWorkspace(window, State.WorkspaceRules)
+                .Tap(workspaceId => { Place(window, workspaceId); }); // fire-and-forget, as above
+    }
+
+    // Finding 3 (reviewer, Important): a window that merely left the taskbar (e.g.
+    // Discord/Outlook minimizing to tray) still EXISTS -- its hwnd stays valid and it may
+    // reappear later. Drop it from live-window bookkeeping exactly like Disappeared
+    // (it's not on any desktop's visible taskbar right now, so tracking it as "known" or
+    // "placed" would be misleading), but deliberately do NOT touch the rename
+    // ledger: if we forgot the original title here, a later re-show's rename-rule
+    // re-application would record our OWN short name as the "original", permanently
+    // breaking restore. Only a genuine Disappeared (the window is actually gone) forgets
+    // the ledger entry. RestoreAllTitles on app exit still finds and restores hidden
+    // windows because their ledger entry -- and their hwnd -- are both still valid. The
+    // roster (spec) is unaffected either way: it lists what BELONGS to a workspace, not
+    // what's currently live, so Hidden never touches it.
+    void OnHidden(WindowInfo window)
+    {
+        knownWindows.Remove(window.Handle);
+        memberships.Remove(window.Handle); // roster entry stays -- that's the point (spec)
+
+        // Fix wave (reviewer, Important): the live panel/Windows tab must lose this row
+        // (it's no longer a live window) -- nothing else in this path calls Persist(), so
+        // without this pulse the UI would keep showing a window that's gone to tray.
+        stateChanged.OnNext(Unit.Default);
+    }
+
+    void OnDisappeared(WindowInfo window)
+    {
+        knownWindows.Remove(window.Handle);
+        lastUsed.Remove(window.Handle);
+        ledger = ledger.Remove(window.Handle);
+        memberships.Remove(window.Handle); // roster entry stays -- ▶ Start relaunches it
+        // A closed window's hwnd can be recycled by Windows for an entirely different
+        // window later; a stale "detached" entry would silently exempt that new window
+        // from rules. Cleared here for the same reason memberships is.
+        detached.Remove(window.Handle);
+
+        // Both container facts are about a LIVE window, and hwnd recycling is the reason they go here
+        // rather than on Hidden: a recycled handle inheriting "this window has Deskbar open" would
+        // send an unrelated window across the machine. Hidden deliberately keeps them, because a window
+        // minimised to the tray has not forgotten what it has loaded, and the persisted home is what
+        // carries the answer across restarts anyway.
+        containerOf.Remove(window.Handle);
+        tookHome.RemoveWhere(pair => pair.Window == window.Handle);
+        // Persisted, unlike the two above, so it would otherwise outlive the window in state.json and
+        // hand its "only opened there" to whatever window gets this handle next.
+        ForgetOpening(window.Handle);
+
+        // Fix wave (reviewer, Important): same rationale as OnHidden above -- a closed
+        // window's running-row must disappear from any open panel/Windows tab, and a
+        // workspace header's running-count must drop, even though this path doesn't
+        // otherwise call Persist().
+        stateChanged.OnNext(Unit.Default);
+    }
+
+    // Returns Result: workspace-lookup and desktop-move failures must reach the caller
+    // (Task 8's UI shows these). OnAppeared discards this deliberately (see comment
+    // there); AssignWindow propagates it.
+    // `roster` false moves the window and records the membership without adding the app to the
+    // workspace's roster (#94). Only the launched-by tier passes false, and the reason is that
+    // RosterAdd strips an identity from every OTHER workspace so exactly one can claim it: an
+    // inference about one window must not rewrite where Petre says the app lives.
+    Result Place(WindowInfo window, Guid workspaceId, bool roster = true) =>
+        Workspace(workspaceId)
+            .Bind(w => w.DesktopId is { } desktopId
+                ? desktops.MoveWindow(window.Handle, desktopId)
+                : Result.Failure("Workspace has no desktop (compatibility mode)."))
+            .Tap(() =>
+            {
+                // The one case the OS cannot answer for us afterwards: a HIDDEN window that we move.
+                // See lastKnownDesktop -- a window minimised to the tray reports no desktop at all, so
+                // without recording the move here the memory would keep naming where it used to live.
+                Workspace(workspaceId).Tap(w =>
+                {
+                    if (w.DesktopId is { } moved) lastKnownDesktop[window.Handle] = moved;
+                });
+                memberships[window.Handle] = workspaceId;
+                detached.Remove(window.Handle); // a workspace claims it again
+                if (roster) RosterAdd(window, workspaceId);
+            });
+
+    // Returns Result: a failed WM_SETTEXT (hung/closed window) must not leave a ledger
+    // entry claiming the rename succeeded -- order matters here. We attempt the actual
+    // write FIRST, and only update the ledger (which captures the original title) once
+    // that succeeds; RenameWindow propagates the failure, OnAppeared/OnTitleChanged
+    // discard it deliberately (see comments there).
+    //
+    // Refuses our OWN windows outright (see IsOurs): WPF owns the Manage window's Title, so
+    // our WM_SETTEXT and its own binding would overwrite each other indefinitely. Guarded
+    // HERE rather than at each of the four callers (Appeared, TitleChanged, the rule sweep,
+    // and Petre right-clicking the icon) so the exemption cannot be forgotten by a fifth --
+    // and it is a Failure, not a silent skip, so the one caller with a human waiting on it
+    // says why instead of appearing to do nothing.
+    Result ApplyRename(WindowInfo window, string shortName) =>
+        IsOurs(window.Handle)
+            ? Result.Failure("Deskbar does not rename its own windows.")
+            : titles.Set(window.Handle, shortName)
+                .Tap(() => ledger = ledger.Apply(window.Handle, window.Title, shortName));
+
+    // --- UI-facing operations ---------------------------------------------------
+
+    public Result Switch(Guid workspaceId) =>
+        Workspace(workspaceId).Bind(w => w.DesktopId is { } id
+            ? desktops.Switch(id)
+            : Result.Failure("Workspace has no desktop (compatibility mode)."))
+            // Recorded here AS WELL AS in the CurrentChanged subscription above, and the
+            // redundancy is deliberate: Touch is idempotent (it moves an id to the front),
+            // and this path must not depend on the OS raising a change notification we did
+            // not ask for. The subscription covers switches made outside the app; this
+            // covers the ones we make.
+            .Tap(() => mru = mru.Touch(workspaceId));
+
+    // Alt+Tab-style switching (Petre: "maybe an alt-tab like shortcut for me to switch
+    // through workspaces"): the workspaces in most-recently-used order, plus where the
+    // highlight should start. One call rather than two, because the index is only meaningful
+    // against the very list returned alongside it.
+    public RecentWorkspaces ByRecentUse()
+    {
+        var ordered = mru.Order(State.Workspaces);
+        var current = desktops.CurrentDesktop();
+        return new RecentWorkspaces(
+            ordered,
+            current.IsFailure ? -1 : ordered.ToList().FindIndex(w => w.DesktopId == current.Value));
+    }
+
+    // Petre: "i want it configurable". The chord that drives the switcher above.
+    //
+    // Every consumer reads it HERE rather than from AppState, because this is where the
+    // fallback lives: blank, missing, or a hand-edited state.json holding nonsense all come
+    // back as the default. A bad string in a file must never leave the app with no way to
+    // switch workspaces at all -- and since it is validated on the way in (below), the only
+    // route to a bad one is editing the file by hand.
+    public string SwitcherShortcut =>
+        Chord.Parse(State.SwitcherShortcut).IsSuccess
+            ? State.SwitcherShortcut.Trim()
+            : AppState.DefaultSwitcherShortcut;
+
+    // Validated BEFORE it is persisted, which is the whole reason Chord.Parse returns a
+    // Result rather than throwing: the editor gets to say exactly why "Ctrl+Bananas" is not
+    // a shortcut, and nothing unusable ever reaches the file.
+    // Stored in Chord's canonical spelling rather than verbatim, so "control + alt+1" and
+    // "Ctrl+Alt+1" cannot sit in state.json as two different-looking versions of one chord.
+    public Result SetSwitcherShortcut(string shortcut) =>
+        Chord.Parse(shortcut)
+            .Tap(chord => Persist(State with { SwitcherShortcut = chord.ToString() }));
+
+    // Petre: "when switching workspaces, i want you to activate the window which was last
+    // active last time this workspace was active."
+    //
+    // Both halves live in one method because they are two ends of the same move and the order
+    // between them matters: the desktop being LEFT must be stamped before `currentDesktopId`
+    // advances, or the stamp lands on the wrong desktop.
+    //
+    // Driven off CurrentChanged rather than Switch() so it covers switches made by ANY means --
+    // our hotkey, the bar, Win+Ctrl+arrows, Task View -- for the same reason the MRU is fed
+    // from here. A restore that only worked for our own switches would be the kind of
+    // half-working that is worse than absent.
+    // No longer stamps the desktop being left: that is done as focus moves, by RememberActiveOn,
+    // because the stamp raced this very notification (see there). currentDesktopId is still
+    // tracked, for the marker suppression on the desktop you are standing on.
+    void OnDesktopChanged(Guid arriving)
+    {
+        // Every arrival, whoever caused it. A desktop that jumps back and forth with no input shows up
+        // here as a burst of arrivals milliseconds apart, and the lines in between say what moved a
+        // window: which is the only way to tell a switch Petre asked for from one Windows made because
+        // something dragged the foreground window to another desktop.
+        trace?.Invoke($"arrived {NameOfDesktop(arriving)} (was {NameOfDesktop(currentDesktopId.GetValueOrDefault())}), " +
+                      $"foreground={monitor.Foreground().GetValueOrDefault().Value:X}");
+
+        currentDesktopId = arriving;
+
+        // Taken here, before anything can return early, so the one-shot cannot survive an arrival and
+        // fire on an unrelated one later. A bounced arrival therefore spends it and does nothing with
+        // it, which is the same deal every other reaction in this method gets while the desktop is
+        // ping-ponging.
+        var sentHere = followed;
+        followed = Maybe<WindowHandle>.None;
+
+        // Petre: "still that rapid changing workspaces... i want you to add protection so that rapid
+        // moving from one to the other is caught by the app."
+        //
+        // Everything this method does can MOVE A WINDOW or take the foreground, and both of those can make
+        // Windows change desktop: borrowing pins the anchor's windows and releasing moves them home, and
+        // restoring focus activates a window, which follows that window to its desktop if it has gone. So
+        // while the desktop is ping-ponging, the app's own reactions are the most likely thing feeding it,
+        // and the honest response is to stop reacting until it settles rather than to keep participating.
+        //
+        // Skipping is SAFE rather than merely cautious. ApplyInheritance decides what to hold from what is
+        // held right now, so the next settled arrival releases and re-borrows correctly; a skipped focus
+        // restore leaves focus wherever Windows put it, which is what happens on any switch this app did
+        // not initiate anyway.
+        if (Bouncing(arriving))
+        {
+            // Still pulsed, so the bar redraws for the desktop actually arrived at: standing somewhere
+            // while the bar shows another row is worse than a missed focus restore.
+            stateChanged.OnNext(Unit.Default);
+            return;
+        }
+
+        // Before the focus restore, because this is what puts the parent's windows ON this desktop
+        // -- and restoring focus to one of them only makes sense once it is here.
+        ApplyInheritance(arriving);
+        // After the borrowing, so a window pinned in from a parent workspace is not moved while it is
+        // only visiting. A first attempt, which may be too early to take: the resync tick retries it.
+        //
+        // A move that LANDS takes the focus with it (#89) and the ledger's answer is skipped, because the
+        // two would otherwise fight: the moved window is activated here and RestoreLastActive would
+        // immediately hand focus back to whatever was last active. A window you have just sent to this
+        // screen is the more useful answer to "what were you about to use".
+        if (ApplyPendingMonitorMoves()) return;
+        // A window you followed here outranks the ledger for the same reason a landed monitor move
+        // does: you sent it a moment ago, so it is the answer to "what were you about to use".
+        if (sentHere.HasValue) activator?.Activate(sentHere.Value);
+        else RestoreLastActive(arriving);
+    }
+
+    // The last few desktop arrivals, and a cool-down once they start alternating.
+    //
+    // A -> B -> A inside one window is the shape being caught: not "switching quickly", which is a thing
+    // Petre does deliberately with Win+Ctrl+Tab, but the same two desktops trading places, which no
+    // deliberate gesture produces and a feedback loop always does.
+    readonly List<(Guid Desktop, DateTimeOffset At)> arrivals = [];
+    DateTimeOffset settledAt = DateTimeOffset.MinValue;
+
+    // 900ms holds three arrivals of a genuine loop, whose hops are milliseconds apart, while being far
+    // shorter than three deliberate switches: a person alternating two workspaces by hand takes half a
+    // second per hop at best, and the trace of him doing exactly that showed 400-600ms.
+    static readonly TimeSpan BounceWindow = TimeSpan.FromMilliseconds(900);
+
+    // Long enough to outlast the loop and short enough that a false positive costs one dulled switch.
+    static readonly TimeSpan BounceCooldown = TimeSpan.FromSeconds(2);
+
+    // True while the desktop is ping-ponging, or during the cool-down after it was.
+    bool Bouncing(Guid arriving)
+    {
+        var at = now();
+
+        arrivals.Add((arriving, at));
+        // Three is all the test below reads; a few more costs nothing and keeps the list honest if the rule
+        // is ever widened.
+        if (arrivals.Count > 6) arrivals.RemoveAt(0);
+
+        if (at < settledAt)
+        {
+            trace?.Invoke($"  bounce: still cooling down, {NameOfDesktop(arriving)} left alone");
+            return true;
+        }
+
+        var recent = arrivals.Where(a => at - a.At <= BounceWindow).ToList();
+        var alternating = recent.Count >= 3
+                          && recent[^1].Desktop == recent[^3].Desktop
+                          && recent[^2].Desktop != recent[^1].Desktop;
+        if (!alternating) return false;
+
+        settledAt = at + BounceCooldown;
+        trace?.Invoke($"  BOUNCE DETECTED at {NameOfDesktop(arriving)}: " +
+                      $"{string.Join(" -> ", recent.Select(a => NameOfDesktop(a.Desktop)))}. " +
+                      $"Borrowing and focus restore suspended for {BounceCooldown.TotalSeconds:F0}s.");
+        return true;
+    }
+
+    // --- a nested workspace borrows its parent's windows (#42) ---------------------------------
+    //
+    // Petre: "i want parent's windows to be present in the child workspace... but on the desktop."
+    // Not icons on a row -- actually there, alongside the child's own windows.
+    //
+    // Windows' own pin is the only mechanism that puts one window on more than one desktop, and it
+    // is ALL-OR-NOTHING: a pinned window is on every desktop, not on a chosen few. So "the parent's
+    // windows, on its children only" is emulated by pinning them while you are inside a child and
+    // unpinning them when you leave. The over-share exists, but only for as long as you are
+    // standing in the subtree that wants it.
+    //
+    // Two facts make this survivable, and both had to be built rather than assumed:
+    //
+    //   * UNPINNING DOES NOT SEND A WINDOW HOME. It leaves it on whatever desktop is current, so
+    //     unpinning while standing in the child would quietly MOVE the parent's windows into the
+    //     child. Every release therefore unpins AND moves the window back to the desktop it was
+    //     borrowed from.
+    //   * A CRASH WOULD STRAND THEM pinned and homeless, which is precisely the failure this app
+    //     avoids by being built on desktops rather than on hiding windows. So every borrow is
+    //     written to state.json with its home desktop, and RepairInheritedPins puts them back at
+    //     the next start.
+    //
+    // Kept live as well as persisted: the set is what the next switch releases, and reading it
+    // back from state on every switch would be slower and no more correct.
+    readonly Dictionary<WindowHandle, Guid> borrowed = [];
+
+    void ApplyInheritance(Guid arriving)
+    {
+        var parentDesktop = ParentDesktopOf(arriving);
+        trace?.Invoke($"  inherit: arriving={NameOfDesktop(arriving)}, borrowsFrom=" +
+                      $"{(parentDesktop is { } from ? NameOfDesktop(from) : "nothing")}, holding={borrowed.Count}");
+
+        // Standing somewhere that borrows nothing, or somewhere that borrows from a DIFFERENT
+        // parent: either way, give back what is held before taking anything new.
+        if (borrowed.Count > 0 && borrowed.Values.FirstOrDefault() != parentDesktop) ReleaseBorrowed();
+        if (parentDesktop is not { } home || borrowed.Count > 0) return;
+
+        // Every window we know to be on the parent's desktop right now. Asked of the OS rather
+        // than of `memberships`, which records where a window was PLACED and not where it is.
+        knownWindows.Keys
+            .Where(w => desktops.DesktopOf(w).Map(d => d == home).GetValueOrDefault(false))
+            .ToList()
+            .ForEach(w => desktops.Pin(w).Tap(() => borrowed[w] = home));
+
+        PersistBorrowed();
+    }
+
+    void ReleaseBorrowed()
+    {
+        // The riskiest moment in the app for an unasked-for switch: moving a window that currently has
+        // FOCUS to another desktop makes Windows follow it there.
+        trace?.Invoke($"  release {borrowed.Count} home, foreground={monitor.Foreground().GetValueOrDefault().Value:X}, " +
+                      $"[{string.Join(", ", borrowed.Select(b => $"{b.Key.Value:X}->{NameOfDesktop(b.Value)}"))}]");
+
+        borrowed.ToList().ForEach(b =>
+        {
+            // Order matters and is the whole trick: unpin first, then put it back. Unpinning alone
+            // would leave the window on whichever desktop is current -- which, on a switch out of a
+            // nested workspace, is the wrong one.
+            desktops.Unpin(b.Key).Tap(() => desktops.MoveWindow(b.Key, b.Value));
+        });
+        borrowed.Clear();
+        PersistBorrowed();
+    }
+
+    void PersistBorrowed() =>
+        Persist(State with
+        {
+            InheritedPins = borrowed.Select(b => new InheritedPin(b.Key.Value, b.Value)).ToList(),
+        });
+
+    // The desktop whose windows the workspace on `desktop` borrows, or null when there is nothing
+    // to borrow.
+    //
+    // Reads AppState.LendsWindowsTo, which answers null for three different situations that all
+    // mean the same thing here: the workspace is in no group, it is in an ANCHORLESS group (#84's
+    // whole point being that there is no parent, so there are no windows to lend), or it is the
+    // anchor itself and already has its own windows.
+    Guid? ParentDesktopOf(Guid desktop) =>
+        State.Workspaces.FirstOrDefault(w => w.DesktopId == desktop) is { } workspace
+        && State.LendsWindowsTo(workspace.Id) is { } lender
+            ? State.Workspaces.FirstOrDefault(w => w.Id == lender)?.DesktopId
+            : null;
+
+    // Called once at startup. Anything still recorded as borrowed is the residue of a crash or a
+    // kill while standing inside a nested workspace: unpin it and put it back where it came from.
+    // A window that has since closed is simply dropped -- IsWindow is not asked, because Unpin and
+    // MoveWindow both fail harmlessly for a dead handle and their Results are already ignored here.
+    void RepairInheritedPins()
+    {
+        if (State.InheritedPins.Count == 0) return;
+        State.InheritedPins.ToList().ForEach(pin =>
+            desktops.Unpin(new WindowHandle((nint)pin.Window))
+                .Tap(() => desktops.MoveWindow(new WindowHandle((nint)pin.Window), pin.HomeDesktop)));
+        Persist(State with { InheritedPins = [] });
+    }
+
+    // ...and put focus back on arrival.
+    //
+    // Re-validated against the OS rather than trusted: the remembered window may have been
+    // closed, or dragged to another desktop, since we left. DesktopOf answers both at once (it
+    // fails outright for a dead hwnd), and a stale entry is DROPPED rather than merely skipped
+    // so the bar's marker stops promising a landing spot that no longer exists.
+    //
+    // Best-effort by design, exactly like every other Activate call here. SetForegroundWindow
+    // is only granted to a process that currently holds foreground rights, and on a switch WE
+    // did not initiate (Win+Ctrl+arrows, Task View) we may well not -- in which case this
+    // degrades to a taskbar flash rather than failing loudly.
+    void RestoreLastActive(Guid arriving)
+    {
+        if (activator is null) return;
+
+        var remembered = Remembered(arriving);
+        var chosen = remembered.Or(() => FrontmostOnMainMonitor(arriving));
+        trace?.Invoke($"  focus: {(remembered.HasValue ? "ledger" : chosen.HasValue ? "frontmost" : "nothing")} " +
+                      $"window={chosen.GetValueOrDefault().Value:X}");
+
+        chosen.Tap(window => activator.Activate(window));
+    }
+
+    // A desktop's workspace name for the trace, or a short id for one that is not a workspace. Only
+    // called from tracing, so it does no COM work.
+    string NameOfDesktop(Guid desktop) =>
+        State.Workspaces.FirstOrDefault(w => w.DesktopId == desktop)?.Name
+        ?? (desktop == Guid.Empty ? "none" : $"unnamed:{desktop.ToString()[..4]}");
+
+    Maybe<WindowHandle> Remembered(Guid arriving)
+    {
+        if (!lastActiveByDesktop.TryGetValue(arriving, out var window)) return Maybe<WindowHandle>.None;
+        if (desktops.DesktopOf(window).GetValueOrDefault() == arriving) return window;
+        // Closed, or dragged to another desktop while we were away. Dropped rather than merely
+        // skipped so the bar's marker stops promising a landing spot that no longer exists.
+        lastActiveByDesktop.Remove(arriving);
+        return Maybe<WindowHandle>.None;
+    }
+
+    // Petre: "if we don't have the information about what was the last active window on that
+    // monitor, activate the foreground window on the main monitor... rather than not focus any
+    // window."
+    //
+    // Applies on the first visit of a session to any desktop, which used to leave focus wherever
+    // Windows happened to drop it.
+    //
+    // EVERY candidate is checked against the desktop we are arriving on, and that check is the
+    // whole reason this method still works. Petre, on the first version: "i can't switch
+    // workspaces anymore... it pushes me back to the current workspace."
+    //
+    // What went wrong is worth keeping, because the reasoning was plausible and wrong. That
+    // version took no DesktopOf calls at all, on the argument that we have already ARRIVED by
+    // the time this runs, so the un-cloaked windows a ScreenFacts snapshot reports must be this
+    // desktop's windows. Cloaking is not synchronous with the desktop-change notification. The
+    // snapshot still described the desktop we had just LEFT, so the fallback activated a window
+    // over there -- and activating a window on another virtual desktop makes Windows follow it.
+    // Every switch bounced straight back, which is indistinguishable from switching being
+    // broken outright.
+    //
+    // So the arrival is now asked about rather than inferred. Note the shape this restores:
+    // Remembered() has always validated its candidate this way, and the fallback was the one
+    // path that did not.
+    //
+    // Narrowed to knownWindows as well, and that is not belt-and-braces either: ScreenLayout
+    // enumerates through TopLevelWindows directly, which has never heard of WindowMonitor's
+    // ignore list, so the floating bar is in that snapshot -- and being permanently topmost, it
+    // heads it. Unfiltered, the fallback would hand focus to our own bar every time.
+    Maybe<WindowHandle> FrontmostOnMainMonitor(Guid arriving) =>
+        screenLayout is null
+            ? Maybe<WindowHandle>.None
+            : screenLayout.Snapshot()
+                .OnPrimaryFrontToBack(knownWindows.Keys)
+                .TryFirst(w => desktops.DesktopOf(w).GetValueOrDefault() == arriving);
+
+    // A desktop became current: if it belongs to a workspace, that is a visit.
+    void RememberVisit(Guid desktopId) =>
+        State.Workspaces.TryFirst(w => w.DesktopId == desktopId).Tap(w => mru = mru.Touch(w.Id));
+
+    // Floating-bar fix round 6 (Petre: the bar must "show tabs from all workspaces" --
+    // including windows on UNBOUND desktops like his "Main"): a desktop group's label
+    // needs a click-to-go-there affordance just like a workspace label, but Switch()
+    // above takes a WORKSPACE id. This is the raw-desktop counterpart for
+    // Overview.DesktopGroup rows -- same delegate, no persistence (like Switch, "current
+    // workspace" is always derived live from CurrentDesktop, never stored).
+    public Result SwitchToDesktop(Guid desktopId) => desktops.Switch(desktopId);
+
+    // CycleWorkspace(direction) and SwitchToIndex(index) used to live here, driving
+    // Ctrl+Alt+arrows and Ctrl+Alt+1..9. Both are gone with those chords (Petre: "i don't
+    // think we need ctrl+alt and those, ctrl+tab is good enough"), and removed rather than
+    // left as unreachable public API so nothing has to wonder later which switching path is
+    // the live one. There are now exactly two: Switch(workspaceId) and SwitchToDesktop.
+    //
+    // If keyboard direct-jump comes back it should bind a NAMED chord to a workspace's id
+    // (Workspace.Shortcut and Chord already exist for it) rather than to its list position,
+    // which is the wart that made SwitchToIndex change meaning whenever anyone reordered the
+    // Workspaces tab. And MRU walking already replaces cycling: see ByRecentUse.
+    public Result<Workspace> AddWorkspace(string name) =>
+        InsertWorkspace(name, State.Workspaces.Count);
+
+    // Petre: "ability to rename existing and add new workspaces from within the floating window,
+    // on top or under the current workspace, something like a insert before/after."
+    //
+    // The same creation as AddWorkspace, which is now a call to this one with the end as the
+    // index -- rather than a second copy of the validate/create/persist chain that would have to
+    // be kept in step with it.
+    //
+    // The index is OURS, not Windows'. desktops.Create always appends a virtual desktop at the end
+    // of the shell's own list, and nothing here tries to reorder that: the bar's rows come from
+    // State.Workspaces, so this list's order is the only one that has ever been visible. The two
+    // have always been free to disagree.
+    //
+    // Clamped rather than validated, because every caller derives the index from a row that was on
+    // screen when the menu opened, and a workspace removed in between should land the new one at
+    // the end instead of raising an error at somebody who asked for something reasonable.
+    // `parentId` makes the new workspace a SIBLING of the row it was invoked on rather than a
+    // top-level workspace (#74). Petre: "before/after is relative to the row it was invoked on, at
+    // that row's depth."
+    //
+    // Null for a top-level row, which is the whole previous behaviour and why it defaults.
+    //
+    // The parent is validated exactly as NestWorkspace and AddChildWorkspace validate it -- it must
+    // exist and must not itself be nested -- rather than trusted because a caller derived it from a
+    // row. A UI that only offers legal choices is not a guarantee; it is a UI.
+    public Result<Workspace> InsertWorkspace(string name, int index, Guid? groupId = null) =>
+        Result.FailureIf(string.IsNullOrWhiteSpace(name), "Workspace name required")
+            .Bind(() => Result.FailureIf(NameTaken(name, excluding: null), $"A workspace named '{name.Trim()}' already exists."))
+            .Bind(() => groupId is { } group && State.Groups.All(g => g.Id != group)
+                ? Result.Failure("That group no longer exists.")
+                : Result.Success())
+            .Bind(() => desktops.Create(name))
+            .Map(d => new Workspace(Guid.NewGuid(), name, d.Id) { GroupId = groupId })
+            .Tap(w => Persist(State with { Workspaces = Inserted(w, Math.Clamp(index, 0, State.Workspaces.Count)) }));
+
+    // A new workspace at the bottom of a group, which is where MoveIntoGroup puts a joiner, so a row
+    // created into a group and a row moved into one end up in the same place. For the remote control's
+    // `create --group` (Petre: "when adding a new workspace, we should say in which group and, if
+    // neither, at what position").
+    public Result<Workspace> AddWorkspaceToGroup(string name, Guid groupId) =>
+        InsertWorkspace(name, AfterLastMemberOf(groupId, State.Workspaces), groupId);
+
+    // A new ungrouped workspace at a 1-based TOP-LEVEL row of the bar, counting a whole group's box as
+    // one row (see Blocks). So no row number can land it between two members of a group. It takes the
+    // place of whatever was drawn at that row, which moves down one; past the last row is the end.
+    //
+    // Inserted before the FIRST list entry of the block at that row, rather than at a sum of block
+    // sizes, so it stays right even for a state.json whose groups are not contiguous in the list.
+    public Result<Workspace> AddWorkspaceAtRow(string name, int row) =>
+        InsertWorkspace(name, ListIndexOfRow(row));
+
+    int ListIndexOfRow(int row) =>
+        Blocks(State) is var blocks && row >= 1 && row <= blocks.Count
+            ? blocks[row - 1].Min(w => State.Workspaces.ToList().FindIndex(x => x.Id == w.Id))
+            : State.Workspaces.Count;
+
+    // Every virtual desktop Windows has right now, named or not, in Windows' own order. For the remote
+    // control's `desktops` and `name-desktop`, which need to reach the unnamed ones the bar shows
+    // separately (the row menu's "Name this desktop…").
+    public Result<IReadOnlyList<DesktopInfo>> LiveDesktops() => desktops.GetDesktops();
+
+    // The 1-based top-level row a workspace is drawn in. A grouped workspace answers its group's row.
+    // Reported back by the remote control, so a caller can see where something actually landed.
+    public Maybe<int> RowOf(Guid workspaceId) =>
+        Blocks(State).Select((block, at) => (block, at))
+            .TryFirst(x => x.block.Any(w => w.Id == workspaceId))
+            .Map(x => x.at + 1);
+
+    IReadOnlyList<Workspace> Inserted(Workspace workspace, int index)
+    {
+        var next = State.Workspaces.ToList();
+        next.Insert(index, workspace);
+        return next;
+    }
+
+    // Reviewer (fix round 1, Critical): duplicate names used to be unchecked, so two
+    // workspaces could share a name; ManageWindow.OnSaveRules' `ToDictionary(w => w.Name)`
+    // then threw ArgumentException with no handler, killing the process before renamed
+    // titles could be restored. Guarded here (case-insensitive, trimmed) -- the ROOT CAUSE
+    // fix -- with a defense-in-depth duplicate-safe dictionary added in ManageWindow too,
+    // and a last-ditch DispatcherUnhandledException handler in App as a backstop.
+    public Result RenameWorkspace(Guid id, string name) =>
+        Result.FailureIf(string.IsNullOrWhiteSpace(name), "Workspace name required")
+            .Bind(() => Workspace(id))
+            .Bind(w => Result.FailureIf(NameTaken(name, excluding: id), $"A workspace named '{name.Trim()}' already exists.")
+                .Map(() => w))
+            .Tap(w => { if (w.DesktopId is { } d) desktops.Rename(d, name); })
+            .Tap(w => Persist(State with
+            {
+                Workspaces = State.Workspaces.Select(x => x.Id == id ? x with { Name = name } : x).ToList(),
+            }));
+
+    // Names a virtual desktop that ALREADY EXISTS, which is the one thing the app could not do
+    // until now (#149). Petre: "right-clicking on the default desktop (desktop1) doesn't do
+    // anything, no context menu for it."
+    //
+    // The distinction against InsertWorkspace is the whole method: that one CREATES a desktop and
+    // names it, so it can never adopt Desktop 1, the desktop everybody starts on and the one most
+    // likely to be sitting there unnamed. This one binds a name to a desktop the shell already has.
+    // Without it, naming Desktop 1 meant creating a second desktop and moving every window over,
+    // which is not what "name this one" means.
+    //
+    // Appended, like AddWorkspace. Order in this list is the bar's row order and the source of the
+    // lane colour, and an unbound desktop's row is already drawn last, so appending keeps the row
+    // where it was when the menu was opened rather than making it jump.
+    //
+    // Refuses a desktop that is already bound rather than quietly renaming that workspace: the two
+    // are different intentions, and a bound desktop's row already carries the full menu with Rename
+    // on it. Existence is checked against the shell rather than assumed from the caller's row,
+    // because the menu was opened on a row built from an overview that is now some milliseconds old
+    // and a desktop can be closed in that time.
+    public Result<Workspace> NameDesktop(Guid desktopId, string name) =>
+        Result.FailureIf(string.IsNullOrWhiteSpace(name), "Workspace name required")
+            .Bind(() => Result.FailureIf(NameTaken(name, excluding: null), $"A workspace named '{name.Trim()}' already exists."))
+            .Bind(() => Result.FailureIf(
+                State.Workspaces.Any(w => w.DesktopId == desktopId),
+                "That desktop already belongs to a workspace."))
+            .Bind(() => desktops.GetDesktops())
+            .Bind(all => all.Any(d => d.Id == desktopId)
+                ? Result.Success()
+                : Result.Failure("That desktop no longer exists."))
+            // The shell's own name is set too, so Task View agrees with the bar. Same order as
+            // RenameWorkspace: tell Windows first, then persist, so a COM failure leaves nothing
+            // claiming a name the desktop does not have.
+            .Bind(() => desktops.Rename(desktopId, name.Trim()))
+            .Map(() => new Workspace(Guid.NewGuid(), name.Trim(), desktopId))
+            .Tap(w => Persist(State with { Workspaces = State.Workspaces.Append(w).ToList() }));
+
+    // Petre: "i need to be able to move workspaces up or down in the manage window".
+    // delta is -1 (up) or +1 (down). This one list drives the floating bar's row order and,
+    // through WorkspacePalette, each workspace's lane colour -- so persisting it here is all
+    // the other surfaces need. It no longer decides what any shortcut does: Ctrl+Alt+1..9 bound
+    // by position and has been removed, which is exactly why reordering is now safe.
+    //
+    // Out-of-range moves SUCCEED as no-ops rather than failing: the Up button on the first
+    // row should do nothing, not raise an error dialog at someone who clicked it.
+    public Result MoveWorkspace(Guid id, int delta) =>
+        MoveAmongPeers(id, from => from + delta, clampIntoRange: false);
+
+    // Petre: "menu options: add move to the end and to the top."
+    //
+    // A REPOSITION, not a run of swaps, and the difference is visible: bubbling a workspace to the
+    // top one swap at a time reaches the same order but persists and pulses once per step, so
+    // every open surface rebuilds N times and state.json is rewritten N times for one gesture.
+    //
+    // The workspaces it passes keep their relative order, which is what "move to the top" means --
+    // taking it out and putting it back is the whole operation, and the rest close the gap.
+    //
+    // Clamped like InsertWorkspace, and for the same reason: the caller derives the target from a
+    // list that may have changed since the menu opened, and landing at an end is a better answer
+    // than an error dialog.
+    // `index` is a position AMONG PEERS, not in the whole list, so "move to top" on a grouped
+    // workspace means the top of its group. Callers that mean "the end" may pass any number past
+    // the last peer, including the full list's length, and it is clamped.
+    public Result MoveWorkspaceTo(Guid id, int index) =>
+        MoveAmongPeers(id, _ => index, clampIntoRange: true);
+
+    // Both moves reorder a workspace among its PEERS, which is the fix for #85: Petre reported that
+    // "move up / move down on a workspace inside a group doesn't work".
+    //
+    // They used to move it one place in the flat list, which predates grouping. The bar draws a
+    // whole group as one box, so moving the first member up swapped it with the anchor in the list
+    // and changed nothing at all on screen: it was still the first member below the anchor. A row
+    // outside any group had the mirror problem, swapping with somebody else's group member and
+    // leaving the order of the bar's top-level rows alone.
+    //
+    // So peers are the rows a row is actually drawn beside, which is one of two things (see Blocks):
+    // the other members of its box, or the bar's other top-level rows.
+    Result MoveAmongPeers(Guid id, Func<int, int> targetOf, bool clampIntoRange)
+    {
+        if (!State.Workspaces.Any(w => w.Id == id)) return Result.Failure("Workspace no longer exists.");
+
+        var blocks = Blocks(State).Select(b => b.ToList()).ToList();
+        var at = blocks.FindIndex(b => b.Exists(w => w.Id == id));
+        var block = blocks[at];
+
+        // A row that HEADS its block moves the whole block, because there is nowhere for it to go
+        // inside one. An ungrouped workspace is a block of one, and an anchor is held at the top of
+        // its box by MembersOf, so for both of them "up" can only mean "up past the row above the
+        // box". The group travels with its anchor rather than being torn open.
+        if (block.Count == 1 || State.IsAnchor(id))
+            return MovedTo(Reordered(blocks, at, targetOf, clampIntoRange)?.SelectMany(b => b).ToList());
+
+        // Otherwise it moves inside its own box. An anchored group's first row belongs to the anchor
+        // and nothing may take it, so the members below reorder among themselves; an anchorless
+        // group (#84) has no such row, so every member is movable and the top of the box is a place
+        // a member can reach.
+        var pinned = State.GroupOf(id)!.IsAnchored ? 1 : 0;
+        var movable = block.Skip(pinned).ToList();
+        var moved = Reordered(movable, movable.FindIndex(w => w.Id == id), targetOf, clampIntoRange);
+
+        return MovedTo(moved is null
+            ? null
+            : blocks.Select((b, i) => i == at ? block.Take(pinned).Concat(moved).ToList() : b).SelectMany(b => b).ToList());
+    }
+
+    // The bar's top-level rows, in the order it draws them: a lone ungrouped workspace, or a whole
+    // group as one box with its members inside.
+    //
+    // Deliberately the same walk FloatingBar does, down to treating a GroupId that names no group as
+    // ungrouped, because a move that disagreed with the drawing about what sits beside what is
+    // exactly the bug #85 reported. It is the reason this lives here rather than in the bar: the
+    // order is a fact about the state, and two surfaces computing it separately is how they drifted.
+    static IReadOnlyList<IReadOnlyList<Workspace>> Blocks(AppState state)
+    {
+        var drawn = new HashSet<Guid>();
+        var blocks = new List<IReadOnlyList<Workspace>>();
+
+        state.Workspaces.ToList().ForEach(w =>
+        {
+            if (!drawn.Add(w.Id)) return;
+            if (w.GroupId is not { } id || state.Groups.All(g => g.Id != id)) { blocks.Add([w]); return; }
+
+            var members = state.MembersOf(id);
+            members.ToList().ForEach(m => drawn.Add(m.Id));
+            blocks.Add(members);
+        });
+
+        return blocks;
+    }
+
+    // Takes one item out and puts it back at the target, or returns null when there is nothing to
+    // do. Null rather than an unchanged copy so the caller can tell a no-op from a real move and
+    // skip the persist: writing state.json and pulsing every surface for a move that changed
+    // nothing would rebuild the whole bar for no reason.
+    static List<T>? Reordered<T>(List<T> order, int from, Func<int, int> targetOf, bool clampIntoRange)
+    {
+        var to = targetOf(from);
+
+        // Out of range is a no-op for the up/down buttons: "Move up" on the first row should do
+        // nothing rather than raise an error at someone who clicked it. Move-to-top/end clamps
+        // instead, since an end is what it was asking for anyway.
+        if (clampIntoRange) to = Math.Clamp(to, 0, order.Count - 1);
+        else if (to < 0 || to >= order.Count) return null;
+        if (to == from) return null;
+
+        var moved = new List<T>(order);
+        moved.RemoveAt(from);
+        moved.Insert(to, order[from]);
+        return moved;
+    }
+
+    // Persisting the flattened blocks makes the stored order the order the bar draws, which is worth
+    // stating because it also TIDIES: a group whose members were scattered through the list (a join
+    // from a distant row, or an old state.json) comes back contiguous. Lane colours follow list
+    // position and a group takes its colour from its anchor, so both agree with the screen
+    // afterwards -- and a list already in drawn order is left untouched, which is the normal case.
+    //
+    // A null order means the move was a no-op, and that SUCCEEDS: see Reordered.
+    Result MovedTo(List<Workspace>? order) =>
+        Result.Success().Tap(() => { if (order is not null) Persist(State with { Workspaces = order }); });
+
+    // A WHOLE GROUP moved among the bar's top-level rows. Petre wanted to "move them around easily",
+    // and an anchorless group (#84) had no way to move at all: its members reorder INSIDE the box
+    // (MoveAmongPeers) and its header's menu had no moves. An anchored group could already move, by
+    // moving its anchor, which this does too, so both kinds now answer the same command.
+    //
+    // The same block arithmetic MoveAmongPeers does for a block of one, applied to the group's block:
+    // up/down are no-ops at the ends, top/end clamp. Members keep their order inside the box.
+    public Result MoveGroup(Guid groupId, int delta) =>
+        MoveGroupBlock(groupId, from => from + delta, clampIntoRange: false);
+
+    // `index` counts the bar's top-level rows, a group being one of them.
+    public Result MoveGroupTo(Guid groupId, int index) =>
+        MoveGroupBlock(groupId, _ => index, clampIntoRange: true);
+
+    Result MoveGroupBlock(Guid groupId, Func<int, int> targetOf, bool clampIntoRange)
+    {
+        if (State.Groups.All(g => g.Id != groupId)) return Result.Failure("That group no longer exists.");
+
+        var blocks = Blocks(State).Select(b => b.ToList()).ToList();
+        var at = blocks.FindIndex(b => b.Exists(w => w.GroupId == groupId));
+        // A group with no members left is not drawn and so has nowhere to move from.
+        if (at < 0) return Result.Success();
+
+        return MovedTo(Reordered(blocks, at, targetOf, clampIntoRange)?.SelectMany(b => b).ToList());
+    }
+
+    // FOLDING a row (see Workspace.Folded) and a whole group (Group.Folded). Petre: "minimize it, to a
+    // single line, so i don't see any icons in it", "i should be able to minimize the entire group".
+    //
+    // Presentational, like the active-window highlight and unlike most of their neighbours here: they
+    // change how a row is DRAWN and nothing else. Membership, placement and the roster are untouched,
+    // and a folded workspace is still switched to, dropped on and walked by the chord exactly as before.
+    //
+    // Idempotent by construction -- setting it to what it already is still persists and pulses,
+    // which costs one redraw and saves a special case that could only ever fire on a menu click
+    // nobody makes twice.
+    public Result SetWorkspaceFolded(Guid id, bool folded) =>
+        Workspace(id).Tap(_ => Persist(State with
+        {
+            Workspaces = State.Workspaces.Select(w => w.Id == id ? w with { Folded = folded } : w).ToList(),
+        }));
+
+    public Result SetGroupFolded(Guid groupId, bool folded) =>
+        State.Groups.Any(g => g.Id == groupId)
+            ? Result.Success().Tap(() => Persist(State with
+            {
+                Groups = State.Groups.Select(g => g.Id == groupId ? g with { Folded = folded } : g).ToList(),
+            }))
+            : Result.Failure("That group no longer exists.");
+
+    // Petre: "a workspace can be nested under a main (parent) workspace... it lives under the main
+    // one rather than sitting as a peer in the flat list" (#42).
+    //
+    // Three refusals, and each one is a shape the model would otherwise accept and the UI could
+    // never draw:
+    //
+    //   * ITSELF. A workspace parented to itself is a cycle of length one, and every walk over the
+    //     tree would run forever.
+    //   * A workspace that is ALREADY NESTED. One level only (see Workspace.ParentId): the bar is
+    //     ten rows tall and a second level of indentation is unreadable without collapsing, which
+    //     is an interaction nobody has asked for.
+    //   * A workspace that HAS CHILDREN. The mirror of the above -- nesting a parent under someone
+    //     else would create the second level from the other end.
+    //
+    // Deliberately NOT refused: nesting a workspace that has windows, or that is current. Both are
+    // ordinary, and neither means anything different afterwards.
+    // Now expressed as groups: nesting a child under a parent puts both into one ANCHORED group
+    // whose anchor is the parent, creating that group on the first child and reusing it after.
+    //
+    // The refusals below are the same three, restated in terms of membership rather than of a
+    // parent pointer.
+    public Result NestWorkspace(Guid child, Guid parent) =>
+        child == parent
+            ? Result.Failure("A workspace cannot be nested under itself.")
+            : Workspace(child).Bind(_ => Workspace(parent))
+                // The parent must not be somebody else's member. It may already be its own group's
+                // anchor, which is exactly the second-and-later child case.
+                .Bind(target => State.GroupOf(parent) is { } group && group.AnchorWorkspaceId != parent
+                    ? Result.Failure($"'{target.Name}' is itself in a group. Workspaces nest one level deep.")
+                    : Result.Success())
+                // ...and the child must not be an anchor, which would make its own members
+                // grandchildren of the parent.
+                .Bind(() => State.IsAnchor(child)
+                    ? Result.Failure("That workspace has workspaces nested under it. Workspaces nest one level deep.")
+                    : Result.Success())
+                .Tap(() => Persist(JoinedAnchoredGroup(child, parent)));
+
+    // The child joins the parent's group, and the group is created if the parent has none yet.
+    //
+    // One Persist for the whole thing, which is why this returns state rather than writing twice:
+    // creating the group and moving two workspaces into it is one change, and pulsing halfway
+    // through would let the bar draw a group with one member in it.
+    AppState JoinedAnchoredGroup(Guid child, Guid parent)
+    {
+        // A new group takes the parent's name AND its colour (#90), so nesting a workspace under a
+        // parent leaves the parent's row looking exactly as it did; only the child changes.
+        var group = State.GroupOf(parent)
+            ?? new Group(Guid.NewGuid(), State.Workspaces.Single(w => w.Id == parent).Name, parent)
+            {
+                Color = State.Workspaces.Single(w => w.Id == parent).Color,
+            };
+
+        return State with
+        {
+            Groups = State.Groups.Any(g => g.Id == group.Id) ? State.Groups : [.. State.Groups, group],
+            Workspaces = State.Workspaces
+                .Select(w => w.Id == child || w.Id == parent ? w with { GroupId = group.Id } : w)
+                .ToList(),
+        };
+    }
+
+    // Petre: "add child as a right click menu item" (#42).
+    //
+    // Create-and-nest in one call, and inserted directly AFTER the parent's existing children
+    // rather than at the end of the list -- a child created from a row should appear under that
+    // row, not at the bottom of the bar where the eye has to go looking for it.
+    //
+    // Not a convenience wrapper the UI could have assembled itself: two persists would pulse
+    // twice, and the intermediate state -- a new top-level workspace that exists for one frame
+    // before becoming a child -- would be visible on the bar as a row that jumps.
+    public Result<Workspace> AddChildWorkspace(Guid parent, string name) =>
+        Workspace(parent)
+            .Bind(p => State.GroupOf(parent) is { } group && group.AnchorWorkspaceId != parent
+                ? Result.Failure<Workspace>($"'{p.Name}' is itself in a group. Workspaces nest one level deep.")
+                : Result.Success(p))
+            .Bind(_ => Result.FailureIf(string.IsNullOrWhiteSpace(name), "Workspace name required"))
+            .Bind(() => Result.FailureIf(NameTaken(name, excluding: null), $"A workspace named '{name.Trim()}' already exists."))
+            .Bind(() => desktops.Create(name))
+            .Map(d => new Workspace(Guid.NewGuid(), name, d.Id))
+            .Tap(child =>
+            {
+                // The parent's group is settled first, so the new workspace has somewhere to be
+                // created into and the whole thing is still ONE Persist. Two writes would pulse
+                // twice, and the state in between -- a group of one, or a workspace that exists
+                // outside it for a frame -- is a shape the bar would briefly draw.
+                var withGroup = JoinedAnchoredGroup(child.Id, parent);
+                var group = withGroup.Groups.Single(g => g.AnchorWorkspaceId == parent).Id;
+
+                var ordered = withGroup.Workspaces.ToList();
+                ordered.Insert(AfterLastMemberOf(group, ordered), child with { GroupId = group });
+
+                Persist(withGroup with { Workspaces = ordered });
+            });
+
+    // One past the group's last member, so a child created from a row lands under that row rather
+    // than at the bottom of the bar where the eye has to go looking for it.
+    static int AfterLastMemberOf(Guid group, IReadOnlyList<Workspace> workspaces) =>
+        workspaces.Select((w, at) => (w, at))
+            .Where(x => x.w.GroupId == group)
+            .Select(x => x.at + 1)
+            .DefaultIfEmpty(workspaces.Count)
+            .Max();
+
+    // Out of the group, back to standing on its own.
+    //
+    // Renamed from UnnestWorkspace: with #84's anchorless groups, "un-nest" describes only half the
+    // cases, and #83 asks for this by the name "move a workspace out of the group".
+    //
+    // Leaving takes the group with it when too little is left to be a group. A group of one is not
+    // a group: the bar would draw an outline round a single row, which #42 already ruled out as
+    // decoration that means nothing.
+    public Result LeaveGroup(Guid workspaceId) =>
+        Workspace(workspaceId).Tap(_ => Persist(WithoutMember(State, workspaceId)));
+
+    // Removes one workspace from whatever group it is in, and tidies up after it.
+    //
+    // Two tidy-ups, both of which have a visible failure if skipped. A group left with one member
+    // is dissolved, as above. A group that has lost its ANCHOR keeps its members and its name and
+    // becomes anchorless: nothing is borrowed any more, which is correct, because the workspace
+    // that was lending the windows has gone.
+    static AppState WithoutMember(AppState state, Guid workspaceId)
+    {
+        if (state.GroupOf(workspaceId) is not { } group) return state;
+
+        var remaining = state.Workspaces.Count(w => w.GroupId == group.Id && w.Id != workspaceId);
+
+        return state with
+        {
+            Workspaces = state.Workspaces
+                .Select(w => w.Id == workspaceId || (remaining < 2 && w.GroupId == group.Id)
+                    ? w with { GroupId = null }
+                    : w)
+                .ToList(),
+            Groups = remaining < 2
+                ? state.Groups.Where(g => g.Id != group.Id).ToList()
+                : state.Groups
+                    .Select(g => g.Id == group.Id && g.AnchorWorkspaceId == workspaceId
+                        ? g with { AnchorWorkspaceId = null }
+                        : g)
+                    .ToList(),
+        };
+    }
+
+    // --- group membership (#83, #84) -----------------------------------------------------------
+    //
+    // Petre's ruling on where these live: "all three live on the workspace row's right-click context
+    // menu", not in Manage.
+
+    // Petre (#84): "workspaces are grouped together under a name... the parent is not a workspace,
+    // it's only the group's name."
+    //
+    // Starts ANCHORLESS with one member, because a group has to be created from somewhere and the
+    // row you right-clicked is the only member the gesture knows about. It draws immediately: an
+    // anchorless group has a header row carrying its name, so a group of one is a header plus a row
+    // rather than a row that looks unchanged.
+    //
+    // A workspace that is already grouped has to leave first. Silently moving it would make "new
+    // group" quietly dissolve the group it came from, which is a second consequence the user did
+    // not ask for.
+    public Result<Group> CreateGroup(string name, Guid firstMember) =>
+        Result.FailureIf(string.IsNullOrWhiteSpace(name), "Group name required")
+            .Bind(() => Workspace(firstMember))
+            .Bind(w => State.GroupOf(firstMember) is { } existing
+                ? Result.Failure<Workspace>($"'{w.Name}' is already in '{existing.Name}'. Move it out first.")
+                : Result.Success(w))
+            // The group starts in the colour the workspace it was made from was already wearing, so
+            // making a group does not recolour the row you made it from (#90). Null for a workspace
+            // that never chose one, which leaves the group following its position like any other row.
+            .Bind(w => GroupNameTaken(name, excluding: null)
+                ? Result.Failure<Group>($"A group named '{name.Trim()}' already exists.")
+                : Result.Success(new Group(Guid.NewGuid(), name.Trim()) { Color = w.Color }))
+            .Tap(group => Persist(State with
+            {
+                Groups = [.. State.Groups, group],
+                Workspaces = State.Workspaces.Select(w => w.Id == firstMember ? w with { GroupId = group.Id } : w).ToList(),
+            }));
+
+    // Petre (#83): "move a workspace into the group."
+    //
+    // Works the same for both kinds, which is the payoff of one model: joining an ANCHORED group
+    // makes the workspace a child that borrows the anchor's windows, joining an ANCHORLESS one is
+    // pure membership. Neither needs a branch here.
+    //
+    // Refused for a workspace that is itself an anchor, because its own members would become
+    // grandchildren of the group it joined. One level only, the same rule NestWorkspace enforces.
+    public Result MoveIntoGroup(Guid workspaceId, Guid groupId) =>
+        Workspace(workspaceId)
+            .Bind(w => State.Groups.FirstOrDefault(g => g.Id == groupId) is { } group
+                ? Result.Success((w, group))
+                : Result.Failure<(Workspace, Group)>("That group no longer exists."))
+            .Bind(x => State.IsAnchor(workspaceId)
+                ? Result.Failure($"'{x.Item1.Name}' has workspaces grouped under it. Workspaces nest one level deep.")
+                : Result.Success())
+            .Tap(() =>
+            {
+                // Out of the old group first, so leaving a group of two dissolves it exactly as a
+                // plain "move out" would. Doing it in one Persist keeps the bar from drawing the
+                // half-finished state.
+                var left = WithoutMember(State, workspaceId);
+
+                // Moved in the LIST as well as in the membership, to the bottom of its new group.
+                // Setting GroupId alone would leave it wherever it happened to sit, and since the
+                // box draws its members in list order, a workspace joining from a row above the
+                // group would appear in the middle of it. The bottom is where a new member belongs,
+                // and it also keeps the group contiguous, which is the order every move now
+                // preserves (see Blocks).
+                var joiner = left.Workspaces.Single(w => w.Id == workspaceId) with { GroupId = groupId };
+                var rest = left.Workspaces.Where(w => w.Id != workspaceId).ToList();
+                rest.Insert(AfterLastMemberOf(groupId, rest), joiner);
+
+                Persist(left with { Workspaces = rest });
+            });
+
+    // Petre (#83): "ungroup -- dissolve a group: the parent's nested workspaces stop being nested."
+    //
+    // Every member is freed and the group record goes. Members keep their desktops, their windows,
+    // their names and their positions in the list, so the only thing that changes is that they stop
+    // being drawn together. For an anchored group that also means the borrowing stops.
+    public Result Ungroup(Guid groupId) =>
+        State.Groups.FirstOrDefault(g => g.Id == groupId) is null
+            ? Result.Failure("That group no longer exists.")
+            : Result.Success().Tap(() => Persist(State with
+            {
+                Groups = State.Groups.Where(g => g.Id != groupId).ToList(),
+                Workspaces = State.Workspaces.Select(w => w.GroupId == groupId ? w with { GroupId = null } : w).ToList(),
+            }));
+
+    // An anchorless group's name is the only thing naming it, so it needs to be editable. An
+    // anchored group shows its anchor's row at the top instead, but it still keeps its own name (see
+    // Group), so renaming works for both.
+    public Result RenameGroup(Guid groupId, string name) =>
+        Result.FailureIf(string.IsNullOrWhiteSpace(name), "Group name required")
+            .Bind(() => State.Groups.Any(g => g.Id == groupId)
+                ? Result.Success()
+                : Result.Failure("That group no longer exists."))
+            .Bind(() => GroupNameTaken(name, excluding: groupId)
+                ? Result.Failure($"A group named '{name.Trim()}' already exists.")
+                : Result.Success())
+            .Tap(() => Persist(State with
+            {
+                Groups = State.Groups.Select(g => g.Id == groupId ? g with { Name = name.Trim() } : g).ToList(),
+            }));
+
+    // Case-insensitive and trim-tolerant, matching NameTaken for workspaces. Groups and workspaces
+    // are allowed to share a name: an anchored group is NAMED after its anchor, so forbidding it
+    // would forbid the commonest case.
+    bool GroupNameTaken(string name, Guid? excluding) =>
+        State.Groups.Any(g => g.Id != excluding && g.Name.Trim().Equals(name.Trim(), StringComparison.OrdinalIgnoreCase));
+
+    // The update check's opt-out (#71). Petre: "an opt-out setting -- this would be the app's only
+    // phone-home behaviour."
+    //
+    // A no-op when the value has not actually changed, and that is not micro-optimisation: Manage
+    // sets the checkbox from state when it opens, which raises Checked, which lands here. Without
+    // this, merely opening the window would write state.json and pulse every subscriber -- one of
+    // which rebuilds the whole bar.
+    public Result SetCheckForUpdates(bool enabled) =>
+        State.CheckForUpdates == enabled
+            ? Result.Success()
+            : Result.Success().Tap(() => Persist(State with { CheckForUpdates = enabled }));
+
+    // The docking setting (AppState.DockBar). The bar follows it from the pulse Persist sends, so Manage,
+    // `deskbar.cmd bar dock|undock` and anything else that sets it all go through one path. A no-op
+    // when unchanged, for the reason SetCheckForUpdates gives.
+    public Result SetDockBar(bool docked) =>
+        State.DockBar == docked
+            ? Result.Success()
+            : Result.Success().Tap(() => Persist(State with { DockBar = docked }));
+
+    // Across the seam between two screens, or on one screen's edge (AppState.DockAcrossScreens). Asking for the
+    // seam turns docking on as well, in the same write, since the one means nothing without the other.
+    public Result SetDockAcrossScreens(bool across) =>
+        State.DockAcrossScreens == across && (!across || State.DockBar)
+            ? Result.Success()
+            : Result.Success().Tap(() => Persist(State with { DockAcrossScreens = across, DockBar = State.DockBar || across }));
+
+    // The Settings tab's four dials (#151). Petre: "make things configurable, like dimming opacity,
+    // timeout, etc."
+    //
+    // ONE method rather than four setters, and the reason is the slider that drives it: a settings tab
+    // writes on every change, and four independent writers would persist four times and pulse four
+    // subscribers for one drag of one thumb. This takes the whole set, so a change is one write and one
+    // pulse however many controls moved.
+    //
+    // NULL means "back to the default" for each one independently, which is the only way back from a
+    // number once chosen -- and for the dwell it means something stronger still: inherit Windows' own
+    // MouseHoverTime (see HoverDwelling). Reset has to be expressible or the tab is a one-way door.
+    //
+    // Unchanged values write NOTHING, on the same principle as SetCheckForUpdates: the tab populates
+    // its controls from state when it opens, which raises ValueChanged on every slider, and without
+    // this merely opening Manage would rewrite state.json and rebuild the bar.
+    //
+    // Clamped on the way IN rather than trusted from the caller. The tab's sliders cannot produce an
+    // out-of-range value, but a slider is a UI, not a guarantee, and this is also the door a future
+    // surface comes through.
+    public Result SetBarAppearance(
+        double? idleOpacity, double? fadeGraceSeconds, double? fadeDurationMs, double? hoverDwellMs)
+    {
+        var next = State with
+        {
+            BarIdleOpacity = idleOpacity is { } opacity ? BarFading.Clamp(opacity) : null,
+            BarFadeGraceSeconds = fadeGraceSeconds is { } grace ? BarFading.ClampGraceSeconds(grace) : null,
+            BarFadeDurationMs = fadeDurationMs is { } duration ? BarFading.ClampDurationMs(duration) : null,
+            // Not clamped through HoverDwelling here, because that method's job is to answer "what
+            // dwell should the bar use", which needs the system value only the App layer can read. The
+            // range check is the part that belongs on the way in.
+            HoverDwellMs = hoverDwellMs is { } dwell && !double.IsNaN(dwell) && !double.IsInfinity(dwell)
+                ? Math.Clamp(dwell, HoverDwelling.MinimumMs, HoverDwelling.MaximumMs)
+                : null,
+        };
+
+        if (next.BarIdleOpacity == State.BarIdleOpacity
+            && next.BarFadeGraceSeconds == State.BarFadeGraceSeconds
+            && next.BarFadeDurationMs == State.BarFadeDurationMs
+            && next.HoverDwellMs == State.HoverDwellMs)
+            return Result.Success();
+
+        Persist(next);
+        return Result.Success();
+    }
+
+    // The bar's text size (see BarText). Its own setter rather than a fifth argument to SetBarAppearance:
+    // it has its own slider, so the one-write-per-drag argument for bundling does not reach it, and keeping
+    // it apart leaves every existing caller of SetBarAppearance untouched.
+    //
+    // Same three rules as SetBarAppearance: null means back to the default, the value is clamped (and
+    // snapped to half points) on the way in, and an unchanged value writes nothing, so opening Manage,
+    // which sets the slider from state, neither rewrites state.json nor rebuilds the bar.
+    public Result SetBarTextOffset(double? offset)
+    {
+        var next = offset is { } value ? BarText.Clamp(value) : (double?)null;
+        if (next == State.BarTextOffset) return Result.Success();
+        Persist(State with { BarTextOffset = next });
+        return Result.Success();
+    }
+
+    // The window list's floor (see WindowListLines). Null puts it back to the default.
+    public Result SetWindowListMinimumLines(int? lines)
+    {
+        var next = lines is { } value ? WindowListLines.Clamp(value) : (int?)null;
+        if (next == State.WindowListMinimumLines) return Result.Success();
+        Persist(State with { WindowListMinimumLines = next });
+        return Result.Success();
+    }
+
+    // How big the bar draws its icons (see IconScaling). Same three rules as SetBarTextOffset: null means back to
+    // the default, the value is clamped and snapped on the way in, and an unchanged value writes nothing.
+    public Result SetIconScale(double? scale)
+    {
+        var next = scale is { } value ? IconScaling.Clamp(value) : (double?)null;
+        if (next == State.IconScale) return Result.Success();
+        Persist(State with { IconScale = next });
+        return Result.Success();
+    }
+
+    // Which of the bottom strip's items are hidden (see StripItem). Same rule as the settings above: an unchanged
+    // set writes nothing, so opening Manage, which ticks the boxes from state, neither rewrites state.json nor
+    // rebuilds the bar. Kept in StripItem's order and without duplicates, so the same choice always saves the
+    // same way whatever order the boxes were clicked in.
+    public Result SetHiddenStripItems(IEnumerable<StripItem> hidden)
+    {
+        var next = hidden.Distinct().Order().ToList();
+        if (next.SequenceEqual(State.HiddenStripItems)) return Result.Success();
+        Persist(State with { HiddenStripItems = next });
+        return Result.Success();
+    }
+
+    // The colour picker on the bar's right-click menu (#68). Petre: "add color picker in the right
+    // click context menu."
+    //
+    // NULL is a real argument and not a missing one: it clears the override and hands the workspace
+    // back to WorkspacePalette's by-position default. Without that there would be no way back from
+    // a colour once chosen except hand-editing state.json, which is the state this issue found the
+    // app in.
+    //
+    // The hex is stored exactly as given rather than parsed here: Core has no colour type, and the
+    // bar already treats an unreadable value as "no tint" rather than as a crash (see
+    // FloatingBar.Lane), which is the right answer for a file a user can edit anyway.
+    //
+    // A GROUPED workspace redirects the choice to its group (#90). Petre: "the parent can change the
+    // group's colour, and so can any child... a group has one colour". So the picker on a member's
+    // row is the group's picker, and there is no such thing as a per-member colour inside a box. Its
+    // own Workspace.Color is deliberately left alone rather than overwritten, which is what lets it
+    // go back to the colour it chose for itself if it ever leaves.
+    public Result SetWorkspaceColor(Guid id, string? color) =>
+        Workspace(id).Bind(_ => State.GroupOf(id) is { } group
+            ? SetGroupColor(group.Id, color)
+            : Result.Success().Tap(() => Persist(State with
+            {
+                Workspaces = State.Workspaces.Select(w => w.Id == id ? w with { Color = color } : w).ToList(),
+            })));
+
+    // The same choice made from an anchorless group's header row, which is the only surface a group
+    // with no anchor has of its own (#84, #90).
+    public Result SetGroupColor(Guid groupId, string? color) =>
+        State.Groups.Any(g => g.Id == groupId)
+            ? Result.Success().Tap(() => Persist(State with
+            {
+                Groups = State.Groups.Select(g => g.Id == groupId ? g with { Color = color } : g).ToList(),
+            }))
+            : Result.Failure("That group no longer exists.");
+
+    // Case-insensitive, trim-tolerant name collision check. `excluding` lets
+    // RenameWorkspace allow renaming a workspace to (a variant of) its own current name --
+    // it must only reject collisions with *other* workspaces.
+    bool NameTaken(string name, Guid? excluding) =>
+        State.Workspaces.Any(w => w.Id != excluding && w.Name.Trim().Equals(name.Trim(), StringComparison.OrdinalIgnoreCase));
+
+    // Removing a workspace never removes its desktop implicitly -- windows live there.
+    // The desktop merge behavior (Windows moves its windows to the previous desktop)
+    // is exactly what we want, so removal = remove desktop + forget definition.
+    public Result RemoveWorkspace(Guid id) =>
+        Workspace(id)
+            .Tap(w => { if (w.DesktopId is { } d) desktops.Remove(d); })
+            .Tap(w =>
+            {
+                // Prune live bookkeeping too: without this, a later Disappeared for one of
+                // this workspace's windows would resurrect a phantom inventory key.
+                memberships.Where(kv => kv.Value == id).Select(kv => kv.Key).ToList()
+                    .ForEach(h => memberships.Remove(h));
+
+                // Taken out of its group FIRST, which is what keeps the rest of the group coherent:
+                // WithoutMember dissolves a group left with one member and clears the anchor of a
+                // group that has just lost it. Deleting the anchor therefore leaves the others
+                // grouped and named, with nothing borrowed any more, rather than promoting them all
+                // to the top level or leaving them pointing at a workspace that is gone.
+                var tidied = WithoutMember(State, id);
+
+                Persist(tidied with
+                {
+                    Workspaces = tidied.Workspaces.Where(x => x.Id != id).ToList(),
+                    WorkspaceRules = tidied.WorkspaceRules.Where(r => r.WorkspaceId != id).ToList(),
+                    Inventory = tidied.Inventory.Where(kv => kv.Key != id).ToDictionary(kv => kv.Key, kv => kv.Value),
+                    // A container home naming a workspace that is gone would move a window to a desktop
+                    // nothing draws (#132). Forgotten in the same breath as the roster and the rules,
+                    // for the same reason all three are.
+                    ContainerHomes = tidied.ContainerHomes.Where(h => h.WorkspaceId != id).ToList(),
+                });
+            });
+
+    // Delete, but only an EMPTY one (#73). Petre: "if it still has windows in it, deletion is
+    // refused with a message: it can't be deleted until its contents are moved elsewhere."
+    //
+    // The refusal is the feature, not a safety rail bolted on. Windows' own desktop deletion
+    // silently reparents that desktop's windows onto a neighbour, so a plain delete scatters
+    // whatever was in the workspace across another one -- and the user finds out later, by
+    // discovering windows somewhere they never put them. There is deliberately no "delete anyway":
+    // moving the windows is a decision, and dragging their icons between rows already exists.
+    //
+    // "Has windows" is answered by the OVERVIEW rather than by counting memberships, because the
+    // question the user is really asking is about the row in front of them. The overview is what
+    // draws that row, so this cannot disagree with it -- including for a window minimized to the
+    // tray, which the OS may not report as on any desktop but which the bar still shows.
+    //
+    // Costs one overview query, which is COM-heavy. Fine for a deliberate delete; it would not be
+    // fine on a rebuild path.
+    //
+    // A workspace with CHILDREN but no windows of its own is deletable, and its children are
+    // promoted to the top level (see RemoveWorkspace). Nothing is lost -- they keep their desktops
+    // and their windows -- and refusing would leave no way to undo a nesting decision from the bar.
+    public Result DeleteWorkspaceIfEmpty(Guid id) =>
+        Workspace(id).Bind(workspace => WindowsByWorkspace()
+            .Bind(overview => overview.Workspaces.FirstOrDefault(g => g.Workspace.Id == id) is { Running.Count: > 0 } group
+                ? Result.Failure(
+                    $"'{workspace.Name}' still has {group.Running.Count} " +
+                    $"{(group.Running.Count == 1 ? "window" : "windows")} in it.\n\n" +
+                    "Move them to another workspace first — drag their icons to another row on the bar — then delete it.")
+                : RemoveWorkspace(id)));
+
+    // Delete, and close what is in it on the way (Petre: "delete workspace in context menu, close
+    // all windows in it").
+    //
+    // This does NOT withdraw the refusal above. DeleteWorkspaceIfEmpty is still what a row with no
+    // windows goes through, and still the only path the bar takes for one, so the accident that
+    // guard was written against -- a mis-aimed right-click on a row full of work -- costs a name and
+    // nothing else. What this adds is the case the guard had no answer for: a workspace you are
+    // finished with, whose windows you are finished with too. Moving five windows to another row so
+    // that a workspace can be deleted, only to close them there, is ceremony with no product.
+    //
+    // Three things keep it from being the scatter that the refusal exists to prevent:
+    //
+    //   * The windows are CLOSED, not left to Windows' desktop merge. A merged desktop's windows
+    //     land on a neighbour and are found days later; a closed window is where the user put it.
+    //   * They are ASKED, by WM_CLOSE (see IWindowActivator.CloseAll). An app with unsaved work puts
+    //     its dialog up and stays, and nothing here kills a process.
+    //   * A survivor CANCELS THE DELETE. The workspace and its desktop are left exactly as they
+    //     were, so a window that is asking a question keeps its desktop under it. The windows that
+    //     did close stay closed, which is why the message says what is still open rather than
+    //     pretending anything can be undone.
+    //
+    // The close set is the overview's Running, which is the row the user is looking at. That is also
+    // what makes a borrowed window safe (#42): the overview attributes it to the workspace that
+    // LENDS it, so deleting the child that is standing on it closes nothing of its parent's.
+    public Result DeleteWorkspaceClosingWindows(Guid id) =>
+        Workspace(id).Bind(workspace => WindowsByWorkspace().Bind(overview =>
+            (overview.Workspaces.FirstOrDefault(g => g.Workspace.Id == id)?.Running ?? []) switch
+            {
+                // Nothing to close, so nothing to ask the OS: this is the old path exactly.
+                { Count: 0 } => RemoveWorkspace(id),
+                // Compatibility mode has no activator (see the constructor), which means no way to
+                // close anything. Reported rather than ignored, because silently deleting a
+                // workspace full of windows is the one outcome nothing here is willing to produce.
+                _ when activator is null => Result.Failure("This build cannot close windows."),
+                var rows => CloseThenRemove(workspace, rows),
+            }));
+
+    Result CloseThenRemove(Workspace workspace, IReadOnlyList<Core.Overview.WindowRow> rows) =>
+        activator!.CloseAll(rows.Select(r => r.Window.Handle).ToList()) switch
+        {
+            { Count: 0 } => RemoveWorkspace(workspace.Id),
+            var survivors => Result.Failure(StillOpen(workspace, survivors, rows)),
+        };
+
+    // Named by APP rather than counted, because the count is not actionable and the name is: the
+    // window is asking something on a desktop the user may not be standing on, and "Word" is the
+    // difference between finding it and clicking delete again in confusion.
+    //
+    // Distinct, so seven Chrome windows that all refused read as "chrome" once. A survivor whose row
+    // has since gone is dropped from the names rather than shown as blank; the count still includes
+    // it, so the message cannot claim fewer windows are open than there are.
+    static string StillOpen(Workspace workspace, IReadOnlyList<WindowHandle> survivors, IReadOnlyList<Core.Overview.WindowRow> rows) =>
+        $"'{workspace.Name}' was not deleted: {survivors.Count} " +
+        $"{(survivors.Count == 1 ? "window" : "windows")} would not close" +
+        survivors
+            .Select(h => rows.FirstOrDefault(r => r.Window.Handle == h)?.Window.ProcessName)
+            .Where(name => !string.IsNullOrWhiteSpace(name))
+            .Distinct()
+            .ToList() switch
+        {
+            { Count: 0 } => ".",
+            var names => $" ({string.Join(", ", names)}).",
+        } +
+        "\n\nThat usually means an app is asking whether to save. Answer it, then delete again.";
+
+    public Result SetRules(IReadOnlyList<WorkspaceRule> workspaceRules, IReadOnlyList<RenameRule> renameRules)
+    {
+        Persist(State with { WorkspaceRules = workspaceRules, RenameRules = renameRules });
+        return Result.Success();
+    }
+
+    // Task 11 (floating icon bar): called after every drag (position) and every
+    // tray-menu toggle (visibility) -- same fire-and-persist shape as SetRules above.
+    // Persist() already pulses StateChanged, which nothing here needs to react to
+    // (the bar's own drag/toggle handlers already know their own new state), but any
+    // future surface that reads FloatingBar gets live updates for free.
+    // `layoutKey` is the monitor arrangement the position was chosen on (#150), a MonitorLayoutKey
+    // string. Both copies are written on every save: FloatingBar stays the last position on any
+    // layout, which is what an older build and the unknown-layout fallback both read, and the entry
+    // for this layout is replaced so returning to it restores what was actually chosen here.
+    //
+    // MonitorLayoutKey.Unknown (the default, and what a failed monitor query produces) writes only
+    // the single position. Storing under an empty key would be worse than storing nothing: two
+    // different unknown layouts would share one entry and hand each other's position back.
+    public Result SaveFloatingBar(FloatingBarState state, string layoutKey = MonitorLayoutKey.Unknown)
+    {
+        Persist(State with
+        {
+            FloatingBar = state,
+            BarPlacements = MonitorLayoutKey.IsKnown(layoutKey)
+                ? State.BarPlacements
+                    .Where(p => p.Layout != layoutKey)
+                    .Append(new BarPlacement(layoutKey, state))
+                    .TakeLast(RememberedLayouts)
+                    .ToList()
+                : State.BarPlacements,
+        });
+        return Result.Success();
+    }
+
+    // How many layouts are worth remembering, and it is a cap rather than a limit anyone will notice:
+    // a desk, a laptop, a docking station, a projector and a few resolutions is under a dozen.
+    //
+    // It is here because one case really does churn. An RDP session with dynamic resolution reshapes
+    // the desktop every time the client window is resized, so a single afternoon of dragging that
+    // window can mint dozens of layouts, each one a real arrangement and each one saved. Uncapped,
+    // state.json grows for ever with positions for desks that existed for four seconds.
+    //
+    // Oldest dropped, which is what makes the cap safe: the list is appended in the order layouts were
+    // last used, so what falls off the front is the arrangement longest unseen, and losing it costs one
+    // clamp the next time it comes back.
+    const int RememberedLayouts = 12;
+
+    // Where the bar sat the last time this exact arrangement of monitors was attached, if it has
+    // been seen before (#150). None for an unknown layout, which the bar reads as "clamp the last
+    // position into a screen that exists" -- the old behaviour, and the only honest answer for a
+    // layout nobody has parked the bar on yet.
+    public Maybe<FloatingBarState> BarPlacementFor(string layoutKey) =>
+        MonitorLayoutKey.IsKnown(layoutKey)
+            ? State.BarPlacements.FirstOrDefault(p => p.Layout == layoutKey)?.Bar ?? Maybe<FloatingBarState>.None
+            : Maybe<FloatingBarState>.None;
+
+    // `monitor` is #89: the drop landed on a particular monitor's half of the row, so the window
+    // gets moved to that screen as well as to that workspace. Null means the row had no split to
+    // aim at, or the drop was nowhere near one, and then this is the workspace-only move it always
+    // was.
+    //
+    // Workspace FIRST, screen second, which is the opposite of what this did when #89 shipped and the
+    // reason is worth keeping. The original argument was that moving a window to another desktop
+    // CLOAKS it and a cloaked window's rectangle is not reliably writable, so the screen move should
+    // happen first, while the window is still visible. That is true and it was the wrong conclusion:
+    // a window dragged FROM another row was already on another desktop and already cloaked, so the
+    // screen move ran against a cloaked window anyway -- silently doing nothing, and dragging Petre's
+    // desktop with it when the window happened to be maximized.
+    //
+    // Doing the workspace move first means the screen move always sees the window on its FINAL
+    // desktop, and MoveWindowToMonitor can then either do it now or hold it until that desktop is the
+    // one you are standing on.
+    //
+    // `follows` is decided BEFORE anything moves, because the move itself changes what is active:
+    // sending the foreground window to another desktop cloaks it, and Windows hands the foreground
+    // to whatever was behind it. Asked here rather than inside Assign so it is read while the answer
+    // is still the one the drag started with.
+    //
+    // `allowFollow: false` turns that rule off for one move, and only the remote control asks for it
+    // (`move --no-follow`). Petre: "can you open a browser window and put it to the workspace without
+    // following the workspace?" A window a script has just opened always has focus, so without this
+    // every agent that opens something and files it away would drag him across the machine with it.
+    // A drag on the bar never passes it, so the rule there is unchanged.
+    public Result AssignWindow(WindowHandle window, Guid workspaceId, int? monitor = null, bool allowFollow = true) =>
+        knownWindows.TryGetValue(window, out var info)
+            ? Assign(info, workspaceId, monitor, follows: allowFollow && SendingTheWindowYouAreIn(window, workspaceId))
+            : Result.Failure("Window no longer exists.");
+
+    Result Assign(WindowInfo info, Guid workspaceId, int? monitor, bool follows) =>
+        // Explicitly moving a pinned window to ONE workspace is a statement that it
+        // should no longer be on ALL of them -- unpin first, then place (spec).
+        desktops.IsPinned(info.Handle)
+            .Bind(pinned => pinned ? desktops.Unpin(info.Handle) : Result.Success())
+            .Bind(() => Place(info, workspaceId))
+            // The one place a container learns its home (#132), because this is the one door every
+            // by-hand move comes through: dragging an icon between rows, and Manage's row menu.
+            // After the move rather than before, so a refused move teaches nothing.
+            .Tap(() => LearnContainer(info, workspaceId))
+            .Bind(() => monitor is { } screen ? MoveWindowToMonitor(info.Handle, screen) : Result.Success())
+            // LAST, after the screen move has been tried, so that move sees the window still on a
+            // desktop we have not left yet and holds itself for the arrival in the usual way. Doing
+            // it earlier would only race the switch.
+            .TapIf(follows, () => Follow(info.Handle, workspaceId));
+
+    // Petre: "i think moving active windows to a different workspace doesn't always activate that
+    // workspace."
+    //
+    // The standing rule is that this app never yanks the desktop, and it holds for every window you
+    // are not in: tidying three background windows onto another row must not drag you across the
+    // machine three times. The window you are ACTIVE in is the one case where staying put is the
+    // surprising answer, because you have just sent away the thing you were looking at.
+    //
+    // Two guards, both of them about not arming a switch that has nothing to spend itself on:
+    //
+    //   * ACTIVE is the app's own answer, the same one the bar draws its highlight from, which is
+    //     what makes this predictable from the screen -- follow the highlighted icon and you go with
+    //     it. The bar cannot muddy it by being clicked, because WindowMonitor ignores our own hwnd,
+    //     so Foreground() reports None for it and MarkActive never clears on None.
+    //   * ELSEWHERE. Dropping the active window back on the row it already lives in asks for
+    //     nothing, and switching to the desktop you are standing on raises no arrival, which would
+    //     leave the one-shot below armed for whatever switch came next.
+    bool SendingTheWindowYouAreIn(WindowHandle window, Guid workspaceId) =>
+        activeWindow.Equals(Maybe<WindowHandle>.From(window))
+        && Workspace(workspaceId).GetValueOrDefault()?.DesktopId is { } destination
+        && destination != desktops.CurrentDesktop().GetValueOrDefault();
+
+    // Arms the arrival, then switches. The one-shot is what makes the window you sent the window you
+    // land IN: without it the arrival's own focus restore answers instead, and the drop would take
+    // you to the right workspace and put you in the wrong window.
+    //
+    // Disarmed again if the switch never happens, so a refused switch cannot fire on some later
+    // arrival minutes away.
+    void Follow(WindowHandle window, Guid workspaceId)
+    {
+        followed = window;
+        Switch(workspaceId).TapError(error =>
+        {
+            followed = Maybe<WindowHandle>.None;
+            trace?.Invoke($"follow refused: {window.Value:X} -> {error}");
+        });
+    }
+
+    // #89. Petre: "dropping the icon onto another monitor within the current workspace -- same drag,
+    // same row: drag the icon across its own row's hairline to send the window to the other screen."
+    //
+    // Nothing to do with virtual desktops, which is why it is a separate operation rather than an
+    // argument to Place: a window has a desktop and a monitor, and neither implies the other. Dropping
+    // across the hairline of a row the window is already in is this on its own.
+    //
+    // A no-op when the window is already there, so dropping onto its own half of its own row costs
+    // nothing rather than nudging the window by a rounding error.
+    //
+    // A window on ANOTHER virtual desktop is HELD rather than moved, and that is the fix for what Petre
+    // hit the first time this shipped: "i tried dragging an icon from EC to the left monitor... and it
+    // didn't work", along with his desktop switching underneath him. A window on another desktop is
+    // cloaked, and neither half of this works on one. The geometry write is silently ignored, so
+    // nothing moves. And if the window is maximized, un-maximizing it to move it brings the window
+    // forward, which takes Windows to ITS desktop -- the app yanking him somewhere he did not ask to
+    // go. Beeper moved correctly throughout, because Beeper was on the desktop he was standing on.
+    //
+    // So the move waits for the window to be reachable, and is applied the moment its desktop is the
+    // one you are standing on. Which is not a compromise: the window ends up where the drop asked, and
+    // it gets there without anything jumping.
+    public Result MoveWindowToMonitor(WindowHandle window, int monitorNumber) =>
+        MoveWindowToMonitor(window, monitorNumber, announce: true);
+
+    // For a window dragged by its own title bar onto a workspace row (FloatingBar's header drop): where it
+    // was when the drag began, and putting it back there before it goes to the other workspace. Petre: "go
+    // back to where it was but in a new workspace". Through the same IScreenLayout the monitor moves use,
+    // so a snapped or maximized window is brought down and placed the careful way (see MoveTo); the window
+    // is still on the desktop you are standing on at that moment, so its show state may change.
+    public Maybe<WindowRect> RectOfWindow(WindowHandle window) =>
+        screenLayout?.RectOf(window) ?? Maybe<WindowRect>.None;
+
+    public Result PutWindowBack(WindowHandle window, WindowRect rect) =>
+        screenLayout is null
+            ? Result.Failure("Window positions are unavailable on this Windows build.")
+            : screenLayout.MoveTo(window, rect, mayChangeShowState: true);
+
+    // `announce` pulses the surfaces when the outcome is known. True for a drop, where the row has to
+    // show the answer at once. False for the retry tick, which would otherwise rebuild the bar once a
+    // second for as long as one window refused to move -- and nothing on screen changes between
+    // attempts, since the icon has been on the target side since the drop. ApplyPendingMonitorMoves
+    // pulses once for the whole round instead.
+    Result MoveWindowToMonitor(WindowHandle window, int monitorNumber, bool announce)
+    {
+        // Null in compatibility mode, where there is no screen layout to ask. Nothing offers this
+        // gesture there, since the row has no monitor marks to aim at either.
+        if (screenLayout is null) return Result.Failure("Monitors are unavailable on this Windows build.");
+
+        // TRIED NOW, whichever desktop the window is on. Petre: "when moving across monitors, it should
+        // update once i drop it in the new monitor."
+        //
+        // The earlier version refused outright for a window on another desktop, on the evidence of three
+        // drops that moved nothing. That evidence was contaminated: those failures were the
+        // ShowWindowAsync race (the un-maximize had not happened when the geometry was written), not
+        // cloaking, and it took fixing the race to see that the two had been confused. So the honest
+        // rule is to attempt it and let the verification below decide, rather than to assume.
+        //
+        // What IS withheld for a window on another desktop is changing its show state: see MoveTo. That
+        // is the part that can drag the desktop, and it is the part that was mistaken for the whole.
+        var here = desktops.DesktopOf(window).GetValueOrDefault() is var where
+                   && (where == Guid.Empty || where == desktops.CurrentDesktop().GetValueOrDefault());
+
+        var facts = screenLayout.Snapshot();
+        if (facts.MonitorPlacement is not { } placement || !placement.TryGetValue(monitorNumber, out var target))
+            return Result.Failure("That monitor is no longer there.");
+
+        if (screenLayout.RectOf(window).GetValueOrDefault() is not { } rect)
+            return Result.Failure("Window no longer exists.");
+
+        // Read from the RECTANGLE rather than from facts.MonitorOf, so both halves of one calculation
+        // agree about where the window is: MonitorOf was captured for the whole overview and the
+        // window may have been moved since, and a source monitor that disagreed with the rectangle
+        // would scale the fractions against the wrong screen.
+        var from = MonitorMove.MonitorOf(rect, placement);
+        if (from == monitorNumber)
+        {
+            trace?.Invoke($"monitor move skipped: {window.Value:X} already on screen {monitorNumber}");
+            return Result.Success();
+        }
+
+        if (from is not { } source || !placement.TryGetValue(source, out var origin))
+            return Result.Failure("Cannot tell which monitor that window is on.");
+
+        var landing = MonitorMove.Fit(rect, origin, target);
+        var moved = screenLayout.MoveTo(window, landing, mayChangeShowState: here);
+
+        // VERIFIED by reading the rectangle back, which is the only honest test. SetWindowPos reports
+        // success for a window it then quietly declines to move, and a window that has just become
+        // visible on arrival at a desktop may still be cloaked -- cloaking is not synchronous with the
+        // desktop-change notification, a trap this file already documents for the focus restore. So a
+        // move that did not take is put back in the queue and tried again on the next tick, rather than
+        // reported as done.
+        var settled = moved.IsSuccess
+                      && screenLayout.RectOf(window).GetValueOrDefault() is { } now
+                      && MonitorMove.MonitorOf(now, placement) == monitorNumber;
+
+        trace?.Invoke($"monitor move {(settled ? "done" : "did not take")}{(here ? "" : " [other desktop]")}: " +
+                      $"{window.Value:X} screen {source}->{monitorNumber}" +
+                      (moved.IsFailure ? $" ({moved.Error})" : "") +
+                      $", asked {landing.Left},{landing.Top} {landing.Width}x{landing.Height}" +
+                      $", now {screenLayout.RectOf(window).GetValueOrDefault()?.Left},{screenLayout.RectOf(window).GetValueOrDefault()?.Top}");
+
+        // Settled: nothing left queued for this window, so entering the workspace again does not repeat
+        // the move. Petre: "if i've already switched to the correct workspace, don't re-run that moving
+        // the window the next time i enter the workspace."
+        // FOREGROUND, not merely raised. Petre: "when you move that window, make it foreground, first
+        // window." Raising it without focus was the cautious choice and it was the wrong one: a window
+        // you have just deliberately sent to another screen is the window you are about to use, and one
+        // that arrives in front but unfocused still needs a click before it answers the keyboard.
+        //
+        // Only when the move SETTLED, so a held move does not pull focus to a window that has not gone
+        // anywhere. See OnDesktopChanged for what this does to the arrival focus restore, which it now
+        // deliberately outranks.
+        //
+        // Except for a MINIMIZED window (#107), which stays down. Bringing it to the front would answer a
+        // question the drag never asked: it said which screen the window belongs on, not that it should
+        // come back up, and a gesture that quietly un-minimizes three windows while you tidy up is a
+        // gesture nobody can use. Its restore rectangle has moved, so it comes back on the new screen when
+        // you next open it, which is the whole of what was asked for.
+        // ...and only when the window is on the desktop you are STANDING ON, which is the fix for
+        // Petre's "i don't understand whether moving a window from one workspace to another takes me to
+        // the destination workspace or not; it seems to me that it does sometimes, sometimes it
+        // doesn't."
+        //
+        // It did, and this line was how. Activating a window that lives on another desktop makes
+        // Windows follow it there, so a cross-workspace drop that ALSO changed the window's screen took
+        // him with it, while one that did not change the screen left him where he was. His log settles
+        // it: three drops wrote "monitor move done" and each was followed by "arrived <destination>";
+        // the twenty-six that wrote "monitor move skipped" were followed by nothing. The deciding
+        // factor was therefore invisible -- not the row he dropped on, but which HALF of it, against
+        // the screen the window already happened to be on.
+        //
+        // #89's request keeps its own case exactly: "when you move that window, make it foreground" was
+        // asked of moving a window between SCREENS within the workspace you are in, and `here` is true
+        // for every one of those. A window sent to a workspace you are not in is by definition not the
+        // window you are about to use, and this app's standing rule is that it never yanks the desktop.
+        //
+        // A HELD move keeps the behaviour too, without needing a case of its own: it lands when you
+        // arrive on that workspace, and by then the window is where you are.
+        if (settled)
+        {
+            Forget(window);
+            if (here && !facts.Minimized.Contains(window)) activator?.Activate(window);
+        }
+        else Hold(window, monitorNumber);
+
+        // Redrawn either way. Settled, and the icon confirms where the window now is; held, and the icon
+        // shows where it is GOING, which is what makes a deferred move visible at the moment of the drop
+        // instead of whenever the bar next happened to rebuild.
+        if (announce) stateChanged.OnNext(Unit.Default);
+        return moved;
+    }
+
+    // Queues a screen move, or gives up on one that has been retried enough to be hopeless -- an
+    // elevated window this process may never move, for instance. Bounded so a window that cannot be
+    // moved is not retried for the life of the session.
+    //
+    // Silent: no pulse here. This runs from the retry tick, and pulsing on every attempt would rebuild
+    // the bar once a second for as long as one window refuses to move. What the row draws does not
+    // change between attempts anyway -- the icon has been on the target side since the drop.
+    void Hold(WindowHandle window, int monitorNumber)
+    {
+        var attempts = pendingAttempts.GetValueOrDefault(window) + 1;
+        if (attempts > PendingAttemptLimit)
+        {
+            trace?.Invoke($"monitor move given up: {window.Value:X} after {attempts - 1} attempts");
+            // Pulsed, because giving up DOES change the row: the icon goes back to the side the window
+            // is really on, which is the honest answer once the move is never going to happen.
+            Forget(window);
+            stateChanged.OnNext(Unit.Default);
+            return;
+        }
+
+        pendingMonitor[window] = monitorNumber;
+        pendingAttempts[window] = attempts;
+    }
+
+    void Forget(WindowHandle window)
+    {
+        pendingMonitor.Remove(window);
+        pendingAttempts.Remove(window);
+    }
+
+    // Twenty tries at roughly a second apart, which covers a window that is slow to un-cloak without
+    // retrying an immovable one all day.
+    const int PendingAttemptLimit = 20;
+
+    // The bar draws a HELD move as though it had already happened (#89). Petre: "i need to see that it
+    // was moved, even though it hasn't, and move it when i activate the workspace."
+    //
+    // Which is the right way round. A drop is an instruction, and the row is where the instruction is
+    // read back: an icon that stays on the old side of the hairline until you happen to visit that
+    // workspace says the drop was ignored, and that is what he saw three times over.
+    //
+    // Only the MonitorOf map is rewritten, so grouping, the hairline and the icon's side all follow it,
+    // while the window itself is untouched until it can be moved. If a move is eventually given up on,
+    // the pending entry goes and the icon returns to where the window really is, which is the honest
+    // outcome rather than a lie that persists.
+    ScreenFacts WithPendingScreens(ScreenFacts facts)
+    {
+        if (pendingMonitor.Count == 0) return facts;
+
+        var monitorOf = facts.MonitorOf.ToDictionary(x => x.Key, x => x.Value);
+        pendingMonitor.ToList().ForEach(pending => monitorOf[pending.Key] = pending.Value);
+        return facts with { MonitorOf = monitorOf };
+    }
+
+    // Whether a screen move for this window would happen now or be held (#89), so the bar can say which
+    // before the drop looks like it did nothing. Asked of the same two facts the move itself uses.
+    public bool ScreenMoveWouldWait(WindowHandle window) =>
+        desktops.DesktopOf(window).GetValueOrDefault() is var where
+        && where != Guid.Empty
+        && where != desktops.CurrentDesktop().GetValueOrDefault();
+
+    // Windows the launched-by tier has already had its one look at (#94). Never cleared while a window
+    // lives: see LaunchedByWorkspace for why one look is the whole point.
+    readonly HashSet<WindowHandle> launchedBy = [];
+
+    // --- containers: the folder a window has loaded (#132) --------------------------------------
+    //
+    // Petre, after a reboot: "now i have all vscode windows in one of the workspaces", and then "for
+    // vscode, take TaskSpaces for the current one... attribute TaskSpaces to the correct workspace".
+    //
+    // Seven VS Code windows are one process with no arguments, so RosterIdentity is identical for all
+    // of them and placement memory stands down on purpose (see Remembered). The container in the title
+    // is the only per-window signal there is, and TitleToken already extracts it.
+    //
+    // KEPT PER WINDOW IN MEMORY rather than read from the title on demand, and that is not an
+    // optimisation, it is the only way this can work on his machine. He has a rename rule
+    // `ProcessName Code -> VSC`, so the live title of every VS Code window IS "VSC" and the folder is
+    // nowhere to be read. The container is therefore captured at the one moment it exists: when the
+    // app itself writes its title, before we overwrite it. The rename ledger is no help either -- it
+    // records the original title from the FIRST rename, which is the bare "Visual Studio Code" a
+    // window has before its folder has finished loading.
+    readonly Dictionary<WindowHandle, string> containerOf = [];
+
+    // Window plus container this tier has already acted on. Keyed on the PAIR, not on the handle,
+    // because loading a different folder in the same window is a new answer and must be allowed to
+    // move it, while every other title change must not.
+    //
+    // Why a guard at all: opening a file rewrites a VS Code title, so this tier is offered the same
+    // window many times a minute. A placement MOVES a window between desktops, and moving a window
+    // that has focus takes Windows to that desktop, so a tier that can re-fire is a tier that can
+    // drag Petre's desktop around with no input from him. #94's launchedBy guard exists for exactly
+    // this, after he reported it happening.
+    readonly HashSet<(WindowHandle Window, string Container)> tookHome = [];
+
+    // Record what a window has loaded, from a title the APP wrote.
+    //
+    // The echo guard is the whole subtlety. ApplyRename's titles.Set produces a genuine NAMECHANGE
+    // that arrives back here carrying OUR short name, and "VSC" is not a folder. Skipping any title
+    // that equals what we applied is the same test late placement already uses, and for the same
+    // reason: only titles the app itself wrote are legitimate signals.
+    //
+    // Never REMOVES a container. A window whose title we no longer recognise has not forgotten which
+    // folder it has open -- VS Code rewrites its title constantly, and one uninformative rewrite must
+    // not lose an answer that was correct. Same principle as never caching a lookup failure.
+    // Every distinct (window, title) this has already written a trace line for. The read itself is
+    // offered many times a minute -- VS Code retitles on every file you open -- so tracing each CALL
+    // would bury the log. One line per distinct title is bounded and is all the question needs.
+    readonly HashSet<(WindowHandle Window, string Title)> tracedReads = [];
+
+    void NoteContainer(WindowInfo window)
+    {
+        // Two ways a title can be OURS. The ledger knows when this run renamed the window, and that is
+        // the ordinary case. The second is a title left behind by a run that DIED: a crash or a forced
+        // kill skips RestoreAllTitles, so the window keeps our short name while the new run starts with
+        // an empty ledger and no way to know it wrote it. That mattered the moment the bracket rule
+        // below stopped being the only way a token could be read: without this, an RDM window still
+        // wearing "RDP" would be learned as a session called RDP, and the wrong home would stick.
+        var ours = ledger.AppliedName(window.Handle).Map(applied => applied == window.Title).GetValueOrDefault(false)
+                   || State.RenameRules.Any(rule => rule.ShortName.Equals(window.Title, StringComparison.OrdinalIgnoreCase));
+        var token = ours ? Maybe<string>.None : TitleToken.For(window.ProcessName, window.Title);
+
+        // Petre's Remote Desktop Manager sessions place on open for some windows and not others, and
+        // the log cannot currently say why: it records the DECISIONS (learned, placed) and nothing
+        // about the read they depend on. A window with no token is inert in both directions -- no home
+        // to place it by, nothing to learn when it is dragged -- and that silence looks identical to
+        // a window whose home simply says somewhere else.
+        //
+        // So the read says what it saw. `ours` means the title on offer is the short name WE wrote,
+        // which is not a folder and is skipped; `none` means the title was the app's own and still
+        // yielded nothing, which for a Bracketed app like RDM means the brackets were not there.
+        if (trace is not null && tracedReads.Add((window.Handle, window.Title)))
+            trace($"container read {window.ProcessName} \"{window.Title}\" -> " +
+                  (ours ? "ours, skipped" : token.GetValueOrDefault("none")));
+
+        token.Tap(container => containerOf[window.Handle] = container);
+    }
+
+    // The placement a window's container asks for, or None.
+    //
+    // Roster: false, which is load-bearing. RosterAdd strips an identity from every OTHER workspace so
+    // exactly one can claim it, and this window's identity is shared with every other window of the
+    // app. Claiming the roster here would therefore rewrite where Petre says VS CODE lives on the
+    // evidence of one folder -- which is precisely the mechanism behind "i'm starting the edge browser
+    // and it immediately goes to personal". The container places one window; the roster keeps
+    // answering for the app.
+    //
+    // A home whose workspace has since been deleted is ignored rather than obeyed. RemoveWorkspace
+    // prunes these, so the only way to hold one is a hand-edited state.json, and moving a window to a
+    // desktop nothing draws is worse than leaving it alone.
+    //
+    // ...and for a TABBED app the tier gets ONE look at the window, ever, rather than one per
+    // container. Petre: "my rdp keeps jumping across spaces", "that jumping should not happen
+    // mid-flight", "after minutes of the app / window being open". His dashboard holds every session
+    // in one window and names the active one in its title, so clicking a tab looked like new
+    // information and walked the window to that session's home:
+    //
+    //   22:52:38  read "Remote Desktop Manager [app.rurua.ge]" -> app.rurua.ge
+    //   22:52:42  read "Remote Desktop Manager [i7-petre]"     -> i7-petre
+    //   22:52:42  container RemoteDesktopManager/i7-petre -> Personal
+    //
+    // A session window opened externally keeps its own case: it is born with its session in the title,
+    // so its first look is the one that places it, and it never asks for a second.
+    Maybe<Decision> ContainerPlacement(WindowInfo window) =>
+        containerOf.TryGetValue(window.Handle, out var container)
+        && !tookHome.Contains((window.Handle, container))
+        && !(TitleToken.ContainerFollowsTabs(window.ProcessName)
+             && tookHome.Any(spent => spent.Window == window.Handle))
+        && State.ContainerHomes.FirstOrDefault(h => IsHomeFor(h, window.ProcessName, container)) is { } home
+        && State.Workspaces.Any(w => w.Id == home.WorkspaceId)
+            ? TakeHome(window, container, home.WorkspaceId)
+            : Maybe<Decision>.None;
+
+    // The tier's one look at this window-and-container pair, spent here whichever way it goes.
+    //
+    // A window ALREADY in its home workspace is the common case, not an edge one: every file you open
+    // rewrites a VS Code title. It gets no move at all, and that is not merely an optimisation. Place()
+    // is unconditional, so re-issuing it would un-cloak and re-cloak a window on another desktop, and
+    // for a window that has focus that means taking Windows to that desktop -- the app moving Petre
+    // somewhere he already was.
+    //
+    // WorkspaceHolding rather than memberships, because "already there" is a question about the DESKTOP
+    // the window sits on. A window this app never placed still sits somewhere, and a startup that
+    // adopted it has no membership recorded for it.
+    Maybe<Decision> TakeHome(WindowInfo window, string container, Guid home)
+    {
+        tookHome.Add((window.Handle, container));
+
+        if (WorkspaceHolding(window) == home) return Maybe<Decision>.None;
+
+        trace?.Invoke($"container {window.ProcessName}/{container} -> {Workspace(home).GetValueOrDefault()?.Name ?? "?"}");
+        return new Decision(Placement.In(home), Roster: false);
+    }
+
+    // --- naming a window after what it has open (#136) -------------------------------------------
+    //
+    // Petre: "that rename to SPS is bad. let's do smart-rename for windows that are in folders."
+    //
+    // The name a window WANTS, or None when nothing here has an opinion and the rename rules should
+    // answer instead. Asked from all three places a name gets applied -- Appeared, TitleChanged and the
+    // 5s sweep -- because unlike a rule's name this one CHANGES: loading another folder in the same
+    // window is a new name, and the sweep is what catches a change whose event went missing.
+    Maybe<string> FolderName(WindowInfo window) =>
+        State.NameByFolder.Any(p => p.Equals(window.ProcessName, StringComparison.OrdinalIgnoreCase))
+        && containerOf.TryGetValue(window.Handle, out var container)
+            ? TitleToken.LastPart(container)
+            : Maybe<string>.None;
+
+    // What to call this window, container first and the rules behind it. The fallback matters as much
+    // as the container does: a freshly opened editor with no folder yet has no container, and it should
+    // still get the app's short name rather than sitting there with a full title until you open
+    // something.
+    Maybe<string> WantedName(WindowInfo window) =>
+        FolderName(window).Or(() => RulesEngine.MatchRename(window, State.RenameRules));
+
+    // Petre turning it on or off for an app, from a window's icon menu. Applied at once to every window
+    // of that app, for the same reason AddRule does it: a rename that only appears the next time a
+    // title happens to change looks like a menu item that did nothing.
+    //
+    // Turning it OFF falls back to whatever the rules say, and restores the original title when they
+    // say nothing. Leaving the folder name in place would be worse than either: a name nothing in the
+    // app's settings could explain.
+    public Result NameWindowsByFolder(WindowHandle window, bool on) =>
+        knownWindows.TryGetValue(window, out var info)
+            ? Result.Success()
+                .Tap(() => Persist(State with
+                {
+                    NameByFolder = on
+                        ? [.. Without(State.NameByFolder, info.ProcessName), info.ProcessName]
+                        : Without(State.NameByFolder, info.ProcessName),
+                    // Turning it ON supersedes every exact-title rename for this app, and they are
+                    // dropped rather than left to argue with it -- the same thing RenameApp does, for the
+                    // same reason. His file is what makes this concrete: it holds
+                    // {Code, OriginalTitle "VSC", ShortName "SPS"}, a rename keyed on a title the app had
+                    // already written itself. That entry can still fire, because ReapplyRenames adopts a
+                    // persisted rename for any window whose CURRENT title matches -- so after Deskbar
+                    // is killed, leaving "VSC" on screen, the next start would put "SPS" back on windows
+                    // that are supposed to be named after their folders.
+                    PersistedRenames = on
+                        ? State.PersistedRenames
+                            .Where(r => !r.ProcessName.Equals(info.ProcessName, StringComparison.OrdinalIgnoreCase))
+                            .ToList()
+                        : State.PersistedRenames,
+                }))
+                .Tap(() => knownWindows.Values
+                    .Where(w => w.ProcessName.Equals(info.ProcessName, StringComparison.OrdinalIgnoreCase))
+                    .ToList()
+                    .ForEach(w => WantedName(w).Match(
+                        name => { ApplyRename(w, name); },
+                        () => { if (!on) RestoreTitleOnly(w.Handle); })))
+            : Result.Failure("Window no longer exists.");
+
+    static IReadOnlyList<string> Without(IReadOnlyList<string> names, string name) =>
+        names.Where(n => !n.Equals(name, StringComparison.OrdinalIgnoreCase)).ToList();
+
+    // For the menu's check mark, and for deciding whether to offer the item at all.
+    public bool NamesByFolder(string processName) =>
+        State.NameByFolder.Any(p => p.Equals(processName, StringComparison.OrdinalIgnoreCase));
+
+    // Exact-title renames belonging to an app that is now named by its folder. One record per app is the
+    // most that can be true, and these are the ones that cannot be.
+    void ForgetRenamesSupersededByFolders()
+    {
+        var remaining = State.PersistedRenames.Where(r => !NamesByFolder(r.ProcessName)).ToList();
+        if (remaining.Count != State.PersistedRenames.Count)
+            Persist(State with { PersistedRenames = remaining });
+    }
+
+    static bool IsHomeFor(ContainerHome home, string processName, string container) =>
+        home.ProcessName.Equals(processName, StringComparison.OrdinalIgnoreCase)
+        && home.Token.Equals(container, StringComparison.OrdinalIgnoreCase);
+
+    // Learning from a move Petre made by hand, which is immediate: a drag is unambiguous, so it needs
+    // no corroboration. The snapshot below covers the moves the app never sees.
+    //
+    // One home per container, replaced rather than appended: a folder lives in one place, and a second
+    // answer for the same token would be a coin toss.
+    void LearnContainer(WindowInfo window, Guid workspaceId)
+    {
+        if (!containerOf.TryGetValue(window.Handle, out var container)) return;
+
+        RecordHomes([(window.ProcessName, container, workspaceId)]);
+
+        // The window is where he just put it, so this tier has nothing left to say about this pair.
+        // Without it, the next title change would "take it home" to the place it already is.
+        tookHome.Add((window.Handle, container));
+    }
+
+    void RecordHomes(IReadOnlyList<(string ProcessName, string Container, Guid WorkspaceId)> homes) =>
+        Persist(State with
+        {
+            ContainerHomes =
+            [
+                .. State.ContainerHomes.Where(existing =>
+                    !homes.Any(h => IsHomeFor(existing, h.ProcessName, h.Container))),
+                .. homes.Select(h => new ContainerHome(h.ProcessName, h.Container, h.WorkspaceId)),
+            ],
+        });
+
+    // Where each container was seen on the PREVIOUS sweep. A position has to hold still to be believed.
+    readonly Dictionary<WindowHandle, Guid> containerSeenIn = [];
+
+    // Learning from where windows ARE, on the 5s sweep. Petre: "why not learn their positions from where
+    // they are, not when they're moved. they are in the correct places now", and then "it should take a
+    // snapshot of where windows are, rather than where they're moved".
+    //
+    // I argued against this and was wrong about the reason. The objection was that after a reboot every
+    // editor window sits in one workspace, so a snapshot would memorise the mess -- and it would, if a
+    // snapshot were the only thing running. It is not. ORDERING is what makes this safe: the container
+    // tier corrects a window the moment it appears, in milliseconds, while learning requires a position
+    // to survive two sweeps. Correction therefore always wins the race, and the snapshot sees the
+    // corrected state. What the snapshot then adds is the case a by-hand rule cannot reach at all --
+    // moves made with Task View or Win+Ctrl+arrows, and the very first teaching pass, where his windows
+    // are already in the right places and the app has never been told.
+    //
+    // THREE things it refuses to learn, each for its own reason:
+    //
+    //   * A position that changed since the last sweep. A window mid-drag, or parked somewhere for a
+    //     minute, is not a statement about where its folder lives.
+    //   * A folder open in TWO workspaces at once. There is no single answer, and this codebase does not
+    //     toss coins: the same reasoning already governs placement memory and the launched-by tier.
+    //   * A window on a desktop no workspace owns. That is not a home, it is somewhere else.
+    //   * A window that OPENED while the app was watching and has not been moved since. Petre: "rider
+    //     jumped to services, why?", then "it had a title that belongs to freight, didn't it?" It did.
+    //     Days earlier Rider had opened the freight solution while he stood in Services, and with no
+    //     home yet there was nothing to correct it, so sixteen seconds later this learned that the
+    //     solution lives in Services. The ordering argument above only protects a container that
+    //     already has a home; for one without, where a window opens is wherever he happened to be.
+    //     Windows already open when the app starts are still learned from where they sit, which is
+    //     the "they are in the correct places now" case this method was asked for. See OpenedWindow.
+    public void SnapshotContainerHomes()
+    {
+        NoteWhereOpenedWindowsAre();
+        var onlyOpenedThere = State.OpenedWindows.Select(opened => opened.Window).ToHashSet();
+
+        var facts = knownWindows.Values
+            .Where(window => !IsOurs(window.Handle) && containerOf.ContainsKey(window.Handle))
+            .Where(window => !onlyOpenedThere.Contains(window.Handle.Value))
+            .Select(window => (Window: window, Container: containerOf[window.Handle], Holder: WorkspaceHolding(window)))
+            .Where(fact => fact.Holder is { } id && State.Workspaces.Any(w => w.Id == id))
+            .Select(fact => (fact.Window, fact.Container, Workspace: fact.Holder!.Value))
+            .ToList();
+
+        // Read BEFORE this sweep's positions overwrite it, and written for every window whether or not
+        // it is settled, so the next sweep can ask the same question.
+        var settled = facts
+            .Where(fact => containerSeenIn.TryGetValue(fact.Window.Handle, out var before) && before == fact.Workspace)
+            .ToList();
+        facts.ForEach(fact => containerSeenIn[fact.Window.Handle] = fact.Workspace);
+        containerSeenIn.Keys.Except(facts.Select(fact => fact.Window.Handle)).ToList()
+            .ForEach(handle => containerSeenIn.Remove(handle));
+
+        var learned = settled
+            .GroupBy(fact => (fact.Window.ProcessName.ToLowerInvariant(), fact.Container.ToLowerInvariant()))
+            // Windows of one folder that disagree about where they live teach nothing at all.
+            .Where(group => group.Select(fact => fact.Workspace).Distinct().Count() == 1)
+            .Select(group => (group.First().Window.ProcessName, group.First().Container, group.First().Workspace))
+            // Already what we hold, which is the overwhelmingly common case: no write, no pulse.
+            .Where(home => !State.ContainerHomes.Any(existing =>
+                IsHomeFor(existing, home.ProcessName, home.Container) && existing.WorkspaceId == home.Workspace))
+            .ToList();
+
+        if (learned.Count == 0) return;
+
+        learned.ForEach(home => trace?.Invoke(
+            $"container learned {home.ProcessName}/{home.Container} lives in " +
+            $"{Workspace(home.Workspace).GetValueOrDefault()?.Name ?? "?"}"));
+        RecordHomes(learned);
+    }
+
+    // --- windows that only opened where they are ----------------------------------------------------
+
+    // Called for every arrival, so it must be idempotent: a window coming back from the tray, or one that
+    // became taskbar-worthy late, arrives here again and must not be recorded twice. A batch, so a repair
+    // sweep adopting several windows writes state.json once. True when it wrote, which also means it
+    // pulsed, so the repair sweep does not announce the same adoption twice.
+    void RecordOpening(WindowInfo window) => RecordOpenings([window]);
+
+    bool RecordOpenings(IReadOnlyList<WindowInfo> windows)
+    {
+        var fresh = windows
+            .Where(window => !IsOurs(window.Handle) && State.OpenedWindows.All(opened => opened.Window != window.Handle.Value))
+            .Select(window => new OpenedWindow(window.Handle.Value, window.ProcessId, null))
+            .ToList();
+        if (fresh.Count > 0)
+            Persist(State with { OpenedWindows = [.. State.OpenedWindows, .. fresh] });
+        return fresh.Count > 0;
+    }
+
+    void ForgetOpening(WindowHandle handle)
+    {
+        if (State.OpenedWindows.All(opened => opened.Window != handle.Value)) return;
+        Persist(State with { OpenedWindows = State.OpenedWindows.Where(opened => opened.Window != handle.Value).ToList() });
+    }
+
+    // On start: keep a record only while its handle still names a live window of the SAME process. A
+    // window we list must match on process id, because after a reboot the number can belong to an
+    // unrelated window that really was open before we started. One we do not list but that is alive
+    // is minimised to the tray, and keeps its record: it has not been moved by going there.
+    void ForgetOpeningsThatAreGone()
+    {
+        var live = State.OpenedWindows
+            .Where(opened => knownWindows.TryGetValue(new WindowHandle((nint)opened.Window), out var window)
+                ? window.ProcessId == opened.ProcessId
+                : monitor.IsAlive(new WindowHandle((nint)opened.Window)))
+            .ToList();
+        if (live.Count != State.OpenedWindows.Count)
+            Persist(State with { OpenedWindows = live });
+    }
+
+    // First look: note the desktop. A later look that finds it on another desktop means it was moved,
+    // by anyone, and from then on it is an ordinary window whose position teaches. A window Windows will
+    // not place on a desktop (not yet shown, pinned, or closing) is simply asked again next sweep.
+    //
+    // Desktops rather than workspaces, so a window that opened on an unnamed desktop and was then moved
+    // into a workspace counts as moved.
+    void NoteWhereOpenedWindowsAre()
+    {
+        if (State.OpenedWindows.Count == 0) return;
+
+        var looked = State.OpenedWindows
+            .Select(opened => (Opened: opened, Now: desktops.DesktopOf(new WindowHandle((nint)opened.Window))))
+            .ToList();
+
+        looked
+            .Where(look => look.Now.IsSuccess && look.Opened.FirstSeenOn is { } first && first != look.Now.Value)
+            .ToList()
+            .ForEach(look => trace?.Invoke($"container: {look.Opened.Window:X} moved since it opened, so its position now teaches"));
+
+        var next = looked
+            .Select(look =>
+                !look.Now.IsSuccess ? look.Opened
+                : look.Opened.FirstSeenOn is null ? look.Opened with { FirstSeenOn = look.Now.Value }
+                : look.Opened.FirstSeenOn == look.Now.Value ? look.Opened
+                : null)
+            .OfType<OpenedWindow>()
+            .ToList();
+
+        if (!next.SequenceEqual(State.OpenedWindows))
+            Persist(State with { OpenedWindows = next });
+    }
+
+    // Screen moves waiting for their window to be reachable (#89). Live-only: a drop is a statement
+    // about now, and one that never got applied because the app was closed is not worth re-applying
+    // days later on a machine whose monitors may have changed.
+    readonly Dictionary<WindowHandle, int> pendingMonitor = [];
+    readonly Dictionary<WindowHandle, int> pendingAttempts = [];
+
+    // Tried on arrival at a desktop and again on every active-window resync tick, for the windows that
+    // live on the desktop you are now standing on.
+    //
+    // Retried rather than done once, because arriving is not the same as being able to move a window:
+    // cloaking lags the desktop-change notification, so the first attempt can be too early. Each
+    // attempt verifies by reading the rectangle back and re-queues itself if it did not take, so this
+    // stops as soon as the window really is where the drop asked.
+    // True when at least one move landed, which the arrival path reads: a window moved onto the screen
+    // you are arriving at is a better answer to "what should have focus" than the ledger's, and the two
+    // must not fight over it.
+    public bool ApplyPendingMonitorMoves()
+    {
+        if (pendingMonitor.Count == 0) return false;
+
+        var current = desktops.CurrentDesktop().GetValueOrDefault();
+        if (current == Guid.Empty) return false;
+
+        // Each attempt either settles (Forget) or re-queues itself (Hold), both from inside
+        // MoveWindowToMonitor, so nothing is removed here: the queue after the loop is the answer, and
+        // comparing it with the queue before is what says whether the bar needs redrawing.
+        var before = pendingMonitor.Count;
+
+        pendingMonitor
+            .Where(pending => desktops.DesktopOf(pending.Key).GetValueOrDefault() == current)
+            .ToList()
+            .ForEach(pending => MoveWindowToMonitor(pending.Key, pending.Value, announce: false));
+
+        // Once, for however many moves landed: the icons were already drawn on the target side, so what
+        // this redraw settles is the window's REAL monitor agreeing with them at last, plus anything else
+        // the rebuild picks up. Silent when nothing landed, so a stuck move costs no rebuilds.
+        var landed = pendingMonitor.Count != before;
+        if (landed) stateChanged.OnNext(Unit.Default);
+        return landed;
+    }
+
+    // Drag-and-drop onto a plain OS desktop row (e.g. Petre's unbound "Main"): the
+    // counterpart to AssignWindow for destinations that aren't workspaces. Same shape --
+    // unpin first, because putting a window on ONE desktop contradicts "on all of
+    // them" -- then move it and drop the workspace membership.
+    //
+    // The workspace's ROSTER entry is deliberately left alone: a roster lists what
+    // BELONGS to a workspace even when it isn't running there (spec), and it has its own
+    // explicit editing UI ("Add app…" / "Remove from workspace"). A drag says where this
+    // window should be right now, not what the workspace is made of -- so ▶ Start still
+    // relaunches the app later, exactly as before the drag.
+    // Recorded here as well as read from the OS, for the one case the OS cannot answer: moving a
+    // window that is currently hidden. Without this the memory above would keep naming where it used
+    // to live until the next time it was visible.
+    public Result MoveToDesktop(WindowHandle window, Guid desktopId) =>
+        desktops.IsPinned(window)
+            .Bind(pinned => pinned ? desktops.Unpin(window) : Result.Success())
+            .Bind(() => desktops.MoveWindow(window, desktopId))
+            .Tap(() =>
+            {
+                lastKnownDesktop[window] = desktopId;
+                memberships.Remove(window);
+                detached.Add(window);
+                // Persisted too, for the same reason pinning is: `detached` is live-only, so
+                // without this a restart would let a rule (or the roster) reclaim a window
+                // Petre deliberately dragged out onto a plain desktop. RememberPlacement
+                // persists and pulses, replacing the bare pulse this path used to do.
+                RememberPlacement(window, pinned: false);
+            });
+
+    // Deskbar's own windows, now that WindowMonitor reports them (it used to hook with
+    // WINEVENT_SKIPOWNPROCESS, which is why the Manage window was missing from the bar).
+    //
+    // They are shown, jumped to and dragged like any other window. What they are exempt
+    // from is everything the app does BEHIND Petre's back, and there are exactly three such
+    // things, each guarded at its own single choke point:
+    //
+    //   AutoPlaceable  we never move our own window between desktops on our own initiative.
+    //                  Yanking the window someone is currently reading is hostile, and it
+    //                  would happen on every launch via RestorePlacements.
+    //   ApplyRename    we never rewrite our own titles. Our WM_SETTEXT would fight WPF's own
+    //                  Title, and a ledger entry for a window we control is a loop waiting
+    //                  to happen.
+    //   RosterAdd /    we never remember ourselves as an app that BELONGS to a workspace.
+    //   EntryFor       Otherwise "▶ Start" would try to relaunch Deskbar and hit its own
+    //                  single-instance guard, and PlacementMemory would try to re-place us
+    //                  at every startup.
+    //
+    // Note this is deliberately NOT a filter on visibility: an exclusion at the monitor
+    // would have put us right back where Petre started.
+    bool IsOurs(WindowHandle handle) =>
+        knownWindows.TryGetValue(handle, out var window) && window.ProcessId == ownProcess;
+
+    // Placement memory, but only when the identity it keys on actually identifies THIS window.
+    //
+    // Petre: "i'm starting the edge browser and it immediately goes to personal, i'm starting
+    // it in messaging, why?" Because membership identity for a Chromium browser is the PROFILE
+    // (deliberately -- session args vary run to run and would make every launch a new app), so
+    // all four of his Default-profile Edge windows share one identity. One of them had been
+    // dragged to Personal, AddEntry strips an identity from every other workspace so exactly
+    // one can claim it, and from then on Personal owned every Edge window he would ever open.
+    //
+    // The fix is not a finer identity -- two plain browser windows on one profile are
+    // genuinely indistinguishable by content, which is the whole premise of identity here.
+    // It is recognising what memory is FOR. Memory restores where an app lives when it comes
+    // BACK: Beeper recreating the window it destroyed on close-to-tray, or a post-reboot
+    // relaunch. It was never meant to herd extra windows of an app that is already open. So
+    // when another live window already shares the identity, the identity is not a placement
+    // key for this one, and the new window stays where it was opened.
+    //
+    // Beeper's case is unaffected, which is the test that matters: it closes to tray, so no
+    // other Beeper window is live when the replacement appears, and memory still places it.
+    Maybe<Placement> Remembered(WindowInfo window) =>
+        SharesIdentityWithAnotherLiveWindow(window) ? Maybe<Placement>.None : PlacementMemory.For(window, State);
+
+    // #94. Petre: "if an app starts another app -- VS Code opening the browser via a clicked link --
+    // the started app's window should be moved to the same workspace as the app that started it."
+    //
+    // The walk up the process chain, and the rule about what counts as a launcher, are in
+    // LaunchedBy, which is pure and where the measured shape of the problem is written down. What is
+    // decided here is what to do with the answer, and there are three parts to that:
+    //
+    //   * The launcher must live in exactly ONE workspace. An app with windows in two of them gives no
+    //     single answer, and the same reasoning already governs placement memory: "put it back" needs
+    //     somewhere to put it. Nothing happens rather than a coin toss.
+    //   * A launcher on the CURRENT desktop is skipped entirely, because Windows already opens new
+    //     windows there. Skipping costs nothing and avoids recording anything at all for the ordinary
+    //     case, which is the overwhelming majority: you are usually looking at the app you clicked in.
+    //   * NO ROSTER ENTRY, which is the `roster: false` this returns. The roster is what an app
+    //     BELONGS to, and joining it strips the identity from every other workspace so exactly one can
+    //     claim it -- which is precisely the mechanism behind "i'm starting the edge browser and it
+    //     immediately goes to personal". An inference about one window must not overwrite what Petre
+    //     taught the app by hand. So this moves the window and remembers the membership, and leaves
+    //     memory to say where the app lives.
+    // STARTED FOR A WORKSPACE. Petre: "can claude session start a window in another deskbar?", then "can we
+    // start there, not move?", then "yes, let's do it". Windows has no way to open a window on a chosen
+    // virtual desktop: every new window appears on the one in front. So `deskbar.cmd start` starts the program
+    // and says what it expects, and this claims the window the moment it appears, before any other tier, and
+    // moves it there without switching (a placement never follows; only AssignWindow does).
+    //
+    // Deskbar used to launch apps on its own (the restore prompt, AppLauncher, pending placements) and Petre
+    // had all of it removed: "no, bad, don't want this". This is narrower by design. Nothing here launches;
+    // the Windows side starts a program only when a caller asks, and this only remembers the request for
+    // ExpectationLifetime.
+    //
+    // Two ways a window answers an expectation, because programs open windows in two ways:
+    //
+    //   by process  the started process, or any process below it (a launcher that starts the real app, a
+    //               .cmd shim that runs an exe), within the lifetime. Every such window is claimed, so a splash
+    //               screen and the main window that follows it both land there.
+    //   by name     the FIRST new window of a process with the same exe name, within the lifetime. This is the
+    //               single-instance case: `chrome --new-window` and `code <folder>` hand the request to the
+    //               copy already running and exit, so the window belongs to a process that is not below the
+    //               one started. Only the first, so a window of that app opened by hand a moment later stays
+    //               where it is.
+    //
+    // Registered by NAME before the launch and given its process id after (NoteExpectedProcess): starting a
+    // program through the shell can pump messages, so a quick window could otherwise appear before the
+    // expectation exists.
+    sealed record Expectation(Guid Id, string ProcessName, Guid WorkspaceId, DateTimeOffset Until, int? ProcessId = null, bool NameSpent = false);
+
+    readonly List<Expectation> expectations = [];
+
+    // Long enough for an editor or a browser to open cold on a busy machine, short enough that a stale
+    // expectation is gone before anything unrelated could match it by name.
+    internal static readonly TimeSpan ExpectationLifetime = TimeSpan.FromSeconds(30);
+
+    public Guid ExpectWindow(string program, Guid workspaceId)
+    {
+        var expectation = new Expectation(Guid.NewGuid(), Path.GetFileNameWithoutExtension(program.Trim()), workspaceId, now() + ExpectationLifetime);
+        expectations.Add(expectation);
+        trace?.Invoke($"start: expecting {expectation.ProcessName} for {NameOf(workspaceId)}");
+        return expectation.Id;
+    }
+
+    public void NoteExpectedProcess(Guid expectation, int processId)
+    {
+        var at = expectations.FindIndex(e => e.Id == expectation);
+        if (at >= 0) expectations[at] = expectations[at] with { ProcessId = processId };
+    }
+
+    public void CancelExpectation(Guid expectation) => expectations.RemoveAll(e => e.Id == expectation);
+
+    Maybe<Decision> StartedFor(WindowInfo window)
+    {
+        expectations.RemoveAll(e => e.Until < now());
+        var byProcess = expectations.FirstOrDefault(e => e.ProcessId is { } started && Descends(window.ProcessId, started, hops: 16));
+        var byName = byProcess is null
+            ? expectations.FirstOrDefault(e => !e.NameSpent && e.ProcessName.Equals(window.ProcessName, StringComparison.OrdinalIgnoreCase))
+            : null;
+        if ((byProcess ?? byName) is not { } match) return Maybe<Decision>.None;
+
+        if (byName is not null) expectations[expectations.IndexOf(byName)] = byName with { NameSpent = true };
+        trace?.Invoke($"start: {window.ProcessName}({window.ProcessId}) 0x{window.Handle.Value:X} -> {NameOf(match.WorkspaceId)} " +
+                      $"by {(byProcess is not null ? "process" : "name")}");
+        return new Decision(Placement.In(match.WorkspaceId), Roster: false);
+    }
+
+    // Whether `processId` is `ancestor` or below it, walking up the parent chain at most `hops` times. Without a
+    // process tree (tests, compatibility) only the process itself counts.
+    bool Descends(int processId, int ancestor, int hops) =>
+        processId == ancestor
+        || hops > 0 && processes is not null && processId > 0
+           && processes.Of(processId).Map(p => p.ParentProcessId != processId && Descends(p.ParentProcessId, ancestor, hops - 1)).GetValueOrDefault(false);
+
+    string NameOf(Guid workspaceId) => Workspace(workspaceId).Map(w => w.Name).GetValueOrDefault(workspaceId.ToString());
+
+    Maybe<Decision> LaunchedByWorkspace(WindowInfo window)
+    {
+        if (processes is null) return Maybe<Decision>.None;
+
+        // ONCE per window, ever. AutoPlaceable already refuses a window with a membership, so this is
+        // belt and braces -- and it is warranted, because the failure it guards against is the worst
+        // one this app can have: Appeared is re-raised for the same window routinely (the 5s Resync
+        // sweep, and one tray app on Petre's machine raised it 23 times in a session), a placement
+        // MOVES a window between desktops, and moving a window that has focus takes Windows to that
+        // desktop. A tier that could fire twice for one window could therefore bounce the desktop
+        // back and forth with no input at all, which is exactly what Petre reported.
+        if (!launchedBy.Add(window.Handle)) return Maybe<Decision>.None;
+
+        // The current desktop, asked once. A COM hiccup leaves it as no answer, and then every
+        // workspace looks different from it -- the safe direction, since the placement is a move to
+        // where the launcher already is and at worst it moves the window to the desktop it is on.
+        var current = desktops.CurrentDesktop().GetValueOrDefault();
+
+        var launcher = LaunchedBy.Launcher(window.ProcessId, processes.Of, OwnsTrackedWindow);
+        var workspace = launcher.Bind(WorkspaceOfLauncher);
+        var decision = workspace
+            .Where(id => Workspace(id).GetValueOrDefault()?.DesktopId != current)
+            .Map(id => new Decision(Placement.In(id), Roster: false));
+
+        // Every step, because each of the three can decline and a window that stays put looks the same
+        // whichever one did.
+        trace?.Invoke($"launched-by {window.ProcessName}({window.ProcessId}) " +
+                      $"launcher={launcher.Map(id => id.ToString()).GetValueOrDefault("none")} " +
+                      $"workspace={workspace.Map(id => Workspace(id).GetValueOrDefault()?.Name ?? id.ToString()).GetValueOrDefault("none")} " +
+                      $"moved={decision.HasValue}");
+
+        return decision;
+    }
+
+    // What OnAppeared decided to do with a new window: where it goes, and whether that also says the
+    // APP belongs there. Only the launched-by tier answers false. See above.
+    sealed record Decision(Placement Placement, bool Roster);
+
+    // Windows OURS are not launchers: the bar starts nothing, and counting the Manage window as the app
+    // that started something would place windows by whichever workspace our own window happens to be
+    // drawn in.
+    bool OwnsTrackedWindow(int processId) =>
+        knownWindows.Values.Any(w => w.ProcessId == processId && !IsOurs(w.Handle));
+
+    // Which workspace the launcher was in, which is a question about one of its WINDOWS rather than
+    // about the process.
+    //
+    // The first version of this asked for the process's sole workspace and declined when there was more
+    // than one, and measuring killed it: Petre's single VS Code process holds seven windows, one on
+    // nearly every workspace, so the rule was never satisfied for the very app #94 was written about.
+    //
+    //   launcher 11400 windows=[TaskSpace, slip39, dice, EC, Personal, Extra, Info]
+    //
+    // So when the launcher has windows in several workspaces, the one you were LAST IN wins. That is as
+    // close to "which window did the launching" as anything available, and it is right for the reported
+    // gesture: you click a link in the editor window you are working in, and that is by definition the
+    // editor window most recently active.
+    //
+    // Declined only when none of the launcher's windows has ever been active in this session, since
+    // then there is nothing to prefer and a guess would be a coin toss between seven.
+    Maybe<Guid> WorkspaceOfLauncher(int processId)
+    {
+        var windows = knownWindows.Values
+            .Where(w => w.ProcessId == processId)
+            .Select(w => (Window: w, Workspace: WorkspaceHolding(w)))
+            .Where(x => x.Workspace is not null)
+            .ToList();
+
+        // Per window, because these fail in ways that look identical from outside: no windows at all, a
+        // window on a desktop that is not a workspace, or several windows and none ever activated.
+        trace?.Invoke($"  launcher {processId} windows=["
+                      + string.Join(", ", knownWindows.Values.Where(w => w.ProcessId == processId).Select(Describe))
+                      + "]");
+
+        if (windows.Count == 0) return Maybe<Guid>.None;
+        if (windows.Select(x => x.Workspace).Distinct().Count() == 1) return windows[0].Workspace!.Value;
+
+        return windows
+            .Where(x => activations.ContainsKey(x.Window.Handle))
+            .OrderByDescending(x => activations[x.Window.Handle])
+            .Select(x => Maybe<Guid>.From(x.Workspace!.Value))
+            .FirstOrDefault();
+    }
+
+    string Describe(WindowInfo window) =>
+        $"{window.Handle.Value:X}:" +
+        (WorkspaceHolding(window) is { } id
+            ? Workspace(id).GetValueOrDefault()?.Name ?? id.ToString()
+            : $"no-workspace(desktop={desktops.DesktopOf(window.Handle).GetValueOrDefault()})") +
+        $"@{activations.GetValueOrDefault(window.Handle, 0)}";
+
+    // Which workspace a window lives in: its membership if this app has ever placed it, and otherwise
+    // the workspace that owns the DESKTOP it is sitting on.
+    //
+    // The desktop half is not a fallback, it is the usual answer, and leaving it out made the whole of
+    // #94 inert on a real machine. `memberships` only records windows this app has MOVED -- a drag, a
+    // rule, placement memory -- so an editor that has simply always been on its workspace's desktop has
+    // no entry at all, and asking memberships alone would find no launcher anywhere.
+    //
+    // Reading the desktop is also what the bar does when it draws that window inside a workspace's row,
+    // so this agrees with what is on screen rather than with an internal ledger.
+    Guid? WorkspaceHolding(WindowInfo window)
+    {
+        if (memberships.TryGetValue(window.Handle, out var membership)) return membership;
+
+        var desktop = desktops.DesktopOf(window.Handle);
+        return desktop.IsSuccess
+            ? State.Workspaces.FirstOrDefault(w => w.DesktopId == desktop.Value)?.Id
+            : null;
+    }
+
+    bool SharesIdentityWithAnotherLiveWindow(WindowInfo window) =>
+        RosterIdentity.Of(window).Match(
+            identity => knownWindows.Values.Any(other =>
+                other.Handle != window.Handle
+                && RosterIdentity.Of(other).Map(id => id == identity).GetValueOrDefault(false)),
+            // No readable path means no identity at all, so there is nothing to be ambiguous
+            // about -- PlacementMemory will return None for it anyway.
+            () => false);
+
+    // Rules (and late placement) only touch windows that are neither ours, placed, pinned,
+    // nor deliberately detached: pinned windows live on ALL desktops -- moving one to a
+    // workspace desktop would silently defeat the pin Petre set by hand -- and a detached
+    // window is one he dragged out of every workspace by hand (see `detached`).
+    bool AutoPlaceable(WindowHandle handle) =>
+        !IsOurs(handle)
+        && !memberships.ContainsKey(handle)
+        && !detached.Contains(handle)
+        && !desktops.IsPinned(handle).GetValueOrDefault(false);
+
+    // Petre: "i want to have the ability to specify a wildcard instead of the full window
+    // name... 'beeper *' would match all beepers and still rename to beeper".
+    //
+    // Branching HERE rather than in each surface is deliberate: the floating bar's icon menu
+    // and Manage's row menu both call RenameWindow, so wildcard support arrives in both from
+    // one place and cannot end up implemented twice with different rules.
+    //
+    // A wildcard produces a durable RenameRule instead of a PersistedRename. That difference
+    // is the whole point: a PersistedRename is keyed on the exact title at the moment of
+    // renaming, so it lapses as soon as the app rewrites its title (Beeper carries the current
+    // chat, RDM the session), whereas a rule keeps matching. Everything downstream already
+    // applies rename rules on Appeared and on TitleChanged, so nothing else needed changing.
+    // The window icon menu's Close, Force close and Close all (Petre: "right clicking an app should have close
+    // and force close", "also, close all", "so i can kill all vscode or edge processes"). Here, not in the
+    // bar, so the control pipe's twins (close-window, force-close, close-all) run the same code as the menu.
+    // Compatibility mode has no activator, the same refusal the delete-with-windows path gives.
+    public Result CloseWindow(WindowHandle window) => WithActivator(a => a.Close(window));
+
+    public Result ForceCloseWindow(WindowHandle window) => WithActivator(a => a.EndProcess(window, everyInstance: false));
+
+    public Result CloseAllOfApp(WindowHandle window) => WithActivator(a => a.EndProcess(window, everyInstance: true));
+
+    Result WithActivator(Func<IWindowActivator, Result> act) =>
+        activator is null ? Result.Failure("This build cannot close windows.") : act(activator);
+
+    public Result RenameWindow(WindowHandle window, string input) =>
+        RenamePattern.IsWildcard(input)
+            ? AddRenameRule(input)
+            : RenameExactly(window, input);
+
+    public Result AddRenameRule(string input) =>
+        Result.FailureIf(RenamePattern.ShortNameOf(input).Length == 0,
+                "A wildcard rename still needs a name: \"*\" on its own matches everything and names it nothing.")
+            .Bind(() => AddRule(new RenameRule(RuleMatchKind.TitleRegex, RenamePattern.ToRegex(input), RenamePattern.ShortNameOf(input))));
+
+    // The two-box form (#136). Petre: "i want two separate boxes - one for the title wildcard, another
+    // for the new name."
+    //
+    // Two arguments rather than one string to be parsed, which is the point: nothing has to guess where
+    // the pattern ends, and a title containing whatever separator we might have chosen cannot be
+    // misread. The pattern still goes through ToRegex, so a '*' means what it always did and every other
+    // character is escaped.
+    //
+    // A pattern with NO wildcard is still accepted and still becomes a rule. It matches that exact title
+    // and keeps matching it, including for a window opened tomorrow, which is strictly more than the
+    // one-off rename can promise.
+    public Result RenameByPattern(string pattern, string shortName) =>
+        Result.FailureIf(string.IsNullOrWhiteSpace(pattern),
+                "There is nothing to match. A pattern of \"*\" on its own would rename every window on the machine.")
+            .Bind(() => Result.FailureIf(pattern.Trim() == "*",
+                "\"*\" on its own matches every window on the machine. Narrow it, as in \"*deskbar*\"."))
+            .Bind(() => Result.FailureIf(string.IsNullOrWhiteSpace(shortName), "A name is required."))
+            .Bind(() => AddRule(new RenameRule(RuleMatchKind.TitleRegex, RenamePattern.ToRegex(pattern), shortName.Trim())));
+
+    // Petre: "i've renamed remote desktop manager to RDP yesterday, today it's still the
+    // original name, why?"
+    //
+    // Because an exact-title rename CANNOT survive that app. His state.json recorded
+    // OriginalTitle "Remote Desktop Manager [_Richard - fhd]" while the window now reads
+    // "Remote Desktop Manager [i7-petre]" -- RDM puts the current session in its title, so the
+    // exact-match adoption in ReapplyRenames could never fire again. RenamePattern's own header
+    // predicted this and named RDM as the example; what was missing was a way to ACT on it,
+    // because the wildcard form derives the short name FROM the pattern ("beeper *" names it
+    // "beeper"), and no pattern matching "Remote Desktop Manager [...]" can be spelled so that
+    // it yields "RDP".
+    //
+    // So: rename by APP. One rule keyed on the process name, which is the one thing about a
+    // window that never changes while it runs. Immune to every title rewrite, and it covers
+    // every window of that app -- which for Beeper, Teams and Edge (18 dead exact-title
+    // entries between them in his file) is what was wanted all along.
+    public Result RenameApp(WindowHandle window, string shortName) =>
+        Result.FailureIf(string.IsNullOrWhiteSpace(shortName), "A name is required.")
+            .Bind(() => knownWindows.TryGetValue(window, out var info)
+                ? AddRule(new RenameRule(RuleMatchKind.ProcessName, info.ProcessName, shortName.Trim()))
+                    // The per-title renames for this app are now superseded, and leaving them
+                    // would mean two records disagreeing about one app forever. Removed in the
+                    // same breath as adding the rule, so state.json never holds both.
+                    .Tap(() => Persist(State with
+                    {
+                        PersistedRenames = State.PersistedRenames
+                            .Where(r => !r.ProcessName.Equals(info.ProcessName, StringComparison.OrdinalIgnoreCase))
+                            .ToList(),
+                    }))
+                : Result.Failure("Window no longer exists."));
+
+    // Prepended, not appended: rules are matched first-hit-wins in list order, so the newest
+    // and most specific intent should win over an older broader pattern. An existing rule with
+    // the same kind AND pattern is REPLACED rather than shadowed -- otherwise renaming the same
+    // app twice would leave the list accumulating rules that can never match, which is exactly
+    // how PersistedRenames turned into a graveyard.
+    Result AddRule(RenameRule rule) =>
+        Result.Success()
+            .Tap(() => Persist(State with
+            {
+                RenameRules = [rule, .. State.RenameRules.Where(r => !(r.Kind == rule.Kind && r.Pattern == rule.Pattern))],
+            }))
+            // Apply it immediately to everything already open, so the rename is visible now
+            // rather than only on the next Appeared or TitleChanged.
+            //
+            // NOT ReapplyRenames(): that sweep refreshes titles for windows ALREADY in the
+            // ledger and adopts persisted renames after a restart. It never evaluates rules,
+            // so a brand-new rule would have left the very window Petre was renaming
+            // untouched until its title happened to change.
+            //
+            // Skips windows we have already renamed, for the same reason OnTitleChanged does:
+            // ApplyRename records the current title as the ORIGINAL, so applying twice would
+            // capture our own short name as the thing to restore later.
+            .Tap(() => knownWindows.Values
+                .Where(w => ledger.AppliedName(w.Handle).HasNoValue)
+                .ToList()
+                .ForEach(w => RulesEngine.MatchRename(w, State.RenameRules)
+                    .Tap(shortName => { ApplyRename(w, shortName); })));
+
+    Result RenameExactly(WindowHandle window, string shortName) =>
+        knownWindows.TryGetValue(window, out var info)
+            ? ApplyRename(info, shortName)
+                // Manual renames persist (spec: survive restarts). Rule-based renames never
+                // pass through here -- the rule itself is already durable. Keyed by process +
+                // the title the window had before ANY rename (ledger's original).
+                .Tap(() =>
+                {
+                    var original = ledger.OriginalTitle(window).GetValueOrDefault(info.Title);
+                    Persist(State with
+                    {
+                        PersistedRenames =
+                        [
+                            .. State.PersistedRenames.Where(r => !(r.ProcessName.Equals(info.ProcessName, StringComparison.OrdinalIgnoreCase) && r.OriginalTitle == original)),
+                            new PersistedRename(info.ProcessName, original, shortName),
+                        ],
+                    });
+                })
+            : Result.Failure("Window no longer exists.");
+
+    // Restore a window's title to its original (called on user un-rename AND app exit).
+    // Internal helper that restores the title and ledger entry, but leaves PersistedRenames alone.
+    // Preserves the Set-before-ledger ordering: a failed WM_SETTEXT must not claim success in the ledger.
+    Result RestoreTitleOnly(WindowHandle window) =>
+        ledger.OriginalTitle(window)
+            .ToResult("Window was never renamed.")
+            .Bind(original => titles.Set(window, original)
+                .Tap(() => ledger = ledger.Remove(window)));
+
+    // User explicitly un-renames a window: restore the title AND remove the durable entry,
+    // else the sweep would re-apply it seconds later.
+    public Result RestoreTitle(WindowHandle window)
+    {
+        // Capture the original title before RestoreTitleOnly removes the ledger entry.
+        var original = ledger.OriginalTitle(window);
+        return RestoreTitleOnly(window)
+            .Tap(() => original.Tap(originalTitle =>
+            {
+                // Only remove the persisted entry if we know the process name -- better a stale
+                // persisted rename than deleting another app's entry if the window is hidden.
+                var processName = knownWindows.TryGetValue(window, out var info) ? info.ProcessName : null;
+                if (processName is not null)
+                {
+                    var remaining = State.PersistedRenames
+                        .Where(r => !(r.OriginalTitle == originalTitle && r.ProcessName.Equals(processName, StringComparison.OrdinalIgnoreCase)))
+                        .ToList();
+                    if (remaining.Count != State.PersistedRenames.Count)
+                        Persist(State with { PersistedRenames = remaining });
+                }
+            }));
+    }
+
+    // App exit / crash-avoidance: leave every window exactly as we found it. Exit-time restoration
+    // is temporary housekeeping; the durable PersistedRenames record must survive so renames re-apply
+    // at the next startup (spec: "renames survive app restarts").
+    public void RestoreAllTitles() => ledger.Handles.ToList().ForEach(h => RestoreTitleOnly(h));
+
+    // The safety-net sweep (Petre: "applying those renamed titles every several
+    // seconds"). Event-driven NAMECHANGE re-apply is the fast path; this catches missed
+    // events AND adopts persisted renames after a restart. App calls it on a ~5s timer.
+    public void ReapplyRenames()
+    {
+        // 0. Windows named after the folder they have open (#136). First, and over ALL known windows
+        //    rather than only over the ledger, because two things here are not true of a rule-based
+        //    rename: the wanted name changes when the folder changes, and a window that has never been
+        //    renamed can acquire a name the moment its folder becomes readable. The event path handles
+        //    both immediately; this is the safety net for the events that get dropped under load, which
+        //    is the same reason this whole sweep exists.
+        knownWindows.Values.ToList().ForEach(window => FolderName(window)
+            .Tap(name =>
+            {
+                if (titles.Get(window.Handle).GetValueOrDefault("") != name) ApplyRename(window, name);
+            }));
+
+        // 1. Active renames whose on-screen title drifted without us hearing about it.
+        //    Fire-and-forget Sets: a hung/closed window just misses this sweep round.
+        ledger.Handles.ToList().ForEach(h =>
+            titles.Get(h).Tap(current =>
+            {
+                if (ledger.NeedsReapply(h, current))
+                    ledger.AppliedName(h).Tap(name => { titles.Set(h, name); });
+            }));
+
+        // 2. Persisted renames not yet active this session (the restart case): adopt any
+        //    window whose process + current title exactly match a recorded rename.
+        //
+        //    NOT for an app named by its folder (#136). Petre: "i still see 'SPS' for vscode windows,
+        //    why?" -- with folder naming on and every window called SPS. This is the step that did it, and
+        //    the chain is worth writing down because it only shows up after a HARD kill. His file holds
+        //    {Code, OriginalTitle "VSC", ShortName "SPS"}, a rename made while our own short name was on
+        //    screen. Killing the app leaves that short name on the window instead of restoring it, so on
+        //    the next start there is no ledger entry, the window's CURRENT title is literally "VSC", and
+        //    this step matches it and applies "SPS" to an app that is supposed to be named after its
+        //    folder. A clean exit never reaches that state, since RestoreAllTitles puts the real titles
+        //    back first.
+        knownWindows.Values
+            .Where(w => ledger.AppliedName(w.Handle).HasNoValue && !NamesByFolder(w.ProcessName))
+            .ToList()
+            .ForEach(w => State.PersistedRenames
+                .TryFirst(r => r.ProcessName.Equals(w.ProcessName, StringComparison.OrdinalIgnoreCase) && r.OriginalTitle == w.Title)
+                .Tap(r => { ApplyRename(w, r.ShortName); }));
+    }
+
+    // The last desktop each window was seen on, and the reason it exists is measured rather than
+    // supposed. Petre: "i have teams running on the messenger workspace and it's not there", with a
+    // screenshot showing Teams in the Unplaced row instead. Probed against the live windows:
+    //
+    //   20842 WhatsApp  isWindow=True  visible=False  FromHwnd=NULL        (minimised to tray)
+    //   313F8 Teams     isWindow=True  visible=True   FromHwnd=Messengers
+    //   1611EC Edge     isWindow=True  visible=True   cloaked=2  FromHwnd=GEPHA
+    //
+    // A window minimised to the tray HAS NO RESOLVABLE DESKTOP. Not closed, not pinned, not cloaked:
+    // the Edge window in the control is cloaked, because it is on another desktop, and answers
+    // perfectly. Invisibility is what the virtual-desktop API declines to answer for.
+    //
+    // So the bar was dropping a window out of its workspace and into the "Unplaced" catch-all for as
+    // long as it sat in the tray, which is where messengers spend most of their day.
+    //
+    // The fix is to remember, because the fact was true a moment ago and is merely unavailable now.
+    // That is the mirror of a rule this codebase already keeps for icons: never cache a lookup failure
+    // that can succeed later. Here: never discard a lookup that succeeded, just because the next one
+    // failed. It self-heals -- the window is shown, the OS answers again, the memory is refreshed --
+    // and it costs one dictionary and no extra calls.
+    readonly Dictionary<WindowHandle, Guid> lastKnownDesktop = [];
+
+    // Asks the OS, remembers a real answer, and falls back to the last real answer when the OS
+    // declines. Unplaced is still reachable, and still means what it says: we have NEVER been told
+    // where this window lives.
+    Result<Guid> DesktopOfRemembering(WindowHandle window, IReadOnlyList<DesktopInfo> live)
+    {
+        var answer = desktops.DesktopOf(window);
+        if (answer.IsSuccess)
+        {
+            lastKnownDesktop[window] = answer.Value;
+            return answer;
+        }
+
+        // Only a desktop that STILL EXISTS. A remembered desktop that has since been deleted would
+        // put the window in a row nothing draws, which is worse than the catch-all: at least the
+        // catch-all is visible and can be dragged out of.
+        return lastKnownDesktop.TryGetValue(window, out var remembered) && live.Any(d => d.Id == remembered)
+            ? Result.Success(remembered)
+            : answer;
+    }
+
+    // --- icon order ------------------------------------------------------------------
+    //
+    // The bar draws a row's icons in knownWindows order (screen first, then this order), so this is the
+    // whole of how icons are arranged. Petre: "go with the first-seen order, with the possibility of
+    // dragging those icons." Activation no longer reorders anything; the active window is told apart by
+    // its highlight alone.
+
+    // Records a window, keeping its place if it is already known. A NEW window goes where the saved
+    // order (AppState.IconOrder) says its app was, or at the end if its app has no saved place: that is
+    // the first-seen order, with what he arranged by hand coming back after a restart.
+    void Know(WindowInfo window)
+    {
+        if (knownWindows.ContainsKey(window.Handle))
+        {
+            knownWindows[window.Handle] = window; // an existing key keeps its position
+            return;
+        }
+
+        knownWindows.Insert(ArrivalIndex(window), window.Handle, window);
+        lastUsed.TryAdd(window.Handle, now());
+    }
+
+    // Before the first known window whose app is saved LATER in the order than this one's, so the saved
+    // apps come back in their saved sequence. A window whose app has no saved place goes at the end.
+    int ArrivalIndex(WindowInfo window)
+    {
+        if (SavedRankOf(window) is not { } rank) return knownWindows.Count;
+
+        var later = knownWindows.Values.ToList().FindIndex(w => SavedRankOf(w) is { } other && other > rank);
+        return later < 0 ? knownWindows.Count : later;
+    }
+
+    int? SavedRankOf(WindowInfo window) =>
+        OrderIdentityOf(window) is { } id && State.IconOrder.ToList().IndexOf(id) is var at and >= 0 ? at : null;
+
+    // The app a window belongs to, for remembering its place across restarts: exe path plus arguments,
+    // the key placement memory uses. Deliberately NOT RosterIdentity.Of(WindowInfo), which returns
+    // nothing for browsers so that placement memory leaves them alone; an icon's PLACE is a different
+    // question, and browsers are the windows most worth arranging. Windows with no readable process
+    // path (elevated ones) have no identity and simply keep their first-seen place.
+    static string? OrderIdentityOf(WindowInfo window) =>
+        window.ProcessPath is { } path ? RosterIdentity.Of(path, window.CommandLine) : null;
+
+    // Petre dragged `moved` to just before (or just after) `anchor`. The two need not be in the same row:
+    // a drop onto another row moves the window there AND puts it where it was dropped, and both are
+    // expressed as a position relative to a neighbour, which is all a single order needs.
+    //
+    // Saved as the sequence of APPS (see MergedIconOrder), because window handles do not survive a
+    // restart. Several windows of one app share one identity, so after a restart they come back
+    // together, in the order they reappear.
+    public Result MoveWindowInOrder(WindowHandle moved, WindowHandle anchor, bool after)
+    {
+        if (moved == anchor) return Result.Success();
+        if (!knownWindows.TryGetValue(moved, out var window)) return Result.Failure("That window has closed.");
+        if (!knownWindows.ContainsKey(anchor)) return Result.Failure("The window it was dropped next to has closed.");
+
+        knownWindows.Remove(moved);
+        knownWindows.Insert(knownWindows.IndexOf(anchor) + (after ? 1 : 0), moved, window);
+        Persist(State with { IconOrder = MergedIconOrder() });
+        return Result.Success();
+    }
+
+    // The saved order after a rearrangement: the apps open now, in the order they are drawn, with every
+    // app saved earlier but not open now kept just after the app it used to follow. Without that second
+    // half, arranging the bar while an app is closed would forget where that app goes.
+    IReadOnlyList<string> MergedIconOrder()
+    {
+        var open = knownWindows.Values.Select(OrderIdentityOf).OfType<string>().Distinct().ToList();
+        var openSet = open.ToHashSet();
+        var merged = new List<string>(open);
+        var saved = State.IconOrder.ToList();
+
+        saved.Select((id, at) => (id, at)).Where(x => !openSet.Contains(x.id)).ToList().ForEach(x =>
+        {
+            var predecessor = saved.Take(x.at).LastOrDefault(merged.Contains);
+            merged.Insert(predecessor is null ? 0 : merged.IndexOf(predecessor) + 1, x.id);
+        });
+
+        return merged;
+    }
+
+    // Whether the current workspace's row expands into its titled list or the list sits at the bottom of
+    // the bar (AppState.ExpandCurrentWorkspace). A no-op when unchanged, like the other settings, so nothing
+    // writes state.json for a value that did not move.
+    public Result SetExpandCurrentWorkspace(bool expand) =>
+        State.ExpandCurrentWorkspace == expand
+            ? Result.Success()
+            : Result.Success().Tap(() => Persist(State with { WindowListAtBottom = !expand }));
+
+    // --- overview / switcher-facing operations -----------------------------------
+
+    // Ground truth for "which workspace is this window in": ASK THE OS which desktop
+    // it is on (memberships only knows what WE placed). Pinned first -- pinned windows
+    // are on all desktops, DesktopOf is meaningless for them.
+    public Result<Core.Overview.Overview> WindowsByWorkspace() =>
+        desktops.GetDesktops().Bind(live => desktops.CurrentDesktop().Map(current =>
+        {
+            var windows = knownWindows.Values.ToList();
+            var pinned = windows
+                .Where(w => desktops.IsPinned(w.Handle).GetValueOrDefault(false))
+                // A window we BORROWED for a nested workspace is pinned as a mechanism, not as a
+                // statement (#42) -- so it must not surface in the 📌 row, which means "you asked
+                // for this everywhere". Without this the parent's windows would vanish out of the
+                // row you are standing in and reappear under a pin nobody asked for, which is the
+                // opposite of "present in the child workspace".
+                .Where(w => !borrowed.ContainsKey(w.Handle))
+                .Select(w => w.Handle).ToHashSet();
+            var desktopOf = windows
+                .Where(w => !pinned.Contains(w.Handle))
+                .Select(w => (w.Handle, Desktop: borrowed.TryGetValue(w.Handle, out var home)
+                    // ...and it still belongs to the desktop it came FROM.
+                    //
+                    // This line said `current` for one build, and Petre saw the result immediately:
+                    // "sparrow loses all windows and they're moved to the child, don't do that."
+                    // Nothing had moved -- the windows were pinned, so they were on both desktops
+                    // -- but the BAR was told they belonged to whichever desktop he was standing
+                    // on, so the parent's row emptied and they piled into the child's.
+                    //
+                    // The rule that survives is the one his two corrections add up to: the bar
+                    // shows where a window LIVES, the desktop shows what is borrowed. A borrowed
+                    // window is present on the child's screen and stays in its parent's row, which
+                    // is also why the child's row is not doubled up -- the thing he rejected first.
+                    ? Result.Success(home)
+                    : DesktopOfRemembering(w.Handle, live)))
+                .Where(x => x.Desktop.IsSuccess) // closed mid-query: just not shown this round
+                .ToDictionary(x => x.Handle, x => x.Desktop.Value);
+            // One screen sweep per build, alongside the DesktopOf calls above -- and far cheaper
+            // than they are, being user32 rather than COM.
+            var screen = WithPendingScreens(screenLayout?.Snapshot() ?? ScreenFacts.Empty);
+            return OverviewBuilder.Build(State, windows, h => ledger.OriginalTitle(h), pinned, desktopOf, live, current, activeWindow, lastActiveByDesktop, screen, wantsAttention, artworkOf);
+        }));
+
+    // Both now RECORD the placement as well as performing it. Petre's defect: "move Beeper
+    // to pinned, close the app, open again, it is incorrectly placed in GEPHA workspace" --
+    // Windows' pin is keyed to the HWND, and Beeper (Electron) destroys and recreates its
+    // window when closed to tray, so the pin died with the handle and the fresh window
+    // surfaced on whatever desktop was current. Remembering the pin by IDENTITY is what
+    // makes it survive that, here and across app restarts.
+    public Result PinWindow(WindowHandle window) =>
+        desktops.Pin(window).Tap(() => RememberPlacement(window, pinned: true));
+
+    public Result UnpinWindow(WindowHandle window) =>
+        desktops.Unpin(window).Tap(() => ForgetPlacement(window));
+
+    // Jump = what clicking a taskbar button does, but across workspaces: land on the
+    // window's desktop (skip the no-op switch), then bring it to the foreground.
+    public Result JumpTo(WindowHandle window, IWindowActivator activator) =>
+        desktops.IsPinned(window).Bind(pinned => pinned
+            ? activator.Activate(window) // pinned windows are already wherever Petre is
+            : desktops.DesktopOf(window)
+                // Claim the target as its desktop's last-active BEFORE switching, and that
+                // ordering is the whole point. Switching fires CurrentChanged, whose
+                // RestoreLastActive would otherwise activate whatever was remembered from the
+                // previous visit -- racing this method's own Activate below for the same
+                // foreground, with the winner decided by when the OS delivers the COM
+                // notification. Writing the answer first makes the two agree instead of
+                // compete: the restore either no-ops on the same handle or is beaten by an
+                // identical call. Recording it is correct on its own terms anyway -- jumping
+                // to a window IS that desktop's most recent focus.
+                .Tap(desktopId => lastActiveByDesktop[desktopId] = window)
+                .Bind(desktopId => desktops.CurrentDesktop()
+                    .Bind(current => desktopId == current ? Result.Success() : desktops.Switch(desktopId)))
+                .Bind(() => activator.Activate(window)));
+
+    // Petre: "i want to be able to minimize windows from the floating bar", clicking the icon of
+    // the window he is already in -- the taskbar's own toggle, and the reason JumpTo has always
+    // restored a minimized window on the way in. Both halves of the gesture now exist.
+    //
+    // The bar only calls this for a row that IsActive, and Petre's condition -- "but only if
+    // we're on that workspace" -- is already carried by that flag rather than needing a check of
+    // its own: a window cannot hold focus on a desktop you are not looking at. That also means
+    // pinned windows keep working, which an explicit is-this-row-current test would have broken
+    // (the Pinned row is deliberately never "current", being no workspace at all).
+    //
+    // Pulsing rather than trusting the OS to tell us: minimizing fires no window event this app
+    // hooks -- EVENT_OBJECT_HIDE does not fire, the window is still visible in the taskbar sense
+    // -- so without this the icon would not dim until focus happened to land somewhere else.
+    public Result MinimizeWindow(WindowHandle window, IWindowActivator windowActivator) =>
+        windowActivator.Minimize(window).Tap(() => stateChanged.OnNext(Unit.Default));
+
+    // Which half of that toggle a click on the bar means. It used to be decided by the BAR, from
+    // the IsActive flag on the row it had drawn, and Petre found what that costs: "when i minimize
+    // an app in the floatingwindow, i can't bring it back up... after several attempts, it does
+    // come up and back down minimized, and then nothing, stays minimized."
+    //
+    // Neither fact the decision needs survives being read from a rendered row:
+    //
+    //   * IsActive is STICKY, deliberately. Clicking a bar icon activates the bar, which
+    //     WindowMonitor ignores by hwnd, so Foreground() reports None and MarkActive -- which
+    //     never clears on None, for good reasons of its own -- goes on naming the window that was
+    //     just put away.
+    //   * IsMinimized is a SNAPSHOT, and a stale one here. Minimizing raises no event this app
+    //     hooks, so the only rebuild that follows is the pulse MinimizeWindow sends itself, and
+    //     that races ShowWindowAsync -- it is usually taken before the window is iconic.
+    //
+    // So the row went on saying "active, not minimized" and each further click re-minimized an
+    // already-minimized window, which Windows treats as a no-op: nothing happened, repeatedly.
+    // It recovered only when some other tracked window took the foreground, which is exactly the
+    // intermittency Petre reported.
+    //
+    // Decided here, from the live active window and a live IsIconic, so neither input can be
+    // older than the click. A minimized window is never the window you are in, whatever the
+    // highlight still claims -- and that ordering makes restore the fallback, which is the safe
+    // way round: the worst a wrong guess can now do is raise a window you meant to put away.
+    public Result ToggleWindow(WindowHandle window, IWindowActivator windowActivator) =>
+        activeWindow.GetValueOrDefault() == window && !windowActivator.IsMinimized(window)
+            ? MinimizeWindow(window, windowActivator)
+            : JumpTo(window, windowActivator);
+
+    // Which of a workspace's roster apps are not currently running anywhere. Checks ALL
+    // known windows rather than just this workspace's, because Rider-on-X sitting in another
+    // workspace still counts as running.
+    //
+    // Kept even though nothing LAUNCHES any more (the ▶ Start surfaces are gone): this is how
+    // the roster is inspected, and a future surface that lists "belongs here but closed" wants
+    // exactly this. It is also the one place the roster's own contents are queryable.
+    public IReadOnlyList<InventoryEntry> NotRunningRoster(Guid workspaceId) =>
+        State.Inventory.GetValueOrDefault(workspaceId, [])
+            .Where(e => !RosterIdentity.IsRunning(e, knownWindows.Values))
+            .ToList();
+
+    // --- persistence helpers -----------------------------------------------------
+
+    Result<Workspace> Workspace(Guid id) =>
+        State.Workspaces.TryFirst(w => w.Id == id).ToResult($"Workspace {id} not found.");
+
+    // Roster (spec): a workspace lists the apps that BELONG to it even when they are
+    // not running. An entry is added/updated when a window is PLACED here and SURVIVES
+    // the window closing; identity = path+args (browser: path+profile), and the same
+    // identity landing in another workspace MOVES (a window can't belong to two --
+    // last placement wins). Entries leave only via user removal or workspace deletion.
+    void RosterAdd(WindowInfo window, Guid workspaceId)
+    {
+        if (window.ProcessPath is null) return; // elevated/inaccessible: nothing relaunchable to remember
+        // Never roster OURSELVES (see IsOurs). Dragging the Manage window onto a workspace
+        // row is allowed -- it is an explicit act, and moving a window between desktops is
+        // harmless -- but recording Deskbar as an app that BELONGS to that workspace
+        // would make "▶ Start" relaunch it into its own "already running" dialog.
+        if (IsOurs(window.Handle)) return;
+        // The shell is not an app that lives anywhere: see RosterIdentity.IsShell. Refused on the WAY
+        // IN as well as on the way out, because a drag is how his file learned the entry that broke
+        // Win+R -- dropping a Run dialog on a row would otherwise teach it again, and there is no UI
+        // that removes a roster entry once written.
+        if (RosterIdentity.IsShell(window.ProcessPath)) return;
+        // Browsers, terminals and pickers, for the same reason: their windows stay where they were
+        // opened, so a drag moves the one window and teaches nothing about the next (see
+        // RosterIdentity.StaysWhereOpened).
+        if (RosterIdentity.StaysWhereOpened(window.ProcessPath, window.CommandLine)) return;
+        AddEntry(workspaceId, new InventoryEntry(window.ProcessPath, window.CommandLine,
+            ledger.OriginalTitle(window.Handle).GetValueOrDefault(window.Title)));
+    }
+
+    void AddEntry(Guid workspaceId, InventoryEntry entry)
+    {
+        var identity = RosterIdentity.Of(entry);
+        var inventory = State.Inventory.ToDictionary(
+            kv => kv.Key,
+            kv => (IReadOnlyList<InventoryEntry>)kv.Value.Where(e => RosterIdentity.Of(e) != identity).ToList());
+        inventory[workspaceId] = [.. inventory.GetValueOrDefault(workspaceId, []), entry];
+        // Belonging to a workspace is mutually exclusive with being pinned to all of them or
+        // detached from all of them, so claiming an identity here clears the other two --
+        // in the SAME Persist, so one placement is one write and one pulse.
+        Persist(State with
+        {
+            Inventory = inventory,
+            PinnedApps = Forget(State.PinnedApps, identity),
+            DetachedApps = Forget(State.DetachedApps, identity),
+        });
+    }
+
+    // --- placement memory (identity-keyed, so it outlives any single window handle) ------
+
+    // Records "Petre put this app HERE": pinned to every workspace, or detached onto a plain
+    // desktop. The workspace case needs nothing extra -- Place() -> RosterAdd() -> AddEntry()
+    // already writes identity -> workspace into Inventory.
+    void RememberPlacement(WindowHandle window, bool pinned) =>
+        EntryFor(window).Match(
+            entry => Persist(State with
+            {
+                PinnedApps = pinned ? [.. Forget(State.PinnedApps, RosterIdentity.Of(entry)), entry] : Forget(State.PinnedApps, RosterIdentity.Of(entry)),
+                DetachedApps = pinned ? Forget(State.DetachedApps, RosterIdentity.Of(entry)) : [.. Forget(State.DetachedApps, RosterIdentity.Of(entry)), entry],
+            }),
+            // No readable process path (elevated): nothing identifiable to remember, but the
+            // OS-level pin/move DID happen, so the UI still needs telling.
+            () => stateChanged.OnNext(Unit.Default));
+
+    void ForgetPlacement(WindowHandle window) =>
+        EntryFor(window).Match(
+            entry => Persist(State with
+            {
+                PinnedApps = Forget(State.PinnedApps, RosterIdentity.Of(entry)),
+                DetachedApps = Forget(State.DetachedApps, RosterIdentity.Of(entry)),
+            }),
+            () => stateChanged.OnNext(Unit.Default));
+
+    // The roster-shaped record of a live window: original title where we renamed it, so
+    // state.json keeps showing what Petre would recognise rather than our short name.
+    //
+    // None for our OWN windows (see IsOurs), which is what keeps Deskbar out of
+    // PinnedApps/DetachedApps: pinning the Manage window by hand still pins it in Windows,
+    // it just isn't remembered as a standing instruction to re-pin us at every launch.
+    //
+    // None as well for an app whose windows stay where they were opened (see
+    // RosterIdentity.StaysWhereOpened). Pinning one Edge window by hand pins that window; remembered,
+    // it would pin every Edge window opened afterwards, which is the opposite of staying put.
+    Maybe<InventoryEntry> EntryFor(WindowHandle window) =>
+        !IsOurs(window) && knownWindows.TryGetValue(window, out var info) && info.ProcessPath is not null
+        && !RosterIdentity.StaysWhereOpened(info.ProcessPath, info.CommandLine)
+            ? new InventoryEntry(info.ProcessPath, info.CommandLine, ledger.OriginalTitle(window).GetValueOrDefault(info.Title))
+            : Maybe<InventoryEntry>.None;
+
+    static IReadOnlyList<InventoryEntry> Forget(IReadOnlyList<InventoryEntry> apps, string identity) =>
+        apps.Where(entry => RosterIdentity.Of(entry) != identity).ToList();
+
+    // `roster` is false for a launched-by placement (#94): it moves the window without claiming the
+    // app belongs to that workspace. See LaunchedByWorkspace.
+    Result ApplyPlacement(WindowInfo window, Placement placement, bool roster = true) => placement.Kind switch
+    {
+        PlacementKind.Workspace => Place(window, placement.WorkspaceId, roster),
+        // Pin the OS window only: memory ALREADY says pinned, so re-persisting would be a
+        // pointless write on every tray-restore of an Electron app.
+        PlacementKind.Pinned => desktops.Pin(window.Handle),
+        // Live-only flag; the persisted DetachedApps entry is what survives restarts.
+        _ => Result.Success().Tap(() => detached.Add(window.Handle)),
+    };
+
+    // Windows already open when Deskbar starts never pass through OnAppeared -- Start()
+    // only recorded them into knownWindows -- so nothing had ever placed them. That was two
+    // gaps at once: rules never touched pre-existing windows, and the roster (which is the
+    // workspace half of placement memory) was never consulted at all. Petre: "when starting
+    // up, all those apps, when started, should be redistributed to the correct workspaces."
+    void RestorePlacements() =>
+        knownWindows.Values
+            .Where(window => AutoPlaceable(window.Handle))
+            .ToList()
+            // Same ambiguity guard as the live path (see Remembered): after a reboot Edge
+            // restores four windows at once, all on whatever desktop is current, and memory
+            // knows one workspace for all four -- so applying it would herd every one of them
+            // into that workspace. Leaving them where the session restored them is the lesser
+            // wrong, and the only honest answer when the key cannot tell them apart.
+            // The container tier joins in here (#132) and is deliberately NOT subject to SafeToRestore,
+            // which every tier below it is. The two tiers are answering different questions. SafeToRestore
+            // exists because a window sitting in a workspace may have been put there with Windows' own
+            // Task View, which the app never sees, and a restart must not undo that -- and the roster
+            // cannot tell the difference, because its answer covers every window of the app. A container
+            // home is a fact about THIS folder, and taking a window home is exactly what it is for.
+            //
+            // This is also what keeps the snapshot in SnapshotContainerHomes honest: a pile left by a
+            // reboot is corrected HERE, before any sweep has had two chances to believe it. Without the
+            // exemption, Deskbar restarting into a pile would learn the pile as the answer.
+            .ForEach(window => ContainerPlacement(window)
+                .Or(() => Remembered(window).Map(placement => new Decision(placement, Roster: true))
+                    .Where(decided => SafeToRestore(window, decided.Placement)))
+                .Or(() => RulesEngine.MatchWorkspace(window, State.WorkspaceRules)
+                    .Map(id => new Decision(Placement.In(id), Roster: true))
+                    .Where(decided => SafeToRestore(window, decided.Placement)))
+                .Tap(decided => ApplyPlacement(window, decided.Placement, decided.Roster)));
+
+    // A pin is ADDITIVE (it makes a window appear everywhere; it does not move it) and
+    // detaching is just a flag, so both are always safe to re-apply. A WORKSPACE placement is
+    // a real move, so it only happens when the window currently sits on a desktop no
+    // workspace owns: Petre may have moved it there with Windows' own Task View, which we
+    // never saw, and a restart must not undo that. A window whose desktop cannot be resolved
+    // at all is fair game -- it is the "Unplaced" case, where placing it can only help.
+    bool SafeToRestore(WindowInfo window, Placement placement) =>
+        placement.Kind != PlacementKind.Workspace
+        || desktops.DesktopOf(window.Handle)
+            .Map(current => !State.Workspaces.Any(w => w.DesktopId == current))
+            .GetValueOrDefault(true);
+
+    public Result<InventoryEntry> AddRosterEntry(Guid workspaceId, string exePath, string? arguments) =>
+        Result.FailureIf(string.IsNullOrWhiteSpace(exePath), "Executable path required")
+            .Bind(() => Workspace(workspaceId))
+            .Map(_ => new InventoryEntry(
+                exePath,
+                string.IsNullOrWhiteSpace(arguments) ? $"\"{exePath}\"" : $"\"{exePath}\" {arguments}",
+                Path.GetFileNameWithoutExtension(exePath)))
+            .Tap(entry => AddEntry(workspaceId, entry));
+
+    public Result RemoveRosterEntry(Guid workspaceId, InventoryEntry entry)
+    {
+        var identity = RosterIdentity.Of(entry);
+        var current = State.Inventory.GetValueOrDefault(workspaceId, []);
+        var remaining = current.Where(e => RosterIdentity.Of(e) != identity).ToList();
+        if (remaining.Count == current.Count) return Result.Failure("That app is no longer in this workspace's list.");
+        var inventory = State.Inventory.ToDictionary(kv => kv.Key, kv => kv.Value);
+        inventory[workspaceId] = remaining;
+        Persist(State with { Inventory = inventory });
+        return Result.Success();
+    }
+
+    void Persist(AppState next)
+    {
+        State = next;
+        store.Save(next); // small JSON, synchronous write on every mutation is fine for v1
+        stateChanged.OnNext(Unit.Default);
+    }
+}

@@ -1,0 +1,110 @@
+using System.Windows;
+using System.Windows.Controls;
+
+namespace Deskbar.Windows.Tests;
+
+// #149. Petre: "right-clicking on the default desktop (desktop1) doesn't do anything, no context menu
+// for it."
+//
+// The bug was a decision that outlived its reasoning. The row menu was attached "only on real
+// workspaces", which is right for 📌 Pinned and for the Unplaced catch-all -- neither is a workspace and
+// neither ever will be -- and wrong for an unbound desktop, which is a workspace nobody has named yet.
+// With the bar's own background menu deleted there was nothing to fall through to either, so the click
+// landed on literally nothing.
+//
+// Asserted on the MENU rather than on what naming does, which NameDesktopTests covers: what broke here
+// was reachability.
+public class UnboundDesktopMenuTests
+{
+    // Rows are a Border wrapping a Grid, and the menu is on that Grid -- the container -- so the whole
+    // row answers: label, lane and the empty space between.
+    static IReadOnlyList<Grid> RowContainers(Panel rows) =>
+        rows.Children.OfType<Border>().Select(b => b.Child).OfType<Grid>().ToList();
+
+    // The pinned row has no text of its own since #173 -- its caption cell holds the bar's two
+    // buttons where the pin glyph used to be -- so it is found by the accessible name every row
+    // now carries. Rows with captions still answer to their caption, which is why both are tried.
+    static Grid RowLabelled(Panel rows, string label) =>
+        RowContainers(rows).Single(row =>
+            TextIn(row).Any(text => text.Contains(label))
+            || System.Windows.Automation.AutomationProperties.GetName(row) == label);
+
+    static IReadOnlyList<string> TextIn(DependencyObject root)
+    {
+        var found = new List<string>();
+        Collect(root);
+        return found;
+
+        void Collect(DependencyObject node) =>
+            LogicalTreeHelper.GetChildren(node)
+                .OfType<DependencyObject>()
+                .ToList()
+                .ForEach(child =>
+                {
+                    if (child is TextBlock { Text: { } text }) found.Add(text);
+                    Collect(child);
+                });
+    }
+
+    static IReadOnlyList<string> HeadersOf(ContextMenu menu) =>
+        menu.Items.OfType<MenuItem>().Select(item => item.Header?.ToString() ?? "").ToList();
+
+    [Fact]
+    public void An_unbound_desktops_row_offers_to_name_it() => StaThread.Run(() =>
+    {
+        var harness = Harness.Build(withUnnamedDesktop: true);
+        using var bar = harness.ShowBar();
+
+        var menu = RowLabelled(bar.Rows, "Desktop 1").ContextMenu;
+
+        Assert.NotNull(menu);
+        Assert.Contains("Name this desktop…", HeadersOf(menu));
+    });
+
+    // One item, and the reason is worth pinning: every other entry on the workspace menu needs a
+    // workspace to act on -- reorder positions a row in a list this desktop is not in, colour comes
+    // from that position, delete would close somebody's desktop from a right-click. Offering them
+    // greyed out would advertise five things that cannot work.
+    //
+    // It gained a SECOND item with #173, and the rule above is why that is not a contradiction:
+    // "Minimize bar" does not act on the desktop the right-click landed on, it acts on the bar. The
+    // rule was never "one item", it was "nothing that needs a workspace", and every menu the bar
+    // opens offers the minimize so that a right-click anywhere on it behaves the same way.
+    //
+    // And a THIRD, "New workspace…", by the same rule. Petre, on a bar holding one unnamed desktop: "can't
+    // add in one workspace?" Creating a workspace needs no existing one to act on, and without it a bar
+    // with no named workspace had no way to add one at all.
+    [Fact]
+    public void That_menu_offers_nothing_else_that_needs_a_workspace() => StaThread.Run(() =>
+    {
+        var harness = Harness.Build(withUnnamedDesktop: true);
+        using var bar = harness.ShowBar();
+
+        Assert.Equal(["Name this desktop…", "New workspace…", "Dock to screen edge", "Minimize bar"],
+            HeadersOf(RowLabelled(bar.Rows, "Desktop 1").ContextMenu!));
+    });
+
+    // The original reasoning still holds where it was right: 📌 Pinned is not a workspace and has
+    // nothing to name.
+    [Fact]
+    public void The_pinned_row_still_has_no_menu() => StaThread.Run(() =>
+    {
+        var harness = Harness.Build(withUnnamedDesktop: true);
+        using var bar = harness.ShowBar();
+
+        Assert.Null(RowLabelled(bar.Rows, "Pinned").ContextMenu);
+    });
+
+    // A named workspace keeps the full menu, so the new branch cannot have stolen the old one.
+    [Fact]
+    public void A_workspace_row_still_gets_the_workspace_menu() => StaThread.Run(() =>
+    {
+        var harness = Harness.Build(withUnnamedDesktop: true);
+        using var bar = harness.ShowBar();
+
+        var headers = HeadersOf(RowLabelled(bar.Rows, "Sparrow").ContextMenu!);
+
+        Assert.Contains("Rename…", headers);
+        Assert.True(headers.Count > 1);
+    });
+}
