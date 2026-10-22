@@ -6933,6 +6933,18 @@ public partial class FloatingBar : Window
 
         Microsoft.Win32.SystemEvents.DisplaySettingsChanged += OnChanged;
         Closed += (_, _) => Microsoft.Win32.SystemEvents.DisplaySettingsChanged -= OnChanged;
+
+        // The bar's OWN DPI changing is a layout change too, and not always one DisplaySettingsChanged
+        // reports: a new scale in Settings, or the bar dragged onto a screen at another scale. WPF has
+        // already re-rendered and resized the window by the time this fires, but a docked bar's strip is
+        // still the old width in physical pixels until the shell is asked again, so it goes through the
+        // same settled readjustment. This only ever fires because app.manifest declares Per-Monitor V2;
+        // a system-aware process never learns its DPI changed (see the manifest for what that cost).
+        DpiChanged += (_, e) =>
+        {
+            if (ClickTrace.On) ClickTrace.Write($"dpi changed {e.OldDpi.PixelsPerInchX} -> {e.NewDpi.PixelsPerInchX}");
+            OnChanged(this, e);
+        };
     }
 
     // The same two steps startup does, in the same order and for the same reasons: rebuild so the rows

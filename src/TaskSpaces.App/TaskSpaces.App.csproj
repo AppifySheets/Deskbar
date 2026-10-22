@@ -41,6 +41,8 @@
          StartupRegistration.IsTheApp both key on this name. -->
     <AssemblyName>Deskbar</AssemblyName>
     <ApplicationIcon>Assets\deskbar.ico</ApplicationIcon>
+    <!-- Declares Per-Monitor V2 DPI awareness; app.manifest says why a docked bar needs it. -->
+    <ApplicationManifest>app.manifest</ApplicationManifest>
     <!-- Must match TaskSpaces.Windows' TFM exactly (net10.0-windows alone is a different,
          incompatible target from the project-reference resolver's point of view). -->
     <TargetFramework>net10.0-windows10.0.19041.0</TargetFramework>

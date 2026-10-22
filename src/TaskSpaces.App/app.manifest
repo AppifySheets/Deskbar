@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Per-Monitor V2 DPI awareness, declared here because it has to be in force before the first window
+  exists, and a manifest is the only place that is guaranteed.
+
+  Without it WPF runs the process SYSTEM-aware: its DPI is fixed at whatever the session had when it
+  started, for the life of the process. Measured on 2026-10-22 after moving from the desk (two 4K
+  screens at 150%, 144 DPI) to a laptop over RDP (one 3840 x 2160 screen at 250%, 240 DPI) with the bar
+  docked left:
+
+    * the process still reported awareness=1 (system) and DPI 144 for the bar's window;
+    * Windows bitmap-stretched the bar by 240/144 to 512 px wide, blurred;
+    * but the bar asked the shell for 205 DIP x 1.5 = 307 px, in its own virtualised 144-DPI pixels,
+      and the shell reserves exactly what it is handed, so the work area began at x=307 and the other
+      205 px of the bar sat on top of every maximized window.
+
+  Per-Monitor V2 makes every number the app reads or hands out physical pixels at the monitor's real
+  DPI: GetDpiForMonitor, rcMonitor, GetWindowRect, the app bar rectangle. That is what AppBar.Dock,
+  the switcher and the drag code already assume. On a desk where every screen is at one scale and the
+  process started there, system-aware and per-monitor produce the same numbers, which is why this was
+  never seen until the scale changed under a running process. FloatingBar's DpiChanged handler re-docks
+  after such a change.
+-->
+<assembly manifestVersion="1.0" xmlns="urn:schemas-microsoft-com:asm.v1">
+  <assemblyIdentity version="1.0.0.0" name="Deskbar.app" />
+
+  <!-- What the SDK's default manifest carries, kept so replacing it changes nothing else. -->
+  <trustInfo xmlns="urn:schemas-microsoft-com:asm.v2">
+    <security>
+      <requestedPrivileges xmlns="urn:schemas-microsoft-com:asm.v3">
+        <requestedExecutionLevel level="asInvoker" uiAccess="false" />
+      </requestedPrivileges>
+    </security>
+  </trustInfo>
+
+  <application xmlns="urn:schemas-microsoft-com:asm.v3">
+    <windowsSettings>
+      <!-- dpiAwareness wins on Windows 10 1607 and later; dpiAware is the fallback older builds read. -->
+      <dpiAware xmlns="http://schemas.microsoft.com/SMI/2005/WindowsSettings">true/pm</dpiAware>
+      <dpiAwareness xmlns="http://schemas.microsoft.com/SMI/2016/WindowsSettings">PerMonitorV2</dpiAwareness>
+    </windowsSettings>
+  </application>
+</assembly>
