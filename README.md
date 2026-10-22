@@ -2,13 +2,16 @@
      layout attributes GitHub keeps. It is a PrintWindow render of the live floating bar (a
      plain screen copy skips its layered window), taken at "BarScale": 1.2 on a 150% display,
      410 pixels wide. width="273" is two thirds of that, so a 150% screen draws it pixel for
-     pixel with the text at its real weight, and other screens scale it once, cleanly. Only the
-     bar's own window is captured, nothing of the desktop behind it, and its corners keep their
-     real alpha. No real people's names: the one window title that carried one was shown as
+     pixel with the text at its real weight, and other screens scale it once, cleanly. The
+     whole bar is too tall to sit beside the text, so the image holds two cuts of that one
+     capture with a gap between them: the pins and the first workspace rows fading out, then the lower
+     part (usage, now playing, tray and clock) fading in. The rows in between are left out,
+     never stitched into a bar that did not exist. Only the bar's own window is captured,
+     nothing of the desktop behind it, and its corners keep their real alpha. No real people's names: the one window title that carried one was shown as
      plain "Beeper" through Rename this window for the capture and restored straight after.
      Keep this comment and the img in one unbroken run of lines; a blank line inside an HTML
      block ends it early and GitHub then shows the rest as text. -->
-<img align="right" src="docs/images/bar-floating.png" width="273" alt="The floating bar, top to bottom: a header with the Start and Search buttons and the back and minimise buttons; the taskbar's pinned apps; then one row per workspace with its name above the icons of every window in it, some with tab counts and the time spent there. The current workspace's row is tinted and ringed and lists its windows with their titles; the rows you came from are ringed in dashes and dots. Groups of workspaces have a line down their left edge. At the bottom, CPU, memory, disk and GPU usage, the track now playing with its controls, and a strip with the tray chevron, wifi, a volume dial, the bell, the input language and the clock." />
+<img align="right" src="docs/images/bar-floating.png" width="273" alt="Two cuts of the floating bar, with the middle rows left out. The top: a header with the Start and Search buttons and the back and minimise buttons; the taskbar's pinned apps; then one row per workspace with its name above the icons of every window in it, some with tab counts and the time spent there. The current workspace's row is tinted and ringed and lists its windows with their titles; the rows you came from are ringed in dashes and dots. Groups of workspaces have a line down their left edge. The bottom: CPU, memory, disk and GPU usage, the track now playing with its controls, and a strip with the tray chevron, wifi, a volume dial, the bell, the input language and the clock." />
 
 # Deskbar
 
