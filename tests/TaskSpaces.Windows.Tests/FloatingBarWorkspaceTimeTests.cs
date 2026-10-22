@@ -42,27 +42,26 @@ public class FloatingBarWorkspaceTimeTests
         Assert.DoesNotContain(texts, t => t.Contains("GEPHA") && t.Contains("min"));
     });
 
-    // An empty workspace you have used today shows its time and not "empty". Petre, on "Mess… · empty · 1 min":
-    // "empty is extra there". The time already says the row is a workspace you work in, and two marks pushed the
-    // name into an ellipsis. One you have not used today keeps "· empty". And the swap follows the minute
-    // refresh, so a row that gains its first minute drops "empty" without waiting for a rebuild.
+    // An empty workspace's row is its name and nothing after it. Petre: "remove empty word from empty bars"
+    // (and before that, on "Mess… · empty · 1 min": "empty is extra there"). The time still appears once the
+    // workspace has some today, at the minute refresh, without waiting for a rebuild.
     [Fact]
-    public void Time_replaces_the_empty_mark() => StaThread.Run(() =>
+    public void An_empty_workspace_has_no_empty_mark_and_still_gets_its_time() => StaThread.Run(() =>
     {
         var harness = Harness.Build();
-        // A workspace with no windows, so its row carries "· empty".
+        // A workspace with no windows.
         var messaging = harness.Manager.AddWorkspace("Messaging").Value.Id;
         var minutes = 0;
         using var bar = harness.ShowBar(timeToday: id => id == messaging ? TimeSpan.FromMinutes(minutes) : TimeSpan.Zero);
 
-        Assert.Contains(" · empty", Texts(bar.Rows));
+        Assert.DoesNotContain(Texts(bar.Rows), t => t.Contains("empty"));
 
         minutes = 4;
         bar.Bar.RefreshWorkspaceTimes();
 
         var texts = Texts(bar.Rows);
         Assert.Contains(" · 4 min", texts);
-        Assert.DoesNotContain(" · empty", texts);
+        Assert.DoesNotContain(texts, t => t.Contains("empty"));
     });
 
     // The clock runs while nothing on the bar changes, so the number is refreshed in place, without a rebuild.

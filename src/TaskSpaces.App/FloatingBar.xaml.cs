@@ -3110,14 +3110,16 @@ public partial class FloatingBar : Window
 
         // A workspace with NO windows shrinks to its name line (accent rail style, "try b"): an empty row of
         // icon lines is a full row of nothing, and Petre's bar has several, which is a good part of why it is
-        // nearly as tall as the screen. The name carries a dim "· empty" and is still the whole row's click
-        // and drop target. Not the pinned row (it holds the bar's buttons and is the pin drop target), and
-        // not a row with a caption of its own.
+        // nearly as tall as the screen. The name is still the whole row's click and drop target. Not the pinned
+        // row (it holds the bar's buttons and is the pin drop target), and not a row with a caption of its own.
+        //
+        // The name used to carry a dim "· empty" too. Petre: "remove empty word from empty bars". A row that is
+        // only its name already says it holds nothing, so the word said it twice, and it pushed long names into
+        // an ellipsis.
         //
         // Never the titled list, which keeps its floor of empty lines even with nothing in it (see
         // WindowListLines): a list that collapsed to its name when its last window left would be the very resize
-        // the floor exists to stop. Its caption carries no "empty" either, measured as the same kind of jump: the
-        // mark made the caption line 2.5 DIP taller, and the empty lines already say it.
+        // the floor exists to stop.
         var emptyRow = ordered.Count == 0 && !pinned && captionContent is null && !titled;
 
         // Petre: "do you think it would make more sense if the captions for the spaces were on
@@ -3241,7 +3243,7 @@ public partial class FloatingBar : Window
         // either, which changes nothing -- RowLabel already returns null for a row with no
         // destination, and the pinned row has never had one.
         var (label, setHover) = captionContent is null
-            ? RowLabel(visualLabel, isCurrent, switchTo, caption: true, currentColour: spine, empty: emptyRow, timeFor: rowKey)
+            ? RowLabel(visualLabel, isCurrent, switchTo, caption: true, currentColour: spine, timeFor: rowKey)
             : (captionContent, (Action<bool>?)null);
 
         // Collected as they are built, because the hover wiring below needs the BUTTONS and
@@ -3455,7 +3457,7 @@ public partial class FloatingBar : Window
         // by the same hover. Only for a real caption, not the pinned row's header.
         if (AcrossSeam && captionContent is null)
         {
-            var (twin, twinHover) = RowLabel(visualLabel, isCurrent, switchTo, caption: true, currentColour: spine, empty: emptyRow, timeFor: rowKey);
+            var (twin, twinHover) = RowLabel(visualLabel, isCurrent, switchTo, caption: true, currentColour: spine, timeFor: rowKey);
             if (twin is FrameworkElement twinCaption && label is FrameworkElement firstCaption) twinCaption.Margin = firstCaption.Margin;
             var holder = AtRightHalf(twin);
             Grid.SetRow(holder, 0);
@@ -4771,7 +4773,7 @@ public partial class FloatingBar : Window
     // `timeFor`: the workspace whose time today follows the name (FloatingBar.WorkspaceTime.cs); null for rows
     // that are not workspaces.
     (UIElement Element, Action<bool>? SetHover) RowLabel(string text, bool isCurrent, Func<Result>? switchTo, bool caption = false,
-        Brush? currentColour = null, bool empty = false, Guid? timeFor = null)
+        Brush? currentColour = null, Guid? timeFor = null)
     {
         // Petre: "when switching workspaces, because the caption of the workspace gets bolded,
         // it increases the width of the floating window a little if that workspace is full,
@@ -4825,36 +4827,22 @@ public partial class FloatingBar : Window
         // This Border survives as pure spacing, with no brush of its own: it carries the label's
         // padding and margin, which the ring used to justify. Collapsing it into the TextBlock
         // would work and is not worth the churn.
-        // An empty workspace's dim "· empty" sits BESIDE the name in a text of its own, not inside it: the
-        // name's Text stays exactly the name, which is what screen readers and everything that finds a row
-        // by its name read. (Built as inlines first, which left Text empty for every caption: WPF does not
-        // fill Text from inlines.)
+        // Today's time sits BESIDE the name in a text of its own (" · 2 h 11 min", FloatingBar.WorkspaceTime.cs),
+        // not inside it: the name's Text stays exactly the name, which is what screen readers and everything that
+        // finds a row by its name read. (Built as inlines first, which left Text empty for every caption: WPF does
+        // not fill Text from inlines.) The mark is DOCKED to the right of a left-aligned panel and the name fills
+        // what is left, so the panel is exactly as wide as name plus mark, with the mark right after the name.
+        // When the line is too narrow, the name is what shrinks and takes the ellipsis, and the time stays
+        // readable.
         //
-        // Today's time joins it the same way (" · 2 h 11 min", FloatingBar.WorkspaceTime.cs). The marks are
-        // DOCKED to the right of a left-aligned panel and the name fills what is left, so the panel is exactly
-        // as wide as name plus marks, with the marks right after the name. When the line is too narrow, the
-        // name is what shrinks and takes the ellipsis, and the time stays readable. Docked right in reverse
-        // order, since the first child docked right sits outermost: time, then "empty", then the name.
-        //
-        // Only one of the two shows at a time: the time, when there is any today, otherwise "empty" (see
-        // FillTimeMark). So the "empty" mark is built first and handed to the time mark, which owns the swap.
+        // An empty workspace's dim " · empty" used to sit there the same way, swapping with the time. Petre:
+        // "remove empty word from empty bars"; see where emptyRow is decided in GroupRow.
         var marks = new List<UIElement>();
-        var emptyMark = empty
-            ? new TextBlock
-            {
-                Text = " · empty",
-                FontSize = textBlock.FontSize,
-                Foreground = EmptyMarkForeground,
-                VerticalAlignment = VerticalAlignment.Center,
-            }
-            : null;
         // LineHeight is NaN unless set, which it is on a caption (above); passed on so the time sits on the
         // same tight line box as the name and the caption does not grow taller.
         var lineHeight = double.IsNaN(textBlock.LineHeight) ? (double?)null : textBlock.LineHeight;
-        if (caption && WorkspaceTimeMark(timeFor, textBlock.FontSize, lineHeight, emptyMark) is { } time)
+        if (caption && WorkspaceTimeMark(timeFor, textBlock.FontSize, lineHeight) is { } time)
             marks.Add(time);
-        if (emptyMark is not null)
-            marks.Add(emptyMark);
 
         UIElement content = textBlock;
         if (marks.Count > 0)
@@ -4962,9 +4950,6 @@ public partial class FloatingBar : Window
     // 66% white, up from 50% with the accent rail style: an untinted row's name sits straight on the bar's
     // dark background, and at half strength it read as disabled.
     static readonly Brush RestingRowForeground = Frozen(0xA8, 0xFF, 0xFF, 0xFF);
-
-    // The "· empty" after an empty workspace's name: present, and quiet.
-    static readonly Brush EmptyMarkForeground = Frozen(0x48, 0xFF, 0xFF, 0xFF);
 
     // Petre: "current white border is quite unnoticeable."
     //
