@@ -66,7 +66,7 @@ public sealed partial class RemoteControl
 
     // The row menu's four moves, plus an exact position. Every one is among PEERS, as the menu's are
     // (#85): a grouped workspace moves inside its group's box, an ungrouped one among the bar's top-level
-    // rows, and a whole group by reordering a member is not a thing. "end" passes the list's length, the
+    // rows. A whole group moves with group-reorder (RemoteControl.Groups.cs), or by moving its anchor. "end" passes the list's length, the
     // same number the menu passes, which the manager clamps to the last peer.
     ControlReply Reorder(string workspace, string where) =>
         WorkspaceNamed(workspace).Bind(w => (where.ToLowerInvariant() switch
@@ -81,9 +81,9 @@ public sealed partial class RemoteControl
             }).Map(() => w.Id))
             .Match(id => Success(Describe(id)), ControlReply.Fail);
 
-    ControlReply SetRowMinimized(string workspace, bool minimized) =>
+    ControlReply SetRowFolded(string workspace, bool folded) =>
         WorkspaceNamed(workspace).Match(
-            w => Reply(manager.SetWorkspaceMinimized(w.Id, minimized), () => Describe(w.Id)),
+            w => Reply(manager.SetWorkspaceFolded(w.Id, folded), () => Describe(w.Id)),
             ControlReply.Fail);
 
     // SetWorkspaceColor already hands a grouped workspace's colour to its group, as the menu does.

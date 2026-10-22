@@ -53,8 +53,8 @@ public sealed partial class RemoteControl(WorkspaceManager manager, Func<bool, R
         ("rename", [var workspace, var name]) => Rename(workspace, name),
         ("add-child", [var parent, var name]) => AddChild(parent, name),
         ("reorder", [var workspace, var where]) => Reorder(workspace, where),
-        ("minimize-row", [var workspace]) => SetRowMinimized(workspace, true),
-        ("restore-row", [var workspace]) => SetRowMinimized(workspace, false),
+        ("fold", [var workspace]) => SetRowFolded(workspace, true),
+        ("unfold", [var workspace]) => SetRowFolded(workspace, false),
         ("color", [var workspace, var colour]) => Colour(workspace, colour),
         ("delete", [var workspace]) => Delete(workspace, closeWindows: false),
         ("delete", [var workspace, "--close-windows"]) => Delete(workspace, closeWindows: true),
@@ -65,6 +65,9 @@ public sealed partial class RemoteControl(WorkspaceManager manager, Func<bool, R
         ("group-leave", [var workspace]) => GroupLeave(workspace),
         ("group-rename", [var group, var name]) => GroupRename(group, name),
         ("group-color", [var group, var colour]) => GroupColour(group, colour),
+        ("group-fold", [var group]) => GroupFold(group, true),
+        ("group-unfold", [var group]) => GroupFold(group, false),
+        ("group-reorder", [var group, var where]) => GroupReorder(group, where),
         ("ungroup", [var group]) => Ungroup(group),
 
         ("name-desktop", [var desktop, var name]) => NameDesktop(desktop, name),
@@ -132,7 +135,7 @@ public sealed partial class RemoteControl(WorkspaceManager manager, Func<bool, R
             // takes for it.
             groupPosition = group is null ? (int?)null : manager.State.MembersOf(group.Id).ToList().FindIndex(m => m.Id == workspaceId) + 1,
             color = workspace.Color,
-            minimized = workspace.Minimized,
+            folded = workspace.Folded,
             current = manager.CurrentWorkspaceId == workspaceId,
         };
     }
@@ -145,6 +148,7 @@ public sealed partial class RemoteControl(WorkspaceManager manager, Func<bool, R
             name = group.Name,
             id = group.Id,
             color = group.Color,
+            folded = group.Folded,
             members = manager.State.MembersOf(groupId).Select(m => m.Name),
             row = manager.State.MembersOf(groupId).Select(m => manager.RowOf(m.Id).GetValueOrDefault()).FirstOrDefault(),
         };

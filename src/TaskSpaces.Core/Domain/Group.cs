@@ -39,4 +39,15 @@ public sealed record Group(Guid Id, string Name, Guid? AnchorWorkspaceId = null)
     // Same three states as Workspace.Color: null follows the group's position in the list,
     // WorkspacePalette.None opts out of a lane colour, anything else is a hex.
     public string? Color { get; init; }
+
+    // The whole group drawn as ONE line: its name, then each member's name as a click target, then how
+    // many windows the members hold between them. Petre: "i should be able to minimize the entire group."
+    //
+    // Separate from each member's own Workspace.Folded, and deliberately so: unfolding the group puts every
+    // member back exactly as it was, folded or not, instead of the group's fold overwriting what each
+    // member said about itself. Like a member's fold, it is a wish the bar honours except for the workspace
+    // you are on, whose row is still drawn under the group's line.
+    //
+    // An init property, defaulting to false, so a state.json from before it loads with every group open.
+    public bool Folded { get; init; }
 }

@@ -137,15 +137,59 @@ public class RemoteControlMenuTests
     }
 
     [Fact]
-    public void Minimize_row_and_restore_row()
+    public void Fold_and_unfold_a_row()
     {
         var manager = Started();
 
-        Ok(Run(manager, "minimize-row", "Main"));
-        Assert.True(Named(manager, "Main").Minimized);
+        var folded = Run(manager, "fold", "Main");
+        Ok(folded);
+        Assert.True(Json(folded).GetProperty("folded").GetBoolean());
+        Assert.True(Named(manager, "Main").Folded);
 
-        Ok(Run(manager, "restore-row", "Main"));
-        Assert.False(Named(manager, "Main").Minimized);
+        Ok(Run(manager, "unfold", "Main"));
+        Assert.False(Named(manager, "Main").Folded);
+    }
+
+    [Fact]
+    public void Fold_and_unfold_a_group()
+    {
+        var manager = Started();
+
+        var folded = Run(manager, "group-fold", "ec");
+        Ok(folded);
+        Assert.True(Json(folded).GetProperty("folded").GetBoolean());
+        Assert.True(manager.State.Groups.Single().Folded);
+
+        Ok(Run(manager, "group-unfold", "ec"));
+        Assert.False(manager.State.Groups.Single().Folded);
+    }
+
+    // The whole box moves, among the bar's top-level rows, and its members keep their order inside it.
+    [Fact]
+    public void Group_reorder_moves_the_whole_group()
+    {
+        var manager = Started();
+
+        Ok(Run(manager, "group-reorder", "ec", "top"));
+        Assert.Equal(["Services", "Alta2PG", "UI", "Main", "Personal"], Order(manager));
+
+        Ok(Run(manager, "group-reorder", "ec", "end"));
+        Assert.Equal(["Main", "Personal", "Services", "Alta2PG", "UI"], Order(manager));
+
+        Ok(Run(manager, "group-reorder", "ec", "up"));
+        Assert.Equal(["Main", "Services", "Alta2PG", "UI", "Personal"], Order(manager));
+
+        Ok(Run(manager, "group-reorder", "ec", "1"));
+        Assert.Equal(["Services", "Alta2PG", "UI", "Main", "Personal"], Order(manager));
+    }
+
+    [Fact]
+    public void Group_reorder_refuses_a_place_it_cannot_read()
+    {
+        var reply = Run(Started(), "group-reorder", "ec", "sideways");
+
+        Assert.Equal(ControlReply.Failed, reply.ExitCode);
+        Assert.Contains("up, down, top, end", reply.Output);
     }
 
     [Theory]
@@ -456,9 +500,9 @@ public class RemoteControlMenuTests
         var help = Run(Started(), "help").Output;
 
         Assert.All(
-            ["workspaces", "windows", "desktops", "create", "move", "rename", "add-child", "reorder", "minimize-row",
-             "restore-row", "color", "delete", "switch", "group-create", "group-join", "group-leave", "group-rename",
-             "group-color", "ungroup", "name-desktop", "rename-window", "rename-app", "rename-pattern",
+            ["workspaces", "windows", "desktops", "create", "move", "rename", "add-child", "reorder", "fold",
+             "unfold", "color", "delete", "switch", "group-create", "group-join", "group-leave", "group-rename",
+             "group-color", "group-fold", "group-unfold", "group-reorder", "ungroup", "name-desktop", "rename-window", "rename-app", "rename-pattern",
              "name-by-folder", "restore-title", "pin", "unpin", "close-window", "force-close", "close-all", "bar"],
             verb => Assert.Contains($"\n  {verb}", help));
     }

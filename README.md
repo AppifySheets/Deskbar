@@ -272,15 +272,19 @@ on Manage → Settings. A fully opaque setting means it never dims.
 ### The workspace row menu
 
 Right-click a row for: **Rename…**; **Insert before…**, **Insert after…** and **Add child…**;
-the group items (next section); **Minimize row**, which shrinks the row to under half height with
-everything still working, for the workspaces you keep but rarely touch, and flips to **Restore row
-height**; the window-list toggle; the colour strip; **Move up**, **Move down**, **Move to top**
+the group items (next section); **Fold row**, which flips to **Unfold row**; the window-list toggle; the colour strip; **Move up**, **Move down**, **Move to top**
 and **Move to end**, which work within the row's group; **Delete workspace…**; and the bar items,
 **Dock to screen edge**, **Dock across both screens** and **Minimize bar**.
 
 <p align="center">
   <img src="docs/images/menu-row.png" alt="The row menu beside the bar: Rename, Insert before, Insert after, Add child, New group, Move into group, Minimize row, Window list at the bottom of the bar, a strip of nine colour swatches, Custom, Transparent, By position, Move up, Move down, Move to top, Move to end, Delete workspace, Undock from screen edge, Dock across both screens, Minimize bar." />
 </p>
+
+**Fold row** draws the row as its name alone, for a workspace you are not working in right now. The
+name is followed by how many windows it holds, and by the amber attention dot when one of them is
+flashing for you, so folding never hides a message. Clicking the name still switches there, and a
+window dropped on it still moves there. The workspace you are on always shows its icons, folded or
+not; leave it and it folds again.
 
 **Colour.** Nine swatches sit in one strip inside the menu, with the current choice ringed. Below
 them, **Custom…** opens Windows' own colour dialog starting on the row's current colour;
@@ -304,10 +308,18 @@ rows, and a line drawn down its left edge like a tree. Two kinds exist:
   child and the parent's windows are there with it.
 - **New group…** on a row, or **Move into group** when groups already exist, makes a plain group:
   a name and a box, nothing borrowed. A plain group has a dim header row with its own menu
-  (**Rename group…**, **Ungroup**, the colour strip).
+  (**Rename group…**, **Ungroup**, **Fold group**, the colour strip, and **Move group up**,
+  **Move group down**, **Move group to top** and **Move group to end**, which move the whole group
+  past the rows around it).
 
-A row inside a group offers **Move out of group** and **Ungroup '…'**; the latter names the group
-because it affects rows other than the one you clicked. Leaving a group of two dissolves it.
+A row inside a group offers **Fold group '…'**, **Move out of group** and **Ungroup '…'**; the
+last names the group because it affects rows other than the one you clicked.
+
+**Fold group** draws the whole group as one line: its name, then each member's name, then how many
+windows they hold between them and the attention dot if any of them wants you. Each name on the line
+switches to that workspace. The workspace you are on keeps its full row under the line. A folded
+group's line has the group's menu, which is where **Unfold group** is. Folding a group leaves each
+member's own fold alone, so unfolding it puts every row back the way it was. Leaving a group of two dissolves it.
 Ungrouping keeps every desktop, name and position. Deleting an anchor leaves its group as a plain
 one.
 
@@ -568,8 +580,8 @@ Everything the bar's menus do has a command, and each one runs the same code as 
 | Group | Commands |
 |---|---|
 | Listing (JSON) | `workspaces`, `windows`, `desktops` |
-| Workspaces | `create <name> [placement]`, `rename`, `add-child`, `reorder <ws> up\|down\|top\|end\|<n>`, `minimize-row`, `restore-row`, `color <ws> <colour>`, `delete <ws> [--close-windows]`, `switch` |
-| Groups | `group-create`, `group-join`, `group-leave`, `group-rename`, `group-color`, `ungroup` |
+| Workspaces | `create <name> [placement]`, `rename`, `add-child`, `reorder <ws> up\|down\|top\|end\|<n>`, `fold`, `unfold`, `color <ws> <colour>`, `delete <ws> [--close-windows]`, `switch` |
+| Groups | `group-create`, `group-join`, `group-leave`, `group-rename`, `group-color`, `group-fold`, `group-unfold`, `group-reorder <group> up\|down\|top\|end\|<n>`, `ungroup` |
 | Desktops | `name-desktop <id or number> <name>` |
 | Starting | `start <ws> [--create [placement]] [--cwd <folder>] -- <program> [arguments...]` |
 | Windows | `move <ws> [--create [placement]] [--no-follow] (--title <text> \| --hwnd <h>)...`, `rename-window`, `rename-app`, `rename-pattern`, `name-by-folder <hwnd> on\|off`, `restore-title`, `pin`, `unpin` |

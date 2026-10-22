@@ -1,3 +1,5 @@
+using System.Text.Json.Serialization;
+
 namespace TaskSpaces.Core.Domain;
 
 // A named group of windows, backed 1:1 by a Windows virtual desktop.
@@ -18,17 +20,30 @@ namespace TaskSpaces.Core.Domain;
 // is the groundwork for per-workspace direct jumps, done right, if they are wanted back.
 public sealed record Workspace(Guid Id, string Name, Guid? DesktopId, string? Color = null, string? Shortcut = null)
 {
-    // Petre: "minimized workspace rows: right-click to shrink a row to a third of its height."
+    // FOLDED: the row is drawn as its name line alone, with no icons. Petre: "now i'm not working on
+    // deskbar and i want to minimize it, to a single line, so i don't see any icons in it."
+    //
+    // This replaced "Minimize row" (#52, #111), which scaled the row to 0.43 of its height and kept every
+    // icon, only smaller. That answered "this row matters less" and not "I do not want to see this row's
+    // windows", and two ways of making a row smaller that disagree would be one too many, so the shrink
+    // went and a minimized row from an older state.json loads folded.
     //
     // A property OF THE WORKSPACE rather than of the bar, which is what makes it survive a restart
     // without a second store to keep in step -- and it is a fact about the workspace anyway
-    // ("this one matters less to me right now"), not about the window that draws it.
+    // ("I am not working on this right now"), not about the window that draws it. The bar decides
+    // when a folded row still shows its icons (while it is the workspace you are on); this only
+    // records the wish.
+    //
+    // Stored under its OLD name, "Minimized", so every state.json written before the rename keeps its
+    // rows the way they were. Renaming the key would have unfolded every minimized row on the first
+    // start of the new build for no reason anyone could see.
     //
     // An init property rather than another positional parameter: the list of those is already
     // five long and every one of them is optional, so a sixth would be one more thing to count
-    // past at every construction site. Defaults to false, so every state.json written before this
-    // loads with every row full size -- no migration, same pattern as everything in AppState.
-    public bool Minimized { get; init; }
+    // past at every construction site. Defaults to false, so a state.json without the key loads
+    // with every row unfolded -- no migration, same pattern as everything in AppState.
+    [JsonPropertyName("Minimized")]
+    public bool Folded { get; init; }
 
     // The group this workspace belongs to, or null for one that stands on its own.
     //

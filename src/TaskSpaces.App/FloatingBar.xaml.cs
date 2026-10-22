@@ -2012,7 +2012,8 @@ public partial class FloatingBar : Window
                     // colour is what groups things here.
                     tint: g.IsCurrent ? LaneTint(colour, colourSlot >= 0 ? colourSlot : ownSlot) : null,
                     rowKey: g.Workspace.Id,
-                    minimized: g.Workspace.Minimized,
+                    // The stored fold; GroupRow decides whether the row is drawn folded right now.
+                    folded: g.Workspace.Folded,
                     nested: nested,
                     // The rail: bright on the current workspace (and on an expanded row, which is the titled
                     // list and the louder fact), the plain accent everywhere else.
@@ -2050,6 +2051,20 @@ public partial class FloatingBar : Window
                 // can produce one. Decided BEFORE the rows are built, because it is what decides
                 // whether a row paints its own lane or the box paints it for the whole group.
                 var boxed = members.Count + (group.IsAnchored ? 0 : 1) > 1;
+
+                // A FOLDED group (Group.Folded) is its one line, plus the full row of any member that is
+                // still in view: the workspace you are on, or one the pointer has opened. The same rule a
+                // folded row follows, and for the same reason: folding is "I am not working in these", and
+                // the moment you switch into one you are. Boxed regardless of how many rows that leaves, so
+                // the group's line still runs down the left and ties the row below to the line above it.
+                if (group.Folded)
+                {
+                    var shown = members.Where(m => m!.IsCurrent || Expanded(m.Workspace.Id)).Select(m => WorkspaceRow(m!, group, boxed: true));
+                    groupRows.Add(FamilyBox([FoldedGroupLine(group, members!), .. shown],
+                        LaneAccent(group.Color, ColourSlotOf(group)), LaneTint(group.Color, ColourSlotOf(group)), AcrossSeam));
+                    return;
+                }
+
                 var rows = members.Select(m => WorkspaceRow(m!, group, boxed)).ToList();
 
                 // An ANCHORLESS group needs a header, because nothing inside it carries the name.
@@ -2788,6 +2803,11 @@ public partial class FloatingBar : Window
 
         if (group is not null)
         {
+            // Folding the whole group from any member, as its colour can be set from any member (#90): an
+            // anchored group has no header of its own to carry the item, and a member is where the
+            // pointer usually is when "not working on any of these" occurs to you.
+            add(group.Folded ? "▾" : "▸", group.Folded ? $"Unfold group '{group.Name}'" : $"Fold group '{group.Name}'",
+                () => Report(manager.SetGroupFolded(group.Id, !group.Folded)));
             add("⇤", "Move out of group", () => Report(manager.LeaveGroup(workspaceId)));
             // Named in the item, because "Ungroup" alone does not say what is about to dissolve and
             // this affects rows other than the one clicked.
@@ -2881,31 +2901,149 @@ public partial class FloatingBar : Window
             header.Children.Add(twin);
         }
 
-        // #84: "where Ungroup lives when the group has no workspace row of its own -- presumably the
-        // group's header gets its own small context menu." It does, and it holds only the two things
-        // that are about the GROUP rather than about a workspace.
-        //
-        // Rename matters more here than it looks: for an anchorless group this name is the only
-        // thing naming it, and there is no anchor row to rename instead.
+        header.ContextMenu = GroupMenu(group);
+        return header;
+    }
+
+    // The GROUP's own menu, on an anchorless group's header and on a folded group's line (FoldedGroupLine),
+    // which is the only surface a folded group has.
+    //
+    // #84: "where Ungroup lives when the group has no workspace row of its own -- presumably the
+    // group's header gets its own small context menu." It does, and it holds only the things that are
+    // about the GROUP rather than about a workspace.
+    //
+    // Rename matters more here than it looks: for an anchorless group this name is the only
+    // thing naming it, and there is no anchor row to rename instead.
+    ContextMenu GroupMenu(Core.Domain.Group group)
+    {
         var menu = new ContextMenu();
         HoldFadeWhileOpen(menu);
 
-        var rename = new MenuItem { Header = "Rename group…", Icon = MenuGlyph("✏") };
-        rename.Click += (_, _) => PromptDialog.Ask("Rename group", "New name:", group.Name, owner: this)
-            .Tap(name => Report(manager.RenameGroup(group.Id, name)));
-        menu.Items.Add(rename);
+        void Add(string glyph, string header, Action click)
+        {
+            var item = new MenuItem { Header = header, Icon = MenuGlyph(glyph) };
+            item.Click += (_, _) => click();
+            menu.Items.Add(item);
+        }
 
-        var ungroup = new MenuItem { Header = "Ungroup", Icon = MenuGlyph("⊟") };
-        ungroup.Click += (_, _) => Report(manager.Ungroup(group.Id));
-        menu.Items.Add(ungroup);
+        Add("✏", "Rename group…", () => PromptDialog.Ask("Rename group", "New name:", group.Name, owner: this)
+            .Tap(name => Report(manager.RenameGroup(group.Id, name))));
+        Add("⊟", "Ungroup", () => Report(manager.Ungroup(group.Id)));
+
+        menu.Items.Add(new Separator());
+
+        // Fold the whole group to one line, or open it again (Group.Folded). One item that flips, like the
+        // row's Fold row.
+        Add(group.Folded ? "▾" : "▸", group.Folded ? "Unfold group" : "Fold group",
+            () => Report(manager.SetGroupFolded(group.Id, !group.Folded)));
 
         // The group's colour belongs here too (#90): the header is a group's own row, and for an
         // anchorless one it is the closest thing it has to a parent to set it from.
-        menu.Items.Add(new Separator());
         AddGroupColourPicker(menu, group.Id);
 
-        header.ContextMenu = menu;
-        return header;
+        menu.Items.Add(new Separator());
+
+        // MOVING THE WHOLE GROUP among the bar's rows. Petre: "move them around easily". An anchorless group
+        // had no way to move at all: a member's moves stay inside the box (#85), and this menu had none. The
+        // same four the row menu has, and "end" passes the workspace count, which is always past the last
+        // row, for the manager to clamp.
+        Add("▲", "Move group up", () => Report(manager.MoveGroup(group.Id, -1)));
+        Add("▼", "Move group down", () => Report(manager.MoveGroup(group.Id, +1)));
+        Add("⤒", "Move group to top", () => Report(manager.MoveGroupTo(group.Id, 0)));
+        Add("⤓", "Move group to end", () => Report(manager.MoveGroupTo(group.Id, manager.State.Workspaces.Count)));
+
+        return menu;
+    }
+
+    // A FOLDED GROUP's one line (Group.Folded). Petre: "i should be able to minimize the entire group", and
+    // from the mockup, the line keeps every member one click away: "DESKBAR ▸ app · release · store · 10 ●".
+    //
+    //   * The group's name first, in the header's capitals and colour, so a folded group still reads as a
+    //     group and not as one more workspace.
+    //   * Then each member's NAME as its own switch target. Folding the group to a bare name would have
+    //     turned "go to release" into two clicks, unfold and pick; this keeps it at one.
+    //   * Then how many windows the members hold between them, and the attention dot when any of them is
+    //     asking for you: the same FoldMark a folded row carries, for the same reason.
+    //
+    // One line, clipped rather than wrapped: a group with more members than fit loses the last names off the
+    // right end, and its menu's Unfold group is how to reach them. Like a long caption, the line still asks
+    // for its whole width on a bar that has never been resized (SizeToContent); once the bar has a stored
+    // width, the clip is what applies.
+    //
+    // The workspace you are on is NOT hidden by this: RebuildCore draws its full row under the line, the same
+    // rule a folded row follows. Its name stays on the line too, so the line never changes as you move
+    // between members.
+    //
+    // No twin across the seam, unlike the header: the names are click targets, and the right half repeating
+    // them would put two copies of every switch on one line.
+    UIElement FoldedGroupLine(Core.Domain.Group group, IReadOnlyList<WorkspaceGroup> members)
+    {
+        var line = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(4, 2, 4, 1) };
+
+        TextBlock Label(string text, Brush foreground) => new()
+        {
+            Text = text,
+            FontSize = GroupHeaderFontSize,
+            FontWeight = FontWeights.Bold,
+            Foreground = foreground,
+            LineHeight = GroupHeaderFontSize + 2,
+            LineStackingStrategy = LineStackingStrategy.BlockLineHeight,
+            VerticalAlignment = VerticalAlignment.Center,
+            TextWrapping = TextWrapping.NoWrap,
+        };
+
+        line.Children.Add(Label($"{group.Name.ToUpperInvariant()} ▸ ", GroupHeaderForeground));
+
+        members.Select((m, at) => (m, at)).ToList().ForEach(x =>
+        {
+            if (x.at > 0) line.Children.Add(Label(" · ", TimeMarkForeground));
+
+            // The current member's name in the group's bright colour, as a current row's caption is, so the
+            // line says which of them you are in even before the eye reaches the full row below it.
+            var resting = x.m.IsCurrent ? CurrentRowForeground : RestingRowForeground;
+            var name = Label(x.m.Workspace.Name, resting);
+            var button = new Button
+            {
+                Content = name,
+                // Chrome-less, like the row captions (see BareButton), and Transparent rather than null so the
+                // whole name is hit-testable.
+                Template = BareButton,
+                Padding = new Thickness(0),
+                Background = Brushes.Transparent,
+                BorderThickness = new Thickness(0),
+                VerticalAlignment = VerticalAlignment.Center,
+                ToolTip = $"Switch to {x.m.Workspace.Name}",
+            };
+            // Hover lights the name the way a row's caption lights, which is the only sign it is clickable.
+            button.MouseEnter += (_, _) => name.Foreground = CurrentRowForeground;
+            button.MouseLeave += (_, _) => name.Foreground = resting;
+            var id = x.m.Workspace.Id;
+            button.Click += (_, _) =>
+            {
+                // The same claim a caption makes: this Click is the switch, so nothing further along the
+                // release may perform another.
+                MarkPressConsumed();
+                if (ClickTrace.On) ClickTrace.Write($"folded-group-click {x.m.Workspace.Name}");
+                Report(manager.Switch(id));
+            };
+            line.Children.Add(button);
+        });
+
+        var windows = members.Sum(m => m.Running.Count);
+        var attention = members.Any(m => m.Running.Any(r => r.WantsAttention));
+        line.Children.Add(FoldMark(windows, attention, GroupHeaderFontSize, GroupHeaderFontSize + 2));
+
+        // Transparent, so a right-click anywhere on the line (not only on a name) reaches the group's menu;
+        // a null Background would let it fall through to the bar's own.
+        var holder = new Border
+        {
+            Child = line,
+            Background = Brushes.Transparent,
+            ClipToBounds = true,
+            ContextMenu = GroupMenu(group),
+        };
+        System.Windows.Automation.AutomationProperties.SetName(holder, $"{group.Name} (folded)");
+        return holder;
     }
 
     // Dimmer than a workspace label, because it names something you cannot go to. The rows below it
@@ -3013,31 +3151,19 @@ public partial class FloatingBar : Window
     // rowKey identifies this row to the switch gesture (see rowRings). Null for rows the chord
     // can never land on: 📌 Pinned, "Unplaced", and unbound desktops -- the chord walks
     // WORKSPACES, so only those need to be repaintable.
-    // Petre: "a minimized row is about a third of the regular row height... everything still works
-    // in that state -- clicks, drags, highlights -- it is just tiny, icons included."
+    // `folded` is the workspace's own fold (Workspace.Folded): the row is drawn as its name line, with how
+    // many windows it holds and the attention dot, and no icons. The setting as stored, not whether it is
+    // drawn folded right now: GroupRow decides that (a folded row you are on still shows its icons), and the
+    // menu has to offer Unfold on such a row because the setting is still on.
     //
-    // A LayoutTransform on the whole row, which is what makes "everything still works" true for
-    // free: hit testing, drag-and-drop and the rings all go through the same transform as the
-    // pixels, so nothing needs a second, scaled-down implementation. It is also the reason this is
-    // a transform rather than smaller icons and fonts -- that would be a second layout to keep in
-    // step with the first, forever.
-    //
-    // LayoutTransform, not RenderTransform, for the third time in this file and the same reason
-    // each time: only a layout transform is part of MEASURE, so the row genuinely occupies a third
-    // of the height rather than painting small inside a full-size slot. The row still spans the
-    // bar's full width, because the transform scales the space it is given as well as what it
-    // draws there.
-    // #111: "minimized workspace rows are too small; make them 30% larger." A third of a row was
-    // right in the abstract and too small in use, which is the sort of thing only a running bar can
-    // say. 30% larger than a third, so 0.43 rather than 0.33.
-    const double MinimizedRowScale = 0.43;
+    // It replaced the minimized row (#52, #111), which scaled the icons to 0.43 and kept them all: smaller,
+    // but not out of the way, which is what Petre was after ("so i don't see any icons in it").
 
     // #109: "make the pinned row at the top of the bar smaller in height." It holds a window or two
     // and does not earn a full row.
     //
-    // The same transform #52 built, at a gentler ratio, and that reuse is the whole reason this is
-    // cheap: clicks, drags, drops and the aim highlight all travel through the transform along with
-    // the pixels, so the shrunk row keeps working with no second implementation.
+    // The scale reaches the icons through LineOf, so clicks, drags, drops and the aim highlight keep
+    // working on the shrunk row with no second implementation.
     //
     // There is a decision pulling the other way and it is why this is 0.8 rather than a third: the
     // pinned row's icon stack carries a full line's height DELIBERATELY, because dropping onto it is
@@ -3076,7 +3202,7 @@ public partial class FloatingBar : Window
     // not a desktop at all.
     // `titledList` draws the current workspace's titled list at the bottom of the bar (see RebuildCore)
     // instead of an icon row.
-    UIElement GroupRow(string visualLabel, string groupLabel, bool isCurrent, Func<Result>? switchTo, string groupKey, Action<WindowHandle, int?>? onDrop, IEnumerable<WindowRow> rows, Brush? tint = null, Guid? rowKey = null, bool minimized = false, bool nested = false, Brush? spine = null, bool pinned = false, Guid? desktopId = null, UIElement? captionContent = null, bool titledList = false)
+    UIElement GroupRow(string visualLabel, string groupLabel, bool isCurrent, Func<Result>? switchTo, string groupKey, Action<WindowHandle, int?>? onDrop, IEnumerable<WindowRow> rows, Brush? tint = null, Guid? rowKey = null, bool folded = false, bool nested = false, Brush? spine = null, bool pinned = false, Guid? desktopId = null, UIElement? captionContent = null, bool titledList = false)
     {
         // Background MUST be non-null for a panel to take part in hit testing at all --
         // a null Background leaves gaps between icons that swallow nothing and report no
@@ -3121,6 +3247,20 @@ public partial class FloatingBar : Window
         // WindowListLines): a list that collapsed to its name when its last window left would be the very resize
         // the floor exists to stop.
         var emptyRow = ordered.Count == 0 && !pinned && captionContent is null && !titled;
+
+        // A FOLDED row is drawn the way an empty one is, as its name line alone, and for the opposite reason:
+        // it has windows, and you have said you do not want to see them. Not while it is the workspace you are
+        // ON: you fold a workspace because you are not working in it, and once you have switched there you are,
+        // so a row hiding its own windows then would be a trap. Not the titled list either, which is the same
+        // "you are here" fact, or a row the pointer has opened (see `expanded` in RebuildCore). Leaving it
+        // folds it again on the next rebuild, with nothing to remember, because the setting never changed.
+        var foldedNow = folded && !isCurrent && !titled;
+
+        // What the folded name line says about what it hides: how many windows, and whether any of them is
+        // asking for you. The count is left off an empty row, where "· 0" would say what the bare name
+        // already does. The dot is the one thing folding must never hide: a message you would miss because you
+        // folded the workspace it arrived in would make folding a trap of its own.
+        (int Windows, bool Attention)? foldMark = foldedNow ? (own.Count, own.Any(r => r.WantsAttention)) : null;
 
         // Petre: "do you think it would make more sense if the captions for the spaces were on
         // the right and icons started from the left edge?"
@@ -3192,11 +3332,10 @@ public partial class FloatingBar : Window
         //
         // Costs nothing on a bar that has no width of its own: SizeToContent makes the star column
         // exactly as wide as the widest row, so stretching to it changes nothing anyone can see.
-        // How much smaller this row's ICONS are drawn: #52 shrinks a minimized workspace's row and
-        // #109 the pinned one. Declared here because LineOf needs it while the lines are being built,
-        // and it no longer reaches the row container at all -- see the note where the transform used
-        // to be applied.
-        var scale = minimized ? MinimizedRowScale : pinned ? PinnedRowScale : 1.0;
+        // How much smaller this row's ICONS are drawn: #109 shrinks the pinned one. Declared here because
+        // LineOf needs it while the lines are being built, and it no longer reaches the row container at
+        // all -- see the note where the transform used to be applied.
+        var scale = pinned ? PinnedRowScale : 1.0;
 
         // THE TITLED LIST (`titledList`, the section at the bottom of the bar): one window per line in its
         // screen's column, icon and TITLE. Petre: "can we try to recreate the actual taskbar in the
@@ -3243,7 +3382,7 @@ public partial class FloatingBar : Window
         // either, which changes nothing -- RowLabel already returns null for a row with no
         // destination, and the pinned row has never had one.
         var (label, setHover) = captionContent is null
-            ? RowLabel(visualLabel, isCurrent, switchTo, caption: true, currentColour: spine, timeFor: rowKey)
+            ? RowLabel(visualLabel, isCurrent, switchTo, caption: true, currentColour: spine, timeFor: rowKey, fold: foldMark)
             : (captionContent, (Action<bool>?)null);
 
         // Collected as they are built, because the hover wiring below needs the BUTTONS and
@@ -3386,9 +3525,10 @@ public partial class FloatingBar : Window
         // what you aim at, so doubling them halves the value of every one. Belonging is a
         // relationship, and a relationship is better drawn once at the edge of the row than
         // restated by copying its contents.
-        // Below the caption line. Not drawn at all for an empty row, which is its name line alone.
+        // Below the caption line. Not drawn at all for an empty row or a folded one, which are their name
+        // line alone.
         Grid.SetRow(icons, 1);
-        if (!emptyRow) container.Children.Add(icons);
+        if (!emptyRow && !foldedNow) container.Children.Add(icons);
 
         // Petre: "only children but with a better representation that it's a child", then "maybe a
         // little indented".
@@ -3457,7 +3597,7 @@ public partial class FloatingBar : Window
         // by the same hover. Only for a real caption, not the pinned row's header.
         if (AcrossSeam && captionContent is null)
         {
-            var (twin, twinHover) = RowLabel(visualLabel, isCurrent, switchTo, caption: true, currentColour: spine, timeFor: rowKey);
+            var (twin, twinHover) = RowLabel(visualLabel, isCurrent, switchTo, caption: true, currentColour: spine, timeFor: rowKey, fold: foldMark);
             if (twin is FrameworkElement twinCaption && label is FrameworkElement firstCaption) twinCaption.Margin = firstCaption.Margin;
             var holder = AtRightHalf(twin);
             Grid.SetRow(holder, 0);
@@ -3520,7 +3660,7 @@ public partial class FloatingBar : Window
         // the menu of the INNERMOST element that has one, which is exactly the right split:
         // right-clicking an icon is about that window, right-clicking anywhere else on the row is
         // about the workspace.
-        if (rowKey is { } workspaceId) container.ContextMenu = WorkspaceMenu(workspaceId, visualLabel, minimized, nested);
+        if (rowKey is { } workspaceId) container.ContextMenu = WorkspaceMenu(workspaceId, visualLabel, folded, nested);
         // ...and an UNBOUND desktop's row gets a menu of its own (#149). Petre: "right-clicking on
         // the default desktop (desktop1) doesn't do anything, no context menu for it."
         //
@@ -3530,10 +3670,6 @@ public partial class FloatingBar : Window
         // the row under the cursor is where that intention actually occurs. Right-clicking it used to
         // land on nothing at all, which reads as broken rather than as a decision.
         else if (desktopId is { } desktop) container.ContextMenu = DesktopMenu(desktop, visualLabel);
-
-        // Scaled down as a whole, everything included: a minimized row (#52) or the pinned row (#109).
-        // Applied LAST, so nothing built above has to know it is being drawn small, and minimized wins
-        // when a row is somehow both -- the smaller claim is the more specific one.
 
         // NO transform on the row. It used to carry one (0.8 for pinned, 0.43 for minimized), and that
         // is what put those rows' hairlines at a different x from everyone else's: a scaled row scales
@@ -4772,8 +4908,10 @@ public partial class FloatingBar : Window
     // stands for the whole row (see GroupRow).
     // `timeFor`: the workspace whose time today follows the name (FloatingBar.WorkspaceTime.cs); null for rows
     // that are not workspaces.
+    // `fold`: set when the row is drawn FOLDED (see GroupRow), and then the name is followed by how many windows
+    // the row is hiding and, when one of them wants you, the attention dot. Null on every row drawn in full.
     (UIElement Element, Action<bool>? SetHover) RowLabel(string text, bool isCurrent, Func<Result>? switchTo, bool caption = false,
-        Brush? currentColour = null, Guid? timeFor = null)
+        Brush? currentColour = null, Guid? timeFor = null, (int Windows, bool Attention)? fold = null)
     {
         // Petre: "when switching workspaces, because the caption of the workspace gets bolded,
         // it increases the width of the floating window a little if that workspace is full,
@@ -4843,6 +4981,11 @@ public partial class FloatingBar : Window
         var lineHeight = double.IsNaN(textBlock.LineHeight) ? (double?)null : textBlock.LineHeight;
         if (caption && WorkspaceTimeMark(timeFor, textBlock.FontSize, lineHeight) is { } time)
             marks.Add(time);
+        // Added AFTER the time, which puts it BEFORE the time on screen: every mark docks right, and the first
+        // one docked takes the far end. So a folded row reads "Mail · 2 ● · 1 h 5 min", the count against the
+        // name it counts.
+        if (fold is { } folded)
+            marks.Add(FoldMark(folded.Windows, folded.Attention, textBlock.FontSize, lineHeight));
 
         UIElement content = textBlock;
         if (marks.Count > 0)
@@ -5832,6 +5975,49 @@ public partial class FloatingBar : Window
         return cell;
     }
 
+    // What a folded name line says about the windows it is hiding (see GroupRow and FoldedGroupLine): " · 4"
+    // in the dim colour the time today is written in, and the attention dot after it when any of them is
+    // asking for you. The same dot, at the same size and with the same rim, as the one on an icon, because it
+    // is the same claim with the icon taken away.
+    //
+    // A panel even with no dot, so both callers place one element and an empty folded row (no count, no dot)
+    // costs nothing: it collapses to zero width rather than leaving a gap after the name.
+    StackPanel FoldMark(int windows, bool attention, double fontSize, double? lineHeight)
+    {
+        var mark = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center };
+        if (windows > 0)
+        {
+            var count = new TextBlock
+            {
+                Text = $" · {windows}",
+                FontSize = fontSize,
+                Foreground = TimeMarkForeground,
+                VerticalAlignment = VerticalAlignment.Center,
+                TextWrapping = TextWrapping.NoWrap,
+            };
+            if (lineHeight is { } line)
+            {
+                count.LineHeight = line;
+                count.LineStackingStrategy = LineStackingStrategy.BlockLineHeight;
+            }
+            mark.Children.Add(count);
+        }
+        if (attention)
+            mark.Children.Add(new Border
+            {
+                Width = 7,
+                Height = 7,
+                CornerRadius = new CornerRadius(4),
+                Background = AttentionDot,
+                BorderBrush = AttentionDotRim,
+                BorderThickness = new Thickness(1),
+                VerticalAlignment = VerticalAlignment.Center,
+                Margin = new Thickness(3, 0, 0, 0),
+                ToolTip = "A window here wants your attention",
+            });
+        return mark;
+    }
+
     // Amber rather than the red a notification badge usually is: red on this bar would read as
     // an error, and "someone messaged you" is not one.
     static readonly Brush AttentionDot = Frozen(0xFF, 0xFF, 0xA7, 0x26);
@@ -6011,7 +6197,7 @@ public partial class FloatingBar : Window
     // 'Remove workspace' is a bad way to find that out" -- and it arrived with #73 once it could
     // refuse a workspace that still held windows. It closes those windows now instead of refusing;
     // the reasoning, and what replaced the guard, is at the item itself at the bottom of this method.
-    ContextMenu WorkspaceMenu(Guid workspaceId, string name, bool minimized, bool nested)
+    ContextMenu WorkspaceMenu(Guid workspaceId, string name, bool folded, bool nested)
     {
         var menu = new ContextMenu();
         HoldFadeWhileOpen(menu);
@@ -6066,15 +6252,15 @@ public partial class FloatingBar : Window
 
         menu.Items.Add(new Separator());
 
-        // Petre: "a minimized row is about a third of the regular row height... the right-click
-        // menu on a minimized row offers Unminimize to restore it."
+        // Fold the row to its name line, or unfold it (see Workspace.Folded).
         //
         // One item that flips rather than two that argue: a row is one or the other, and a menu
-        // offering "Minimize" on an already-minimized row would be asking a question the row has
-        // already answered. `minimized` comes from the row this menu was built for, and rows are
-        // rebuilt whenever state changes, so it cannot go stale in a way the user could reach.
-        Add(minimized ? "⊞" : "⊖", minimized ? "Restore row height" : "Minimize row",
-            () => Report(manager.SetWorkspaceMinimized(workspaceId, !minimized)));
+        // offering "Fold" on an already-folded row would be asking a question the row has already
+        // answered. `folded` is the STORED setting, so the workspace you are on, drawn in full while you
+        // are there, still offers Unfold when it is folded. Rows are rebuilt whenever state changes, so
+        // it cannot go stale in a way the user could reach.
+        Add(folded ? "▾" : "▸", folded ? "Unfold row" : "Fold row",
+            () => Report(manager.SetWorkspaceFolded(workspaceId, !folded)));
 
         // Where the current workspace's titled list is ("let's try both"): its own row expands into it, or
         // it sits at the bottom of the bar. One item that flips, naming what it would switch TO. On every
@@ -6204,7 +6390,7 @@ public partial class FloatingBar : Window
     // ...and docking, which acts on the bar for the same reason. Petre: "add dock as the rightclick
     // option", after it became a setting. So it is both: this item flips the SAME setting Manage's
     // checkbox shows (AppState.DockBar), and the bar follows the setting, so the two can never disagree.
-    // One item that flips, like Minimize row / Restore row height.
+    // One item that flips, like Fold row / Unfold row.
     // The bar's BACKGROUND menu. Petre: "make right-clicking possible in the empty area when docked; now it
     // only works on existing workspaces". Docked, the bar is the screen's full height and most of it is bare
     // background under the last row, which answered a right-click with nothing (see the precedence note above

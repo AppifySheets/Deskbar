@@ -15,7 +15,7 @@ public static class ControlUsage
     public static readonly IReadOnlyList<Section> Sections =
     [
         new("Listing", [
-            new("workspaces", "", "every workspace as JSON: name, group, row, colour, minimized, current"),
+            new("workspaces", "", "every workspace as JSON: name, group, row, colour, folded, current"),
             new("windows", "", "every window as JSON: hwnd, title, originalTitle, process, workspace"),
             new("desktops", "", "every virtual desktop as JSON, including unnamed ones"),
         ]),
@@ -33,8 +33,8 @@ public static class ControlUsage
             new("rename", "<workspace> <new name>", "Rename…"),
             new("add-child", "<parent> <name>", "Add child… (nests a new workspace that borrows the parent's windows)"),
             new("reorder", "<workspace> up|down|top|end|<n>", "Move up / down / to top / to end, or to position n among its peers"),
-            new("minimize-row", "<workspace>", "Minimize row"),
-            new("restore-row", "<workspace>", "Restore row height"),
+            new("fold", "<workspace>", "Fold row (the name line only, no icons, except while you are on it)"),
+            new("unfold", "<workspace>", "Unfold row"),
             new("color", "<workspace> <colour>", "Colour (a grouped workspace sets its group's colour)"),
             new("delete", "<workspace> [--close-windows]", "Delete workspace…; refuses while windows are open unless --close-windows"),
             new("switch", "<workspace>", "go to that workspace, as clicking its row does"),
@@ -45,6 +45,9 @@ public static class ControlUsage
             new("group-leave", "<workspace>", "Move out of group"),
             new("group-rename", "<group> <new name>", "Rename group…"),
             new("group-color", "<group> <colour>", "the group's colour"),
+            new("group-fold", "<group>", "Fold group (one line: the group's name and its members' names)"),
+            new("group-unfold", "<group>", "Unfold group (each member as it was)"),
+            new("group-reorder", "<group> up|down|top|end|<n>", "Move group up / down / to top / to end, or to row n of the bar"),
             new("ungroup", "<group>", "Ungroup (members keep their places)"),
         ]),
         new("Unnamed desktop menu", [

@@ -1426,17 +1426,56 @@ public sealed class WorkspaceManager(
     Result MovedTo(List<Workspace>? order) =>
         Result.Success().Tap(() => { if (order is not null) Persist(State with { Workspaces = order }); });
 
-    // Petre: "minimized workspace rows: right-click to shrink a row to a third of its height",
-    // and "the right-click menu on a minimized row offers Unminimize to restore it".
+    // A WHOLE GROUP moved among the bar's top-level rows. Petre wanted to "move them around easily",
+    // and an anchorless group (#84) had no way to move at all: its members reorder INSIDE the box
+    // (MoveAmongPeers) and its header's menu had no moves. An anchored group could already move, by
+    // moving its anchor, which this does too, so both kinds now answer the same command.
     //
-    // Presentational, like the active-window highlight and unlike most of its neighbours here: it
-    // changes how tall a row is DRAWN and nothing else. Membership, placement and the roster are
-    // untouched, and a minimized workspace is still switched to, dropped on and walked by the
-    // chord exactly as before.
+    // The same block arithmetic MoveAmongPeers does for a block of one, applied to the group's block:
+    // up/down are no-ops at the ends, top/end clamp. Members keep their order inside the box.
+    public Result MoveGroup(Guid groupId, int delta) =>
+        MoveGroupBlock(groupId, from => from + delta, clampIntoRange: false);
+
+    // `index` counts the bar's top-level rows, a group being one of them.
+    public Result MoveGroupTo(Guid groupId, int index) =>
+        MoveGroupBlock(groupId, _ => index, clampIntoRange: true);
+
+    Result MoveGroupBlock(Guid groupId, Func<int, int> targetOf, bool clampIntoRange)
+    {
+        if (State.Groups.All(g => g.Id != groupId)) return Result.Failure("That group no longer exists.");
+
+        var blocks = Blocks(State).Select(b => b.ToList()).ToList();
+        var at = blocks.FindIndex(b => b.Exists(w => w.GroupId == groupId));
+        // A group with no members left is not drawn and so has nowhere to move from.
+        if (at < 0) return Result.Success();
+
+        return MovedTo(Reordered(blocks, at, targetOf, clampIntoRange)?.SelectMany(b => b).ToList());
+    }
+
+    // FOLDING a row (see Workspace.Folded) and a whole group (Group.Folded). Petre: "minimize it, to a
+    // single line, so i don't see any icons in it", "i should be able to minimize the entire group".
+    //
+    // Presentational, like the active-window highlight and unlike most of their neighbours here: they
+    // change how a row is DRAWN and nothing else. Membership, placement and the roster are untouched,
+    // and a folded workspace is still switched to, dropped on and walked by the chord exactly as before.
     //
     // Idempotent by construction -- setting it to what it already is still persists and pulses,
     // which costs one redraw and saves a special case that could only ever fire on a menu click
     // nobody makes twice.
+    public Result SetWorkspaceFolded(Guid id, bool folded) =>
+        Workspace(id).Tap(_ => Persist(State with
+        {
+            Workspaces = State.Workspaces.Select(w => w.Id == id ? w with { Folded = folded } : w).ToList(),
+        }));
+
+    public Result SetGroupFolded(Guid groupId, bool folded) =>
+        State.Groups.Any(g => g.Id == groupId)
+            ? Result.Success().Tap(() => Persist(State with
+            {
+                Groups = State.Groups.Select(g => g.Id == groupId ? g with { Folded = folded } : g).ToList(),
+            }))
+            : Result.Failure("That group no longer exists.");
+
     // Petre: "a workspace can be nested under a main (parent) workspace... it lives under the main
     // one rather than sitting as a peer in the flat list" (#42).
     //
@@ -1685,12 +1724,6 @@ public sealed class WorkspaceManager(
     // would forbid the commonest case.
     bool GroupNameTaken(string name, Guid? excluding) =>
         State.Groups.Any(g => g.Id != excluding && g.Name.Trim().Equals(name.Trim(), StringComparison.OrdinalIgnoreCase));
-
-    public Result SetWorkspaceMinimized(Guid id, bool minimized) =>
-        Workspace(id).Tap(_ => Persist(State with
-        {
-            Workspaces = State.Workspaces.Select(w => w.Id == id ? w with { Minimized = minimized } : w).ToList(),
-        }));
 
     // The update check's opt-out (#71). Petre: "an opt-out setting -- this would be the app's only
     // phone-home behaviour."
