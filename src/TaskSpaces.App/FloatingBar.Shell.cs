@@ -6,6 +6,7 @@ using System.Windows.Markup;
 using System.Windows.Media;
 using System.Windows.Shapes;
 using System.Windows.Threading;
+using TaskSpaces.Core.Persistence;
 using TaskSpaces.Windows.Monitoring;
 
 namespace TaskSpaces.App;
@@ -176,18 +177,25 @@ public partial class FloatingBar
     //
     // The language switcher sits just inside the clock, where Windows puts its own language indicator, on
     // either layout. It is collapsed with a single input language, and a collapsed child takes no room.
+    //
+    // An item switched off in Manage > Settings (AppState.HiddenStripItems, see StripItem) is simply not added,
+    // so the rest close up and nothing of it takes room. Petre: "i don't want wifi there", "and i don't think i
+    // want notifications either", "make it a setting, what to show". Left out of the strip rather than
+    // collapsed, because the volume dial and the language switcher already set their own Visibility (no
+    // device, one language), and a second owner of the same property would have each undo the other.
     void LayOutStrip(bool acrossSeam)
     {
         stripAcrossSeam = acrossSeam;
+        stripHidden = manager.State.HiddenStripItems.ToHashSet();
         ShellStrip.Children.Clear();
         Button[] left = acrossSeam ? [stripTray!, stripQuickSettings!, stripVolume!] : [stripTray!, stripQuickSettings!, stripVolume!, stripBell!];
         Button[] right = acrossSeam ? [stripSliver!, stripClock!, stripLanguage!, stripBell!] : [stripSliver!, stripClock!, stripLanguage!];
-        left.ToList().ForEach(b =>
+        left.Where(ShownInStrip).ToList().ForEach(b =>
         {
             DockPanel.SetDock(b, Dock.Left);
             ShellStrip.Children.Add(b);
         });
-        right.ToList().ForEach(b =>
+        right.Where(ShownInStrip).ToList().ForEach(b =>
         {
             DockPanel.SetDock(b, Dock.Right);
             ShellStrip.Children.Add(b);
@@ -196,6 +204,21 @@ public partial class FloatingBar
         FitClock();
     }
 
+    // The hidden items the strip was last laid out with, so a rebuild can tell whether the setting has changed.
+    IReadOnlySet<StripItem> stripHidden = new HashSet<StripItem>();
+
+    bool ShownInStrip(Button button) => !(StripItemOf(button) is { } item && stripHidden.Contains(item));
+
+    StripItem? StripItemOf(Button button) =>
+        button == stripTray ? StripItem.Tray
+        : button == stripQuickSettings ? StripItem.QuickSettings
+        : button == stripVolume ? StripItem.Volume
+        : button == stripBell ? StripItem.Notifications
+        : button == stripLanguage ? StripItem.Language
+        : button == stripClock ? StripItem.Clock
+        : button == stripSliver ? StripItem.ShowDesktop
+        : null;
+
     // Everything that has to respect the seam (see LayOutStrip, the pins' PackedPinPanel and the now-playing
     // line), brought into line with the current docking. Called at the start of every rebuild, so it follows
     // the bar onto the seam and off it.
@@ -203,7 +226,9 @@ public partial class FloatingBar
     {
         // ...and the header's second Start and search, which follow the same switch.
         LayOutHeader(AcrossSeam);
-        if (stripAcrossSeam != AcrossSeam) LayOutStrip(AcrossSeam);
+        // ...and the strip again when the items shown in it were changed in Manage > Settings, since saving that
+        // setting is what triggers this rebuild.
+        if (stripAcrossSeam != AcrossSeam || !stripHidden.SetEquals(manager.State.HiddenStripItems)) LayOutStrip(AcrossSeam);
         FitPinsToSeam();
         FitNowPlayingToSeam();
         FitStatsToSeam();
@@ -245,9 +270,19 @@ public partial class FloatingBar
     // to the time's width, which is the narrower of the two lines in every regional format worth worrying
     // about. The time stays, the tooltip keeps the full date. Measured at natural widths, every time the
     // strip's width or the clock's text changes.
+    //
+    // THE CLOCK GIVES WAY TO THE LANGUAGE. Petre, on a laptop strip where the clock was cut to "12:(" and the
+    // language switcher had been squeezed out entirely: "i want language as a priority". The strip hands out
+    // its width in the order its children were added, and the language switcher comes after the clock, so a
+    // short strip starved it first. So when not even the time fits beside everything else, the clock goes
+    // too, and the switcher keeps its room. The clock's place in that order is not the fix, because it is
+    // also its place on screen (just right of the language code, where Windows draws them). The other way to
+    // make room is the setting above it: switch off what is not wanted (wifi, the bell).
     void FitClock()
     {
         if (clockTime is null || clockDate is null || stripClock is null || ShellStrip.ActualWidth <= 0) return;
+        // Switched off in Settings: nothing to fit.
+        if (!ShellStrip.Children.Contains(stripClock)) return;
         var infinite = new Size(double.PositiveInfinity, double.PositiveInfinity);
         double Natural(UIElement element)
         {
@@ -260,16 +295,20 @@ public partial class FloatingBar
         // The clock's lines by their TEXT, not by measuring the elements: a collapsed date measures 0 wide, so
         // measuring it would make the next check think the date fits, show it, and hide it again, every minute.
         var withDate = stripClock.Padding.Left + stripClock.Padding.Right + Math.Max(TextWidth(clockTime), TextWidth(clockDate));
+        var timeOnly = stripClock.Padding.Left + stripClock.Padding.Right + TextWidth(clockTime);
         var fits = others + withDate <= ShellStrip.ActualWidth;
+        var timeFits = others + timeOnly <= ShellStrip.ActualWidth;
         lastClockFit = (ShellStrip.ActualWidth, others, withDate);
         clockDate.Visibility = fits ? Visibility.Visible : Visibility.Collapsed;
-        if (ClickTrace.On && clockDateShown != fits)
-            ClickTrace.Write($"clock: date {(fits ? "shown" : "hidden")}, strip={ShellStrip.ActualWidth:0.0} others={others:0.0} clock with date={withDate:0.0}");
-        clockDateShown = fits;
+        stripClock.Visibility = timeFits ? Visibility.Visible : Visibility.Collapsed;
+        var verdict = fits ? "date shown" : timeFits ? "date hidden" : "clock hidden";
+        if (ClickTrace.On && clockVerdict != verdict)
+            ClickTrace.Write($"clock: {verdict}, strip={ShellStrip.ActualWidth:0.0} others={others:0.0} clock with date={withDate:0.0} time only={timeOnly:0.0}");
+        clockVerdict = verdict;
     }
 
     // Last FitClock verdict, so the trace says only when it changes.
-    bool? clockDateShown;
+    string? clockVerdict;
 
     // ...and the numbers behind it, for the tests.
     internal (double Strip, double Others, double ClockWithDate) lastClockFit;

@@ -171,7 +171,20 @@
                              changed in a later build still reaches anyone who pressed this. -->
                         <Button x:Name="ResetAppearanceButton" Content="Reset to defaults" Padding="12,2" Click="OnResetAppearance"/>
                     </StackPanel>
-                    <StackPanel>
+                    <!-- Scrolls, because the tab outgrew the window. Petre: "settings page can't be scrolled and it
+                         doesn't fit on a page in smaller res screens". Only the controls scroll: the explanation
+                         above and the reset button below stay put, so the way back is always in view. -->
+                    <ScrollViewer x:Name="SettingsScroll" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                    <StackPanel Margin="0,0,8,0">
+                        <!-- What the bar's bottom strip shows (AppState.HiddenStripItems, StripItem). Petre: "i
+                             don't want wifi there", "and i don't think i want notifications either", "make it a
+                             setting, what to show". One box per item, built in code from StripItem so a new item
+                             cannot be forgotten here. -->
+                        <TextBlock Text="Bottom strip" FontWeight="Bold"/>
+                        <TextBlock TextWrapping="Wrap" Opacity="0.75" Margin="0,2,0,6"
+                                   Text="What the strip at the bottom of the bar shows. Untick what you do not use, and the rest close up. When the strip is still too narrow, the clock's date goes first and then the clock, so the language switcher always keeps its place."/>
+                        <WrapPanel x:Name="StripItemsPanel" Orientation="Horizontal" Margin="0,0,0,16"/>
+
                         <TextBlock Text="Dimming" FontWeight="Bold"/>
                         <TextBlock TextWrapping="Wrap" Opacity="0.75" Margin="0,2,0,6"
                                    Text="How faint the bar goes once the pointer is elsewhere. Fully opaque means it never dims. It never goes fully invisible: an unseeable bar still swallows the clicks aimed at whatever is behind it. A docked bar never dims, since nothing sits under it."/>
@@ -241,6 +254,7 @@
                             <TextBlock x:Name="ListLinesValue" Margin="8,0,0,0" VerticalAlignment="Center" MinWidth="70"/>
                         </StackPanel>
                     </StackPanel>
+                    </ScrollViewer>
                 </DockPanel>
             </TabItem>
             <TabItem Header="Rules">

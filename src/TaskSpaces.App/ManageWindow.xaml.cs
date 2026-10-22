@@ -376,6 +376,8 @@ public partial class ManageWindow : Window
             HoverDwellSlider.Value = manager.State.HoverDwellMs ?? system;
             TextSizeSlider.Value = BarText.Clamp(manager.State.BarTextOffset);
             ListLinesSlider.Value = WindowListLines.Clamp(manager.State.WindowListMinimumLines);
+            // Ticked from state like the sliders, under the same guard, so opening Manage writes nothing.
+            StripItemBoxes().ForEach(box => box.IsChecked = !manager.State.HiddenStripItems.Contains((StripItem)box.Tag));
         }
         finally
         {
@@ -415,6 +417,43 @@ public partial class ManageWindow : Window
         if (loading) return;
         ShowAppearanceValues();
         manager.SetBarTextOffset(TextSizeSlider.Value).TapError(err => MessageBox.Show(this, err, "Deskbar"));
+    }
+
+    // THE BOTTOM STRIP'S BOXES, one per StripItem, built on first use rather than written out in XAML: the enum
+    // is the one list of what the strip can show, so an item added there gets its box here without anyone
+    // remembering to. Each box carries its item in Tag. Applied live like everything else on the tab: ticking
+    // or unticking saves the whole hidden set, and the bar lays its strip out again.
+    List<CheckBox> StripItemBoxes()
+    {
+        if (StripItemsPanel.Children.Count == 0)
+            Enum.GetValues<StripItem>().ToList().ForEach(item =>
+            {
+                var box = new CheckBox { Content = StripItemName(item), Tag = item, Margin = new Thickness(0, 0, 16, 4) };
+                box.Checked += (_, _) => ApplyStripItems();
+                box.Unchecked += (_, _) => ApplyStripItems();
+                StripItemsPanel.Children.Add(box);
+            });
+        return StripItemsPanel.Children.OfType<CheckBox>().ToList();
+    }
+
+    // What each item is called on the tab: the thing you see on the strip, not the enum's name.
+    static string StripItemName(StripItem item) => item switch
+    {
+        StripItem.Tray => "Tray icons",
+        StripItem.QuickSettings => "Wifi and battery",
+        StripItem.Volume => "Volume",
+        StripItem.Notifications => "Notifications",
+        StripItem.Language => "Language",
+        StripItem.Clock => "Clock",
+        StripItem.ShowDesktop => "Show desktop",
+        _ => item.ToString(),
+    };
+
+    void ApplyStripItems()
+    {
+        if (loading) return;
+        manager.SetHiddenStripItems(StripItemBoxes().Where(box => box.IsChecked != true).Select(box => (StripItem)box.Tag))
+            .TapError(err => MessageBox.Show(this, err, "Deskbar"));
     }
 
     // The window list's floor, the same way: applied live, each step rebuilds the bar with that many lines.
@@ -463,6 +502,8 @@ public partial class ManageWindow : Window
         manager.SetBarAppearance(null, null, null, null).TapError(err => MessageBox.Show(this, err, "Deskbar"));
         manager.SetBarTextOffset(null).TapError(err => MessageBox.Show(this, err, "Deskbar"));
         manager.SetWindowListMinimumLines(null).TapError(err => MessageBox.Show(this, err, "Deskbar"));
+        // Everything back on the strip.
+        manager.SetHiddenStripItems([]).TapError(err => MessageBox.Show(this, err, "Deskbar"));
         LoadAppearance();
     }
 

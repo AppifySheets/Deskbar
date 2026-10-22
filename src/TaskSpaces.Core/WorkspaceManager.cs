@@ -1783,6 +1783,18 @@ public sealed class WorkspaceManager(
         return Result.Success();
     }
 
+    // Which of the bottom strip's items are hidden (see StripItem). Same rule as the settings above: an unchanged
+    // set writes nothing, so opening Manage, which ticks the boxes from state, neither rewrites state.json nor
+    // rebuilds the bar. Kept in StripItem's order and without duplicates, so the same choice always saves the
+    // same way whatever order the boxes were clicked in.
+    public Result SetHiddenStripItems(IEnumerable<StripItem> hidden)
+    {
+        var next = hidden.Distinct().Order().ToList();
+        if (next.SequenceEqual(State.HiddenStripItems)) return Result.Success();
+        Persist(State with { HiddenStripItems = next });
+        return Result.Success();
+    }
+
     // The colour picker on the bar's right-click menu (#68). Petre: "add color picker in the right
     // click context menu."
     //

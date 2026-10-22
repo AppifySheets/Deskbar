@@ -2,9 +2,11 @@
 using System.Windows.Automation;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
+using System.Windows.Media;
 using TaskSpaces.App;
 using TaskSpaces.Core;
 using TaskSpaces.Core.Abstractions;
+using TaskSpaces.Core.Persistence;
 using Xunit.Abstractions;
 
 namespace TaskSpaces.Windows.Tests;
@@ -31,6 +33,64 @@ public class FloatingBarShellTests(ITestOutputHelper output)
         bar.UpdateLayout();
         return (bar, sent);
     }
+
+    // Petre: "i don't want wifi there", "and i don't think i want notifications either", "make it a setting,
+    // what to show". Items switched off in Settings are not in the strip at all, and switching them back on
+    // puts them back.
+    [Fact]
+    public void Items_switched_off_in_settings_leave_the_strip() => StaThread.Run(() =>
+    {
+        var desktops = new PulsingDesktops { CurrentId = Guid.NewGuid() };
+        desktops.Desktops.Add(new DesktopInfo(desktops.CurrentId, "Work"));
+        var manager = new WorkspaceManager(desktops, new StubMonitor(), new StubTitles(), new StubStore());
+        Assert.True(manager.Start().IsSuccess);
+        var bar = new FloatingBar(manager) { Left = -32000, Top = -32000, SendShellKeys = _ => { }, PressSpace = () => { } };
+        bar.ShowBar();
+        bar.UpdateLayout();
+        var strip = (DockPanel)bar.FindName("ShellStrip")!;
+        string[] Names() => strip.Children.OfType<Button>().Select(b => AutomationProperties.GetName(b)).ToArray();
+        Assert.Contains("Notifications", Names());
+
+        Assert.True(manager.SetHiddenStripItems([StripItem.QuickSettings, StripItem.Notifications]).IsSuccess);
+        bar.UpdateLayout();
+        Assert.DoesNotContain("Notifications", Names());
+        Assert.DoesNotContain("Quick settings: wifi, volume, battery", Names());
+        Assert.Contains("Clock", Names());
+
+        Assert.True(manager.SetHiddenStripItems([]).IsSuccess);
+        bar.UpdateLayout();
+        Assert.Contains("Notifications", Names());
+        bar.Close();
+    });
+
+    // Petre, on a laptop strip with the clock cut to "12:(" and no room left for the language switcher: "i want
+    // language as a priority". When not even the time fits beside everything else, the clock goes, rather than
+    // the switcher being squeezed out.
+    [Fact]
+    public void A_strip_too_narrow_even_for_the_time_drops_the_clock() => StaThread.Run(() =>
+    {
+        var (bar, _) = Bar();
+        var strip = (DockPanel)bar.FindName("ShellStrip")!;
+        var clock = strip.Children.OfType<Button>().Single(b => AutomationProperties.GetName(b) == "Clock");
+        var time = ((StackPanel)clock.Content).Children.OfType<TextBlock>().First();
+
+        strip.Width = 600;
+        bar.UpdateLayout();
+        var (_, others, _) = bar.lastClockFit;
+        var timeOnly = clock.Padding.Left + clock.Padding.Right +
+            new FormattedText(time.Text, System.Globalization.CultureInfo.CurrentCulture, time.FlowDirection,
+                new Typeface(time.FontFamily, time.FontStyle, time.FontWeight, time.FontStretch), time.FontSize,
+                System.Windows.Media.Brushes.White, VisualTreeHelper.GetDpi(time).PixelsPerDip).WidthIncludingTrailingWhitespace;
+
+        strip.Width = others + timeOnly - 0.5;
+        bar.UpdateLayout();
+        Assert.Equal(Visibility.Collapsed, clock.Visibility);
+
+        strip.Width = others + timeOnly + 0.5;
+        bar.UpdateLayout();
+        Assert.Equal(Visibility.Visible, clock.Visibility);
+        bar.Close();
+    });
 
     static Button Named(FloatingBar bar, string panel, string name) =>
         ((Panel)bar.FindName(panel)!).Children.OfType<Button>().Single(b => AutomationProperties.GetName(b) == name);

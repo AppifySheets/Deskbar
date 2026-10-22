@@ -84,6 +84,11 @@ public sealed record AppState(
     // null means WindowListLines.Default.
     public int? WindowListMinimumLines { get; init; }
 
+    // The bottom strip's items that are switched OFF in Manage > Settings (see StripItem for why the hidden ones
+    // are kept rather than the shown ones). Empty, the default, shows everything; a state.json written before
+    // this setting existed has no such field and reads as empty, so nothing needs migrating.
+    public IReadOnlyList<StripItem> HiddenStripItems { get; init; } = [];
+
     // The two placements the Inventory above cannot express (Petre: "last placement IS the
     // rule"). Inventory already records identity -> workspace on every Place(), but a
     // PINNED window belongs to no single workspace and a DETACHED one belongs to none at

@@ -63,6 +63,73 @@ public class ManageSettingsTabTests
         window.Close();
     });
 
+    // The bottom strip's boxes (Petre: "make it a setting, what to show"): ticked from state, and opening the
+    // window with items hidden writes nothing, the same promise the sliders keep.
+    [Fact]
+    public void The_strip_boxes_show_what_is_hidden_and_opening_stores_nothing() => StaThread.Run(() =>
+    {
+        var manager = Built(AppState.Empty with { HiddenStripItems = [StripItem.QuickSettings, StripItem.Notifications] });
+        var pulses = 0;
+        using var _ = manager.StateChanged.Subscribe(_ => pulses++);
+
+        var window = new ManageWindow(manager, compatibilityMode: false);
+        var boxes = StripBoxes(window);
+
+        Assert.Equal(Enum.GetValues<StripItem>().Length, boxes.Count);
+        Assert.False(boxes[StripItem.QuickSettings].IsChecked);
+        Assert.False(boxes[StripItem.Notifications].IsChecked);
+        Assert.True(boxes[StripItem.Language].IsChecked);
+        Assert.True(boxes[StripItem.Clock].IsChecked);
+        Assert.Equal(0, pulses);
+
+        window.Close();
+    });
+
+    // Unticking hides the item at once, ticking brings it back, and Reset shows everything.
+    [Fact]
+    public void Unticking_a_strip_box_hides_that_item() => StaThread.Run(() =>
+    {
+        var manager = Built(AppState.Empty);
+        var window = new ManageWindow(manager, compatibilityMode: false);
+        var boxes = StripBoxes(window);
+
+        boxes[StripItem.Notifications].IsChecked = false;
+        boxes[StripItem.QuickSettings].IsChecked = false;
+        Assert.Equal([StripItem.QuickSettings, StripItem.Notifications], manager.State.HiddenStripItems);
+
+        boxes[StripItem.QuickSettings].IsChecked = true;
+        Assert.Equal([StripItem.Notifications], manager.State.HiddenStripItems);
+
+        ((Button)window.FindName("ResetAppearanceButton")!).RaiseEvent(new RoutedEventArgs(ButtonBase.ClickEvent));
+        Assert.Empty(manager.State.HiddenStripItems);
+        Assert.True(StripBoxes(window)[StripItem.Notifications].IsChecked);
+
+        window.Close();
+    });
+
+    // Petre: "settings page can't be scrolled and it doesn't fit on a page in smaller res screens".
+    [Fact]
+    public void The_settings_scroll() => StaThread.Run(() =>
+    {
+        var window = new ManageWindow(Built(AppState.Empty), compatibilityMode: false);
+        var scroll = (ScrollViewer)window.FindName("SettingsScroll")!;
+
+        Assert.Equal(ScrollBarVisibility.Auto, scroll.VerticalScrollBarVisibility);
+        // The controls are inside it, the reset button is not, so the way back never scrolls out of view. By the
+        // LOGICAL tree: the window is never shown here, so the tab's visual tree does not exist yet.
+        Assert.True(Inside((FrameworkElement)window.FindName("IdleOpacitySlider")!, scroll));
+        Assert.True(Inside((FrameworkElement)window.FindName("StripItemsPanel")!, scroll));
+        Assert.False(Inside((FrameworkElement)window.FindName("ResetAppearanceButton")!, scroll));
+
+        window.Close();
+    });
+
+    static bool Inside(DependencyObject element, DependencyObject container) =>
+        LogicalTreeHelper.GetParent(element) is { } parent && (parent == container || Inside(parent, container));
+
+    static Dictionary<StripItem, CheckBox> StripBoxes(ManageWindow window) =>
+        ((Panel)window.FindName("StripItemsPanel")!).Children.OfType<CheckBox>().ToDictionary(box => (StripItem)box.Tag);
+
     // The one that matters: opening the window must not be a change.
     [Fact]
     public void Opening_the_window_stores_nothing() => StaThread.Run(() =>
