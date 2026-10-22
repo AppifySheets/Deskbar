@@ -1,39 +1,32 @@
-﻿<p align="center">
-  <img src="docs/branding/deskbar-mark-256.png" width="128" alt="Deskbar" />
-</p>
+﻿<!-- The hero capture floats to the right of the opening text; align="right" is one of the few
+     layout attributes GitHub keeps. It is a PrintWindow render of the live floating bar (a
+     plain screen copy skips its layered window), taken at "BarScale": 1.2 on a 150% display,
+     410 pixels wide. width="273" is two thirds of that, so a 150% screen draws it pixel for
+     pixel with the text at its real weight, and other screens scale it once, cleanly. Only the
+     bar's own window is captured, nothing of the desktop behind it, and its corners keep their
+     real alpha. No real people's names: the one window title that carried one was shown as
+     plain "Beeper" through Rename this window for the capture and restored straight after.
+     Keep this comment and the img in one unbroken run of lines; a blank line inside an HTML
+     block ends it early and GitHub then shows the rest as text. -->
+<img align="right" src="docs/images/bar-floating.png" width="273" alt="The floating bar, top to bottom: a header with the Start and Search buttons and the back and minimise buttons; the taskbar's pinned apps; then one row per workspace with its name above the icons of every window in it, some with tab counts and the time spent there. The current workspace's row is tinted and ringed and lists its windows with their titles; the rows you came from are ringed in dashes and dots. Groups of workspaces have a line down their left edge. At the bottom, CPU, memory, disk and GPU usage, the track now playing with its controls, and a strip with the tray chevron, wifi, a volume dial, the bell, the input language and the clock." />
 
-<h1 align="center">Deskbar</h1>
+# Deskbar
 
-<p align="center"><em>The taskbar for your virtual desktops.<br />Name them, colour them, see every desktop's windows at once, and switch with one chord.</em></p>
+*The taskbar for your virtual desktops.*
+*Name them, colour them, see every desktop's windows at once, and switch with one chord.*
 
-<p align="center">
-  <img src="https://img.shields.io/badge/platform-Windows%2011%20%C2%B7%20x64-0078D4" alt="Platform: Windows 11, x64" />
-  <img src="https://img.shields.io/github/v/release/AppifySheets/Deskbar" alt="Latest release" />
-  <img src="https://img.shields.io/badge/.NET-10-512BD4" alt=".NET 10" />
-</p>
+<img src="https://img.shields.io/badge/platform-Windows%2011%20%C2%B7%20x64-0078D4" alt="Platform: Windows 11, x64" />
+<img src="https://img.shields.io/github/v/release/AppifySheets/Deskbar" alt="Latest release" />
+<img src="https://img.shields.io/badge/.NET-10-512BD4" alt=".NET 10" />
 
-<p align="center">
-  <!-- NEVER PUT A BLANK LINE INSIDE THIS BLOCK, comments included. `<p ...>` opens a CommonMark
-       HTML block whose END CONDITION IS A BLANK LINE, so one blank line here closes the <p>
-       early and GitHub discards the rest of the FILE. This README once rendered as its header
-       and nothing else for exactly that reason. Keep comments in one unbroken run of lines.
-       .
-       No width attribute, deliberately: the browser would scale the capture and soften every
-       edge. Left intrinsic, it draws pixel for pixel. The images in this file are PrintWindow
-       renders of the live bar (a plain screen copy skips its layered window), so the corners
-       keep their real alpha and the page shows through them. The bar's own windows are the
-       only thing captured; nothing of the desktop behind it is. -->
-  <img src="docs/images/bar-floating.png" alt="The floating bar: one row per workspace, each with its name on a line above the icons of every window in it. A pinned row at the top carries the Start and Search buttons and the back and minimise buttons. The current workspace's row is tinted and ringed, and expands into a list of its windows with their titles; the row you came from is ringed in dashes. Some icons carry small tab counts. Groups of workspaces are drawn with a line down their left edge. Along the bottom run the taskbar's pinned apps, a tray chevron, quick settings, a volume dial, a bell, the clock and a show-desktop sliver." />
-</p>
-
-<p align="center"><em>Everything you have open, one row per workspace, every desktop at once. Click an
+<p><em>Everything you have open, one row per workspace, every desktop at once. Click an
 icon to jump to that window from anywhere, click it again to put it away, drag it to another row
 to move the window there. Floating here; it also docks to a screen edge, or across two.</em></p>
 
 **Deskbar is a layer over Windows' own virtual desktops.** Every workspace *is* a real
 virtual desktop. Windows keeps doing the window management it already does well, and
 Deskbar adds what it never had: names, colours, one chord to switch, memory of where each
-window belongs, and the bar above, which shows the windows of *every* desktop at once instead of
+window belongs, and the bar on the right, which shows the windows of *every* desktop at once instead of
 only the one you are standing on.
 
 Nothing is hidden by trickery. Quit Deskbar and your windows are still sitting on their
