@@ -1539,6 +1539,12 @@ public partial class FloatingBar : Window
 
     void OnPreviewMouseDown(object sender, MouseButtonEventArgs e)
     {
+        // Any other button takes the foreground from an open shell flyout just as the left one does, and the left
+        // one says so in OnPreviewMouseLeftButtonDown (which is why it is left out here, so it is noted once). Without
+        // this a middle drag (or a right or X press) closed the tray with the bar none the wiser: the arrow stayed
+        // down, and the next left click was read as "the tray was open", so it only turned the arrow up.
+        if (e.ChangedButton != MouseButton.Left) NoteBarPressed();
+
         if (e.ChangedButton != MouseButton.Middle) return;
         NativeMethods.GetCursorPos(out var cursor);
         middleStart = new Point(cursor.X, cursor.Y);

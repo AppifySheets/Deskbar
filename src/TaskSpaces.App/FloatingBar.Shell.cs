@@ -4,6 +4,7 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Markup;
 using System.Windows.Media;
+using System.Windows.Media.Animation;
 using System.Windows.Shapes;
 using System.Windows.Threading;
 using TaskSpaces.Core.Persistence;
@@ -107,7 +108,11 @@ public partial class FloatingBar
 
         // Built once and laid out by LayOutStrip, which decides which edge each one docks to. At the strip's own
         // sizes (StripGlyphSize and friends), which are larger than the header's Start and search.
-        stripTray = ShellButton(ShellFlyout.Tray, "Show the tray icons", Glyph(ChevronShape, size: StripGlyphSize), StripButtonWidth, StripButtonHeight);
+        var chevron = Glyph(ChevronShape, size: StripGlyphSize);
+        chevron.RenderTransform = trayChevronTurn;
+        chevron.RenderTransformOrigin = new Point(0.5, ChevronMiddle / 16);
+        stripTray = ShellButton(ShellFlyout.Tray, ShowTrayTip, chevron, StripButtonWidth, StripButtonHeight);
+        stripTray.ToolTip = trayTip;
         stripQuickSettings = ShellButton(ShellFlyout.QuickSettings, "Quick settings: wifi, volume, battery", QuickSettingsGlyph(), double.NaN, StripButtonHeight);
         stripVolume = VolumeDial();
         stripBell = ShellButton(ShellFlyout.Notifications, "Notifications", Glyph(BellShape, size: StripGlyphSize), StripButtonWidth, StripButtonHeight);
@@ -475,6 +480,7 @@ public partial class FloatingBar
     {
         var flyout = ShellKeys.Recognise(hwnd) ?? (hwnd != 0 && hwnd == trayOverflow ? ShellFlyout.Tray : null);
         NoteFlyoutInFront(flyout);
+        TurnTrayChevron(IsTrayOverflow(hwnd));
         NoteLanguageTarget(hwnd, isFlyout: flyout is not null);
     }
 
@@ -498,6 +504,7 @@ public partial class FloatingBar
         if (ShellKeys.Recognise(opened) is { } known && known != ShellFlyout.Tray) return;
         trayOverflow = opened;
         NoteFlyoutInFront(ShellFlyout.Tray);
+        TurnTrayChevron(IsTrayOverflow(opened));
     }
 
     internal void NoteFlyoutInFront(ShellFlyout? flyout) => flyoutInFront = flyout;
@@ -507,7 +514,94 @@ public partial class FloatingBar
     {
         flyoutInFrontAtPress = flyoutInFront;
         flyoutInFront = null;
+        TurnTrayChevron(false);
     }
+
+    // Windows' own chevron points down while the hidden icons are open, so its next press reads as "hide
+    // them", and it TURNS there rather than jumping. This one follows the overflow window itself, not
+    // flyoutInFront: that counts the focused taskbar as the tray too (Recognise), and the taskbar is in front
+    // with nothing open for a moment after Win+B and again after Esc closes the overflow. Set where the overflow
+    // comes or goes: a foreground change (NoteForeground), the bar's own Space opening it (RememberTrayOverflow),
+    // a press on the bar. The strip keeps one chevron for the bar's whole life (LayOutStrip only moves it), so a
+    // rebuild cannot lose this.
+    //
+    // Only a CHANGE of target starts a turn: this runs on every foreground change, and restarting the animation
+    // each time would stall it. A turn that starts while another is running has no From, so it goes on from where
+    // the arrow is and a reversal does not jump. A bar that is not shown has nothing to animate, so the angle is
+    // just set. All callers are on the UI thread.
+    //
+    // NOT gated on Windows' "animation effects" (SystemParameters.ClientAreaAnimation). The app's author has that
+    // off, so a turn gated on it would never have been seen: the same decision as the glide's, see
+    // GlideIfExpansionChanged in FloatingBar.Motion.cs. Asked for by name, it runs whatever the system setting says.
+    void TurnTrayChevron(bool open)
+    {
+        if (open == trayChevronOpen) return;
+        trayChevronOpen = open;
+        SetTrayWords(open);
+        var angle = open ? 180.0 : 0.0;
+        TrayChevronTurning = null;
+        if (!IsVisible)
+        {
+            trayChevronTurn.Angle = angle;
+            trayChevronTurn.BeginAnimation(RotateTransform.AngleProperty, null);
+            return;
+        }
+
+        var turn = new DoubleAnimationUsingKeyFrames { Duration = TrayChevronTurnTime };
+        turn.KeyFrames.Add(new SplineDoubleKeyFrame(angle, KeyTime.FromPercent(1), ChevronTurnCurve));
+        // A turn that was reversed half way is replaced, not finished, so only the current one settles the angle.
+        // Settling is what releases the animation: a held one would own the property, and the next plain
+        // assignment (or a read of the angle) would see its end value instead of the latest target.
+        turn.Completed += (_, _) =>
+        {
+            if (TrayChevronTurning != turn) return;
+            TrayChevronTurning = null;
+            trayChevronTurn.Angle = angle;
+            trayChevronTurn.BeginAnimation(RotateTransform.AngleProperty, null);
+        };
+        TrayChevronTurning = turn;
+        trayChevronTurn.BeginAnimation(RotateTransform.AngleProperty, turn);
+    }
+
+    // What the chevron says goes with where it points: Windows' own says "hide" while the hidden icons are open.
+    // Set by TurnTrayChevron, off the same flag, so the words and the arrow cannot disagree. The tooltip is a
+    // ToolTip of its own that is changed, not replaced, so one that is showing right now changes with it. The
+    // accessible name is the same words, as ShellButton sets it from the tip.
+    const string ShowTrayTip = "Show the tray icons";
+    const string HideTrayTip = "Hide the tray icons";
+    readonly ToolTip trayTip = new() { Content = ShowTrayTip };
+
+    void SetTrayWords(bool open)
+    {
+        var words = open ? HideTrayTip : ShowTrayTip;
+        trayTip.Content = words;
+        if (stripTray is { } tray) System.Windows.Automation.AutomationProperties.SetName(tray, words);
+    }
+
+    // 0 points up, 180 down, about the chevron's own middle (ChevronMiddle) so the glyph stays in place.
+    readonly RotateTransform trayChevronTurn = new(0);
+
+    // Where the chevron is going (false: up), so a call that changes nothing starts nothing...
+    bool trayChevronOpen;
+
+    // ...and the turn in progress, or null at rest. Read by the tests, to tell a restart from a turn left alone...
+    internal DoubleAnimationUsingKeyFrames? TrayChevronTurning { get; private set; }
+
+    // ...and how long a turn takes, so a test can slow it down enough to catch it half way.
+    internal Duration TrayChevronTurnTime { get; init; } = new(TimeSpan.FromMilliseconds(ChevronTurnMs));
+
+    // Frozen, because this one is static and every bar (each on its own thread in the tests) uses it.
+    static KeySpline Curve(double x1, double y1, double x2, double y2)
+    {
+        var spline = new KeySpline(x1, y1, x2, y2);
+        spline.Freeze();
+        return spline;
+    }
+
+    // The overflow: a window of a class it is known by, or the one RememberTrayOverflow saw open. Never the bare
+    // taskbar, even if that is what the Space left in front, because the two cannot be told apart then.
+    bool IsTrayOverflow(nint hwnd) =>
+        ShellKeys.IsTrayOverflow(hwnd) || (hwnd != 0 && hwnd == trayOverflow && !ShellKeys.IsBareTaskbar(hwnd));
 
     // --- glyphs ---------------------------------------------------------------------------------------
     //
@@ -516,6 +610,12 @@ public partial class FloatingBar
     // bar's MenuGlyph comment), and these are six simple shapes. Each part is (geometry, filled).
     const string SearchShape = "M2,6.5 A4.5,4.5 0 1 1 11,6.5 A4.5,4.5 0 1 1 2,6.5 Z M10,10 L14.5,14.5";
     const string ChevronShape = "M3.5,10 L8,5.5 L12.5,10";
+    // Where the tray's turn pivots (TurnTrayChevron): the chevron's own middle, not the square's 8, so it stays put.
+    const double ChevronMiddle = (5.5 + 10) / 2;
+    // How the turn runs: WinUI's standard "fast" duration and fast-out-slow-in curve (KeySpline 0,0,0,1). Assumed
+    // to be what Windows' own arrow does, NOT measured from its taskbar, so change them here if it looks off.
+    const int ChevronTurnMs = 167;
+    static readonly KeySpline ChevronTurnCurve = Curve(0, 0, 0, 1);
     const string BellShape = "M8,1.8 C5.8,1.8 4,3.6 4,5.8 L4,8.8 L2.6,11.4 L13.4,11.4 L12,8.8 L12,5.8 C12,3.6 10.2,1.8 8,1.8 Z M6.4,13.2 A1.7,1.7 0 0 0 9.6,13.2";
     const string WifiShape = "M1.5,6 A9.5,9.5 0 0 1 14.5,6 M4,8.7 A5.8,5.8 0 0 1 12,8.7 M6.4,11.3 A2.6,2.6 0 0 1 9.6,11.3";
     const string WifiDot = "M7,13.6 A1,1 0 1 1 9,13.6 A1,1 0 1 1 7,13.6 Z";
@@ -644,12 +744,23 @@ static class ShellKeys
         // the classic overflow (Petre's machine); TopLevelWindowForOverflowXamlIsland is Windows 11's newer
         // XAML one (#227), named from the shell, not measured here. The bar also remembers whatever window
         // its Space opened (FloatingBar.RememberTrayOverflow), so a class missing from this list still works.
-        ("Shell_TrayWnd" or "Shell_SecondaryTrayWnd" or "NotifyIconOverflowWindow" or "TopLevelWindowForOverflowXamlIsland", _) =>
+        (var windowClass, _) when IsBareTaskbarClass(windowClass) || IsOverflowClass(windowClass) =>
             FloatingBar.ShellFlyout.Tray,
         ("Windows.UI.Core.CoreWindow", "Search") => FloatingBar.ShellFlyout.Search,
         ("Windows.UI.Core.CoreWindow", "Notification Center") => FloatingBar.ShellFlyout.Notifications,
         _ => null,
     };
+
+    // The overflow window alone, for the chevron's arrow (FloatingBar.TurnTrayChevron). Recognise counts the bare
+    // taskbar as the tray as well, which is right for closing a flyout and wrong for "the hidden icons are open".
+    public static bool IsTrayOverflow(nint hwnd) => IsOverflowClass(ClassOf(hwnd));
+
+    public static bool IsBareTaskbar(nint hwnd) => IsBareTaskbarClass(ClassOf(hwnd));
+
+    static bool IsBareTaskbarClass(string windowClass) => windowClass is "Shell_TrayWnd" or "Shell_SecondaryTrayWnd";
+
+    static bool IsOverflowClass(string windowClass) =>
+        windowClass is "NotifyIconOverflowWindow" or "TopLevelWindowForOverflowXamlIsland";
 
     // Explorer's Alt+Tab machinery, measured with a foreground hook on Petre's machine (Windows 11): each Alt+Tab
     // brings a ForegroundStaging window and then the XAML switcher, an XamlExplorerHostIslandWindow titled "Task
