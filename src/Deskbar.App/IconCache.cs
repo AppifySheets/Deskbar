@@ -72,6 +72,23 @@ public static class IconCache
     // first appears -- while its icon is still blank -- would be the only one ever taken.
     public static bool HasPendingIcons => probing.Count > 0;
 
+    // Asks every window still without an icon of its own again, exactly as a rebuild would (through For, so the
+    // same once-a-second rate limit and two-minute deadline apply), and answers how many of them stopped being
+    // pending: their own icon arrived, or the deadline made the provisional one final.
+    //
+    // For the bar's icon watch, which used to rebuild the whole bar on every tick while anything was pending and let
+    // the rebuild do the asking. Petre: "language button needs to be clicked twice". For the two minutes after every
+    // start, while some window that never draws an icon of its own sat out its deadline, the bar rebuilt once a
+    // second, at 200 to 740 ms a time over RDP at 250%, and a click that landed in one waited behind it. Asked here,
+    // the watch redraws only when there is something new to draw.
+    public static int ProbePending() =>
+        probing.Keys.ToList()
+            .Select(key => { For(new WindowHandle(key.Hwnd), key.Path.Length == 0 ? null : key.Path); return key; })
+            .Count(key => !probing.ContainsKey(key));
+
+    // Whether this window is still being asked for an icon of its own. For the tests.
+    internal static bool IsPending(WindowHandle window, string? processPath) => probing.ContainsKey((window.Value, processPath ?? ""));
+
     // For live windows. Prefer this everywhere a WindowHandle is in hand.
     public static ImageSource? For(WindowHandle window, string? processPath)
     {

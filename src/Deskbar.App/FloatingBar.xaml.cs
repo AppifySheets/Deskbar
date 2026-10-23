@@ -173,10 +173,23 @@ public partial class FloatingBar : Window
         // launches and never otherwise. Idle cost is one bool per tick, then it turns itself
         // off. Driving it from the existing 1s topmost timer was the alternative and was
         // rejected: that one runs forever and this concern has a natural end.
+        //
+        // It asks the pending windows itself and redraws only when one of them stopped being pending, rather than
+        // redrawing on every tick and letting the redraw do the asking. Petre: "language button needs to be clicked
+        // twice". The trace showed why: some window that never draws an icon of its own kept the watch running for
+        // its full two-minute deadline after every start, so the bar rebuilt once a second, at 200 to 740 ms a time
+        // over RDP at 250%, a click that landed in one waited, and the second click ran right behind it.
         iconWatch.Tick += (_, _) =>
         {
-            if (IconCache.HasPendingIcons && IsVisible) Rebuild();
-            else iconWatch.Stop();
+            if (!IconCache.HasPendingIcons || !IsVisible)
+            {
+                iconWatch.Stop();
+                return;
+            }
+            var arrived = IconCache.ProbePending();
+            if (arrived == 0) return;
+            if (ClickTrace.On) ClickTrace.Write($"icon watch: {arrived} window(s) settled their icon, rebuilding");
+            Rebuild();
         };
         // appBar.Remove gives the docked strip back on a normal exit. A crash is covered by the shell
         // itself, which was measured reclaiming a dead app bar's strip within a second (see AppBar).
