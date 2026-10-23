@@ -1,4 +1,5 @@
-﻿using System.Runtime.InteropServices;
+﻿using System.Diagnostics;
+using System.Runtime.InteropServices;
 using System.Text;
 using System.Windows;
 using System.Windows.Controls;
@@ -46,6 +47,22 @@ namespace Deskbar.App;
 //     to close has already closed, and sending Win would open it again. The bar therefore remembers which
 //     flyout was in front when the press arrived (flyoutInFrontAtPress), and a click on that flyout's own
 //     button just lets the press do the closing, which is what the taskbar's buttons do.
+//
+// A third thing, measured later on Windows 11 build 26300 and not on the machine above: there the Windows key and Win+S
+// bring the SAME window to the front, a Windows.UI.Core.CoreWindow titled "Search" in SearchHost.exe, so what is in front
+// no longer says whether Start or search is open. Two things follow, handled in SendAndConfirm and NoteStartSearch:
+//
+//   * The confirming check read that window as Search, decided Start had not come up, and sent Win again. Win TOGGLES, so
+//     Start was shut 0.7 s after it opened; and a Start the user had already dismissed in that time (a click on the desktop)
+//     was opened again. The check now sends again only when the flyout NEVER came to the front.
+//   * Which button opened the window is who sent keys just before it came up. A window that came up with nobody asking (the
+//     keyboard) has no known opener: neither button lights, and a click on either only closes it.
+//
+// A fourth, on the same machine: a flyout can close without the bar hearing it. Esc, the Windows key or Win+S shut it and
+// Windows hands the foreground to THIS bar, whose own windows the monitor never reports (App.xaml.cs, monitor.Ignore), so no
+// NoteForeground said the flyout was gone. The light stayed on, the tray's arrow stayed down, and the next click on the button
+// was read as "it was open" and swallowed, so it took two. The bar being activated, and the 1 s tick, now look at what is in
+// front and settle the state against it (OnActivated, ResyncShellFlyouts).
 public partial class FloatingBar
 {
     // What each button opens. Desktop is Win+D, which toggles by itself and opens nothing to look for.
@@ -58,6 +75,39 @@ public partial class FloatingBar
     // ...and what it was when the current press arrived, which is what a button's Click reads.
     ShellFlyout? flyoutInFrontAtPress;
 
+    // START AND SEARCH CAN BE ONE WINDOW (see the header, build 26300). Whether it is in front, and which button opened it:
+    // the one whose keys the bar sent just before it came up (pendingSend), or null when nobody the bar knows of did, as
+    // when the keyboard opened it. flyoutInFront names that button for a window with an opener; for one without, it stays
+    // what Recognise made of the title, which cannot say.
+    bool hostInFront;
+    ShellFlyout? hostOpener;
+
+    // ...and whether the press now being answered found it in front with no known opener. It is Start or search and nothing
+    // here can tell which, so a click on EITHER button only closes it: the press has already, and a key now would open it again.
+    bool hostUnclaimedAtPress;
+
+    // Set once the bar has seen a Start window of its own (DV2ControlHost). On such a machine the "Search" window is only
+    // search, whoever opened it, so none of the shared-window handling applies and it behaves as it always did.
+    bool startHasOwnWindow;
+
+    // The bar was activated while it showed a flyout open, and the re-sync that settles that has not run yet (OnActivated). A
+    // press on the bar clears it (NoteBarPressed), and the 1 s tick leaves the settling to the queued re-sync while it is set.
+    bool shellResyncPending;
+
+    // The latest send whose confirming check is not over (SendAndConfirm), and whether its flyout has come to the front since
+    // the keys went out. One object per send, because a check that outlives its click must not read a newer click's flyout.
+    ShellSend? pendingSend;
+
+    sealed class ShellSend(ShellFlyout flyout)
+    {
+        internal ShellFlyout Flyout { get; } = flyout;
+        internal bool Shown, Retried;
+    }
+
+    // The buttons that light while their flyout is open: Start and search, and the second pair across the seam. Added by
+    // ShellButton, which BuildShellStrip calls once, so the list is complete for the bar's whole life.
+    readonly List<(ShellFlyout Flyout, Button Button)> shellLights = [];
+
     // What actually presses the keys. A seam for the tests and nothing else: a test that pressed the real
     // Windows key would open the Start menu on the screen of whoever runs the suite.
     internal Action<ShellFlyout> SendShellKeys { get; init; } = ShellKeys.Send;
@@ -65,6 +115,12 @@ public partial class FloatingBar
     // ...and the Space that opens the tray's hidden icons once Win+B has focused it (see OpenTrayOverflow),
     // a seam for the same reason.
     internal Action PressSpace { get; init; } = () => ShellKeys.Press(ShellKeys.VK_SPACE);
+
+    // How long after sending a shortcut the bar waits before it looks for the flyout (SendAndConfirm), and whether that look,
+    // and the retry's, is still to come. Seams for the tests, which would otherwise wait out the real 0.7 s.
+    internal TimeSpan ShellCheckDelay { get; init; } = TimeSpan.FromMilliseconds(700);
+
+    internal bool ShellCheckPending => pendingSend is not null;
 
     // Ticks every second but writes only when the text changes, so the clock turns over on the minute
     // without the bar ever re-laying out between minutes.
@@ -76,6 +132,10 @@ public partial class FloatingBar
     static readonly Brush StartBlue = Frozen(0xFF, 0x4C, 0xC2, 0xFF);
     static readonly Brush ClockForeground = Frozen(0xE6, 0xFF, 0xFF, 0xFF);
     static readonly Brush SliverLine = Frozen(0x29, 0xFF, 0xFF, 0xFF);
+
+    // How Start and search look while their flyout is open: the hover square, kept. ShellButtonTemplate paints the same
+    // colour on hover (a test holds the two together), and its pressed colour still wins over this while the mouse is down.
+    static readonly Brush ShellOpenBrush = Frozen(0x1F, 0xFF, 0xFF, 0xFF);
 
     // Fills the two panels the XAML declares for this: ShellStart in the header, ShellStrip at the bottom.
     // Called once from the constructor; nothing here is rebuilt with the rows, so the buttons keep their
@@ -395,6 +455,7 @@ public partial class FloatingBar
         if (tip.Length > 0) button.ToolTip = tip;
         System.Windows.Automation.AutomationProperties.SetName(button, tip.Length > 0 ? tip : "Clock");
         button.Click += (_, _) => OnShellClick(flyout);
+        if (flyout is ShellFlyout.Start or ShellFlyout.Search) shellLights.Add((flyout, button));
         return button;
     }
 
@@ -405,8 +466,10 @@ public partial class FloatingBar
         // pinned row Start and search sit in) may treat its release as a click of its own.
         MarkPressConsumed();
 
-        var wasOpen = flyoutInFrontAtPress == flyout;
+        // The shared Start/search window with no known opener counts as open for both of them (hostUnclaimedAtPress).
+        var wasOpen = flyoutInFrontAtPress == flyout || (hostUnclaimedAtPress && flyout is ShellFlyout.Start or ShellFlyout.Search);
         flyoutInFrontAtPress = null;
+        hostUnclaimedAtPress = false;
         if (ClickTrace.On) ClickTrace.Write($"shell: {flyout} clicked, open at press={wasOpen}");
 
         // The press already closed it by taking the foreground; sending the shortcut now would reopen it.
@@ -416,8 +479,16 @@ public partial class FloatingBar
     }
 
     // Sends the shortcut, then looks once more after the flyout has had time to open, and sends again if
-    // it is not in front. Once, not in a loop: a flyout that does not open twice running is not going to
+    // it never came up. Once, not in a loop: a flyout that does not open twice running is not going to
     // open, and a third press would most likely land just as the user dismissed it.
+    //
+    // "Never came up", and not "is not in front now". Win, Win+S, Win+A and Win+N all TOGGLE, so a second send to a flyout
+    // that has come and gone shuts it, or opens it again, and this check used to send whenever the flyout was not in
+    // front at the 0.7 s mark. Measured on build 26300 that undid the flyout it was confirming: Start came up 70 ms
+    // after the click, the check did not take that window for Start (it is the shared one, see the header), and its Win
+    // shut Start again. A Start the user had dismissed within the 0.7 s was opened again the same way. So the retry is for
+    // a LOST keystroke: the flyout is not in front now and did not come to the front at any moment since the send
+    // (NoteStartSearch watches for that, as foreground events arrive).
     void SendAndConfirm(ShellFlyout flyout)
     {
         SendShellKeys(flyout);
@@ -428,13 +499,28 @@ public partial class FloatingBar
             return;
         }
 
-        var check = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(700) };
+        // Set after the keys went out, which is safe: the foreground hook is out of context, so its events come through this
+        // thread's message queue and none can be handled before this method returns.
+        var send = pendingSend = new ShellSend(flyout);
+        var check = new DispatcherTimer { Interval = ShellCheckDelay };
         check.Tick += (_, _) =>
         {
             check.Stop();
-            var front = ShellKeys.Recognise(NativeMethods.GetForegroundWindow());
-            if (ClickTrace.On) ClickTrace.Write($"shell: {flyout} check, in front={front?.ToString() ?? "other"}");
-            if (front != flyout) SendShellKeys(flyout);
+            // A newer click has taken over: this flyout is no longer the question, and its shortcut now would undo the
+            // newer one.
+            if (pendingSend != send) return;
+            var front = NativeMethods.GetForegroundWindow();
+            var cameUp = send.Shown || Opens(flyout, ShellKeys.Recognise(front), IsSharedHost(front));
+            if (ClickTrace.On) ClickTrace.Write($"shell: {flyout} check, in front={ShellKeys.Describe(front)}, came up={cameUp}");
+            if (!cameUp && !send.Retried)
+            {
+                send.Retried = true;
+                SendShellKeys(flyout);
+                // The retry is a send like the first: what it opens is still ours to name, so it gets the same time.
+                check.Start();
+                return;
+            }
+            pendingSend = null;
         };
         check.Start();
     }
@@ -489,9 +575,61 @@ public partial class FloatingBar
     public void NoteForeground(nint hwnd)
     {
         var flyout = ShellKeys.Recognise(hwnd) ?? (hwnd != 0 && hwnd == trayOverflow ? ShellFlyout.Tray : null);
-        NoteFlyoutInFront(flyout);
+        NoteFlyoutInFront(NoteStartSearch(hwnd, flyout));
         TurnTrayChevron(IsTrayOverflow(hwnd));
         NoteLanguageTarget(hwnd, isFlyout: flyout is not null);
+    }
+
+    // START AND SEARCH IN ONE WINDOW. Runs for every foreground change and returns what to note as in front: the flyout
+    // Recognise found, except that the shared window (ShellKeys.IsStartSearchHost) is whichever button opened it.
+    //
+    // Who opened it is who sent keys just before it came up: pendingSend, from the send until its check is over
+    // (SendAndConfirm). It can come up with nothing pending, when the keyboard opened it, and then nobody knows: the opener
+    // stays null, neither button lights (it would be a guess), and a click on either only closes it (hostUnclaimedAtPress).
+    // That is a known limit, and so is a window opened by one button and then switched to the other's shortcut from the
+    // keyboard: it is the same window, there is no foreground change, and the opener stays the first button.
+    //
+    // The opener lasts while the window stays in front. A press on the bar takes the foreground and ends it
+    // (NoteBarPressed), and so does any other window coming up, which is the "host left" case here.
+    //
+    // This also marks pendingSend as shown when its flyout comes to the front, which is how SendAndConfirm knows not to send
+    // again for a flyout that came up and has since been closed.
+    ShellFlyout? NoteStartSearch(nint hwnd, ShellFlyout? flyout)
+    {
+        if (flyout == ShellFlyout.Start) startHasOwnWindow = true;
+        var host = IsSharedHost(hwnd);
+        if (pendingSend is { } send && Opens(send.Flyout, flyout, host)) send.Shown = true;
+        if (!host)
+        {
+            hostInFront = false;
+            hostOpener = null;
+            return flyout;
+        }
+        if (!hostInFront)
+        {
+            hostInFront = true;
+            hostOpener = pendingSend is { Flyout: ShellFlyout.Start or ShellFlyout.Search } opener ? opener.Flyout : null;
+            if (ClickTrace.On) ClickTrace.Write($"shell: Start/search window up, opener={hostOpener?.ToString() ?? "unknown"}");
+        }
+        return hostOpener ?? flyout;
+    }
+
+    bool IsSharedHost(nint hwnd) => !startHasOwnWindow && ShellKeys.IsStartSearchHost(hwnd);
+
+    // Whether a window, as Recognise and IsSharedHost read it, is the one `flyout`'s shortcut opens. The shared window is both
+    // Start's and search's.
+    static bool Opens(ShellFlyout flyout, ShellFlyout? recognised, bool host) =>
+        recognised == flyout || (host && flyout is ShellFlyout.Start or ShellFlyout.Search);
+
+    // Start and search look the way they do on hover for as long as their flyout is in front, as the taskbar's own Start
+    // button does. Set on the buttons themselves, which are made once and only moved afterwards (LayOutHeader shows or hides
+    // the second pair; the header changes parent but is never rebuilt), so no re-layout can lose it. Not for the shared
+    // window with no known opener: it is one of the two and nothing here can say which, so neither pretends to be.
+    void LightShellButtons()
+    {
+        var unclaimed = hostInFront && hostOpener is null;
+        foreach (var (flyout, button) in shellLights)
+            button.Background = !unclaimed && flyoutInFront == flyout ? ShellOpenBrush : Brushes.Transparent;
     }
 
     // THE TRAY'S OVERFLOW, as it actually appeared. Issue #227: "When I press system tray arrow from deskbar it
@@ -517,15 +655,82 @@ public partial class FloatingBar
         TurnTrayChevron(IsTrayOverflow(opened));
     }
 
-    internal void NoteFlyoutInFront(ShellFlyout? flyout) => flyoutInFront = flyout;
+    internal void NoteFlyoutInFront(ShellFlyout? flyout)
+    {
+        flyoutInFront = flyout;
+        LightShellButtons();
+    }
 
-    // From the window's first press handler: the flyout in front right now is the one this press closes.
+    // From the window's first press handler: the flyout in front right now is the one this press closes. That includes the
+    // shared Start/search window, which is no longer in front either, and the buttons stop being lit.
     internal void NoteBarPressed()
     {
         flyoutInFrontAtPress = flyoutInFront;
+        hostUnclaimedAtPress = hostInFront && hostOpener is null;
         flyoutInFront = null;
+        hostInFront = false;
+        hostOpener = null;
+        // The press has settled what the bar shows, and it is newer than the activation that queued a re-sync (OnActivated).
+        shellResyncPending = false;
+        LightShellButtons();
         TurnTrayChevron(false);
     }
+
+    // THE FLYOUT THAT CLOSES WITHOUT THE BAR HEARING IT (the header's fourth point). Esc, the Windows key or Win+S shuts it, and
+    // on build 26300 the foreground goes to this bar, whose windows the monitor never reports: no NoteForeground says the flyout
+    // is gone, so the light stays on, the tray's arrow stays down, and the next click reads "it was open" and is swallowed. The
+    // bar being activated is the one sign of it, and this is where the bar hears it.
+    //
+    // QUEUED, not settled here. A click on Start while Start is open activates the bar FIRST, which runs this, and only then
+    // delivers the press whose NoteBarPressed records that Start was open. Settling here would wipe that before the press read
+    // it: the click would read "not open", send Win and open Start again, the very bug this fixes. Background is below input,
+    // so the dispatcher runs the re-sync only when no input is left to deliver, which is after that press; and the press clears
+    // shellResyncPending, so the re-sync a click brought with it does nothing.
+    //
+    // Only when something is shown open. Activating a quiet bar (its first Show, a click on it) has nothing to put right, and a
+    // re-sync queued then would undo whatever came up before it ran.
+    protected override void OnActivated(EventArgs e)
+    {
+        base.OnActivated(e);
+        NoteBarActivated();
+    }
+
+    void NoteBarActivated()
+    {
+        if (shellResyncPending || !ShowsAnOpenFlyout) return;
+        shellResyncPending = true;
+        Dispatcher.BeginInvoke(DispatcherPriority.Background, () =>
+        {
+            if (!shellResyncPending) return;
+            shellResyncPending = false;
+            SettleShellFlyouts();
+        });
+    }
+
+    // THE 1 s TICK (App.xaml.cs), beside the active-window highlight and for the same reason: an event can be missed, and a light
+    // on a flyout that is gone is misinformation. If the bar shows a flyout open, it asks Windows what is in front NOW and lets
+    // that decide, as a foreground change would (NoteForeground). With nothing shown open it reads three fields and stops.
+    //
+    // It leaves the settling to a queued activation re-sync while there is one, so it cannot land between the activation of a
+    // click and its press. The timer is a dispatcher job at the same priority and so is behind that press anyway; this makes it
+    // certain rather than a matter of how Windows orders its messages.
+    internal void ResyncShellFlyouts()
+    {
+        if (shellResyncPending) return;
+        SettleShellFlyouts();
+    }
+
+    // 0 is Windows saying there is no foreground window, which it does for a moment between two: not an answer to act on.
+    void SettleShellFlyouts()
+    {
+        if (!ShowsAnOpenFlyout) return;
+        var front = ForegroundWindow();
+        if (front != 0) NoteForeground(front);
+    }
+
+    // What the bar shows as open: a flyout in front (which lights Start and search), the shared Start/search window up (which can
+    // leave flyoutInFront null when its title is not recognised), or the tray's arrow down.
+    bool ShowsAnOpenFlyout => flyoutInFront is not null || hostInFront || trayChevronOpen;
 
     // Windows' own chevron points down while the hidden icons are open, so its next press reads as "hide
     // them", and it TURNS there rather than jumping. This one follows the overflow window itself, not
@@ -743,8 +948,9 @@ static class ShellKeys
 
     // The class names measured on Petre's machine (see FloatingBar.Shell's header). Search and the
     // notification centre share a class, so those two are told apart by title, which is English on his
-    // machine and may be localised elsewhere; a title that does not match just means the confirming
-    // check sends the shortcut a second time, which opens nothing extra on a flyout that is already up.
+    // machine and may be localised elsewhere. Start and search do not depend on it where they share a window
+    // (IsStartSearchHost reads the process); the notification centre still does, and a title that does not match leaves it
+    // unrecognised, so its confirming check cannot tell that it came up and sends Win+N again, which toggles it shut.
     public static FloatingBar.ShellFlyout? Recognise(nint hwnd) => (ClassOf(hwnd), TitleOf(hwnd)) switch
     {
         ("DV2ControlHost", _) => FloatingBar.ShellFlyout.Start,
@@ -760,6 +966,34 @@ static class ShellKeys
         ("Windows.UI.Core.CoreWindow", "Notification Center") => FloatingBar.ShellFlyout.Notifications,
         _ => null,
     };
+
+    const string CoreWindowClass = "Windows.UI.Core.CoreWindow";
+
+    // The window that is Start AND search on some builds (measured on Windows 11 build 26300, where the Windows key and
+    // Win+S both bring the same one forward): a CoreWindow of SearchHost.exe. The process says so in any language; the title
+    // "Search" is the fallback for a process that cannot be read, and is all Recognise has ever had to go on (English only).
+    // The decision is pure so a test needs no real process.
+    internal static bool IsStartSearchHost(string windowClass, string title, string processName) =>
+        windowClass == CoreWindowClass && (processName.Equals("SearchHost", StringComparison.OrdinalIgnoreCase) || title == "Search");
+
+    // The process is looked up only for a CoreWindow, which is a rare foreground change.
+    public static bool IsStartSearchHost(nint hwnd) =>
+        ClassOf(hwnd) == CoreWindowClass && IsStartSearchHost(CoreWindowClass, TitleOf(hwnd), ProcessNameOf(hwnd));
+
+    // Empty when it cannot be read (the process is gone, or not ours to look at). Never throws: it runs on a foreground event.
+    static string ProcessNameOf(nint hwnd)
+    {
+        if (hwnd == 0 || NativeMethods.GetWindowThreadProcessId(hwnd, out var pid) == 0) return "";
+        try
+        {
+            using var process = Process.GetProcessById((int)pid);
+            return process.ProcessName;
+        }
+        catch
+        {
+            return "";
+        }
+    }
 
     // The overflow window alone, for the chevron's arrow (FloatingBar.TurnTrayChevron). Recognise counts the bare
     // taskbar as the tray as well, which is right for closing a flyout and wrong for "the hidden icons are open".

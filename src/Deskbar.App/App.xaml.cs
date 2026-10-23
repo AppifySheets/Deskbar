@@ -1144,6 +1144,10 @@ public partial class App : Application
                 // eyes: a highlight pointing at the wrong window is misinformation, not a
                 // missing feature, so up to five seconds of it is far worse than up to one.
                 manager.ResyncActiveWindow();
+                // ...and which shell flyout the bar shows as open, which an event can also leave wrong: Esc shuts Start, Windows gives
+                // the foreground to the bar itself, whose windows the monitor never reports, and nothing says the flyout is gone
+                // (FloatingBar.ResyncShellFlyouts). Three field reads unless the bar shows one open.
+                floatingBar.ResyncShellFlyouts();
                 // ...and serve any rebuild the bar postponed while a mouse button was down. It
                 // flushes those on mouse-up, but a drag has no mouse-up to flush from -- the OLE
                 // drag loop eats it -- so without a heartbeat a dropped window stayed drawn in

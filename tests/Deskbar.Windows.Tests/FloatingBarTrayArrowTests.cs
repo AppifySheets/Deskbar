@@ -486,7 +486,7 @@ public class FloatingBarTrayArrowTests
 
     // A real window, never shown, of a given class name: the bar reads the foreground window's class from Windows, and the
     // shell's own windows cannot be made to take the foreground from a test. The class is registered for this process only.
-    sealed class ClassedWindow : IDisposable
+    internal sealed class ClassedWindow : IDisposable
     {
         const uint WsPopup = 0x80000000;
         readonly string windowClass;
@@ -494,7 +494,7 @@ public class FloatingBarTrayArrowTests
 
         public nint Handle { get; }
 
-        public ClassedWindow(string windowClass)
+        public ClassedWindow(string windowClass, string? title = null)
         {
             this.windowClass = windowClass;
             var definition = new WindowClass
@@ -505,7 +505,7 @@ public class FloatingBarTrayArrowTests
                 ClassName = windowClass,
             };
             Assert.True(RegisterClassExW(ref definition) != 0);
-            Handle = CreateWindowExW(0, windowClass, null, WsPopup, 0, 0, 0, 0, 0, 0, instance, 0);
+            Handle = CreateWindowExW(0, windowClass, title, WsPopup, 0, 0, 0, 0, 0, 0, instance, 0);
             Assert.True(Handle != 0);
         }
 
