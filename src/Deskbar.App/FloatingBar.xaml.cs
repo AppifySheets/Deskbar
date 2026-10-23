@@ -114,6 +114,8 @@ public partial class FloatingBar : Window
             if (liveListTarget is { } live) heldExpanded.Add(live);
         };
         MouseLeave += (_, _) => ReleaseHeldRows();
+        // Leaving the window takes the pointer out of the docked edge strip too (see EdgeRowAt).
+        MouseLeave += (_, _) => EdgeHover(new Point(-1, -1), dockedEdge);
         releaseGrace.Tick += (_, _) => ReleaseHeldRowsNow();
 
         // See foregroundZoom: what a title-bar drag needs to know about the window before the drag began.
@@ -979,6 +981,10 @@ public partial class FloatingBar : Window
             return;
         }
 
+        // A press in the docked edge strip is remembered by the row it was beside (see EdgeRowAt); the
+        // release decides. It still arms nothing else: docked, the bar does not move.
+        EdgePress(e.GetPosition(this), dockedEdge);
+
         dragStart = Keyboard.Modifiers.HasFlag(ModifierKeys.Control)
                     || !(StartedOnIcon(e.OriginalSource) || StartedOnClickTarget(e.OriginalSource))
             ? PointToScreen(e.GetPosition(this))
@@ -1170,6 +1176,9 @@ public partial class FloatingBar : Window
                 Save();
             }
         }
+        // A release in the docked edge strip, beside the row its press was beside, switches to that row's
+        // workspace (see EdgeRowAt). Not after a drag: that release belongs to the drag.
+        else if (!dragJustFinished) EdgeRelease(e.GetPosition(this), dockedEdge);
         FlushDeferredRebuild();
     }
 
@@ -1253,7 +1262,9 @@ public partial class FloatingBar : Window
     // icon Buttons already carry Tag = IconTag, so a walk up the tree looking for "any string Tag"
     // would stop at the icon and report "icon" as the row key -- releasing the freeze the instant
     // the pointer touched the very icons it exists to hold still.
-    sealed record RowTag(string Key);
+    // `Switch` is the row's own switch, for the docked edge strip (see EdgeRowAt): null on a row that has
+    // no destination (the pinned row, the titled list at the bottom, Unplaced).
+    sealed record RowTag(string Key, Func<Result>? Switch = null);
 
     void EnterRow(string groupKey, Guid? rowKey, IReadOnlyList<WindowRow> displayed)
     {
@@ -1436,6 +1447,72 @@ public partial class FloatingBar : Window
         : x >= width - ResizeGrip && x <= width && dockedEdge != "right" ? ResizeSide.Right
         : null;
 
+    // --- the docked edge strip ----------------------------------------------------------------------
+    //
+    // Petre, docked left: "can you activate the workspace when i'm on the left edge of the screen?",
+    // "which doesn't offer resize anymore?". Docked, the bar's screen-side edge IS the screen's edge, the
+    // one target a pointer cannot overshoot, and until now a click there landed on the bar's padding and
+    // did nothing. So the strip between that edge and a row's box counts as the row: the pointer there
+    // lights the row exactly as the pointer on the row does (its own MouseEnter and MouseLeave are raised,
+    // so the label, the wash and the amber ring all follow with no second hover state), and a press and
+    // release there run the row's own switch. Only on an edge dock: across the seam neither edge is a
+    // screen's edge, and floating the strip is the resize grip.
+    //
+    // The row is found by GEOMETRY (which box's vertical span holds the point) rather than by hit test,
+    // because the point is on the bar's padding, where a hit test finds the bar and nothing else. The press
+    // and the release are matched by the row's KEY, never its container (#48: a rebuild between the two
+    // swaps the container out). Everything takes the edge as a parameter so a test can ask without docking.
+
+    // The row beside a point in the edge strip, or null when the point is not in the strip.
+    internal Grid? EdgeRowAt(Point point, string? dockedEdge)
+    {
+        if (dockedEdge is not ("left" or "right") || point.Y < 0 || point.Y > ActualHeight) return null;
+        return Rows.Children.OfType<Border>()
+            .Where(box => box.Child is Grid && box.IsVisible)
+            .Select(box => (Box: box, Bounds: box.TransformToAncestor(this).TransformBounds(new Rect(box.RenderSize))))
+            .Where(x => point.Y >= x.Bounds.Top && point.Y < x.Bounds.Bottom)
+            .Where(x => dockedEdge == "left" ? point.X >= 0 && point.X < x.Bounds.Left : point.X > x.Bounds.Right && point.X <= ActualWidth)
+            .Select(x => (Grid)x.Box.Child)
+            .FirstOrDefault();
+    }
+
+    // The row the strip is lighting, by key, and the key of the row a strip press landed beside.
+    string? edgeHoverKey;
+    string? edgePressKey;
+
+    // Keeps the row beside the strip lit by raising the row's own enter and leave. Called on every move and
+    // on leaving the window (with a point outside it). A row the pointer has REALLY moved onto gets no
+    // synthetic leave, since its own leave will follow when the pointer goes; WPF then raises the real
+    // enter too, and the row's handlers are idempotent, so the two sources never fight.
+    internal void EdgeHover(Point point, string? dockedEdge)
+    {
+        var row = EdgeRowAt(point, dockedEdge);
+        var key = row?.Tag is RowTag tag ? tag.Key : null;
+        if (key == edgeHoverKey) return;
+        if (edgeHoverKey is { } old && RowContainer(old) is { IsMouseOver: false } left)
+            left.RaiseEvent(new MouseEventArgs(Mouse.PrimaryDevice, 0) { RoutedEvent = MouseLeaveEvent });
+        edgeHoverKey = key;
+        row?.RaiseEvent(new MouseEventArgs(Mouse.PrimaryDevice, 0) { RoutedEvent = MouseEnterEvent });
+    }
+
+    internal void EdgePress(Point point, string? dockedEdge) =>
+        edgePressKey = EdgeRowAt(point, dockedEdge)?.Tag is RowTag tag ? tag.Key : null;
+
+    // A release in the strip beside the row its press was beside runs that row's switch. True when it did.
+    internal bool EdgeRelease(Point point, string? dockedEdge)
+    {
+        var pressed = edgePressKey;
+        edgePressKey = null;
+        if (pressed is null || EdgeRowAt(point, dockedEdge)?.Tag is not RowTag { Switch: { } switchTo } tag || tag.Key != pressed) return false;
+        var outcome = switchTo();
+        if (ClickTrace.On) ClickTrace.Write($"edge-up group={tag.Key} ok={outcome.IsSuccess}{(outcome.IsFailure ? $" error={outcome.Error}" : "")}");
+        Report(outcome);
+        return true;
+    }
+
+    Grid? RowContainer(string key) =>
+        Rows.Children.OfType<Border>().Select(b => b.Child).OfType<Grid>().FirstOrDefault(g => g.Tag is RowTag t && t.Key == key);
+
     // Cursor from GetCursorPos, NOT from the event's position: the event's position is measured
     // relative to a window this very method is moving and resizing, so the delta would shrink to
     // nothing as the window caught up. Identical trap to the middle-drag move above, and it is
@@ -1482,6 +1559,8 @@ public partial class FloatingBar : Window
         // the middle of dragging the bar across the screen.
         if (e.LeftButton != MouseButtonState.Pressed)
             Cursor = ResizeSideAt(e.GetPosition(this)) is not null ? Cursors.SizeWE : Cursors.Arrow;
+        // The docked edge strip lights the row beside it (see EdgeRowAt).
+        EdgeHover(e.GetPosition(this), dockedEdge);
         if (MiddleDragging(e)) return;
         if (e.LeftButton != MouseButtonState.Pressed || dragStart is not { } start) return;
         var current = PointToScreen(e.GetPosition(this));
@@ -3761,7 +3840,7 @@ public partial class FloatingBar : Window
         // undoing now: the two buttons in the pinned row's cell are drawn at their natural size
         // because nothing shrank them in the first place.
 
-        container.Tag = new RowTag(groupKey);
+        container.Tag = new RowTag(groupKey, switchTo is not null && setHover is not null ? switchTo : null);
 
         // The row's name for anything that cannot read pixels. It was always worth setting and is
         // now load-bearing: the pinned row has NO text of its own any more, so without this it is a
