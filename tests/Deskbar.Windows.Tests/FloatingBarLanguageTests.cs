@@ -156,6 +156,27 @@ public class FloatingBarLanguageTests
         bar.Close();
     });
 
+    // Petre: "when i click the language switcher, can focus go back to the window it had before the language
+    // switcher was clicked?" The trace of two clicks on 2.1.29 read `front 0x0`: nothing was in front when the click
+    // arrived, so the switch went to the right window but no window had the keyboard. With nothing you type in at
+    // the front, the window you were in gets the foreground back.
+    [Fact]
+    public void With_nothing_in_front_the_window_you_were_in_gets_the_foreground_back() => StaThread.Run(() =>
+    {
+        var languages = new FakeLanguages(English, Georgian);
+        languages.ByWindow[Editor] = English;
+        nint front = Editor;
+        var handed = new List<nint>();
+        var bar = BarWith(languages, () => front, handed.Add);
+
+        front = 0;
+        bar.StepLanguage(+1);
+
+        Assert.Equal([(Editor, "KA")], languages.Switches);
+        Assert.Equal([Editor], handed);
+        bar.Close();
+    });
+
     // Petre: "it's changing apps when i click on it and then it's inaccurate when i type", "not always, but very
     // inconsistent". The trace from his clicks: each one handed the foreground to a REMEMBERED window, a Teams chat
     // or an Edge window in turn, so a click brought one of them forward, and the switch landed in a window he was

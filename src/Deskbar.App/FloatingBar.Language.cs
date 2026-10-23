@@ -29,8 +29,9 @@ namespace Deskbar.App;
 // hand-off. The window that got the switch was a guess, and so was the window brought forward. Now the bar answers
 // WM_MOUSEACTIVATE over the switcher with "do not activate" (KeepForegroundOnLanguageClick), so the window you type
 // in is still in front when the click arrives: it is the one switched, and the foreground is not touched. Only when
-// the bar itself is already in front (another part of it was clicked first) does the old path run: switch the
-// remembered window and hand it the foreground back.
+// no window you type in is in front (the bar itself, after another part of it was clicked first, or nothing at all,
+// which two clicks on 2.1.29 found) does the old path run: switch the remembered window and hand it the foreground
+// back, so focus returns to the window you were in.
 //
 // The installed list and the current language are read again on every clock tick, because Windows raises no
 // event this process can hear when Win+Space or Alt+Shift changes the language in another program, and when a
@@ -185,8 +186,12 @@ public partial class FloatingBar
     // tick (the switch is posted, so reading it back straight away could still see the old one).
     //
     // In the window in front at the click, when that is one you type in, which is the usual case now the click
-    // leaves the foreground where it was. Only when the bar itself is in front does the switch go to the
-    // remembered window, which then gets the foreground back so typing carries on there.
+    // leaves the foreground where it was. When it is not (the bar itself is in front, or nothing is), the switch
+    // goes to the remembered window, the last one you typed in, and that window gets the foreground back so typing
+    // carries on there. Petre: "can focus go back to the window it had before the language switcher was clicked?"
+    // Two clicks on 2.1.29 found NOTHING in front (`front 0x0` in the trace): the switch reached the right window
+    // and no window had the keyboard. The remembered window is the right one to hand it to, because nothing you
+    // type in has come to the front since; had something, it would be in front now and would be the one switched.
     internal void StepLanguage(int step)
     {
         if (InputLanguages is null) return;
@@ -194,16 +199,16 @@ public partial class FloatingBar
         if (installed.Count < 2) return;
         FollowForeground();
         var front = ForegroundWindow();
-        var barInFront = front != 0 && IsOwnWindow(front);
+        var focusLost = front == 0 || IsOwnWindow(front);
         var window = LanguageWindow();
         var current = InputLanguages.Of(window).Map(now => installed.ToList().FindIndex(l => l.Layout == now.Layout)).GetValueOrDefault(-1);
         // A current language missing from the list (a layout Windows added for one program) counts as the first.
         var next = installed[((Math.Max(current, 0) + step) % installed.Count + installed.Count) % installed.Count];
         var outcome = InputLanguages.SwitchTo(window, next);
-        if (outcome.IsSuccess && barInFront) HandForegroundTo(window);
+        if (outcome.IsSuccess && focusLost) HandForegroundTo(window);
         // The window in front is named beside the one switched, so a trace of a wrong switch says which it was.
         if (ClickTrace.On)
-            ClickTrace.Write($"language: {next.Code} in 0x{window:X}, front 0x{front:X}{(barInFront ? " (the bar; foreground handed back)" : "")} "
+            ClickTrace.Write($"language: {next.Code} in 0x{window:X}, front 0x{front:X}{(focusLost ? " (not a window you type in; foreground handed back)" : "")} "
                 + (outcome.IsSuccess ? "ok" : outcome.Error));
         if (outcome.IsFailure) return;
         Show(next, installed.Count);
