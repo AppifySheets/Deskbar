@@ -1414,16 +1414,26 @@ public partial class FloatingBar : Window
     // rather than something the current row alone pays.
     const double RowRingThickness = 2;
 
-    enum ResizeSide { Left, Right }
+    internal enum ResizeSide { Left, Right }
 
     (ResizeSide Side, int StartCursorX, double StartWidth, double StartLeft)? resizing;
 
     // Which side strip a point is in, or none. Uses ActualWidth rather than Width so it works
     // before a width has ever been set, when Width is NaN (SizeToContent).
-    ResizeSide? ResizeSideAt(Point point) =>
-        point.Y < 0 || point.Y > ActualHeight ? null
-        : point.X >= 0 && point.X <= ResizeGrip ? ResizeSide.Left
-        : point.X >= ActualWidth - ResizeGrip && point.X <= ActualWidth ? ResizeSide.Right
+    ResizeSide? ResizeSideAt(Point point) => GripAt(point.X, point.Y, ActualWidth, ActualHeight, dockedEdge);
+
+    // The rule itself, with everything it reads passed in, so a test can ask it directly.
+    //
+    // DOCKED, the edge on the screen's side has no grip. The reservation pins that edge to the screen, so a
+    // drag there could only move Left, which the next re-dock puts straight back: a resize arrow offering a
+    // resize that cannot happen. Petre, docked left: "when i move the mouse to the left edge, it changes to
+    // resize; shouldn't when docked". The other edge keeps its grip, because a docked bar's width may still
+    // be dragged and the reservation follows (see the docked section). Across the seam both edges sit
+    // inside a screen, so both stay.
+    internal static ResizeSide? GripAt(double x, double y, double width, double height, string? dockedEdge) =>
+        y < 0 || y > height ? null
+        : x >= 0 && x <= ResizeGrip && dockedEdge != "left" ? ResizeSide.Left
+        : x >= width - ResizeGrip && x <= width && dockedEdge != "right" ? ResizeSide.Right
         : null;
 
     // Cursor from GetCursorPos, NOT from the event's position: the event's position is measured
@@ -3238,6 +3248,15 @@ public partial class FloatingBar : Window
     // wears one, in its own colour, as the row's colour now that the row itself is no longer tinted. Three
     // pixels, as in the mockup: it has to carry the colour on its own.
     const double SpineWidth = 3;
+
+    // NOT a click target of its own, and this was tried. An expanded row is one window per line, each
+    // filling its column, so there is nowhere on it to click for the workspace without picking a window.
+    // Petre asked for one ("i want the expanded bar to be clickable so that i don't have to click the
+    // window, but the bar"), chose the rail from six mockups, rejected a 10 DIP stripe on sight ("i don't
+    // like the thick left panel"), was shown an 8 DIP click band holding the thin stripe, and ended it:
+    // "i don't think i need that bar at all". A click on any window line lands in that workspace anyway,
+    // so the band bought a different focused window and nothing else. If it comes back, the band version
+    // is in the history of the pull request that added the docked grip rule (2.1.39).
 
     // Petre: "maybe a little indented", then, on seeing it against the row above: "gap before the
     // beginning of the left edge and the browser icon."
