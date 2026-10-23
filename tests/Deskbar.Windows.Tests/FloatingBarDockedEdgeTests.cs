@@ -13,9 +13,18 @@ namespace Deskbar.Windows.Tests;
 // real dock.
 public class FloatingBarDockedEdgeTests(ITestOutputHelper output)
 {
+    // The row's Grid for a label, top-level or inside a group's family box: the tagged Grid nearest the label.
     static Grid RowFor(Panel rows, string label) =>
-        rows.Children.OfType<Border>().Select(b => b.Child).OfType<Grid>()
-            .Single(g => Descendants(g).OfType<TextBlock>().Any(t => t.Text == label));
+        Descendants(rows).OfType<TextBlock>().Where(t => t.Text == label)
+            .Select(t => Ancestors(t).OfType<Grid>().First(g => g.Tag is not null && VisualTreeHelper.GetParent(g) is Border))
+            .Distinct()
+            .Single();
+
+    static IEnumerable<DependencyObject> Ancestors(DependencyObject node)
+    {
+        for (var at = VisualTreeHelper.GetParent(node); at is not null; at = VisualTreeHelper.GetParent(at))
+            yield return at;
+    }
 
     static IEnumerable<DependencyObject> Descendants(DependencyObject node) =>
         Enumerable.Range(0, VisualTreeHelper.GetChildrenCount(node))
@@ -80,6 +89,47 @@ public class FloatingBarDockedEdgeTests(ITestOutputHelper output)
 
         bar.Bar.EdgePress(besideGepha, "left");
         Assert.False(bar.Bar.EdgeRelease(besideSparrow, "left"));
+        Assert.Empty(harness.Desktops.Switched);
+    });
+
+    // Petre: "should also work for grouped bars". A group's members sit inside its family box, one level down
+    // from the bar's rows, and the strip beside a member names that MEMBER: hover, click and pointer alike.
+    [Fact]
+    public void The_strip_beside_a_group_member_switches_to_that_member() => StaThread.Run(() =>
+    {
+        var harness = Harness.Build(grouped: true);
+        using var bar = harness.ShowBar();
+        var archiveDesktop = harness.Desktops.Desktops.Single(d => d.Name == "Archive").Id;
+        var archive = RowFor(bar.Rows, "Archive");
+        var beside = BesideOnTheLeft(bar.Bar, archive);
+        output.WriteLine($"beside grouped Archive at {beside}");
+
+        Assert.Same(archive, bar.Bar.EdgeRowAt(beside, "left"));
+        bar.Bar.EdgePress(beside, "left");
+        Assert.True(bar.Bar.EdgeRelease(beside, "left"));
+        Assert.Equal([archiveDesktop], harness.Desktops.Switched);
+    });
+
+    // Petre: "change bar activation pointer", "show something else; pointer for over-the-icon". The strip shows a
+    // hand, where every icon shows the arrow; beside the current row, which goes nowhere, it stays the arrow; and
+    // floating, the same strip is the resize grip.
+    [Fact]
+    public void The_strip_shows_a_hand_except_beside_the_current_row() => StaThread.Run(() =>
+    {
+        var harness = Harness.Build();
+        using var bar = harness.ShowBar();
+        var besideSparrow = BesideOnTheLeft(bar.Bar, RowFor(bar.Rows, "Sparrow"));
+        var besideGepha = BesideOnTheLeft(bar.Bar, RowFor(bar.Rows, "GEPHA")); // the current workspace
+
+        Assert.Equal(System.Windows.Input.Cursors.Hand, bar.Bar.CursorAt(besideSparrow, "left"));
+        Assert.Equal(System.Windows.Input.Cursors.Arrow, bar.Bar.CursorAt(besideGepha, "left"));
+        // Docked right or floating, the left edge is the resize grip, and the strip there says so.
+        Assert.Equal(System.Windows.Input.Cursors.SizeWE, bar.Bar.CursorAt(besideSparrow, "right"));
+        Assert.Equal(System.Windows.Input.Cursors.SizeWE, bar.Bar.CursorAt(besideSparrow, null));
+
+        // And the current row's strip takes no click either.
+        bar.Bar.EdgePress(besideGepha, "left");
+        Assert.False(bar.Bar.EdgeRelease(besideGepha, "left"));
         Assert.Empty(harness.Desktops.Switched);
     });
 

@@ -1263,7 +1263,7 @@ public partial class FloatingBar : Window
     // would stop at the icon and report "icon" as the row key -- releasing the freeze the instant
     // the pointer touched the very icons it exists to hold still.
     // `Switch` is the row's own switch, for the docked edge strip (see EdgeRowAt): null on a row that has
-    // no destination (the pinned row, the titled list at the bottom, Unplaced).
+    // no destination (the pinned row, the titled list at the bottom, Unplaced) and on the current row.
     sealed record RowTag(string Key, Func<Result>? Switch = null);
 
     void EnterRow(string groupKey, Guid? rowKey, IReadOnlyList<WindowRow> displayed)
@@ -1464,17 +1464,47 @@ public partial class FloatingBar : Window
     // swaps the container out). Everything takes the edge as a parameter so a test can ask without docking.
 
     // The row beside a point in the edge strip, or null when the point is not in the strip.
+    //
+    // Every row BOX under Rows, not only the panel's direct children: a group's members sit inside its
+    // family box (FamilyBox), one level down, and the strip beside a member names the member, not the
+    // group. Petre: "should also work for grouped bars". A box is a Border whose child is a row's Grid,
+    // which carries a RowTag; the family box's child is a StackPanel, so it is not one.
     internal Grid? EdgeRowAt(Point point, string? dockedEdge)
     {
         if (dockedEdge is not ("left" or "right") || point.Y < 0 || point.Y > ActualHeight) return null;
-        return Rows.Children.OfType<Border>()
-            .Where(box => box.Child is Grid && box.IsVisible)
+        return RowBoxes()
+            .Where(box => box.IsVisible)
             .Select(box => (Box: box, Bounds: box.TransformToAncestor(this).TransformBounds(new Rect(box.RenderSize))))
             .Where(x => point.Y >= x.Bounds.Top && point.Y < x.Bounds.Bottom)
             .Where(x => dockedEdge == "left" ? point.X >= 0 && point.X < x.Bounds.Left : point.X > x.Bounds.Right && point.X <= ActualWidth)
             .Select(x => (Grid)x.Box.Child)
             .FirstOrDefault();
     }
+
+    // Every row's box under Rows, top-level rows and group members alike (see EdgeRowAt). Walked by the
+    // bar's own SHAPE rather than the whole visual tree, because this runs on every mouse move and a row
+    // holds a great many elements (every icon, its chrome, its badges) that can never be a row. The shapes,
+    // all built in RebuildCore: a row is a Border around a Grid tagged RowTag; a group is a FamilyBox, a
+    // Border around a StackPanel of its rows (or, across the seam, around a Grid holding that StackPanel);
+    // a separator is a childless Border.
+    IEnumerable<Border> RowBoxes() => Rows.Children.OfType<Border>().SelectMany(BoxesIn);
+
+    static IEnumerable<Border> BoxesIn(Border box) => box.Child switch
+    {
+        Grid { Tag: RowTag } => [box],
+        StackPanel members => members.Children.OfType<Border>().SelectMany(BoxesIn),
+        Grid seam => seam.Children.OfType<StackPanel>().SelectMany(s => s.Children.OfType<Border>()).SelectMany(BoxesIn),
+        _ => [],
+    };
+
+    // The pointer in the edge strip beside a row that can be switched to: a HAND, so the strip does not show
+    // the arrow every icon shows. Petre: "change bar activation pointer", "show something else; pointer for
+    // over-the-icon". The arrow means "a window", the hand "go to this workspace". Not beside the current
+    // row, whose switch would go nowhere (its RowTag carries none, see GroupRow).
+    internal Cursor CursorAt(Point point, string? dockedEdge) =>
+        GripAt(point.X, point.Y, ActualWidth, ActualHeight, dockedEdge) is not null ? Cursors.SizeWE
+        : EdgeRowAt(point, dockedEdge)?.Tag is RowTag { Switch: not null } ? Cursors.Hand
+        : Cursors.Arrow;
 
     // The row the strip is lighting, by key, and the key of the row a strip press landed beside.
     string? edgeHoverKey;
@@ -1511,7 +1541,7 @@ public partial class FloatingBar : Window
     }
 
     Grid? RowContainer(string key) =>
-        Rows.Children.OfType<Border>().Select(b => b.Child).OfType<Grid>().FirstOrDefault(g => g.Tag is RowTag t && t.Key == key);
+        RowBoxes().Select(b => (Grid)b.Child).FirstOrDefault(g => g.Tag is RowTag t && t.Key == key);
 
     // Cursor from GetCursorPos, NOT from the event's position: the event's position is measured
     // relative to a window this very method is moving and resizing, so the delta would shrink to
@@ -1558,7 +1588,7 @@ public partial class FloatingBar : Window
         // Only when nothing else owns the mouse, so the cursor cannot flip to a resize arrow in
         // the middle of dragging the bar across the screen.
         if (e.LeftButton != MouseButtonState.Pressed)
-            Cursor = ResizeSideAt(e.GetPosition(this)) is not null ? Cursors.SizeWE : Cursors.Arrow;
+            Cursor = CursorAt(e.GetPosition(this), dockedEdge);
         // The docked edge strip lights the row beside it (see EdgeRowAt).
         EdgeHover(e.GetPosition(this), dockedEdge);
         if (MiddleDragging(e)) return;
@@ -3840,7 +3870,10 @@ public partial class FloatingBar : Window
         // undoing now: the two buttons in the pinned row's cell are drawn at their natural size
         // because nothing shrank them in the first place.
 
-        container.Tag = new RowTag(groupKey, switchTo is not null && setHover is not null ? switchTo : null);
+        // The switch rides on the tag for the docked edge strip (see EdgeRowAt), and not for the CURRENT row:
+        // switching to where you are goes nowhere, so its strip shows no hand and takes no click, the same rule
+        // that keeps the row's own hover dark (see SyncHover).
+        container.Tag = new RowTag(groupKey, switchTo is not null && setHover is not null && !isCurrent ? switchTo : null);
 
         // The row's name for anything that cannot read pixels. It was always worth setting and is
         // now load-bearing: the pinned row has NO text of its own any more, so without this it is a

@@ -803,9 +803,12 @@ sealed class Harness
     // extraWorkspace: a THIRD workspace, which is the fewest that gives the history trail (#155) two
     // steps -- with two workspaces the walk returns to where it started after one, so "the one before
     // the previous one" cannot exist to be drawn.
+    // grouped: Sparrow and Archive in one anchorless group, "Team", so their rows are drawn inside a family
+    // box with a header above them. Implies extraWorkspace, which is where Archive comes from.
     public static Harness Build(bool withUnresolvableWindow = false, bool singleWorkspace = false,
-        bool busyWorkspace = false, bool withUnnamedDesktop = false, bool extraWorkspace = false)
+        bool busyWorkspace = false, bool withUnnamedDesktop = false, bool extraWorkspace = false, bool grouped = false)
     {
+        extraWorkspace |= grouped;
 
         // NO Application is created here, deliberately. An Application belongs to the thread
         // that constructs it, StaThread gives every test a FRESH STA thread, and only one
@@ -869,6 +872,13 @@ sealed class Harness
             monitor.Initial.Add(filed);
         }
 
+        var team = new Group(Guid.NewGuid(), "Team");
+        if (grouped)
+        {
+            sparrow = sparrow with { GroupId = team.Id };
+            archive = archive with { GroupId = team.Id };
+        }
+
         var store = new StubStore
         {
             Stored = AppState.Empty with
@@ -876,6 +886,7 @@ sealed class Harness
                 Workspaces = singleWorkspace ? [gepha]
                     : extraWorkspace ? [gepha, sparrow, archive]
                     : [gepha, sparrow],
+                Groups = grouped ? [team] : [],
             },
         };
         var manager = new WorkspaceManager(desktops, monitor, new StubTitles(), store);
