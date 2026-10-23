@@ -2657,30 +2657,50 @@ public partial class FloatingBar : Window
                     Margin = firstLane || AcrossSeam ? new Thickness(indent, 0, 0, 0) : default,
                 };
                 laneContent.Children.Add(stack);
-                // A titled line has no free space: its one window fills the column (the stack is then the
-                // last child, which LastChildFill stretches whatever its Dock says). So its wash goes BEHIND
-                // the line instead, filling the lane under the titled window, where an icon row's wash
-                // deliberately does not go (see above). The exception is deliberate too. Petre, with the
-                // current workspace expanded and the others opening under the pointer: "when hovering over a
-                // collapsed bar i can see the bar highlight, but i can't see that when over an expanded bar",
-                // "it highlights the main app but not the bar", "i want the bar highlighted". An expanded row
-                // is nothing but its windows, so a wash that avoided them would never show, and the row would
-                // be the one kind that gives no sign the pointer is on it. Under the window, never over it,
-                // and hit-test-invisible, so the line's own click, drag and hover card are untouched. A Grid
-                // stacks the two; the lane's indent stays on the DockPanel so the wash runs to the lane's edge.
-                washes.Add(free);
                 UIElement laneCell = laneContent;
-                if (titled)
+
+                // A TITLED line is split for the CLICK, not for the text: its left part is the window, its
+                // right side the workspace. Petre: "let's also have only the left part of the horizontal bar
+                // clickable", "right side activating the workspace bar". The right side is the right HALF of the
+                // line. A third was tried first, from an earlier "maybe not the entire right side half", and
+                // settled the other way once he had it under the pointer: "just don't activate it on the right
+                // half". An expanded bar is one window per line, each filling its column, so before this every
+                // click on it picked a window.
+                //
+                // The title still runs the whole width of the line: the window's button stays stretched (see
+                // Titled), and the workspace's half is a transparent zone laid OVER the button's right end.
+                // Petre, of a version that trimmed the title at two thirds: "i want to see the entire width of
+                // the caption", and earlier of the half split, "it still shows the app's text, but clicking
+                // right side of the bar activates the bar, not that particular app". The zone is the topmost
+                // hit there, so a click on it reaches the row's own switch and never the window's button, and
+                // moving onto it is moving OFF the window (the button raises its leave), so the wash rule is
+                // the icon line's: lit on the zone, dark on the window (see SyncHover). The wash is the zone
+                // itself, translucent over the end of the title.
+                //
+                // This replaces 2.1.38's wash laid BEHIND the whole line, which lit under the window too and
+                // could only be clicked through it. An icon line keeps its free space as it was.
+                if (!titled)
                 {
-                    free.IsHitTestVisible = false;
-                    free.CornerRadius = WashCorners(left: firstLane, right: lane.Rank == lastRank);
-                    var layered = new Grid();
-                    layered.Children.Add(free);
-                    layered.Children.Add(laneContent);
-                    laneCell = layered;
+                    laneContent.Children.Add(free);
+                    washes.Add(free);
                 }
                 else
-                    laneContent.Children.Add(free);
+                {
+                    var workspaceZone = new Border
+                    {
+                        Background = Brushes.Transparent,
+                        CornerRadius = WashCorners(left: true, right: lane.Rank == lastRank),
+                    };
+                    washes.Add(workspaceZone);
+                    var split = new Grid();
+                    split.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+                    split.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+                    Grid.SetColumnSpan(laneContent, 2);
+                    Grid.SetColumn(workspaceZone, 1);
+                    split.Children.Add(laneContent);
+                    split.Children.Add(workspaceZone);
+                    laneCell = split;
+                }
 
                 var stackColumn = AddColumn(laneCell, new GridLength(1, GridUnitType.Star));
                 ShadeLane(stackColumn);
@@ -4025,19 +4045,17 @@ public partial class FloatingBar : Window
             // hover ring, which already skips this row (see ApplyCandidate). isCurrent covers unnamed
             // desktops too, since their rows pass IsCurrent the same way.
             //
-            // EXCEPT the wash of an EXPANDED row, which lights whenever the pointer is in the row: current
-            // or not, on a window or not. Both halves of the rule above assumed a row with free space to
-            // aim at, and an expanded row has none, so under them it never lit at all. Petre, once the
-            // current workspace expanded by default: "when hovering over a collapsed bar i can see the bar
-            // highlight, but i can't see that when over an expanded bar", "i want the bar highlighted",
-            // "including for the currently active bar". Its wash sits under the titled lines (see LineOf),
-            // so "on a window" is where the pointer always is there, and the current row is the one that
-            // is expanded most of the time, so the earlier ruling would have kept the list dark exactly
-            // where he asked for the light. The LABEL keeps the old rule: the current caption still rests
-            // in its colour, so a hover there would still make it blink.
+            // EXCEPT the wash of an EXPANDED row, which lights on the current row too. Petre, once the current
+            // workspace expanded by default: "when hovering over a collapsed bar i can see the bar highlight,
+            // but i can't see that when over an expanded bar", "i want the bar highlighted", "including for
+            // the currently active bar". The current row is the one that is expanded most of the time, so the
+            // earlier ruling would have kept the list dark exactly where he asked for the light. Off the
+            // window only, now that an expanded line has free space of its own (the right side of each line,
+            // see LineOf), the same rule as an icon line. The LABEL keeps the old rule: the current caption
+            // still rests in its colour, so a hover there would still make it blink.
             var inRow = false;
             var onIcons = new HashSet<UIElement>();
-            void SyncHover() => Hover(label: !isCurrent && inRow, wash: inRow && (titled || !isCurrent && onIcons.Count == 0));
+            void SyncHover() => Hover(label: !isCurrent && inRow, wash: inRow && onIcons.Count == 0 && (titled || !isCurrent));
 
             container.MouseEnter += (_, _) => { inRow = true; SyncHover(); };
             container.MouseLeave += (_, _) => { inRow = false; SyncHover(); ClearInfo(); };
@@ -5810,6 +5828,8 @@ public partial class FloatingBar : Window
         button.Content = line;
         // The stretch variant of the bare template, so the line fills the column and the title has its
         // width to trim against; the centring one would size the button to the whole title and clip it.
+        // Stretched across the WHOLE line, the workspace's half included: that half is a click zone laid
+        // over the button's right end (see the titled split in LineOf), so the title reads to the line's end.
         button.Template = BareStretchButton;
         button.HorizontalAlignment = HorizontalAlignment.Stretch;
     }
