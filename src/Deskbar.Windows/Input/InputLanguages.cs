@@ -29,7 +29,8 @@ public interface IInputLanguages
     // The language active in this window right now, or None for a window that is gone.
     Maybe<InputLanguage> Of(nint window);
 
-    // Switch this window to the language, then hand it the foreground back, so typing carries on in it.
+    // Switch this window to the language. Only that: whether the window also needs the foreground back is the
+    // bar's call (FloatingBar.StepLanguage), because a click on the switcher normally leaves it in front.
     Result SwitchTo(nint window, InputLanguage language);
 }
 
@@ -60,12 +61,9 @@ public sealed class InputLanguages : IInputLanguages
         // Posted, not sent: the window applies it when it next reads its queue, so a busy or hung window cannot
         // stall the bar. A window running elevated refuses a post from this one (UIPI), and that is the failure
         // reported here.
-        if (!PostMessage(window, WM_INPUTLANGCHANGEREQUEST, 0, language.Layout))
-            return Result.Failure($"Could not switch the input language (error {Marshal.GetLastWin32Error()}).");
-        // The click on the bar took the foreground from that window; give it back. Allowed, because the bar is
-        // the foreground window at this moment and may hand the foreground on.
-        SetForegroundWindow(window);
-        return Result.Success();
+        return PostMessage(window, WM_INPUTLANGCHANGEREQUEST, 0, language.Layout)
+            ? Result.Success()
+            : Result.Failure($"Could not switch the input language (error {Marshal.GetLastWin32Error()}).");
     }
 
     // The code is the TWO letter ISO name, upper case: "KA", "EN", "RU". It was the three letter one first,
@@ -94,5 +92,4 @@ public sealed class InputLanguages : IInputLanguages
     [DllImport("user32.dll")] static extern nint GetKeyboardLayout(uint threadId);
     [DllImport("user32.dll")] static extern uint GetWindowThreadProcessId(nint window, out uint processId);
     [DllImport("user32.dll", SetLastError = true, CharSet = CharSet.Unicode)] static extern bool PostMessage(nint window, uint message, nint wParam, nint lParam);
-    [DllImport("user32.dll")] static extern bool SetForegroundWindow(nint window);
 }

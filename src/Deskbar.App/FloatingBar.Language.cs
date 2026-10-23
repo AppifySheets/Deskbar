@@ -17,11 +17,20 @@ namespace Deskbar.App;
 //   wheel      steps through them either way
 //
 // WHICH WINDOW. A layout belongs to a thread, so "the current language" means the language of the window you
-// were typing in. Clicking the bar takes the foreground from that window, so the switcher reads and switches the
-// last window that had the foreground before the bar did (NoteForeground keeps it, and never sees the bar
-// itself), then hands the foreground back to it so you can carry on typing. Every look first takes the window in
-// front right now, whenever that is one you type in (FollowForeground says why the events alone were wrong), so
-// the remembered one only answers while the bar itself or a shell flyout is in front.
+// were typing in. Every look first takes the window in front right now, whenever that is one you type in
+// (FollowForeground says why the events alone were wrong); a remembered one (NoteForeground keeps it, and never
+// sees the bar itself) only answers while the bar itself or a shell flyout is in front.
+//
+// A CLICK ON THE SWITCHER DOES NOT ACTIVATE THE BAR. Petre: "it's changing apps when i click on it and then it's
+// inaccurate when i type", "not always, but very inconsistent". It used to: the click took the foreground from the
+// window you were typing in, so the switcher switched the REMEMBERED window and then handed it the foreground. The
+// trace of his clicks showed what that cost: five clicks switched a Teams chat and an Edge window in turn, each
+// click brought one of them forward, and twice the window the button read jumped to the other one 5 ms after the
+// hand-off. The window that got the switch was a guess, and so was the window brought forward. Now the bar answers
+// WM_MOUSEACTIVATE over the switcher with "do not activate" (KeepForegroundOnLanguageClick), so the window you type
+// in is still in front when the click arrives: it is the one switched, and the foreground is not touched. Only when
+// the bar itself is already in front (another part of it was clicked first) does the old path run: switch the
+// remembered window and hand it the foreground back.
 //
 // The installed list and the current language are read again on every clock tick, because Windows raises no
 // event this process can hear when Win+Space or Alt+Shift changes the language in another program, and when a
@@ -49,6 +58,10 @@ public partial class FloatingBar
     // What Windows says is in the foreground right now. A seam for the tests and nothing else, like SendShellKeys:
     // a test reading the real foreground would read whatever the person running the suite has open.
     internal Func<nint> ForegroundWindow { get; init; } = Windows.Monitoring.NativeMethods.GetForegroundWindow;
+
+    // Hands a window the foreground, for the one case a switch needs it (see StepLanguage). A seam for the same
+    // reason: a test must never move the real foreground.
+    internal Action<nint> HandForegroundTo { get; init; } = hwnd => Windows.Monitoring.NativeMethods.SetForegroundWindow(hwnd);
 
     Button? languageButton;
     TextBlock? languageCode;
@@ -99,14 +112,41 @@ public partial class FloatingBar
             StepLanguage(e.Delta < 0 ? +1 : -1);
         };
         clockTimer.Tick += (_, _) => PaintLanguage();
+        SourceInitialized += (_, _) => KeepForegroundOnLanguageClick();
         PaintLanguage();
         return languageButton;
     }
+
+    // Asked by Windows before a click activates the bar. Over the switcher the answer is "click, but do not
+    // activate", so the window you were typing in keeps the foreground (see the comment at the top). The click
+    // itself still arrives and the Button still raises Click: only the activation is withheld. The pointer's
+    // position decides rather than WPF's IsMouseOver, which follows input WPF has processed and can lag the press.
+    void KeepForegroundOnLanguageClick() =>
+        System.Windows.Interop.HwndSource.FromHwnd(new System.Windows.Interop.WindowInteropHelper(this).Handle)?.AddHook(
+            (nint _, int message, nint _, nint _, ref bool handled) =>
+            {
+                if (message != WM_MOUSEACTIVATE || !PointerOnLanguageButton()) return 0;
+                handled = true;
+                return MA_NOACTIVATE;
+            });
+
+    bool PointerOnLanguageButton()
+    {
+        if (languageButton is not { IsVisible: true } button || !Windows.Monitoring.NativeMethods.GetCursorPos(out var cursor)) return false;
+        var at = button.PointFromScreen(new Point(cursor.X, cursor.Y));
+        return at.X >= 0 && at.Y >= 0 && at.X < button.ActualWidth && at.Y < button.ActualHeight;
+    }
+
+    const int WM_MOUSEACTIVATE = 0x0021;
+    const nint MA_NOACTIVATE = 3;
 
     // Called from NoteForeground with every foreground change but the bar's own.
     void NoteLanguageTarget(nint hwnd, bool isFlyout)
     {
         if (!IsTypingWindow(hwnd, isFlyout)) return;
+        // Traced when it moves: the first trace of the "changing apps" report could show the target jumping between
+        // two windows but not what moved it.
+        if (ClickTrace.On && hwnd != languageTarget) ClickTrace.Write($"language target 0x{hwnd:X} (foreground event)");
         languageTarget = hwnd;
         // With "a different input method for each app window" on, the window that just came forward may be in a
         // different language from the last one, so show its language straight away rather than at the next tick.
@@ -143,17 +183,28 @@ public partial class FloatingBar
 
     // The language one step along from the current one, switched to, and shown at once rather than at the next
     // tick (the switch is posted, so reading it back straight away could still see the old one).
+    //
+    // In the window in front at the click, when that is one you type in, which is the usual case now the click
+    // leaves the foreground where it was. Only when the bar itself is in front does the switch go to the
+    // remembered window, which then gets the foreground back so typing carries on there.
     internal void StepLanguage(int step)
     {
         if (InputLanguages is null) return;
         var installed = InputLanguages.Installed();
         if (installed.Count < 2) return;
+        FollowForeground();
+        var front = ForegroundWindow();
+        var barInFront = front != 0 && IsOwnWindow(front);
         var window = LanguageWindow();
         var current = InputLanguages.Of(window).Map(now => installed.ToList().FindIndex(l => l.Layout == now.Layout)).GetValueOrDefault(-1);
         // A current language missing from the list (a layout Windows added for one program) counts as the first.
         var next = installed[((Math.Max(current, 0) + step) % installed.Count + installed.Count) % installed.Count];
         var outcome = InputLanguages.SwitchTo(window, next);
-        if (ClickTrace.On) ClickTrace.Write($"language: {next.Code} in 0x{window:X} {(outcome.IsSuccess ? "ok" : outcome.Error)}");
+        if (outcome.IsSuccess && barInFront) HandForegroundTo(window);
+        // The window in front is named beside the one switched, so a trace of a wrong switch says which it was.
+        if (ClickTrace.On)
+            ClickTrace.Write($"language: {next.Code} in 0x{window:X}, front 0x{front:X}{(barInFront ? " (the bar; foreground handed back)" : "")} "
+                + (outcome.IsSuccess ? "ok" : outcome.Error));
         if (outcome.IsFailure) return;
         Show(next, installed.Count);
     }

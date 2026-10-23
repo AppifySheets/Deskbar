@@ -60,8 +60,8 @@ public class FloatingBarLanguageTests
         bar.Close();
     });
 
-    // The click goes to the next language in Windows' order, in the window you were typing in (not the bar,
-    // which the click brought to the front), and wraps round at the end.
+    // The click goes to the next language in Windows' order, in the window you were typing in, and wraps round at
+    // the end.
     [Fact]
     public void The_click_steps_to_the_next_language_and_wraps() => StaThread.Run(() =>
     {
@@ -135,15 +135,16 @@ public class FloatingBarLanguageTests
         bar.Close();
     });
 
-    // Clicking the bar brings the bar to the front. That must not make the bar the window whose language is shown
-    // or switched: the click is for the editor you were typing in.
+    // With the bar itself in front (something else on the bar was clicked first, and that click does activate it),
+    // the switch goes to the window you were in and hands it the foreground back so typing carries on there.
     [Fact]
-    public void With_the_bar_itself_in_front_it_keeps_the_window_you_were_in() => StaThread.Run(() =>
+    public void With_the_bar_itself_in_front_it_keeps_the_window_you_were_in_and_gives_it_the_foreground() => StaThread.Run(() =>
     {
         var languages = new FakeLanguages(English, Georgian);
         languages.ByWindow[Editor] = Georgian;
         nint front = Editor;
-        var bar = BarWith(languages, () => front);
+        var handed = new List<nint>();
+        var bar = BarWith(languages, () => front, handed.Add);
 
         front = new System.Windows.Interop.WindowInteropHelper(bar).Handle;
         bar.PaintLanguage();
@@ -151,6 +152,35 @@ public class FloatingBarLanguageTests
 
         bar.StepLanguage(+1);
         Assert.Equal([(Editor, "EN")], languages.Switches);
+        Assert.Equal([Editor], handed);
+        bar.Close();
+    });
+
+    // Petre: "it's changing apps when i click on it and then it's inaccurate when i type", "not always, but very
+    // inconsistent". The trace from his clicks: each one handed the foreground to a REMEMBERED window, a Teams chat
+    // or an Edge window in turn, so a click brought one of them forward, and the switch landed in a window he was
+    // not typing in. A click on the switcher no longer activates the bar (FloatingBar.Language.cs), so the window
+    // you type in is still in front when the click arrives: that is the one switched, and the foreground is not
+    // touched at all.
+    [Fact]
+    public void A_click_switches_the_window_in_front_and_moves_no_app_forward() => StaThread.Run(() =>
+    {
+        const nint teams = 0x1F000021, edge = 0x1F000022;
+        var languages = new FakeLanguages(English, Georgian);
+        languages.ByWindow[teams] = English;
+        languages.ByWindow[edge] = English;
+        nint front = teams;
+        var handed = new List<nint>();
+        var bar = BarWith(languages, () => front, handed.Add);
+
+        bar.NoteForeground(teams);
+        front = edge; // typing in Edge now, and its foreground event not seen yet
+
+        bar.StepLanguage(+1);
+
+        Assert.Equal([(edge, "KA")], languages.Switches);
+        Assert.Empty(handed);
+        Assert.Equal("KA", Code(bar));
         bar.Close();
     });
 
@@ -170,8 +200,9 @@ public class FloatingBarLanguageTests
     static string Code(FloatingBar bar) => ((TextBlock)Switcher(bar).Content).Text;
 
     // `front` stands in for the window Windows says is in the foreground; the editor unless a test says otherwise,
-    // and never the real one, which is whatever the person running the suite has open.
-    static FloatingBar BarWith(IInputLanguages languages, Func<nint>? front = null)
+    // and never the real one, which is whatever the person running the suite has open. `handForeground` hears every
+    // window the bar hands the foreground to, which in a test must never be a real one either.
+    static FloatingBar BarWith(IInputLanguages languages, Func<nint>? front = null, Action<nint>? handForeground = null)
     {
         var desktops = new PulsingDesktops { CurrentId = Guid.NewGuid() };
         desktops.Desktops.Add(new DesktopInfo(desktops.CurrentId, "Work"));
@@ -181,6 +212,7 @@ public class FloatingBarLanguageTests
         {
             Left = -32000, Top = -32000, SendShellKeys = _ => { },
             ForegroundWindow = front ?? (() => Editor),
+            HandForegroundTo = handForeground ?? (_ => { }),
             InputLanguages = languages,
         };
         bar.ShowBar();
