@@ -3683,7 +3683,26 @@ public partial class FloatingBar : Window
         // empty, droppable half per screen at exactly a line's height, and a window arriving takes one over
         // without the list or anything below it moving.
         var drawn = perGroup.Count == 0 ? 1 : perGroup.Max(g => g.Count);
-        var lineCount = titled ? Math.Max(drawn, WindowListLines.Clamp(manager.State.WindowListMinimumLines)) : drawn;
+
+        // ONE SPARE LINE under a row that is fully filled in. Petre: "let's add an extra row at the bottom of
+        // a fully filled-in bar". A row's free space is where a click switches workspace and the hover wash
+        // shows (see LineOf), and a row whose every lane is full on every line has none: the only way into it
+        // was through one of its windows. The spare line is an ordinary empty line, so it is all free space,
+        // lights on hover, takes the click, and is a drop target per screen (#102) like any empty half.
+        //
+        // "Full" is IconRowLimit.LeavesNoRoom, against the same capacity the wrap above used (the fixed five
+        // on a bar with no width, else what fits in a lane's share), so the spare appears exactly when the
+        // wrap would have started a new line for one more window: that window then takes the spare line
+        // over and the row does not grow. Only on a row that can be switched to: the pinned row and the
+        // titled list have no switch to make room for, and a titled row is one window per line anyway.
+        var perLine = double.IsNaN(Width)
+            ? IconRowLimit.IconsPerLine
+            : IconRowLimit.PerLine(IconCellWidth, share, Math.Max(1, IconRowLimit.MinimumIconsPerLine / lanes));
+        var spare = !titled && switchTo is not null
+                    && IconRowLimit.LeavesNoRoom(perGroup.Select(g => g.Sum(line => line.Count)).ToList(), lanes, perLine)
+            ? 1 : 0;
+
+        var lineCount = titled ? Math.Max(drawn, WindowListLines.Clamp(manager.State.WindowListMinimumLines)) : drawn + spare;
         var drawnLines = Enumerable.Range(0, lineCount)
             .Select(i => perGroup.SelectMany(g => i < g.Count ? g[i] : []).ToList())
             .ToList();

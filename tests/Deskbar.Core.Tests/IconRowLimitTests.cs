@@ -37,6 +37,34 @@ public class IconRowLimitTests
     public void An_exact_multiple_of_the_limit_leaves_no_trailing_empty_line() =>
         Assert.Equal([5, 5], Sizes(10));
 
+    // PerLine is LinesThatFit's own break rule solved for the count, so the two must agree on every width.
+    [Theory]
+    [InlineData(80, 1, 3)]
+    [InlineData(72, 1, 3)]
+    [InlineData(71.9, 1, 2)]
+    [InlineData(40, 3, 3)]
+    [InlineData(200, 1, 8)]
+    public void PerLine_matches_where_LinesThatFit_breaks(double available, int floor, int expected)
+    {
+        Assert.Equal(expected, IconRowLimit.PerLine(24, available, floor));
+        var lines = IconRowLimit.LinesThatFit(Enumerable.Range(0, 20), _ => 24.0, available, floor);
+        Assert.Equal(expected, lines[0].Count);
+    }
+
+    // Petre: "let's add an extra row at the bottom of a fully filled-in bar". Full means no lane has room on
+    // any line: every lane used, all equally, in whole lines.
+    [Theory]
+    [InlineData(new[] { 3, 3 }, 2, 3, true)]
+    [InlineData(new[] { 6, 6 }, 2, 3, true)]
+    [InlineData(new[] { 3 }, 1, 3, true)]
+    [InlineData(new[] { 3, 2 }, 2, 3, false)]  // the second screen's line has room
+    [InlineData(new[] { 6, 3 }, 2, 3, false)]  // the second screen is empty on the second line
+    [InlineData(new[] { 3 }, 2, 3, false)]     // a whole screen's lane is empty
+    [InlineData(new[] { 4 }, 1, 3, false)]     // the last line is short
+    [InlineData(new int[0], 1, 3, false)]      // an empty row is its name line, not a full one
+    public void A_row_is_full_only_when_no_lane_has_room_on_any_line(int[] perLane, int lanes, int perLine, bool full) =>
+        Assert.Equal(full, IconRowLimit.LeavesNoRoom(perLane, lanes, perLine));
+
     // An empty workspace's row is just its label. Yielding one empty line instead would add an
     // icon's worth of height to every empty lane -- Personal and Extra both sit empty on
     // Petre's bar, so that is two wasted rows of the thing this feature exists to save.

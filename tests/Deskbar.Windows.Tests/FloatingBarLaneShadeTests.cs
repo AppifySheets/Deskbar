@@ -265,6 +265,34 @@ public class FloatingBarLaneShadeTests(ITestOutputHelper output)
         Assert.Empty(bar.LitWashes(row));
     });
 
+    // Petre: "let's add an extra row at the bottom of a fully filled-in bar". At the fixture's width each lane
+    // holds three icons, so three on each screen fill the row: it gets one spare, empty line, which is all free
+    // space and lights on hover. One window fewer leaves room on a line, and no spare is added.
+    [Fact]
+    public void A_fully_filled_in_row_gets_one_spare_line_that_lights_on_hover() => StaThread.Run(() =>
+    {
+        static void Raise(UIElement target, RoutedEvent e) =>
+            target.RaiseEvent(new System.Windows.Input.MouseEventArgs(System.Windows.Input.Mouse.PrimaryDevice, 0) { RoutedEvent = e });
+        int LinesOf(Bar bar) => bar.Shades().Count(s => s.Row == "Busy" && !s.IsFade);
+
+        using (var full = TwoScreens(busyIcons: 6, onSecondScreen: 3))
+        {
+            output.WriteLine($"full row: {LinesOf(full)} lines");
+            Assert.Equal(2, LinesOf(full));
+            var row = full.RowContainer("Busy");
+            Raise(row, UIElement.MouseEnterEvent);
+            // The spare line's two empty halves light, each a whole lane wide. (The full line lights its slack
+            // too, but that is under one icon wide.)
+            var lit = full.LitWashes(row);
+            lit.ForEach(w => output.WriteLine($"lit {w.ActualWidth:0.#} wide"));
+            Assert.Equal(2, lit.Count(w => w.ActualWidth > 24));
+        }
+
+        using var roomLeft = TwoScreens(busyIcons: 5, onSecondScreen: 2);
+        output.WriteLine($"row with room: {LinesOf(roomLeft)} lines");
+        Assert.Equal(1, LinesOf(roomLeft));
+    });
+
     // Petre: "can we try to recreate the actual taskbar in the workspace?", "with window titles, vertically
     // arranged", "active workspace only", then "same as it is now but at the bottom". The workspace you
     // are on is listed at the bottom of the bar, one window per line in its screen's column, each with its
@@ -582,7 +610,8 @@ public class FloatingBarLaneShadeTests(ITestOutputHelper output)
     // `expandRow` turns on AppState.ExpandCurrentWorkspace: the current workspace's own row expands into
     // the titled list instead of the list sitting at the bottom of the bar.
     // `longTitles` gives every window a title far longer than any line, so the titled list has to trim them.
-    static Bar TwoScreens(int busyIcons, bool oneWithNoMonitor = false, bool everythingOnOneScreen = false, bool standOnBusy = false, bool withPinned = false, bool expandRow = false, bool longTitles = false)
+    // `onSecondScreen` is how many of Busy's windows (the last ones) go on the second screen; one by default.
+    static Bar TwoScreens(int busyIcons, bool oneWithNoMonitor = false, bool everythingOnOneScreen = false, bool standOnBusy = false, bool withPinned = false, bool expandRow = false, bool longTitles = false, int onSecondScreen = 1)
     {
         var busyDesktop = Guid.NewGuid();
         var emptyDesktop = Guid.NewGuid();
@@ -604,7 +633,7 @@ public class FloatingBarLaneShadeTests(ITestOutputHelper output)
             // The last window goes on the second screen; the one before it can be given no monitor at
             // all, which is the case that used to add a lane.
             if (oneWithNoMonitor && i == busyIcons - 1) return;
-            placement.Add((window.Handle, i == busyIcons && !everythingOnOneScreen ? 2 : 1));
+            placement.Add((window.Handle, i > busyIcons - onSecondScreen && !everythingOnOneScreen ? 2 : 1));
         });
 
         if (withPinned)

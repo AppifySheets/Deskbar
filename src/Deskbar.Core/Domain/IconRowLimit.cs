@@ -84,4 +84,28 @@ public static class IconRowLimit
             .ToList();
 
     static double Used<T>(IEnumerable<T> line, Func<T, double> widthOf) => line.Sum(widthOf);
+
+    // How many equal cells LinesThatFit puts on a line: as many as fit, never fewer than the floor. The
+    // same two conditions it breaks on, solved for the count, so the two cannot disagree.
+    public static int PerLine(double cellWidth, double available, int minimumPerLine = MinimumIconsPerLine) =>
+        Math.Max(Math.Max(1, minimumPerLine), cellWidth <= 0 ? 1 : (int)Math.Floor(available / cellWidth + 1e-9));
+
+    // Whether a row is FULLY FILLED IN: no screen's share of it has room for another icon on any line, so
+    // the row has no free space left at all. Petre: "let's add an extra row at the bottom of a fully
+    // filled-in bar". Free space is where a click switches workspace and where the hover wash shows (the
+    // bar's LineOf), so a full row could only be entered through one of its windows; the bar answers by
+    // giving such a row one spare, empty line.
+    //
+    // Full means: every lane has windows, every lane holds the same number of them, and that number is a
+    // whole number of lines. A lane with fewer, or one ending on a short line, leaves free space beside it,
+    // and then no spare line is needed. The slack under one cell at a lane's end does not count: no icon
+    // fits there, and it is too narrow to aim at.
+    //
+    // `perLane` is each lane's window count, `lanes` how many lanes the row is laid out in (one per known
+    // screen), `perLine` a lane's capacity per line (PerLine, or IconsPerLine on a bar with no width).
+    public static bool LeavesNoRoom(IReadOnlyList<int> perLane, int lanes, int perLine) =>
+        perLine > 0
+        && perLane.Count == lanes
+        && perLane.All(count => count > 0 && count % perLine == 0)
+        && perLane.Distinct().Count() == 1;
 }
