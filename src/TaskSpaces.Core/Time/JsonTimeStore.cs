@@ -1,10 +1,11 @@
 using System.Text.Json;
 using CSharpFunctionalExtensions;
+using TaskSpaces.Core.Persistence;
 
 namespace TaskSpaces.Core.Time;
 
-// time.json, beside state.json. Same write-then-rename discipline as JsonPersistenceStore, for the
-// same reason: a crash mid-write must not destroy what was already tracked.
+// time.json, beside state.json. Written and read through DurableFile, as JsonPersistenceStore is, for
+// the same reason: neither a crash mid-write nor a restart may destroy what was already tracked.
 //
 // Stored as a flat list of rows rather than as the nested dictionary the model uses. Guid and
 // DateOnly keys serialise awkwardly and read badly, and this file is meant to be openable:
@@ -23,15 +24,13 @@ public sealed class JsonTimeStore(string baseDirectory) : ITimeStore
 
     string TimePath => Path.Combine(baseDirectory, "time.json");
 
-    // Missing file is the normal first-run case. A corrupt one is a real failure the caller
-    // surfaces rather than something to overwrite silently -- tracked history is not
-    // reconstructible from anywhere else.
+    // Missing file is the normal first-run case. An unreadable one falls back to the previous copy
+    // (DurableFile.Read), because tracked history is not reconstructible from anywhere else; only
+    // when both are unreadable is it a failure.
     public Result<WorkspaceTime> Load() =>
-        !File.Exists(TimePath)
-            ? WorkspaceTime.Empty
-            : Result.Try(() => Rebuild(JsonSerializer.Deserialize<File_>(File.ReadAllText(TimePath), Options)
-                                       ?? throw new JsonException("time.json deserialized to null")),
-                         e => $"Could not read {TimePath}: {e.Message}");
+        DurableFile.Read(TimePath,
+            text => Rebuild(JsonSerializer.Deserialize<File_>(text, Options) ?? throw new JsonException("time.json deserialized to null")),
+            WorkspaceTime.Empty);
 
     static WorkspaceTime Rebuild(File_ file) =>
         file.Rows.Aggregate(WorkspaceTime.Empty, (time, row) =>
@@ -48,8 +47,7 @@ public sealed class JsonTimeStore(string baseDirectory) : ITimeStore
                 .OrderBy(r => r.Workspace).ThenBy(r => r.Day)
                 .ToList();
 
-            var tmp = TimePath + ".tmp";
-            File.WriteAllText(tmp, JsonSerializer.Serialize(new File_(rows), Options));
-            File.Move(tmp, TimePath, overwrite: true);
+            // Flushed and swapped in with the old file kept as time.json.previous, as state.json is.
+            DurableFile.Write(TimePath, JsonSerializer.Serialize(new File_(rows), Options));
         }, e => $"Could not write {TimePath}: {e.Message}");
 }

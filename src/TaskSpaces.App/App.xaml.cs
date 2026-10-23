@@ -853,7 +853,8 @@ public partial class App : Application
         // probe hooked every event in both ranges and saw nothing), so this listens to the shell
         // hook instead, which is a different subscription with a different lifetime.
         attentionMonitor = new ShellHookAttentionMonitor();
-        manager = new WorkspaceManager(desktops, monitor, new Win32WindowTitles(), new JsonPersistenceStore(stateDir),
+        // The store traces a fallback to state.json.previous, the one sign that the latest file was lost.
+        manager = new WorkspaceManager(desktops, monitor, new Win32WindowTitles(), new JsonPersistenceStore(stateDir, ClickTrace.On ? ClickTrace.Write : null),
             activator: new WindowActivator(), screenLayout: new ScreenLayout(), attention: attentionMonitor,
             // #94: which app started this one, so a window opened by another app joins it. Stateless
             // and cheap, asked only when a new window appears.

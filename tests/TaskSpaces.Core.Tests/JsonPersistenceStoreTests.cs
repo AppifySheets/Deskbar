@@ -188,6 +188,94 @@ public sealed class JsonPersistenceStoreTests : IDisposable
         Assert.Null(loaded.Value.FloatingBar);
     }
 
+    // --- the previous copy -------------------------------------------------------------------------
+    //
+    // A colleague's machine lost every workspace when it restarted. Petre: "let's also have a backup for the
+    // previous file", "so that if the last one is not available the one before that is". Each save keeps the
+    // file it replaces as state.json.previous, and a load that cannot read state.json falls back to it.
+
+    string StateFile => Path.Combine(dir, "state.json");
+    string PreviousFile => StateFile + ".previous";
+
+    static AppState Named(params string[] names) =>
+        AppState.Empty with { Workspaces = names.Select(n => new Workspace(Guid.NewGuid(), n, Guid.NewGuid())).ToList() };
+
+    static IReadOnlyList<string> Names(AppState state) => state.Workspaces.Select(w => w.Name).ToList();
+
+    [Fact]
+    public void Each_save_keeps_the_file_it_replaces_as_the_previous_copy()
+    {
+        var store = new JsonPersistenceStore(dir);
+        store.Save(Named("first"));
+        store.Save(Named("second"));
+
+        Assert.Equal(["second"], Names(store.Load().Value));
+        Assert.Contains("first", File.ReadAllText(PreviousFile));
+        Assert.DoesNotContain("second", File.ReadAllText(PreviousFile));
+    }
+
+    // What a power cut can leave behind: the rename reached the disk and the bytes did not, so the file is the
+    // right length and every byte of it is zero.
+    [Fact]
+    public void An_unreadable_state_file_falls_back_to_the_previous_copy_and_is_kept_aside()
+    {
+        var store = new JsonPersistenceStore(dir);
+        store.Save(Named("Work", "Personal"));
+        store.Save(Named("Work", "Personal", "Later"));
+        File.WriteAllBytes(StateFile, new byte[4096]);
+
+        var loaded = new JsonPersistenceStore(dir).Load();
+
+        Assert.True(loaded.IsSuccess, loaded.IsFailure ? loaded.Error : "");
+        Assert.Equal(["Work", "Personal"], Names(loaded.Value));
+        // The broken file is moved aside for a look later, never deleted.
+        Assert.False(File.Exists(StateFile));
+        Assert.Single(Directory.GetFiles(dir, "state.json.*.bak"));
+    }
+
+    [Fact]
+    public void A_missing_state_file_falls_back_to_the_previous_copy()
+    {
+        var store = new JsonPersistenceStore(dir);
+        store.Save(Named("Work"));
+        store.Save(Named("Work", "Personal"));
+        File.Delete(StateFile);
+
+        Assert.Equal(["Work"], Names(new JsonPersistenceStore(dir).Load().Value));
+    }
+
+    // After a fallback, the next save must not rotate the broken file into the previous slot over the good copy
+    // it was just rescued from.
+    [Fact]
+    public void Saving_after_a_fallback_keeps_the_good_previous_copy()
+    {
+        var store = new JsonPersistenceStore(dir);
+        store.Save(Named("Work"));
+        store.Save(Named("Work", "Personal"));
+        File.WriteAllBytes(StateFile, new byte[4096]);
+
+        var recovering = new JsonPersistenceStore(dir);
+        recovering.Load();
+        recovering.Save(Named("Work", "Again"));
+
+        Assert.Equal(["Work", "Again"], Names(recovering.Load().Value));
+        Assert.Contains("\"Work\"", File.ReadAllText(PreviousFile));
+        // A char, not a string: xUnit compares substrings culture-sensitively, and "\0" is ignorable there, so a
+        // string search for it "finds" it in any text.
+        Assert.False(File.ReadAllText(PreviousFile).Contains('\0'));
+    }
+
+    // Both unreadable: still the failure App answers by backing the file up and telling the user.
+    [Fact]
+    public void Both_copies_unreadable_is_still_a_failure()
+    {
+        Directory.CreateDirectory(dir);
+        File.WriteAllText(StateFile, "{ not json !!!");
+        File.WriteAllText(PreviousFile, "{ nor this");
+
+        Assert.True(new JsonPersistenceStore(dir).Load().IsFailure);
+    }
+
     [Fact]
     public void Save_leaves_no_temp_file_behind()
     {
