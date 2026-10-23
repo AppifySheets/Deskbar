@@ -401,7 +401,8 @@ public class FloatingBarShellTests(ITestOutputHelper output)
         var bar = new FloatingBar(manager)
         {
             Left = -32000, Top = -32000, SendShellKeys = _ => { },
-            AppActions = new FloatingBar.AppCommands(() => ran.Add("manage"), () => ran.Add("updates"), () => ran.Add("exit"), () => null),
+            AppActions = new FloatingBar.AppCommands(() => ran.Add("manage"), () => ran.Add("updates"), () => ran.Add("exit"), () => null,
+                SaveDebugDump: () => ran.Add("dump")),
             OpenTaskManager = () => ran.Add("taskmgr"),
         };
         bar.ShowBar();
@@ -410,13 +411,14 @@ public class FloatingBarShellTests(ITestOutputHelper output)
         bar.FillBarMenu(menu);
         var items = menu.Items.OfType<MenuItem>().ToList();
         output.WriteLine(string.Join(" | ", items.Select(i => (string)i.Header)));
-        Assert.Equal(["New workspace…", "Window list at the bottom of the bar", "Dock to screen edge", "Minimize bar", "Task Manager", "Manage…", "Check for updates…", "Exit"],
+        Assert.Equal(["New workspace…", "Window list at the bottom of the bar", "Dock to screen edge", "Minimize bar", "Task Manager", "Manage…", "Check for updates…", "Save debug dump", "Exit"],
             items.Select(i => (string)i.Header).Where(h => h != "Dock across both screens"));
 
         items.Single(i => (string)i.Header == "Task Manager").RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
         items.Single(i => (string)i.Header == "Manage…").RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
         items.Single(i => (string)i.Header == "Check for updates…").RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
-        Assert.Equal(["taskmgr", "manage", "updates"], ran);
+        items.Single(i => (string)i.Header == "Save debug dump").RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
+        Assert.Equal(["taskmgr", "manage", "updates", "dump"], ran);
         bar.Close();
     });
 

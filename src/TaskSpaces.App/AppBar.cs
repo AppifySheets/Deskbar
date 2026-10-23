@@ -83,6 +83,17 @@ sealed class AppBar
         Registered = false;
     }
 
+    // Where the shell says the Windows taskbar is, and whether it auto-hides, for the debug dump. Null when the
+    // shell does not answer (no Explorer running, as in some RDP setups). Edge: 0 left, 1 top, 2 right, 3 bottom.
+    public static (Rect Rect, uint Edge, bool AutoHide)? Taskbar()
+    {
+        var data = new APPBARDATA { cbSize = Marshal.SizeOf<APPBARDATA>() };
+        if (SHAppBarMessage(ABM_GETTASKBARPOS, ref data) == 0) return null;
+        var state = new APPBARDATA { cbSize = Marshal.SizeOf<APPBARDATA>() };
+        var autoHide = (SHAppBarMessage(ABM_GETSTATE, ref state) & ABS_AUTOHIDE) != 0;
+        return (data.rc, data.uEdge, autoHide);
+    }
+
     nint Hook(nint window, int message, nint wParam, nint lParam, ref bool handled)
     {
         if (message != callbackMessage || !Registered) return 0;
@@ -116,7 +127,8 @@ sealed class AppBar
         public nint lParam;
     }
 
-    const uint ABM_NEW = 0, ABM_REMOVE = 1, ABM_QUERYPOS = 2, ABM_SETPOS = 3;
+    const uint ABM_NEW = 0, ABM_REMOVE = 1, ABM_QUERYPOS = 2, ABM_SETPOS = 3, ABM_GETSTATE = 4, ABM_GETTASKBARPOS = 5;
+    const nuint ABS_AUTOHIDE = 1;
     const int ABN_POSCHANGED = 1, ABN_FULLSCREENAPP = 2;
 
     [DllImport("shell32.dll")]

@@ -179,7 +179,8 @@ static class ClickTrace
     static readonly bool Enabled =
         Environment.GetEnvironmentVariable(EnvironmentSwitch) == "1" || Exists(MarkerPath) || Exists(OldMarkerPath);
 
-    static readonly string LogPath = Path.Combine(Path.GetTempPath(), "deskbar-trace.log");
+    // Internal so the debug dump can attach the log's tail (DebugDump).
+    internal static readonly string LogPath = Path.Combine(Path.GetTempPath(), "deskbar-trace.log");
 
     static readonly Lock Gate = new();
 

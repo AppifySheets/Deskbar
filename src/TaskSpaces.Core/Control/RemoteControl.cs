@@ -29,7 +29,11 @@ namespace TaskSpaces.Core.Control;
 // starting a process is the Windows side's business. It answers the new process's id, or null when the shell
 // handed the request to something already running. Left null, as the tests that do not exercise `start`
 // leave it, `start` refuses.
-public sealed partial class RemoteControl(WorkspaceManager manager, Func<bool, Result>? setBarVisible = null, Func<ProgramLaunch, Result<int?>>? launch = null)
+//
+// `dump` writes the debug dump the tray's "Save debug dump" writes and answers the file's path. It reads the
+// bar and the screens, which only the app can see, so the app hands it in; left null, `dump` refuses.
+public sealed partial class RemoteControl(WorkspaceManager manager, Func<bool, Result>? setBarVisible = null, Func<ProgramLaunch, Result<int?>>? launch = null,
+    Func<Result<string>>? dump = null)
 {
     static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web) { WriteIndented = true };
 
@@ -84,6 +88,11 @@ public sealed partial class RemoteControl(WorkspaceManager manager, Func<bool, R
         ("close-all", [var hwnd]) => CloseAll(hwnd),
 
         ("bar", [var state]) => Bar(state),
+
+        // The file is the answer, not a window: whoever asked through the pipe reads it back from the path.
+        ("dump", []) => dump is null
+            ? ControlReply.Fail("A debug dump cannot be written from here.")
+            : dump().Match(file => Success(new { file }), ControlReply.Fail),
 
         ("help" or "--help" or "-h" or "/?", _) => new ControlReply(ControlReply.Ok, ControlUsage.Text),
         _ when ControlUsage.IsVerb(verb) => ControlReply.Fail($"Wrong arguments for {verb}.\n{ControlUsage.LineFor(verb)}"),

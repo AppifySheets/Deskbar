@@ -774,6 +774,9 @@ public partial class FloatingBar : Window
     // while docked, which is the only time the shell sends it.
     void OnFullScreenApp(bool open)
     {
+        // Kept for the debug dump and traced, so a report of the bar over a fullscreen window can be told apart:
+        // did the shell never say so, or did it say so and the bar stayed on top anyway (FloatingBar.Diagnostics.cs).
+        RememberFullScreenNotice(open);
         fullScreenAppOpen = open;
         var hwnd = new WindowInteropHelper(this).Handle;
         if (hwnd == nint.Zero) return;
@@ -6451,13 +6454,16 @@ public partial class FloatingBar : Window
         if (app.PendingUpdate() is { } update) Add("⬇", update.Label, update.Open);
         Add("⚙", "Manage…", app.OpenManage);
         Add("↻", "Check for updates…", app.CheckForUpdates);
+        if (app.SaveDebugDump is { } dump) Add("⚑", "Save debug dump", dump);
         menu.Items.Add(new Separator());
         Add("⏻", "Exit", app.Exit);
     }
 
     // The tray's app-wide commands, for the bar's background menu. Null in the tests, which then get the bar's
-    // own items only.
-    public sealed record AppCommands(Action OpenManage, Action CheckForUpdates, Action Exit, Func<(string Label, Action Open)?> PendingUpdate);
+    // own items only. SaveDebugDump is the tray's "Save debug dump" (see DebugDump), optional so a caller that
+    // has no dump to offer leaves the item out.
+    public sealed record AppCommands(Action OpenManage, Action CheckForUpdates, Action Exit, Func<(string Label, Action Open)?> PendingUpdate,
+        Action? SaveDebugDump = null);
 
     public AppCommands? AppActions { get; init; }
 

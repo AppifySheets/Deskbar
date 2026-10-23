@@ -81,6 +81,23 @@ public class TrayMenuTests
         Assert.Equal(["Manage…", "Show bar", "Check for updates…", "Exit"], Headers(show));
     });
 
+    // "let's add debug dump which will give me a file and open window": for a problem on a machine that is not
+    // this one (an RDP session on another computer), where nothing can be traced live. Above Exit, below the
+    // update check: the least used item, and the one nobody should hit by reaching for Exit.
+    [Fact]
+    public void The_debug_dump_sits_above_exit_and_invokes_the_dump() => StaThread.Run(() =>
+    {
+        var dumps = 0;
+        var menu = TrayMenu.Build(compatibilityMode: false, () => { }, () => { }, () => { },
+            update: null, bar: null, dump: () => dumps++);
+
+        Assert.Equal(["Manage…", "Check for updates…", "Save debug dump", "Exit"], Headers(menu));
+
+        menu.Items.OfType<MenuItem>().Single(item => (string)item.Header == "Save debug dump")
+            .RaiseEvent(new System.Windows.RoutedEventArgs(MenuItem.ClickEvent));
+        Assert.Equal(1, dumps);
+    });
+
     [Fact]
     public void The_bar_toggle_invokes_the_toggle() => StaThread.Run(() =>
     {

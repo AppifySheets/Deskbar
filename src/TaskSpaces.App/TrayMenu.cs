@@ -35,8 +35,13 @@ public static class TrayMenu
     // turns being greyed out, because the tray is the channel that must never be a dead end -- if
     // the taskbar button is ever lost (a shell restart, a pin that failed on a Windows build
     // without the desktop COM), this is the way back.
+    //
+    // `dump` is "Save debug dump" (see DebugDump): Petre, about a bar misbehaving in an RDP session on another
+    // computer, "let's add debug dump which will give me a file and open window". Nothing can be traced live
+    // on a machine that is not this one, so the machine has to describe itself. Above Exit, as the least used
+    // item, and kept off the line Exit sits on so nobody reaching for Exit lands on it.
     public static ContextMenu Build(bool compatibilityMode, Action openManage, Action exit, Action checkNow,
-        (string Label, Action Open)? update = null, (string Label, Action Toggle)? bar = null)
+        (string Label, Action Open)? update = null, (string Label, Action Toggle)? bar = null, Action? dump = null)
     {
         var menu = new ContextMenu();
 
@@ -76,6 +81,13 @@ public static class TrayMenu
         var check = new MenuItem { Header = "Check for updates…" };
         check.Click += (_, _) => checkNow();
         menu.Items.Add(check);
+
+        if (dump is { } save)
+        {
+            var item = new MenuItem { Header = "Save debug dump" };
+            item.Click += (_, _) => save();
+            menu.Items.Add(item);
+        }
 
         var exitItem = new MenuItem { Header = "Exit" };
         exitItem.Click += (_, _) => exit();

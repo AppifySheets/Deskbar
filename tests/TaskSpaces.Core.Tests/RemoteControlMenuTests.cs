@@ -479,6 +479,30 @@ public class RemoteControlMenuTests
         Assert.False(manager.State.DockBar);
     }
 
+    // `dump` is the tray's "Save debug dump" from outside: it writes the same file and answers its path, so an
+    // agent can read the file back. Writing it is the app's business, handed in like the bar's toggle.
+    [Fact]
+    public void Dump_answers_the_path_of_the_file_the_app_wrote()
+    {
+        var control = new RemoteControl(Started(), dump: () => Result.Success(@"C:\dumps\deskbar-dump.txt"));
+
+        var reply = control.Execute(["dump"]);
+
+        Ok(reply);
+        Assert.Equal(@"C:\dumps\deskbar-dump.txt", Json(reply).GetProperty("file").GetString());
+    }
+
+    [Fact]
+    public void Dump_reports_why_the_file_could_not_be_written()
+    {
+        var failing = new RemoteControl(Started(), dump: () => Result.Failure<string>("disk full"));
+        var unwired = new RemoteControl(Started());
+
+        Assert.Equal(ControlReply.Failed, failing.Execute(["dump"]).ExitCode);
+        Assert.Contains("disk full", failing.Execute(["dump"]).Output);
+        Assert.Equal(ControlReply.Failed, unwired.Execute(["dump"]).ExitCode);
+    }
+
     [Fact]
     public void A_known_command_with_the_wrong_arguments_prints_its_own_usage_line()
     {
@@ -503,7 +527,7 @@ public class RemoteControlMenuTests
             ["workspaces", "windows", "desktops", "create", "move", "rename", "add-child", "reorder", "fold",
              "unfold", "color", "delete", "switch", "group-create", "group-join", "group-leave", "group-rename",
              "group-color", "group-fold", "group-unfold", "group-reorder", "ungroup", "name-desktop", "rename-window", "rename-app", "rename-pattern",
-             "name-by-folder", "restore-title", "pin", "unpin", "close-window", "force-close", "close-all", "bar"],
+             "name-by-folder", "restore-title", "pin", "unpin", "close-window", "force-close", "close-all", "bar", "dump"],
             verb => Assert.Contains($"\n  {verb}", help));
     }
 }

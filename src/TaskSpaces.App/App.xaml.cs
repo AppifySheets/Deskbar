@@ -525,6 +525,13 @@ public partial class App : Application
     // anything else -- which matters because it arrived from the network.
     static void OpenReleasePage(ReleaseInfo release) => OpenUrl(release.PageUrl);
 
+    // "Save debug dump" from the tray or the bar's menu (see DebugDump): write the file, then open Explorer
+    // with it selected. A failure is said out loud, because whoever clicked is waiting for a window.
+    void SaveDebugDump() =>
+        DebugDump.Save(floatingBar, manager!)
+            .Bind(DebugDump.Reveal)
+            .TapError(error => MessageBox.Show(error, "Deskbar", MessageBoxButton.OK, MessageBoxImage.Warning));
+
     // Split out for #110's failure path, which has no ReleaseInfo to name a page with: a check that
     // could not be made knows nothing about any release, and the releases page is still the way
     // through.
@@ -952,7 +959,10 @@ public partial class App : Application
                     if (visible && bar.Minimized) RestoreBar();
                     else if (!visible && !bar.Minimized) MinimizeBar();
                 }),
-            ProgramStarter.Start);
+            ProgramStarter.Start,
+            // `dump` writes the same file as the menus' "Save debug dump" but opens no window: the caller
+            // reads the path from the reply. The bar is read when the command arrives, as above.
+            () => DebugDump.Save(floatingBar, manager!));
         controlServer = new ControlPipeServer(ControlCommandLine.PipeName,
             args => Dispatcher.InvokeAsync(() =>
             {
@@ -976,7 +986,7 @@ public partial class App : Application
             // taskbar and window icons cannot drift apart.
             IconSource = AppIcon,
             ToolTipText = compatibilityMode ? "Deskbar (compatibility mode)" : "Deskbar",
-            ContextMenu = TrayMenu.Build(compatibilityMode, OpenManage, ExitApp, CheckForUpdateNow, null, BarToggle()),
+            ContextMenu = TrayMenu.Build(compatibilityMode, OpenManage, ExitApp, CheckForUpdateNow, null, BarToggle(), SaveDebugDump),
             // Petre: "left click gives us the main window, right click gives exit and
             // manage". RightClick only, so a left-click is free to open Manage (wired
             // below) instead of raising the same menu twice.
@@ -1037,7 +1047,7 @@ public partial class App : Application
                 // ...and the stats line's above it: the counters Task Manager reads (FloatingBar.Stats.cs).
                 Stats = new Windows.Performance.SystemStats(),
                 // The tray's own commands, for the bar's background menu, so both menus run the same code.
-                AppActions = new FloatingBar.AppCommands(OpenManage, CheckForUpdateNow, ExitApp, () => pendingUpdate),
+                AppActions = new FloatingBar.AppCommands(OpenManage, CheckForUpdateNow, ExitApp, () => pendingUpdate, SaveDebugDump),
                 // ...and the captions' time today (FloatingBar.WorkspaceTime.cs): the Time tab's own reading
                 // of the same tracker, so the two cannot disagree.
                 TimeToday = id => timeTracker?.Time.On(id, DateOnly.FromDateTime(DateTime.Now)) ?? TimeSpan.Zero,
@@ -1508,7 +1518,7 @@ public partial class App : Application
     {
         if (trayIcon is null) return;
         trayIcon.ContextMenu = TrayMenu.Build(compatibilityMode, OpenManage, ExitApp, CheckForUpdateNow,
-            pendingUpdate, BarToggle());
+            pendingUpdate, BarToggle(), SaveDebugDump);
     }
 
     (string Label, Action Toggle)? BarToggle() =>
