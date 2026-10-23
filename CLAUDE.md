@@ -130,7 +130,12 @@ object.
   (`Workspace.Shortcut` and `Chord` exist for it), never to an index.
 - **No launching, no restore prompt.** `RehydratePrompt`, `AppLauncher`,
   `PendingPlacements`, `StartWorkspace` and friends are deleted. "no, bad, don't want
-  this". The **roster stays**: it is the workspace half of placement memory.
+  this". The **roster stays**: it is the workspace half of placement memory. Two launches
+  exist since, both only at a caller's request and both through `ProgramStarter`:
+  `deskbar.cmd start` (2.1.21) and the icon menu's "Restart all … windows" with its
+  `restart-app` twin (2.1.32), which learns each window's folder-to-workspace seat, ends the
+  app's processes, waits for them to go and starts the exe bare, so VS Code restores its own
+  session and the folder tier puts the windows back. Nothing starts on its own, and no prompt.
 - **Membership identity = exe path + args.** Chromium browsers key on
   `--profile-directory` plus `--app-id` (so a PWA is not the browser); Firefox is
   deliberately excluded because its args are too generic. Do not "fix" that.

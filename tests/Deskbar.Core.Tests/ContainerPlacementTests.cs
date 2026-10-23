@@ -1,4 +1,7 @@
-﻿using Deskbar.Core.Domain;
+﻿using CSharpFunctionalExtensions;
+using Deskbar.Core.Abstractions;
+using Deskbar.Core.Control;
+using Deskbar.Core.Domain;
 using Deskbar.Core.Persistence;
 
 namespace Deskbar.Core.Tests;
@@ -43,17 +46,21 @@ public class ContainerPlacementTests
     const string LoadedDice = "seed.ts - dice-to-seed - Visual Studio Code";
     const string Bare = "Visual Studio Code";
 
-    WorkspaceManager Started(params WindowInfo[] alreadyOpen)
+    WorkspaceManager Started(params WindowInfo[] alreadyOpen) => Started(activator: null, alreadyOpen);
+
+    // With an activator, for the one test that ends processes (Restart all); the rest run as compatibility
+    // mode does, with none.
+    WorkspaceManager Started(IWindowActivator? activator, params WindowInfo[] alreadyOpen)
     {
         taskSpaces = new Workspace(Guid.NewGuid(), "TaskSpace", Guid.NewGuid());
         framework = new Workspace(Guid.NewGuid(), "framework", Guid.NewGuid());
         new[] { taskSpaces, framework }.ToList()
-            .ForEach(w => desktops.Desktops.Add(new Abstractions.DesktopInfo(w.DesktopId!.Value, w.Name)));
+            .ForEach(w => desktops.Desktops.Add(new DesktopInfo(w.DesktopId!.Value, w.Name)));
         desktops.CurrentDesktopId = framework.DesktopId!.Value; // where the reboot left him
         store.Stored = AppState.Empty with { Workspaces = [taskSpaces, framework] };
         monitor.InitialWindows.AddRange(alreadyOpen);
 
-        var manager = new WorkspaceManager(desktops, monitor, titles, store, ownProcessId: 4242);
+        var manager = new WorkspaceManager(desktops, monitor, titles, store, ownProcessId: 4242, activator: activator);
         Assert.True(manager.Start().IsSuccess);
         return manager;
     }
@@ -658,5 +665,59 @@ public class ContainerPlacementTests
         Retitled(monitor, Code(0x925, "build.cs - TaskSpaces - Visual Studio Code"));
 
         Assert.Equal(1, moves);
+    }
+
+    // --- restart all --------------------------------------------------------------------------
+    //
+    // Petre: "can you bring back all vscode windows as they are in workspaces, with a restart all button?"
+    // The layout as it stands is learned BEFORE the processes are ended, because a dead window has no desktop
+    // to read: the fake OS here forgets every placement the moment the app is ended, and the home is written
+    // all the same. Unlike the sweep, one look is enough and a window that merely opened here counts, since
+    // the click is the statement that this layout is the right one. Then the exe is started again bare, in
+    // its own folder, which is what lets VS Code restore its session.
+    [Fact]
+    public void Restart_learns_where_each_window_sits_before_ending_the_app_and_starts_it_bare()
+    {
+        var activator = new FakeActivator();
+        var manager = Started(activator);
+        Appears(monitor, Code(0x931, LoadedTaskSpaces));
+        Appears(monitor, Code(0x932, LoadedDice));
+        desktops.WindowPlacements[new WindowHandle(0x931)] = taskSpaces.DesktopId!.Value;
+        desktops.WindowPlacements[new WindowHandle(0x932)] = framework.DesktopId!.Value;
+        activator.WhenEnded = () => desktops.WindowPlacements.Clear();
+        var launched = new List<ProgramLaunch>();
+
+        var outcome = manager.RestartApp(new WindowHandle(0x931), launch =>
+        {
+            launched.Add(launch);
+            return Result.Success<int?>(1);
+        });
+
+        Assert.True(outcome.IsSuccess, outcome.IsFailure ? outcome.Error : "");
+        Assert.Equal(
+            [("TaskSpaces", taskSpaces.Id), ("dice-to-seed", framework.Id)],
+            store.Stored.ContainerHomes.Select(h => (h.Token, h.WorkspaceId)).ToList());
+        Assert.Equal([(new WindowHandle(0x931), true)], activator.Ended);
+        Assert.Equal([new WindowHandle(0x931)], activator.Awaited);
+        Assert.Equal(CodePath, Assert.Single(launched).Program);
+        Assert.Empty(launched.Single().Arguments);
+        Assert.Equal(@"C:\Users\p\AppData\Local\Programs\Microsoft VS Code", launched.Single().WorkingDirectory);
+    }
+
+    // A folder open in two workspaces at once teaches nothing, on a restart as on the sweep: there is no
+    // single answer, and the windows that come back are placed by whatever was already known.
+    [Fact]
+    public void Restart_does_not_learn_a_folder_that_is_open_in_two_workspaces()
+    {
+        var activator = new FakeActivator();
+        var manager = Started(activator);
+        Appears(monitor, Code(0x941, LoadedTaskSpaces));
+        Appears(monitor, Code(0x942, LoadedTaskSpaces));
+        desktops.WindowPlacements[new WindowHandle(0x941)] = taskSpaces.DesktopId!.Value;
+        desktops.WindowPlacements[new WindowHandle(0x942)] = framework.DesktopId!.Value;
+
+        Assert.True(manager.RestartApp(new WindowHandle(0x941), _ => Result.Success<int?>(1)).IsSuccess);
+
+        Assert.Empty(store.Stored.ContainerHomes);
     }
 }

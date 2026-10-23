@@ -54,11 +54,15 @@ public class FloatingBarPinsTests
 
     static TaskbarPin InstalledApp(string name, string appId) => new(name, appId, appId, null, []);
 
-    static FloatingBar Bar(ITaskbarPins? pins)
+    // `open` are windows already on the current desktop when the bar comes up, so a pin can have a window here.
+    static FloatingBar Bar(ITaskbarPins? pins, params WindowInfo[] open)
     {
         var desktops = new PulsingDesktops { CurrentId = Guid.NewGuid() };
         desktops.Desktops.Add(new DesktopInfo(desktops.CurrentId, "Work"));
-        var manager = new WorkspaceManager(desktops, new StubMonitor(), new StubTitles(), new StubStore());
+        var monitor = new StubMonitor();
+        monitor.Initial.AddRange(open);
+        open.ToList().ForEach(w => desktops.Placements[w.Handle] = desktops.CurrentId);
+        var manager = new WorkspaceManager(desktops, monitor, new StubTitles(), new StubStore());
         Assert.True(manager.Start().IsSuccess);
         var bar = new FloatingBar(manager) { Left = -32000, Top = -32000, SendShellKeys = _ => { }, Pins = pins };
         bar.ShowBar();
@@ -112,21 +116,40 @@ public class FloatingBarPinsTests
         bar.Close();
     });
 
-    // Petre: "i want it to always open a new window". The VS Code pin starts VS Code with --new-window, so a new
-    // window opens whatever VS Code's own setting says; any other pin starts as its shortcut stands.
+    const string CodeExe = @"C:\Users\me\AppData\Local\Programs\Microsoft VS Code\Code.exe";
+
+    // Petre: "i want it to always open a new window". While VS Code has a window somewhere, its pin starts VS
+    // Code with --new-window, so a new window opens whatever VS Code's own setting says; any other pin starts
+    // as its shortcut stands.
     [Fact]
-    public void The_vs_code_pin_always_asks_for_a_new_window() => StaThread.Run(() =>
+    public void The_vs_code_pin_asks_for_a_new_window_while_vs_code_has_one() => StaThread.Run(() =>
     {
         var pins = new FakePins(
-            Shortcut("Visual Studio Code", @"C:\Users\me\AppData\Local\Programs\Microsoft VS Code\Code.exe"),
+            Shortcut("Visual Studio Code", CodeExe),
             Shortcut("Obsidian", @"C:\Obsidian\Obsidian.exe", "md.obsidian"));
-        var bar = Bar(pins);
+        var bar = Bar(pins, Window(CodeExe));
 
         Pin(bar, "Visual Studio Code").RaiseEvent(new RoutedEventArgs(ButtonBase.ClickEvent));
         Pin(bar, "Obsidian").RaiseEvent(new RoutedEventArgs(ButtonBase.ClickEvent));
 
         Assert.Equal(["Visual Studio Code", "Obsidian"], pins.Launched);
         Assert.Equal(["--new-window", null], pins.LaunchedWith);
+        bar.Close();
+    });
+
+    // ...and from nothing, as the shortcut stands. Started with --new-window, VS Code opens one empty window
+    // in place of the session it had; started bare, it brings every window back. Petre: "when closing all
+    // vscode windows with taskkill, it used to offer me to restore them all, but not anymore, why not?"
+    [Fact]
+    public void The_vs_code_pin_starts_vs_code_bare_when_it_has_no_window() => StaThread.Run(() =>
+    {
+        var pins = new FakePins(Shortcut("Visual Studio Code", CodeExe));
+        var bar = Bar(pins);
+
+        Pin(bar, "Visual Studio Code").RaiseEvent(new RoutedEventArgs(ButtonBase.ClickEvent));
+
+        Assert.Equal(["Visual Studio Code"], pins.Launched);
+        Assert.Equal([null], pins.LaunchedWith);
         bar.Close();
     });
 

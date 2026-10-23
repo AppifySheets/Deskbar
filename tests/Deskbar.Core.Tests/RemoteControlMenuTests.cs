@@ -441,6 +441,42 @@ public class RemoteControlMenuTests
         Assert.True(manager.CloseAllOfApp(Code.Handle).IsFailure);
     }
 
+    // Restart all (Petre: "can you bring back all vscode windows as they are in workspaces, with a restart all
+    // button?"): every process of the exe ended and waited for, then the exe started again bare, in its own
+    // folder, so VS Code restores the windows it had. The launch is the composition root's, the one `start` uses.
+    [Fact]
+    public void Restart_app_ends_every_process_waits_for_them_and_starts_the_exe_again()
+    {
+        var manager = Started();
+        var launched = new List<ProgramLaunch>();
+        var control = new RemoteControl(manager, launch: program =>
+        {
+            launched.Add(program);
+            return Result.Success<int?>(900);
+        });
+
+        Ok(control.Execute(["restart-app", "0x10"]));
+
+        Assert.Equal([(Code.Handle, true)], activator.Ended);
+        Assert.Equal([Code.Handle], activator.Awaited);
+        Assert.Equal(@"C:\apps\Code.exe", Assert.Single(launched).Program);
+        Assert.Empty(launched.Single().Arguments);
+        Assert.Equal(@"C:\apps", launched.Single().WorkingDirectory);
+    }
+
+    // A build with no launcher refuses before ending anything: the processes gone and nothing started would
+    // be worse than either half alone.
+    [Fact]
+    public void Without_a_launcher_restart_is_refused_before_anything_is_ended()
+    {
+        var manager = Started();
+
+        var reply = Run(manager, "restart-app", "0x10");
+
+        Assert.Equal(ControlReply.Failed, reply.ExitCode);
+        Assert.Empty(activator.Ended);
+    }
+
     [Fact]
     public void A_handle_no_window_has_is_refused()
     {
@@ -527,7 +563,7 @@ public class RemoteControlMenuTests
             ["workspaces", "windows", "desktops", "create", "move", "rename", "add-child", "reorder", "fold",
              "unfold", "color", "delete", "switch", "group-create", "group-join", "group-leave", "group-rename",
              "group-color", "group-fold", "group-unfold", "group-reorder", "ungroup", "name-desktop", "rename-window", "rename-app", "rename-pattern",
-             "name-by-folder", "restore-title", "pin", "unpin", "close-window", "force-close", "close-all", "bar", "dump"],
+             "name-by-folder", "restore-title", "pin", "unpin", "close-window", "force-close", "close-all", "restart-app", "bar", "dump"],
             verb => Assert.Contains($"\n  {verb}", help));
     }
 }

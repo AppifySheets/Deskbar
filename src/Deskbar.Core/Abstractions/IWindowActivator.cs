@@ -52,5 +52,10 @@ public interface IWindowActivator
     // all vscode or edge processes"): an app like VS Code or Edge runs as a dozen processes, most with no
     // window, and ending only the windowed ones leaves the rest. Never this app's own process. A Result,
     // because a process running as administrator refuses a normal-level caller, and that is worth saying.
-    Result EndProcess(WindowHandle window, bool everyInstance);
+    //
+    // `awaitExit` holds the caller until the ended processes are gone, for a bounded time. Close all has
+    // nothing to do afterwards and does not ask for it; Restart all must: an editor started again while
+    // its old main process is still dying finds that process's single-instance pipe, hands it the request
+    // and exits, and nothing opens (see WorkspaceManager.RestartApp).
+    Result EndProcess(WindowHandle window, bool everyInstance, bool awaitExit);
 }

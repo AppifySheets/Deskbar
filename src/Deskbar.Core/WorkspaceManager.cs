@@ -2640,29 +2640,41 @@ public sealed class WorkspaceManager(
         NoteWhereOpenedWindowsAre();
         var onlyOpenedThere = State.OpenedWindows.Select(opened => opened.Window).ToHashSet();
 
-        var facts = knownWindows.Values
-            .Where(window => !IsOurs(window.Handle) && containerOf.ContainsKey(window.Handle))
-            .Where(window => !onlyOpenedThere.Contains(window.Handle.Value))
-            .Select(window => (Window: window, Container: containerOf[window.Handle], Holder: WorkspaceHolding(window)))
-            .Where(fact => fact.Holder is { } id && State.Workspaces.Any(w => w.Id == id))
-            .Select(fact => (fact.Window, fact.Container, Workspace: fact.Holder!.Value))
-            .ToList();
+        var facts = Seats(window => !onlyOpenedThere.Contains(window.Handle.Value));
 
         // Read BEFORE this sweep's positions overwrite it, and written for every window whether or not
         // it is settled, so the next sweep can ask the same question.
         var settled = facts
             .Where(fact => containerSeenIn.TryGetValue(fact.Window.Handle, out var before) && before == fact.Workspace)
             .ToList();
-        facts.ForEach(fact => containerSeenIn[fact.Window.Handle] = fact.Workspace);
+        facts.ToList().ForEach(fact => containerSeenIn[fact.Window.Handle] = fact.Workspace);
         containerSeenIn.Keys.Except(facts.Select(fact => fact.Window.Handle)).ToList()
             .ForEach(handle => containerSeenIn.Remove(handle));
 
-        var learned = settled
+        Learn(settled);
+    }
+
+    // Where the windows that pass `among` sit right now: each with the folder it has open and the workspace
+    // holding it. Only windows with both; a bare editor, or a window on a desktop no workspace owns, has
+    // nothing to say about where a folder lives.
+    IReadOnlyList<(WindowInfo Window, string Container, Guid Workspace)> Seats(Func<WindowInfo, bool> among) =>
+        knownWindows.Values
+            .Where(window => !IsOurs(window.Handle) && containerOf.ContainsKey(window.Handle) && among(window))
+            .Select(window => (Window: window, Container: containerOf[window.Handle], Holder: WorkspaceHolding(window)))
+            .Where(fact => fact.Holder is { } id && State.Workspaces.Any(w => w.Id == id))
+            .Select(fact => (fact.Window, fact.Container, Workspace: fact.Holder!.Value))
+            .ToList();
+
+    // Write the homes these seats agree on, for the sweep (SnapshotContainerHomes) and for Restart all
+    // (RestartApp). Windows of one folder that disagree about where they live teach nothing at all, and a
+    // home already held is not rewritten: no write, no pulse, which on the sweep is the overwhelmingly
+    // common case.
+    void Learn(IReadOnlyList<(WindowInfo Window, string Container, Guid Workspace)> seats)
+    {
+        var learned = seats
             .GroupBy(fact => (fact.Window.ProcessName.ToLowerInvariant(), fact.Container.ToLowerInvariant()))
-            // Windows of one folder that disagree about where they live teach nothing at all.
             .Where(group => group.Select(fact => fact.Workspace).Distinct().Count() == 1)
             .Select(group => (group.First().Window.ProcessName, group.First().Container, group.First().Workspace))
-            // Already what we hold, which is the overwhelmingly common case: no write, no pulse.
             .Where(home => !State.ContainerHomes.Any(existing =>
                 IsHomeFor(existing, home.ProcessName, home.Container) && existing.WorkspaceId == home.Workspace))
             .ToList();
@@ -3102,12 +3114,45 @@ public sealed class WorkspaceManager(
     // Compatibility mode has no activator, the same refusal the delete-with-windows path gives.
     public Result CloseWindow(WindowHandle window) => WithActivator(a => a.Close(window));
 
-    public Result ForceCloseWindow(WindowHandle window) => WithActivator(a => a.EndProcess(window, everyInstance: false));
+    public Result ForceCloseWindow(WindowHandle window) => WithActivator(a => a.EndProcess(window, everyInstance: false, awaitExit: false));
 
-    public Result CloseAllOfApp(WindowHandle window) => WithActivator(a => a.EndProcess(window, everyInstance: true));
+    public Result CloseAllOfApp(WindowHandle window) => WithActivator(a => a.EndProcess(window, everyInstance: true, awaitExit: false));
 
     Result WithActivator(Func<IWindowActivator, Result> act) =>
         activator is null ? Result.Failure("This build cannot close windows.") : act(activator);
+
+    // Restart all. Petre, once a taskkill of VS Code stopped bringing its windows back: "can you bring back
+    // all vscode windows as they are in workspaces, with a restart all button?" Three steps, and the ORDER
+    // is the point:
+    //
+    //   1. Learn where every window of the app sits, by the folder it has open. A kill forgets a window's
+    //      desktop the instant the window dies, and the windows that come back are new handles that only
+    //      the folder tier can place, so the layout as it stands goes into ContainerHomes first. "As they
+    //      are" is the brief, so unlike the 5s snapshot this does not ask a position to hold still and does
+    //      not skip a window that opened under watch and was never moved: the click is the statement that
+    //      this layout is the right one. A folder open in two workspaces still teaches nothing.
+    //   2. End every process of the exe and WAIT for them to go (IWindowActivator.EndProcess): an editor
+    //      started while its old copy is still dying hands the request to that copy's single-instance pipe
+    //      and exits, and nothing opens.
+    //   3. Start the exe bare, in its own folder, through the launch the caller hands in: ProgramStarter,
+    //      the one `start` uses, so Deskbar still starts nothing except at a caller's request. Bare rather
+    //      than --new-window, because on a first start that flag forces one empty window in place of the
+    //      session (see FloatingBar.OpenPin). VS Code saves its window list whenever a window loses focus,
+    //      so a kill loses nothing and the bare start brings every window back; a browser restores its
+    //      session the same way; anything else starts fresh.
+    //
+    // A window whose exe path is unknown (an elevated process) cannot be started again, and says so before
+    // anything is ended.
+    public Result RestartApp(WindowHandle window, Func<Control.ProgramLaunch, Result<int?>> launch)
+    {
+        if (!knownWindows.TryGetValue(window, out var known) || known.ProcessPath is not { } path)
+            return Result.Failure("That window's program is not known, so it cannot be started again. It may be running as administrator.");
+        if (activator is null) return Result.Failure("This build cannot close windows.");
+
+        Learn(Seats(w => w.ProcessName.Equals(known.ProcessName, StringComparison.OrdinalIgnoreCase)));
+        return activator.EndProcess(window, everyInstance: true, awaitExit: true)
+            .Bind(() => (Result)launch(new Control.ProgramLaunch(path, [], Path.GetDirectoryName(path))));
+    }
 
     public Result RenameWindow(WindowHandle window, string input) =>
         RenamePattern.IsWildcard(input)

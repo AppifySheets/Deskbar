@@ -140,12 +140,20 @@ public sealed class FakeActivator : IWindowActivator
         return Result.Success();
     }
 
-    // Every EndProcess call, with whether it was asked for every instance of the exe.
+    // Every EndProcess call, with whether it was asked for every instance of the exe, and separately the
+    // calls that asked to wait for the processes to be gone.
     public List<(WindowHandle Window, bool EveryInstance)> Ended { get; } = [];
+    public List<WindowHandle> Awaited { get; } = [];
 
-    public Result EndProcess(WindowHandle window, bool everyInstance)
+    // What the test says happens to the world when the processes go. The real OS forgets a dead window's
+    // desktop at once, so a test can make this clear the placements and prove that a caller read them first.
+    public Action? WhenEnded { get; set; }
+
+    public Result EndProcess(WindowHandle window, bool everyInstance, bool awaitExit)
     {
         Ended.Add((window, everyInstance));
+        if (awaitExit) Awaited.Add(window);
+        WhenEnded?.Invoke();
         return Result.Success();
     }
 }

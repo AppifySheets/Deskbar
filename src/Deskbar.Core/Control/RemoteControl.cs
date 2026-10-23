@@ -86,6 +86,7 @@ public sealed partial class RemoteControl(WorkspaceManager manager, Func<bool, R
         ("close-window", [var hwnd]) => CloseWindow(hwnd),
         ("force-close", [var hwnd]) => ForceClose(hwnd),
         ("close-all", [var hwnd]) => CloseAll(hwnd),
+        ("restart-app", [var hwnd]) => RestartApp(hwnd),
 
         ("bar", [var state]) => Bar(state),
 

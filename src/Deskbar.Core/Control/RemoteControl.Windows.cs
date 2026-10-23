@@ -131,6 +131,14 @@ public sealed partial class RemoteControl
 
     ControlReply CloseAll(string hwnd) => OnWindow(hwnd, w => manager.CloseAllOfApp(w.Handle));
 
+    // Restart all. The launch is the composition root's (ProgramStarter), the same one `start` uses, and a
+    // build without one refuses up front: ending every process and then starting nothing would be the worst
+    // of both halves.
+    ControlReply RestartApp(string hwnd) =>
+        launch is null
+            ? ControlReply.Fail("This build cannot start programs, so it cannot restart one.")
+            : OnWindow(hwnd, w => manager.RestartApp(w.Handle, launch));
+
     ControlReply Pin(string hwnd, bool pin) =>
         OnWindow(hwnd, w => pin ? manager.PinWindow(w.Handle) : manager.UnpinWindow(w.Handle));
 

@@ -6845,6 +6845,18 @@ public partial class FloatingBar : Window
         var all = new MenuItem { Header = $"Close all {process} processes", Icon = MenuGlyph("⊘") };
         all.Click += (_, _) => Report(manager.CloseAllOfApp(row.Window.Handle));
         menu.Items.Add(all);
+
+        // Restart all. Petre, once a taskkill of VS Code stopped bringing its windows back (the pin started it
+        // with --new-window, which skips VS Code's own session restore): "can you bring back all vscode windows
+        // as they are in workspaces, with a restart all button?" Close all, a wait for the processes to be gone,
+        // then the exe started again bare. VS Code restores the windows it had, since it saves its window list
+        // every time a window loses focus and a kill loses nothing, and the folder tier puts each one back in
+        // its workspace, which RestartApp learns from where they sit before ending them. Offered for every app,
+        // because a browser restores its session the same way and anything else starts fresh, which is still
+        // what the label says. The launch is ProgramStarter's, the one `start` uses.
+        var restart = new MenuItem { Header = $"Restart all {process} windows", Icon = MenuGlyph("⟳") };
+        restart.Click += (_, _) => Report(manager.RestartApp(row.Window.Handle, Deskbar.Windows.Control.ProgramStarter.Start));
+        menu.Items.Add(restart);
         menu.Opened += (_, _) =>
         {
             var count = ProcessCount(process);

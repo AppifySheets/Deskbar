@@ -170,7 +170,9 @@ public class FloatingBarRebuildTests
     //
     // The menu was naming ONLY until Petre: "right clicking an app should have close and force close",
     // "also, close all", "so i can kill all vscode or edge processes". So naming, then closing below a
-    // separator; drag still expresses movement and pinning.
+    // separator; drag still expresses movement and pinning. "Restart all" closes the closing group: it is
+    // Close all followed by starting the exe again ("can you bring back all vscode windows as they are in
+    // workspaces, with a restart all button?").
     [Fact]
     public void Icon_right_click_menu_offers_naming_then_closing() => StaThread.Run(() =>
     {
@@ -182,7 +184,7 @@ public class FloatingBarRebuildTests
         Assert.NotNull(menu);
         Assert.Equal(
             ["Rename this window…", "Rename by title pattern…", "Rename all rdm windows…", "Restore title",
-             "Close", "Force close (rdm)", "Close all rdm processes"],
+             "Close", "Force close (rdm)", "Close all rdm processes", "Restart all rdm windows"],
             menu.Items.OfType<MenuItem>().Select(item => (string)item.Header));
         // Never renamed, so Restore title is visible-but-unavailable rather than absent
         // (mirrors WindowGroupsView.RunningMenu; a menu whose shape shifts per icon is

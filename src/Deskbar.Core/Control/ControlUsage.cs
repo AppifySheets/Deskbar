@@ -64,6 +64,10 @@ public static class ControlUsage
             new("close-window", "<hwnd>", "Close (asks the window to close, as its X does)"),
             new("force-close", "<hwnd>", "Force close (ends the process that owns the window)"),
             new("close-all", "<hwnd>", "Close all <app> processes (ends every process running the window's exe)"),
+            new("restart-app", "<hwnd>",
+                "Restart all <app> windows (ends every process running the window's exe, waits for them to go, and\n"
+                + "      starts the exe again bare; VS Code and a browser then restore their own windows, and the folder\n"
+                + "      each editor window has open puts it back in the workspace it was in)"),
         ]),
         new("Bar", [
             new("bar", "minimize|restore|dock|undock|across|edge",

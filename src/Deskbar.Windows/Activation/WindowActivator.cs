@@ -105,7 +105,7 @@ public sealed class WindowActivator : IWindowActivator
     // purpose: a File Explorer window belongs to explorer.exe, and its "tree" is every app started from the
     // shell. Chromium and Electron helpers notice their browser process has gone and exit on their own; Close
     // all takes care of the rest by exe name.
-    public Result EndProcess(WindowHandle window, bool everyInstance)
+    public Result EndProcess(WindowHandle window, bool everyInstance, bool awaitExit)
     {
         GetWindowThreadProcessId(window.Value, out var pid);
         if (pid == 0) return Result.Failure("That window has already closed.");
@@ -125,12 +125,37 @@ public sealed class WindowActivator : IWindowActivator
         var targets = (everyInstance ? System.Diagnostics.Process.GetProcessesByName(name) : [owner])
             .Where(p => p.Id != Environment.ProcessId)
             .ToList();
-        var refused = targets.Count(p => !TryKill(p));
+        var ended = targets.Where(TryKill).ToList();
+        var refused = targets.Count - ended.Count;
+        if (awaitExit) AwaitExit(ended);
         targets.ForEach(p => p.Dispose());
         if (everyInstance) owner.Dispose();
         return refused == 0
             ? Result.Success()
             : Result.Failure($"{refused} of {targets.Count} {name} processes could not be ended. They may be running as administrator.");
+    }
+
+    // One deadline for all of them, three seconds, on the UI thread. Kill is TerminateProcess, which a
+    // process cannot refuse once it has been accepted, so this waits only for the kernel to tear the
+    // processes down, milliseconds each; the deadline is for the day that assumption is wrong, and a
+    // process still there when it passes has already been counted as refused by the caller's Result.
+    static void AwaitExit(List<System.Diagnostics.Process> ended)
+    {
+        var deadline = Environment.TickCount64 + 3000;
+        ended.ForEach(p => TryWait(p, (int)Math.Max(0, deadline - Environment.TickCount64)));
+    }
+
+    // A process that is already gone, or that we could never wait on, is not a reason to stop waiting on the rest.
+    static void TryWait(System.Diagnostics.Process process, int milliseconds)
+    {
+        try
+        {
+            process.WaitForExit(milliseconds);
+        }
+        catch (SystemException)
+        {
+            // Win32Exception (no handle to wait on) or InvalidOperationException (no process behind it): gone either way.
+        }
     }
 
     // True when the process is gone afterwards, including when it had already exited.

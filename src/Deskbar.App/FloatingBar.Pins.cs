@@ -57,6 +57,10 @@ public partial class FloatingBar
     // The windows each pin has in the current workspace, from the last overview, for its click.
     Dictionary<string, IReadOnlyList<WindowHandle>> pinWindowsHere = [];
 
+    // The pins with a window ANYWHERE, this workspace or another: what decides whether an editor's pin asks
+    // its running copy for a new window or starts the app from nothing (OpenPin).
+    HashSet<string> pinsWithAWindow = [];
+
     // Where the pins come from. Set by the composition root (ShellTaskbarPins); left unset, as every test but
     // the pin ones leaves it, there is no dock line.
     public ITaskbarPins? Pins
@@ -241,13 +245,21 @@ public partial class FloatingBar
     // second start with no arguments opens a window only while VS Code's window.openWithoutArgumentsInNewWindow
     // says so (measured: with it at its default, a plain start and --new-window each opened one), and the flag
     // makes that independent of the setting.
+    //
+    // ...but only while VS Code has a window somewhere. Started with --new-window from NOTHING, VS Code opens
+    // one empty window instead of the session it had: its -n means "force an empty window" on a first start
+    // (electron-main/app.ts passes forceEmpty with it), so the windows it would have restored never come
+    // back. That is what Petre lost when the flag arrived: "when closing all vscode windows with taskkill, it
+    // used to offer me to restore them all, but not anymore, why not?" A bare start of a VS Code that is not
+    // running restores every window it had, and the folder tier puts each one back in its workspace.
     void OpenPin(TaskbarPin pin, bool newWindow)
     {
         var here = pinWindowsHere.GetValueOrDefault(pin.ParsingName) ?? [];
         newWindow |= IsBrowser(pin) || IsEditor(pin);
+        var arguments = IsEditor(pin) && pinsWithAWindow.Contains(pin.ParsingName) ? "--new-window" : null;
         var outcome = !newWindow && here.Count > 0
             ? manager.ToggleWindow(here[0], activator)
-            : pins?.Launch(pin, IsEditor(pin) ? "--new-window" : null) ?? Result.Success();
+            : pins?.Launch(pin, arguments) ?? Result.Success();
         if (ClickTrace.On)
             ClickTrace.Write($"pins: open {pin.Name} newWindow={newWindow} here={here.Count} ok={outcome.IsSuccess}{(outcome.IsFailure ? $" error={outcome.Error}" : "")}");
         Report(outcome);
@@ -298,6 +310,10 @@ public partial class FloatingBar
 
         pinWindowsHere = shownPins.ToDictionary(p => p.ParsingName,
             p => (IReadOnlyList<WindowHandle>)here.Where(w => PinMatches(p, w, AppIdOf(w), claimed)).Select(w => w.Handle).ToList());
+        pinsWithAWindow = shownPins
+            .Where(p => here.Concat(elsewhere).Any(w => PinMatches(p, w, AppIdOf(w), claimed)))
+            .Select(p => p.ParsingName)
+            .ToHashSet();
 
         shownPins.ToList().ForEach(pin =>
         {
