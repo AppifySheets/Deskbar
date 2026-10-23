@@ -384,7 +384,7 @@ public class FloatingBarShellTests(ITestOutputHelper output)
         var headers = root.ContextMenu.Items.OfType<MenuItem>().Select(i => (string)i.Header).Where(h => h != "Dock across both screens").ToList();
         output.WriteLine(string.Join(" | ", headers));
 
-        Assert.Equal(["New workspace…", "Window list at the bottom of the bar", "Dock to screen edge", "Minimize bar", "Task Manager"], headers);
+        Assert.Equal(["New workspace…", "Window list at the bottom of the bar", "Whole window lines bring the window up", "Dock to screen edge", "Minimize bar", "Task Manager"], headers);
         bar.Close();
     });
 
@@ -411,7 +411,7 @@ public class FloatingBarShellTests(ITestOutputHelper output)
         bar.FillBarMenu(menu);
         var items = menu.Items.OfType<MenuItem>().ToList();
         output.WriteLine(string.Join(" | ", items.Select(i => (string)i.Header)));
-        Assert.Equal(["New workspace…", "Window list at the bottom of the bar", "Dock to screen edge", "Minimize bar", "Task Manager", "Manage…", "Check for updates…", "Save debug dump", "Exit"],
+        Assert.Equal(["New workspace…", "Window list at the bottom of the bar", "Whole window lines bring the window up", "Dock to screen edge", "Minimize bar", "Task Manager", "Manage…", "Check for updates…", "Save debug dump", "Exit"],
             items.Select(i => (string)i.Header).Where(h => h != "Dock across both screens"));
 
         items.Single(i => (string)i.Header == "Task Manager").RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));

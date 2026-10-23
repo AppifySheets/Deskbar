@@ -89,6 +89,7 @@ public sealed partial class RemoteControl(WorkspaceManager manager, Func<bool, R
         ("restart-app", [var hwnd]) => RestartApp(hwnd),
 
         ("bar", [var state]) => Bar(state),
+        ("window-lines", [var mode]) => WindowLines(mode),
 
         // The file is the answer, not a window: whoever asked through the pipe reads it back from the path.
         ("dump", []) => dump is null

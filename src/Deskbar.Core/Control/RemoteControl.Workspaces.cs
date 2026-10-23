@@ -131,6 +131,14 @@ public sealed partial class RemoteControl
         _ => ControlReply.Fail(ControlUsage.LineFor("bar")),
     };
 
+    // The split window lines setting (AppState.SplitWindowLines), the remote twin of the menu item that flips it.
+    ControlReply WindowLines(string mode) => mode.ToLowerInvariant() switch
+    {
+        "split" => Reply(manager.SetSplitWindowLines(true), () => new { windowLines = "split" }),
+        "whole" => Reply(manager.SetSplitWindowLines(false), () => new { windowLines = "whole" }),
+        _ => ControlReply.Fail(ControlUsage.LineFor("window-lines")),
+    };
+
     // The palette's names, a #RRGGBB of your own (what the Custom… picker stores), "none" for the
     // Transparent entry, or "default" for By position, which is the absence of a colour.
     static Result<string?> ParseColour(string raw) =>

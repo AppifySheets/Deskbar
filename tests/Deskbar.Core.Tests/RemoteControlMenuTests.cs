@@ -563,7 +563,27 @@ public class RemoteControlMenuTests
             ["workspaces", "windows", "desktops", "create", "move", "rename", "add-child", "reorder", "fold",
              "unfold", "color", "delete", "switch", "group-create", "group-join", "group-leave", "group-rename",
              "group-color", "group-fold", "group-unfold", "group-reorder", "ungroup", "name-desktop", "rename-window", "rename-app", "rename-pattern",
-             "name-by-folder", "restore-title", "pin", "unpin", "close-window", "force-close", "close-all", "restart-app", "bar", "dump"],
+             "name-by-folder", "restore-title", "pin", "unpin", "close-window", "force-close", "close-all", "restart-app", "bar",
+             "window-lines", "dump"],
             verb => Assert.Contains($"\n  {verb}", help));
+    }
+
+    // The split window lines setting's remote twin (AppState.SplitWindowLines). Petre: "make this a setting,
+    // enabled by default": a fresh state is split, `whole` turns it off, `split` back on, anything else is a usage
+    // error that changes nothing.
+    [Fact]
+    public void Window_lines_turns_the_split_off_and_on()
+    {
+        var manager = Started();
+        Assert.True(manager.State.SplitWindowLines);
+
+        Ok(Run(manager, "window-lines", "whole"));
+        Assert.False(manager.State.SplitWindowLines);
+
+        Ok(Run(manager, "window-lines", "split"));
+        Assert.True(manager.State.SplitWindowLines);
+
+        Assert.Equal(ControlReply.Failed, Run(manager, "window-lines", "sideways").ExitCode);
+        Assert.True(manager.State.SplitWindowLines);
     }
 }

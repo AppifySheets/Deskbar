@@ -189,6 +189,16 @@ public sealed record AppState(
     // The reading every caller wants, kept under its old name so they did not all have to change. Not stored.
     [JsonIgnore] public bool ExpandCurrentWorkspace => !WindowListAtBottom;
 
+    // Whether an expanded bar's window lines are SPLIT for the click: the left half brings the window up, the
+    // right half switches to the workspace (the bar's LineOf). Petre: "just don't activate it on the right half",
+    // then "make this a setting, enabled by default". Stored as its NEGATION, for the reason WindowListAtBottom
+    // is: false is what every existing state.json reads for a key it does not have, so the split is on for
+    // every install, new or old, until someone turns it off.
+    public bool WholeWindowLines { get; init; }
+
+    // The reading the bar wants. Not stored.
+    [JsonIgnore] public bool SplitWindowLines => !WholeWindowLines;
+
     // Petre: "i want it configurable" -- the Alt+Tab-style workspace switcher's chord.
     //
     // Stored as the TEXT the user typed, not as a parsed Chord: state.json stays readable

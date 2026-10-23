@@ -285,6 +285,30 @@ public class FloatingBarLaneShadeTests(ITestOutputHelper output)
         Assert.Empty(bar.LitWashes(row));
     });
 
+    // Petre: "make this a setting, enabled by default". Off, a window line is the window end to end again: a
+    // click right of its middle lands on the window, and no workspace zone lights on it.
+    [Fact]
+    public void With_the_split_off_a_window_line_is_the_window_end_to_end() => StaThread.Run(() =>
+    {
+        using var bar = TwoScreens(busyIcons: 3, standOnBusy: true, expandRow: true, longTitles: true, wholeLines: true);
+        var row = bar.RowContainer("Busy");
+        static bool Inside(DependencyObject? node, DependencyObject ancestor)
+        {
+            for (var at = node; at is not null; at = VisualTreeHelper.GetParent(at))
+                if (ReferenceEquals(at, ancestor)) return true;
+            return false;
+        }
+
+        row.RaiseEvent(new System.Windows.Input.MouseEventArgs(System.Windows.Input.Mouse.PrimaryDevice, 0) { RoutedEvent = UIElement.MouseEnterEvent });
+        bar.Icons(row).ForEach(w =>
+        {
+            var at = w.TransformToAncestor(row).TransformBounds(new Rect(w.RenderSize));
+            var hit = row.InputHitTest(new Point(at.Left + at.Width * 0.8, at.Top + at.Height / 2)) as DependencyObject;
+            Assert.True(Inside(hit, w), "the whole line should be the window");
+            Assert.DoesNotContain(bar.LitWashes(row), wash => wash.TransformToAncestor(row).TransformBounds(new Rect(wash.RenderSize)).IntersectsWith(Rect.Inflate(at, -1, -1)));
+        });
+    });
+
     // Petre: "can we try to recreate the actual taskbar in the workspace?", "with window titles, vertically
     // arranged", "active workspace only", then "same as it is now but at the bottom". The workspace you
     // are on is listed at the bottom of the bar, one window per line in its screen's column, each with its
@@ -604,7 +628,8 @@ public class FloatingBarLaneShadeTests(ITestOutputHelper output)
     // `expandRow` turns on AppState.ExpandCurrentWorkspace: the current workspace's own row expands into
     // the titled list instead of the list sitting at the bottom of the bar.
     // `longTitles` gives every window a title far longer than any line, so the titled list has to trim them.
-    static Bar TwoScreens(int busyIcons, bool oneWithNoMonitor = false, bool everythingOnOneScreen = false, bool standOnBusy = false, bool withPinned = false, bool expandRow = false, bool longTitles = false)
+    // `wholeLines` turns the split window lines setting off (AppState.WholeWindowLines).
+    static Bar TwoScreens(int busyIcons, bool oneWithNoMonitor = false, bool everythingOnOneScreen = false, bool standOnBusy = false, bool withPinned = false, bool expandRow = false, bool longTitles = false, bool wholeLines = false)
     {
         var busyDesktop = Guid.NewGuid();
         var emptyDesktop = Guid.NewGuid();
@@ -659,6 +684,7 @@ public class FloatingBarLaneShadeTests(ITestOutputHelper output)
                 Workspaces = [busy, empty],
                 FloatingBar = new FloatingBarState(0, 0, true) { Width = 160 },
                 WindowListAtBottom = !expandRow,
+                WholeWindowLines = wholeLines,
             },
         };
         var manager = new WorkspaceManager(desktops, monitor, new StubTitles(), store, screenLayout: screens);

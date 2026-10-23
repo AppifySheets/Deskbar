@@ -70,6 +70,22 @@ public sealed class JsonPersistenceStoreTests : IDisposable
         Assert.True(loaded.ExpandCurrentWorkspace);
     }
 
+    // Petre: "make this a setting, enabled by default". A file written before the setting existed has no key
+    // for it and must load with the split ON, which is why it is stored as its negation (AppState.WholeWindowLines);
+    // turning it off is remembered.
+    [Fact]
+    public void Window_lines_are_split_by_default_and_whole_is_remembered()
+    {
+        Directory.CreateDirectory(dir);
+        File.WriteAllText(Path.Combine(dir, "state.json"),
+            """{"Workspaces":[],"WorkspaceRules":[],"RenameRules":[],"Inventory":{}}""");
+        Assert.True(new JsonPersistenceStore(dir).Load().Value.SplitWindowLines);
+
+        var store = new JsonPersistenceStore(dir);
+        Assert.True(store.Save(AppState.Empty with { WholeWindowLines = true }).IsSuccess);
+        Assert.False(store.Load().Value.SplitWindowLines);
+    }
+
     // Choosing the bottom list is still remembered, under its new name.
     [Fact]
     public void The_bottom_list_roundtrips_when_chosen()
