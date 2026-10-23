@@ -2668,14 +2668,15 @@ public partial class FloatingBar : Window
 
                 // A TITLED line is split for the CLICK, not for the text: its left part is the window, its
                 // right side the workspace. Petre: "let's also have only the left part of the horizontal bar
-                // clickable", "right side activating the workspace bar". The right side is the right HALF of the
-                // line. A third was tried first, from an earlier "maybe not the entire right side half", and
-                // settled the other way once he had it under the pointer: "just don't activate it on the right
-                // half". An expanded bar is one window per line, each filling its column, so before this every
-                // click on it picked a window.
+                // clickable", "right side activating the workspace bar". The right side is the last THIRD of the
+                // line, the window the other two. It went round once: a third first, from "maybe not the entire
+                // right side half"; then half, "just don't activate it on the right half" (2.1.40); then back,
+                // living with the half: "maybe a third of the line is the bar, rest is the app itself". An
+                // expanded bar is one window per line, each filling its column, so before the split every click
+                // on it picked a window.
                 //
                 // The title still runs the whole width of the line: the window's button stays stretched (see
-                // Titled), and the workspace's half is a transparent zone laid OVER the button's right end.
+                // Titled), and the workspace's third is a transparent zone laid OVER the button's right end.
                 // Petre, of a version that trimmed the title at two thirds: "i want to see the entire width of
                 // the caption", and earlier of the half split, "it still shows the app's text, but clicking
                 // right side of the bar activates the bar, not that particular app". The zone is the topmost
@@ -2703,7 +2704,8 @@ public partial class FloatingBar : Window
                     };
                     washes.Add(workspaceZone);
                     var split = new Grid();
-                    split.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+                    // Two thirds the window's, one third the workspace's.
+                    split.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(2, GridUnitType.Star) });
                     split.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
                     Grid.SetColumnSpan(laneContent, 2);
                     Grid.SetColumn(workspaceZone, 1);
@@ -5819,7 +5821,7 @@ public partial class FloatingBar : Window
         button.Content = line;
         // The stretch variant of the bare template, so the line fills the column and the title has its
         // width to trim against; the centring one would size the button to the whole title and clip it.
-        // Stretched across the WHOLE line, the workspace's half included: that half is a click zone laid
+        // Stretched across the WHOLE line, the workspace's third included: that third is a click zone laid
         // over the button's right end (see the titled split in LineOf), so the title reads to the line's end.
         button.Template = BareStretchButton;
         button.HorizontalAlignment = HorizontalAlignment.Stretch;
@@ -6764,7 +6766,7 @@ public partial class FloatingBar : Window
     void AddSplitItem(Action<string, string, Action> add)
     {
         var split = manager.State.SplitWindowLines;
-        add("◧", split ? "Whole window lines bring the window up" : "Right half of window lines switches workspace",
+        add("◧", split ? "Whole window lines bring the window up" : "Right third of window lines switches workspace",
             () => Report(manager.SetSplitWindowLines(!split)));
     }
 

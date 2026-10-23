@@ -73,7 +73,7 @@ public static class ControlUsage
             new("bar", "minimize|restore|dock|undock|across|edge",
                 "Minimize bar, or bring it back; turn the Dock to screen edge setting on or off; dock across the line between two screens, or back to one screen's edge"),
             new("window-lines", "split|whole",
-                "Right half of window lines switches workspace, or Whole window lines bring the window up"),
+                "Right third of window lines switches workspace, or Whole window lines bring the window up"),
         ]),
         new("Diagnostics", [
             new("dump", "", "Save debug dump: write a diagnostics file (screens, the bar, every window in z-order) and print its path"),

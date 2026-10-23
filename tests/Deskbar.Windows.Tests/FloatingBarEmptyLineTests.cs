@@ -33,7 +33,7 @@ public class FloatingBarEmptyLineTests(ITestOutputHelper output)
         var lit = Lit();
         lit.ForEach(b => output.WriteLine($"lit {b.ActualWidth:0}x{b.ActualHeight:0}"));
 
-        // Every empty line lights across the whole line, not only the window line's right half.
+        // Every empty line lights across the whole line, not only the window line's right third.
         var fullWidth = lit.Max(b => b.ActualWidth);
         Assert.True(lit.Count(b => b.ActualWidth >= fullWidth - 1) >= 4, "each empty line should light across its width");
     });

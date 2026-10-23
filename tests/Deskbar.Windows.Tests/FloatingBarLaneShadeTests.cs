@@ -226,9 +226,9 @@ public class FloatingBarLaneShadeTests(ITestOutputHelper output)
     // An expanded bar's window lines are SPLIT for the click: the left part is the window, the right side the
     // workspace. Petre: "let's also have only the left part of the horizontal bar clickable", "right side
     // activating the workspace bar", after "maybe not the entire right side half", and then "i want to see the
-    // entire width of the caption", "just don't activate it on the right half". So the title still runs the
-    // whole line, and the right half of the line is
-    // a zone laid over it: a click there lands on the zone, not the window, it lights on hover, goes dark with
+    // entire width of the caption", "just don't activate it on the right half", and then "maybe a third of the
+    // line is the bar, rest is the app itself". So the title still runs the whole line, and the right third of
+    // the line is a zone laid over it: a click there lands on the zone, not the window, it lights on hover, goes dark with
     // the pointer on a window, and lights on the current workspace too ("including for the currently active
     // bar"). The current bar's caption still does not change (see the test above).
     [Fact]
@@ -262,10 +262,10 @@ public class FloatingBarLaneShadeTests(ITestOutputHelper output)
             // The window's button still spans the whole line, so its title can run to the end of it...
             var lane = (FrameworkElement)VisualTreeHelper.GetParent(VisualTreeHelper.GetParent(w));
             Assert.True(at.Width > BoundsIn(lane, row).Width * 0.9, "the window should still span its line");
-            // ...but a click just right of its middle lands on the workspace's zone, and one just left of it on
-            // the window: the split is at half.
-            var right = row.InputHitTest(new Point(at.Left + at.Width * 0.55, at.Top + at.Height / 2)) as DependencyObject;
-            var left = row.InputHitTest(new Point(at.Left + at.Width * 0.4, at.Top + at.Height / 2)) as DependencyObject;
+            // ...but a click just right of two thirds lands on the workspace's zone, and one just left of it (and
+            // right of the middle, where the half split put its seam) on the window: the split is at two thirds.
+            var right = row.InputHitTest(new Point(at.Left + at.Width * 0.72, at.Top + at.Height / 2)) as DependencyObject;
+            var left = row.InputHitTest(new Point(at.Left + at.Width * 0.6, at.Top + at.Height / 2)) as DependencyObject;
             Assert.False(Inside(right, w), "the right side should not reach the window");
             Assert.Contains(lit, wash => ReferenceEquals(wash, right));
             Assert.True(Inside(left, w), "the left part should be the window");
