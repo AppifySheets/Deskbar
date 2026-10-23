@@ -3476,6 +3476,13 @@ public sealed class WorkspaceManager(
             ? Result.Success()
             : Result.Success().Tap(() => Persist(State with { WindowListAtBottom = !expand }));
 
+    // Whether an expanded bar's window lines split for the click (AppState.SplitWindowLines). A no-op when
+    // unchanged, like the setting above.
+    public Result SetSplitWindowLines(bool split) =>
+        State.SplitWindowLines == split
+            ? Result.Success()
+            : Result.Success().Tap(() => Persist(State with { WholeWindowLines = !split }));
+
     // --- overview / switcher-facing operations -----------------------------------
 
     // Ground truth for "which workspace is this window in": ASK THE OS which desktop

@@ -2528,6 +2528,14 @@ public partial class FloatingBar : Window
         else
             runs.ForEach(run => lanes.Add((run[0].MonitorRank.GetValueOrDefault(0), run[0].Monitor, run)));
 
+        // An EMPTY line with no screen lanes (one screen, or markers off) used to get no lanes at all, so it was
+        // nothing but the drop target: a click there still reached the row's switch, but nothing lit, so it read
+        // as dead. Petre, with an expanded bar's empty lines under the pointer and dark: "i want the empty area of
+        // the active bar to also be highlighted", "activate the empty part of the bar". One empty lane across the
+        // line makes it free space like every empty half: a wash, lit on hover, and the switch. The spare line
+        // under a full row (see GroupRow) is such a line too.
+        if (lanes.Count == 0) lanes.Add((0, Maybe<int>.None, null));
+
         // SHADED LANES instead of a hairline between them. Petre: "let's also separate the two halves not
         // by hairline but make them ringed", then, seeing the rings, "no, rings are too much", "softer
         // separation", and from five mockups he picked the shade step: every other screen's lane is a
@@ -2679,12 +2687,15 @@ public partial class FloatingBar : Window
                 //
                 // This replaces 2.1.38's wash laid BEHIND the whole line, which lit under the window too and
                 // could only be clicked through it. An icon line keeps its free space as it was.
+                //
+                // A SETTING, on by default (AppState.SplitWindowLines). Petre: "make this a setting, enabled by
+                // default". Off, a window line is the window end to end, as it was before the split.
                 if (!titled)
                 {
                     laneContent.Children.Add(free);
                     washes.Add(free);
                 }
-                else
+                else if (manager.State.SplitWindowLines)
                 {
                     var workspaceZone = new Border
                     {
@@ -6576,6 +6587,7 @@ public partial class FloatingBar : Window
         var expanding = manager.State.ExpandCurrentWorkspace;
         Add("☰", expanding ? "Window list at the bottom of the bar" : "Expand the current workspace",
             () => Report(manager.SetExpandCurrentWorkspace(!expanding)));
+        AddSplitItem(Add);
 
         // Petre: "add color picker in the right click context menu" (#68).
         //
@@ -6736,6 +6748,7 @@ public partial class FloatingBar : Window
         var expanding = manager.State.ExpandCurrentWorkspace;
         Add("☰", expanding ? "Window list at the bottom of the bar" : "Expand the current workspace",
             () => Report(manager.SetExpandCurrentWorkspace(!expanding)));
+        AddSplitItem(Add);
 
         AddBarItems(menu);
 
@@ -6763,6 +6776,17 @@ public partial class FloatingBar : Window
         Action? SaveDebugDump = null);
 
     public AppCommands? AppActions { get; init; }
+
+    // The split window lines setting (AppState.SplitWindowLines), on every workspace's menu and the bar's own,
+    // right under the window list item it belongs with. Petre: "make this a setting, enabled by default". One
+    // item that flips, naming what it would switch TO, like the window list item above it. Its control pipe
+    // twin is `window-lines split|whole` (ControlUsage).
+    void AddSplitItem(Action<string, string, Action> add)
+    {
+        var split = manager.State.SplitWindowLines;
+        add("◧", split ? "Whole window lines bring the window up" : "Right half of window lines switches workspace",
+            () => Report(manager.SetSplitWindowLines(!split)));
+    }
 
     void AddBarItems(ContextMenu menu)
     {
