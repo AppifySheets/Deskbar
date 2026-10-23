@@ -223,44 +223,64 @@ public class FloatingBarLaneShadeTests(ITestOutputHelper output)
         Assert.Same(resting, caption.Foreground);
     });
 
-    // An EXPANDED row has no free space to wash (each of its lines is one window filling its column), so
-    // hovering one lit only the window under the pointer and never the row. Petre: "when hovering over a
-    // collapsed bar i can see the bar highlight, but i can't see that when over an expanded bar", "it
-    // highlights the main app but not the bar", "i want the bar highlighted", "including for the currently
-    // active bar". So an expanded row washes its whole lanes, behind the titled lines, and stays lit with the
-    // pointer on a window, because there is nowhere else in it to stand. The current row's caption still
-    // does not change (see the test above), and the current row stays out of the amber hover ring.
+    // An expanded bar's window lines are SPLIT for the click: the left part is the window, the right side the
+    // workspace. Petre: "let's also have only the left part of the horizontal bar clickable", "right side
+    // activating the workspace bar", after "maybe not the entire right side half", and then "i want to see the
+    // entire width of the caption", "just don't activate it on the right half". So the title still runs the
+    // whole line, and the right half of the line is
+    // a zone laid over it: a click there lands on the zone, not the window, it lights on hover, goes dark with
+    // the pointer on a window, and lights on the current workspace too ("including for the currently active
+    // bar"). The current bar's caption still does not change (see the test above).
     [Fact]
-    public void Hovering_an_expanded_row_washes_it_whole_even_the_current_one() => StaThread.Run(() =>
+    public void An_expanded_bars_lines_are_split_window_left_workspace_right() => StaThread.Run(() =>
     {
-        using var bar = TwoScreens(busyIcons: 3, standOnBusy: true, expandRow: true);
+        using var bar = TwoScreens(busyIcons: 3, standOnBusy: true, expandRow: true, longTitles: true);
         var row = bar.RowContainer("Busy");
         var caption = Bar.Descendants(row).OfType<TextBlock>().First(t => t.Text == "Busy");
         var resting = caption.Foreground;
         static void Raise(UIElement target, RoutedEvent e) =>
             target.RaiseEvent(new System.Windows.Input.MouseEventArgs(System.Windows.Input.Mouse.PrimaryDevice, 0) { RoutedEvent = e });
+        static Rect BoundsIn(FrameworkElement e, Visual row) => e.TransformToAncestor(row).TransformBounds(new Rect(e.RenderSize));
+        static bool Inside(DependencyObject? node, DependencyObject ancestor)
+        {
+            for (var at = node; at is not null; at = VisualTreeHelper.GetParent(at))
+                if (ReferenceEquals(at, ancestor)) return true;
+            return false;
+        }
 
         Assert.Empty(bar.LitWashes(row));
 
         Raise(row, UIElement.MouseEnterEvent);
         var lit = bar.LitWashes(row);
-        lit.ForEach(w => output.WriteLine($"lit wash {w.ActualWidth:0.#}x{w.ActualHeight:0.#} corners {w.CornerRadius}"));
-        Assert.NotEmpty(lit);
-        // The wash is the row's whole lanes, every line of them: it spans the titled lines, not a sliver beside them.
-        var icons = bar.Icons(row);
-        Assert.True(lit.Sum(w => w.ActualWidth * w.ActualHeight) > icons.Sum(i => i.ActualWidth * i.ActualHeight) * 0.9,
-            "the wash should cover the lanes the titled lines fill");
+        lit.ForEach(w => output.WriteLine($"lit wash {BoundsIn(w, row)}"));
+        var windows = bar.Icons(row);
+        windows.ForEach(w => output.WriteLine($"window {BoundsIn(w, row)}"));
+
+        windows.ForEach(w =>
+        {
+            var at = BoundsIn(w, row);
+            // The window's button still spans the whole line, so its title can run to the end of it...
+            var lane = (FrameworkElement)VisualTreeHelper.GetParent(VisualTreeHelper.GetParent(w));
+            Assert.True(at.Width > BoundsIn(lane, row).Width * 0.9, "the window should still span its line");
+            // ...but a click just right of its middle lands on the workspace's zone, and one just left of it on
+            // the window: the split is at half.
+            var right = row.InputHitTest(new Point(at.Left + at.Width * 0.55, at.Top + at.Height / 2)) as DependencyObject;
+            var left = row.InputHitTest(new Point(at.Left + at.Width * 0.4, at.Top + at.Height / 2)) as DependencyObject;
+            Assert.False(Inside(right, w), "the right side should not reach the window");
+            Assert.Contains(lit, wash => ReferenceEquals(wash, right));
+            Assert.True(Inside(left, w), "the left part should be the window");
+        });
         Assert.Same(resting, caption.Foreground);
 
-        // Onto a window and off it again: still lit, since in an expanded row the pointer is nearly always on one.
-        var icon = icons.First();
-        Raise(icon, UIElement.MouseEnterEvent);
-        Assert.Equal(lit.Count, bar.LitWashes(row).Count);
-        Raise(icon, UIElement.MouseLeaveEvent);
+        // Onto a window: dark, as on an icon line. Off it again: lit.
+        var window = windows.First();
+        Raise(window, UIElement.MouseEnterEvent);
+        Assert.Empty(bar.LitWashes(row));
+        Raise(window, UIElement.MouseLeaveEvent);
         Assert.Equal(lit.Count, bar.LitWashes(row).Count);
         Assert.Same(resting, caption.Foreground);
 
-        // Out of the row: off.
+        // Out of the bar: off.
         Raise(row, UIElement.MouseLeaveEvent);
         Assert.Empty(bar.LitWashes(row));
     });
@@ -335,8 +355,10 @@ public class FloatingBarLaneShadeTests(ITestOutputHelper output)
 
             Assert.Equal(artRight + 3, titleLeft, 1);
             // Within a character of the line's end (the title's 2 DIP right margin, and trimmed text stops at
-            // its last whole character): no cap holding it short, which would end it near 23 + 140.
-            Assert.InRange(titleRight, x.Line.ActualWidth - 10, x.Line.ActualWidth - 2);
+            // its last whole character): no cap holding it short, which would end it near 23 + 140. The whole
+            // line, the workspace's click half included ("i want to see the entire width of the caption"). A
+            // title that fills it can end exactly on its margin, hence the hundredth of slack for rounding.
+            Assert.InRange(titleRight, x.Line.ActualWidth - 10, x.Line.ActualWidth - 2 + 0.01);
             Assert.True(x.Line.ActualWidth > 140 + 40, $"the line is {x.Line.ActualWidth:0.#} DIP, too narrow to show the cap");
         });
     });
