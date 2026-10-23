@@ -50,6 +50,37 @@ object.
   `DESKBAR_APPDATA` set to a scratch folder and the 1.x app exited, see Traps.
 - **Never push to `main`, never merge.** Branch, PR, wait to be told it merged. Pushing a
   feature branch in order to open a PR is fine; anything beyond that needs asking.
+- **While a pull request is open, keep it on top of its base without being asked.** Other
+  sessions merge all day, and each merge leaves every open pull request behind: GitHub can no
+  longer fast-forward it, and a version bump on main makes its `VersionPrefix` conflict. So once
+  a session has opened a pull request, it watches the pull request's base (main, or the branch of
+  the pull request below it in a stack) until the pull request is merged or closed, and runs the
+  `refresh-pr` skill as soon as the base moves or GitHub says it conflicts. The watch is a Monitor
+  that polls every minute and stops by itself once the pull request is no longer open:
+
+  ```bash
+  pr=245; repo=AppifySheets/Deskbar; base=; head=; was=
+  while true; do
+    info=$(gh pr view $pr --repo $repo --json state,baseRefName,mergeable \
+      --jq '"\(.state) \(.baseRefName) \(.mergeable)"') || { sleep 60; continue; }
+    set -- $info
+    [ "$1" = OPEN ] || { echo "#$pr is $1, watch ends"; exit 0; }
+    [ "$2" = "$base" ] || { [ -n "$base" ] && echo "#$pr now targets $2"; base=$2; head=; }
+    h=$(gh api repos/$repo/commits/$base --jq .sha) || h=$head
+    [ -z "$head" ] || [ "$h" = "$head" ] || echo "$base moved to ${h:0:7}"
+    head=$h
+    [ "$3" = CONFLICTING ] && [ "$was" != CONFLICTING ] && echo "#$pr conflicts with $base"
+    was=$3
+    sleep 60
+  done
+  ```
+
+  A Monitor lasts at most 30 minutes and dies with the session, so re-arm it when it expires, and
+  say in the final message that the watch ends when the session does. Pull requests here merge
+  with "Rebase and merge", which keeps the commits of a pull request that is already on top of
+  its base, so a stack merged from the bottom up lands without another rebase; squash would
+  break the pull requests above. Branches are deleted on merge, so the next pull request in a
+  stack retargets to main by itself.
 - **Measure, do not theorise.** Every wrong answer this project has produced was a guess,
   and throwaway probes have settled what reasoning got wrong. Two probe traps worth
   remembering:
