@@ -932,6 +932,14 @@ public partial class FloatingBar : Window
         pressConsumedByChild = false;
         pressedRowKey = null;
 
+        // ...and a new press means the stray release a finished drag leaves behind is no longer coming:
+        // it arrives straight after the drag, before any press. Cleared here because the row's release
+        // handler, the only other place that clears it, never sees a drag whose release went nowhere.
+        // The trace caught exactly that (#48, sixth visit): a drag onto GPH at 11:04:27 left this set, a
+        // click on a footer button did not clear it, and the next workspace click, 2m22s later, was
+        // refused as "afterDrag=True" with no drag anywhere near it. The retry worked.
+        dragJustFinished = false;
+
         // This press takes the foreground from whatever shell flyout was open, which closes it. Noted before
         // any Click runs, so Start's own button can tell "close it" from "open it" (FloatingBar.Shell.cs).
         NoteBarPressed();
@@ -1010,7 +1018,8 @@ public partial class FloatingBar : Window
     bool pressConsumedByChild;
 
     // A drag has just given the mouse back, so the release that follows belongs to it rather than to a
-    // click. See onDragFinished, where it is set, and the row's release handler, which clears it.
+    // click. See onDragFinished, where it is set, and the row's release handler and the next press, which
+    // clear it.
     bool dragJustFinished;
 
     // Whether the press for the release now being handled ever reached this window, and its complement.
