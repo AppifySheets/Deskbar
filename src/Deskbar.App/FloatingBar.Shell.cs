@@ -287,15 +287,25 @@ public partial class FloatingBar
         // strip only grows by what the text really needs.
         // FIXED sizes, deliberately outside the bar's text size setting: the clock matches the taskbar's, and at
         // the setting's +4 default Petre found it "too big" (see FloatingBar.TextSize.cs).
-        clockTime = new TextBlock { FontSize = 14.5, Foreground = ClockForeground, TextAlignment = TextAlignment.Right, LineHeight = 17, LineStackingStrategy = LineStackingStrategy.BlockLineHeight };
+        //
+        // The time is the DATE's size now, not a size above it. Petre, of 14.5 over 13 with "11:59 PM": "make
+        // clock smaller, and no pm", "24h", "smaller as the date". The two lines then read as one block, and the
+        // 24-hour time (see ClockText) is shorter than the 12-hour one it replaces, so the clock is narrower too.
+        clockTime = new TextBlock { FontSize = 13, Foreground = ClockForeground, TextAlignment = TextAlignment.Right, LineHeight = 16, LineStackingStrategy = LineStackingStrategy.BlockLineHeight };
         clockDate = new TextBlock { FontSize = 13, Foreground = ClockForeground, TextAlignment = TextAlignment.Right, LineHeight = 16, LineStackingStrategy = LineStackingStrategy.BlockLineHeight };
         return new StackPanel { Children = { clockTime, clockDate }, VerticalAlignment = VerticalAlignment.Center };
     }
 
+    // The time on the clock: 24-hour, hours and minutes, whatever the region's own short time is. Petre: "no
+    // pm", "24h". The DATE still follows the regional format, as the taskbar's does; only the time stopped
+    // following it, because the regional short time here is 12-hour with an AM/PM. Two-digit hours, so the line
+    // does not change width at ten o'clock. Internal so a test reads the same format the clock does.
+    internal static string ClockText(DateTime at) => at.ToString("HH:mm", System.Globalization.CultureInfo.InvariantCulture);
+
     void UpdateClock(FrameworkElement clock)
     {
         var now = DateTime.Now;
-        var time = now.ToString("t");
+        var time = ClockText(now);
         if (clockTime is null || clockDate is null || clockTime.Text == time) return;
         clockTime.Text = time;
         clockDate.Text = now.ToString("d");

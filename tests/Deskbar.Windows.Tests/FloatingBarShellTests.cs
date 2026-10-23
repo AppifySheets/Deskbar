@@ -208,25 +208,35 @@ public class FloatingBarShellTests(ITestOutputHelper output)
         int leftTop, int leftBottom, int rightTop, int rightBottom, int windowTop, int windowBottom, int insetTop, int insetBottom) =>
         Assert.Equal((windowTop, windowBottom, insetTop, insetBottom), FloatingBar.SeamSpan(leftTop, leftBottom, rightTop, rightBottom));
 
-    // The clock shows the time in the user's own short format, the one the taskbar uses. Read before and
-    // after, so a minute turning over mid-test cannot fail it.
+    // The clock shows the time as 24-hour hours and minutes, with no AM/PM ("no pm", "24h"), at the date's size
+    // ("smaller as the date"); the date stays in the user's own short format, the one the taskbar uses. Read
+    // before and after, so a minute turning over mid-test cannot fail it.
     [Fact]
-    public void The_clock_shows_the_time_in_the_regional_format() => StaThread.Run(() =>
+    public void The_clock_shows_a_24_hour_time_at_the_dates_size_over_the_regional_date() => StaThread.Run(() =>
     {
-        var before = DateTime.Now.ToString("t");
+        var before = FloatingBar.ClockText(DateTime.Now);
         var (bar, _) = Bar();
-        var after = DateTime.Now.ToString("t");
+        var after = FloatingBar.ClockText(DateTime.Now);
 
         var face = (StackPanel)Named(bar, "ShellStrip", "Clock").Content;
-        var time = ((TextBlock)face.Children[0]).Text;
-        var date = ((TextBlock)face.Children[1]).Text;
-        output.WriteLine($"time={time} date={date}");
+        var time = (TextBlock)face.Children[0];
+        var date = (TextBlock)face.Children[1];
+        output.WriteLine($"time={time.Text} ({time.FontSize}) date={date.Text} ({date.FontSize})");
 
-        Assert.Contains(time, new[] { before, after });
-        Assert.Equal(DateTime.Now.ToString("d"), date);
+        Assert.Contains(time.Text, new[] { before, after });
+        Assert.Matches(@"^\d\d:\d\d$", time.Text);
+        Assert.Equal(date.FontSize, time.FontSize);
+        Assert.Equal(DateTime.Now.ToString("d"), date.Text);
 
         bar.Close();
     });
+
+    [Theory]
+    [InlineData(23, 59, "23:59")]
+    [InlineData(9, 5, "09:05")]
+    [InlineData(0, 0, "00:00")]
+    public void The_clock_text_is_24_hour_with_two_digit_hours(int hour, int minute, string expected) =>
+        Assert.Equal(expected, FloatingBar.ClockText(new DateTime(2026, 10, 23, hour, minute, 0)));
 
     // A click on a button presses its shortcut, once.
     [Fact]
