@@ -44,6 +44,7 @@ public partial class FloatingBar
         Line("docked edge", dockedEdge ?? "(floating)");
         Line("dock setting", $"DockBar={manager.State.DockBar} DockAcrossScreens={manager.State.DockAcrossScreens}");
         Line("app bar registered", $"main={appBar?.Registered.ToString() ?? "never created"} seam={seamBar?.Registered.ToString() ?? "never created"}");
+        Line("strip held by work area", DescribeStripForDump());
         Line("fullscreen app open", $"{fullScreenAppOpen} (set only by the shell's notice, and only while docked)");
         Line("WPF geometry (DIPs)", $"Left={Left:0.#} Top={Top:0.#} Width={ActualWidth:0.#} Height={ActualHeight:0.#}");
         Line("anchors", $"right={anchorRight?.ToString("0.#") ?? "none"} bottom={anchorBottom?.ToString("0.#") ?? "none"}");

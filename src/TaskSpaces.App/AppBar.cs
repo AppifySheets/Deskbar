@@ -43,8 +43,15 @@ sealed class AppBar
         this.onPositionChanged = onPositionChanged;
         this.onFullScreen = onFullScreen;
         callbackMessage = RegisterWindowMessageW("Deskbar.AppBar");
+        taskbarCreated = RegisterWindowMessageW("TaskbarCreated");
         HwndSource.FromHwnd(hwnd)?.AddHook(Hook);
     }
+
+    // Explorer broadcasts "TaskbarCreated" when it starts again, and a new Explorer knows nothing of the app
+    // bars the old one held: each has to register again. Without this the bar went on believing it was
+    // registered while the strip was gone and maximized windows ran under it. A dump from an RDP session
+    // showed exactly that state (registered, work area the full width); a restarted Explorer is one way to it.
+    readonly uint taskbarCreated;
 
     // Reserves a strip `widthPx` wide on `edge` of the monitor `screen` (physical pixels), registering
     // first if needed, and returns the rectangle the shell granted: the full height of the screen, beside
@@ -96,6 +103,16 @@ sealed class AppBar
 
     nint Hook(nint window, int message, nint wParam, nint lParam, ref bool handled)
     {
+        // Left unhandled: it is a broadcast, and anything else hooked on this window may want it too. The owner's
+        // re-dock goes through Dock, which registers again now that Registered is false.
+        if (message == taskbarCreated && Registered)
+        {
+            ClickTrace.Write("app bar: Explorer restarted (TaskbarCreated), registering again");
+            Registered = false;
+            onPositionChanged();
+            return 0;
+        }
+
         if (message != callbackMessage || !Registered) return 0;
 
         switch ((int)wParam)

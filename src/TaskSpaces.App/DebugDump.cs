@@ -222,9 +222,17 @@ static class DebugDump
     {
         if (cache.TryGetValue(pid, out var known)) return known;
         string name;
-        try { using var process = Process.GetProcessById((int)pid); name = $"{process.ProcessName} (pid {pid}, session {process.SessionId})"; }
+        try { using var process = Process.GetProcessById((int)pid); name = $"{process.ProcessName} (pid {pid}, session {process.SessionId}{StartedOf(process)})"; }
         catch { name = $"pid {pid}"; }
         return cache[pid] = name;
+    }
+
+    // When the process started: an Explorer younger than Deskbar means the shell restarted under the bar and
+    // forgot its app bar (the first RDP dump could not show this). Empty where access is refused.
+    static string StartedOf(Process process)
+    {
+        try { return $", started {process.StartTime:MM-dd HH:mm:ss}"; }
+        catch { return ""; }
     }
 
     static string ClassOf(nint hwnd)

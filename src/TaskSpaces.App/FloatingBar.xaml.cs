@@ -617,6 +617,9 @@ public partial class FloatingBar : Window
                 onPositionChanged: () => Dispatcher.BeginInvoke(new Action(() => { if (dockedEdge is { } e) DockTo(e); })),
                 onFullScreen: OnFullScreenApp);
 
+            // KeepDockedStrip gives the shell a moment from here before it judges the work area.
+            lastDocked = DateTime.UtcNow;
+
             if (edge == "seam") return DockAcrossSeam(hwnd);
             // An edge dock has one reservation; a seam dock's other half goes.
             seamBar?.Remove();
@@ -634,6 +637,7 @@ public partial class FloatingBar : Window
             var granted = appBar.Dock(edge == "left" ? AppBar.Edge.Left : AppBar.Edge.Right,
                 new AppBar.Rect(info.rcMonitor.Left, info.rcMonitor.Top, info.rcMonitor.Right, info.rcMonitor.Bottom),
                 (int)Math.Round(widthDips * scaleX));
+            ClickTrace.Write($"dock: {edge}, registered={appBar.Registered}, granted {granted.L},{granted.T} to {granted.R},{granted.B}");
 
             dockedEdge = edge;
             anchorRight = null;

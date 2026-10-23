@@ -1121,6 +1121,9 @@ public partial class App : Application
             topmost.Tick += (_, _) =>
             {
                 floatingBar.ReclaimTopmost();
+                // Docked, the strip is checked on the same beat: the shell can stop holding it without a word
+                // (see FloatingBar.KeepDockedStrip). One GetMonitorInfo a second, and nothing more unless lost.
+                floatingBar.KeepDockedStrip();
                 // Petre: "i want to always refresh what's the active window, i can't afford to
                 // think that one window is active and another being highlighted."
                 //
