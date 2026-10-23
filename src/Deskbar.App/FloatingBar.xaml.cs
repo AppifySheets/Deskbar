@@ -1558,6 +1558,9 @@ public partial class FloatingBar : Window
         // down, and the next left click was read as "the tray was open", so it only turned the arrow up.
         if (e.ChangedButton != MouseButton.Left) NoteBarPressed();
 
+        // Any press on an icon hides its hover card straight away (see DismissHoverCard).
+        DismissHoverCard(e.OriginalSource);
+
         if (e.ChangedButton != MouseButton.Middle) return;
         NativeMethods.GetCursorPos(out var cursor);
         middleStart = new Point(cursor.X, cursor.Y);
@@ -4583,6 +4586,20 @@ public partial class FloatingBar : Window
     WindowHandle hoverShowing;
     int hoverMisses;
 
+    // The icon whose card a click put away, and which may not bring it back until the pointer has really
+    // left it. Petre: "when hovering over an icon and you click on it, it should immediately hide the
+    // preview".
+    //
+    // Closing the popup on the press is the easy half. The hard half is keeping it closed: the click
+    // activates a window or switches workspace, both rebuild the bar, and a rebuild re-runs MouseEnter for
+    // the icon under the unmoved pointer, which arms the dwell, which shows the card again a dwell later.
+    // So the dismissal is remembered against the WINDOW (the button itself is replaced by that rebuild) and
+    // ArmHoverCard refuses that window while it stands. It is lifted by the same pointer watch that closes
+    // the card, with the same two-miss tolerance, so a rebuild's gap between old and new icon cannot lift
+    // it early and a real move off the icon lifts it within a quarter of a second.
+    WindowHandle? hoverDismissed;
+    int dismissedMisses;
+
     // --- the dwell -------------------------------------------------------------------------------
     //
     // Petre: "i want to go over the taskspaces window with my mouse, if i'm not meaning to do anything with
@@ -4624,6 +4641,8 @@ public partial class FloatingBar : Window
         // moment could postpone the card for ever while he sat there waiting for it.
         if (hoverPopup is { IsOpen: true } && hoverShowing.Equals(row.Window.Handle)) return;
         if (hoverDwell is { IsEnabled: true } && dwellFor.Equals(row.Window.Handle)) return;
+        // Clicked while the pointer has not left it since: the card stays put away (see hoverDismissed).
+        if (hoverDismissed.Equals(row.Window.Handle)) return;
 
         dwellFor = row.Window.Handle;
         dwelling = (groupLabel, row, anchor, here);
@@ -4703,13 +4722,39 @@ public partial class FloatingBar : Window
         var middle = anchor.TranslatePoint(new Point(anchor.ActualWidth / 2, 0), this).X;
         hoverPopup.Placement = HoverSide(AcrossSeam, middle, ActualWidth);
         hoverPopup.IsOpen = true;
+        StartHoverWatch();
+    }
 
-        hoverWatch ??= new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromMilliseconds(120) };
-        if (!hoverWatch.IsEnabled)
+    // One watch for both jobs, the open card and a dismissal waiting to be lifted. Tick is attached once,
+    // when the timer is made: the old code attached it on every start, so each card shown added one more
+    // copy of the handler to the same timer.
+    void StartHoverWatch()
+    {
+        if (hoverWatch is null)
         {
+            hoverWatch = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromMilliseconds(120) };
             hoverWatch.Tick += (_, _) => Guarded(WatchHover, "hover watch");
-            hoverWatch.Start();
         }
+        if (!hoverWatch.IsEnabled) hoverWatch.Start();
+    }
+
+    // A press of any button on an icon puts its card away at once. Left is the click Petre asked about;
+    // right opens the icon's menu, which the card would otherwise sit beside; middle and the X buttons have
+    // no business leaving a picture up either. Called from OnPreviewMouseDown, which sees every press on
+    // the bar before the icon does, so the card is gone before the click's own work (a capture, a switch)
+    // gets to run.
+    void DismissHoverCard(object pressed)
+    {
+        if (IconAncestorOf(pressed as DependencyObject) is not { DataContext: WindowRow row }) return;
+
+        // A pending dwell too, or a press during the wait would be followed by the card appearing anyway.
+        hoverDwell?.Stop();
+        dwelling = null;
+        if (hoverPopup is not null) hoverPopup.IsOpen = false;
+
+        hoverDismissed = row.Window.Handle;
+        dismissedMisses = 0;
+        StartHoverWatch();
     }
 
     // Which side of the bar the hover card opens on. Across the seam the bar is two halves on two screens,
@@ -4744,16 +4789,26 @@ public partial class FloatingBar : Window
     // would close the card exactly as often as the old tooltip blinked.
     void WatchHover()
     {
-        if (hoverPopup is not { IsOpen: true }) { hoverWatch?.Stop(); return; }
+        var under = Mouse.DirectlyOver is DependencyObject over && IconAncestorOf(over) is { DataContext: WindowRow row }
+            ? row.Window.Handle
+            : (WindowHandle?)null;
 
-        var overIcon = Mouse.DirectlyOver is DependencyObject over && IconAncestorOf(over) is { } icon
-                       && icon.DataContext is WindowRow row && row.Window.Handle.Equals(hoverShowing);
+        // A dismissed icon, lifted on the same two misses that close a card. Landing on a DIFFERENT icon
+        // lifts it at once: that is a real move, not a rebuild's gap, so coming back to the clicked icon
+        // straight after should show its card again.
+        if (hoverDismissed is { } dismissed)
+        {
+            if (under.Equals(dismissed)) dismissedMisses = 0;
+            else if (++dismissedMisses >= 2 || under is not null) hoverDismissed = null;
+        }
 
-        if (overIcon) { hoverMisses = 0; return; }
-        if (++hoverMisses < 2) return;
+        if (hoverPopup is { IsOpen: true })
+        {
+            if (under.Equals(hoverShowing)) hoverMisses = 0;
+            else if (++hoverMisses >= 2) hoverPopup.IsOpen = false;
+        }
 
-        hoverPopup.IsOpen = false;
-        hoverWatch?.Stop();
+        if (hoverPopup is not { IsOpen: true } && hoverDismissed is null) hoverWatch?.Stop();
     }
 
     // The icon a hit-tested element belongs to, or null. Walks up because the pointer is usually over the
