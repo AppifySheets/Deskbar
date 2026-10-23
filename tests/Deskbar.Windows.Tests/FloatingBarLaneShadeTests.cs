@@ -223,6 +223,48 @@ public class FloatingBarLaneShadeTests(ITestOutputHelper output)
         Assert.Same(resting, caption.Foreground);
     });
 
+    // An EXPANDED row has no free space to wash (each of its lines is one window filling its column), so
+    // hovering one lit only the window under the pointer and never the row. Petre: "when hovering over a
+    // collapsed bar i can see the bar highlight, but i can't see that when over an expanded bar", "it
+    // highlights the main app but not the bar", "i want the bar highlighted", "including for the currently
+    // active bar". So an expanded row washes its whole lanes, behind the titled lines, and stays lit with the
+    // pointer on a window, because there is nowhere else in it to stand. The current row's caption still
+    // does not change (see the test above), and the current row stays out of the amber hover ring.
+    [Fact]
+    public void Hovering_an_expanded_row_washes_it_whole_even_the_current_one() => StaThread.Run(() =>
+    {
+        using var bar = TwoScreens(busyIcons: 3, standOnBusy: true, expandRow: true);
+        var row = bar.RowContainer("Busy");
+        var caption = Bar.Descendants(row).OfType<TextBlock>().First(t => t.Text == "Busy");
+        var resting = caption.Foreground;
+        static void Raise(UIElement target, RoutedEvent e) =>
+            target.RaiseEvent(new System.Windows.Input.MouseEventArgs(System.Windows.Input.Mouse.PrimaryDevice, 0) { RoutedEvent = e });
+
+        Assert.Empty(bar.LitWashes(row));
+
+        Raise(row, UIElement.MouseEnterEvent);
+        var lit = bar.LitWashes(row);
+        lit.ForEach(w => output.WriteLine($"lit wash {w.ActualWidth:0.#}x{w.ActualHeight:0.#} corners {w.CornerRadius}"));
+        Assert.NotEmpty(lit);
+        // The wash is the row's whole lanes, every line of them: it spans the titled lines, not a sliver beside them.
+        var icons = bar.Icons(row);
+        Assert.True(lit.Sum(w => w.ActualWidth * w.ActualHeight) > icons.Sum(i => i.ActualWidth * i.ActualHeight) * 0.9,
+            "the wash should cover the lanes the titled lines fill");
+        Assert.Same(resting, caption.Foreground);
+
+        // Onto a window and off it again: still lit, since in an expanded row the pointer is nearly always on one.
+        var icon = icons.First();
+        Raise(icon, UIElement.MouseEnterEvent);
+        Assert.Equal(lit.Count, bar.LitWashes(row).Count);
+        Raise(icon, UIElement.MouseLeaveEvent);
+        Assert.Equal(lit.Count, bar.LitWashes(row).Count);
+        Assert.Same(resting, caption.Foreground);
+
+        // Out of the row: off.
+        Raise(row, UIElement.MouseLeaveEvent);
+        Assert.Empty(bar.LitWashes(row));
+    });
+
     // Petre: "can we try to recreate the actual taskbar in the workspace?", "with window titles, vertically
     // arranged", "active workspace only", then "same as it is now but at the bottom". The workspace you
     // are on is listed at the bottom of the bar, one window per line in its screen's column, each with its

@@ -2539,15 +2539,31 @@ public partial class FloatingBar : Window
                 };
                 laneContent.Children.Add(stack);
                 // A titled line has no free space: its one window fills the column (the stack is then the
-                // last child, which LastChildFill stretches whatever its Dock says). So no wash either;
-                // the current workspace is the one row there is no point switching to.
-                if (!titled)
+                // last child, which LastChildFill stretches whatever its Dock says). So its wash goes BEHIND
+                // the line instead, filling the lane under the titled window, where an icon row's wash
+                // deliberately does not go (see above). The exception is deliberate too. Petre, with the
+                // current workspace expanded and the others opening under the pointer: "when hovering over a
+                // collapsed bar i can see the bar highlight, but i can't see that when over an expanded bar",
+                // "it highlights the main app but not the bar", "i want the bar highlighted". An expanded row
+                // is nothing but its windows, so a wash that avoided them would never show, and the row would
+                // be the one kind that gives no sign the pointer is on it. Under the window, never over it,
+                // and hit-test-invisible, so the line's own click, drag and hover card are untouched. A Grid
+                // stacks the two; the lane's indent stays on the DockPanel so the wash runs to the lane's edge.
+                washes.Add(free);
+                UIElement laneCell = laneContent;
+                if (titled)
                 {
-                    washes.Add(free);
-                    laneContent.Children.Add(free);
+                    free.IsHitTestVisible = false;
+                    free.CornerRadius = WashCorners(left: firstLane, right: lane.Rank == lastRank);
+                    var layered = new Grid();
+                    layered.Children.Add(free);
+                    layered.Children.Add(laneContent);
+                    laneCell = layered;
                 }
+                else
+                    laneContent.Children.Add(free);
 
-                var stackColumn = AddColumn(laneContent, new GridLength(1, GridUnitType.Star));
+                var stackColumn = AddColumn(laneCell, new GridLength(1, GridUnitType.Star));
                 ShadeLane(stackColumn);
                 if (firstColumn < 0) firstColumn = stackColumn;
                 // No zone without a monitor: a zone is a drop target that names a screen, and there is no
@@ -3858,9 +3874,20 @@ public partial class FloatingBar : Window
             // blinking when hovering over icons", "that's also not needed"). Same reasoning as the amber
             // hover ring, which already skips this row (see ApplyCandidate). isCurrent covers unnamed
             // desktops too, since their rows pass IsCurrent the same way.
+            //
+            // EXCEPT the wash of an EXPANDED row, which lights whenever the pointer is in the row: current
+            // or not, on a window or not. Both halves of the rule above assumed a row with free space to
+            // aim at, and an expanded row has none, so under them it never lit at all. Petre, once the
+            // current workspace expanded by default: "when hovering over a collapsed bar i can see the bar
+            // highlight, but i can't see that when over an expanded bar", "i want the bar highlighted",
+            // "including for the currently active bar". Its wash sits under the titled lines (see LineOf),
+            // so "on a window" is where the pointer always is there, and the current row is the one that
+            // is expanded most of the time, so the earlier ruling would have kept the list dark exactly
+            // where he asked for the light. The LABEL keeps the old rule: the current caption still rests
+            // in its colour, so a hover there would still make it blink.
             var inRow = false;
             var onIcons = new HashSet<UIElement>();
-            void SyncHover() => Hover(label: !isCurrent && inRow, wash: !isCurrent && inRow && onIcons.Count == 0);
+            void SyncHover() => Hover(label: !isCurrent && inRow, wash: inRow && (titled || !isCurrent && onIcons.Count == 0));
 
             container.MouseEnter += (_, _) => { inRow = true; SyncHover(); };
             container.MouseLeave += (_, _) => { inRow = false; SyncHover(); ClearInfo(); };
