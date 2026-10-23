@@ -4162,11 +4162,15 @@ public partial class FloatingBar : Window
                 // The reserved info line doubles as the drop-target readout: on a bar this
                 // small, "where will this land?" is otherwise pure guesswork -- rows are
                 // ~28px tall and adjacent.
+                //
+                // "bar", not "row", in the text: Petre calls a workspace's row a BAR ("let's call it a bar,
+                // rename everywhere"), so that is the word on screen. The code keeps "row", because there
+                // "bar" already names the whole floating window (FloatingBar).
                 ShowReadout(placement.SameHalf
-                    ? placement.StaysPut ? "→ drag along the row to move it" : "→ put here"
+                    ? placement.StaysPut ? "→ drag along the bar to move it" : "→ put here"
                     : (screen, ownRow) switch
                     {
-                        (null, true) => "→ drag along the row to move it",
+                        (null, true) => "→ drag along the bar to move it",
                         (null, false) => $"→ move to {groupLabel}",
                         ({ } s, true) => $"→ move to screen {s}",
                         ({ } s, false) => $"→ move to {groupLabel}, screen {s}",
