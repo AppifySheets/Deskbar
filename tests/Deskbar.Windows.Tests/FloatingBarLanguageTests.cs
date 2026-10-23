@@ -152,6 +152,9 @@ public class FloatingBarLanguageTests
 
         bar.StepLanguage(+1);
         Assert.Equal([(Editor, "EN")], languages.Switches);
+        // Handed back once the click has finished, not during it (see StepLanguage).
+        Assert.Empty(handed);
+        Settle(bar);
         Assert.Equal([Editor], handed);
         bar.Close();
     });
@@ -171,11 +174,37 @@ public class FloatingBarLanguageTests
 
         front = 0;
         bar.StepLanguage(+1);
+        Settle(bar);
 
         Assert.Equal([(Editor, "KA")], languages.Switches);
         Assert.Equal([Editor], handed);
         bar.Close();
     });
+
+    // Petre, on 2.1.30: "focus does go back to the window but i can't type unless i activate the window manually",
+    // "so it doesn't really go back". All six of his clicks found the bar activated anyway (front 0x0 or the bar),
+    // so the WM_MOUSEACTIVATE answer had not kept the foreground. The bar now carries WS_EX_NOACTIVATE for exactly
+    // as long as the pointer is on the switcher, which Windows honours for every click, and loses it the moment
+    // the pointer leaves, so the rest of the bar still activates as it always did.
+    [Fact]
+    public void The_bar_cannot_be_activated_while_the_pointer_is_on_the_switcher() => StaThread.Run(() =>
+    {
+        var languages = new FakeLanguages(English, Georgian);
+        languages.ByWindow[Editor] = English;
+        var bar = BarWith(languages);
+        var hwnd = new System.Windows.Interop.WindowInteropHelper(bar).Handle;
+        bool NoActivate() => ((long)Monitoring.NativeMethods.GetWindowLongPtr(hwnd, Monitoring.NativeMethods.GWL_EXSTYLE) & 0x08000000) != 0;
+
+        Assert.False(NoActivate());
+        Switcher(bar).RaiseEvent(new System.Windows.Input.MouseEventArgs(System.Windows.Input.Mouse.PrimaryDevice, 0) { RoutedEvent = System.Windows.Input.Mouse.MouseEnterEvent });
+        Assert.True(NoActivate());
+        Switcher(bar).RaiseEvent(new System.Windows.Input.MouseEventArgs(System.Windows.Input.Mouse.PrimaryDevice, 0) { RoutedEvent = System.Windows.Input.Mouse.MouseLeaveEvent });
+        Assert.False(NoActivate());
+        bar.Close();
+    });
+
+    // Runs what the dispatcher has queued behind the current input, as a finished click would.
+    static void Settle(FloatingBar bar) => bar.Dispatcher.Invoke(() => { }, System.Windows.Threading.DispatcherPriority.Background);
 
     // Petre: "it's changing apps when i click on it and then it's inaccurate when i type", "not always, but very
     // inconsistent". The trace from his clicks: each one handed the foreground to a REMEMBERED window, a Teams chat

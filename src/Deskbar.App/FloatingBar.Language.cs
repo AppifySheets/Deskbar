@@ -26,9 +26,10 @@ namespace Deskbar.App;
 // window you were typing in, so the switcher switched the REMEMBERED window and then handed it the foreground. The
 // trace of his clicks showed what that cost: five clicks switched a Teams chat and an Edge window in turn, each
 // click brought one of them forward, and twice the window the button read jumped to the other one 5 ms after the
-// hand-off. The window that got the switch was a guess, and so was the window brought forward. Now the bar answers
-// WM_MOUSEACTIVATE over the switcher with "do not activate" (KeepForegroundOnLanguageClick), so the window you type
-// in is still in front when the click arrives: it is the one switched, and the foreground is not touched. Only when
+// hand-off. The window that got the switch was a guess, and so was the window brought forward. Now the bar cannot
+// be activated while the pointer is on the switcher (NoActivateWhileOnSwitcher says how, and why the first way did
+// not hold), so the window you type in is still in front when the click arrives: it is the one switched, and the
+// foreground is not touched. Only when
 // no window you type in is in front (the bar itself, after another part of it was clicked first, or nothing at all,
 // which two clicks on 2.1.29 found) does the old path run: switch the remembered window and hand it the foreground
 // back, so focus returns to the window you were in.
@@ -112,34 +113,54 @@ public partial class FloatingBar
             e.Handled = true;
             StepLanguage(e.Delta < 0 ? +1 : -1);
         };
+        // Unactivatable while the pointer is on the switcher, and only then (see NoActivateWhileOnSwitcher).
+        languageButton.MouseEnter += (_, _) => NoActivateWhileOnSwitcher(true);
+        languageButton.MouseLeave += (_, _) => NoActivateWhileOnSwitcher(false);
         clockTimer.Tick += (_, _) => PaintLanguage();
         SourceInitialized += (_, _) => KeepForegroundOnLanguageClick();
         PaintLanguage();
         return languageButton;
     }
 
-    // Asked by Windows before a click activates the bar. Over the switcher the answer is "click, but do not
-    // activate", so the window you were typing in keeps the foreground (see the comment at the top). The click
-    // itself still arrives and the Button still raises Click: only the activation is withheld. The pointer's
-    // position decides rather than WPF's IsMouseOver, which follows input WPF has processed and can lag the press.
+    // THE CLICK MUST NOT ACTIVATE THE BAR, and the first way of saying so did not hold. 2.1.29 answered
+    // WM_MOUSEACTIVATE with MA_NOACTIVATE over the switcher, deciding "over the switcher" by converting the cursor's
+    // screen position into the button's coordinates. Petre, on 2.1.30: "focus does go back to the window but i can't
+    // type unless i activate the window manually", "so it doesn't really go back". All six of his clicks in the trace
+    // found the bar activated anyway (front 0x0, or the bar itself), on an RDP session where the trace also had the
+    // bar's DPI and its screen's disagreeing (144 against 240), which is exactly what that conversion leans on.
+    //
+    // So the window style does it now: WS_EX_NOACTIVATE, which Windows honours for every click on the window, set
+    // while WPF says the pointer is on the switcher (its own hover, no coordinate arithmetic) and cleared the moment
+    // it leaves, so every other part of the bar activates on a click as it always has. The WM_MOUSEACTIVATE answer
+    // stays as a second line, keyed on the same hover, and is traced, so a log shows whether it is ever the one
+    // that answered.
+    bool pointerOnSwitcher;
+
+    void NoActivateWhileOnSwitcher(bool on)
+    {
+        pointerOnSwitcher = on;
+        var hwnd = new System.Windows.Interop.WindowInteropHelper(this).Handle;
+        if (hwnd == 0) return;
+        var style = (long)Windows.Monitoring.NativeMethods.GetWindowLongPtr(hwnd, Windows.Monitoring.NativeMethods.GWL_EXSTYLE);
+        var wanted = on ? style | WS_EX_NOACTIVATE : style & ~WS_EX_NOACTIVATE;
+        if (wanted != style) Windows.Monitoring.NativeMethods.SetWindowLongPtr(hwnd, Windows.Monitoring.NativeMethods.GWL_EXSTYLE, (nint)wanted);
+    }
+
+    // Asked by Windows before a click activates the bar: over the switcher, "click, but do not activate". The click
+    // itself still arrives and the Button still raises Click; only the activation is withheld.
     void KeepForegroundOnLanguageClick() =>
         System.Windows.Interop.HwndSource.FromHwnd(new System.Windows.Interop.WindowInteropHelper(this).Handle)?.AddHook(
             (nint _, int message, nint _, nint _, ref bool handled) =>
             {
-                if (message != WM_MOUSEACTIVATE || !PointerOnLanguageButton()) return 0;
+                if (message != WM_MOUSEACTIVATE || !pointerOnSwitcher) return 0;
+                if (ClickTrace.On) ClickTrace.Write("language: WM_MOUSEACTIVATE over the switcher, answered MA_NOACTIVATE");
                 handled = true;
                 return MA_NOACTIVATE;
             });
 
-    bool PointerOnLanguageButton()
-    {
-        if (languageButton is not { IsVisible: true } button || !Windows.Monitoring.NativeMethods.GetCursorPos(out var cursor)) return false;
-        var at = button.PointFromScreen(new Point(cursor.X, cursor.Y));
-        return at.X >= 0 && at.Y >= 0 && at.X < button.ActualWidth && at.Y < button.ActualHeight;
-    }
-
     const int WM_MOUSEACTIVATE = 0x0021;
     const nint MA_NOACTIVATE = 3;
+    const long WS_EX_NOACTIVATE = 0x08000000;
 
     // Called from NoteForeground with every foreground change but the bar's own.
     void NoteLanguageTarget(nint hwnd, bool isFlyout)
@@ -205,7 +226,12 @@ public partial class FloatingBar
         // A current language missing from the list (a layout Windows added for one program) counts as the first.
         var next = installed[((Math.Max(current, 0) + step) % installed.Count + installed.Count) % installed.Count];
         var outcome = InputLanguages.SwitchTo(window, next);
-        if (outcome.IsSuccess && focusLost) HandForegroundTo(window);
+        // After the click has finished, not during it: this runs inside the Button's Click, with the press still
+        // being handled and the bar's own activation possibly still completing (`front 0x0` is that moment), and a
+        // hand-back made then gave the window its frame but not the keyboard ("focus does go back to the window but
+        // i can't type unless i activate the window manually"). Background priority runs after the input queue.
+        if (outcome.IsSuccess && focusLost)
+            Dispatcher.BeginInvoke(System.Windows.Threading.DispatcherPriority.Background, () => HandForegroundTo(window));
         // The window in front is named beside the one switched, so a trace of a wrong switch says which it was.
         if (ClickTrace.On)
             ClickTrace.Write($"language: {next.Code} in 0x{window:X}, front 0x{front:X}{(focusLost ? " (not a window you type in; foreground handed back)" : "")} "
