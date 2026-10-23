@@ -7152,10 +7152,21 @@ public partial class FloatingBar : Window
         // a system-aware process never learns its DPI changed (see the manifest for what that cost).
         DpiChanged += (_, e) =>
         {
+            if (!IsOwnDpiChange(this, e.OriginalSource, e.OldDpi, e.NewDpi)) return;
             if (ClickTrace.On) ClickTrace.Write($"dpi changed {e.OldDpi.PixelsPerInchX} -> {e.NewDpi.PixelsPerInchX}");
             OnChanged(this, e);
         };
     }
+
+    // Whether a DpiChanged that reached the window is the window's own scale changing. Petre: "showing hiding".
+    // An Image raises the SAME routed event (Image.DpiChangedEvent is Window.DpiChangedEvent) and it bubbles,
+    // so every icon a rebuild created reported "240 -> 240" up to the window; the handler took each one for
+    // the window's own change and scheduled a readjustment, whose rebuild created the icons again. Measured:
+    // a readjustment every 1.4 seconds, without end, and the bar re-docking each time. So only the window's
+    // own event counts, and only when the scale actually changed.
+    internal static bool IsOwnDpiChange(Window window, object? originalSource, DpiScale oldDpi, DpiScale newDpi) =>
+        ReferenceEquals(originalSource, window)
+        && (oldDpi.PixelsPerInchX != newDpi.PixelsPerInchX || oldDpi.PixelsPerInchY != newDpi.PixelsPerInchY);
 
     // The same two steps startup does, in the same order and for the same reasons: rebuild so the rows
     // describe the monitors that are actually attached, then put the bar somewhere that exists.
