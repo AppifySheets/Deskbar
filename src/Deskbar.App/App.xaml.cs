@@ -776,6 +776,14 @@ public partial class App : Application
         // simply has to be started by hand, which is where we already were.
         CrashRestart.Register().TapError(error => ClickTrace.Write(error));
 
+        // Last, delete the published exes beside this one that are older than the version it replaced
+        // (OldVersions has the rule, and keeps that previous one). After ReassertIfEnabled and
+        // StartMenuShortcut.Ensure on purpose: the Run entry (when on) is re-pointed at THIS exe first, and
+        // an error there is not caught, so the start ends before this line; the shortcut names this exe too,
+        // unless writing it failed, which is only traced. Off the UI thread and silent about failures; only a
+        // published build does it.
+        OldVersionCleanup.StartIfPublished();
+
         // Reviewer (fix round 1, Critical, last-ditch backstop): an unhandled exception on
         // the dispatcher thread -- e.g. the ArgumentException a duplicate-name dictionary
         // build used to throw -- otherwise takes the whole process down immediately, with

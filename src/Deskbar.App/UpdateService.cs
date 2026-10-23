@@ -114,7 +114,9 @@ public static class UpdateService
     //
     // NEXT TO the running exe, never over it. The app is portable and updating it means gaining a
     // second file, not losing the first: the running exe cannot be replaced while it is running
-    // anyway, and a user who dislikes the new version still has the old one sitting beside it.
+    // anyway, and a user who dislikes the new version still has the old one sitting beside it. (The new
+    // version removes the exes older than that one when it starts, OldVersionCleanup, so the previous
+    // one is kept and a folder does not collect every release ever downloaded.)
     //
     // Returns the path of the downloaded file.
     /// <param name="onProgress">

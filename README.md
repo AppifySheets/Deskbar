@@ -542,7 +542,9 @@ on the tray and bar menus until you are on that version. Only the newest offer i
 Accepting downloads the new exe **next to the one you are running**, never over it, through a
 `.part` file renamed only when complete, with a progress window showing the real percentage; then
 the new copy starts and the old one exits, and "Start with Windows" is re-pointed at the new file.
-The old exe stays on disk, so if you dislike the new version you still have the previous one.
+The previous exe stays on disk, so if you dislike the new version you can go back one step. When the
+new version starts it removes the `Deskbar-<version>-win-x64.exe` files beside it that are older than
+that previous one.
 Downloads are https only, from github.com or githubusercontent.com.
 
 **Check for updates…** on the tray and bar menus asks immediately and always answers: you are on
