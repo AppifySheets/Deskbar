@@ -269,6 +269,36 @@ public class FloatingBarLaneShadeTests(ITestOutputHelper output)
             System.Windows.Automation.AutomationProperties.GetName(icon) == "Beeper");
     });
 
+    // Petre, of a titled list with a gap after every icon: "no need for space between icons and text". The
+    // title's 140 DIP cap made WPF centre it in any wider line, so the gap only showed on a WIDE bar with LONG
+    // titles, which is why the fixture's default (a narrow bar, "App 1") passed against the bug. Measured:
+    // the title starts 3 DIP after the icon and runs to the end of the line.
+    [Fact]
+    public void A_title_starts_right_after_its_icon_and_runs_to_the_end_of_the_line() => StaThread.Run(() =>
+    {
+        using var bar = TwoScreens(busyIcons: 3, standOnBusy: true, everythingOnOneScreen: true, longTitles: true);
+        bar.Window.ApplyWidth(420);
+        bar.Pulse();
+
+        var lines = bar.Icons(bar.TitledList()).OfType<Button>().Select(b => (Button: b, Line: (DockPanel)b.Content)).ToList();
+        Assert.NotEmpty(lines);
+        lines.ForEach(x =>
+        {
+            var art = (FrameworkElement)x.Line.Children[0];
+            var title = (TextBlock)x.Line.Children[1];
+            var artRight = art.TranslatePoint(new Point(art.ActualWidth, 0), x.Line).X;
+            var titleLeft = title.TranslatePoint(new Point(0, 0), x.Line).X;
+            var titleRight = title.TranslatePoint(new Point(title.ActualWidth, 0), x.Line).X;
+            output.WriteLine($"{title.Text[..5]}: icon ends {artRight:0.#}, title {titleLeft:0.#} to {titleRight:0.#} of {x.Line.ActualWidth:0.#}");
+
+            Assert.Equal(artRight + 3, titleLeft, 1);
+            // Within a character of the line's end (the title's 2 DIP right margin, and trimmed text stops at
+            // its last whole character): no cap holding it short, which would end it near 23 + 140.
+            Assert.InRange(titleRight, x.Line.ActualWidth - 10, x.Line.ActualWidth - 2);
+            Assert.True(x.Line.ActualWidth > 140 + 40, $"the line is {x.Line.ActualWidth:0.#} DIP, too narrow to show the cap");
+        });
+    });
+
     // Petre: "make the expanded workspace stand out from the rest", and from the mockups he picked a bar in
     // the workspace's colour down the list's left edge: the spine a nested row wears, drawn by the same code.
     [Fact]
@@ -509,7 +539,8 @@ public class FloatingBarLaneShadeTests(ITestOutputHelper output)
     // `withPinned` adds one window pinned to every desktop, on screen 1, named "Beeper".
     // `expandRow` turns on AppState.ExpandCurrentWorkspace: the current workspace's own row expands into
     // the titled list instead of the list sitting at the bottom of the bar.
-    static Bar TwoScreens(int busyIcons, bool oneWithNoMonitor = false, bool everythingOnOneScreen = false, bool standOnBusy = false, bool withPinned = false, bool expandRow = false)
+    // `longTitles` gives every window a title far longer than any line, so the titled list has to trim them.
+    static Bar TwoScreens(int busyIcons, bool oneWithNoMonitor = false, bool everythingOnOneScreen = false, bool standOnBusy = false, bool withPinned = false, bool expandRow = false, bool longTitles = false)
     {
         var busyDesktop = Guid.NewGuid();
         var emptyDesktop = Guid.NewGuid();
@@ -524,7 +555,8 @@ public class FloatingBarLaneShadeTests(ITestOutputHelper output)
         var placement = new List<(WindowHandle Window, int Monitor)>();
         Enumerable.Range(1, busyIcons).ToList().ForEach(i =>
         {
-            var window = new WindowInfo(new WindowHandle(100 + i), 10 + i, "app" + i, @"C:\app" + i + ".exe", "App " + i, null);
+            var title = "App " + i + (longTitles ? ": a window title long enough to need trimming in any line of the bar" : "");
+            var window = new WindowInfo(new WindowHandle(100 + i), 10 + i, "app" + i, @"C:\app" + i + ".exe", title, null);
             desktops.Placements[window.Handle] = busyDesktop;
             monitor.Initial.Add(window);
             // The last window goes on the second screen; the one before it can be given no monitor at

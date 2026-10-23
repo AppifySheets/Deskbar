@@ -5593,11 +5593,20 @@ public partial class FloatingBar : Window
                 : TitleResting,
             TextTrimming = TextTrimming.CharacterEllipsis,
             VerticalAlignment = VerticalAlignment.Center,
+            // LEFT, never the default Stretch, and the reason is the cap below. WPF centres an element its
+            // MaxWidth holds narrower than its slot, so on a wide bar a capped title floated into the middle
+            // of the line: Petre's Beeper title started 34 DIP into a 188 DIP line instead of 25, about 9 DIP
+            // of gap after the icon and as much wasted at the end ("no need for space between icons and
+            // text"). Left keeps the 3 DIP after the icon whatever the cap does.
+            HorizontalAlignment = HorizontalAlignment.Left,
             Margin = new Thickness(3, 0, 2, 0),
-            // A ceiling for a bar with no width of its own (never resized, so SizeToContent): there a
-            // title is measured at its full length and would make the whole bar as wide as the longest
-            // one. With a stored width the column is narrower than this and the ellipsis applies first.
-            MaxWidth = 140,
+            // A ceiling for a bar with no width of its own (never resized, so SizeToContent in the width axis):
+            // there a title is measured at its full length and would make the whole bar as wide as the
+            // longest one. A bar with a stored width needs no ceiling, because the line's own width trims the
+            // title, so there it runs to the end of the line and shows as much of itself as fits. The mode is
+            // read at build time; a resize that ends SizeToContent is followed by a rebuild soon enough that
+            // a title briefly held to 140 there costs nothing.
+            MaxWidth = SizeToContent.HasFlag(SizeToContent.Width) ? 140 : double.PositiveInfinity,
         };
 
         var line = new DockPanel { LastChildFill = true };
