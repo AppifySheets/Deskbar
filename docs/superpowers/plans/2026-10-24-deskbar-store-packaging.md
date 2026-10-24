@@ -31,7 +31,7 @@
 2. A `StoreContext` call that throws or times out (no Store on the machine, a Windows Sandbox) must read as `Store licence unavailable` and Pro for the session, traced, not as free tier. Pinned in Task 7.
 3. `state.json` written by a build whose version carries build metadata (`2.1.50+abc123`) or by a build with no `WrittenBy` at all must load in a build of the same or a newer version; only a strictly newer `WrittenBy` refuses. Pinned in Task 3.
 4. The first-packaged-start takeover under `DESKBAR_APPDATA` must do nothing at all, not even write the marker, and a second start with the marker present must do nothing. Pinned in Task 9.
-5. A program path with spaces, an argument with embedded quotes and an argument containing `%` must survive the cmd `start` breakaway line unchanged. Pinned in Task 5.
+5. A program path with spaces, an argument with embedded quotes and an argument containing `%` must survive the cmd `start` breakaway line unchanged, for programs that split their command line with the C runtime's rules. Measured during Task 5: `%` is not doubled on a `cmd /c` line (`^%` is the escape), and programs that split with `CommandLineToArgvW` end a quoted region at `""`, so an embedded quote followed later by whitespace splits there; accepted because no caller passes embedded quotes. Pinned in Task 5.
 
 ---
 
