@@ -178,6 +178,18 @@ object.
     you opened yourself, by the hwnd that appeared, with `--no-follow`: a fresh window has
     focus, and without it the move takes Petre's screen along (it did, once).
 
+- **`PackageIdentity.IsPackaged` (in `Deskbar.Windows.Packaging`) is the one switch for
+  Store-build behaviour**, and every switch on it carries a one-line comment naming
+  `docs/superpowers/specs/2026-10-24-deskbar-store-packaging-design.md`. What changes under
+  the package: Manage's box drives the startup task instead of the Run value; no Run value and
+  no Start menu shortcut are written; `deskbar.cmd` points at the `deskbar` alias; updates come
+  from the Store, not GitHub; child processes (`start`, `restart-app`, dock pins) break away
+  from the package; and the first packaged start takes over from a direct copy by deleting its
+  Run value and shortcut once. The Store build is Deskbar Pro and nothing is gated yet.
+- **On a Store machine `deskbar` is on the PATH**, a console program with output and exit
+  codes, so a session can run `deskbar windows` and `deskbar move ...` instead of the
+  `deskbar.cmd` shim. The shim still exists and works.
+
 ## Instrumentation, and start with it
 
 Every wrong answer in this project has been a guess, and every right one has come from a
