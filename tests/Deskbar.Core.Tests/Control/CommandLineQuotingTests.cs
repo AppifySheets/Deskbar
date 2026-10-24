@@ -74,4 +74,34 @@ public class CommandLineQuotingTests
     public void A_percent_in_the_folder_or_program_steps_out_of_the_quotes_too() =>
         Assert.Equal(@"/d /v:off /c start """" /d ""C:\w 100""^%""x""^%"""" ""C:\p""^%""\x.exe""",
             CommandLineQuoting.ForCmdStart(@"C:\p%\x.exe", [], @"C:\w 100%x%"));
+
+    // In the C-runtime sense, an argument that already holds quotes and a comma is quoted once more and its
+    // quotes doubled, which a C-runtime program reads back as the original text. That is right for such a
+    // program and wrong for Explorer, whose `/select,"<path>"` is its own syntax: this is why Explorer goes
+    // through ForCmdStartVerbatim instead.
+    [Fact]
+    public void An_argument_with_quotes_and_a_comma_is_quoted_again_for_the_C_runtime() =>
+        Assert.EndsWith(@" ""/select,""""C:\a,b\x.txt""""""",
+            CommandLineQuoting.ForCmdStart("x", ["/select,\"C:\\a,b\\x.txt\""], null));
+
+    // The verbatim form hands Explorer its `/select,"<path>"` exactly as written: the path keeps its one pair
+    // of quotes, comma and spaces inside them, and nothing is quoted a second time.
+    [Theory]
+    [InlineData(@"/select,""C:\a,b\x.txt""")]
+    [InlineData(@"/select,""C:\Program Files\a, b\x.txt""")]
+    [InlineData(@"/select,""C:\d&e\x.txt""")]
+    public void Verbatim_arguments_with_quotes_and_a_comma_are_not_quoted_again(string arguments) =>
+        Assert.Equal(@"/d /v:off /c start """" ""explorer.exe"" " + arguments,
+            CommandLineQuoting.ForCmdStartVerbatim("explorer.exe", arguments, null));
+
+    // cmd still reads the verbatim text first, so it gets cmd's two rules by cmd's own quote state: a caret
+    // before an operator or a percent outside quotes, the step out of the quotes for a percent inside them.
+    [Fact]
+    public void Verbatim_arguments_are_escaped_for_cmd_by_its_quote_state() =>
+        Assert.EndsWith(@" ""x"" /a^&b 50^% ""c""^%""d & e""",
+            CommandLineQuoting.ForCmdStartVerbatim("x", @"/a&b 50% ""c%d & e""", null));
+
+    [Fact]
+    public void Empty_verbatim_arguments_end_at_the_program() =>
+        Assert.Equal(@"/d /v:off /c start """" /d ""C:\w"" ""x""", CommandLineQuoting.ForCmdStartVerbatim("x", "", @"C:\w"));
 }

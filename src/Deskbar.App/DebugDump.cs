@@ -45,10 +45,11 @@ static class DebugDump
     // file off a remote machine.
     //
     // Through DetachedLauncher, so under the Store copy the Explorer window is not part of Deskbar's package
-    // (store packaging design). `/select,` and the path go as two arguments, which Explorer reads as the
-    // long-standing `/select, "<path>"` form.
+    // (store packaging design). Explorer's own `/select,"<path>"` goes as ONE verbatim string with the path
+    // always quoted, as before the package; split into two C-runtime arguments the path went unquoted when it
+    // had no space, and a comma in it broke Explorer's parse (TaskbarPins.Reveal has the same fix).
     public static Result Reveal(string path) =>
-        DetachedLauncher.Start("explorer.exe", ["/select,", path], null)
+        DetachedLauncher.StartVerbatim("explorer.exe", $"/select,\"{path}\"", null)
             .MapError(e => $"The dump is at {path}, but Explorer could not be opened: {e}");
 
     internal static string Compose(FloatingBar? bar, WorkspaceManager manager)

@@ -43,6 +43,27 @@ public sealed class DetachedLauncherTests : IDisposable
         Assert.True(SpinWait.SpinUntil(() => File.Exists(marker), 5000), "the started program never wrote its marker");
     }
 
+    // The verbatim form (Explorer's `/select,"<path>"`) on both paths, run for real: the marker's path has a
+    // comma and a space in it and is quoted once by the caller, and the script only finds it if neither path
+    // quoted it again or split it at the comma or the space.
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void Verbatim_arguments_reach_the_program_as_written(bool packaged)
+    {
+        var awkward = Path.Combine(Path.GetTempPath(), $"deskbar launcher, {Guid.NewGuid():N}.txt");
+        try
+        {
+            var result = DetachedLauncher.StartVerbatim("wscript.exe", $"//B //E:JScript \"{script}\" \"{awkward}\"", null, packaged);
+            Assert.True(result.IsSuccess, result.IsFailure ? result.Error : "");
+            Assert.True(SpinWait.SpinUntil(() => File.Exists(awkward), 5000), "the started program never wrote its marker");
+        }
+        finally
+        {
+            try { File.Delete(awkward); } catch (IOException) { }
+        }
+    }
+
     // A program that is not there: the unpackaged path fails the way Process.Start does, with its message.
     [Fact]
     public void Unpackaged_start_of_a_missing_program_is_a_failure()

@@ -213,11 +213,13 @@ public sealed class ShellTaskbarPins : ITaskbarPins
     static Result StartDetached(TaskbarPin pin, string program, IReadOnlyList<string> arguments, string? workingDirectory) =>
         DetachedLauncher.Start(program, arguments, workingDirectory).MapError(e => $"Could not start {pin.Name}: {e}");
 
-    // `/select,` and the path as two arguments: the path is quoted when it has spaces in it, giving Explorer
-    // the long-standing `/select, "<path>"` form. Through DetachedLauncher for the same reason as Launch.
+    // Explorer's own `/select,"<path>"`, as ONE verbatim argument string with the path always quoted, which is
+    // what this did before the package. As two C-runtime arguments the path went unquoted whenever it had no
+    // space, and Explorer cut a path holding a comma at the comma. Through DetachedLauncher for the same
+    // reason as Launch (StartVerbatim: neither the shell nor the packaged path quotes it a second time).
     public Result Reveal(TaskbarPin pin) =>
         (pin.TargetPath ?? (pin.IsInstalledApp ? null : pin.ParsingName)) is { } path
-            ? DetachedLauncher.Start("explorer.exe", ["/select,", path], null)
+            ? DetachedLauncher.StartVerbatim("explorer.exe", $"/select,\"{path}\"", null)
                 .MapError(e => $"Could not open the location of {pin.Name}: {e}")
             : Result.Failure($"{pin.Name} is an installed app, with no file location to open");
 

@@ -48,27 +48,41 @@ public static class DetachedLauncher
     // The same with the package question answered by the caller, so the tests can run both paths on an
     // unpackaged test host. The error is the bare reason; each call site words its own message around it.
     internal static Result<int?> Start(string program, IReadOnlyList<string> arguments, string? workingDirectory, bool packaged) =>
-        packaged ? StartBrokenAway(program, arguments, workingDirectory) : StartThroughShell(program, arguments, workingDirectory);
+        packaged
+            ? StartBrokenAway(CommandLineQuoting.ForCmdStart(program, arguments, workingDirectory))
+            : StartThroughShell(program, workingDirectory, info => arguments.ToList().ForEach(info.ArgumentList.Add));
 
-    static Result<int?> StartThroughShell(string program, IReadOnlyList<string> arguments, string? workingDirectory) =>
+    // The same, with the arguments as ONE string handed to the program exactly as written, never split and
+    // never quoted again. For Explorer's `/select,"<path>"`, which is Explorer's own syntax rather than C
+    // runtime arguments (CommandLineQuoting.ForCmdStartVerbatim has the reason). Unpackaged it is
+    // ProcessStartInfo.Arguments, which the shell passes on verbatim, exactly what the direct build always did.
+    // docs/superpowers/specs/2026-10-24-deskbar-store-packaging-design.md
+    public static Result<int?> StartVerbatim(string program, string arguments, string? workingDirectory) =>
+        StartVerbatim(program, arguments, workingDirectory, PackageIdentity.IsPackaged);
+
+    internal static Result<int?> StartVerbatim(string program, string arguments, string? workingDirectory, bool packaged) =>
+        packaged
+            ? StartBrokenAway(CommandLineQuoting.ForCmdStartVerbatim(program, arguments, workingDirectory))
+            : StartThroughShell(program, workingDirectory, info => info.Arguments = arguments);
+
+    // The shell's start, as every call site did it before the package. `withArguments` puts the arguments in,
+    // one by one (ArgumentList, quoted by .NET for the C runtime) or as one verbatim string (Arguments).
+    static Result<int?> StartThroughShell(string program, string? workingDirectory, Action<ProcessStartInfo> withArguments) =>
         Result.Try(() =>
         {
-            var info = new ProcessStartInfo(program)
-            {
-                UseShellExecute = true,
-                WorkingDirectory = workingDirectory ?? "",
-            };
-            arguments.ToList().ForEach(info.ArgumentList.Add);
+            var info = new ProcessStartInfo(program) { UseShellExecute = true, WorkingDirectory = workingDirectory ?? "" };
+            withArguments(info);
             using var started = Process.Start(info);
             return started?.Id;
         }, e => e.Message);
 
-    static Result<int?> StartBrokenAway(string program, IReadOnlyList<string> arguments, string? workingDirectory) =>
+    // cmdArguments is everything after cmd's own name: CommandLineQuoting's `/d /v:off /c start "" ...` line.
+    static Result<int?> StartBrokenAway(string cmdArguments) =>
         Result.Try(() =>
         {
             var cmd = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.System), "cmd.exe");
             // cmd skips its own name (the first token) before it reads /d /c, so the line starts with it.
-            var commandLine = new StringBuilder($"\"{cmd}\" {CommandLineQuoting.ForCmdStart(program, arguments, workingDirectory)}");
+            var commandLine = new StringBuilder($"\"{cmd}\" {cmdArguments}");
             WithBreakawayAttribute(attributes =>
             {
                 var startup = new StartupInfoEx { StartupInfo = new StartupInfo { Size = Marshal.SizeOf<StartupInfoEx>() }, AttributeList = attributes };

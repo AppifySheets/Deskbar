@@ -49,6 +49,37 @@ public static class CommandLineQuoting
     public static string ForCmdStart(string program, IReadOnlyList<string> arguments, string? workingDirectory) =>
         string.Join(" ", ["/d /v:off /c start \"\"", .. Folder(workingDirectory), ForStart(program), .. arguments.Select(ForProgram)]);
 
+    // The same line, with the program's arguments given as ONE string already written the way the program must
+    // receive it, for a program that does not split its command line with the C runtime's rules. Explorer is
+    // the caller: `/select,"<path>"` is Explorer's own syntax, a switch and a quoted path joined by a comma,
+    // and it is what the direct build always passed (ShellExecute's parameters, verbatim). Splitting it into
+    // the two arguments `/select,` and `<path>` let the quoting above leave a path without spaces unquoted,
+    // and Explorer then cuts a path holding a comma at the comma.
+    //
+    // Nothing here quotes for the program: the text keeps its own quotes, so `/select,"<path>"` is not quoted
+    // a second time. Only cmd's reading is undone, with the same two measured rules as above, applied by
+    // following cmd's quote state through the text: outside quotes a caret before `& | < > ^ %`, inside quotes
+    // a percent steps out for its caret and back in. A program that joins adjacent quoted runs the C runtime's
+    // way gets `"C:\p"%"x"` back as C:\p%x; whether Explorer does is not measured, and no revealed path with a
+    // percent in it has been seen.
+    public static string ForCmdStartVerbatim(string program, string arguments, string? workingDirectory) =>
+        string.Join(" ", ["/d /v:off /c start \"\"", .. Folder(workingDirectory), ForStart(program), .. Verbatim(arguments)]);
+
+    static IEnumerable<string> Verbatim(string arguments) =>
+        arguments.Length == 0 ? [] : [ForCmdReading(arguments)];
+
+    // Walks the text with cmd's quote state: every `"` flips it, as it does for cmd.
+    static string ForCmdReading(string text) =>
+        text.Aggregate(
+            (Text: new StringBuilder(), Quoted: false),
+            (state, c) => (c, state.Quoted) switch
+            {
+                ('"', var quoted) => (state.Text.Append(c), !quoted),
+                ('%', true) => (state.Text.Append(PercentInsideQuotes), true),
+                ('&' or '|' or '<' or '>' or '^' or '%', false) => (state.Text.Append('^').Append(c), false),
+                _ => (state.Text.Append(c), state.Quoted),
+            }).Text.ToString();
+
     // No folder, or an empty one, means none: cmd's own, as Process.Start treats an empty WorkingDirectory.
     static IEnumerable<string> Folder(string? workingDirectory) =>
         string.IsNullOrEmpty(workingDirectory) ? [] : ["/d", ForStart(workingDirectory)];
@@ -59,8 +90,7 @@ public static class CommandLineQuoting
     static string ForStart(string path) => $"\"{path.Replace("%", PercentInsideQuotes)}\"";
 
     // An argument for the program. Quoted only when it has to be (a space, a tab, a quote, or nothing at all),
-    // so `--new-window` and `/select,` arrive exactly as written, the same as Process.Start's ArgumentList
-    // would send them.
+    // so `--new-window` arrives exactly as written, the same as Process.Start's ArgumentList would send it.
     static string ForProgram(string argument) =>
         argument.Length == 0 || argument.Any(c => c is ' ' or '\t' or '"') ? Quoted(argument) : Unquoted(argument);
 
