@@ -12,6 +12,8 @@ public static class StartupNoteText
     {
         StartupAvailability.DisabledByPolicy => "Startup is turned off by policy. Turn it on under Settings, Apps, Startup.",
         StartupAvailability.DisabledByUser => "Startup is turned off in Settings. Turn it on under Settings, Apps, Startup.",
+        // An administrator's EnabledByPolicy: on, and not the app's to turn off, so there is no place to send them.
+        StartupAvailability.LockedOn => "Startup is turned on by policy and cannot be changed here.",
         StartupAvailability.Unavailable => "Startup could not be read.",
         // Store packaging design: the direct build warns when the Store copy is installed beside it, because
         // that copy's startup task (on by default) and this build's Run value would each start a Deskbar at

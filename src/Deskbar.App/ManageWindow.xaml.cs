@@ -330,15 +330,18 @@ public partial class ManageWindow : Window
     // Sets the start-with-Windows box and its note from StartupSwitch.Current (the Run value in the direct
     // build, the package's startup task in the Store copy). When Settings or a policy turned the startup
     // task off, the app is not allowed to turn it back on, so the box is unticked and greyed out and the
-    // note says where it can be turned on. Unavailable (the state could not be read) leaves the box usable.
+    // note says where it can be turned on. When a policy turned it ON (LockedOn), the app may not turn it
+    // off, so the box is ticked and greyed out. Unavailable (the state could not be read) leaves the box usable.
     void ShowStartup()
     {
         var startup = StartupSwitch.Current;
         var availability = startup.Availability;
-        var locked = availability is StartupAvailability.DisabledByUser or StartupAvailability.DisabledByPolicy;
+        var lockedOff = availability is StartupAvailability.DisabledByUser or StartupAvailability.DisabledByPolicy;
+        var lockedOn = availability is StartupAvailability.LockedOn;
+        var locked = lockedOff || lockedOn;
 
         showingStartup = true;
-        StartWithWindows.IsChecked = !locked && startup.IsEnabled;
+        StartWithWindows.IsChecked = lockedOn || (!lockedOff && startup.IsEnabled);
         showingStartup = false;
         StartWithWindows.IsEnabled = !locked;
 

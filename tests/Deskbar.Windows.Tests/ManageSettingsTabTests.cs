@@ -321,6 +321,25 @@ public class ManageSettingsTabTests
         window.Close();
     });
 
+    // An administrator turned the startup task ON by policy (EnabledByPolicy): it starts with Windows and the
+    // app may not turn it off, so the box is ticked, greyed out, and the note says why. Opening writes nothing.
+    [Fact]
+    public void A_startup_task_on_by_policy_is_ticked_and_greyed() => StaThread.Run(() =>
+    {
+        var fake = new FakeStartupSwitch(StartupAvailability.LockedOn, enabled: true);
+        using var _ = StartupSwitch.Override(fake);
+
+        var window = new ManageWindow(Built(AppState.Empty), compatibilityMode: false);
+
+        Assert.True(StartBox(window).IsChecked);
+        Assert.False(StartBox(window).IsEnabled);
+        Assert.Equal("Startup is turned on by policy and cannot be changed here.", StartNote(window).Text);
+        Assert.Equal(Visibility.Visible, StartNote(window).Visibility);
+        Assert.Equal(0, fake.Enables + fake.Disables);
+
+        window.Close();
+    });
+
     // A state that could not be read is not a reason to lock the box: ticking it may well work.
     [Fact]
     public void An_unreadable_startup_state_leaves_the_box_usable() => StaThread.Run(() =>
@@ -388,6 +407,7 @@ public class ManageSettingsTabTests
     [InlineData(StartupAvailability.Available, true, true, "")]
     [InlineData(StartupAvailability.DisabledByPolicy, true, true, "Startup is turned off by policy. Turn it on under Settings, Apps, Startup.")]
     [InlineData(StartupAvailability.DisabledByUser, true, false, "Startup is turned off in Settings. Turn it on under Settings, Apps, Startup.")]
+    [InlineData(StartupAvailability.LockedOn, true, true, "Startup is turned on by policy and cannot be changed here.")]
     [InlineData(StartupAvailability.Unavailable, true, false, "Startup could not be read.")]
     public void The_startup_note_says_the_right_thing(StartupAvailability availability, bool packaged, bool storeCopyInstalled, string expected) =>
         Assert.Equal(expected, StartupNoteText.For(availability, packaged, storeCopyInstalled));

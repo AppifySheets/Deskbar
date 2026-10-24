@@ -7,14 +7,16 @@ namespace Deskbar.App.Startup;
 // Only the Store package's startup task can be anything but Available: Windows lets the user turn a
 // startup task off in Settings, Apps, Startup (DisabledByUser) and an administrator turn it off by policy
 // (DisabledByPolicy), and in both cases the app is not allowed to turn it back on, so Manage greys the box
-// and says where it can be turned on. Unavailable means the state could not be read at all (the call
-// threw or timed out), which is no reason to lock the box. The Run value of the direct build is always
-// Available.
+// and says where it can be turned on. LockedOn is the mirror case: an administrator turned the task ON by
+// policy (EnabledByPolicy), so it starts with Windows and the app may not turn it off; Manage shows the box
+// ticked and greyed. Unavailable means the state could not be read at all (the call threw or timed out),
+// which is no reason to lock the box. The Run value of the direct build is always Available.
 public enum StartupAvailability
 {
     Available,
     DisabledByUser,
     DisabledByPolicy,
+    LockedOn,
     Unavailable,
 }
 

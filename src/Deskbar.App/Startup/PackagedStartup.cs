@@ -43,13 +43,15 @@ public sealed class PackagedStartup : IStartupSwitch
 
     static bool IsOn(StartupTaskState state) => state is StartupTaskState.Enabled or StartupTaskState.EnabledByPolicy;
 
-    // Enabled, EnabledByPolicy and Disabled are all states the app may leave as they are or change (the
-    // last one is just the box unticked). The two Disabled-by states are the ones only the user or an
-    // administrator can undo.
+    // Enabled and Disabled are states the app may leave as they are or change (the second is just the box
+    // unticked). The two Disabled-by states are the ones only the user or an administrator can undo, and
+    // EnabledByPolicy is an administrator's ON that the app may not turn off, so it counts as enabled (IsOn
+    // above) and locked: Manage shows the box ticked and greyed.
     static StartupAvailability AvailabilityOf(StartupTaskState state) => state switch
     {
         StartupTaskState.DisabledByUser => StartupAvailability.DisabledByUser,
         StartupTaskState.DisabledByPolicy => StartupAvailability.DisabledByPolicy,
+        StartupTaskState.EnabledByPolicy => StartupAvailability.LockedOn,
         _ => StartupAvailability.Available,
     };
 
