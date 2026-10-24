@@ -128,6 +128,59 @@ public class RemoteControlStartTests
         Assert.Equal(DesktopOf(manager, "Research"), desktops.WindowPlacements[new WindowHandle(0x51)]);
     }
 
+    // --- the attention dot ---------------------------------------------------------------------
+    //
+    // Petre: "when claude starts a process in the collapsed deskbar, it should have a new icon", "as does teams". A
+    // window started for a workspace you are not looking at wears the dot a flashing taskbar button gets.
+
+    Overview.WindowRow RowOf(WorkspaceManager manager, string workspace, nint hwnd) =>
+        manager.WindowsByWorkspace().Value.Workspaces.Single(g => g.Workspace.Name == workspace).Running.Single(r => r.Window.Handle.Value == hwnd);
+
+    void StandOn(WorkspaceManager manager, string workspace)
+    {
+        desktops.CurrentDesktopId = DesktopOf(manager, workspace)!.Value;
+        desktops.CurrentChangedSubject.OnNext(desktops.CurrentDesktopId);
+    }
+
+    void Activate(WindowInfo window) => monitor.Subject.OnNext(new WindowEvent(WindowEventKind.Activated, window));
+
+    [Fact]
+    public void A_window_started_out_of_sight_wears_the_attention_dot_until_you_look_at_it()
+    {
+        var manager = Started();
+        manager.AddWorkspace("Research");
+        manager.AddWorkspace("Here");
+        StandOn(manager, "Here");
+        var browser = Window(0x70, 9000, "chrome");
+
+        Run(manager, processId: null, "start", "Research", "--", "chrome", "--new-window", "https://example.com");
+        Appear(browser);
+        Assert.True(RowOf(manager, "Research", 0x70).WantsAttention);
+
+        // Windows focuses a new window as it opens, out of sight on its own desktop: that is not looking at it.
+        Activate(browser);
+        Assert.True(RowOf(manager, "Research", 0x70).WantsAttention);
+
+        // Going there and looking at it is.
+        StandOn(manager, "Research");
+        Activate(browser);
+        Assert.False(RowOf(manager, "Research", 0x70).WantsAttention);
+    }
+
+    // Started for the workspace you are on, it opens in front of you: nothing to point at.
+    [Fact]
+    public void A_window_started_where_you_are_gets_no_dot()
+    {
+        var manager = Started();
+        manager.AddWorkspace("Research");
+        StandOn(manager, "Research");
+
+        Run(manager, processId: null, "start", "Research", "--", "chrome");
+        Appear(Window(0x71, 9001, "chrome"));
+
+        Assert.False(RowOf(manager, "Research", 0x71).WantsAttention);
+    }
+
     // A launch that fails says why and withdraws its expectation, so nothing of that name is claimed afterwards.
     [Fact]
     public void A_failed_launch_reports_and_expects_nothing()

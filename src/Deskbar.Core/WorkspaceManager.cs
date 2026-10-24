@@ -559,6 +559,12 @@ public sealed class WorkspaceManager(
     // dictionary, which is exactly the moment this is asked, so the question is asked of the snapshot.
     bool IsOursByProcess(WindowInfo window) => window.ProcessId == ownProcess;
 
+    // Whether a window is on the desktop in front, asked of the shell now (see MarkActive for why not of
+    // currentDesktopId). A window the shell cannot place (a pinned one is on every desktop) counts as in front,
+    // and so does any failure to ask, which keeps the old rule: focus clears the mark.
+    bool OnDesktopInFront(WindowHandle window) =>
+        desktops.DesktopOf(window).Bind(on => desktops.CurrentDesktop().Map(front => front == on)).Match(inFront => inFront, _ => true);
+
     // The one place activeWindow is written after startup, so the event path and the sweep can
     // never disagree about what "became active" means.
     void MarkActive(WindowHandle window)
@@ -577,7 +583,15 @@ public sealed class WorkspaceManager(
         // before the change guard below, and that ordering matters: re-activating the window you
         // are already in is a no-op for the highlight but must still clear a flash that arrived
         // while you sat there.
-        var settled = wantsAttention.Remove(window);
+        //
+        // ...but only a window on the desktop you are LOOKING AT. Windows focuses a new window as it opens, and a
+        // window `start` claimed for another workspace (StartedFor) is focused there, out of sight, a moment after it
+        // was marked; clearing on that focus would take the mark off before anyone could see it. Read live from the
+        // shell rather than from currentDesktopId, because on a switch the focus event arrives BEFORE the desktop
+        // change does (see the note on currentDesktopId), so the cached value would still name the desktop you left
+        // and the mark would survive your looking at it. Asked only for a window that has a mark to clear, so an
+        // ordinary focus change costs no COM call.
+        var settled = wantsAttention.Contains(window) && OnDesktopInFront(window) && wantsAttention.Remove(window);
         if (activeWindow.Equals(Maybe<WindowHandle>.From(window)))
         {
             if (settled) stateChanged.OnNext(Unit.Default);
@@ -2952,8 +2966,17 @@ public sealed class WorkspaceManager(
         if ((byProcess ?? byName) is not { } match) return Maybe<Decision>.None;
 
         if (byName is not null) expectations[expectations.IndexOf(byName)] = byName with { NameSpent = true };
+
+        // A window started for a workspace you are NOT looking at wears the attention dot, the one a flashing taskbar
+        // button gets. Petre: "when claude starts a process in the collapsed deskbar, it should have a new icon", "as
+        // does teams". The window arrives out of sight by design (that is what start and open are for), so without a
+        // mark nothing says the session put something there. Cleared the way a flash is: by looking at the window
+        // (MarkActive), and only once you can actually see it (see there).
+        var unseen = CurrentWorkspaceId.Map(current => current != match.WorkspaceId).GetValueOrDefault(true);
+        if (unseen) wantsAttention.Add(window.Handle);
+
         trace?.Invoke($"start: {window.ProcessName}({window.ProcessId}) 0x{window.Handle.Value:X} -> {NameOf(match.WorkspaceId)} " +
-                      $"by {(byProcess is not null ? "process" : "name")}");
+                      $"by {(byProcess is not null ? "process" : "name")}{(unseen ? ", marked for attention" : "")}");
         return new Decision(Placement.In(match.WorkspaceId), Roster: false);
     }
 
