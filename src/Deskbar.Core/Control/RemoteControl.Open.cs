@@ -29,34 +29,72 @@ public sealed partial class RemoteControl
     {
         if (launch is not { } starter) return ControlReply.Fail("This copy of Deskbar cannot open links.");
 
-        var editors = manager.KnownWindows
-            .Where(EditorFolder.IsEditor)
-            .Select(w => (w.Handle, Titles: manager.OriginalTitle(w.Handle).Map(t => (IEnumerable<string>)[w.Title, t]).GetValueOrDefault([w.Title])))
-            .ToList();
-        var matches = request.From is { } from ? EditorFolder.Best(from, editors) : [];
-        var places = matches.Select(h => manager.WorkspaceOf(h)).ToList();
-        var workspaces = places.Where(p => p.HasValue).Select(p => p.Value).DistinctBy(w => w.Id).ToList();
-
-        var window = matches.Count == 1
-            ? manager.KnownWindows.Where(w => w.Handle == matches[0]).Select(w => new { hwnd = Hex(w.Handle), title = w.Title }).FirstOrDefault()
-            : null;
-
-        // Every reason the link opens as usual, in the order they are checked, so the reply names the first that
-        // applied. A window that is not in any workspace counts as no answer, the same as two answers.
-        var target = places.Count > 0 && places.All(p => p.HasValue) && workspaces.Count == 1 ? workspaces[0] : null;
+        var caller = CallerOf(request.From);
+        var target = caller.Workspace;
         var browser = defaultBrowser?.Invoke() ?? Maybe<string>.None;
+        // Every reason the link opens as usual, in the order they are checked, so the reply names the first that
+        // applied.
         var reason =
-            request.From is null ? "the caller's folder is not known"
-            : matches.Count == 0 ? $"no VS Code window shows a folder on {request.From}"
-            : target is null ? $"{matches.Count} VS Code windows match {request.From} and they are not in one workspace"
-            : manager.CurrentWorkspaceId.Map(id => id == target.Id).GetValueOrDefault(false) ? $"{target.Name} is the current workspace"
+            caller.Missing is { } missing ? missing
+            : manager.CurrentWorkspaceId.Map(id => id == target!.Id).GetValueOrDefault(false) ? $"{target!.Name} is the current workspace"
             : !ControlArguments.IsWeb(request.Url) ? "it is not a web link"
             : browser.HasNoValue ? "the default browser could not be found"
             : null;
 
         return reason is not null || target is null
-            ? AsUsual(starter, request.Url, reason ?? "", window)
-            : InNewWindow(starter, request.Url, target, browser.Value, window);
+            ? AsUsual(starter, request.Url, reason ?? "", caller.Window)
+            : InNewWindow(starter, request.Url, target, browser.Value, caller.Window);
+    }
+
+    // The caller's editor window and its workspace, from the folder it works in (see EditorFolder), shared by `open`
+    // and `attention`. `Missing` says why there is no workspace when there is none: no folder given, no window on
+    // it, or several windows in different workspaces. A window that is in no workspace counts as no answer, the same
+    // as two answers. `Handle` and `Window` are set only when exactly one window matched.
+    sealed record Caller(Workspace? Workspace, Maybe<WindowHandle> Handle, object? Window, string? Missing);
+
+    Caller CallerOf(string? from)
+    {
+        var editors = manager.KnownWindows
+            .Where(EditorFolder.IsEditor)
+            .Select(w => (w.Handle, Titles: manager.OriginalTitle(w.Handle).Map(t => (IEnumerable<string>)[w.Title, t]).GetValueOrDefault([w.Title])))
+            .ToList();
+        var matches = from is null ? [] : EditorFolder.Best(from, editors);
+        var places = matches.Select(h => manager.WorkspaceOf(h)).ToList();
+        var workspaces = places.Where(p => p.HasValue).Select(p => p.Value).DistinctBy(w => w.Id).ToList();
+        var target = places.Count > 0 && places.All(p => p.HasValue) && workspaces.Count == 1 ? workspaces[0] : null;
+
+        var handle = matches.Count == 1 ? matches[0] : Maybe<WindowHandle>.None;
+        var window = handle.Bind(h => manager.KnownWindows.TryFirst(w => w.Handle == h))
+            .Map(w => (object)new { hwnd = Hex(w.Handle), title = w.Title })
+            .GetValueOrDefault();
+
+        var missing =
+            from is null ? "the caller's folder is not known"
+            : matches.Count == 0 ? $"no VS Code window shows a folder on {from}"
+            : target is null ? $"{matches.Count} VS Code windows match {from} and they are not in one workspace"
+            : null;
+        return new Caller(target, handle, window, missing);
+    }
+
+    // `attention [--from <folder>]`: the session in the caller's editor window wants the user. Its workspace's row
+    // blinks and the window glows (WorkspaceManager.RequestAttention), unless the user is already on that workspace.
+    // Answered with what happened either way, never refused for an unknown caller: a Claude Code hook runs this on
+    // every notification, and a hook that fails prints an error into the session for nothing.
+    ControlReply Attention(string? from)
+    {
+        var caller = CallerOf(from);
+        if (caller.Workspace is not { } target)
+            return Success(new { marked = false, reason = caller.Missing });
+
+        return manager.RequestAttention(target.Id, caller.Handle).Match(
+            marked => Success(new
+            {
+                marked,
+                workspace = target.Name,
+                reason = marked ? null : $"{target.Name} is the current workspace",
+                window = caller.Window,
+            }),
+            ControlReply.Fail);
     }
 
     ControlReply AsUsual(Func<ProgramLaunch, Result<int?>> starter, string url, string reason, object? window) =>

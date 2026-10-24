@@ -32,6 +32,10 @@ public static class ControlUsage
                 "open a link where the caller works: when the VS Code window whose folder holds --from (the caller's\n"
                 + "      own folder if not given) is in a background workspace, a new default-browser window opens\n"
                 + "      there, without taking you along; otherwise the link opens as usual. The reply says which"),
+            new("attention", "[--from <folder>]",
+                "ask for the user: the workspace of the VS Code window whose folder holds --from (the caller's own\n"
+                + "      folder if not given) blinks on the bar and that window's icon glows, until the user goes there.\n"
+                + "      Nothing happens when the user is already on that workspace"),
         ]),
         new("Workspace row menu", [
             new("rename", "<workspace> <new name>", "Rename…"),

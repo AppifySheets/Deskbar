@@ -111,6 +111,13 @@ static class ClaudeSkill
         without it takes the user's screen to that workspace. Do not use the workspace marked `current` in
         `deskbar.cmd workspaces` as yours: that is the one the user is looking at.
 
+        ## Asking for the user
+
+        When you are blocked on the user (a question only they can answer, a decision, something they must do or
+        check) or you have finished work they are waiting for, run `deskbar.cmd attention` from your working folder.
+        If the user is on another workspace, your workspace's row on the bar blinks and your VS Code icon glows until
+        they come to it; if they are already there, nothing happens. Do not call it for routine progress.
+
         ## Everything else
 
         `deskbar.cmd help` lists every command (creating workspaces, renaming, groups, closing windows).

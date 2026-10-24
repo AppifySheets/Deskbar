@@ -559,6 +559,46 @@ public sealed class WorkspaceManager(
     // dictionary, which is exactly the moment this is asked, so the question is asked of the snapshot.
     bool IsOursByProcess(WindowInfo window) => window.ProcessId == ownProcess;
 
+    // A SESSION ASKING FOR YOU. Petre: "i also want to tell claude through the deskbar that if it needs attention, it
+    // should alert the deskbar, which should alert me by having that bar on the deskbar blink", then "and the app
+    // itself should also glow, most likely vscode", and "c" from the mockup: the row's name and rail flash orange.
+    //
+    // `deskbar.cmd attention` (RemoteControl.Attention) finds the caller's editor window and asks here for its
+    // workspace. The workspace's row blinks until you arrive there (OnDesktopChanged), and the window glows until
+    // you look at it (MarkActive). A workspace you are already on is never marked: you are looking at it, and a
+    // blink in front of you would only say what you can see. Live-only, like the attention dot: a request from
+    // before a restart is about a moment that has passed.
+    readonly HashSet<Guid> askingWorkspaces = [];
+    readonly HashSet<WindowHandle> askingWindows = [];
+
+    // True when the row was marked, false when the workspace is the one in front and so nothing was.
+    public Result<bool> RequestAttention(Guid workspaceId, Maybe<WindowHandle> window)
+    {
+        if (Workspace(workspaceId).IsFailure) return Result.Failure<bool>($"Workspace {workspaceId} not found.");
+        if (CurrentWorkspaceId.Map(current => current == workspaceId).GetValueOrDefault(false)) return false;
+
+        var changed = askingWorkspaces.Add(workspaceId);
+        window.Tap(w => changed |= askingWindows.Add(w));
+        trace?.Invoke($"attention: {NameOf(workspaceId)} asked{window.Map(w => $" by 0x{w.Value:X}").GetValueOrDefault("")}");
+        if (changed) stateChanged.OnNext(Unit.Default);
+        return true;
+    }
+
+    // The overview as built, with the two facts above stamped on: the asking workspaces' groups and the asking
+    // windows' rows. Done after the build rather than through it, because both are about this session's live state
+    // and nothing in the build needs them.
+    Overview.Overview Asking(Overview.Overview built) =>
+        askingWorkspaces.Count == 0 && askingWindows.Count == 0
+            ? built
+            : built with
+            {
+                Workspaces = built.Workspaces.Select(g => g with
+                {
+                    WantsAttention = askingWorkspaces.Contains(g.Workspace.Id),
+                    Running = g.Running.Select(r => askingWindows.Contains(r.Window.Handle) ? r with { Asks = true } : r).ToList(),
+                }).ToList(),
+            };
+
     // Whether a window is on the desktop in front, asked of the shell now (see MarkActive for why not of
     // currentDesktopId). A window the shell cannot place (a pinned one is on every desktop) counts as in front,
     // and so does any failure to ask, which keeps the old rule: focus clears the mark.
@@ -592,6 +632,8 @@ public sealed class WorkspaceManager(
         // and the mark would survive your looking at it. Asked only for a window that has a mark to clear, so an
         // ordinary focus change costs no COM call.
         var settled = wantsAttention.Contains(window) && OnDesktopInFront(window) && wantsAttention.Remove(window);
+        // A session's window that asked for you (RequestAttention) stops glowing by the same rule.
+        settled |= askingWindows.Contains(window) && OnDesktopInFront(window) && askingWindows.Remove(window);
         if (activeWindow.Equals(Maybe<WindowHandle>.From(window)))
         {
             if (settled) stateChanged.OnNext(Unit.Default);
@@ -902,6 +944,11 @@ public sealed class WorkspaceManager(
                       $"foreground={monitor.Foreground().GetValueOrDefault().Value:X}");
 
         currentDesktopId = arriving;
+
+        // Arriving is what answers a workspace that asked for you (see RequestAttention): its row stops blinking.
+        // The session's window keeps its glow until you look at IT (MarkActive), which is usually a moment later.
+        if (State.Workspaces.FirstOrDefault(w => w.DesktopId == arriving) is { } here && askingWorkspaces.Remove(here.Id))
+            stateChanged.OnNext(Unit.Default);
 
         // Taken here, before anything can return early, so the one-shot cannot survive an arrival and
         // fire on an unrelated one later. A bounced arrival therefore spends it and does nothing with
@@ -3569,7 +3616,7 @@ public sealed class WorkspaceManager(
             // One screen sweep per build, alongside the DesktopOf calls above -- and far cheaper
             // than they are, being user32 rather than COM.
             var screen = WithPendingScreens(screenLayout?.Snapshot() ?? ScreenFacts.Empty);
-            return OverviewBuilder.Build(State, windows.Where(w => !hiddenByShell.Contains(w.Handle)).ToList(), h => ledger.OriginalTitle(h), pinned, desktopOf, live, current, activeWindow, lastActiveByDesktop, screen, wantsAttention, artworkOf);
+            return Asking(OverviewBuilder.Build(State, windows.Where(w => !hiddenByShell.Contains(w.Handle)).ToList(), h => ledger.OriginalTitle(h), pinned, desktopOf, live, current, activeWindow, lastActiveByDesktop, screen, wantsAttention, artworkOf));
         }));
 
     // Both now RECORD the placement as well as performing it. Petre's defect: "move Beeper

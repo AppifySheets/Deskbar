@@ -57,6 +57,8 @@ public sealed partial class RemoteControl(WorkspaceManager manager, Func<bool, R
         ("move", _) => ControlArguments.ParseMove(rest).Match(Move, ControlReply.Fail),
         ("start", _) => ControlArguments.ParseStart(rest).Match(Start, ControlReply.Fail),
         ("open", _) => ControlArguments.ParseOpen(rest).Match(Open, ControlReply.Fail),
+        ("attention", []) => Attention(null),
+        ("attention", ["--from", var folder]) => Attention(folder),
 
         ("rename", [var workspace, var name]) => Rename(workspace, name),
         ("add-child", [var parent, var name]) => AddChild(parent, name),

@@ -2043,6 +2043,8 @@ public partial class FloatingBar : Window
         {
             Phase("query");
             if (ClickTrace.On) DumpBands(overview);
+            // The blink runs only while some row is asking (FloatingBar.Asking.cs).
+            SyncAsking(overview);
 
             // Tab counts and the sound ring (FloatingBar.Activity.cs): which windows are sounding is worked out
             // here, before any icon below is built, so every icon and pin of this rebuild agrees about it.
@@ -2270,7 +2272,8 @@ public partial class FloatingBar : Window
                     spine: g.IsCurrent || Expanded(g.Workspace.Id)
                         ? ListSpine(colour, colourSlot >= 0 ? colourSlot : ownSlot)
                         : LaneAccent(colour, colourSlot >= 0 ? colourSlot : ownSlot),
-                    titledList: Expanded(g.Workspace.Id));
+                    titledList: Expanded(g.Workspace.Id),
+                    asking: g.WantsAttention);
                 Phase($"row {g.Workspace.Name}");
                 return built;
             }
@@ -2699,7 +2702,7 @@ public partial class FloatingBar : Window
                     if (button is FrameworkElement placed) slots.Add(new IconSlot(placed, r));
                     stack.Children.Add(button);
                     if (button is Button icon)
-                        iconRings.Add(new IconRing(icon, rowKey, r.Window.Handle, r.IsActive, r.WillActivate));
+                        iconRings.Add(new IconRing(icon, rowKey, r.Window.Handle, r.IsActive, r.WillActivate, r.Asks));
                 });
 
                 // THE FIRST SCREEN'S ICONS START AT THE LEFT AND EVERY LATER SCREEN'S ARE PUSHED RIGHT, so
@@ -3511,7 +3514,7 @@ public partial class FloatingBar : Window
     // not a desktop at all.
     // `titledList` draws the current workspace's titled list at the bottom of the bar (see RebuildCore)
     // instead of an icon row.
-    UIElement GroupRow(string visualLabel, string groupLabel, bool isCurrent, Func<Result>? switchTo, string groupKey, Action<WindowHandle, int?>? onDrop, IEnumerable<WindowRow> rows, Brush? tint = null, Guid? rowKey = null, bool folded = false, bool nested = false, Brush? spine = null, bool pinned = false, Guid? desktopId = null, UIElement? captionContent = null, bool titledList = false)
+    UIElement GroupRow(string visualLabel, string groupLabel, bool isCurrent, Func<Result>? switchTo, string groupKey, Action<WindowHandle, int?>? onDrop, IEnumerable<WindowRow> rows, Brush? tint = null, Guid? rowKey = null, bool folded = false, bool nested = false, Brush? spine = null, bool pinned = false, Guid? desktopId = null, UIElement? captionContent = null, bool titledList = false, bool asking = false)
     {
         // Background MUST be non-null for a panel to take part in hit testing at all --
         // a null Background leaves gaps between icons that swallow nothing and report no
@@ -3691,7 +3694,7 @@ public partial class FloatingBar : Window
         // either, which changes nothing -- RowLabel already returns null for a row with no
         // destination, and the pinned row has never had one.
         var (label, setHover) = captionContent is null
-            ? RowLabel(visualLabel, isCurrent, switchTo, caption: true, currentColour: spine, timeFor: rowKey, fold: foldMark)
+            ? RowLabel(visualLabel, isCurrent, switchTo, caption: true, currentColour: spine, timeFor: rowKey, fold: foldMark, asking: asking)
             : (captionContent, (Action<bool>?)null);
 
         // Collected as they are built, because the hover wiring below needs the BUTTONS and
@@ -3872,6 +3875,14 @@ public partial class FloatingBar : Window
             };
             Grid.SetRowSpan(mark, container.RowDefinitions.Count);
             container.Children.Add(mark);
+
+            // A row whose session asked for the user: the rail flashes orange (FloatingBar.Asking.cs).
+            if (asking)
+            {
+                var flash = AskingRail(mark);
+                Grid.SetRowSpan(flash, container.RowDefinitions.Count);
+                container.Children.Add(flash);
+            }
 
             // Its twin where the right half begins, across the seam.
             if (AcrossSeam)
@@ -4427,7 +4438,7 @@ public partial class FloatingBar : Window
     // unbound desktops), which is how "landing here also changes workspace" is answered.
     readonly List<IconRing> iconRings = [];
 
-    sealed record IconRing(Button Button, Guid? RowKey, WindowHandle Handle, bool IsActive, bool WillActivate);
+    sealed record IconRing(Button Button, Guid? RowKey, WindowHandle Handle, bool IsActive, bool WillActivate, bool Asks = false);
 
     // The icon the pointer is resting on, held by WINDOW HANDLE and not by button (#67).
     //
@@ -4571,7 +4582,7 @@ public partial class FloatingBar : Window
         // Costs no layout: every icon already carries a 1px border, transparent when it has
         // nothing to say, precisely so gaining a marker cannot nudge a SizeToContent bar.
         iconRings.ForEach(icon =>
-            PaintMarker(icon.Button, ringed: target is { } t && icon.Handle == t, icon.IsActive, icon.WillActivate));
+            PaintMarker(icon.Button, ringed: target is { } t && icon.Handle == t, icon.IsActive, icon.WillActivate, icon.Asks ? AskingPulse : null));
     }
 
     // Which row RebuildCore drew as current, so ApplyCandidate can put the white ring back when
@@ -5278,7 +5289,7 @@ public partial class FloatingBar : Window
     // `fold`: set when the row is drawn FOLDED (see GroupRow), and then the name is followed by how many windows
     // the row is hiding and, when one of them wants you, the attention dot. Null on every row drawn in full.
     (UIElement Element, Action<bool>? SetHover) RowLabel(string text, bool isCurrent, Func<Result>? switchTo, bool caption = false,
-        Brush? currentColour = null, Guid? timeFor = null, (int Windows, bool Attention)? fold = null)
+        Brush? currentColour = null, Guid? timeFor = null, (int Windows, bool Attention)? fold = null, bool asking = false)
     {
         // Petre: "when switching workspaces, because the caption of the workspace gets bolded,
         // it increases the width of the floating window a little if that workspace is full,
@@ -5293,7 +5304,9 @@ public partial class FloatingBar : Window
         //
         // Bold for EVERY row rather than regular for every row: the bar is small, translucent
         // and read at a glance, and the labels were already the hardest thing on it to read.
-        var resting = isCurrent ? currentColour ?? CurrentRowForeground : RestingRowForeground;
+        // A row whose session asked for the user rests in the pulsing orange instead (FloatingBar.Asking.cs); hover
+        // still lifts it to white, and leaving lets the pulse show again.
+        var resting = asking ? AskingCaption : isCurrent ? currentColour ?? CurrentRowForeground : RestingRowForeground;
         var textBlock = new TextBlock
         {
             Text = text,
@@ -6003,7 +6016,7 @@ public partial class FloatingBar : Window
             Template = MarkedButton,
             Tag = IconTag, // marks this as an icon: press-drag moves the WINDOW, not the bar
         };
-        PaintMarker(button, ringed: false, focused: row.IsActive, landing: row.WillActivate);
+        PaintMarker(button, ringed: false, focused: row.IsActive, landing: row.WillActivate, asking: row.Asks ? AskingPulse : null);
 
         // The window's title as the automation name. Two jobs, both real: a screen reader announces the
         // icon as the window it stands for rather than as "button", and it is how a test tells which icon

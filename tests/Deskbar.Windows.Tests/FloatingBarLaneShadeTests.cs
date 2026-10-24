@@ -224,6 +224,26 @@ public class FloatingBarLaneShadeTests(ITestOutputHelper output)
         Assert.Empty(bar.LitWashes(row));
     });
 
+    // Petre, of a session that needs him: "having that bar on the deskbar blink", and "c" from the mockup: the row's
+    // name and rail flash orange. The caption rests in the animated orange brush, the rail gets an orange layer over
+    // it, and the shared animation runs only while some row is asking.
+    [Fact]
+    public void A_workspace_that_asked_for_you_flashes_its_name_and_rail() => StaThread.Run(() =>
+    {
+        using var bar = TwoScreens(busyIcons: 2);
+        Assert.False(bar.Window.AskingAnimated);
+
+        var busy = bar.Manager.State.Workspaces.Single(w => w.Name == "Busy");
+        Assert.True(bar.Manager.RequestAttention(busy.Id, CSharpFunctionalExtensions.Maybe<WindowHandle>.None).Value);
+        bar.Pulse();
+
+        var row = bar.RowContainer("Busy");
+        var caption = Bar.Descendants(row).OfType<TextBlock>().First(t => t.Text == "Busy");
+        Assert.Same(bar.Window.AskingCaption, caption.Foreground);
+        Assert.Contains(Bar.Descendants(row).OfType<Border>(), b => ReferenceEquals(b.Background, bar.Window.AskingPulse));
+        Assert.True(bar.Window.AskingAnimated);
+    });
+
     // Petre: "the wash shouldn't show in the currently active workspace", "there's no point, it is already
     // active". Clicking the current row switches to where you already are, so nothing marks it as a target:
     // no wash, and no caption change either ("title keeps blinking when hovering over icons", "that's also

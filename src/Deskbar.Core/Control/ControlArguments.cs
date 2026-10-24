@@ -121,12 +121,14 @@ public static class ControlArguments
     public static bool IsWeb(string link) =>
         Uri.TryCreate(link, UriKind.Absolute, out var uri) && (uri.Scheme == Uri.UriSchemeHttps || uri.Scheme == Uri.UriSchemeHttp);
 
-    // THE ONE PLACE THE CLIENT ADDS TO A COMMAND (see ControlWire for why it otherwise forwards verbatim). `open`
-    // needs the caller's folder, and only the asking process knows it: the running app has its own current folder,
-    // and the pipe carries the arguments alone. So an `open` that does not name one gets the client's, which is the
-    // folder of the shell that ran deskbar.cmd. Every other command goes through untouched.
+    // THE ONE PLACE THE CLIENT ADDS TO A COMMAND (see ControlWire for why it otherwise forwards verbatim). `open` and
+    // `attention` need the caller's folder, and only the asking process knows it: the running app has its own current
+    // folder, and the pipe carries the arguments alone. So either one that does not name a folder gets the client's,
+    // which is the folder of the shell that ran deskbar.cmd. Every other command goes through untouched.
+    static readonly string[] AboutTheCaller = ["open", "attention"];
+
     public static IReadOnlyList<string> WithCallerFolder(IReadOnlyList<string> args, string callerFolder) =>
-        args.Count > 0 && args[0].Equals("open", StringComparison.OrdinalIgnoreCase) && !args.Contains("--from")
+        args.Count > 0 && AboutTheCaller.Contains(args[0], StringComparer.OrdinalIgnoreCase) && !args.Contains("--from")
             ? [.. args, "--from", callerFolder]
             : args;
 

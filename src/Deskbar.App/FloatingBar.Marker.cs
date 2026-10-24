@@ -45,6 +45,14 @@ public partial class FloatingBar
     public static readonly DependencyProperty MarkerGlowProperty =
         DependencyProperty.RegisterAttached("MarkerGlow", typeof(double), typeof(FloatingBar), new PropertyMetadata(0.0));
 
+    // The glow's colour: white for the focused and landing windows, the pulsing orange for a window whose session
+    // asked for the user (FloatingBar.Asking.cs).
+    public static readonly DependencyProperty MarkerGlowBrushProperty =
+        DependencyProperty.RegisterAttached("MarkerGlowBrush", typeof(Brush), typeof(FloatingBar), new PropertyMetadata(Brushes.White));
+
+    public static Brush GetMarkerGlowBrush(DependencyObject element) => (Brush)element.GetValue(MarkerGlowBrushProperty);
+    public static void SetMarkerGlowBrush(DependencyObject element, Brush value) => element.SetValue(MarkerGlowBrushProperty, value);
+
     public static Brush? GetMarkerBar(DependencyObject element) => (Brush?)element.GetValue(MarkerBarProperty);
     public static void SetMarkerBar(DependencyObject element, Brush? value) => element.SetValue(MarkerBarProperty, value);
     public static double GetMarkerGlow(DependencyObject element) => (double)element.GetValue(MarkerGlowProperty);
@@ -66,15 +74,19 @@ public partial class FloatingBar
     // The bar and the glow stay with the window's own facts underneath, so hovering the focused window does not
     // stop it looking focused. Focused wins over landing where both could apply, as it always has: an icon is only
     // both if the suppression in OverviewBuilder.WillActivate ever lapses.
-    internal static void PaintMarker(Button icon, bool ringed, bool focused, bool landing)
+    //
+    // `asking` is the pulsing orange of a window whose session asked for the user (FloatingBar.Asking.cs), or null.
+    // It takes the ring and a full-strength glow, below only the amber ring: a hover is the pointer, there now.
+    internal static void PaintMarker(Button icon, bool ringed, bool focused, bool landing, Brush? asking = null)
     {
         icon.BorderBrush = ringed ? CandidateRowRing
-            : focused ? FocusedRing
-            : landing ? LandingRing
-            : Brushes.Transparent;
+            : asking ?? (focused ? FocusedRing
+                : landing ? LandingRing
+                : Brushes.Transparent);
         icon.Background = ringed || focused ? FocusedFill : Brushes.Transparent;
         SetMarkerBar(icon, focused ? FocusedBar : landing ? LandingBar : null);
-        SetMarkerGlow(icon, focused ? FocusedGlow : landing ? LandingGlow : 0);
+        SetMarkerGlow(icon, asking is not null ? 1.0 : focused ? FocusedGlow : landing ? LandingGlow : 0);
+        SetMarkerGlowBrush(icon, asking ?? Brushes.White);
     }
 
     // BareButton and BareStretchButton (see there for why the stock chrome is gone) plus the marker's two parts:
@@ -100,7 +112,8 @@ public partial class FloatingBar
             $$$"""
             <ControlTemplate TargetType="Button">
               <Grid>
-                <Border x:Name="Glow" BorderBrush="White" BorderThickness="2" Margin="-1" IsHitTestVisible="False"
+                <Border x:Name="Glow" BorderThickness="2" Margin="-1" IsHitTestVisible="False"
+                        BorderBrush="{Binding Path=(app:FloatingBar.MarkerGlowBrush), RelativeSource={RelativeSource TemplatedParent}}"
                         Opacity="{Binding Path=(app:FloatingBar.MarkerGlow), RelativeSource={RelativeSource TemplatedParent}}">
                   <Border.Effect>
                     <BlurEffect Radius="6" />

@@ -60,7 +60,10 @@ public sealed record WindowRow(
     // Petre's own machine the primary is DISPLAY2, so the marks were landing on his main screen
     // and the silence on his side one -- backwards from the intent, and invisible while the only
     // thing ever checked was whether the marks were CORRECT rather than whether they were RARE.
-    Maybe<int> MonitorRank = default);
+    Maybe<int> MonitorRank = default,
+    // A Claude session in this window asked for the user (`deskbar.cmd attention`), and the user has not looked at
+    // it since. Petre: "the app itself should also glow, most likely vscode". Set by WorkspaceManager, see Asking.
+    bool Asks = false);
 
 // A workspace's slice of the world: live windows + roster entries not running anywhere.
 // There was briefly an `Inherited` list here, carrying the parent's windows so a nested row could
@@ -72,7 +75,11 @@ public sealed record WindowRow(
 // child's desktop while you are standing in it, and they arrive in Running like any other window
 // that is genuinely on that desktop. Nothing here needs to know -- which is the point, and the
 // reason this record went back to what it was.
-public sealed record WorkspaceGroup(Workspace Workspace, bool IsCurrent, IReadOnlyList<WindowRow> Running, IReadOnlyList<InventoryEntry> NotRunning);
+// WantsAttention: a session working in this workspace asked for the user and the user has not come here since, so
+// the row blinks (Petre: "it should alert the deskbar, which should alert me by having that bar on the deskbar
+// blink"). Set by WorkspaceManager, see Asking.
+public sealed record WorkspaceGroup(Workspace Workspace, bool IsCurrent, IReadOnlyList<WindowRow> Running, IReadOnlyList<InventoryEntry> NotRunning,
+    bool WantsAttention = false);
 
 // A desktop that is NOT a Deskbar workspace still has a name ("Desktop 1") -- its
 // windows group under that name, never under a generic "Unassigned" (Petre's ask).
