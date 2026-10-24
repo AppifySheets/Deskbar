@@ -50,6 +50,10 @@
       <virtualization:ExcludedDirectories>
         <virtualization:ExcludedDirectory>$(KnownFolder:RoamingAppData)\Deskbar</virtualization:ExcludedDirectory>
         <virtualization:ExcludedDirectory>$(KnownFolder:RoamingAppData)\TaskSpaces</virtualization:ExcludedDirectory>
+        <!-- The packaged first start deletes the direct build's Start menu shortcut (Deskbar.lnk) here
+             (PackagedTakeover). Virtualised, that delete would only hide the shortcut from the package
+             while the real one stayed in Start. -->
+        <virtualization:ExcludedDirectory>$(KnownFolder:RoamingAppData)\Microsoft\Windows\Start Menu\Programs</virtualization:ExcludedDirectory>
       </virtualization:ExcludedDirectories>
     </virtualization:FileSystemWriteVirtualization>
     <virtualization:RegistryWriteVirtualization>

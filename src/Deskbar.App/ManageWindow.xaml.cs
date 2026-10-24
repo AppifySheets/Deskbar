@@ -54,6 +54,12 @@ public partial class ManageWindow : Window
         // SetCheckForUpdates ignores a value that has not changed rather than writing state.json
         // every time this window opens.
         CheckForUpdates.IsChecked = manager.State.CheckForUpdates;
+        // The Store copy checks the Microsoft Store, not GitHub (Store packaging design:
+        // docs/superpowers/specs/2026-10-24-deskbar-store-packaging-design.md), so the box says so. The
+        // XAML keeps the direct build's wording, whose "never installs anything" would be untrue here:
+        // saying yes to the Store's offer does install. The one setting governs both checks.
+        if (PackageIdentity.IsPackaged)
+            CheckForUpdates.Content = "Check the Microsoft Store for new versions";
         // Same pattern, and the same reason it is harmless: SetDockBar ignores an unchanged value.
         DockBar.IsChecked = manager.State.DockBar;
         // Same again: SetClaudeSkill ignores an unchanged value.

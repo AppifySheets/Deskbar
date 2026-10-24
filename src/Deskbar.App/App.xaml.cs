@@ -22,6 +22,7 @@ using Deskbar.Windows.Monitoring;
 using Deskbar.Windows.Packaging;
 using Deskbar.Windows.Recovery;
 using Deskbar.Windows.Renaming;
+using Deskbar.Windows.Store;
 
 namespace Deskbar.App;
 
@@ -81,6 +82,18 @@ public partial class App : Application
     System.Windows.Threading.DispatcherTimer? updateTimer;
     ReleaseInfo? availableUpdate;
 
+    // The Store copy's counterpart of availableUpdate: what the Microsoft Store last said it has waiting.
+    // Only one of the two is ever set in a process, because PackageIdentity.IsPackaged cannot change while
+    // it runs (Store packaging design: docs/superpowers/specs/2026-10-24-deskbar-store-packaging-design.md).
+    StoreUpdate? storeUpdate;
+
+    // Whether Windows has been MEASURED to start Deskbar again after the Store has updated it. The Store
+    // closes the running copy to replace the package, and the restart registration (CrashRestart, made at
+    // startup) asks Windows to bring it back, but nobody has watched that happen yet. Until the spike has,
+    // this stays false and the offer warns that Deskbar closes and has to be opened from Start
+    // (UpdateChannel.OfferQuestion). The spike sets it, by editing this line, once it has seen the restart.
+    const bool RestartProven = false;
+
     void StartUpdateChecks()
     {
         // The only gate. With it off nothing below ever runs, so no request leaves the machine.
@@ -108,7 +121,9 @@ public partial class App : Application
             // The cost is twelve requests an hour to GitHub's unauthenticated releases endpoint, whose
             // limit is sixty an hour PER IP. Fine for one machine, and worth knowing for a shared
             // office address: five colleagues running this would sit exactly on the limit, and a
-            // rate-limited check is already handled as today's answer rather than as an error.
+            // rate-limited check is already handled as today's answer rather than as an error. The Store
+            // copy asks the Microsoft Store on the same beat instead (see CheckForUpdate), so none of
+            // those requests go to GitHub there.
             //
             // Re-setting the interval on the running timer beats a second timer that would have to be
             // kept alive too.
@@ -129,6 +144,15 @@ public partial class App : Application
     // it as a Result rather than throwing.
     async void CheckForUpdate()
     {
+        // The Store copy asks the Store and never GitHub (Store packaging design:
+        // docs/superpowers/specs/2026-10-24-deskbar-store-packaging-design.md): only the Store can update
+        // a package, so a GitHub release is no use to it, and DownloadAndRestart must never run there.
+        if (PackageIdentity.IsPackaged)
+        {
+            CheckTheStore();
+            return;
+        }
+
         var latest = await UpdateService.NewerThanRunningAsync().ConfigureAwait(true);
 
         // TRACED, every outcome, and this line is why: the whole path is silent on purpose, so
@@ -170,7 +194,7 @@ public partial class App : Application
         }
         availableUpdate = release;
 
-        Announce(release);
+        Announce(release.Version, $"Update to {release.Version}…", () => OfferUpdate(release));
 
         // ...and then ASK, with a real dialog, rather than trusting the balloon (#123).
         //
@@ -192,9 +216,13 @@ public partial class App : Application
     // would lose the news the check just found.
     //
     // ConfigureAwait(true) on both callers' awaits put us back on the dispatcher, which these need.
-    void Announce(ReleaseInfo release)
+    //
+    // Takes the version, the menu label and what the item opens rather than a ReleaseInfo, so the Store
+    // copy's checks (CheckTheStore, CheckForUpdateNow) announce through the same two channels with their
+    // own label and their own offer.
+    void Announce(string version, string label, Action open)
     {
-        pendingUpdate = ($"Update to {release.Version}…", () => OfferUpdate(release));
+        pendingUpdate = (label, open);
         RefreshTrayMenu();
 
         // The balloon is BEST EFFORT and always has been, which the trace now says out loud. It is a
@@ -205,15 +233,15 @@ public partial class App : Application
         try
         {
             trayIcon!.ShowNotification(
-                title: $"Deskbar {release.Version} is available",
+                title: $"Deskbar {version} is available",
                 message: $"You are running {UpdateService.DisplayVersion}. Click here to update.");
-            ClickTrace.Write($"update {release.Version} announced: menu item set, balloon requested");
+            ClickTrace.Write($"update {version} announced: menu item set, balloon requested");
         }
         catch (Exception e)
         {
             // Never worth losing the app over, and never worth losing the menu item over either: it is
             // already set by the time we get here.
-            ClickTrace.Write($"update {release.Version} announced: menu item set, balloon threw {e.GetType().Name}: {e.Message}");
+            ClickTrace.Write($"update {version} announced: menu item set, balloon threw {e.GetType().Name}: {e.Message}");
         }
     }
 
@@ -240,6 +268,17 @@ public partial class App : Application
         // that missed.
         var wasTip = trayIcon!.ToolTipText;
         trayIcon.ToolTipText = "Deskbar — checking for updates…";
+
+        // The Store copy asks the Store and never GitHub (Store packaging design:
+        // docs/superpowers/specs/2026-10-24-deskbar-store-packaging-design.md), with the same manners as
+        // below: every outcome gets an answer, because somebody asked.
+        if (PackageIdentity.IsPackaged)
+        {
+            var fromStore = await StoreUpdates.NewerAsync(barHandle).ConfigureAwait(true);
+            trayIcon.ToolTipText = wasTip;
+            AnswerFromStore(fromStore);
+            return;
+        }
 
         var latest = await UpdateService.NewerThanRunningAsync().ConfigureAwait(true);
 
@@ -280,8 +319,114 @@ public partial class App : Application
         // rather than throwing it away. The version guard the background check uses is deliberately
         // not here: asking by hand should always answer, even for a release already announced.
         availableUpdate = release;
-        Announce(release);
+        Announce(release.Version, $"Update to {release.Version}…", () => OfferUpdate(release));
         OfferUpdate(release);
+    }
+
+    // --- the Store copy's update path ------------------------------------------------------
+    //
+    // Store packaging design: docs/superpowers/specs/2026-10-24-deskbar-store-packaging-design.md.
+    // Reached only when PackageIdentity.IsPackaged (the forks at the top of CheckForUpdate and
+    // CheckForUpdateNow). The shape is the GitHub path's: a silent background check that announces once
+    // per version, a manual check that always answers, one offer on screen. What differs is the source
+    // (StoreUpdates rather than UpdateService) and the install: the Store replaces the package itself and
+    // closes Deskbar to do it, so there is no download window and no handover of our own.
+
+    // The timer's check. Silent and traced, exactly like the GitHub check it stands in for: a failure is
+    // today's answer and the next tick asks again.
+    async void CheckTheStore()
+    {
+        var newer = await StoreUpdates.NewerAsync(barHandle).ConfigureAwait(true);
+
+        ClickTrace.Write(
+            newer.IsFailure ? $"update check (the Store) failed: {newer.Error}"
+            : newer.Value.HasNoValue ? $"update check (the Store): {UpdateService.RunningVersion} is current"
+            : $"update check (the Store): {newer.Value.Value.Version} available{(newer.Value.Value.Mandatory ? " (mandatory)" : "")}, running {UpdateService.RunningVersion}");
+
+        if (newer.IsFailure || newer.Value.HasNoValue) return;
+
+        var update = newer.Value.Value;
+
+        // Once per version, for the same reason as the GitHub check: five-minute ticks would otherwise
+        // re-ask about the same update for as long as the user chooses to wait.
+        if (storeUpdate?.Version == update.Version)
+        {
+            ClickTrace.Write($"update {update.Version} (the Store) already announced, staying quiet");
+            return;
+        }
+
+        storeUpdate = update;
+        Announce(update.Version, "Update from the Store…", () => OfferFromStore(update));
+        OfferFromStore(update);
+    }
+
+    // The manual check's answer from the Store, with the GitHub path's manners: every outcome gets a
+    // dialog. There is no "open the releases page instead" on a failure: GitHub's releases are the
+    // direct build, and the Store copy cannot install one.
+    void AnswerFromStore(Result<Maybe<StoreUpdate>> fromStore)
+    {
+        if (fromStore.IsFailure)
+        {
+            MessageBox.Show(
+                $"Could not check the Store for updates:\n{fromStore.Error}",
+                "Deskbar", MessageBoxButton.OK, MessageBoxImage.Warning);
+            return;
+        }
+
+        if (fromStore.Value.HasNoValue)
+        {
+            MessageBox.Show(
+                $"You are running {UpdateService.DisplayVersion}, which is the latest version in the Store.",
+                "Deskbar", MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
+        }
+
+        // Announced as well as offered, as in the GitHub path, so declining leaves the item on the tray
+        // menu; and no once-per-version guard, because asking by hand should always answer.
+        var update = fromStore.Value.Value;
+        storeUpdate = update;
+        Announce(update.Version, "Update from the Store…", () => OfferFromStore(update));
+        OfferFromStore(update);
+    }
+
+    // The one question, worded by UpdateChannel for the Store. No second button: the GitHub offer's
+    // "Microsoft Store" link is for the direct build, and this copy already is the Store's.
+    void OfferFromStore(StoreUpdate update)
+    {
+        if (!ClearForOffer(update.Version)) return;
+        Ask(UpdateChannel.OfferQuestion(true, update.Version, RestartProven), UpdateChannel.OfferButton(true), () => InstallFromStore());
+    }
+
+    // Hands the install to the Store. `async void` for the same reason as DownloadAndRestart: this is the
+    // end of a click, with no caller to hand a Task to.
+    //
+    // NOT registered for restart here, although the design asks for a registration before the install:
+    // CrashRestart.Register already ran at startup, in every copy that got past the single-instance guard,
+    // and a registration lasts for the life of the process, so a second call would only repeat it. Its
+    // flags leave the patch restart on (only RESTART_NO_REBOOT is set), which is the restart an installer
+    // that closes the app through Restart Manager asks for. Whether the Store's update really brings
+    // Deskbar back is what the spike measures (RestartProven).
+    async void InstallFromStore()
+    {
+        // No new offer while the Store is installing: the answer to this one is still arriving.
+        updating = true;
+        ClickTrace.Write($"update from the Store requested{(storeUpdate is { } update ? $" ({update.Version})" : "")}");
+
+        var installed = await StoreUpdates.InstallAsync(barHandle).ConfigureAwait(true);
+
+        // Reached only when the Store did NOT end this process, which on success it does to replace the
+        // package. So this is a cancel in the Store's own UI or an error, and the user, who asked, is told.
+        updating = false;
+        if (installed.IsSuccess)
+        {
+            ClickTrace.Write("update from the Store: the Store reported success but Deskbar is still running");
+            return;
+        }
+
+        ClickTrace.Write($"update from the Store failed: {installed.Error}");
+        MessageBox.Show(
+            $"Could not update from the Store:\n{installed.Error}",
+            "Deskbar", MessageBoxButton.OK, MessageBoxImage.Warning);
     }
 
     // Petre: "i clicked it, it disappeared."
@@ -293,10 +438,13 @@ public partial class App : Application
     // after the second check, three times after the third.
     //
     // `availableUpdate` rather than a captured release: the click arrives long after the check, and
-    // the field is the one that is still current.
+    // the field is the one that is still current. The Store copy's field is storeUpdate; only one of the
+    // two is ever set, because a process is packaged or not for its whole life (Store packaging design:
+    // docs/superpowers/specs/2026-10-24-deskbar-store-packaging-design.md).
     void OnUpdateNotificationClicked()
     {
         if (availableUpdate is { } release) OfferUpdate(release);
+        else if (storeUpdate is { } update) OfferFromStore(update);
     }
 
     // Petre: "it should just tell me -- new version available, do you want to update? if i do, then
@@ -307,24 +455,34 @@ public partial class App : Application
     // The one update question on screen, so a newer version can take an older one's place (see UpdateOffer).
     UpdateOffer? openOffer;
 
-    // A download is under way: no new question while the answer to the last one is still arriving.
+    // A download (or the Store's install) is under way: no new question while the answer to the last one
+    // is still arriving.
     bool updating;
 
-    void OfferUpdate(ReleaseInfo release)
+    // The two rules every offer obeys before it asks, shared by the GitHub offer below and the Store's
+    // (OfferFromStore). False means do not ask now.
+    bool ClearForOffer(string version)
     {
         if (updating)
         {
-            ClickTrace.Write($"update {release.Version} found while another downloads, not asked");
-            return;
+            ClickTrace.Write($"update {version} found while another downloads, not asked");
+            return false;
         }
 
         // Only the newest version is asked about. Petre: "when there are multiple new versions, app shows many
         // popups with all the versions; let's close all previous versions when showing a new version".
         if (openOffer is { IsLoaded: true } older)
         {
-            ClickTrace.Write($"update offer replaced by {release.Version}");
+            ClickTrace.Write($"update offer replaced by {version}");
             older.Close();
         }
+
+        return true;
+    }
+
+    void OfferUpdate(ReleaseInfo release)
+    {
+        if (!ClearForOffer(release.Version)) return;
 
         // A release with no exe attached can still be looked at, which is what the link is for.
         // Reached when a build was published without its artifact, or when the asset failed the
@@ -353,9 +511,12 @@ public partial class App : Application
         // (UpdateService.StoreProductId stays empty until then, and this dialog is exactly as it was).
         // It is a second button beside Update that opens the listing; "Not now", Esc and the window's X
         // still only close the offer.
+        //
+        // The words come from UpdateChannel, which keeps the direct build's question and button exactly
+        // as they were and holds the Store copy's beside them (OfferFromStore).
         var onStore = UpdateService.StoreProductId.Length > 0;
-        Ask($"Update Deskbar to {release.Version}?" + (onStore ? "\n\nAlso on the Microsoft Store." : ""),
-            "Update", () => DownloadAndRestart(release),
+        Ask(UpdateChannel.OfferQuestion(false, release.Version, RestartProven) + (onStore ? "\n\nAlso on the Microsoft Store." : ""),
+            UpdateChannel.OfferButton(false), () => DownloadAndRestart(release),
             onStore ? "Microsoft Store" : null, onStore ? () => OpenUrl(UpdateService.StoreLink) : null);
     }
 
