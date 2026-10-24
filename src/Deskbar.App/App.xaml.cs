@@ -89,10 +89,18 @@ public partial class App : Application
 
     // Whether Windows has been MEASURED to start Deskbar again after the Store has updated it. The Store
     // closes the running copy to replace the package, and the restart registration (CrashRestart, made at
-    // startup) asks Windows to bring it back, but nobody has watched that happen yet. Until the spike has,
-    // this stays false and the offer warns that Deskbar closes and has to be opened from Start
-    // (UpdateChannel.OfferQuestion). The spike sets it, by editing this line, once it has seen the restart.
-    const bool RestartProven = false;
+    // startup) asks Windows to bring it back.
+    //
+    // Measured on 2026-10-24 by the Store package spike (scripts/store-spike.ps1, findings in
+    // docs/superpowers/notes/2026-10-24-store-package-spike.md), on Windows 11 25H2, build 26200:
+    // `Add-AppxPackage -ForceApplicationShutdown` of package 0.0.2 over a running 0.0.1 closed it, and
+    // Windows started Deskbar again by itself 38 s after the install began, from the 0.0.2 folder, with
+    // sihost as the parent and not elevated. Nothing in the script started it.
+    //
+    // What true changes: the Store offer (UpdateChannel.OfferQuestion) is only the question, without the
+    // "Deskbar will close to update; open it from Start afterwards." line. Set it back to false if a later
+    // Windows stops bringing the app back, and the line returns.
+    const bool RestartProven = true;
 
     void StartUpdateChecks()
     {
@@ -404,8 +412,8 @@ public partial class App : Application
     // CrashRestart.Register already ran at startup, in every copy that got past the single-instance guard,
     // and a registration lasts for the life of the process, so a second call would only repeat it. Its
     // flags leave the patch restart on (only RESTART_NO_REBOOT is set), which is the restart an installer
-    // that closes the app through Restart Manager asks for. Whether the Store's update really brings
-    // Deskbar back is what the spike measures (RestartProven).
+    // that closes the app through Restart Manager asks for. The spike watched the Store-style update bring
+    // Deskbar back by itself (RestartProven).
     async void InstallFromStore()
     {
         // No new offer while the Store is installing: the answer to this one is still arriving.

@@ -122,14 +122,15 @@ startup task that **Start Deskbar with Windows** in Manage turns on and off. It 
 value and no Start menu shortcut of its own making. It also puts `deskbar` on your PATH, so
 `deskbar windows` and `deskbar help` work from PowerShell, cmd and Git Bash. The
 `deskbar.cmd` in `%APPDATA%\Deskbar` is still written and points at that command, so scripts
-that call it keep working. `deskbar version` prints the running build's version on both builds.
+that call it keep working. `deskbar version` prints the running build's version and whether it
+is the packaged Store copy.
 
 If the GitHub copy was already on the machine, the first start of the Store copy removes that
 copy's "Start with Windows" entry and its Start menu shortcut, once, so you do not get two bars
 at login. It does not delete the exe. To go back to the GitHub copy, untick the box in the
 Store copy's Manage (or remove the Store copy), then tick it in the GitHub copy's Manage.
-Nothing turns autostart back on by itself, and ticking the box in the GitHub copy while the
-Store copy is installed shows a warning that it starts both.
+Nothing turns autostart back on by itself. While the Store copy is installed, a note under the
+box in the GitHub copy's Manage says that ticking it starts both.
 
 Only one copy runs at a time. Starting the other while one is running shows a dialog that says
 which one is running: the Store copy, or the copy at a folder. Both copies share
@@ -584,8 +585,8 @@ the next start. The check is the app's only network traffic.
 
 The Store copy does not use GitHub for any of this. It asks the Store on the same timer and
 from the same menu items, under the same checkbox in Manage, and the offer window has one
-button, **Update from the Store**, which has the Store install the update. Deskbar closes while
-that happens, so open it from Start afterwards if it does not come back.
+action button, **Update from the Store**, which has the Store install the update. Deskbar
+closes to update and comes back by itself.
 
 Why a window rather than a Windows notification: a portable exe with no Start-menu shortcut has no
 AppUserModelID, and Windows silently drops its toasts. Registering one would cost the "one file,
@@ -971,6 +972,6 @@ own workflow runs instead, rebuilds the exe and replaces the release's asset wit
 unsigned one, and nothing reverts it.
 
 The release build also packs `Deskbar-<version>-store.msix` and keeps it as a workflow
-artifact, not a release asset. Petre uploads it in Partner Center by hand, since the Store
+artifact, not a release asset. The package is uploaded in Partner Center by hand, since the Store
 lags the direct exe by the days certification takes. The `store-smoke` job installs that
 package on the runner and checks that `deskbar version` answers from it.
