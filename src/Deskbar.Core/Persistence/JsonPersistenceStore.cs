@@ -8,7 +8,8 @@ namespace Deskbar.Core.Persistence;
 // workspaces come back, and the line in the trace is how anyone learns the latest file was lost.
 //
 // `runningVersion` is this build's version. Save stamps it into state.json as WrittenBy and Load refuses a file
-// stamped by a newer build (StateVersionGate). Null (the tests, mostly) stamps nothing and refuses nothing.
+// stamped by a newer major version (StateVersionGate). Null (the tests, mostly) stamps nothing and refuses
+// nothing. Top-level fields this build does not know ride through Load and Save in AppState.Extra.
 public sealed class JsonPersistenceStore(string baseDirectory, Action<string>? trace = null, string? runningVersion = null) : IPersistenceStore
 {
     // Finding 5 (reviewer, Important): without a string converter, RuleMatchKind (and any

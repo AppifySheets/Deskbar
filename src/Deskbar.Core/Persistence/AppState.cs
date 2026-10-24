@@ -1,4 +1,5 @@
 ﻿using Deskbar.Core.Domain;
+using System.Text.Json;
 using System.Text.Json.Serialization;
 using Deskbar.Core.Rules;
 
@@ -280,10 +281,23 @@ public sealed record AppState(
     public IReadOnlyList<Group> Groups { get; init; } = [];
 
     // The version of the build that last saved this file, e.g. "2.1.44". JsonPersistenceStore stamps it on every
-    // Save and StateVersionGate.Check refuses to load a file whose stamp is newer than the running build, so an
-    // older copy (the lagging Microsoft Store build) never loads, drops fields from, and overwrites a newer
-    // copy's state. Init property with no default, so files written before this key load as null, which passes.
+    // Save and StateVersionGate.Check refuses to load a file whose stamp is from a newer MAJOR version than the
+    // running build. Within a major an older copy (the lagging Microsoft Store build) loads a newer file and
+    // keeps what it understands; Extra below is what stops it dropping the rest. Init property with no
+    // default, so files written before this key load as null, which passes.
     public string? WrittenBy { get; init; }
+
+    // Top-level fields of state.json this build does not know. A build that does not know a field an older or
+    // newer build wrote carries it through Save unchanged, so switching between the Store copy and the GitHub
+    // copy within a major loses no top-level setting (see "Shared state and version lag" in
+    // docs/superpowers/specs/2026-10-24-deskbar-store-packaging-design.md).
+    //
+    // Top level only: nested records (a Workspace, a rule, the bar's state) have no such bag, so a field a newer
+    // build adds INSIDE one of them is still dropped by an older save. Null when the file had nothing unknown,
+    // which is the normal case and keeps the record's equality unaffected. The type is a mutable dictionary
+    // because System.Text.Json fills extension data only into IDictionary or JsonObject; nothing here writes it.
+    [JsonExtensionData]
+    public IDictionary<string, JsonElement>? Extra { get; init; }
 
     // --- asking about groups ------------------------------------------------------------------
     //

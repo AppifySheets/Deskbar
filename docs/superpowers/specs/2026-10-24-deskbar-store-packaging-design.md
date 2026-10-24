@@ -74,8 +74,8 @@ the package makes the direct build's self-maintenance wrong or redundant, and in
 - A Store submission that is automated end to end. The first submissions are uploaded by
   hand in Partner Center; the submission API is a later convenience.
 - ARM64. x64 only, as the direct build.
-- Supporting a downgrade between channels. An older build reading state a newer build wrote
-  refuses rather than guesses (see "Shared state and version lag"); making it work is not
+- Supporting a downgrade between channels. An older build reading state a newer major
+  version wrote refuses rather than guesses (see "Shared state and version lag"); making it work is not
   attempted.
 
 ## Anti-goals
@@ -306,6 +306,16 @@ Deskbar 2.1.50; this is 2.1.43. Start the newer copy, or remove it and delete th
 WrittenBy line from state.json to go on with this one.") rather than loading. Same major
 version only; the 1.x migration is not affected because it copies into a new file. This is
 small, it is in Core, and it is the only honest alternative to silent loss.
+
+Changed after the whole-branch review (2026-10-24): the refusal is on a newer MAJOR version
+only. Releases are daily and the Store copy lags certification, so refusing a newer patch or
+minor would have blocked the Store upgrade path and any machine that keeps two builds: the
+Store copy would almost never start beside the GitHub copy. Within a major, an older build
+that loads a newer file keeps what it understands, and `AppState` carries every top-level
+field it does not know through `Save` unchanged (`[JsonExtensionData]`), so switching
+channels loses no top-level setting. A field a newer build adds inside a nested record is
+still dropped by an older save; that is the accepted cost. The dialog text is unchanged, and
+when it appears it now names two majors ("Deskbar 3.0.0; this is 2.9.99").
 
 ### Versioning and what ships from one tag
 
