@@ -3,6 +3,7 @@ using System.Runtime.InteropServices;
 using CSharpFunctionalExtensions;
 using Microsoft.Win32;
 using Deskbar.Core.Domain;
+using Deskbar.Windows.Processes;
 
 namespace Deskbar.Windows.Shell;
 
@@ -190,27 +191,34 @@ public sealed class ShellTaskbarPins : ITaskbarPins
     // A shortcut through the shell, the way a double-click on it would; an installed app through
     // shell:AppsFolder, which is how Start launches one. With arguments, the shortcut's target exe directly, in
     // its own folder, since a shortcut cannot be handed extra arguments through the shell.
+    //
+    // The two file arms go through DetachedLauncher, so under the Store copy what a pin starts breaks away from
+    // Deskbar's package instead of running as part of it (store packaging design). `arguments` is ONE argument
+    // (the only caller passes "--new-window"), sent as it is.
+    //
+    // The installed-app arm stays a plain shell start of Explorer: Explorer brokers the activation, so the app
+    // is started by Explorer under its own package, not as Deskbar's child. The Store packaging spike checks
+    // that this holds under the package.
     public Result Launch(TaskbarPin pin, string? arguments = null) =>
-        Result.Try(() =>
+        (pin.IsInstalledApp, arguments, pin.TargetPath) switch
         {
-            using var started = (pin.IsInstalledApp, arguments, pin.TargetPath) switch
+            (true, _, _) => Result.Try(() =>
             {
-                (true, _, _) => Process.Start(new ProcessStartInfo("explorer.exe", $"shell:AppsFolder\\{pin.ParsingName}") { UseShellExecute = true }),
-                (false, { } args, { } target) => Process.Start(new ProcessStartInfo(target, args)
-                {
-                    UseShellExecute = true,
-                    WorkingDirectory = Path.GetDirectoryName(target) ?? "",
-                }),
-                _ => Process.Start(new ProcessStartInfo(pin.ParsingName) { UseShellExecute = true }),
-            };
-        }, e => $"Could not start {pin.Name}: {e.Message}");
+                using var started = Process.Start(new ProcessStartInfo("explorer.exe", $"shell:AppsFolder\\{pin.ParsingName}") { UseShellExecute = true });
+            }, e => $"Could not start {pin.Name}: {e.Message}"),
+            (false, { } args, { } target) => StartDetached(pin, target, [args], Path.GetDirectoryName(target)),
+            _ => StartDetached(pin, pin.ParsingName, [], null),
+        };
 
+    static Result StartDetached(TaskbarPin pin, string program, IReadOnlyList<string> arguments, string? workingDirectory) =>
+        DetachedLauncher.Start(program, arguments, workingDirectory).MapError(e => $"Could not start {pin.Name}: {e}");
+
+    // `/select,` and the path as two arguments: the path is quoted when it has spaces in it, giving Explorer
+    // the long-standing `/select, "<path>"` form. Through DetachedLauncher for the same reason as Launch.
     public Result Reveal(TaskbarPin pin) =>
         (pin.TargetPath ?? (pin.IsInstalledApp ? null : pin.ParsingName)) is { } path
-            ? Result.Try(() =>
-            {
-                using var started = Process.Start(new ProcessStartInfo("explorer.exe", $"/select,\"{path}\"") { UseShellExecute = true });
-            }, e => $"Could not open the location of {pin.Name}: {e.Message}")
+            ? DetachedLauncher.Start("explorer.exe", ["/select,", path], null)
+                .MapError(e => $"Could not open the location of {pin.Name}: {e}")
             : Result.Failure($"{pin.Name} is an installed app, with no file location to open");
 
     // Through the item's context menu, the way Explorer runs a verb: build the menu (some handlers only know

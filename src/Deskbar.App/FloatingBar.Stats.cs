@@ -1,5 +1,4 @@
 using System.Collections.Immutable;
-using System.Diagnostics;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
@@ -8,6 +7,7 @@ using System.Windows.Media;
 using System.Windows.Shapes;
 using CSharpFunctionalExtensions;
 using Deskbar.Windows.Performance;
+using Deskbar.Windows.Processes;
 
 namespace Deskbar.App;
 
@@ -87,9 +87,16 @@ public partial class FloatingBar
     }
 
     // Starts Task Manager. A seam so the tests can press the line without starting one on whoever runs them.
-    // Shell execute, because Task Manager asks to run elevated and only the shell honours that.
+    // Through the shell, because Task Manager asks to run elevated and only the shell honours that: the loose exe
+    // shell-executes it, and the Store copy goes through cmd's `start`, which shell-executes too, from a cmd that
+    // has broken away from Deskbar's package (DetachedLauncher, store packaging design).
+    //
+    // A failed start (the commonest is a declined UAC prompt) is traced and otherwise ignored. Process.Start used
+    // to throw it straight into the dispatcher, where an unhandled exception ends the app; nothing is lost by
+    // Task Manager not opening, so it is not worth a dialog either.
     internal Action OpenTaskManager { get; init; } = () =>
-        Process.Start(new ProcessStartInfo("taskmgr.exe") { UseShellExecute = true })?.Dispose();
+        DetachedLauncher.Start("taskmgr.exe", [], null)
+            .TapError(e => ClickTrace.Write($"stats: Task Manager did not start: {e}"));
 
     void BuildStats()
     {

@@ -5,6 +5,7 @@ using System.Text;
 using CSharpFunctionalExtensions;
 using Deskbar.Core;
 using Deskbar.Windows.Monitoring;
+using Deskbar.Windows.Processes;
 
 namespace Deskbar.App;
 
@@ -42,11 +43,13 @@ static class DebugDump
 
     // Explorer with the file selected: the "open window" half of the request, and the quickest way to copy the
     // file off a remote machine.
+    //
+    // Through DetachedLauncher, so under the Store copy the Explorer window is not part of Deskbar's package
+    // (store packaging design). `/select,` and the path go as two arguments, which Explorer reads as the
+    // long-standing `/select, "<path>"` form.
     public static Result Reveal(string path) =>
-        Result.Try(() =>
-        {
-            using var _ = Process.Start(new ProcessStartInfo("explorer.exe", $"/select,\"{path}\"") { UseShellExecute = true });
-        }, e => $"The dump is at {path}, but Explorer could not be opened: {e.Message}");
+        DetachedLauncher.Start("explorer.exe", ["/select,", path], null)
+            .MapError(e => $"The dump is at {path}, but Explorer could not be opened: {e}");
 
     internal static string Compose(FloatingBar? bar, WorkspaceManager manager)
     {
