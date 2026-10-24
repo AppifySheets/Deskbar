@@ -25,6 +25,9 @@ $script:StorePublisherDisplayName = 'AppifySheets'
 # Publisher. Windows names the install folder after it, so the smoke test can find the
 # installed exe from the version alone.
 $script:StoreFamilyName = 'Petre.Deskbar_n8ch8v53xw03y'
+# The manifest's Application Id, which Invoke-CommandInDesktopPackage needs to start the app
+# inside its package. A Pester test checks it against the real manifest.
+$script:StoreAppId = 'Deskbar'
 
 # The token in AppxManifest.xml that stands for the package version.
 $script:VersionToken = '__VERSION__'
@@ -295,8 +298,9 @@ function Get-StoreInstallPaths {
         Where Windows puts an installed copy of the package for one version, and where the
         `deskbar` execution alias lives.
     .DESCRIPTION
-        Returns FullName (the package full name), InstallDir, Exe (the installed Deskbar.exe) and
-        Alias (%LOCALAPPDATA%\Microsoft\WindowsApps\deskbar.exe). The full name is the family
+        Returns FamilyName, AppId (the manifest's Application Id), FullName (the package full
+        name), InstallDir, Exe (the installed Deskbar.exe) and Alias
+        (%LOCALAPPDATA%\Microsoft\WindowsApps\deskbar.exe). The full name is the family
         name with the four-part version and the architecture spliced in:
         Petre.Deskbar_<v>.0_x64__n8ch8v53xw03y. The manifest declares x64 only, so the
         architecture is fixed. Nothing is read from the machine except the two roots, which
@@ -320,6 +324,8 @@ function Get-StoreInstallPaths {
     $installDir = Join-Path $ProgramFiles "WindowsApps\$fullName"
 
     [pscustomobject]@{
+        FamilyName = $script:StoreFamilyName
+        AppId      = $script:StoreAppId
         FullName   = $fullName
         InstallDir = $installDir
         Exe        = Join-Path $installDir 'Deskbar.exe'

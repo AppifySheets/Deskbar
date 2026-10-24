@@ -7,11 +7,13 @@
 .DESCRIPTION
     WRITTEN FOR AN ELEVATED, THROWAWAY MACHINE: the release workflow's store-smoke job on a
     GitHub runner, and the Store packaging spike. It changes the machine while it runs:
-      - trusts a self-signed test certificate machine-wide, in Cert:\LocalMachine\TrustedPeople
-        (removed again at the end, unless it was already trusted before the script started);
+      - trusts a self-signed test certificate machine-wide, in Cert:\LocalMachine\TrustedPeople,
+        and, when none was there, creates that certificate in Cert:\CurrentUser\My. Both are
+        removed at the end, but only when this run added them;
       - installs the package Petre.Deskbar for this user, replacing any installed copy, and
-        removes it at the end;
-      - starts the installed Deskbar.exe with DESKBAR_APPDATA pointing at -AppData, so it never
+        once it has tried to install, removes every copy of the package family at the end,
+        however the run ended;
+      - starts the installed Deskbar with DESKBAR_APPDATA pointing at -AppData, so it never
         reads or writes a real profile, and stops it at the end.
     Do not run it on a machine where an installed Store copy of Deskbar should survive.
 
@@ -19,10 +21,15 @@
       Sign a COPY with a certificate whose subject is the Store publisher, because Windows
       installs only a signed package whose signer matches the manifest's Publisher, and the
       package as built stays unsigned for Partner Center (the Store signs it).
-      Start the installed exe DIRECTLY from this process, rather than through
-      explorer.exe shell:AppsFolder\..., because a process started here gets the variables set
-      for it here; an activation through the shell starts from the shell's environment, and
-      DESKBAR_APPDATA would be lost.
+      Start the app with Invoke-CommandInDesktopPackage, the Appx cmdlet made for starting a
+      process inside an installed package. Two other launchers were ruled out. Starting the
+      installed exe by its path from this unpackaged process is a plain CreateProcess, which
+      does not reliably give the new process the package's identity, so "packaged" could come
+      back false for a reason that has nothing to do with the package. Activating it through
+      explorer.exe shell:AppsFolder\... starts it from the shell's environment, so
+      DESKBAR_APPDATA would be lost. The cmdlet starts the process from this one, so the
+      variable is set in this process's environment just for the call and restored after it.
+      That the child inherits it is what the cmdlet is expected to do; the spike checks it.
       Ask through the ALIAS (deskbar.exe -> deskbar-cli.exe), because that is the command line
       a Store user has, so one answer proves the alias, the pipe and the app at once.
       Check "packaged": true, because that is what proves the installed copy runs with package
@@ -48,7 +55,8 @@
 .PARAMETER WaitSeconds
     How long the app has to start answering `deskbar version`. 30 by default.
 .PARAMETER WackTimeoutMinutes
-    How long WACK may run before it is stopped and reported as timed out. 30 by default.
+    How long WACK's test run may take before it is stopped and reported as timed out. 30 by
+    default. Its reset, run first, gets 5 minutes.
 .EXAMPLE
     scripts/store-smoke.ps1 -Package artifacts\Deskbar-2.1.43-store.msix -AppData $env:TEMP\deskbar-smoke
 #>
@@ -122,19 +130,57 @@ function Invoke-VersionQuery([string] $Alias) {
     }
 }
 
+# The processes running from the package's install folder: the Deskbar the cmdlet started (it
+# hands back no process object, so this is how the script finds it) and any deskbar-cli left
+# over. Matched by path, so nothing else on the machine named Deskbar is touched.
+function Get-InstalledProcess {
+    @(Get-Process -Name Deskbar, deskbar-cli -ErrorAction SilentlyContinue |
+        Where-Object { $_.Path -and $_.Path.StartsWith($paths.InstallDir, [System.StringComparison]::OrdinalIgnoreCase) })
+}
+
+# Stops whatever runs from the package and removes every installed copy of the package family.
+# Asks Windows what is installed rather than assuming Add-AppxPackage finished, so a package
+# that was registered before Add-AppxPackage threw is removed too. Idempotent: it runs once
+# before WACK and again in the cleanup.
+function Remove-SmokeInstall {
+    Get-InstalledProcess | ForEach-Object {
+        Stop-Process -Id $_.Id -Force -ErrorAction SilentlyContinue
+        $_.WaitForExit(10000) | Out-Null
+    }
+    Get-AppxPackage -Name ($paths.FamilyName.Split('_')[0]) |
+        Where-Object { $_.PackageFamilyName -eq $paths.FamilyName } |
+        ForEach-Object {
+            Remove-AppxPackage -Package $_.PackageFullName
+            Write-Information "Removed $($_.PackageFullName)"
+        }
+}
+
+# Runs a WACK command and waits for it, at most $Minutes. Start-Process joins the arguments with
+# spaces and does not quote them, so paths arrive quoted by the caller.
+function Invoke-AppCert([string] $AppCert, [string[]] $Arguments, [int] $Minutes) {
+    $run = Start-Process -FilePath $AppCert -ArgumentList $Arguments -PassThru -NoNewWindow
+    if (-not $run.WaitForExit($Minutes * 60 * 1000)) {
+        Stop-Process -Id $run.Id -Force -ErrorAction SilentlyContinue
+        throw "appcert $($Arguments[0]) did not finish within $Minutes minutes and was stopped."
+    }
+    $run
+}
+
 $workDir = Join-Path ([System.IO.Path]::GetTempPath()) "store-smoke-$([guid]::NewGuid().ToString('N'))"
 New-Item -ItemType Directory -Path $workDir | Out-Null
 $signed = Join-Path $workDir (Split-Path -Leaf $Package)
 $certificate = $null
+$certificateCreated = $false
 $trustAdded = $false
-$installed = $false
-$process = $null
-$failure = $null
+$installAttempted = $false
+# Which test certificates the user already had, so the cleanup removes only one this run made.
+$certificatesBefore = @(Get-ChildItem -Path Cert:\CurrentUser\My | ForEach-Object Thumbprint)
 
 try {
     # Step 1: a signed copy, and Windows' trust in its signer.
     Copy-Item -LiteralPath $Package -Destination $signed
     $certificate = Invoke-StoreTestSign -Path $signed
+    $certificateCreated = $certificatesBefore -notcontains $certificate.Thumbprint
     $trustedPath = "Cert:\LocalMachine\TrustedPeople\$($certificate.Thumbprint)"
     if (Test-Path -LiteralPath $trustedPath) {
         Write-Information "Certificate $($certificate.Thumbprint) is already trusted machine-wide; it stays."
@@ -149,8 +195,11 @@ try {
 
     # Step 2: install, and check Windows put it where the derivation says. A mismatch here
     # means the family name or the architecture changed, and every later path would be wrong.
+    # The flag is set BEFORE the call, so a package registered by an Add-AppxPackage that then
+    # threw is still removed; a run that failed earlier never got this far, and leaves an
+    # installed copy it did not touch alone.
+    $installAttempted = $true
     Add-AppxPackage -Path $signed
-    $installed = $true
     if (-not (Test-Path -LiteralPath $paths.Exe -PathType Leaf)) {
         $actual = @(Get-AppxPackage -Name 'Petre.Deskbar' | ForEach-Object InstallLocation) -join ', '
         throw "Installed, but $($paths.Exe) does not exist. Windows reports the install location as: $actual"
@@ -160,87 +209,72 @@ try {
     }
     Write-Information "Installed $($paths.FullName)"
 
-    # Step 3: start the installed exe with a throwaway profile. ProcessStartInfo with
-    # UseShellExecute off is a plain CreateProcess, so the variable is set for the child only
-    # and this process's environment is left alone.
+    # Step 3: start the app inside its package with a throwaway profile (the header says why
+    # this launcher). The variable lives in this process's environment only for the call. The
+    # full path names the exe unambiguously; it is the manifest's Application executable.
     New-Item -ItemType Directory -Path $AppData -Force | Out-Null
-    $startInfo = New-Object System.Diagnostics.ProcessStartInfo $paths.Exe
-    $startInfo.UseShellExecute = $false
-    $startInfo.WorkingDirectory = $AppData
-    $startInfo.EnvironmentVariables['DESKBAR_APPDATA'] = $AppData
-    $process = [System.Diagnostics.Process]::Start($startInfo)
-    Write-Information "Started $($paths.Exe) as process $($process.Id) with DESKBAR_APPDATA=$AppData"
+    $hadVariable = Test-Path -LiteralPath Env:DESKBAR_APPDATA
+    $previousVariable = $env:DESKBAR_APPDATA
+    $env:DESKBAR_APPDATA = $AppData
+    try {
+        Invoke-CommandInDesktopPackage -PackageFamilyName $paths.FamilyName -AppId $paths.AppId -Command $paths.Exe
+    }
+    finally {
+        if ($hadVariable) { $env:DESKBAR_APPDATA = $previousVariable }
+        else { Remove-Item -LiteralPath Env:DESKBAR_APPDATA -ErrorAction SilentlyContinue }
+    }
+    Write-Information "Started $($paths.AppId) in $($paths.FamilyName) with DESKBAR_APPDATA=$AppData"
 
-    # Step 4: ask until it answers or the time is up. Each failed ask already waits for the
-    # pipe (the client's own connect timeout), so the pause between asks is short.
+    # Step 4: ask until it answers or the time is up. The cmdlet returns no process to watch,
+    # so the bound is the deadline alone. Each failed ask already waits for the pipe (the
+    # client's own connect timeout), so the pause between asks is short.
     $deadline = (Get-Date).AddSeconds($WaitSeconds)
     $answer = $null
     $last = $null
     while ($null -eq $answer -and (Get-Date) -lt $deadline) {
-        if ($process.HasExited) {
-            throw "Deskbar exited with code $($process.ExitCode) before answering. Last reply: $(if ($last) { $last.Text } else { '(none)' })"
-        }
         $last = Invoke-VersionQuery -Alias $paths.Alias
         if ($last.ExitCode -eq 0) { $answer = $last }
         else { Start-Sleep -Seconds 1 }
     }
     if ($null -eq $answer) {
-        throw "deskbar version did not answer within $WaitSeconds seconds. Last reply (exit $($last.ExitCode)): $($last.Text)"
+        # Whether the app is running at all tells "never started or crashed" apart from
+        # "running but not answering".
+        $running = @(Get-InstalledProcess | Where-Object { $_.ProcessName -eq 'Deskbar' } | ForEach-Object Id)
+        $state = if ($running.Count -gt 0) { "Deskbar is running (process $($running -join ', '))" } else { 'no Deskbar is running from the package' }
+        throw "deskbar version did not answer within $WaitSeconds seconds, and $state. Last reply (exit $($last.ExitCode)): $($last.Text)"
     }
 
-    # Step 5: the verdict.
+    # Step 5: the verdict. A throw here skips WACK and goes straight to the cleanup.
     $reply = Assert-StoreVersionReply -Reply $answer.Stdout -Version $Version
     Write-Information "deskbar version answered: version $($reply.version), packaged $($reply.packaged), exe $($reply.exe)"
     Write-Information 'Smoke test passed: the installed package runs with package identity and answers through its alias.'
-}
-catch {
-    $failure = $_
-}
-finally {
-    # Stop the copy that was started, then anything else running from the install folder (a
-    # copy the app may have started itself), so Remove-AppxPackage does not find it in use.
-    if ($process -and -not $process.HasExited) {
-        Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
-        $process.WaitForExit(10000) | Out-Null
-    }
-    Get-Process -Name Deskbar, deskbar-cli -ErrorAction SilentlyContinue |
-        Where-Object { $_.Path -and $_.Path.StartsWith($paths.InstallDir, [System.StringComparison]::OrdinalIgnoreCase) } |
-        Stop-Process -Force -ErrorAction SilentlyContinue
 
-    # Cleanup failures are warnings: they must not hide the verdict above.
-    if ($installed) {
-        try { Remove-AppxPackage -Package $paths.FullName; Write-Information "Removed $($paths.FullName)" }
-        catch { Write-Warning "Could not remove $($paths.FullName): $_" }
-    }
-}
+    # Step 6: out of WACK's way. WACK installs and removes the package itself, so the smoke
+    # test's install goes first; the certificate stays trusted, since WACK's install needs it.
+    Remove-SmokeInstall
 
-# Step 6, optional: WACK, against the same signed copy, after the smoke test's install is gone
-# (WACK installs and removes the package itself, so the certificate must still be trusted).
-# Skipped when the smoke test failed: the run is red anyway, and WACK can take many minutes.
-# A WACK failure is reported, as a warning annotation in CI, and never fails the script: it
-# has not yet been seen to run stably on the runner, and a later task makes it fatal once it has.
-if ($null -eq $failure) {
-    $appcert = Find-AppCert
-    if (-not $appcert) {
-        Write-Information 'WACK is not installed (no App Certification Kit under the Windows SDK), so it was skipped.'
-    }
-    else {
-        try {
+    # Step 7, optional: WACK, against the same signed copy. Only reached when the smoke test
+    # passed: otherwise the run is red anyway, and WACK can take many minutes. Its failures,
+    # timeouts included, are reported as a warning (an annotation in CI) and never fail the
+    # script: it has not yet been seen to run stably on the runner, and a later task makes it
+    # fatal once it has.
+    try {
+        $appcert = Find-AppCert
+        if (-not $appcert) {
+            Write-Information 'WACK is not installed (no App Certification Kit under the Windows SDK), so it was skipped.'
+        }
+        else {
             $reportDir = Split-Path -Parent $WackReport
             if (-not (Test-Path -LiteralPath $reportDir)) { New-Item -ItemType Directory -Path $reportDir | Out-Null }
             if (Test-Path -LiteralPath $WackReport) { Remove-Item -LiteralPath $WackReport -Force }
 
             # reset clears state an earlier WACK run left behind, as Microsoft's command-line
-            # steps say to do before each test. Its own failure is not a verdict.
-            Start-Process -FilePath $appcert -ArgumentList 'reset' -Wait -NoNewWindow
+            # steps say to do before each test. Bounded like the test run, since a hung reset
+            # would otherwise hold the job until its own timeout.
+            Invoke-AppCert -AppCert $appcert -Arguments @('reset') -Minutes 5 | Out-Null
             Write-Information "Running WACK ($appcert) against $signed"
-            # Quoted by hand: Start-Process joins the arguments with spaces and does not quote.
-            $wack = Start-Process -FilePath $appcert -PassThru -NoNewWindow -ArgumentList @(
+            $wack = Invoke-AppCert -AppCert $appcert -Minutes $WackTimeoutMinutes -Arguments @(
                 'test', '-appxpackagepath', "`"$signed`"", '-reportoutputpath', "`"$WackReport`"")
-            if (-not $wack.WaitForExit($WackTimeoutMinutes * 60 * 1000)) {
-                Stop-Process -Id $wack.Id -Force -ErrorAction SilentlyContinue
-                throw "WACK did not finish within $WackTimeoutMinutes minutes and was stopped."
-            }
 
             if (-not (Test-Path -LiteralPath $WackReport)) { throw "WACK exited with code $($wack.ExitCode) and wrote no report." }
             # The report's root element carries the overall verdict in OVERALL_RESULT, PASS when
@@ -250,18 +284,39 @@ if ($null -eq $failure) {
             if ($overall -eq 'PASS') { Write-Information "WACK passed. Report: $WackReport" }
             else { throw "WACK's overall result is '$overall'. Report: $WackReport" }
         }
-        catch {
-            Write-Warning "WACK: $_"
-            if ($env:GITHUB_ACTIONS -eq 'true') { Write-Host "::warning title=WACK::$_" }
-        }
+    }
+    catch {
+        Write-Warning "WACK: $_"
+        if ($env:GITHUB_ACTIONS -eq 'true') { Write-Host "::warning title=WACK::$_" }
     }
 }
+finally {
+    # Everything the run changed is undone here, whether it passed, failed or threw somewhere
+    # unexpected, so neither the package nor a machine-wide trust outlives it. Each piece is
+    # caught on its own: a failing cleanup must not hide the verdict, or stop the next piece.
+    if ($installAttempted) {
+        try { Remove-SmokeInstall }
+        catch { Write-Warning "Could not remove the installed package: $_" }
+    }
 
-# The trust goes last, after WACK has used it, and only when this run added it.
-if ($trustAdded) {
-    try { Remove-Item -LiteralPath "Cert:\LocalMachine\TrustedPeople\$($certificate.Thumbprint)" -Force; Write-Information 'Removed the test certificate from Cert:\LocalMachine\TrustedPeople.' }
-    catch { Write-Warning "Could not remove the test certificate from Cert:\LocalMachine\TrustedPeople: $_" }
+    # The trust goes after WACK has used it, and only when this run added it.
+    if ($trustAdded) {
+        try {
+            Remove-Item -LiteralPath "Cert:\LocalMachine\TrustedPeople\$($certificate.Thumbprint)" -Force
+            Write-Information 'Removed the test certificate from Cert:\LocalMachine\TrustedPeople.'
+        }
+        catch { Write-Warning "Could not remove the test certificate from Cert:\LocalMachine\TrustedPeople: $_" }
+    }
+
+    # The signing certificate with its private key, only when this run created it. One the user
+    # already had (pack-store.ps1 -TestSign makes the same one) stays.
+    if ($certificateCreated) {
+        try {
+            Remove-Item -LiteralPath "Cert:\CurrentUser\My\$($certificate.Thumbprint)" -DeleteKey -Force
+            Write-Information 'Removed the test certificate this run created from Cert:\CurrentUser\My.'
+        }
+        catch { Write-Warning "Could not remove the test certificate from Cert:\CurrentUser\My: $_" }
+    }
+
+    Remove-Item -LiteralPath $workDir -Recurse -Force -ErrorAction SilentlyContinue
 }
-Remove-Item -LiteralPath $workDir -Recurse -Force -ErrorAction SilentlyContinue
-
-if ($null -ne $failure) { throw $failure }

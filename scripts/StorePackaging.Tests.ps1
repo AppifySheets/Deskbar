@@ -119,6 +119,16 @@ Describe 'StorePackaging' {
             $paths.Alias | Should Be 'C:\Users\someone\AppData\Local\Microsoft\WindowsApps\deskbar.exe'
         }
 
+        It 'names the family and the application the launcher starts, matching the real manifest' {
+            $paths = Get-StoreInstallPaths -Version '2.1.43'
+            $paths.FamilyName | Should Be 'Petre.Deskbar_n8ch8v53xw03y'
+            # Invoke-CommandInDesktopPackage needs the manifest's Application Id, so it is read
+            # from the real manifest here rather than trusted from the module's constant.
+            [xml]$manifest = Get-Content -LiteralPath $realTemplate -Raw
+            $application = $manifest.SelectSingleNode("//*[local-name()='Application']")
+            $paths.AppId | Should Be $application.GetAttribute('Id')
+        }
+
         It 'takes the install roots from the environment when none are given' {
             $paths = Get-StoreInstallPaths -Version '2.1.43'
             $paths.Exe | Should Be (Join-Path $env:ProgramFiles 'WindowsApps\Petre.Deskbar_2.1.43.0_x64__n8ch8v53xw03y\Deskbar.exe')

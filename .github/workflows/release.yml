@@ -384,8 +384,9 @@ jobs:
   # manifest is well formed; only an install proves Windows accepts the package, gives the app
   # package identity and registers the `deskbar` alias. scripts/store-smoke.ps1 signs a copy
   # with a throwaway certificate created on the runner, trusts it machine-wide (the runner is
-  # elevated, and thrown away afterwards), installs it, starts the installed Deskbar.exe with
-  # DESKBAR_APPDATA pointing at a runner folder, and waits up to 30 s for `deskbar version`
+  # elevated, and thrown away afterwards), installs it, starts the app inside its package with
+  # Invoke-CommandInDesktopPackage (so it runs with package identity) and DESKBAR_APPDATA
+  # pointing at a runner folder, and waits up to 30 s for `deskbar version`
   # through the alias to answer "packaged": true with this build's version. Then it removes the
   # package and, if the image has the App Certification Kit, runs WACK.
   #
@@ -424,7 +425,8 @@ jobs:
         # runner; a later change makes it fatal once it has.
         #
         # Windows PowerShell (shell: powershell), not pwsh: the Appx cmdlets (Add-AppxPackage,
-        # Remove-AppxPackage) are Windows PowerShell modules, and PowerShell 7 loads them only
+        # Invoke-CommandInDesktopPackage, Remove-AppxPackage) are Windows PowerShell modules,
+        # and PowerShell 7 loads them only
         # through a compatibility shim with a known "Operation is not supported on this
         # platform" failure. The script and its module are written for 5.1.
         continue-on-error: false
@@ -438,9 +440,12 @@ jobs:
 
       - name: Keep the WACK report
         # Whatever WACK said, pass or not, so its verdict can be read without re-running a slow
-        # kit (a WACK failure leaves the job green, so the report is where it shows). Nothing is
-        # uploaded when the kit is not on the image, and the step does not run when the smoke
-        # check failed, since the script skips WACK then.
+        # kit (a WACK failure leaves the job green, so the report is where it shows).
+        # always(): a report WACK already wrote is kept even when the step failed or was cut
+        # off after it, by an unexpected error in the cleanup or by the job's timeout. Nothing
+        # is uploaded when there is no report: the kit was not on the image, or the smoke check
+        # failed and the script skipped WACK.
+        if: always()
         uses: actions/upload-artifact@v7
         with:
           name: wack-report-${{ needs.build.outputs.version }}
