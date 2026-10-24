@@ -33,8 +33,17 @@ public static class Entitlement
 
     public static Verdict Current => current;
 
-    // Recomputes the verdict, caches it and traces it. Never throws: StoreLicence.ReadAsync returns its
-    // failures as a Result, and everything else here is pure.
+    // What the last refresh traced: its verdict, and the licence read's failure message (null when the read
+    // worked or was not attempted). Null verdict means no refresh has run yet. The refresh runs on every tick
+    // of the update timer, all day, so like the bar's other periodic traces it writes only when its output
+    // CHANGES (the briefing's rule that keeps the trace readable with tracing on). Swapped with
+    // Interlocked.Exchange, because a startup refresh and a timer refresh can finish together on two
+    // thread-pool threads, and each must compare against the value it replaced.
+    static Verdict? lastVerdict;
+    static string? lastReadFailure;
+
+    // Recomputes the verdict, caches it and traces it when it changed. Never throws: StoreLicence.ReadAsync
+    // returns its failures as a Result, and everything else here is pure.
     public static async Task RefreshAsync(IntPtr ownerHwnd)
     {
         // The Store licence is only read inside the package (Store packaging design): an unpackaged copy
@@ -46,12 +55,18 @@ public static class Entitlement
         var verdict = Decide(licence);
         current = verdict;
 
-        ClickTrace.Write($"entitlement: {verdict.Reason}");
+        // Always on the first refresh (nothing traced yet), then only when the verdict differs from the one
+        // before (record equality: Pro or not, and the reason, which carries a trial's end date).
+        if (Interlocked.Exchange(ref lastVerdict, verdict) != verdict)
+            ClickTrace.Write($"entitlement: {verdict.Reason}");
+
         // The reason alone says "unavailable" without saying why; the Store's own message is what a
         // log reader needs to tell an outage from a timeout from a missing Store. Only when packaged,
-        // since unpackaged the "failure" is just the read that was never attempted.
-        if (PackageIdentity.IsPackaged && licence.IsFailure)
-            ClickTrace.Write($"entitlement: licence read failed: {licence.Error}");
+        // since unpackaged the "failure" is just the read that was never attempted. Also only on change, so
+        // a Store that stays unreachable writes its message once rather than every five minutes.
+        var readFailure = PackageIdentity.IsPackaged && licence.IsFailure ? licence.Error : null;
+        if (Interlocked.Exchange(ref lastReadFailure, readFailure) != readFailure && readFailure is not null)
+            ClickTrace.Write($"entitlement: licence read failed: {readFailure}");
     }
 
     // Reads the override afresh each time rather than once: it costs nothing, and keeps the provisional
