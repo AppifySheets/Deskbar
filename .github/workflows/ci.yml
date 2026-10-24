@@ -1,21 +1,71 @@
-# Builds and tests every push to main and every pull request.
+# Builds and tests every pull request.
 #
 # WHY this exists separately from release.yml: a release workflow only tells you something was
 # broken at the moment you tried to ship, which is far too late. This one fails on the PR that
 # introduced the problem. It matters more now that the app is being shared with other people --
 # nobody else can see the local test run on Petre's machine.
+#
+# WHY PULL REQUESTS ONLY, and not pushes to main as well. Pull requests here merge with "Rebase and
+# merge", and a branch that is already on top of main is fast-forwarded: the commit that lands on
+# main is the very commit this workflow tested on the pull request. All 15 merges before this was
+# written were (#252 to #267), so a run on main built and tested the same commit a second time. A
+# merge that bumps the version also starts release.yml, which builds and tests that commit yet
+# again before it publishes anything, so every release merge ran three identical builds. Now a
+# merge starts at most one run, the release. The `rebased` job below is what keeps "already
+# tested" true: a branch that is behind its base gets a red check, because merging it would
+# rewrite its commits into ones nobody tested. Ported from app.rurua.ge's build.yml, where the
+# same check exists for the same reason.
 name: CI
 
 on:
-  push:
-    branches: [main]
   pull_request:
 
 permissions:
   contents: read
 
 jobs:
+  # FIRST, AND ON A CHEAP LINUX RUNNER, so a branch that is behind fails in seconds rather than
+  # after a Windows build. The build job waits for it.
+  #
+  # The question is asked about the base branch AS IT IS NOW, through the compare API, rather than
+  # the base commit recorded in the event, so a branch that fell behind while its run sat in the
+  # queue is caught too. The base is the pull request's own base, not main by name: a pull request
+  # stacked on another one targets that one's branch, and has to be on top of it, not of main.
+  # "identical" and "ahead" mean the head contains the base; "behind" and "diverged" mean it does
+  # not. The fix is the refresh-pr skill: rebase, push with a lease.
+  #
+  # Base moving on AFTER this ran does not turn the check red again, since nothing reruns it. The
+  # merge button's own "out of date" notice covers that moment, and so does the watch every
+  # session keeps on its open pull request's base (see CLAUDE.md), which runs refresh-pr and so
+  # pushes, which reruns this.
+  rebased:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Require a branch rebased onto its base
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          # Through env rather than pasted into the script, so a branch name cannot become shell.
+          # HEAD is the branch head, not GitHub's synthetic refs/pull/N/merge commit: the head is
+          # the commit that reaches main when the merge fast-forwards.
+          BASE: ${{ github.base_ref }}
+          HEAD: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+
+          status=$(gh api "repos/$GITHUB_REPOSITORY/compare/$BASE...$HEAD" --jq .status)
+          case "$status" in
+            identical|ahead)
+              echo "The branch head $HEAD contains $BASE ($status)." ;;
+            *)
+              echo "::error::This branch is not rebased onto $BASE (compare says $status). Rebase it onto origin/$BASE and push with --force-with-lease (the refresh-pr skill does both)."
+              exit 1 ;;
+          esac
+
   build-and-test:
+    needs: rebased
+
     # MUST be Windows: WPF app targeting net10.0-windows, and the tests construct real windows.
     runs-on: windows-latest
 
