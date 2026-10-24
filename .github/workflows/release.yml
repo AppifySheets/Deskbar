@@ -21,6 +21,11 @@
 #   COMMIT, not from main. A release cut from a commit that has this file gets this guard; a
 #   tag on a commit from before it gets whatever release.yml that commit carried, and that
 #   older file does not guard anything (see the comment above the guard job).
+#
+# THE STORE PACKAGE. The build job also packs the Microsoft Store .msix of the same commit
+# (scripts/pack-store.ps1) and keeps it as a workflow artifact, never a release asset; the
+# store-smoke job then installs it on a fresh runner and checks it answers `deskbar version`
+# as a packaged app. Both run after the release is made, so neither holds back the direct exe.
 name: Release
 
 on:
@@ -170,6 +175,12 @@ jobs:
     # MUST be Windows: this is a WPF app targeting net10.0-windows, and the test suite
     # constructs real WPF windows. It cannot build or test on Linux.
     runs-on: windows-latest
+
+    # For the store-smoke job, which installs the Store package this job packs: which version
+    # it must report, and the name of the workflow artifact the package was uploaded under.
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      store_package: ${{ steps.store.outputs.name }}
 
     steps:
       - name: Check out the repository
@@ -330,6 +341,111 @@ jobs:
           gh release edit $env:TAG --draft=false --latest
           if ($LASTEXITCODE -ne 0) { "::error::Could not publish $env:TAG; it is still a draft."; exit 1 }
           "::warning::Published $env:TAG with $($exes -join ', '), unsigned: signing is not enforced (SIGNING_CERT_THUMBPRINT is not set)."
+
+      - name: Pack the Store package
+        # The Microsoft Store build of the same commit, beside the direct exe above: an .msix
+        # for Partner Center, unsigned, because the Store signs what it receives. See
+        # scripts/pack-store.ps1 and the Store packaging design
+        # (docs/superpowers/specs/2026-10-24-deskbar-store-packaging-design.md).
+        #
+        # Its own publish, made inside pack-store.ps1 (no -PublishDir): the Store build is NOT
+        # single-file, since a package installs a folder anyway and the Store scans its files,
+        # so the single-file exe above cannot be reused. The script also publishes
+        # deskbar-cli.exe, the target of the package's `deskbar` alias, next to it. It packs
+        # with the Windows SDK's MakePri and MakeAppx from the runner image (Find-SdkTool in
+        # StorePackaging.psm1 names the SDK when they are missing), and MakeAppx refusing a bad
+        # manifest is this step's first check of the package.
+        #
+        # LAST in the job, after the release exists, on purpose: the package is not attached to
+        # the release (it goes to Partner Center by hand), and its tooling is new, so a failure
+        # here must not hold back the direct release. It still turns the run red, and the
+        # store-smoke job below then does not run.
+        id: store
+        shell: pwsh
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          $name = "Deskbar-$env:VERSION-store.msix"
+          ./scripts/pack-store.ps1 -Version $env:VERSION -Output "artifacts/store/$name"
+          "name=$name" >> $env:GITHUB_OUTPUT
+          "{0} ({1:N1} MB)" -f $name, ((Get-Item "artifacts/store/$name").Length / 1MB)
+
+      - name: Keep the Store package as a workflow artifact
+        # For the store-smoke job, which installs it on a fresh runner, and for whoever submits
+        # it to Partner Center. A workflow artifact only, never a release asset: the release is
+        # the direct download, and an unsigned .msix there is a file nobody can install.
+        uses: actions/upload-artifact@v7
+        with:
+          name: ${{ steps.store.outputs.name }}
+          path: artifacts/store/${{ steps.store.outputs.name }}
+          if-no-files-found: error
+
+  # INSTALLS THE STORE PACKAGE ON A FRESH RUNNER AND ASKS IT WHAT IT IS. Packing proves the
+  # manifest is well formed; only an install proves Windows accepts the package, gives the app
+  # package identity and registers the `deskbar` alias. scripts/store-smoke.ps1 signs a copy
+  # with a throwaway certificate created on the runner, trusts it machine-wide (the runner is
+  # elevated, and thrown away afterwards), installs it, starts the installed Deskbar.exe with
+  # DESKBAR_APPDATA pointing at a runner folder, and waits up to 30 s for `deskbar version`
+  # through the alias to answer "packaged": true with this build's version. Then it removes the
+  # package and, if the image has the App Certification Kit, runs WACK.
+  #
+  # Its own job, after build rather than inside it, so the install happens on a machine that
+  # did not build the app: nothing from the build's folders can stand in for a missing file in
+  # the package. It does not gate the release, which the build job has already made; it says
+  # whether the Store package is fit to submit.
+  store-smoke:
+    needs: build
+
+    # Windows, because installing an .msix is.
+    runs-on: windows-latest
+
+    # A backstop for a hung install or a stuck app. The script bounds its own waits (30 s for
+    # the answer, 30 minutes for WACK), so an hour is only ever reached by something it does
+    # not control, and the default six hours would be a long time to find that out.
+    timeout-minutes: 60
+
+    steps:
+      - name: Check out the repository
+        # For scripts/store-smoke.ps1 and the StorePackaging.psm1 module it imports.
+        uses: actions/checkout@v7
+
+      - name: Download the Store package
+        # v8, the current major, which reads artifacts uploaded by upload-artifact v7.
+        uses: actions/download-artifact@v8
+        with:
+          name: ${{ needs.build.outputs.store_package }}
+          path: artifacts/store
+
+      - name: Install it, start it and ask it its version
+        # The install-and-ask check FAILS the job (continue-on-error false, said out loud so
+        # nobody relaxes it by accident): a package that does not install, or that runs without
+        # package identity, is not one to submit. WACK's verdict, by contrast, is only reported
+        # by the script as a warning, because WACK has not yet been seen to run stably on the
+        # runner; a later change makes it fatal once it has.
+        #
+        # Windows PowerShell (shell: powershell), not pwsh: the Appx cmdlets (Add-AppxPackage,
+        # Remove-AppxPackage) are Windows PowerShell modules, and PowerShell 7 loads them only
+        # through a compatibility shim with a known "Operation is not supported on this
+        # platform" failure. The script and its module are written for 5.1.
+        continue-on-error: false
+        shell: powershell
+        env:
+          VERSION: ${{ needs.build.outputs.version }}
+          PACKAGE: artifacts/store/${{ needs.build.outputs.store_package }}
+        run: |
+          ./scripts/store-smoke.ps1 -Package $env:PACKAGE -Version $env:VERSION `
+            -AppData "$env:RUNNER_TEMP\deskbar-appdata" -WackReport "$env:RUNNER_TEMP\wack\wack-report.xml"
+
+      - name: Keep the WACK report
+        # Whatever WACK said, pass or not, so its verdict can be read without re-running a slow
+        # kit (a WACK failure leaves the job green, so the report is where it shows). Nothing is
+        # uploaded when the kit is not on the image, and the step does not run when the smoke
+        # check failed, since the script skips WACK then.
+        uses: actions/upload-artifact@v7
+        with:
+          name: wack-report-${{ needs.build.outputs.version }}
+          path: ${{ runner.temp }}/wack/wack-report.xml
+          if-no-files-found: ignore
 
   # Runs when a release is published, and re-checks what was published rather than trusting
   # how it got there. It defends against:

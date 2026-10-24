@@ -4,7 +4,9 @@
 # These cover the pack script's pure parts: the version token, the identity check and the
 # presence of every image the manifest and the resource index expect. Packing itself (MakePri
 # and MakeAppx) is exercised by running scripts/pack-store.ps1, not here, because it needs a
-# full publish of the app first.
+# full publish of the app first. They also cover the smoke script's pure parts (the install
+# paths, the version reply check, the WACK lookup); installing the package is
+# scripts/store-smoke.ps1's job, on an elevated machine.
 #
 # Pester 3 has no BeforeAll/AfterAll, so setup sits at the top of the Describe block and the
 # temp folder is removed in a finally block around everything after it is created.
@@ -103,6 +105,82 @@ Describe 'StorePackaging' {
 
         It 'throws a clear error for a tool the SDK does not have' {
             { Find-SdkTool -Name 'NoSuchTool.exe' } | Should Throw 'NoSuchTool.exe not found'
+        }
+
+        # The smoke test's pure parts (scripts/store-smoke.ps1): where the installed package and
+        # its alias live, what the version reply must say, and whether WACK is there to run. The
+        # install itself needs an elevated machine and runs in CI and the spike, not here.
+
+        It 'derives the installed exe and the alias from the version and the family name' {
+            $paths = Get-StoreInstallPaths -Version '2.1.43' -ProgramFiles 'C:\Program Files' -LocalAppData 'C:\Users\someone\AppData\Local'
+            $paths.FullName | Should Be 'Petre.Deskbar_2.1.43.0_x64__n8ch8v53xw03y'
+            $paths.InstallDir | Should Be 'C:\Program Files\WindowsApps\Petre.Deskbar_2.1.43.0_x64__n8ch8v53xw03y'
+            $paths.Exe | Should Be 'C:\Program Files\WindowsApps\Petre.Deskbar_2.1.43.0_x64__n8ch8v53xw03y\Deskbar.exe'
+            $paths.Alias | Should Be 'C:\Users\someone\AppData\Local\Microsoft\WindowsApps\deskbar.exe'
+        }
+
+        It 'takes the install roots from the environment when none are given' {
+            $paths = Get-StoreInstallPaths -Version '2.1.43'
+            $paths.Exe | Should Be (Join-Path $env:ProgramFiles 'WindowsApps\Petre.Deskbar_2.1.43.0_x64__n8ch8v53xw03y\Deskbar.exe')
+            $paths.Alias | Should Be (Join-Path $env:LOCALAPPDATA 'Microsoft\WindowsApps\deskbar.exe')
+        }
+
+        It 'refuses a version that is not three parts when deriving the install paths' {
+            { Get-StoreInstallPaths -Version '2.1.43.0' } | Should Throw 'three-part'
+        }
+
+        It 'reads the three-part version back out of a packed manifest' {
+            $text = Get-StoreManifest -TemplatePath $realTemplate -Version '2.1.43'
+            Get-StoreManifestVersion -ManifestText $text | Should Be '2.1.43'
+        }
+
+        It 'refuses a manifest whose fourth version part is not 0' {
+            { Get-StoreManifestVersion -ManifestText '<Package><Identity Name="Petre.Deskbar" Version="2.1.43.1" /></Package>' } | Should Throw '2.1.43.1'
+        }
+
+        # The reply as deskbar-cli prints it: indented JSON, which PowerShell hands back as one
+        # string per line.
+        $goodReply = @('{', '  "version": "2.1.43",', '  "exe": "C:\\Program Files\\WindowsApps\\Petre.Deskbar_2.1.43.0_x64__n8ch8v53xw03y\\Deskbar.exe",', '  "packaged": true', '}')
+
+        It 'accepts a packaged reply of the expected version, given line by line, and returns it' {
+            $reply = Assert-StoreVersionReply -Reply $goodReply -Version '2.1.43'
+            $reply.packaged | Should Be $true
+            $reply.exe | Should Match 'WindowsApps'
+        }
+
+        It 'accepts a version carrying a +commit suffix, which the SDK can append from source control' {
+            { Assert-StoreVersionReply -Reply '{"version":"2.1.43+0123abc","exe":"x","packaged":true}' -Version '2.1.43' } | Should Not Throw
+        }
+
+        It 'refuses a reply that says it is not packaged' {
+            { Assert-StoreVersionReply -Reply '{"version":"2.1.43","exe":"x","packaged":false}' -Version '2.1.43' } | Should Throw 'packaged'
+        }
+
+        It 'refuses a reply with no packaged field at all' {
+            { Assert-StoreVersionReply -Reply '{"version":"2.1.43","exe":"x"}' -Version '2.1.43' } | Should Throw 'packaged'
+        }
+
+        It 'refuses a reply of another version' {
+            { Assert-StoreVersionReply -Reply '{"version":"2.1.42","exe":"x","packaged":true}' -Version '2.1.43' } | Should Throw '2.1.42'
+        }
+
+        It 'refuses a version that merely starts with the expected one' {
+            { Assert-StoreVersionReply -Reply '{"version":"2.1.430","exe":"x","packaged":true}' -Version '2.1.43' } | Should Throw '2.1.430'
+        }
+
+        It 'refuses a reply that is not JSON, quoting it' {
+            { Assert-StoreVersionReply -Reply 'Deskbar is not running.' -Version '2.1.43' } | Should Throw 'Deskbar is not running.'
+        }
+
+        It 'finds appcert.exe under the App Certification Kit when it is there' {
+            $kits = Join-Path $workDir 'Kits'
+            New-Item -ItemType Directory -Path (Join-Path $kits 'App Certification Kit') -Force | Out-Null
+            Set-Content -LiteralPath (Join-Path $kits 'App Certification Kit\appcert.exe') -Value ''
+            Find-AppCert -KitsRoot $kits | Should Be (Join-Path $kits 'App Certification Kit\appcert.exe')
+        }
+
+        It 'answers nothing, rather than throwing, when WACK is not installed' {
+            Find-AppCert -KitsRoot (Join-Path $workDir 'NoKits') | Should BeNullOrEmpty
         }
     }
     finally {
