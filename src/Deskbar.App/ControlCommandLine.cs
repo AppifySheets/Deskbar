@@ -38,7 +38,9 @@ static class ControlCommandLine
     {
         // Off the UI thread and waited for synchronously. Nothing in the client needs the dispatcher,
         // and blocking the UI thread on async work that captured it would deadlock.
-        var reply = Task.Run(() => ControlClient.RunAsync(PipeName, args.Skip(1).ToList())).GetAwaiter().GetResult();
+        // `open` is told which folder the caller is in (ControlArguments.WithCallerFolder); nothing else changes.
+        var forwarded = ControlArguments.WithCallerFolder(args.Skip(1).ToList(), Environment.CurrentDirectory);
+        var reply = Task.Run(() => ControlClient.RunAsync(PipeName, forwarded)).GetAwaiter().GetResult();
         Print(reply);
         return reply.ExitCode;
     }

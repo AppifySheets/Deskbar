@@ -43,6 +43,12 @@
         <CheckBox x:Name="DockBar" DockPanel.Dock="Bottom" Margin="8,0,8,0"
                   Content="Dock the bar to the edge of its screen, like the taskbar (windows keep clear of it)"
                   Checked="OnDockBarToggled" Unchecked="OnDockBarToggled"/>
+        <!-- The Claude Code skill (AppState.ClaudeSkill, ClaudeSkill.cs). Petre: "add a skill for claude per user".
+             Here with the other choices about how the app sits on the machine; on by default, and it only ever
+             writes when Claude Code's own folder exists. -->
+        <CheckBox x:Name="ClaudeSkill" DockPanel.Dock="Bottom" Margin="8,8,8,0"
+                  Content="Teach Claude Code about Deskbar (keeps a skill in ~/.claude/skills/deskbar, so sessions open windows in their own workspace)"
+                  Checked="OnClaudeSkillToggled" Unchecked="OnClaudeSkillToggled"/>
         <TabControl>
             <TabItem Header="Workspaces">
                 <DockPanel Margin="8">

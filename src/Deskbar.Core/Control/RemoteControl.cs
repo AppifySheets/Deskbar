@@ -32,8 +32,11 @@ namespace Deskbar.Core.Control;
 //
 // `dump` writes the debug dump the tray's "Save debug dump" writes and answers the file's path. It reads the
 // bar and the screens, which only the app can see, so the app hands it in; left null, `dump` refuses.
+//
+// `defaultBrowser` answers the default browser's exe for `open` (DefaultBrowser on the Windows side). Left null, `open`
+// still works and always opens a link as usual.
 public sealed partial class RemoteControl(WorkspaceManager manager, Func<bool, Result>? setBarVisible = null, Func<ProgramLaunch, Result<int?>>? launch = null,
-    Func<Result<string>>? dump = null)
+    Func<Result<string>>? dump = null, Func<Maybe<string>>? defaultBrowser = null)
 {
     static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web) { WriteIndented = true };
 
@@ -53,6 +56,7 @@ public sealed partial class RemoteControl(WorkspaceManager manager, Func<bool, R
         ("create", _) => ControlArguments.ParseCreate(rest).Match(Create, ControlReply.Fail),
         ("move", _) => ControlArguments.ParseMove(rest).Match(Move, ControlReply.Fail),
         ("start", _) => ControlArguments.ParseStart(rest).Match(Start, ControlReply.Fail),
+        ("open", _) => ControlArguments.ParseOpen(rest).Match(Open, ControlReply.Fail),
 
         ("rename", [var workspace, var name]) => Rename(workspace, name),
         ("add-child", [var parent, var name]) => AddChild(parent, name),
@@ -90,6 +94,7 @@ public sealed partial class RemoteControl(WorkspaceManager manager, Func<bool, R
 
         ("bar", [var state]) => Bar(state),
         ("window-lines", [var mode]) => WindowLines(mode),
+        ("claude-skill", [var onOff]) => ClaudeSkill(onOff),
 
         // The file is the answer, not a window: whoever asked through the pipe reads it back from the path.
         ("dump", []) => dump is null

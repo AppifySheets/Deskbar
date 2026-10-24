@@ -88,6 +88,7 @@ user profile:
 | Time spent per workspace | `%APPDATA%\Deskbar\time.json` |
 | When each window was last used, for the icon fade | `%APPDATA%\Deskbar\last-used.json` |
 | The command-line shim scripts call (rewritten at each start) | `%APPDATA%\Deskbar\deskbar.cmd` |
+| The Claude Code skill, when Claude Code is installed and the setting is on | `%USERPROFILE%\.claude\skills\deskbar\SKILL.md` |
 | "Start with Windows", when enabled | the `Deskbar` value under `HKCU\Software\Microsoft\Windows\CurrentVersion\Run` |
 
 If `state.json` ever fails to parse, the broken file is kept beside it as `state.json.bak` and the
@@ -576,7 +577,7 @@ Everything the bar's menus do has a command, and each one runs the same code as 
 | Workspaces | `create <name> [placement]`, `rename`, `add-child`, `reorder <ws> up\|down\|top\|end\|<n>`, `fold`, `unfold`, `color <ws> <colour>`, `delete <ws> [--close-windows]`, `switch` |
 | Groups | `group-create`, `group-join`, `group-leave`, `group-rename`, `group-color`, `group-fold`, `group-unfold`, `group-reorder <group> up\|down\|top\|end\|<n>`, `ungroup` |
 | Desktops | `name-desktop <id or number> <name>` |
-| Starting | `start <ws> [--create [placement]] [--cwd <folder>] -- <program> [arguments...]` |
+| Starting | `start <ws> [--create [placement]] [--cwd <folder>] -- <program> [arguments...]`, `open <link> [--from <folder>]` |
 | Windows | `move <ws> [--create [placement]] [--no-follow] (--title <text> \| --hwnd <h>)...`, `rename-window`, `rename-app`, `rename-pattern`, `name-by-folder <hwnd> on\|off`, `restore-title`, `pin`, `unpin` |
 | Bar | `bar minimize\|restore\|dock\|undock\|across\|edge` |
 
@@ -593,6 +594,19 @@ $ts = "$env:APPDATA\Deskbar\deskbar.cmd"
 & $ts bar across                          # dock across both screens
 & $ts delete Review                       # refused while it still has windows
 ```
+
+`open <link>` is for a session or a terminal inside VS Code. It finds the VS Code window whose folder
+holds the caller's folder; when that window is in a workspace you are not looking at, the link gets a
+new window of your default browser there, and you stay where you are. Otherwise it opens as usual.
+
+### Claude Code
+
+When Claude Code is installed (there is a `.claude` folder in your profile), Deskbar keeps a skill at
+`%USERPROFILE%\.claude\skills\deskbar\SKILL.md`. Every Claude Code session on the machine then knows
+to open links with `open`, start programs with `start` and move the windows it opens with
+`move --no-follow`, so they land in the session's own workspace instead of on the one you are
+looking at. The file is rewritten when Deskbar updates. Untick "Teach Claude Code about Deskbar" in
+Manage, or run `deskbar.cmd claude-skill off`, and it is removed.
 
 A new workspace goes at the end of the bar unless you say where: `--group <group>` puts it at the
 bottom of that group, `--position <n>` at row n counting a whole group as one row, and `--before`

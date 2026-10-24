@@ -28,6 +28,10 @@ public static class ControlUsage
                 "start a program and put its window in that workspace as it opens, without taking you along.\n"
                 + "      Its windows for the next 30 s go there, and the first new window of the same exe (a browser or\n"
                 + "      editor that hands the request to a copy already running). Deskbar starts nothing on its own"),
+            new("open", "<link> [--from <folder>]",
+                "open a link where the caller works: when the VS Code window whose folder holds --from (the caller's\n"
+                + "      own folder if not given) is in a background workspace, a new default-browser window opens\n"
+                + "      there, without taking you along; otherwise the link opens as usual. The reply says which"),
         ]),
         new("Workspace row menu", [
             new("rename", "<workspace> <new name>", "Rename…"),
@@ -74,6 +78,8 @@ public static class ControlUsage
                 "Minimize bar, or bring it back; turn the Dock to screen edge setting on or off; dock across the line between two screens, or back to one screen's edge"),
             new("window-lines", "split|whole",
                 "Right third of window lines switches workspace, or Whole window lines bring the window up"),
+            new("claude-skill", "on|off",
+                "Manage's \"Teach Claude Code\" setting: keep ~/.claude/skills/deskbar/SKILL.md written, or remove it"),
         ]),
         new("Diagnostics", [
             new("dump", "", "Save debug dump: write a diagnostics file (screens, the bar, every window in z-order) and print its path"),

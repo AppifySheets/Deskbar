@@ -971,7 +971,9 @@ public partial class App : Application
             ProgramStarter.Start,
             // `dump` writes the same file as the menus' "Save debug dump" but opens no window: the caller
             // reads the path from the reply. The bar is read when the command arrives, as above.
-            () => DebugDump.Save(floatingBar, manager!));
+            () => DebugDump.Save(floatingBar, manager!),
+            // `open` starts a new window of the default browser in a background workspace (RemoteControl.Open).
+            DefaultBrowser.Exe);
         controlServer = new ControlPipeServer(ControlCommandLine.PipeName,
             args => Dispatcher.InvokeAsync(() =>
             {
@@ -985,6 +987,14 @@ public partial class App : Application
         // a batch file). Traced, not surfaced: losing it costs the convenience path, not the control.
         try { ControlCommandLine.WriteShim(AppPaths.NewStateDir, Environment.ProcessPath ?? ""); }
         catch (Exception ex) { ClickTrace.Write($"control shim not written: {ex.Message}"); }
+
+        // ...and the Claude Code skill that tells sessions about all of the above (ClaudeSkill), kept in step with the
+        // setting now and whenever the state changes, so Manage's checkbox and `claude-skill on|off` take effect at once.
+        ClaudeSkill.Sync(manager.State.ClaudeSkill);
+        manager.StateChanged
+            .Select(_ => manager.State.ClaudeSkill)
+            .DistinctUntilChanged()
+            .Subscribe(ClaudeSkill.Sync);
 
         trayIcon = new TaskbarIcon
         {

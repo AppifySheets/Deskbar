@@ -42,6 +42,10 @@ public sealed record StartRequest(string Workspace, bool Create, Placement Place
 // start by name, like `code`), its arguments one by one, and the folder to start it in, if any.
 public sealed record ProgramLaunch(string Program, IReadOnlyList<string> Arguments, string? WorkingDirectory);
 
+// `open <url> [--from <folder>]`: the link, and the folder the caller works in, which says which editor window,
+// and so which workspace, the link belongs with (see EditorFolder). The client fills `--from` in itself.
+public sealed record OpenRequest(string Url, string? From);
+
 // The command line after `ctl`, with the parsing kept apart from the doing so both halves can be tested
 // without a pipe or a running app.
 public static class ControlArguments
@@ -90,6 +94,41 @@ public static class ControlArguments
                 .Bind(o => OnePlacement(o).Map(placement =>
                     new StartRequest(name, o.Create, placement, new ProgramLaunch(program[0], program.Skip(1).ToList(), o.WorkingDirectory)))));
     }
+
+    // `open <url> [--from <folder>]`. Only absolute links with a scheme (https://, file://, mailto:), because the
+    // link is handed to the shell or a browser as it is, and a bare word would be run as a program.
+    public static Result<OpenRequest> ParseOpen(IReadOnlyList<string> args)
+    {
+        const string usage = "open needs a link, e.g. open https://example.com";
+        return args switch
+        {
+            [var url] => Link(url, usage).Map(link => new OpenRequest(link, null)),
+            [var url, "--from", var folder] when Named(folder) => Link(url, usage).Map(link => new OpenRequest(link, folder)),
+            ["--from", var folder, var url] when Named(folder) => Link(url, usage).Map(link => new OpenRequest(link, folder)),
+            _ => Result.Failure<OpenRequest>(usage),
+        };
+    }
+
+    // A bare Windows path parses as an absolute file URI, so a file link has to say file: itself.
+    static Result<string> Link(string raw, string usage) =>
+        Uri.TryCreate(raw.Trim(), UriKind.Absolute, out var uri)
+        && (!uri.IsFile || raw.TrimStart().StartsWith("file:", StringComparison.OrdinalIgnoreCase))
+            ? raw.Trim()
+            : Result.Failure<string>($"'{raw}' is not a link. {usage}");
+
+    // Whether a link is a web page, the only kind `open` gives a browser window of its own: a mailto: or file: link
+    // is the shell's to hand to whatever handles it.
+    public static bool IsWeb(string link) =>
+        Uri.TryCreate(link, UriKind.Absolute, out var uri) && (uri.Scheme == Uri.UriSchemeHttps || uri.Scheme == Uri.UriSchemeHttp);
+
+    // THE ONE PLACE THE CLIENT ADDS TO A COMMAND (see ControlWire for why it otherwise forwards verbatim). `open`
+    // needs the caller's folder, and only the asking process knows it: the running app has its own current folder,
+    // and the pipe carries the arguments alone. So an `open` that does not name one gets the client's, which is the
+    // folder of the shell that ran deskbar.cmd. Every other command goes through untouched.
+    public static IReadOnlyList<string> WithCallerFolder(IReadOnlyList<string> args, string callerFolder) =>
+        args.Count > 0 && args[0].Equals("open", StringComparison.OrdinalIgnoreCase) && !args.Contains("--from")
+            ? [.. args, "--from", callerFolder]
+            : args;
 
     // `create <name> [--group <g> | --position <n> | --before <ws> | --after <ws>]`
     public static Result<CreateRequest> ParseCreate(IReadOnlyList<string> args) =>

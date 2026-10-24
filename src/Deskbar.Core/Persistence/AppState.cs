@@ -200,6 +200,14 @@ public sealed record AppState(
     // The reading the bar wants. Not stored.
     [JsonIgnore] public bool SplitWindowLines => !WholeWindowLines;
 
+    // Whether Deskbar writes its Claude Code skill (ClaudeSkill in the app). Petre: "can you do it so that deskbar
+    // advertises this to other claude users?", "yes, add a skill for claude per user". On by default, and stored as
+    // its NEGATION for the reason WholeWindowLines is: every existing state.json lacks the key and reads false.
+    public bool NoClaudeSkill { get; init; }
+
+    // The reading the app wants. Not stored.
+    [JsonIgnore] public bool ClaudeSkill => !NoClaudeSkill;
+
     // Petre: "i want it configurable" -- the Alt+Tab-style workspace switcher's chord.
     //
     // Stored as the TEXT the user typed, not as a parsed Chord: state.json stays readable
