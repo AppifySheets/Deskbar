@@ -895,10 +895,13 @@ public partial class App : Application
             // onto) or start the window monitor (no desktop moves/renames will ever
             // happen, so there's nothing for it to drive). LoadState() alone gives the
             // tray menu and Manage window a read-only view of what's on disk.
-            manager.LoadState()
-                .TapError(err => MessageBox.Show(
-                    $"Deskbar could not load your saved workspaces:\n{err}\n\nStarting with an empty list.",
-                    "Deskbar", MessageBoxButton.OK, MessageBoxImage.Warning));
+            var loaded = manager.LoadState();
+            // A newer file must not reach the "empty list" path either: a later Save would overwrite it.
+            if (loaded.IsFailure && RefuseNewerState(loaded.Error))
+                return;
+            loaded.TapError(err => MessageBox.Show(
+                $"Deskbar could not load your saved workspaces:\n{err}\n\nStarting with an empty list.",
+                "Deskbar", MessageBoxButton.OK, MessageBoxImage.Warning));
         }
         else
         {
