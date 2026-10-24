@@ -1,0 +1,21 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <ItemGroup>
+    <ProjectReference Include="..\Deskbar.Core\Deskbar.Core.csproj" />
+    <ProjectReference Include="..\Deskbar.Windows\Deskbar.Windows.csproj" />
+  </ItemGroup>
+
+  <PropertyGroup>
+    <!-- A CONSOLE exe on purpose: the Store package's app execution alias (deskbar.exe) points at it so
+         `deskbar windows` works from any shell with its output and exit code. Deskbar.exe is a GUI exe
+         and loses both in PowerShell. Only the package ships this exe; the direct build does not. -->
+    <OutputType>Exe</OutputType>
+    <AssemblyName>deskbar-cli</AssemblyName>
+    <!-- Must match Deskbar.Windows' TFM exactly. No UseWPF: the client touches no window. -->
+    <TargetFramework>net10.0-windows10.0.19041.0</TargetFramework>
+    <PlatformTarget>x64</PlatformTarget>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+  </PropertyGroup>
+
+</Project>
