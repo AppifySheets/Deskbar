@@ -6,7 +6,6 @@ namespace Deskbar.Windows.Tests.Packaging;
 // from an MSIX package? The test host is a plain unpackaged exe, so the real answer is false, and
 // Override stands in for the packaged case.
 // docs/superpowers/specs/2026-10-24-deskbar-store-packaging-design.md
-[Collection("PackageIdentity")]
 public class PackageIdentityTests
 {
     [Fact]
@@ -20,6 +19,18 @@ public class PackageIdentityTests
     {
         using (PackageIdentity.Override(true))
             Assert.True(PackageIdentity.IsPackaged);
+        Assert.False(PackageIdentity.IsPackaged);
+    }
+
+    [Fact]
+    public void Nested_override_restores_the_previous_override_not_the_default()
+    {
+        using (PackageIdentity.Override(true))
+        {
+            using (PackageIdentity.Override(false))
+                Assert.False(PackageIdentity.IsPackaged);
+            Assert.True(PackageIdentity.IsPackaged);
+        }
         Assert.False(PackageIdentity.IsPackaged);
     }
 

@@ -29,15 +29,20 @@ public static class PackageIdentity
     // Answered once for the process. Lazy so a test that only uses Override never touches kernel32.
     static readonly Lazy<bool> actual = new(() => IsPackagedProbe());
 
-    static readonly Lazy<string?> familyName = new(() => IsPackagedProbe() ? ReadFamilyName() : null);
+    static readonly Lazy<string?> familyName = new(() => ReadFamilyName());
 
-    // Test-only stand-in for the real answer, null meaning "ask Windows". A plain static is enough:
-    // the tests that set it share one xunit collection, so they never run side by side.
-    static bool? overrideValue;
+    // Test-only stand-in for the real answer, null meaning "ask Windows". An AsyncLocal, not a plain
+    // static and not a thread-static: xunit runs test classes in parallel, so a plain static would let
+    // one test's override leak into every other running test; a thread-static would be invisible to
+    // the fresh STA thread a Windows test starts to build real WPF windows. An AsyncLocal flows to
+    // threads and tasks a test starts (ExecutionContext is captured on start) and nowhere else.
+    static readonly AsyncLocal<bool?> overrideValue = new();
 
     // True when the process runs from an MSIX package (the Store copy).
-    public static bool IsPackaged => overrideValue ?? actual.Value;
+    public static bool IsPackaged => overrideValue.Value ?? actual.Value;
 
+    // Not affected by Override: always the real process's family name.
+    // Not affected by Override: always the real process's family name.
     // The package family name (Petre.Deskbar_n8ch8v53xw03y for the Store copy), or null unpackaged.
     public static string? PackageFamilyName => familyName.Value;
 
@@ -50,9 +55,9 @@ public static class PackageIdentity
     // whatever was set before. For tests only, hence internal.
     internal static IDisposable Override(bool packaged)
     {
-        var previous = overrideValue;
-        overrideValue = packaged;
-        return new Restore(() => overrideValue = previous);
+        var previous = overrideValue.Value;
+        overrideValue.Value = packaged;
+        return new Restore(() => overrideValue.Value = previous);
     }
 
     // Length probe: no buffer, so the call can only say "no package" or "I need N characters".
