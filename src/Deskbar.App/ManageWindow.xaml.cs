@@ -10,6 +10,8 @@ using Deskbar.Core.Domain;
 using Deskbar.Core.Persistence;
 using Deskbar.Core.Time;
 using Deskbar.Core.Rules;
+using Deskbar.App.Startup;
+using Deskbar.Windows.Packaging;
 
 namespace Deskbar.App;
 
@@ -47,7 +49,7 @@ public partial class ManageWindow : Window
         this.timeTracker = timeTracker;
         InitializeComponent();
         if (compatibilityMode) CompatBanner.Visibility = Visibility.Visible;
-        StartWithWindows.IsChecked = StartupRegistration.IsEnabled;
+        ShowStartup();
         // Raises Checked, which lands in OnCheckForUpdatesToggled -- harmless, because
         // SetCheckForUpdates ignores a value that has not changed rather than writing state.json
         // every time this window opens.
@@ -314,9 +316,42 @@ public partial class ManageWindow : Window
 
     void OnMoveWorkspaceUp(object s, RoutedEventArgs e) => WithSelectedWorkspace(w => manager.MoveWorkspace(w.Id, -1));
     void OnMoveWorkspaceDown(object s, RoutedEventArgs e) => WithSelectedWorkspace(w => manager.MoveWorkspace(w.Id, +1));
+    // True while ShowStartup is setting the box from the switch, so the Checked/Unchecked that raises is not
+    // taken for the user flipping it. Before this guard, opening Manage with autostart on called Enable,
+    // which re-pointed the Run value at whichever build opened the window, a development copy included.
+    bool showingStartup;
+
+    // Sets the start-with-Windows box and its note from StartupSwitch.Current (the Run value in the direct
+    // build, the package's startup task in the Store copy). When Settings or a policy turned the startup
+    // task off, the app is not allowed to turn it back on, so the box is unticked and greyed out and the
+    // note says where it can be turned on. Unavailable (the state could not be read) leaves the box usable.
+    void ShowStartup()
+    {
+        var startup = StartupSwitch.Current;
+        var availability = startup.Availability;
+        var locked = availability is StartupAvailability.DisabledByUser or StartupAvailability.DisabledByPolicy;
+
+        showingStartup = true;
+        StartWithWindows.IsChecked = !locked && startup.IsEnabled;
+        showingStartup = false;
+        StartWithWindows.IsEnabled = !locked;
+
+        // Store packaging design (docs/superpowers/specs/2026-10-24-deskbar-store-packaging-design.md): only
+        // the direct build warns about the Store copy, found by the execution alias it installs.
+        var note = StartupNoteText.For(availability, PackageIdentity.IsPackaged, File.Exists(PackageIdentity.AliasPath));
+        StartupNote.Text = note;
+        StartupNote.Visibility = note.Length == 0 ? Visibility.Collapsed : Visibility.Visible;
+    }
+
+    // A switch that did not flip (the test host refusing the Run value, the startup task turned off in
+    // Settings since the window opened, a timeout) puts the box back to what the switch now reports, so the
+    // box never claims a state that is not true, and the note gets the chance to say why.
     void OnStartupToggled(object s, RoutedEventArgs e)
     {
-        if (StartWithWindows.IsChecked == true) StartupRegistration.Enable(); else StartupRegistration.Disable();
+        if (showingStartup) return;
+        var startup = StartupSwitch.Current;
+        var result = StartWithWindows.IsChecked == true ? startup.Enable() : startup.Disable();
+        if (result.IsFailure) ShowStartup();
     }
 
     // #71. Persisted immediately rather than on a Save button, matching the checkbox above it:

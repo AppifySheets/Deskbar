@@ -1,10 +1,14 @@
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
+using CSharpFunctionalExtensions;
 using Deskbar.App;
+using Deskbar.App.Startup;
 using Deskbar.Core;
 using Deskbar.Core.Domain;
 using Deskbar.Core.Persistence;
+using Deskbar.Windows.Packaging;
+using Deskbar.Windows.Tests.Startup;
 
 namespace Deskbar.Windows.Tests;
 
@@ -277,4 +281,131 @@ public class ManageSettingsTabTests
 
         window.Close();
     });
+
+    // "Start Deskbar with Windows" goes through StartupSwitch, the Run value in the direct build and the
+    // package's startup task in the Store copy. These drive it with a fake switch, so no test here can
+    // touch the real login entry (StartupRegistrationTests carries why that matters).
+    // docs/superpowers/specs/2026-10-24-deskbar-store-packaging-design.md
+    static CheckBox StartBox(ManageWindow window) => (CheckBox)window.FindName("StartWithWindows")!;
+    static TextBlock StartNote(ManageWindow window) => (TextBlock)window.FindName("StartupNote")!;
+
+    // Policy (or the user, in Settings) turned the startup task off: the app cannot turn it back on, so the
+    // box is greyed out and the note says where it can be turned on.
+    [Fact]
+    public void A_startup_task_off_by_policy_greys_the_box_and_says_where() => StaThread.Run(() =>
+    {
+        var fake = new FakeStartupSwitch(StartupAvailability.DisabledByPolicy, enabled: false);
+        using var _ = StartupSwitch.Override(fake);
+
+        var window = new ManageWindow(Built(AppState.Empty), compatibilityMode: false);
+
+        Assert.False(StartBox(window).IsChecked);
+        Assert.False(StartBox(window).IsEnabled);
+        Assert.Equal("Startup is turned off by policy. Turn it on under Settings, Apps, Startup.", StartNote(window).Text);
+        Assert.Equal(Visibility.Visible, StartNote(window).Visibility);
+        Assert.Equal(0, fake.Enables + fake.Disables);
+
+        window.Close();
+    });
+
+    [Fact]
+    public void A_startup_task_off_in_settings_greys_the_box_and_says_where() => StaThread.Run(() =>
+    {
+        using var _ = StartupSwitch.Override(new FakeStartupSwitch(StartupAvailability.DisabledByUser, enabled: false));
+
+        var window = new ManageWindow(Built(AppState.Empty), compatibilityMode: false);
+
+        Assert.False(StartBox(window).IsEnabled);
+        Assert.Equal("Startup is turned off in Settings. Turn it on under Settings, Apps, Startup.", StartNote(window).Text);
+
+        window.Close();
+    });
+
+    // A state that could not be read is not a reason to lock the box: ticking it may well work.
+    [Fact]
+    public void An_unreadable_startup_state_leaves_the_box_usable() => StaThread.Run(() =>
+    {
+        using var _ = StartupSwitch.Override(new FakeStartupSwitch(StartupAvailability.Unavailable, enabled: false));
+
+        var window = new ManageWindow(Built(AppState.Empty), compatibilityMode: false);
+
+        Assert.True(StartBox(window).IsEnabled);
+        Assert.Equal("Startup could not be read.", StartNote(window).Text);
+
+        window.Close();
+    });
+
+    // Opening the window reads the switch and writes nothing: ticking the box from the stored state raises
+    // Checked, and before this guard that call rewrote the Run value every time Manage opened. Unticking it
+    // afterwards is the one call.
+    [Fact]
+    public void An_enabled_startup_is_ticked_and_unticking_disables_it_once() => StaThread.Run(() =>
+    {
+        // Packaged, so the direct build's Store-copy warning cannot appear on a machine that has the Store copy.
+        using var packaged = PackageIdentity.Override(true);
+        var fake = new FakeStartupSwitch(StartupAvailability.Available, enabled: true);
+        using var _ = StartupSwitch.Override(fake);
+
+        var window = new ManageWindow(Built(AppState.Empty), compatibilityMode: false);
+
+        Assert.True(StartBox(window).IsChecked);
+        Assert.True(StartBox(window).IsEnabled);
+        Assert.Equal(Visibility.Collapsed, StartNote(window).Visibility);
+        Assert.Equal(0, fake.Enables + fake.Disables);
+
+        StartBox(window).IsChecked = false;
+
+        Assert.Equal(1, fake.Disables);
+        Assert.Equal(0, fake.Enables);
+
+        window.Close();
+    });
+
+    // A failed switch puts the box back to what the switch reports, so the box never claims a state that is
+    // not true. Here the user turned the task off in Settings between the window opening and the tick.
+    [Fact]
+    public void A_failed_enable_puts_the_box_back() => StaThread.Run(() =>
+    {
+        using var packaged = PackageIdentity.Override(true);
+        var fake = new FailingStartupSwitch();
+        using var _ = StartupSwitch.Override(fake);
+
+        var window = new ManageWindow(Built(AppState.Empty), compatibilityMode: false);
+        StartBox(window).IsChecked = true;
+
+        Assert.False(StartBox(window).IsChecked);
+        Assert.Equal(1, fake.Enables);
+
+        window.Close();
+    });
+
+    // The note's text on its own, for the case a window test cannot set up: whether the Store copy is
+    // installed is a file on the real machine (its execution alias), so it is passed in here.
+    [Theory]
+    [InlineData(StartupAvailability.Available, false, true, "The Microsoft Store copy of Deskbar starts with Windows. Ticking this starts both.")]
+    [InlineData(StartupAvailability.Available, false, false, "")]
+    // The Store copy itself has the alias; the warning is only for the direct build beside it.
+    [InlineData(StartupAvailability.Available, true, true, "")]
+    [InlineData(StartupAvailability.DisabledByPolicy, true, true, "Startup is turned off by policy. Turn it on under Settings, Apps, Startup.")]
+    [InlineData(StartupAvailability.DisabledByUser, true, false, "Startup is turned off in Settings. Turn it on under Settings, Apps, Startup.")]
+    [InlineData(StartupAvailability.Unavailable, true, false, "Startup could not be read.")]
+    public void The_startup_note_says_the_right_thing(StartupAvailability availability, bool packaged, bool storeCopyInstalled, string expected) =>
+        Assert.Equal(expected, StartupNoteText.For(availability, packaged, storeCopyInstalled));
+
+    // Reports Available and off, and refuses to enable, as the startup task does once the user has turned
+    // it off in Settings after the window read it.
+    sealed class FailingStartupSwitch : IStartupSwitch
+    {
+        public bool IsEnabled => false;
+        public StartupAvailability Availability => StartupAvailability.Available;
+        public int Enables { get; private set; }
+
+        public Result Enable()
+        {
+            Enables++;
+            return Result.Failure("the startup task is DisabledByUser");
+        }
+
+        public Result Disable() => Result.Success();
+    }
 }
