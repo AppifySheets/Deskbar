@@ -113,6 +113,11 @@ public partial class App : Application
             // kept alive too.
             updateTimer!.Interval = TimeSpan.FromMinutes(5);
             CheckForUpdate();
+            // The Pro verdict rides the same beat, so a trial that runs out or a purchase made while the
+            // app runs is noticed within five minutes. Fire-and-forget: RefreshAsync never throws (see
+            // Entitlement), and nothing here waits for it. barHandle is the bar's hwnd, which owns the
+            // Store context; it is zero in compatibility mode, where there is no bar.
+            _ = Entitlement.RefreshAsync(barHandle);
         };
         updateTimer.Start();
     }
@@ -1180,6 +1185,13 @@ public partial class App : Application
             };
             topmost.Start();
         }
+
+        // The first real Pro verdict, read now because the bar's hwnd exists from here on and a Store
+        // context in a desktop app is tied to a window (Entitlement, StoreLicence). Until it lands,
+        // Entitlement.Current holds the provisional answer. In compatibility mode there is no bar and
+        // barHandle is zero, which StoreLicence handles by skipping the window step. Fire-and-forget:
+        // RefreshAsync never throws, and startup does not wait on the Store.
+        _ = Entitlement.RefreshAsync(barHandle);
 
         // The hover-to-peek switcher panel USED to be summoned from here, with a 400ms
         // DispatcherTimer, a drift radius to reject drive-by cursor passes, and a proximity

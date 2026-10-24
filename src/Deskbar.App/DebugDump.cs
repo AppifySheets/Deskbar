@@ -88,6 +88,8 @@ static class DebugDump
 
         Line("written", DateTimeOffset.Now.ToString("yyyy-MM-dd HH:mm:ss zzz"));
         Line("version", UpdateService.RunningVersion);
+        // Pro or the free tier, and why: the cached verdict (Entitlement), so the dump never waits on the Store.
+        Line("entitlement", $"{(Entitlement.Current.IsPro ? "Pro" : "free")}, {Entitlement.Current.Reason}");
         Line("exe", Environment.ProcessPath);
         Line("windows", $"{RuntimeInformation.OSDescription} ({Environment.OSVersion.Version})");
         Line("session", $"id {Process.GetCurrentProcess().SessionId}, console session {WTSGetActiveConsoleSessionId()}, "
