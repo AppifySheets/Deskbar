@@ -504,8 +504,9 @@ function Start-Elevated([string] $Exe) {
 
 # As the signed-in user with a limited token: a one-off scheduled task (run only while the user is
 # signed in, so it needs no password and runs on their desktop) runs Windows PowerShell, which sets
-# the variable (dropped by the brokered launch, as in Start-Elevated) and calls the same cmdlet. Its own output, including whether it saw itself as an
-# administrator, goes to evidence\launch-as-user.log. The task is removed before this returns.
+# the variable (dropped by the brokered launch, as in Start-Elevated) and calls the same cmdlet. Its
+# own output, including whether it saw itself as an administrator, goes to
+# evidence\launch-as-user.log. The task is removed before this returns.
 function Start-AsUser([string] $Exe) {
     $log = Join-Path $evidence 'launch-as-user.log'
     Remove-Item -LiteralPath $log -ErrorAction SilentlyContinue

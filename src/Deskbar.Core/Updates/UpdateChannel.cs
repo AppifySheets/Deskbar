@@ -12,9 +12,11 @@ namespace Deskbar.Core.Updates;
 // (the Store decides which package arrives), and its button says where the update comes from.
 //
 // restartProven: whether Windows has been measured to bring Deskbar back after the Store's update
-// (the App registers for restart before it asks). Until the spike has shown that it does, the
-// question warns that Deskbar closes and has to be opened from Start again, because a bar that
-// vanishes without a word looks like a crash. The App holds the flag as a constant set by the spike.
+// (the App registers for restart before it asks). The Store package spike on 2026-10-24 measured
+// that it does: Windows started Deskbar again by itself after a Store-style update, so the App's
+// RestartProven constant is true and the question is the first line alone. The second line, that
+// Deskbar closes and has to be opened from Start again, stays for a future measurement that says
+// otherwise, because a bar that vanishes without a word looks like a crash.
 //
 // Pure, so the copy is pinned by Deskbar.Core.Tests.Updates.UpdateChannelTests.
 public static class UpdateChannel
