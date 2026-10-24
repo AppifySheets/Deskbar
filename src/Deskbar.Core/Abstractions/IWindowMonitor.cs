@@ -32,6 +32,12 @@ public interface IWindowMonitor
     // the title path asks it for every title change on the machine.
     bool IsListed(WindowHandle window);
 
+    // Has the shell itself cloaked it (DWM_CLOAKED_SHELL)? Windows does that to hide a window it still
+    // holds: one on another virtual desktop, and also the empty frame a closed Store app leaves behind.
+    // Alone the answer cannot tell those two apart -- the first has a desktop and the second has none --
+    // so the manager asks it only of a window the virtual-desktop service could not place.
+    bool IsCloakedByShell(WindowHandle window);
+
     // Whichever window has focus RIGHT NOW. Needed because EVENT_SYSTEM_FOREGROUND only
     // fires on a CHANGE: without seeding, the active-window highlight would stay blank from
     // launch until the user next switched windows, which reads as the feature being broken.
