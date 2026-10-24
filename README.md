@@ -89,6 +89,7 @@ user profile:
 | When each window was last used, for the icon fade | `%APPDATA%\Deskbar\last-used.json` |
 | The command-line shim scripts call (rewritten at each start) | `%APPDATA%\Deskbar\deskbar.cmd` |
 | The Claude Code skill, when Claude Code is installed and the setting is on | `%USERPROFILE%\.claude\skills\deskbar\SKILL.md` |
+| ...its two hooks (Notification and Stop), beside your own | `%USERPROFILE%\.claude\settings.json`, running `%APPDATA%\Deskbar\claude-hook.cmd` |
 | "Start with Windows", when enabled | the `Deskbar` value under `HKCU\Software\Microsoft\Windows\CurrentVersion\Run` |
 
 If `state.json` ever fails to parse, the broken file is kept beside it as `state.json.bak` and the
@@ -605,8 +606,17 @@ When Claude Code is installed (there is a `.claude` folder in your profile), Des
 `%USERPROFILE%\.claude\skills\deskbar\SKILL.md`. Every Claude Code session on the machine then knows
 to open links with `open`, start programs with `start` and move the windows it opens with
 `move --no-follow`, so they land in the session's own workspace instead of on the one you are
-looking at. The file is rewritten when Deskbar updates. Untick "Teach Claude Code about Deskbar" in
-Manage, or run `deskbar.cmd claude-skill off`, and it is removed.
+looking at. The file is rewritten when Deskbar updates.
+
+It also adds two hooks to `%USERPROFILE%\.claude\settings.json`, beside any you have: when a session
+finishes a reply or waits for a permission while you are on another workspace, that workspace's name
+and colour rail flash orange on the bar and the session's VS Code icon glows, until you go there. The
+hooks run `%APPDATA%\Deskbar\claude-hook.cmd`, which runs `deskbar.cmd attention` and always exits 0.
+The first time Deskbar changes `settings.json` it keeps the original as `settings.json.deskbar-backup`,
+and it leaves a file with comments in it alone.
+
+Untick "Teach Claude Code about Deskbar" in Manage, or run `deskbar.cmd claude-skill off`, and the
+skill and Deskbar's own hooks are removed; your other hooks stay as they are.
 
 A new workspace goes at the end of the bar unless you say where: `--group <group>` puts it at the
 bottom of that group, `--position <n>` at row n counting a whole group as one row, and `--before`

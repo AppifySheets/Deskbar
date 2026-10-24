@@ -21,15 +21,29 @@ namespace Deskbar.App;
 //   * Turning it off removes the file, and only a file that says Deskbar wrote it, then the folder if that left it
 //     empty. Anything else in ~/.claude is never touched.
 //
+// AND TWO HOOKS. Petre, choosing between a skill alone and hooks: "Add the hooks". A session asks for the user with
+// `deskbar.cmd attention` (FloatingBar.Asking.cs), but a session that is waiting on a permission prompt cannot run
+// anything, and that is when it most needs the user. Claude Code's own hooks fire then: Notification (a permission
+// prompt, or a session left waiting for input) and Stop (a reply finished). So the same setting also keeps two
+// entries in ~/.claude/settings.json that run Deskbar's hook script, beside whatever hooks the user has, and takes
+// out only its own when it is turned off (ClaudeHooks).
+//
+// The script, claude-hook.cmd next to deskbar.cmd, exists for two reasons a bare command line could not cover. It
+// always exits 0, because a Stop hook that exits 2 tells Claude to KEEP GOING, and deskbar.cmd exits 2 whenever
+// Deskbar is not running. And it passes the session's folder (CLAUDE_PROJECT_DIR, which Claude Code sets for hooks)
+// so the right workspace blinks. Run as `cmd.exe /c "<path>"`, the shape of the hooks Petre already had working.
+//
 // Never throws: a skill that could not be written costs sessions a hint, and is not worth a dialog. Traced instead.
 static class ClaudeSkill
 {
     const string Marker = "Written by Deskbar";
+    internal const string HookScriptName = "claude-hook.cmd";
 
-    public static void Sync(bool on) => Sync(on, Environment.GetFolderPath(Environment.SpecialFolder.UserProfile));
+    public static void Sync(bool on) =>
+        Sync(on, Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), AppPaths.NewStateDir);
 
-    // `home` is a parameter so a test can point it at a scratch folder.
-    internal static void Sync(bool on, string home)
+    // `home` and `deskbarFolder` (where deskbar.cmd lives) are parameters so a test can point them at scratch folders.
+    internal static void Sync(bool on, string home, string deskbarFolder)
     {
         try
         {
@@ -38,13 +52,34 @@ static class ClaudeSkill
 
             var folder = Path.Combine(claude, "skills", "deskbar");
             var file = Path.Combine(folder, "SKILL.md");
-            if (on) Write(folder, file);
+            var hookScript = Path.Combine(deskbarFolder, HookScriptName);
+            if (on)
+            {
+                Write(folder, file);
+                WriteHookScript(hookScript, Path.Combine(deskbarFolder, ControlCommandLine.ShimName));
+            }
             else Remove(folder, file);
+            ClaudeHooks.Sync(on, Path.Combine(claude, "settings.json"), $"cmd.exe /c \"{hookScript}\"");
         }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException)
         {
             ClickTrace.Write($"claude skill not {(on ? "written" : "removed")}: {e.Message}");
         }
+    }
+
+    // The script the hooks run. Its output goes nowhere: a hook's output is shown to nobody useful, and an error from
+    // a Deskbar that is not running is not the session's business.
+    static void WriteHookScript(string path, string shim)
+    {
+        var quoted = shim.Replace("%", "%%");
+        var text = string.Join("\r\n",
+            "@rem Written by Deskbar for Claude Code's hooks: asks the bar for the user, for the session that runs it. Do not edit.",
+            $"@if defined CLAUDE_PROJECT_DIR (call \"{quoted}\" attention --from \"%CLAUDE_PROJECT_DIR%\" >nul 2>&1) else (call \"{quoted}\" attention >nul 2>&1)",
+            "@exit /b 0",
+            "");
+        if (File.Exists(path) && File.ReadAllText(path) == text) return;
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        File.WriteAllText(path, text);
     }
 
     static void Write(string folder, string file)
@@ -113,10 +148,11 @@ static class ClaudeSkill
 
         ## Asking for the user
 
-        When you are blocked on the user (a question only they can answer, a decision, something they must do or
-        check) or you have finished work they are waiting for, run `deskbar.cmd attention` from your working folder.
-        If the user is on another workspace, your workspace's row on the bar blinks and your VS Code icon glows until
-        they come to it; if they are already there, nothing happens. Do not call it for routine progress.
+        Deskbar's Claude Code hooks already ask for the user whenever you finish a reply or wait for a permission: if
+        the user is on another workspace, your workspace's row on the bar blinks and your VS Code icon glows until
+        they come to it. So you rarely need to do anything. Run `deskbar.cmd attention` from your working folder only
+        when you need the user in the middle of a turn, for example before waiting on something they must do in
+        another window. Do not call it for routine progress.
 
         ## Everything else
 
