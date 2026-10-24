@@ -37,14 +37,14 @@ public static class StoreUpdates
 
     // Is there a newer package in the Store? None when the Store has nothing waiting for this app.
     //
-    // ownerHwnd is the bar's window, which the Store context is tied to (see Context); IntPtr.Zero (no
-    // bar, as in compatibility mode) skips that step, which the check itself does not need since it shows
-    // no UI.
+    // ownerHwnd is the bar's window, which the process's one Store context is tied to the first time a
+    // non-zero hwnd arrives (StoreContextHolder); IntPtr.Zero (no bar, as in compatibility mode) leaves it
+    // untied, which the check itself does not need since it shows no UI.
     public static async Task<Result<Maybe<StoreUpdate>>> NewerAsync(IntPtr ownerHwnd)
     {
         try
         {
-            var updates = await PendingAsync(Context(ownerHwnd)).ConfigureAwait(false);
+            var updates = await PendingAsync(StoreContextHolder.Get(ownerHwnd)).ConfigureAwait(false);
             return Result.Success(updates.Count == 0
                 ? Maybe<StoreUpdate>.None
                 : Maybe.From(new StoreUpdate(VersionOf(updates[0]), updates.Any(update => update.Mandatory))));
@@ -68,13 +68,20 @@ public static class StoreUpdates
     // hours before anyone answers it, and a StorePackageUpdate from that long ago may no longer describe
     // what the Store has; a fresh list is the one the Store will accept.
     //
-    // Registering for restart is the App's job, done before it calls this (see App.InstallFromStore), so
-    // this class stays about the Store alone.
+    // No restart registration here: the App registered for restart at startup (CrashRestart.Register), and
+    // the Store package spike (docs/superpowers/notes/2026-10-24-store-package-spike.md) measured Windows
+    // starting Deskbar again by itself after the install.
+    //
+    // A zero ownerHwnd is refused before the Store is asked: the Store's install UI needs a window to sit
+    // in front of, and compatibility mode, the one state with no bar, has none to give it.
     public static async Task<Result> InstallAsync(IntPtr ownerHwnd)
     {
+        if (ownerHwnd == IntPtr.Zero)
+            return Result.Failure("The Microsoft Store needs a Deskbar window to show its update in, and there is no bar in compatibility mode.");
+
         try
         {
-            var context = Context(ownerHwnd);
+            var context = StoreContextHolder.Get(ownerHwnd);
             // No ConfigureAwait(false) here, deliberately: the request below raises the Store's UI, which
             // has to be asked for from the UI thread the caller is on, so the continuation must come back
             // to it.
@@ -93,18 +100,6 @@ public static class StoreUpdates
         {
             return Result.Failure($"{ex.GetType().Name}: {ex.Message}");
         }
-    }
-
-    // The same two steps StoreLicence takes: the default context, tied to the owner window when there is
-    // one. A desktop (non-UWP) app must initialise a StoreContext with a window before any call that can
-    // raise Store UI; the projection's own helper for IInitializeWithWindow means no hand-written COM
-    // interface or P/Invoke.
-    static StoreContext Context(IntPtr ownerHwnd)
-    {
-        var context = StoreContext.GetDefault();
-        if (ownerHwnd != IntPtr.Zero)
-            WinRT.Interop.InitializeWithWindow.Initialize(context, ownerHwnd);
-        return context;
     }
 
     // The app's own package and any optional packages, each with a newer version in the Store. The

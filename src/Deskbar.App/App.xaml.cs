@@ -977,22 +977,8 @@ public partial class App : Application
         // instance that actually takes ownership gets to claim it.
         StartupRegistration.ReassertIfEnabled();
 
-        // The Store copy's first start takes autostart over from the direct build: it deletes the Run value
-        // `Deskbar` and the Start menu's Deskbar.lnk, once, behind a marker file in the state folder, and
-        // never under DESKBAR_APPDATA. Its own autostart is the package's startup task, and leaving the
-        // direct build's would start a second bar at login. PackagedTakeover has every rule; the plan is
-        // empty outside the package (IsPackaged below, Store packaging design:
-        // docs/superpowers/specs/2026-10-24-deskbar-store-packaging-design.md), so this is a no-op for the
-        // direct build. Here, after the guard and the rename migration, so only the copy that won the race
-        // touches autostart, and before StartMenuShortcut.Ensure, which is itself a no-op under the package
-        // (RunsAsPublished is false there).
-        var takeoverFacts = new TakeoverFacts(
-            Packaged: PackageIdentity.IsPackaged,
-            MarkerExists: File.Exists(Path.Combine(AppPaths.NewStateDir, PackagedTakeover.MarkerName)),
-            RootOverridden: AppPaths.RootOverridden,
-            DirectRunValueExists: StartupRegistration.IsEnabled,
-            DirectShortcutExists: File.Exists(StartMenuShortcut.ShortcutPath));
-        PackagedTakeoverApplier.Apply(PackagedTakeover.Plan(takeoverFacts), AppPaths.NewStateDir, ClickTrace.Write);
+        // (The Store copy's autostart takeover used to sit here. It now runs once the state has loaded, see
+        // TakeOverAutostartIfPackaged below, so a copy that refuses a newer state.json never touches it.)
 
         // ...and keep Deskbar in Start, pointing at this exe, so it can be started by hand after it stops
         // (StartMenuShortcut). Same owner rule as the Run entry. A failure only costs the shortcut.
@@ -1154,7 +1140,7 @@ public partial class App : Application
             if (started.IsFailure)
             {
                 var loadError = started.Error;
-                // A file stamped by a NEWER build is not corrupt: see RefuseNewerState.
+                // A file stamped by a newer major version is not corrupt: see RefuseNewerState.
                 if (RefuseNewerState(loadError))
                     return;
                 BackupCorruptState(statePath, loadError);
@@ -1186,6 +1172,10 @@ public partial class App : Application
             attentionMonitor.Start().TapError(err =>
                 System.Diagnostics.Debug.WriteLine($"Deskbar: notification badges unavailable: {err}"));
         }
+
+        // Both branches above have returned already if state.json was written by a newer major version
+        // (RefuseNewerState), so from here on this copy is the one that keeps running.
+        TakeOverAutostartIfPackaged();
 
         // The remote control: other processes (an agent setting up a worktree, a script) asking this
         // instance to list, create and move. Opened once the manager has loaded state and seen the
@@ -1626,8 +1616,33 @@ public partial class App : Application
         };
     }
 
-    // A state.json stamped by a NEWER build (the Store build lags the GitHub one and both share the file; see
-    // docs/superpowers/specs/2026-10-24-deskbar-store-packaging-design.md) is not corrupt. Backing it up and
+    // The Store copy's first start takes autostart over from the direct build: it deletes the Run value
+    // `Deskbar` and the Start menu's Deskbar.lnk, once, behind a marker file in the state folder, and never
+    // under DESKBAR_APPDATA. Its own autostart is the package's startup task, and leaving the direct build's
+    // would start a second bar at login. PackagedTakeover has every rule; the plan is empty outside the
+    // package (IsPackaged below, Store packaging design:
+    // docs/superpowers/specs/2026-10-24-deskbar-store-packaging-design.md), so this is a no-op for the direct
+    // build.
+    //
+    // Called from OnStartup only once the state has loaded, after both RefuseNewerState early returns. A copy
+    // that refuses a state.json written by a newer major version shows its dialog and exits; if it had taken
+    // autostart over first, it would have deleted the other (newer, working) copy's autostart on its way out
+    // and left the machine with no bar at the next sign-in. Its order against StartMenuShortcut.Ensure does
+    // not matter: Ensure is a no-op under the package (RunsAsPublished is false there), and the plan is empty
+    // outside it.
+    static void TakeOverAutostartIfPackaged()
+    {
+        var takeoverFacts = new TakeoverFacts(
+            Packaged: PackageIdentity.IsPackaged,
+            MarkerExists: File.Exists(Path.Combine(AppPaths.NewStateDir, PackagedTakeover.MarkerName)),
+            RootOverridden: AppPaths.RootOverridden,
+            DirectRunValueExists: StartupRegistration.IsEnabled,
+            DirectShortcutExists: File.Exists(StartMenuShortcut.ShortcutPath));
+        PackagedTakeoverApplier.Apply(PackagedTakeover.Plan(takeoverFacts), AppPaths.NewStateDir, ClickTrace.Write);
+    }
+
+    // A state.json stamped by a newer MAJOR version (the Store build lags the GitHub one and both share the
+    // file; see docs/superpowers/specs/2026-10-24-deskbar-store-packaging-design.md) is not corrupt. Backing it up and
     // starting clean, or starting empty, would let a later Save overwrite the newer copy's settings. So show
     // the message and exit, leaving the file exactly as it is. Returns true when it did, and the caller must
     // then return from OnStartup. Safe early in startup: no Exit handler is registered yet (the first is

@@ -20,20 +20,14 @@ public static class StoreLicence
     // verdict at its provisional value for long. A licence read is local and normally answers at once.
     static readonly TimeSpan Timeout = TimeSpan.FromSeconds(10);
 
-    // ownerHwnd is the window the Store context is tied to, the bar's. A desktop (non-UWP) app must
-    // initialise a StoreContext with a window before using it, so any Store UI it raises has an owner;
-    // IntPtr.Zero (no bar, as in compatibility mode) skips that step, which a licence read does not
-    // need since it shows no UI.
+    // ownerHwnd is the bar's window, which the process's one Store context is tied to the first time a
+    // non-zero hwnd arrives (StoreContextHolder has why there is only one). IntPtr.Zero (no bar, as in
+    // compatibility mode) still reads: a licence read shows no UI, so it does not need the window.
     public static async Task<Result<LicenceFacts>> ReadAsync(IntPtr ownerHwnd)
     {
         try
         {
-            var context = StoreContext.GetDefault();
-            // The projection's own helper for IInitializeWithWindow (3E68D4BD-7135-4D10-8018-9FB6D9F33FA1),
-            // so no hand-written COM interface or P/Invoke is needed.
-            if (ownerHwnd != IntPtr.Zero)
-                WinRT.Interop.InitializeWithWindow.Initialize(context, ownerHwnd);
-
+            var context = StoreContextHolder.Get(ownerHwnd);
             var licence = await context.GetAppLicenseAsync().AsTask().WaitAsync(Timeout).ConfigureAwait(false);
             return Result.Success(FactsOf(licence));
         }
