@@ -42,7 +42,6 @@ public static class PackageIdentity
     public static bool IsPackaged => overrideValue.Value ?? actual.Value;
 
     // Not affected by Override: always the real process's family name.
-    // Not affected by Override: always the real process's family name.
     // The package family name (Petre.Deskbar_n8ch8v53xw03y for the Store copy), or null unpackaged.
     public static string? PackageFamilyName => familyName.Value;
 

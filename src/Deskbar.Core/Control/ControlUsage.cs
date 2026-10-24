@@ -18,6 +18,7 @@ public static class ControlUsage
             new("workspaces", "", "every workspace as JSON: name, group, row, colour, folded, current"),
             new("windows", "", "every window as JSON: hwnd, title, originalTitle, process, workspace"),
             new("desktops", "", "every virtual desktop as JSON, including unnamed ones"),
+            new("version", "", "the running build as JSON: version, exe, packaged"),
         ]),
         new("Creating, and moving windows", [
             new("create", "<name> [placement]", "create a workspace; already existing is not an error"),

@@ -35,8 +35,13 @@ namespace Deskbar.Core.Control;
 //
 // `defaultBrowser` answers the default browser's exe for `open` (DefaultBrowser on the Windows side). Left null, `open`
 // still works and always opens a link as usual.
+//
+// `identity` answers `version`: the running build's version, its exe path and whether it runs from the
+// Microsoft Store package (docs/superpowers/specs/2026-10-24-deskbar-store-packaging-design.md). Whether
+// the process is packaged is the Windows side's business, so the app hands it in; left null, `version` refuses.
 public sealed partial class RemoteControl(WorkspaceManager manager, Func<bool, Result>? setBarVisible = null, Func<ProgramLaunch, Result<int?>>? launch = null,
-    Func<Result<string>>? dump = null, Func<Maybe<string>>? defaultBrowser = null)
+    Func<Result<string>>? dump = null, Func<Maybe<string>>? defaultBrowser = null,
+    Func<(string Version, string? Exe, bool Packaged)>? identity = null)
 {
     static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web) { WriteIndented = true };
 
@@ -52,6 +57,7 @@ public sealed partial class RemoteControl(WorkspaceManager manager, Func<bool, R
         ("workspaces", []) => Workspaces(),
         ("windows", []) => Windows(),
         ("desktops", []) => Desktops(),
+        ("version", []) => Version(),
 
         ("create", _) => ControlArguments.ParseCreate(rest).Match(Create, ControlReply.Fail),
         ("move", _) => ControlArguments.ParseMove(rest).Match(Move, ControlReply.Fail),
@@ -178,6 +184,13 @@ public sealed partial class RemoteControl(WorkspaceManager manager, Func<bool, R
 
     static ControlReply Reply(Result result, Func<object> describe) =>
         result.IsSuccess ? Success(describe()) : ControlReply.Fail(result.Error);
+
+    // The running build as JSON. The CI smoke step reads "packaged" from here to prove the installed
+    // package really runs with package identity.
+    ControlReply Version() =>
+        identity?.Invoke() is { } build
+            ? Success(new { version = build.Version, exe = build.Exe, packaged = build.Packaged })
+            : ControlReply.Fail("version is not available in this build");
 
     static string Serialize(object value) => JsonSerializer.Serialize(value, Json);
 }

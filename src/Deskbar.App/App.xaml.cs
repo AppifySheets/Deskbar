@@ -18,6 +18,7 @@ using Deskbar.Windows.Control;
 using Deskbar.Windows.Desktops;
 using Deskbar.Windows.Diagnostics;
 using Deskbar.Windows.Monitoring;
+using Deskbar.Windows.Packaging;
 using Deskbar.Windows.Recovery;
 using Deskbar.Windows.Renaming;
 
@@ -973,7 +974,10 @@ public partial class App : Application
             // reads the path from the reply. The bar is read when the command arrives, as above.
             () => DebugDump.Save(floatingBar, manager!),
             // `open` starts a new window of the default browser in a background workspace (RemoteControl.Open).
-            DefaultBrowser.Exe);
+            DefaultBrowser.Exe,
+            // `version` reports which build answers; "packaged" comes from the Store packaging design's
+            // PackageIdentity, which the CI smoke step reads to prove the installed package has identity.
+            identity: () => (UpdateService.RunningVersion, Environment.ProcessPath, PackageIdentity.IsPackaged));
         controlServer = new ControlPipeServer(ControlCommandLine.PipeName,
             args => Dispatcher.InvokeAsync(() =>
             {
