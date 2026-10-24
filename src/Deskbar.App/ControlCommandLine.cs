@@ -81,20 +81,29 @@ static class ControlCommandLine
     // exe, and a copy run from somewhere else takes it over while it is the one running.
     public const string ShimName = "deskbar.cmd";
 
-    public static string ShimContent(string exePath) =>
+    public static string ShimContent(string exePath) => ShimContent(exePath, aliasTarget: false);
+
+    // aliasTarget: the shim points at the Store package's execution alias rather than at Deskbar.exe.
+    // Store packaging design, "The command line under the package"
+    // (docs/superpowers/specs/2026-10-24-deskbar-store-packaging-design.md): the alias runs deskbar-cli.exe,
+    // a console client that takes the command directly, so `ctl` is left out. The alias path is stable
+    // across Store updates, so the shim written by the Store copy never goes stale.
+    public static string ShimContent(string exePath, bool aliasTarget) =>
         string.Join("\r\n",
             "@rem Written by Deskbar at startup; points at the copy that last started. Do not edit.",
             "@rem Usage: deskbar help",
             // %* forwards the arguments exactly as typed, quotes and all. Percent signs in the path are
             // doubled because cmd expands %NAME% even inside quotes.
-            $"@\"{exePath.Replace("%", "%%")}\" ctl %*",
+            $"@\"{exePath.Replace("%", "%%")}\"{(aliasTarget ? "" : " ctl")} %*",
             "@exit /b %ERRORLEVEL%",
             "");
 
-    public static void WriteShim(string folder, string exePath)
+    public static void WriteShim(string folder, string exePath) => WriteShim(folder, exePath, aliasTarget: false);
+
+    public static void WriteShim(string folder, string exePath, bool aliasTarget)
     {
         var path = Path.Combine(folder, ShimName);
-        var content = ShimContent(exePath);
+        var content = ShimContent(exePath, aliasTarget);
         if (File.Exists(path) && File.ReadAllText(path) == content) return;
         Directory.CreateDirectory(folder);
         // In the OEM code page, because that is what cmd reads a batch file in. ASCII would turn any

@@ -22,7 +22,9 @@ namespace Deskbar.App;
 // (see App.xaml.cs on #123), which is a change of its own and not what this is for.
 public static class StartMenuShortcut
 {
-    static string ShortcutPath =>
+    // Internal so the Store copy's first start can ask whether the direct build's shortcut is there and
+    // delete it (PackagedTakeover, App.OnStartup).
+    internal static string ShortcutPath =>
         Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Programs), "Deskbar.lnk");
 
     // Whether the shortcut has to be written: there is none, or it starts some other exe (an older version,

@@ -20,7 +20,7 @@ public class RenameMigrationTests
         OldShimExists: true,
         OldRunValueExists: true, NewRunValueExists: false,
         OldMutexHeld: false, AwaitingPrevious: true,
-        RootOverridden: false, IsTheApp: true);
+        RootOverridden: false, IsTheApp: true, Packaged: false);
 
     const string Refusal = "Exit TaskSpaces from its tray icon first, then start Deskbar.";
 
@@ -62,7 +62,7 @@ public class RenameMigrationTests
             OldShimExists: false,
             OldRunValueExists: false, NewRunValueExists: false,
             OldMutexHeld: false, AwaitingPrevious: false,
-            RootOverridden: false, IsTheApp: true)));
+            RootOverridden: false, IsTheApp: true, Packaged: false)));
 
     // Once only: a copy made at the first start is never made again, so a second upgrade after a
     // rollback to 1.x does not overwrite what 2.0 has written since. "Once" means until the new
@@ -112,4 +112,15 @@ public class RenameMigrationTests
         Assert.DoesNotContain(plan, step => step is DeleteOldRunValue or SetNewRunValueToThisExe);
         Assert.Contains(new CopyFile("state.json"), plan);
     }
+
+    // The Store copy's autostart is its package startup task, so a Run value pointing at it would start a
+    // second bar at login. The old TaskSpaces value still goes. Store packaging design:
+    // docs/superpowers/specs/2026-10-24-deskbar-store-packaging-design.md
+    [Fact]
+    public void Packaged_rename_migration_sets_no_new_run_value() =>
+        Assert.DoesNotContain(RenameMigration.Plan(AfterTheUpdate with { Packaged = true, OldRunValueExists = true }), s => s is SetNewRunValueToThisExe);
+
+    [Fact]
+    public void Packaged_rename_migration_still_deletes_the_old_run_value() =>
+        Assert.Contains(new DeleteOldRunValue(), RenameMigration.Plan(AfterTheUpdate with { Packaged = true }));
 }

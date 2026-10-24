@@ -8,6 +8,7 @@ using H.NotifyIcon;
 using H.NotifyIcon.Core;
 using Deskbar.Core;
 using Deskbar.Core.Abstractions;
+using Deskbar.Core.Control;
 using Deskbar.Core.Domain;
 using Deskbar.Core.Migration;
 using Deskbar.Core.Persistence;
@@ -591,6 +592,44 @@ public partial class App : Application
         return icon;
     }
 
+    // The exe path of every OTHER running Deskbar app process, for the "already running" dialog
+    // (OtherInstance.Describe). Store packaging design, "One machine, one running Deskbar":
+    // docs/superpowers/specs/2026-10-24-deskbar-store-packaging-design.md
+    //
+    // Every process is looked at, not GetProcessesByName("Deskbar"): the release exe is named after its
+    // version (Deskbar-2.1.40-win-x64.exe), so the direct build's process is not called Deskbar, and only
+    // the Store and Debug exes are. OtherInstance.IsDeskbarProcessName decides. A path that cannot be read
+    // is null rather than an error: an elevated process refuses an unelevated one (Win32Exception), and a
+    // process can exit between the listing and the read (InvalidOperationException). The dialog then
+    // falls back to the plain sentence.
+    static IReadOnlyList<string?> OtherDeskbarExePaths()
+    {
+        var self = Environment.ProcessId;
+        var processes = System.Diagnostics.Process.GetProcesses();
+        try
+        {
+            return [.. processes
+                .Where(process => process.Id != self && IsDeskbarProcess(process))
+                .Select(ExePathOf)];
+        }
+        finally
+        {
+            processes.ToList().ForEach(process => process.Dispose());
+        }
+    }
+
+    static bool IsDeskbarProcess(System.Diagnostics.Process process)
+    {
+        try { return OtherInstance.IsDeskbarProcessName(process.ProcessName); }
+        catch (InvalidOperationException) { return false; } // exited since the listing
+    }
+
+    static string? ExePathOf(System.Diagnostics.Process process)
+    {
+        try { return process.MainModule?.FileName; }
+        catch (Exception) { return null; }
+    }
+
     protected override void OnStartup(StartupEventArgs e)
     {
         base.OnStartup(e);
@@ -694,8 +733,13 @@ public partial class App : Application
         {
             // Told, not silently exited: a portable exe that appears to do nothing when
             // double-clicked reads as broken, and the icon is easy to miss in a full tray.
+            //
+            // The first sentence names WHICH copy is running (OtherInstance), so someone with both the Store
+            // copy and the direct build set to start with Windows knows which one to untick. Store packaging
+            // design, "One machine, one running Deskbar"
+            // (docs/superpowers/specs/2026-10-24-deskbar-store-packaging-design.md).
             MessageBox.Show(
-                "Deskbar is already running.\n\nLook for the tiled icon in the notification area, and click it to open Manage.",
+                $"{OtherInstance.Describe(OtherDeskbarExePaths())}\n\nLook for the tiled icon in the notification area, and click it to open Manage.",
                 "Deskbar", MessageBoxButton.OK, MessageBoxImage.Information);
             singleInstance = null; // not ours to release
             Shutdown();
@@ -763,6 +807,23 @@ public partial class App : Application
         // user it is already running has no business rewriting where startup points. Only the
         // instance that actually takes ownership gets to claim it.
         StartupRegistration.ReassertIfEnabled();
+
+        // The Store copy's first start takes autostart over from the direct build: it deletes the Run value
+        // `Deskbar` and the Start menu's Deskbar.lnk, once, behind a marker file in the state folder, and
+        // never under DESKBAR_APPDATA. Its own autostart is the package's startup task, and leaving the
+        // direct build's would start a second bar at login. PackagedTakeover has every rule; the plan is
+        // empty outside the package (IsPackaged below, Store packaging design:
+        // docs/superpowers/specs/2026-10-24-deskbar-store-packaging-design.md), so this is a no-op for the
+        // direct build. Here, after the guard and the rename migration, so only the copy that won the race
+        // touches autostart, and before StartMenuShortcut.Ensure, which is itself a no-op under the package
+        // (RunsAsPublished is false there).
+        var takeoverFacts = new TakeoverFacts(
+            Packaged: PackageIdentity.IsPackaged,
+            MarkerExists: File.Exists(Path.Combine(AppPaths.NewStateDir, PackagedTakeover.MarkerName)),
+            RootOverridden: AppPaths.RootOverridden,
+            DirectRunValueExists: StartupRegistration.IsEnabled,
+            DirectShortcutExists: File.Exists(StartMenuShortcut.ShortcutPath));
+        PackagedTakeoverApplier.Apply(PackagedTakeover.Plan(takeoverFacts), AppPaths.NewStateDir, ClickTrace.Write);
 
         // ...and keep Deskbar in Start, pointing at this exe, so it can be started by hand after it stops
         // (StartMenuShortcut). Same owner rule as the Run entry. A failure only costs the shortcut.
@@ -1000,7 +1061,19 @@ public partial class App : Application
 
         // ...and the fixed path callers use to reach it (see ControlCommandLine.WriteShim for why it is
         // a batch file). Traced, not surfaced: losing it costs the convenience path, not the control.
-        try { ControlCommandLine.WriteShim(AppPaths.NewStateDir, Environment.ProcessPath ?? ""); }
+        //
+        // The Store copy points the shim at its execution alias instead (Store packaging design, "The
+        // command line under the package": docs/superpowers/specs/2026-10-24-deskbar-store-packaging-design.md).
+        // The alias runs deskbar-cli.exe, which takes the command without `ctl`, and its path does not
+        // change across Store updates, while the package's own exe path does and sits in a folder scripts
+        // should not name.
+        try
+        {
+            if (PackageIdentity.IsPackaged)
+                ControlCommandLine.WriteShim(AppPaths.NewStateDir, PackageIdentity.AliasPath, aliasTarget: true);
+            else
+                ControlCommandLine.WriteShim(AppPaths.NewStateDir, Environment.ProcessPath ?? "");
+        }
         catch (Exception ex) { ClickTrace.Write($"control shim not written: {ex.Message}"); }
 
         // ...and the Claude Code skill that tells sessions about all of the above (ClaudeSkill), kept in step with the

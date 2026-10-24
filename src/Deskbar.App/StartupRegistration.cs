@@ -80,6 +80,15 @@ public static class StartupRegistration
     // has no file of its own, so its Location is empty, which is the documented way to tell the two apart.
     internal static bool IsPublished(string assemblyLocation) => assemblyLocation.Length == 0;
 
+    // The Store package RELIES on this being false under it, and keeps it meaning what it means rather than
+    // adding a second guard. Store packaging design
+    // (docs/superpowers/specs/2026-10-24-deskbar-store-packaging-design.md): the package is published with
+    // PublishSingleFile=false, so its assemblies have a Location and this is false there. That alone makes
+    // the Run re-assert (ReassertIfEnabled), the Start menu shortcut (StartMenuShortcut.Ensure), the cleanup
+    // of older exes (OldVersionCleanup) and the rename migration's new Run value (MigrateFromTaskSpaces)
+    // no-ops in the Store copy, which is what the design wants: its autostart is the startup task, its
+    // Start entry is the package's own, and its folder is read-only. If the Store build ever became single
+    // file, every one of those would start writing again, so change this with that in mind.
 #pragma warning disable IL3000 // Location is empty in a single-file app, and that emptiness is the point here.
     internal static bool RunsAsPublished => IsPublished(typeof(StartupRegistration).Assembly.Location);
 #pragma warning restore IL3000

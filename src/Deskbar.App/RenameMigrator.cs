@@ -5,6 +5,7 @@ using System.Reflection;
 using System.Runtime.InteropServices;
 using CSharpFunctionalExtensions;
 using Deskbar.Core.Migration;
+using Deskbar.Windows.Packaging;
 
 namespace Deskbar.App;
 
@@ -49,7 +50,11 @@ static class RenameMigrator
             OldMutexHeld: oldMutexHeld,
             AwaitingPrevious: awaitingPrevious,
             RootOverridden: AppPaths.RootOverridden || !SamePath(root, AppPaths.RealRoot),
-            IsTheApp: StartupRegistration.IsTheApp(Assembly.GetEntryAssembly()?.GetName().Name));
+            IsTheApp: StartupRegistration.IsTheApp(Assembly.GetEntryAssembly()?.GetName().Name),
+            // Store packaging design (docs/superpowers/specs/2026-10-24-deskbar-store-packaging-design.md):
+            // the Store copy deletes the TaskSpaces value but sets no Deskbar one; its startup task is
+            // its autostart.
+            Packaged: PackageIdentity.IsPackaged);
     }
 
     static bool SamePath(string a, string b) =>

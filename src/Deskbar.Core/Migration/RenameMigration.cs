@@ -11,13 +11,16 @@ namespace Deskbar.Core.Migration;
 // by then can only be a TaskSpaces 1.x that is running right now. AwaitingPrevious is true for a copy
 // whose predecessor is on its way out: the updater's handshake, and a relaunch after a crash. IsTheApp
 // is the same test StartupRegistration applies (the entry assembly is Deskbar), false under a test host.
+// Packaged is PackageIdentity.IsPackaged: the Store copy, whose autostart is its package startup task
+// (docs/superpowers/specs/2026-10-24-deskbar-store-packaging-design.md).
 public sealed record RenameFacts(
     bool OldFolderExists, bool NewStateFileExists,
     IReadOnlyList<string> OldFilesPresent,
     bool OldShimExists,
     bool OldRunValueExists, bool NewRunValueExists,
     bool OldMutexHeld, bool AwaitingPrevious,
-    bool RootOverridden, bool IsTheApp);
+    bool RootOverridden, bool IsTheApp,
+    bool Packaged);
 
 // One thing the migration does. The App layer applies them in the order the plan lists them.
 public abstract record RenameStep;
@@ -67,7 +70,7 @@ public sealed record SetNewRunValueToThisExe : RenameStep;
 //   rehearsal that must leave the real autostart alone. The old Run value goes, so login does not
 //   start TaskSpaces beside Deskbar; the new one is set to this exe only if it is not already there,
 //   which is what keeps "start with Windows" true across the rename, including for the copy a 1.x
-//   updater has just started.
+//   updater has just started. Never for the Store copy, whose autostart is its startup task.
 public static class RenameMigration
 {
     // The one file that holds the workspaces. Named on its own because two rules key on it: its
@@ -95,9 +98,13 @@ public static class RenameMigration
     static IEnumerable<RenameStep> Shim(RenameFacts facts) =>
         facts.OldShimExists ? [new DeleteOldShim()] : [];
 
+    // Packaged (the Store copy, see the Store packaging design,
+    // docs/superpowers/specs/2026-10-24-deskbar-store-packaging-design.md): the old TaskSpaces value still
+    // goes, but no Deskbar value is set, because the package's startup task is its autostart and a Run
+    // value pointing at the package's exe would start a second bar at login.
     static IEnumerable<RenameStep> Registry(RenameFacts facts) =>
         facts.IsTheApp && !facts.RootOverridden && facts.OldRunValueExists
-            ? facts.NewRunValueExists
+            ? facts.NewRunValueExists || facts.Packaged
                 ? [new DeleteOldRunValue()]
                 : [new DeleteOldRunValue(), new SetNewRunValueToThisExe()]
             : [];
