@@ -247,6 +247,12 @@ all day. Leave them in; this is the third visit to two of these bugs.
   profile and swaps the autostart value, and the 1.x builds from main stop seeing later changes.
 - An **exact-title rename lapses** the moment the app rewrites its own title. Prefer
   "Rename all *app* windows", which keys on the process.
+- **`DESKBAR_APPDATA` does not reach a packaged app.** The Store package is started through a
+  broker, so it never sees a variable the launching process set (measured 2026-10-24, see
+  `docs/superpowers/notes/2026-10-24-store-package-spike.md`). A test install of the Store
+  package on this machine therefore runs against the real profile, performs the autostart
+  takeover (deletes the direct build's Run value and Start shortcut), and its startup task
+  fires at the next sign-in. Test the package elsewhere: a VM, Windows Sandbox or a CI runner.
 
 ## Open threads
 
