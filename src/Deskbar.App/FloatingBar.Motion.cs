@@ -29,7 +29,15 @@ public partial class FloatingBar
     HashSet<Guid> lastExpanded = [];
     bool expansionChanged;
 
-    sealed record LayoutSnapshot(Dictionary<string, Point> Rows, Dictionary<WindowHandle, Point> Icons);
+    // Icons is keyed by the ROW an icon sits in as well as its window, because a window can be on the bar more than
+    // once: a pinned one is in the pinned row AND in every expanded row's titled list. Keyed by window alone, the
+    // first copy recorded stood for all of them, so with two rows expanded and one collapsing, the Beeper line that
+    // never moved in the row still expanded flew in again from the other row's copy. Petre: "it shouldn't", "it's
+    // already there". FirstSeen is the window alone, for a copy that is new to its row (see WhereItWas).
+    internal sealed record LayoutSnapshot(
+        Dictionary<string, Point> Rows,
+        Dictionary<(string? Row, WindowHandle Window), Point> Icons,
+        Dictionary<WindowHandle, Point> FirstSeen);
 
     // Called by every rebuild with the rows it expands; whether that differs from the last rebuild's is what
     // decides whether this one glides.
@@ -44,11 +52,25 @@ public partial class FloatingBar
     {
         var rows = new Dictionary<string, Point>();
         foreach (var row in RowElements()) rows.TryAdd(((RowTag)row.Tag).Key, row.TranslatePoint(new Point(0, 0), Root));
-        var icons = new Dictionary<WindowHandle, Point>();
+        var icons = new Dictionary<(string?, WindowHandle), Point>();
+        var firstSeen = new Dictionary<WindowHandle, Point>();
         foreach (var ring in iconRings.Where(r => r.Button.IsLoaded))
-            icons.TryAdd(ring.Handle, ring.Button.TranslatePoint(new Point(0, 0), Root));
-        return new LayoutSnapshot(rows, icons);
+        {
+            var at = ring.Button.TranslatePoint(new Point(0, 0), Root);
+            icons.TryAdd((RowKeyOf(ring.Button), ring.Handle), at);
+            firstSeen.TryAdd(ring.Handle, at);
+        }
+        return new LayoutSnapshot(rows, icons, firstSeen);
     }
+
+    // Where a window's icon in `row` was before the rebuild: its own copy in that row if the row had one, so a copy
+    // that stayed put stays put; otherwise wherever the window was first seen, which is what flies a pinned window
+    // into a row as it expands, and links any window to the titled line it becomes. Null for a window that was
+    // not on the bar at all.
+    internal static Point? WhereItWas(LayoutSnapshot before, string? row, WindowHandle window) =>
+        before.Icons.TryGetValue((row, window), out var own) ? own
+        : before.FirstSeen.TryGetValue(window, out var elsewhere) ? elsewhere
+        : null;
 
     void GlideIfExpansionChanged(LayoutSnapshot before)
     {
@@ -77,9 +99,9 @@ public partial class FloatingBar
         var icons = 0;
         foreach (var ring in iconRings)
         {
-            if (!before.Icons.TryGetValue(ring.Handle, out var was)) continue;
-            var slide = was - ring.Button.TranslatePoint(new Point(0, 0), Root);
             var row = RowOf(ring.Button);
+            if (WhereItWas(before, (row?.Tag as RowTag)?.Key, ring.Handle) is not { } was) continue;
+            var slide = was - ring.Button.TranslatePoint(new Point(0, 0), Root);
             if (row is not null && rowSlides.TryGetValue(row, out var carried)) slide -= carried;
             Glide(ring.Button, slide);
             icons++;
@@ -120,4 +142,6 @@ public partial class FloatingBar
             if (node is FrameworkElement { Tag: RowTag } row) return row;
         return null;
     }
+
+    static string? RowKeyOf(DependencyObject element) => (RowOf(element)?.Tag as RowTag)?.Key;
 }
