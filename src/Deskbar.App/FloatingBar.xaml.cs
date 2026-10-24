@@ -1651,10 +1651,16 @@ public partial class FloatingBar : Window
     // shrink to nothing as the window caught up with the cursor and the bar would refuse to
     // travel. GetCursorPos is absolute and has no such feedback.
     //
-    // Left/Top are in DIPs while the cursor is in physical pixels, hence the DPI divide -- on
-    // this 150% machine, omitting it would move the bar half as far as the mouse.
+    // The whole drag is in PHYSICAL pixels, and the window is moved with SetWindowPos rather than by
+    // writing Left/Top. A DIP is not a fixed place on the desktop once the monitors differ in scale:
+    // this used to keep the press position in DIPs and divide the cursor's travel by the window's
+    // CURRENT scale, so the moment the bar crossed from a 150% screen to a 100% one and WPF rescaled
+    // it, the same DIPs meant a different pixel, the next write landed on the other screen, the scale
+    // flipped back, and so on (measured: 7 to 81 flips per drag, the bar up to 1600 px from the
+    // cursor). A pixel is the same place on every screen. MiddleDrag has the arithmetic, and why the
+    // bar is placed from where on it the cursor took hold: the crossing resizes it (332 px to 221).
     Point? middleStart;   // cursor at press, physical pixels
-    Point middleOrigin;   // window position at press, DIPs
+    MiddleDrag.Grab middleGrab;
     bool middleDragging;
 
     bool MiddleDragging(MouseEventArgs e)
@@ -1669,16 +1675,39 @@ public partial class FloatingBar : Window
                 && Math.Abs(cursor.Y - start.Y) < SystemParameters.MinimumVerticalDragDistance) return false;
             middleDragging = true;
             // `moving` suppresses ReclaimTopmost, whose SetWindowPos would otherwise fight these
-            // Left/Top writes for the same window -- the same reason the left-drag path sets it.
+            // moves for the same window -- the same reason the left-drag path sets it.
             moving = true;
             // Capture so the moves keep arriving even if the pointer outruns the window, which
             // it does on a fast throw across a 4K screen.
             CaptureMouse();
         }
 
-        var dpi = VisualTreeHelper.GetDpi(this);
-        Left = middleOrigin.X + (cursor.X - start.X) / dpi.DpiScaleX;
-        Top = middleOrigin.Y + (cursor.Y - start.Y) / dpi.DpiScaleY;
+        MoveBarTo(cursor.X, cursor.Y);
+        return true;
+    }
+
+    // The window's size is read FRESH on every move, not remembered from the press: the move that
+    // carries the bar onto a screen of another scale makes Windows send WM_DPICHANGED, which WPF answers
+    // by resizing the window. The next move then places the resized bar from its new size, and that
+    // is what stops it sliding off the cursor; nothing else here touches the window, so the two do
+    // not fight over it. Internal so a test can drive it without a real mouse.
+    internal void MoveBarTo(int cursorX, int cursorY)
+    {
+        var hwnd = new WindowInteropHelper(this).Handle;
+        if (!NativeMethods.GetWindowRect(hwnd, out var rect)) return;
+        var (left, top) = MiddleDrag.Target(middleGrab, cursorX, cursorY, rect.Right - rect.Left, rect.Bottom - rect.Top);
+        NativeMethods.SetWindowPos(hwnd, nint.Zero, left, top, 0, 0,
+            NativeMethods.SWP_NOSIZE | NativeMethods.SWP_NOZORDER | NativeMethods.SWP_NOACTIVATE);
+    }
+
+    // Records where the cursor took hold of the bar. False when Windows will not give the window's
+    // rectangle, which leaves no middle drag armed. Internal for the same reason as MoveBarTo.
+    internal bool GrabBarAt(int cursorX, int cursorY)
+    {
+        middleStart = null;
+        if (!NativeMethods.GetWindowRect(new WindowInteropHelper(this).Handle, out var rect)) return false;
+        middleStart = new Point(cursorX, cursorY);
+        middleGrab = MiddleDrag.Press(cursorX, cursorY, rect.Left, rect.Top, rect.Right - rect.Left, rect.Bottom - rect.Top);
         return true;
     }
 
@@ -1695,8 +1724,7 @@ public partial class FloatingBar : Window
 
         if (e.ChangedButton != MouseButton.Middle) return;
         NativeMethods.GetCursorPos(out var cursor);
-        middleStart = new Point(cursor.X, cursor.Y);
-        middleOrigin = new Point(Left, Top);
+        GrabBarAt(cursor.X, cursor.Y);
     }
 
     void OnPreviewMouseUp(object sender, MouseButtonEventArgs e)
@@ -1705,12 +1733,60 @@ public partial class FloatingBar : Window
         middleStart = null;
         if (!middleDragging) return;
         middleDragging = false;
-        moving = false;
         ReleaseMouseCapture();
+        // While `moving` is still set, so the rescale a settle can cause does not wake OnSizeChanged's
+        // growth anchor, which still holds the edge from before the drag.
+        SettleOnOneScreen();
+        moving = false;
         // Same finish as a left-drag: the user has chosen a new position, so snap to any edge it
         // landed near and re-derive the growth anchor from where it ended up.
         SnapToEdges();
         Save();
+    }
+
+    // The screens as pixels with their scale, for SettleOnOneScreen. A property only so a test can describe
+    // screens a test machine does not have.
+    internal Func<IReadOnlyList<MiddleDrag.Screen>> ScreensOf { get; set; } = () =>
+    {
+        var screens = new List<MiddleDrag.Screen>();
+        NativeMethods.EnumDisplayMonitors(0, 0, (nint monitor, nint _, ref NativeMethods.RECT _, nint _) =>
+        {
+            var info = new NativeMethods.MONITORINFO { cbSize = Marshal.SizeOf<NativeMethods.MONITORINFO>() };
+            if (NativeMethods.GetMonitorInfo(monitor, ref info))
+            {
+                NativeMethods.GetDpiForMonitor(monitor, NativeMethods.MDT_EFFECTIVE_DPI, out var dpi, out _);
+                screens.Add(new(info.rcMonitor.Left, info.rcMonitor.Top, info.rcMonitor.Right, info.rcMonitor.Bottom, (int)dpi));
+            }
+            return true;
+        }, 0);
+        return screens;
+    };
+
+    // A bar dropped across the border between screens of different scale goes wholly onto the one holding
+    // most of it (MiddleDrag.Settle has why), in pixels, BEFORE SnapToEdges and Save: both pick the screen
+    // from the bar's top-left corner in DIPs, so left straddling they would snap to the wrong screen's edges
+    // and store a position that the readjustment after a change of scale clamps onto the corner's screen
+    // (that clamp, in PositionFrom, is what moved the owner's bar; SnapToEdges only snaps within 20 DIPs of an
+    // edge and never clamps). Wholly on one screen, the corner's screen IS the bar's screen and both are right.
+    //
+    // Twice at most: moving the bar fully onto a screen of another scale makes Windows rescale it, and the
+    // rescaled bar may overhang again. Windows sends the rescale inside SetWindowPos and WPF answers it on the
+    // spot, so the second pass sees the new size.
+    internal void SettleOnOneScreen()
+    {
+        var hwnd = new WindowInteropHelper(this).Handle;
+        var moved = false;
+        for (var pass = 0; pass < 2; pass++)
+        {
+            if (!NativeMethods.GetWindowRect(hwnd, out var rect)) break;
+            if (MiddleDrag.Settle(rect.Left, rect.Top, rect.Right - rect.Left, rect.Bottom - rect.Top, ScreensOf()) is not { } at) break;
+            NativeMethods.SetWindowPos(hwnd, nint.Zero, at.Left, at.Top, 0, 0,
+                NativeMethods.SWP_NOSIZE | NativeMethods.SWP_NOZORDER | NativeMethods.SWP_NOACTIVATE);
+            moved = true;
+        }
+        // Settles any resize now, while the caller still has `moving` set, so ActualWidth is the bar's new width
+        // when SnapToEdges derives the growth anchor from it.
+        if (moved) UpdateLayout();
     }
 
     bool moving;
@@ -7440,11 +7516,7 @@ public partial class FloatingBar : Window
         void OnChanged(object? sender, EventArgs e) =>
             Dispatcher.BeginInvoke(new Action(() => { layoutSettling.Stop(); layoutSettling.Start(); }));
 
-        layoutSettling.Tick += (_, _) =>
-        {
-            layoutSettling.Stop();
-            Guarded(ReadjustToDisplayLayout, "layout");
-        };
+        layoutSettling.Tick += (_, _) => SettleLayout();
 
         Microsoft.Win32.SystemEvents.DisplaySettingsChanged += OnChanged;
         Closed += (_, _) => Microsoft.Win32.SystemEvents.DisplaySettingsChanged -= OnChanged;
@@ -7461,6 +7533,22 @@ public partial class FloatingBar : Window
             if (ClickTrace.On) ClickTrace.Write($"dpi changed {e.OldDpi.PixelsPerInchX} -> {e.NewDpi.PixelsPerInchX}");
             OnChanged(this, e);
         };
+    }
+
+    // The end of the debounce above. Not while a middle drag is carrying the bar: the bar's own DpiChanged
+    // arms this when the drag crosses onto a screen of another scale, and the readjustment puts the bar at
+    // its STORED position, which is still the one from before the drag, so a drag that went on past the
+    // debounce would be pulled back to the old screen. Re-armed instead, so it runs once the drag has ended
+    // and the drop has been saved. Internal so a test can call it.
+    internal void SettleLayout()
+    {
+        layoutSettling.Stop();
+        if (middleDragging)
+        {
+            layoutSettling.Start();
+            return;
+        }
+        Guarded(ReadjustToDisplayLayout, "layout");
     }
 
     // Whether a DpiChanged that reached the window is the window's own scale changing. Petre: "showing hiding".
