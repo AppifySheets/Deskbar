@@ -390,6 +390,8 @@ In `ManageSettingsTabTests`: with `StartupSwitch.Override(fake)` where the fake 
 
 ### Task 12: The spike on a real machine (needs Petre)
 
+Run on 2026-10-24 on a second machine; findings in docs/superpowers/notes/2026-10-24-store-package-spike.md.
+
 **Files:**
 - Create: `docs/superpowers/notes/2026-10-xx-store-package-spike.md` (findings)
 - Modify: whichever source files the findings require, each with its own commit

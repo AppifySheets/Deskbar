@@ -13,9 +13,14 @@
       - installs the package Petre.Deskbar for this user, replacing any installed copy, and
         once it has tried to install, removes every copy of the package family at the end,
         however the run ended;
-      - starts the installed Deskbar with DESKBAR_APPDATA pointing at -AppData, so it never
-        reads or writes a real profile, and stops it at the end.
-    Do not run it on a machine where an installed Store copy of Deskbar should survive.
+      - starts the installed Deskbar and stops it at the end. It sets DESKBAR_APPDATA to
+        -AppData for the start, but the variable does NOT reach the app (measured by the Store
+        package spike on 2026-10-24, see below), so the app reads and writes the profile of
+        the user running this script: %APPDATA%\Deskbar, its Run value and its Start shortcut.
+        On a throwaway runner that profile is empty and dies with the machine, which is fine.
+    Do not run it on a machine where an installed Store copy of Deskbar should survive, nor on
+    one whose real Deskbar profile matters: scripts/store-spike.ps1 is the one that backs a real
+    profile up and puts it back.
 
     Why each step is there:
       Sign a COPY with a certificate whose subject is the Store publisher, because Windows
@@ -26,10 +31,13 @@
       installed exe by its path from this unpackaged process is a plain CreateProcess, which
       does not reliably give the new process the package's identity, so "packaged" could come
       back false for a reason that has nothing to do with the package. Activating it through
-      explorer.exe shell:AppsFolder\... starts it from the shell's environment, so
-      DESKBAR_APPDATA would be lost. The cmdlet starts the process from this one, so the
-      variable is set in this process's environment just for the call and restored after it.
-      That the child inherits it is what the cmdlet is expected to do; the spike checks it.
+      explorer.exe shell:AppsFolder\... starts it from the shell's environment. The cmdlet was
+      expected to start the process from this one, so the variable is set in this process's
+      environment just for the call and restored after it. The spike measured otherwise: the
+      cmdlet's launch is brokered, the app is not a child of this process, and it never sees
+      the variable (findings in docs/superpowers/notes/2026-10-24-store-package-spike.md). The
+      variable is still set, because it costs nothing and a later Windows may pass it on, but
+      nothing here depends on it: the check below asks only for the version and "packaged".
       Ask through the ALIAS (deskbar.exe -> deskbar-cli.exe), because that is the command line
       a Store user has, so one answer proves the alias, the pipe and the app at once.
       Check "packaged": true, because that is what proves the installed copy runs with package
@@ -46,7 +54,8 @@
 .PARAMETER Package
     The .msix from scripts/pack-store.ps1, unsigned. It is not modified: a copy is signed.
 .PARAMETER AppData
-    The folder the started Deskbar uses as its profile (DESKBAR_APPDATA). Created if absent.
+    The folder set as DESKBAR_APPDATA for the start. Created if absent. The spike measured that
+    the variable does not reach the packaged app, so the app uses the runner's own profile.
 .PARAMETER Version
     The version the installed copy must report, three parts. Defaults to the version in the
     package's own manifest.
@@ -209,9 +218,11 @@ try {
     }
     Write-Information "Installed $($paths.FullName)"
 
-    # Step 3: start the app inside its package with a throwaway profile (the header says why
-    # this launcher). The variable lives in this process's environment only for the call. The
-    # full path names the exe unambiguously; it is the manifest's Application executable.
+    # Step 3: start the app inside its package (the header says why this launcher). The
+    # variable lives in this process's environment only for the call, and the brokered launch
+    # drops it (measured by the spike), so the app writes to the runner's own profile, which is
+    # thrown away with the runner. The full path names the exe unambiguously; it is the
+    # manifest's Application executable.
     New-Item -ItemType Directory -Path $AppData -Force | Out-Null
     $hadVariable = Test-Path -LiteralPath Env:DESKBAR_APPDATA
     $previousVariable = $env:DESKBAR_APPDATA
@@ -223,7 +234,7 @@ try {
         if ($hadVariable) { $env:DESKBAR_APPDATA = $previousVariable }
         else { Remove-Item -LiteralPath Env:DESKBAR_APPDATA -ErrorAction SilentlyContinue }
     }
-    Write-Information "Started $($paths.AppId) in $($paths.FamilyName) with DESKBAR_APPDATA=$AppData"
+    Write-Information "Started $($paths.AppId) in $($paths.FamilyName) (DESKBAR_APPDATA=$AppData was set for the call; the packaged app does not see it)"
 
     # Step 4: ask until it answers or the time is up. The cmdlet returns no process to watch,
     # so the bound is the deadline alone. Each failed ask already waits for the pipe (the

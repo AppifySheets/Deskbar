@@ -385,8 +385,9 @@ jobs:
   # package identity and registers the `deskbar` alias. scripts/store-smoke.ps1 signs a copy
   # with a throwaway certificate created on the runner, trusts it machine-wide (the runner is
   # elevated, and thrown away afterwards), installs it, starts the app inside its package with
-  # Invoke-CommandInDesktopPackage (so it runs with package identity) and DESKBAR_APPDATA
-  # pointing at a runner folder, and waits up to 30 s for `deskbar version`
+  # Invoke-CommandInDesktopPackage (so it runs with package identity; the DESKBAR_APPDATA it
+  # sets does not reach the app, measured by the spike, so the app uses the runner's own
+  # profile, which is thrown away with the runner), and waits up to 30 s for `deskbar version`
   # through the alias to answer "packaged": true with this build's version. Then it removes the
   # package and, if the image has the App Certification Kit, runs WACK.
   #

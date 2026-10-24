@@ -15,13 +15,19 @@
       - creates one virtual desktop, SpikeWs (deleted through the app at the end);
       - starts Notepad and Character Map through the app to see whether they inherit its package
         identity (both stopped again).
-    Every start of the app runs with DESKBAR_APPDATA pointing at %TEMP%\deskbar-spike\appdata, so
-    the app reads and writes a scratch profile, never the real %APPDATA%\Deskbar. One start is not
-    the script's: if Windows brings the app back by itself after the update, it decides that
-    process's environment. So the real profile (the folder, the Run values and the Start menu
-    shortcut) is snapshotted and copied into evidence\ first, compared at the end, and put back
-    where the run changed it: added files and a created shortcut or Run value removed, changed or
-    deleted ones restored from the copies. A folder that existed before is never moved or deleted.
+    THE APP RUNS AGAINST THE REAL PROFILE. The script sets DESKBAR_APPDATA to
+    %TEMP%\deskbar-spike\appdata for every start it makes, but the first run of this script
+    (2026-10-24, findings in docs/superpowers/notes/2026-10-24-store-package-spike.md) measured
+    that the variable never reaches the app: Invoke-CommandInDesktopPackage hands the start to a
+    broker, so the app is not a child of the process that set it and does not inherit it. The
+    packaged app therefore reads and writes the real %APPDATA%\Deskbar from its first start, and
+    its first-packaged-start takeover removes the direct build's Run value and Start shortcut.
+    The variable is still set, in case a later Windows passes it on (check d says which folder
+    the app used), but nothing relies on it. What protects the person's profile is the backup
+    and the restore: the real profile (the folder, the Run values and the Start menu shortcut) is
+    snapshotted and copied into evidence\ first, compared at the end, and put back where the run
+    changed it: added files and a created shortcut or Run value removed, changed or deleted ones
+    restored from the copies. A folder that existed before is never moved or deleted.
     It refuses to start while Notepad or Character Map is open, since the checks close the copies
     that appear after they start one. Every command it runs is bounded (30 s for a CLI call,
     5 minutes for an Appx install or removal), so nothing can hold the cleanup hostage.
@@ -33,19 +39,21 @@
     questions; the person brings back one report instead of a description from memory.
 
     Why Windows PowerShell 5.1: under PowerShell 7 the Appx cmdlets load through a Windows
-    PowerShell compatibility process started at import, so Invoke-CommandInDesktopPackage would
-    start the app from THAT process, which never sees the DESKBAR_APPDATA this script sets. The
-    script relaunches itself under powershell.exe when started from pwsh. The release workflow's
-    smoke step runs under Windows PowerShell for the same reason.
+    PowerShell compatibility process started at import, one more process between this script and
+    the cmdlets. The script relaunches itself under powershell.exe when started from pwsh, so the
+    cmdlets run in the process that calls them. (The first reason given here was that pwsh would
+    lose DESKBAR_APPDATA; the spike showed the brokered launch loses it under 5.1 too.)
 
     Why two launchers. The first start uses Invoke-CommandInDesktopPackage from this elevated
-    process, as scripts/store-smoke.ps1 does in CI, so the spike also proves the assumption the
-    smoke test rests on (that the started app inherits DESKBAR_APPDATA). That app runs elevated,
-    though, and a real Store user's never does. So the start the person looks at, before the
-    questions, is made as the signed-in user without elevation: a one-off scheduled task with a
-    limited token runs the same cmdlet. If that start does not answer, the script says so and falls
-    back to the elevated launcher. The report names which one each check saw, and the elevation
-    of every process it describes.
+    process, as scripts/store-smoke.ps1 does in CI, so the spike starts the app the way the smoke
+    test does. That app runs elevated, though, and a real Store user's never does. So the start
+    the person looks at, before the questions, is made as the signed-in user without elevation:
+    a one-off scheduled task with a limited token runs the same cmdlet. If that start does not
+    answer, the script says so and falls back to the elevated launcher. The report names which
+    one each check saw, and the elevation of every process it describes. On the first run it
+    fell back: a non-elevated app never answered this elevated script's `deskbar version`
+    (the same happened after the update), while elevated app and elevated CLI answered in about
+    200 ms. Unexplained; the findings note has it.
 
     A failed check never stops the run: each is recorded PASS, FAIL, SKIP or INFO with its
     evidence, and the cleanup and the report are in the finally.
@@ -482,7 +490,8 @@ function Save-Screen([string] $Prefix) {
 # ---------------------------------------------------------------------------------------------
 
 # From this elevated process, as store-smoke.ps1 does: the variable is set in this process only for
-# the call, and the cmdlet's child is expected to inherit it (check d measures that).
+# the call. The first run measured that the brokered launch drops it, so the app uses the real
+# profile (the header says so, and what protects it); check d records which folder it used.
 function Start-Elevated([string] $Exe) {
     $had = Test-Path -LiteralPath Env:DESKBAR_APPDATA
     $previous = $env:DESKBAR_APPDATA
@@ -495,7 +504,7 @@ function Start-Elevated([string] $Exe) {
 
 # As the signed-in user with a limited token: a one-off scheduled task (run only while the user is
 # signed in, so it needs no password and runs on their desktop) runs Windows PowerShell, which sets
-# the variable and calls the same cmdlet. Its own output, including whether it saw itself as an
+# the variable (dropped by the brokered launch, as in Start-Elevated) and calls the same cmdlet. Its own output, including whether it saw itself as an
 # administrator, goes to evidence\launch-as-user.log. The task is removed before this returns.
 function Start-AsUser([string] $Exe) {
     $log = Join-Path $evidence 'launch-as-user.log'
@@ -655,7 +664,7 @@ if ($DryRun) {
     Write-Step 'Dry run: nothing is changed'
     $facts | Format-List | Out-String | Write-Host
     $bundleState.Lines | ForEach-Object { Write-Host "  $_" }
-    Write-Host "  scratch profile would be: $scratchRoot"
+    Write-Host "  DESKBAR_APPDATA would be set to: $scratchRoot (the app is expected not to see it and to use the real profile, which is backed up and restored)"
     Write-Host "  report would be: $Report"
     if ($problems.Count -eq 0) { Write-Host 'Preconditions hold: a real run would start.' -ForegroundColor Green }
     else { Write-Host 'A real run would refuse:' -ForegroundColor Yellow; $problems | ForEach-Object { Write-Host "  - $_" -ForegroundColor Yellow } }
@@ -716,6 +725,9 @@ try {
     }
 
     Write-Step 'First start, elevated, through Invoke-CommandInDesktopPackage'
+    # The scratch profile is still made, with the trace switched on in it, for a Windows that does
+    # pass DESKBAR_APPDATA on. The first run's app never saw it (the header says why), so there the
+    # app used the real profile, with the trace off unless the person had switched it on.
     if (Test-Path -LiteralPath (Split-Path -Parent $scratchRoot)) { Remove-Item -LiteralPath (Split-Path -Parent $scratchRoot) -Recurse -Force }
     New-Item -ItemType Directory -Path $scratchState -Force | Out-Null
     New-Item -ItemType File -Path (Join-Path $scratchState 'trace.on') | Out-Null
@@ -776,18 +788,32 @@ try {
         }
     }
 
-    Invoke-Check 'd' 'the scratch state folder: state.json with WrittenBy, the shim on the alias, no takeover marker' {
+    # The state folder the app really used. The first run found nothing in the scratch folder:
+    # DESKBAR_APPDATA does not reach a process started through Invoke-CommandInDesktopPackage,
+    # because the launch is brokered and the app does not inherit this process's environment. So
+    # the app writes to the real %APPDATA%\Deskbar, and with the root not overridden its
+    # first-packaged-start takeover runs and leaves its marker there. This check looks in the
+    # scratch folder first, in case a later Windows does pass the variable on (then no marker is
+    # right, since an overridden root skips the takeover), and otherwise in the real folder (then
+    # the marker must be there). The real folder is not this check's to protect: the backup taken
+    # at the start and the restore in the finally (checks e and f) put it back.
+    Invoke-Check 'd' 'the state folder the app used: state.json with WrittenBy, the shim on the alias, the takeover marker as the root implies' {
         if (-not $answered) { return $skip }
-        $state = @(Save-AppFile (Join-Path $scratchState 'state.json') 'state.json')
-        $shim = @(Save-AppFile (Join-Path $scratchState 'deskbar.cmd') 'deskbar.cmd')
-        $marker = @(Find-AppFile (Join-Path $scratchState 'packaged-first-start-done'))
+        $overridden = @(Find-AppFile (Join-Path $scratchState 'state.json')).Count -gt 0
+        $folder = if ($overridden) { $scratchState } else { $realState }
+        $state = @(Save-AppFile (Join-Path $folder 'state.json') 'state.json')
+        $shim = @(Save-AppFile (Join-Path $folder 'deskbar.cmd') 'deskbar.cmd')
+        $marker = @(Find-AppFile (Join-Path $folder 'packaged-first-start-done'))
         $hasWrittenBy = $state.Count -gt 0 -and (Get-Content -LiteralPath $state[0] -Raw) -match '"WrittenBy"'
         $shimText = if ($shim.Count -gt 0) { Get-Content -LiteralPath $shim[0] -Raw } else { '' }
         $shimGood = $shimText -match [regex]::Escape('Microsoft\WindowsApps\deskbar.exe') -and $shimText -notmatch ' ctl'
-        @{ Result = if ($hasWrittenBy -and $shimGood -and $marker.Count -eq 0) { 'PASS' } else { 'FAIL' }
-            Evidence = @("state.json found at: $(if ($state) { $state -join ', ' } else { 'nowhere' }); WrittenBy present: $hasWrittenBy",
+        $markerRight = if ($overridden) { $marker.Count -eq 0 } else { $marker.Count -gt 0 }
+        $markerWhy = if ($overridden) { 'none expected: the root is overridden' } else { 'expected: the root is the real one' }
+        @{ Result = if ($hasWrittenBy -and $shimGood -and $markerRight) { 'PASS' } else { 'FAIL' }
+            Evidence = @("DESKBAR_APPDATA reached the app: $overridden, so the app used $folder",
+                "state.json found at: $(if ($state) { $state -join ', ' } else { 'nowhere' }); WrittenBy present: $hasWrittenBy",
                 "deskbar.cmd found at: $(if ($shim) { $shim -join ', ' } else { 'nowhere' }); names the alias without ctl: $shimGood",
-                "packaged-first-start-done found at: $(if ($marker) { $marker -join ', ' } else { 'nowhere (right: the root is overridden)' })") + @($shimText -split "`r?`n" | Where-Object { $_ }) }
+                "packaged-first-start-done found at: $(if ($marker) { $marker -join ', ' } else { 'nowhere' }) ($markerWhy)") + @($shimText -split "`r?`n" | Where-Object { $_ }) }
     }
 
     Invoke-Check 'g' 'the Start menu has the Deskbar entry' {
@@ -806,8 +832,13 @@ try {
     Invoke-Check 'h' '`deskbar dump` writes a dump (copied to evidence\), and the trace is on' {
         if (-not $answered) { return $skip }
         $reply = Invoke-Deskbar @('dump')
+        # The reply is {"file": "<full path>"}; the file it names is copied into evidence\.
         $file = Get-Field (ConvertFrom-Reply $reply) 'file'
-        $found = if ($file) { @(Save-AppFile $file 'dump.txt') } else { @() }
+        # @() around the whole if, not inside its branch. The first run threw "Cannot find path
+        # 'C'" here: an if statement's output goes through the pipeline, which unrolls a
+        # one-element array, so $found became the path STRING and $found[0] its first character,
+        # the drive letter. Reproduced under Windows PowerShell 5.1 with the same message.
+        $found = @(if ($file) { Save-AppFile $file 'dump.txt' })
         $header = if ($found) { @(Get-Content -LiteralPath $found[0] | Where-Object { $_ -match '^\s+(version|entitlement|exe)\s' } | ForEach-Object { $_.Trim() }) } else { @() }
         $traces = @(Find-AppFile $traceLog)
         @{ Result = if ($found.Count -gt 0 -and $header.Count -eq 3) { 'PASS' } else { 'FAIL' }
@@ -865,7 +896,8 @@ try {
             $reply = Wait-Answer 30
             $update['deskbar version'] = if ($reply) { ($reply.Raw.Stdout -join ' ').Trim() } else { 'no answer within 30 s' }
         }
-        # A restart Windows makes is not the script's, so it may not carry DESKBAR_APPDATA.
+        # No start carries DESKBAR_APPDATA to the app (the header says why), so the real profile is
+        # expected to be touched by now; the finally puts it back.
         $update['real %APPDATA%\Deskbar touched so far'] = (Get-RealProfile).StateNewest -ne $before.StateNewest
         @{ Result = 'INFO'; Evidence = @($update.Keys | ForEach-Object { "${_}: $($update[$_])" }) }
     }
@@ -950,22 +982,28 @@ finally {
     # The real profile, compared with the snapshot and put back where the run changed it. Three
     # separate pieces (the folder, the Run values, the shortcut), so one failing restore does not
     # skip the others; each records what it found and what it did.
+    # The app is expected to have touched all three, since DESKBAR_APPDATA never reaches it (the
+    # header says why), so a change alone is INFO: what each check judges is the putting back. FAIL
+    # means a restore stopped part way and the person has to finish it from evidence\; PASS means
+    # the run changed nothing there at all.
     $after = $null
     try { $after = Get-RealProfile } catch { Write-Warning "Could not read the real profile after the run: $_" }
 
     if ($after) {
         $folder = New-Object System.Collections.Generic.List[string]
         $touched = $true
+        $folderStopped = $false
         try { $touched = Restore-RealState $before $after $folder }
-        catch { $folder.Add("the folder restore stopped: $_; the backup is in evidence\real-appdata-Deskbar-backup") }
-        Add-Check 'e' 'the real %APPDATA%\Deskbar was not created or modified' $(if ($touched) { 'FAIL' } else { 'PASS' }) $folder
+        catch { $folderStopped = $true; $folder.Add("the folder restore stopped: $_; the backup is in evidence\real-appdata-Deskbar-backup") }
+        Add-Check 'e' 'the real %APPDATA%\Deskbar is as it was before the run (put back where the run changed it)' $(if ($folderStopped) { 'FAIL' } elseif ($touched) { 'INFO' } else { 'PASS' }) $folder
 
         $registry = New-Object System.Collections.Generic.List[string]
         $runChanged = $true
         $shortcutChanged = $true
-        try { $runChanged = Restore-RunValues $before $after $registry } catch { $registry.Add("the Run value restore stopped: $_") }
-        try { $shortcutChanged = Restore-Shortcut $before $after $registry } catch { $registry.Add("the shortcut restore stopped: $_") }
-        Add-Check 'f' 'no Run value or Start shortcut was written, changed or deleted by the run' $(if ($runChanged -or $shortcutChanged) { 'FAIL' } else { 'PASS' }) $registry
+        $registryStopped = $false
+        try { $runChanged = Restore-RunValues $before $after $registry } catch { $registryStopped = $true; $registry.Add("the Run value restore stopped: $_") }
+        try { $shortcutChanged = Restore-Shortcut $before $after $registry } catch { $registryStopped = $true; $registry.Add("the shortcut restore stopped: $_") }
+        Add-Check 'f' 'the Run values and the Start shortcut are as they were before the run (put back where the run changed them)' $(if ($registryStopped) { 'FAIL' } elseif ($runChanged -or $shortcutChanged) { 'INFO' } else { 'PASS' }) $registry
     }
 
     # The report: everything above, in one file to bring back.
@@ -976,7 +1014,7 @@ finally {
         $md.Add('## Machine'); $md.Add('')
         $facts.PSObject.Properties | ForEach-Object { $md.Add("- $($_.Name): $($_.Value)") }
         $bundleState.Lines | ForEach-Object { $md.Add("- $_") }
-        $md.Add("- scratch profile (DESKBAR_APPDATA): $scratchRoot"); $md.Add('')
+        $md.Add("- DESKBAR_APPDATA set to (the brokered launch is expected to drop it; check d says): $scratchRoot"); $md.Add('')
         $md.Add('## Summary'); $md.Add(''); $md.Add('| Check | Result | What |'); $md.Add('|---|---|---|')
         $checks | ForEach-Object { $md.Add("| $($_.Id) | $($_.Result) | $($_.Title -replace '\|', '/') |") }
         $md.Add(''); $md.Add('## Checks with evidence'); $md.Add('')
