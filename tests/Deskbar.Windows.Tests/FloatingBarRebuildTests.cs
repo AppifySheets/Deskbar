@@ -217,21 +217,22 @@ public class FloatingBarRebuildTests
         Assert.NotEqual(Brushes.Transparent, active.BorderBrush);
         Assert.Equal(Brushes.Transparent, inactive.BorderBrush);
         // The glow and the bar on the left (FloatingBar.Marker.cs), on the focused icon only.
-        Assert.True(FloatingBar.GetMarkerGlow(active));
+        Assert.True(FloatingBar.GetMarkerGlow(active) > 0);
         Assert.NotNull(FloatingBar.GetMarkerBar(active));
-        Assert.False(FloatingBar.GetMarkerGlow(inactive));
+        Assert.Equal(0, FloatingBar.GetMarkerGlow(inactive));
         Assert.Null(FloatingBar.GetMarkerBar(inactive));
         // Layout must not shift when the highlight moves, or the SizeToContent bar would
         // creep across the screen as focus changes.
         Assert.Equal(active.BorderThickness, inactive.BorderThickness);
     });
 
-    // Petre, of the marker in the other workspaces' rows: "should apply to collapsed bars as well". The window a
-    // workspace brings forward when you switch to it wears the focused window's ring and bar, but no glow and no
-    // fill, so "you are here" still outranks "you will be there". And the marker hangs outside the layout: an
-    // icon measures the same marked or not, or the SizeToContent bar would move as focus does.
+    // Petre, of the marker in the other workspaces' rows: "should apply to collapsed bars as well", then "also give
+    // collapsed icons that kind of halo look". The window a workspace brings forward when you switch to it wears
+    // the focused window's ring, bar and halo, the halo fainter and without the fill, so "you are here" still
+    // outranks "you will be there". And the marker hangs outside the layout: an icon measures the same marked or
+    // not, or the SizeToContent bar would move as focus does.
     [Fact]
-    public void The_landing_window_wears_the_bar_without_the_glow_and_no_marker_costs_layout() => StaThread.Run(() =>
+    public void The_landing_window_wears_a_fainter_halo_and_no_marker_costs_layout() => StaThread.Run(() =>
     {
         Button Icon(bool focused, bool landing)
         {
@@ -252,7 +253,7 @@ public class FloatingBarRebuildTests
         var plain = Icon(focused: false, landing: false);
 
         Assert.NotNull(FloatingBar.GetMarkerBar(landing));
-        Assert.False(FloatingBar.GetMarkerGlow(landing));
+        Assert.InRange(FloatingBar.GetMarkerGlow(landing), 0.01, FloatingBar.GetMarkerGlow(focused) - 0.01);
         Assert.Equal(Brushes.Transparent, landing.Background);
         Assert.NotEqual(Brushes.Transparent, landing.BorderBrush);
         Assert.Equal(plain.DesiredSize, landing.DesiredSize);
