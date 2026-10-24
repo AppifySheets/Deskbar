@@ -6,9 +6,11 @@ namespace Deskbar.Core.Control;
 // not run as Deskbar's package (DetachedLauncher's packaged path).
 // Design: docs/superpowers/specs/2026-10-24-deskbar-store-packaging-design.md
 //
-//     /d /c start "" [/d "<folder>"] "<program>" <arguments...>
+//     /d /v:off /c start "" [/d "<folder>"] "<program>" <arguments...>
 //
-// `/d` skips cmd's AutoRun, so nothing a user hung on cmd runs first. `start` is there because it finds a bare
+// `/d` skips cmd's AutoRun, so nothing a user hung on cmd runs first. `/v:off` keeps delayed expansion off even
+// on a machine whose registry turns it on by default, where `!NAME!` in an argument would otherwise be expanded
+// (measured: `/v:on` expands `!USERNAME!`, `/v:off` leaves it as written). `start` is there because it finds a bare
 // program name through the PATH and App Paths the way Run does (`code`, `chrome`), which plain CreateProcess
 // cannot. The empty "" is start's window title: without it the quoted program would be taken as the title.
 //
@@ -27,13 +29,25 @@ namespace Deskbar.Core.Control;
 // expansion is a caret before the percent, and a caret only works OUTSIDE quotes, so a percent inside a
 // quoted argument steps out of the quotes for its caret and back in: "q 100"^%"". The program then sees
 // "q 100"%"" and the C runtime joins it back into `q 100%`.
+//
+// WHAT IS NOT GUARANTEED: an embedded quote. It is written as `""` inside the quotes, because that keeps cmd's
+// quote state in step (a backslash-escaped `\"` would flip it and expose the operators after it). Programs
+// that split their command line with the C runtime's rules read `""` as one literal quote and get the argument
+// back whole. Programs that split it with CommandLineToArgvW (Chromium, Edge, Electron, VS Code's Code.exe) end
+// the quoted region at the `""` instead, so a quote followed later by whitespace splits the argument there:
+// `x"y z` arrives as [x"y] [z], and `say "hi there"` as [say "hi] [there"]. Measured by the Task 5 review with
+// a pythonw argv echo reading the real command line, and confirmed by calling CommandLineToArgvW on the line.
+// The .NET probe used for everything else could not see it, because its Environment.CommandLine is rebuilt
+// from args rather than read from GetCommandLineW. Accepted because no caller passes an embedded quote (the
+// pins pass `--new-window`, `restart-app` starts the exe bare), and serving both splitters would mean tracking
+// cmd's quote parity through every argument.
 public static class CommandLineQuoting
 {
     // A percent inside quotes: close the quotes, caret-escaped percent, reopen them.
     const string PercentInsideQuotes = "\"^%\"";
 
     public static string ForCmdStart(string program, IReadOnlyList<string> arguments, string? workingDirectory) =>
-        string.Join(" ", ["/d /c start \"\"", .. Folder(workingDirectory), ForStart(program), .. arguments.Select(ForProgram)]);
+        string.Join(" ", ["/d /v:off /c start \"\"", .. Folder(workingDirectory), ForStart(program), .. arguments.Select(ForProgram)]);
 
     // No folder, or an empty one, means none: cmd's own, as Process.Start treats an empty WorkingDirectory.
     static IEnumerable<string> Folder(string? workingDirectory) =>

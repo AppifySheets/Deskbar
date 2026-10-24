@@ -3,13 +3,21 @@ using Deskbar.Core.Control;
 namespace Deskbar.Core.Tests.Control;
 
 // The command line the Store copy hands cmd.exe when it starts a program on someone's behalf
-// (DetachedLauncher's packaged path): `cmd /d /c start "" [/d "<cwd>"] "<program>" <args...>`.
+// (DetachedLauncher's packaged path): `cmd /d /v:off /c start "" [/d "<cwd>"] "<program>" <args...>`.
 // docs/superpowers/specs/2026-10-24-deskbar-store-packaging-design.md
 //
 // Two parsers read it in turn. cmd.exe reads the whole line first (quote state, carets, %VAR%), then
-// `start` hands the tail after the program to the program verbatim, which splits it into argv with the
-// usual C runtime rules. Every expected string here was run through cmd on Petre's machine (2026-10-24)
-// against a probe that printed its argv, and arrived as the original arguments.
+// `start` hands the tail after the program to the program verbatim, which splits it into argv. Every
+// expected string here was run through cmd on Petre's machine (2026-10-24) against a probe that printed
+// its argv, and arrived as the original arguments for a program that splits with the C runtime's rules.
+//
+// One exception, accepted: an embedded quote, written as `""`. A program that splits with
+// CommandLineToArgvW (Chromium, Edge, Electron, VS Code's Code.exe) ends the quoted region at the `""`, so
+// a quote followed later by whitespace splits the argument there (`say "hi there"` arrives as
+// [say "hi] [there"]). Measured by the Task 5 review with a pythonw argv echo reading the real command
+// line; the .NET probe could not see it, as its Environment.CommandLine is rebuilt from args. No caller
+// passes an embedded quote, and fixing it would mean tracking cmd's quote parity. CommandLineQuoting's
+// header has the full account.
 public class CommandLineQuotingTests
 {
     // Measured: on a `cmd /c` command line (unlike inside a batch file) `%%` is NOT collapsed to `%`, so
@@ -17,21 +25,21 @@ public class CommandLineQuotingTests
     // there, so an unquoted `100%` becomes `100^%`.
     [Fact]
     public void Quotes_spaces_embedded_quotes_and_percent_for_cmd_start() =>
-        Assert.Equal(@"/d /c start """" /d ""C:\my dir"" ""C:\Program Files\X\x.exe"" ""a b"" ""say """"hi"""""" 100^%",
+        Assert.Equal(@"/d /v:off /c start """" /d ""C:\my dir"" ""C:\Program Files\X\x.exe"" ""a b"" ""say """"hi"""""" 100^%",
             CommandLineQuoting.ForCmdStart(@"C:\Program Files\X\x.exe", ["a b", "say \"hi\"", "100%"], @"C:\my dir"));
 
     [Fact]
     public void No_working_directory_means_no_d_switch() =>
-        Assert.StartsWith(@"/d /c start """" ""code""", CommandLineQuoting.ForCmdStart("code", [], null));
+        Assert.StartsWith(@"/d /v:off /c start """" ""code""", CommandLineQuoting.ForCmdStart("code", [], null));
 
     // An empty folder means "no folder", as it does to Process.Start, never `/d ""`.
     [Fact]
     public void An_empty_working_directory_means_no_d_switch_too() =>
-        Assert.Equal(@"/d /c start """" ""code""", CommandLineQuoting.ForCmdStart("code", [], ""));
+        Assert.Equal(@"/d /v:off /c start """" ""code""", CommandLineQuoting.ForCmdStart("code", [], ""));
 
     [Fact]
     public void No_arguments_ends_at_the_program() =>
-        Assert.Equal(@"/d /c start """" ""code""", CommandLineQuoting.ForCmdStart("code", [], null));
+        Assert.Equal(@"/d /v:off /c start """" ""code""", CommandLineQuoting.ForCmdStart("code", [], null));
 
     // A caret is only an escape OUTSIDE quotes, and inside them cmd cannot be stopped from expanding
     // %VAR%, so a percent in a quoted argument steps out of the quotes for its caret and back in. The
@@ -64,6 +72,6 @@ public class CommandLineQuotingTests
     // the percent rule applies to them.
     [Fact]
     public void A_percent_in_the_folder_or_program_steps_out_of_the_quotes_too() =>
-        Assert.Equal(@"/d /c start """" /d ""C:\w 100""^%""x""^%"""" ""C:\p""^%""\x.exe""",
+        Assert.Equal(@"/d /v:off /c start """" /d ""C:\w 100""^%""x""^%"""" ""C:\p""^%""\x.exe""",
             CommandLineQuoting.ForCmdStart(@"C:\p%\x.exe", [], @"C:\w 100%x%"));
 }

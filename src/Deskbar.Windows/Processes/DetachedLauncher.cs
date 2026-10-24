@@ -24,10 +24,13 @@ namespace Deskbar.Windows.Processes;
 //   handed the request to a copy already running.
 //
 //   Packaged (the Store copy): CreateProcess of %SystemRoot%\System32\cmd.exe with no window, carrying
-//   PROC_THREAD_ATTRIBUTE_DESKTOP_APP_POLICY = PROCESS_CREATION_DESKTOP_APP_BREAKAWAY_ENABLE_PROCESS_TREE, so
-//   cmd and everything it starts run without Deskbar's package. cmd runs `start`, which finds a bare program
-//   name through the PATH and App Paths the way the shell does (plain CreateProcess cannot, and a `code` from
-//   `deskbar.cmd start` must still work) and honours a program's request to run elevated (Task Manager). The
+//   PROC_THREAD_ATTRIBUTE_DESKTOP_APP_POLICY = PROCESS_CREATION_DESKTOP_APP_BREAKAWAY_ENABLE_PROCESS_TREE.
+//   Microsoft documents that flag as acting on the CHILDREN of the process it is given to: cmd itself still
+//   runs inside Deskbar's package, and the processes cmd creates are created outside it. That is one reason
+//   for the cmd hop: the program the user wanted is cmd's child, so it is the one that breaks away. The other
+//   is `start`, which finds a bare program name through the PATH and App Paths the way the shell does (plain
+//   CreateProcess cannot, and a `code` from `deskbar.cmd start` must still work) and honours a program's
+//   request to run elevated (Task Manager). cmd itself exits as soon as `start` has handed the program off. The
 //   line is CommandLineQuoting.ForCmdStart's. The answer is always null: `start` hands the program off and
 //   cmd exits, so the only pid in hand is cmd's, which is useless, and every caller already treats null as
 //   "expect it by name only".
