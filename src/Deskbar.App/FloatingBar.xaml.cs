@@ -4551,14 +4551,7 @@ public partial class FloatingBar : Window
         // Costs no layout: every icon already carries a 1px border, transparent when it has
         // nothing to say, precisely so gaining a marker cannot nudge a SizeToContent bar.
         iconRings.ForEach(icon =>
-        {
-            var ringed = target is { } t && icon.Handle == t;
-            icon.Button.BorderBrush = ringed ? CandidateRowRing
-                : icon.IsActive ? ActiveBorder
-                : icon.WillActivate ? WillActivateBorder
-                : Brushes.Transparent;
-            icon.Button.Background = ringed || icon.IsActive ? ActiveBackground : Brushes.Transparent;
-        });
+            PaintMarker(icon.Button, ringed: target is { } t && icon.Handle == t, icon.IsActive, icon.WillActivate));
     }
 
     // Which row RebuildCore drew as current, so ApplyCandidate can put the white ring back when
@@ -4620,26 +4613,14 @@ public partial class FloatingBar : Window
     // background without washing the icons out mid-drag.
     static readonly Brush DropHighlight = Frozen(0x33, 0xFF, 0xFF, 0xFF);
 
-    // Active-window highlight. Kept dimmer than DropHighlight above and paired with a
-    // brighter outline: the drop highlight is a transient answer to "where will this land",
-    // while this one is always on screen somewhere, so it has to read as a marker rather
-    // than compete with the icons themselves.
-    static readonly Brush ActiveBackground = Frozen(0x22, 0xFF, 0xFF, 0xFF);
+    // The ring round the chosen colour swatch. It was the active-window ring's brush too, until
+    // the window markers got their own (FloatingBar.Marker.cs), and keeps that ring's old 60%.
     static readonly Brush ActiveBorder = Frozen(0x99, 0xFF, 0xFF, 0xFF);
 
     // Petre: "make the last active window in that workspace look a bit different... so i know
-    // what i'm going to have activated when i land on that workspace."
-    //
-    // Outline only, no background, at roughly a third of ActiveBorder's strength. The two
-    // markers are deliberately the SAME SHAPE at different weights rather than two different
-    // shapes, because they mean the same thing at different tenses -- "you are here" and "you
-    // will be here". Reading them as a pair is the point; a differently-shaped badge would read
-    // as an unrelated piece of information.
-    //
-    // Costs no layout, which is why it can be a border at all: BorderThickness is already 1 on
-    // every icon with a transparent brush (see the icon button below), so filling that brush in
-    // cannot nudge the row -- and the bar is SizeToContent, so a nudged row moves the window.
-    static readonly Brush WillActivateBorder = Frozen(0x38, 0xFF, 0xFF, 0xFF);
+    // what i'm going to have activated when i land on that workspace." That marker and the
+    // focused window's are drawn in FloatingBar.Marker.cs, one shape at two weights, because
+    // they mean the same thing at different tenses -- "you are here" and "you will be here".
 
     // Every shared brush here is FROZEN. A Freezable that is still mutable takes on the
     // thread affinity of whoever created it, and these are `static` -- created once, on
@@ -5524,7 +5505,7 @@ public partial class FloatingBar : Window
     // The SAME SHAPE as the current-workspace ring, in a different colour, and that pairing is
     // deliberate rather than convenient: the two mean the same kind of thing in different
     // tenses -- "you are here" and "you would land here" -- which is exactly the relationship
-    // the icon markers already express (ActiveBorder against WillActivateBorder). A different
+    // the icon markers already express (focused against landing, see PaintMarker). A different
     // shape would read as unrelated information.
     //
     // Amber rather than a brighter white, because white is already taken twice over: by the
@@ -5899,7 +5880,8 @@ public partial class FloatingBar : Window
         // width to trim against; the centring one would size the button to the whole title and clip it.
         // Stretched across the WHOLE line, the workspace's third included: that third is a click zone laid
         // over the button's right end (see the titled split in LineOf), so the title reads to the line's end.
-        button.Template = BareStretchButton;
+        // The marked one, like the icon's own template, so a titled line keeps its glow and bar.
+        button.Template = MarkedStretchButton;
         button.HorizontalAlignment = HorizontalAlignment.Stretch;
     }
 
@@ -5990,19 +5972,18 @@ public partial class FloatingBar : Window
             // icon-only surface with three identical VS Code glyphs, "which one am I in" is
             // otherwise unanswerable. BorderThickness stays 1 for EVERY icon with a
             // transparent brush when inactive, so gaining the highlight cannot nudge the
-            // row's layout (and thus the whole SizeToContent bar's position) by 2px.
-            // Three states, and IsActive wins where both could apply. An icon can only be both
-            // if the suppression in OverviewBuilder.WillActivate ever lapses, and "you are in
-            // this window" is the stronger, more immediate claim of the two.
-            Background = row.IsActive ? ActiveBackground : Brushes.Transparent,
-            BorderBrush = row.IsActive ? ActiveBorder : row.WillActivate ? WillActivateBorder : Brushes.Transparent,
+            // row's layout (and thus the whole SizeToContent bar's position) by 2px. The
+            // marker's look, focused and landing alike, is PaintMarker's (FloatingBar.Marker.cs).
             BorderThickness = new Thickness(1),
             // Chrome-less for the same reason as the row labels, and here it matters more: the
             // stock template's hover layer would sit on top of the active-window fill and the
-            // landing-spot outline, muddying the two states this icon exists to show.
-            Template = BareButton,
+            // landing-spot outline, muddying the two states this icon exists to show. The marked
+            // variant of the bare chrome, which adds the focused window's glow and the marker's
+            // bar on the left.
+            Template = MarkedButton,
             Tag = IconTag, // marks this as an icon: press-drag moves the WINDOW, not the bar
         };
+        PaintMarker(button, ringed: false, focused: row.IsActive, landing: row.WillActivate);
 
         // The window's title as the automation name. Two jobs, both real: a screen reader announces the
         // icon as the window it stands for rather than as "button", and it is how a test tells which icon
