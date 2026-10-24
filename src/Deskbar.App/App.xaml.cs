@@ -863,7 +863,7 @@ public partial class App : Application
         // hook instead, which is a different subscription with a different lifetime.
         attentionMonitor = new ShellHookAttentionMonitor();
         // The store traces a fallback to state.json.previous, the one sign that the latest file was lost.
-        manager = new WorkspaceManager(desktops, monitor, new Win32WindowTitles(), new JsonPersistenceStore(stateDir, ClickTrace.On ? ClickTrace.Write : null),
+        manager = new WorkspaceManager(desktops, monitor, new Win32WindowTitles(), new JsonPersistenceStore(stateDir, ClickTrace.On ? ClickTrace.Write : null, UpdateService.RunningVersion),
             activator: new WindowActivator(), screenLayout: new ScreenLayout(), attention: attentionMonitor,
             // #94: which app started this one, so a window opened by another app joins it. Stateless
             // and cheap, asked only when a new window appears.
@@ -916,6 +916,15 @@ public partial class App : Application
             if (started.IsFailure)
             {
                 var loadError = started.Error;
+                // A file stamped by a NEWER build is not corrupt: backing it up and starting clean would throw
+                // the newer copy's settings away (Store packaging design: the Store build lags the GitHub one
+                // and both share state.json). Say so and exit; the file stays exactly as it is.
+                if (loadError.StartsWith(StateVersionGate.RefusalPrefix, StringComparison.Ordinal))
+                {
+                    MessageBox.Show(loadError, "Deskbar", MessageBoxButton.OK, MessageBoxImage.Warning);
+                    Shutdown();
+                    return;
+                }
                 BackupCorruptState(statePath, loadError);
                 started = manager.Start();
                 if (started.IsFailure)

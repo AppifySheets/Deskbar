@@ -279,6 +279,12 @@ public sealed record AppState(
     // different way.
     public IReadOnlyList<Group> Groups { get; init; } = [];
 
+    // The version of the build that last saved this file, e.g. "2.1.44". JsonPersistenceStore stamps it on every
+    // Save and StateVersionGate.Check refuses to load a file whose stamp is newer than the running build, so an
+    // older copy (the lagging Microsoft Store build) never loads, drops fields from, and overwrites a newer
+    // copy's state. Init property with no default, so files written before this key load as null, which passes.
+    public string? WrittenBy { get; init; }
+
     // --- asking about groups ------------------------------------------------------------------
     //
     // Every surface asks these rather than working membership out for itself. The bar, the
