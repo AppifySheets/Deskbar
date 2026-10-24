@@ -1002,6 +1002,7 @@ sealed class StubMonitor : IWindowMonitor
     public IReadOnlyList<WindowInfo> Snapshot() => Initial.ToList();
     public bool IsAlive(WindowHandle window) => true;
     public bool IsListed(WindowHandle window) => Initial.Any(w => w.Handle == window);
+    public bool IsCloakedByShell(WindowHandle window) => false;
     public Maybe<WindowHandle> Foreground() => ForegroundWindow;
 }
 

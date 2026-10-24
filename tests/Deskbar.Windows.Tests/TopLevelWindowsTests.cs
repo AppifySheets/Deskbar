@@ -1,4 +1,5 @@
 using System.Runtime.InteropServices;
+using Deskbar.Core.Domain;
 using Deskbar.Windows.Monitoring;
 
 namespace Deskbar.Windows.Tests;
@@ -71,6 +72,24 @@ public class TopLevelWindowsTests
         Assert.True(TopLevelWindows.IsTaskbarCandidate(optedIn.Handle));
     });
 
+    // The Windows half of "a closed Store app's hidden frame stays out of the bar" is one DWM question,
+    // IsShellCloaked. A test window cannot be cloaked by the shell without being moved to another virtual
+    // desktop, which would change the desktops of whoever runs the suite, so only the answer that must
+    // never be a false positive is pinned here: an ordinary window, and a handle that names nothing.
+    // The decision that uses the answer is tested in Deskbar.Core.Tests (ShellHiddenFrameTests).
+    [Fact]
+    public void An_ordinary_window_is_not_cloaked_by_the_shell() => StaThread.Run(() =>
+    {
+        using var window = TestWindow.Create(title: "Ordinary window", exStyle: 0);
+
+        Assert.False(TopLevelWindows.IsShellCloaked(window.Handle));
+        Assert.False(new WindowMonitor().IsCloakedByShell(new WindowHandle(window.Handle)));
+    });
+
+    [Fact]
+    public void A_handle_that_names_no_window_is_not_cloaked_by_the_shell() =>
+        Assert.False(TopLevelWindows.IsShellCloaked(0x7FFFFFF0));
+
     const uint WS_EX_TOOLWINDOW = 0x00000080;
     const uint WS_EX_APPWINDOW = 0x00040000;
 
@@ -99,6 +118,16 @@ public class TopLevelWindowsTests
             EnsureClass(className);
             var handle = CreateWindowExW(exStyle, className, title, WS_POPUP | WS_VISIBLE,
                 -32000, -32000, 40, 40, 0, 0, 0, 0);
+            Assert.NotEqual(0, handle);
+            return new TestWindow { Handle = handle };
+        }
+
+        // A window of the "static" class OWNED by another, which is how an app's dialog or settings window
+        // relates to its main window. CreateWindowEx takes the owner as the parent of a WS_POPUP.
+        public static TestWindow CreateOwned(nint owner, string title, uint exStyle)
+        {
+            var handle = CreateWindowExW(exStyle, "static", title, WS_POPUP | WS_VISIBLE,
+                -32000, -32000, 40, 40, owner, 0, 0, 0);
             Assert.NotEqual(0, handle);
             return new TestWindow { Handle = handle };
         }
@@ -179,5 +208,35 @@ public class TopLevelWindowsTests
         // would pass just as well against a rule that had stopped admitting titleless windows at all,
         // which is the fix it is guarding.
         Assert.True(TopLevelWindows.IsTaskbarCandidate(ordinary.Handle));
+    }
+
+    // Clicking the tray's overflow arrow repeatedly flashed a window of class Xaml_WindowedPopupClass,
+    // titled "PopupHost", for about 0.2 s each time: visible, not cloaked, not a tool window, so it was a
+    // candidate and the bar showed it as an Unplaced row. The class is the XAML popup surface, never an
+    // app's own window.
+    [Fact]
+    public void A_xaml_popup_surface_is_not_a_candidate()
+    {
+        using var popup = TestWindow.CreateOfClass("Xaml_WindowedPopupClass", "PopupHost", 0);
+        using var ordinary = TestWindow.CreateOfClass("NotAPopupSurface", "PopupHost", 0);
+
+        Assert.False(TopLevelWindows.IsTaskbarCandidate(popup.Handle));
+        Assert.DoesNotContain(popup.Handle, TopLevelWindows.Enumerate());
+
+        // The control: same title and styles, another class, so the test cannot pass against a rule that
+        // had started refusing everything titled "PopupHost".
+        Assert.True(TopLevelWindows.IsTaskbarCandidate(ordinary.Handle));
+    }
+
+    // The owner is not the rule: a window owned by a window that is not on the taskbar, as a tray app's
+    // window can be owned by its hidden main window, stays a candidate.
+    [Fact]
+    public void A_window_owned_by_a_non_candidate_is_still_a_candidate()
+    {
+        using var hiddenOwner = TestWindow.CreateOfClass("OwnerNobodyListed", "", 0);
+        using var owned = TestWindow.CreateOwned(hiddenOwner.Handle, "Settings", 0);
+
+        Assert.False(TopLevelWindows.IsTaskbarCandidate(hiddenOwner.Handle));
+        Assert.True(TopLevelWindows.IsTaskbarCandidate(owned.Handle));
     }
 }

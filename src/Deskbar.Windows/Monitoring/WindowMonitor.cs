@@ -189,6 +189,9 @@ public sealed class WindowMonitor : IWindowMonitor, IDisposable
     // gone quiet without mistaking it for a window that has gone.
     public bool IsListed(WindowHandle window) => IsTracked(window.Value);
 
+    // A thin pass-through: what a shell cloak means for a window is the manager's decision, not ours.
+    public bool IsCloakedByShell(WindowHandle window) => TopLevelWindows.IsShellCloaked(window.Value);
+
     // The one question that tells a destroyed window from one minimised to the tray, asked with the
     // same call Resync's own drop half uses (see above). On the interface because the manager's repair
     // needs it and must not be tempted to ask a cheaper question.

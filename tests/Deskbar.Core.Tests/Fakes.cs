@@ -77,6 +77,11 @@ public sealed class FakeMonitor : IWindowMonitor
     // Listed means "in InitialWindows", which is what Snapshot answers from: a test hides a window by
     // taking it out of that list, exactly as the shell drops a hidden window from its own.
     public bool IsListed(WindowHandle window) => InitialWindows.Any(w => w.Handle == window);
+
+    // Handles the shell has cloaked. A window on another desktop is in here too; what tells the leftover
+    // frame apart is that the fake desktops cannot place it.
+    public HashSet<WindowHandle> ShellCloaked { get; } = [];
+    public bool IsCloakedByShell(WindowHandle window) => ShellCloaked.Contains(window);
     public Maybe<WindowHandle> Foreground() => ForegroundWindow;
 }
 

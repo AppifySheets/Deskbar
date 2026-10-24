@@ -3370,12 +3370,27 @@ public sealed class WorkspaceManager(
     // Asks the OS, remembers a real answer, and falls back to the last real answer when the OS
     // declines. Unplaced is still reachable, and still means what it says: we have NEVER been told
     // where this window lives.
-    Result<Guid> DesktopOfRemembering(WindowHandle window, IReadOnlyList<DesktopInfo> live)
+    //
+    // The one window it neither remembers nor sends to Unplaced is a frame the shell has hidden. Measured
+    // with Settings closed: its ApplicationFrameWindow stays visible, cloaked by the shell (DWM_CLOAKED_SHELL)
+    // and on NO desktop (GetWindowDesktopId returns an empty id), with no app window inside it. The shell's
+    // own taskbar and Alt+Tab skip it, and the bar showed it in Unplaced as an empty icon. A window on
+    // another desktop is cloaked the same way but HAS a desktop, so "cloaked and unplaced" is the leftover
+    // alone. It is only left out of this build, not dropped from the list: when the app reopens, the same
+    // frame gets a desktop back and the next build shows it in its row. Decided before the memory below,
+    // or a frame seen on a desktop while its app was open would stay in that row after the app closed.
+    Result<Guid> DesktopOfRemembering(WindowHandle window, IReadOnlyList<DesktopInfo> live, ISet<WindowHandle> hiddenByShell)
     {
         var answer = desktops.DesktopOf(window);
         if (answer.IsSuccess)
         {
             lastKnownDesktop[window] = answer.Value;
+            return answer;
+        }
+
+        if (monitor.IsCloakedByShell(window))
+        {
+            hiddenByShell.Add(window);
             return answer;
         }
 
@@ -3501,6 +3516,7 @@ public sealed class WorkspaceManager(
                 // opposite of "present in the child workspace".
                 .Where(w => !borrowed.ContainsKey(w.Handle))
                 .Select(w => w.Handle).ToHashSet();
+            var hiddenByShell = new HashSet<WindowHandle>(); // filled while the OS is asked below, see DesktopOfRemembering
             var desktopOf = windows
                 .Where(w => !pinned.Contains(w.Handle))
                 .Select(w => (w.Handle, Desktop: borrowed.TryGetValue(w.Handle, out var home)
@@ -3517,13 +3533,13 @@ public sealed class WorkspaceManager(
                     // window is present on the child's screen and stays in its parent's row, which
                     // is also why the child's row is not doubled up -- the thing he rejected first.
                     ? Result.Success(home)
-                    : DesktopOfRemembering(w.Handle, live)))
+                    : DesktopOfRemembering(w.Handle, live, hiddenByShell)))
                 .Where(x => x.Desktop.IsSuccess) // closed mid-query: just not shown this round
                 .ToDictionary(x => x.Handle, x => x.Desktop.Value);
             // One screen sweep per build, alongside the DesktopOf calls above -- and far cheaper
             // than they are, being user32 rather than COM.
             var screen = WithPendingScreens(screenLayout?.Snapshot() ?? ScreenFacts.Empty);
-            return OverviewBuilder.Build(State, windows, h => ledger.OriginalTitle(h), pinned, desktopOf, live, current, activeWindow, lastActiveByDesktop, screen, wantsAttention, artworkOf);
+            return OverviewBuilder.Build(State, windows.Where(w => !hiddenByShell.Contains(w.Handle)).ToList(), h => ledger.OriginalTitle(h), pinned, desktopOf, live, current, activeWindow, lastActiveByDesktop, screen, wantsAttention, artworkOf);
         }));
 
     // Both now RECORD the placement as well as performing it. Petre's defect: "move Beeper

@@ -91,6 +91,22 @@ public static class TopLevelWindows
         // -32000), and the shell itself never lists a ghost separately -- it replaces the hung
         // window's own button, which this app is already showing.
         "Ghost",
+        // The surface a XAML flyout, tooltip or drop-down is drawn on. Clicking the tray's overflow arrow
+        // again and again made one appear for about 0.2 s each time, measured while it was on screen:
+        //
+        //   class='Xaml_WindowedPopupClass'  title='PopupHost'  explorer  visible, not cloaked, ~110x63
+        //       owner = the TopLevelWindowForOverflowXamlIsland (a tool window), no WS_EX_TOOLWINDOW itself,
+        //       and on no virtual desktop (GetWindowDesktopId answers with an empty id)
+        //
+        // Titled and not a tool window, so it passed every other test here, and each flash put an Unplaced
+        // row in the bar for a moment: the bar grew taller under the cursor and the next click landed on
+        // whatever had moved up. The shell's own taskbar skips it because it is owned and does not ask for
+        // a button with WS_EX_APPWINDOW.
+        //
+        // Excluded by CLASS, like the rest of this list, and not as "owned by a window that is not a
+        // candidate": an app's own window can be owned by a hidden main window too (a tray app), and that
+        // rule could not tell the two apart. The class is the XAML framework's own popup surface.
+        "Xaml_WindowedPopupClass",
     };
 
     static bool IsShellOwned(nint hwnd)
@@ -107,4 +123,11 @@ public static class TopLevelWindows
         DwmGetWindowAttribute(hwnd, DWMWA_CLOAKED, out var cloaked, sizeof(int)) == 0
         && cloaked != 0
         && cloaked != 2; // DWM_CLOAKED_SHELL: cloaked by the shell = other virtual desktop = keep it
+
+    // The same value, asked on its own. IsCloaked above keeps these windows because an off-desktop window
+    // reports it; WorkspaceManager asks it of a window that has NO desktop, where it means something else
+    // (see WorkspaceManager.DesktopOfRemembering). False when DWM cannot answer, e.g. for a destroyed window.
+    public static bool IsShellCloaked(nint hwnd) =>
+        DwmGetWindowAttribute(hwnd, DWMWA_CLOAKED, out var cloaked, sizeof(int)) == 0
+        && cloaked == 2; // DWM_CLOAKED_SHELL
 }
