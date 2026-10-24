@@ -1116,6 +1116,10 @@ public partial class App : Application
             monitor.Events
                 .Where(e => e.Kind is WindowEventKind.Moved)
                 .Subscribe(e => floatingBar.OnWindowDragEnded(e.Window.Handle));
+            // Every minimize and restore, into the trace only (see FloatingBar.MinimizeTrace.cs).
+            monitor.Events
+                .Where(e => e.Kind is WindowEventKind.MinimizeChanged)
+                .Subscribe(e => floatingBar.NoteMinimizeEvent(e.Window.Handle));
 
             // ...and a 1s timer, because the event alone is not enough. Petre: "taskbar makes
             // its way over the floating window if i click the taskbar twice, so maybe you could

@@ -195,7 +195,7 @@ public partial class FloatingBar : Window
         };
         // appBar.Remove gives the docked strip back on a normal exit. A crash is covered by the shell
         // itself, which was measured reclaiming a dead app bar's strip within a second (see AppBar).
-        Closed += (_, _) => { iconWatch.Stop(); fadeDelay.Stop(); subscription?.Dispose(); appBar?.Remove(); seamBar?.Remove(); };
+        Closed += (_, _) => { iconWatch.Stop(); fadeDelay.Stop(); subscription?.Dispose(); settleWatch?.Dispose(); appBar?.Remove(); seamBar?.Remove(); };
     }
 
     // --- fading while the pointer is elsewhere ---------------------------------------
@@ -1841,6 +1841,8 @@ public partial class FloatingBar : Window
         // later", and the release path below serves it.
         if (Mouse.LeftButton == MouseButtonState.Pressed && IsMouseOver)
         {
+            // Traced so a redraw that waits here shows up (see FloatingBar.MinimizeTrace.cs).
+            if (ClickTrace.On) ClickTrace.Write("rebuild deferred: button down over the bar");
             rebuildRequested = true;
             return;
         }
@@ -1904,9 +1906,11 @@ public partial class FloatingBar : Window
 
         rebuilding = true;
         var clock = ClickTrace.On ? System.Diagnostics.Stopwatch.StartNew() : null;
+        StartPhases();
         try
         {
             RebuildCore();
+            Phase("finish");
         }
         finally
         {
@@ -1917,7 +1921,8 @@ public partial class FloatingBar : Window
             // and there are many, so logging every one would bury the interesting ones.
             if (clock is { } elapsed && elapsed.ElapsedMilliseconds >= 150)
                 ClickTrace.Write($"rebuild took {elapsed.ElapsedMilliseconds}ms " +
-                                 $"(query {lastQueryMs}ms, draw {elapsed.ElapsedMilliseconds - lastQueryMs}ms)");
+                                 $"(query {lastQueryMs}ms, draw {elapsed.ElapsedMilliseconds - lastQueryMs}ms){SlowPhases()}");
+            StopPhases();
         }
 
         // The suppressed pulse still carried real news (a window opened, closed or moved),
@@ -1955,7 +1960,7 @@ public partial class FloatingBar : Window
         }
 
         var clock = System.Diagnostics.Stopwatch.StartNew();
-        var overview = manager.WindowsByWorkspace().Tap(o => lastOverview = o);
+        var overview = manager.WindowsByWorkspace().Tap(o => lastOverview = o).Tap(DumpMinimized);
         lastQueryMs = clock.ElapsedMilliseconds;
         return overview;
     }
@@ -2028,6 +2033,7 @@ public partial class FloatingBar : Window
         // disagree about where "back" is, and the only way to guarantee that is to derive both from
         // one reading of the MRU on one rebuild.
         RefreshHistoryTrail();
+        Phase("prepare");
 
         // A geometry dump once the layout has settled, behind the trace marker and only when it differs
         // from the last one (see DumpRowGeometry).
@@ -2035,15 +2041,18 @@ public partial class FloatingBar : Window
             Dispatcher.BeginInvoke(System.Windows.Threading.DispatcherPriority.Loaded, DumpRowGeometry);
         OverviewFor(fresh).Tap(overview =>
         {
+            Phase("query");
             if (ClickTrace.On) DumpBands(overview);
 
             // Tab counts and the sound ring (FloatingBar.Activity.cs): which windows are sounding is worked out
             // here, before any icon below is built, so every icon and pin of this rebuild agrees about it.
             NoteActivity(overview);
+            Phase("activity");
 
             // The dock line's markers: which taskbar pins have a window here, and which only elsewhere
             // (FloatingBar.Pins.cs). Its buttons are not rebuilt, only repainted.
             PaintPins(overview);
+            Phase("pins");
 
             // A window whose desktop cannot be found is in the Unplaced row, and the commonest reason is that it
             // has just closed and its close event never arrived (Petre: "i closed youtube music and it kept
@@ -2236,7 +2245,7 @@ public partial class FloatingBar : Window
                 // better representation that it's a child", and a glyph inside a label that already
                 // sits in a narrow gutter is the weakest place to put it. The spine, the shared
                 // colour, the indent and the group outline all say it around the row instead.
-                return GroupRow(
+                var built = GroupRow(
                     g.Workspace.Name,
                     g.Workspace.Name, g.IsCurrent,
                     switchTo: () => manager.Switch(g.Workspace.Id),
@@ -2262,6 +2271,8 @@ public partial class FloatingBar : Window
                         ? ListSpine(colour, colourSlot >= 0 ? colourSlot : ownSlot)
                         : LaneAccent(colour, colourSlot >= 0 ? colourSlot : ownSlot),
                     titledList: Expanded(g.Workspace.Id));
+                Phase($"row {g.Workspace.Name}");
+                return built;
             }
 
             // Walked in list order, emitting a whole group at its first member and skipping the
@@ -6089,6 +6100,9 @@ public partial class FloatingBar : Window
             // already down) can be older than the click by the time it happens. See
             // WorkspaceManager.ToggleWindow for what that cost -- a minimized window that could
             // not be brought back.
+            // Watched from before the toggle, so the icon redraws once the window has really changed state rather
+            // than waiting for a late event (FloatingBar.Minimize.cs).
+            RedrawWhenToggleSettles(row, activator.IsMinimized(row.Window.Handle));
             var outcome = manager.ToggleWindow(row.Window.Handle, activator);
 
             // Traced for the same reason the row's switch is (#48, and Petre again: "i've clicked on
@@ -6161,6 +6175,7 @@ public partial class FloatingBar : Window
             if (e.ChangedButton != MouseButton.Left || !orphanRelease || dragJustFinished) return;
             MarkPressConsumed();
 
+            RedrawWhenToggleSettles(row, activator.IsMinimized(row.Window.Handle));
             var outcome = manager.ToggleWindow(row.Window.Handle, activator);
             if (ClickTrace.On)
                 ClickTrace.Write($"icon-orphan-click app={row.Window.ProcessName} hwnd={row.Window.Handle.Value:X} " +
