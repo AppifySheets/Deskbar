@@ -1438,7 +1438,8 @@ public partial class App : Application
         // The first real Pro verdict, read now because the bar's hwnd exists from here on and a Store
         // context in a desktop app is tied to a window (Entitlement, StoreLicence). Until it lands,
         // Entitlement.Current holds the provisional answer. In compatibility mode there is no bar and
-        // barHandle is zero, which StoreLicence handles by skipping the window step. Fire-and-forget:
+        // barHandle is zero, which StoreContextHolder handles by leaving the context untied to a window (a
+        // licence read needs none). Fire-and-forget:
         // RefreshAsync never throws, and startup does not wait on the Store.
         _ = Entitlement.RefreshAsync(barHandle);
 

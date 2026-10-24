@@ -20,8 +20,9 @@ namespace Deskbar.Windows.Store;
 //
 // A failure is never cached (the briefing's trap: never cache a lookup failure that can succeed later). If
 // GetDefault throws, nothing is kept and the next call tries again. If Initialize throws, the context is
-// dropped rather than kept half-initialised, so the next call starts from a fresh GetDefault instead of
-// initialising the same object a second time.
+// dropped rather than kept half-initialised, and the next call retries from GetDefault. Whether that hands
+// back the same object (so the retry is a second Initialize on it) is the unmeasured part above; either way
+// a throw there is an ordinary failure for that one call, and a later call can still succeed.
 static class StoreContextHolder
 {
     // Licence reads and update checks can overlap (both run off the update timer and the first is fired at

@@ -135,8 +135,9 @@ box in the GitHub copy's Manage says that ticking it starts both.
 Only one copy runs at a time. Starting the other while one is running shows a dialog that says
 which one is running: the Store copy, or the copy at a folder. Both copies share
 `%APPDATA%\Deskbar`, and `state.json` records which version saved it. The Store runs a few
-days behind GitHub, and an older copy within the same major version loads a newer file and
-keeps the settings it does not know about when it saves. A copy that finds a file saved by a
+days behind GitHub, and an older copy within the same major version loads a newer file. When it
+saves, it keeps the top-level settings it does not know about; a setting a newer version added
+inside a workspace, a rule or the bar's own settings is still dropped. A copy that finds a file saved by a
 newer major version does not load it. It shows a dialog that tells you to start the newer copy,
 or to remove it and delete the `WrittenBy` line from `state.json` to go on with the older one.
 
