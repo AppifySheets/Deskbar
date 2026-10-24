@@ -11,6 +11,7 @@ public sealed class StateVersionGateTests
     [InlineData("garbage", "2.1.44")]
     [InlineData("2.1.44", "2.1.44+deadbeef")]
     [InlineData("2.1.44-beta", "2.1.44")]
+    [InlineData("2.1.44+a", "2.1.44+b")]
     public void Same_older_missing_or_unreadable_WrittenBy_passes(string? writtenBy, string running) =>
         Assert.True(StateVersionGate.Check(writtenBy, running).IsSuccess);
 
@@ -28,4 +29,11 @@ public sealed class StateVersionGateTests
     [InlineData("2.1.50+abc", "2.1.44+def")]
     public void Newer_is_compared_numerically_ignoring_metadata(string writtenBy, string running) =>
         Assert.True(StateVersionGate.Check(writtenBy, running).IsFailure);
+
+    [Fact]
+    public void IsRefusal_recognises_only_the_refusal_message()
+    {
+        Assert.True(StateVersionGate.IsRefusal(StateVersionGate.RefusalMessage("2.1.50", "2.1.44")));
+        Assert.False(StateVersionGate.IsRefusal("Could not read state.json: bad"));
+    }
 }

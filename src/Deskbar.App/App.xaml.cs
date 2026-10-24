@@ -916,15 +916,9 @@ public partial class App : Application
             if (started.IsFailure)
             {
                 var loadError = started.Error;
-                // A file stamped by a NEWER build is not corrupt: backing it up and starting clean would throw
-                // the newer copy's settings away (Store packaging design: the Store build lags the GitHub one
-                // and both share state.json). Say so and exit; the file stays exactly as it is.
-                if (loadError.StartsWith(StateVersionGate.RefusalPrefix, StringComparison.Ordinal))
-                {
-                    MessageBox.Show(loadError, "Deskbar", MessageBoxButton.OK, MessageBoxImage.Warning);
-                    Shutdown();
+                // A file stamped by a NEWER build is not corrupt: see RefuseNewerState.
+                if (RefuseNewerState(loadError))
                     return;
-                }
                 BackupCorruptState(statePath, loadError);
                 started = manager.Start();
                 if (started.IsFailure)
@@ -1373,6 +1367,20 @@ public partial class App : Application
             monitor.Dispose();
             manager.RestoreAllTitles();
         };
+    }
+
+    // A state.json stamped by a NEWER build (the Store build lags the GitHub one and both share the file; see
+    // docs/superpowers/specs/2026-10-24-deskbar-store-packaging-design.md) is not corrupt. Backing it up and
+    // starting clean, or starting empty, would let a later Save overwrite the newer copy's settings. So show
+    // the message and exit, leaving the file exactly as it is. Returns true when it did, and the caller must
+    // then return from OnStartup. Safe early in startup: no Exit handler is registered yet (the first is
+    // added further down), and App.xaml uses ShutdownMode=OnExplicitShutdown, so nothing else keeps it alive.
+    bool RefuseNewerState(string loadError)
+    {
+        if (!StateVersionGate.IsRefusal(loadError)) return false;
+        MessageBox.Show(loadError, "Deskbar", MessageBoxButton.OK, MessageBoxImage.Warning);
+        Shutdown();
+        return true;
     }
 
     // Finding 1 (reviewer, Critical): renames (never deletes) a corrupt state.json so the

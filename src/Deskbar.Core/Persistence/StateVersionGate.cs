@@ -19,6 +19,9 @@ public static class StateVersionGate
     // a newer one must never be, so the App shows the message and exits instead.
     public const string RefusalPrefix = "Your settings were saved by";
 
+    // The one place the prefix is tested, so the App's two load-failure branches cannot disagree.
+    public static bool IsRefusal(string message) => message.StartsWith(RefusalPrefix, StringComparison.Ordinal);
+
     public static Result Check(string? writtenBy, string runningVersion) =>
         Parse(writtenBy) is { } written && Parse(runningVersion) is { } running && written > running
             ? Result.Failure(RefusalMessage(writtenBy!, runningVersion))
