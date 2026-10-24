@@ -10,13 +10,19 @@ folded in below and marked "builder check" where they changed a decision.
 
 The Store is the trusted channel. Microsoft signs the package, so a person who presses Get
 sees no SmartScreen page and no "unknown publisher", which is the trust the direct exe on
-GitHub Releases cannot offer without a certificate we have decided not to buy yet. The
-listing is free. The licence gate (a later design) will apply to the Store build the same
-way it applies to the direct build, with the same key.
+GitHub Releases cannot offer without a certificate we have decided not to buy yet.
+
+The Store is also where Deskbar Pro is sold (Petre, 2026-10-24, replacing the frame spec's
+key-and-Paddle model): the listing is paid, $19 once, with the Store's own trial, and the
+Store build is Pro with everything on. The direct build on GitHub is the free tier. There
+is no licence key, no checkout on the site and no merchant of record besides Microsoft.
+Upgrading is installing from the Store; the state carries over because both builds share
+the real `%APPDATA%\Deskbar`. The free tier's limits are the next design; this one makes
+the Store build exist and know that it is Pro.
 
 The Store build is the same program from the same tag, packaged as MSIX with full trust.
 It must behave like the direct build in everything a person can see, and differ only where
-the package makes the direct build's self-maintenance wrong or redundant.
+the package makes the direct build's self-maintenance wrong or redundant, and in being Pro.
 
 ## What is already in place (paperwork, done by Petre, 2026-10-21 to 2026-10-24)
 
@@ -54,11 +60,16 @@ the package makes the direct build's self-maintenance wrong or redundant.
    way the direct build offers its own, and comes back after installing it.
 7. The direct build's update offer gains its "Microsoft Store" button, and the README and
    the site show the Store badge, once the listing is live.
+8. The app can answer "am I Pro?" offline and without a key: packaged and licensed by the
+   Store (a purchase or an unexpired Store trial) means Pro. The free tier's gate, which is
+   the next design, asks this one question.
 
 ## Non-goals
 
-- Selling through the Store. The listing is free; the key is sold on the site (frame spec).
-- The licence gate, the trial clock and the Pro tab. Separate design.
+- The free tier's limits, the Pro tab's contents and the reminders. Separate design; this
+  one only provides the entitlement answer.
+- A licence key, a site checkout, Paddle. Dropped on 2026-10-24 with the pricing change.
+  If a way to buy outside the Store is ever needed, a key can be added then.
 - An installer for the direct channel. The direct download stays the portable exe.
 - A Store submission that is automated end to end. The first submissions are uploaded by
   hand in Partner Center; the submission API is a later convenience.
@@ -238,6 +249,30 @@ meaning what it means and adds the `IsPackaged` switches explicitly, with a comm
 | `ProgramStarter` (`start`, `restart-app`), the dock pins, `explorer /select`, Task Manager: started with `UseShellExecute` | Started through `CreateProcess` with the `PROC_THREAD_ATTRIBUTE_DESKTOP_APP_POLICY` attribute set to break away from the package, process tree included, when `IsPackaged` | Builder check, sure: a child of a packaged full-trust process inherits the package identity, so VS Code started by `restart-app` would run as Deskbar's package and be ended when the Store services or removes it (anti-goal). Breakaway cannot be expressed through `UseShellExecute`, so these call sites get a starter that uses `CreateProcess` under the package and keep `UseShellExecute` outside it. The spike checks the child's package identity both ways |
 | 1.x migration (copy state, swap Run value, delete old shim) | Same copy and old-shim deletion; the Run step deletes the `TaskSpaces` value and sets no new one | The startup task replaces the new value |
 
+### Pro is the package (Petre's model, my call on mechanics)
+
+- A static `Entitlement` in the App project with one question, `IsPro`, and a reason
+  (`Packaged licence`, `Store trial until <date>`, `Free tier`, `Store licence unavailable`)
+  for the Pro tab and the trace. Unpackaged: never Pro. Packaged: Pro when
+  `StoreContext.GetAppLicenseAsync` says the licence is active, trial or full; the Store
+  caches licences, so this answers offline. `IsActive` false (the trial has run out, or the
+  package was sideloaded with a test certificate and has no licence) means free tier, with
+  the reason shown. A `StoreContext` failure is treated as "unavailable", which is Pro for
+  that session and traced, because punishing a paying customer for a Store hiccup is worse
+  than one unpaid session; the builder puts a bound on it (a retry on the update timer).
+- Nothing in this design is gated yet. `Entitlement` ships with tests and a line in the
+  trace and the debug dump; the free tier's design wires it to features. Until then the
+  direct build and the Store build do the same things, and the listing's description says
+  that the free version on GitHub will lose the Pro features in a later update.
+- The sideloaded test package has no Store licence, so during the spike and in CI
+  `Entitlement` reports free tier. That is correct and is what the tests expect; a
+  developer override (`DESKBAR_PRO=1`, honoured only when `AppPaths.RootOverridden` is
+  true) exists so Pro paths can be exercised without a purchase. The override is traced
+  and never honoured against the real profile.
+- Trial: the Store's own, configured on the listing's pricing page. The Store offers fixed
+  lengths and 14 days is not one of them; 15 days is, and that is what is set. The app
+  reads the trial state and expiry from the licence and never keeps its own clock.
+
 ### One machine, one running Deskbar (my call; builder check asked which way)
 
 The single-instance guard is unchanged: both builds take `Local\Deskbar.SingleInstance`,
@@ -312,15 +347,15 @@ submission carries the whole app.
 
 ### The listing (Petre writes the final words; this is the shape)
 
-- Name: Deskbar. Publisher: AppifySheets. Category: Utilities and tools. Price: free, all
-  markets. Age rating: the IARC questionnaire, answered as a utility with no content.
+- Name: Deskbar. Publisher: AppifySheets. Category: Utilities and tools. Price: $19 once
+  (Microsoft converts per market), all markets, with a 15-day free trial. Age rating: the
+  IARC questionnaire, answered as a utility with no content.
 - Short description, under 100 characters: "The taskbar for your virtual desktops: name
   them, see every window on one bar."
 - Description: the README's first section, cut to the Store's length, plus a paragraph
-  saying that a free tier and Deskbar Pro are coming in a later update and what stays free,
-  so an early Store user is not surprised later. The exact free and Pro split is the frame
-  spec's open item for Petre and is not decided here; the paragraph says "coming" and
-  nothing more precise until it is.
+  saying that this is Deskbar Pro, that a free version with fewer features is on GitHub,
+  and that the free version keeps everything until the first gated release. The exact free
+  and Pro split is the frame spec's open item for Petre and is not decided here.
 - Screenshots: at least three at 1920 by 1080, taken from a profile whose workspace names
   are generic (Work, Writing, Side project). Captured by Petre or by the builder with
   `DESKBAR_APPDATA` pointing at a staged `state.json`. The README's own hero image is
@@ -344,8 +379,8 @@ the link 404s until the listing is published.
 
 1. Packaging: manifest, images and resource index, `pack-store.ps1` and its tests,
    `Deskbar.Cli`, `Packaging.IsPackaged`, the behaviour switches with their tests, the
-   breakaway starter, `WrittenBy`, the `version` command, the README section, the CI pack
-   step. One PR, version bump included, because it changes the app. If the spike shows it
+   breakaway starter, `WrittenBy`, the `version` command, `Entitlement`, the README
+   section, the CI pack step. One PR, version bump included, because it changes the app. If the spike shows it
    is too much for one review, the split is: packaging and CLI first (no behaviour change
    to the direct build), switches second.
 2. The spike runs between the manifest existing and the switches being finished, on the
@@ -368,13 +403,21 @@ the link 404s until the listing is published.
   version or on demand.
 - The restricted-capabilities paragraph's final wording.
 
+## Decided by Petre on 2026-10-24
+
+- Pricing model: the Store build is Deskbar Pro, paid; the direct build is the free tier;
+  no licence key, no Paddle, no site checkout. The first submission goes in as a paid
+  listing before the free tier's gate exists; early Store buyers get what the direct build
+  still gives free, and the description says so.
+- Payout: Georgia is on Microsoft's payout list for the Store, bank transfer and PayPal.
+  Petre fills in the payout and tax profile in Partner Center before the first submission;
+  that is paperwork, not code, and it is where the address may be asked for again.
+
 ## Open for Petre
 
-1. Whether the first submission goes in before the licence gate exists, with the "coming"
-   paragraph in the description, or waits for the gate. The frame spec's order says before;
-   my recommendation stands: before, because certification feedback on a full-trust tray
-   app is worth having early and the audience before the gate is small.
-2. Who captures the screenshots, and on which machine.
-3. Whether the package should also be offered for sideloading from GitHub Releases later,
+1. Who captures the screenshots, and on which machine.
+2. Whether the package should also be offered for sideloading from GitHub Releases later,
    which would need the certificate this design avoids. Not now; noted so it is not
    forgotten.
+3. The free and Pro split, carried over from the frame spec, needed by the next design and
+   by nothing in this one.

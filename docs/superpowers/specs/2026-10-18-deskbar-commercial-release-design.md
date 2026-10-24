@@ -32,6 +32,21 @@ Updates keep coming through the existing update checker. The Microsoft Store is 
 second channel, alongside the direct sale, not instead of it, and the same key works
 in both.
 
+## Pricing model changed on 2026-10-24 (Petre), superseding the key and Paddle sections
+
+The Microsoft Store listing is paid: Deskbar Pro, $19 once, with the Store's 15-day
+trial, and the packaged build is Pro with everything on. The direct build on GitHub is the
+free tier. There is no licence key, no minting endpoint, no Paddle and no checkout on the
+site; Microsoft is the only merchant of record. Upgrading is installing from the Store;
+the state carries over because both builds share `%APPDATA%\Deskbar`. Reasons: the
+audience is technical and would take a free exe over a paid signature, and the Store's
+licence replaces two whole designs (keys, site checkout). The sections below on the key,
+the trial clock, Paddle and the checkout stand as the record of what was decided on
+2026-10-18 and are no longer the plan. The order of work is now: rename (done), Store
+packaging and listing (`2026-10-24-deskbar-store-packaging-design.md`),
+the free tier's gate, then signing if ever needed. Georgia is on Microsoft's Store payout
+list, bank transfer and PayPal.
+
 ## Decisions already made
 
 ### The name: Deskbar, shown as "Deskbar for Windows" (Petre)
