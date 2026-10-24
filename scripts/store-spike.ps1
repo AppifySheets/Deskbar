@@ -3,7 +3,7 @@
 .SYNOPSIS
     The Store package spike, carried to a Windows 11 machine as a bundle: installs a test-signed
     Deskbar 0.0.1 package, measures what can be measured from a script, simulates a Store update
-    to 0.0.2 while it runs, asks the person five questions about what they see, removes everything
+    to 0.0.2 while it runs, asks the person eight short questions about what they see, removes everything
     and writes spike-report.md plus an evidence\ folder to bring back.
 .DESCRIPTION
     WRITTEN FOR A MACHINE THAT IS NOT THE DEVELOPER'S: run it elevated, interactively, from the
@@ -19,7 +19,12 @@
     the app reads and writes a scratch profile, never the real %APPDATA%\Deskbar. One start is not
     the script's: if Windows brings the app back by itself after the update, it decides that
     process's environment. So the real profile (the folder, the Run values and the Start menu
-    shortcut) is snapshotted first, compared at the end, and anything the run deleted is put back.
+    shortcut) is snapshotted and copied into evidence\ first, compared at the end, and put back
+    where the run changed it: added files and a created shortcut or Run value removed, changed or
+    deleted ones restored from the copies. A folder that existed before is never moved or deleted.
+    It refuses to start while Notepad or Character Map is open, since the checks close the copies
+    that appear after they start one. Every command it runs is bounded (30 s for a CLI call,
+    5 minutes for an Appx install or removal), so nothing can hold the cleanup hostage.
 
     Why it exists: the spike in "Testing, and the spike that proves full trust" in
     docs/superpowers/specs/2026-10-24-deskbar-store-packaging-design.md has to run on a machine
@@ -206,21 +211,72 @@ function Write-Step([string] $Text) { Write-Host ''; Write-Host "== $Text" -Fore
 # Running things and looking at processes.
 # ---------------------------------------------------------------------------------------------
 
-# A native command's exit code, output lines and duration. Continue is scoped here because under
-# Windows PowerShell with a Stop preference a native command's stderr becomes a terminating error
-# before its exit code can be read, and the CLI's "not running yet" arrives on stderr.
-function Invoke-Native([string] $File, [string[]] $Arguments) {
-    $ErrorActionPreference = 'Continue'
-    # Cleared: $LASTEXITCODE is global, and a command that never started would inherit an old 0.
-    $global:LASTEXITCODE = $null
+# Arguments joined into one command line by the rules the C runtime splits them by: quoted when
+# they hold a space or a quote, inner quotes escaped, and backslashes doubled only where they
+# precede a quote. cmd strips the outer quotes of its /c argument itself.
+function ConvertTo-CommandLine([string[]] $Arguments) {
+    (@($Arguments) | ForEach-Object {
+        if ($_ -and $_ -notmatch '[\s"]') { $_ }
+        else { '"' + (($_ -replace '(\\*)"', '$1$1\"') -replace '(\\+)$', '$1$1') + '"' }
+    }) -join ' '
+}
+
+# A native command's exit code, output lines and duration, bounded: a CLI that hangs (a pipe that
+# never answers, a shell that never returns) is killed with its child processes after $Seconds and
+# reported as timed out, which every check counts as a failure, so the run goes on. Started as a
+# Process rather than with & because & has no timeout. Both streams are read asynchronously so a
+# full pipe cannot stall the child.
+function Invoke-Native([string] $File, [string[]] $Arguments, [int] $Seconds = 30) {
+    $info = New-Object System.Diagnostics.ProcessStartInfo
+    $info.FileName = $File
+    $info.Arguments = ConvertTo-CommandLine $Arguments
+    $info.UseShellExecute = $false
+    $info.CreateNoWindow = $true
+    $info.RedirectStandardOutput = $true
+    $info.RedirectStandardError = $true
+    # deskbar-cli writes UTF-8 without a BOM; the shells' own lines here are ASCII.
+    $info.StandardOutputEncoding = New-Object System.Text.UTF8Encoding $false
+    $info.StandardErrorEncoding = New-Object System.Text.UTF8Encoding $false
     $watch = [Diagnostics.Stopwatch]::StartNew()
-    $all = @(& $File @Arguments 2>&1)
+    try { $process = [System.Diagnostics.Process]::Start($info) }
+    catch { return [pscustomobject]@{ ExitCode = $null; TimedOut = $false; Stdout = [string[]]@(); Text = "could not start ${File}: $_"; Ms = 0 } }
+    $out = $process.StandardOutput.ReadToEndAsync()
+    $err = $process.StandardError.ReadToEndAsync()
+    $exited = $process.WaitForExit($Seconds * 1000)
+    if (-not $exited) {
+        # /T: cmd and powershell wait on a deskbar-cli of their own, which would hold the pipes open.
+        & "$env:SystemRoot\System32\taskkill.exe" /T /F /PID $process.Id 2>&1 | Out-Null
+    }
+    else { $process.WaitForExit() }
+    # A grandchild that outlived the kill can keep a pipe open; what arrived within 2 s is enough.
+    $stdout = if ($out.Wait(2000)) { $out.Result } else { '' }
+    $stderr = if ($err.Wait(2000)) { $err.Result } else { '' }
+    $text = (@($stdout.TrimEnd(), $stderr.TrimEnd()) | Where-Object { $_ }) -join "`n"
+    if (-not $exited) { $text = "$text`n(timed out after $Seconds s and was killed)".Trim() }
     [pscustomobject]@{
-        ExitCode = $LASTEXITCODE
-        Stdout   = [string[]]@($all | Where-Object { $_ -isnot [System.Management.Automation.ErrorRecord] } | ForEach-Object { "$_" })
-        Text     = ($all | ForEach-Object { "$_" }) -join "`n"
+        ExitCode = if ($exited) { $process.ExitCode } else { $null }
+        TimedOut = -not $exited
+        Stdout   = [string[]]@($stdout -split "`r?`n" | Where-Object { $_ -ne '' })
+        Text     = $text
         Ms       = $watch.ElapsedMilliseconds
     }
+}
+
+# An Appx cmdlet with a bound: run in a background job, abandoned after $Seconds with a throw the
+# calling check records as FAIL. Add-AppxPackage and Remove-AppxPackage wait on the deployment
+# service, and a stuck deployment would otherwise hold the run, and its cleanup, for ever. The job
+# is a Windows PowerShell child of this elevated process, so it is elevated and sees this
+# environment. Errors inside the job come back as a throw through Receive-Job.
+function Invoke-Bounded([string] $What, [scriptblock] $Script, [object[]] $Arguments, [int] $Seconds = 300) {
+    $job = Start-Job -ScriptBlock $Script -ArgumentList $Arguments
+    try {
+        if (-not (Wait-Job -Job $job -Timeout $Seconds)) {
+            Stop-Job -Job $job
+            throw "$What did not finish within $Seconds s and was abandoned."
+        }
+        Receive-Job -Job $job -ErrorAction Stop
+    }
+    finally { Remove-Job -Job $job -Force -ErrorAction SilentlyContinue }
 }
 
 # `deskbar <arguments>` through the execution alias, the command line a Store user has.
@@ -249,10 +305,9 @@ function ConvertFrom-Reply($Reply) {
 }
 
 # tasklist /apps lists every process that runs inside a package, with the package's full name.
-# No header (/nh), because the header row is localised.
+# No header (/nh), because the header row is localised. Bounded like every other command.
 function Get-PackagedProcessList {
-    $ErrorActionPreference = 'Continue'
-    @(& tasklist.exe /apps /fo csv /nh 2>$null | ConvertFrom-Csv -Header Image, Pid, Memory, Package)
+    @((Invoke-Native "$env:SystemRoot\System32\tasklist.exe" @('/apps', '/fo', 'csv', '/nh')).Stdout | ConvertFrom-Csv -Header Image, Pid, Memory, Package)
 }
 
 # One line saying everything that matters about a process for the identity questions.
@@ -273,6 +328,15 @@ function Format-Process([int] $Id) {
 function Get-PackagedDeskbar([string] $InstallDir = (Join-Path $env:ProgramFiles 'WindowsApps\Petre.Deskbar_')) {
     @(Get-Process -Name Deskbar, deskbar-cli -ErrorAction SilentlyContinue |
         Where-Object { $_.Path -and $_.Path.StartsWith($InstallDir, [StringComparison]::OrdinalIgnoreCase) })
+}
+
+# Deletes SpikeWs, the real virtual desktop check b created, through the running app, once.
+# Called on the happy path after the questions and again from the finally for a run that stopped
+# early, so the desktop does not outlive the spike on someone else's machine.
+function Remove-SpikeWorkspace {
+    $delete = Invoke-Deskbar @('delete', 'SpikeWs')
+    if ($delete.ExitCode -eq 0) { $script:spikeWsDeleted = $true }
+    Add-Check 'X' 'SpikeWs deleted again' $(if ($delete.ExitCode -eq 0) { 'INFO' } else { 'FAIL' }) @("exit $($delete.ExitCode) $($delete.Text)", 'if it failed, close the SpikeWs desktop by hand (Win+Tab)')
 }
 
 function Stop-PackagedDeskbar {
@@ -314,6 +378,80 @@ function Find-AppFile([string] $Path) {
         $candidates += Join-Path $private ('Roaming\' + $Path.Substring($roamingAppData.Length + 1))
     }
     @($candidates | Where-Object { Test-Path -LiteralPath $_ })
+}
+
+
+# ---------------------------------------------------------------------------------------------
+# Putting the real profile back. Three functions, called from the finally each in its own try, so
+# a restore that fails (a locked file, a registry error) does not skip the other two. Each writes
+# what it found and what it did into $Log and returns whether the run had changed anything.
+# ---------------------------------------------------------------------------------------------
+
+# %APPDATA%\Deskbar. A folder that existed before the run is never moved or deleted: only the files
+# the run added are removed, the ones it changed or deleted come back from the backup taken at the
+# start, and folders the run made and left empty go. A folder the run CREATED is moved whole into
+# evidence, so a later real install on that machine starts clean.
+function Restore-RealState($Before, $After, [System.Collections.Generic.List[string]] $Log) {
+    $when = { param($ticks) if ($ticks) { ([datetime]$ticks).ToString('yyyy-MM-dd HH:mm:ss.fff') + ' UTC' } else { '-' } }
+    $Log.Add("before: exists $($Before.StateExists), $($Before.StateHashes.Count) files, newest write $(& $when $Before.StateNewest)")
+    $Log.Add("after: exists $($After.StateExists), $($After.StateHashes.Count) files, newest write $(& $when $After.StateNewest)")
+    if ($After.StateExists -and -not $Before.StateExists) {
+        Move-Item -LiteralPath $realState -Destination (Join-Path $evidence 'real-appdata-Deskbar-created-by-run')
+        $Log.Add('it did not exist before, so it was moved into evidence\real-appdata-Deskbar-created-by-run')
+        return $true
+    }
+    if (-not $Before.StateExists) { return $false }
+    if (-not $After.StateExists) { $Log.Add('the folder is gone; restoring it from the backup') }
+
+    $added = @($After.StateHashes.Keys | Where-Object { -not $Before.StateHashes.ContainsKey($_) })
+    $changed = @($After.StateHashes.Keys | Where-Object { $Before.StateHashes.ContainsKey($_) -and $Before.StateHashes[$_] -ne $After.StateHashes[$_] })
+    $deleted = @($Before.StateHashes.Keys | Where-Object { -not $After.StateHashes.ContainsKey($_) })
+    $added | ForEach-Object { Remove-Item -LiteralPath (Join-Path $realState $_) -Force; $Log.Add("added by the run, removed: $_") }
+    @($changed + $deleted) | ForEach-Object {
+        $target = Join-Path $realState $_
+        New-Item -ItemType Directory -Path (Split-Path -Parent $target) -Force | Out-Null
+        Copy-Item -LiteralPath (Join-Path $profileBackup $_) -Destination $target -Force
+        $Log.Add("changed or deleted by the run, restored from the backup: $_")
+    }
+    # Deepest first, so a folder emptied by removing its empty child goes too. Relative paths cut
+    # against the folder's own FullName, as in Get-RealProfile.
+    $root = (Get-Item -LiteralPath $realState).FullName
+    @(Get-ChildItem -LiteralPath $realState -Recurse -Directory -Force | Sort-Object { $_.FullName.Length } -Descending) |
+        Where-Object { -not (Test-Path -LiteralPath (Join-Path $profileBackup $_.FullName.Substring($root.Length + 1))) -and
+            @(Get-ChildItem -LiteralPath $_.FullName -Force).Count -eq 0 } |
+        ForEach-Object { Remove-Item -LiteralPath $_.FullName -Force; $Log.Add("empty folder the run made, removed: $($_.FullName)") }
+    ($added.Count + $changed.Count + $deleted.Count) -gt 0 -or -not $After.StateExists
+}
+
+# The Run values Deskbar and TaskSpaces: one the run wrote is removed, one it changed or deleted
+# is written back as it was.
+function Restore-RunValues($Before, $After, [System.Collections.Generic.List[string]] $Log) {
+    $changedAny = $false
+    foreach ($name in @('Deskbar', 'TaskSpaces')) {
+        $was = $Before."Run$name"; $now = $After."Run$name"
+        $Log.Add("Run value ${name}: before '$was', after '$now'")
+        if ("$was" -ne "$now") {
+            $changedAny = $true
+            if ($null -eq $was) { Remove-ItemProperty -LiteralPath $runKey -Name $name; $Log.Add("removed the $name value the run wrote") }
+            else { Set-ItemProperty -LiteralPath $runKey -Name $name -Value $was; $Log.Add("put the $name value back") }
+        }
+    }
+    $changedAny
+}
+
+# The Start menu Deskbar.lnk: one the run created is removed, one it deleted or overwrote comes
+# back from the backup.
+function Restore-Shortcut($Before, $After, [System.Collections.Generic.List[string]] $Log) {
+    $Log.Add("Start menu Deskbar.lnk: before $($Before.Shortcut), after $($After.Shortcut), same content: $($Before.ShortcutHash -eq $After.ShortcutHash)")
+    if (-not $Before.Shortcut -and $After.Shortcut) {
+        Remove-Item -LiteralPath $startShortcut -Force
+        $Log.Add('removed the shortcut the run created')
+    }
+    elseif ($Before.Shortcut -and $Before.ShortcutHash -ne $After.ShortcutHash) {
+        Copy-Item -LiteralPath $shortcutBackup -Destination $startShortcut -Force
+        $Log.Add('put the shortcut back from the backup')
+    }
+    $Before.ShortcutHash -ne $After.ShortcutHash
 }
 
 # Copies an app file into evidence\ under a name of our choosing; returns where it was found.
@@ -466,15 +604,25 @@ function Get-RealProfile {
     $value = { param($name) if ($run -and $run.PSObject.Properties[$name]) { [string]$run.PSObject.Properties[$name].Value } else { $null } }
     # The folder itself too: deleting a file changes its time and no remaining file's.
     $files = @(if (Test-Path -LiteralPath $realState) { Get-Item -LiteralPath $realState; Get-ChildItem -LiteralPath $realState -Recurse -Force -ErrorAction SilentlyContinue })
+    # Every file by its path under the folder, with a hash of its content, so the end can tell an
+    # added file from a changed one from a deleted one, and restore exactly those.
+    # Cut against the folder's own FullName, not $realState as written: Get-ChildItem reports the
+    # form the folder resolves to (measured: long where $realState was 8.3), and a prefix of the
+    # wrong length cuts into the names.
+    $hashes = @{}
+    $files | Where-Object { -not $_.PSIsContainer } | ForEach-Object {
+        $hashes[$_.FullName.Substring($files[0].FullName.Length + 1)] = (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash
+    }
     [pscustomobject]@{
         StateExists   = Test-Path -LiteralPath $realState
         # In ticks, compared exactly (Measure-Object would round them through a double); 0 when
         # there is no folder.
         StateNewest   = [long](@($files | ForEach-Object { $_.LastWriteTimeUtc.Ticks }) + [long]0 | Sort-Object -Descending | Select-Object -First 1)
-        StateFiles    = @($files | ForEach-Object { $_.FullName })
+        StateHashes   = $hashes
         RunDeskbar    = & $value 'Deskbar'
         RunTaskSpaces = & $value 'TaskSpaces'
         Shortcut      = Test-Path -LiteralPath $startShortcut
+        ShortcutHash  = if (Test-Path -LiteralPath $startShortcut) { (Get-FileHash -LiteralPath $startShortcut -Algorithm SHA256).Hash } else { $null }
     }
 }
 
@@ -493,6 +641,11 @@ if ($facts.ShellUser -ne '(unknown)' -and $facts.ShellUser -ne $facts.User) {
 }
 Get-SessionDeskbar | ForEach-Object {
     $problems.Add("$($_.ProcessName) (process $($_.Id), $(if ($_.Path) { $_.Path } else { 'path unreadable' })) is running in this session; exit it first.")
+}
+# Checks c and c2 stop every Notepad and Character Map that appeared after `deskbar start`. One the
+# person had open would only be safe while it predates the start, so none may be open at all.
+Get-Process -Name notepad, charmap -ErrorAction SilentlyContinue | Where-Object { $_.SessionId -eq $sessionId } | ForEach-Object {
+    $problems.Add("$($_.ProcessName) (process $($_.Id)) is open; close it first, since the checks close the copies they start.")
 }
 Get-AppxPackage -Name Petre.Deskbar -ErrorAction SilentlyContinue | ForEach-Object {
     $problems.Add("$($_.PackageFullName) is already installed; remove it first (Get-AppxPackage Petre.Deskbar | Remove-AppxPackage).")
@@ -527,9 +680,15 @@ Start-Transcript -LiteralPath (Join-Path $evidence 'console.log') | Out-Null
 $trustAdded = $false
 $installAttempted = $false
 $answered = $false
+$spikeWsCreated = $false
+$spikeWsDeleted = $false
 $before = Get-RealProfile
-# A copy of the direct build's Start shortcut, so the end can put it back if the run deleted it.
-if ($before.Shortcut) { Copy-Item -LiteralPath $startShortcut -Destination (Join-Path $evidence 'Deskbar.lnk.backup') }
+# Copies of the real profile and the direct build's Start shortcut, taken before anything can
+# start the app, so the end can put back any file the run changed or deleted.
+$profileBackup = Join-Path $evidence 'real-appdata-Deskbar-backup'
+$shortcutBackup = Join-Path $evidence 'Deskbar.lnk.backup'
+if ($before.StateExists) { Copy-Item -LiteralPath $realState -Destination $profileBackup -Recurse }
+if ($before.Shortcut) { Copy-Item -LiteralPath $startShortcut -Destination $shortcutBackup }
 $traceOffset = if (Test-Path -LiteralPath $traceLog) { (Get-Item -LiteralPath $traceLog).Length } else { 0 }
 
 try {
@@ -547,7 +706,7 @@ try {
 
     $installAttempted = $true
     Invoke-Check 'I' "Add-AppxPackage $(Split-Path -Leaf $oldPackage)" {
-        Add-AppxPackage -Path $oldPackage
+        Invoke-Bounded 'Add-AppxPackage' { param($path) Add-AppxPackage -Path $path } @($oldPackage) | Out-Null
         $installed = @(Get-AppxPackage -Name Petre.Deskbar)
         @{
             Result   = if ($installed.Count -eq 1 -and $installed[0].InstallLocation -eq $paths.InstallDir -and (Test-Path -LiteralPath $paths.Alias)) { 'PASS' } else { 'FAIL' }
@@ -587,6 +746,9 @@ try {
     }
     Invoke-Check 'b' '`deskbar create SpikeWs` and `deskbar workspaces` lists it' {
         if (-not $answered) { return $skip }
+        # Counted as created once asked for, whatever the answer: a timed-out call may still have
+        # made it, and the cleanup's delete of a workspace that does not exist only fails harmlessly.
+        $script:spikeWsCreated = $true
         $create = Invoke-Deskbar @('create', 'SpikeWs')
         $list = Invoke-Deskbar @('workspaces')
         $names = @(ConvertFrom-Reply $list | ForEach-Object { Get-Field $_ 'name' })
@@ -681,7 +843,11 @@ try {
         $running = @(Get-PackagedDeskbar $paths.InstallDir | Where-Object { $_.ProcessName -eq 'Deskbar' } | ForEach-Object Id)
         $update['running before'] = if ($running) { $running -join ', ' } else { 'nothing (the update is then no test of a restart)' }
         $watch = [Diagnostics.Stopwatch]::StartNew()
-        try { Add-AppxPackage -Path $newPackage -ForceApplicationShutdown; $update['Add-AppxPackage'] = "returned after $([int]$watch.Elapsed.TotalSeconds) s" }
+        # The time includes the job's own start, a second or two.
+        try {
+            Invoke-Bounded 'Add-AppxPackage -ForceApplicationShutdown' { param($path) Add-AppxPackage -Path $path -ForceApplicationShutdown } @($newPackage) | Out-Null
+            $update['Add-AppxPackage'] = "returned after $([int]$watch.Elapsed.TotalSeconds) s"
+        }
         catch { $update['Add-AppxPackage'] = "threw after $([int]$watch.Elapsed.TotalSeconds) s: $_" }
         $update['installed now'] = (@(Get-AppxPackage -Name Petre.Deskbar | ForEach-Object PackageFullName) -join ', ')
         $back = @()
@@ -740,16 +906,23 @@ try {
         $manual.Add([pscustomobject]@{ Id = $question.Id; Question = $question.Text; Answer = $answer })
     }
 
-    # The workspace the checks created is a real virtual desktop; delete it while the app runs.
-    if ($reply) {
-        $delete = Invoke-Deskbar @('delete', 'SpikeWs')
-        Add-Check 'X' 'SpikeWs deleted again' $(if ($delete.ExitCode -eq 0) { 'INFO' } else { 'FAIL' }) @("exit $($delete.ExitCode) $($delete.Text)", 'if it failed, close that desktop by hand (Win+Tab)')
-    }
+    # The workspace the checks created is a real virtual desktop; delete it while the app runs. A
+    # run that stops before this gets a second try in the finally.
+    if ($reply -and $spikeWsCreated) { Remove-SpikeWorkspace }
 }
 catch { Add-Check 'Z' 'the run stopped early' 'FAIL' @("$_", $_.ScriptStackTrace) }
 finally {
     Write-Step 'Cleanup'
     # Each piece on its own, so one failing does not skip the rest or hide the report.
+    # SpikeWs first, while a Deskbar may still be running to delete it: a run that stopped between
+    # check b and the end of the questions never reached the happy-path delete.
+    if ($spikeWsCreated -and -not $spikeWsDeleted) {
+        try {
+            if (@(Get-PackagedDeskbar | Where-Object { $_.ProcessName -eq 'Deskbar' }).Count -gt 0) { Remove-SpikeWorkspace }
+            else { Add-Check 'X' 'SpikeWs deleted again' 'FAIL' @('no Deskbar was running to delete it; close the SpikeWs desktop by hand (Win+Tab)') }
+        }
+        catch { Write-Warning "Could not delete SpikeWs: $_ (close the SpikeWs desktop by hand with Win+Tab)" }
+    }
     try { Stop-PackagedDeskbar } catch { Write-Warning "Could not stop the app: $_" }
     try {
         $traces = @(Find-AppFile $traceLog)
@@ -757,54 +930,43 @@ finally {
         Add-Check 't' 'trace log copied' 'INFO' (@($traces | ForEach-Object { "from $_" }) + @("the real %TEMP% log was $traceOffset bytes before this run; this run's lines follow that offset"))
     }
     catch { Write-Warning "Could not copy the trace: $_" }
-    if ($installAttempted) {
-        try {
-            Get-AppxPackage -Name Petre.Deskbar | ForEach-Object { Remove-AppxPackage -Package $_.PackageFullName; Write-Host "Removed $($_.PackageFullName)" }
-        }
-        catch { Write-Warning "Could not remove the package: $_ (remove it with: Get-AppxPackage Petre.Deskbar | Remove-AppxPackage)" }
-    }
+    # The certificate trust goes BEFORE the package: the removal below can hang for minutes, and a
+    # run abandoned during it must not leave a test certificate trusted machine-wide.
     if ($trustAdded) {
         try { Remove-Item -LiteralPath "Cert:\LocalMachine\TrustedPeople\$($bundleState.Thumbprint)" -Force; Write-Host 'Removed the test certificate from TrustedPeople.' }
         catch { Write-Warning "Could not remove the test certificate: $_" }
     }
+    if ($installAttempted) {
+        try {
+            $removed = @(Invoke-Bounded 'Remove-AppxPackage' {
+                    param($name)
+                    Get-AppxPackage -Name $name | ForEach-Object { Remove-AppxPackage -Package $_.PackageFullName; $_.PackageFullName }
+                } @('Petre.Deskbar'))
+            $removed | ForEach-Object { Write-Host "Removed $_" }
+        }
+        catch { Write-Warning "Could not remove the package: $_ (remove it with: Get-AppxPackage Petre.Deskbar | Remove-AppxPackage)" }
+    }
 
-    # The real profile, compared with the snapshot and put back where the run changed it.
-    try {
-        $after = Get-RealProfile
-        $when = { param($ticks) if ($ticks) { ([datetime]$ticks).ToString('yyyy-MM-dd HH:mm:ss.fff') + ' UTC' } else { '-' } }
-        $folder = @("before: exists $($before.StateExists), newest write $(& $when $before.StateNewest)", "after: exists $($after.StateExists), newest write $(& $when $after.StateNewest)")
-        $touched = $after.StateExists -ne $before.StateExists -or $after.StateNewest -ne $before.StateNewest
-        if ($after.StateExists -and -not $before.StateExists) {
-            # Created by the run: moved into the evidence, so a later real install starts clean.
-            Move-Item -LiteralPath $realState -Destination (Join-Path $evidence 'real-appdata-Deskbar-created-by-run')
-            $folder += 'it did not exist before, so it was moved into evidence\real-appdata-Deskbar-created-by-run'
-        }
-        elseif ($after.StateExists) {
-            $added = @($after.StateFiles | Where-Object { $before.StateFiles -notcontains $_ })
-            $folder += @($added | ForEach-Object { "added by the run: $_" })
-            # The takeover marker would stop a later real Store install from taking over autostart.
-            $added | Where-Object { (Split-Path -Leaf $_) -eq 'packaged-first-start-done' } | ForEach-Object { Remove-Item -LiteralPath $_; $folder += "removed $_" }
-        }
+    # The real profile, compared with the snapshot and put back where the run changed it. Three
+    # separate pieces (the folder, the Run values, the shortcut), so one failing restore does not
+    # skip the others; each records what it found and what it did.
+    $after = $null
+    try { $after = Get-RealProfile } catch { Write-Warning "Could not read the real profile after the run: $_" }
+
+    if ($after) {
+        $folder = New-Object System.Collections.Generic.List[string]
+        $touched = $true
+        try { $touched = Restore-RealState $before $after $folder }
+        catch { $folder.Add("the folder restore stopped: $_; the backup is in evidence\real-appdata-Deskbar-backup") }
         Add-Check 'e' 'the real %APPDATA%\Deskbar was not created or modified' $(if ($touched) { 'FAIL' } else { 'PASS' }) $folder
 
-        $registry = @()
-        foreach ($name in @('Deskbar', 'TaskSpaces')) {
-            $was = $before."Run$name"; $now = $after."Run$name"
-            $registry += "Run value ${name}: before '$was', after '$now'"
-            if ("$was" -ne "$now") {
-                if ($null -eq $was) { Remove-ItemProperty -LiteralPath $runKey -Name $name; $registry += "removed the $name value the run wrote" }
-                else { Set-ItemProperty -LiteralPath $runKey -Name $name -Value $was; $registry += "put the $name value back" }
-            }
-        }
-        $registry += "Start menu Deskbar.lnk: before $($before.Shortcut), after $($after.Shortcut)"
-        if ($before.Shortcut -and -not $after.Shortcut) {
-            Copy-Item -LiteralPath (Join-Path $evidence 'Deskbar.lnk.backup') -Destination $startShortcut
-            $registry += 'put the shortcut back from the backup'
-        }
-        $same = "$($before.RunDeskbar)" -eq "$($after.RunDeskbar)" -and "$($before.RunTaskSpaces)" -eq "$($after.RunTaskSpaces)" -and $before.Shortcut -eq $after.Shortcut
-        Add-Check 'f' 'no Run value or Start shortcut was written or deleted by the run' $(if ($same) { 'PASS' } else { 'FAIL' }) $registry
+        $registry = New-Object System.Collections.Generic.List[string]
+        $runChanged = $true
+        $shortcutChanged = $true
+        try { $runChanged = Restore-RunValues $before $after $registry } catch { $registry.Add("the Run value restore stopped: $_") }
+        try { $shortcutChanged = Restore-Shortcut $before $after $registry } catch { $registry.Add("the shortcut restore stopped: $_") }
+        Add-Check 'f' 'no Run value or Start shortcut was written, changed or deleted by the run' $(if ($runChanged -or $shortcutChanged) { 'FAIL' } else { 'PASS' }) $registry
     }
-    catch { Write-Warning "Could not compare the real profile: $_" }
 
     # The report: everything above, in one file to bring back.
     try {
