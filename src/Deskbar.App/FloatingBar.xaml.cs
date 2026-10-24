@@ -4122,9 +4122,18 @@ public partial class FloatingBar : Window
             // window only, now that an expanded line has free space of its own (the right side of each line,
             // see LineOf), the same rule as an icon line. The LABEL keeps the old rule: the current caption
             // still rests in its colour, so a hover there would still make it blink.
+            //
+            // And the LANDING icon lights the wash as if it were free space. Petre: "when hovering over an
+            // active icon, it should highlight the entire workspace", "just like an empty space does", "because
+            // it's the same thing, isn't it?" It is: that icon is the window this workspace brings forward when
+            // you switch to it (WindowRow.WillActivate, the one with the halo, see FloatingBar.Marker.cs), so
+            // clicking it lands you exactly where clicking the free space does. Only that icon: any other one
+            // brings a different window forward, and the focused window's icon in your own row puts it away
+            // (see the icon's Click). It never wears WillActivate anyway, which the current desktop suppresses.
             var inRow = false;
             var onIcons = new HashSet<UIElement>();
-            void SyncHover() => Hover(label: !isCurrent && inRow, wash: inRow && onIcons.Count == 0 && (titled || !isCurrent));
+            static bool Lands(UIElement icon) => icon is FrameworkElement { DataContext: WindowRow { WillActivate: true } };
+            void SyncHover() => Hover(label: !isCurrent && inRow, wash: inRow && onIcons.All(Lands) && (titled || !isCurrent));
 
             container.MouseEnter += (_, _) => { inRow = true; SyncHover(); };
             container.MouseLeave += (_, _) => { inRow = false; SyncHover(); ClearInfo(); };

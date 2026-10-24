@@ -6,6 +6,7 @@ using Deskbar.App;
 using Deskbar.Core;
 using Deskbar.Core.Abstractions;
 using Deskbar.Core.Domain;
+using Deskbar.Core.Overview;
 using Deskbar.Core.Persistence;
 using Xunit.Abstractions;
 
@@ -194,6 +195,32 @@ public class FloatingBarLaneShadeTests(ITestOutputHelper output)
 
         // And out of the row altogether: off again.
         Raise(row, UIElement.MouseLeaveEvent);
+        Assert.Empty(bar.LitWashes(row));
+    });
+
+    // Petre: "when hovering over an active icon, it should highlight the entire workspace", "just like an empty
+    // space does", "because it's the same thing, isn't it?" The icon with the halo is the window the workspace
+    // brings forward when you switch to it, so clicking it and clicking the free space land you in the same
+    // place, and hovering it lights the same wash. Any other icon still puts the wash out.
+    [Fact]
+    public void Hovering_the_landing_icon_lights_the_row_like_its_free_space() => StaThread.Run(() =>
+    {
+        using var bar = TwoScreens(busyIcons: 2);
+        // App 1 comes to the front while we stand on Empty, which makes it Busy's landing window.
+        bar.Pulse();
+        var row = bar.RowContainer("Busy");
+        var icons = bar.Icons(row).ToList();
+        var landing = icons.Single(i => i is FrameworkElement { DataContext: WindowRow { WillActivate: true } });
+        var other = icons.First(i => !ReferenceEquals(i, landing));
+        static void Raise(UIElement target, RoutedEvent e) =>
+            target.RaiseEvent(new System.Windows.Input.MouseEventArgs(System.Windows.Input.Mouse.PrimaryDevice, 0) { RoutedEvent = e });
+
+        Raise(row, UIElement.MouseEnterEvent);
+        Raise(landing, UIElement.MouseEnterEvent);
+        Assert.Equal(3, bar.LitWashes(row).Count);
+
+        Raise(landing, UIElement.MouseLeaveEvent);
+        Raise(other, UIElement.MouseEnterEvent);
         Assert.Empty(bar.LitWashes(row));
     });
 
