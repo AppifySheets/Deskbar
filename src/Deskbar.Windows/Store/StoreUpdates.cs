@@ -9,6 +9,26 @@ namespace Deskbar.Windows.Store;
 // true when the Store marked any of the waiting packages as mandatory.
 public sealed record StoreUpdate(string Version, bool Mandatory);
 
+// What came of asking the Store to install an update, so the App switches on these four and never on the
+// Store's own StorePackageUpdateState (StoreUpdates.OutcomeOf is the one mapping).
+//
+//   Installed: the package was replaced. Never produced today, and kept so the App's switch names the case:
+//     a completed install that replaces the running package ends this process while it deploys (the spike
+//     watched the old process go and Windows start the new one), so no answer reaches this code.
+//   Deferred: the Store reported Completed and this process is still running to hear it, which means the
+//     package could not be replaced while Deskbar ran and Windows applies it at the next start.
+//   Cancelled: the user said no in the Store's own UI; there is nothing to tell them.
+//   Failed: anything else, with a message for the user.
+public abstract record StoreInstallOutcome
+{
+    StoreInstallOutcome() { }
+
+    public sealed record Installed : StoreInstallOutcome;
+    public sealed record Deferred : StoreInstallOutcome;
+    public sealed record Cancelled : StoreInstallOutcome;
+    public sealed record Failed(string Message) : StoreInstallOutcome;
+}
+
 // The Store copy's update check and install, in place of the GitHub download the direct build does.
 // Design: docs/superpowers/specs/2026-10-24-deskbar-store-packaging-design.md
 //
@@ -23,8 +43,9 @@ public sealed record StoreUpdate(string Version, bool Mandatory);
 // packaged. An unpackaged process has no package for the Store to update.
 //
 // Never throws. Every failure (no Store, offline, a COM error, the Store taking too long to answer) comes
-// back as a Result.Failure carrying the message, so the background check can stay silent about it and
-// the manual check can say it out loud, the same two manners the GitHub check has.
+// back as a Result.Failure (for the install, a StoreInstallOutcome.Failed) carrying the message, so the
+// background check can stay silent about it and the manual check can say it out loud, the same two manners
+// the GitHub check has.
 //
 // Cannot be exercised on a development machine: an unpackaged process has nothing for the Store to look
 // up. It is covered by the build and by the spike, which runs it from an installed package.
@@ -60,9 +81,9 @@ public static class StoreUpdates
     // owned by ownerHwnd, which is why a window matters here: without one the Store has nothing to put
     // its UI in front of.
     //
-    // When it works, this method never returns: the Store ends this process to replace the package. So
-    // any result that comes back is a failure, and the state the Store reports is named in it (Canceled
-    // when the user said no in the Store's UI, an error state otherwise), for the App to show.
+    // When it replaces the package, this method never returns: the Store ends this process to do it. So an
+    // answer that does come back is a deferred install, a cancel, or a failure (OutcomeOf), for the App to
+    // show or not.
     //
     // The list is fetched again rather than carried over from NewerAsync. The offer can sit on screen for
     // hours before anyone answers it, and a StorePackageUpdate from that long ago may no longer describe
@@ -74,10 +95,10 @@ public static class StoreUpdates
     //
     // A zero ownerHwnd is refused before the Store is asked: the Store's install UI needs a window to sit
     // in front of, and compatibility mode, the one state with no bar, has none to give it.
-    public static async Task<Result> InstallAsync(IntPtr ownerHwnd)
+    public static async Task<StoreInstallOutcome> InstallAsync(IntPtr ownerHwnd)
     {
         if (ownerHwnd == IntPtr.Zero)
-            return Result.Failure("The Microsoft Store needs a Deskbar window to show its update in, and there is no bar in compatibility mode.");
+            return new StoreInstallOutcome.Failed("The Microsoft Store needs a Deskbar window to show its update in, and there is no bar in compatibility mode.");
 
         try
         {
@@ -87,20 +108,28 @@ public static class StoreUpdates
             // to it.
             var updates = await PendingAsync(context);
             if (updates.Count == 0)
-                return Result.Failure("The Microsoft Store has no update waiting for Deskbar any more.");
+                return new StoreInstallOutcome.Failed("The Microsoft Store has no update waiting for Deskbar any more.");
 
             // No timeout on the install itself: it is a download of unknown size behind a UI the user is
             // answering, and cutting it short would only abandon a Store operation that carries on anyway.
-            var outcome = await context.RequestDownloadAndInstallStorePackageUpdatesAsync(updates).AsTask();
-            return outcome.OverallState == StorePackageUpdateState.Completed
-                ? Result.Success()
-                : Result.Failure($"The Microsoft Store did not install the update ({outcome.OverallState}).");
+            var result = await context.RequestDownloadAndInstallStorePackageUpdatesAsync(updates).AsTask();
+            return OutcomeOf(result.OverallState);
         }
         catch (Exception ex)
         {
-            return Result.Failure($"{ex.GetType().Name}: {ex.Message}");
+            return new StoreInstallOutcome.Failed($"{ex.GetType().Name}: {ex.Message}");
         }
     }
+
+    // The Store's overall state, as the App's four cases. Only ever called with the answer to a request that
+    // has come back, which is why Completed is Deferred and never Installed (see StoreInstallOutcome). Pure,
+    // so Deskbar.Windows.Tests pins it without a Store.
+    internal static StoreInstallOutcome OutcomeOf(StorePackageUpdateState overall) => overall switch
+    {
+        StorePackageUpdateState.Completed => new StoreInstallOutcome.Deferred(),
+        StorePackageUpdateState.Canceled => new StoreInstallOutcome.Cancelled(),
+        _ => new StoreInstallOutcome.Failed($"The Microsoft Store did not install the update ({overall})."),
+    };
 
     // The app's own package and any optional packages, each with a newer version in the Store. The
     // timeout covers only this question, never the install, which can rightly take minutes.

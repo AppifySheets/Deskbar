@@ -420,21 +420,38 @@ public partial class App : Application
         updating = true;
         ClickTrace.Write($"update from the Store requested{(storeUpdate is { } update ? $" ({update.Version})" : "")}");
 
-        var installed = await StoreUpdates.InstallAsync(barHandle).ConfigureAwait(true);
+        var outcome = await StoreUpdates.InstallAsync(barHandle).ConfigureAwait(true);
 
-        // Reached only when the Store did NOT end this process, which on success it does to replace the
-        // package. So this is a cancel in the Store's own UI or an error, and the user, who asked, is told.
+        // Reached only when the Store did NOT end this process, which it does when it replaces the package.
+        // StoreUpdates.OutcomeOf has already turned the Store's state into one of four cases:
+        //   Cancelled: the user said no in the Store's own UI, which they just saw, so nothing more is shown.
+        //   Deferred: the Store downloaded it but could not replace a running package; it lands at the next
+        //     start, and the user, who asked, is told so rather than left wondering why nothing changed.
+        //   Installed: never produced today (see StoreInstallOutcome); traced only, since the Store's restart
+        //     is what the user would see.
+        //   Failed: the old warning, with the Store's reason.
         updating = false;
-        if (installed.IsSuccess)
+        switch (outcome)
         {
-            ClickTrace.Write("update from the Store: the Store reported success but Deskbar is still running");
-            return;
+            case StoreInstallOutcome.Cancelled:
+                ClickTrace.Write("update from the Store: cancelled in the Store's own window");
+                break;
+            case StoreInstallOutcome.Installed:
+                ClickTrace.Write("update from the Store: installed, waiting for the Store to restart Deskbar");
+                break;
+            case StoreInstallOutcome.Deferred:
+                ClickTrace.Write("update from the Store: downloaded, applied at the next start");
+                MessageBox.Show(
+                    "The update is downloaded and will be applied the next time Deskbar starts.",
+                    "Deskbar", MessageBoxButton.OK, MessageBoxImage.Information);
+                break;
+            case StoreInstallOutcome.Failed failed:
+                ClickTrace.Write($"update from the Store failed: {failed.Message}");
+                MessageBox.Show(
+                    $"Could not update from the Store:\n{failed.Message}",
+                    "Deskbar", MessageBoxButton.OK, MessageBoxImage.Warning);
+                break;
         }
-
-        ClickTrace.Write($"update from the Store failed: {installed.Error}");
-        MessageBox.Show(
-            $"Could not update from the Store:\n{installed.Error}",
-            "Deskbar", MessageBoxButton.OK, MessageBoxImage.Warning);
     }
 
     // Petre: "i clicked it, it disappeared."
