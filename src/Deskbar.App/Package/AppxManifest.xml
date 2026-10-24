@@ -1,0 +1,116 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  The Microsoft Store package's manifest. scripts/pack-store.ps1 copies it into the staged
+  package folder, replacing __VERSION__ with VersionPrefix plus ".0" (the Store wants four parts,
+  the last one 0), and checks Name, Publisher and PublisherDisplayName against the Store's values
+  before MakeAppx runs. Hand-written on purpose: no packaging project, no Visual Studio. The
+  reasoning for every choice below is in "The manifest" section of
+  docs/superpowers/specs/2026-10-24-deskbar-store-packaging-design.md.
+
+  Nothing in this folder is part of the direct build: Deskbar.App.csproj excludes Package\**.
+-->
+<Package
+  xmlns="http://schemas.microsoft.com/appx/manifest/foundation/windows10"
+  xmlns:uap="http://schemas.microsoft.com/appx/manifest/uap/windows10"
+  xmlns:uap3="http://schemas.microsoft.com/appx/manifest/uap/windows10/3"
+  xmlns:desktop="http://schemas.microsoft.com/appx/manifest/desktop/windows10"
+  xmlns:rescap="http://schemas.microsoft.com/appx/manifest/foundation/windows10/restrictedcapabilities"
+  xmlns:virtualization="http://schemas.microsoft.com/appx/manifest/virtualization/windows10"
+  IgnorableNamespaces="uap uap3 desktop rescap virtualization">
+
+  <!-- The Store's identity for Deskbar, verbatim from Partner Center (package family name
+       Petre.Deskbar_n8ch8v53xw03y). A one-character difference and the Store refuses the upload. -->
+  <Identity
+    Name="Petre.Deskbar"
+    Publisher="CN=804EE50D-C32E-4285-AAF6-E1C851F9FCEF"
+    Version="__VERSION__"
+    ProcessorArchitecture="x64" />
+
+  <Properties>
+    <DisplayName>Deskbar</DisplayName>
+    <PublisherDisplayName>AppifySheets</PublisherDisplayName>
+    <!-- Unqualified names everywhere: resources.pri (built by MakePri from priconfig.xml)
+         resolves them to the scale and target-size variants under Images\. -->
+    <Logo>Images\StoreLogo.png</Logo>
+
+    <!-- Virtualisation off for exactly the places Deskbar writes, so the packaged app reads and
+         writes the REAL %APPDATA%\Deskbar (its state, shared with the direct build so people can
+         switch between the two), the REAL %APPDATA%\TaskSpaces (the 1.x profile the migration
+         reads) and the REAL HKCU Run key (where the direct build's autostart value lives and gets
+         cleaned up). Virtualised, each of those would silently fork into a private package copy.
+         The scoped form keeps every other write virtualised; it needs the unvirtualizedResources
+         capability below and Windows 11, which TargetDeviceFamily already requires.
+
+         Fallback if MakeAppx or the Store ever rejects the scoped form (declare the desktop6
+         namespace, add it to IgnorableNamespaces, and replace both elements below with):
+           <desktop6:FileSystemWriteVirtualization>disabled</desktop6:FileSystemWriteVirtualization>
+           <desktop6:RegistryWriteVirtualization>disabled</desktop6:RegistryWriteVirtualization>
+         That turns virtualisation off for every write, which is more than Deskbar needs. -->
+    <virtualization:FileSystemWriteVirtualization>
+      <virtualization:ExcludedDirectories>
+        <virtualization:ExcludedDirectory>$(KnownFolder:RoamingAppData)\Deskbar</virtualization:ExcludedDirectory>
+        <virtualization:ExcludedDirectory>$(KnownFolder:RoamingAppData)\TaskSpaces</virtualization:ExcludedDirectory>
+      </virtualization:ExcludedDirectories>
+    </virtualization:FileSystemWriteVirtualization>
+    <virtualization:RegistryWriteVirtualization>
+      <virtualization:ExcludedKeys>
+        <virtualization:ExcludedKey>HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\Run</virtualization:ExcludedKey>
+      </virtualization:ExcludedKeys>
+    </virtualization:RegistryWriteVirtualization>
+  </Properties>
+
+  <!-- Windows 11 (22000) and up, tested through 24H2 (26100). The project's TFM stays
+       net10.0-windows10.0.19041.0; this is the package's floor, not the build's. -->
+  <Dependencies>
+    <TargetDeviceFamily Name="Windows.Desktop" MinVersion="10.0.22000.0" MaxVersionTested="10.0.26100.0" />
+  </Dependencies>
+
+  <Resources>
+    <Resource Language="en-us" />
+  </Resources>
+
+  <Applications>
+    <!-- A full-trust Win32 app. This EntryPoint form and the uap10 RuntimeBehavior/TrustLevel pair
+         are alternatives, not a pair; this one is used unless MakeAppx or the Store rejects it.
+         The exe is Deskbar.exe, as in the direct build, so StartupRegistration.IsTheApp and the
+         pack:// URIs are unchanged. -->
+    <Application Id="Deskbar" Executable="Deskbar.exe" EntryPoint="Windows.FullTrustApplication">
+      <!-- BackgroundColor is the tile colour the plated Square44x44Logo images are drawn on, so a
+           plated icon and its tile never disagree. -->
+      <uap:VisualElements
+        DisplayName="Deskbar"
+        Description="The taskbar for your virtual desktops: name them, see every window on one bar."
+        BackgroundColor="#1F1F1F"
+        Square150x150Logo="Images\Square150x150Logo.png"
+        Square44x44Logo="Images\Square44x44Logo.png">
+        <uap:DefaultTile Wide310x150Logo="Images\Wide310x150Logo.png" />
+      </uap:VisualElements>
+
+      <Extensions>
+        <!-- Start with Windows, on by default: a package has a fixed path to start, unlike the
+             portable direct build, whose box defaults to off for that reason alone. The person
+             turns it off in Manage or in Settings, Apps, Startup. -->
+        <desktop:Extension Category="windows.startupTask" Executable="Deskbar.exe" EntryPoint="Windows.FullTrustApplication">
+          <desktop:StartupTask TaskId="Deskbar" Enabled="true" DisplayName="Deskbar" />
+        </desktop:Extension>
+
+        <!-- The `deskbar` command on PATH, through %LOCALAPPDATA%\Microsoft\WindowsApps\deskbar.exe.
+             It runs deskbar-cli.exe, the console control client, not Deskbar.exe: a shell waits for
+             a console exe and gets its output and exit code, and loses both with a GUI exe. -->
+        <uap3:Extension Category="windows.appExecutionAlias" Executable="deskbar-cli.exe" EntryPoint="Windows.FullTrustApplication">
+          <uap3:AppExecutionAlias>
+            <desktop:ExecutionAlias Alias="deskbar.exe" />
+          </uap3:AppExecutionAlias>
+        </uap3:Extension>
+      </Extensions>
+    </Application>
+  </Applications>
+
+  <!-- Both restricted. runFullTrust: a tray utility that drives Windows' virtual desktops through
+       COM, registers a global hotkey and an app bar. unvirtualizedResources: required by the
+       scoped virtualisation exclusions above. -->
+  <Capabilities>
+    <rescap:Capability Name="runFullTrust" />
+    <rescap:Capability Name="unvirtualizedResources" />
+  </Capabilities>
+</Package>

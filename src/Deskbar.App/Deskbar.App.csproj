@@ -49,6 +49,12 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <UseWPF>true</UseWPF>
+    <!-- Package\ holds the Microsoft Store package's manifest, resource index config and tile
+         images. scripts/pack-store.ps1 reads them from source; they are not part of this project's
+         build. DefaultItemExcludes takes them out of every default glob at once (Compile, None,
+         Content, EmbeddedResource, Page and, with WPF, Resource), so nothing from the folder is
+         compiled, embedded or copied into the direct build's exe or output. -->
+    <DefaultItemExcludes>$(DefaultItemExcludes);Package\**</DefaultItemExcludes>
   </PropertyGroup>
 
 </Project>

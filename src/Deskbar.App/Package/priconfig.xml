@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  The resource index configuration for the Store package. scripts/pack-store.ps1 (through
+  Invoke-StorePack in StorePackaging.psm1) runs
+    MakePri.exe new /pr <pri root> /cf priconfig.xml /mn <stage>\AppxManifest.xml /of <stage>\resources.pri
+  where <pri root> is a scratch folder holding nothing but a copy of Images\, and the package name
+  comes from the staged manifest.
+
+  Why an index at all: the manifest names Images\Square44x44Logo.png and friends, unqualified, and
+  no file by that name exists. The files are qualified (scale-200, targetsize-16_altform-unplated,
+  ...), and the shell resolves the unqualified name to the best variant only through
+  resources.pri. Without it the taskbar and Alt+Tab icons come out plated or blank.
+
+  Why a root holding only Images\, and startIndexAt="\": resource names are relative to
+  startIndexAt, not to root (measured with MakePri 10.0.22621: startIndexAt="Images" produced
+  Files/Square44x44Logo.png, which the manifest's Images\Square44x44Logo.png does not find). So
+  indexing has to start at the folder ABOVE Images\, and if that were the stage, every published
+  DLL would become a resource too.
+
+  No <packaging> section: that splits resources into separate resource packages for a bundle, and
+  this is one .msix with every variant inside it.
+-->
+<resources targetOsVersion="10.0.0" majorVersion="1">
+  <index root="\" startIndexAt="\">
+    <default>
+      <qualifier name="Language" value="en-US" />
+      <qualifier name="Contrast" value="standard" />
+      <qualifier name="Scale" value="100" />
+      <qualifier name="HomeRegion" value="001" />
+      <qualifier name="TargetSize" value="256" />
+      <qualifier name="LayoutDirection" value="LTR" />
+      <qualifier name="Theme" value="dark" />
+      <qualifier name="AlternateForm" value="" />
+      <qualifier name="DXFeatureLevel" value="DX9" />
+      <qualifier name="Configuration" value="" />
+      <qualifier name="DeviceFamily" value="Universal" />
+      <qualifier name="Custom" value="" />
+    </default>
+    <!-- Qualifiers come from file names (Square44x44Logo.scale-200.png), split on the dot. -->
+    <indexer-config type="folder" foldernameAsQualifier="true" filenameAsQualifier="true" qualifierDelimiter="." />
+  </index>
+</resources>
