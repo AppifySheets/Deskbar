@@ -939,6 +939,9 @@ Before the first signed release:
 1. Bump `VersionPrefix` in `Directory.Build.props` in the pull request that earns the
    version. Give the PR description a `## Release notes` section written for the people
    updating: the release takes its notes from that section, up to the next `##` heading.
+   The Version workflow fails a pull request that changes anything under `src/` without
+   raising `VersionPrefix` above its base's. Label it `no-release` when the change must not
+   ship on its own yet; it then goes out with the next bump.
 2. Merge it. The merge starts the Release workflow by itself: it builds the version
    `VersionPrefix` now names and creates release `vx.y.z` with an unsigned exe, named
    `Deskbar-x.y.z-win-x64.exe`, so `Deskbar-2.0.0-win-x64.exe` for 2.0.0. A merge that

@@ -112,7 +112,11 @@ object.
   `## Release notes` section: the merge releases it, as the Releasing section of `README.md`
   and the Current state bullet above describe, never a release created by hand. Petre, ending
   it: "change that convention, include version bump with prs". A bump that must NOT ship yet
-  must not be merged yet: every merged bump is a release.
+  must not be merged yet: every merged bump is a release. This holds for every pull request that
+  changes `src/`, whoever opens it and for whomever their session works: do not leave the bump
+  out and ask the maintainer in the description. The `Version` workflow (`version.yml`) fails a
+  pull request that changes `src/` without raising `VersionPrefix` above its base's; the
+  `no-release` label is the only way past it, for a change that must not ship on its own yet.
 - **Built on Windows' virtual desktops**, never `ShowWindow(SW_HIDE)`. Hidden windows can be
   orphaned by a crash; a virtual desktop cannot lose one. This is also why the app is
   Windows-only by design rather than by omission.

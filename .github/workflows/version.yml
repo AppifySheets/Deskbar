@@ -1,0 +1,108 @@
+# Fails a pull request that changes the app without bumping the version.
+#
+# WHY this exists. Here a merge that raises VersionPrefix releases itself (release.yml), and the
+# convention is that the bump rides in the pull request that earns it (CLAUDE.md, "A version bump
+# rides in the PR that earns it", and README.md, "Releasing"). That rule lived only in prose, and
+# prose lost: #281 fixed deskbar.cmd on a Georgian PC, its author's agent read the rule, left the
+# bump out on purpose and asked in the description whether to add it, and the pull request was
+# merged four minutes later with the question unanswered. The fix sat on main in no release until
+# a separate commit bumped the version. A red check is answered before the merge, by whoever
+# opened the pull request, person or agent, whatever they made of the prose.
+#
+# WHAT counts as "changes the app": any file under src/, added, edited, deleted, or renamed into
+# or out of it. Tests, docs, scripts and workflows ship nothing, so they need no release.
+#
+# WHAT counts as "bumped": VersionPrefix at the branch head is higher than VersionPrefix on the
+# pull request's base branch as it is NOW. The base and not the releases list, because every bump
+# that reaches main is released (or drafted, once signing is on), so main's VersionPrefix is
+# always the newest version that has, or is about to have, a release; and drafts are not visible
+# to this workflow's token anyway. For a pull request stacked on another one, the base is that
+# one's branch, so the upper pull request has to bump above the lower one, which is right: each
+# merge to main is its own release.
+#
+# THE WAY OUT is the `no-release` label, for a change under src/ that must not ship on its own
+# yet. Remember that the label only defers the release: the change goes out with the next bump.
+#
+# WHY a file of its own rather than a job in ci.yml: this check has to rerun when the label is
+# added or removed, and putting `labeled` on ci.yml would rebuild and retest on Windows every
+# time someone touched a label.
+name: Version
+
+on:
+  pull_request:
+    # opened/reopened/synchronize: the usual set, a new pull request or new commits.
+    # labeled/unlabeled: adding or removing `no-release` must turn the check green or red.
+    # edited: fires when the pull request is retargeted to another base (as the next pull request
+    # in a stack is when the one below it merges and its branch is deleted). It also fires on
+    # title and description edits; the job is a few API calls on Linux, so that costs nothing.
+    types: [opened, reopened, synchronize, labeled, unlabeled, edited]
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  bumped:
+    # Linux and no checkout: everything it needs comes from the GitHub API in a few seconds.
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Require a version bump when the app changes
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          # Through env rather than pasted into the script, so a branch name cannot become shell.
+          PR: ${{ github.event.pull_request.number }}
+          # The base by name, so its VersionPrefix is read as the branch is NOW (the same reason
+          # ci.yml's `rebased` job asks about the base as it is now). The head by commit, the
+          # commit that reaches main when the merge fast-forwards.
+          BASE: ${{ github.base_ref }}
+          HEAD: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+
+          # 1. The opt-out. Read live rather than from the event, so re-running the job after a
+          #    label change sees the change.
+          labels=$(gh api "repos/$GITHUB_REPOSITORY/issues/$PR/labels" --jq '.[].name')
+          if grep -qx 'no-release' <<<"$labels"; then
+            echo "::notice::Labelled no-release: no version bump required. The change ships with the next pull request that bumps VersionPrefix."
+            exit 0
+          fi
+
+          # 2. Does it change the app? Every file the pull request touches, plus the old name of a
+          #    renamed one, so a file moved out of src/ counts too. --paginate because the API
+          #    returns 30 files per page.
+          changed=$(gh api --paginate "repos/$GITHUB_REPOSITORY/pulls/$PR/files" \
+            --jq '.[] | .filename, (.previous_filename // empty)')
+          app=$(grep '^src/' <<<"$changed" | sort -u || true)
+          if [ -z "$app" ]; then
+            echo "Nothing under src/ changes, so this pull request releases nothing and needs no bump."
+            exit 0
+          fi
+
+          # 3. VersionPrefix on each side, read from Directory.Build.props through the contents
+          #    API (raw). -f ref= lets gh encode the branch name, slashes and all.
+          version_at() {
+            gh api -X GET -H "Accept: application/vnd.github.raw" \
+              "repos/$GITHUB_REPOSITORY/contents/Directory.Build.props" -f ref="$1" \
+              | sed -n 's:.*<VersionPrefix>[[:space:]]*\([^<[:space:]]*\)[[:space:]]*</VersionPrefix>.*:\1:p'
+          }
+          base_version=$(version_at "$BASE")
+          head_version=$(version_at "$HEAD")
+          if [ -z "$base_version" ] || [ -z "$head_version" ]; then
+            echo "::error::Could not read <VersionPrefix> from Directory.Build.props (base '$BASE': '$base_version', head: '$head_version')."
+            exit 1
+          fi
+
+          # 4. Higher, not just different: sort -V orders x.y.z numerically, so 2.10.0 is above
+          #    2.9.0. A lower version would collide with a release that already exists.
+          highest=$(printf '%s\n%s\n' "$base_version" "$head_version" | sort -V | tail -n 1)
+          if [ "$head_version" != "$base_version" ] && [ "$highest" = "$head_version" ]; then
+            echo "VersionPrefix goes from $base_version on $BASE to $head_version, so the merge releases v$head_version."
+            exit 0
+          fi
+
+          echo "This pull request changes the app:"
+          sed 's/^/  /' <<<"$app"
+          echo "::error::This pull request changes files under src/, but VersionPrefix in Directory.Build.props is $head_version, not above $base_version on $BASE. A merge that changes the app ships as a release, so raise VersionPrefix in this branch and give the description a '## Release notes' section (README.md, Releasing). If this change must not ship yet, add the no-release label instead."
+          exit 1
