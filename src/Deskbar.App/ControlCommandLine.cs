@@ -106,18 +106,26 @@ static class ControlCommandLine
         var content = ShimContent(exePath, aliasTarget);
         if (File.Exists(path) && File.ReadAllText(path) == content) return;
         Directory.CreateDirectory(folder);
-        // In the OEM code page, because that is what cmd reads a batch file in. ASCII would turn any
-        // non-ASCII letter in the path into a question mark and the shim would point nowhere.
-        File.WriteAllText(path, content, Oem);
+        // In the system's OEM code page, because that is what cmd reads a batch file in (the console's
+        // default, whatever the user's culture says). ASCII would turn any non-ASCII letter in the path
+        // into a question mark and the shim would point nowhere.
+        File.WriteAllText(path, content, ShimEncoding((int)GetOEMCP()));
     }
 
-    static Encoding Oem
+    // Not the culture's TextInfo.OEMCodePage: a Unicode-only culture such as Georgian (ka-GE) has none and
+    // reports 1, GetEncoding(1) throws, and the shim was never written. Measured with a ka-GE user on a
+    // 437 system. Falls back to UTF-8 where the number is no encoding (or is one with a byte order mark,
+    // as 65001 is when the system uses UTF-8): a BOM ahead of the first `@rem` would break that line.
+    public static Encoding ShimEncoding(int codePage)
     {
-        get
+        Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
+        try
         {
-            Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
-            return Encoding.GetEncoding(System.Globalization.CultureInfo.CurrentCulture.TextInfo.OEMCodePage);
+            var encoding = Encoding.GetEncoding(codePage);
+            if (encoding.GetPreamble().Length == 0) return encoding;
         }
+        catch (Exception ex) when (ex is ArgumentException or NotSupportedException) { }
+        return new UTF8Encoding(encoderShouldEmitUTF8Identifier: false);
     }
 
     const int AttachParentProcess = -1;
@@ -127,4 +135,7 @@ static class ControlCommandLine
 
     [DllImport("kernel32.dll", SetLastError = true)]
     static extern IntPtr GetStdHandle(int standardHandle);
+
+    [DllImport("kernel32.dll")]
+    static extern uint GetOEMCP();
 }

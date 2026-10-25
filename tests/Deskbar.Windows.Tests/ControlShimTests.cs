@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.IO;
 using Deskbar.App;
 
@@ -83,4 +84,45 @@ public class ControlShimTests
             if (Directory.Exists(folder)) Directory.Delete(folder, recursive: true);
         }
     }
+
+    // A Georgian user's culture has no OEM code page of its own (TextInfo.OEMCodePage is 1), and the
+    // shim was never written. The system's code page is what cmd reads, not the culture's.
+    [Fact]
+    public void A_culture_without_an_oem_code_page_does_not_stop_the_shim_being_written()
+    {
+        var folder = Path.Combine(Path.GetTempPath(), $"ts-shim-{Guid.NewGuid():N}");
+        var culture = CultureInfo.CurrentCulture;
+        try
+        {
+            CultureInfo.CurrentCulture = new CultureInfo("ka-GE");
+
+            ControlCommandLine.WriteShim(folder, @"C:\Tools\Deskbar.exe");
+
+            Assert.True(File.Exists(Path.Combine(folder, "deskbar.cmd")));
+        }
+        finally
+        {
+            CultureInfo.CurrentCulture = culture;
+            if (Directory.Exists(folder)) Directory.Delete(folder, recursive: true);
+        }
+    }
+
+    // 1 is no encoding at all, and 65001 is UTF-8, which Encoding.GetEncoding hands out with a BOM that
+    // would sit ahead of the first `@rem`. Both get a plain encoding instead.
+    [Theory]
+    [InlineData(1)]
+    [InlineData(437)]
+    [InlineData(65001)]
+    public void The_shim_encoding_writes_no_BOM_and_keeps_a_non_ASCII_path(int codePage)
+    {
+        var encoding = ControlCommandLine.ShimEncoding(codePage);
+        var path = @"C:\Tools\Grüße\Deskbar.exe";
+
+        Assert.Empty(encoding.GetPreamble());
+        Assert.Equal(path, encoding.GetString(encoding.GetBytes(path)));
+    }
+
+    [Fact]
+    public void A_real_code_page_is_used_as_it_is() =>
+        Assert.Equal(437, ControlCommandLine.ShimEncoding(437).CodePage);
 }
