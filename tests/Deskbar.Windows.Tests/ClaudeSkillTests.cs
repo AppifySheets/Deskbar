@@ -86,6 +86,62 @@ public sealed class ClaudeSkillTests : IDisposable
         Assert.Null(System.Text.Json.Nodes.JsonNode.Parse(json)!["hooks"]!["Notification"]);
     }
 
+    // An entry an older Deskbar wrote, `cmd.exe /c "...claude-hook.cmd"`, never ran under Claude Code (see ClaudeSkill's
+    // header). The next start swaps it for the current command, once, and leaves the bell beside it alone.
+    [Fact]
+    public void An_older_cmd_exe_hook_is_replaced()
+    {
+        Directory.CreateDirectory(Path.Combine(home, ".claude"));
+        var old = $"cmd.exe /c \"{Path.Combine(Deskbar, "claude-hook.cmd")}\"";
+        File.WriteAllText(Settings, $$"""
+            {
+              "hooks": {
+                "Stop": [
+                  { "matcher": "", "hooks": [ { "type": "command", "command": "cmd.exe /c C:\\bell.bat" } ] },
+                  { "hooks": [ { "type": "command", "command": {{System.Text.Json.JsonSerializer.Serialize(old)}} } ] }
+                ]
+              }
+            }
+            """);
+
+        ClaudeSkill.Sync(true, home, Deskbar);
+
+        var json = File.ReadAllText(Settings);
+        Assert.Equal([@"cmd.exe /c C:\bell.bat", ClaudeSkill.HookCommand(Path.Combine(Deskbar, "claude-hook.cmd"))],
+            Commands(json, "Stop"));
+    }
+
+    // The command Deskbar writes, run the way Claude Code runs a hook on Windows: through Git Bash, with the hook's
+    // JSON on stdin and CLAUDE_PROJECT_DIR set. A stand-in deskbar.cmd records what it was called with. The old
+    // `cmd.exe /c` command fails this: Git Bash turns /c into C:/, cmd.exe sits at a prompt eating stdin, and the
+    // stand-in is never called.
+    [Fact]
+    public void The_hook_reaches_deskbar_when_git_bash_runs_it()
+    {
+        Directory.CreateDirectory(Path.Combine(home, ".claude"));
+        ClaudeSkill.Sync(true, home, Deskbar);
+        var called = Path.Combine(home, "called.txt");
+        File.WriteAllText(Path.Combine(Deskbar, "deskbar.cmd"), $"@echo %*> \"{called}\"\r\n");
+        var project = Path.Combine(home, "My Project");
+        var command = Commands(File.ReadAllText(Settings), "Stop").Single(c => c.Contains("claude-hook.cmd"));
+
+        // Git for Windows' own bash, by path: a bare `bash` on PATH can be WSL's, which is not what Claude Code uses.
+        var bash = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "Git", "bin", "bash.exe");
+        Assert.True(File.Exists(bash), $"Git Bash not found at {bash}");
+        var start = new System.Diagnostics.ProcessStartInfo(bash) { RedirectStandardInput = true, CreateNoWindow = true };
+        start.ArgumentList.Add("-c");
+        start.ArgumentList.Add(command);
+        start.Environment["CLAUDE_PROJECT_DIR"] = project;
+        using var hook = System.Diagnostics.Process.Start(start)!;
+        hook.StandardInput.Write("""{"hook_event_name":"Stop"}""");
+        hook.StandardInput.Close();
+        Assert.True(hook.WaitForExit(30_000), "the hook did not finish");
+
+        Assert.Equal(0, hook.ExitCode);
+        Assert.True(File.Exists(called), "the hook never called deskbar.cmd");
+        Assert.Equal($"attention --from \"{project}\"", File.ReadAllText(called).Trim());
+    }
+
     // A file a parser would lose something from (comments) is not touched.
     [Fact]
     public void A_settings_file_with_comments_is_left_alone()

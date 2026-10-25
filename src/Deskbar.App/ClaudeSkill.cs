@@ -31,7 +31,16 @@ namespace Deskbar.App;
 // The script, claude-hook.cmd next to deskbar.cmd, exists for two reasons a bare command line could not cover. It
 // always exits 0, because a Stop hook that exits 2 tells Claude to KEEP GOING, and deskbar.cmd exits 2 whenever
 // Deskbar is not running. And it passes the session's folder (CLAUDE_PROJECT_DIR, which Claude Code sets for hooks)
-// so the right workspace blinks. Run as `cmd.exe /c "<path>"`, the shape of the hooks Petre already had working.
+// so the right workspace blinks.
+//
+// The hook's command is the script's path alone, quoted, with forward slashes: `"C:/Users/.../claude-hook.cmd"`. It
+// was `cmd.exe /c "<path>"` at first, copied from Petre's bell hook, and it never ran once. Claude Code runs hook
+// commands through Git Bash on Windows, and Git Bash rewrites a lone `/c` argument into the path `C:/`, so cmd.exe
+// got no /c, opened an interactive prompt, read the hook's JSON from stdin as a command, failed on it and exited 0.
+// Exit 0 meant Claude Code reported nothing, and the transcript showed only a cmd banner as the hook's output.
+// Measured: `echo {} | cmd.exe /c echo hi` in Git Bash prints the banner, not "hi". A quoted path needs no
+// translation: Git Bash runs a .cmd by itself, and cmd.exe accepts forward slashes in a quoted path too, so the same
+// line works if a hook ever runs under cmd. The test runs it through Git Bash so this cannot come back unnoticed.
 //
 // Never throws: a skill that could not be written costs sessions a hint, and is not worth a dialog. Traced instead.
 static class ClaudeSkill
@@ -59,13 +68,18 @@ static class ClaudeSkill
                 WriteHookScript(hookScript, Path.Combine(deskbarFolder, ControlCommandLine.ShimName));
             }
             else Remove(folder, file);
-            ClaudeHooks.Sync(on, Path.Combine(claude, "settings.json"), $"cmd.exe /c \"{hookScript}\"");
+            // An entry written by an older Deskbar (`cmd.exe /c ...`) still names the script, so Sync sees it as
+            // Deskbar's own, finds its command differs, and replaces it with this one.
+            ClaudeHooks.Sync(on, Path.Combine(claude, "settings.json"), HookCommand(hookScript));
         }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException)
         {
             ClickTrace.Write($"claude skill not {(on ? "written" : "removed")}: {e.Message}");
         }
     }
+
+    // The hook's command line: the script's path, quoted, with forward slashes (see the header for why not cmd.exe /c).
+    internal static string HookCommand(string hookScript) => $"\"{hookScript.Replace('\\', '/')}\"";
 
     // The script the hooks run. Its output goes nowhere: a hook's output is shown to nobody useful, and an error from
     // a Deskbar that is not running is not the session's business.
