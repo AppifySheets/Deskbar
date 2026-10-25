@@ -2097,7 +2097,10 @@ public sealed class WorkspaceManager(
             FloatingBar = state,
             BarPlacements = MonitorLayoutKey.IsKnown(layoutKey)
                 ? State.BarPlacements
-                    .Where(p => p.Layout != layoutKey)
+                    // Every entry for this DESK goes, not only this exact key: a desk whose screen comes
+                    // back a few pixels off keeps one entry rather than a copy per reconnect (see
+                    // MonitorLayoutKey.SameDesk).
+                    .Where(p => !MonitorLayoutKey.SameDesk(p.Layout, layoutKey))
                     .Append(new BarPlacement(layoutKey, state))
                     .TakeLast(RememberedLayouts)
                     .ToList()
@@ -2123,9 +2126,14 @@ public sealed class WorkspaceManager(
     // been seen before (#150). None for an unknown layout, which the bar reads as "clamp the last
     // position into a screen that exists" -- the old behaviour, and the only honest answer for a
     // layout nobody has parked the bar on yet.
+    //
+    // The exact key first, then the same desk with its screens a few pixels off (see
+    // MonitorLayoutKey.SameDesk), the most recent of those, which is the last in the list.
     public Maybe<FloatingBarState> BarPlacementFor(string layoutKey) =>
         MonitorLayoutKey.IsKnown(layoutKey)
-            ? State.BarPlacements.FirstOrDefault(p => p.Layout == layoutKey)?.Bar ?? Maybe<FloatingBarState>.None
+            ? State.BarPlacements.FirstOrDefault(p => p.Layout == layoutKey)?.Bar
+              ?? State.BarPlacements.LastOrDefault(p => MonitorLayoutKey.SameDesk(p.Layout, layoutKey))?.Bar
+              ?? Maybe<FloatingBarState>.None
             : Maybe<FloatingBarState>.None;
 
     // `monitor` is #89: the drop landed on a particular monitor's half of the row, so the window

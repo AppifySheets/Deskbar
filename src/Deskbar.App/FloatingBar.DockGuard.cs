@@ -36,9 +36,13 @@ public partial class FloatingBar
     int stripRepairs;
 
     // Called on the app's 1s timer (App, beside ReclaimTopmost).
+    //
+    // Never during a width drag. A bar dragged wider than its strip reaches past the work area by design, the
+    // strip follows only when the drag ends, and this read that as the shell losing the strip: it re-registered
+    // and re-docked under the pointer (measured, 23:19:29 on 2026-10-25, in the middle of Petre's "jumpy" resize).
     public void KeepDockedStrip()
     {
-        if (dockedEdge is not ("left" or "right") || Minimized || !IsVisible || docking || appBar is null) return;
+        if (dockedEdge is not ("left" or "right") || Minimized || !IsVisible || docking || resizing is not null || appBar is null) return;
         var now = DateTime.UtcNow;
         if (now - lastDocked < SettleFor || now - lastStripRepair < RetryEvery) return;
         if (StripState() is not { Held: false } state) return;

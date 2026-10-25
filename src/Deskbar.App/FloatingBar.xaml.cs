@@ -594,6 +594,19 @@ public partial class FloatingBar : Window
     Result UndockFromEdge()
     {
         if (!Docked) return Result.Success();
+        LetGoOfStrip();
+        PositionFrom(floatingBeforeDock ?? StoredPlacement());
+        floatingBeforeDock = null;
+        Save();
+        return Result.Success();
+    }
+
+    // Everything undocking does apart from choosing where the bar goes and saving it. Split out for the
+    // display-layout readjustment, which lets go of the old strip only to dock again at the spot this desk
+    // remembers: a save in between would write the bar as FLOATING on this desk and wipe the very edge it is
+    // about to read back.
+    void LetGoOfStrip()
+    {
         appBar?.Remove();
         seamBar?.Remove();
         var wasAcross = AcrossSeam;
@@ -607,12 +620,14 @@ public partial class FloatingBar : Window
         SizeToContent = SizeToContent.Height;
         Height = double.NaN;
         UpdateLayout();
-
-        PositionFrom(floatingBeforeDock ?? StoredPlacement());
-        floatingBeforeDock = null;
-        Save();
-        return Result.Success();
     }
+
+    // The shell saying something on an edge moved, so the strip is asked for again. Queued, because the
+    // notice arrives inside the shell's own message. Not during a width drag: the strip follows the new
+    // width once, when the drag ends (see the mouse-up), and a re-dock in the middle put the window back
+    // under the pointer.
+    void OnShellMovedStrips() =>
+        Dispatcher.BeginInvoke(new Action(() => { if (dockedEdge is { } e && resizing is null) DockTo(e); }));
 
     // Reserves the strip and moves the window into it. Also the way to RE-dock, after a width drag, a
     // display change or a notification that something else on the edge moved.
@@ -629,7 +644,7 @@ public partial class FloatingBar : Window
             if (!Docked) floatingBeforeDock = FloatingState();
 
             appBar ??= new AppBar(hwnd,
-                onPositionChanged: () => Dispatcher.BeginInvoke(new Action(() => { if (dockedEdge is { } e) DockTo(e); })),
+                onPositionChanged: OnShellMovedStrips,
                 onFullScreen: OnFullScreenApp);
 
             // KeepDockedStrip gives the shell a moment from here before it judges the work area.
@@ -698,7 +713,7 @@ public partial class FloatingBar : Window
             Height = 0,
         });
         seamBar ??= new AppBar(seamHolder.Handle,
-            onPositionChanged: () => Dispatcher.BeginInvoke(new Action(() => { if (dockedEdge is { } e) DockTo(e); })),
+            onPositionChanged: OnShellMovedStrips,
             onFullScreen: OnFullScreenApp);
 
         var widthDips = double.IsNaN(Width) ? ActualWidth : Width;
@@ -1566,6 +1581,12 @@ public partial class FloatingBar : Window
         // cursor can outrun the edge, and deriving Left from a value that has already been
         // clamped would drift the bar a little further on every move.
         if (grip.Side == ResizeSide.Left) Left = grip.StartLeft + (grip.StartWidth - width);
+
+        // One line per move, only while a drag is on, so a "the resize does not follow me" report can be read
+        // from the log: where the pointer went, what width that asked for, and what the window really did.
+        if (ClickTrace.On && NativeMethods.GetWindowRect(new WindowInteropHelper(this).Handle, out var actual))
+            ClickTrace.Write($"resize {grip.Side} docked={dockedEdge ?? "no"} cursor={cursor.X} travelled={travelled:F0} wanted={wanted:F0} width={width:F0} " +
+                             $"window={actual.Left},{actual.Top} to {actual.Right},{actual.Bottom}");
         return true;
     }
 
@@ -1576,9 +1597,15 @@ public partial class FloatingBar : Window
     // axis changes nothing, because the content recomputes it. Internal so #120's tests can drive a
     // resize through the same entry point the drag uses, rather than reproducing this pair and drifting
     // from it.
+    //
+    // Except docked: there the height is the strip's, the screen's full height, and handing it back to the
+    // content made a docked bar collapse to its rows on every move of a width drag and spring back to full
+    // height at each re-dock. Petre: "i'm trying to resize the bar and it's kinda jumpy, doesn't follow my
+    // resize". Measured mid-drag, docked right: the bar 353x1400 px on a screen 2160 tall. DockTo set the
+    // height Manual already, so docked only the width moves.
     internal void ApplyWidth(double width)
     {
-        SizeToContent = SizeToContent.Height;
+        if (!Docked) SizeToContent = SizeToContent.Height;
         Width = width;
     }
 
@@ -7525,6 +7552,10 @@ public partial class FloatingBar : Window
     readonly System.Windows.Threading.DispatcherTimer layoutSettling =
         new() { Interval = TimeSpan.FromMilliseconds(1200) };
 
+    // The arrangement the last readjustment settled on, starting with the one the bar started on, so a
+    // readjustment can tell a new desk from another settle on the same one (see ReadjustToDisplayLayout).
+    string settledLayout = LayoutKey();
+
     // Subscribed in the constructor and released when the window closes. SystemEvents holds a STATIC
     // event, so an unsubscribed handler outlives the window that owns it, and its handlers are raised
     // on SystemEvents' own thread rather than ours -- hence the marshal, without which the first thing
@@ -7606,8 +7637,37 @@ public partial class FloatingBar : Window
             }
         }
 
-        // Docked: ask the shell again on whatever screen the bar is on now. Windows has already moved a
-        // window whose screen went away onto one that exists, so "the screen it is on" is always real.
+        // Docked, on a desk the bar has been docked on before: go back to THAT spot, the way startup does
+        // (PositionFromState, then DockToEdge, which reads the remembered edge). Petre, back at his desk
+        // after an RDP session: "deskbar ended up being stuck to the wrong monitor edge". Measured: docked
+        // right on the RDP session's second screen at x 5504..5760, a position the desk does not have, so
+        // Windows moved the window to the nearest screen, the primary, and the branch below docked it on
+        // the primary's outer edge. The desk's own placement, the left screen's inner edge, was never read.
+        //
+        // Let go of the strip first, so the bar is floating when DockToEdge looks, and so DockTo keeps the
+        // desk's floating spot as the one undocking returns to.
+        //
+        // Only when the DESK changed since the last readjustment. A settle on the same desk (the bar's own
+        // DPI changing, a resolution set back to what it was) would otherwise undock and dock again on the
+        // spot, a visible flicker for nothing. Compared against the layout of the last readjustment rather
+        // than of the last dock: the shell's position notices re-dock the bar DURING the burst, on the new
+        // desk, long before this runs (measured: 25 docks in two seconds before the settle).
+        var layout = LayoutKey();
+        var deskChanged = !MonitorLayoutKey.SameDesk(settledLayout, layout);
+        settledLayout = layout;
+        if (deskChanged && Docked && !Minimized && manager.BarPlacementFor(layout).GetValueOrDefault() is { DockedEdge: not null })
+        {
+            if (ClickTrace.On) ClickTrace.Write("display layout: this desk has a remembered dock, going back to it");
+            LetGoOfStrip();
+            floatingBeforeDock = null;
+            PositionFromState();
+            DockToEdge().TapError(error => ClickTrace.Write($"re-dock at the remembered spot failed: {error}"));
+            return;
+        }
+
+        // Docked on a desk with no remembered dock: ask the shell again on whatever screen the bar is on
+        // now. Windows has already moved a window whose screen went away onto one that exists, so "the
+        // screen it is on" is always real.
         if (dockedEdge is { } edge && !Minimized)
         {
             DockTo(edge).TapError(error => ClickTrace.Write($"re-dock after layout change failed: {error}"));

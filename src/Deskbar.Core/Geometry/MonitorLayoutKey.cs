@@ -52,4 +52,58 @@ public static class MonitorLayoutKey
     }
 
     public static bool IsKnown(string? key) => !string.IsNullOrEmpty(key);
+
+    // Whether two keys describe the same DESK, which is looser than the same key. Petre: "after i
+    // reconnected with my main desktop, deskbar ended up being stuck to the wrong monitor edge". His
+    // state.json held four keys for one desk, a 4K screen left of a 4K primary, because the left screen
+    // came back 229, 232, 246 and 248 px down on different reconnects. Each return minted a key the
+    // exact lookup had never seen, so the spot he had parked the bar in at that desk was never found.
+    //
+    // So the offsets are left out, and what is compared is each screen's SIZE and the SIDE of the primary
+    // screen it sits on. That keeps everything the key exists to tell apart: another resolution, another
+    // number of screens, a screen moved to the other side or above. What it gives up is a screen slid along
+    // the edge it shares with the primary, and that never moves an edge the bar docks against.
+    //
+    // A key that cannot be read (only a hand-edited state.json could hold one) matches only itself.
+    public static bool SameDesk(string? first, string? second) =>
+        IsKnown(first) && IsKnown(second)
+        && (first == second
+            || (Arrangement(first!) is { } a && Arrangement(second!) is { } b && a.SequenceEqual(b, StringComparer.Ordinal)));
+
+    // The desk with the offsets taken out: one "side WxH" per screen, sorted so enumeration order cannot
+    // matter (the same reason Of sorts). The primary screen is the one at the origin, which Windows
+    // guarantees; a key with no screen there is unreadable as a desk and answers null.
+    static IReadOnlyList<string>? Arrangement(string key)
+    {
+        var screens = key.Split('|').Select(Parse).ToList();
+        if (screens.Any(s => s is null)) return null;
+        var primary = screens.FirstOrDefault(s => s!.Left == 0 && s.Top == 0);
+        return primary is null
+            ? null
+            : screens
+                .Select(s => $"{SideOf(s!, primary)} {s!.Right - s.Left}x{s.Bottom - s.Top}")
+                .OrderBy(text => text, StringComparer.Ordinal)
+                .ToList();
+    }
+
+    // Left and right are asked first, so a screen touching the primary only at a corner counts as beside it.
+    static string SideOf(MonitorBounds screen, MonitorBounds primary) =>
+        screen.Right <= primary.Left ? "left"
+        : screen.Left >= primary.Right ? "right"
+        : screen.Bottom <= primary.Top ? "above"
+        : screen.Top >= primary.Bottom ? "below"
+        : "primary";
+
+    // One "left,top,right,bottom" back into a rectangle, or null. Invariant culture on the way back in,
+    // because a culture with its own minus sign has broken this app before (the Georgian control shim).
+    static MonitorBounds? Parse(string part)
+    {
+        var numbers = part.Split(',')
+            .Select(text => int.TryParse(text, System.Globalization.NumberStyles.AllowLeadingSign,
+                System.Globalization.CultureInfo.InvariantCulture, out var value) ? value : (int?)null)
+            .ToList();
+        return numbers.Count == 4 && numbers.All(n => n is not null)
+            ? new MonitorBounds(numbers[0]!.Value, numbers[1]!.Value, numbers[2]!.Value, numbers[3]!.Value)
+            : null;
+    }
 }

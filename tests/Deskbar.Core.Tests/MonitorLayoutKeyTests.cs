@@ -72,4 +72,60 @@ public class MonitorLayoutKeyTests
 
     [Fact]
     public void A_real_layout_is_known() => Assert.True(MonitorLayoutKey.IsKnown(MonitorLayoutKey.Of([Desk])));
+
+    // --- the same desk under a different key -------------------------------------------------------
+    //
+    // Petre's desk, measured from his state.json on 2026-10-25: one arrangement, a 4K screen to the left
+    // of a 4K primary, saved under four keys because the left screen came back 229, 232, 246 and 248 px
+    // down on different reconnects. The exact key missed every time, so the bar never found the spot it
+    // had been parked in at that desk.
+
+    static readonly MonitorBounds Primary4K = Screen(0, 0, 3840, 2160);
+
+    [Fact]
+    public void A_screen_that_came_back_a_few_pixels_lower_is_the_same_desk() =>
+        Assert.True(MonitorLayoutKey.SameDesk(
+            MonitorLayoutKey.Of([Screen(-3840, 229, 0, 2389), Primary4K]),
+            MonitorLayoutKey.Of([Screen(-3840, 246, 0, 2406), Primary4K])));
+
+    [Fact]
+    public void The_same_key_is_the_same_desk() =>
+        Assert.True(MonitorLayoutKey.SameDesk(MonitorLayoutKey.Of([Desk, Second]), MonitorLayoutKey.Of([Desk, Second])));
+
+    // The other direction, and the reason the side is part of it: the screen on the other side of the
+    // primary puts every edge the bar could dock against somewhere else.
+    [Fact]
+    public void The_same_screens_on_the_other_side_are_another_desk() =>
+        Assert.False(MonitorLayoutKey.SameDesk(
+            MonitorLayoutKey.Of([Screen(-3840, 0, 0, 2160), Primary4K]),
+            MonitorLayoutKey.Of([Primary4K, Screen(3840, 0, 7680, 2160)])));
+
+    [Fact]
+    public void A_screen_above_is_not_a_screen_beside() =>
+        Assert.False(MonitorLayoutKey.SameDesk(
+            MonitorLayoutKey.Of([Screen(0, -2160, 3840, 0), Primary4K]),
+            MonitorLayoutKey.Of([Screen(-3840, 0, 0, 2160), Primary4K])));
+
+    // An RDP session that keeps the arrangement but not the resolution is still another desk.
+    [Fact]
+    public void Another_resolution_is_another_desk() =>
+        Assert.False(MonitorLayoutKey.SameDesk(
+            MonitorLayoutKey.Of([Primary4K, Screen(3840, 0, 7680, 2160)]),
+            MonitorLayoutKey.Of([Primary4K, Screen(3840, 0, 5760, 1080)])));
+
+    [Fact]
+    public void Another_number_of_screens_is_another_desk() =>
+        Assert.False(MonitorLayoutKey.SameDesk(MonitorLayoutKey.Of([Primary4K]), MonitorLayoutKey.Of([Screen(-3840, 0, 0, 2160), Primary4K])));
+
+    [Fact]
+    public void Unknown_is_never_the_same_desk_as_anything() =>
+        Assert.False(MonitorLayoutKey.SameDesk(MonitorLayoutKey.Unknown, MonitorLayoutKey.Unknown));
+
+    // A key nobody could have written (a hand-edited state.json) only matches itself.
+    [Fact]
+    public void An_unreadable_key_only_matches_itself()
+    {
+        Assert.True(MonitorLayoutKey.SameDesk("garbage", "garbage"));
+        Assert.False(MonitorLayoutKey.SameDesk("garbage", MonitorLayoutKey.Of([Primary4K])));
+    }
 }

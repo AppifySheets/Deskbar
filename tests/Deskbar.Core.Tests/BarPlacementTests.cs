@@ -165,6 +165,61 @@ public class BarPlacementTests
         Assert.True(manager.BarPlacementFor(Laptop).HasNoValue);
     }
 
+    // Petre's desk again (see MonitorLayoutKeyTests): one arrangement whose left screen comes back a few
+    // pixels higher or lower after a reconnect, so each return to the desk minted a key the lookup had
+    // never seen.
+    static readonly string DeskBefore = MonitorLayoutKey.Of([new MonitorBounds(-3840, 229, 0, 2389), new MonitorBounds(0, 0, 3840, 2160)]);
+    static readonly string DeskNow = MonitorLayoutKey.Of([new MonitorBounds(-3840, 246, 0, 2406), new MonitorBounds(0, 0, 3840, 2160)]);
+    static readonly string DeskEarlier = MonitorLayoutKey.Of([new MonitorBounds(-3840, 248, 0, 2408), new MonitorBounds(0, 0, 3840, 2160)]);
+
+    [Fact]
+    public void A_desk_whose_screen_moved_a_few_pixels_still_finds_its_placement()
+    {
+        var manager = Started();
+
+        manager.SaveFloatingBar(At(-515, 396) with { DockedEdge = "right" }, DeskBefore);
+
+        Assert.Equal("right", manager.BarPlacementFor(DeskNow).Value.DockedEdge);
+    }
+
+    // One entry per desk, or the dozen fills up with copies of the one desk Petre sits at every day and
+    // pushes the laptop's spot out.
+    [Fact]
+    public void Saving_on_a_nudged_desk_replaces_its_old_entry()
+    {
+        var manager = Started();
+
+        manager.SaveFloatingBar(At(-515, 396), DeskBefore);
+        manager.SaveFloatingBar(At(-427, 396), DeskNow);
+
+        var saved = Assert.Single(manager.State.BarPlacements);
+        Assert.Equal(DeskNow, saved.Layout);
+    }
+
+    // A state.json written before the match was tolerant can hold several entries for one desk. The
+    // exact key wins when there is one; otherwise the most recent, which is the last in the list.
+    [Fact]
+    public void Among_several_entries_for_one_desk_the_exact_one_wins()
+    {
+        store.Stored = AppState.Empty with
+        {
+            BarPlacements = [new BarPlacement(DeskNow, At(1, 1)), new BarPlacement(DeskBefore, At(2, 2))],
+        };
+
+        Assert.Equal(1, Started().BarPlacementFor(DeskNow).Value.Left);
+    }
+
+    [Fact]
+    public void Without_an_exact_entry_the_most_recent_one_for_the_desk_wins()
+    {
+        store.Stored = AppState.Empty with
+        {
+            BarPlacements = [new BarPlacement(DeskEarlier, At(1, 1)), new BarPlacement(DeskBefore, At(2, 2))],
+        };
+
+        Assert.Equal(2, Started().BarPlacementFor(DeskNow).Value.Left);
+    }
+
     // A state.json written before this key existed has no placements and must load without one.
     [Fact]
     public void A_state_file_without_placements_loads_empty()
