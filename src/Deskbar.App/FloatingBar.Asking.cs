@@ -13,6 +13,11 @@ namespace Deskbar.App;
 //
 // Orange is the attention dot's colour (AttentionDot), so the bar keeps one colour for "something here wants you".
 //
+// A window whose TASKBAR BUTTON flashed (the attention dot, WindowRow.WantsAttention) glows the same way. Petre, of
+// Teams with a dot next to a glowing VS Code: "does it make sense to do the same for apps that have a golden dot",
+// "have them do the same kind of glow". The ICON only: the name and rail stay a session's, because Teams flashes
+// for every chat message and a row that blinked for each one would drown out the session that is stuck waiting.
+//
 // Two brushes, one per bar, animated together at 1.2 s a cycle:
 //
 //   AskingPulse     orange, its opacity running 1 -> 0.15 -> 1. Laid OVER the rail, so the rail alternates between
@@ -40,11 +45,20 @@ public partial class FloatingBar
     // Whether the animation is running, for the tests.
     internal bool AskingAnimated => askingRunning;
 
-    // Called with each fresh overview: start the two animations when the first row asks, stop them when the last one
-    // stops. Stopping leaves both brushes at their base values, which nothing draws with by then.
+    // Whether a window's icon glows: its session asked for you, or its taskbar button flashed and you have not looked
+    // at it since. Both clear when you activate the window.
+    internal static bool Glows(WindowRow row) => row.Asks || row.WantsAttention;
+
+    // Called with each fresh overview: start the two animations when the first row asks or icon glows, stop them when
+    // the last one stops. Stopping leaves both brushes at their base values, which nothing draws with by then.
+    //
+    // Every window the bar can draw counts, pinned ones and those on unnamed desktops included, because a flashed
+    // window can be any of them; a session's ask only ever lands on a workspace's row.
     void SyncAsking(Core.Overview.Overview overview)
     {
-        var any = overview.Workspaces.Any(g => g.WantsAttention || g.Running.Any(r => r.Asks));
+        var any = overview.Workspaces.Any(g => g.WantsAttention || g.Running.Any(Glows))
+            || overview.Pinned.Any(Glows)
+            || overview.OtherDesktops.Any(d => d.Windows.Any(Glows));
         if (any == askingRunning) return;
         askingRunning = any;
 

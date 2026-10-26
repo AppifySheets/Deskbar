@@ -75,7 +75,8 @@ public partial class FloatingBar
     // stop it looking focused. Focused wins over landing where both could apply, as it always has: an icon is only
     // both if the suppression in OverviewBuilder.WillActivate ever lapses.
     //
-    // `asking` is the pulsing orange of a window whose session asked for the user (FloatingBar.Asking.cs), or null.
+    // `asking` is the pulsing orange of a window whose session asked for the user or whose taskbar button flashed
+    // (FloatingBar.Glows in FloatingBar.Asking.cs), or null.
     // It takes the ring and a full-strength glow, below only the amber ring: a hover is the pointer, there now.
     internal static void PaintMarker(Button icon, bool ringed, bool focused, bool landing, Brush? asking = null)
     {
