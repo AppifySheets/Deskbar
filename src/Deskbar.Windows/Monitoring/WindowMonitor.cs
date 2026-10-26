@@ -110,6 +110,17 @@ public sealed class WindowMonitor : IWindowMonitor, IDisposable
             .ToList();
     }
 
+    // The filter runs on the bare handle, BEFORE any lookup, which is the whole point: a window the caller
+    // already knows costs nothing here. No batch is passed to FromHwnd, so each window that does pass goes
+    // through TryCommandLine: our own command line, then the process's own memory (about 0.1ms), and WMI
+    // only for an elevated process, under its 200ms budget and the shared breaker. See IWindowMonitor.
+    public IReadOnlyList<WindowInfo> SnapshotOf(Func<WindowHandle, bool> wanted) =>
+        TopLevelWindows.Enumerate()
+            .Where(h => !ignored.Contains(h) && wanted(new WindowHandle(h)))
+            .Select(h => WindowInfoFactory.FromHwnd(h))
+            .Where(m => m.HasValue).Select(m => m.Value)
+            .ToList();
+
     // Only reports a window we actually track, so the highlight can never point at something
     // that has no row (the shell, a tooltip, a non-taskbar helper window).
     public Maybe<WindowHandle> Foreground()

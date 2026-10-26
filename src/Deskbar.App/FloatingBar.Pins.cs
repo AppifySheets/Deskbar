@@ -46,9 +46,20 @@ public partial class FloatingBar
     readonly DispatcherTimer pinWatch = new() { Interval = TimeSpan.FromSeconds(3) };
 
     // Per pin (by ParsingName): its icon, never caching a miss, since a shell icon can arrive late (the
-    // project's rule, learnt on window icons). And per window: its AppUserModelID, same rule.
+    // project's rule, learnt on window icons).
     readonly Dictionary<string, ImageSource> pinImages = [];
+
+    // Per window: its AppUserModelID, asked of the shell on a pool thread and never on the UI thread (see
+    // AskAppIds). An ID, once found, is kept while the window is in the overview. "This window has none" is
+    // believed for NoAppIdRecheck and then asked again, because an app can set its ID after its window
+    // appears, and the project's rule is that a miss which can turn into a hit is never cached for good.
     readonly Dictionary<WindowHandle, string> windowAppIds = [];
+    readonly Dictionary<WindowHandle, DateTime> noAppIdUntil = [];
+    readonly HashSet<WindowHandle> appIdsAsked = [];
+    static readonly TimeSpan NoAppIdRecheck = TimeSpan.FromSeconds(30);
+
+    // A lookup this slow is written to the trace with its window, so the next stall names the app behind it.
+    const long SlowAppIdMs = 100;
 
     // The pin buttons by ParsingName, with their markers, so a rebuild repaints markers without
     // recreating buttons.
@@ -290,7 +301,7 @@ public partial class FloatingBar
     void PaintPins(Overview overview)
     {
         lastPinOverview = overview;
-        if (pins is null || shownPins.Count == 0) return;
+        if (pins is null) return;
 
         var here = overview.Pinned
             .Concat(overview.Workspaces.Where(w => w.IsCurrent).SelectMany(w => w.Running))
@@ -303,6 +314,16 @@ public partial class FloatingBar
             .Select(r => r.Window)
             .Where(w => !hereHandles.Contains(w.Handle))
             .ToList();
+
+        // Every window in the overview, which is also every window the sound ring asks about (NoteActivity), so
+        // the IDs are kept for exactly these: a closed window's entry goes, and a handle Windows reuses later
+        // starts clean. Asked for even with no pins on the line, because the sound ring needs them too.
+        var everyWindow = here.Concat(elsewhere).ToList();
+        var present = everyWindow.Select(w => w.Handle).ToHashSet();
+        windowAppIds.Keys.Where(h => !present.Contains(h)).ToList().ForEach(h => windowAppIds.Remove(h));
+        noAppIdUntil.Keys.Where(h => !present.Contains(h)).ToList().ForEach(h => noAppIdUntil.Remove(h));
+        AskAppIds(everyWindow);
+        if (shownPins.Count == 0) return;
 
         // The IDs some pin claims outright, so a window carrying one of them is never also claimed by a pin
         // through its exe path (a PWA runs as its browser's exe; see PinMatches).
@@ -328,13 +349,66 @@ public partial class FloatingBar
         });
     }
 
-    string? AppIdOf(WindowInfo window)
+    // From what AskAppIds has already learnt, never from the shell: this runs inside a rebuild, on the UI thread.
+    string? AppIdOf(WindowInfo window) => windowAppIds.GetValueOrDefault(window.Handle);
+
+    // WHY THE LOOKUP LEFT THE UI THREAD. Petre: "see why the bar had a delay just now". The trace had a rebuild
+    // of 4738ms with 4168ms of it in "pins", and fifteen like it in an hour, 4.3 to 5.6s each, the bar drawing
+    // nothing while one ran. A stack-sampling trace of that rebuild put all of it in ShellTaskbarPins.AppIdOf,
+    // WAITING rather than working: three calls of 464, 2064 and 1640ms, one from each place PaintPins asked,
+    // because a window with no ID was not cached and so was asked again every time. The same lookup made from
+    // another process took well under a millisecond a window, so which window answers slowly, and when, is
+    // still unknown; the trace line in TakeAppIds exists to name it next time.
+    //
+    // So the shell is asked on a pool thread, at most once per window until it answers, and the answers come
+    // back to the UI thread, which repaints the pins if any ID turned up. Until then PinMatches falls back to a
+    // pin's exe, which can light a browser's pin for a web app's window for that moment.
+    void AskAppIds(IReadOnlyList<WindowInfo> windows)
     {
-        if (windowAppIds.TryGetValue(window.Handle, out var known)) return known;
-        var found = pins?.AppIdOf(window.Handle);
-        if (found is not null) windowAppIds[window.Handle] = found;
-        return found;
+        if (pins is not { } shell) return;
+        var ask = AppIdsToAsk(windows.Select(w => w.Handle), windowAppIds, appIdsAsked, noAppIdUntil, DateTime.UtcNow);
+        if (ask.Count == 0) return;
+        ask.ToList().ForEach(h => appIdsAsked.Add(h));
+        // The process names, for the trace line only, taken here so the pool thread touches nothing of the bar's.
+        var names = windows.DistinctBy(w => w.Handle).ToDictionary(w => w.Handle, w => w.ProcessName);
+        Task.Run(() => ask.Select(handle =>
+            {
+                var clock = System.Diagnostics.Stopwatch.StartNew();
+                var id = shell.AppIdOf(handle);
+                return (Handle: handle, Id: id, Ms: clock.ElapsedMilliseconds);
+            }).ToList())
+            .ContinueWith(done => Dispatcher.BeginInvoke(() =>
+                TakeAppIds(ask, done.IsCompletedSuccessfully ? done.Result : [], names)), TaskScheduler.Default);
     }
+
+    // Back on the UI thread. A faulted batch answers nothing, which leaves its windows to be asked again on the
+    // next rebuild rather than marked as having no ID.
+    void TakeAppIds(IReadOnlyList<WindowHandle> asked, IReadOnlyList<(WindowHandle Handle, string? Id, long Ms)> answers,
+        IReadOnlyDictionary<WindowHandle, string> names)
+    {
+        asked.ToList().ForEach(h => appIdsAsked.Remove(h));
+        var recheckAt = DateTime.UtcNow + NoAppIdRecheck;
+        answers.Where(a => a.Id is null).ToList().ForEach(a => noAppIdUntil[a.Handle] = recheckAt);
+        answers.Where(a => a.Id is not null).ToList().ForEach(a =>
+        {
+            windowAppIds[a.Handle] = a.Id!;
+            noAppIdUntil.Remove(a.Handle);
+        });
+        if (ClickTrace.On)
+            answers.Where(a => a.Ms >= SlowAppIdMs).ToList().ForEach(a =>
+                ClickTrace.Write($"pins: app id of {a.Handle.Value:X}/{names.GetValueOrDefault(a.Handle) ?? "?"} took {a.Ms}ms -> {a.Id ?? "none"}"));
+        if (answers.Any(a => a.Id is not null) && lastPinOverview is { } overview) PaintPins(overview);
+    }
+
+    // Which windows to ask the shell about: no ID known, not already being asked, and not told "none" within
+    // the recheck window. Pure, so the tests can pin the policy down.
+    internal static IReadOnlyList<WindowHandle> AppIdsToAsk(IEnumerable<WindowHandle> windows,
+        IReadOnlyDictionary<WindowHandle, string> known, IReadOnlySet<WindowHandle> asked,
+        IReadOnlyDictionary<WindowHandle, DateTime> noneUntil, DateTime now) =>
+        windows.Distinct()
+            .Where(h => !known.ContainsKey(h) && !asked.Contains(h)
+                        && !(noneUntil.TryGetValue(h, out var until) && until > now))
+            .ToList();
 
     // Whether a window is one of a pin's, the way the taskbar groups them: by AppUserModelID when both say
     // one, and otherwise by the exe the pin starts. The exe rule stands down for a window whose ID another pin

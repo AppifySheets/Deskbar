@@ -321,6 +321,39 @@ public class FloatingBarPinsTests
     public void An_installed_app_needs_its_id() =>
         Assert.False(FloatingBar.PinMatches(InstalledApp("Files", "Files!App"), Window(@"C:\Files\Files.exe"), null, Claimed));
 
+    // --- which windows' app IDs are asked for -------------------------------------------------------------
+    //
+    // Petre: "see why the bar had a delay just now". A rebuild waited 4.2s on the shell for app IDs, the same
+    // window asked three times because "no ID" was never remembered. The lookup now runs on a pool thread, and
+    // this is the rule for what it is handed.
+
+    static readonly WindowHandle First = new(0x10), Second = new(0x20), Third = new(0x30);
+    static readonly DateTime Now = new(2026, 10, 26, 12, 0, 0, DateTimeKind.Utc);
+
+    static IReadOnlyList<WindowHandle> ToAsk(Dictionary<WindowHandle, string>? known = null, HashSet<WindowHandle>? asked = null,
+        Dictionary<WindowHandle, DateTime>? noneUntil = null) =>
+        FloatingBar.AppIdsToAsk([First, Second, Third, First], known ?? [], asked ?? [], noneUntil ?? [], Now);
+
+    // Each window once, even when the overview lists it twice.
+    [Fact]
+    public void Every_unknown_window_is_asked_about_once() =>
+        Assert.Equal([First, Second, Third], ToAsk());
+
+    [Fact]
+    public void A_window_with_a_known_id_is_not_asked_again() =>
+        Assert.Equal([Second, Third], ToAsk(known: new() { [First] = "Spotify.exe" }));
+
+    // A second rebuild while the first batch is still out must not start the same lookups again.
+    [Fact]
+    public void A_window_already_being_asked_about_is_not_asked_twice() =>
+        Assert.Equal([First, Third], ToAsk(asked: [Second]));
+
+    // "No ID" holds until the recheck time and no longer: an app can set its ID after its window appears, and a
+    // miss that can become a hit is never cached for good.
+    [Fact]
+    public void No_id_is_believed_until_the_recheck_time_then_asked_again() =>
+        Assert.Equal([First, Third], ToAsk(noneUntil: new() { [Second] = Now.AddSeconds(1), [Third] = Now.AddSeconds(-1) }));
+
     // --- the pin list's format ------------------------------------------------------------------------------
 
     // [flag][uint32 size][size bytes], repeated, as measured. A size that runs off the end stops the walk and

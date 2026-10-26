@@ -1039,6 +1039,7 @@ sealed class StubMonitor : IWindowMonitor
     public Result Start() => Result.Success();
     public IObservable<WindowEvent> Events => Pump;
     public IReadOnlyList<WindowInfo> Snapshot() => Initial.ToList();
+    public IReadOnlyList<WindowInfo> SnapshotOf(Func<WindowHandle, bool> wanted) => Initial.Where(w => wanted(w.Handle)).ToList();
     public bool IsAlive(WindowHandle window) => true;
     public bool IsListed(WindowHandle window) => Initial.Any(w => w.Handle == window);
     public bool IsCloakedByShell(WindowHandle window) => false;

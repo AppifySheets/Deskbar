@@ -75,6 +75,28 @@ public class WindowListRepairTests
             row => row.Window.Handle == Obs().Handle);
     }
 
+    // The cost half. Petre: "see why the bar had a delay just now". The repair used to take a whole Snapshot,
+    // which in the real monitor is a WMI query of every process on the machine, on the UI thread, every five
+    // seconds, to adopt nothing. It now asks only about handles it has never seen, and a window it knows is
+    // never looked up again.
+    [Fact]
+    public void The_repair_looks_up_only_windows_the_manager_does_not_know()
+    {
+        var workspace = GivenAWorkspace();
+        monitor.InitialWindows.Add(Beeper());
+        desktops.WindowPlacements[Beeper().Handle] = workspace.DesktopId!.Value;
+        var manager = Started();
+        monitor.InitialWindows.Add(Obs());
+        desktops.WindowPlacements[Obs().Handle] = workspace.DesktopId!.Value;
+        var snapshotsBefore = monitor.SnapshotCount;
+
+        manager.RepairWindowList();
+
+        Assert.Equal(snapshotsBefore, monitor.SnapshotCount);
+        Assert.Equal([Obs().Handle], monitor.SnapshotOfAsked);
+        Assert.Contains(manager.KnownWindows, w => w.Handle == Obs().Handle);
+    }
+
     // The ghost half. A destroyed handle the manager is still drawing a row for, because the monitor
     // dropped it without the manager hearing.
     [Fact]

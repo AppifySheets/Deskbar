@@ -11,6 +11,16 @@ public interface IWindowMonitor
     IObservable<WindowEvent> Events { get; }
     IReadOnlyList<WindowInfo> Snapshot();
 
+    // The listed windows that `wanted` accepts, each looked up on its own, with no batch query of every
+    // process on the machine. For the 5s repair (WorkspaceManager.RepairWindowList), which only needs the
+    // windows it has never seen and is almost always handed none.
+    //
+    // Snapshot's batch is one WMI query of every process, and the repair used to run it on the UI thread
+    // every five seconds to learn about windows it already knew. Petre: "see why the bar had a delay just
+    // now". A trace of 2.2.2 had RepairWindowList holding the UI thread for 4.3s of every 25s, about 850ms
+    // a sweep, all of it waiting on that query; the bar's 1s stats line stalled 28 times in 9 minutes.
+    IReadOnlyList<WindowInfo> SnapshotOf(Func<WindowHandle, bool> wanted);
+
     // Does this handle still name a real window? The one question that separates a window minimised
     // to the tray from a window that has been destroyed, and the reason it is on the interface at all
     // is that WorkspaceManager.RepairWindowList must never answer it any other way.

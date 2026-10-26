@@ -511,8 +511,11 @@ public sealed class WorkspaceManager(
 
     public void RepairWindowList()
     {
-        var adopted = monitor.Snapshot()
-            .Where(w => !knownWindows.ContainsKey(w.Handle) && !IsOursByProcess(w))
+        // SnapshotOf, not Snapshot: only the handles this list has never seen are looked up, one by one, so
+        // the sweep never runs the whole-machine WMI query that used to stop the bar for most of a second
+        // every five seconds (see IWindowMonitor.SnapshotOf).
+        var adopted = monitor.SnapshotOf(handle => !knownWindows.ContainsKey(handle))
+            .Where(w => !IsOursByProcess(w))
             .ToList();
 
         adopted.ForEach(w => { Know(w); NoteContainer(w); });

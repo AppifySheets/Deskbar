@@ -71,7 +71,20 @@ public sealed class FakeMonitor : IWindowMonitor
 
     public Result Start() => Result.Success();
     public IObservable<WindowEvent> Events => Subject.AsObservable();
-    public IReadOnlyList<WindowInfo> Snapshot() => InitialWindows.ToList();
+    // How many times the whole-list Snapshot ran; the 5s repair must never be one of them.
+    public int SnapshotCount { get; private set; }
+    public IReadOnlyList<WindowInfo> Snapshot() { SnapshotCount++; return InitialWindows.ToList(); }
+
+    // Every handle SnapshotOf was asked about, so a test can see the repair skip the windows it knows.
+    public List<WindowHandle> SnapshotOfAsked { get; } = [];
+    public IReadOnlyList<WindowInfo> SnapshotOf(Func<WindowHandle, bool> wanted) =>
+        InitialWindows.Where(w =>
+        {
+            var take = wanted(w.Handle);
+            if (take) SnapshotOfAsked.Add(w.Handle);
+            return take;
+        }).ToList();
+
     public bool IsAlive(WindowHandle window) => !Dead.Contains(window);
 
     // Listed means "in InitialWindows", which is what Snapshot answers from: a test hides a window by
