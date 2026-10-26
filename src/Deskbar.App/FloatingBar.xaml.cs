@@ -2729,7 +2729,7 @@ public partial class FloatingBar : Window
                     if (button is FrameworkElement placed) slots.Add(new IconSlot(placed, r));
                     stack.Children.Add(button);
                     if (button is Button icon)
-                        iconRings.Add(new IconRing(icon, rowKey, r.Window.Handle, r.IsActive, r.WillActivate, r.Asks));
+                        iconRings.Add(new IconRing(icon, rowKey, r.Window.Handle, r.IsActive, r.WillActivate, Glows(r)));
                 });
 
                 // THE FIRST SCREEN'S ICONS START AT THE LEFT AND EVERY LATER SCREEN'S ARE PUSHED RIGHT, so
@@ -4465,7 +4465,8 @@ public partial class FloatingBar : Window
     // unbound desktops), which is how "landing here also changes workspace" is answered.
     readonly List<IconRing> iconRings = [];
 
-    sealed record IconRing(Button Button, Guid? RowKey, WindowHandle Handle, bool IsActive, bool WillActivate, bool Asks = false);
+    // Glows: the icon carries the pulsing orange (FloatingBar.Glows), for a session's ask or a flashed taskbar button.
+    sealed record IconRing(Button Button, Guid? RowKey, WindowHandle Handle, bool IsActive, bool WillActivate, bool Glows = false);
 
     // The icon the pointer is resting on, held by WINDOW HANDLE and not by button (#67).
     //
@@ -4609,7 +4610,7 @@ public partial class FloatingBar : Window
         // Costs no layout: every icon already carries a 1px border, transparent when it has
         // nothing to say, precisely so gaining a marker cannot nudge a SizeToContent bar.
         iconRings.ForEach(icon =>
-            PaintMarker(icon.Button, ringed: target is { } t && icon.Handle == t, icon.IsActive, icon.WillActivate, icon.Asks ? AskingPulse : null));
+            PaintMarker(icon.Button, ringed: target is { } t && icon.Handle == t, icon.IsActive, icon.WillActivate, icon.Glows ? AskingPulse : null));
     }
 
     // Which row RebuildCore drew as current, so ApplyCandidate can put the white ring back when
@@ -6043,7 +6044,7 @@ public partial class FloatingBar : Window
             Template = MarkedButton,
             Tag = IconTag, // marks this as an icon: press-drag moves the WINDOW, not the bar
         };
-        PaintMarker(button, ringed: false, focused: row.IsActive, landing: row.WillActivate, asking: row.Asks ? AskingPulse : null);
+        PaintMarker(button, ringed: false, focused: row.IsActive, landing: row.WillActivate, asking: Glows(row) ? AskingPulse : null);
 
         // The window's title as the automation name. Two jobs, both real: a screen reader announces the
         // icon as the window it stands for rather than as "button", and it is how a test tells which icon

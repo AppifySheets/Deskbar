@@ -244,6 +244,36 @@ public class FloatingBarLaneShadeTests(ITestOutputHelper output)
         Assert.True(bar.Window.AskingAnimated);
     });
 
+    // Petre, of Teams carrying the attention dot next to a glowing VS Code: "have them do the same kind of glow". A
+    // window whose taskbar button flashed gets the asking icon's pulsing ring, and the animation runs for it, but its
+    // row's name stays as it was: the name and rail blink only for a session that asked.
+    [Fact]
+    public void A_flashed_window_glows_like_a_session_that_asked() => StaThread.Run(() =>
+    {
+        var flashes = new Flashes();
+        using var bar = TwoScreens(busyIcons: 2, attention: flashes);
+        Assert.False(bar.Window.AskingAnimated);
+
+        // App 2: App 1 is the window the harness's pulse activates, and a flash on the active window is ignored.
+        flashes.Subject.OnNext(new WindowHandle(102));
+        bar.Pulse();
+
+        var row = bar.RowContainer("Busy");
+        var flashed = bar.Icons(row).Single(i => i.DataContext is WindowRow r && r.Window.Handle == new WindowHandle(102));
+        Assert.Same(bar.Window.AskingPulse, flashed.BorderBrush);
+        Assert.True(bar.Window.AskingAnimated);
+        var caption = Bar.Descendants(row).OfType<TextBlock>().First(t => t.Text == "Busy");
+        Assert.NotSame(bar.Window.AskingCaption, caption.Foreground);
+    });
+
+    // A taskbar button flashing, on demand: what the shell hook reports, minus the shell.
+    sealed class Flashes : IAttentionMonitor
+    {
+        public System.Reactive.Subjects.Subject<WindowHandle> Subject { get; } = new();
+        public Result Start() => Result.Success();
+        public IObservable<WindowHandle> Flashed => Subject;
+    }
+
     // Petre: "the wash shouldn't show in the currently active workspace", "there's no point, it is already
     // active". Clicking the current row switches to where you already are, so nothing marks it as a target:
     // no wash, and no caption change either ("title keeps blinking when hovering over icons", "that's also
@@ -676,7 +706,7 @@ public class FloatingBarLaneShadeTests(ITestOutputHelper output)
     // the titled list instead of the list sitting at the bottom of the bar.
     // `longTitles` gives every window a title far longer than any line, so the titled list has to trim them.
     // `wholeLines` turns the split window lines setting off (AppState.WholeWindowLines).
-    static Bar TwoScreens(int busyIcons, bool oneWithNoMonitor = false, bool everythingOnOneScreen = false, bool standOnBusy = false, bool withPinned = false, bool expandRow = false, bool longTitles = false, bool wholeLines = false)
+    static Bar TwoScreens(int busyIcons, bool oneWithNoMonitor = false, bool everythingOnOneScreen = false, bool standOnBusy = false, bool withPinned = false, bool expandRow = false, bool longTitles = false, bool wholeLines = false, IAttentionMonitor? attention = null)
     {
         var busyDesktop = Guid.NewGuid();
         var emptyDesktop = Guid.NewGuid();
@@ -734,7 +764,7 @@ public class FloatingBarLaneShadeTests(ITestOutputHelper output)
                 WholeWindowLines = wholeLines,
             },
         };
-        var manager = new WorkspaceManager(desktops, monitor, new StubTitles(), store, screenLayout: screens);
+        var manager = new WorkspaceManager(desktops, monitor, new StubTitles(), store, screenLayout: screens, attention: attention);
         Assert.True(manager.Start().IsSuccess);
 
         // Parked off the virtual screen, as every bar test does, so the suite never flashes a
