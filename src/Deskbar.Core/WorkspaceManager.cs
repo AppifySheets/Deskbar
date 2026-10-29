@@ -3014,6 +3014,13 @@ public sealed class WorkspaceManager(
 
     public void CancelExpectation(Guid expectation) => expectations.RemoveAll(e => e.Id == expectation);
 
+    // Whether an expectation is still waiting for its window: false once a window has answered it by name, once it
+    // has lapsed, or once it was cancelled. For a caller that starts several windows of one app in a row (the bar's
+    // Restart Explorer reopening folders) and must let each be claimed before starting the next, since by name the
+    // first new window answers whichever expectation is waiting.
+    public bool Awaits(Guid expectation) =>
+        expectations.Any(e => e.Id == expectation && !e.NameSpent && e.Until >= now());
+
     Maybe<Decision> StartedFor(WindowInfo window)
     {
         expectations.RemoveAll(e => e.Until < now());

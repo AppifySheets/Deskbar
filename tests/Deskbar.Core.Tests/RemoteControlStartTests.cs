@@ -109,6 +109,50 @@ public class RemoteControlStartTests
         Assert.DoesNotContain(new WindowHandle(0x40), desktops.WindowPlacements.Keys);
     }
 
+    // Awaits, which the bar's Restart Explorer uses to start folders one at a time: true while the expectation waits,
+    // false once a window has answered it, once it has run out, and once it is cancelled.
+    [Fact]
+    public void Awaits_is_true_only_while_the_expectation_is_waiting()
+    {
+        var manager = Started();
+        var research = manager.AddWorkspace("Research").Value;
+
+        var answered = manager.ExpectWindow("explorer", research.Id);
+        Assert.True(manager.Awaits(answered));
+        Appear(Window(0x60, 7000, "explorer"));
+        Assert.False(manager.Awaits(answered));
+
+        var cancelled = manager.ExpectWindow("explorer", research.Id);
+        manager.CancelExpectation(cancelled);
+        Assert.False(manager.Awaits(cancelled));
+
+        var lapsed = manager.ExpectWindow("explorer", research.Id);
+        now += TimeSpan.FromSeconds(31);
+        Assert.False(manager.Awaits(lapsed));
+    }
+
+    // Restart Explorer's reopening, as the manager sees it: folder windows of ONE process, each expected by name for
+    // its own workspace and started only once the one before has been claimed, each land where theirs was.
+    [Fact]
+    public void Folders_expected_one_after_another_each_go_to_their_own_workspace()
+    {
+        var manager = Started();
+        var research = manager.AddWorkspace("Research").Value;
+        var home = manager.AddWorkspace("Home").Value;
+
+        var first = manager.ExpectWindow("explorer", research.Id);
+        Appear(Window(0x70, 8000, "explorer"));
+        Assert.False(manager.Awaits(first));
+        manager.CancelExpectation(first);
+
+        var second = manager.ExpectWindow("explorer", home.Id);
+        Appear(Window(0x71, 8000, "explorer"));
+        Assert.False(manager.Awaits(second));
+
+        Assert.Equal(research.DesktopId, desktops.WindowPlacements[new WindowHandle(0x70)]);
+        Assert.Equal(home.DesktopId, desktops.WindowPlacements[new WindowHandle(0x71)]);
+    }
+
     // Asked-for outranks remembered: an app placement memory keeps in another workspace still goes where it was
     // started for.
     [Fact]
