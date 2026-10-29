@@ -20,6 +20,17 @@ namespace Deskbar.App;
 // landing glow is the fainter one, and it has no fill, so "you are here" still wins over "you will be there": with
 // both at full strength (the mockup's other column) every row would look focused.
 //
+// A third, quieter one since 2.2.10, for two screens:
+//
+//   fronted   "this is in front on your other screen"   no ring, no bar, an 8% fill and a glow at 45%
+//
+// Petre: "in 2monitor setup, can you identify the window that's on top on ANOTHER screen, not the one that's
+// active?", "mark it, too", "with a lesser glow, but similar", then "c" from four mockups (a halo only; the others
+// were the landing weight, and the landing weight without its bar). It has neither the ring nor the bar, so it never
+// reads as "you are here" or "you will be there"; what it shares with the focused marker is the halo. It lands only
+// in the current workspace's row, since a virtual desktop spans every screen, and which window it lands on comes from
+// ScreenFronts, read on every rebuild.
+//
 // The bar on the left is the cue nothing else on the bar uses. The ring alone is a thin line, and a thin white
 // line is exactly what gets lost on light artwork; the bar is three pixels wide and stands off the icon's edge,
 // so it reads on any icon.
@@ -65,6 +76,8 @@ public partial class FloatingBar
     static readonly Brush LandingRing = Frozen(0xB3, 0xFF, 0xFF, 0xFF);
     static readonly Brush LandingBar = Frozen(0xB3, 0xFF, 0xFF, 0xFF);
     const double LandingGlow = 0.4;
+    static readonly Brush FrontedFill = Frozen(0x14, 0xFF, 0xFF, 0xFF);
+    const double FrontedGlow = 0.45;
 
     // Paints one icon from the window's facts, the one place that decides how a marker looks: IconButton calls it
     // when the icon is built and ApplyCandidate whenever the amber ring moves, so the two cannot drift apart.
@@ -78,15 +91,18 @@ public partial class FloatingBar
     // `asking` is the pulsing orange of a window whose session asked for the user or whose taskbar button flashed
     // (FloatingBar.Glows in FloatingBar.Asking.cs), or null.
     // It takes the ring and a full-strength glow, below only the amber ring: a hover is the pointer, there now.
-    internal static void PaintMarker(Button icon, bool ringed, bool focused, bool landing, Brush? asking = null)
+    //
+    // `fronted` is the window in front on another screen (ScreenFronts): the weakest marker, under all of the above.
+    // It only ever adds a fill and a glow where nothing stronger has already put one.
+    internal static void PaintMarker(Button icon, bool ringed, bool focused, bool landing, Brush? asking = null, bool fronted = false)
     {
         icon.BorderBrush = ringed ? CandidateRowRing
             : asking ?? (focused ? FocusedRing
                 : landing ? LandingRing
                 : Brushes.Transparent);
-        icon.Background = ringed || focused ? FocusedFill : Brushes.Transparent;
+        icon.Background = ringed || focused ? FocusedFill : fronted ? FrontedFill : Brushes.Transparent;
         SetMarkerBar(icon, focused ? FocusedBar : landing ? LandingBar : null);
-        SetMarkerGlow(icon, asking is not null ? 1.0 : focused ? FocusedGlow : landing ? LandingGlow : 0);
+        SetMarkerGlow(icon, asking is not null ? 1.0 : focused ? FocusedGlow : landing ? LandingGlow : fronted ? FrontedGlow : 0);
         SetMarkerGlowBrush(icon, asking ?? Brushes.White);
     }
 
