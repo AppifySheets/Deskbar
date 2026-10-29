@@ -1239,6 +1239,49 @@ public sealed class WorkspaceManager(
     public Result<Workspace> AddWorkspace(string name) =>
         InsertWorkspace(name, State.Workspaces.Count);
 
+    // THE WORKSPACES A FIRST INSTALL STARTS WITH. Petre: "add multiple workspaces the first time it's installed", then,
+    // from three choices each: Work, Personal and Projects; the desktops already there kept and named, new ones made
+    // only to reach the count. A bar with one row says little about what the app is for; three say it at once.
+    //
+    // The caller decides it is a first install (App: no state.json when the app starts); this only refuses to run over
+    // workspaces that already exist, so it can never rename anyone's setup.
+    //
+    // In two steps, existing desktops first and in the shell's order:
+    //   * a desktop the user has named in Windows (Task View) keeps that name and becomes a workspace under it. The
+    //     shell reports an unnamed desktop's name as empty (the bar shows those as "Desktop N", OverviewBuilder), so a
+    //     name here is one somebody typed.
+    //   * an unnamed desktop takes the next default, skipping any default a named desktop already uses.
+    // Then new desktops, one per default left over, until there are as many workspaces as defaults. A machine with
+    // more desktops than defaults ends with its extra unnamed ones unnamed, as they were.
+    //
+    // Best effort, one workspace at a time: a desktop that cannot be named or created is skipped, not a reason to stop,
+    // and the answer is the workspaces that were made.
+    public IReadOnlyList<Workspace> SeedFirstWorkspaces(IReadOnlyList<string> defaults)
+    {
+        if (State.Workspaces.Count > 0) return [];
+        var existing = desktops.GetDesktops().GetValueOrDefault([]);
+        var taken = existing.Where(d => !string.IsNullOrWhiteSpace(d.Name)).Select(d => d.Name.Trim()).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var remaining = new Queue<string>(defaults.Where(name => !taken.Contains(name)));
+
+        var named = existing
+            .Select(desktop => !string.IsNullOrWhiteSpace(desktop.Name)
+                ? NameDesktop(desktop.Id, desktop.Name.Trim())
+                : remaining.TryDequeue(out var name) ? NameDesktop(desktop.Id, name) : Result.Failure<Workspace>("no default left"))
+            .Where(result => result.IsSuccess)
+            .Select(result => result.Value)
+            .ToList();
+
+        var created = Enumerable.Range(0, Math.Max(0, defaults.Count - named.Count))
+            .Select(_ => remaining.TryDequeue(out var name) ? AddWorkspace(name) : Result.Failure<Workspace>("no default left"))
+            .Where(result => result.IsSuccess)
+            .Select(result => result.Value)
+            .ToList();
+
+        var made = named.Concat(created).ToList();
+        trace?.Invoke($"first install: workspaces [{string.Join(", ", made.Select(w => w.Name))}]");
+        return made;
+    }
+
     // Petre: "ability to rename existing and add new workspaces from within the floating window,
     // on top or under the current workspace, something like a insert before/after."
     //

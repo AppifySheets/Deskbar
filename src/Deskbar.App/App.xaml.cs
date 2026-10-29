@@ -1153,6 +1153,11 @@ public partial class App : Application
             // was recoverable in it. Instead: back the corrupt file up (rename, never
             // delete), tell the user, and only THEN retry -- the retry succeeds because
             // Load() now sees a missing file, which is the normal "first run" case.
+            //
+            // ...which is why a first install is decided HERE, before the first Start: no state.json yet (the 1.x
+            // rename migration has already run above, so a TaskSpaces user arrives with theirs). A corrupt file that
+            // gets backed up below is someone's existing setup, not a first install, and must not be treated as one.
+            var firstInstall = !File.Exists(statePath);
             var started = manager.Start();
             if (started.IsFailure)
             {
@@ -1167,6 +1172,8 @@ public partial class App : Application
                         $"Deskbar failed to start even after backing up state.json:\n{started.Error}",
                         "Deskbar", MessageBoxButton.OK, MessageBoxImage.Error);
             }
+
+            if (firstInstall && started.IsSuccess) SetUpFirstInstall(manager);
 
             // The aging icons' stamps from before this restart, then saved every minute (LastUsedFile).
             var lastUsedPath = Path.Combine(stateDir, "last-used.json");
@@ -1677,6 +1684,34 @@ public partial class App : Application
     // user's data stays recoverable, and tells them about it. Called once, right before
     // the retried manager.Start() -- by the time this returns, nothing has had a chance to
     // persist an empty state over the original file.
+    // A FIRST INSTALL'S SETUP. Petre, asked whether "start with Windows" is on after an install (only for the Store
+    // build, whose startup task the manifest enables) and then "also, add multiple workspaces the first time it's
+    // installed": start with Windows on, and three workspaces, Work, Personal and Projects, the desktops already
+    // there kept and named first (WorkspaceManager.SeedFirstWorkspaces).
+    //
+    // Only for a PUBLISHED build run against the real profile. A development build started with a scratch profile
+    // (DESKBAR_APPDATA) also finds no state.json, and would otherwise name or create desktops on the real machine and
+    // point the login entry at a bin folder, the very thing StartupRegistration.ReassertIfEnabled already refuses.
+    //
+    // Start with Windows: the Run value for the direct build. The Store copy leaves it alone: its startup task is
+    // already enabled by its manifest, and the Store packaging design keeps the Run value out of the package
+    // (docs/superpowers/specs/2026-10-24-deskbar-store-packaging-design.md).
+    static readonly IReadOnlyList<string> FirstWorkspaces = ["Work", "Personal", "Projects"];
+
+    static void SetUpFirstInstall(WorkspaceManager manager)
+    {
+        if (!StartupRegistration.RunsAsPublished || AppPaths.RootOverridden)
+        {
+            ClickTrace.Write("first install: not a published build on the real profile, nothing set up");
+            return;
+        }
+        manager.SeedFirstWorkspaces(FirstWorkspaces);
+        if (!PackageIdentity.IsPackaged)
+            StartupRegistration.Enable()
+                .Tap(() => ClickTrace.Write("first install: start with Windows turned on"))
+                .TapError(e => ClickTrace.Write($"first install: start with Windows not turned on: {e}"));
+    }
+
     static void BackupCorruptState(string statePath, string loadError)
     {
         try
