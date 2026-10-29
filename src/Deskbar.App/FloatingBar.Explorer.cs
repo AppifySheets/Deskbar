@@ -64,7 +64,7 @@ public partial class FloatingBar
         var started = DetachedLauncher.Start("explorer.exe", [folder], null);
         if (started.IsFailure)
         {
-            expectation.Execute(id => Dispatcher.Invoke(() => manager.CancelExpectation(id)));
+            expectation.Tap(id => Dispatcher.Invoke(() => manager.CancelExpectation(id)));
             return $"{folder}: not reopened ({started.Error})";
         }
         if (expectation.HasNoValue) return $"{folder}: reopened where you are (it was in no workspace)";
