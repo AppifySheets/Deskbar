@@ -49,6 +49,9 @@ public partial class FloatingBar : Window
     public FloatingBar(WorkspaceManager manager)
     {
         this.manager = manager;
+        // The default needs this bar (its dispatcher, its error box), so it is set here rather than by an
+        // initializer; the tests' initializer replaces it afterwards.
+        RestartTaskbar = RestartTaskbarOffThread;
         InitializeComponent();
 
         // Start, search, the tray, quick settings, the bell and the clock (FloatingBar.Shell.cs). Built once
@@ -6862,6 +6865,10 @@ public partial class FloatingBar : Window
         // can talk to the pipe can start taskmgr.exe itself.
         menu.Items.Add(new Separator());
         Add("▤", "Task Manager", () => OpenTaskManager());
+        // Restarting Explorer, which is what brings the taskbar back (TaskbarRestart). Petre: "add restart explorer
+        // in the right click menu of the bar", "which restarts the taskbar". Beside Task Manager, where the same
+        // restart is done by hand, and without a control pipe twin for Task Manager's reason.
+        Add("⟲", "Restart taskbar", () => RestartTaskbar());
 
         if (AppActions is not { } app) return;
         menu.Items.Add(new Separator());
@@ -6880,6 +6887,23 @@ public partial class FloatingBar : Window
         Action? SaveDebugDump = null);
 
     public AppCommands? AppActions { get; init; }
+
+    // The background menu's "Restart taskbar". On a pool thread, because shutting Explorer down can take several
+    // seconds and the bar must keep drawing meanwhile; it answers TaskbarCreated by itself when the taskbar comes
+    // back (see the app bar's registration), so nothing here has to wait for that. The outcome goes to the trace,
+    // which records which way the taskbar came back (see TaskbarRestart), and a failure is also shown, since a
+    // shut-down Explorer that did not come back is a missing taskbar the user has to fix. Replaced in the tests,
+    // which must never restart the shell of whoever runs them.
+    internal Action RestartTaskbar { get; init; }
+
+    void RestartTaskbarOffThread() =>
+        Task.Run(() => Deskbar.Windows.Shell.TaskbarRestart.Restart())
+            .ContinueWith(done => Dispatcher.InvokeAsync(() =>
+            {
+                var outcome = done.Result;
+                ClickTrace.Write($"restart taskbar: {(outcome.IsSuccess ? outcome.Value : outcome.Error)}");
+                Report(outcome.IsSuccess ? Result.Success() : Result.Failure(outcome.Error));
+            }), TaskScheduler.Default);
 
     // The split window lines setting (AppState.SplitWindowLines), on every workspace's menu and the bar's own,
     // right under the window list item it belongs with. Petre: "make this a setting, enabled by default". One
