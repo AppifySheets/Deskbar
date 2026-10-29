@@ -139,6 +139,16 @@ public sealed partial class RemoteControl
         _ => ControlReply.Fail(ControlUsage.LineFor("window-lines")),
     };
 
+    // The collapsed bar click setting (AppState.CollapsedBarSwitchesWhole), the remote twin of the menu item that
+    // flips it: `bar` switches to the workspace wherever the collapsed bar is clicked, `icon` lets an icon bring
+    // up its own window.
+    ControlReply CollapsedClick(string mode) => mode.ToLowerInvariant() switch
+    {
+        "bar" => Reply(manager.SetCollapsedBarSwitchesWhole(true), () => new { collapsedClick = "bar" }),
+        "icon" => Reply(manager.SetCollapsedBarSwitchesWhole(false), () => new { collapsedClick = "icon" }),
+        _ => ControlReply.Fail(ControlUsage.LineFor("collapsed-click")),
+    };
+
     // The palette's names, a #RRGGBB of your own (what the Custom… picker stores), "none" for the
     // Transparent entry, or "default" for By position, which is the absence of a colour.
     static Result<string?> ParseColour(string raw) =>

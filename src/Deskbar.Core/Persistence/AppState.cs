@@ -201,6 +201,17 @@ public sealed record AppState(
     // The reading the bar wants. Not stored.
     [JsonIgnore] public bool SplitWindowLines => !WholeWindowLines;
 
+    // Whether a COLLAPSED bar is clicked as a whole, its icons included: the click switches to the workspace and
+    // lands on the window that was in front there last time, and the bar opens so a window is picked from its
+    // list (FloatingBar.GroupRow, `wholeRow`). Petre: "clicking a collapsed bar, i want it to not let me select
+    // what to open, but the entire bar is selected, with its previously active programs", then "make this
+    // default, config option to disable". Stored as its NEGATION for the reason WholeWindowLines is: every
+    // existing state.json lacks the key and reads false, so the whole-bar click is on until someone turns it off.
+    public bool CollapsedIconsPickWindow { get; init; }
+
+    // The reading the bar wants. Not stored.
+    [JsonIgnore] public bool CollapsedBarSwitchesWhole => !CollapsedIconsPickWindow;
+
     // Whether Deskbar writes its Claude Code skill (ClaudeSkill in the app). Petre: "can you do it so that deskbar
     // advertises this to other claude users?", "yes, add a skill for claude per user". On by default, and stored as
     // its NEGATION for the reason WholeWindowLines is: every existing state.json lacks the key and reads false.

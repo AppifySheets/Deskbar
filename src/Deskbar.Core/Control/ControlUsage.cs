@@ -83,6 +83,8 @@ public static class ControlUsage
                 "Minimize bar, or bring it back; turn the Dock to screen edge setting on or off; dock across the line between two screens, or back to one screen's edge"),
             new("window-lines", "split|whole",
                 "Right third of window lines switches workspace, or Whole window lines bring the window up"),
+            new("collapsed-click", "bar|icon",
+                "Clicking a collapsed bar switches to its workspace, icons included, or Icons on collapsed bars bring their window up"),
             new("claude-skill", "on|off",
                 "Manage's \"Teach Claude Code\" setting: keep ~/.claude/skills/deskbar/SKILL.md written, or remove it"),
         ]),

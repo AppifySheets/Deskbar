@@ -102,6 +102,7 @@ public sealed partial class RemoteControl(WorkspaceManager manager, Func<bool, R
 
         ("bar", [var state]) => Bar(state),
         ("window-lines", [var mode]) => WindowLines(mode),
+        ("collapsed-click", [var mode]) => CollapsedClick(mode),
         ("claude-skill", [var onOff]) => ClaudeSkill(onOff),
 
         // The file is the answer, not a window: whoever asked through the pipe reads it back from the path.

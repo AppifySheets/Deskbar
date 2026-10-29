@@ -564,7 +564,7 @@ public class RemoteControlMenuTests
              "unfold", "color", "delete", "switch", "group-create", "group-join", "group-leave", "group-rename",
              "group-color", "group-fold", "group-unfold", "group-reorder", "ungroup", "name-desktop", "rename-window", "rename-app", "rename-pattern",
              "name-by-folder", "restore-title", "pin", "unpin", "close-window", "force-close", "close-all", "restart-app", "bar",
-             "window-lines", "dump"],
+             "window-lines", "collapsed-click", "dump"],
             verb => Assert.Contains($"\n  {verb}", help));
     }
 
@@ -585,5 +585,24 @@ public class RemoteControlMenuTests
 
         Assert.Equal(ControlReply.Failed, Run(manager, "window-lines", "sideways").ExitCode);
         Assert.True(manager.State.SplitWindowLines);
+    }
+
+    // The collapsed bar click setting's remote twin (AppState.CollapsedBarSwitchesWhole). Petre: "make this
+    // default, config option to disable": a fresh state clicks the bar as a whole, `icon` turns it off, `bar` back
+    // on, anything else is a usage error that changes nothing.
+    [Fact]
+    public void Collapsed_click_turns_the_whole_bar_click_off_and_on()
+    {
+        var manager = Started();
+        Assert.True(manager.State.CollapsedBarSwitchesWhole);
+
+        Ok(Run(manager, "collapsed-click", "icon"));
+        Assert.False(manager.State.CollapsedBarSwitchesWhole);
+
+        Ok(Run(manager, "collapsed-click", "bar"));
+        Assert.True(manager.State.CollapsedBarSwitchesWhole);
+
+        Assert.Equal(ControlReply.Failed, Run(manager, "collapsed-click", "sideways").ExitCode);
+        Assert.True(manager.State.CollapsedBarSwitchesWhole);
     }
 }

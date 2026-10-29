@@ -2516,7 +2516,7 @@ public partial class FloatingBar : Window
     // lanes) so GroupRow can light it on hover: that is where a click switches workspace.
     // `slots` collects each icon with the window it stands for, so a drop can work out which two icons
     // it landed between (see InsertionAt).
-    UIElement LineOf(IReadOnlyList<WindowRow> line, ISet<WindowHandle> opensGroup, string groupLabel, string groupKey, Guid? rowKey, List<UIElement> iconButtons, List<Border> washes, List<IconSlot> slots, bool isLastLine, double scale = 1.0, double indent = 0, bool titled = false)
+    UIElement LineOf(IReadOnlyList<WindowRow> line, ISet<WindowHandle> opensGroup, string groupLabel, string groupKey, Guid? rowKey, List<UIElement> iconButtons, List<Border> washes, List<IconSlot> slots, bool isLastLine, double scale = 1.0, double indent = 0, bool titled = false, bool wholeRow = false)
     {
         // Runs of consecutive icons that share a monitor. `opensGroup` already knows where each
         // one starts -- it is the same set the wrap arithmetic budgets a marker for -- so this
@@ -2724,7 +2724,7 @@ public partial class FloatingBar : Window
                 Panel stack = titled ? new Grid() : new StackPanel { Orientation = Orientation.Horizontal };
                 run.ForEach(r =>
                 {
-                    var button = IconButton(groupLabel, groupKey, r, rowKey);
+                    var button = IconButton(groupLabel, groupKey, r, rowKey, wholeRow);
                     if (titled && button is Button item) Titled(item, r);
                     // The row's shrink, applied per ICON. A LayoutTransform rather than a smaller
                     // icon size: the icon's own pixels come from a cache keyed by size, and asking
@@ -3572,6 +3572,20 @@ public partial class FloatingBar : Window
         // well"), and each is marked with a pin in its title (see Titled) so a window that follows you
         // everywhere is not mistaken for one that lives here.
         var titled = titledList;
+
+        // A COLLAPSED row is clicked as a whole, icons included. Petre: "clicking a collapsed bar,
+        // i want it to not let me select what to open, but the entire bar is selected, with its previously
+        // active programs", "then click whatever you want after the bar is expanded". So on a row that expands
+        // when clicked, an icon no longer jumps to its own window: the click falls through to the row's switch,
+        // which lands on the window that was in front there last time (WindowRow.WillActivate, the halo), and
+        // the row opens into its titled list, where each window is picked by name. Only while rows expand
+        // (AppState.ExpandCurrentWorkspace): with the list at the bottom no row ever opens, so an icon is the
+        // only way to reach one window and keeps its click. Never the current row, where the icon's click is
+        // the minimize toggle, nor a row with no switch (the pinned row). A SETTING, on by default
+        // (AppState.CollapsedBarSwitchesWhole): "make this default, config option to disable". Off, an icon on a
+        // collapsed row brings its own window up, as it did before.
+        var wholeRow = manager.State.ExpandCurrentWorkspace && manager.State.CollapsedBarSwitchesWhole
+            && !titled && !isCurrent && switchTo is not null;
         var own = rows.ToList();
         var ordered = titled
             ? own.Concat(pinnedNow.Where(p => own.All(r => r.Window.Handle != p.Window.Handle)))
@@ -3859,7 +3873,7 @@ public partial class FloatingBar : Window
         // wrapped lines.
         drawnLines.Select((line, at) => (line, last: at == drawnLines.Count - 1)).ToList()
             .ForEach(x => icons.Children.Add(LineOf(x.line, showMonitorMarkers ? opensLine : [], groupLabel, groupKey, rowKey, iconButtons, washes, slots, x.last,
-                scale, spine is not null ? NestedIndent : 0, titled)));
+                scale, spine is not null ? NestedIndent : 0, titled, wholeRow)));
 
         // The parent's windows USED to be drawn here, dimmed, on every nested row -- the issue
         // asked for "everything from the main workspace pinned to the nested ones". Petre, seeing
@@ -4188,7 +4202,9 @@ public partial class FloatingBar : Window
             var inRow = false;
             var onIcons = new HashSet<UIElement>();
             static bool Lands(UIElement icon) => icon is FrameworkElement { DataContext: WindowRow { WillActivate: true } };
-            void SyncHover() => Hover(label: !isCurrent && inRow, wash: inRow && onIcons.All(Lands) && (titled || !isCurrent));
+            // On a row clicked as a whole (wholeRow, see the top of this method) EVERY icon lands where the free
+            // space does, since its click now is the row's switch, so the wash stays lit across them all.
+            void SyncHover() => Hover(label: !isCurrent && inRow, wash: inRow && (wholeRow || onIcons.All(Lands)) && (titled || !isCurrent));
 
             container.MouseEnter += (_, _) => { inRow = true; SyncHover(); };
             container.MouseLeave += (_, _) => { inRow = false; SyncHover(); ClearInfo(); };
@@ -6015,7 +6031,9 @@ public partial class FloatingBar : Window
     // `rowKey` is the workspace the row stands for (null for the pinned, unplaced and other-desktop rows),
     // so the hover card can tell, at the moment the pointer arrives, whether this icon is in the workspace
     // you are standing in and therefore needs no picture.
-    UIElement IconButton(string groupLabel, string groupKey, WindowRow row, Guid? rowKey = null)
+    // wholeRow: the icon sits on a collapsed row that is clicked as a whole (see GroupRow), so its click is
+    // the row's switch rather than a jump to this one window, and hovering it rings the row's landing icon.
+    UIElement IconButton(string groupLabel, string groupKey, WindowRow row, Guid? rowKey = null, bool wholeRow = false)
     {
         var button = new Button
         {
@@ -6073,8 +6091,14 @@ public partial class FloatingBar : Window
         // workspace we are already in, the row above it stays unringed, because nothing about the
         // workspace would change. That case needs no code: the row rule already declines to ring
         // the current row.
-        button.MouseEnter += (_, _) => { hoveredIcon = row.Window.Handle; ApplyCandidate(); };
-        button.MouseLeave += (_, _) => LeaveIcon(row.Window.Handle);
+        //
+        // Not on a row clicked as a whole: there the click lands on the row's own landing window whichever icon
+        // it hits, so the ring stays on that one (ApplyCandidate falls back to it with no hovered icon).
+        if (!wholeRow)
+        {
+            button.MouseEnter += (_, _) => { hoveredIcon = row.Window.Handle; ApplyCandidate(); };
+            button.MouseLeave += (_, _) => LeaveIcon(row.Window.Handle);
+        }
         // The HANDLE, not just the path: IconCache asks the window itself (WM_GETICON)
         // before falling back to extracting from the exe. Petre: "i also don't see an icon
         // for whatsapp app" -- WhatsApp.Root.exe is an MSIX launcher stub carrying no icon,
@@ -6141,6 +6165,14 @@ public partial class FloatingBar : Window
         // Without it, one click on an icon would jump to the window AND switch to the row.
         button.Click += (_, _) =>
         {
+            // On a row clicked as a whole the icon claims nothing: the press is left unconsumed, so the row's
+            // own mouse-up handler, further up the same route, performs the switch exactly as a click on its
+            // free space would. One path for the switch, with its trace and its guards, rather than a copy.
+            if (wholeRow)
+            {
+                if (ClickTrace.On) ClickTrace.Write($"icon-click-row app={row.Window.ProcessName} group={groupLabel}");
+                return;
+            }
             MarkPressConsumed();
             // Which half of the toggle this is belongs to the manager, NOT to the row: a row is a
             // snapshot, and both facts the decision needs (is this the window you are in, is it
@@ -6219,7 +6251,8 @@ public partial class FloatingBar : Window
         // gesture from both activating the window and switching workspace.
         button.AddHandler(MouseLeftButtonUpEvent, new MouseButtonEventHandler((_, e) =>
         {
-            if (e.ChangedButton != MouseButton.Left || !orphanRelease || dragJustFinished) return;
+            // A row clicked as a whole rescues its own orphan release (see the row's handler), so nothing here.
+            if (e.ChangedButton != MouseButton.Left || !orphanRelease || dragJustFinished || wholeRow) return;
             MarkPressConsumed();
 
             RedrawWhenToggleSettles(row, activator.IsMinimized(row.Window.Handle));
@@ -6900,6 +6933,15 @@ public partial class FloatingBar : Window
         var split = manager.State.SplitWindowLines;
         add("◧", split ? "Whole window lines bring the window up" : "Right third of window lines switches workspace",
             () => Report(manager.SetSplitWindowLines(!split)));
+
+        // The collapsed bar click setting (AppState.CollapsedBarSwitchesWhole), beside the split it is a sibling of:
+        // both decide what a click on a bar does. Same one-item flip naming what it would switch TO. Its control
+        // pipe twin is `collapsed-click bar|icon` (ControlUsage). Only offered while rows expand, because with the
+        // window list at the bottom no bar ever opens and the setting does nothing.
+        if (!manager.State.ExpandCurrentWorkspace) return;
+        var whole = manager.State.CollapsedBarSwitchesWhole;
+        add("▭", whole ? "Icons on collapsed bars bring their window up" : "Clicking a collapsed bar switches to its workspace",
+            () => Report(manager.SetCollapsedBarSwitchesWhole(!whole)));
     }
 
     void AddBarItems(ContextMenu menu)

@@ -3629,6 +3629,13 @@ public sealed class WorkspaceManager(
             ? Result.Success()
             : Result.Success().Tap(() => Persist(State with { WholeWindowLines = !split }));
 
+    // Whether a collapsed bar is clicked as a whole, icons included (AppState.CollapsedBarSwitchesWhole). A no-op
+    // when unchanged, like the settings above.
+    public Result SetCollapsedBarSwitchesWhole(bool whole) =>
+        State.CollapsedBarSwitchesWhole == whole
+            ? Result.Success()
+            : Result.Success().Tap(() => Persist(State with { CollapsedIconsPickWindow = !whole }));
+
     // Whether the app writes its Claude Code skill (AppState.ClaudeSkill). A no-op when unchanged, like the
     // settings above; the app writes or removes the file on the state pulse this sends.
     public Result SetClaudeSkill(bool on) =>
