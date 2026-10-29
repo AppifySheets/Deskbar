@@ -204,9 +204,10 @@ public static class OverviewBuilder
                 .ToHashSet();
 
             // Whether this desktop can answer the question AT ALL, asked once for the group
-            // rather than per window. Every desktop but the current one is made of cloaked
-            // windows, which EnumWindows does not return, so none of them has any z-order --
-            // and "no window here is known to be in front" must not be reported as "every
+            // rather than per window. A desktop whose windows the sweep did not return has no
+            // z-order (it was once believed every desktop but the current one was such a desktop;
+            // measured 2026-10-29, it is not: see WindowRow) -- and "no window here is known to
+            // be in front" must not be reported as "every
             // window here is behind". Petre dims the ones that are behind; that distinction is
             // the difference between one dimmed icon per monitor and an entire workspace
             // rendering greyed out.

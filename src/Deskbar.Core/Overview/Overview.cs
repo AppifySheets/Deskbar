@@ -19,8 +19,10 @@ namespace Deskbar.Core.Overview;
 // Monitor / IsMinimized / IsFrontmostOnMonitor: Petre, "sort icons in workspaces by monitors...
 // and i want to have the monitor number on the icon", "can you also identify which window is
 // minimized, vs not? or which one is on top?", "maybe we can do 1 in bold, if it's on top".
-// IsFrontmostOnMonitor is false on every desktop except the current one -- z-order comes from
-// EnumWindows, which skips the cloaked windows every other desktop consists of.
+// IsFrontmostOnMonitor comes from one EnumWindows sweep (ScreenLayout), which keeps the windows of
+// other desktops: they are cloaked by the shell (reason 2), and TopLevelWindows keeps that reason.
+// Measured 2026-10-29: every workspace's windows had a z-order and a monitor, and the front window per
+// screen it predicted for a desktop before switching to it was the one in front after the switch.
 public sealed record WindowRow(
     WindowInfo Window,
     Maybe<string> OriginalTitle,
@@ -29,8 +31,8 @@ public sealed record WindowRow(
     Maybe<int> Monitor = default,
     bool IsMinimized = false,
     // Tri-state on purpose, and the third state is load-bearing. None means "z-order is not
-    // knowable here", which is every desktop but the current one -- EnumWindows skips cloaked
-    // windows and that is what a window on another desktop is. Petre wants non-front windows
+    // knowable here": a desktop none of whose windows the sweep returned. That was once believed
+    // to be every desktop but the current one; it is not (see above). Petre wants non-front windows
     // dimmed; without the distinction, "not known to be front" would collapse into "behind" and
     // every icon on every other workspace would render dimmed at once.
     Maybe<bool> IsFrontmostOnMonitor = default,

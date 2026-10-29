@@ -260,13 +260,13 @@ public class FloatingBarRebuildTests
         Assert.Equal(plain.DesiredSize, focused.DesiredSize);
     });
 
-    // Petre, with two screens: "mark it, too", "with a lesser glow, but similar", then "c" from the mockups. The window
-    // in front on the other screen wears a halo and a faint fill, with no ring and no side bar, so it never reads as the
-    // focused or the landing window. And it costs no layout either.
+    // Petre, with two screens: "mark it, too", "with a lesser glow, but similar", then "b" from the mockups. The window
+    // in front on the other screen wears the landing ring and glow without the side bar and without a fill, so it never
+    // reads as the focused or the landing window. And it costs no layout either.
     [Fact]
-    public void The_other_screens_front_window_wears_a_halo_only() => StaThread.Run(() =>
+    public void The_other_screens_front_window_wears_the_landing_ring_without_the_bar() => StaThread.Run(() =>
     {
-        Button Icon(bool focused, bool fronted)
+        Button Icon(bool focused, bool landing, bool fronted)
         {
             var icon = new Button
             {
@@ -275,52 +275,27 @@ public class FloatingBarRebuildTests
                 Padding = new Thickness(1),
                 Content = new Border { Width = 20, Height = 20 },
             };
-            FloatingBar.PaintMarker(icon, ringed: false, focused, landing: false, fronted: fronted);
+            FloatingBar.PaintMarker(icon, ringed: false, focused, landing, fronted: fronted);
             icon.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
             return icon;
         }
 
-        var fronted = Icon(focused: false, fronted: true);
-        var focused = Icon(focused: true, fronted: false);
-        var plain = Icon(focused: false, fronted: false);
+        var fronted = Icon(focused: false, landing: false, fronted: true);
+        var landing = Icon(focused: false, landing: true, fronted: false);
+        var focused = Icon(focused: true, landing: false, fronted: false);
+        var plain = Icon(focused: false, landing: false, fronted: false);
 
-        Assert.Equal(Brushes.Transparent, fronted.BorderBrush);
+        Assert.Equal(landing.BorderBrush, fronted.BorderBrush);
+        Assert.Equal(FloatingBar.GetMarkerGlow(landing), FloatingBar.GetMarkerGlow(fronted));
         Assert.Null(FloatingBar.GetMarkerBar(fronted));
-        Assert.NotEqual(Brushes.Transparent, fronted.Background);
-        Assert.InRange(FloatingBar.GetMarkerGlow(fronted), 0.01, FloatingBar.GetMarkerGlow(focused) - 0.01);
+        Assert.Equal(Brushes.Transparent, fronted.Background);
         Assert.Equal(plain.DesiredSize, fronted.DesiredSize);
 
         // Focused outranks it: an icon told both is simply focused.
-        var both = Icon(focused: true, fronted: true);
+        var both = Icon(focused: true, landing: false, fronted: true);
         Assert.Equal(FloatingBar.GetMarkerGlow(focused), FloatingBar.GetMarkerGlow(both));
         Assert.Equal(focused.Background, both.Background);
-    });
-
-    // The bar marks the window its reader names, and never the active window, which keeps its own marker.
-    [Fact]
-    public void The_bar_marks_the_window_in_front_on_another_screen_unless_it_is_active() => StaThread.Run(() =>
-    {
-        var harness = Harness.Build();
-        using var bar = harness.ShowBar(screenFronts: new HashSet<WindowHandle> { harness.First.Handle });
-        // The bar's first draw happens in its constructor, before the initializer hands it the reader, as in the app;
-        // any later rebuild reads it. A window appearing gives one without making anything active.
-        var extra = new WindowInfo(new WindowHandle(909), 99, "notepad", @"C:
-otepad.exe", "Extra", null);
-        harness.Desktops.Placements[extra.Handle] = harness.Desktops.CurrentId;
-        harness.Monitor.Pump.OnNext(new WindowEvent(WindowEventKind.Appeared, extra));
-
-        Button IconOf(WindowInfo window) =>
-            IconButtons(bar.Rows).Single(b => System.Windows.Automation.AutomationProperties.GetName(b) == window.Title);
-
-        var front = IconOf(harness.First);
-        Assert.Equal(Brushes.Transparent, front.BorderBrush);
-        Assert.Null(FloatingBar.GetMarkerBar(front));
-        Assert.True(FloatingBar.GetMarkerGlow(front) > 0);
-
-        harness.Monitor.Pump.OnNext(new WindowEvent(WindowEventKind.Activated, harness.First));
-        var active = IconOf(harness.First);
-        Assert.NotEqual(Brushes.Transparent, active.BorderBrush);
-        Assert.NotNull(FloatingBar.GetMarkerBar(active));
+        Assert.NotNull(FloatingBar.GetMarkerBar(both));
     });
 
     // Petre: "i need to be able to move workspaces up or down in the manage window".
@@ -1006,13 +981,9 @@ sealed class Harness
     // live-refresh subscription requires.
     // timeToday: what the bar's workspace captions read as today's time (FloatingBar.WorkspaceTime.cs). Left
     // null, as every test but those leaves it, the captions carry no time at all.
-    // screenFronts: the windows the bar is told are in front on another screen (FloatingBar.ScreenFronts.cs). Left
-    // out, the bar reads none, as every bar built outside the app does.
-    public BarUnderTest ShowBar(Func<Guid, TimeSpan>? timeToday = null, IReadOnlySet<WindowHandle>? screenFronts = null)
+    public BarUnderTest ShowBar(Func<Guid, TimeSpan>? timeToday = null)
     {
-        var bar = screenFronts is null
-            ? new FloatingBar(Manager) { Left = -32000, Top = -32000, TimeToday = timeToday }
-            : new FloatingBar(Manager) { Left = -32000, Top = -32000, TimeToday = timeToday, ReadScreenFronts = () => screenFronts };
+        var bar = new FloatingBar(Manager) { Left = -32000, Top = -32000, TimeToday = timeToday };
         bar.Show();
         return new BarUnderTest(bar);
     }

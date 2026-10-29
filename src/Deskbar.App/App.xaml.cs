@@ -1323,8 +1323,6 @@ public partial class App : Application
                 // ...and the language switcher's, the keyboard input languages (FloatingBar.Language.cs).
                 InputLanguages = new Windows.Input.InputLanguages(),
                 Pins =new Windows.Shell.ShellTaskbarPins(),
-                // ...and which window is in front on each other screen, for its marker (FloatingBar.ScreenFronts.cs).
-                ReadScreenFronts = () => FloatingBar.ScreenFrontsOf(manager),
                 Tabs = new BrowserTabs(),
                 Sound = new Windows.Audio.AudioActivity(ClickTrace.Write),
                 // ...and the now-playing line's: Windows' own media sessions (FloatingBar.Media.cs).

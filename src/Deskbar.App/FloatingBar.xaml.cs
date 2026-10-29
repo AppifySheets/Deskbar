@@ -2054,9 +2054,6 @@ public partial class FloatingBar : Window
         monitorLines.Clear();
         currentRow = null;
         ClearInfo();
-        // Which window is in front on each other screen, read now so every icon built below agrees
-        // (FloatingBar.ScreenFronts.cs).
-        screenFronts = ReadScreenFronts();
         // BEFORE the overview query, and outside its Tap, deliberately: the back button reads
         // the MRU rather than the overview, so a transient desktop-enumeration failure (which
         // leaves the rows showing whatever they last showed) must not also leave the button
@@ -2076,6 +2073,9 @@ public partial class FloatingBar : Window
         {
             Phase("query");
             if (ClickTrace.On) DumpBands(overview);
+            // The windows in front on a screen other than their row's active or landing window, for the quieter
+            // marker (FrontsElsewhere, FloatingBar.Marker.cs), worked out before any icon below is built.
+            frontsElsewhere = FrontsElsewhere.Of(overview);
             // The blink runs only while some row is asking (FloatingBar.Asking.cs).
             SyncAsking(overview);
 

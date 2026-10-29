@@ -22,14 +22,14 @@ namespace Deskbar.App;
 //
 // A third, quieter one since 2.2.10, for two screens:
 //
-//   fronted   "this is in front on your other screen"   no ring, no bar, an 8% fill and a glow at 45%
+//   fronted   "this is in front on your other screen"   the landing ring and glow, no bar, no fill
 //
 // Petre: "in 2monitor setup, can you identify the window that's on top on ANOTHER screen, not the one that's
-// active?", "mark it, too", "with a lesser glow, but similar", then "c" from four mockups (a halo only; the others
-// were the landing weight, and the landing weight without its bar). It has neither the ring nor the bar, so it never
-// reads as "you are here" or "you will be there"; what it shares with the focused marker is the halo. It lands only
-// in the current workspace's row, since a virtual desktop spans every screen, and which window it lands on comes from
-// ScreenFronts, read on every rebuild.
+// active?", "mark it, too", "with a lesser glow, but similar", then "b" from four mockups (after trying "c", a halo
+// and a faint fill alone, live). It has the landing marker's weight without the bar, and the bar is what says "you
+// are here" or "you will be there", so it reads as the focused window's quieter sibling and never as either. It
+// lands only in the current workspace's row, since a virtual desktop spans every screen, and which window it lands
+// on comes from ScreenFronts, read on every rebuild.
 //
 // The bar on the left is the cue nothing else on the bar uses. The ring alone is a thin line, and a thin white
 // line is exactly what gets lost on light artwork; the bar is three pixels wide and stands off the icon's edge,
@@ -69,6 +69,12 @@ public partial class FloatingBar
     public static double GetMarkerGlow(DependencyObject element) => (double)element.GetValue(MarkerGlowProperty);
     public static void SetMarkerGlow(DependencyObject element, double value) => element.SetValue(MarkerGlowProperty, value);
 
+    // The windows that wear the fronted marker, from the overview of the rebuild in progress (FrontsElsewhere.Of in
+    // RebuildCore), so every icon of one rebuild agrees.
+    IReadOnlySet<Core.Domain.WindowHandle> frontsElsewhere = new HashSet<Core.Domain.WindowHandle>();
+
+    bool Fronted(Core.Overview.WindowRow row) => frontsElsewhere.Contains(row.Window.Handle);
+
     static readonly Brush FocusedRing = Frozen(0xFF, 0xFF, 0xFF, 0xFF);
     static readonly Brush FocusedFill = Frozen(0x2E, 0xFF, 0xFF, 0xFF);
     static readonly Brush FocusedBar = Frozen(0xFF, 0xFF, 0xFF, 0xFF);
@@ -76,8 +82,6 @@ public partial class FloatingBar
     static readonly Brush LandingRing = Frozen(0xB3, 0xFF, 0xFF, 0xFF);
     static readonly Brush LandingBar = Frozen(0xB3, 0xFF, 0xFF, 0xFF);
     const double LandingGlow = 0.4;
-    static readonly Brush FrontedFill = Frozen(0x14, 0xFF, 0xFF, 0xFF);
-    const double FrontedGlow = 0.45;
 
     // Paints one icon from the window's facts, the one place that decides how a marker looks: IconButton calls it
     // when the icon is built and ApplyCandidate whenever the amber ring moves, so the two cannot drift apart.
@@ -93,16 +97,16 @@ public partial class FloatingBar
     // It takes the ring and a full-strength glow, below only the amber ring: a hover is the pointer, there now.
     //
     // `fronted` is the window in front on another screen (ScreenFronts): the weakest marker, under all of the above.
-    // It only ever adds a fill and a glow where nothing stronger has already put one.
+    // It takes the landing ring and glow where nothing stronger has already put one, and never a bar or a fill.
     internal static void PaintMarker(Button icon, bool ringed, bool focused, bool landing, Brush? asking = null, bool fronted = false)
     {
         icon.BorderBrush = ringed ? CandidateRowRing
             : asking ?? (focused ? FocusedRing
-                : landing ? LandingRing
+                : landing || fronted ? LandingRing
                 : Brushes.Transparent);
-        icon.Background = ringed || focused ? FocusedFill : fronted ? FrontedFill : Brushes.Transparent;
+        icon.Background = ringed || focused ? FocusedFill : Brushes.Transparent;
         SetMarkerBar(icon, focused ? FocusedBar : landing ? LandingBar : null);
-        SetMarkerGlow(icon, asking is not null ? 1.0 : focused ? FocusedGlow : landing ? LandingGlow : fronted ? FrontedGlow : 0);
+        SetMarkerGlow(icon, asking is not null ? 1.0 : focused ? FocusedGlow : landing || fronted ? LandingGlow : 0);
         SetMarkerGlowBrush(icon, asking ?? Brushes.White);
     }
 
