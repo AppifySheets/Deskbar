@@ -73,6 +73,27 @@ public class FrontsElsewhereTests
         Assert.Empty(Marked(oneScreen));
     }
 
+    // Petre, with a Teams meeting pinned to every desktop and active on the left screen: "why second is not active?"
+    // A pinned window lives in Overview.Pinned, outside every group, so the current group has no active window of its
+    // own. It anchors on the pinned one: the front window on the right screen is marked, the left one is not. A row
+    // that is not current is unaffected.
+    [Fact]
+    public void A_pinned_active_window_anchors_the_current_row()
+    {
+        var teams = Row(9, monitor: 1, front: true, active: true);
+        var overview = new Overview.Overview(
+            [teams],
+            [
+                new WorkspaceGroup(new Workspace(Guid.NewGuid(), "iam.ge", Guid.NewGuid()), IsCurrent: true,
+                    [Row(1, monitor: 1, front: true), Row(2, monitor: 2, front: true), Row(3, monitor: 2, front: false)], []),
+                new WorkspaceGroup(new Workspace(Guid.NewGuid(), "other", Guid.NewGuid()), IsCurrent: false,
+                    [Row(4, monitor: 1, front: true), Row(5, monitor: 2, front: true)], []),
+            ],
+            []);
+
+        Assert.Equal([2], Marked(overview));
+    }
+
     // Three screens: one marked window for each screen that is not the anchor's.
     [Fact]
     public void Every_other_screen_gets_its_own_marked_window()

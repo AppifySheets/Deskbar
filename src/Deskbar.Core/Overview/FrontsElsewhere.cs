@@ -19,17 +19,27 @@ namespace Deskbar.Core.Overview;
 // A row with no anchor marks nothing: without one there is no "other" screen to speak of, and marking the front window
 // of every screen would also mark the one you are looking at. Nor does a row with no z-order (IsFrontmostOnMonitor
 // None), or a window on no known monitor. A minimized window is never in front, whatever the order says.
+//
+// The active window can be one pinned to every desktop, and the overview keeps those in Overview.Pinned, not in any
+// group, while the bar draws them into the current row. Petre, with a pinned Teams meeting active on one screen and
+// nothing marked on the other: "why second is not active?" The current group had no active window of its own, so it
+// had no anchor. So the current group's anchor is the active window wherever the overview keeps it, pinned included.
 public static class FrontsElsewhere
 {
-    public static IReadOnlySet<WindowHandle> Of(Overview overview) =>
-        overview.Workspaces.Select(group => group.Running)
-            .Concat(overview.OtherDesktops.Select(desktop => desktop.Windows))
-            .SelectMany(InRow)
-            .ToHashSet();
-
-    internal static IEnumerable<WindowHandle> InRow(IReadOnlyList<WindowRow> rows)
+    public static IReadOnlySet<WindowHandle> Of(Overview overview)
     {
-        var anchor = rows.FirstOrDefault(r => r.IsActive) ?? rows.FirstOrDefault(r => r.WillActivate);
+        var activePinned = overview.Pinned.FirstOrDefault(r => r.IsActive);
+        return overview.Workspaces.Select(group => InRow(group.Running, group.IsCurrent ? activePinned : null))
+            .Concat(overview.OtherDesktops.Select(desktop => InRow(desktop.Windows, desktop.IsCurrent ? activePinned : null)))
+            .SelectMany(handles => handles)
+            .ToHashSet();
+    }
+
+    // `activeElsewhere`: the active window when the overview keeps it outside these rows (a pinned one), for the
+    // current group only.
+    internal static IEnumerable<WindowHandle> InRow(IReadOnlyList<WindowRow> rows, WindowRow? activeElsewhere = null)
+    {
+        var anchor = rows.FirstOrDefault(r => r.IsActive) ?? activeElsewhere ?? rows.FirstOrDefault(r => r.WillActivate);
         if (anchor is null || anchor.Monitor.HasNoValue) return [];
         return rows
             .Where(r => r != anchor
