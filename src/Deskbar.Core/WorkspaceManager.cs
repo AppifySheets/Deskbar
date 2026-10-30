@@ -1859,6 +1859,17 @@ public sealed class WorkspaceManager(
             ? Result.Success()
             : Result.Success().Tap(() => Persist(State with { DockAcrossScreens = across, DockBar = State.DockBar || across }));
 
+    // Whether a full-screen window may cover the floating bar on its own screen
+    // (AppState.StepAsideForFullScreen). Off by default, like the docking setting above, and for the same
+    // reason: the bar is on top of everything until someone says otherwise.
+    //
+    // A no-op when unchanged, for the reason SetCheckForUpdates gives: Manage sets the checkbox from
+    // state when it opens, which raises Checked, which lands here.
+    public Result SetStepAsideForFullScreen(bool enabled) =>
+        State.StepAsideForFullScreen == enabled
+            ? Result.Success()
+            : Result.Success().Tap(() => Persist(State with { StepAsideForFullScreen = enabled }));
+
     // The Settings tab's four dials (#151). Petre: "make things configurable, like dimming opacity,
     // timeout, etc."
     //
