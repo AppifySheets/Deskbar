@@ -2516,7 +2516,9 @@ public partial class FloatingBar : Window
     // lanes) so GroupRow can light it on hover: that is where a click switches workspace.
     // `slots` collects each icon with the window it stands for, so a drop can work out which two icons
     // it landed between (see InsertionAt).
-    UIElement LineOf(IReadOnlyList<WindowRow> line, ISet<WindowHandle> opensGroup, string groupLabel, string groupKey, Guid? rowKey, List<UIElement> iconButtons, List<Border> washes, List<IconSlot> slots, bool isLastLine, double scale = 1.0, double indent = 0, bool titled = false, bool wholeRow = false)
+    // `isCurrent`: the line belongs to the workspace you are in, so a titled line keeps no workspace third (see
+    // the split below).
+    UIElement LineOf(IReadOnlyList<WindowRow> line, ISet<WindowHandle> opensGroup, string groupLabel, string groupKey, Guid? rowKey, List<UIElement> iconButtons, List<Border> washes, List<IconSlot> slots, bool isLastLine, double scale = 1.0, double indent = 0, bool titled = false, bool wholeRow = false, bool isCurrent = false)
     {
         // Runs of consecutive icons that share a monitor. `opensGroup` already knows where each
         // one starts -- it is the same set the wrap arithmetic budgets a marker for -- so this
@@ -2813,12 +2815,17 @@ public partial class FloatingBar : Window
                 //
                 // A SETTING, on by default (AppState.SplitWindowLines). Petre: "make this a setting, enabled by
                 // default". Off, a window line is the window end to end, as it was before the split.
+                //
+                // Never on the CURRENT workspace's bar. Its third would switch to the workspace you are already
+                // in, so it only took clicks away from the windows. Petre, of the current bar's lines: "currently
+                // active expanded bar doesn't need that, let apps be clickable", keeping it "the way it is now for
+                // non-currently active expanded bars".
                 if (!titled)
                 {
                     laneContent.Children.Add(free);
                     washes.Add(free);
                 }
-                else if (manager.State.SplitWindowLines)
+                else if (manager.State.SplitWindowLines && !isCurrent)
                 {
                     var workspaceZone = new Border
                     {
@@ -3873,7 +3880,7 @@ public partial class FloatingBar : Window
         // wrapped lines.
         drawnLines.Select((line, at) => (line, last: at == drawnLines.Count - 1)).ToList()
             .ForEach(x => icons.Children.Add(LineOf(x.line, showMonitorMarkers ? opensLine : [], groupLabel, groupKey, rowKey, iconButtons, washes, slots, x.last,
-                scale, spine is not null ? NestedIndent : 0, titled, wholeRow)));
+                scale, spine is not null ? NestedIndent : 0, titled, wholeRow, isCurrent)));
 
         // The parent's windows USED to be drawn here, dimmed, on every nested row -- the issue
         // asked for "everything from the main workspace pinned to the nested ones". Petre, seeing

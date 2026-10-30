@@ -305,16 +305,19 @@ public class FloatingBarLaneShadeTests(ITestOutputHelper output)
     // activating the workspace bar", after "maybe not the entire right side half", and then "i want to see the
     // entire width of the caption", "just don't activate it on the right half", and then "maybe a third of the
     // line is the bar, rest is the app itself". So the title still runs the whole line, and the right third of
-    // the line is a zone laid over it: a click there lands on the zone, not the window, it lights on hover, goes dark with
-    // the pointer on a window, and lights on the current workspace too ("including for the currently active
-    // bar"). The current bar's caption still does not change (see the test above).
+    // the line is a zone laid over it: a click there lands on the zone, not the window, it lights on hover, and
+    // goes dark with the pointer on a window. Only on a bar that is NOT the current workspace's: it once lit on
+    // the current one too ("including for the currently active bar"), and Petre then took that back, "currently
+    // active expanded bar doesn't need that, let apps be clickable" (see the test after the next). So the row
+    // here is one held expanded after switching away from it, the only way a non-current row is expanded.
     [Fact]
     public void An_expanded_bars_lines_are_split_window_left_workspace_right() => StaThread.Run(() =>
     {
         using var bar = TwoScreens(busyIcons: 3, standOnBusy: true, expandRow: true, longTitles: true);
+        bar.Enter();
+        Assert.True(bar.Manager.Switch(bar.EmptyWorkspace).IsSuccess);
+        bar.Pulse();
         var row = bar.RowContainer("Busy");
-        var caption = Bar.Descendants(row).OfType<TextBlock>().First(t => t.Text == "Busy");
-        var resting = caption.Foreground;
         static void Raise(UIElement target, RoutedEvent e) =>
             target.RaiseEvent(new System.Windows.Input.MouseEventArgs(System.Windows.Input.Mouse.PrimaryDevice, 0) { RoutedEvent = e });
         static Rect BoundsIn(FrameworkElement e, Visual row) => e.TransformToAncestor(row).TransformBounds(new Rect(e.RenderSize));
@@ -347,19 +350,44 @@ public class FloatingBarLaneShadeTests(ITestOutputHelper output)
             Assert.Contains(lit, wash => ReferenceEquals(wash, right));
             Assert.True(Inside(left, w), "the left part should be the window");
         });
-        Assert.Same(resting, caption.Foreground);
 
-        // Onto a window: dark, as on an icon line. Off it again: lit.
-        var window = windows.First();
+        // Onto a window: dark, as on an icon line. Off it again: lit. Not the landing window, which lights the
+        // wash like free space does (SyncHover in GroupRow), since clicking it lands where the row's switch does.
+        var window = windows.First(w => w.DataContext is WindowRow { WillActivate: false });
         Raise(window, UIElement.MouseEnterEvent);
         Assert.Empty(bar.LitWashes(row));
         Raise(window, UIElement.MouseLeaveEvent);
         Assert.Equal(lit.Count, bar.LitWashes(row).Count);
-        Assert.Same(resting, caption.Foreground);
 
-        // Out of the bar: off.
+        // Out of the row: off.
         Raise(row, UIElement.MouseLeaveEvent);
         Assert.Empty(bar.LitWashes(row));
+    });
+
+    // Petre, of the current workspace's expanded bar: "currently active expanded bar doesn't need that, let apps be
+    // clickable". Its workspace third would switch to where you already are, so with the split ON its window lines
+    // are still the window end to end, and no zone lights over them.
+    [Fact]
+    public void The_current_expanded_bars_lines_are_the_window_end_to_end() => StaThread.Run(() =>
+    {
+        using var bar = TwoScreens(busyIcons: 3, standOnBusy: true, expandRow: true, longTitles: true);
+        var row = bar.RowContainer("Busy");
+        static bool Inside(DependencyObject? node, DependencyObject ancestor)
+        {
+            for (var at = node; at is not null; at = VisualTreeHelper.GetParent(at))
+                if (ReferenceEquals(at, ancestor)) return true;
+            return false;
+        }
+
+        // The row's empty lines still light (FloatingBarEmptyLineTests); only the window lines must not.
+        row.RaiseEvent(new System.Windows.Input.MouseEventArgs(System.Windows.Input.Mouse.PrimaryDevice, 0) { RoutedEvent = UIElement.MouseEnterEvent });
+        bar.Icons(row).ForEach(w =>
+        {
+            var at = w.TransformToAncestor(row).TransformBounds(new Rect(w.RenderSize));
+            var hit = row.InputHitTest(new Point(at.Left + at.Width * 0.9, at.Top + at.Height / 2)) as DependencyObject;
+            Assert.True(Inside(hit, w), "the whole line should be the window");
+            Assert.DoesNotContain(bar.LitWashes(row), wash => wash.TransformToAncestor(row).TransformBounds(new Rect(wash.RenderSize)).IntersectsWith(Rect.Inflate(at, -1, -1)));
+        });
     });
 
     // Petre: "make this a setting, enabled by default". Off, a window line is the window end to end again: a
