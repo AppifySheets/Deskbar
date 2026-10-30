@@ -288,6 +288,17 @@ public sealed record AppState(
     // an option". Off by default, and only meaningful with DockBar on and a second screen beside the bar's.
     public bool DockAcrossScreens { get; init; }
 
+    // Whether a full-screen window (a video, a game) may cover the FLOATING bar on the screen the bar is
+    // on, instead of the bar sitting on top of the movie.
+    //
+    // Off by default, like every other choice about how the bar sits on the desk: the bar is on top of
+    // everything, and that is what people expect of it until they say otherwise. A state.json written
+    // before this setting existed has no such field and reads as false, so nothing needs migrating.
+    //
+    // Only about the FLOATING bar: docked, the shell's own full-screen notice already moves the bar out
+    // of the topmost band (see the docking notes in FloatingBar), and that is left as it is.
+    public bool StepAsideForFullScreen { get; init; }
+
     // The groups workspaces belong to (#42 anchored, #84 anchorless). Membership lives on the
     // workspace as GroupId; this holds the group's own name and its anchor, if it has one.
     //
