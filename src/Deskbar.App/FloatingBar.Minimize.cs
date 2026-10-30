@@ -69,6 +69,9 @@ public partial class FloatingBar
     {
         if (ClickTrace.On)
             ClickTrace.Write($"minimize event hwnd={window.Value:X} iconic={activator.IsMinimized(window)} rebuilding={rebuilding} pending={rebuildRequested}");
+
+        // A restore of the window the bar was last owned by: own the bar by it again now, not on the next 1s check.
+        if (!activator.IsMinimized(window)) OwnBackOnRestore(window.Value);
     }
 
     // The drawn state, from a FRESH overview only: a re-layout reuses the last one and says nothing new.

@@ -62,6 +62,8 @@ public partial class ManageWindow : Window
             CheckForUpdates.Content = "Check the Microsoft Store for new versions";
         // Same pattern, and the same reason it is harmless: SetDockBar ignores an unchanged value.
         DockBar.IsChecked = manager.State.DockBar;
+        // Same again: SetStepAsideForFullScreen ignores an unchanged value.
+        StepAsideForFullScreen.IsChecked = manager.State.StepAsideForFullScreen;
         // Same again: SetClaudeSkill ignores an unchanged value.
         ClaudeSkill.IsChecked = manager.State.ClaudeSkill;
         // #82. Read from the assembly at runtime, never written as a literal here: the whole reason
@@ -378,6 +380,11 @@ public partial class ManageWindow : Window
     // The bar follows the setting from the state pulse this sends (FloatingBar.FollowDockSetting).
     void OnDockBarToggled(object s, RoutedEventArgs e) =>
         manager.SetDockBar(DockBar.IsChecked == true).TapError(err => MessageBox.Show(err));
+
+    // The bar reads the setting on its next tick, so there is nothing to push here (see
+    // FloatingBar.StepAsideIfCovered).
+    void OnStepAsideForFullScreenToggled(object s, RoutedEventArgs e) =>
+        manager.SetStepAsideForFullScreen(StepAsideForFullScreen.IsChecked == true).TapError(err => MessageBox.Show(err));
 
     // The app writes or removes the skill from the state pulse this sends (see where App wires ClaudeSkill.Sync).
     void OnClaudeSkillToggled(object s, RoutedEventArgs e) =>

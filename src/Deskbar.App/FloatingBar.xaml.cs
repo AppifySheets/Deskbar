@@ -124,7 +124,12 @@ public partial class FloatingBar : Window
         // See foregroundZoom: what a title-bar drag needs to know about the window before the drag began.
         foregroundZoomSampler.Tick += (_, _) => SampleForegroundZoom();
         foregroundZoomSampler.Start();
-        Closed += (_, _) => { foregroundZoomSampler.Stop(); releaseGrace.Stop(); headerDragWatch.Stop(); };
+
+        // The delegate for the hook that lets the bar go of its owner when the owner is minimized or
+        // goes away (see the notes below). Kept in a field: if the GC collected it, the hook would
+        // silently die -- the classic SetWinEventHook bug (see WindowMonitor).
+        coverEventCallback = OnOwnerEvent;
+        Closed += (_, _) => { foregroundZoomSampler.Stop(); releaseGrace.Stop(); headerDragWatch.Stop(); windowClosed = true; ReleaseBarOwner(); };
 
         // The grace, and then the slow fade (#46). One-shot: Stop() first, so a fade that is
         // interrupted and later restarted always gets the full grace rather than whatever was left of
@@ -156,6 +161,10 @@ public partial class FloatingBar : Window
             // The docking setting, followed here so every way of changing it (Manage, the remote
             // command) reaches the bar the same way.
             FollowDockSetting();
+            // The step-aside setting, followed here for the same reason: with it on the bar steps
+            // BELOW a full-screen window instead of being owned by it, so any owner the bar had is
+            // let go of (see the step-aside notes below).
+            if (manager.State.StepAsideForFullScreen) ReleaseBarOwner();
             if (IsVisible) Rebuild();
         }));
 
@@ -470,6 +479,16 @@ public partial class FloatingBar : Window
     // second is both cheaper and impossible to make loop.
     public void ReclaimTopmost()
     {
+        // Backstop for the owner's minimize, in case its hook missed the event: a bar owned by a window while
+        // its own HWND is hidden is let go of here, and ReleaseBarOwner shows it again. Checked before the
+        // IsVisible guard below, which would otherwise return early. MinimizeToTaskbar releases the owner
+        // before it hides the bar, so a deliberately hidden bar never reaches this with an owner.
+        if (barOwner != nint.Zero)
+        {
+            var ownedHwnd = new WindowInteropHelper(this).Handle;
+            if (ownedHwnd != nint.Zero && !NativeMethods.IsWindowVisible(ownedHwnd)) ReleaseBarOwner();
+        }
+
         // Not while the user is dragging the bar: DragMove's native loop owns the window's
         // position, and a SetWindowPos arriving mid-drag fights it.
         if (!IsVisible || moving) return;
@@ -478,10 +497,376 @@ public partial class FloatingBar : Window
         if (fullScreenAppOpen) return;
         var hwnd = new WindowInteropHelper(this).Handle;
         if (hwnd == nint.Zero) return;
+        // While a full-screen window covers the bar's screen, the bar is OWNED by that window, so
+        // Windows keeps it above the window instead of the bar climbing back over it after the
+        // fact (see the notes below).
+        FollowCover(hwnd);
+        // A full-screen window on the bar's own screen may take the bar out of the way, with the setting
+        // on. True when the bar has stepped aside, so it does not climb back on top.
+        if (StepAsideIfCovered(hwnd)) return;
         // SWP_NOACTIVATE is the load-bearing flag: without it this would yank focus off
         // whatever was just clicked -- including the taskbar the user was reaching for.
         NativeMethods.SetWindowPos(hwnd, NativeMethods.HWND_TOPMOST, 0, 0, 0, 0,
             NativeMethods.SWP_NOMOVE | NativeMethods.SWP_NOSIZE | NativeMethods.SWP_NOACTIVATE);
+    }
+
+    // --- stepping aside for a full-screen window ------------------------------------------------------
+    //
+    // The bar re-asserts HWND_TOPMOST on every foreground change and every second, so it sits OVER a
+    // full-screen movie: the player raises itself over the bar on every pause, and the bar puts itself
+    // back on top a moment later. Measured on Windows 11 build 26300, two screens (3840x2160 at 0,0 and
+    // 1920x1080 at 3840,0), with a video player full screen on the 4K one: the bar flickered, the
+    // player's full-screen window having the rectangle EXACTLY the monitor's (0,0,3840,2160) and
+    // IsZoomed being FALSE.
+    //
+    // So, with the setting on, the bar steps BELOW the window that covers its screen instead of fighting
+    // it for the top of the band. It steps aside: it is not hidden, not minimised and not moved. The bar
+    // is still there, one step down, and it comes back the moment the covering window leaves.
+    //
+    // Docked, the shell's own full-screen notice already moves the bar out of the band (OnFullScreenApp),
+    // and that is left exactly as it is.
+    //
+    // No exception for a bar the user has just pressed or dragged: a bar dropped on the covered screen steps
+    // below the full-screen window within a second, as if it had been there all along. An exception "until the
+    // user clicks back into the full-screen window" was tried and failed on the owner's machine: a middle drag
+    // does not activate the bar, so the player never LEFT the foreground, there was no "back" to wait for, and
+    // the bar went on fighting the player on every pause. The owner: it should "adopt the settings" of the
+    // screen "as soon as it got dragged in it".
+
+    // Whether the bar is currently sitting below a covering window.
+    bool steppedAside;
+
+    // Whether the bar should step aside right now, and the putting of it below the covering window when it
+    // should. True when the bar has stepped aside, so ReclaimTopmost does not climb back on top.
+    bool StepAsideIfCovered(nint hwnd)
+    {
+        // With the setting off, or docked, Windows is not asked at all: the bar is on top of everything,
+        // exactly as it always was. (Docked, the shell's own full-screen notice already moves the bar out
+        // of the band, and that is left as it is.)
+        var covered = manager.State.StepAsideForFullScreen && !Docked
+            ? TopLevelWindows.CoveringWindow(hwnd) ?? nint.Zero
+            : nint.Zero;
+
+        if (covered == nint.Zero)
+        {
+            // The screen is not covered: the full-screen window left full screen, closed, was minimised,
+            // or another window came up on that screen.
+            BackOnTop();
+            return false;
+        }
+
+        // Out of the topmost band, and just BELOW the covering window.
+        //
+        // A topmost covering window (a video player in full screen) needs only the first call: leaving the
+        // band puts the bar below every topmost window, the player among them. An ordinary one (a browser
+        // in full screen) needs the second as well, because leaving the band puts the bar at the TOP of
+        // the ordinary band -- above the browser -- and only putting it directly behind the browser puts
+        // it where it belongs.
+        NativeMethods.SetWindowPos(hwnd, HWND_NOTOPMOST, 0, 0, 0, 0,
+            NativeMethods.SWP_NOMOVE | NativeMethods.SWP_NOSIZE | NativeMethods.SWP_NOACTIVATE);
+        if (!TopLevelWindows.IsTopmost(covered))
+            NativeMethods.SetWindowPos(hwnd, covered, 0, 0, 0, 0,
+                NativeMethods.SWP_NOMOVE | NativeMethods.SWP_NOSIZE | NativeMethods.SWP_NOACTIVATE);
+
+        if (!steppedAside)
+        {
+            steppedAside = true;
+            ClickTrace.Write($"step aside for {covered:X} class={TopLevelWindows.ClassOf(covered)}");
+        }
+        return true;
+    }
+
+    // The bar is on top again, and the trace says so once: only on the change, never on every tick.
+    void BackOnTop()
+    {
+        if (!steppedAside) return;
+        steppedAside = false;
+        ClickTrace.Write("step aside: back on top");
+    }
+
+    // --- staying above a full-screen window that covers the bar's screen -------------------------------
+    //
+    // The bar is on top of everything by default -- the step-aside setting is off -- and a full-screen
+    // window on the bar's screen puts that to the test. A video player raises itself over the bar on
+    // every pause, and a bar that merely REACTS to that blinks: it is on top, the player covers it, the
+    // bar climbs back, and the eye reads the swap as a flicker.
+    //
+    // So the bar does not react. While a full-screen window covers the bar's screen, the bar's HWND is
+    // OWNED by that window. An owned window always stays above its owner and moves with it, so Windows
+    // itself keeps the bar above the player, and there is no moment when the player is on top.
+    //
+    // MEASURED on Windows 11 build 26300. A topmost test box over PotPlayer full screen, Space pressed
+    // every 2 to 3 s, 30 s per mode, sampled every ~2 ms:
+    //
+    //   * re-asserting topmost every 100 ms: 11 covers after the start, 6 to 109 ms each. The user saw
+    //     it blink.
+    //   * removing WS_EX_TOPMOST from the player every ~15 ms: 19 covers, 6 to 17 ms each. The user saw
+    //     it blink.
+    //   * owned by the player's main window, re-asserting NOTHING: 0 covers. The user saw no blink.
+    //
+    // The first two are the two ways of fighting the player, and neither is a detail of the flicker:
+    // taking the top back is a fight, and every fight has a moment when the other side is on top. The
+    // third is not a fight at all, which is why it has no covers.
+    //
+    // A window owned by a window of ANOTHER PROCESS, both off-screen, measured the same way:
+    //
+    //   * owner closed: the owned window stayed alive and visible, and Windows cleared its owner to 0.
+    //   * owner process killed: the same.
+    //   * owner minimized: the owned window became INVISIBLE (IsWindowVisible false), and came back when
+    //     the owner was restored.
+    //   * owner's UI thread hung for 6 s: the owned window kept answering messages (SendMessageTimeout).
+    //
+    // NOT MEASURED: mouse input to the bar while the owner is hung. The window answered messages, so it
+    // was alive, but nothing here says a click would have reached it.
+    //
+    // The bar is owned by the covering window and by nothing else, and it is let go of as soon as that
+    // window is not covering the bar's screen any more.
+
+    // The window the bar is owned by, and the owner the bar had before that one.
+    //
+    // The previous owner must never be assumed to be zero: WPF gives a ShowInTaskbar="False" window a
+    // hidden owner of its own, so whatever was there is kept and put back exactly.
+    nint barOwner;
+    nint barPreviousOwner;
+
+    // The window the bar was last owned by. It is kept after the bar is let go, so that OwnBackOnRestore can
+    // own the bar by it again the moment it is restored from the taskbar.
+    nint lastCover;
+
+    // Set by the Closed handler. Once the window has closed, WPF will not Show it again, so ReleaseBarOwner
+    // must not try to bring the bar back.
+    bool windowClosed;
+
+    // The two hooks that say the owner is going away. Zero when there is no owner to hear about.
+    nint ownerMinimizeHook;
+    nint ownerHideHook;
+
+    // The delegate must be kept alive in a field. If the GC collects it, the hook silently dies --
+    // the classic SetWinEventHook bug (see WindowMonitor).
+    readonly NativeMethods.WinEventProc coverEventCallback;
+
+    // Asks who covers the bar's screen, and hands the bar over to that window, or takes it back.
+    // Called from ReclaimTopmost, which runs on the 1s tick and on every foreground change.
+    void FollowCover(nint hwnd)
+    {
+        // Only one case can own the bar by a covering window: the setting off, the bar floating and on
+        // screen. With the setting on the bar steps BELOW the covering window instead
+        // (StepAsideIfCovered), docked the shell's own full-screen notice has already moved the bar
+        // out of the band, and hidden there is no bar to own.
+        //
+        // The question costs an enumeration of every window on the machine, so it is asked only in that
+        // one case: on the 1s tick and on every foreground change, and nowhere else.
+        var eligible = !manager.State.StepAsideForFullScreen && !Docked && IsVisible;
+        var covering = eligible ? TopLevelWindows.CoveringWindow(hwnd) ?? nint.Zero : nint.Zero;
+
+        // One decision, and it is the whole one: the bar is owned by the covering window exactly when it
+        // may be and there is one (FullScreenCover.OwnedByCover).
+        if (!FullScreenCover.OwnedByCover(manager.State.StepAsideForFullScreen, Docked, IsVisible, covering != nint.Zero))
+        {
+            ReleaseBarOwner();
+            return;
+        }
+
+        OwnBarBy(covering);
+    }
+
+    // Called for every restore of a window the monitor knows (from NoteMinimizeEvent). When the window the bar was
+    // last owned by is restored, the bar is owned by it again at once, instead of up to a second later on the
+    // 1s check. The bar is left alone unless every condition below holds.
+    internal void OwnBackOnRestore(nint restored)
+    {
+        if (restored == nint.Zero || restored != lastCover) return;
+        if (barOwner != nint.Zero) return;
+        if (manager.State.StepAsideForFullScreen || Docked || !IsVisible || moving) return;
+
+        var hwnd = new WindowInteropHelper(this).Handle;
+        if (hwnd == nint.Zero) return;
+
+        // The bar may have been dragged to the other screen while the player was minimized.
+        if (NativeMethods.MonitorFromWindow(restored, NativeMethods.MONITOR_DEFAULTTONEAREST)
+            != NativeMethods.MonitorFromWindow(hwnd, NativeMethods.MONITOR_DEFAULTTONEAREST)) return;
+
+        if (TopLevelWindows.IsShellCloaked(restored)) return;
+
+        // A restored window has not always reached its full size at this moment, so CoveringWindow could still say
+        // no. The 1s check in FollowCover releases the bar again if the window did not come back full screen.
+        OwnBarBy(restored);
+    }
+
+    // The bar is owned by the covering window from here on, which is what keeps it above that window:
+    // an owned window always stays above its owner and moves with it.
+    void OwnBarBy(nint covering)
+    {
+        // Already owned by that exact window: nothing to do, and nothing to trace again.
+        if (barOwner == covering) return;
+
+        // Any owner the bar has goes first, so it is never owned by two windows at once.
+        ReleaseBarOwner();
+
+        var hwnd = new WindowInteropHelper(this).Handle;
+        if (hwnd == nint.Zero) return;
+
+        // The RETURN VALUE is the owner the bar had before this one, and it is kept because it has to be
+        // put back exactly (see the field above).
+        //
+        // The raw call, and not WPF's Window.Owner, which takes a Window of this app: the covering window
+        // belongs to another process.
+        barPreviousOwner = NativeMethods.SetWindowLongPtr(hwnd, NativeMethods.GWLP_HWNDPARENT, covering);
+        barOwner = covering;
+        lastCover = covering;
+
+        // The bar goes to the top of the band, with the same flags ReclaimTopmost uses:
+        // SWP_NOACTIVATE is the load-bearing one, so this never takes the focus off whatever the user
+        // is using.
+        NativeMethods.SetWindowPos(hwnd, NativeMethods.HWND_TOPMOST, 0, 0, 0, 0,
+            NativeMethods.SWP_NOMOVE | NativeMethods.SWP_NOSIZE | NativeMethods.SWP_NOACTIVATE);
+
+        // And the hooks that let the bar go of the owner when the owner is minimized or goes away.
+        HookOwnerEvents(covering);
+
+        ClickTrace.Write($"bar owned by {covering:X} class={TopLevelWindows.ClassOf(covering)}");
+    }
+
+    // The bar is let go of its owner: the previous owner goes back exactly as it was, and the bar is on
+    // top of the band again.
+    void ReleaseBarOwner()
+    {
+        // The hooks go with the owner: they exist only to hear about it.
+        RemoveOwnerHooks();
+
+        if (barOwner == nint.Zero) return;
+
+        var hwnd = new WindowInteropHelper(this).Handle;
+        var previous = barPreviousOwner;
+        barOwner = nint.Zero;
+        barPreviousOwner = nint.Zero;
+        if (hwnd == nint.Zero) return;
+
+        // The covering window may be gone by now (measured: closed or killed, Windows clears the owner to
+        // zero and leaves the owned window alive). What goes back is the bar's PREVIOUS owner, which does
+        // not depend on that, so it is done without asking.
+        NativeMethods.SetWindowLongPtr(hwnd, NativeMethods.GWLP_HWNDPARENT, previous);
+
+        // And back to the top of the band, with the same flags as everywhere else.
+        NativeMethods.SetWindowPos(hwnd, NativeMethods.HWND_TOPMOST, 0, 0, 0, 0,
+            NativeMethods.SWP_NOMOVE | NativeMethods.SWP_NOSIZE | NativeMethods.SWP_NOACTIVATE);
+
+        // The owner's minimize hides the bar. Measured with a WPF window owned by a window of another process:
+        // the HWND goes invisible AND WPF sets Visibility to Hidden, so IsVisible is false too. A check on
+        // IsVisible would therefore never run, and the bar would stay hidden. So this asks the HWND instead,
+        // and shows the window through WPF, which put both back in 8 of 8 runs without moving the focus.
+        // ShowBar is not used: it repositions and saves.
+        // A deliberately minimized bar (Minimized) is not shown back. The window is not shown after close
+        // either: WPF throws on Show() once a window has closed, and Closed calls this.
+        if (!windowClosed && !Minimized && !NativeMethods.IsWindowVisible(hwnd))
+        {
+            ClickTrace.Write($"bar hidden by its owner, showing it again (IsVisible={IsVisible} before)");
+
+            // Show without activating: the bar must never take the focus. The raw ShowWindow below is a
+            // fallback in case WPF still believes the window is visible; it was never needed when measured.
+            var activated = ShowActivated;
+            ShowActivated = false;
+            try { Show(); }
+            finally { ShowActivated = activated; }
+
+            if (!NativeMethods.IsWindowVisible(hwnd))
+                NativeMethods.ShowWindow(hwnd, NativeMethods.SW_SHOWNOACTIVATE);
+
+            NativeMethods.SetWindowPos(hwnd, NativeMethods.HWND_TOPMOST, 0, 0, 0, 0,
+                NativeMethods.SWP_NOMOVE | NativeMethods.SWP_NOSIZE | NativeMethods.SWP_NOACTIVATE);
+        }
+
+        ClickTrace.Write("bar owner released");
+    }
+
+    // --- the hooks that let the bar go of an owner that is going away -------------------------------
+    //
+    // The owner can end the arrangement without being asked: it is minimized (and an owned window
+    // becomes invisible when its owner is minimized -- measured), it is hidden, or it is destroyed. The
+    // bar has to let go then, and the waiting must not be a second long.
+    //
+    // WHY THIS HOOK CANNOT FEED ITSELF: the hook is scoped to the OWNER'S PROCESS ID, and the bar's own
+    // SetWindowPos raises its events from Deskbar's process, never from the player's. A change the bar
+    // makes cannot reach a hook that only listens to another process. The hook that would feed itself
+    // is the global one -- every process -- and that is exactly what this is not.
+    //
+    // It exists ONLY while the bar is owned by a covering window. With the setting on, the bar steps
+    // below the covering window and has no owner; docked, the shell's own full-screen notice has
+    // already moved the bar out of the band.
+    //
+    // Out of context, so the callback arrives on the bar's own dispatcher thread, which pumps messages:
+    // Windows delivers the event to the thread that asked for it (see WindowMonitor for the same
+    // arrangement).
+
+    // The hooks that say the owner is going away, scoped to the owner's process and to nothing else.
+    //
+    // Never a global hook: process id 0 would mean every process on the machine, and Deskbar's own
+    // process would mean the bar hearing itself. Re-targeted when the owner turns out to belong to
+    // another process, and removed when the bar lets go of its owner or closes.
+    void HookOwnerEvents(nint owner)
+    {
+        NativeMethods.GetWindowThreadProcessId(owner, out var pid);
+
+        // Process 0 means EVERY process, and our own process means the bar hearing itself. Neither is
+        // hooked.
+        if (pid == 0 || pid == Environment.ProcessId)
+        {
+            RemoveOwnerHooks();
+            return;
+        }
+
+        // A different owner now, so the old hooks go first and the bar never listens to two.
+        RemoveOwnerHooks();
+
+        // TWO hooks, because the events do not fit in one range: EVENT_SYSTEM_MINIMIZESTART is 0x0016
+        // and the OBJECT family starts at 0x8001, and one range spanning both would subscribe the bar
+        // to every event in between -- which is the global hook this is not.
+        var minimize = NativeMethods.SetWinEventHook(
+            NativeMethods.EVENT_SYSTEM_MINIMIZESTART, NativeMethods.EVENT_SYSTEM_MINIMIZESTART,
+            0, coverEventCallback, pid, 0, NativeMethods.WINEVENT_OUTOFCONTEXT);
+        var gone = NativeMethods.SetWinEventHook(
+            NativeMethods.EVENT_OBJECT_DESTROY, NativeMethods.EVENT_OBJECT_HIDE,
+            0, coverEventCallback, pid, 0, NativeMethods.WINEVENT_OUTOFCONTEXT);
+
+        if (minimize == nint.Zero && gone == nint.Zero) return;
+
+        ownerMinimizeHook = minimize;
+        ownerHideHook = gone;
+        ClickTrace.Write($"owner hooks on: pid={pid} hwnd={owner:X}");
+    }
+
+    // ...and the hooks go, and the trace says so once.
+    void RemoveOwnerHooks()
+    {
+        if (ownerMinimizeHook == nint.Zero && ownerHideHook == nint.Zero) return;
+        if (ownerMinimizeHook != nint.Zero) NativeMethods.UnhookWinEvent(ownerMinimizeHook);
+        if (ownerHideHook != nint.Zero) NativeMethods.UnhookWinEvent(ownerHideHook);
+        ownerMinimizeHook = nint.Zero;
+        ownerHideHook = nint.Zero;
+        ClickTrace.Write("owner hooks off");
+    }
+
+    // The callback. The owner and only the owner -- the hook is scoped to the owner's process, and that
+    // process has other windows -- and then the bar lets go, which is what a minimized, hidden or
+    // destroyed owner means.
+    void OnOwnerEvent(nint hook, uint @event, nint hwnd, int idObject, int idChild, uint thread, uint time)
+    {
+        if (idObject != NativeMethods.OBJID_WINDOW) return;
+        if (hwnd != barOwner) return;
+
+        // INVARIANT: no managed exception may escape a native callback. This one is called by user32
+        // through the SetWinEventHook out-of-context callback, and an unhandled exception here unwinds
+        // through native stack frames and takes the whole process down, not just this bar (see
+        // WindowMonitor).
+        try
+        {
+            ReleaseBarOwner();
+        }
+        catch (Exception e)
+        {
+            System.Diagnostics.Debug.WriteLine(
+                $"FloatingBar.OnOwnerEvent swallowed an exception for hwnd={hwnd}, event=0x{@event:X}: {e}");
+        }
     }
 
     // --- docked to a screen edge ------------------------------------------------------------------
@@ -643,6 +1028,11 @@ public partial class FloatingBar : Window
         docking = true;
         try
         {
+            // Docked, the bar is not floating, so it is not owned by a covering window: the
+            // shell's own full-screen notice moves the bar out of the band instead (see the
+            // step-aside notes above).
+            ReleaseBarOwner();
+
             // Captured once, on the way in: a re-dock must not overwrite it with docked geometry.
             if (!Docked) floatingBeforeDock = FloatingState();
 
@@ -868,6 +1258,9 @@ public partial class FloatingBar : Window
         // edge is remembered (dockedEdge stays set and is saved), and ShowBar docks it again.
         appBar?.Remove();
         seamBar?.Remove();
+        // Hidden, there is no bar to own, so it lets go of the covering window it was owned by (see
+        // the notes above).
+        ReleaseBarOwner();
         Hide();
         Save();
     }
