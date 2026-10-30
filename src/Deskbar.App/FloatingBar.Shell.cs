@@ -578,6 +578,9 @@ public partial class FloatingBar
         NoteFlyoutInFront(NoteStartSearch(hwnd, flyout));
         TurnTrayChevron(IsTrayOverflow(hwnd));
         NoteLanguageTarget(hwnd, isFlyout: flyout is not null);
+        // Measured, a restore from the taskbar: the foreground change comes 120 to 320 ms BEFORE the minimize event,
+        // and the player covers the bar in between. So this is the earlier of the two calls (see NoteMinimizeEvent).
+        OwnBackOnRestore(hwnd);
     }
 
     // START AND SEARCH IN ONE WINDOW. Runs for every foreground change and returns what to note as in front: the flyout

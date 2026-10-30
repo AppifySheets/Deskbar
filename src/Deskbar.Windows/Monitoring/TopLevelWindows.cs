@@ -1,5 +1,7 @@
 ﻿namespace Deskbar.Windows.Monitoring;
 
+using System.Runtime.InteropServices;
+using Deskbar.Core.Geometry;
 using static NativeMethods;
 
 // Decides which HWNDs the product cares about: roughly "would this show on the taskbar?".
@@ -40,6 +42,69 @@ public static class TopLevelWindows
         var found = new List<nint>();
         EnumWindows((hwnd, _) => { if (IsTaskbarCandidate(hwnd)) found.Add(hwnd); return true; }, 0);
         return found;
+    }
+
+    // THE WINDOW THAT COVERS A SCREEN, or null when nothing does. The question the floating bar asks
+    // before it steps out of the way of a full-screen window (see FullScreenCover, which decides what to
+    // do with the answer).
+    //
+    // Everything about it was measured rather than guessed, on Windows 11 build 26300 with two screens
+    // (3840x2160 at 0,0 and 1920x1080 at 3840,0) and a video player full screen on the 4K one:
+    //
+    //   * WHICH SCREEN a window is on is the one holding most of it: MonitorFromWindow with
+    //     MONITOR_DEFAULTTONEAREST. Never "does its rectangle touch the screen": a maximized VS Code
+    //     window on the second screen had the rectangle 3829,-11,5771,1043, so it hangs about 11 px
+    //     over the first one and touches both.
+    //   * THE FIRST WINDOW IN Z-ORDER on that screen decides, and EnumWindows' order is z-order, top
+    //     first. A small window in front of a full-screen one means the full-screen one is not what is
+    //     being looked at.
+    //   * A full-screen window's rectangle is EXACTLY the monitor's (0,0,3840,2160 for the 4K one), and
+    //     IsZoomed is FALSE for it: "maximized" is not the test for "full screen".
+    //   * The bar's OWN windows are skipped: the bar is one of them, and it is on that very screen.
+    public static nint? CoveringWindow(nint barHwnd)
+    {
+        var monitor = NativeMethods.MonitorFromWindow(barHwnd, NativeMethods.MONITOR_DEFAULTTONEAREST);
+        if (monitor == nint.Zero) return null;
+        var info = new NativeMethods.MONITORINFO { cbSize = Marshal.SizeOf<NativeMethods.MONITORINFO>() };
+        if (!NativeMethods.GetMonitorInfo(monitor, ref info)) return null;
+        var screen = new FullScreenCover.Rect(info.rcMonitor.Left, info.rcMonitor.Top, info.rcMonitor.Right, info.rcMonitor.Bottom);
+
+        var candidates = new List<FullScreenCover.Candidate>();
+        foreach (var hwnd in Enumerate())
+        {
+            if (IsOurOwnWindow(hwnd)) continue;
+            // A window on ANOTHER virtual desktop is kept by Enumerate (see IsCloaked) and still sits on this
+            // screen's rectangle, so it would count as covering the screen. A video full screen on another
+            // desktop must not take the bar out of the way here, so the shell-cloaked ones are skipped.
+            if (IsShellCloaked(hwnd)) continue;
+            if (NativeMethods.MonitorFromWindow(hwnd, NativeMethods.MONITOR_DEFAULTTONEAREST) != monitor) continue;
+            if (!NativeMethods.GetWindowRect(hwnd, out var rect)) continue;
+            candidates.Add(new FullScreenCover.Candidate(hwnd, new FullScreenCover.Rect(rect.Left, rect.Top, rect.Right, rect.Bottom)));
+        }
+        return FullScreenCover.Covering(screen, candidates)?.Handle;
+    }
+
+    // A window of this process. The floating bar is one, and it sits on the screen being asked about,
+    // so it would answer every question about that screen.
+    static bool IsOurOwnWindow(nint hwnd)
+    {
+        NativeMethods.GetWindowThreadProcessId(hwnd, out var processId);
+        return processId == Environment.ProcessId;
+    }
+
+    // Whether the window is in the topmost band. A full-screen video player is (measured: PotPlayer's
+    // full-screen window carried WS_EX_TOPMOST); a browser in full screen is not, and the bar is put
+    // below each of them differently (see FloatingBar's step-aside notes).
+    public static bool IsTopmost(nint hwnd) =>
+        (GetWindowLongPtr(hwnd, GWL_EXSTYLE) & WS_EX_TOPMOST) != 0;
+
+    // The window's class, as Windows spells it. For the trace, which names the window that took the
+    // bar's place ("PotPlayer64" and such).
+    public static string ClassOf(nint hwnd)
+    {
+        var buffer = new char[256];
+        var length = GetClassNameW(hwnd, buffer, buffer.Length);
+        return length > 0 ? new string(buffer, 0, length) : "";
     }
 
     static bool HasExStyle(nint hwnd, long style) => (GetWindowLongPtr(hwnd, GWL_EXSTYLE) & style) != 0;
@@ -109,12 +174,7 @@ public static class TopLevelWindows
         "Xaml_WindowedPopupClass",
     };
 
-    static bool IsShellOwned(nint hwnd)
-    {
-        var buffer = new char[256];
-        var length = GetClassNameW(hwnd, buffer, buffer.Length);
-        return length > 0 && ShellClasses.Contains(new string(buffer, 0, length));
-    }
+    static bool IsShellOwned(nint hwnd) => ShellClasses.Contains(ClassOf(hwnd));
 
     // Caveat: windows on OTHER virtual desktops report DWM cloaked. Only exclude cloaked
     // windows at initial-snapshot time when they're also invisible; for our purposes a

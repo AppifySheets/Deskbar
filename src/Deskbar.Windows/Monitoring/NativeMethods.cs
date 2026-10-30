@@ -99,7 +99,16 @@ public static class NativeMethods
     public const int OBJID_WINDOW = 0, CHILDID_SELF = 0;
     public const uint GA_ROOT = 2;
     public const int GWL_EXSTYLE = -20;
+    // The window's OWNER, and the write half of it: setting it makes this window an owned window of
+    // that one, and an owned window always stays above its owner (measured; see the notes in
+    // FloatingBar). Used for exactly one thing: the floating bar handing itself to the full-screen
+    // window that covers its screen.
+    public const int GWLP_HWNDPARENT = -8;
     public const long WS_EX_TOOLWINDOW = 0x00000080, WS_EX_APPWINDOW = 0x00040000;
+    // The window is in the always-on-top band. A full-screen video player is (measured on build 26300:
+    // PotPlayer's full-screen window carried it); a browser in full screen is not, and the floating bar
+    // steps below one and the other differently (see FloatingBar's step-aside notes).
+    public const long WS_EX_TOPMOST = 0x00000008;
     public const uint DWMWA_CLOAKED = 14;
     public const uint WM_SETTEXT = 0x000C;
     public const uint SMTO_ABORTIFHUNG = 0x0002;
@@ -144,6 +153,14 @@ public static class NativeMethods
     public static extern bool SetWindowPos(nint hwnd, nint insertAfter, int x, int y, int cx, int cy, uint flags);
 
     public static readonly nint HWND_TOPMOST = new(-1);
+
+    // Shows a window WITHOUT activating it. SW_SHOWNOACTIVATE, because the bar must never take the
+    // focus off whatever the user is using -- the same rule SWP_NOACTIVATE carries for SetWindowPos.
+    //
+    // ShowWindow (not ShowWindowAsync, which exists above for the shell's window moves): the bar's
+    // own HWND, on our own thread, and the answer matters now rather than later.
+    [DllImport("user32.dll")] public static extern bool ShowWindow(nint hwnd, int cmdShow);
+    public const int SW_SHOWNOACTIVATE = 4;
 
     // The front of the ORDINARY z-order, which is a different thing from HWND_TOPMOST above: that one
     // puts a window in the always-on-top band the bar and the taskbar live in, which no ordinary window
