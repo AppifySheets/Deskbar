@@ -55,15 +55,30 @@ public partial class FloatingBar
     }
 
     // The bar's rectangle and its screen's work area, both physical pixels, and whether the work area keeps clear
-    // of the strip. Null while the window or its screen cannot be read.
-    (NativeMethods.RECT Bar, NativeMethods.RECT Work, bool Held)? StripState()
+    // of the strip: null for no verdict (see the overload of StripHeld below). Null as a whole while the window or
+    // its screen cannot be read.
+    (NativeMethods.RECT Bar, NativeMethods.RECT Work, bool? Held)? StripState()
     {
         var hwnd = new WindowInteropHelper(this).Handle;
         if (hwnd == 0 || dockedEdge is not ("left" or "right") || !NativeMethods.GetWindowRect(hwnd, out var bar)) return null;
         var info = new NativeMethods.MONITORINFO { cbSize = Marshal.SizeOf<NativeMethods.MONITORINFO>() };
         if (!NativeMethods.GetMonitorInfo(NativeMethods.MonitorFromWindow(hwnd, NativeMethods.MONITOR_DEFAULTTONEAREST), ref info)) return null;
-        return (bar, info.rcWork, StripHeld(dockedEdge, bar, info.rcWork));
+        return (bar, info.rcWork, StripHeld(dockedEdge, bar, info.rcMonitor, info.rcWork));
     }
+
+    // The verdict, but only from the screen the bar is ON: null when the screen Windows answered with is not the
+    // one under the bar's centre. MONITOR_DEFAULTTONEAREST always answers, and when the bar's own screen has dropped
+    // out it answers with ANOTHER one, whose work area says nothing about the bar's strip. Petre: "after a few
+    // restarts and unlocks, bar ended up on another screen, docked to the edge". Measured at 00:23:13 on 2026-11-01:
+    // a screen waking on unlock dropped out for a moment, the bar docked right on it at -395..0 was judged against
+    // the primary's work area 0..3840, the guard registered again, and the shell handed it the primary's right
+    // edge. The layout settled four seconds later on the same desk, so the readjustment kept it there. With no
+    // verdict the guard waits: if the screen comes back the strip is still its own, and if it does not, the
+    // display-layout readjustment docks the bar again on whatever screen it ends up on.
+    internal static bool? StripHeld(string edge, NativeMethods.RECT bar, NativeMethods.RECT monitor, NativeMethods.RECT work) =>
+        Contains(monitor, (bar.Left + bar.Right) / 2, (bar.Top + bar.Bottom) / 2) ? StripHeld(edge, bar, work) : null;
+
+    static bool Contains(NativeMethods.RECT r, int x, int y) => x >= r.Left && x < r.Right && y >= r.Top && y < r.Bottom;
 
     // The work area keeps clear of a strip on the left when it starts at or past the strip's right edge, and of one
     // on the right when it ends at or before the strip's left edge. "At or past" rather than "exactly at" because
@@ -78,7 +93,7 @@ public partial class FloatingBar
     // The dump's lines about it (FloatingBar.Diagnostics.cs).
     string DescribeStripForDump() =>
         (StripState() is { } state
-            ? $"{(state.Held ? "yes" : "NO")} (work {DebugDump.Format(state.Work)})"
+            ? $"{state.Held switch { true => "yes", false => "NO", null => "can't tell, the bar is not on the screen measured" }} (work {DebugDump.Format(state.Work)})"
             : "n/a (not docked on an edge)")
         + $"; taken back {stripRepairs} time(s){(stripRepairs > 0 ? $", last {lastStripRepair.ToLocalTime():HH:mm:ss}" : "")}";
 }
