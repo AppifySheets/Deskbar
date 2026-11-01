@@ -349,7 +349,12 @@ public sealed class WindowMonitor : IWindowMonitor, IDisposable
         }
         catch (Exception e)
         {
+            // Into the trace, not only the debugger. An exception that reaches here came back out of a
+            // subscriber, and Rx has just disposed that subscriber for good: this is how the manager went deaf
+            // to window events for the rest of a run with nothing written anywhere (see
+            // WorkspaceManager.OnWindowEvent). The line names which event and which subscriber's stack.
             Debug.WriteLine($"WindowMonitor.OnWinEvent swallowed an exception for hwnd={hwnd}, event=0x{@event:X}: {e}");
+            trace?.Invoke($"window event 0x{@event:X} for {hwnd:X}: a subscriber threw {e.GetType().Name}: {e.Message}\n{e.StackTrace}");
         }
     }
 

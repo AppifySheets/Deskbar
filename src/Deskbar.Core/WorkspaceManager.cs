@@ -315,7 +315,33 @@ public sealed class WorkspaceManager(
                     () => desktops.Create(workspace.Name).Map(created => workspace with { DesktopId = created.Id }));
 
     // --- event pipeline -------------------------------------------------------------
+    //
+    // NOTHING may escape this method, and the reason is how the subscription in Start() behaves, not
+    // tidiness. Petre: "i sometimes feel that the deskbar icons don't reflect the change in windows, what's
+    // open, etc soon enough." Measured on 2026-11-01: every open and close reached the manager only at the
+    // next 5s repair sweep ("destroy 1079E (Docker Desktop)" at :31.855, "repair: ... dropped [1079E/...]"
+    // at :35.849), and a window started with `deskbar.cmd start` was never placed, because OnAppeared never
+    // ran. The monitor's other subscribers still heard everything; only this one had gone deaf.
+    //
+    // Rx disposes a Subscribe(action) subscription the first time its handler throws, and WindowMonitor
+    // swallows the rethrow to protect the native callback, so ONE exception from anything this reaches
+    // (placement, a rename, any StateChanged subscriber, since those run inline on the pulse) left the
+    // manager deaf to window events until the app restarted. It happened in 4 of 15 runs, 30 to 50 minutes in.
+    //
+    // So a failure costs that one event, which the 5s repair still covers, and never the ones after it. It
+    // is traced with the event and the stack, because which handler threw on his machine is still unknown
+    // and this line is how the next occurrence gets named (see WindowEventResilienceTests).
     void OnWindowEvent(WindowEvent e)
+    {
+        try { HandleWindowEvent(e); }
+        catch (Exception ex)
+        {
+            trace?.Invoke($"window event {e.Kind} for {e.Window.Handle.Value:X} ({e.Window.ProcessName}) threw " +
+                          $"{ex.GetType().Name}: {ex.Message}\n{ex.StackTrace}");
+        }
+    }
+
+    void HandleWindowEvent(WindowEvent e)
     {
         switch (e.Kind)
         {
