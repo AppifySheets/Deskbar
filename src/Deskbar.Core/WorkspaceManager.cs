@@ -2246,6 +2246,10 @@ public sealed class WorkspaceManager(
         desktops.IsPinned(info.Handle)
             .Bind(pinned => pinned ? desktops.Unpin(info.Handle) : Result.Success())
             .Bind(() => Place(info, workspaceId))
+            // Once the user has placed a window by hand it is no longer lent to a nested workspace.
+            // Left in `borrowed`, the next release would send it back to the parent and undo the move
+            // that was just made. Saved at once, so a crash cannot bring it back either.
+            .Tap(() => { if (borrowed.Remove(info.Handle)) PersistBorrowed(); })
             // The one place a container learns its home (#132), because this is the one door every
             // by-hand move comes through: dragging an icon between rows, and Manage's row menu.
             // After the move rather than before, so a refused move teaches nothing.
@@ -2958,6 +2962,8 @@ public sealed class WorkspaceManager(
         desktops.IsPinned(window)
             .Bind(pinned => pinned ? desktops.Unpin(window) : Result.Success())
             .Bind(() => desktops.MoveWindow(window, desktopId))
+            // No longer lent to a nested workspace, for the same reason as in Assign.
+            .Tap(() => { if (borrowed.Remove(window)) PersistBorrowed(); })
             .Tap(() =>
             {
                 lastKnownDesktop[window] = desktopId;

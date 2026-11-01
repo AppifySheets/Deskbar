@@ -216,6 +216,47 @@ public class NestedWorkspaceTests
             r => r.Window.Handle == onParent.Handle);
     }
 
+    // A borrowed window the user moves by hand from the child is theirs now. Assign unpins it and
+    // places it, but it stayed recorded as borrowed, so leaving the child sent it back to the parent.
+    [Fact]
+    public void A_borrowed_window_moved_to_another_workspace_stays_there_after_leaving()
+    {
+        var (manager, _, child, onParent) = NestedWithAParentWindow();
+        var childDesktop = manager.State.Workspaces.Single(w => w.Id == child).DesktopId!.Value;
+        var other = manager.State.Workspaces.Single(w => w.Name == "Personal");
+        var otherDesktop = other.DesktopId!.Value;
+        desktops.CurrentChangedSubject.OnNext(childDesktop);
+        Assert.True(desktops.IsPinned(onParent.Handle).Value);
+
+        Assert.True(manager.AssignWindow(onParent.Handle, other.Id, allowFollow: false).IsSuccess);
+        desktops.CurrentDesktopId = otherDesktop;
+        desktops.CurrentChangedSubject.OnNext(otherDesktop);
+
+        Assert.Equal(otherDesktop, desktops.WindowPlacements[onParent.Handle]);
+        Assert.False(desktops.IsPinned(onParent.Handle).Value);
+        Assert.Empty(manager.State.InheritedPins);
+    }
+
+    // The same through the other by-hand door: a drop onto a plain desktop that no workspace owns.
+    [Fact]
+    public void A_borrowed_window_moved_to_a_plain_desktop_stays_there_after_leaving()
+    {
+        var (manager, _, child, onParent) = NestedWithAParentWindow();
+        var childDesktop = manager.State.Workspaces.Single(w => w.Id == child).DesktopId!.Value;
+        var plain = new DesktopInfo(Guid.NewGuid(), "Main");
+        desktops.Desktops.Add(plain);
+        desktops.CurrentChangedSubject.OnNext(childDesktop);
+        Assert.True(desktops.IsPinned(onParent.Handle).Value);
+
+        Assert.True(manager.MoveToDesktop(onParent.Handle, plain.Id).IsSuccess);
+        desktops.CurrentDesktopId = plain.Id;
+        desktops.CurrentChangedSubject.OnNext(plain.Id);
+
+        Assert.Equal(plain.Id, desktops.WindowPlacements[onParent.Handle]);
+        Assert.False(desktops.IsPinned(onParent.Handle).Value);
+        Assert.Empty(manager.State.InheritedPins);
+    }
+
     // --- creating one from the bar ------------------------------------------------------------
 
     [Fact]
