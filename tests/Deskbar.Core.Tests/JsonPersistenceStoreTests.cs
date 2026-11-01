@@ -344,4 +344,33 @@ public sealed class JsonPersistenceStoreTests : IDisposable
         Assert.Equal(RuleMatchKind.ProcessName, loaded.WorkspaceRules.Single().Kind);
         Assert.Equal(RuleMatchKind.TitleRegex, loaded.RenameRules.Single().Kind);
     }
+
+    // A newer build can add a StripItem and save it as hidden. This build must load the rest of that file instead
+    // of treating it as corrupt (which would move it aside and fall back to .previous), so it skips the name it
+    // does not know and keeps the ones it does.
+    [Fact]
+    public void A_hidden_strip_item_this_build_does_not_know_is_skipped_and_the_file_still_loads()
+    {
+        Directory.CreateDirectory(dir);
+        File.WriteAllText(Path.Combine(dir, "state.json"),
+            """{"Workspaces":[],"WorkspaceRules":[],"RenameRules":[],"Inventory":{},"HiddenStripItems":["Weather","Clock"]}""");
+
+        var result = new JsonPersistenceStore(dir).Load();
+
+        Assert.True(result.IsSuccess);
+        Assert.Equal([StripItem.Clock], result.Value.HiddenStripItems);
+        Assert.Empty(Directory.GetFiles(dir, "*.bak*"));
+        Assert.True(File.Exists(Path.Combine(dir, "state.json")));
+    }
+
+    [Fact]
+    public void Every_hidden_strip_item_roundtrips_and_is_saved_by_name()
+    {
+        var store = new JsonPersistenceStore(dir);
+        var all = Enum.GetValues<StripItem>();
+        Assert.True(store.Save(SampleState() with { HiddenStripItems = all }).IsSuccess);
+
+        Assert.Equal(all, store.Load().Value.HiddenStripItems);
+        Assert.Contains("\"Clock\"", File.ReadAllText(Path.Combine(dir, "state.json")));
+    }
 }

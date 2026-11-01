@@ -88,6 +88,11 @@ public sealed record AppState(
     // The bottom strip's items that are switched OFF in Manage > Settings (see StripItem for why the hidden ones
     // are kept rather than the shown ones). Empty, the default, shows everything; a state.json written before
     // this setting existed has no such field and reads as empty, so nothing needs migrating.
+    //
+    // A name this build does not know (an item a newer build added) is skipped on load rather than failing the
+    // whole file; see KnownNamesOnlyConverter. This build's next save drops it, so that item shows again in the
+    // newer build, the same known limit as for fields nested inside records (see Extra).
+    [JsonConverter(typeof(KnownNamesOnlyConverter<StripItem>))]
     public IReadOnlyList<StripItem> HiddenStripItems { get; init; } = [];
 
     // How big the bar draws its icons, read through IconScaling.Clamp; null means 100%.
