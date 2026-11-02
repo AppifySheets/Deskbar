@@ -50,17 +50,4 @@ public static class FullScreenCover
             ? first
             : null;
     }
-
-    // Whether the bar is OWNED BY the window that covers its screen: the step-aside setting is off,
-    // the bar is floating, it is on screen, and there is a covering window.
-    //
-    // An owned window always stays above its owner and moves with it, so Windows itself keeps the
-    // bar above a full-screen window -- there is no moment when the player is on top, which is what
-    // taking the top back could never manage (measured; see the notes in FloatingBar).
-    //
-    // The setting on is the opposite case and is left exactly as it was: the bar steps BELOW the
-    // covering window (see StepAsideIfCovered), so there is no owner to be. Docked, the shell's own
-    // full-screen notice has already moved the bar out of the band. Hidden, there is no bar to own.
-    public static bool OwnedByCover(bool stepAsideForFullScreen, bool docked, bool visible, bool covered) =>
-        !stepAsideForFullScreen && !docked && visible && covered;
 }

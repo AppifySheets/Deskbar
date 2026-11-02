@@ -41,27 +41,3 @@ public class FullScreenCoverTests
     public void No_windows_cover_the_screen() =>
         Assert.Null(FullScreenCover.Covering(Screen, []));
 }
-
-// The bar OWNED BY the window that covers its screen: the bar is on top of everything by default,
-// and a full-screen window on its screen puts that to the test. Measured on Windows 11 build 26300
-// with a video player full screen on the 4K screen: the player raises itself over the bar on every
-// pause, and a bar that only climbs back over it blinks. Owned by the player, it does not.
-public class OwnedByCoverTests
-{
-    [Theory]
-    // Floating bar, on screen, something covering it: the bar is owned by the covering window, which
-    // is what keeps it above it.
-    [InlineData(false, false, true, true, true)]
-    // Nothing covers the bar: there is no window to be owned by.
-    [InlineData(false, false, true, false, false)]
-    // The step-aside setting is on: the bar steps BELOW the covering window instead, and that is left
-    // exactly as it was.
-    [InlineData(true, false, true, true, false)]
-    // Docked: the shell's own full-screen notice moves the bar out of the band.
-    [InlineData(false, true, true, true, false)]
-    // Hidden: there is no bar to own.
-    [InlineData(false, false, false, true, false)]
-    public void The_bar_is_owned_by_the_covering_window_only_where_it_may_be(
-        bool stepAsideForFullScreen, bool docked, bool visible, bool covered, bool owned) =>
-        Assert.Equal(owned, FullScreenCover.OwnedByCover(stepAsideForFullScreen, docked, visible, covered));
-}

@@ -369,8 +369,8 @@ cover the floating bar on its screen** box in Manage lets a full-screen window c
 screen: the bar steps just below the window and comes back when the window leaves full screen,
 closes or is minimised. Only the bar's own screen counts: a video on the other screen leaves the bar
 on top, and a bar dragged onto the video's screen goes below it too. With the box off, the bar stays
-on top of a full-screen window, without a flicker when the window raises itself (a video player does
-on every pause).
+on top of a full-screen window as it always has, so a video player that raises itself on every pause
+can cover it for a moment until the bar comes back on top; turn the box on if that bothers you.
 
 **Dock across both screens** straddles the seam between two side-by-side screens: the first
 screen's lane sits on the left screen, the second's on the right, each half reserving half the
