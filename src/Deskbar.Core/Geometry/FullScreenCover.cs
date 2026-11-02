@@ -25,8 +25,8 @@ public static class FullScreenCover
     public readonly record struct Rect(int Left, int Top, int Right, int Bottom);
 
     // A window that could cover a screen: its handle, so the caller can name it in a trace and
-    // put the bar below it, and where it is.
-    public readonly record struct Candidate(nint Handle, Rect Rect);
+    // put the bar below it, where it is, and whether it is MAXIMIZED (IsZoomed).
+    public readonly record struct Candidate(nint Handle, Rect Rect, bool Maximized);
 
     // The window that covers the screen, or null when nothing does.
     //
@@ -39,15 +39,30 @@ public static class FullScreenCover
     // hangs a few pixels over the neighbouring screen: a maximized window with a visible taskbar
     // never reaches the screen's bottom, so it never counts.
     //
+    // A MAXIMIZED window covers only when its rectangle is EXACTLY the screen's. It is not skipped
+    // either way: it is the first candidate, so it decides. Two kinds of maximized window reach here:
+    //
+    //   * An ordinary maximized window on a screen with NO taskbar ("show taskbar on main display
+    //     only"). The work area is the whole monitor, so the window has the monitor's rectangle PLUS
+    //     its frame hanging over every edge (~7-11 px), and it is a window the user is working in, not
+    //     a full-screen one. The answer is null, and the same holds when it is in front of a full-screen
+    //     window: it is the one being looked at.
+    //   * A browser in full screen (F11, or a video's full-screen button) that was maximized before.
+    //     Measured on Windows 11 build 26300, 2560x1440 screen: Chrome in F11 kept IsZoomed TRUE, and its
+    //     rectangle was exactly 0,0,2560,1440, with no frame over the edges. It is full screen, so it
+    //     covers.
+    //
+    // A full-screen video player is not maximized (IsZoomed is FALSE for it, see above), so it covers by
+    // the containment test alone.
+    //
     // The windows of this app are left out by the caller, and so are the ones on other screens.
     public static Candidate? Covering(Rect screen, IReadOnlyList<Candidate> candidates)
     {
         if (candidates.Count == 0) return null;
         var first = candidates[0];
         var rect = first.Rect;
-        return rect.Left <= screen.Left && rect.Top <= screen.Top
-            && rect.Right >= screen.Right && rect.Bottom >= screen.Bottom
-            ? first
-            : null;
+        var covers = rect.Left <= screen.Left && rect.Top <= screen.Top
+            && rect.Right >= screen.Right && rect.Bottom >= screen.Bottom;
+        return covers && (!first.Maximized || rect == screen) ? first : null;
     }
 }

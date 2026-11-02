@@ -13,8 +13,8 @@ public class FullScreenCoverTests
     // The 4K screen, as measured.
     static readonly FullScreenCover.Rect Screen = new(0, 0, 3840, 2160);
 
-    static FullScreenCover.Candidate Window(nint handle, int left, int top, int right, int bottom) =>
-        new(handle, new FullScreenCover.Rect(left, top, right, bottom));
+    static FullScreenCover.Candidate Window(nint handle, int left, int top, int right, int bottom, bool maximized = false) =>
+        new(handle, new FullScreenCover.Rect(left, top, right, bottom), maximized);
 
     [Fact]
     public void A_window_exactly_on_the_screen_covers_it() =>
@@ -36,6 +36,29 @@ public class FullScreenCoverTests
     [Fact]
     public void A_small_window_in_front_of_a_full_screen_one_does_not_cover_it() =>
         Assert.Null(FullScreenCover.Covering(Screen, [Window(4, 100, 100, 500, 400), Window(5, 0, 0, 3840, 2160)]));
+
+    // The owner's review: with "show taskbar on main display only" the secondary screen has no taskbar, so
+    // a maximized window there has the monitor's rectangle plus its ~11 px frame. It covers by rectangle and
+    // IsZoomed says it is maximized, so it is not a full-screen window and the bar stays on top.
+    [Fact]
+    public void A_maximized_window_that_contains_the_screen_does_not_cover_it() =>
+        Assert.Null(FullScreenCover.Covering(Screen, [Window(6, -11, -11, 3851, 2171, maximized: true)]));
+
+    // A maximized window in front of a full-screen video is what the user is looking at: the screen is not covered.
+    [Fact]
+    public void A_maximized_window_in_front_of_a_full_screen_one_does_not_cover_it() =>
+        Assert.Null(FullScreenCover.Covering(Screen, [Window(7, -11, -11, 3851, 2171, maximized: true), Window(8, 0, 0, 3840, 2160)]));
+
+    // A browser in F11 that was maximized before keeps IsZoomed TRUE, but its rectangle is exactly the
+    // screen's, with no frame over the edges (measured: Chrome, 0,0,2560,1440 on a 2560x1440 screen). It covers.
+    [Fact]
+    public void A_maximized_window_exactly_on_the_screen_covers_it() =>
+        Assert.Equal(10, FullScreenCover.Covering(Screen, [Window(10, 0, 0, 3840, 2160, maximized: true)])?.Handle);
+
+    // The video player is NOT maximized (IsZoomed FALSE, measured), so a full-screen one still covers.
+    [Fact]
+    public void A_non_maximized_full_screen_window_covers_the_screen() =>
+        Assert.Equal(9, FullScreenCover.Covering(Screen, [Window(9, 0, 0, 3840, 2160, maximized: false)])?.Handle);
 
     [Fact]
     public void No_windows_cover_the_screen() =>

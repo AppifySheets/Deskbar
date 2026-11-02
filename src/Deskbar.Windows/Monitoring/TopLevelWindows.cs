@@ -61,6 +61,12 @@ public static class TopLevelWindows
     //   * A full-screen window's rectangle is EXACTLY the monitor's (0,0,3840,2160 for the 4K one), and
     //     IsZoomed is FALSE for it: "maximized" is not the test for "full screen".
     //   * The bar's OWN windows are skipped: the bar is one of them, and it is on that very screen.
+    //   * A MAXIMIZED window is reported as such (IsZoomed) and is not skipped: it is the window in front.
+    //     On a screen with no taskbar ("show taskbar on main display only") its rectangle is the monitor's
+    //     plus its frame, so it covers by rectangle, and the owner's review found it counted as a
+    //     full-screen window; FullScreenCover now answers null for it. A browser in F11 can be maximized
+    //     too (Chrome kept IsZoomed TRUE), but its rectangle is exactly the monitor's, so it still covers.
+    //     A full-screen video is not maximized (IsZoomed FALSE), so it is not affected.
     public static nint? CoveringWindow(nint barHwnd)
     {
         var monitor = NativeMethods.MonitorFromWindow(barHwnd, NativeMethods.MONITOR_DEFAULTTONEAREST);
@@ -79,7 +85,7 @@ public static class TopLevelWindows
             if (IsShellCloaked(hwnd)) continue;
             if (NativeMethods.MonitorFromWindow(hwnd, NativeMethods.MONITOR_DEFAULTTONEAREST) != monitor) continue;
             if (!NativeMethods.GetWindowRect(hwnd, out var rect)) continue;
-            candidates.Add(new FullScreenCover.Candidate(hwnd, new FullScreenCover.Rect(rect.Left, rect.Top, rect.Right, rect.Bottom)));
+            candidates.Add(new FullScreenCover.Candidate(hwnd, new FullScreenCover.Rect(rect.Left, rect.Top, rect.Right, rect.Bottom), NativeMethods.IsZoomed(hwnd)));
         }
         return FullScreenCover.Covering(screen, candidates)?.Handle;
     }
