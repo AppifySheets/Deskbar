@@ -7754,14 +7754,45 @@ public partial class FloatingBar : Window
     // Docked, it saves the FLOATING position it kept (see DockTo) plus the edge, so a restart docks again
     // and an undock after the restart still knows where the bar floated. The width is the live one either
     // way: a width dragged while docked is the bar's width when it floats again too.
-    void Save() => manager.SaveFloatingBar(Docked
-        ? (floatingBeforeDock ?? FloatingState()) with
+    //
+    // Nothing is written while the desk is changing (see DeskChanging below).
+    void Save()
+    {
+        var layout = LayoutKey();
+        if (DeskChanging(settledLayout, layout))
         {
-            Visible = !Minimized,
-            Width = double.IsNaN(Width) ? null : Width,
-            DockedEdge = dockedEdge,
+            if (ClickTrace.On) ClickTrace.Write($"save skipped, the desk is changing: settled {settledLayout}, attached {layout}");
+            return;
         }
-        : FloatingState(), LayoutKey());
+        manager.SaveFloatingBar(Docked
+            ? (floatingBeforeDock ?? FloatingState()) with
+            {
+                Visible = !Minimized,
+                Width = double.IsNaN(Width) ? null : Width,
+                DockedEdge = dockedEdge,
+            }
+            : FloatingState(), layout);
+    }
+
+    // Whether the monitors attached now are another desk than the one the last readjustment settled on, which
+    // means a topology change is still in its burst and ReadjustToDisplayLayout has not run for it yet.
+    //
+    // Petre, back at his desk after an RDP session: "deskbar was still attached to another monitor's edge
+    // today". Measured on 2026-11-02 at 10:26: the shell's position notices re-docked the bar 29 times on the
+    // returning desk BEFORE the debounced readjustment ran, and every re-dock saved. Each save wrote
+    // floatingBeforeDock, the floating spot from the RDP session (Left 0 on the primary), under the key of the
+    // desk now attached. The readjustment then found "a remembered dock" for the desk, read that overwritten
+    // spot and docked on the primary's right edge instead of the left screen's inner edge. The other direction
+    // shows in the same state.json: the RDP layouts 0,0,7680,2406 and 0,0,7680,2389 stored Left -372 and -366,
+    // positions on the desk's left screen that a desk starting at 0 does not have.
+    //
+    // So the bar saves only on the desk it last settled on. The readjustment updates settledLayout before it
+    // docks again, so its own saves land under the right key. A desk that only shifted (a screen coming back a
+    // few pixels lower) is still the same desk (MonitorLayoutKey.SameDesk), and so is a drag onto a screen of
+    // another scale, so neither stops a save. An unknown settled layout never blocks one: compatibility mode and
+    // a failed monitor query save as they always did.
+    internal static bool DeskChanging(string settled, string attached) =>
+        MonitorLayoutKey.IsKnown(settled) && !MonitorLayoutKey.SameDesk(settled, attached);
 
     // Owned by the bar for the same reason PromptDialog.Ask now takes an owner: this window
     // is Topmost, so an unowned message box can open behind it and strand the user with an
