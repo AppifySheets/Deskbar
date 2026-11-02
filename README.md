@@ -364,13 +364,10 @@ windows keep clear of it. The bar cannot be moved while docked (moving the strip
 reservation behind), but its width can still be dragged. A full-screen app takes the bar out of the
 topmost band while it runs. Minimising the bar gives the strip back.
 
-The floating bar is on top of everything by default. The **Let a full-screen window (a video, a game)
-cover the floating bar on its screen** box in Manage lets a full-screen window cover it on that
-screen: the bar steps just below the window and comes back when the window leaves full screen,
-closes or is minimised. Only the bar's own screen counts: a video on the other screen leaves the bar
-on top, and a bar dragged onto the video's screen goes below it too. With the box off, the bar stays
-on top of a full-screen window as it always has, so a video player that raises itself on every pause
-can cover it for a moment until the bar comes back on top; turn the box on if that bothers you.
+The floating bar does the same for a full-screen window (a video, a game) on its own screen: the bar
+steps just below the window and comes back when the window leaves full screen, closes or is
+minimised. Only the bar's own screen counts: a video on the other screen leaves the bar on top, and a
+bar dragged onto the video's screen goes below it too.
 
 **Dock across both screens** straddles the seam between two side-by-side screens: the first
 screen's lane sits on the left screen, the second's on the right, each half reserving half the

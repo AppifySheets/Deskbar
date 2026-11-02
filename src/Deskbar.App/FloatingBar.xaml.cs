@@ -478,8 +478,8 @@ public partial class FloatingBar : Window
         if (fullScreenAppOpen) return;
         var hwnd = new WindowInteropHelper(this).Handle;
         if (hwnd == nint.Zero) return;
-        // A full-screen window on the bar's own screen may take the bar out of the way, with the setting
-        // on. True when the bar has stepped aside, so it does not climb back on top.
+        // A full-screen window on the bar's own screen takes the bar out of the way. True when the bar has
+        // stepped aside, so it does not climb back on top.
         if (StepAsideIfCovered(hwnd)) return;
         // SWP_NOACTIVATE is the load-bearing flag: without it this would yank focus off
         // whatever was just clicked -- including the taskbar the user was reaching for.
@@ -496,12 +496,15 @@ public partial class FloatingBar : Window
     // player's full-screen window having the rectangle EXACTLY the monitor's (0,0,3840,2160) and
     // IsZoomed being FALSE.
     //
-    // So, with the setting on, the bar steps BELOW the window that covers its screen instead of fighting
-    // it for the top of the band. It steps aside: it is not hidden, not minimised and not moved. The bar
-    // is still there, one step down, and it comes back the moment the covering window leaves.
+    // So the bar steps BELOW the window that covers its screen instead of fighting it for the top of the
+    // band. It steps aside: it is not hidden, not minimised and not moved. The bar is still there, one step
+    // down, and it comes back the moment the covering window leaves.
     //
-    // Docked, the shell's own full-screen notice already moves the bar out of the band (OnFullScreenApp),
-    // and that is left exactly as it is.
+    // Always, with no setting. #295 first shipped it as an opt-in box, off by default, and Petre, looking at
+    // the floating bar over a full-screen video in Edge: "can we always hide it?", then "it's hidden in docked
+    // mode". Docked, the shell's own full-screen notice already moves the bar out of the band
+    // (OnFullScreenApp) with no setting either, and that is left exactly as it is; this gives the floating bar
+    // the same behaviour.
     //
     // No exception for a bar the user has just pressed or dragged: a bar dropped on the covered screen steps
     // below the full-screen window within a second, as if it had been there all along. An exception "until the
@@ -510,16 +513,16 @@ public partial class FloatingBar : Window
     // the bar went on fighting the player on every pause. The owner: it should "adopt the settings" of the
     // screen "as soon as it got dragged in it".
     //
-    // With the setting OFF the bar stays on top as it always has, and a player that raises itself on a pause
-    // can still cover it until the next re-assert. Do not "fix" that by making the bar an OWNED window of the
-    // player (SetWindowLongPtr GWLP_HWNDPARENT). It was built (#295) and it does stop the blink, because an
+    // If keeping the bar ON TOP of a full-screen window is ever wanted again, do not do it by making the bar
+    // an OWNED window of the player (SetWindowLongPtr GWLP_HWNDPARENT), even though that is the one way that
+    // does not blink when the player raises itself on a pause. It was built (#295) and it works, because an
     // owned window always sits above its owner, but measured on build 26300 a cross-process owner ATTACHES
     // the two threads' input queues, exactly as AttachThreadInput does: the owned thread's GetGUIThreadInfo
     // reported the owner's active and focus windows while owned, and its own again once released. So the
     // player and Deskbar's UI thread, which runs the bar, Manage and the control pipe, would share one input
     // state: a hung player can stall input to all of Deskbar, and a busy Deskbar the player's keys. Re-asserting
     // topmost every 100 ms and stripping the player's WS_EX_TOPMOST every 15 ms were measured too, and both
-    // still blinked. Stepping aside, opt-in, is what is left.
+    // still blinked.
 
     // Whether the bar is currently sitting below a covering window.
     bool steppedAside;
@@ -528,10 +531,9 @@ public partial class FloatingBar : Window
     // should. True when the bar has stepped aside, so ReclaimTopmost does not climb back on top.
     bool StepAsideIfCovered(nint hwnd)
     {
-        // With the setting off, or docked, Windows is not asked at all: the bar is on top of everything,
-        // exactly as it always was. (Docked, the shell's own full-screen notice already moves the bar out
-        // of the band, and that is left as it is.)
-        var covered = manager.State.StepAsideForFullScreen && !Docked
+        // Docked, Windows is not asked at all: the shell's own full-screen notice already moves the bar
+        // out of the band, and that is left as it is.
+        var covered = !Docked
             ? TopLevelWindows.CoveringWindow(hwnd) ?? nint.Zero
             : nint.Zero;
 
