@@ -3244,7 +3244,7 @@ public partial class FloatingBar : Window
             header.Children.Add(twin);
         }
 
-        header.ContextMenu = GroupMenu(group);
+        LazyMenu(header, menu => GroupMenu(group, menu)); // filled on the first right-click (FloatingBar.LazyMenus.cs)
         return header;
     }
 
@@ -3257,9 +3257,9 @@ public partial class FloatingBar : Window
     //
     // Rename matters more here than it looks: for an anchorless group this name is the only
     // thing naming it, and there is no anchor row to rename instead.
-    ContextMenu GroupMenu(Core.Domain.Group group)
+    ContextMenu GroupMenu(Core.Domain.Group group, ContextMenu? into = null)
     {
-        var menu = new ContextMenu();
+        var menu = into ?? new ContextMenu(); // `into`: the empty menu a lazy element already holds (FloatingBar.LazyMenus.cs)
         HoldFadeWhileOpen(menu);
 
         void Add(string glyph, string header, Action click)
@@ -3383,8 +3383,8 @@ public partial class FloatingBar : Window
             Child = line,
             Background = Brushes.Transparent,
             ClipToBounds = true,
-            ContextMenu = GroupMenu(group),
         };
+        LazyMenu(holder, menu => GroupMenu(group, menu)); // filled on the first right-click (FloatingBar.LazyMenus.cs)
         System.Windows.Automation.AutomationProperties.SetName(holder, $"{group.Name} (folded)");
         return holder;
     }
@@ -4034,7 +4034,8 @@ public partial class FloatingBar : Window
         // the menu of the INNERMOST element that has one, which is exactly the right split:
         // right-clicking an icon is about that window, right-clicking anywhere else on the row is
         // about the workspace.
-        if (rowKey is { } workspaceId) container.ContextMenu = WorkspaceMenu(workspaceId, visualLabel, folded, nested);
+        // Both built on the first right-click, not now (FloatingBar.LazyMenus.cs).
+        if (rowKey is { } workspaceId) LazyMenu(container, menu => WorkspaceMenu(workspaceId, visualLabel, folded, nested, menu));
         // ...and an UNBOUND desktop's row gets a menu of its own (#149). Petre: "right-clicking on
         // the default desktop (desktop1) doesn't do anything, no context menu for it."
         //
@@ -4043,7 +4044,7 @@ public partial class FloatingBar : Window
         // different in kind. It is not a non-workspace, it is a workspace nobody has named yet, and
         // the row under the cursor is where that intention actually occurs. Right-clicking it used to
         // land on nothing at all, which reads as broken rather than as a decision.
-        else if (desktopId is { } desktop) container.ContextMenu = DesktopMenu(desktop, visualLabel);
+        else if (desktopId is { } desktop) LazyMenu(container, menu => DesktopMenu(desktop, visualLabel, menu));
 
         // NO transform on the row. It used to carry one (0.8 for pinned, 0.43 for minimized), and that
         // is what put those rows' hairlines at a different x from everyone else's: a scaled row scales
@@ -6075,7 +6076,8 @@ public partial class FloatingBar : Window
             Template = MarkedButton,
             Tag = IconTag, // marks this as an icon: press-drag moves the WINDOW, not the bar
         };
-        PaintMarker(button, ringed: false, focused: row.IsActive, landing: row.WillActivate, asking: Glows(row) ? AskingPulse : null, fronted: Fronted(row));
+        // Clocked across the rebuild (Cost, FloatingBar.RebuildPhases.cs), like the icon lookup and the menu below.
+        Cost("markers", () => PaintMarker(button, ringed: false, focused: row.IsActive, landing: row.WillActivate, asking: Glows(row) ? AskingPulse : null, fronted: Fronted(row)));
 
         // The window's title as the automation name. Two jobs, both real: a screen reader announces the
         // icon as the window it stands for rather than as "button", and it is how a test tells which icon
@@ -6111,7 +6113,7 @@ public partial class FloatingBar : Window
         // for whatsapp app" -- WhatsApp.Root.exe is an MSIX launcher stub carrying no icon,
         // so the exe-only lookup returned Windows' generic default and there was nothing to
         // detect as a failure. Asking the window gets the icon the taskbar itself draws.
-        var icon = IconCache.For(row.Window.Handle, row.Window.ProcessPath);
+        var icon = Cost("icons", () => IconCache.For(row.Window.Handle, row.Window.ProcessPath));
         // Petre: "something popped up in unplaced, then disappeared, but now i see the
         // unplaced section" -- with the row looking empty. It was NOT empty. OverviewBuilder
         // only emits a group that has at least one window, so there was a window there; the
@@ -6270,7 +6272,8 @@ public partial class FloatingBar : Window
             Report(outcome);
         }), handledEventsToo: true);
 
-        button.ContextMenu = IconMenu(row);
+        // Built on the first right-click, not now (FloatingBar.LazyMenus.cs).
+        LazyMenu(button, menu => IconMenu(row, menu));
         return button;
     }
 
@@ -6666,9 +6669,9 @@ public partial class FloatingBar : Window
     // 'Remove workspace' is a bad way to find that out" -- and it arrived with #73 once it could
     // refuse a workspace that still held windows. It closes those windows now instead of refusing;
     // the reasoning, and what replaced the guard, is at the item itself at the bottom of this method.
-    ContextMenu WorkspaceMenu(Guid workspaceId, string name, bool folded, bool nested)
+    ContextMenu WorkspaceMenu(Guid workspaceId, string name, bool folded, bool nested, ContextMenu? into = null)
     {
-        var menu = new ContextMenu();
+        var menu = into ?? new ContextMenu(); // `into`: the empty menu a lazy element already holds (FloatingBar.LazyMenus.cs)
         HoldFadeWhileOpen(menu);
 
         // Read at CLICK time rather than captured when the menu was built: a rebuild between the
@@ -6990,9 +6993,9 @@ public partial class FloatingBar : Window
         menu.Items.Add(minimize);
     }
 
-    ContextMenu DesktopMenu(Guid desktopId, string currentName)
+    ContextMenu DesktopMenu(Guid desktopId, string currentName, ContextMenu? into = null)
     {
-        var menu = new ContextMenu();
+        var menu = into ?? new ContextMenu(); // `into`: the empty menu a lazy element already holds (FloatingBar.LazyMenus.cs)
         HoldFadeWhileOpen(menu);
 
         var name = new MenuItem { Header = "Name this desktop…", Icon = MenuGlyph("✏") };
@@ -7232,9 +7235,9 @@ public partial class FloatingBar : Window
             // off the pulse that creating it sent.
             .Tap(fresh => Report(manager.InsertWorkspace(fresh, index, parentId)));
 
-    ContextMenu IconMenu(WindowRow row)
+    ContextMenu IconMenu(WindowRow row, ContextMenu? into = null)
     {
-        var menu = new ContextMenu();
+        var menu = into ?? new ContextMenu(); // `into`: the empty menu a lazy element already holds (FloatingBar.LazyMenus.cs)
         HoldFadeWhileOpen(menu);
 
 

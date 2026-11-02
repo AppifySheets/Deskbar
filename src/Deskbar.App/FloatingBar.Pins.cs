@@ -182,7 +182,7 @@ public partial class FloatingBar
             e.Handled = true;
             OpenPin(pin, newWindow: true);
         };
-        button.ContextMenu = PinMenu(pin);
+        LazyMenu(button, menu => PinMenu(pin, menu)); // filled on the first right-click (FloatingBar.LazyMenus.cs)
         // At the icon size setting from the start, like Start and search beside it (see ScaleChromeIcons).
         ScaleAsIcon(button);
         return (button, mark, ring);
@@ -212,9 +212,9 @@ public partial class FloatingBar
         return source;
     }
 
-    ContextMenu PinMenu(TaskbarPin pin)
+    ContextMenu PinMenu(TaskbarPin pin, ContextMenu? into = null)
     {
-        var menu = new ContextMenu();
+        var menu = into ?? new ContextMenu(); // `into`: the empty menu a lazy element already holds (FloatingBar.LazyMenus.cs)
         HoldFadeWhileOpen(menu);
         menu.Items.Add(new MenuItem { Header = pin.Name, IsEnabled = false, FontWeight = FontWeights.SemiBold });
         menu.Items.Add(new Separator());

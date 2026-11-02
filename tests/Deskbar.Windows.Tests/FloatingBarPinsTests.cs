@@ -253,7 +253,7 @@ public class FloatingBarPinsTests
         var pins = new FakePins(Shortcut("Obsidian", @"C:\Obsidian\Obsidian.exe"), Shortcut("RustDesk", @"C:\RustDesk\RustDesk.exe"));
         var bar = Bar(pins);
 
-        var unpin = Pin(bar, "Obsidian").ContextMenu!.Items.OfType<MenuItem>().Single(i => (string)i.Header == "Unpin from taskbar");
+        var unpin = FloatingBar.MenuOf(Pin(bar, "Obsidian"))!.Items.OfType<MenuItem>().Single(i => (string)i.Header == "Unpin from taskbar");
         unpin.RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
 
         Assert.Equal(["RustDesk"], Names(bar));

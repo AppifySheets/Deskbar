@@ -3684,6 +3684,9 @@ public sealed class WorkspaceManager(
         desktops.GetDesktops().Bind(live => desktops.CurrentDesktop().Map(current =>
         {
             var windows = knownWindows.Values.ToList();
+            // The query's own clock, for the trace line at the bottom: the bar's "rebuild took" line gives the
+            // query as one number, and this says which of its two COM calls per window the number was.
+            var clock = System.Diagnostics.Stopwatch.StartNew();
             var pinned = windows
                 .Where(w => desktops.IsPinned(w.Handle).GetValueOrDefault(false))
                 // A window we BORROWED for a nested workspace is pinned as a mechanism, not as a
@@ -3693,6 +3696,7 @@ public sealed class WorkspaceManager(
                 // opposite of "present in the child workspace".
                 .Where(w => !borrowed.ContainsKey(w.Handle))
                 .Select(w => w.Handle).ToHashSet();
+            var pinnedMs = clock.ElapsedMilliseconds;
             var hiddenByShell = new HashSet<WindowHandle>(); // filled while the OS is asked below, see DesktopOfRemembering
             var desktopOf = windows
                 .Where(w => !pinned.Contains(w.Handle))
@@ -3713,9 +3717,14 @@ public sealed class WorkspaceManager(
                     : DesktopOfRemembering(w.Handle, live, hiddenByShell)))
                 .Where(x => x.Desktop.IsSuccess) // closed mid-query: just not shown this round
                 .ToDictionary(x => x.Handle, x => x.Desktop.Value);
+            var desktopOfMs = clock.ElapsedMilliseconds - pinnedMs;
             // One screen sweep per build, alongside the DesktopOf calls above -- and far cheaper
             // than they are, being user32 rather than COM.
             var screen = WithPendingScreens(screenLayout?.Snapshot() ?? ScreenFacts.Empty);
+            // Only the slow ones, like the bar's own rebuild line, so the log stays readable with tracing on all day.
+            if (clock.ElapsedMilliseconds >= 50)
+                trace?.Invoke($"query: pinned {pinnedMs}ms for {windows.Count} windows, desktopOf {desktopOfMs}ms for {desktopOf.Count}, " +
+                              $"screen {clock.ElapsedMilliseconds - pinnedMs - desktopOfMs}ms");
             return Asking(OverviewBuilder.Build(State, windows.Where(w => !hiddenByShell.Contains(w.Handle)).ToList(), h => ledger.OriginalTitle(h), pinned, desktopOf, live, current, activeWindow, lastActiveByDesktop, screen, wantsAttention, artworkOf));
         }));
 

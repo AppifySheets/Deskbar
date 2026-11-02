@@ -83,14 +83,25 @@ public static class IconCache
     // the watch redraws only when there is something new to draw.
     public static int ProbePending() =>
         probing.Keys.ToList()
-            .Select(key => { For(new WindowHandle(key.Hwnd), key.Path.Length == 0 ? null : key.Path); return key; })
+            .Select(key => { Lookup(new WindowHandle(key.Hwnd), key.Path.Length == 0 ? null : key.Path, mayProbe: true); return key; })
             .Count(key => !probing.ContainsKey(key));
 
     // Whether this window is still being asked for an icon of its own. For the tests.
     internal static bool IsPending(WindowHandle window, string? processPath) => probing.ContainsKey((window.Value, processPath ?? ""));
 
     // For live windows. Prefer this everywhere a WindowHandle is in hand.
-    public static ImageSource? For(WindowHandle window, string? processPath)
+    //
+    // ASKS THE WINDOW ONLY ON FIRST SIGHT. Petre: "when activating a bar in deskbar, it takes a little while to
+    // activate." The rebuild's cost ledger (FloatingBar.RebuildPhases.cs) put 71ms, 217ms and 226ms of three
+    // draws in this lookup: the once-a-second re-probe of every window still without an icon of its own ran
+    // from inside the draw, three SendMessageTimeouts of up to 100ms each per window, and a busy window paid
+    // all three. The first probe stays here, so a new window's icon is drawn as soon as it appears; every
+    // later one is the icon watch's (ProbePending, from the bar's 1s timer), which redraws only when an icon
+    // arrives. A rebuild between probes gets the provisional icon without touching Win32 at all.
+    public static ImageSource? For(WindowHandle window, string? processPath) =>
+        Lookup(window, processPath, mayProbe: !probing.ContainsKey((window.Value, processPath ?? "")));
+
+    static ImageSource? Lookup(WindowHandle window, string? processPath, bool mayProbe)
     {
         var key = (window.Value, processPath ?? "");
         if (byWindow.TryGetValue(key, out var hit)) return hit;
@@ -101,7 +112,7 @@ public static class IconCache
         // Only the window's OWN icon is a final answer. The class icon and the exe icon are
         // both process-wide, so for any PWA they are the browser's -- correct-looking, and
         // wrong. Rate-limited: between probes we skip the three SendMessageTimeouts entirely.
-        if (now - state.LastProbe >= ProbeInterval)
+        if (mayProbe && now - state.LastProbe >= ProbeInterval)
         {
             state = (state.FirstSeen, now);
             var own = FromSources(window.Value, OwnIconSources);

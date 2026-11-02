@@ -1,3 +1,4 @@
+using Deskbar.App;
 using System.Windows;
 using System.Windows.Controls;
 
@@ -55,7 +56,7 @@ public class UnboundDesktopMenuTests
         var harness = Harness.Build(withUnnamedDesktop: true);
         using var bar = harness.ShowBar();
 
-        var menu = RowLabelled(bar.Rows, "Desktop 1").ContextMenu;
+        var menu = FloatingBar.MenuOf(RowLabelled(bar.Rows, "Desktop 1"));
 
         Assert.NotNull(menu);
         Assert.Contains("Name this desktop…", HeadersOf(menu));
@@ -80,8 +81,10 @@ public class UnboundDesktopMenuTests
         var harness = Harness.Build(withUnnamedDesktop: true);
         using var bar = harness.ShowBar();
 
+        // "Dock across both screens" is offered only on a machine with two screens, so it is left out of the
+        // comparison, as FloatingBarShellTests leaves it out of the bar's own menu.
         Assert.Equal(["Name this desktop…", "New workspace…", "Dock to screen edge", "Minimize bar"],
-            HeadersOf(RowLabelled(bar.Rows, "Desktop 1").ContextMenu!));
+            HeadersOf(FloatingBar.MenuOf(RowLabelled(bar.Rows, "Desktop 1"))!).Where(h => h != "Dock across both screens"));
     });
 
     // The original reasoning still holds where it was right: 📌 Pinned is not a workspace and has
@@ -92,7 +95,7 @@ public class UnboundDesktopMenuTests
         var harness = Harness.Build(withUnnamedDesktop: true);
         using var bar = harness.ShowBar();
 
-        Assert.Null(RowLabelled(bar.Rows, "Pinned").ContextMenu);
+        Assert.Null(FloatingBar.MenuOf(RowLabelled(bar.Rows, "Pinned")));
     });
 
     // A named workspace keeps the full menu, so the new branch cannot have stolen the old one.
@@ -102,7 +105,7 @@ public class UnboundDesktopMenuTests
         var harness = Harness.Build(withUnnamedDesktop: true);
         using var bar = harness.ShowBar();
 
-        var headers = HeadersOf(RowLabelled(bar.Rows, "Sparrow").ContextMenu!);
+        var headers = HeadersOf(FloatingBar.MenuOf(RowLabelled(bar.Rows, "Sparrow"))!);
 
         Assert.Contains("Rename…", headers);
         Assert.True(headers.Count > 1);

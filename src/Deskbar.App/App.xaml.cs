@@ -1089,7 +1089,11 @@ public partial class App : Application
         var stateDir = AppPaths.NewStateDir;
         var statePath = Path.Combine(stateDir, "state.json");
         // The trace explains the "Unplaced" row: why a window's desktop could not be resolved.
-        desktops = new VirtualDesktopService(ClickTrace.On ? ClickTrace.Write : null);
+        // Wrapped in a short memory of each window's desktop and pinned state (PlacementCache): the overview
+        // query asks both for every window on every rebuild, and two rebuilds follow each switch, which is
+        // where the bar's wait after a click went. Two seconds covers a switch's rebuilds and the burst a
+        // window event brings, and is the longest a change made outside this app can go unnoticed.
+        desktops = new PlacementCache(new VirtualDesktopService(ClickTrace.On ? ClickTrace.Write : null), TimeSpan.FromSeconds(2));
         monitor = new WindowMonitor(ClickTrace.On ? ClickTrace.Write : null);
         // The activator is what lets a desktop switch put focus back on the window that had it
         // last time you were there (WorkspaceManager.RestoreLastActive). Same WindowActivator

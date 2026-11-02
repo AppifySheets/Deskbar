@@ -179,7 +179,7 @@ public class FloatingBarRebuildTests
         var harness = Harness.Build();
         using var bar = harness.ShowBar();
 
-        var menu = IconButtons(bar.Rows).First().ContextMenu;
+        var menu = FloatingBar.MenuOf(IconButtons(bar.Rows).First());
 
         Assert.NotNull(menu);
         Assert.Equal(
