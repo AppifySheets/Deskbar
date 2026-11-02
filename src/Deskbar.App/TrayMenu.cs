@@ -40,8 +40,15 @@ public static class TrayMenu
     // computer, "let's add debug dump which will give me a file and open window". Nothing can be traced live
     // on a machine that is not this one, so the machine has to describe itself. Above Exit, as the least used
     // item, and kept off the line Exit sits on so nobody reaching for Exit lands on it.
+    //
+    // `restart` is "Restart Deskbar" (see App.RestartApp): Petre, after a colleague's bar stopped switching
+    // workspaces and a restart cleared it, "i need to be able to restart deskbar". Directly above Exit, as its
+    // kin: both end this copy, and this one starts the next. It is the one item a mis-reach for Exit may land
+    // on, and that costs a few seconds of bar, not the app. Separate from the bar's Restart Explorer on purpose:
+    // that one takes seconds, closes folders and fixes the taskbar, none of which a stale Deskbar needs.
     public static ContextMenu Build(bool compatibilityMode, Action openManage, Action exit, Action checkNow,
-        (string Label, Action Open)? update = null, (string Label, Action Toggle)? bar = null, Action? dump = null)
+        (string Label, Action Open)? update = null, (string Label, Action Toggle)? bar = null, Action? dump = null,
+        Action? restart = null)
     {
         var menu = new ContextMenu();
 
@@ -86,6 +93,13 @@ public static class TrayMenu
         {
             var item = new MenuItem { Header = "Save debug dump" };
             item.Click += (_, _) => save();
+            menu.Items.Add(item);
+        }
+
+        if (restart is { } again)
+        {
+            var item = new MenuItem { Header = "Restart Deskbar" };
+            item.Click += (_, _) => again();
             menu.Items.Add(item);
         }
 

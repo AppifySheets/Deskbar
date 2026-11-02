@@ -1276,7 +1276,7 @@ public partial class App : Application
             // taskbar and window icons cannot drift apart.
             IconSource = AppIcon,
             ToolTipText = compatibilityMode ? "Deskbar (compatibility mode)" : "Deskbar",
-            ContextMenu = TrayMenu.Build(compatibilityMode, OpenManage, ExitApp, CheckForUpdateNow, null, BarToggle(), SaveDebugDump),
+            ContextMenu = TrayMenu.Build(compatibilityMode, OpenManage, ExitApp, CheckForUpdateNow, null, BarToggle(), SaveDebugDump, RestartApp),
             // Petre: "left click gives us the main window, right click gives exit and
             // manage". RightClick only, so a left-click is free to open Manage (wired
             // below) instead of raising the same menu twice.
@@ -1337,7 +1337,7 @@ public partial class App : Application
                 // ...and the stats line's above it: the counters Task Manager reads (FloatingBar.Stats.cs).
                 Stats = new Windows.Performance.SystemStats(),
                 // The tray's own commands, for the bar's background menu, so both menus run the same code.
-                AppActions = new FloatingBar.AppCommands(OpenManage, CheckForUpdateNow, ExitApp, () => pendingUpdate, SaveDebugDump),
+                AppActions = new FloatingBar.AppCommands(OpenManage, CheckForUpdateNow, ExitApp, () => pendingUpdate, SaveDebugDump, RestartApp),
                 // ...and the captions' time today (FloatingBar.WorkspaceTime.cs): the Time tab's own reading
                 // of the same tracker, so the two cannot disagree.
                 TimeToday = id => timeTracker?.Time.On(id, DateOnly.FromDateTime(DateTime.Now)) ?? TimeSpan.Zero,
@@ -1894,7 +1894,7 @@ public partial class App : Application
     {
         if (trayIcon is null) return;
         trayIcon.ContextMenu = TrayMenu.Build(compatibilityMode, OpenManage, ExitApp, CheckForUpdateNow,
-            pendingUpdate, BarToggle(), SaveDebugDump);
+            pendingUpdate, BarToggle(), SaveDebugDump, RestartApp);
     }
 
     (string Label, Action Toggle)? BarToggle() =>
@@ -1941,6 +1941,46 @@ public partial class App : Application
         // costs one line and removes any doubt about ordering.
         ReleaseInstanceMutexes();
         Shutdown();
+    }
+
+    // "Restart Deskbar", on the tray menu and the bar's background menu. Petre, after a colleague's bar stopped
+    // switching workspaces and a restart cleared it: "i need to be able to restart deskbar". Until now the only
+    // way was Exit and then the Start menu, and a stale virtual-desktop COM object after idle (ClickTrace's
+    // `switch ... ok=False` note, and #148) is exactly the fault a restart is the remedy for, so the remedy
+    // belongs where the fault shows. Separate from the bar's Restart Explorer on purpose: that one takes
+    // seconds, closes folders and fixes the taskbar, and the desktop interop reconnects to a restarted Explorer
+    // by itself.
+    //
+    // The same handover the update does (above), with this exe in place of the downloaded one, in the other
+    // order: the successor is started FIRST, and only once it is running does this copy stand down. The update
+    // releases the mutexes before starting because the version it starts may not understand the wait switch;
+    // this exe does, so the successor waits for this process to be gone (RenameMigrator.AwaitParentExit) and
+    // then for the mutex (OnStartup), and a successor that fails to start leaves this copy exactly as it was,
+    // mutex held, bar up. The user asked for a restart, not an exit, and an app that vanishes because its
+    // successor failed to start would look like the crash it was meant to cure.
+    //
+    // Then the ORDINARY exit path rather than a bare Shutdown, for the reason the update gives: it restores
+    // every renamed window's title, so the successor's monitor finds the windows as the user named them and
+    // not wearing names from a ledger it never saw. ProcessPath rather than a file on disk also serves the
+    // Store build: a packaged process starting its own exe stays inside the package, as the crash relaunch
+    // (CrashRelaunch.Start) already relies on.
+    void RestartApp()
+    {
+        ClickTrace.Write("restart: asked from a menu");
+        var started = Environment.ProcessPath is { } exe
+            ? Result.Try(
+                () => System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(exe, AwaitPreviousSwitch) { UseShellExecute = false })?.Dispose(),
+                e => $"Could not start a new copy of Deskbar: {e.Message}")
+            : Result.Failure("Could not start a new copy of Deskbar: this process has no exe path.");
+        if (started.IsFailure)
+        {
+            ClickTrace.Write($"restart: {started.Error}");
+            MessageBox.Show($"{started.Error}\n\nThis copy keeps running.", "Deskbar", MessageBoxButton.OK, MessageBoxImage.Warning);
+            return;
+        }
+        ClickTrace.Write("restart: the next copy is started; this one is exiting");
+        ExitApp();
+        EndIfShutdownHangs();
     }
 
     // Lets go of both single-instance mutexes, the new name and the old one, on the two ways this copy

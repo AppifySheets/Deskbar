@@ -412,7 +412,7 @@ public class FloatingBarShellTests(ITestOutputHelper output)
         {
             Left = -32000, Top = -32000, SendShellKeys = _ => { },
             AppActions = new FloatingBar.AppCommands(() => ran.Add("manage"), () => ran.Add("updates"), () => ran.Add("exit"), () => null,
-                SaveDebugDump: () => ran.Add("dump")),
+                SaveDebugDump: () => ran.Add("dump"), Restart: () => ran.Add("restart")),
             OpenTaskManager = () => ran.Add("taskmgr"),
             RestartExplorer = () => ran.Add("explorer"),
         };
@@ -422,7 +422,7 @@ public class FloatingBarShellTests(ITestOutputHelper output)
         bar.FillBarMenu(menu);
         var items = menu.Items.OfType<MenuItem>().ToList();
         output.WriteLine(string.Join(" | ", items.Select(i => (string)i.Header)));
-        Assert.Equal(["New workspace…", "Window list at the bottom of the bar", "Whole window lines bring the window up", "Icons on collapsed bars bring their window up", "Dock to screen edge", "Minimize bar", "Task Manager", "Restart Explorer", "Manage…", "Check for updates…", "Save debug dump", "Exit"],
+        Assert.Equal(["New workspace…", "Window list at the bottom of the bar", "Whole window lines bring the window up", "Icons on collapsed bars bring their window up", "Dock to screen edge", "Minimize bar", "Task Manager", "Restart Explorer", "Manage…", "Check for updates…", "Save debug dump", "Restart Deskbar", "Exit"],
             items.Select(i => (string)i.Header).Where(h => h != "Dock across both screens"));
 
         items.Single(i => (string)i.Header == "Task Manager").RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
@@ -430,7 +430,8 @@ public class FloatingBarShellTests(ITestOutputHelper output)
         items.Single(i => (string)i.Header == "Manage…").RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
         items.Single(i => (string)i.Header == "Check for updates…").RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
         items.Single(i => (string)i.Header == "Save debug dump").RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
-        Assert.Equal(["taskmgr", "explorer", "manage", "updates", "dump"], ran);
+        items.Single(i => (string)i.Header == "Restart Deskbar").RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
+        Assert.Equal(["taskmgr", "explorer", "manage", "updates", "dump", "restart"], ran);
         bar.Close();
     });
 

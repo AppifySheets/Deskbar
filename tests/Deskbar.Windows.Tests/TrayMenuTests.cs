@@ -98,6 +98,23 @@ public class TrayMenuTests
         Assert.Equal(1, dumps);
     });
 
+    // Petre, after a colleague's bar stopped switching workspaces and only a restart cleared it: "i need to be
+    // able to restart deskbar". Directly above Exit, as its kin: both end this copy, and this one starts the
+    // next. A separate item from Restart Explorer, which fixes the taskbar and takes seconds.
+    [Fact]
+    public void Restart_sits_directly_above_exit_and_invokes_the_restart() => StaThread.Run(() =>
+    {
+        var restarts = 0;
+        var menu = TrayMenu.Build(compatibilityMode: false, () => { }, () => { }, () => { },
+            update: null, bar: null, dump: () => { }, restart: () => restarts++);
+
+        Assert.Equal(["Manage…", "Check for updates…", "Save debug dump", "Restart Deskbar", "Exit"], Headers(menu));
+
+        menu.Items.OfType<MenuItem>().Single(item => (string)item.Header == "Restart Deskbar")
+            .RaiseEvent(new System.Windows.RoutedEventArgs(MenuItem.ClickEvent));
+        Assert.Equal(1, restarts);
+    });
+
     [Fact]
     public void The_bar_toggle_invokes_the_toggle() => StaThread.Run(() =>
     {

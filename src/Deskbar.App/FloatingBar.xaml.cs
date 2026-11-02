@@ -6920,14 +6920,19 @@ public partial class FloatingBar : Window
         Add("↻", "Check for updates…", app.CheckForUpdates);
         if (app.SaveDebugDump is { } dump) Add("⚑", "Save debug dump", dump);
         menu.Items.Add(new Separator());
+        // Restarting Deskbar itself (App.RestartApp), beside Exit as its kin and in the same place the tray puts
+        // it. Not beside Restart Explorer above, although the names rhyme: that one fixes the taskbar, this one
+        // fixes a Deskbar that has gone stale, and neither needs the other.
+        if (app.Restart is { } restart) Add("⟳", "Restart Deskbar", restart);
         Add("⏻", "Exit", app.Exit);
     }
 
     // The tray's app-wide commands, for the bar's background menu. Null in the tests, which then get the bar's
     // own items only. SaveDebugDump is the tray's "Save debug dump" (see DebugDump), optional so a caller that
-    // has no dump to offer leaves the item out.
+    // has no dump to offer leaves the item out; Restart is the tray's "Restart Deskbar" (App.RestartApp), optional
+    // for the same reason.
     public sealed record AppCommands(Action OpenManage, Action CheckForUpdates, Action Exit, Func<(string Label, Action Open)?> PendingUpdate,
-        Action? SaveDebugDump = null);
+        Action? SaveDebugDump = null, Action? Restart = null);
 
     public AppCommands? AppActions { get; init; }
 
