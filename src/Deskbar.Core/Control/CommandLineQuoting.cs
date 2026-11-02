@@ -80,6 +80,19 @@ public static class CommandLineQuoting
                 _ => (state.Text.Append(c), state.Quoted),
             }).Text.ToString();
 
+    // The line that runs a program as cmd's own CHILD and waits for it, for DetachedLauncher.RunOutsidePackage:
+    // no `start`, so cmd runs the program itself, waits, and exits with the program's exit code.
+    //
+    //     /d /v:off /c ""<program>" <arguments...>"
+    //
+    // The outer pair of quotes is for cmd's /c rule: when the text after /c starts with a quote, cmd strips
+    // that first quote and the LAST one on the line, then reads what is left. Without the pair, a quoted
+    // program followed by a quoted argument would lose both of its outer quotes and break at the first space.
+    // Inside, the program is quoted like start's (a path holds no quote, only the percent rule applies) and
+    // each argument exactly as ForCmdStart quotes it.
+    public static string ForCmdRun(string program, IReadOnlyList<string> arguments) =>
+        $"/d /v:off /c \"{string.Join(" ", [ForStart(program), .. arguments.Select(ForProgram)])}\"";
+
     // No folder, or an empty one, means none: cmd's own, as Process.Start treats an empty WorkingDirectory.
     static IEnumerable<string> Folder(string? workingDirectory) =>
         string.IsNullOrEmpty(workingDirectory) ? [] : ["/d", ForStart(workingDirectory)];

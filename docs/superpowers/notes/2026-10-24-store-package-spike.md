@@ -91,6 +91,36 @@ the first-packaged-start takeover doing its job. **Pass for the app:** the `Roam
 HKCU Run exclusions resolve at run time, and the takeover runs once and leaves its marker. The
 script's backup and restore then put every file, the Run value and the shortcut back as they were.
 
+## Without unvirtualizedResources (2026-11-02)
+
+Certification of submission 1 failed on policy 10.6.3: "Your request to use unvirtualizedResources has
+been reviewed and was denied based on the information provided." So the exclusions above went, and what
+virtualisation then does was measured on Petre's machine with a throwaway probe package
+(`Petre.DeskbarVirtProbe`, full trust, runFullTrust only, no exclusions, test-signed with the same
+certificate, run through its execution alias). It acted only on probe-named files, folders and Run values
+set up from outside first, and all of them and the package were removed afterwards. What the rest of the
+machine saw after the packaged process wrote:
+
+| From inside the package | Lands in the real profile |
+|---|---|
+| new file in an AppData folder that already exists outside | yes |
+| existing file overwritten in place | yes |
+| `File.Replace` over an existing file with a `.previous` backup (DurableFile's way) | yes, both files |
+| delete an existing AppData file | yes |
+| delete an existing file in the per-user Start menu folder | yes |
+| NEW top-level AppData folder and a file in it | **no**: `LocalCache\Roaming\<folder>` in the package's data |
+| delete an HKCU Run value with the registry API | **no**: hidden from the package, still there outside |
+| `reg delete` and `del` from cmd started with the breakaway attribute | yes |
+| folder created by `mkdir` in that cmd, then files and a subfolder written into it from inside | yes, all of it |
+| append to a file in `%TEMP%` | yes |
+
+So the Store copy needs help with exactly two things, and gets it through
+`DetachedLauncher.RunOutsidePackage` (the program runs as the breakaway cmd's child and is waited for):
+`PackagedStateFolder` creates `%APPDATA%\Deskbar` on a fresh install before anything writes into it, and
+`StartupRegistration.DeleteValue` deletes Run values (the takeover's `Deskbar`, the migration's
+`TaskSpaces`) through `reg.exe`. Not measured: the real Deskbar package under these rules, because
+installing it here would run the takeover on Petre's real autostart.
+
 ## Script findings
 
 - **`DESKBAR_APPDATA` does not reach the packaged app (d, e, f).** The script set it for every

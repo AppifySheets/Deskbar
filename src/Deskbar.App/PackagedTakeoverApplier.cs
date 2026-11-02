@@ -27,7 +27,9 @@ static class PackagedTakeoverApplier
         step switch
         {
             // Through StartupRegistration so the same owner guard applies as for Manage's box: only Deskbar
-            // itself touches the Run key, never a test host. Disable deletes exactly the `Deskbar` value.
+            // itself touches the Run key, never a test host. Disable deletes exactly the `Deskbar` value, and
+            // under the package it does so through reg.exe outside it, because the package's own HKCU delete
+            // would only hide the value (StartupRegistration.DeleteValue).
             DeleteDirectRunValue => Run("deleting the direct build's Run value Deskbar",
                 () => StartupRegistration.Disable()),
             DeleteDirectShortcut => Run($"deleting the direct build's Start menu shortcut {StartMenuShortcut.ShortcutPath}",

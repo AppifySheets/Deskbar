@@ -104,4 +104,12 @@ public class CommandLineQuotingTests
     [Fact]
     public void Empty_verbatim_arguments_end_at_the_program() =>
         Assert.Equal(@"/d /v:off /c start """" /d ""C:\w"" ""x""", CommandLineQuoting.ForCmdStartVerbatim("x", "", @"C:\w"));
+
+    // RunOutsidePackage's line: no `start`, and the whole command inside one extra pair of quotes, which cmd's
+    // /c rule strips (first quote and last quote) before it reads the quoted program and arguments as written.
+    // DetachedLauncherTests runs such lines through cmd for real.
+    [Fact]
+    public void Run_line_wraps_the_quoted_command_in_one_pair_for_cmd_c() =>
+        Assert.Equal(@"/d /v:off /c """"C:\Windows\System32\reg.exe"" delete HKCU\Software\Microsoft\Windows\CurrentVersion\Run /v Deskbar ""a b""""",
+            CommandLineQuoting.ForCmdRun(@"C:\Windows\System32\reg.exe", ["delete", @"HKCU\Software\Microsoft\Windows\CurrentVersion\Run", "/v", "Deskbar", "a b"]));
 }

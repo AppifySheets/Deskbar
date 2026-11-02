@@ -76,23 +76,57 @@ public static class DetachedLauncher
             return started?.Id;
         }, e => e.Message);
 
+    // RUNS a program outside Deskbar's package and waits for it, for the few writes the Store copy must make to
+    // the REAL profile rather than to the package's private copy of it. Microsoft refused the manifest's
+    // unvirtualizedResources capability (certification, 2026-11-02), and without it Windows virtualises two
+    // things a packaged process does (measured on 2026-11-02 with a throwaway probe package, details in
+    // docs/superpowers/notes/2026-10-24-store-package-spike.md, "Without unvirtualizedResources"):
+    //
+    //   - every HKCU write: deleting a Run value only hides it from the package, the real value stays;
+    //   - a NEW top-level folder under AppData: it goes to the package's LocalCache, invisible outside.
+    //
+    // Files written into a folder that already exists outside, File.Replace over an existing file and file
+    // deletes all land in the real profile, so only those two need this. A process outside the package
+    // writes the real profile, so the program runs as the breakaway cmd's own CHILD (CommandLineQuoting.
+    // ForCmdRun: no `start`, cmd runs it and waits), which is outside the package by the flag's documented
+    // meaning. Unpackaged this works the same, the attribute is accepted there too, so the tests run it.
+    //
+    // The failure says which program and why: it did not start, it did not end within the timeout (it is
+    // left running, not killed), or its exit code was not 0.
+    public static Result RunOutsidePackage(string program, IReadOnlyList<string> arguments, TimeSpan timeout) =>
+        Result.Try(() => CreateBrokenAway(CommandLineQuoting.ForCmdRun(program, arguments), process =>
+                WaitForSingleObject(process, (uint)timeout.TotalMilliseconds) != WaitObject0
+                    ? Result.Failure($"{Path.GetFileName(program)} did not finish within {timeout.TotalSeconds:0} s")
+                    : GetExitCodeProcess(process, out var code) && code == 0
+                        ? Result.Success()
+                        : Result.Failure($"{Path.GetFileName(program)} exited with code {code}")),
+            e => e.Message).Bind(result => result);
+
     // cmdArguments is everything after cmd's own name: CommandLineQuoting's `/d /v:off /c start "" ...` line.
     static Result<int?> StartBrokenAway(string cmdArguments) =>
-        Result.Try(() =>
+        Result.Try(() => CreateBrokenAway(cmdArguments, _ => (int?)null), e => e.Message);
+
+    // Creates cmd with the breakaway attribute and hands its process handle to `withProcess` before closing
+    // it, so a caller can wait on cmd or ignore it.
+    static T CreateBrokenAway<T>(string cmdArguments, Func<nint, T> withProcess)
+    {
+        var cmd = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.System), "cmd.exe");
+        // cmd skips its own name (the first token) before it reads /d /c, so the line starts with it.
+        var commandLine = new StringBuilder($"\"{cmd}\" {cmdArguments}");
+        var process = default(ProcessInformation);
+        WithBreakawayAttribute(attributes =>
         {
-            var cmd = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.System), "cmd.exe");
-            // cmd skips its own name (the first token) before it reads /d /c, so the line starts with it.
-            var commandLine = new StringBuilder($"\"{cmd}\" {cmdArguments}");
-            WithBreakawayAttribute(attributes =>
-            {
-                var startup = new StartupInfoEx { StartupInfo = new StartupInfo { Size = Marshal.SizeOf<StartupInfoEx>() }, AttributeList = attributes };
-                if (!CreateProcessW(cmd, commandLine, 0, 0, false, ExtendedStartupInfoPresent | CreateNoWindow, 0, null, ref startup, out var process))
-                    throw new Win32Exception(Marshal.GetLastWin32Error());
-                CloseHandle(process.Thread);
-                CloseHandle(process.Process);
-            });
-            return (int?)null;
-        }, e => e.Message);
+            var startup = new StartupInfoEx { StartupInfo = new StartupInfo { Size = Marshal.SizeOf<StartupInfoEx>() }, AttributeList = attributes };
+            if (!CreateProcessW(cmd, commandLine, 0, 0, false, ExtendedStartupInfoPresent | CreateNoWindow, 0, null, ref startup, out process))
+                throw new Win32Exception(Marshal.GetLastWin32Error());
+        });
+        try { return withProcess(process.Process); }
+        finally
+        {
+            CloseHandle(process.Thread);
+            CloseHandle(process.Process);
+        }
+    }
 
     // A one-entry attribute list holding the breakaway policy, alive for the duration of `use` and freed after.
     // The value is a DWORD in unmanaged memory because the list only points at it: it must stay put until
@@ -173,4 +207,12 @@ public static class DetachedLauncher
 
     [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
     static extern bool CloseHandle(nint handle);
+
+    const uint WaitObject0 = 0;
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    static extern uint WaitForSingleObject(nint handle, uint milliseconds);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    static extern bool GetExitCodeProcess(nint process, out uint exitCode);
 }

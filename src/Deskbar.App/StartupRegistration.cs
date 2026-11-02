@@ -1,5 +1,8 @@
+using System.IO;
 using System.Reflection;
 using CSharpFunctionalExtensions;
+using Deskbar.Windows.Packaging;
+using Deskbar.Windows.Processes;
 using Microsoft.Win32;
 
 namespace Deskbar.App;
@@ -94,8 +97,21 @@ public static class StartupRegistration
 #pragma warning restore IL3000
 
     public static Result Disable() =>
-        OwnedByThisProcess().Tap(() =>
-            Registry.CurrentUser.CreateSubKey(RunKey).DeleteValue(Name, throwOnMissingValue: false));
+        OwnedByThisProcess().Bind(() => DeleteValue(Name));
+
+    // Deletes one value from the Run key, wherever this copy runs. Under the Store package an HKCU delete made
+    // by the package's own process is VIRTUALISED: the value disappears for the package and stays in the real
+    // registry, so the direct build would still start at login (measured 2026-11-02, once Microsoft refused
+    // the unvirtualizedResources capability that used to exclude the Run key). So the packaged copy hands the
+    // delete to reg.exe outside the package (DetachedLauncher.RunOutsidePackage). The only packaged callers are
+    // the takeover (Disable) and the rename migration (the old TaskSpaces value), each once per machine.
+    // Store packaging design: docs/superpowers/specs/2026-10-24-deskbar-store-packaging-design.md
+    static Result DeleteValue(string name) =>
+        PackageIdentity.IsPackaged
+            ? DetachedLauncher.RunOutsidePackage(
+                Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.System), "reg.exe"),
+                ["delete", $@"HKCU\{RunKey}", "/v", name, "/f"], TimeSpan.FromSeconds(10))
+            : Result.Try(() => Registry.CurrentUser.CreateSubKey(RunKey).DeleteValue(name, throwOnMissingValue: false), error => error.Message);
 
     // The rename migration's half of autostart, on Deskbar's first start after TaskSpaces 1.x: the old
     // value goes, so login does not start 1.x beside Deskbar, and the new one points at this exe, which
@@ -109,11 +125,16 @@ public static class StartupRegistration
     //
     // The new value is written only by a published build, for the reason ReassertIfEnabled gives: a
     // development copy pointing the login entry at itself is the bug that guard exists for.
+    //
+    // The old value goes through DeleteValue, so the Store copy's delete reaches the real registry. setNew is
+    // never planned for the Store copy (RenameMigration.Plan) and RunsAsPublished is false there anyway, so the
+    // SetValue below only ever runs in the direct build, where HKCU is not virtualised.
     public static Result MigrateFromTaskSpaces(bool deleteOld, bool setNew) =>
-        OwnedByThisProcess().Bind(() => Result.Try(() =>
-        {
-            using var key = Registry.CurrentUser.CreateSubKey(RunKey);
-            if (deleteOld) key.DeleteValue(LegacyName, throwOnMissingValue: false);
-            if (setNew && RunsAsPublished) key.SetValue(Name, $"\"{Environment.ProcessPath}\"");
-        }, error => $"could not move start with Windows from TaskSpaces to Deskbar: {error.Message}"));
+        OwnedByThisProcess()
+            .Bind(() => deleteOld ? DeleteValue(LegacyName) : Result.Success())
+            .Bind(() => Result.Try(() =>
+            {
+                if (setNew && RunsAsPublished) Registry.CurrentUser.CreateSubKey(RunKey).SetValue(Name, $"\"{Environment.ProcessPath}\"");
+            }, error => error.Message))
+            .MapError(error => $"could not move start with Windows from TaskSpaces to Deskbar: {error}");
 }

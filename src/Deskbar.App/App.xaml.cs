@@ -968,6 +968,11 @@ public partial class App : Application
         // running; but a dying process may let go of the new name before the old one, and in that gap
         // this copy would win the guard above, find the old name still held, and refuse to start: the
         // crash relaunch would end in "Exit TaskSpaces first" with no TaskSpaces anywhere.
+        //
+        // Under the Store package the state folder is created first, from outside the package, so the
+        // migration's copies and everything after them land in the real %APPDATA%\Deskbar rather than in the
+        // package's private copy of it (PackagedStateFolder has the measurement). A no-op everywhere else.
+        PackagedStateFolder.EnsureReal(AppPaths.NewStateDir, ClickTrace.Write);
         var renamed = RenameMigrator.Apply(
             AppPaths.Root,
             RenameMigration.Plan(RenameMigrator.Gather(AppPaths.Root, awaitingPrevious || afterCrash, oldMutexHeld: !legacyInstanceOwned)),

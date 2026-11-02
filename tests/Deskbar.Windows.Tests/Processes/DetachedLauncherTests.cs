@@ -72,6 +72,35 @@ public sealed class DetachedLauncherTests : IDisposable
         Assert.True(result.IsFailure);
     }
 
+    // RunOutsidePackage waits: the folder exists the moment it returns, with no spin. The path has a space and
+    // a comma in it, so the line's quoting (the extra pair cmd /c strips) is exercised for real.
+    [Fact]
+    public void Run_outside_package_waits_for_the_program_and_its_work_is_done()
+    {
+        var folder = Path.Combine(Path.GetTempPath(), $"deskbar run outside, {Guid.NewGuid():N}");
+        try
+        {
+            var result = DetachedLauncher.RunOutsidePackage(Cmd, ["/d", "/c", "mkdir", folder], TimeSpan.FromSeconds(10));
+            Assert.True(result.IsSuccess, result.IsFailure ? result.Error : "");
+            Assert.True(Directory.Exists(folder));
+        }
+        finally
+        {
+            try { Directory.Delete(folder); } catch (IOException) { }
+        }
+    }
+
+    // A non-zero exit code is a failure naming the program and the code.
+    [Fact]
+    public void Run_outside_package_reports_a_nonzero_exit_code()
+    {
+        var result = DetachedLauncher.RunOutsidePackage(Cmd, ["/d", "/c", "exit", "3"], TimeSpan.FromSeconds(10));
+        Assert.True(result.IsFailure);
+        Assert.Equal("cmd.exe exited with code 3", result.Error);
+    }
+
+    static string Cmd => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.System), "cmd.exe");
+
     // The started program may still hold its file for a moment after it appears; a leftover temp file is not
     // worth failing a test over.
     public void Dispose() =>
