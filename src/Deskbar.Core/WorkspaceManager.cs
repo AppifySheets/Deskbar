@@ -3668,6 +3668,14 @@ public sealed class WorkspaceManager(
             ? Result.Success()
             : Result.Success().Tap(() => Persist(State with { CollapsedIconsPickWindow = !whole }));
 
+    // Whether the floating bar stays on top of a full-screen window instead of stepping behind it
+    // (AppState.FloatingBarOverFullScreen). A no-op when unchanged, like the settings above. The bar reads it on
+    // its next 1s check, so nothing is pushed to it.
+    public Result SetFloatingBarOverFullScreen(bool over) =>
+        State.FloatingBarOverFullScreen == over
+            ? Result.Success()
+            : Result.Success().Tap(() => Persist(State with { FloatingBarOverFullScreen = over }));
+
     // Whether the app writes its Claude Code skill (AppState.ClaudeSkill). A no-op when unchanged, like the
     // settings above; the app writes or removes the file on the state pulse this sends.
     public Result SetClaudeSkill(bool on) =>

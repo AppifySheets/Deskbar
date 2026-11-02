@@ -367,7 +367,9 @@ topmost band while it runs. Minimising the bar gives the strip back.
 The floating bar does the same for a full-screen window (a video, a game) on its own screen: the bar
 steps just below the window and comes back when the window leaves full screen, closes or is
 minimised. Only the bar's own screen counts: a video on the other screen leaves the bar on top, and a
-bar dragged onto the video's screen goes below it too.
+bar dragged onto the video's screen goes below it too. To keep the floating bar on top of full-screen
+windows instead, pick **Stay on top of full-screen windows** in the bar's right-click menu
+(`deskbar.cmd full-screen top`); **Step aside for full-screen windows** turns it back.
 
 **Dock across both screens** straddles the seam between two side-by-side screens: the first
 screen's lane sits on the left screen, the second's on the right, each half reserving half the

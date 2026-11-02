@@ -564,7 +564,7 @@ public class RemoteControlMenuTests
              "unfold", "color", "delete", "switch", "group-create", "group-join", "group-leave", "group-rename",
              "group-color", "group-fold", "group-unfold", "group-reorder", "ungroup", "name-desktop", "rename-window", "rename-app", "rename-pattern",
              "name-by-folder", "restore-title", "pin", "unpin", "close-window", "force-close", "close-all", "restart-app", "bar",
-             "window-lines", "collapsed-click", "dump"],
+             "window-lines", "collapsed-click", "full-screen", "dump"],
             verb => Assert.Contains($"\n  {verb}", help));
     }
 
@@ -604,5 +604,24 @@ public class RemoteControlMenuTests
 
         Assert.Equal(ControlReply.Failed, Run(manager, "collapsed-click", "sideways").ExitCode);
         Assert.True(manager.State.CollapsedBarSwitchesWhole);
+    }
+
+    // The full-screen setting's remote twin (AppState.FloatingBarOverFullScreen). Petre: "can we always hide it?",
+    // then "i may want to have that as an option": a fresh state steps aside, `top` keeps the bar on top, `step`
+    // goes back, anything else is a usage error that changes nothing.
+    [Fact]
+    public void Full_screen_keeps_the_bar_on_top_and_back()
+    {
+        var manager = Started();
+        Assert.False(manager.State.FloatingBarOverFullScreen);
+
+        Ok(Run(manager, "full-screen", "top"));
+        Assert.True(manager.State.FloatingBarOverFullScreen);
+
+        Ok(Run(manager, "full-screen", "step"));
+        Assert.False(manager.State.FloatingBarOverFullScreen);
+
+        Assert.Equal(ControlReply.Failed, Run(manager, "full-screen", "sideways").ExitCode);
+        Assert.False(manager.State.FloatingBarOverFullScreen);
     }
 }

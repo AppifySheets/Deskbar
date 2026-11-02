@@ -500,11 +500,12 @@ public partial class FloatingBar : Window
     // band. It steps aside: it is not hidden, not minimised and not moved. The bar is still there, one step
     // down, and it comes back the moment the covering window leaves.
     //
-    // Always, with no setting. #295 first shipped it as an opt-in box, off by default, and Petre, looking at
+    // On by default. #295 first shipped it as an opt-in box in Manage, off by default, and Petre, looking at
     // the floating bar over a full-screen video in Edge: "can we always hide it?", then "it's hidden in docked
     // mode". Docked, the shell's own full-screen notice already moves the bar out of the band
-    // (OnFullScreenApp) with no setting either, and that is left exactly as it is; this gives the floating bar
-    // the same behaviour.
+    // (OnFullScreenApp), and that is left exactly as it is; this gives the floating bar the same behaviour.
+    // Then "i may want to have that as an option", "in the rightclick": the bar's right-click menu flips it
+    // (AppState.FloatingBarOverFullScreen, in AddBarItems), with `full-screen step|top` as its remote twin.
     //
     // No exception for a bar the user has just pressed or dragged: a bar dropped on the covered screen steps
     // below the full-screen window within a second, as if it had been there all along. An exception "until the
@@ -513,9 +514,9 @@ public partial class FloatingBar : Window
     // the bar went on fighting the player on every pause. The owner: it should "adopt the settings" of the
     // screen "as soon as it got dragged in it".
     //
-    // If keeping the bar ON TOP of a full-screen window is ever wanted again, do not do it by making the bar
-    // an OWNED window of the player (SetWindowLongPtr GWLP_HWNDPARENT), even though that is the one way that
-    // does not blink when the player raises itself on a pause. It was built (#295) and it works, because an
+    // With the bar kept on top, a player that raises itself on a pause can still cover it until the next
+    // re-assert. Do not "fix" that by making the bar an OWNED window of the player (SetWindowLongPtr
+    // GWLP_HWNDPARENT), even though that is the one way that does not blink. It was built (#295) and it works, because an
     // owned window always sits above its owner, but measured on build 26300 a cross-process owner ATTACHES
     // the two threads' input queues, exactly as AttachThreadInput does: the owned thread's GetGUIThreadInfo
     // reported the owner's active and focus windows while owned, and its own again once released. So the
@@ -532,8 +533,8 @@ public partial class FloatingBar : Window
     bool StepAsideIfCovered(nint hwnd)
     {
         // Docked, Windows is not asked at all: the shell's own full-screen notice already moves the bar
-        // out of the band, and that is left as it is.
-        var covered = !Docked
+        // out of the band, and that is left as it is. Nor when the user keeps the floating bar on top.
+        var covered = !Docked && !manager.State.FloatingBarOverFullScreen
             ? TopLevelWindows.CoveringWindow(hwnd) ?? nint.Zero
             : nint.Zero;
 
@@ -7054,6 +7055,23 @@ public partial class FloatingBar : Window
         menu.Items.Add(new Separator());
 
         var docked = manager.State.DockBar;
+
+        // The full-screen setting (AppState.FloatingBarOverFullScreen; see StepAsideIfCovered). One item that
+        // flips, naming what it would switch TO, like the dock items below. Only on a floating bar: docked, the
+        // shell moves the bar out of a full-screen app's way and the setting does nothing. Its control pipe twin
+        // is `full-screen step|top` (ControlUsage).
+        if (!docked)
+        {
+            var over = manager.State.FloatingBarOverFullScreen;
+            var fullScreen = new MenuItem
+            {
+                Header = over ? "Step aside for full-screen windows" : "Stay on top of full-screen windows",
+                Icon = MenuGlyph("⤢"),
+            };
+            fullScreen.Click += (_, _) => Report(manager.SetFloatingBarOverFullScreen(!over));
+            menu.Items.Add(fullScreen);
+        }
+
         var dock = new MenuItem
         {
             Header = docked ? "Undock from screen edge" : "Dock to screen edge",

@@ -217,6 +217,13 @@ public sealed record AppState(
     // The reading the bar wants. Not stored.
     [JsonIgnore] public bool CollapsedBarSwitchesWhole => !CollapsedIconsPickWindow;
 
+    // Whether the FLOATING bar stays on top of a full-screen window (a video, a game) on its screen instead of
+    // stepping behind it (FloatingBar.StepAsideIfCovered). Petre: "can we always hide it?", then "i may want to
+    // have that as an option", "in the rightclick". Stored as the exception, so a state.json without the key
+    // reads false and the bar steps aside: the default he asked for, and what the docked bar has always done.
+    // Docked, this is ignored: the shell's own full-screen notice moves a docked bar out of the way regardless.
+    public bool FloatingBarOverFullScreen { get; init; }
+
     // Whether Deskbar writes its Claude Code skill (ClaudeSkill in the app). Petre: "can you do it so that deskbar
     // advertises this to other claude users?", "yes, add a skill for claude per user". On by default, and stored as
     // its NEGATION for the reason WholeWindowLines is: every existing state.json lacks the key and reads false.

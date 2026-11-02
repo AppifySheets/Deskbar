@@ -83,7 +83,7 @@ public class UnboundDesktopMenuTests
 
         // "Dock across both screens" is offered only on a machine with two screens, so it is left out of the
         // comparison, as FloatingBarShellTests leaves it out of the bar's own menu.
-        Assert.Equal(["Name this desktop…", "New workspace…", "Dock to screen edge", "Minimize bar"],
+        Assert.Equal(["Name this desktop…", "New workspace…", "Stay on top of full-screen windows", "Dock to screen edge", "Minimize bar"],
             HeadersOf(FloatingBar.MenuOf(RowLabelled(bar.Rows, "Desktop 1"))!).Where(h => h != "Dock across both screens"));
     });
 

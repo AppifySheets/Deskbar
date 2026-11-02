@@ -149,6 +149,15 @@ public sealed partial class RemoteControl
         _ => ControlReply.Fail(ControlUsage.LineFor("collapsed-click")),
     };
 
+    // The full-screen setting (AppState.FloatingBarOverFullScreen), the remote twin of the menu item that flips
+    // it: `step` lets a full-screen window on the bar's screen cover the floating bar, `top` keeps the bar on top.
+    ControlReply FullScreen(string mode) => mode.ToLowerInvariant() switch
+    {
+        "step" => Reply(manager.SetFloatingBarOverFullScreen(false), () => new { fullScreen = "step" }),
+        "top" => Reply(manager.SetFloatingBarOverFullScreen(true), () => new { fullScreen = "top" }),
+        _ => ControlReply.Fail(ControlUsage.LineFor("full-screen")),
+    };
+
     // The palette's names, a #RRGGBB of your own (what the Custom… picker stores), "none" for the
     // Transparent entry, or "default" for By position, which is the absence of a colour.
     static Result<string?> ParseColour(string raw) =>

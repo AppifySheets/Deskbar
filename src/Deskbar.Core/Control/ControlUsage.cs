@@ -85,6 +85,8 @@ public static class ControlUsage
                 "Right third of window lines switches workspace, or Whole window lines bring the window up"),
             new("collapsed-click", "bar|icon",
                 "Clicking a collapsed bar switches to its workspace, icons included, or Icons on collapsed bars bring their window up"),
+            new("full-screen", "step|top",
+                "Step aside for full-screen windows (the floating bar goes behind a video or game on its screen), or Stay on top of full-screen windows"),
             new("claude-skill", "on|off",
                 "Manage's \"Teach Claude Code\" setting: keep ~/.claude/skills/deskbar/SKILL.md written, or remove it"),
         ]),
