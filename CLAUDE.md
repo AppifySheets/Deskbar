@@ -106,6 +106,45 @@ object.
 - SDD ledgers: `.superpowers/sdd/*/progress.md`: gitignored, carry every ruling and
   deferred minor from the original build.
 
+## Microsoft Store links (Petre asks for these by name)
+
+Deskbar Pro's Store ID is `9PJX26NGFPNF`, in the Partner Center account of Petre's personal
+Microsoft account. Hand these over as links, and open the overview when he asks for "the link" or
+the Store status. Sign-ins, consent screens and account pickers are always his clicks, and the
+browser extension cannot act on Microsoft's login pages. Signed in as the company account
+(`@AppifySheets.com`), Partner Center opens the company's own partner account, where every Deskbar
+page says "Sorry, we couldn't find that page": switch accounts, do not debug the page.
+
+- [Product overview](https://partner.microsoft.com/en-us/dashboard/products/9PJX26NGFPNF/overview):
+  certification status, publishing hold, Publish now, Start update.
+- [Acquisitions analytics](https://partner.microsoft.com/en-us/dashboard/insights/analytics/store/acquisitions?productId=9PJX26NGFPNF&viewSelected=1):
+  page views, installs, conversion. Money is under Earnings, not here. A scripted query runs
+  locally, never in a workflow: this repo is public and so are its run logs.
+- Submission sections: append `availability`, `properties`, `packages`, `options` or
+  `listings?languageid=4&languagecode=en-us` to
+  `https://partner.microsoft.com/en-us/dashboard/products/9PJX26NGFPNF/submissions/<id>/`, the id
+  from the overview.
+- Account: [Legal info](https://partner.microsoft.com/en-us/dashboard/account/v3/organization/legalinfo#developer)
+  (seller ID), [Tenants](https://partner.microsoft.com/en-us/dashboard/account/v3/tenantmanagement),
+  [User management](https://partner.microsoft.com/en-us/dashboard/account/v3/usermanagement)
+  (its Microsoft Entra applications tab).
+- The automation's Entra app "Deskbar Store CI" lives in the dedicated tenant
+  `AppifySheetsPC.onmicrosoft.com` (the company tenant could not be used, see above), with the
+  Manager (Windows) role:
+  [overview](https://portal.azure.com/AppifySheetsPC.onmicrosoft.com#view/Microsoft_AAD_RegisteredApps/ApplicationMenuBlade/~/Overview/appId/26857fd8-153f-4405-8785-dc799082a7dd/objectId/9d96ce84-1d61-4825-b559-d2709aefa72c/isMSAApp~/false/defaultBlade/Overview/appSignInAudience/AzureADMyOrg),
+  [Certificates & secrets](https://portal.azure.com/AppifySheetsPC.onmicrosoft.com#view/Microsoft_AAD_RegisteredApps/ApplicationMenuBlade/~/Credentials/appId/26857fd8-153f-4405-8785-dc799082a7dd/objectId/9d96ce84-1d61-4825-b559-d2709aefa72c/isMSAApp~/false/defaultBlade/Overview/appSignInAudience/AzureADMyOrg).
+  When its client secret expires, the Store submission fails at the token: make a new one there
+  and update the `STORE_CLIENT_SECRET` repository secret. Keep the domain in a portal URL; without
+  it the sign-in can stick on the wrong directory.
+- GitHub: the [Store submission workflow](https://github.com/AppifySheets/Deskbar/actions/workflows/store-submit.yml),
+  its [secrets](https://github.com/AppifySheets/Deskbar/settings/secrets/actions) and the
+  `STORE_PRICE_ID` [variable](https://github.com/AppifySheets/Deskbar/settings/variables/actions).
+- Public: the [Store listing](https://apps.microsoft.com/detail/9PJX26NGFPNF) (check it with
+  `curl -L`, it redirects to a lowercase id) and [deskbar.app](https://deskbar.app).
+- Microsoft's docs: [Store CLI commands](https://learn.microsoft.com/en-us/windows/apps/publish/msstore-dev-cli/commands)
+  (price tiers too), [Store updates from GitHub Actions](https://learn.microsoft.com/en-us/windows/apps/publish/msstore-dev-cli/github-actions),
+  [acquisitions report](https://learn.microsoft.com/en-us/partner-center/insights/apps-and-msix-games-acquisitions-report).
+
 ## Decisions already made, do not relitigate
 
 - **A version bump rides in the PR that earns it**, never in a release PR of its own. Every
