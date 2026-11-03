@@ -20,6 +20,13 @@
 #   GH_TOKEN         for gh: listing artifacts and runs, downloading the package
 #   GITHUB_REPOSITORY  owner/repo, set by Actions
 #   DRY_RUN          'true' to stop after the decision, uploading nothing
+#   STORE_PRICE_ID   the base price tier msstore publish sets, e.g. Tier1120 (US$18.99). Required:
+#                    Deskbar is priced through a Partner Center market group, so the submission API
+#                    reports its price as 'Base', and msstore refuses to pass that back (measured on
+#                    the first real run, 2026-11-03) rather than risk resetting the app to free.
+#   NO_COMMIT        'true' to stop with the edited draft saved but not submitted, so the price and
+#                    the package can be checked in Partner Center first; the next run then fails on
+#                    the open draft until it is submitted or deleted there
 param(
     # The Store ID of Deskbar's listing (Partner Center, Product identity).
     [string] $AppId = '9PJX26NGFPNF'
@@ -129,12 +136,23 @@ Invoke-Checked 'Configuring msstore' {
 
 # Into a draft, uncommitted, so the draft can be edited before it goes in. msstore publish deletes
 # a pending draft before it makes its own; the decision above has made sure there is none.
-Invoke-Checked 'Uploading the package into a draft' { msstore publish $package --appId $AppId --noCommit } | Write-Host
+# --priceId states the base price, which msstore cannot carry over by itself (see STORE_PRICE_ID).
+# It sets one base tier for every market; Deskbar has one market group and no per-market prices,
+# so that is the price it already has. A per-market price added in Partner Center later would be
+# overwritten by this, so such a change has to come with a different way of pricing here.
+if (-not $env:STORE_PRICE_ID) { throw 'STORE_PRICE_ID is not set; the submission would stop on the price anyway.' }
+Invoke-Checked 'Uploading the package into a draft' {
+    msstore publish $package --appId $AppId --noCommit --priceId $env:STORE_PRICE_ID
+} | Write-Host
 
 $draft = (Invoke-Checked 'Reading the draft' { msstore submission get $AppId }) -join "`n" | ConvertFrom-Json
 $draft = Set-StoreSubmissionForUpdate $draft $candidate.Version.ToString()
 $json = $draft | ConvertTo-Json -Depth 100 -Compress
 Invoke-Checked 'Saving the edited draft' { msstore submission update $AppId $json } | Write-Host
 
+if ($env:NO_COMMIT -eq 'true') {
+    Write-Summary "Draft saved with $($candidate.Name) and NOT submitted. Check it in Partner Center (https://partner.microsoft.com/en-us/dashboard/products/$AppId/overview), then submit or delete it there."
+    exit 0
+}
 Invoke-Checked 'Committing the submission' { msstore submission publish $AppId } | Write-Host
 Write-Summary "Submitted $($candidate.Name) for certification. It goes live by itself once it passes; the daily run reports a failure."
