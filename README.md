@@ -143,26 +143,6 @@ inside a workspace, a rule or the bar's own settings is still dropped. A copy th
 newer major version does not load it. It shows a dialog that tells you to start the newer copy,
 or to remove it and delete the `WrittenBy` line from `state.json` to go on with the older one.
 
-### Coming from TaskSpaces
-
-Deskbar is TaskSpaces under a new name, from version 2.0. The usual route is to accept the
-update when TaskSpaces offers it (or pick Check for updates from its tray menu), and that does
-everything below on its own. To do it by hand, exit TaskSpaces from its tray icon first, then
-start Deskbar. The first start copies `state.json`, `time.json` and
-`last-used.json` from `%APPDATA%\TaskSpaces` into `%APPDATA%\Deskbar`, so your workspaces,
-names and rules come with you. It also swaps the autostart entry: the `TaskSpaces` value is
-removed and a `Deskbar` one takes its place, so you do not get two bars at the next login.
-The old folder is left where it is, and you can delete `%APPDATA%\TaskSpaces` by hand once you
-are happy.
-
-Rolling back to 1.x is safe because the copy leaves the old files as they were at that moment.
-The copy happens once, so changes you make in 2.0 are not carried back, and a later upgrade
-does not copy again. The migration removed the `TaskSpaces` autostart value and set a
-`Deskbar` one, so the two need undoing by hand. Before rolling back, untick "Start Deskbar with
-Windows" in 2.0, or delete the `Deskbar` value under
-`HKCU\Software\Microsoft\Windows\CurrentVersion\Run`, or login keeps starting 2.0 beside 1.x.
-Afterwards 1.x shows "Start with Windows" unticked, and ticking it there restores it.
-
 ### "Windows protected your PC"
 
 The executable is **not code-signed yet**, so SmartScreen warns the first time you run it. Click
@@ -901,18 +881,15 @@ The `Category=Integration` tests are excluded from that command on purpose: they
 and delete **real** virtual desktops on the machine running them. Run them deliberately, not
 while you are working.
 
-The C# namespaces, project files and `Deskbar.sln` keep their old names on purpose, so the
-commands above are unchanged. Until 2.0 is on main, run a Debug build on a machine that still
-runs TaskSpaces 1.x with the environment variable `DESKBAR_APPDATA` set to a scratch folder,
-given as a full path (a relative one is ignored). Otherwise its first start migrates your real
-profile. With it set, Deskbar reads and writes under that folder instead of `%APPDATA%`, and the
-migration touches no registry value. Leave "Start with Windows" alone in a Debug build run under
-the override, since that checkbox still writes the real value. Set the variable in the shell you
-start the build from (`$env:DESKBAR_APPDATA = 'C:\scratch\deskbar'` in PowerShell), not with
-`setx`: setx makes it permanent for every Deskbar started afterwards, a real one at login
-included, and does not reach a shell that is already open. The override does not let the two
-run together either: the check for a running 1.x does not follow it, so exit TaskSpaces from its
-tray icon before starting the Debug build.
+To try a Debug build without touching your real settings, set the environment variable
+`DESKBAR_APPDATA` to a scratch folder, given as a full path (a relative one is ignored). Deskbar
+then reads and writes under that folder instead of `%APPDATA%`. Leave "Start with Windows" alone
+in a Debug build run under the override, since that checkbox still writes the real value. Set the
+variable in the shell you start the build from (`$env:DESKBAR_APPDATA = 'C:\scratch\deskbar'` in
+PowerShell), not with `setx`: setx makes it permanent for every Deskbar started afterwards, a real
+one at login included, and does not reach a shell that is already open. Only one copy runs at a
+time, override or not, so exit the running Deskbar from its tray icon before starting the Debug
+build.
 
 ### Releasing
 
