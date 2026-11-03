@@ -89,6 +89,11 @@ object.
   - Declare P/Invokes `CharSet.Unicode`. A `FindWindowW` without it silently returns 0 and
     the probe "proves" whatever you hoped.
 - He asks to be pushed back on. Do it with reasons, then do what he decides.
+- **Every reference is a link he can click**, every time it comes up, never bare text: a pull
+  request is [Deskbar #306](https://github.com/AppifySheets/Deskbar/pull/306), not "#306", and
+  the same goes for issues, workflow runs, releases, commits, the Store listing, Partner Center
+  pages and files. Petre (2026-11-03): "prs and other things as well, always carry links i can
+  click".
 
 ## Where the context lives
 
