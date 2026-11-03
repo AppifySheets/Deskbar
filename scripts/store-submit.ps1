@@ -148,7 +148,11 @@ Invoke-Checked 'Uploading the package into a draft' {
 $draft = (Invoke-Checked 'Reading the draft' { msstore submission get $AppId }) -join "`n" | ConvertFrom-Json
 $draft = Set-StoreSubmissionForUpdate $draft $candidate.Version.ToString()
 $json = $draft | ConvertTo-Json -Depth 100 -Compress
-Invoke-Checked 'Saving the edited draft' { msstore submission update $AppId $json } | Write-Host
+# Its output is NOT echoed: msstore prints the whole submission back, and that includes
+# FileUploadUrl, a writable link to the uploaded package that lasts about a day, which the public
+# run log would show to anyone (it did once, on 2026-11-03; that log was deleted). Invoke-Checked
+# still puts the output into the error when the update fails.
+Invoke-Checked 'Saving the edited draft' { msstore submission update $AppId $json } | Out-Null
 
 if ($env:NO_COMMIT -eq 'true') {
     Write-Summary "Draft saved with $($candidate.Name) and NOT submitted. Check it in Partner Center (https://partner.microsoft.com/en-us/dashboard/products/$AppId/overview), then submit or delete it there."
