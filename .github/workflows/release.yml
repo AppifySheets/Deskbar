@@ -26,6 +26,8 @@
 # (scripts/pack-store.ps1) and keeps it as a workflow artifact, never a release asset; the
 # store-smoke job then installs it on a fresh runner and checks it answers `deskbar version`
 # as a packaged app. Both run after the release is made, so neither holds back the direct exe.
+# Submitting that package to Partner Center is store-submit.yml's job, which starts when this
+# workflow finishes.
 name: Release
 
 on:
@@ -357,7 +359,7 @@ jobs:
         # manifest is this step's first check of the package.
         #
         # LAST in the job, after the release exists, on purpose: the package is not attached to
-        # the release (it goes to Partner Center by hand), and its tooling is new, so a failure
+        # the release (store-submit.yml sends it to Partner Center), and its tooling is new, so a failure
         # here must not hold back the direct release. It still turns the run red, and the
         # store-smoke job below then does not run.
         id: store
@@ -371,8 +373,9 @@ jobs:
           "{0} ({1:N1} MB)" -f $name, ((Get-Item "artifacts/store/$name").Length / 1MB)
 
       - name: Keep the Store package as a workflow artifact
-        # For the store-smoke job, which installs it on a fresh runner, and for whoever submits
-        # it to Partner Center. A workflow artifact only, never a release asset: the release is
+        # For the store-smoke job, which installs it on a fresh runner, and for store-submit.yml,
+        # which finds it by this name and submits it to Partner Center. Renaming it breaks that
+        # (StoreSubmission.psm1's Select-StoreCandidate). A workflow artifact only, never a release asset: the release is
         # the direct download, and an unsigned .msix there is a file nobody can install.
         uses: actions/upload-artifact@v7
         with:

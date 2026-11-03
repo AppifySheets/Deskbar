@@ -956,6 +956,18 @@ own workflow runs instead, rebuilds the exe and replaces the release's asset wit
 unsigned one, and nothing reverts it.
 
 The release build also packs `Deskbar-<version>-store.msix` and keeps it as a workflow
-artifact, not a release asset. The package is uploaded in Partner Center by hand, since the Store
-lags the direct exe by the days certification takes. The `store-smoke` job installs that
-package on the runner and checks that `deskbar version` answers from it.
+artifact, not a release asset. The `store-smoke` job installs that package on the runner and
+checks that `deskbar version` answers from it.
+
+The Store submission workflow (`store-submit.yml`) then sends the package to Partner Center. It
+runs after every release, once a day, and by hand from the Actions tab (with a dry-run switch).
+Each time, it takes the newest package from a successful release run and submits it only when
+the Store has an older version and nothing is pending in Partner Center. A release that lands
+while an earlier submission is still in certification waits for the daily run, so certification
+never restarts. An update goes live by itself once it passes. A failed certification, a draft
+left open in Partner Center or a submission held for Publish now fails the daily run, so GitHub
+emails about it.
+
+It needs four repository secrets for a Microsoft Entra app that Partner Center trusts with the
+Manager role: `STORE_TENANT_ID`, `STORE_CLIENT_ID`, `STORE_CLIENT_SECRET` and
+`STORE_SELLER_ID`. Until they are set, every run says so and passes without submitting.

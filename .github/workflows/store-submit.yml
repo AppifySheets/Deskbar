@@ -1,0 +1,105 @@
+# Sends Deskbar's newest Store package to Partner Center, so the Microsoft Store follows the GitHub
+# releases without anyone uploading a file by hand.
+#
+# WHEN THIS RUNS
+#   - After every Release run that finishes (workflow_run). A release that bumped the version has
+#     just packed and smoke-tested a Store package, and this submits it.
+#   - Once a day (schedule). The catch-up: a release that landed while an earlier submission was
+#     still in certification was skipped, and this submits the newest package once that earlier
+#     one is through. It also turns a certification failure into a failed run, which GitHub emails
+#     about, since nothing else would say so.
+#   - By hand (workflow_dispatch), with a dry-run switch that reports the decision and uploads
+#     nothing. The way to try it the first time.
+#   Every trigger does the same thing: scripts/store-submit.ps1 takes the newest Store package
+#   from a successful Release run and submits it only when the Store is behind and Partner Center
+#   holds no pending submission. The rules are in scripts/StoreSubmission.psm1 and its tests.
+#
+# THE RULES (Petre, 2026-11-03): every release goes to the Store; an in-flight submission is never
+# replaced, the newer package waits for the next run; an update goes live by itself once it
+# passes certification.
+#
+# DORMANT UNTIL CONFIGURED. It needs four repository secrets for an Entra app that Partner Center
+# trusts with the Manager role (Account settings, User management, Microsoft Entra applications):
+# STORE_TENANT_ID, STORE_CLIENT_ID, STORE_CLIENT_SECRET and STORE_SELLER_ID. Until all four exist,
+# every run says so and passes, the way release.yml waits for SIGNING_CERT_THUMBPRINT.
+name: Store submission
+
+on:
+  workflow_run:
+    workflows: [Release]
+    types: [completed]
+  schedule:
+    # Once a day at 06:00 UTC. The hour is arbitrary; certification takes hours to days, so a
+    # daily look is often enough.
+    - cron: '0 6 * * *'
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Only report what it would do, upload nothing'
+        type: boolean
+        default: true
+
+# Reading the Release runs and downloading their artifacts. Nothing in the repository is written.
+permissions:
+  actions: read
+  contents: read
+
+# One submission at a time: two runs deciding at once could both see "nothing pending" and the
+# second would replace the first's fresh submission. A queued run waits rather than being dropped.
+concurrency:
+  group: store-submission
+  cancel-in-progress: false
+
+jobs:
+  submit:
+    # After a Release run only when it succeeded: a failed run's package is not one to submit, and
+    # the script would pass it over anyway. A run that only skipped (no version bump) succeeds too,
+    # and then simply finds the Store already up to date.
+    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
+
+    # Windows, for the Microsoft Store Developer CLI the action installs.
+    runs-on: windows-latest
+
+    # The upload is about 75 MB and the API calls are few; anything near this is stuck.
+    timeout-minutes: 30
+
+    steps:
+      - name: Check for the Partner Center credentials
+        # Secrets cannot be tested in an `if:`, so this step reads them into an output.
+        id: creds
+        shell: pwsh
+        env:
+          TENANT: ${{ secrets.STORE_TENANT_ID }}
+          CLIENT: ${{ secrets.STORE_CLIENT_ID }}
+          SECRET: ${{ secrets.STORE_CLIENT_SECRET }}
+          SELLER: ${{ secrets.STORE_SELLER_ID }}
+        run: |
+          $ready = [bool]($env:TENANT -and $env:CLIENT -and $env:SECRET -and $env:SELLER)
+          "ready=$($ready.ToString().ToLower())" >> $env:GITHUB_OUTPUT
+          if (-not $ready) {
+            "Store submission is not configured yet: set STORE_TENANT_ID, STORE_CLIENT_ID, STORE_CLIENT_SECRET and STORE_SELLER_ID. Nothing submitted." >> $env:GITHUB_STEP_SUMMARY
+            Write-Host '::notice::Store submission not configured; nothing submitted.'
+          }
+
+      - name: Check out the repository
+        # For scripts/store-submit.ps1 and the StoreSubmission.psm1 module it imports.
+        if: steps.creds.outputs.ready == 'true'
+        uses: actions/checkout@v7
+
+      - name: Install the Microsoft Store Developer CLI
+        # Microsoft's own action; it puts `msstore` on the PATH.
+        if: steps.creds.outputs.ready == 'true'
+        uses: microsoft/microsoft-store-apppublisher@v1.1
+
+      - name: Submit the newest Store package if the Store is behind
+        if: steps.creds.outputs.ready == 'true'
+        shell: pwsh
+        env:
+          STORE_TENANT_ID: ${{ secrets.STORE_TENANT_ID }}
+          STORE_CLIENT_ID: ${{ secrets.STORE_CLIENT_ID }}
+          STORE_CLIENT_SECRET: ${{ secrets.STORE_CLIENT_SECRET }}
+          STORE_SELLER_ID: ${{ secrets.STORE_SELLER_ID }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Only a manual run can be a dry run; the automatic ones always submit.
+          DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run }}
+        run: ./scripts/store-submit.ps1
