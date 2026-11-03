@@ -4,8 +4,8 @@ using Deskbar.App;
 namespace Deskbar.Windows.Tests;
 
 // The update question's optional Microsoft Store button. App.OfferUpdate passes it only once there is
-// a listing (UpdateService.StoreProductId set); until then the offer must look exactly as it did, with
-// the primary button and "Not now" and nothing else.
+// a listing (UpdateService.StoreProductId set, as it is since the listing went live); without one the
+// offer must look exactly as it did, with the primary button and "Not now" and nothing else.
 //
 // The window is real WPF, so these run on the STA thread like every other surface test here.
 public class UpdateOfferTests

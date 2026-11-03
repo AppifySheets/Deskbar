@@ -63,9 +63,10 @@ there**, so you arrive typing rather than hunting. Workspaces survive reboots.
 **Requirements:** Windows 11 (build 22000 or newer) on x64. Nothing else: the download bundles
 the .NET runtime.
 
-<!-- Store badge: fill in PRODUCTID when the listing exists, then take this out of the comment.
-<a href="https://apps.microsoft.com/detail/PRODUCTID"><img src="https://get.microsoft.com/images/en-us%20dark.svg" width="200" alt="Get it from Microsoft Store" /></a>
--->
+<a href="https://apps.microsoft.com/detail/9PJX26NGFPNF"><img src="https://get.microsoft.com/images/en-us%20dark.svg" width="200" alt="Get it from Microsoft Store" /></a>
+
+The Store copy is Deskbar Pro, US$18.99 once with a 15-day trial; see
+[From the Microsoft Store](#from-the-microsoft-store). The exe below is the free version.
 
 1. Download the `Deskbar-…-win-x64.exe` attached to the
    [latest release](https://github.com/AppifySheets/Deskbar/releases/latest). The file
@@ -113,8 +114,9 @@ you want your settings gone too, delete `%APPDATA%\Deskbar`.
 
 ### From the Microsoft Store
 
-Deskbar is coming to the Microsoft Store. The Store copy is Deskbar Pro: $19 once, with a
-15-day trial from the Store. The exe on GitHub is the free version. Nothing is held back from
+Deskbar is [on the Microsoft Store](https://apps.microsoft.com/detail/9PJX26NGFPNF). The Store
+copy is Deskbar Pro: US$18.99 once (the Store sets the price in other currencies), with a 15-day
+trial from the Store. The exe on GitHub is the free version. Nothing is held back from
 it yet, so the free version keeps everything until a later release says otherwise.
 
 The Store copy installs and updates through the Store, and it starts with Windows through a

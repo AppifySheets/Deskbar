@@ -532,8 +532,9 @@ public partial class App : Application
         // implemented, offered to somebody who is being asked one question. The progress window says what
         // happens next, which is the job it was added for, so this dialog only has to ask.
         //
-        // The one addition is the Microsoft Store, and only once there is a listing to send anyone to
-        // (UpdateService.StoreProductId stays empty until then, and this dialog is exactly as it was).
+        // The one addition is the Microsoft Store, and only while there is a listing to send anyone to
+        // (UpdateService.StoreProductId, filled in since the listing went live; empty, this dialog is
+        // exactly as it was).
         // It is a second button beside Update that opens the listing; "Not now", Esc and the window's X
         // still only close the offer.
         //

@@ -31,11 +31,12 @@ public static class UpdateService
     // api.github.com.
     public const string ReleasesPage = "https://github.com/AppifySheets/Deskbar/releases/latest";
 
-    // The Microsoft Store listing's product id. EMPTY until the listing exists, and set then, in a
-    // one-line change: the update notice shows its "Also on the Microsoft Store" line only when this
-    // is filled in, so an empty id simply means there is no such line yet. A constant rather than a
-    // redirect on a web site, because there is no site yet either.
-    public const string StoreProductId = "";
+    // The Microsoft Store listing's product id, from Partner Center. It stayed EMPTY until the listing
+    // went live (2026-11-03): the update notice shows its "Also on the Microsoft Store" line and button
+    // only when this is filled in, and a button to a listing that is not public yet opens a Store page
+    // that says the product cannot be found. A constant rather than a redirect on the web site, so where
+    // the app sends people stays visible in the source. Emptying it again takes the line back out.
+    public const string StoreProductId = "9PJX26NGFPNF";
 
     // The Store app's own deep link to the listing, opened through the shell like any other URL.
     public static string StoreLink => $"ms-windows-store://pdp/?productid={StoreProductId}";
