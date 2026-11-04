@@ -72,7 +72,7 @@ public sealed class WindowMonitor : IWindowMonitor, IDisposable
 
     // The single "do we care about this hwnd" question, so the snapshot and the event path
     // can never disagree about it.
-    bool IsTracked(nint hwnd) => !ignored.Contains(hwnd) && TopLevelWindows.IsTaskbarCandidate(hwnd);
+    bool IsTracked(nint hwnd) => !ignored.Contains(hwnd) && TopLevelWindows.IsListed(hwnd);
 
     // Must run on a message-pumping thread (WPF dispatcher): WINEVENT_OUTOFCONTEXT
     // delivers callbacks via the registering thread's message queue.

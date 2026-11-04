@@ -25,6 +25,9 @@ public static class NativeMethods
     // reports CHANGES, so without this nothing is highlighted until the user switches window.
     [DllImport("user32.dll")] public static extern nint GetForegroundWindow();
     [DllImport("user32.dll")] public static extern nint GetAncestor(nint hwnd, uint flags);
+    // The owner of a window (GW_OWNER), or 0 when it has none. Used to tell a dialog of ours from a main window.
+    [DllImport("user32.dll")] public static extern nint GetWindow(nint hwnd, uint relationship);
+    public const uint GW_OWNER = 4;
     [DllImport("user32.dll")] public static extern int GetWindowTextLength(nint hwnd);
     [DllImport("user32.dll", CharSet = CharSet.Unicode)] public static extern int GetWindowText(nint hwnd, StringBuilder text, int maxCount);
     [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(nint hwnd, out uint processId);

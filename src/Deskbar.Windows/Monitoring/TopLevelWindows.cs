@@ -16,6 +16,11 @@ public static class TopLevelWindows
         && !IsShellOwned(hwnd)                       // the desktop, the Start button, the IME host: real hwnds with titles that Windows itself never lists
         && (!HasExStyle(hwnd, WS_EX_TOOLWINDOW) || HasExStyle(hwnd, WS_EX_APPWINDOW)); // tool windows skip the taskbar unless they opt back in
 
+    // What the app lists: every taskbar candidate except our own dialogs (see IsOurDialog). Both the
+    // snapshots (Enumerate) and the event path (WindowMonitor.IsTracked) ask this, so they cannot disagree.
+    public static bool IsListed(nint hwnd) =>
+        IsTaskbarCandidate(hwnd) && !IsOurDialog(IsOurOwnWindow(hwnd), GetWindow(hwnd, GW_OWNER), ClassOf(hwnd));
+
     // WHY TEXT IS NOT REQUIRED ANY MORE, and why the alternative is an opt-in rather than nothing.
     //
     // Petre: "i can't see Buzz in HRIS workspace." Buzz was running with its window visible on that
@@ -40,7 +45,7 @@ public static class TopLevelWindows
     public static IReadOnlyList<nint> Enumerate()
     {
         var found = new List<nint>();
-        EnumWindows((hwnd, _) => { if (IsTaskbarCandidate(hwnd)) found.Add(hwnd); return true; }, 0);
+        EnumWindows((hwnd, _) => { if (IsListed(hwnd)) found.Add(hwnd); return true; }, 0);
         return found;
     }
 
@@ -97,6 +102,13 @@ public static class TopLevelWindows
         NativeMethods.GetWindowThreadProcessId(hwnd, out var processId);
         return processId == Environment.ProcessId;
     }
+
+    // Our own windows are listed on purpose, so Manage has a row on the bar. A dialog of ours is not one of
+    // those: it would show as a row for as long as it is open, in "Unplaced", because Windows answers no
+    // desktop for it. A window of this process is a dialog when it has an owner, or the dialog class #32770
+    // (a MessageBox.Show with no owner). Manage has neither, so it keeps its row.
+    internal static bool IsOurDialog(bool ourProcess, nint owner, string className) =>
+        ourProcess && (owner != 0 || className == "#32770");
 
     // Whether the window is in the topmost band. A full-screen video player is (measured: PotPlayer's
     // full-screen window carried WS_EX_TOPMOST); a browser in full screen is not, and the bar is put
