@@ -116,6 +116,7 @@ public partial class ManageWindow : Window
         // BOUND -- including the fallback to the default when state.json holds something
         // unusable. Assigning Text raises TextChanged, which validates it for free.
         SwitcherShortcutBox.Text = manager.SwitcherShortcut;
+        QuickFindShortcutBox.Text = manager.QuickFindShortcut;
     }
 
     // --- Shortcuts tab ------------------------------------------------------------------
@@ -150,6 +151,25 @@ public partial class ManageWindow : Window
 
     void OnResetSwitcherShortcut(object s, RoutedEventArgs e) =>
         Report(manager.SetSwitcherShortcut(AppState.DefaultSwitcherShortcut).Map(() => true)).Tap(Reload);
+
+    // Quick find's chord, edited the same way. The manager refuses the switcher's chord (and its Shift
+    // variant), and says so in the same report as any other refusal.
+    void OnQuickFindShortcutTyped(object s, RoutedEventArgs e) =>
+        Chord.Parse(QuickFindShortcutBox.Text).Match(
+            chord => QuickFindStatus($"Press {chord} to open quick find.", ok: true),
+            error => QuickFindStatus(error, ok: false));
+
+    void QuickFindStatus(string message, bool ok)
+    {
+        QuickFindShortcutStatus.Text = message;
+        QuickFindShortcutStatus.Foreground = ok ? SystemColors.GrayTextBrush : Brushes.Firebrick;
+    }
+
+    void OnApplyQuickFindShortcut(object s, RoutedEventArgs e) =>
+        Report(manager.SetQuickFindShortcut(QuickFindShortcutBox.Text).Map(() => true)).Tap(Reload);
+
+    void OnResetQuickFindShortcut(object s, RoutedEventArgs e) =>
+        Report(manager.SetQuickFindShortcut(AppState.DefaultQuickFindShortcut).Map(() => true)).Tap(Reload);
 
     // --- tracked time (#53) -----------------------------------------------------------------
 

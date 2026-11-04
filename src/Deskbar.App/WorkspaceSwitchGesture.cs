@@ -89,29 +89,17 @@ public sealed class WorkspaceSwitchGesture : IDisposable
         bar.ShowCandidate(recent.Ordered[selected].Id);
     }
 
-    int DefinedIndexOf(Workspace workspace) =>
-        Math.Max(0, manager.State.Workspaces.ToList().FindIndex(w => w.Id == workspace.Id));
-
     // The name the picker prefixes a workspace with, or null for one that stands alone (#93).
     //
     // The GROUP's name, for both kinds of group. It used to be the parent workspace's, which meant a
     // member of an anchorless group (#84) got no prefix at all, since there is no parent workspace to
     // read: Petre reported exactly that, and ruled that "both group kinds present the same way in the
     // switcher". An anchored group is named after its anchor anyway, so nothing changes there.
-    //
-    // The ANCHOR itself gets no prefix. Its row would read "Sparrow › Sparrow", and it is not inside
-    // anything: it is the thing the others are inside.
-    string? GroupNameOf(Workspace workspace) =>
-        manager.State.GroupOf(workspace.Id) is { } group && !manager.State.IsAnchor(workspace.Id)
-            ? group.Name
-            : null;
+    // Shared with quick find through LaneColour, so both lists name a workspace the same way.
+    string? GroupNameOf(Workspace workspace) => LaneColour.GroupNameOf(manager.State, workspace);
 
-    // The lane colour to draw beside the name, resolved exactly as the bar resolves it: a group has
-    // one colour (#90), so every member shows the group's, and an ungrouped workspace shows its own.
-    string ColourOf(Workspace workspace) =>
-        manager.State.GroupOf(workspace.Id) is { } group
-            ? WorkspacePalette.For(group.Color, Math.Max(0, manager.State.ColourSlotOf(group)))
-            : WorkspacePalette.For(workspace, DefinedIndexOf(workspace));
+    // The lane colour to draw beside the name, resolved exactly as the bar resolves it (LaneColour).
+    string ColourOf(Workspace workspace) => LaneColour.Of(manager.State, workspace);
 
     // The picker's hwnd, so the composition root can hand it to WindowMonitor.Ignore. The monitor
     // no longer skips our own process (Petre wanted the Manage window in the bar), so without

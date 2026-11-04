@@ -1,0 +1,62 @@
+using System.Windows.Media;
+using CSharpFunctionalExtensions;
+using Deskbar.Core;
+using Deskbar.Core.Abstractions;
+using Deskbar.Core.Domain;
+using Deskbar.Core.QuickFind;
+
+namespace Deskbar.App;
+
+// Where quick find's facts come from in the running app, handed to QuickFind as functions by the composition
+// root. Kept out of App.xaml.cs, which is long enough.
+public static class QuickFindSources
+{
+    // Every open window and tab, each placed the way the BAR places it: the bar's own overview sorts windows
+    // into workspaces, unnamed desktops ("Desktop 1") and the pinned row, so quick find and the bar never
+    // disagree about where something is. A window borrowed by a nested workspace still belongs to the
+    // workspace it came from (WorkspaceOf), which is where Enter takes Petre.
+    public static IReadOnlyList<FindResult> Open(WorkspaceManager manager, IBrowserTabs? tabs) =>
+        manager.WindowsByWorkspace().Map(overview =>
+        {
+            var state = manager.State;
+            var rows = overview.Workspaces
+                .SelectMany(g => g.Running.Select(r => (Row: r, Place: Place(state, g.Workspace))))
+                .Concat(overview.OtherDesktops.SelectMany(d => d.Windows.Select(r => (Row: r, Place: new FindPlace(null, d.Name)))))
+                .Concat(overview.Pinned.Select(r => (Row: r, Place: new FindPlace(null, "all desktops"))))
+                .Select(x => x with { Place = manager.WorkspaceOf(x.Row.Window.Handle).Map(w => Place(state, w)).GetValueOrDefault(x.Place) })
+                .DistinctBy(x => x.Row.Window.Handle)
+                .ToList();
+            var places = rows.ToDictionary(x => x.Row.Window.Handle, x => x.Place);
+            var originals = rows.ToDictionary(x => x.Row.Window.Handle, x => x.Row.OriginalTitle);
+            return OpenCatalog.Of(
+                rows.Select(x => x.Row.Window).ToList(),
+                handle => places[handle],
+                handle => tabs?.NamesOf(handle) ?? [],
+                BrowserTabs.IsBrowser,
+                handle => originals[handle]);
+        }).GetValueOrDefault([]);
+
+    // The header colour of a place: its workspace's lane colour, or none for an unnamed desktop or the pinned
+    // row, which the bar draws without one either.
+    public static string? ColourOf(WorkspaceManager manager, FindPlace place) =>
+        place.WorkspaceId is { } id && manager.State.Workspaces.TryFirst(w => w.Id == id) is { HasValue: true } found
+            ? LaneColour.Of(manager.State, found.Value)
+            : null;
+
+    // The icon the bar would draw: by window when there is one, so a PWA shows its own and not the browser's.
+    public static ImageSource? IconOf(FindResult result) =>
+        result.Window is { } window ? IconCache.For(window, result.IconPath) : IconCache.For(result.IconPath);
+
+    // Enter on an open result: go to its window as clicking its icon on the bar does (JumpTo switches only when
+    // the window is on another desktop). A window that has closed fails here, and QuickFind drops its row.
+    public static Result Go(WorkspaceManager manager, IWindowActivator activator, FindResult result) =>
+        result.Window is { } window
+            ? manager.JumpTo(window, activator)
+            : Result.Failure("Nothing to go to.");
+
+    public static IReadOnlyList<Guid> Recent(WorkspaceManager manager) =>
+        manager.ByRecentUse().Ordered.Select(w => w.Id).ToList();
+
+    static FindPlace Place(Core.Persistence.AppState state, Workspace workspace) =>
+        new(workspace.Id, LaneColour.FullName(state, workspace));
+}

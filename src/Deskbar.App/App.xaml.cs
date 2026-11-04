@@ -45,6 +45,8 @@ public partial class App : Application
     HotkeyService? hotkeys;
     WorkspaceSwitchGesture? switcher; // Alt+Tab-style workspace picker (Win+Ctrl+Tab by default)
     Chord boundSwitcher;              // the chord the picker and the hotkey are currently registered on
+    QuickFind? quickFind;             // the search box for every window, tab and app (Win+Alt+Space by default)
+    Chord boundQuickFind;             // the chord quick find's hotkey is currently registered on
     FloatingBar? floatingBar; // Task 11: created lazily on first show
     TimeTracker? timeTracker; // #53: active time per workspace, in its own file beside state.json
 
@@ -1242,7 +1244,12 @@ public partial class App : Application
             DefaultBrowser.Exe,
             // `version` reports which build answers; "packaged" comes from the Store packaging design's
             // PackageIdentity, which the CI smoke step reads to prove the installed package has identity.
-            identity: () => (UpdateService.RunningVersion, Environment.ProcessPath, PackageIdentity.IsPackaged));
+            identity: () => (UpdateService.RunningVersion, Environment.ProcessPath, PackageIdentity.IsPackaged),
+            // `find` opens quick find with the words after it typed in. Read when the command arrives: quick find
+            // is built later, with the hotkeys, and is missing in compatibility mode.
+            showFind: text => quickFind is { } find
+                ? Result.Success().Tap(() => find.Show(text))
+                : Result.Failure("Quick find is not available in this mode."));
         controlServer = new ControlPipeServer(ControlCommandLine.PipeName,
             args => Dispatcher.InvokeAsync(() =>
             {
@@ -1511,7 +1518,23 @@ public partial class App : Application
             switcher = new WorkspaceSwitchGesture(manager, boundSwitcher, bar);
             monitor.Ignore(switcher.EnsureHandle());
 
-            hotkeys = new HotkeyService(direction => switcher.Step(direction), boundSwitcher);
+            // QUICK FIND (docs/superpowers/specs/2026-11-04-quick-find-design.md): a box that finds any window,
+            // browser tab or VS Code tab on any workspace. Its facts come from QuickFindSources: places from the
+            // bar's own overview, tab titles from the bar's tab reader (none in compatibility mode, where there is
+            // no bar), Enter through the same JumpTo the bar's icons use. Its window is ignored by the monitor like
+            // the switcher's, so quick find never finds itself.
+            var findActivator = new WindowActivator();
+            quickFind = new QuickFind(new QuickFindWindow(),
+                () => QuickFindSources.Open(manager, floatingBar?.Tabs),
+                () => QuickFindSources.Recent(manager),
+                result => QuickFindSources.Go(manager, findActivator, result),
+                place => QuickFindSources.ColourOf(manager, place),
+                QuickFindSources.IconOf);
+            monitor.Ignore(quickFind.EnsureHandle());
+            boundQuickFind = Chord.Parse(manager.QuickFindShortcut).Value;
+
+            hotkeys = new HotkeyService(direction => switcher.Step(direction), boundSwitcher,
+                () => quickFind.Show(), boundQuickFind);
 
             // Petre: "i want it configurable". Rebinding is driven off StateChanged rather
             // than off a callback from the Shortcuts tab, so ANY route that changes the
@@ -1519,8 +1542,9 @@ public partial class App : Application
             // ends up writing it later. Comparing against what is currently bound makes this
             // a no-op on the many pulses that have nothing to do with shortcuts.
             manager.StateChanged.Subscribe(_ => RebindSwitcherIfChanged());
-            // One chord now, so at most one failure -- and it names the chord, since the whole
-            // point is that the reader can go and change it on Manage -> Shortcuts.
+            manager.StateChanged.Subscribe(_ => RebindQuickFindIfChanged());
+            // At most one failure per chord, each naming its chord, since the whole point is that
+            // the reader can go and change it on Manage -> Shortcuts.
             if (hotkeys.Failures.Count > 0)
                 MessageBox.Show(
                     string.Join("\n", hotkeys.Failures)
@@ -1928,6 +1952,16 @@ public partial class App : Application
             .TapError(err => MessageBox.Show(err, "Deskbar", MessageBoxButton.OK, MessageBoxImage.Warning));
     }
 
+    // The same for quick find's chord, off the same StateChanged pulse.
+    void RebindQuickFindIfChanged()
+    {
+        var configured = Chord.Parse(manager!.QuickFindShortcut);
+        if (configured.IsFailure || configured.Value == boundQuickFind) return;
+        boundQuickFind = configured.Value;
+        hotkeys!.BindQuickFind(boundQuickFind)
+            .TapError(err => MessageBox.Show(err, "Deskbar", MessageBoxButton.OK, MessageBoxImage.Warning));
+    }
+
     void ExitApp()
     {
         // Unsubscribed first: closing this raises RestoreRequested, and showing the bar again while
@@ -1944,6 +1978,7 @@ public partial class App : Application
         manager?.RestoreAllTitles();  // leave every window as we found it
         monitor?.Dispose();
         hotkeys?.Dispose(); // unregisters RegisterHotKey chords before the process exits
+        quickFind?.Dispose();
         switcher?.Dispose(); // stops the release poll and closes the picker window
         trayIcon?.Dispose();
         // Released explicitly on the orderly exit path so a relaunch a moment later is never

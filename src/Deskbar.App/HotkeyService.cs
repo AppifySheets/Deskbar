@@ -30,6 +30,10 @@ public sealed class HotkeyService : IDisposable
     // leaving the gap keeps the ids stable for anyone reading an old log.
     const int IdRecentNext = 3, IdRecentPrev = 4;
 
+    // Id 5 is quick find's (docs/superpowers/specs/2026-11-04-quick-find-design.md), the second global chord
+    // the app holds. One press opens the box; it has no reverse half, so no Shift registration.
+    const int IdQuickFind = 5;
+
     readonly HwndSource source;
     readonly List<int> registeredIds = [];
     readonly List<string> failures = [];
@@ -37,14 +41,16 @@ public sealed class HotkeyService : IDisposable
     // Failed registrations (another app already owns that chord) are recorded here rather
     // than thrown -- spec: "Registration failures ... surface once as a warning -- never a
     // crash, never silent." The composition root reads this once, after construction, to show
-    // a single MessageBox if non-empty. At most one entry now that there is one chord.
+    // a single MessageBox if non-empty. At most one entry per chord.
     public IReadOnlyList<string> Failures => failures;
 
     readonly Action<int> stepRecent;
+    readonly Action showQuickFind;
 
-    public HotkeyService(Action<int> stepRecent, Chord switcher)
+    public HotkeyService(Action<int> stepRecent, Chord switcher, Action showQuickFind, Chord quickFind)
     {
         this.stepRecent = stepRecent;
+        this.showQuickFind = showQuickFind;
 
         source = new HwndSource(new HwndSourceParameters("DeskbarHotkeys")
         {
@@ -58,6 +64,17 @@ public sealed class HotkeyService : IDisposable
         // Configurable (Petre: "i want it configurable"), hence a parameter rather than a
         // constant, and rebindable below without a restart.
         BindSwitcher(switcher).TapError(failures.Add);
+        BindQuickFind(quickFind).TapError(failures.Add);
+    }
+
+    // Rebinds quick find to a new chord, releasing the old one first. A Result for the same reason as
+    // BindSwitcher: a rebind has Petre waiting on Manage > Shortcuts.
+    public Result BindQuickFind(Chord chord)
+    {
+        Unregister(IdQuickFind);
+        return Result.SuccessIf(
+            Register(IdQuickFind, chord.Modifiers, chord.VirtualKey),
+            $"{chord} is already taken by another app, so it will not open quick find.");
     }
 
     // Rebinds the Alt+Tab-style switcher to a new chord, releasing the old one first.
@@ -109,6 +126,7 @@ public sealed class HotkeyService : IDisposable
         // the chord's modifiers are released. See WorkspaceSwitchGesture.
         if (id == IdRecentNext) stepRecent(+1);
         else if (id == IdRecentPrev) stepRecent(-1);
+        else if (id == IdQuickFind) showQuickFind();
         else return nint.Zero; // not one of ours: leave `handled` false
 
         handled = true;
