@@ -44,7 +44,7 @@ public static class LaunchedBy
     {
         "explorer", "sihost", "svchost", "services", "wininit", "winlogon", "csrss", "smss",
         "taskhostw", "dllhost", "runtimebroker", "startmenuexperiencehost", "searchhost",
-        "shellexperiencehost", "applicationframehost",
+        "shellexperiencehost", "applicationframehost", // also ProcessFacts.IsFrameHost, its own check
     };
 
     // The nearest ancestor process that owns a window this app is tracking, or None.

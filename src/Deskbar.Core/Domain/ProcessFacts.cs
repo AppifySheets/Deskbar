@@ -9,6 +9,11 @@ public sealed record ProcessFacts(int ProcessId, string Name, int ParentProcessI
 {
     // The one process that owns the window of several Store apps at once (Calculator, Settings): ending it
     // closes every app it hosts, so Force close, Close all and Restart all must not treat it as "the app".
+    //
+    // The same name is spelled in other places, each for its own list, so a change here may belong there too:
+    // LaunchedBy.NotLaunchers (lower case, "plumbing" ancestors skipped when looking for a launcher) and
+    // RosterIdentity.StayWhereOpened (windows that stay in the workspace they opened in), and LaunchCatalog's own
+    // check on a path (quick find offers no frame to launch).
     public static bool IsFrameHost(string processName) =>
         processName.Equals("ApplicationFrameHost", StringComparison.OrdinalIgnoreCase);
 }

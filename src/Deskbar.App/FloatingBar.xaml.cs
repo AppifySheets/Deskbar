@@ -7378,13 +7378,21 @@ public partial class FloatingBar : Window
         // Named after the actual process so the difference between the two entries is visible
         // rather than something to be inferred from wording: "Rename this window…" versus
         // "Rename all RemoteDesktopManager windows…".
-        var renameApp = new MenuItem { Header = $"Rename all {row.Window.ProcessName} windows…", Icon = MenuGlyph("✎") };
-        renameApp.Click += (_, _) => PromptDialog.Ask(
-                $"Rename every {row.Window.ProcessName} window",
-                "Short name to show on the taskbar (survives the app changing its own title):",
-                row.Window.ProcessName, owner: this)
-            .Tap(shortName => Report(manager.RenameApp(row.Window.Handle, shortName)));
-        menu.Items.Add(renameApp);
+        //
+        // Left out for a Store app (Calculator, Settings): its window belongs to the shared ApplicationFrameHost,
+        // so a rule keyed on that process name would rename every Store app at once. WorkspaceManager.RenameApp
+        // refuses it too, for the control command.
+        var frameHost = ProcessFacts.IsFrameHost(row.Window.ProcessName);
+        if (!frameHost)
+        {
+            var renameApp = new MenuItem { Header = $"Rename all {row.Window.ProcessName} windows…", Icon = MenuGlyph("✎") };
+            renameApp.Click += (_, _) => PromptDialog.Ask(
+                    $"Rename every {row.Window.ProcessName} window",
+                    "Short name to show on the taskbar (survives the app changing its own title):",
+                    row.Window.ProcessName, owner: this)
+                .Tap(shortName => Report(manager.RenameApp(row.Window.Handle, shortName)));
+            menu.Items.Add(renameApp);
+        }
 
         // #136. Petre: "that rename to SPS is bad. let's do smart-rename for windows that are in
         // folders." One name for every window of an app is the wrong shape for an editor -- seven VS
@@ -7432,7 +7440,6 @@ public partial class FloatingBar : Window
         // A Store app (Calculator, Settings) shows its window through the shared ApplicationFrameHost, so the
         // process name would mislead and Close all / Restart all would act on the helper, not the app. Force
         // close ends the hosted app instead (WindowActivator.EndProcess); the other two are left out.
-        var frameHost = ProcessFacts.IsFrameHost(process);
         var force = new MenuItem { Header = frameHost ? "Force close" : $"Force close ({process})", Icon = MenuGlyph("⊗") };
         force.Click += (_, _) => Report(manager.ForceCloseWindow(row.Window.Handle));
         menu.Items.Add(force);

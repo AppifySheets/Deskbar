@@ -127,8 +127,12 @@ public sealed class WindowActivator : IWindowActivator
         {
             var hosted = PickHostedProcess(pid, ChildProcessIds(window.Value));
             owner.Dispose();
-            // A minimised Store app can detach its content, leaving no child to name: ask the window to close.
-            if (hosted is null) return Close(window);
+            // A minimised Store app can detach its content, leaving no child to name: ask the window to close and
+            // wait (the same wait as CloseAll), so a window that stayed open is not reported as closed.
+            if (hosted is null)
+                return CloseAll([window]).Count == 0
+                    ? Result.Success()
+                    : Result.Failure("The app inside that window could not be found, and the window did not close.");
             try
             {
                 owner = System.Diagnostics.Process.GetProcessById((int)hosted.Value);

@@ -69,15 +69,15 @@ public static class ControlUsage
         ]),
         new("Window icon menu", [
             new("rename-window", "<hwnd> <short name>", "Rename this window…"),
-            new("rename-app", "<hwnd> <short name>", "Rename all <app> windows…"),
+            new("rename-app", "<hwnd> <short name>", "Rename all <app> windows… (refused for a Store app's shared frame)"),
             new("rename-pattern", "<title pattern> <short name>", "Rename by title pattern… (* is a wildcard)"),
             new("name-by-folder", "<hwnd> on|off", "Name <app> windows by folder"),
             new("restore-title", "<hwnd>", "Restore title"),
             new("pin", "<hwnd>", "show the window on every workspace, as dropping it on the pin row does"),
             new("unpin", "<hwnd>", "undo pin"),
             new("close-window", "<hwnd>", "Close (asks the window to close, as its X does)"),
-            new("force-close", "<hwnd>", "Force close (ends the process that owns the window)"),
-            new("close-all", "<hwnd>", "Close all <app> processes (ends every process running the window's exe)"),
+            new("force-close", "<hwnd>", "Force close (ends the process that owns the window; for a Store app, the app inside its shared frame)"),
+            new("close-all", "<hwnd>", "Close all <app> processes (ends every process running the window's exe; for a Store app, the app inside its frame)"),
             new("restart-app", "<hwnd>",
                 "Restart all <app> windows (ends every process running the window's exe, waits for them to go, and\n"
                 + "      starts the exe again bare; VS Code and a browser then restore their own windows, and the folder\n"

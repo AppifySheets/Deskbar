@@ -193,8 +193,8 @@ public class FloatingBarRebuildTests
     });
 
     // A Store app's window belongs to the shared ApplicationFrameHost. Force close ends the app inside it, so its
-    // label must not name the helper, and Close all / Restart all (which would name and act on the helper) are
-    // left out. Every other app keeps the full menu, which the test above pins.
+    // label must not name the helper, and Rename all / Close all / Restart all (which would name and act on the
+    // helper) are left out. Every other app keeps the full menu, which the test above pins.
     [Fact]
     public void A_frame_host_icon_menu_has_Close_and_an_unnamed_Force_close_only() => StaThread.Run(() =>
     {
@@ -206,7 +206,7 @@ public class FloatingBarRebuildTests
             .Single(m => m!.Items.OfType<MenuItem>().Any(item => (string)item.Header == "Force close"))!;
 
         Assert.Equal(
-            ["Rename this window…", "Rename by title pattern…", "Rename all ApplicationFrameHost windows…", "Restore title",
+            ["Rename this window…", "Rename by title pattern…", "Restore title",
              "Close", "Force close"],
             menu.Items.OfType<MenuItem>().Select(item => (string)item.Header));
     });

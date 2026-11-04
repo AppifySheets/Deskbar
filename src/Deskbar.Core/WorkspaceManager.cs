@@ -3474,10 +3474,15 @@ public sealed class WorkspaceManager(
     // window that never changes while it runs. Immune to every title rewrite, and it covers
     // every window of that app -- which for Beeper, Teams and Edge (18 dead exact-title
     // entries between them in his file) is what was wanted all along.
+    //
+    // Refused for a Store app: its process is the shared ApplicationFrameHost, so the rule would rename every
+    // Store app at once (the icon menu leaves the item out for the same reason).
     public Result RenameApp(WindowHandle window, string shortName) =>
         Result.FailureIf(string.IsNullOrWhiteSpace(shortName), "A name is required.")
             .Bind(() => knownWindows.TryGetValue(window, out var info)
-                ? AddRule(new RenameRule(RuleMatchKind.ProcessName, info.ProcessName, shortName.Trim()))
+                ? ProcessFacts.IsFrameHost(info.ProcessName)
+                    ? Result.Failure("This Store app cannot be renamed as a whole from here. Rename this window instead.")
+                    : AddRule(new RenameRule(RuleMatchKind.ProcessName, info.ProcessName, shortName.Trim()))
                     // The per-title renames for this app are now superseded, and leaving them
                     // would mean two records disagreeing about one app forever. Removed in the
                     // same breath as adding the rule, so state.json never holds both.

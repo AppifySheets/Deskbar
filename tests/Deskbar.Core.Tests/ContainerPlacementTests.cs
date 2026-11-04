@@ -723,6 +723,22 @@ public class ContainerPlacementTests
         Assert.Empty(store.Stored.ContainerHomes);
     }
 
+    // The same shared frame, the same mistake: a rename rule keyed on ApplicationFrameHost would name every Store
+    // app at once. Refused, and no rule is recorded.
+    [Fact]
+    public void Rename_app_is_refused_for_a_frame_host_window_and_records_no_rule()
+    {
+        var host = new WindowInfo(new WindowHandle(0x952), 4242, "ApplicationFrameHost",
+            @"C:\Windows\System32\ApplicationFrameHost.exe", "Calculator", null);
+        var manager = Started(new FakeActivator(), host);
+        var rulesBefore = manager.State.RenameRules.Count;
+
+        var outcome = manager.RenameApp(host.Handle, "Calc");
+
+        Assert.True(outcome.IsFailure);
+        Assert.Equal(rulesBefore, manager.State.RenameRules.Count);
+    }
+
     // A folder open in two workspaces at once teaches nothing, on a restart as on the sweep: there is no
     // single answer, and the windows that come back are placed by whatever was already known.
     [Fact]
