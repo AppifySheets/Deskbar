@@ -39,9 +39,13 @@ namespace Deskbar.Core.Control;
 // `identity` answers `version`: the running build's version, its exe path and whether it runs from the
 // Microsoft Store package (docs/superpowers/specs/2026-10-24-deskbar-store-packaging-design.md). Whether
 // the process is packaged is the Windows side's business, so the app hands it in; left null, `version` refuses.
+//
+// `showFind` opens quick find with the given text already typed (`find`). The box is a window of the app's, so
+// the app hands the opener in; left null, `find` refuses.
 public sealed partial class RemoteControl(WorkspaceManager manager, Func<bool, Result>? setBarVisible = null, Func<ProgramLaunch, Result<int?>>? launch = null,
     Func<Result<string>>? dump = null, Func<Maybe<string>>? defaultBrowser = null,
-    Func<(string Version, string? Exe, bool Packaged)>? identity = null)
+    Func<(string Version, string? Exe, bool Packaged)>? identity = null,
+    Func<string, Result>? showFind = null)
 {
     static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web) { WriteIndented = true };
 
@@ -58,6 +62,7 @@ public sealed partial class RemoteControl(WorkspaceManager manager, Func<bool, R
         ("windows", []) => Windows(),
         ("desktops", []) => Desktops(),
         ("version", []) => Version(),
+        ("find", _) => Find(string.Join(' ', rest)),
 
         ("create", _) => ControlArguments.ParseCreate(rest).Match(Create, ControlReply.Fail),
         ("move", _) => ControlArguments.ParseMove(rest).Match(Move, ControlReply.Fail),
@@ -193,6 +198,13 @@ public sealed partial class RemoteControl(WorkspaceManager manager, Func<bool, R
         identity?.Invoke() is { } build
             ? Success(new { version = build.Version, exe = build.Exe, packaged = build.Packaged })
             : ControlReply.Fail("version is not available in this build");
+
+    // Quick find, opened from outside: every word after `find` becomes the box's text, joined by single spaces,
+    // which is exactly how the box splits it again (FindQuery).
+    ControlReply Find(string text) =>
+        showFind is null
+            ? ControlReply.Fail("This copy of Deskbar cannot open quick find.")
+            : Reply(showFind(text), () => new { opened = "quick find", text });
 
     static string Serialize(object value) => JsonSerializer.Serialize(value, Json);
 }

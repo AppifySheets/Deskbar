@@ -20,6 +20,11 @@ public static class ControlUsage
             new("desktops", "", "every virtual desktop as JSON, including unnamed ones"),
             new("version", "", "the running build as JSON: version, exe, packaged"),
         ]),
+        new("Quick find", [
+            new("find", "[text...]",
+                "open quick find, as its shortcut does, with the text already typed: every window, browser tab and\n"
+                + "      VS Code tab on every workspace"),
+        ]),
         new("Creating, and moving windows", [
             new("create", "<name> [placement]", "create a workspace; already existing is not an error"),
             new("move", "<workspace> [--create [placement]] [--no-follow] (--title <text> | --hwnd <handle>)...",
