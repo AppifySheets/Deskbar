@@ -1,5 +1,6 @@
 using System.IO;
 using System.Text;
+using System.Text.Json;
 
 namespace Deskbar.App;
 
@@ -42,7 +43,8 @@ namespace Deskbar.App;
 // translation: Git Bash runs a .cmd by itself, and cmd.exe accepts forward slashes in a quoted path too, so the same
 // line works if a hook ever runs under cmd. The test runs it through Git Bash so this cannot come back unnoticed.
 //
-// Never throws: a skill that could not be written costs sessions a hint, and is not worth a dialog. Traced instead.
+// A settings file or disk problem (IO, access, JSON) is traced and costs sessions a hint, which is not worth a dialog.
+// A programming error is not swallowed: it reaches the error box, where it can be found and fixed.
 static class ClaudeSkill
 {
     const string Marker = "Written by Deskbar";
@@ -62,19 +64,44 @@ static class ClaudeSkill
             var folder = Path.Combine(claude, "skills", "deskbar");
             var file = Path.Combine(folder, "SKILL.md");
             var hookScript = Path.Combine(deskbarFolder, HookScriptName);
+            var settings = Path.Combine(claude, "settings.json");
             if (on)
             {
-                Write(folder, file);
-                WriteHookScript(hookScript, Path.Combine(deskbarFolder, ControlCommandLine.ShimName));
+                // The hooks first: the skill tells a session whether they ask for the user, so it must know.
+                // An entry written by an older Deskbar (`cmd.exe /c ...`) still names the script, so Sync sees it as
+                // Deskbar's own, finds its command differs, and replaces it with this one.
+                var hooksInstalled = InstallHooks(hookScript, Path.Combine(deskbarFolder, ControlCommandLine.ShimName), settings);
+                Write(folder, file, hooksInstalled);
             }
-            else Remove(folder, file);
-            // An entry written by an older Deskbar (`cmd.exe /c ...`) still names the script, so Sync sees it as
-            // Deskbar's own, finds its command differs, and replaces it with this one.
-            ClaudeHooks.Sync(on, Path.Combine(claude, "settings.json"), HookCommand(hookScript));
+            else
+            {
+                Remove(folder, file);
+                ClaudeHooks.Sync(false, settings, HookCommand(hookScript));
+            }
         }
-        catch (Exception e)
+        catch (Exception e) when (IsSettingsOrDiskProblem(e))
         {
             ClickTrace.Write($"claude skill not {(on ? "written" : "removed")}: {e.Message}");
+        }
+    }
+
+    // A settings file or disk problem, as opposed to a bug in Deskbar.
+    static bool IsSettingsOrDiskProblem(Exception e) =>
+        e is IOException or UnauthorizedAccessException or JsonException or InvalidOperationException or ArgumentException;
+
+    // The hook script and the entries that run it; true when the entries are in settings.json. A failure here must not
+    // stop the skill from being written, so it is traced and counts as "not installed".
+    static bool InstallHooks(string hookScript, string shim, string settings)
+    {
+        try
+        {
+            WriteHookScript(hookScript, shim);
+            return ClaudeHooks.Sync(true, settings, HookCommand(hookScript));
+        }
+        catch (Exception e) when (IsSettingsOrDiskProblem(e))
+        {
+            ClickTrace.Write($"claude hooks not installed: {e.Message}");
+            return false;
         }
     }
 
@@ -96,9 +123,9 @@ static class ClaudeSkill
         File.WriteAllText(path, text);
     }
 
-    static void Write(string folder, string file)
+    static void Write(string folder, string file, bool hooksInstalled)
     {
-        var text = Text(UpdateService.DisplayVersion);
+        var text = Text(UpdateService.DisplayVersion, hooksInstalled);
         if (File.Exists(file) && File.ReadAllText(file) == text) return;
         Directory.CreateDirectory(folder);
         File.WriteAllText(file, text, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
@@ -113,10 +140,26 @@ static class ClaudeSkill
         ClickTrace.Write($"claude skill removed: {file}");
     }
 
+    // The "Asking for the user" paragraph: the hooks are in settings.json, or Deskbar could not add them.
+    const string HooksAsk = """
+        Deskbar's Claude Code hooks already ask for the user whenever you finish a reply or wait for a permission: if
+        the user is on another workspace, your workspace's row on the bar blinks and your VS Code icon glows until
+        they come to it. So you rarely need to do anything. Run `deskbar.cmd attention` from your working folder only
+        when you need the user in the middle of a turn, for example before waiting on something they must do in
+        another window. Do not call it for routine progress.
+        """;
+
+    const string HooksMissing = """
+        Deskbar could not add its Claude Code hooks to settings.json, so nothing asks for the user when you finish a
+        reply or wait for a permission. Run `deskbar.cmd attention` from your working folder when you need the user:
+        if the user is on another workspace, your workspace's row on the bar blinks and your VS Code icon glows until
+        they come to it. Do not call it for routine progress.
+        """;
+
     // The skill. Written for a Claude session, not for a person: what Deskbar is in two sentences, then the three
     // commands a session needs, each with the one mistake that has cost time here (a move without --no-follow took
     // the user's screen along; a bare URL landed in a browser window on another workspace).
-    internal static string Text(string version) =>
+    internal static string Text(string version, bool hooksInstalled = true) =>
         $$"""
         ---
         name: deskbar
@@ -162,11 +205,7 @@ static class ClaudeSkill
 
         ## Asking for the user
 
-        Deskbar's Claude Code hooks already ask for the user whenever you finish a reply or wait for a permission: if
-        the user is on another workspace, your workspace's row on the bar blinks and your VS Code icon glows until
-        they come to it. So you rarely need to do anything. Run `deskbar.cmd attention` from your working folder only
-        when you need the user in the middle of a turn, for example before waiting on something they must do in
-        another window. Do not call it for routine progress.
+        {{(hooksInstalled ? HooksAsk : HooksMissing)}}
 
         ## Everything else
 

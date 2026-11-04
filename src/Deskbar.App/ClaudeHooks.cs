@@ -15,8 +15,10 @@ namespace Deskbar.App;
 //   * Written only when something changes, so a Deskbar that starts every morning does not rewrite the file every
 //     morning.
 //   * Before the FIRST change, the file as it was is copied to settings.json.deskbar-backup, once.
-//   * A file that does not parse as strict JSON (comments, a half-written save) is left alone and traced: rewriting
-//     it through a parser would drop what the parser skipped.
+//   * A file that does not parse as strict JSON (comments, a half-written save, a repeated key) is left alone and
+//     traced: rewriting it through a parser would drop what the parser skipped. Sync then returns false.
+//   * A foreign entry of an odd shape (a string, null, a command that is not a string) is kept and skipped: it is not
+//     Deskbar's, and it does not stop Deskbar's own from being added.
 //   * Written to a temporary file and moved over the original, so a crash mid-write cannot leave half a file.
 static class ClaudeHooks
 {
@@ -30,7 +32,9 @@ static class ClaudeHooks
         Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
     };
 
-    internal static void Sync(bool on, string settingsPath, string command)
+    // True when the file now matches what was asked: hooks added or removed, nothing to do, or no file with the setting
+    // off. False only when the file was left alone because it cannot be parsed (see above), so the caller can tell.
+    internal static bool Sync(bool on, string settingsPath, string command)
     {
         JsonObject root;
         string? original = null;
@@ -39,27 +43,21 @@ static class ClaudeHooks
             original = File.ReadAllText(settingsPath);
             try
             {
-                root = JsonNode.Parse(original) as JsonObject ?? throw new JsonException("not an object");
+                // A repeated key anywhere in the file is an error here, not "the last one wins": rewriting the file
+                // would silently drop the other value.
+                root = JsonNode.Parse(original, documentOptions: new JsonDocumentOptions { AllowDuplicateProperties = false })
+                    as JsonObject ?? throw new JsonException("not an object");
             }
             catch (JsonException e)
             {
-                ClickTrace.Write($"claude hooks: {settingsPath} left alone, it does not parse as JSON: {e.Message}");
-                return;
+                ClickTrace.Write($"claude hooks: {settingsPath} left alone, it does not parse as JSON (or repeats a key): {e.Message}");
+                return false;
             }
         }
         else if (on) root = [];
-        else return;
+        else return true;
 
-        // Apply only changes the tree in memory, so a file whose shape it cannot work with (a repeated key, a command
-        // that is not a string, an entry that is not an object) loses nothing here: it is left alone and traced.
-        bool changed;
-        try { changed = Apply(root, on, command); }
-        catch (Exception e) when (e is InvalidOperationException or ArgumentException)
-        {
-            ClickTrace.Write($"claude hooks: {settingsPath} left alone, its shape is not one Deskbar can work with: {e.Message}");
-            return;
-        }
-        if (!changed) return;
+        if (!Apply(root, on, command)) return true;
 
         if (original is not null)
         {
@@ -70,6 +68,7 @@ static class ClaudeHooks
         File.WriteAllText(temporary, root.ToJsonString(Indented));
         File.Move(temporary, settingsPath, overwrite: true);
         ClickTrace.Write($"claude hooks {(on ? "added to" : "removed from")} {settingsPath}");
+        return true;
     }
 
     // The change itself, on the parsed file: true when anything changed. Public to the tests through Sync.
@@ -116,5 +115,7 @@ static class ClaudeHooks
     // The command of an entry that holds exactly one command hook, which is the shape Deskbar writes; anything else is
     // not Deskbar's.
     static string? CommandOf(JsonNode? entry) =>
-        entry?["hooks"] is JsonArray { Count: 1 } list && list[0]?["command"]?.GetValue<string>() is { } command ? command : null;
+        (entry as JsonObject)?["hooks"] is JsonArray { Count: 1 } list
+        && list[0] is JsonObject hook
+        && hook["command"] is JsonValue value && value.TryGetValue<string>(out var command) ? command : null;
 }

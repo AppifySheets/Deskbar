@@ -155,39 +155,132 @@ public sealed class ClaudeSkillTests : IDisposable
         Assert.Equal(commented, File.ReadAllText(Settings));
     }
 
-    // A file that parses but has a shape Deskbar cannot work with (a repeated key, a command that is not a string, an
-    // entry that is not an object) crashed every start. It is left alone and traced instead.
-    [Theory]
-    [InlineData("""{"hooks":{"Stop":[]},"hooks":{"Notification":[]}}""", true)]
-    [InlineData("""{"hooks":{"Stop":[]},"hooks":{"Notification":[]}}""", false)]
-    [InlineData("""{"hooks":{"Stop":[{"hooks":[{"type":"command","command":5}]}]}}""", true)]
-    [InlineData("""{"hooks":{"Stop":[{"hooks":[{"type":"command","command":5}]}]}}""", false)]
-    [InlineData("""{"hooks":{"Stop":["x"]}}""", true)]
-    [InlineData("""{"hooks":{"Stop":["x"]}}""", false)]
-    [InlineData("""{"a":1,"a":2}""", true)]
-    [InlineData("""{"a":1,"a":2}""", false)]
-    public void A_settings_file_of_an_odd_shape_is_left_alone(string odd, bool on)
+    string Settled(string json)
     {
         Directory.CreateDirectory(Path.Combine(home, ".claude"));
-        File.WriteAllText(Settings, odd);
+        File.WriteAllText(Settings, json);
+        return json;
+    }
 
-        ClaudeSkill.Sync(on, home, Deskbar);
+    const string Repeated = """{"hooks":{"Stop":[]},"hooks":{"Notification":[]}}""";
 
+    // A repeated key, anywhere in the file, counts as a file that does not parse: rewriting it would drop one of the
+    // values. Sync says so by returning false, and nothing is written, not even the backup.
+    [Theory]
+    [InlineData(Repeated, true)]
+    [InlineData(Repeated, false)]
+    [InlineData("""{"a":1,"a":2}""", true)]
+    [InlineData("""{"a":1,"a":2}""", false)]
+    [InlineData("""{"x":{"a":1,"a":2}}""", true)]
+    [InlineData("""{"x":{"a":1,"a":2}}""", false)]
+    public void A_settings_file_that_does_not_parse_is_left_alone(string odd, bool on)
+    {
+        Settled(odd);
+
+        var result = ClaudeHooks.Sync(on, Settings, "\"C:/x/claude-hook.cmd\"");
+
+        Assert.False(result);
         Assert.Equal(odd, File.ReadAllText(Settings));
         Assert.False(File.Exists(Settings + ".deskbar-backup"));
         Assert.False(File.Exists(Settings + ".deskbar-new"));
     }
 
-    // Only the hooks cannot be added; the skill itself is still written.
-    [Fact]
-    public void The_skill_is_still_written_when_the_settings_file_is_of_an_odd_shape()
+    const string ForeignCommandNumber = """{"hooks":{"Stop":[{"hooks":[{"type":"command","command":5}]}]}}""";
+    const string ForeignCommandObject = """{"hooks":{"Stop":[{"hooks":[{"type":"command","command":{}}]}]}}""";
+    const string ForeignString = """{"hooks":{"Stop":["x"]}}""";
+    const string ForeignNull = """{"hooks":{"Stop":[null]}}""";
+    const string ForeignHooksNotObject = """{"hooks":{"Stop":[{"hooks":[5]}]}}""";
+
+    // The text of the foreign Stop entry, as it is written back: the entry itself is what must survive.
+    static string ForeignEntryOf(string json) =>
+        System.Text.Json.Nodes.JsonNode.Parse(json)!["hooks"]!["Stop"]!.AsArray()[0]?.ToJsonString() ?? "null";
+
+    static int HookEntries(string json, string hookEvent) =>
+        System.Text.Json.Nodes.JsonNode.Parse(json)!["hooks"]![hookEvent]!.AsArray()
+            .Count(e => e?.ToJsonString().Contains("claude-hook.cmd") == true);
+
+    // One odd entry that is not Deskbar's must not stop Deskbar's own from being added; it stays where it was.
+    [Theory]
+    [InlineData(ForeignCommandNumber)]
+    [InlineData(ForeignCommandObject)]
+    [InlineData(ForeignString)]
+    [InlineData(ForeignNull)]
+    [InlineData(ForeignHooksNotObject)]
+    public void A_foreign_entry_of_an_odd_shape_is_kept_and_does_not_stop_the_hooks(string odd)
     {
-        Directory.CreateDirectory(Path.Combine(home, ".claude"));
-        File.WriteAllText(Settings, """{"hooks":{"Stop":[]},"hooks":{"Notification":[]}}""");
+        Settled(odd);
+
+        var result = ClaudeHooks.Sync(true, Settings, "\"C:/x/claude-hook.cmd\"");
+
+        Assert.True(result);
+        var json = File.ReadAllText(Settings);
+        Assert.Equal(ForeignEntryOf(odd), ForeignEntryOf(json));
+        Assert.Equal(1, HookEntries(json, "Stop"));
+        Assert.Equal(1, HookEntries(json, "Notification"));
+        Assert.Equal(odd, File.ReadAllText(Settings + ".deskbar-backup"));
+    }
+
+    // Off, there is nothing of Deskbar's to take out, so the file is not touched.
+    [Theory]
+    [InlineData(ForeignCommandNumber)]
+    [InlineData(ForeignCommandObject)]
+    [InlineData(ForeignString)]
+    [InlineData(ForeignNull)]
+    [InlineData(ForeignHooksNotObject)]
+    public void A_foreign_entry_of_an_odd_shape_is_not_touched_when_the_hooks_are_off(string odd)
+    {
+        Settled(odd);
+
+        var result = ClaudeHooks.Sync(false, Settings, "\"C:/x/claude-hook.cmd\"");
+
+        Assert.True(result);
+        Assert.Equal(odd, File.ReadAllText(Settings));
+        Assert.False(File.Exists(Settings + ".deskbar-backup"));
+    }
+
+    // Beside an entry of Deskbar's, a foreign odd one stays when Deskbar's goes.
+    [Fact]
+    public void Turning_the_hooks_off_leaves_a_foreign_odd_entry_beside_deskbars()
+    {
+        Settled("""{"hooks":{"Stop":["x",{"hooks":[{"type":"command","command":"\"C:/x/Deskbar/claude-hook.cmd\""}]}]}}""");
+
+        var result = ClaudeHooks.Sync(false, Settings, "\"C:/x/Deskbar/claude-hook.cmd\"");
+
+        Assert.True(result);
+        var stop = System.Text.Json.Nodes.JsonNode.Parse(File.ReadAllText(Settings))!["hooks"]!["Stop"]!.AsArray();
+        Assert.Single(stop);
+        Assert.Equal("x", stop[0]!.GetValue<string>());
+    }
+
+    // The skill must not claim hooks that are not there. With a settings file that cannot be parsed, the skill is still
+    // written, says the hooks are missing, and points at `attention`; once the file is fixed the next sync brings the
+    // claim back.
+    [Fact]
+    public void The_skill_does_not_claim_hooks_that_were_not_installed()
+    {
+        Settled(Repeated);
 
         ClaudeSkill.Sync(true, home, Deskbar);
 
-        Assert.True(File.Exists(Skill));
+        var text = File.ReadAllText(Skill);
+        Assert.DoesNotContain("hooks already ask", text);
+        Assert.Contains("attention", text);
+        Assert.Equal(Repeated, File.ReadAllText(Settings));
+
+        File.WriteAllText(Settings, "{}");
+        ClaudeSkill.Sync(true, home, Deskbar);
+
+        Assert.Contains("hooks already ask", File.ReadAllText(Skill));
+    }
+
+    [Fact]
+    public void The_skill_says_the_hooks_ask_when_they_are_installed()
+    {
+        Settled(WithABell);
+
+        ClaudeSkill.Sync(true, home, Deskbar);
+
+        Assert.Contains("hooks already ask", File.ReadAllText(Skill));
     }
 
     public void Dispose() => Directory.Delete(home, recursive: true);
