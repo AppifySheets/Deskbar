@@ -20,7 +20,7 @@ public class DeleteWorkspaceTests
     readonly FakeStore store = new();
     readonly FakeActivator activator = new();
 
-    (WorkspaceManager manager, Guid target, Guid other) Started()
+    (WorkspaceManager manager, Guid target, Guid other) Started(int? ownProcessId = null)
     {
         var target = new Workspace(Guid.NewGuid(), "Doomed", Guid.NewGuid());
         var other = new Workspace(Guid.NewGuid(), "Keeper", Guid.NewGuid());
@@ -28,7 +28,7 @@ public class DeleteWorkspaceTests
             .ForEach(w => desktops.Desktops.Add(new DesktopInfo(w.DesktopId!.Value, w.Name)));
         store.Stored = AppState.Empty with { Workspaces = [target, other] };
 
-        var manager = new WorkspaceManager(desktops, monitor, titles, store, activator: activator);
+        var manager = new WorkspaceManager(desktops, monitor, titles, store, ownProcessId: ownProcessId, activator: activator);
         Assert.True(manager.Start().IsSuccess);
         return (manager, target.Id, other.Id);
     }
@@ -276,4 +276,169 @@ public class DeleteWorkspaceTests
     [Fact]
     public void Deleting_and_closing_a_workspace_that_does_not_exist_is_refused() =>
         Assert.True(Started().manager.DeleteWorkspaceClosingWindows(Guid.NewGuid()).IsFailure);
+
+    // --- delete after asking ------------------------------------------------------------
+    //
+    // The bar and Manage both go through DeleteWorkspaceAfterConfirming, so the rule is one rule:
+    // a workspace with windows is never deleted without the user having been told which, and a No
+    // changes nothing and is not an error.
+
+    [Fact]
+    public void Saying_no_to_the_warning_closes_nothing_and_keeps_the_workspace()
+    {
+        var (manager, target, _) = Started();
+        PlaceWindowOn(manager, target, 0xA, "WINWORD");
+        var asked = new List<string>();
+
+        var result = manager.DeleteWorkspaceAfterConfirming(target, text => { asked.Add(text); return false; });
+
+        Assert.True(result.IsSuccess);
+        Assert.False(result.Value);
+        Assert.Single(asked);
+        Assert.Contains("WINWORD", asked[0]);
+        Assert.Empty(activator.Closed);
+        Assert.Contains(manager.State.Workspaces, w => w.Id == target);
+        Assert.Contains(desktops.Desktops, d => d.Id == manager.State.Workspaces.Single(w => w.Id == target).DesktopId);
+    }
+
+    [Fact]
+    public void Saying_yes_to_the_warning_closes_the_windows_and_deletes_the_workspace()
+    {
+        var (manager, target, _) = Started();
+        var desktop = manager.State.Workspaces.Single(w => w.Id == target).DesktopId!.Value;
+        var first = PlaceWindowOn(manager, target, 0xA);
+        var second = PlaceWindowOn(manager, target, 0xB);
+
+        var result = manager.DeleteWorkspaceAfterConfirming(target, _ => true);
+
+        Assert.True(result.IsSuccess);
+        Assert.True(result.Value);
+        Assert.Equal(new[] { first.Handle, second.Handle }, activator.Closed.OrderBy(h => h.Value).ToArray());
+        Assert.DoesNotContain(manager.State.Workspaces, w => w.Id == target);
+        Assert.DoesNotContain(desktops.Desktops, d => d.Id == desktop);
+    }
+
+    [Fact]
+    public void Saying_yes_when_a_window_will_not_close_fails_and_keeps_the_workspace()
+    {
+        var (manager, target, _) = Started();
+        var stubborn = PlaceWindowOn(manager, target, 0xA, "WINWORD");
+        activator.Stubborn.Add(stubborn.Handle);
+
+        var result = manager.DeleteWorkspaceAfterConfirming(target, _ => true);
+
+        Assert.True(result.IsFailure);
+        Assert.Contains("WINWORD", result.Error);
+        Assert.Contains(manager.State.Workspaces, w => w.Id == target);
+    }
+
+    [Fact]
+    public void An_empty_workspace_is_deleted_on_yes_and_the_text_does_not_mention_closing()
+    {
+        var (manager, target, _) = Started();
+        var asked = new List<string>();
+
+        var result = manager.DeleteWorkspaceAfterConfirming(target, text => { asked.Add(text); return true; });
+
+        Assert.True(result.IsSuccess);
+        Assert.True(result.Value);
+        Assert.Single(asked);
+        Assert.DoesNotContain("closed", asked[0]);
+        Assert.Empty(activator.Closed);
+        Assert.DoesNotContain(manager.State.Workspaces, w => w.Id == target);
+    }
+
+    [Fact]
+    public void An_empty_workspace_is_kept_on_no()
+    {
+        var (manager, target, _) = Started();
+
+        var result = manager.DeleteWorkspaceAfterConfirming(target, _ => false);
+
+        Assert.True(result.IsSuccess);
+        Assert.False(result.Value);
+        Assert.Contains(manager.State.Workspaces, w => w.Id == target);
+    }
+
+    // A workspace deleted from somewhere else while a menu or Manage sat open: nothing to ask and
+    // nothing to say, so no dialog and no error box.
+    [Fact]
+    public void A_workspace_that_is_already_gone_asks_nothing_and_is_not_an_error()
+    {
+        var (manager, _, _) = Started();
+        var called = false;
+
+        var result = manager.DeleteWorkspaceAfterConfirming(Guid.NewGuid(), _ => { called = true; return true; });
+
+        Assert.True(result.IsSuccess);
+        Assert.False(result.Value);
+        Assert.False(called);
+    }
+
+    // --- Deskbar's own windows are not part of a delete -----------------------------------------
+    //
+    // Found live: Manage sat on the workspace being deleted, the dialog counted it, and on Yes the
+    // delete failed, because CloseAll blocks the thread Manage runs on and so Manage could never
+    // close during the wait. Our own windows are neither counted, named nor closed; the delete moves
+    // them to a neighbouring desktop and they stay open. Window() uses the handle as the process id,
+    // so the manager's own pid is simply the handle of "our" window.
+
+    const nint OurHandle = 0xD0;
+
+    [Fact]
+    public void Our_own_window_is_not_counted_named_or_closed_next_to_other_windows()
+    {
+        var (manager, target, _) = Started(ownProcessId: (int)OurHandle);
+        var notepad = PlaceWindowOn(manager, target, 0xA, "Notepad");
+        PlaceWindowOn(manager, target, OurHandle, "Deskbar");
+        var asked = new List<string>();
+
+        var result = manager.DeleteWorkspaceAfterConfirming(target, text => { asked.Add(text); return true; });
+
+        Assert.True(result.IsSuccess);
+        Assert.True(result.Value);
+        Assert.Contains("Notepad", asked.Single());
+        Assert.DoesNotContain("Deskbar", asked.Single());
+        Assert.Contains("1 window is", asked.Single());
+        Assert.Equal(new[] { notepad.Handle }, activator.Closed.ToArray());
+        Assert.DoesNotContain(manager.State.Workspaces, w => w.Id == target);
+    }
+
+    [Fact]
+    public void A_workspace_with_only_our_own_window_counts_as_empty()
+    {
+        var (manager, target, _) = Started(ownProcessId: (int)OurHandle);
+        PlaceWindowOn(manager, target, OurHandle, "Deskbar");
+        var asked = new List<string>();
+
+        var result = manager.DeleteWorkspaceAfterConfirming(target, text => { asked.Add(text); return true; });
+
+        Assert.True(result.IsSuccess);
+        Assert.True(result.Value);
+        Assert.DoesNotContain("closed", asked.Single());
+        Assert.Empty(activator.Closed);
+        Assert.DoesNotContain(manager.State.Workspaces, w => w.Id == target);
+    }
+
+    [Fact]
+    public void The_guard_does_not_refuse_for_only_our_own_window()
+    {
+        var (manager, target, _) = Started(ownProcessId: (int)OurHandle);
+        PlaceWindowOn(manager, target, OurHandle, "Deskbar");
+
+        Assert.True(manager.DeleteWorkspaceIfEmpty(target).IsSuccess);
+        Assert.DoesNotContain(manager.State.Workspaces, w => w.Id == target);
+    }
+
+    [Fact]
+    public void Closing_a_workspace_with_only_our_own_window_asks_nothing_to_close()
+    {
+        var (manager, target, _) = Started(ownProcessId: (int)OurHandle);
+        PlaceWindowOn(manager, target, OurHandle, "Deskbar");
+
+        Assert.True(manager.DeleteWorkspaceClosingWindows(target).IsSuccess);
+
+        Assert.Empty(activator.Closed);
+        Assert.DoesNotContain(manager.State.Workspaces, w => w.Id == target);
+    }
 }

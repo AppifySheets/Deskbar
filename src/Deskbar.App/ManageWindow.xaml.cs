@@ -305,7 +305,25 @@ public partial class ManageWindow : Window
 
     void OnAddWorkspace(object s, RoutedEventArgs e) => Report(manager.AddWorkspace(NewWorkspaceName.Text).Map(_ => true)).Tap(Reload);
     void OnRenameWorkspace(object s, RoutedEventArgs e) => WithSelectedWorkspace(w => manager.RenameWorkspace(w.Id, NewWorkspaceName.Text));
-    void OnRemoveWorkspace(object s, RoutedEventArgs e) => WithSelectedWorkspace(w => manager.RemoveWorkspace(w.Id));
+
+    // The same question the bar's "Delete workspace…" asks, answered by the same Core method,
+    // so one rule holds on every surface. It does NOT go through WithSelectedWorkspace, because that
+    // reloads on any success and a No is a success: Reload throws away unsaved rule edits and a
+    // typed shortcut, and declining a delete must not cost anyone those. Reload only after
+    // a real delete.
+    void OnRemoveWorkspace(object s, RoutedEventArgs e)
+    {
+        if (WorkspaceList.SelectedItem is not Workspace workspace)
+        {
+            MessageBox.Show("Select a workspace first.");
+            return;
+        }
+
+        Report(manager.DeleteWorkspaceAfterConfirming(workspace.Id, text =>
+                MessageBox.Show(this, text, "Deskbar", MessageBoxButton.YesNo,
+                    MessageBoxImage.Warning, MessageBoxResult.No) == MessageBoxResult.Yes))
+            .Tap(deleted => { if (deleted) Reload(); });
+    }
 
     // Petre: "i need to be able to move workspaces up or down in the manage window".
     // WithSelectedWorkspace already reloads and re-selects by Id, so the selection follows

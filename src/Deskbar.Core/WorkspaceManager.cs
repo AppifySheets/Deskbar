@@ -2099,10 +2099,10 @@ public sealed class WorkspaceManager(
     // and their windows -- and refusing would leave no way to undo a nesting decision from the bar.
     public Result DeleteWorkspaceIfEmpty(Guid id) =>
         Workspace(id).Bind(workspace => WindowsByWorkspace()
-            .Bind(overview => overview.Workspaces.FirstOrDefault(g => g.Workspace.Id == id) is { Running.Count: > 0 } group
+            .Bind(overview => Deletable(overview.Workspaces.FirstOrDefault(g => g.Workspace.Id == id)?.Running) is { Count: > 0 } running
                 ? Result.Failure(
-                    $"'{workspace.Name}' still has {group.Running.Count} " +
-                    $"{(group.Running.Count == 1 ? "window" : "windows")} in it.\n\n" +
+                    $"'{workspace.Name}' still has {running.Count} " +
+                    $"{(running.Count == 1 ? "window" : "windows")} in it.\n\n" +
                     "Move them to another workspace first — drag their icons to another row on the bar — then delete it.")
                 : RemoveWorkspace(id)));
 
@@ -2132,7 +2132,7 @@ public sealed class WorkspaceManager(
     // LENDS it, so deleting the child that is standing on it closes nothing of its parent's.
     public Result DeleteWorkspaceClosingWindows(Guid id) =>
         Workspace(id).Bind(workspace => WindowsByWorkspace().Bind(overview =>
-            (overview.Workspaces.FirstOrDefault(g => g.Workspace.Id == id)?.Running ?? []) switch
+            Deletable(overview.Workspaces.FirstOrDefault(g => g.Workspace.Id == id)?.Running) switch
             {
                 // Nothing to close, so nothing to ask the OS: this is the old path exactly.
                 { Count: 0 } => RemoveWorkspace(id),
@@ -2142,6 +2142,58 @@ public sealed class WorkspaceManager(
                 _ when activator is null => Result.Failure("This build cannot close windows."),
                 var rows => CloseThenRemove(workspace, rows),
             }));
+
+    // The whole "Delete workspace" decision, shared by every surface that offers it. The
+    // bar's menu and Manage's Remove button both call this, so they cannot disagree about whether a
+    // workspace full of windows is deleted silently, which is what Manage did before: the desktop
+    // went, Windows merged its windows onto a neighbour, and its rules, roster and homes were wiped
+    // without a word. The surface supplies only the dialog; what it says, and what happens after
+    // Yes, is decided here.
+    //
+    // Success(true) is deleted. Success(false) is "nothing happened": the user said No, or the
+    // workspace was already gone. Neither is an error, so a caller shows no message for it, and a
+    // caller that reloads its own view should do so only on true. Failure is a refusal worth
+    // showing (a window that would not close, or a window that appeared after the dialog).
+    public Result<bool> DeleteWorkspaceAfterConfirming(Guid id, Func<string, bool> confirm)
+    {
+        // Read at CALL time, for the same reason a menu's IndexOf is: a rebuild between a menu
+        // opening and its click is routine, and a count captured earlier would describe a row that
+        // has since gained or lost windows. Costs one overview query, which is COM-heavy and
+        // entirely fine on a deliberate delete.
+        //
+        // One entry per WINDOW, named by its app: the dialog counts windows and names apps, and
+        // DeleteWorkspacePrompt is what knows the difference.
+        //
+        // A query that fails reads as "nothing to close", which is the safe way round: the
+        // empty-workspace path below re-checks emptiness and refuses if it was wrong.
+        var closing = WindowsByWorkspace() is { IsSuccess: true } overview
+            ? Deletable(overview.Value.Workspaces.FirstOrDefault(g => g.Workspace.Id == id)?.Running)
+                .Select(r => r.Window.ProcessName).ToList()
+            : [];
+
+        // None means the workspace was deleted from somewhere else while the menu sat open.
+        if (DeleteWorkspacePrompt.For(State, id, closing) is not { HasValue: true } prompt)
+            return Result.Success(false);
+
+        if (!confirm(prompt.Value))
+            return Result.Success(false);
+
+        // Two paths on purpose, chosen by what the user was actually shown. A row that looked
+        // empty goes through the guard, so if a window appeared in the seconds between the
+        // dialog and this click, the delete is REFUSED rather than closing a window nobody was
+        // warned about. Only a dialog that named windows is allowed to close any.
+        return (closing.Count == 0 ? DeleteWorkspaceIfEmpty(id) : DeleteWorkspaceClosingWindows(id))
+            .Map(() => true);
+    }
+
+    // The rows a workspace delete counts, warns about and closes: the overview's Running without
+    // Deskbar's OWN windows. CloseAll blocks the thread these windows run on while it waits, so they
+    // could never close during that wait and would always read as survivors, failing the delete.
+    // And Manage is not work to lose: the delete moves it to a neighbouring desktop, as Windows does
+    // for any window, and it stays open. One helper for the guard, the closing path and the prompt,
+    // so the three cannot disagree. The overview itself is untouched: Manage keeps its row on the bar.
+    IReadOnlyList<Core.Overview.WindowRow> Deletable(IReadOnlyList<Core.Overview.WindowRow>? running) =>
+        (running ?? []).Where(r => !IsOurs(r.Window.Handle)).ToList();
 
     Result CloseThenRemove(Workspace workspace, IReadOnlyList<Core.Overview.WindowRow> rows) =>
         activator!.CloseAll(rows.Select(r => r.Window.Handle).ToList()) switch

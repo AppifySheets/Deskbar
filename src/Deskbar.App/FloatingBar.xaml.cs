@@ -6888,41 +6888,18 @@ public partial class FloatingBar : Window
         // roster entry (placement memory), yes."
         Add("🗑", "Delete workspace…", () =>
         {
-            // Read at CLICK time, for the same reason IndexOf above is: a rebuild between the menu
-            // opening and this click is routine on this bar, and a count captured when the menu was
-            // built would describe a row that has since gained or lost windows. Costs one overview
-            // query, which is COM-heavy and entirely fine on a deliberate delete.
+            // What is shown and what happens after Yes is decided in Core, so Manage's
+            // Remove button cannot differ from this item. Only the dialog lives here.
             //
-            // One entry per WINDOW, named by its app: the dialog counts windows and names apps, and
-            // DeleteWorkspacePrompt is what knows the difference.
-            //
-            // A query that fails reads as "nothing to close", which is the safe way round: the
-            // empty-workspace path below re-checks emptiness in Core and refuses if it was wrong.
-            var closing = manager.WindowsByWorkspace() is { IsSuccess: true } overview
-                ? overview.Value.Workspaces.FirstOrDefault(g => g.Workspace.Id == workspaceId)?.Running
-                    .Select(r => r.Window.ProcessName).ToList() ?? []
-                : [];
-
-            // None means the workspace was deleted from somewhere else while this menu sat open.
-            if (DeleteWorkspacePrompt.For(manager.State, workspaceId, closing) is not { HasValue: true } prompt)
-                return;
-
             // MessageBoxResult.No as the default button, which this dialog did not set while the
             // only thing it could lose was a name.
-            if (MessageBox.Show(this, prompt.Value, "Deskbar", MessageBoxButton.YesNo,
-                    MessageBoxImage.Warning, MessageBoxResult.No) != MessageBoxResult.Yes)
-                return;
-
-            // Two paths on purpose, chosen by what the user was actually shown. A row that looked
-            // empty goes through the guard, so if a window appeared in the seconds between the
-            // dialog and this click, the delete is REFUSED rather than closing a window nobody was
-            // warned about. Only a dialog that named windows is allowed to close any.
             //
-            // Both report through the same Report() as everything else, so a refusal arrives as a
-            // plain message rather than as a silent no-op.
-            Report(closing.Count == 0
-                ? manager.DeleteWorkspaceIfEmpty(workspaceId)
-                : manager.DeleteWorkspaceClosingWindows(workspaceId));
+            // A refusal arrives through the same Report() as everything else, as a plain message
+            // rather than a silent no-op. A No, or a workspace already gone, is not a failure and
+            // shows nothing.
+            Report(manager.DeleteWorkspaceAfterConfirming(workspaceId, text =>
+                MessageBox.Show(this, text, "Deskbar", MessageBoxButton.YesNo,
+                    MessageBoxImage.Warning, MessageBoxResult.No) == MessageBoxResult.Yes));
         });
 
         AddBarItems(menu);
