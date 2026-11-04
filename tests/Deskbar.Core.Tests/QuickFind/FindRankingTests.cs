@@ -42,11 +42,29 @@ public class FindRankingTests
         ]));
 
     [Fact]
-    public void The_most_recently_used_workspace_breaks_a_tie() =>
+    public void The_most_recently_used_workspace_comes_first() =>
         Assert.Equal(["on-b", "on-a"], Keys("notes",
         [
             Row("on-a", FindKind.Window, "Notes", A),
             Row("on-b", FindKind.Window, "Notes", B),
+        ], B, A));
+
+    // Petre: "search should show me most recently used bars first". Recency of the workspace outranks how well
+    // the title matches, so the rows he was just in lead even when an older workspace has a better prefix.
+    [Fact]
+    public void A_recent_workspace_outranks_a_better_prefix_in_an_older_one() =>
+        Assert.Equal(["recent-contains", "older-starts"], Keys("inv",
+        [
+            Row("older-starts", FindKind.Window, "Invoices 2026", A),
+            Row("recent-contains", FindKind.Window, "My invoices", B),
+        ], B, A));
+
+    [Fact]
+    public void Running_things_still_come_before_a_recent_workspaces_launch_rows() =>
+        Assert.Equal(["older-window", "recent-launch"], Keys("inv",
+        [
+            Row("recent-launch", FindKind.Remembered, "Invoicer", B),
+            Row("older-window", FindKind.Window, "Invoices", A),
         ], B, A));
 
     [Fact]

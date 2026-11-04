@@ -61,9 +61,10 @@ With more than one screen, whether to also name the screen is left to the mockup
 
 Running things always come before things that would have to be started, so Enter never starts a second copy
 of something already open by accident. Within that: running windows and their tabs first, then remembered
-apps, then Start menu apps. Inside each group, a result whose title starts with the first piece sorts above
-one that merely contains it, and then the most recently used workspace first (`WorkspaceMru`), so the thing
-you were just using wins a tie.
+apps, then Start menu apps. Inside each of those, the most recently used workspace comes first
+(`WorkspaceMru`). Petre, after trying the first build: "search should show me most recently used bars first",
+so recency outranks how well a title matches. Inside one workspace, a result whose title starts with the first
+piece sorts above one that merely contains it.
 
 ### Going to a result
 
