@@ -266,6 +266,20 @@ public sealed record AppState(
     // successful registration.
     public const string DefaultSwitcherShortcut = "Win+Ctrl+Tab";
 
+    // QUICK FIND's chord (docs/superpowers/specs/2026-11-04-quick-find-design.md, "The shortcut"): the box
+    // that finds any window, tab or app. Stored as text for the same reasons as SwitcherShortcut above, read
+    // through WorkspaceManager.QuickFindShortcut, which falls back to the default for anything unusable.
+    // Same init-property/no-migration pattern: an older state.json loads with the default.
+    public string QuickFindShortcut { get; init; } = DefaultQuickFindShortcut;
+
+    // The app had held to exactly ONE global hotkey, and the reason was the price of eleven exclusive chords
+    // that bound by list position, not a rule that only one may ever exist. One more for the feature Petre
+    // reaches for most is a small price. Chosen the way Win+Ctrl+Tab was, by measurement: of six candidates
+    // tried against RegisterHotKey on his machine, Win+Ctrl+F, Win+Ctrl+Q and Win+Alt+F were taken and this
+    // was the first free one (docs/superpowers/notes/2026-11-04-quick-find-probes.md). PowerToys binds it to
+    // Command Palette by default; anyone running that changes it on Manage > Shortcuts.
+    public const string DefaultQuickFindShortcut = "Win+Alt+Space";
+
 
     // Petre, on the update check (#71): "an opt-out setting -- this would be the app's only
     // phone-home behaviour."

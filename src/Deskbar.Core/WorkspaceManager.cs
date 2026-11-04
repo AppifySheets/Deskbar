@@ -947,7 +947,32 @@ public sealed class WorkspaceManager(
     // "Ctrl+Alt+1" cannot sit in state.json as two different-looking versions of one chord.
     public Result SetSwitcherShortcut(string shortcut) =>
         Chord.Parse(shortcut)
+            .Ensure(chord => !Collides(chord, Chord.Parse(QuickFindShortcut).Value),
+                chord => $"{chord} is quick find's shortcut. Give one of them another chord first.")
             .Tap(chord => Persist(State with { SwitcherShortcut = chord.ToString() }));
+
+    // Quick find's chord (docs/superpowers/specs/2026-11-04-quick-find-design.md, "The shortcut"), with the same
+    // fallback and canonical spelling as the switcher's above.
+    public string QuickFindShortcut =>
+        Chord.Parse(State.QuickFindShortcut).IsSuccess
+            ? State.QuickFindShortcut.Trim()
+            : AppState.DefaultQuickFindShortcut;
+
+    public Result SetQuickFindShortcut(string shortcut) =>
+        Chord.Parse(shortcut)
+            .Ensure(chord => !Collides(chord, Chord.Parse(SwitcherShortcut).Value),
+                chord => $"{chord} is the workspace switcher's shortcut. Give one of them another chord first.")
+            .Tap(chord => Persist(State with { QuickFindShortcut = chord.ToString() }));
+
+    // Whether a chord would land on the switcher's registrations. RegisterHotKey is exclusive per chord, so two
+    // features bound to one would leave whichever registers second silently dead. The switcher registers its
+    // chord AND, when that has no Shift, the same chord with Shift for walking backwards (HotkeyService), so
+    // both count. Order of arguments: (candidate, switcher) or (switcher, candidate) both work, since the check
+    // tries Shift on whichever of the two lacks it.
+    static bool Collides(Chord a, Chord b) =>
+        a == b || WithShift(a) == b || a == WithShift(b);
+
+    static Chord WithShift(Chord chord) => chord with { Modifiers = chord.Modifiers | Chord.Shift };
 
     // Petre: "when switching workspaces, i want you to activate the window which was last
     // active last time this workspace was active."
