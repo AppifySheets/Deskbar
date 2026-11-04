@@ -46,7 +46,19 @@ public interface IBrowserTabs
     // are forgotten.
     void Watch(IReadOnlyList<WindowInfo> windows);
 
+    // Fires when a COUNT or the audio mark changes, which is what the bar draws. A tab's title changing does
+    // not fire it: page titles change all the time and the bar would rebuild for nothing.
     IObservable<Unit> Changed { get; }
+
+    // QUICK FIND (docs/superpowers/specs/2026-11-04-quick-find-design.md): each tab's title, in tab strip
+    // order, cleaned by TabTitle. Empty before the first reading. Read from the last background reading and
+    // never on the caller's thread: a full pass over Petre's 25 windows took 4.9 s
+    // (docs/superpowers/notes/2026-11-04-quick-find-probes.md).
+    IReadOnlyList<string> NamesOf(WindowHandle window);
+
+    // Quick find opening: read these windows again if stale, like Watch, but forget nothing. Watch's list is
+    // the bar's, and quick find must not make the bar lose readings for windows it is not showing.
+    void Refresh(IReadOnlyList<WindowInfo> windows);
 }
 
 public sealed class BrowserTabs : IBrowserTabs, IDisposable
@@ -59,6 +71,7 @@ public sealed class BrowserTabs : IBrowserTabs, IDisposable
     static readonly TimeSpan Fresh = TimeSpan.FromSeconds(4);
 
     readonly ConcurrentDictionary<WindowHandle, TabInfo> readings = new();
+    readonly ConcurrentDictionary<WindowHandle, IReadOnlyList<string>> names = new();
     readonly ConcurrentDictionary<WindowHandle, (string Title, DateTime At)> lastRead = new();
     readonly ConcurrentDictionary<WindowHandle, byte> queued = new();
     readonly BlockingCollection<(WindowHandle Window, bool Code)> queue = new();
@@ -83,15 +96,23 @@ public sealed class BrowserTabs : IBrowserTabs, IDisposable
 
     public IObservable<Unit> Changed => changed.AsObservable();
 
+    public IReadOnlyList<string> NamesOf(WindowHandle window) => names.TryGetValue(window, out var found) ? found : [];
+
     public void Watch(IReadOnlyList<WindowInfo> windows)
     {
         var listed = windows.Select(w => w.Handle).ToHashSet();
         readings.Keys.Where(h => !listed.Contains(h)).ToList().ForEach(h =>
         {
             readings.TryRemove(h, out _);
+            names.TryRemove(h, out _);
             lastRead.TryRemove(h, out _);
         });
 
+        Refresh(windows);
+    }
+
+    public void Refresh(IReadOnlyList<WindowInfo> windows)
+    {
         var now = DateTime.UtcNow;
         windows.Where(HasTabs)
             .Where(w => !lastRead.TryGetValue(w.Handle, out var last) || last.Title != w.Title || now - last.At > Fresh)
@@ -109,8 +130,9 @@ public sealed class BrowserTabs : IBrowserTabs, IDisposable
         foreach (var (window, code) in queue.GetConsumingEnumerable())
         {
             queued.TryRemove(window, out _);
-            var reading = code ? ReadCode(window) : Read(window);
-            if (reading is null) continue;
+            if ((code ? ReadCode(window) : Read(window)) is not var (reading, titles)) continue;
+            // Titles are kept on every reading; only a change the bar draws fires Changed (see the interface).
+            names[window] = titles;
             if (readings.TryGetValue(window, out var before) && before == reading) continue;
             readings[window] = reading;
             changed.OnNext(Unit.Default);
@@ -120,18 +142,19 @@ public sealed class BrowserTabs : IBrowserTabs, IDisposable
     // The browser's own tabs: TabItems with no Document between them and the window. A tab whose name says it
     // is playing audio marks the window as the sound's source. Chromium appends this to the tab's accessible
     // name ("... - Audio playing"); "muted" is the tab that would play but has been silenced.
-    internal static TabInfo? Read(WindowHandle window)
+    internal static (TabInfo Info, IReadOnlyList<string> Titles)? Read(WindowHandle window)
     {
         try
         {
             var root = AutomationElement.FromHandle(window.Value);
             var walker = TreeWalker.ControlViewWalker;
-            var tabs = root.FindAll(TreeScope.Descendants, new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.TabItem))
+            var tabNames = root.FindAll(TreeScope.Descendants, new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.TabItem))
                 .Cast<AutomationElement>()
                 .Where(tab => !InsidePage(tab, root, walker))
+                .Select(tab => tab.Current.Name)
                 .ToList();
-            var playing = tabs.Any(tab => PlaysAudio(tab.Current.Name));
-            return new TabInfo(tabs.Count, playing);
+            var playing = tabNames.Any(PlaysAudio);
+            return (new TabInfo(tabNames.Count, playing), tabNames.Select(TabTitle).ToList());
         }
         catch
         {
@@ -142,15 +165,17 @@ public sealed class BrowserTabs : IBrowserTabs, IDisposable
 
     // VS Code's editor tabs: TabItems whose class has the word "tab", in every editor group. None at all means
     // its accessibility tree has not been built yet (see the header), so there is no reading rather than a 0.
-    internal static TabInfo? ReadCode(WindowHandle window)
+    internal static (TabInfo Info, IReadOnlyList<string> Titles)? ReadCode(WindowHandle window)
     {
         try
         {
-            var tabs = AutomationElement.FromHandle(window.Value)
+            var tabNames = AutomationElement.FromHandle(window.Value)
                 .FindAll(TreeScope.Descendants, new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.TabItem))
                 .Cast<AutomationElement>()
-                .Count(tab => IsEditorTab(tab.Current.ClassName));
-            return tabs > 0 ? new TabInfo(tabs, false) : null;
+                .Where(tab => IsEditorTab(tab.Current.ClassName))
+                .Select(tab => tab.Current.Name)
+                .ToList();
+            return tabNames.Count > 0 ? (new TabInfo(tabNames.Count, false), tabNames.Select(TabTitle).ToList()) : null;
         }
         catch
         {
@@ -160,6 +185,29 @@ public sealed class BrowserTabs : IBrowserTabs, IDisposable
 
     internal static bool IsEditorTab(string className) =>
         className.Split(' ', StringSplitOptions.RemoveEmptyEntries).Contains("tab");
+
+    // A tab's title as Petre would type it: its accessible name without what the app appends. Measured on his
+    // machine (docs/superpowers/notes/2026-11-04-quick-find-probes.md):
+    //
+    //   Edge     "Microsoft Partner - Sleeping", "New tab - Discarded", "... - Part of tab group Store",
+    //            and "... - Audio playing" / "... - Audio muted" (the PlaysAudio marks below)
+    //   VS Code  "Running apps quick find, Editor Group 1"
+    //
+    // Stripped repeatedly, because Edge can stack two ("... - Audio playing - Sleeping" would read as one
+    // state after another). Only ever a whole trailing " - <state>" or ", Editor Group N", so a page titled
+    // "Sleeping bags" is left alone.
+    internal static string TabTitle(string accessibleName)
+    {
+        var title = accessibleName.Trim();
+        for (var stripped = Strip(title); stripped != title; stripped = Strip(title)) title = stripped;
+        return title;
+    }
+
+    static readonly System.Text.RegularExpressions.Regex AppendedState = new(
+        @"(\s-\s(Audio playing|Audio muted|Sleeping|Discarded|Part of tab group\b.*)|,\sEditor Group \d+)$",
+        System.Text.RegularExpressions.RegexOptions.Compiled | System.Text.RegularExpressions.RegexOptions.CultureInvariant);
+
+    static string Strip(string title) => AppendedState.Replace(title, "").TrimEnd();
 
     internal static bool PlaysAudio(string tabName) =>
         tabName.Contains("audio", StringComparison.OrdinalIgnoreCase)
