@@ -121,6 +121,24 @@ public sealed class WindowActivator : IWindowActivator
             return Result.Success(); // ended between the click and here
         }
 
+        // A Store app's window is owned by the shared ApplicationFrameHost, and ending that would close every
+        // app it hosts (Force close on Calculator took Settings with it). End the app inside the frame instead.
+        if (ProcessFacts.IsFrameHost(owner.ProcessName))
+        {
+            var hosted = PickHostedProcess(pid, ChildProcessIds(window.Value));
+            owner.Dispose();
+            // A minimised Store app can detach its content, leaving no child to name: ask the window to close.
+            if (hosted is null) return Close(window);
+            try
+            {
+                owner = System.Diagnostics.Process.GetProcessById((int)hosted.Value);
+            }
+            catch (ArgumentException)
+            {
+                return Result.Success(); // ended between the click and here
+            }
+        }
+
         var name = owner.ProcessName;
         var targets = (everyInstance ? System.Diagnostics.Process.GetProcessesByName(name) : [owner])
             .Where(p => p.Id != Environment.ProcessId)
@@ -133,6 +151,22 @@ public sealed class WindowActivator : IWindowActivator
         return refused == 0
             ? Result.Success()
             : Result.Failure($"{refused} of {targets.Count} {name} processes could not be ended. They may be running as administrator.");
+    }
+
+    // The first child window owned by a process other than the frame's: the app the frame is showing.
+    internal static uint? PickHostedProcess(uint frameProcessId, IEnumerable<uint> childProcessIds) =>
+        childProcessIds.Where(id => id != 0 && id != frameProcessId).Select(id => (uint?)id).FirstOrDefault();
+
+    static List<uint> ChildProcessIds(nint frame)
+    {
+        var ids = new List<uint>();
+        EnumChildWindows(frame, (child, _) =>
+        {
+            GetWindowThreadProcessId(child, out var id);
+            ids.Add(id);
+            return true;
+        }, 0);
+        return ids;
     }
 
     // One deadline for all of them, three seconds, on the UI thread. Kill is TerminateProcess, which a

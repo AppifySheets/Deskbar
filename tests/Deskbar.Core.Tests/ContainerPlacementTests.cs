@@ -704,6 +704,25 @@ public class ContainerPlacementTests
         Assert.Equal(@"C:\Users\p\AppData\Local\Programs\Microsoft VS Code", launched.Single().WorkingDirectory);
     }
 
+    // The frame host owns the window of every Store app, so "restart all" would end them all and start the
+    // helper bare. Refused before anything is learned or ended.
+    [Fact]
+    public void Restart_is_refused_for_a_frame_host_window_and_ends_nothing()
+    {
+        var activator = new FakeActivator();
+        var host = new WindowInfo(new WindowHandle(0x951), 4242, "ApplicationFrameHost",
+            @"C:\Windows\System32\ApplicationFrameHost.exe", "Calculator", null);
+        var manager = Started(activator, host);
+        var launched = false;
+
+        var outcome = manager.RestartApp(host.Handle, _ => { launched = true; return Result.Success<int?>(1); });
+
+        Assert.True(outcome.IsFailure);
+        Assert.Empty(activator.Ended);
+        Assert.False(launched);
+        Assert.Empty(store.Stored.ContainerHomes);
+    }
+
     // A folder open in two workspaces at once teaches nothing, on a restart as on the sweep: there is no
     // single answer, and the windows that come back are placed by whatever was already known.
     [Fact]

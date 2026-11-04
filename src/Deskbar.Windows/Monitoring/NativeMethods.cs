@@ -14,6 +14,7 @@ public static class NativeMethods
     [DllImport("user32.dll")] public static extern nint SetWinEventHook(uint eventMin, uint eventMax, nint hmodWinEventProc, WinEventProc proc, uint idProcess, uint idThread, uint flags);
     [DllImport("user32.dll")] public static extern bool UnhookWinEvent(nint hook);
     [DllImport("user32.dll")] public static extern bool EnumWindows(EnumWindowsProc callback, nint lparam);
+    [DllImport("user32.dll")] public static extern bool EnumChildWindows(nint parent, EnumWindowsProc callback, nint lparam);
     [DllImport("user32.dll")] public static extern bool IsWindowVisible(nint hwnd);
     // "Does this hwnd still name a window at all?" -- the unambiguous test Resync uses to
     // tell a DESTROYED window from one that merely left the taskbar (minimised to tray).

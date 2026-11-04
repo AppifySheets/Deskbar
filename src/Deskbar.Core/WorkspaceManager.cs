@@ -3311,6 +3311,10 @@ public sealed class WorkspaceManager(
         if (!knownWindows.TryGetValue(window, out var known) || known.ProcessPath is not { } path)
             return Result.Failure("That window's program is not known, so it cannot be started again. It may be running as administrator.");
         if (activator is null) return Result.Failure("This build cannot close windows.");
+        // Its process is the shared frame host of every Store app: ending it closes them all and starting it
+        // bare brings nothing back.
+        if (ProcessFacts.IsFrameHost(known.ProcessName))
+            return Result.Failure("This Store app cannot be restarted from here. Close it and open it again yourself.");
 
         Learn(Seats(w => w.ProcessName.Equals(known.ProcessName, StringComparison.OrdinalIgnoreCase)));
         return activator.EndProcess(window, everyInstance: true, awaitExit: true)

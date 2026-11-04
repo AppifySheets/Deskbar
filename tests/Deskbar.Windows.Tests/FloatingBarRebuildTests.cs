@@ -192,6 +192,25 @@ public class FloatingBarRebuildTests
         Assert.False(menu.Items.OfType<MenuItem>().Single(item => (string)item.Header == "Restore title").IsEnabled);
     });
 
+    // A Store app's window belongs to the shared ApplicationFrameHost. Force close ends the app inside it, so its
+    // label must not name the helper, and Close all / Restart all (which would name and act on the helper) are
+    // left out. Every other app keeps the full menu, which the test above pins.
+    [Fact]
+    public void A_frame_host_icon_menu_has_Close_and_an_unnamed_Force_close_only() => StaThread.Run(() =>
+    {
+        var harness = Harness.Build(withFrameHostWindow: true);
+        using var bar = harness.ShowBar();
+
+        var menu = IconButtons(bar.Rows)
+            .Select(FloatingBar.MenuOf)
+            .Single(m => m!.Items.OfType<MenuItem>().Any(item => (string)item.Header == "Force close"))!;
+
+        Assert.Equal(
+            ["Rename this window…", "Rename by title pattern…", "Rename all ApplicationFrameHost windows…", "Restore title",
+             "Close", "Force close"],
+            menu.Items.OfType<MenuItem>().Select(item => (string)item.Header));
+    });
+
     // Petre: "active window should be highlighted in the floating window". Asserts the fact
     // travels the whole way -- foreground event -> WorkspaceManager -> Overview.IsActive ->
     // the icon's own brushes -- and that only ONE icon is marked.
@@ -883,7 +902,7 @@ sealed class Harness
     // grouped: Sparrow and Archive in one anchorless group, "Team", so their rows are drawn inside a family
     // box with a header above them. Implies extraWorkspace, which is where Archive comes from.
     public static Harness Build(bool withUnresolvableWindow = false, bool singleWorkspace = false,
-        bool busyWorkspace = false, bool withUnnamedDesktop = false, bool extraWorkspace = false, bool grouped = false)
+        bool busyWorkspace = false, bool withUnnamedDesktop = false, bool extraWorkspace = false, bool grouped = false, bool withFrameHostWindow = false)
     {
         extraWorkspace |= grouped;
 
@@ -920,6 +939,13 @@ sealed class Harness
                 desktops.Placements[extra.Handle] = sparrowDesktop;
                 monitor.Initial.Add(extra);
             });
+
+        if (withFrameHostWindow)
+        {
+            var storeApp = new WindowInfo(new WindowHandle(707), 77, "ApplicationFrameHost", @"C:\Windows\System32\ApplicationFrameHost.exe", "Calculator", null);
+            desktops.Placements[storeApp.Handle] = gephaDesktop;
+            monitor.Initial.Add(storeApp);
+        }
 
         if (withUnresolvableWindow)
             // Deliberately absent from Placements, so DesktopOf fails for it exactly as

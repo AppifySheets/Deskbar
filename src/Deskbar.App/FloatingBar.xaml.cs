@@ -7429,9 +7429,14 @@ public partial class FloatingBar : Window
         var close = new MenuItem { Header = "Close", Icon = MenuGlyph("✕") };
         close.Click += (_, _) => Report(manager.CloseWindow(row.Window.Handle));
         menu.Items.Add(close);
-        var force = new MenuItem { Header = $"Force close ({process})", Icon = MenuGlyph("⊗") };
+        // A Store app (Calculator, Settings) shows its window through the shared ApplicationFrameHost, so the
+        // process name would mislead and Close all / Restart all would act on the helper, not the app. Force
+        // close ends the hosted app instead (WindowActivator.EndProcess); the other two are left out.
+        var frameHost = ProcessFacts.IsFrameHost(process);
+        var force = new MenuItem { Header = frameHost ? "Force close" : $"Force close ({process})", Icon = MenuGlyph("⊗") };
         force.Click += (_, _) => Report(manager.ForceCloseWindow(row.Window.Handle));
         menu.Items.Add(force);
+        if (frameHost) return menu;
         var all = new MenuItem { Header = $"Close all {process} processes", Icon = MenuGlyph("⊘") };
         all.Click += (_, _) => Report(manager.CloseAllOfApp(row.Window.Handle));
         menu.Items.Add(all);
