@@ -98,8 +98,8 @@ public static class CommandLineQuoting
         string.IsNullOrEmpty(workingDirectory) ? [] : ["/d", ForStart(workingDirectory)];
 
     // The program and the folder are read by `start` alone, which knows no backslash escapes and strips the
-    // quotes itself, and a path cannot hold a quote, so only the percent rule applies. Always quoted, so a
-    // path with spaces or shell operators in it is one token.
+    // quotes itself, and a path cannot hold a quote (nor can a link: ControlArguments.Link refuses one), so only
+    // the percent rule applies. Always quoted, so a path with spaces or shell operators in it is one token.
     static string ForStart(string path) => $"\"{path.Replace("%", PercentInsideQuotes)}\"";
 
     // An argument for the program. Quoted only when it has to be (a space, a tab, a quote, or nothing at all),

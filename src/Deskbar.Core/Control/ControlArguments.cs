@@ -110,8 +110,12 @@ public static class ControlArguments
     }
 
     // A bare Windows path parses as an absolute file URI, so a file link has to say file: itself.
+    // This text reaches a cmd line (and, in a new window, a browser's arguments), where a quote ends the quoted run
+    // and lets `&` start another command, and a line break ends the command. A real link writes a quote as %22, so
+    // a raw quote or any control character is refused rather than rewritten, which keeps every valid link as typed.
     static Result<string> Link(string raw, string usage) =>
         Uri.TryCreate(raw.Trim(), UriKind.Absolute, out var uri)
+        && !raw.Trim().Any(c => c == '"' || char.IsControl(c))
         && (!uri.IsFile || raw.TrimStart().StartsWith("file:", StringComparison.OrdinalIgnoreCase))
             ? raw.Trim()
             : Result.Failure<string>($"'{raw}' is not a link. {usage}");
