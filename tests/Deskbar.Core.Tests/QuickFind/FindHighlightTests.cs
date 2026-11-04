@@ -23,6 +23,25 @@ public class FindHighlightTests
     public void Nothing_highlighted_yet_takes_the_first_row() =>
         Assert.Equal("a", FindHighlight.Keep(["a", "b"], null));
 
+    // A tab's key carries its title and position, which change under a live page (an unread counter, a tab
+    // opened to its left). The highlight follows it to the same window's tab with the same title, then to the
+    // same window's tab at the same position, before falling to the first row (final review, finding 5).
+    [Fact]
+    public void A_tab_that_moved_keeps_the_highlight_by_its_title() =>
+        Assert.Equal("t:1F:3:Inbox", FindHighlight.Keep(["w:9", "t:1F:3:Inbox"], "t:1F:2:Inbox"));
+
+    [Fact]
+    public void A_tab_whose_title_changed_keeps_the_highlight_by_its_place() =>
+        Assert.Equal("t:1F:2:Inbox (3)", FindHighlight.Keep(["w:9", "t:1F:2:Inbox (3)"], "t:1F:2:Inbox"));
+
+    [Fact]
+    public void A_title_with_colons_still_matches_its_tab() =>
+        Assert.Equal("t:1F:4:a: b", FindHighlight.Keep(["w:9", "t:1F:4:a: b"], "t:1F:1:a: b"));
+
+    [Fact]
+    public void Another_windows_tab_does_not_take_the_highlight() =>
+        Assert.Equal("w:9", FindHighlight.Keep(["w:9", "t:2A:2:Inbox"], "t:1F:2:Inbox"));
+
     [Theory]
     [InlineData("a", 1, "b")]
     [InlineData("b", -1, "a")]

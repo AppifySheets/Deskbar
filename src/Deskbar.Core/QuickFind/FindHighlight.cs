@@ -12,7 +12,28 @@ namespace Deskbar.Core.QuickFind;
 public static class FindHighlight
 {
     public static string? Keep(IReadOnlyList<string> keys, string? current) =>
-        current is not null && keys.Contains(current) ? current : keys.FirstOrDefault();
+        current is null ? keys.FirstOrDefault()
+        : keys.Contains(current) ? current
+        : SameTab(keys, current) ?? keys.FirstOrDefault();
+
+    // A TAB's key (t:<hwnd>:<index>:<title>, see FindResult) carries its title and position, and both change
+    // under a live page: an unread counter ticks in the title, a tab opens to its left. Exact keys alone would
+    // drop the highlight to the first row on every such change, which is the move-under-the-cursor the spec
+    // forbids. So a vanished tab key is followed to the same window's tab with the same title (it moved), then
+    // to the same window's tab at the same position (its title changed). Never to another window's tab.
+    static string? SameTab(IReadOnlyList<string> keys, string current) =>
+        Tab(current) is not { } was
+            ? null
+            : keys.Select(k => (Key: k, Tab: Tab(k))).Where(k => k.Tab?.Window == was.Window).ToList() is var sameWindow
+                ? sameWindow.FirstOrDefault(k => k.Tab!.Value.Title == was.Title).Key
+                  ?? sameWindow.FirstOrDefault(k => k.Tab!.Value.Index == was.Index).Key
+                : null;
+
+    // Split on the first three colons only: a title may hold colons of its own.
+    static (string Window, string Index, string Title)? Tab(string key) =>
+        key.StartsWith("t:", StringComparison.Ordinal) && key.Split(':', 4) is [_, var window, var index, var title]
+            ? (window, index, title)
+            : null;
 
     // Up and Down stop at the ends instead of wrapping: in a list that can be long, wrapping from the top
     // straight to the bottom hides where you are.
