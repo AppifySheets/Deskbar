@@ -1,0 +1,38 @@
+<Window x:Class="Deskbar.App.QuickFindWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Deskbar quick find"
+        WindowStyle="None" AllowsTransparency="True" Background="Transparent"
+        Topmost="True" ResizeMode="NoResize" SizeToContent="Height" Width="520"
+        ShowInTaskbar="False">
+    <!-- QUICK FIND (docs/superpowers/specs/2026-11-04-quick-find-design.md): a text box over a list of every
+         window, tab and app that matches. Layout B from three mockups, Petre's pick: rows grouped under a
+         header per workspace in its lane colour, the way the bar groups windows into rows.
+
+         Unlike the switcher this window DOES take focus: it is typed into. It is opened from a hotkey, and
+         the process that receives WM_HOTKEY is allowed to take the foreground, so Activate works.
+
+         Borderless and transparent like the bar and the switcher, set in XAML because WPF throws when these
+         are assigned imperatively in the wrong order. The panel colour is the switcher's. -->
+    <Border CornerRadius="10" Background="#E6202020" Padding="8">
+        <DockPanel>
+            <Border DockPanel.Dock="Top" CornerRadius="6" Background="#14FFFFFF" Padding="10,7" Margin="0,0,0,6">
+                <Grid>
+                    <TextBox x:Name="Query" FontSize="15" Foreground="White" Background="Transparent"
+                             BorderThickness="0" CaretBrush="White" Padding="0"/>
+                    <TextBlock x:Name="Count" HorizontalAlignment="Right" VerticalAlignment="Center"
+                               FontSize="11" Foreground="White" Opacity="0.5" IsHitTestVisible="False"/>
+                </Grid>
+            </Border>
+            <TextBlock DockPanel.Dock="Bottom" Text="Enter go    Esc close    Up/Down move" FontSize="11"
+                       Foreground="White" Opacity="0.45" Margin="8,6,8,0"/>
+            <!-- Rows built in code-behind, like every other list in this app, so each header can carry its
+                 workspace's own colour. Bounded height: past it the list scrolls rather than growing off the
+                 screen. -->
+            <ScrollViewer x:Name="Scroller" MaxHeight="440" VerticalScrollBarVisibility="Auto"
+                          HorizontalScrollBarVisibility="Disabled" Focusable="False">
+                <StackPanel x:Name="Rows"/>
+            </ScrollViewer>
+        </DockPanel>
+    </Border>
+</Window>
