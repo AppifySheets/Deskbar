@@ -81,9 +81,10 @@ public static class RosterIdentity
     //
     // Kept to explorer, deliberately. The rest of LaunchedBy's NotLaunchers list is there to end a
     // process walk early; those processes own no window this app tracks, so adding them here would be
-    // a claim about windows nobody has measured. ApplicationFrameHost is the one worth naming: it
-    // frames Store app windows, and on this machine WhatsApp and Teams are rostered under their own
-    // paths, so the frame is not what the window reports and it does not belong here either.
+    // a claim about windows nobody has measured. ApplicationFrameHost is the one worth naming, and it
+    // is handled in StayWhereOpened, not here: it frames Store app windows and reports one identity
+    // for all of them. WhatsApp and Teams are rostered under their own paths, because their windows
+    // report their own exe and not the frame.
     static readonly IReadOnlySet<string> Shell =
         new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "explorer" };
 
@@ -126,6 +127,11 @@ public static class RosterIdentity
     //              sign-in prompt). The system starts these, not the app that asked, so not even the
     //              launched-by walk can connect them; staying put keeps them in front of the asker.
     //   Taskmgr    a tool you open to look at the machine from wherever you are.
+    //   ApplicationFrameHost  the frame around a Store app window (Calculator, Settings and the like). Each
+    //              of them reports this one exe with the same arguments, so the identity names the frame
+    //              and not the app: a row titled Calculator sent a new Calculator window to that row's
+    //              workspace, from wherever it was opened. Measured on a real machine: the window reports
+    //              "C:\WINDOWS\system32\ApplicationFrameHost.exe -Embedding" as its command line.
     //   SnippingTool  the same kind of tool, summoned by a key (Win+Shift+S, PrtScn) to capture whatever
     //              is in front of you. Petre: "snipping tool opened in another workspace, why?", then
     //              "snipping tool should have no memory of where it was before". It had been placed in
@@ -134,15 +140,17 @@ public static class RosterIdentity
     //              versioned Microsoft.ScreenSketch_... folder, which is why the list keys on the file
     //              name and not the path.
     //
-    // Deliberately NOT included: Settings and other Store apps, because they report through
-    // ApplicationFrameHost and nobody has measured what their windows say (see the note on the Shell
-    // list above).
+    // Deliberately NOT included: the Store apps that report their own exe, WhatsApp and Teams among them.
+    // They are rostered under their own paths and keep their own memory. ApplicationFrameHost IS included
+    // (measured, see above): a Store app framed by it reports that exe, not its own, so it has no
+    // identity that could be remembered.
     static readonly IReadOnlySet<string> StayWhereOpened = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
     {
         "chrome", "msedge", "brave", "vivaldi", "opera", "firefox",
         "WindowsTerminal", "OpenConsole", "conhost", "cmd", "powershell", "pwsh",
         "PickerHost", "CredentialUIBroker",
         "Taskmgr", "SnippingTool",
+        "ApplicationFrameHost",
     };
 
     // An installed web app is the exception, and the reason a command line is needed at all. A PWA
