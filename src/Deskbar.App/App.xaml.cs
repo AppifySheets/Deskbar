@@ -1529,7 +1529,12 @@ public partial class App : Application
                 () => QuickFindSources.Recent(manager),
                 result => QuickFindSources.Go(manager, findActivator, result),
                 place => QuickFindSources.ColourOf(manager, place),
-                QuickFindSources.IconOf);
+                QuickFindSources.IconOf,
+                // Fresh tab titles on open and while open: queued for the reader's own thread, never waited on.
+                refresh: () => floatingBar?.Tabs?.Refresh(manager.KnownWindows),
+                // A `deskbar find` from a terminal has no foreground right; the activator's path gets the box
+                // focus anyway, the same one the bar's icons use to bring a window forward.
+                bringForward: hwnd => findActivator.Activate(new WindowHandle(hwnd)));
             monitor.Ignore(quickFind.EnsureHandle());
             boundQuickFind = Chord.Parse(manager.QuickFindShortcut).Value;
 

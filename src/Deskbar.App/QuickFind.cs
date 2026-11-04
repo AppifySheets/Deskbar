@@ -27,7 +27,9 @@ public sealed class QuickFind : IDisposable
     readonly Func<FindResult, Result> go;
     readonly Func<FindPlace, string?> colourOf;
     readonly Func<FindResult, ImageSource?> iconOf;
-    readonly DispatcherTimer refresh = new() { Interval = TimeSpan.FromSeconds(1) };
+    readonly Action? refreshSources;
+    readonly Action<nint>? bringForward;
+    readonly DispatcherTimer timer = new() { Interval = TimeSpan.FromSeconds(1) };
     readonly IDisposable subscriptions;
 
     // Results whose Enter failed while the box was open: a window that closed between the search and Enter.
@@ -39,8 +41,14 @@ public sealed class QuickFind : IDisposable
     IReadOnlyList<FindResult> shown = [];
     FindQuery query = FindQuery.Parse("");
 
+    //   refreshSources  asks the background tab reader to read stale windows again, without waiting for it
+    //                   (final review, finding 3: tab titles otherwise only refreshed when the bar rebuilt)
+    //   bringForward    pulls the box to the front by its own handle. A hotkey press carries the right to take
+    //                   the foreground; a `deskbar find` typed in a terminal does not, and without this the box
+    //                   would show with no keyboard focus (finding 2)
     public QuickFind(QuickFindWindow window, Func<IReadOnlyList<FindResult>> catalog, Func<IReadOnlyList<Guid>> recent,
-        Func<FindResult, Result> go, Func<FindPlace, string?> colourOf, Func<FindResult, ImageSource?> iconOf)
+        Func<FindResult, Result> go, Func<FindPlace, string?> colourOf, Func<FindResult, ImageSource?> iconOf,
+        Action? refresh = null, Action<nint>? bringForward = null)
     {
         this.window = window;
         this.catalog = catalog;
@@ -48,12 +56,14 @@ public sealed class QuickFind : IDisposable
         this.go = go;
         this.colourOf = colourOf;
         this.iconOf = iconOf;
+        refreshSources = refresh;
+        this.bringForward = bringForward;
 
-        refresh.Tick += (_, _) => { all = catalog(); Render(); };
+        timer.Tick += (_, _) => Tick();
         subscriptions = new System.Reactive.Disposables.CompositeDisposable(
-            window.Typed.Subscribe(text => { query = FindQuery.Parse(text); Render(); }),
+            window.Typed.Subscribe(text => { query = FindQuery.Parse(text); Render(typed: true); }),
             window.Chosen.Subscribe(Choose),
-            window.Dismissed.Subscribe(_ => { refresh.Stop(); gone.Clear(); }));
+            window.Dismissed.Subscribe(_ => { timer.Stop(); gone.Clear(); }));
     }
 
     // The window's handle, so the composition root can hand it to WindowMonitor.Ignore before it ever shows:
@@ -64,21 +74,33 @@ public sealed class QuickFind : IDisposable
     public void Show(string text = "")
     {
         gone.Clear();
+        refreshSources?.Invoke();
         all = catalog();
         query = FindQuery.Parse(text);
         window.Open(text);
-        Render();
-        refresh.Start();
+        bringForward?.Invoke(EnsureHandle());
+        Render(typed: true);
+        timer.Start();
     }
 
-    void Render()
+    // The once-a-second refresh while the box is open. Nothing typed means nothing is shown, so the catalogue
+    // (one overview query, two COM calls per window) is not rebuilt for an empty box (finding 4).
+    internal void Tick()
+    {
+        if (query.IsEmpty) return;
+        refreshSources?.Invoke();
+        all = catalog();
+        Render(typed: false);
+    }
+
+    void Render(bool typed)
     {
         shown = FindRanking.Rank(query, all.Where(r => !gone.Contains(r.Key)).ToList(), recent());
         var groups = FindGrouping.Group(shown)
             .Select(g => new FindGroupView(g.Header, colourOf(g.Place), !g.Open,
                 g.Results.Select(r => new FindRowView(r.Key, iconOf(r), r.Title, r.Detail)).ToList()))
             .ToList();
-        window.Present(groups, query.Pieces);
+        window.Present(groups, query.Pieces, typed);
     }
 
     void Choose(string key)
@@ -89,13 +111,14 @@ public sealed class QuickFind : IDisposable
             _ =>
             {
                 gone.Add(key);
-                Render();
+                Render(typed: false);
             });
     }
 
     public void Dispose()
     {
-        refresh.Stop();
+        timer.Stop();
         subscriptions.Dispose();
+        window.CloseForGood();
     }
 }

@@ -68,6 +68,89 @@ public class QuickFindWindowTests
         window.Dismiss();
     });
 
+    // Final review, finding 1: Alt+F4 closed the box for good, and the next shortcut press threw on a closed
+    // window and took the app down. Closing it must only hide it.
+    [Fact]
+    public void Closing_the_box_hides_it_and_it_opens_again() => StaThread.Run(() =>
+    {
+        var window = new QuickFindWindow();
+        using var find = Controller(window, [Window("w:1", "Invoice", 1)], _ => Result.Success());
+
+        find.Show("inv");
+        window.Close();
+        Assert.False(window.IsOpen);
+
+        find.Show("inv");
+        Assert.True(window.IsOpen);
+        Assert.Equal(["w:1"], window.Keys);
+        window.Dismiss();
+    });
+
+    // Finding 6: after the text changes, the highlight goes to the new top result; it is kept by key only
+    // across background refreshes.
+    [Fact]
+    public void Typing_moves_the_highlight_to_the_new_top_result() => StaThread.Run(() =>
+    {
+        var window = new QuickFindWindow();
+        using var find = Controller(window, [Window("w:1", "Invoice a", 1), Window("w:2", "Invoice b", 2)], _ => Result.Success());
+
+        find.Show("inv");
+        window.Press(Key.Down);
+        Assert.Equal("w:2", window.Highlighted);
+
+        window.Query.Text = "invoice";
+        Assert.Equal("w:1", window.Highlighted);
+        window.Dismiss();
+    });
+
+    // Finding 4: the once-a-second refresh must not rebuild rows that did not change (it cost a full redraw
+    // and snapped a scrolled list back to the highlight every second)...
+    [Fact]
+    public void Refreshing_with_nothing_changed_keeps_the_rows() => StaThread.Run(() =>
+    {
+        var window = new QuickFindWindow();
+        using var find = Controller(window, [Window("w:1", "Invoice", 1)], _ => Result.Success());
+
+        find.Show("inv");
+        var drawn = window.Rebuilds;
+        find.Tick();
+        Assert.Equal(drawn, window.Rebuilds);
+        window.Dismiss();
+    });
+
+    // ...and must not rebuild the catalogue at all while nothing is typed, since nothing is shown.
+    [Fact]
+    public void An_empty_box_does_not_rebuild_the_catalogue_each_second() => StaThread.Run(() =>
+    {
+        var window = new QuickFindWindow();
+        var built = 0;
+        using var find = new QuickFind(window, () => { built++; return [Window("w:1", "Invoice", 1)]; }, () => [], _ => Result.Success(), _ => null, _ => null);
+
+        find.Show("");
+        var atOpen = built;
+        find.Tick();
+        Assert.Equal(atOpen, built);
+        window.Dismiss();
+    });
+
+    // Findings 2 and 3: opening asks for fresh tab readings, and pulls the box to the front by its own handle,
+    // because a `deskbar find` from a terminal arrives without the foreground right a hotkey press carries.
+    [Fact]
+    public void Opening_refreshes_tabs_and_brings_the_box_forward() => StaThread.Run(() =>
+    {
+        var window = new QuickFindWindow();
+        var refreshed = 0;
+        nint brought = 0;
+        using var find = new QuickFind(window, () => [], () => [], _ => Result.Success(), _ => null, _ => null,
+            refresh: () => refreshed++, bringForward: hwnd => brought = hwnd);
+
+        find.Show("");
+
+        Assert.Equal(1, refreshed);
+        Assert.Equal(find.EnsureHandle(), brought);
+        window.Dismiss();
+    });
+
     [Fact]
     public void Results_sit_under_their_workspace_header() => StaThread.Run(() =>
     {

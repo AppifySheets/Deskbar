@@ -449,10 +449,22 @@ window on your main monitor.
 both its forward and reverse halves free, and it neighbours `Win+Ctrl+←/→`, which Windows already
 uses for desktops. Change it on Manage → **Shortcuts**; the new chord is checked as you type and
 takes effect at once. Whatever you pick becomes **exclusive** while Deskbar runs, so avoid
-chords other apps need (`Ctrl+Tab` would stop reaching browsers, editors and Explorer). It is the
-*only* shortcut Deskbar registers; everything else is on the bar, one click away. Key release is
-detected by polling while the list is up, not by a keyboard hook, so Deskbar never sits in the
+chords other apps need (`Ctrl+Tab` would stop reaching browsers, editors and Explorer). Key release
+is detected by polling while the list is up, not by a keyboard hook, so Deskbar never sits in the
 path of your keystrokes.
+
+## Quick find
+
+`Win+Alt+Space` opens a search box over everything open on every workspace: window titles, every
+browser tab and every VS Code editor tab (open Claude Code sessions included, since each is a tab
+named after the session). Type a few letters of anything in the title, in any order: `inv 10` finds
+"Invoice 2026-10". Results sit under the workspace they are in, in its colour, the workspaces you
+used most recently first. Enter takes you there, Esc closes the box. A browser window is listed by
+its tabs, so you find the page, not the window that happens to show it.
+
+`deskbar find inv 10` opens it with the text already typed. Change the chord on Manage →
+**Shortcuts**; it can never be the switcher's. These two chords are the only ones Deskbar
+registers; everything else is on the bar, one click away.
 
 ## Naming windows
 
@@ -528,7 +540,7 @@ Left-click the tray icon. Five tabs:
   workspace** to forget a placement. Removing an entry never touches a running window; move the
   app back by hand and a new entry is written. Remove on a workspace here does not close its
   windows; the bar's **Delete workspace…** does.
-- **Shortcuts** rebinds the one chord.
+- **Shortcuts** rebinds the switcher's chord and quick find's.
 - **Time** reports how long you have spent in each workspace today, this week (since Monday) and
   over the last thirty days, by group and by workspace, sortable. Only input counts, keyboard or
   mouse; two minutes without either is idle, so a workspace left on screen overnight accrues

@@ -19,11 +19,20 @@ public static class QuickFindSources
         manager.WindowsByWorkspace().Map(overview =>
         {
             var state = manager.State;
-            var rows = overview.Workspaces
+            var listed = overview.Workspaces
                 .SelectMany(g => g.Running.Select(r => (Row: r, Place: Place(state, g.Workspace))))
                 .Concat(overview.OtherDesktops.SelectMany(d => d.Windows.Select(r => (Row: r, Place: new FindPlace(null, d.Name)))))
                 .Concat(overview.Pinned.Select(r => (Row: r, Place: new FindPlace(null, "all desktops"))))
-                .Select(x => x with { Place = manager.WorkspaceOf(x.Row.Window.Handle).Map(w => Place(state, w)).GetValueOrDefault(x.Place) })
+                .ToList();
+
+            // A window listed more than once is one a nested workspace borrowed (#42): ask which workspace it
+            // really belongs to. Only those, since WorkspaceOf costs COM calls and this runs every second while
+            // the box is open (final review, finding 4).
+            var borrowed = listed.GroupBy(x => x.Row.Window.Handle).Where(g => g.Count() > 1).Select(g => g.Key).ToHashSet();
+            var rows = listed
+                .Select(x => borrowed.Contains(x.Row.Window.Handle)
+                    ? x with { Place = manager.WorkspaceOf(x.Row.Window.Handle).Map(w => Place(state, w)).GetValueOrDefault(x.Place) }
+                    : x)
                 .DistinctBy(x => x.Row.Window.Handle)
                 .ToList();
             var places = rows.ToDictionary(x => x.Row.Window.Handle, x => x.Place);

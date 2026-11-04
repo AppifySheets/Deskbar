@@ -38,6 +38,16 @@ public partial class QuickFindWindow : Window
     readonly Dictionary<string, Border> rowsByKey = [];
     IReadOnlyList<string> pieces = [];
 
+    // What was last drawn, so a refresh that changes nothing redraws nothing (final review, finding 4): the box
+    // refreshes every second, and rebuilding every row each time cost a full redraw and snapped a list Petre
+    // had scrolled back to the highlight.
+    string drawn = "";
+
+    // Set only when the app is going away. Until then a close request (Alt+F4) only hides the box: a closed
+    // WPF window can never be shown again, and the next Win+Alt+Space would throw and take the app down
+    // (final review, finding 1).
+    bool closingForGood;
+
     public QuickFindWindow()
     {
         InitializeComponent();
@@ -57,6 +67,25 @@ public partial class QuickFindWindow : Window
     public IReadOnlyList<string> Headers { get; private set; } = [];
     public string? Highlighted { get; private set; }
     public bool IsOpen { get; private set; }
+
+    // How many times the rows were rebuilt, for the test that a refresh with nothing new rebuilds nothing.
+    internal int Rebuilds { get; private set; }
+
+    protected override void OnClosing(System.ComponentModel.CancelEventArgs e)
+    {
+        if (!closingForGood)
+        {
+            e.Cancel = true;
+            Dismiss();
+        }
+        base.OnClosing(e);
+    }
+
+    public void CloseForGood()
+    {
+        closingForGood = true;
+        Close();
+    }
 
     // Opens on the screen Petre is working on: the one holding the foreground window, read BEFORE this window
     // takes the foreground. Centred across, a quarter of the way down, the way launchers usually sit.
@@ -81,8 +110,18 @@ public partial class QuickFindWindow : Window
     }
 
     // Typed pieces come along so each title can show which letters matched.
-    public void Present(IReadOnlyList<FindGroupView> groups, IReadOnlyList<string> typedPieces)
+    //
+    // `typed` says why this is drawn. After Petre changed the text the highlight goes to the new top result,
+    // which is what Enter should take (final review, finding 6). On a background refresh it stays on its
+    // result by key (FindHighlight.Keep), and a refresh that changes nothing draws nothing.
+    public void Present(IReadOnlyList<FindGroupView> groups, IReadOnlyList<string> typedPieces, bool typed)
     {
+        var signature = string.Join('\n', typedPieces) + '\u0001' + string.Join('\n', groups.Select(g =>
+            $"{g.Header}|{g.Colour}|{g.Faded}|" + string.Join('\u0002', g.Rows.Select(r => $"{r.Key}|{r.Title}|{r.Detail}|{r.Icon is null}"))));
+        if (!typed && signature == drawn) return;
+        drawn = signature;
+        Rebuilds++;
+
         pieces = typedPieces;
         Rows.Children.Clear();
         rowsByKey.Clear();
@@ -99,7 +138,7 @@ public partial class QuickFindWindow : Window
         Keys = groups.SelectMany(g => g.Rows).Select(r => r.Key).ToList();
         Headers = groups.Select(g => g.Header).ToList();
         Count.Text = Keys.Count switch { 0 => typedPieces.Count == 0 ? "" : "nothing", 1 => "1 result", var n => $"{n} results" };
-        Highlight(FindHighlight.Keep(Keys, Highlighted));
+        Highlight(typed ? Keys.FirstOrDefault() : FindHighlight.Keep(Keys, Highlighted), scroll: typed);
     }
 
     // Keyboard handling, as one method so the tests can drive it without a real key event.
@@ -114,21 +153,23 @@ public partial class QuickFindWindow : Window
                 if (Highlighted is { } key0) chosen.OnNext(key0);
                 return true;
             case Key.Down:
-                Highlight(FindHighlight.Move(Keys, Highlighted, +1));
+                Highlight(FindHighlight.Move(Keys, Highlighted, +1), scroll: true);
                 return true;
             case Key.Up:
-                Highlight(FindHighlight.Move(Keys, Highlighted, -1));
+                Highlight(FindHighlight.Move(Keys, Highlighted, -1), scroll: true);
                 return true;
             default:
                 return false;
         }
     }
 
-    void Highlight(string? key)
+    // Scrolls the row into view only when Petre moved the highlight himself or typed. A background refresh
+    // must leave a list he scrolled with the wheel where he put it.
+    void Highlight(string? key, bool scroll)
     {
         Highlighted = key;
         rowsByKey.ToList().ForEach(pair => pair.Value.Background = pair.Key == key ? HighlightFill : Brushes.Transparent);
-        if (key is not null && rowsByKey.TryGetValue(key, out var row)) row.BringIntoView();
+        if (scroll && key is not null && rowsByKey.TryGetValue(key, out var row)) row.BringIntoView();
     }
 
     UIElement Header(FindGroupView group)

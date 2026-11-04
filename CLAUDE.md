@@ -168,7 +168,11 @@ page says "Sorry, we couldn't find that page": switch accounts, do not debug the
   Manage's Windows tab were both deleted once the bar covered their jobs. Left-click the
   tray opens Manage; right-click gives Manage, Check for updates (#110) and Exit, plus an
   update item while one is available.
-- **Exactly one global hotkey**: `Win+Ctrl+Tab` (configurable on Manage → Shortcuts),
+- **Two global hotkeys, each earned**: quick find's `Win+Alt+Space` (2.3.0, Petre: "i want a quick
+  find for opening running apps"; spec `docs/superpowers/specs/2026-11-04-quick-find-design.md`) and
+  the switcher's below. The two can never be set to one chord. Do not add a third without the same
+  case being made.
+- **The switcher's hotkey**: `Win+Ctrl+Tab` (configurable on Manage → Shortcuts),
   walking workspaces most-recently-used first, committing on modifier release. It was
   chosen by trying every `*+Tab` chord against `RegisterHotKey`: the only one with both
   its forward and reverse halves free, and it neighbours Windows' own `Win+Ctrl+←/→`.
