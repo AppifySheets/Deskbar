@@ -2045,12 +2045,17 @@ public sealed class WorkspaceManager(
     bool NameTaken(string name, Guid? excluding) =>
         State.Workspaces.Any(w => w.Id != excluding && w.Name.Trim().Equals(name.Trim(), StringComparison.OrdinalIgnoreCase));
 
-    // Removing a workspace never removes its desktop implicitly -- windows live there.
-    // The desktop merge behavior (Windows moves its windows to the previous desktop)
-    // is exactly what we want, so removal = remove desktop + forget definition.
+    // Removing a workspace removes its desktop and forgets the definition.
+    //
+    // Where you land is OURS to choose when you are standing on it. Left to itself Windows picks a
+    // neighbour in its own desktop list, which is often somewhere you have never been.
+    // So we ask for the one you were last on, the same one
+    // the switcher's first tap would take you to (RemoveDesktop below). Any window still on the removed
+    // desktop goes there with you, in the same step. Deleting a workspace you are NOT on changes nothing
+    // about where you are.
     public Result RemoveWorkspace(Guid id) =>
         Workspace(id)
-            .Tap(w => { if (w.DesktopId is { } d) desktops.Remove(d); })
+            .Tap(w => { if (w.DesktopId is { } d) RemoveDesktop(w, d); })
             .Tap(w =>
             {
                 // Prune live bookkeeping too: without this, a later Disappeared for one of
@@ -2076,6 +2081,42 @@ public sealed class WorkspaceManager(
                     ContainerHomes = tidied.ContainerHomes.Where(h => h.WorkspaceId != id).ToList(),
                 });
             });
+
+    // The most recently used OTHER workspace that was visited this session and has a desktop, or None.
+    // Read from the MRU's own list rather than Order(): Order appends workspaces never visited, and a
+    // workspace nobody visited is not "the one you were last on". A deleted one is not in State, so it
+    // is skipped here by the lookup, the same way Order lets it fall out.
+    Maybe<Guid> LastVisitedDesktopOtherThan(Workspace leaving, Guid leavingDesktop) =>
+        mru.Recent
+            .Where(recent => recent != leaving.Id)
+            .Select(recent => State.Workspaces.TryFirst(w => w.Id == recent))
+            .Where(found => found.HasValue && found.Value.DesktopId is { } d && d != leavingDesktop)
+            .Select(found => found.Value.DesktopId!.Value)
+            .TryFirst();
+
+    // Removes the desktop. Standing on it, and having somewhere visited to go back to, we remove it with that
+    // as the fallback; every other case is the plain removal and Windows picks. A failed fallback must not stop
+    // the delete: it is traced and the plain removal runs, which is what happened before this existed.
+    void RemoveDesktop(Workspace workspace, Guid desktop)
+    {
+        var standingOn = desktops.CurrentDesktop() is { IsSuccess: true } here && here.Value == desktop;
+        if (standingOn && LastVisitedDesktopOtherThan(workspace, desktop) is { HasValue: true } target)
+        {
+            var landed = desktops.Remove(desktop, target.Value);
+            if (landed.IsSuccess)
+            {
+                // The same bookkeeping Switch does, for the same reason: the arrival is also noticed through
+                // CurrentChanged, and Touch is idempotent. currentDesktopId follows that notification,
+                // exactly as it does for a switch we made ourselves.
+                State.Workspaces.TryFirst(w => w.DesktopId == target.Value).Tap(w => mru = mru.Touch(w.Id));
+                return;
+            }
+
+            trace?.Invoke($"delete {workspace.Name}: could not land on {NameOfDesktop(target.Value)} ({landed.Error}), removing plainly");
+        }
+
+        desktops.Remove(desktop);
+    }
 
     // Delete, but only an EMPTY one (#73). Petre: "if it still has windows in it, deletion is
     // refused with a message: it can't be deleted until its contents are moved elsewhere."
@@ -2189,7 +2230,7 @@ public sealed class WorkspaceManager(
     // The rows a workspace delete counts, warns about and closes: the overview's Running without
     // Deskbar's OWN windows. CloseAll blocks the thread these windows run on while it waits, so they
     // could never close during that wait and would always read as survivors, failing the delete.
-    // And Manage is not work to lose: the delete moves it to a neighbouring desktop, as Windows does
+    // And Manage is not work to lose: the delete moves it to another desktop, as it does
     // for any window, and it stays open. One helper for the guard, the closing path and the prompt,
     // so the three cannot disagree. The overview itself is untouched: Manage keeps its row on the bar.
     IReadOnlyList<Core.Overview.WindowRow> Deletable(IReadOnlyList<Core.Overview.WindowRow>? running) =>

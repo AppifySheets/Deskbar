@@ -51,6 +51,13 @@ public sealed class PlacementCache(IVirtualDesktopService os, TimeSpan memory, F
         current = null;
     });
 
+    // The same for a removal that names where to land: the windows moved and the current desktop changed.
+    public Result Remove(Guid desktopId, Guid fallbackDesktopId) => os.Remove(desktopId, fallbackDesktopId).Tap(() =>
+    {
+        desktops.Clear();
+        current = null;
+    });
+
     public Result MoveWindow(WindowHandle window, Guid desktopId) => os.MoveWindow(window, desktopId).Tap(() => desktops.Remove(window));
     public Result<Guid> DesktopOf(WindowHandle window) => Remembered(desktops, window, () => os.DesktopOf(window));
 

@@ -17,6 +17,10 @@ public interface IVirtualDesktopService
     Result Rename(Guid desktopId, string name);
     Result Switch(Guid desktopId);
     Result Remove(Guid desktopId);
+
+    // Remove, and land on `fallbackDesktopId` instead of wherever Windows would pick. The windows still
+    // on the removed desktop go there too, in the same step.
+    Result Remove(Guid desktopId, Guid fallbackDesktopId);
     Result MoveWindow(WindowHandle window, Guid desktopId);
     Result<Guid> DesktopOf(WindowHandle window);
 

@@ -1047,6 +1047,7 @@ sealed class PulsingDesktops : IVirtualDesktopService
 
     public Result Rename(Guid desktopId, string name) => Result.Success();
     public Result Remove(Guid desktopId) => Result.Success();
+    public Result Remove(Guid desktopId, Guid fallbackDesktopId) => Result.Success();
 
     // Recorded rather than merely succeeding: the row-click tests assert on WHICH desktop a
     // click reached, and that an inert row reached none.

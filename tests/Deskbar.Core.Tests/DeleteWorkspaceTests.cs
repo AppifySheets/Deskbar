@@ -441,4 +441,141 @@ public class DeleteWorkspaceTests
         Assert.Empty(activator.Closed);
         Assert.DoesNotContain(manager.State.Workspaces, w => w.Id == target);
     }
+
+    // --- Deleting the workspace you are standing on lands you on the one you were last on ---------
+    //
+    // Windows would pick a neighbour in its own desktop list. The roster below is deliberately listed
+    // B, A, C so that C's neighbour by position (A) is NOT the one visited last before it (B).
+
+    (WorkspaceManager manager, Workspace a, Workspace b, Workspace c) StartedWithThree()
+    {
+        var a = new Workspace(Guid.NewGuid(), "A", Guid.NewGuid());
+        var b = new Workspace(Guid.NewGuid(), "B", Guid.NewGuid());
+        var c = new Workspace(Guid.NewGuid(), "C", Guid.NewGuid());
+        new[] { b, a, c }.ToList().ForEach(w => desktops.Desktops.Add(new DesktopInfo(w.DesktopId!.Value, w.Name)));
+        store.Stored = AppState.Empty with { Workspaces = [b, a, c] };
+
+        var manager = new WorkspaceManager(desktops, monitor, titles, store, activator: activator);
+        Assert.True(manager.Start().IsSuccess);
+        return (manager, a, b, c);
+    }
+
+    // Arrives the way a switch does: the OS says where we are, then announces it.
+    void Visit(Workspace workspace)
+    {
+        desktops.CurrentDesktopId = workspace.DesktopId!.Value;
+        desktops.CurrentChangedSubject.OnNext(workspace.DesktopId!.Value);
+    }
+
+    [Fact]
+    public void Deleting_the_current_workspace_lands_on_the_one_visited_last()
+    {
+        var (manager, a, b, c) = StartedWithThree();
+        Visit(a); Visit(b); Visit(c);
+
+        Assert.True(manager.RemoveWorkspace(c.Id).IsSuccess);
+
+        var removal = Assert.Single(desktops.RemovesWithFallback);
+        Assert.Equal((c.DesktopId!.Value, b.DesktopId!.Value), removal);
+        Assert.Equal(b.DesktopId!.Value, desktops.CurrentDesktopId);
+        Assert.DoesNotContain(manager.State.Workspaces, w => w.Id == c.Id);
+        Assert.DoesNotContain(desktops.Desktops, d => d.Id == c.DesktopId!.Value);
+    }
+
+    [Fact]
+    public void After_landing_the_manager_and_the_switcher_agree_where_you_are()
+    {
+        var (manager, a, b, c) = StartedWithThree();
+        Visit(a); Visit(b); Visit(c);
+
+        Assert.True(manager.RemoveWorkspace(c.Id).IsSuccess);
+        desktops.CurrentChangedSubject.OnNext(b.DesktopId!.Value); // the OS announcing the landing
+
+        Assert.Equal(b.Id, manager.CurrentWorkspaceId.Value);
+        var recent = manager.ByRecentUse();
+        Assert.Equal(b.Id, recent.Ordered[0].Id);
+        Assert.Equal(0, recent.CurrentIndex);
+        Assert.Equal(a.Id, recent.Back.Value.Id);
+    }
+
+    [Fact]
+    public void Deleting_a_workspace_you_are_not_on_does_not_move_you()
+    {
+        var (manager, a, b, c) = StartedWithThree();
+        Visit(a); Visit(b); Visit(c);
+
+        Assert.True(manager.RemoveWorkspace(a.Id).IsSuccess);
+
+        Assert.Empty(desktops.RemovesWithFallback);
+        Assert.Empty(desktops.Switches);
+        Assert.Equal(c.DesktopId!.Value, desktops.CurrentDesktopId);
+        Assert.DoesNotContain(desktops.Desktops, d => d.Id == a.DesktopId!.Value);
+    }
+
+    [Fact]
+    public void Standing_on_the_only_workspace_visited_this_session_removes_it_plainly()
+    {
+        var (manager, _, _, c) = StartedWithThree();
+        Visit(c);
+
+        Assert.True(manager.RemoveWorkspace(c.Id).IsSuccess);
+
+        Assert.Empty(desktops.RemovesWithFallback);
+        Assert.Empty(desktops.Switches);
+        Assert.DoesNotContain(manager.State.Workspaces, w => w.Id == c.Id);
+        Assert.DoesNotContain(desktops.Desktops, d => d.Id == c.DesktopId!.Value);
+    }
+
+    [Fact]
+    public void A_failed_fallback_does_not_stop_the_delete()
+    {
+        var (manager, a, b, c) = StartedWithThree();
+        Visit(a); Visit(b); Visit(c);
+        desktops.RejectFallbackRemove = true;
+
+        Assert.True(manager.RemoveWorkspace(c.Id).IsSuccess);
+
+        Assert.Single(desktops.RemovesWithFallback); // it was tried
+        Assert.DoesNotContain(manager.State.Workspaces, w => w.Id == c.Id);
+        Assert.DoesNotContain(desktops.Desktops, d => d.Id == c.DesktopId!.Value); // plain removal followed
+    }
+
+    [Fact]
+    public void A_most_recent_workspace_that_was_deleted_earlier_is_skipped()
+    {
+        var (manager, a, b, c) = StartedWithThree();
+        Visit(a); Visit(b); Visit(c);
+        Assert.True(manager.RemoveWorkspace(b.Id).IsSuccess); // visited most recently before C, and not standing on it
+        desktops.RemovesWithFallback.Clear();
+
+        Assert.True(manager.RemoveWorkspace(c.Id).IsSuccess);
+
+        Assert.Equal((c.DesktopId!.Value, a.DesktopId!.Value), Assert.Single(desktops.RemovesWithFallback));
+    }
+
+    [Fact]
+    public void Deleting_an_empty_current_workspace_lands_on_the_one_visited_last()
+    {
+        var (manager, a, b, c) = StartedWithThree();
+        Visit(a); Visit(b); Visit(c);
+
+        Assert.True(manager.DeleteWorkspaceIfEmpty(c.Id).IsSuccess);
+
+        Assert.Equal((c.DesktopId!.Value, b.DesktopId!.Value), Assert.Single(desktops.RemovesWithFallback));
+    }
+
+    [Fact]
+    public void Deleting_and_closing_the_current_workspace_lands_on_the_one_visited_last()
+    {
+        var (manager, a, b, c) = StartedWithThree();
+        Visit(a); Visit(b); Visit(c);
+        var onC = Window(0xC, "slack");
+        monitor.Subject.OnNext(new WindowEvent(WindowEventKind.Appeared, onC));
+        desktops.WindowPlacements[onC.Handle] = c.DesktopId!.Value;
+
+        Assert.True(manager.DeleteWorkspaceClosingWindows(c.Id).IsSuccess);
+
+        Assert.Contains(onC.Handle, activator.Closed);
+        Assert.Equal((c.DesktopId!.Value, b.DesktopId!.Value), Assert.Single(desktops.RemovesWithFallback));
+    }
 }

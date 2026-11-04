@@ -31,6 +31,19 @@ public sealed class FakeDesktops : IVirtualDesktopService
         Result.SuccessIf(Desktops.RemoveAll(d => d.Id == id) > 0, "missing").Tap(() => Desktops.Add(new DesktopInfo(id, name)));
     public Result Switch(Guid id) { Switches.Add(id); return Result.Success(); }
     public Result Remove(Guid id) { Desktops.RemoveAll(d => d.Id == id); return Result.Success(); }
+
+    // Every remove-with-fallback asked for, and a switch to make it fail on demand. The fake lands on the
+    // fallback the way Windows does (current desktop follows), without raising CurrentChanged, as Switch above.
+    public List<(Guid Removed, Guid Fallback)> RemovesWithFallback { get; } = [];
+    public bool RejectFallbackRemove { get; set; }
+    public Result Remove(Guid id, Guid fallback)
+    {
+        RemovesWithFallback.Add((id, fallback));
+        if (RejectFallbackRemove) return Result.Failure("fallback remove rejected (test)");
+        Desktops.RemoveAll(d => d.Id == id);
+        CurrentDesktopId = fallback;
+        return Result.Success();
+    }
     // #89 needs the ORDER of two moves to be observable: the screen move has to happen before the
     // desktop move, because moving a window to another desktop cloaks it and a cloaked window's
     // rectangle is not reliably writable.

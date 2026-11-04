@@ -72,6 +72,11 @@ public sealed class VirtualDesktopService(Action<string>? trace = null) : IVirtu
             d.Remove,
             e => $"Could not remove desktop {desktopId}: {e.Message}"));
 
+    public Result Remove(Guid desktopId, Guid fallbackDesktopId) =>
+        Find(desktopId).Bind(d => Find(fallbackDesktopId).Bind(fallback => Result.Try(
+            () => d.Remove(fallback),
+            e => $"Could not remove desktop {desktopId} and land on {fallbackDesktopId}: {e.Message}")));
+
     public Result MoveWindow(WindowHandle window, Guid desktopId) =>
         Find(desktopId).Bind(d => Result.Try(
             () => VirtualDesktop.MoveToDesktop(window.Value, d),

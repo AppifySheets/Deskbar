@@ -146,6 +146,7 @@ public class PlacementCacheTests
         public Result Rename(Guid desktopId, string name) => Inner.Rename(desktopId, name);
         public Result Switch(Guid desktopId) => Inner.Switch(desktopId);
         public Result Remove(Guid desktopId) => Inner.Remove(desktopId);
+        public Result Remove(Guid desktopId, Guid fallbackDesktopId) => Inner.Remove(desktopId, fallbackDesktopId);
         public Result MoveWindow(WindowHandle window, Guid desktopId) => Inner.MoveWindow(window, desktopId);
         public Result<Guid> DesktopOf(WindowHandle window) { DesktopOfCalls++; return Inner.DesktopOf(window); }
         public Result Pin(WindowHandle window) => Inner.Pin(window);
