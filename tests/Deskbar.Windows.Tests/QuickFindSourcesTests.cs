@@ -37,6 +37,15 @@ public class QuickFindSourcesTests
         Assert.Equal(asked, checkedPaths.Count == 1);
     }
 
+    // Review M4: a mapped network drive letter is a share too, and is skipped the same way.
+    [Fact]
+    public void A_path_on_a_mapped_network_drive_is_not_checked()
+    {
+        var asked = false;
+        QuickFindSources.LocalPathExists(@"Z:\work\X.sln", _ => asked = true, isNetworkDrive: root => root == @"Z:\");
+        Assert.False(asked);
+    }
+
     [Fact]
     public void A_vs_code_tab_row_selects_by_the_editor_rule() =>
         Assert.True(QuickFindSources.TabToSelect(

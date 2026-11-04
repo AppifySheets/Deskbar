@@ -38,6 +38,29 @@ public class LaunchDestinationTests
         Assert.Equal(Dev, manager.LaunchDestination(Rider, $"\"{Rider}\" C:\\src\\X.sln"));
     }
 
+    // Review I1: a pinned app is remembered as pinned, and its row must not force it onto one workspace.
+    [Fact]
+    public void A_pinned_app_is_reported_as_pinned()
+    {
+        const string Beeper = @"C:\apps\beeper.exe";
+        var manager = Manager(WithWorkspaces with { PinnedApps = [new InventoryEntry(Beeper, null, "Beeper")] });
+
+        Assert.Equal(Rehydration.PlacementKind.Pinned, manager.LaunchPlacement(Beeper, null)!.Kind);
+        Assert.Null(manager.LaunchDestination(Beeper, null));
+    }
+
+    // Review M2: an app whose windows stay where they are opened has no remembered home to promise.
+    [Fact]
+    public void A_shell_window_has_no_destination()
+    {
+        var explorer = @"C:\Windows\explorer.exe";
+        var manager = Manager(WithWorkspaces with
+        {
+            Inventory = new Dictionary<Guid, IReadOnlyList<InventoryEntry>> { [Dev] = [new InventoryEntry(explorer, null, "x")] },
+        });
+        Assert.Null(manager.LaunchPlacement(explorer, null));
+    }
+
     [Fact]
     public void A_rule_decides_for_an_app_memory_has_never_seen()
     {

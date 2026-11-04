@@ -67,6 +67,19 @@ public class FindRankingTests
             Row("older-window", FindKind.Window, "Invoices", A),
         ], B, A));
 
+    // Review I6: launch rows are capped, so a broad query does not draw hundreds of programs; open things are
+    // never capped.
+    [Fact]
+    public void Launch_rows_are_capped_and_open_rows_are_not()
+    {
+        var all = Enumerable.Range(0, 40).Select(i => Row($"w{i}", FindKind.Window, $"app {i}"))
+            .Concat(Enumerable.Range(0, 40).Select(i => Row($"s{i}", FindKind.StartMenu, $"app {i}")))
+            .ToList();
+        var ranked = FindRanking.Rank(FindQuery.Parse("app"), all, []);
+        Assert.Equal(40, ranked.Count(r => r.IsOpen));
+        Assert.Equal(FindRanking.MaxLaunchRows, ranked.Count(r => !r.IsOpen));
+    }
+
     [Fact]
     public void Only_matching_results_are_returned() =>
         Assert.Empty(Keys("zzz", [Row("w", FindKind.Window, "Notes")]));

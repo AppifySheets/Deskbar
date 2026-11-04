@@ -6,107 +6,148 @@ using Deskbar.Core.Rehydration;
 namespace Deskbar.Core.QuickFind;
 
 // One entry of the Start menu's full app list (shell:AppsFolder). ParsingName is what the shell launches it by:
-// an AppUserModelID ("Microsoft.Windows.Photos_8wekyb3d8bbwe!App") for a packaged app, a path-like name for a
-// desktop one. TargetPath is the exe a desktop app's shortcut points at, null for a packaged app. Measured on
+// an AppUserModelID ("Microsoft.Windows.Photos_8wekyb3d8bbwe!App") for a packaged app or a PWA, a path-like
+// name for a desktop shortcut. TargetPath is the exe a desktop shortcut points at, null otherwise. Measured on
 // Petre's machine: 494 entries (docs/superpowers/notes/2026-11-04-quick-find-probes.md).
 public sealed record StartMenuApp(string Name, string ParsingName, string? TargetPath);
+
+// Everything the catalogue needs, handed in by the app so the rules are tested without Windows:
+//   Roster          every remembered app (AppState.Inventory's entries)
+//   StartMenu       the Start menu's app list
+//   Running         every open window, with its process path and command line
+//   RunningAppIds   the AppUserModelIDs of open windows: a PWA's window belongs to the browser and a framed
+//                   app's to ApplicationFrameHost, so only this says they are open
+//   Starting        exe names a start is still waiting for (WorkspaceManager.AwaitedProcesses)
+//   PathExists      whether a local file or folder exists
+//   DestinationOf   where a start of this program and command line would land, as the row shows it
+//   IsSelf          Deskbar's own Start menu entry
+public sealed record LaunchFacts(
+    IReadOnlyList<InventoryEntry> Roster,
+    IReadOnlyList<StartMenuApp> StartMenu,
+    IReadOnlyList<WindowInfo> Running,
+    IReadOnlySet<string> RunningAppIds,
+    IReadOnlySet<string> Starting,
+    Func<string, bool> PathExists,
+    Func<string, string?, FindPlace> DestinationOf,
+    Func<StartMenuApp, bool> IsSelf);
 
 // WHAT QUICK FIND COULD START (docs/superpowers/specs/2026-11-04-quick-find-design.md, "Launching"). Petre:
 // "this should be a quick launcher as well. if a window isn't opened, it should show me, including which
 // deskbar it will run in, before it runs".
 //
-// Two sources, and the roster is not a clean list of command lines. Of the 29 entries in Petre's real
-// state.json, eleven were Teams with throwaway session arguments, Photos and Snipping Tool were stored under
-// versioned WindowsApps paths that cannot be started, and others were ApplicationFrameHost or protocol
-// activations. So:
+// Rebuilt after a review measured the first version against Petre's real Start menu and roster:
 //
-//   * One row per PROGRAM, started bare. Session arguments are never replayed.
-//   * Plus one row per CONTENT argument: an argument naming a file or folder that exists, like
-//     `rider64 X.sln`. That row starts the program with just that argument.
-//   * A packaged program (under \WindowsApps\) starts through its Start menu entry, by AppUserModelID, never by
-//     its stored path; with no matching entry it gets no row. ApplicationFrameHost says nothing about the app
-//     it framed, so it never gets a row.
-//   * A program counts as running if any of its windows is open, whatever its arguments, and then it has no
-//     row: its windows are already listed, and Enter must never start a second copy by accident. A content
-//     row disappears only while a window with that content is open.
-//   * Then every Start menu program the roster does not cover and that is not running. Only programs: an
-//     AppUserModelID or an .exe target, and nothing named "Uninstall".
+//   * ONE ROW PER START MENU ENTRY, launched through the shell by that entry (explorer.exe
+//     shell:AppsFolder\<entry>), so the shortcut's own arguments and working folder come along. The first
+//     version started the target exe bare and kept one row per exe, so "Electrum Testnet" started the mainnet
+//     wallet and "Command Prompt" vanished behind one of the eleven shortcuts on cmd.exe.
+//   * A remembered program with no Start menu entry gets one bare row, started by its exe. Session arguments
+//     (eleven Teams entries differed only in --restart-count) are never replayed.
+//   * One row per CONTENT argument a remembered program was started with: an existing local file or folder,
+//     like `rider64 X.sln`, never an option's value or an exe repeated on the line.
+//   * RUNNING means any window of a process with the same EXE NAME (a newer Rider in another folder is still
+//     Rider), or a window carrying the entry's AppUserModelID (PWAs, framed apps), or a start still waiting
+//     for its window. Such programs get no row: Enter must never start a second copy.
+//   * Packaged programs are held to their row's workspace by the exe their window really belongs to
+//     (ms-teams, Photos), known from the roster; ApplicationFrameHost entries say nothing and are skipped.
+//   * Deskbar never lists itself: starting its own Store package here would perform the autostart takeover.
 //
-// `destinationOf` says where a start would land for a program path (or an AppUserModelID) and command line,
-// from the placement chain the app runs on a new window; the row shows it before anything runs.
+// A launch row matches on its name, its exe and its content path, never on "not running" or its workspace,
+// so one common letter does not match every program on the machine.
 public static class LaunchCatalog
 {
-    public static IReadOnlyList<FindResult> Of(
-        IReadOnlyList<InventoryEntry> roster,
-        IReadOnlyList<StartMenuApp> startMenu,
-        IReadOnlyList<WindowInfo> running,
-        Func<string, bool> pathExists,
-        Func<string, string?, FindPlace> destinationOf)
+    public static IReadOnlyList<FindResult> Of(LaunchFacts facts)
     {
-        var programs = startMenu.Where(IsProgram).ToList();
-        var runningPrograms = running.Where(w => w.ProcessPath is not null).Select(w => ProgramOf(w.ProcessPath!)).ToHashSet(StringComparer.OrdinalIgnoreCase);
-
-        var remembered = roster
+        var runningExes = facts.Running.Where(w => w.ProcessPath is not null).Select(w => Path.GetFileName(w.ProcessPath!)).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var programs = facts.Roster
             .Where(e => !IsFrameHost(e.ProcessPath))
             .GroupBy(e => ProgramOf(e.ProcessPath), StringComparer.OrdinalIgnoreCase)
-            .SelectMany(program => Remembered(program.Key, program.ToList(), programs, running, runningPrograms, pathExists, destinationOf))
+            .ToDictionary(g => g.Key, g => (IReadOnlyList<InventoryEntry>)g.ToList(), StringComparer.OrdinalIgnoreCase);
+        var menu = facts.StartMenu.Where(IsProgram).Where(app => !facts.IsSelf(app)).ToList();
+
+        var menuRows = menu.Select(app => MenuRow(app, programs.GetValueOrDefault(ProgramOf(app)), facts, runningExes));
+        var bareRows = programs.Where(p => !menu.Any(app => string.Equals(ProgramOf(app), p.Key, StringComparison.OrdinalIgnoreCase)))
+            .Select(p => BareRow(p.Value, facts, runningExes));
+        var contentRows = programs.Values.Where(entries => !IsPackaged(entries[0].ProcessPath)).SelectMany(entries => ContentRows(entries, facts));
+
+        return menuRows.Concat(bareRows).OfType<FindResult>().Concat(contentRows)
+            .Where(row => row.Launch?.ExpectedProcess is not { } expected || !facts.Starting.Contains(expected))
             .ToList();
-
-        var covered = roster.Select(e => ProgramOf(e.ProcessPath)).ToHashSet(StringComparer.OrdinalIgnoreCase);
-        var fromStartMenu = programs
-            .Where(app => !covered.Contains(ProgramOf(app)) && !runningPrograms.Contains(ProgramOf(app)))
-            .DistinctBy(ProgramOf, StringComparer.OrdinalIgnoreCase)
-            .Select(app => Row($"s:{app.ParsingName}", FindKind.StartMenu, app.Name, LaunchOf(app), app.TargetPath,
-                destinationOf(app.TargetPath ?? app.ParsingName, null)));
-
-        return remembered.Concat(fromStartMenu).ToList();
     }
 
-    static IEnumerable<FindResult> Remembered(
-        string program,
-        IReadOnlyList<InventoryEntry> entries,
-        IReadOnlyList<StartMenuApp> startMenu,
-        IReadOnlyList<WindowInfo> running,
-        IReadOnlySet<string> runningPrograms,
-        Func<string, bool> pathExists,
-        Func<string, string?, FindPlace> destinationOf)
+    static FindResult? MenuRow(StartMenuApp app, IReadOnlyList<InventoryEntry>? remembered, LaunchFacts facts, IReadOnlySet<string> runningExes)
     {
-        var path = entries[0].ProcessPath;
-        var entry = startMenu.FirstOrDefault(app => string.Equals(ProgramOf(app), program, StringComparison.OrdinalIgnoreCase));
-        var packaged = IsPackaged(path);
-        if (packaged && entry is null) yield break;
+        var exe = app.TargetPath ?? remembered?[0].ProcessPath;
+        if (exe is not null && runningExes.Contains(Path.GetFileName(exe))) return null;
+        if (facts.RunningAppIds.Contains(app.ParsingName)) return null;
 
-        var exe = Path.GetFileNameWithoutExtension(path);
-        var bare = packaged ? LaunchOf(entry!) : new LaunchTarget(new ProgramLaunch(path, [], null), exe);
-
-        if (!runningPrograms.Contains(program))
-            yield return Row($"r:{program}", FindKind.Remembered, entry?.Name ?? exe, bare, path, destinationOf(path, null));
-
-        // Content rows only for programs started by path: a packaged app's arguments are activations, not files.
-        if (packaged) yield break;
-        var contents = entries
-            .Select(e => Arguments(CommandLines.ArgumentsOf(e.CommandLine, path)).FirstOrDefault(pathExists))
-            .OfType<string>()
-            .Distinct(StringComparer.OrdinalIgnoreCase);
-        foreach (var content in contents.Where(c => !running.Any(w => SameProgram(w, program) && (w.CommandLine ?? "").Contains(c, StringComparison.OrdinalIgnoreCase))))
-            yield return Row($"r:{program}|{content}", FindKind.Remembered, Path.GetFileName(content.TrimEnd('\\', '/')),
-                new LaunchTarget(new ProgramLaunch(path, [content], null), exe), path, destinationOf(path, $"\"{path}\" \"{content}\""),
-                detailPrefix: exe);
+        var home = remembered is null ? null : Representative(remembered, facts);
+        var place = home is null ? facts.DestinationOf(app.TargetPath ?? app.ParsingName, null) : facts.DestinationOf(home.ProcessPath, home.CommandLine);
+        var launch = new LaunchTarget(
+            new ProgramLaunch("explorer.exe", [$@"shell:AppsFolder\{app.ParsingName}"], null),
+            exe is null ? null : Path.GetFileNameWithoutExtension(exe));
+        return Row($"s:{app.ParsingName}", remembered is null ? FindKind.StartMenu : FindKind.Remembered, app.Name, launch,
+            app.TargetPath ?? home?.ProcessPath, place, searchExtra: exe is null ? "" : Path.GetFileNameWithoutExtension(exe));
     }
 
-    static FindResult Row(string key, FindKind kind, string title, LaunchTarget launch, string? iconPath, FindPlace place, string? detailPrefix = null)
+    // A remembered program the Start menu does not list: started by its exe, bare. Only while that exe still
+    // exists (an uninstalled program keeps roster entries) and never for a packaged one, whose versioned path
+    // cannot be started.
+    static FindResult? BareRow(IReadOnlyList<InventoryEntry> entries, LaunchFacts facts, IReadOnlySet<string> runningExes)
+    {
+        if (IsPackaged(entries[0].ProcessPath)) return null;
+        var path = entries.Select(e => e.ProcessPath).FirstOrDefault(facts.PathExists);
+        if (path is null || runningExes.Contains(Path.GetFileName(path))) return null;
+        var exe = Path.GetFileNameWithoutExtension(path);
+        var home = Representative(entries, facts)!;
+        return Row($"r:{path}", FindKind.Remembered, exe, new LaunchTarget(new ProgramLaunch(path, [], null), exe),
+            path, facts.DestinationOf(home.ProcessPath, home.CommandLine));
+    }
+
+    static IEnumerable<FindResult> ContentRows(IReadOnlyList<InventoryEntry> entries, LaunchFacts facts)
+    {
+        var path = entries.Select(e => e.ProcessPath).FirstOrDefault(facts.PathExists);
+        if (path is null) yield break;
+        var exeFile = Path.GetFileName(path);
+        var exe = Path.GetFileNameWithoutExtension(path);
+        var withContent = entries
+            .Select(e => (Entry: e, Content: Content(e, facts.PathExists)))
+            .Where(x => x.Content is not null)
+            .DistinctBy(x => x.Content, StringComparer.OrdinalIgnoreCase);
+        foreach (var (entry, content) in withContent)
+        {
+            var open = facts.Running.Any(w => w.ProcessPath is { } p
+                && Path.GetFileName(p).Equals(exeFile, StringComparison.OrdinalIgnoreCase)
+                && (w.CommandLine ?? "").Contains(content!, StringComparison.OrdinalIgnoreCase));
+            if (open) continue;
+            yield return Row($"r:{path}|{content}", FindKind.Remembered, Path.GetFileName(content!.TrimEnd('\\', '/')),
+                new LaunchTarget(new ProgramLaunch(path, [content], null), exe), path,
+                facts.DestinationOf(entry.ProcessPath, entry.CommandLine), detailPrefix: exe, searchExtra: $"{exe} {content}");
+        }
+    }
+
+    // The argument that names a file or folder, if any: the first one that exists, skipping exes (a program
+    // that repeats its own path) and the value right after an option (`--datadir C:\data` is not content).
+    static string? Content(InventoryEntry entry, Func<string, bool> exists)
+    {
+        var tokens = Arguments(CommandLines.ArgumentsOf(entry.CommandLine, entry.ProcessPath));
+        return tokens
+            .Where((token, i) => !token.EndsWith(".exe", StringComparison.OrdinalIgnoreCase)
+                && !(i > 0 && (tokens[i - 1].StartsWith('-') || tokens[i - 1].StartsWith('/'))))
+            .FirstOrDefault(exists);
+    }
+
+    // The entry whose command line best stands for starting the program: one with no arguments if there is one
+    // (what a bare start produces), else the first. Its identity is what placement memory knows the app by.
+    static InventoryEntry? Representative(IReadOnlyList<InventoryEntry> entries, LaunchFacts facts) =>
+        entries.FirstOrDefault(e => CommandLines.ArgumentsOf(e.CommandLine, e.ProcessPath).Length == 0) ?? entries.FirstOrDefault();
+
+    static FindResult Row(string key, FindKind kind, string title, LaunchTarget launch, string? iconPath, FindPlace place,
+        string? detailPrefix = null, string searchExtra = "")
     {
         var detail = detailPrefix is null ? "not running" : $"{detailPrefix}, not running";
-        return new FindResult(key, kind, title, place, $"{title} {detail} {place.Label}", Detail: detail, IconPath: iconPath, Launch: launch);
+        return new FindResult(key, kind, title, place, $"{title} {searchExtra}".Trim(), Detail: detail, IconPath: iconPath, Launch: launch);
     }
-
-    // A packaged app is started through the shell by its AppUserModelID; its window then belongs to
-    // ApplicationFrameHost or the app's own exe, never to anything it was started as, so there is nothing to
-    // expect it by (probes, decision c). A desktop app is started by its exe and expected under that exe's name.
-    static LaunchTarget LaunchOf(StartMenuApp app) =>
-        app.TargetPath is { } target
-            ? new LaunchTarget(new ProgramLaunch(target, [], null), Path.GetFileNameWithoutExtension(target))
-            : new LaunchTarget(new ProgramLaunch("explorer.exe", [$@"shell:AppsFolder\{app.ParsingName}"], null), null);
 
     static bool IsProgram(StartMenuApp app) =>
         !app.Name.Contains("uninstall", StringComparison.OrdinalIgnoreCase)
@@ -114,16 +155,13 @@ public static class LaunchCatalog
             ? target.EndsWith(".exe", StringComparison.OrdinalIgnoreCase) && !Path.GetFileName(target).Contains("unins", StringComparison.OrdinalIgnoreCase)
             : app.ParsingName.Contains('!'));
 
-    // A program's identity across versions: a packaged app's family name (its WindowsApps folder changes with
-    // every update, Photos_2025.11010... today, something else next week), a desktop app's exe path.
+    // A program's identity: a packaged app's family name (its WindowsApps folder changes with every update), a
+    // desktop app's exe path.
     static string ProgramOf(string processPath) =>
         IsPackaged(processPath) && Family(processPath) is { } family ? family : processPath;
 
     static string ProgramOf(StartMenuApp app) =>
         app.TargetPath ?? (app.ParsingName.Split('!') is [var family, ..] ? family : app.ParsingName);
-
-    static bool SameProgram(WindowInfo window, string program) =>
-        window.ProcessPath is { } path && string.Equals(ProgramOf(path), program, StringComparison.OrdinalIgnoreCase);
 
     static bool IsPackaged(string path) => path.Contains(@"\WindowsApps\", StringComparison.OrdinalIgnoreCase);
 

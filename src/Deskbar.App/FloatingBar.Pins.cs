@@ -352,6 +352,11 @@ public partial class FloatingBar
     // From what AskAppIds has already learnt, never from the shell: this runs inside a rebuild, on the UI thread.
     string? AppIdOf(WindowInfo window) => windowAppIds.GetValueOrDefault(window.Handle);
 
+    // Every AppUserModelID the bar has read for an open window, from the same cache. Quick find uses it to tell
+    // that a PWA or a framed app is open, whose window belongs to the browser or to ApplicationFrameHost.
+    // UI thread only, like the cache.
+    public IReadOnlySet<string> OpenAppIds => windowAppIds.Values.ToHashSet(StringComparer.OrdinalIgnoreCase);
+
     // WHY THE LOOKUP LEFT THE UI THREAD. Petre: "see why the bar had a delay just now". The trace had a rebuild
     // of 4738ms with 4168ms of it in "pins", and fifteen like it in an hour, 4.3 to 5.6s each, the bar drawing
     // nothing while one ran. A stack-sampling trace of that rebuild put all of it in ShellTaskbarPins.AppIdOf,

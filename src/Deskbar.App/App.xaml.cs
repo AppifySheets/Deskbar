@@ -1525,16 +1525,26 @@ public partial class App : Application
             // the switcher's, so quick find never finds itself.
             var findActivator = new WindowActivator();
             // Launch rows (pull request C): the Start menu, read off the UI thread and kept a minute, and which
-            // roster arguments are files or folders, remembered for the session so the per-second refresh never
-            // touches the disk twice for one path.
+            // paths exist, remembered for a minute so the per-second refresh does not touch the disk again for
+            // one path, and then forgotten, so a file created or deleted since is seen (final review, M4: never
+            // cache an answer that can change for good).
             var startMenu = new StartMenuCache();
             startMenu.RefreshIfStale();
             var exists = new System.Collections.Concurrent.ConcurrentDictionary<string, bool>(StringComparer.OrdinalIgnoreCase);
-            Func<string, bool> pathExists = argument => exists.GetOrAdd(argument,
-                a => QuickFindSources.LocalPathExists(a, p => System.IO.File.Exists(p) || System.IO.Directory.Exists(p)));
+            var existsSince = DateTime.UtcNow;
+            Func<string, bool> pathExists = argument =>
+            {
+                if (DateTime.UtcNow - existsSince > TimeSpan.FromMinutes(1))
+                {
+                    exists.Clear();
+                    existsSince = DateTime.UtcNow;
+                }
+                return exists.GetOrAdd(argument, a => QuickFindSources.LocalPathExists(a, p => System.IO.File.Exists(p) || System.IO.Directory.Exists(p)));
+            };
             quickFind = new QuickFind(new QuickFindWindow(),
                 () => QuickFindSources.Open(manager, floatingBar?.Tabs)
-                    .Concat(QuickFindSources.Launchable(manager, startMenu.Apps, pathExists))
+                    .Concat(QuickFindSources.Launchable(manager, startMenu.Apps, pathExists,
+                        floatingBar?.OpenAppIds ?? new HashSet<string>()))
                     .ToList(),
                 () => QuickFindSources.Recent(manager),
                 result => QuickFindSources.Go(manager, findActivator, floatingBar?.Tabs, result),

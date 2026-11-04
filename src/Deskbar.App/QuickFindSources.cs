@@ -88,24 +88,45 @@ public static class QuickFindSources
     // EVERYTHING QUICK FIND COULD START (pull request C of the plan): the roster and the Start menu, minus
     // whatever is running, each with the workspace it would open in. LaunchCatalog decides the rows;
     // this hands it the app's facts.
-    public static IReadOnlyList<FindResult> Launchable(WorkspaceManager manager, IReadOnlyList<StartMenuApp> startMenu, Func<string, bool> pathExists) =>
-        LaunchCatalog.Of(
-            manager.State.Inventory.Values.SelectMany(entries => entries).ToList(),
+    //
+    // `openAppIds` are the AppUserModelIDs of open windows, from the bar's cache (read off the UI thread there):
+    // only they say a PWA or a framed app is open, since its window belongs to another process.
+    public static IReadOnlyList<FindResult> Launchable(WorkspaceManager manager, IReadOnlyList<StartMenuApp> startMenu,
+        Func<string, bool> pathExists, IReadOnlySet<string> openAppIds) =>
+        LaunchCatalog.Of(new LaunchFacts(
+            manager.State.Inventory.Values.SelectMany(entries => entries)
+                .Concat(manager.State.PinnedApps).Concat(manager.State.DetachedApps).ToList(),
             startMenu,
             manager.KnownWindows,
+            openAppIds,
+            manager.AwaitedProcesses,
             pathExists,
-            (program, commandLine) => Destination(manager, manager.LaunchDestination(program, commandLine)));
+            (program, commandLine) => Destination(manager, manager.LaunchPlacement(program, commandLine)),
+            IsDeskbar));
+
+    // Deskbar's own Start menu entry, Store package or loose exe (final review, M7): starting the Store package
+    // on a machine running another copy performs its autostart takeover.
+    static bool IsDeskbar(StartMenuApp app) =>
+        app.ParsingName.StartsWith("Petre.Deskbar_", StringComparison.OrdinalIgnoreCase)
+        || (app.TargetPath is { } target && Path.GetFileName(target).StartsWith("Deskbar", StringComparison.OrdinalIgnoreCase));
 
     // The workspace Petre is on, or null on an unnamed desktop.
     static Guid? Current(WorkspaceManager manager) =>
         manager.CurrentWorkspaceId.HasValue ? manager.CurrentWorkspaceId.Value : null;
 
-    // The workspace a start lands in: the one placement memory or a rule names, else the one Petre is on. On an
-    // unnamed desktop there is no workspace to name, and the row says it opens here.
-    static FindPlace Destination(WorkspaceManager manager, Guid? decided) =>
-        (decided ?? Current(manager)) is { } id && manager.State.Workspaces.TryFirst(w => w.Id == id) is { HasValue: true } found
+    // Where a start lands, as its row says it. A remembered workspace or a rule names one. A PINNED app opens on
+    // every desktop and a DETACHED one wherever Petre is, and both rows carry no workspace, so Enter neither
+    // switches nor registers an expectation, and placement memory re-applies the pin when the window appears
+    // (final review, I1: the expectation used to outrank memory and land Beeper unpinned). Nothing known means
+    // the workspace Petre is on; on an unnamed desktop, "this desktop".
+    static FindPlace Destination(WorkspaceManager manager, Core.Rehydration.Placement? placement) => placement switch
+    {
+        { Kind: Core.Rehydration.PlacementKind.Pinned } => new FindPlace(null, "all desktops"),
+        { Kind: Core.Rehydration.PlacementKind.Detached } => new FindPlace(null, "this desktop"),
+        _ => (placement?.WorkspaceId ?? Current(manager)) is { } id && manager.State.Workspaces.TryFirst(w => w.Id == id) is { HasValue: true } found
             ? Place(manager.State, found.Value)
-            : new FindPlace(null, "this desktop");
+            : new FindPlace(null, "this desktop"),
+    };
 
     // Enter on a not-running row: switch to the workspace the row named, then start the program there, held to
     // it by the same expectation `deskbar.cmd start` uses (StartIn). Switching FIRST is what makes a packaged
@@ -124,12 +145,27 @@ public static class QuickFindSources
     // Whether a roster argument names a file or folder, asked only of LOCAL rooted paths: this runs on the UI
     // thread while the box refreshes, and a path on a network share can block for seconds when the share is
     // offline. Such a path simply makes no content row.
-    internal static bool LocalPathExists(string argument, Func<string, bool> exists) =>
+    // A mapped drive letter is a network share too (final review, M4), told apart by its drive type, which
+    // Windows answers without touching the share.
+    internal static bool LocalPathExists(string argument, Func<string, bool> exists, Func<string, bool>? isNetworkDrive = null) =>
         argument.Length > 2
         && Path.IsPathFullyQualified(argument)
         && !argument.StartsWith(@"\\", StringComparison.Ordinal)
         && !argument.StartsWith("//", StringComparison.Ordinal)
+        && !(isNetworkDrive ?? IsNetworkDrive)(Path.GetPathRoot(argument) ?? "")
         && exists(argument);
+
+    static bool IsNetworkDrive(string root)
+    {
+        try
+        {
+            return new DriveInfo(root).DriveType == DriveType.Network;
+        }
+        catch
+        {
+            return true; // a root Windows cannot describe is not checked
+        }
+    }
 
     static FindPlace Place(Core.Persistence.AppState state, Workspace workspace) =>
         new(workspace.Id, LaneColour.FullName(state, workspace));

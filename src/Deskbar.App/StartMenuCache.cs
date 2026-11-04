@@ -26,7 +26,6 @@ public sealed class StartMenuCache
             try
             {
                 Volatile.Write(ref apps, StartMenuApps.Read());
-                readAt = DateTime.UtcNow;
             }
             catch (Exception e)
             {
@@ -35,6 +34,9 @@ public sealed class StartMenuCache
             }
             finally
             {
+                // Stamped on failure too, so a broken shell is asked once a minute rather than every second
+                // (final review, M8).
+                readAt = DateTime.UtcNow;
                 Volatile.Write(ref reading, 0);
             }
         });

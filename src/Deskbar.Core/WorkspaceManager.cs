@@ -3159,14 +3159,31 @@ public sealed class WorkspaceManager(
     // there (StartIn). Memory standing down for a shared identity cannot apply: only programs that are not
     // running get a row.
     public Guid? LaunchDestination(string processPath, string? commandLine) =>
-        PlacementMemory.For(RosterIdentity.Of(processPath, commandLine), State)
-            .Where(placement => placement.Kind == PlacementKind.Workspace)
-            .Map(placement => placement.WorkspaceId)
-            .Or(() => RulesEngine.MatchWorkspace(
-                new WindowInfo(new WindowHandle(0), 0, Path.GetFileNameWithoutExtension(processPath), processPath, "", commandLine),
-                State.WorkspaceRules))
-            .Map(id => (Guid?)id)
-            .GetValueOrDefault((Guid?)null);
+        LaunchPlacement(processPath, commandLine) is { Kind: PlacementKind.Workspace } placement ? placement.WorkspaceId : null;
+
+    // The whole remembered placement, not only a workspace (final review of quick find, I1): a PINNED app such
+    // as Beeper is remembered as pinned, and its row must say so instead of forcing it onto one workspace, where
+    // the start's expectation would outrank memory and land it unpinned. Detached is kept the same way.
+    //
+    // None for the apps whose windows deliberately stay where they are opened (the shell, browsers and
+    // terminals per RosterIdentity, review M2): they have no home to promise. Rules are asked only of a real
+    // program path; an AppUserModelID has no exe name for a process-name rule to match (review M3).
+    public Placement? LaunchPlacement(string processPath, string? commandLine) =>
+        RosterIdentity.IsShell(processPath) || RosterIdentity.StaysWhereOpened(processPath, commandLine)
+            ? null
+            : PlacementMemory.For(RosterIdentity.Of(processPath, commandLine), State)
+                .Or(() => Path.IsPathRooted(processPath)
+                    ? RulesEngine.MatchWorkspace(
+                        new WindowInfo(new WindowHandle(0), 0, Path.GetFileNameWithoutExtension(processPath), processPath, "", commandLine),
+                        State.WorkspaceRules).Map(Placement.In)
+                    : Maybe<Placement>.None) is { HasValue: true } found
+                ? found.Value
+                : null;
+
+    // The exe names starts are still waiting for, so quick find does not offer a program again while its first
+    // start is on its way (final review, I5).
+    public IReadOnlySet<string> AwaitedProcesses =>
+        expectations.Where(e => !e.NameSpent && e.Until >= now()).Select(e => e.ProcessName).ToHashSet(StringComparer.OrdinalIgnoreCase);
 
     Maybe<Decision> StartedFor(WindowInfo window)
     {
