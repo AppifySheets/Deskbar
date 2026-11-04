@@ -159,9 +159,11 @@ public partial class QuickFindWindow : Window
 
         if (row.Detail is { } detail)
         {
+            // A FIXED width, not a maximum: every detail then starts at the same x, so the column reads as a
+            // column instead of a ragged edge that moves with each text's length.
             var right = new TextBlock
             {
-                Text = detail, Foreground = DimText, FontSize = 11, MaxWidth = 180, Margin = new Thickness(10, 0, 0, 0),
+                Text = detail, Foreground = DimText, FontSize = 11, Width = 180, Margin = new Thickness(10, 0, 0, 0),
                 TextTrimming = TextTrimming.CharacterEllipsis, VerticalAlignment = VerticalAlignment.Center,
             };
             Grid.SetColumn(right, 2);

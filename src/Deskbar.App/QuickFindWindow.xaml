@@ -16,11 +16,26 @@
          are assigned imperatively in the wrong order. The panel colour is the switcher's. -->
     <Border CornerRadius="10" Background="#E6202020" Padding="8">
         <DockPanel>
+            <!-- The text box is given a bare template: the system style draws its own rounded box, an
+                 accent underline and a clear button INSIDE this one, which pushed the typed text off centre
+                 and put the button on top of the result count (Petre, with a screenshot: "text alignment").
+                 The count sits in its own column beside the box rather than over it, for the same reason. -->
             <Border DockPanel.Dock="Top" CornerRadius="6" Background="#14FFFFFF" Padding="10,7" Margin="0,0,0,6">
                 <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="Auto"/>
+                    </Grid.ColumnDefinitions>
                     <TextBox x:Name="Query" FontSize="15" Foreground="White" Background="Transparent"
-                             BorderThickness="0" CaretBrush="White" Padding="0"/>
-                    <TextBlock x:Name="Count" HorizontalAlignment="Right" VerticalAlignment="Center"
+                             BorderThickness="0" CaretBrush="White" Padding="0" VerticalContentAlignment="Center">
+                        <TextBox.Template>
+                            <ControlTemplate TargetType="TextBox">
+                                <ScrollViewer x:Name="PART_ContentHost" Focusable="False" VerticalAlignment="Center"
+                                              HorizontalScrollBarVisibility="Hidden" VerticalScrollBarVisibility="Hidden"/>
+                            </ControlTemplate>
+                        </TextBox.Template>
+                    </TextBox>
+                    <TextBlock x:Name="Count" Grid.Column="1" VerticalAlignment="Center" Margin="10,0,0,0"
                                FontSize="11" Foreground="White" Opacity="0.5" IsHitTestVisible="False"/>
                 </Grid>
             </Border>
