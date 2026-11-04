@@ -216,6 +216,9 @@ public sealed class WorkspaceManager(
                 // past it for ever. NameWindowsByFolder does the same at the moment the setting is turned
                 // on; this is for the files where the setting was turned on first.
                 ForgetRenamesSupersededByFolders();
+                // Rows that name the frame around a Store app and not the app, from before such windows
+                // stopped being remembered. Dropped once, on load.
+                ForgetFrameHostRows();
                 // Before anything else looks at where windows are: a crash while standing inside a
                 // nested workspace leaves the parent's windows pinned to every desktop, and every
                 // sweep and overview after that would be reading a machine we left in a borrowed
@@ -2741,6 +2744,22 @@ public sealed class WorkspaceManager(
         var remaining = State.PersistedRenames.Where(r => !NamesByFolder(r.ProcessName)).ToList();
         if (remaining.Count != State.PersistedRenames.Count)
             Persist(State with { PersistedRenames = remaining });
+    }
+
+    // A roster row for ApplicationFrameHost is dead. It names the frame around a Store app (Calculator,
+    // Settings) and not the app, so nothing can be remembered by it, and started bare the frame host
+    // brings nothing back. These rows were written before such windows stopped being remembered; the
+    // window no longer has an identity to match them, so they would sit in Manage as "not running"
+    // while the app is open. Dropped once, on load, and only these: a row for a browser or a terminal
+    // may have been added by hand (AddRosterEntry), and that is what the user asked for.
+    void ForgetFrameHostRows()
+    {
+        var remaining = State.Inventory
+            .ToDictionary(
+                kv => kv.Key,
+                kv => (IReadOnlyList<InventoryEntry>)kv.Value.Where(e => !RosterIdentity.IsFrameHost(e.ProcessPath)).ToList());
+        if (remaining.Sum(kv => kv.Value.Count) != State.Inventory.Sum(kv => kv.Value.Count))
+            Persist(State with { Inventory = remaining });
     }
 
     static bool IsHomeFor(ContainerHome home, string processName, string container) =>

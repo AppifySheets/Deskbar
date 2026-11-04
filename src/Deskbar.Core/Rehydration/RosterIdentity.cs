@@ -82,14 +82,20 @@ public static class RosterIdentity
     // Kept to explorer, deliberately. The rest of LaunchedBy's NotLaunchers list is there to end a
     // process walk early; those processes own no window this app tracks, so adding them here would be
     // a claim about windows nobody has measured. ApplicationFrameHost is the one worth naming, and it
-    // is handled in StayWhereOpened, not here: it frames Store app windows and reports one identity
-    // for all of them. WhatsApp and Teams are rostered under their own paths, because their windows
-    // report their own exe and not the frame.
+    // is handled in StayWhereOpened, not here: it frames Store app windows, and a framed window is
+    // assumed to report the frame's exe and not its own (only Calculator's was read, see there).
+    // WhatsApp and Teams are rostered under their own paths, because their windows report their own
+    // exe and not the frame.
     static readonly IReadOnlySet<string> Shell =
         new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "explorer" };
 
     public static bool IsShell(string processPath) =>
         Shell.Contains(Path.GetFileNameWithoutExtension(processPath));
+
+    // The frame around a Store app window. A roster row with this path names the frame, not an app. Null-safe
+    // because a damaged state.json can load a row with no path, and this runs during the start.
+    public static bool IsFrameHost(string? processPath) =>
+        processPath is not null && ProcessFacts.IsFrameHost(Path.GetFileNameWithoutExtension(processPath));
 
     // Apps whose windows open WHERE THEY WERE OPENED FROM, and are never sent anywhere by memory.
     //
@@ -127,11 +133,13 @@ public static class RosterIdentity
     //              sign-in prompt). The system starts these, not the app that asked, so not even the
     //              launched-by walk can connect them; staying put keeps them in front of the asker.
     //   Taskmgr    a tool you open to look at the machine from wherever you are.
-    //   ApplicationFrameHost  the frame around a Store app window (Calculator, Settings and the like). Each
-    //              of them reports this one exe with the same arguments, so the identity names the frame
-    //              and not the app: a row titled Calculator sent a new Calculator window to that row's
-    //              workspace, from wherever it was opened. Measured on a real machine: the window reports
+    //   ApplicationFrameHost  the frame around a Store app window (Calculator, Settings and the like). A
+    //              framed window reports the frame's exe, so the identity names the frame and not the
+    //              app: a row titled Calculator sent a new Calculator window to that row's workspace,
+    //              from wherever it was opened. Measured: Calculator's window reports
     //              "C:\WINDOWS\system32\ApplicationFrameHost.exe -Embedding" as its command line.
+    //              Settings was only checked by hand after the change (it stays where it is opened).
+    //              That the other framed apps behave the same is an assumption from the shared frame.
     //   SnippingTool  the same kind of tool, summoned by a key (Win+Shift+S, PrtScn) to capture whatever
     //              is in front of you. Petre: "snipping tool opened in another workspace, why?", then
     //              "snipping tool should have no memory of where it was before". It had been placed in
@@ -142,8 +150,8 @@ public static class RosterIdentity
     //
     // Deliberately NOT included: the Store apps that report their own exe, WhatsApp and Teams among them.
     // They are rostered under their own paths and keep their own memory. ApplicationFrameHost IS included
-    // (measured, see above): a Store app framed by it reports that exe, not its own, so it has no
-    // identity that could be remembered.
+    // (Calculator measured, the rest assumed, see above): a Store app framed by it is taken to report
+    // that exe, not its own, so it has no identity that could be remembered.
     static readonly IReadOnlySet<string> StayWhereOpened = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
     {
         "chrome", "msedge", "brave", "vivaldi", "opera", "firefox",

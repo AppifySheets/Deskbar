@@ -85,7 +85,7 @@ public class StayWhereOpenedTests(ITestOutputHelper output)
     [InlineData(@"C:\WINDOWS\system32\PickerHost.exe")]
     [InlineData(@"C:\Windows\System32\CredentialUIBroker.exe")]
     [InlineData(@"C:\WINDOWS\system32\Taskmgr.exe")]
-    // Every Store app framed by the shell reports this one exe, so it has no identity of its own.
+    // A Store app framed by this exe reports it and not its own (Calculator's was read), so it has no identity.
     [InlineData(@"C:\WINDOWS\system32\ApplicationFrameHost.exe")]
     // The path as Petre's state.json recorded it; the hotkey's own command line is covered below.
     [InlineData(@"C:\Program Files\WindowsApps\Microsoft.ScreenSketch_11.2608.41.0_x64__8wekyb3d8bbwe\SnippingTool\SnippingTool.exe")]
@@ -97,17 +97,11 @@ public class StayWhereOpenedTests(ITestOutputHelper output)
     [InlineData(@"C:\Users\me\AppData\Local\Programs\Microsoft VS Code\Code.exe")]
     // Not a substring test: a tool of one's own whose name starts like a browser's is not one.
     [InlineData(@"C:\Tools\chrome-devtools-helper.exe")]
-    public void Other_apps_do_not(string path) =>
-        Assert.False(RosterIdentity.StaysWhereOpened(path, $"\"{path}\""));
-
     // The frame host's entry must not catch the Store apps that report their own exe: WhatsApp runs as
     // WhatsApp.Root.exe under its own package path, and keeps its own memory.
-    [Fact]
-    public void A_store_app_that_reports_its_own_exe_is_not_a_frame_host_window()
-    {
-        const string whatsAppPath = @"C:\Program Files\WindowsApps\5319275A.WhatsAppDesktop_2.2608.102.0_x64__cv1g1gvanyjgm\WhatsApp.Root.exe";
-        Assert.False(RosterIdentity.StaysWhereOpened(whatsAppPath, $"\"{whatsAppPath}\""));
-    }
+    [InlineData(@"C:\Program Files\WindowsApps\5319275A.WhatsAppDesktop_2.2608.102.0_x64__cv1g1gvanyjgm\WhatsApp.Root.exe")]
+    public void Other_apps_do_not(string path) =>
+        Assert.False(RosterIdentity.StaysWhereOpened(path, $"\"{path}\""));
 
     // Calculator, framed by ApplicationFrameHost, was rostered in workspace A from an earlier placement, and
     // Calculator is opened again while the current desktop is B. Memory used to move it to A, because every
@@ -127,15 +121,125 @@ public class StayWhereOpenedTests(ITestOutputHelper output)
             Workspaces = [workspaceA, workspaceB],
             Inventory = new Dictionary<Guid, IReadOnlyList<InventoryEntry>>
             {
-                [workspaceA.Id] = [new InventoryEntry(framePath, frameCmd, "Calculator")],
+                [workspaceA.Id] =
+                [
+                    new InventoryEntry(framePath, frameCmd, "Calculator"),
+                    new InventoryEntry(BeeperPath, BeeperCmd, "Beeper"),
+                ],
             },
         });
 
         monitor.Subject.OnNext(new WindowEvent(WindowEventKind.Appeared,
             new WindowInfo(new WindowHandle(0xCA1C), 9120, "ApplicationFrameHost", framePath, "Calculator", frameCmd)));
+        monitor.Subject.OnNext(new WindowEvent(WindowEventKind.Appeared, BeeperWindow(0xBEE)));
 
         Log();
         Assert.DoesNotContain(new WindowHandle(0xCA1C), desktops.WindowPlacements.Keys);
+        // Positive control: same state, and a real app still goes home.
+        Assert.Equal(workspaceA.DesktopId, desktops.WindowPlacements[new WindowHandle(0xBEE)]);
+    }
+
+    const string FramePath = @"C:\WINDOWS\system32\ApplicationFrameHost.exe";
+    const string FrameCmd = @"C:\WINDOWS\system32\ApplicationFrameHost.exe -Embedding";
+
+    // Rows written before frame-hosted windows stopped being remembered name the frame, not an app.
+    // They go on load; a real app's row beside them stays.
+    [Fact]
+    public void A_saved_frame_host_row_is_dropped_on_start_and_a_real_apps_row_stays()
+    {
+        var home = new Workspace(Guid.NewGuid(), "TaskSpace", null);
+        var manager = Started(AppState.Empty with
+        {
+            Workspaces = [home],
+            Inventory = new Dictionary<Guid, IReadOnlyList<InventoryEntry>>
+            {
+                [home.Id] =
+                [
+                    new InventoryEntry(FramePath, FrameCmd, "Calculator"),
+                    new InventoryEntry(BeeperPath, BeeperCmd, "Beeper"),
+                ],
+            },
+        });
+
+        Assert.Equal(BeeperPath, manager.State.Inventory[home.Id].Single().ProcessPath);
+        Assert.Equal(BeeperPath, store.Stored.Inventory[home.Id].Single().ProcessPath);
+    }
+
+    // A damaged state.json can load a row with no path. The sweep runs during the start, so it must not throw there.
+    [Fact]
+    public void A_saved_row_with_no_path_does_not_stop_the_start()
+    {
+        var home = new Workspace(Guid.NewGuid(), "TaskSpace", null);
+        var manager = Started(AppState.Empty with
+        {
+            Workspaces = [home],
+            Inventory = new Dictionary<Guid, IReadOnlyList<InventoryEntry>>
+            {
+                [home.Id] = [new InventoryEntry(null!, null, "Damaged")],
+            },
+        });
+
+        Assert.Single(manager.State.Inventory[home.Id]);
+    }
+
+    // The reported defect: with Calculator open, its old row was listed as not running.
+    [Fact]
+    public void An_old_frame_host_row_is_not_listed_as_not_running_while_the_app_is_open()
+    {
+        var home = new Workspace(Guid.NewGuid(), "TaskSpace", null);
+        var manager = Started(AppState.Empty with
+        {
+            Workspaces = [home],
+            Inventory = new Dictionary<Guid, IReadOnlyList<InventoryEntry>>
+            {
+                [home.Id] = [new InventoryEntry(FramePath, FrameCmd, "Calculator")],
+            },
+        });
+        monitor.Subject.OnNext(new WindowEvent(WindowEventKind.Appeared,
+            new WindowInfo(new WindowHandle(0xCA1C), 9120, "ApplicationFrameHost", FramePath, "Calculator", FrameCmd)));
+
+        Assert.Empty(manager.NotRunningRoster(home.Id));
+    }
+
+    // Why only frame-host rows go: a program added by hand in Manage may be a browser, and that row is
+    // what the user asked for.
+    [Fact]
+    public void A_hand_added_browser_row_is_not_dropped_on_start()
+    {
+        var home = new Workspace(Guid.NewGuid(), "TaskSpace", null);
+        var manager = Started(AppState.Empty with
+        {
+            Workspaces = [home],
+            Inventory = new Dictionary<Guid, IReadOnlyList<InventoryEntry>>
+            {
+                [home.Id] = [new InventoryEntry(EdgePath, EdgeCmd, "Edge")],
+            },
+        });
+
+        Assert.Single(manager.State.Inventory[home.Id]);
+        Assert.Equal(EdgePath, store.Stored.Inventory[home.Id].Single().ProcessPath);
+    }
+
+    [Fact]
+    public void A_file_with_no_frame_host_rows_is_not_rewritten_on_start()
+    {
+        // Start saves once for its own reasons; what is measured is that a row-free inventory adds nothing
+        // to that, by comparing with a start that has no inventory at all.
+        var home = new Workspace(Guid.NewGuid(), "TaskSpace", null);
+        Started(AppState.Empty with { Workspaces = [home] });
+        var savesWithNoInventory = store.SaveCount;
+
+        store.Stored = AppState.Empty with
+        {
+            Workspaces = [home],
+            Inventory = new Dictionary<Guid, IReadOnlyList<InventoryEntry>>
+            {
+                [home.Id] = [new InventoryEntry(BeeperPath, BeeperCmd, "Beeper")],
+            },
+        };
+        Assert.True(new WorkspaceManager(desktops, monitor, titles, store).Start().IsSuccess);
+
+        Assert.Equal(2 * savesWithNoInventory, store.SaveCount);
     }
 
     // The one exception inside the list: an installed web app is an app with a home.
