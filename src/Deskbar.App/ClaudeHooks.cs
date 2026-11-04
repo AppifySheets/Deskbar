@@ -50,7 +50,16 @@ static class ClaudeHooks
         else if (on) root = [];
         else return;
 
-        if (!Apply(root, on, command)) return;
+        // Apply only changes the tree in memory, so a file whose shape it cannot work with (a repeated key, a command
+        // that is not a string, an entry that is not an object) loses nothing here: it is left alone and traced.
+        bool changed;
+        try { changed = Apply(root, on, command); }
+        catch (Exception e) when (e is InvalidOperationException or ArgumentException)
+        {
+            ClickTrace.Write($"claude hooks: {settingsPath} left alone, its shape is not one Deskbar can work with: {e.Message}");
+            return;
+        }
+        if (!changed) return;
 
         if (original is not null)
         {

@@ -155,6 +155,41 @@ public sealed class ClaudeSkillTests : IDisposable
         Assert.Equal(commented, File.ReadAllText(Settings));
     }
 
+    // A file that parses but has a shape Deskbar cannot work with (a repeated key, a command that is not a string, an
+    // entry that is not an object) crashed every start. It is left alone and traced instead.
+    [Theory]
+    [InlineData("""{"hooks":{"Stop":[]},"hooks":{"Notification":[]}}""", true)]
+    [InlineData("""{"hooks":{"Stop":[]},"hooks":{"Notification":[]}}""", false)]
+    [InlineData("""{"hooks":{"Stop":[{"hooks":[{"type":"command","command":5}]}]}}""", true)]
+    [InlineData("""{"hooks":{"Stop":[{"hooks":[{"type":"command","command":5}]}]}}""", false)]
+    [InlineData("""{"hooks":{"Stop":["x"]}}""", true)]
+    [InlineData("""{"hooks":{"Stop":["x"]}}""", false)]
+    [InlineData("""{"a":1,"a":2}""", true)]
+    [InlineData("""{"a":1,"a":2}""", false)]
+    public void A_settings_file_of_an_odd_shape_is_left_alone(string odd, bool on)
+    {
+        Directory.CreateDirectory(Path.Combine(home, ".claude"));
+        File.WriteAllText(Settings, odd);
+
+        ClaudeSkill.Sync(on, home, Deskbar);
+
+        Assert.Equal(odd, File.ReadAllText(Settings));
+        Assert.False(File.Exists(Settings + ".deskbar-backup"));
+        Assert.False(File.Exists(Settings + ".deskbar-new"));
+    }
+
+    // Only the hooks cannot be added; the skill itself is still written.
+    [Fact]
+    public void The_skill_is_still_written_when_the_settings_file_is_of_an_odd_shape()
+    {
+        Directory.CreateDirectory(Path.Combine(home, ".claude"));
+        File.WriteAllText(Settings, """{"hooks":{"Stop":[]},"hooks":{"Notification":[]}}""");
+
+        ClaudeSkill.Sync(true, home, Deskbar);
+
+        Assert.True(File.Exists(Skill));
+    }
+
     public void Dispose() => Directory.Delete(home, recursive: true);
 
     // No Claude Code on the machine, no folder of its own: nothing is written.

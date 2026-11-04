@@ -72,7 +72,7 @@ static class ClaudeSkill
             // Deskbar's own, finds its command differs, and replaces it with this one.
             ClaudeHooks.Sync(on, Path.Combine(claude, "settings.json"), HookCommand(hookScript));
         }
-        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+        catch (Exception e)
         {
             ClickTrace.Write($"claude skill not {(on ? "written" : "removed")}: {e.Message}");
         }
