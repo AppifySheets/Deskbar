@@ -1,9 +1,11 @@
+using System.IO;
 using System.Windows.Media;
 using CSharpFunctionalExtensions;
 using Deskbar.Core;
 using Deskbar.Core.Abstractions;
 using Deskbar.Core.Domain;
 using Deskbar.Core.QuickFind;
+using Deskbar.Windows.Control;
 
 namespace Deskbar.App;
 
@@ -65,6 +67,7 @@ public static class QuickFindSources
     // tab, and goes to the trace; the jump itself already succeeded, so it is not reported as a failure.
     public static Result Go(WorkspaceManager manager, IWindowActivator activator, IBrowserTabs? tabs, FindResult result)
     {
+        if (result.Launch is not null) return Launch(manager, result);
         if (result.Window is not { } window) return Result.Failure("Nothing to go to.");
         if (tabs is not null && TabToSelect(result, h => manager.KnownWindows.FirstOrDefault(w => w.Handle == h)?.ProcessName) is { } tab)
             tabs.Select(tab.Window, tab.Code, tab.Index, tab.Title)
@@ -81,6 +84,52 @@ public static class QuickFindSources
 
     public static IReadOnlyList<Guid> Recent(WorkspaceManager manager) =>
         manager.ByRecentUse().Ordered.Select(w => w.Id).ToList();
+
+    // EVERYTHING QUICK FIND COULD START (pull request C of the plan): the roster and the Start menu, minus
+    // whatever is running, each with the workspace it would open in. LaunchCatalog decides the rows;
+    // this hands it the app's facts.
+    public static IReadOnlyList<FindResult> Launchable(WorkspaceManager manager, IReadOnlyList<StartMenuApp> startMenu, Func<string, bool> pathExists) =>
+        LaunchCatalog.Of(
+            manager.State.Inventory.Values.SelectMany(entries => entries).ToList(),
+            startMenu,
+            manager.KnownWindows,
+            pathExists,
+            (program, commandLine) => Destination(manager, manager.LaunchDestination(program, commandLine)));
+
+    // The workspace Petre is on, or null on an unnamed desktop.
+    static Guid? Current(WorkspaceManager manager) =>
+        manager.CurrentWorkspaceId.HasValue ? manager.CurrentWorkspaceId.Value : null;
+
+    // The workspace a start lands in: the one placement memory or a rule names, else the one Petre is on. On an
+    // unnamed desktop there is no workspace to name, and the row says it opens here.
+    static FindPlace Destination(WorkspaceManager manager, Guid? decided) =>
+        (decided ?? Current(manager)) is { } id && manager.State.Workspaces.TryFirst(w => w.Id == id) is { HasValue: true } found
+            ? Place(manager.State, found.Value)
+            : new FindPlace(null, "this desktop");
+
+    // Enter on a not-running row: switch to the workspace the row named, then start the program there, held to
+    // it by the same expectation `deskbar.cmd start` uses (StartIn). Switching FIRST is what makes a packaged
+    // app land right: its window belongs to ApplicationFrameHost, which nothing can expect, so it simply opens
+    // on the desktop in front (probes, decision c). With no workspace (an unnamed desktop) it starts here.
+    public static Result Launch(WorkspaceManager manager, FindResult result)
+    {
+        if (result.Launch is not { } target) return Result.Failure("Nothing to start.");
+        var started = result.Place.WorkspaceId is { } workspace
+            ? (Current(manager) == workspace ? Result.Success() : manager.Switch(workspace))
+                .Bind(() => manager.StartIn(workspace, target, ProgramStarter.Start))
+            : ProgramStarter.Start(target.Launch);
+        return started.IsSuccess ? Result.Success() : Result.Failure(started.Error);
+    }
+
+    // Whether a roster argument names a file or folder, asked only of LOCAL rooted paths: this runs on the UI
+    // thread while the box refreshes, and a path on a network share can block for seconds when the share is
+    // offline. Such a path simply makes no content row.
+    internal static bool LocalPathExists(string argument, Func<string, bool> exists) =>
+        argument.Length > 2
+        && Path.IsPathFullyQualified(argument)
+        && !argument.StartsWith(@"\\", StringComparison.Ordinal)
+        && !argument.StartsWith("//", StringComparison.Ordinal)
+        && exists(argument);
 
     static FindPlace Place(Core.Persistence.AppState state, Workspace workspace) =>
         new(workspace.Id, LaneColour.FullName(state, workspace));

@@ -23,6 +23,20 @@ public class QuickFindSourcesTests
         Assert.Equal((new WindowHandle(1), false, 2, "Inbox"), tab);
     }
 
+    // Which roster arguments count as content is checked on the UI thread while the box refreshes, so a path on
+    // a network share is never asked about: an offline share can block the check for seconds.
+    [Theory]
+    [InlineData(@"\\server\share\X.sln", false)]
+    [InlineData(@"//server/share/X.sln", false)]
+    [InlineData(@"C:\src\X.sln", true)]
+    [InlineData(@"--update-trigger", false)]
+    public void Only_local_rooted_paths_are_checked(string argument, bool asked)
+    {
+        var checkedPaths = new List<string>();
+        QuickFindSources.LocalPathExists(argument, p => { checkedPaths.Add(p); return true; });
+        Assert.Equal(asked, checkedPaths.Count == 1);
+    }
+
     [Fact]
     public void A_vs_code_tab_row_selects_by_the_editor_rule() =>
         Assert.True(QuickFindSources.TabToSelect(

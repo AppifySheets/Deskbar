@@ -1524,14 +1524,28 @@ public partial class App : Application
             // no bar), Enter through the same JumpTo the bar's icons use. Its window is ignored by the monitor like
             // the switcher's, so quick find never finds itself.
             var findActivator = new WindowActivator();
+            // Launch rows (pull request C): the Start menu, read off the UI thread and kept a minute, and which
+            // roster arguments are files or folders, remembered for the session so the per-second refresh never
+            // touches the disk twice for one path.
+            var startMenu = new StartMenuCache();
+            startMenu.RefreshIfStale();
+            var exists = new System.Collections.Concurrent.ConcurrentDictionary<string, bool>(StringComparer.OrdinalIgnoreCase);
+            Func<string, bool> pathExists = argument => exists.GetOrAdd(argument,
+                a => QuickFindSources.LocalPathExists(a, p => System.IO.File.Exists(p) || System.IO.Directory.Exists(p)));
             quickFind = new QuickFind(new QuickFindWindow(),
-                () => QuickFindSources.Open(manager, floatingBar?.Tabs),
+                () => QuickFindSources.Open(manager, floatingBar?.Tabs)
+                    .Concat(QuickFindSources.Launchable(manager, startMenu.Apps, pathExists))
+                    .ToList(),
                 () => QuickFindSources.Recent(manager),
                 result => QuickFindSources.Go(manager, findActivator, floatingBar?.Tabs, result),
                 place => QuickFindSources.ColourOf(manager, place),
                 QuickFindSources.IconOf,
                 // Fresh tab titles on open and while open: queued for the reader's own thread, never waited on.
-                refresh: () => floatingBar?.Tabs?.Refresh(manager.KnownWindows),
+                refresh: () =>
+                {
+                    floatingBar?.Tabs?.Refresh(manager.KnownWindows);
+                    startMenu.RefreshIfStale();
+                },
                 // A `deskbar find` from a terminal has no foreground right; the activator's path gets the box
                 // focus anyway, the same one the bar's icons use to bring a window forward.
                 bringForward: hwnd => findActivator.Activate(new WindowHandle(hwnd)));
