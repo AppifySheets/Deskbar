@@ -59,6 +59,11 @@ public interface IBrowserTabs
     // Quick find opening: read these windows again if stale, like Watch, but forget nothing. Watch's list is
     // the bar's, and quick find must not make the bar lose readings for windows it is not showing.
     void Refresh(IReadOnlyList<WindowInfo> windows);
+
+    // Quick find's Enter on a tab: make that tab the window's selected one. On a pool thread, never the
+    // caller's, like every other UI Automation call here. `code` says the window is VS Code, whose editor tabs
+    // are found by their class rather than by the browser rule.
+    Task<CSharpFunctionalExtensions.Result> Select(WindowHandle window, bool code, int index, string title);
 }
 
 public sealed class BrowserTabs : IBrowserTabs, IDisposable
@@ -185,6 +190,46 @@ public sealed class BrowserTabs : IBrowserTabs, IDisposable
 
     internal static bool IsEditorTab(string className) =>
         className.Split(' ', StringSplitOptions.RemoveEmptyEntries).Contains("tab");
+
+    // SELECTING A TAB from outside the browser. Measured on Petre's machine before this was written
+    // (docs/superpowers/notes/2026-11-04-quick-find-probes.md): SelectionItemPattern.Select() switches Edge and
+    // VS Code to the tab in 23 to 36 ms, with the window on another desktop and while minimised.
+    //
+    // The tab is re-found at the index it was listed under, and its title checked: tabs move and close between
+    // the background reading and Enter. When the index no longer holds that title, the strip is searched for
+    // it once, so a tab that moved is still found; when no tab has it, nothing is selected and the window
+    // stays on whatever tab it shows.
+    public Task<CSharpFunctionalExtensions.Result> Select(WindowHandle window, bool code, int index, string title) =>
+        Task.Run(() => SelectNow(window, code, index, title));
+
+    static CSharpFunctionalExtensions.Result SelectNow(WindowHandle window, bool code, int index, string title)
+    {
+        try
+        {
+            var root = AutomationElement.FromHandle(window.Value);
+            var walker = TreeWalker.ControlViewWalker;
+            var tabs = root.FindAll(TreeScope.Descendants, new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.TabItem))
+                .Cast<AutomationElement>()
+                .Where(tab => code ? IsEditorTab(tab.Current.ClassName) : !InsidePage(tab, root, walker))
+                .ToList();
+            var target = index < tabs.Count && SameTab(title, tabs[index].Current.Name)
+                ? tabs[index]
+                : tabs.FirstOrDefault(tab => SameTab(title, tab.Current.Name));
+            if (target is null) return CSharpFunctionalExtensions.Result.Failure($"No tab titled \"{title}\" any more.");
+            if (!target.TryGetCurrentPattern(SelectionItemPattern.Pattern, out var pattern))
+                return CSharpFunctionalExtensions.Result.Failure($"The tab \"{title}\" cannot be selected from outside.");
+            ((SelectionItemPattern)pattern).Select();
+            return CSharpFunctionalExtensions.Result.Success();
+        }
+        catch (Exception e)
+        {
+            // A window that closed mid-way, or one that will not answer: the window is still where Enter took
+            // Petre, only on its old tab.
+            return CSharpFunctionalExtensions.Result.Failure($"Selecting \"{title}\" failed: {e.Message}");
+        }
+    }
+
+    internal static bool SameTab(string listedTitle, string accessibleName) => TabTitle(accessibleName) == listedTitle;
 
     // A tab's title as Petre would type it: its accessible name without what the app appends. Measured on his
     // machine (docs/superpowers/notes/2026-11-04-quick-find-probes.md):

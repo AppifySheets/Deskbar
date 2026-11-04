@@ -1527,7 +1527,7 @@ public partial class App : Application
             quickFind = new QuickFind(new QuickFindWindow(),
                 () => QuickFindSources.Open(manager, floatingBar?.Tabs),
                 () => QuickFindSources.Recent(manager),
-                result => QuickFindSources.Go(manager, findActivator, result),
+                result => QuickFindSources.Go(manager, findActivator, floatingBar?.Tabs, result),
                 place => QuickFindSources.ColourOf(manager, place),
                 QuickFindSources.IconOf,
                 // Fresh tab titles on open and while open: queued for the reader's own thread, never waited on.

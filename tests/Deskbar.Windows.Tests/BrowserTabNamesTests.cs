@@ -25,6 +25,16 @@ public class BrowserTabNamesTests
     public void A_title_that_only_contains_a_state_word_is_left_alone() =>
         Assert.Equal("Sleeping bags", BrowserTabs.TabTitle("Sleeping bags"));
 
+    // Selecting a tab re-finds it at the index quick find listed it under and checks its title first: tabs
+    // move and close between the reading and Enter, and selecting whatever now sits at that index would take
+    // Petre to the wrong page.
+    [Theory]
+    [InlineData("Invoice 2026-10", "Invoice 2026-10 - Sleeping", true)]
+    [InlineData("app.cs", "app.cs, Editor Group 2", true)]
+    [InlineData("Invoice 2026-10", "Mail", false)]
+    public void Select_checks_the_tab_at_that_index_is_still_the_one(string listed, string accessibleName, bool same) =>
+        Assert.Equal(same, BrowserTabs.SameTab(listed, accessibleName));
+
     [Fact]
     public void No_names_before_the_first_reading()
     {

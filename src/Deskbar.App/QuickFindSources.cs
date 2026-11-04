@@ -58,10 +58,26 @@ public static class QuickFindSources
 
     // Enter on an open result: go to its window as clicking its icon on the bar does (JumpTo switches only when
     // the window is on another desktop). A window that has closed fails here, and QuickFind drops its row.
-    public static Result Go(WorkspaceManager manager, IWindowActivator activator, FindResult result) =>
-        result.Window is { } window
-            ? manager.JumpTo(window, activator)
-            : Result.Failure("Nothing to go to.");
+    //
+    // For a TAB, the tab is selected as well, on the tab reader's pool thread, started before the jump so it is
+    // usually done by the time the window is in front (selection takes 23 to 36 ms, and works on another
+    // desktop and while minimised, per the probes). A failed selection leaves Petre on the window, on its old
+    // tab, and goes to the trace; the jump itself already succeeded, so it is not reported as a failure.
+    public static Result Go(WorkspaceManager manager, IWindowActivator activator, IBrowserTabs? tabs, FindResult result)
+    {
+        if (result.Window is not { } window) return Result.Failure("Nothing to go to.");
+        if (tabs is not null && TabToSelect(result, h => manager.KnownWindows.FirstOrDefault(w => w.Handle == h)?.ProcessName) is { } tab)
+            tabs.Select(tab.Window, tab.Code, tab.Index, tab.Title)
+                .ContinueWith(t => t.Result.TapError(error => ClickTrace.Write($"quick find: {error}")), TaskScheduler.Default);
+        return manager.JumpTo(window, activator);
+    }
+
+    // What to select for a row: nothing for a window, the listed tab for a tab, by VS Code's rule when the
+    // window belongs to VS Code (its editor tabs are found by class, not by the browser rule).
+    internal static (WindowHandle Window, bool Code, int Index, string Title)? TabToSelect(FindResult result, Func<WindowHandle, string?> processOf) =>
+        result is { Kind: FindKind.Tab, Window: { } window, TabIndex: { } index }
+            ? (window, string.Equals(processOf(window), "Code", StringComparison.OrdinalIgnoreCase), index, result.Title)
+            : null;
 
     public static IReadOnlyList<Guid> Recent(WorkspaceManager manager) =>
         manager.ByRecentUse().Ordered.Select(w => w.Id).ToList();
