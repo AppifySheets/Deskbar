@@ -3121,6 +3121,53 @@ public sealed class WorkspaceManager(
     public bool Awaits(Guid expectation) =>
         expectations.Any(e => e.Id == expectation && !e.NameSpent && e.Until >= now());
 
+    // Whether any start is still waiting for a window of this exe name. For checks that know the program, not
+    // the expectation's id.
+    public bool AwaitsAny(string processName) =>
+        expectations.Any(e => e.ProcessName.Equals(processName, StringComparison.OrdinalIgnoreCase) && !e.NameSpent && e.Until >= now());
+
+    // STARTING A PROGRAM IN A WORKSPACE, the sequence `deskbar.cmd start` and quick find's launch rows share:
+    // expect the window by name before the start (a quick window could otherwise appear first), start it,
+    // tie the expectation to the new process, and withdraw it when the start failed, so nothing of that name is
+    // claimed for a launch that never happened. With no ExpectedProcess (a packaged app started through the
+    // shell, whose window belongs to ApplicationFrameHost), nothing is expected: the caller switches to the
+    // workspace first, and the window opens there by Windows' own rule
+    // (docs/superpowers/notes/2026-11-04-quick-find-probes.md, decision c).
+    //
+    // Answers the new process's id, or null when the shell handed the start to a copy already running.
+    public Result<int?> StartIn(Guid workspaceId, QuickFind.LaunchTarget target, Func<Control.ProgramLaunch, Result<int?>> starter)
+    {
+        var expectation = target.ExpectedProcess is { } name ? ExpectWindow(name, workspaceId) : (Guid?)null;
+        return starter(target.Launch)
+            .Tap(processId =>
+            {
+                if (expectation is { } id && processId is { } started) NoteExpectedProcess(id, started);
+            })
+            .TapError(_ =>
+            {
+                if (expectation is { } id) CancelExpectation(id);
+            });
+    }
+
+    // WHERE A START WOULD LAND, for quick find to show on a not-running row before anything runs. Petre: "if a
+    // window isn't opened, it should show me, including which deskbar it will run in, before it runs".
+    //
+    // The tiers of the new-window chain that can be known before the window exists: placement memory for this
+    // program and command line (the roster identity), then the workspace rules on its exe name. Null means none
+    // applies, and the program opens where Petre is. Started-for, the container tier and launched-by need the
+    // window itself; the launch makes them moot anyway, since it switches to this answer and expects the window
+    // there (StartIn). Memory standing down for a shared identity cannot apply: only programs that are not
+    // running get a row.
+    public Guid? LaunchDestination(string processPath, string? commandLine) =>
+        PlacementMemory.For(RosterIdentity.Of(processPath, commandLine), State)
+            .Where(placement => placement.Kind == PlacementKind.Workspace)
+            .Map(placement => placement.WorkspaceId)
+            .Or(() => RulesEngine.MatchWorkspace(
+                new WindowInfo(new WindowHandle(0), 0, Path.GetFileNameWithoutExtension(processPath), processPath, "", commandLine),
+                State.WorkspaceRules))
+            .Map(id => (Guid?)id)
+            .GetValueOrDefault((Guid?)null);
+
     Maybe<Decision> StartedFor(WindowInfo window)
     {
         expectations.RemoveAll(e => e.Until < now());

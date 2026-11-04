@@ -77,28 +77,18 @@ public sealed partial class RemoteControl
         launch is not { } starter
             ? ControlReply.Fail("This copy of Deskbar cannot start programs.")
             : Ensure(request.Workspace, request.Create, request.Placement).Match(
-                found =>
-                {
-                    var expectation = manager.ExpectWindow(request.Launch.Program, found.Workspace.Id);
-                    return starter(request.Launch).Match(
-                        processId =>
-                        {
-                            if (processId is { } started) manager.NoteExpectedProcess(expectation, started);
-                            return Success(new
-                            {
-                                created = found.Created,
-                                workspace = Describe(found.Workspace.Id),
-                                started = request.Launch.Program,
-                                pid = processId,
-                                expectingFor = $"{WorkspaceManager.ExpectationLifetime.TotalSeconds:0} s",
-                            });
-                        },
-                        error =>
-                        {
-                            manager.CancelExpectation(expectation);
-                            return ControlReply.Fail(error);
-                        });
-                },
+                // The expect, start, note, withdraw sequence lives in WorkspaceManager.StartIn, shared with quick
+                // find's launch rows. The program is expected under its own exe name.
+                found => manager.StartIn(found.Workspace.Id, new QuickFind.LaunchTarget(request.Launch, request.Launch.Program), starter).Match(
+                    processId => Success(new
+                    {
+                        created = found.Created,
+                        workspace = Describe(found.Workspace.Id),
+                        started = request.Launch.Program,
+                        pid = processId,
+                        expectingFor = $"{WorkspaceManager.ExpectationLifetime.TotalSeconds:0} s",
+                    }),
+                    ControlReply.Fail),
                 ControlReply.Fail);
 
     // Matched case-insensitively against what the window says now AND what it said before a rename
