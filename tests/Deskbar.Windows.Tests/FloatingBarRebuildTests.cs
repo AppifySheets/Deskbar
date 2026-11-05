@@ -35,6 +35,10 @@ namespace Deskbar.Windows.Tests;
 // rows on top. Every row appears twice until the next clean pulse repairs it, which is
 // exactly why the bug was transient and self-healing.
 //
+// The query now runs before the clear, so even with the `rebuilding` guard removed a nested call
+// no longer doubles the rows: it draws, then the outer call clears and draws. This test therefore
+// pins "no duplicates", and no longer proves the guard itself, which stays for the half-built case.
+//
 // The test reproduces that call stack with no COM and no message pump at all: the
 // desktop-service stub fires one window event from inside DesktopOf, which
 // WindowsByWorkspace calls -- precisely the point where the real pump used to let a
@@ -113,6 +117,83 @@ public class FloatingBarRebuildTests
 
         bar.Close();
     });
+
+    // The bar went blank while Explorer restarted: a rebuild cleared every row and the header BEFORE it asked
+    // for the overview, so a query that failed left nothing to draw. The query now runs first, and a failure
+    // changes nothing on screen.
+    [Fact]
+    public void A_rebuild_whose_query_fails_keeps_the_rows_and_the_header() => StaThread.Run(() =>
+    {
+        var harness = Harness.Build();
+        using var bar = harness.ShowBar();
+        var header = (Grid)bar.Bar.FindName("BarHeader")!;
+        var before = bar.Rows.Children.Cast<UIElement>().ToList();
+        Assert.NotEmpty(before);                  // precondition: something is drawn
+        Assert.NotNull(header.Parent);            // ...including the header, which a rebuild places in a row
+
+        harness.Desktops.FailEnumeration = true;
+        harness.Monitor.Pump.OnNext(new WindowEvent(WindowEventKind.Activated, harness.Second));
+
+        // The same ELEMENTS, not merely the same count: a rebuild that cleared and redrew would pass a count.
+        Assert.Equal(before, bar.Rows.Children.Cast<UIElement>().ToList());
+        Assert.NotNull(header.Parent);
+    });
+
+    [Fact]
+    public void The_next_rebuild_that_works_redraws_after_a_failed_one() => StaThread.Run(() =>
+    {
+        var harness = Harness.Build();
+        using var bar = harness.ShowBar();
+        var before = bar.Rows.Children.Cast<UIElement>().ToList();
+        var header = (Grid)bar.Bar.FindName("BarHeader")!;
+
+        // A workspace added while the shell cannot be read: its pulse rebuilds, the query fails, and the
+        // bar still shows the rows it had.
+        harness.Desktops.FailEnumeration = true;
+        Assert.True(harness.Manager.AddWorkspace("Extra").IsSuccess);
+        Assert.Equal(before, bar.Rows.Children.Cast<UIElement>().ToList());
+        Assert.DoesNotContain("Extra", RowNames(bar.Rows));
+
+        harness.Desktops.FailEnumeration = false;
+        harness.Monitor.Pump.OnNext(new WindowEvent(WindowEventKind.Activated, harness.Second));
+
+        // New rows, built from the state as it is now, and the header is in the new pinned row.
+        Assert.DoesNotContain(before[0], bar.Rows.Children.Cast<UIElement>());
+        Assert.Contains("Extra", RowNames(bar.Rows));
+        Assert.NotNull(header.Parent);
+        Assert.Contains(header, Descendants(bar.Rows));
+    });
+
+    // The back button reads the recent-use list, not the overview, so it must follow a change even when the
+    // query behind the same rebuild fails (see the top of RebuildCore).
+    [Fact]
+    public void The_back_button_still_refreshes_when_the_query_fails() => StaThread.Run(() =>
+    {
+        var harness = Harness.Build();
+        using var bar = harness.ShowBar();
+        var back = (Button)bar.Bar.FindName("BackButton")!;
+        Assert.Equal("Back to Sparrow", back.ToolTip);
+
+        // Standing somewhere else now, which moves "back".
+        harness.Desktops.CurrentId = harness.Desktops.Desktops.Single(d => d.Name == "Sparrow").Id;
+        var expected = harness.Manager.ByRecentUse().Back;
+        Assert.True(!expected.HasValue || $"Back to {expected.Value.Name}" != "Back to Sparrow"); // the fixture really moved it
+
+        harness.Desktops.FailEnumeration = true;
+        harness.Monitor.Pump.OnNext(new WindowEvent(WindowEventKind.Activated, harness.Second));
+
+        Assert.Equal(expected.HasValue ? $"Back to {expected.Value.Name}" : "Nowhere to go back to", back.ToolTip);
+    });
+
+    static IEnumerable<DependencyObject> Descendants(DependencyObject root)
+    {
+        for (var i = 0; i < VisualTreeHelper.GetChildrenCount(root); i++)
+        {
+            var child = VisualTreeHelper.GetChild(root, i);
+            yield return child;
+            foreach (var deeper in Descendants(child)) yield return deeper;
+        }
+    }
 
     // Task 12 (spec: "always rendered, even when empty"). The 📌 row is the ONLY way to
     // pin a window from the bar -- dropping onto it calls PinWindow -- so hiding it while
@@ -1036,7 +1117,14 @@ sealed class PulsingDesktops : IVirtualDesktopService
     public Action? PulseOnNextDesktopOf { get; set; }
 
     public Result Initialize() => Result.Success();
-    public Result<IReadOnlyList<DesktopInfo>> GetDesktops() => Result.Success<IReadOnlyList<DesktopInfo>>(Desktops.ToList());
+    // While set, the desktop list cannot be read, which fails the overview query: the state Explorer's restart
+    // leaves the bar in. Left alone, every other test sees a service that always answers.
+    public bool FailEnumeration { get; set; }
+
+    public Result<IReadOnlyList<DesktopInfo>> GetDesktops() =>
+        FailEnumeration
+            ? Result.Failure<IReadOnlyList<DesktopInfo>>("Could not enumerate desktops: the shell is restarting")
+            : Result.Success<IReadOnlyList<DesktopInfo>>(Desktops.ToList());
 
     public Result<DesktopInfo> Create(string name)
     {

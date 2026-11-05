@@ -2129,8 +2129,34 @@ public partial class FloatingBar : Window
         MinimizeButton.Visibility = AcrossSeam ? Visibility.Collapsed : Visibility.Visible;
         // The strip, the pins and the now-playing line keep everything off the seam while docked across it.
         LayOutBottomForSeam();
+        // BEFORE anything is cleared, and the other half of the same rule: the back button reads
+        // the MRU rather than the overview, so a failed query (a transient desktop-enumeration
+        // failure, for instance while Explorer restarts) must not also leave the button pointing at a
+        // workspace we have since left.
+        RefreshBackButton();
+        // Same fact, same moment, same source (#155). The trail and the back button must never
+        // disagree about where "back" is, and the only way to guarantee that is to derive both from
+        // one reading of the MRU on one rebuild.
+        RefreshHistoryTrail();
+        Phase("prepare");
+
+        // THE QUERY RUNS BEFORE THE OLD ROWS ARE TOUCHED. It used to run after the clear, so a failed
+        // query left an empty bar: no rows and no header (the header is placed by TakeBarCommands inside the
+        // build below), while the stats strip stayed. A query that fails now changes nothing: the rows, the
+        // header, the lists and the bookkeeping stay exactly as they were, and the next rebuild that works
+        // redraws them. The query may pump messages (see `rebuilding`), which is fine: the guard holds
+        // across the whole method, and nothing has been cleared yet for a nested call to trip over.
+        var queried = OverviewFor(fresh);
+        Phase("query");
+        if (queried.IsFailure)
+        {
+            if (ClickTrace.On) ClickTrace.Write($"rebuild kept the old rows: overview query failed: {queried.Error}");
+            return;
+        }
+
         // Where every row and icon is NOW, before they are thrown away, so the new ones can glide from there
-        // when this rebuild expands or collapses a row (FloatingBar.Motion.cs).
+        // when this rebuild expands or collapses a row (FloatingBar.Motion.cs). Only a rebuild that draws
+        // takes one: a skipped rebuild moves nothing, so there is nothing to glide.
         var before = TakeLayoutSnapshot();
         Dispatcher.BeginInvoke(System.Windows.Threading.DispatcherPriority.Loaded, () => GlideIfExpansionChanged(before));
         Rows.Children.Clear();
@@ -2145,24 +2171,13 @@ public partial class FloatingBar : Window
         monitorLines.Clear();
         currentRow = null;
         ClearInfo();
-        // BEFORE the overview query, and outside its Tap, deliberately: the back button reads
-        // the MRU rather than the overview, so a transient desktop-enumeration failure (which
-        // leaves the rows showing whatever they last showed) must not also leave the button
-        // pointing at a workspace we have since left.
-        RefreshBackButton();
-        // Same fact, same moment, same source (#155). The trail and the back button must never
-        // disagree about where "back" is, and the only way to guarantee that is to derive both from
-        // one reading of the MRU on one rebuild.
-        RefreshHistoryTrail();
-        Phase("prepare");
 
         // A geometry dump once the layout has settled, behind the trace marker and only when it differs
         // from the last one (see DumpRowGeometry).
         if (ClickTrace.On)
             Dispatcher.BeginInvoke(System.Windows.Threading.DispatcherPriority.Loaded, DumpRowGeometry);
-        OverviewFor(fresh).Tap(overview =>
+        queried.Tap(overview =>
         {
-            Phase("query");
             if (ClickTrace.On) DumpBands(overview);
             // The windows in front on a screen other than their row's active or landing window, for the quieter
             // marker (FrontsElsewhere, FloatingBar.Marker.cs), worked out before any icon below is built.
@@ -2558,9 +2573,9 @@ public partial class FloatingBar : Window
         // knows whether the icons just drawn are real or placeholders. Stops itself on the
         // first tick where nothing is pending (see the ctor).
         if (IconCache.HasPendingIcons && !iconWatch.IsEnabled) iconWatch.Start();
-        // Overview query failure (e.g. a transient desktop-enumeration hiccup) just
-        // leaves whatever the bar last showed -- there's no text area on this surface to
-        // report an error into, and the next StateChanged pulse retries for free.
+        // A failed overview query never gets this far: it returns above with the old rows untouched
+        // (traced there). There is no text area on this surface to report an error into, and the next
+        // rebuild that works redraws.
     }
 
     // One line of a row's icons: one equal half per monitor, the mark on the middle between them,
