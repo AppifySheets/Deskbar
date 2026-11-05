@@ -262,6 +262,20 @@ public class FloatingBarStartSearchTests
         Assert.Equal(["Start", "Start"], s.Sent);
     });
 
+    // Start's keystroke was lost and its check is still waiting when Search is clicked. The click is the newest thing asked for, so
+    // the check must not press Win again, which would open Start over the search box.
+    [Fact]
+    public void A_click_on_search_ends_an_older_confirming_check() => Run(s =>
+    {
+        s.Click("Start");
+        s.Click("Search");
+        Assert.False(s.Bar.ShellCheckPending);
+
+        Thread.Sleep(60); // well past the 20 ms check, and the timer's tick runs on the dispatcher
+        s.Drain();
+        Assert.Equal(["Start"], s.Sent);
+    });
+
     // The light is what the template paints on hover, and the buttons keep it through a new layout: the second pair shown across
     // the seam and hidden again, and the rebuild a setting change brings.
     [Fact]
