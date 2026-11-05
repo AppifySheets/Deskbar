@@ -481,6 +481,8 @@ public partial class FloatingBar
             MarkPressConsumed(); // same as OnShellClick: the row it sits in must not treat the release as its own click
             flyoutInFrontAtPress = null;
             hostUnclaimedAtPress = false;
+            // The newest click takes over, as in SendAndConfirm: a check still waiting on Start must not send Win over the box.
+            pendingSend = null;
             if (ClickTrace.On) ClickTrace.Write("shell: search clicked, quick find");
             OpenFind?.Invoke();
         };
