@@ -1094,6 +1094,7 @@ sealed class PulsingDesktops : IVirtualDesktopService
     public Result<bool> IsPinned(WindowHandle window) => PinnedWindows.Contains(window);
     public Result<Guid> CurrentDesktop() => CurrentId;
     public IObservable<Guid> CurrentChanged { get; } = new Subject<Guid>();
+    public IObservable<Guid> Destroyed { get; } = new Subject<Guid>();
 }
 
 sealed class StubMonitor : IWindowMonitor

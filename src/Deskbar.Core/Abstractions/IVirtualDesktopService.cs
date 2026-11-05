@@ -38,4 +38,9 @@ public interface IVirtualDesktopService
     // Fires with the new desktop's id whenever the user switches by ANY means
     // (our UI, Win+Ctrl+arrows, Task View) -- keeps the tray menu checkmark honest.
     IObservable<Guid> CurrentChanged { get; }
+
+    // Fires with the id of a desktop that Windows has destroyed, by ANY means (Task View's close
+    // button, our own Remove, another program). The event alone is only a hint: a subscriber that
+    // would lose something on it must ask GetDesktops() again before acting.
+    IObservable<Guid> Destroyed { get; }
 }

@@ -164,6 +164,7 @@ public sealed class WorkspaceManager(
     // Separate from `subscription` above: window events and desktop-change events are two
     // different sources, and one must be disposable without the other.
     IDisposable? currentDesktop;
+    IDisposable? destroyedSubscription;
 
     public AppState State { get; private set; } = AppState.Empty;
 
@@ -251,6 +252,11 @@ public sealed class WorkspaceManager(
                     RememberVisit(desktopId);
                     stateChanged.OnNext(Unit.Default);
                 });
+                // A desktop closed in Task View takes its workspace with it. The event alone is only a
+                // hint (see OnDesktopDestroyed), and the re-bind in WithLiveDesktop stays as the backup for
+                // when nobody heard the close. Disposed like the subscription above, which means never: it
+                // lives as long as the manager does.
+                destroyedSubscription = desktops.Destroyed.Subscribe(OnDesktopDestroyed);
                 // Seed it with wherever we started, so the very first switcher tap of a session
                 // already knows which workspace it is leaving.
                 desktops.CurrentDesktop().Tap(id =>
@@ -297,25 +303,72 @@ public sealed class WorkspaceManager(
 
     // --- workspace <-> desktop reconciliation -------------------------------------
     // Desktops don't survive reboots and ids go stale across app restarts. For each
-    // workspace: keep a still-valid DesktopId; else adopt a live desktop with the same
-    // name; else create one. Runs once at startup.
+    // workspace: keep a still-valid DesktopId; else adopt a FREE live desktop with the same
+    // name (one no other workspace holds); else create one.
+    //
+    // Reconcile runs once, at startup, and it RE-CREATES or adopts for a workspace whose desktop is
+    // gone. It cannot do otherwise: a desktop closed while Deskbar was not running looks exactly like a
+    // stale id after a reboot, and there is nobody to ask which it was.
+    //
+    // While the app runs, a desktop closed in Task View is different, because Windows says so:
+    // OnDesktopDestroyed forgets that workspace, row and all, after checking the list again. If the
+    // close was never heard, the row stays and WithLiveDesktop binds it again when the user asks for
+    // that workspace, and NOT by a sweep: nothing here brings a closed desktop back by itself.
     Result Reconcile() =>
         desktops.GetDesktops().Bind(live =>
         {
+            // Computed first, so a workspace that still has its own live desktop keeps it whatever
+            // the order of the list; otherwise an earlier workspace could adopt it by name.
+            var held = State.Workspaces
+                .Select(w => w.DesktopId)
+                .OfType<Guid>()
+                .Where(id => live.Any(d => d.Id == id))
+                .ToHashSet();
             var reconciled = State.Workspaces
-                .Select(w => BindDesktop(w, live))
+                .Select(w => BindDesktop(w, live, held))
                 .ToList();
             return reconciled.Combine()
                 .Tap(workspaces => Persist(State with { Workspaces = workspaces.ToList() }));
         });
 
-    Result<Workspace> BindDesktop(Workspace workspace, IReadOnlyList<DesktopInfo> live) =>
+    // `held` is every live desktop another workspace already has. A desktop taken by adoption or
+    // creation joins it, so two lost workspaces can never end up on the same one.
+    Result<Workspace> BindDesktop(Workspace workspace, IReadOnlyList<DesktopInfo> live, ISet<Guid> held) =>
         live.Any(d => d.Id == workspace.DesktopId)
             ? workspace
-            : live.TryFirst(d => d.Name.Equals(workspace.Name, StringComparison.OrdinalIgnoreCase))
+            : live.TryFirst(d => !held.Contains(d.Id) && d.Name.Equals(workspace.Name, StringComparison.OrdinalIgnoreCase))
                 .Match(
                     adopted => Result.Success(workspace with { DesktopId = adopted.Id }),
-                    () => desktops.Create(workspace.Name).Map(created => workspace with { DesktopId = created.Id }));
+                    () => desktops.Create(workspace.Name).Map(created => workspace with { DesktopId = created.Id }))
+                .Tap(bound => { if (bound.DesktopId is { } id) held.Add(id); });
+
+    // For the paths where the USER chose the workspace: a click on its row, a window dragged or moved
+    // into it by hand (AssignWindow, `deskbar.cmd move`), a program started in it (StartIn). Never for
+    // what memory or a rule decided (Place via ApplyPlacement, on a window event or at start-up):
+    // those fire with nobody asking, and a desktop closed on purpose would come back by itself the
+    // next time a matching window opened. There a dead id keeps failing the move quietly, as before.
+    //
+    // A live desktop returns the workspace untouched, with no write. A vanished one is bound again the way
+    // Reconcile does it, and the new id is saved. A workspace with no desktop (compatibility mode)
+    // comes back as it is, so the caller's own message still applies.
+    Result<Workspace> WithLiveDesktop(Workspace workspace) =>
+        workspace.DesktopId is null
+            ? workspace
+            : desktops.GetDesktops().Bind(live =>
+            {
+                if (live.Any(d => d.Id == workspace.DesktopId)) return Result.Success(workspace);
+
+                var held = State.Workspaces
+                    .Where(w => w.Id != workspace.Id)
+                    .Select(w => w.DesktopId)
+                    .OfType<Guid>()
+                    .ToHashSet();
+                return BindDesktop(workspace, live, held)
+                    .Tap(bound => Persist(State with
+                    {
+                        Workspaces = State.Workspaces.Select(w => w.Id == bound.Id ? bound : w).ToList(),
+                    }));
+            });
 
     // --- event pipeline -------------------------------------------------------------
     //
@@ -908,7 +961,7 @@ public sealed class WorkspaceManager(
     // --- UI-facing operations ---------------------------------------------------
 
     public Result Switch(Guid workspaceId) =>
-        Workspace(workspaceId).Bind(w => w.DesktopId is { } id
+        Workspace(workspaceId).Bind(WithLiveDesktop).Bind(w => w.DesktopId is { } id
             ? desktops.Switch(id)
             : Result.Failure("Workspace has no desktop (compatibility mode)."))
             // Recorded here AS WELL AS in the CurrentChanged subscription above, and the
@@ -2056,31 +2109,82 @@ public sealed class WorkspaceManager(
     public Result RemoveWorkspace(Guid id) =>
         Workspace(id)
             .Tap(w => { if (w.DesktopId is { } d) RemoveDesktop(w, d); })
-            .Tap(w =>
+            .Tap(ForgetWorkspace);
+
+    // A desktop that Windows has destroyed, by any means. Our own Remove lands here too, once the
+    // desktop is gone, and finds the workspace already forgotten or about to be (ForgetWorkspace is
+    // safe to reach twice).
+    //
+    // NOTHING may escape, for the reason OnWindowEvent gives: a throw ends the Rx subscription and
+    // the manager goes deaf to closes for the rest of the session.
+    //
+    // The event alone never removes anything, because removing a workspace also wipes its name, rules,
+    // roster and homes, and a wrong removal cannot be undone, while a missed one is harmless (the
+    // re-bind in WithLiveDesktop covers it). So the list is asked again, and the workspace goes only
+    // when the query worked, the list is not empty (no machine has no desktops, so an empty list means the
+    // shell is in trouble) and the desktop is not in it.
+    void OnDesktopDestroyed(Guid desktop)
+    {
+        try
+        {
+            var held = State.Workspaces.TryFirst(w => w.DesktopId == desktop);
+            if (held.HasNoValue)
             {
-                // Prune live bookkeeping too: without this, a later Disappeared for one of
-                // this workspace's windows would resurrect a phantom inventory key.
-                memberships.Where(kv => kv.Value == id).Select(kv => kv.Key).ToList()
-                    .ForEach(h => memberships.Remove(h));
+                trace?.Invoke($"desktop destroyed {desktop}: no workspace has it");
+                return;
+            }
+            var workspace = held.Value;
 
-                // Taken out of its group FIRST, which is what keeps the rest of the group coherent:
-                // WithoutMember dissolves a group left with one member and clears the anchor of a
-                // group that has just lost it. Deleting the anchor therefore leaves the others
-                // grouped and named, with nothing borrowed any more, rather than promoting them all
-                // to the top level or leaving them pointing at a workspace that is gone.
-                var tidied = WithoutMember(State, id);
+            var live = desktops.GetDesktops();
+            if (live.IsFailure)
+                trace?.Invoke($"desktop destroyed: kept {workspace.Name}, could not list desktops ({live.Error})");
+            else if (live.Value.Count == 0)
+                trace?.Invoke($"desktop destroyed: kept {workspace.Name}, the desktop list is empty");
+            else if (live.Value.Any(d => d.Id == desktop))
+                trace?.Invoke($"desktop destroyed: kept {workspace.Name}, list still has it");
+            else
+            {
+                trace?.Invoke($"desktop destroyed: forgot workspace {workspace.Name}");
+                ForgetWorkspace(workspace);
+            }
+        }
+        catch (Exception ex)
+        {
+            trace?.Invoke($"desktop destroyed {desktop} threw {ex.GetType().Name}: {ex.Message}\n{ex.StackTrace}");
+        }
+    }
 
-                Persist(tidied with
-                {
-                    Workspaces = tidied.Workspaces.Where(x => x.Id != id).ToList(),
-                    WorkspaceRules = tidied.WorkspaceRules.Where(r => r.WorkspaceId != id).ToList(),
-                    Inventory = tidied.Inventory.Where(kv => kv.Key != id).ToDictionary(kv => kv.Key, kv => kv.Value),
-                    // A container home naming a workspace that is gone would move a window to a desktop
-                    // nothing draws (#132). Forgotten in the same breath as the roster and the rules,
-                    // for the same reason all three are.
-                    ContainerHomes = tidied.ContainerHomes.Where(h => h.WorkspaceId != id).ToList(),
-                });
-            });
+    // The forget half of a removal: the desktop is already gone, one way or the other. Safe to reach
+    // twice (a delete of ours and the Destroyed it causes can both arrive here, in either order): a
+    // workspace that is no longer in the state is left alone.
+    void ForgetWorkspace(Workspace w)
+    {
+        var id = w.Id;
+        if (State.Workspaces.All(x => x.Id != id)) return;
+
+        // Prune live bookkeeping too: without this, a later Disappeared for one of
+        // this workspace's windows would resurrect a phantom inventory key.
+        memberships.Where(kv => kv.Value == id).Select(kv => kv.Key).ToList()
+            .ForEach(h => memberships.Remove(h));
+
+        // Taken out of its group FIRST, which is what keeps the rest of the group coherent:
+        // WithoutMember dissolves a group left with one member and clears the anchor of a
+        // group that has just lost it. Deleting the anchor therefore leaves the others
+        // grouped and named, with nothing borrowed any more, rather than promoting them all
+        // to the top level or leaving them pointing at a workspace that is gone.
+        var tidied = WithoutMember(State, id);
+
+        Persist(tidied with
+        {
+            Workspaces = tidied.Workspaces.Where(x => x.Id != id).ToList(),
+            WorkspaceRules = tidied.WorkspaceRules.Where(r => r.WorkspaceId != id).ToList(),
+            Inventory = tidied.Inventory.Where(kv => kv.Key != id).ToDictionary(kv => kv.Key, kv => kv.Value),
+            // A container home naming a workspace that is gone would move a window to a desktop
+            // nothing draws (#132). Forgotten in the same breath as the roster and the rules,
+            // for the same reason all three are.
+            ContainerHomes = tidied.ContainerHomes.Where(h => h.WorkspaceId != id).ToList(),
+        });
+    }
 
     // The most recently used OTHER workspace that was visited this session and has a desktop, or None.
     // Read from the MRU's own list rather than Order(): Order appends workspaces never visited, and a
@@ -2358,7 +2462,8 @@ public sealed class WorkspaceManager(
     // A drag on the bar never passes it, so the rule there is unchanged.
     public Result AssignWindow(WindowHandle window, Guid workspaceId, int? monitor = null, bool allowFollow = true) =>
         knownWindows.TryGetValue(window, out var info)
-            ? Assign(info, workspaceId, monitor, follows: allowFollow && SendingTheWindowYouAreIn(window, workspaceId))
+            ? Workspace(workspaceId).Bind(WithLiveDesktop)
+                .Bind(_ => Assign(info, workspaceId, monitor, follows: allowFollow && SendingTheWindowYouAreIn(window, workspaceId)))
             : Result.Failure("Window no longer exists.");
 
     Result Assign(WindowInfo info, Guid workspaceId, int? monitor, bool follows) =>
@@ -3249,6 +3354,11 @@ public sealed class WorkspaceManager(
     // Answers the new process's id, or null when the shell handed the start to a copy already running.
     public Result<int?> StartIn(Guid workspaceId, QuickFind.LaunchTarget target, Func<Control.ProgramLaunch, Result<int?>> starter)
     {
+        // The user named this workspace, so a vanished desktop is bound again before the window is expected.
+        // A workspace that does not exist is left to the code below, as before.
+        var ready = Workspace(workspaceId).Bind(WithLiveDesktop);
+        if (ready.IsFailure && Workspace(workspaceId).IsSuccess) return Result.Failure<int?>(ready.Error);
+
         var expectation = target.ExpectedProcess is { } name ? ExpectWindow(name, workspaceId) : (Guid?)null;
         return starter(target.Launch)
             .Tap(processId =>

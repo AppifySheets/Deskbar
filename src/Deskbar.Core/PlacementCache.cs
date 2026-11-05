@@ -81,6 +81,14 @@ public sealed class PlacementCache(IVirtualDesktopService os, TimeSpan memory, F
     // so a handler that asks for the current desktop in response is answered from memory and answered right.
     public IObservable<Guid> CurrentChanged => os.CurrentChanged.Do(id => current = (id, now()));
 
+    // A desktop destroyed behind our back moved its windows exactly as Remove does, so the same things are
+    // forgotten on the way to the subscribers.
+    public IObservable<Guid> Destroyed => os.Destroyed.Do(_ =>
+    {
+        desktops.Clear();
+        current = null;
+    });
+
     // The remembered answer while it is young, otherwise the OS's, which is remembered only when it succeeds.
     Result<T> Remembered<T>(Dictionary<WindowHandle, (T Value, DateTimeOffset At)> known, WindowHandle window, Func<Result<T>> ask)
     {

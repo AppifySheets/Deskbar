@@ -134,6 +134,15 @@ public sealed class VirtualDesktopService(Action<string>? trace = null) : IVirtu
                     h => VirtualDesktop.CurrentChanged -= h)
                 .Select(e => e.EventArgs.NewDesktop.Id));
 
+    // Deferred for the same reason as CurrentChanged above. VirtualDesktop.Destroyed is raised AFTER the
+    // desktop is gone (DestroyBegin is the early one, and is not used: the desktop is still there then).
+    public IObservable<Guid> Destroyed { get; } =
+        Observable.Defer(() =>
+            Observable.FromEventPattern<VirtualDesktopDestroyEventArgs>(
+                    h => VirtualDesktop.Destroyed += h,
+                    h => VirtualDesktop.Destroyed -= h)
+                .Select(e => e.EventArgs.Destroyed.Id));
+
     // CORRECTION (against the package's real surface, not the spike doc's "not exercised"
     // guess): VirtualDesktop.PinWindow/UnpinWindow return bool, not void -- per the package's
     // shipped XML doc, false means "target window not found or not ready", which is an

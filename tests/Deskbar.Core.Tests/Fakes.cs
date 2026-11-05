@@ -14,15 +14,31 @@ public sealed class FakeDesktops : IVirtualDesktopService
     public Dictionary<WindowHandle, Guid> WindowPlacements { get; } = [];
     public List<Guid> Switches { get; } = [];
     public Subject<Guid> CurrentChangedSubject { get; } = new();
+    public Subject<Guid> DestroyedSubject { get; } = new();
+
+    // Every id Remove was asked for, and whether Remove announces it through Destroyed on its own
+    // (inside the call, as Windows may do) or leaves the test to fire it.
+    public List<Guid> Removed { get; } = [];
+    public bool AnnounceRemovals { get; set; }
 
     // Fix round 1: lets tests force MoveWindow to fail for a specific handle, so
     // WorkspaceManager's failure-propagation path can be exercised on demand.
     public HashSet<WindowHandle> RejectMoveFor { get; } = [];
 
+    // Lets a test make the shell refuse to list or create desktops.
+    public bool FailGetDesktops { get; set; }
+    public bool ThrowOnGetDesktops { get; set; }
+    public bool FailCreate { get; set; }
+
+    // The real service refuses a move to a desktop that no longer exists; the fake only does when asked.
+    public bool RefuseMoveToMissingDesktop { get; set; }
+
     public Result Initialize() => Result.Success();
-    public Result<IReadOnlyList<DesktopInfo>> GetDesktops() => Result.Success<IReadOnlyList<DesktopInfo>>(Desktops.ToList());
+    public Result<IReadOnlyList<DesktopInfo>> GetDesktops() =>
+        ThrowOnGetDesktops ? throw new InvalidOperationException("list threw (test)") : FailGetDesktops ? Result.Failure<IReadOnlyList<DesktopInfo>>("list refused (test)") : Result.Success<IReadOnlyList<DesktopInfo>>(Desktops.ToList());
     public Result<DesktopInfo> Create(string name)
     {
+        if (FailCreate) return Result.Failure<DesktopInfo>("create refused (test)");
         var d = new DesktopInfo(Guid.NewGuid(), name);
         Desktops.Add(d);
         return d;
@@ -30,7 +46,13 @@ public sealed class FakeDesktops : IVirtualDesktopService
     public Result Rename(Guid id, string name) =>
         Result.SuccessIf(Desktops.RemoveAll(d => d.Id == id) > 0, "missing").Tap(() => Desktops.Add(new DesktopInfo(id, name)));
     public Result Switch(Guid id) { Switches.Add(id); return Result.Success(); }
-    public Result Remove(Guid id) { Desktops.RemoveAll(d => d.Id == id); return Result.Success(); }
+    public Result Remove(Guid id)
+    {
+        Removed.Add(id);
+        Desktops.RemoveAll(d => d.Id == id);
+        if (AnnounceRemovals) DestroyedSubject.OnNext(id);
+        return Result.Success();
+    }
 
     // Every remove-with-fallback asked for, and a switch to make it fail on demand. The fake lands on the
     // fallback the way Windows does (current desktop follows), without raising CurrentChanged, as Switch above.
@@ -42,6 +64,7 @@ public sealed class FakeDesktops : IVirtualDesktopService
         if (RejectFallbackRemove) return Result.Failure("fallback remove rejected (test)");
         Desktops.RemoveAll(d => d.Id == id);
         CurrentDesktopId = fallback;
+        if (AnnounceRemovals) DestroyedSubject.OnNext(id);
         return Result.Success();
     }
     // #89 needs the ORDER of two moves to be observable: the screen move has to happen before the
@@ -52,6 +75,7 @@ public sealed class FakeDesktops : IVirtualDesktopService
     public Result MoveWindow(WindowHandle w, Guid id)
     {
         if (RejectMoveFor.Contains(w)) return Result.Failure("move rejected (test)");
+        if (RefuseMoveToMissingDesktop && Desktops.All(d => d.Id != id)) return Result.Failure($"Desktop {id} no longer exists.");
         OnMoveWindow?.Invoke(w, id);
         WindowPlacements[w] = id;
         return Result.Success();
@@ -59,6 +83,7 @@ public sealed class FakeDesktops : IVirtualDesktopService
     public Result<Guid> DesktopOf(WindowHandle w) =>
         WindowPlacements.TryGetValue(w, out var id) ? id : Result.Failure<Guid>("not placed");
     public IObservable<Guid> CurrentChanged => CurrentChangedSubject.AsObservable();
+    public IObservable<Guid> Destroyed => DestroyedSubject.AsObservable();
 
     public HashSet<WindowHandle> PinnedWindows { get; } = [];
     public Guid CurrentDesktopId { get; set; } = Guid.NewGuid();

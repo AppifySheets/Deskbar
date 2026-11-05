@@ -154,5 +154,6 @@ public class PlacementCacheTests
         public Result<bool> IsPinned(WindowHandle window) { IsPinnedCalls++; return Inner.IsPinned(window); }
         public Result<Guid> CurrentDesktop() { CurrentDesktopCalls++; return Inner.CurrentDesktop(); }
         public IObservable<Guid> CurrentChanged => Inner.CurrentChanged;
+        public IObservable<Guid> Destroyed => Inner.Destroyed;
     }
 }
