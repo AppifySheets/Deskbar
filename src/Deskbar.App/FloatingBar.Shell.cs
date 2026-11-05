@@ -22,7 +22,9 @@ namespace Deskbar.App;
 // clock and Windows' show desktop sliver.
 //
 // EVERY BUTTON SENDS THE WINDOWS SHORTCUT, so the real Windows flyout opens and nothing of the shell is
-// rebuilt here. Measured with a throwaway probe on his machine before a line of this was written:
+// rebuilt here. The exception is Search: it opens Deskbar's own quick find (FindButton), while Win+S still opens
+// Windows' search and the bar still recognises its window. Measured with a throwaway probe on his machine before a
+// line of this was written:
 //
 //   Win    -> "Start menu"           DV2ControlHost               bottom left of the taskbar's screen
 //   Win+S  -> "Search"               Windows.UI.Core.CoreWindow   bottom left, over the docked bar
@@ -104,13 +106,16 @@ public partial class FloatingBar
         internal bool Shown, Retried;
     }
 
-    // The buttons that light while their flyout is open: Start and search, and the second pair across the seam. Added by
+    // The buttons that light while their flyout is open: Start, and the second one across the seam. Added by
     // ShellButton, which BuildShellStrip calls once, so the list is complete for the bar's whole life.
     readonly List<(ShellFlyout Flyout, Button Button)> shellLights = [];
 
     // What actually presses the keys. A seam for the tests and nothing else: a test that pressed the real
     // Windows key would open the Start menu on the screen of whoever runs the suite.
     internal Action<ShellFlyout> SendShellKeys { get; init; } = ShellKeys.Send;
+
+    // What the Search button does: opens Deskbar's quick find (QuickFind.ToggleFromBar), not Windows' search.
+    internal Action? OpenFind { get; init; }
 
     // ...and the Space that opens the tray's hidden icons once Win+B has focused it (see OpenTrayOverflow),
     // a seam for the same reason.
@@ -143,11 +148,11 @@ public partial class FloatingBar
     void BuildShellStrip()
     {
         ShellStart.Children.Add(ShellButton(ShellFlyout.Start, "Start", StartGlyph()));
-        ShellStart.Children.Add(ShellButton(ShellFlyout.Search, "Search", Glyph(SearchShape, size: HeaderGlyphSize)));
+        ShellStart.Children.Add(FindButton(Glyph(SearchShape, size: HeaderGlyphSize)));
 
         // The same pair again, where the right half of the header begins, shown only across the seam (see
-        // LayOutHeader). Their own buttons, wired to the same OnShellClick, so a press on either pair behaves
-        // identically, including closing a flyout that is already open.
+        // LayOutHeader). Their own buttons, wired the same way, so a press on either pair behaves identically,
+        // including closing what is already open.
         shellStartTwin = new StackPanel
         {
             Orientation = Orientation.Horizontal,
@@ -160,7 +165,7 @@ public partial class FloatingBar
             Children =
             {
                 ShellButton(ShellFlyout.Start, "Start", StartGlyph()),
-                ShellButton(ShellFlyout.Search, "Search", Glyph(SearchShape, size: HeaderGlyphSize)),
+                FindButton(Glyph(SearchShape, size: HeaderGlyphSize)),
             },
         };
         BarHeader.Children.Add(AtRightHalf(shellStartTwin));
@@ -222,9 +227,9 @@ public partial class FloatingBar
     // far left, on the left screen. So across the seam the pair appears a second time at the right half's left
     // edge, in the same place the right half's captions start.
     //
-    // Where the menus OPEN does not change, and cannot from here: Windows anchors Start and search to the
-    // screen that has the taskbar, wherever the press came from (the probe in this file's header). With one
-    // taskbar, both pairs open them on that screen. What the second pair saves is the reach across the bar.
+    // Where Start OPENS does not change, and cannot from here: Windows anchors it to the screen that has the
+    // taskbar, wherever the press came from (the probe in this file's header). With one taskbar, both pairs open
+    // it on that screen. Search opens quick find, wherever its box is placed. What the second pair saves is the reach across the bar.
     internal void LayOutHeader(bool acrossSeam)
     {
         if (shellStartTwin is not null)
@@ -440,6 +445,14 @@ public partial class FloatingBar
     // 26 by 28 is the header's size (Start and search); the strip passes its own (StripButtonWidth, -Height).
     Button ShellButton(ShellFlyout flyout, string tip, UIElement content, double width = 26, double height = 28)
     {
+        var button = BareShellButton(tip, content, width, height);
+        button.Click += (_, _) => OnShellClick(flyout);
+        if (flyout is ShellFlyout.Start or ShellFlyout.Search) shellLights.Add((flyout, button));
+        return button;
+    }
+
+    Button BareShellButton(string tip, UIElement content, double width = 26, double height = 28)
+    {
         var button = new Button
         {
             Content = content,
@@ -454,10 +467,27 @@ public partial class FloatingBar
         };
         if (tip.Length > 0) button.ToolTip = tip;
         System.Windows.Automation.AutomationProperties.SetName(button, tip.Length > 0 ? tip : "Clock");
-        button.Click += (_, _) => OnShellClick(flyout);
-        if (flyout is ShellFlyout.Start or ShellFlyout.Search) shellLights.Add((flyout, button));
         return button;
     }
+
+    // The header's Search button: Deskbar's own quick find, not Windows' search (Win+S still opens that).
+    Button FindButton(UIElement content)
+    {
+        var button = BareShellButton("Search", content);
+        button.ToolTip = FindTip();
+        button.ToolTipOpening += (_, _) => button.ToolTip = FindTip(); // the chord can be rebound on Manage
+        button.Click += (_, _) =>
+        {
+            MarkPressConsumed(); // same as OnShellClick: the row it sits in must not treat the release as its own click
+            flyoutInFrontAtPress = null;
+            hostUnclaimedAtPress = false;
+            if (ClickTrace.On) ClickTrace.Write("shell: search clicked, quick find");
+            OpenFind?.Invoke();
+        };
+        return button;
+    }
+
+    string FindTip() => $"Search windows, tabs and apps ({manager.QuickFindShortcut})";
 
     // The one place the bar answers a press on these buttons.
     void OnShellClick(ShellFlyout flyout)

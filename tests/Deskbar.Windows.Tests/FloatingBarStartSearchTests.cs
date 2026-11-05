@@ -158,7 +158,6 @@ public class FloatingBarStartSearchTests
     // the desktop) is not opened again by it.
     [Theory]
     [InlineData("Start", "Search")]
-    [InlineData("Search", "Start")]
     public void The_flyout_a_button_opened_stays_and_only_its_button_is_lit_until_it_closes(string name, string other) => Run(s =>
     {
         s.Click(name);
@@ -191,7 +190,6 @@ public class FloatingBarStartSearchTests
     // still when the first click's check is yet to come. The next click opens it as normal.
     [Theory]
     [InlineData("Start")]
-    [InlineData("Search")]
     public void A_click_on_the_button_while_its_flyout_is_open_only_closes_it(string name) => Run(s =>
     {
         s.Click(name);
@@ -207,26 +205,11 @@ public class FloatingBarStartSearchTests
         Assert.Equal([name, name], s.Sent);
     });
 
-    // The press shuts Start, the click on search opens search in the same window, and the new opener is search: a window still
-    // counted as Start's would light the wrong button.
-    [Fact]
-    public void Opening_search_over_an_open_start_names_search_as_the_opener() => Run(s =>
-    {
-        s.Open("Start");
-        s.Click("Search");
-        Assert.Equal(["Start", "Search"], s.Sent);
-
-        s.Up();
-        Assert.True(s.Lit("Search"));
-        Assert.False(s.Lit("Start"));
-    });
-
     // A keystroke that was lost, so nothing ever came to the front, is sent once more and no more. And when the retry is what
     // opens the window, it is still the button's: it comes up just after the retry goes out (queued behind the check that sent
     // it, as on the real machine, where it takes tens of milliseconds).
     [Theory]
     [InlineData("Start", "Search", false)]
-    [InlineData("Search", "Start", false)]
     [InlineData("Start", "Search", true)]
     public void A_lost_keystroke_is_sent_once_more_and_no_more(string name, string other, bool retryOpens) => Run(s =>
     {
@@ -238,20 +221,17 @@ public class FloatingBarStartSearchTests
         Assert.False(s.Lit(other));
     }, onKeys: retryOpens ? (s, count) => { if (count == 2) s.Bar.Dispatcher.InvokeAsync(s.Up); } : null);
 
-    // A window the keyboard opened has no known opener. Neither button lights, since either could be right, and a click on EITHER
-    // only closes it: a key would open it again, since the press has already closed it.
+    // A window the keyboard opened (Win+S, say) has no known opener. Start does not light, since it could be Start's, and a click
+    // on Start only closes it: a key would open it again, since the press has already closed it.
     [Fact]
-    public void A_window_the_keyboard_opened_lights_nothing_and_a_click_on_either_button_only_closes_it() => Run(s =>
+    public void A_window_the_keyboard_opened_lights_nothing_and_a_click_on_start_only_closes_it() => Run(s =>
     {
-        foreach (var name in new[] { "Start", "Search" })
-        {
-            s.Up();
-            Assert.False(s.Lit("Start"));
-            Assert.False(s.Lit("Search"));
+        s.Up();
+        Assert.False(s.Lit("Start"));
+        Assert.False(s.Lit("Search"));
 
-            s.Click(name);
-            Assert.Empty(s.Sent);
-        }
+        s.Click("Start");
+        Assert.Empty(s.Sent);
 
         // Closed now, so the next click opens it as normal.
         s.Click("Start");
@@ -259,7 +239,7 @@ public class FloatingBarStartSearchTests
     });
 
     // Where Start has a window of its own, DV2ControlHost (the maintainer's machine), everything works as before and lights up.
-    // The "Search" window there is only search, so it is lit for search whoever opened it, and a click on Start still opens Start.
+    // The "Search" window there is only search, so it is not Start's, and a click on Start still opens Start.
     [Fact]
     public void Where_start_has_a_window_of_its_own_everything_works_as_before_and_lights_up() => Run(s =>
     {
@@ -277,14 +257,9 @@ public class FloatingBarStartSearchTests
         Assert.False(s.Lit("Start"));
 
         s.Up();
-        Assert.True(s.Lit("Search"));
         Assert.False(s.Lit("Start"));
         s.Click("Start");
         Assert.Equal(["Start", "Start"], s.Sent);
-
-        s.Up();
-        s.Click("Search");
-        Assert.Equal(2, s.Sent.Count);
     });
 
     // The light is what the template paints on hover, and the buttons keep it through a new layout: the second pair shown across
@@ -317,10 +292,10 @@ public class FloatingBarStartSearchTests
     public void A_newer_click_supersedes_an_older_confirming_check() => Run(s =>
     {
         s.Click("Start");
-        s.Click("Search");
+        s.Click("Start");
         s.AwaitCheck();
 
-        Assert.Equal(["Start", "Search", "Search"], s.Sent);
+        Assert.Equal(["Start", "Start", "Start"], s.Sent);
     });
 
     // THE FLYOUT THAT CLOSES WITHOUT THE BAR HEARING IT. Esc, the Windows key or Win+S shuts it and Windows gives the foreground to
@@ -332,7 +307,6 @@ public class FloatingBarStartSearchTests
     // the click that closes a window no longer there.
     [Theory]
     [InlineData("Start", false)]
-    [InlineData("Search", false)]
     [InlineData("Start", true)]
     public void The_light_goes_out_when_the_flyout_closes_unheard_and_the_next_click_opens_it(string name, bool keyboard) => Run(s =>
     {
@@ -365,7 +339,6 @@ public class FloatingBarStartSearchTests
     // ran before the press would make this click read "not open" and send Win, which opens Start again.
     [Theory]
     [InlineData("Start", false)]
-    [InlineData("Search", false)]
     [InlineData("Start", true)]     // opened from the keyboard: no known opener, and a click on either button only closes it
     public void A_click_while_the_flyout_is_open_only_closes_it_though_the_click_activates_the_bar(string name, bool keyboard) => Run(s =>
     {
@@ -386,21 +359,27 @@ public class FloatingBarStartSearchTests
     [Fact]
     public void The_resync_an_activation_queued_does_nothing_once_a_press_has_come_after_it() => Run(s =>
     {
-        s.Open("Start");
-        s.Activate();
-        s.Click("Search");
+        // Where Start has its own window, Windows' search in front (opened with Win+S) is what the bar shows as open, so the
+        // activation queues a re-sync; with nothing open it would queue none, and this would prove nothing.
+        using var start = new ClassedWindow(StartMenu, "Start menu");
+        s.Click("Start");
+        s.Bar.NoteForeground(start.Handle);
+        s.AwaitCheck();
         s.Up();
-        Assert.True(s.Lit("Search"));
+
+        s.Activate();
+        s.Click("Start");
+        s.Bar.NoteForeground(start.Handle);
+        Assert.True(s.Lit("Start"));
 
         s.Drain();
-        Assert.True(s.Lit("Search"));
-        Assert.Equal(["Start", "Search"], s.Sent);
+        Assert.True(s.Lit("Start"));
+        Assert.Equal(["Start", "Start"], s.Sent);
     });
 
     // THE TICK, for a close the activation did not tell the bar about: it asks Windows what is in front and lets that decide.
     [Theory]
     [InlineData("Start")]
-    [InlineData("Search")]
     public void The_tick_puts_a_stale_light_out_when_no_event_said_the_flyout_closed(string name) => Run(s =>
     {
         // With nothing shown open it does nothing, whatever is in front.
@@ -428,7 +407,6 @@ public class FloatingBarStartSearchTests
     // behind the press, and the tick leaves the settling to that one.
     [Theory]
     [InlineData("Start")]
-    [InlineData("Search")]
     public void The_tick_cannot_land_between_the_activation_of_a_click_and_its_press(string name) => Run(s =>
     {
         s.Open(name);

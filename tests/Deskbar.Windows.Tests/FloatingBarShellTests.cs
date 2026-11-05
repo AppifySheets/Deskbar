@@ -19,7 +19,7 @@ namespace Deskbar.Windows.Tests;
 // real sender would open the Start menu on the screen of whoever runs the suite.
 public class FloatingBarShellTests(ITestOutputHelper output)
 {
-    static (FloatingBar Bar, List<FloatingBar.ShellFlyout> Sent) Bar()
+    static (FloatingBar Bar, List<FloatingBar.ShellFlyout> Sent) Bar(Action? openFind = null)
     {
         var desktops = new PulsingDesktops { CurrentId = Guid.NewGuid() };
         desktops.Desktops.Add(new DesktopInfo(desktops.CurrentId, "Work"));
@@ -28,7 +28,7 @@ public class FloatingBarShellTests(ITestOutputHelper output)
         var sent = new List<FloatingBar.ShellFlyout>();
         // Parked off the virtual screen like every other bar test, so nothing flashes at whoever runs this.
         // ...and PressSpace a no-op, so the chevron's follow-up Space never reaches a real window either.
-        var bar = new FloatingBar(manager) { Left = -32000, Top = -32000, SendShellKeys = sent.Add, PressSpace = () => { } };
+        var bar = new FloatingBar(manager) { Left = -32000, Top = -32000, SendShellKeys = sent.Add, PressSpace = () => { }, OpenFind = openFind };
         bar.ShowBar();
         bar.UpdateLayout();
         return (bar, sent);
@@ -343,17 +343,47 @@ public class FloatingBarShellTests(ITestOutputHelper output)
         bar.Close();
     });
 
-    // Only the button for the flyout that was open stands down: with the Start menu up, a click on search
-    // still opens search.
+    // Only the button for the flyout that was open stands down: with Windows' search up, a click on Start
+    // still opens Start.
     [Fact]
     public void Another_flyout_being_open_does_not_stop_a_button() => StaThread.Run(() =>
     {
         var (bar, sent) = Bar();
+        bar.NoteFlyoutInFront(FloatingBar.ShellFlyout.Search);
+        bar.NoteBarPressed();
+        Click(Named(bar, "ShellStart", "Start"));
+
+        Assert.Equal([FloatingBar.ShellFlyout.Start], sent);
+        bar.Close();
+    });
+
+    // The Search button is Deskbar's quick find, not Windows' search: it asks for the box and presses no key.
+    [Fact]
+    public void The_search_button_opens_quick_find_and_sends_no_keys() => StaThread.Run(() =>
+    {
+        var opened = 0;
+        var (bar, sent) = Bar(() => opened++);
+        bar.NoteBarPressed();
+        Click(Named(bar, "ShellStart", "Search"));
+
+        Assert.Equal(1, opened);
+        Assert.Empty(sent);
+        bar.Close();
+    });
+
+    // A Windows flyout in front at the press (it has already closed, as the press took the foreground) changes nothing:
+    // the click still opens quick find, and still presses no key.
+    [Fact]
+    public void The_search_button_opens_quick_find_with_a_windows_flyout_in_front() => StaThread.Run(() =>
+    {
+        var opened = 0;
+        var (bar, sent) = Bar(() => opened++);
         bar.NoteFlyoutInFront(FloatingBar.ShellFlyout.Start);
         bar.NoteBarPressed();
         Click(Named(bar, "ShellStart", "Search"));
 
-        Assert.Equal([FloatingBar.ShellFlyout.Search], sent);
+        Assert.Equal(1, opened);
+        Assert.Empty(sent);
         bar.Close();
     });
 
