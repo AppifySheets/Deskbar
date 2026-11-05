@@ -196,6 +196,11 @@ public partial class FloatingBar : Window
             if (ClickTrace.On) ClickTrace.Write($"icon watch: {arrived} window(s) settled their icon, rebuilding");
             Rebuild();
         };
+        // A store app's icon arrives on a pool thread, so the bar is woken from there and redraws on its own thread.
+        // Rebuild guards its own re-entrancy. If the bar is hidden, the next rebuild takes the answer.
+        Action hostedIcon = () => Dispatcher.BeginInvoke(new Action(() => { if (IsVisible) Rebuild(); }));
+        IconCache.HostedIconArrived += hostedIcon;
+        Closed += (_, _) => IconCache.HostedIconArrived -= hostedIcon;
         // appBar.Remove gives the docked strip back on a normal exit. A crash is covered by the shell
         // itself, which was measured reclaiming a dead app bar's strip within a second (see AppBar).
         Closed += (_, _) => { iconWatch.Stop(); fadeDelay.Stop(); subscription?.Dispose(); settleWatch?.Dispose(); appBar?.Remove(); seamBar?.Remove(); };

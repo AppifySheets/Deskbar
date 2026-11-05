@@ -1,9 +1,13 @@
+using System.Collections.Concurrent;
 using System.Windows;
 using System.Windows.Interop;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
+using CSharpFunctionalExtensions;
 using Deskbar.Core.Domain;
+using Deskbar.Core.Rehydration;
 using Deskbar.Windows.Monitoring;
+using Deskbar.Windows.Shell;
 
 namespace Deskbar.App;
 
@@ -39,6 +43,21 @@ public static class IconCache
     static readonly Dictionary<nint, ImageSource?> byIconHandle = [];
     // The exe fallback, unchanged from the original implementation.
     static readonly Dictionary<string, ImageSource?> byExePath = new(StringComparer.OrdinalIgnoreCase);
+
+    // The shell, for a store app's icon (AskHostedApp). A seam for the tests, like the bar's pins.
+    internal static ITaskbarPins Shell { get; set; } = new ShellTaskbarPins();
+
+    // Answers from the pool thread, waiting for the bar's next lookup to take them: only these two concurrent
+    // dictionaries are touched off the UI thread.
+    static readonly ConcurrentDictionary<(nint Hwnd, string Path), ImageSource> hostedAnswers = [];
+    static readonly ConcurrentDictionary<(nint Hwnd, string Path), byte> hostedAsking = [];
+
+    // How many times a store app's window is asked for its app id before the ask gives up, 50 ms apart. A new frame
+    // can appear a moment before its id does, so one read is not always enough.
+    internal const int AppIdTries = 10;
+
+    // Raised on a pool thread, when a store app's icon arrives. Handlers must get back to their own thread.
+    internal static event Action? HostedIconArrived;
 
     // For roster ("not running") rows, which have an app but no window to ask.
     public static ImageSource? For(string? processPath) => FromExe(processPath);
@@ -106,6 +125,15 @@ public static class IconCache
         var key = (window.Value, processPath ?? "");
         if (byWindow.TryGetValue(key, out var hit)) return hit;
 
+        // A store app's icon that the pool thread has already fetched. Free: no Win32 call, so it is not rate-limited.
+        if (hostedAnswers.TryRemove(key, out var hosted))
+        {
+            byWindow[key] = hosted;
+            probing.Remove(key);
+            Trace(window, processPath, hosted, "hosted-app");
+            return hosted;
+        }
+
         var now = DateTime.UtcNow;
         var state = probing.TryGetValue(key, out var seen) ? seen : (FirstSeen: now, LastProbe: DateTime.MinValue);
 
@@ -123,6 +151,9 @@ public static class IconCache
                 Trace(window, processPath, own, "own");
                 return own;
             }
+
+            // A store app's frame has no icon of its own, and the icon of the app it hosts is just as final.
+            AskHostedApp(key, window, processPath);
         }
 
         // Petre: "youtube music can't be seen in personal" -- it rendered as a blank
@@ -186,6 +217,57 @@ public static class IconCache
         var print = icon is BitmapSource bitmap ? Fingerprint(bitmap) ?? "?" : "-";
         ClickTrace.Write($"icon {window.Value:X} {System.IO.Path.GetFileName(processPath) ?? "?"} " +
                          $"source={source} {size} print={print}");
+    }
+
+    // A store app's window is hosted by ApplicationFrameHost, which answers no icon for the window and whose exe
+    // icon is the host's, so every store app looked the same on the bar (measured on Settings and Calculator).
+    // The shell knows the window's app, so it is asked for that app's icon instead. Its calls can block for
+    // seconds (see the note above AskAppIds in FloatingBar.Pins.cs), so they run on a pool thread. The answer is
+    // stored for the next lookup and raises HostedIconArrived, which wakes the bar at once instead of on its next probe.
+    static void AskHostedApp((nint Hwnd, string Path) key, WindowHandle window, string? processPath)
+    {
+        if (!RosterIdentity.IsFrameHost(processPath)) return;
+        if (hostedAsking.TryAdd(key, 0))
+        {
+            var shell = Shell;
+            Task.Run(() =>
+            {
+                try
+                {
+                    if (AskShell(shell, window) is { } icon)
+                    {
+                        hostedAnswers[key] = icon;
+                        HostedIconArrived?.Invoke();
+                    }
+                }
+                catch (Exception) { /* no icon this time: the next probe asks again */ }
+                finally { hostedAsking.TryRemove(key, out _); }
+            });
+        }
+    }
+
+    // On a pool thread. Touches nothing of this class's UI-thread caches.
+    static ImageSource? AskShell(ITaskbarPins shell, WindowHandle window)
+    {
+        string? appId = null;
+        for (var attempt = 0; attempt < AppIdTries && appId is null; attempt++)
+        {
+            if (attempt > 0) Thread.Sleep(50);
+            appId = shell.AppIdOf(window);
+        }
+        if (appId is null) return null;
+        ImageSource? found = null;
+        shell.ImageOfApp(appId, 32).Map(ToImageSource).Tap(image => found = image);
+        return found is BitmapSource bitmap && !IsBlank(bitmap) ? found : null;
+    }
+
+    // Moved here from FloatingBar.Pins.cs unchanged, so a pool thread can build one without touching FloatingBar
+    // (whose static initialisers would then run there, and WPF objects made on that thread keep its affinity).
+    internal static ImageSource ToImageSource(PinImage image)
+    {
+        var source = BitmapSource.Create(image.Width, image.Height, 96, 96, PixelFormats.Pbgra32, null, image.Pixels, image.Width * 4);
+        source.Freeze();
+        return source;
     }
 
     // THIS WINDOW's own icon, asked of the owning process. The only source specific to the
