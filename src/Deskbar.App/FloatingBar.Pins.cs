@@ -205,12 +205,7 @@ public partial class FloatingBar
         return image;
     }
 
-    static ImageSource ToImageSource(PinImage image)
-    {
-        var source = BitmapSource.Create(image.Width, image.Height, 96, 96, PixelFormats.Pbgra32, null, image.Pixels, image.Width * 4);
-        source.Freeze();
-        return source;
-    }
+    static ImageSource ToImageSource(PinImage image) => IconCache.ToImageSource(image);
 
     ContextMenu PinMenu(TaskbarPin pin, ContextMenu? into = null)
     {
