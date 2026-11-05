@@ -32,6 +32,9 @@ public sealed class QuickFind : IDisposable
     readonly DispatcherTimer timer = new() { Interval = TimeSpan.FromSeconds(1) };
     readonly IDisposable subscriptions;
 
+    static readonly TimeSpan JustClosed = TimeSpan.FromMilliseconds(500);
+    DateTime dismissedAt = DateTime.MinValue;
+
     // Results whose Enter failed while the box was open: a window that closed between the search and Enter.
     // Dropped from the list so the next Enter takes the next row (the plan's Review Focus, item 1), and
     // forgotten when the box closes, since a failure now says nothing about the next time.
@@ -63,7 +66,7 @@ public sealed class QuickFind : IDisposable
         subscriptions = new System.Reactive.Disposables.CompositeDisposable(
             window.Typed.Subscribe(text => { query = FindQuery.Parse(text); Render(typed: true); }),
             window.Chosen.Subscribe(Choose),
-            window.Dismissed.Subscribe(_ => { timer.Stop(); gone.Clear(); }));
+            window.Dismissed.Subscribe(_ => { timer.Stop(); gone.Clear(); dismissedAt = DateTime.UtcNow; }));
     }
 
     // The window's handle, so the composition root can hand it to WindowMonitor.Ignore before it ever shows:
@@ -81,6 +84,15 @@ public sealed class QuickFind : IDisposable
         bringForward?.Invoke(EnsureHandle());
         Render(typed: true);
         timer.Start();
+    }
+
+    // The bar's Search button. A press on the bar takes the foreground, so an open box has already closed itself
+    // (Deactivated) by the time the click arrives, and showing it again would make a second click reopen it. A box
+    // that closed this recently is the same press closing it, so the click stops there, as Start's button does.
+    public void ToggleFromBar()
+    {
+        if (DateTime.UtcNow - dismissedAt < JustClosed) return;
+        Show();
     }
 
     // The once-a-second refresh while the box is open. Nothing typed means nothing is shown, so the catalogue

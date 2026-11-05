@@ -86,6 +86,48 @@ public class QuickFindWindowTests
         window.Dismiss();
     });
 
+    // The bar's Search button (QuickFind.ToggleFromBar).
+    [Fact]
+    public void The_bars_button_opens_the_box() => StaThread.Run(() =>
+    {
+        var window = new QuickFindWindow();
+        using var find = Controller(window, [Window("w:1", "Invoice", 1)], _ => Result.Success());
+
+        find.ToggleFromBar();
+
+        Assert.True(window.IsOpen);
+        window.Dismiss();
+    });
+
+    // The press on the bar closes the open box (Deactivated) before the click arrives; the click must not open it again.
+    [Fact]
+    public void A_second_click_on_the_bars_button_closes_the_box() => StaThread.Run(() =>
+    {
+        var window = new QuickFindWindow();
+        using var find = Controller(window, [Window("w:1", "Invoice", 1)], _ => Result.Success());
+
+        find.ToggleFromBar();
+        window.Dismiss(); // what Deactivated does
+        find.ToggleFromBar();
+
+        Assert.False(window.IsOpen);
+    });
+
+    [Fact]
+    public void The_bars_button_opens_it_again_later() => StaThread.Run(() =>
+    {
+        var window = new QuickFindWindow();
+        using var find = Controller(window, [Window("w:1", "Invoice", 1)], _ => Result.Success());
+
+        find.ToggleFromBar();
+        window.Dismiss();
+        Thread.Sleep(600);
+        find.ToggleFromBar();
+
+        Assert.True(window.IsOpen);
+        window.Dismiss();
+    });
+
     // Finding 6: after the text changes, the highlight goes to the new top result; it is kept by key only
     // across background refreshes.
     [Fact]

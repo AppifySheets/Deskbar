@@ -1355,6 +1355,8 @@ public partial class App : Application
                 Stats = new Windows.Performance.SystemStats(),
                 // The tray's own commands, for the bar's background menu, so both menus run the same code.
                 AppActions = new FloatingBar.AppCommands(OpenManage, CheckForUpdateNow, ExitApp, () => pendingUpdate, SaveDebugDump, RestartApp),
+                // ...and the Search button's: quick find, built further down, so reached through the field.
+                OpenFind = () => quickFind?.ToggleFromBar(),
                 // ...and the captions' time today (FloatingBar.WorkspaceTime.cs): the Time tab's own reading
                 // of the same tracker, so the two cannot disagree.
                 TimeToday = id => timeTracker?.Time.On(id, DateOnly.FromDateTime(DateTime.Now)) ?? TimeSpan.Zero,

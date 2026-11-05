@@ -455,16 +455,16 @@ path of your keystrokes.
 
 ## Quick find
 
-`Win+Alt+Space` opens a search box over everything open on every workspace: window titles, every
-browser tab and every VS Code editor tab (open Claude Code sessions included, since each is a tab
-named after the session). Type a few letters of anything in the title, in any order: `inv 10` finds
-"Invoice 2026-10". Results sit under the workspace they are in, in its colour, the workspaces you
+`Win+Alt+Space`, or the bar's **Search** button, opens a search box over everything open on every
+workspace: window titles, every browser tab and every VS Code editor tab (open Claude Code
+sessions included, since each is a tab named after the session). Type a few letters of anything
+in the title, in any order: `inv 10` finds "Invoice 2026-10". Results sit under the workspace they are in, in its colour, the workspaces you
 used most recently first. Enter takes you there, Esc closes the box. A browser window is listed by
 its tabs, so you find the page, not the window that happens to show it.
 
 `deskbar find inv 10` opens it with the text already typed. Change the chord on Manage →
 **Shortcuts**; it can never be the switcher's. These two chords are the only ones Deskbar
-registers; everything else is on the bar, one click away.
+registers; everything else is on the bar, one click away. Windows' own search is still `Win+S`.
 
 ## Naming windows
 
