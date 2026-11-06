@@ -661,10 +661,10 @@ public partial class FloatingBar
     // THE OVERFLOW OVER THE BAR. Reported by the owner (Windows 11 build 26300, two screens, the LEFT one the main one, the
     // taskbar on both, the bar docked on the right edge of the left one), and seen in the trace of his test of this fix (the
     // bar stepped below the overflow within 5 ms of the chevron press, and was back on top on each of 8 closes): Win+B
-    // focuses the main taskbar's tray, so Windows
-    // anchors the hidden-icons flyout to the chevron in the bottom-right corner of the LEFT screen, exactly where the bar is
-    // docked, and the flyout then straddles the seam into the right screen. The bar re-asserts HWND_TOPMOST on every foreground change and every
-    // second (ReclaimTopmost), and the flyout is only another window in the same band, so the bar climbed OVER its right half:
+    // focuses the main taskbar's tray, so Windows anchors the hidden-icons flyout to the chevron in the bottom-right corner
+    // of the LEFT screen, exactly where the bar is docked, and the flyout then straddles the seam into the right screen. The
+    // bar re-asserts HWND_TOPMOST on every foreground change and every second (ReclaimTopmost), and the flyout is only
+    // another window in the same band, so the bar climbed OVER its right half:
     // its icons could not be clicked, it flickered as the two took the top from each other, and it closed by itself.
     //
     // Why it closed, from the code and NOT measured: a click on the covered half lands on the BAR, which takes the foreground,
