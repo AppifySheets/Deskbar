@@ -334,8 +334,8 @@ jobs:
         # --target pins the tag, created only when the draft is published, to the exact commit
         # this run built.
         #
-        # THE NOTES are what the people updating read, so they come from the merged PR that
-        # carried the version bump: its "## Release notes" section, written for them, up to the
+        # THE NOTES are what the people updating read, so they come from the merged PR, the one
+        # this commit landed from: its "## Release notes" section, written for them, up to the
         # next "## " heading. The rest of a PR description (tests, measurements, review notes) is
         # for reviewers and stays out. A PR without that section, or a commit no PR is associated
         # with, falls back to --generate-notes, the list of merged PRs since the last release.
