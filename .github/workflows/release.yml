@@ -1,16 +1,20 @@
 # Builds Deskbar into a DRAFT GitHub Release, and guards the moment a release is published.
 #
 # WHEN THIS RUNS
-#   - On a MERGE to main that bumps the version (push to main touching Directory.Build.props).
-#     Petre: "release on merge so". Every PR that earns a release bumps VersionPrefix in the same
-#     PR (see CLAUDE.md), so a merge that changes it IS the release; making someone come back
-#     and press a button afterwards only added a step that could be forgotten or done too early.
-#     The `decide` job reads the version from the file and skips quietly when that tag already
-#     has a release (the file changed, the version did not). The `build` job then builds the
-#     release exactly as a manual run does, and, while signing is not enforced, publishes it.
+#   - On EVERY push to main, that is every merge. Petre: "release on merge so". The version is not
+#     in a file: Nerdbank.GitVersioning computes it from version.json (the major.minor line) and
+#     the git height, so a pull request never bumps anything (see CLAUDE.md). The `decide` job
+#     asks MSBuild for that version, and skips quietly when there is nothing to release: the
+#     merged pull request has the `no-release` label, no file under src/ changed in the push, or
+#     that version already has a release (a re-run). The `build` job then builds the release
+#     exactly as a manual run does, and, while signing is not enforced, publishes it.
 #     Once SIGNING_CERT_THUMBPRINT is set it stops at the draft, as a manual run always does.
-#   - Manually, via the Actions tab or `gh workflow run Release -f version=2.0.0`
-#     (workflow_dispatch). The `build` job compiles, tests and publishes the executable, then
+#     If a runner ever misbehaves on the MSBuild query, the nbgv command line is the fallback:
+#     `dotnet tool install -g nbgv --version 3.10.94`, then `nbgv get-version -v Version`.
+#   - Manually, via the Actions tab or `gh workflow run Release` (workflow_dispatch), from main.
+#     There is no version input: it builds the version the checked-out commit computes, and
+#     refuses a ref that is not main (its version carries a -g<hash> suffix) and a version that
+#     already has a release. The `build` job compiles, tests and publishes the executable, then
 #     creates a draft release v<version> with it attached. The draft is where signing happens:
 #     scripts/sign-release.ps1, on Petre's machine, downloads the draft's executable, signs it,
 #     uploads it back and publishes. Still the way to retry a merge's release that failed.
@@ -22,6 +26,15 @@
 #   tag on a commit from before it gets whatever release.yml that commit carried, and that
 #   older file does not guard anything (see the comment above the guard job).
 #
+# FULL HISTORY. Every checkout that computes or builds the version uses fetch-depth: 0, because
+# the patch number is the count of commits since version.json changed. A shallow clone makes the
+# build fail ("Shallow clone lacks the objects required to calculate version height"), on
+# purpose: a wrong version would be worse than no build.
+#
+# TWO MERGES CLOSE TOGETHER each get their own version and run, but the `build` job's concurrency
+# group holds only one waiting run, so a middle one can be dropped. That version gets no release
+# and its changes ship in the next one: a gap in the numbers, nothing lost.
+#
 # THE STORE PACKAGE. The build job also packs the Microsoft Store .msix of the same commit
 # (scripts/pack-store.ps1) and keeps it as a workflow artifact, never a release asset; the
 # store-smoke job then installs it on a fresh runner and checks it answers `deskbar version`
@@ -31,18 +44,12 @@
 name: Release
 
 on:
-  # A merge to main. Only pushes that touch Directory.Build.props, where VersionPrefix lives, so an
-  # ordinary merge that bumps nothing does not even start a runner. Whether the version actually
-  # changed is decided by the `decide` job, from the tags that already have releases.
+  # Every merge to main. Whether it releases is decided by the `decide` job (label, files under
+  # src/, tags that already have releases), so a merge that changes only docs costs one cheap
+  # job and no build.
   push:
     branches: [main]
-    paths: [Directory.Build.props]
   workflow_dispatch:
-    inputs:
-      version:
-        description: 'Version to build, e.g. 2.0.0, no leading v'
-        required: true
-        type: string
   release:
     types: [published]
 
@@ -54,87 +61,62 @@ permissions:
   contents: write
 
 jobs:
-  # WHICH VERSION, AND WHETHER TO BUILD IT AT ALL. Its own job, on a cheap Linux runner, so a merge
-  # that touched Directory.Build.props without bumping the version costs seconds, not a Windows
-  # build. Outputs:
-  #   version  the version to build, "2.1.8", no leading v
+  # WHICH VERSION, AND WHETHER TO BUILD IT AT ALL. Its own job so a merge that releases nothing
+  # (docs, tests, workflows, the `no-release` label) costs a minute, not the full build.
+  # It runs on Windows because it asks MSBuild for the version: the same code path the build
+  # uses, so the two cannot disagree. Outputs:
+  #   version  the version to build, "2.4.7", no leading v
   #   go       'true' when the build job should run
   decide:
     # Publishing a release must NOT rebuild: the asset on a published release is the one Petre's
     # machine signed, and a rebuild would have nothing to sign it with. So only a merge or a
     # manual run decides anything.
     if: github.event_name == 'workflow_dispatch' || github.event_name == 'push'
-    runs-on: ubuntu-latest
+    runs-on: windows-latest
     outputs:
       version: ${{ steps.version.outputs.version }}
-      go: ${{ steps.existing.outputs.go }}
+      go: ${{ steps.worth.outputs.go }}
 
     steps:
       - name: Check out the repository
         uses: actions/checkout@v7
+        with:
+          # The version is computed from the commit count, which needs the whole history. The
+          # range check below also reads the commits before this push.
+          fetch-depth: 0
 
-      - name: Check the version
+      - name: Install the .NET SDK
+        uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Restore the project that names the version
+        run: dotnet restore src/Deskbar.Core/Deskbar.Core.csproj
+
+      - name: Ask MSBuild for the version
         id: version
         shell: pwsh
-        # Read through env rather than pasted into the script, so whatever was typed into the
-        # input cannot become PowerShell.
-        env:
-          VERSION: ${{ inputs.version }}
-          EVENT: ${{ github.event_name }}
         run: |
-          # A merge names no version: it releases whatever VersionPrefix the merged commit carries,
-          # read here the same way the check below reads it. A manual run names one, which must
-          # match the file (checked below), so a typo cannot ship a version no commit ever had.
-          if ($env:EVENT -eq 'push') {
-            $props = Get-Content -LiteralPath Directory.Build.props -Raw
-            $found = [regex]::Match($props, '<VersionPrefix>\s*([^<]*?)\s*</VersionPrefix>')
-            if (-not $found.Success) {
-              "::error::Could not find <VersionPrefix> in Directory.Build.props."
-              exit 1
-            }
-            $env:VERSION = $found.Groups[1].Value
-          }
-          # The input is the .NET version itself ("2.0.0"); the "v" is added only where a git
-          # tag is made. Typing "v2.0.0" would produce a tag "vv2.0.0", so refuse it here,
-          # before ten minutes of building, rather than after.
-          # Not trimmed: later steps use the input as typed, so a stray space has to fail the
-          # shape check below rather than be quietly fixed here and then reappear in the tag.
-          $version = "$env:VERSION"
-          if (-not $version.Trim()) {
-            "::error::The version input is empty. Give the version to build, e.g. 2.0.0."
+          # GetBuildVersion is Nerdbank.GitVersioning's target; -getProperty prints just the
+          # value. On main it is "2.4.7". On any other ref it is "2.4.7-g<hash>" (version.json
+          # makes only refs/heads/main a public release), which is refused below: a tag and the
+          # asset names need the plain three numbers.
+          $version = (dotnet msbuild src/Deskbar.Core/Deskbar.Core.csproj -t:GetBuildVersion -getProperty:Version -nologo | Out-String).Trim()
+          if ($LASTEXITCODE -ne 0 -or -not $version) {
+            "::error::MSBuild could not compute the version (exit $LASTEXITCODE). Output: $version"
             exit 1
           }
-          if ($version.StartsWith('v') -or $version.StartsWith('V')) {
-            "::error::The version input '$version' starts with a 'v'. Give it without one, e.g. $($version.Substring(1)); the tag gets its 'v' added for you."
-            exit 1
-          }
-          # VersionPrefix only takes numbers, so anything else would fail the build much later
-          # with a less obvious message. Case-sensitive, ASCII digits only and anchored with
-          # \A and \z: -notmatch is case-insensitive, \d also matches non-ASCII digits, and $
-          # accepts a trailing newline, none of which belong in a version or a tag.
+          # Case-sensitive, ASCII digits only and anchored with \A and \z: -notmatch is
+          # case-insensitive, \d also matches non-ASCII digits, and $ accepts a trailing newline,
+          # none of which belong in a version or a tag.
           if ($version -cnotmatch '\A[0-9]+\.[0-9]+\.[0-9]+\z') {
-            "::error::The version input '$version' is not three numbers separated by dots, e.g. 2.0.0."
-            exit 1
-          }
-          # The input must be the version the checked-out commit already carries. The build
-          # passes -p:VersionPrefix and would quietly override the file, so without this check
-          # a typo ships an exe whose version no commit ever had. Read with a regex rather than
-          # as XML so a comment or an extra PropertyGroup in the file cannot change the answer.
-          $props = Get-Content -LiteralPath Directory.Build.props -Raw
-          $match = [regex]::Match($props, '<VersionPrefix>\s*([^<]*?)\s*</VersionPrefix>')
-          if (-not $match.Success) {
-            "::error::Could not find <VersionPrefix> in Directory.Build.props."
-            exit 1
-          }
-          $prefix = $match.Groups[1].Value
-          if ($version -cne $prefix) {
-            "::error::The version input '$version' does not match VersionPrefix '$prefix' in Directory.Build.props at this commit. The version is bumped in the PR that earns it: merge that PR first, then build the version it set."
+            "::error::The version for this ref is '$version', not three plain numbers. A -g<hash> suffix means this is not a public release ref: run the workflow from main."
             exit 1
           }
           "version=$version" >> $env:GITHUB_OUTPUT
           "Building version $version"
 
-      - name: Refuse a version that already has a release
+      - name: Check whether that version already has a release
         id: existing
         shell: pwsh
         env:
@@ -149,19 +131,69 @@ jobs:
           $tags = @(gh api "repos/${{ github.repository }}/releases" --paginate --jq '.[].tag_name')
           if ($LASTEXITCODE -ne 0) { "::error::Could not list the existing releases."; exit 1 }
           if ($tags -contains $env:TAG) {
-            # On a merge this is the ordinary case of a Directory.Build.props change that did not
-            # bump the version (or a merge whose release was already cut by hand): nothing to do,
-            # and not a failure. A manual run asked for this version specifically, so it fails.
-            if ($env:EVENT -eq 'push') {
-              "::notice::$env:TAG already has a release, so this merge did not bump the version. Nothing to release."
-              "go=false" >> $env:GITHUB_OUTPUT
-              exit 0
+            # A manual run asked for a build specifically, so it fails. On a merge it is the
+            # ordinary case of a re-run, or a release cut by hand: nothing to do.
+            if ($env:EVENT -ne 'push') {
+              "::error::A release (draft or published) tagged $env:TAG already exists. Delete it first; a manual run builds the version this commit computes."
+              exit 1
             }
-            "::error::A release (draft or published) tagged $env:TAG already exists. Delete it first, or build a different version."
-            exit 1
+            "exists=true" >> $env:GITHUB_OUTPUT
+            exit 0
+          }
+          "exists=false" >> $env:GITHUB_OUTPUT
+          "No release tagged $env:TAG yet."
+
+      - name: Decide whether this run releases
+        id: worth
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          EVENT: ${{ github.event_name }}
+          EXISTS: ${{ steps.existing.outputs.exists }}
+          TAG: v${{ steps.version.outputs.version }}
+          BEFORE: ${{ github.event.before }}
+          SHA: ${{ github.sha }}
+        run: |
+          # A manual run is an explicit request: build it.
+          if ($env:EVENT -ne 'push') { "go=true" >> $env:GITHUB_OUTPUT; exit 0 }
+
+          if ($env:EXISTS -eq 'true') {
+            "::notice::$env:TAG already has a release, so this push has nothing new to release."
+            "go=false" >> $env:GITHUB_OUTPUT
+            exit 0
+          }
+
+          # 1. The opt-out label on the pull request that was merged. Read through the commit,
+          #    because a push event does not name its pull request. If the API fails, release:
+          #    a release nobody wanted is a draft to delete, a release that silently did not
+          #    happen is a bug nobody sees.
+          $labels = @(gh api "repos/${{ github.repository }}/commits/$env:SHA/pulls" --jq '.[].labels[].name')
+          if ($LASTEXITCODE -ne 0) {
+            "::warning::Could not read the merged pull request's labels; treating the push as releasable."
+            $labels = @()
+          }
+          if ($labels -contains 'no-release') {
+            "::notice::The merged pull request is labelled no-release. $env:TAG is not released; the change ships with the next release."
+            "go=false" >> $env:GITHUB_OUTPUT
+            exit 0
+          }
+
+          # 2. Did the app change? Every file in the push, which can be several commits
+          #    (a rebase merge). A new branch or a force push has no usable "before": release.
+          git cat-file -e "$($env:BEFORE)^{commit}" 2>$null
+          if ($env:BEFORE -match '\A0+\z' -or $LASTEXITCODE -ne 0) {
+            "::notice::No usable previous commit ($env:BEFORE); treating the push as releasable."
+            "go=true" >> $env:GITHUB_OUTPUT
+            exit 0
+          }
+          $changed = @(git diff --name-only $env:BEFORE $env:SHA)
+          if (-not ($changed | Where-Object { $_ -like 'src/*' })) {
+            "::notice::Nothing under src/ changed in this push, so $env:TAG is not released."
+            "go=false" >> $env:GITHUB_OUTPUT
+            exit 0
           }
           "go=true" >> $env:GITHUB_OUTPUT
-          "No release tagged $env:TAG yet."
+          "$env:TAG will be released."
 
   build:
     # Only when `decide` found a version with no release yet.
@@ -169,7 +201,8 @@ jobs:
     if: needs.decide.outputs.go == 'true'
 
     # One release build at a time: two merges in quick succession would otherwise race to create
-    # releases, and the second could finish first. Queued, never cancelled, so neither is lost.
+    # releases. A running build is never cancelled; GitHub keeps one waiting run per group, so a
+    # third merge can replace a second one that was still waiting (see TWO MERGES at the top).
     concurrency:
       group: release-build
       cancel-in-progress: false
@@ -187,6 +220,9 @@ jobs:
     steps:
       - name: Check out the repository
         uses: actions/checkout@v7
+        with:
+          # The version is the commit count since version.json changed: full history.
+          fetch-depth: 0
 
       - name: Install the .NET SDK
         uses: actions/setup-dotnet@v6
@@ -211,7 +247,23 @@ jobs:
       - name: Build
         # -warnaserror: the branch builds clean today, and a release is exactly the wrong
         # moment to let a new warning slide by unnoticed.
-        run: dotnet build Deskbar.sln -c Release --no-restore -warnaserror -p:VersionPrefix=${{ steps.version.outputs.version }}
+        run: dotnet build Deskbar.sln -c Release --no-restore -warnaserror
+
+      - name: Check the built version is the one decided
+        shell: pwsh
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          # The decide job and this build each compute the version from the same commit; this
+          # proves they agree before anything is tagged. ProductVersion is the exe's
+          # InformationalVersion, "2.4.7+<hash>".
+          $dll = Get-ChildItem src/Deskbar.App/bin/Release -Recurse -Filter Deskbar.dll | Select-Object -First 1
+          $built = [System.Diagnostics.FileVersionInfo]::GetVersionInfo($dll.FullName).ProductVersion
+          if (-not $built.StartsWith("$env:VERSION+")) {
+            "::error::The build is $built but the decide job chose $env:VERSION. Nothing is tagged."
+            exit 1
+          }
+          "Built $built"
 
       - name: Test
         # Category=Integration is EXCLUDED deliberately: those tests create, switch and delete
@@ -244,7 +296,6 @@ jobs:
           -p:IncludeNativeLibrariesForSelfExtract=true
           -p:EnableCompressionInSingleFile=true
           -p:DebugType=none
-          -p:VersionPrefix=${{ steps.version.outputs.version }}
           -o artifacts/publish
 
       - name: Name the executable after its version
