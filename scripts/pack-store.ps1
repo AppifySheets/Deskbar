@@ -19,8 +19,9 @@
     in docs/superpowers/specs/2026-10-24-deskbar-store-packaging-design.md. The pure parts live
     in StorePackaging.psm1, tested by StorePackaging.Tests.ps1.
 .PARAMETER Version
-    Three-part version, normally VersionPrefix from Directory.Build.props. The package version
-    is this plus ".0", and the publish stamps the exe with the same version.
+    Three-part version, normally the one Nerdbank.GitVersioning computes for the commit
+    (release.yml passes it). The package version is this plus ".0". The publish stamps the exe
+    with the computed version itself, so this must be the same number or the smoke test fails.
 .PARAMETER PublishDir
     A folder that already holds a Store publish: Deskbar.exe and deskbar-cli.exe side by side,
     self-contained, not single-file. When absent, the script publishes both projects itself.
@@ -81,10 +82,10 @@ try {
 
         # The Store publish, per the spec: self-contained so the package needs no runtime
         # installed, NOT single-file because a package installs a folder anyway and the Store
-        # scans its files, no PDBs, and never trimmed (WPF is not trim-safe). VersionPrefix is
-        # passed so the exe's file version and the package version cannot disagree.
+        # scans its files, no PDBs, and never trimmed (WPF is not trim-safe). No version is passed:
+        # the exe takes its version from git (version.json), the same number $Version should be.
         $publishFlags = @('-c', 'Release', '-r', 'win-x64', '--self-contained', 'true',
-            '-p:DebugType=none', '-p:PublishSingleFile=false', "-p:VersionPrefix=$Version")
+            '-p:DebugType=none', '-p:PublishSingleFile=false')
 
         Write-Information 'Publishing Deskbar.App'
         Invoke-DotNet -Arguments (@('publish', (Join-Path $repoRoot 'src\Deskbar.App\Deskbar.App.csproj')) + $publishFlags + @('-o', $PublishDir))

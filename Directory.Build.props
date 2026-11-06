@@ -9,20 +9,26 @@
   <!-- Version and product identity, shared by every project so the exe, its file
        properties and any future NuGet package can never disagree.
 
-       Three version properties exist because Windows and .NET read different ones:
-         Version                - the NuGet/semantic version (3 parts, what humans quote)
-         AssemblyVersion        - what assembly binding uses; kept at the major version with zeros
-                                  (2.0.0.0 for 2.x) so servicing releases never break a reference
-         FileVersion            - what Explorer's Details tab shows (4 parts, must be numeric)
-         InformationalVersion   - free-form; the one place a suffix like -beta could go
-       Bumping a release means editing VersionPrefix here and nothing else. -->
-  <PropertyGroup>
-    <VersionPrefix>2.3.9</VersionPrefix>
-    <Version>$(VersionPrefix)</Version>
-    <AssemblyVersion>2.0.0.0</AssemblyVersion>
-    <FileVersion>$(VersionPrefix).0</FileVersion>
-    <InformationalVersion>$(VersionPrefix)</InformationalVersion>
+       The version is NOT written here. Nerdbank.GitVersioning computes it from version.json
+       (the major.minor line) and the git height (commits since version.json last changed), so
+       every commit has one fixed version and a pull request never edits a version file. A minor
+       bump is a pull request that edits version.json. It needs the full git history: a shallow
+       clone fails the build, and a source zip without .git builds as x.y.0.
 
+       What the package sets, and what Windows and .NET read:
+         Version                - the semantic version, 2.4.7 (a non-main build: 2.4.7-g<hash>)
+         AssemblyVersion        - what assembly binding uses; kept at the major version with zeros
+                                  (2.0.0.0 for 2.x, version.json: assemblyVersion precision major)
+                                  so servicing releases never break a reference
+         FileVersion            - what Explorer's Details tab shows. Its 4th part is a number the
+                                  tool derives from the commit id: not zero and not increasing.
+                                  Accepted on purpose; the Store package has its own x.y.z.0.
+         InformationalVersion   - 2.4.7+<commit hash>; what the app reads as its own version -->
+  <ItemGroup>
+    <PackageReference Include="Nerdbank.GitVersioning" Version="3.10.94" PrivateAssets="all" />
+  </ItemGroup>
+
+  <PropertyGroup>
     <Product>Deskbar</Product>
     <Company>AppifySheets</Company>
     <Authors>Petre Chitashvili</Authors>
