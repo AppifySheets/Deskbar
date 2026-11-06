@@ -21,6 +21,16 @@ public class TrayOverflowCoverTests
     public void Overflow_that_only_touches_the_bars_edge_leaves_the_bar_on_top() =>
         Assert.False(TrayOverflowCover.ShouldStepBelow(true, true, new(3840, 1500, 4240, 2100), Bar));
 
+    // A screen to the left of the main one has negative x: the bar docked on its right edge, and a flyout over that edge.
+    [Fact]
+    public void Overflow_over_a_bar_on_a_screen_at_negative_x_puts_the_bar_below_it() =>
+        Assert.True(TrayOverflowCover.ShouldStepBelow(true, true, new(-200, 1500, 200, 2100), new(-400, 0, 0, 2160)));
+
+    // A flyout that covers the whole bar, edges and all, still counts as over it.
+    [Fact]
+    public void Overflow_that_fully_contains_the_bar_puts_the_bar_below_it() =>
+        Assert.True(TrayOverflowCover.ShouldStepBelow(true, true, new(3000, 0, 4500, 2160), Bar));
+
     [Fact]
     public void Overflow_no_longer_in_front_leaves_the_bar_on_top() =>
         Assert.False(TrayOverflowCover.ShouldStepBelow(false, true, OverBar, Bar));

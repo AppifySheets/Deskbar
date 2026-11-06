@@ -690,8 +690,10 @@ public partial class FloatingBar
         NoteOverflowInFront(IsTrayOverflow(opened) ? opened : 0);
     }
 
-    // THE OVERFLOW OVER THE BAR. Measured on the owner's PC (Windows 11 build 26300, two screens, the LEFT one the main one, the
-    // taskbar on both, the bar docked on the right edge of the left one): Win+B focuses the main taskbar's tray, so Windows
+    // THE OVERFLOW OVER THE BAR. Reported by the owner (Windows 11 build 26300, two screens, the LEFT one the main one, the
+    // taskbar on both, the bar docked on the right edge of the left one), and seen in the trace of his test of this fix (the
+    // bar stepped below the overflow within 5 ms of the chevron press, and was back on top on each of 8 closes): Win+B
+    // focuses the main taskbar's tray, so Windows
     // anchors the hidden-icons flyout to the chevron in the bottom-right corner of the LEFT screen, exactly where the bar is
     // docked, and the flyout then straddles the seam into the right screen. The bar re-asserts HWND_TOPMOST on every foreground change and every
     // second (ReclaimTopmost), and the flyout is only another window in the same band, so the bar climbed OVER its right half:
@@ -771,6 +773,9 @@ public partial class FloatingBar
         shellResyncPending = false;
         LightShellButtons();
         TurnTrayChevron(false);
+        // The foreground hook never reports the bar's own windows, so nothing else says the overflow has gone:
+        // settle it now, not on the next tick.
+        NoteOverflowInFront(0);
     }
 
     // THE FLYOUT THAT CLOSES WITHOUT THE BAR HEARING IT (the header's fourth point). Esc, the Windows key or Win+S shuts it, and

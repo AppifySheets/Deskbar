@@ -216,8 +216,8 @@ public class FloatingBarTrayArrowTests
 
         bar.RememberTrayOverflow(0x7E57);
         Assert.Equal(0x7E57, bar.OverflowInFront);
+        // A press on the bar settles it by itself: the foreground hook never reports the bar's own windows.
         bar.NoteBarPressed();
-        bar.NoteForeground(0);
         Assert.Equal(0, bar.OverflowInFront);
     });
 
