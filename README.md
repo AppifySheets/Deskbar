@@ -925,28 +925,30 @@ Before the first signed release:
 - Enforcement is switched on with `gh variable set SIGNING_CERT_THUMBPRINT --body <thumbprint>`.
   Renewing the certificate changes the thumbprint, so update the variable before the next
   release, or every release reverts.
-- One rehearsal on a throwaway version, for example 0.0.2. The workflow only builds the
-  version that `VersionPrefix` names, so run it from a throwaway branch with `VersionPrefix`
-  set to 0.0.2 (`gh workflow run Release --ref <branch> -f version=0.0.2`). Mark the draft a
-  prerelease (`gh release edit v0.0.2 --prerelease`) so it never becomes latest, sign and
-  publish it with the script, and confirm the guard passes. Then build a second throwaway
-  version the same way, mark it a prerelease too, publish it unsigned by hand and confirm the
-  guard reverts it. Delete both with `gh release delete vX --yes --cleanup-tag`, and the
-  branch with them.
+- One rehearsal. The version cannot be chosen any more (git computes it), so a rehearsal is a
+  real release from `main`: run the workflow by hand (`gh workflow run Release`), mark the
+  draft a prerelease (`gh release edit vX --prerelease`) so it never becomes latest, sign and
+  publish it with the script, and confirm the guard passes. For the second half, build another
+  draft the same way, mark it a prerelease, publish it unsigned by hand and confirm the guard
+  reverts it. Delete both with `gh release delete vX --yes --cleanup-tag`.
 
-1. Bump `VersionPrefix` in `Directory.Build.props` in the pull request that earns the
-   version. Give the PR description a `## Release notes` section written for the people
-   updating: the release takes its notes from that section, up to the next `##` heading.
-   The Version workflow fails a pull request that changes anything under `src/` without
-   raising `VersionPrefix` above its base's. Label it `no-release` when the change must not
-   ship on its own yet; it then goes out with the next bump.
-2. Merge it. The merge starts the Release workflow by itself: it builds the version
-   `VersionPrefix` now names and creates release `vx.y.z` with an unsigned exe, named
-   `Deskbar-x.y.z-win-x64.exe`, so `Deskbar-2.0.0-win-x64.exe` for 2.0.0. A merge that
-   touches `Directory.Build.props` without bumping the version releases nothing. To build a
-   version by hand instead, for example to retry a failed run, open Actions, pick Release,
-   choose Run workflow and enter the version as `x.y.z`, with no leading `v`; it has to match
-   `VersionPrefix` at that commit, and it always stops at a draft.
+1. Write the pull request as usual, with a `## Release notes` section in its description,
+   written for the people updating: the release takes its notes from that section, up to
+   the next `##` heading. Nothing is bumped and the title carries no version: the version is
+   `version.json`'s `major.minor` plus the git height (commits since `version.json` last
+   changed), so every commit on `main` has its own number, such as 2.4.7. Label the pull request
+   `no-release` when the change must not ship on its own yet; it then goes out with the next
+   release. A minor bump (2.5.0) is a pull request that edits `version.json`.
+2. Merge it. The merge starts the Release workflow by itself. It skips quietly when the merged
+   pull request has the `no-release` label, when nothing under `src/` changed, or when that
+   version already has a release. Otherwise it builds the version git computes for the merge
+   and creates release `vx.y.z` with an unsigned exe, named `Deskbar-x.y.z-win-x64.exe`. Two
+   merges close together each get their own number, but a run waiting behind a running build can
+   be replaced by a newer one, so the numbers can have gaps; the skipped change ships in the next
+   release. To build by hand instead, for example to retry a failed run, open Actions, pick
+   Release and choose Run workflow on `main` (there is no input): it builds the version `main`'s
+   head computes, refuses a version that already has a release, and always stops at a draft.
+   A build from any other branch is `x.y.z+<hash>` and not a release; the workflow refuses it.
 3. On the signing machine, with the token plugged in, run
    `scripts/sign-release.ps1 -Tag vx.y.z -Thumbprint <thumbprint>`, for 2.0.0
    `scripts/sign-release.ps1 -Tag v2.0.0 -Thumbprint <thumbprint>`. The token's driver

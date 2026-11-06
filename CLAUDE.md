@@ -21,10 +21,11 @@ object.
 
 - **Shipped and in daily use.** Everything is on `main`; **v1.17.0** is released. One branch
   per topic, PR, merge, and no long-lived feature branch. About 180 PRs merged so far.
-- **A merge that bumps `VersionPrefix` releases itself** (Petre: "release on merge so"). The
-  push to main runs `release.yml`, which builds that version and, while `SIGNING_CERT_THUMBPRINT`
+- **Every merge to main that changes `src/` releases itself** (Petre: "release on merge so").
+  The push to main runs `release.yml`, which builds the version git computes for that commit
+  (see the version decision below) and, while `SIGNING_CERT_THUMBPRINT`
   is unset, publishes it unsigned with the notes from the PR's `## Release notes` section. So
-  write that section for users in every PR that bumps the version, and do not start a release by
+  write that section for users in every PR that changes `src/`, and do not start a release by
   hand after a merge; check the run instead (`gh run list --workflow Release`). Once the variable
   is set, a merge only drafts, and `scripts/sign-release.ps1` on Petre's machine signs and
   publishes, because the signing key sits on a token. `workflow_dispatch` still builds a draft by
@@ -52,7 +53,7 @@ object.
   feature branch in order to open a PR is fine; anything beyond that needs asking.
 - **While a pull request is open, keep it on top of its base without being asked.** Other
   sessions merge all day, and each merge leaves every open pull request behind: GitHub can no
-  longer fast-forward it, and a version bump on main makes its `VersionPrefix` conflict. So once
+  longer fast-forward it, and what lands is no longer the commit that was tested. So once
   a session has opened a pull request, it watches the pull request's base (main, or the branch of
   the pull request below it in a stack) until the pull request is merged or closed, and runs the
   `refresh-pr` skill as soon as the base moves or GitHub says it conflicts. The watch is a Monitor
@@ -147,20 +148,18 @@ page says "Sorry, we couldn't find that page": switch accounts, do not debug the
 
 ## Decisions already made, do not relitigate
 
-- **A version bump rides in the PR that earns it**, never in a release PR of its own. Every
-  release from 1.7.0 to 1.14.0 was a standalone one-line commit touching only
-  `Directory.Build.props`, and that habit was copied forward without anyone asking what it
-  bought: it costs a second merge before anything can ship, and there has never been a case
-  here where the fixes land and the version should not follow them. So bump `VersionPrefix`
-  in the same branch as the work, title the PR after the version it ships, and give it a
-  `## Release notes` section: the merge releases it, as the Releasing section of `README.md`
-  and the Current state bullet above describe, never a release created by hand. Petre, ending
-  it: "change that convention, include version bump with prs". A bump that must NOT ship yet
-  must not be merged yet: every merged bump is a release. This holds for every pull request that
-  changes `src/`, whoever opens it and for whomever their session works: do not leave the bump
-  out and ask the maintainer in the description. The `Version` workflow (`version.yml`) fails a
-  pull request that changes `src/` without raising `VersionPrefix` above its base's; the
-  `no-release` label is the only way past it, for a change that must not ship on its own yet.
+- **The version comes from git history, and a PR never touches it** (issue #327, Petre agreed).
+  Nerdbank.GitVersioning builds the version from `version.json` (the `major.minor` line) and the
+  git height, the number of commits since `version.json` last changed, so every commit has one
+  fixed version, on every machine and in CI. This replaced "every PR bumps `VersionPrefix`",
+  which made each merge conflict with every other open PR and kept "Rebase and merge" out of
+  reach. So: do not edit a version file (there is none), and put no version in the PR title.
+  Give a PR that changes `src/` a `## Release notes` section written for users: the merge
+  releases it, as the Releasing section of `README.md` describes, never a release created by
+  hand. A PR with the `no-release` label, or one that changes nothing under `src/`, gets a
+  version number but no release; its change ships with the next release. A minor bump (2.5.0) is
+  one PR that edits `version.json`. A build from a branch reports `2.4.N+<hash>`; only a build
+  from `main` is a public release. Builds need the full git history (a shallow clone fails).
 - **Built on Windows' virtual desktops**, never `ShowWindow(SW_HIDE)`. Hidden windows can be
   orphaned by a crash; a virtual desktop cannot lose one. This is also why the app is
   Windows-only by design rather than by omission.
