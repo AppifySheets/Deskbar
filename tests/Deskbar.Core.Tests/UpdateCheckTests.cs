@@ -27,6 +27,8 @@ public class UpdateCheckTests
     // itself because one side carries a trailing zero.
     [InlineData("1.6.0.0", "1.6.1")]
     [InlineData("1.6", "1.6.1")]
+    // Nerdbank.GitVersioning builds report "2.4.7+<commit>"; the metadata must not hide the number.
+    [InlineData("2.4.3+266816d48d", "v2.4.4")]
     public void A_higher_version_is_newer(string running, string latest) =>
         Assert.True(UpdateCheck.IsNewer(running, latest));
 
@@ -35,6 +37,7 @@ public class UpdateCheckTests
     [InlineData("1.6.0", "v1.6.0")]
     [InlineData("1.6.0.0", "1.6.0")]
     [InlineData("1.6.0", "1.6.0.0")]
+    [InlineData("2.4.3+266816d48d", "v2.4.3")]
     public void The_version_we_are_running_is_not_newer(string running, string latest) =>
         Assert.False(UpdateCheck.IsNewer(running, latest));
 
