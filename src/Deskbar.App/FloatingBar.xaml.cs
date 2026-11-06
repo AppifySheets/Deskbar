@@ -473,7 +473,10 @@ public partial class FloatingBar : Window
     // EVENT_OBJECT_REORDER, and it is worse: it fires constantly on a busy desktop, and our own
     // SetWindowPos changes z-order, so we would be feeding our own hook. One SetWindowPos per
     // second is both cheaper and impossible to make loop.
-    public void ReclaimTopmost()
+    public void ReclaimTopmost() => ReclaimTopmost(ForegroundWindow());
+
+    // `front` is what is in front now: the real foreground, or the window a foreground event named.
+    void ReclaimTopmost(nint front)
     {
         // Not while the user is dragging the bar: DragMove's native loop owns the window's
         // position, and a SetWindowPos arriving mid-drag fights it.
@@ -486,6 +489,10 @@ public partial class FloatingBar : Window
         // A full-screen window on the bar's own screen takes the bar out of the way. True when the bar has
         // stepped aside, so it does not climb back on top.
         if (StepAsideIfCovered(hwnd)) return;
+        // The tray's hidden-icons flyout, open over the bar: the bar goes just behind it (StepBelowOverflow).
+        // 0 is Windows saying there is no foreground window for a moment, not an answer to act on.
+        if (front != 0) overflowInFront = IsTrayOverflow(front) ? front : 0;
+        if (StepBelowOverflow(hwnd)) return;
         // SWP_NOACTIVATE is the load-bearing flag: without it this would yank focus off
         // whatever was just clicked -- including the taskbar the user was reaching for.
         NativeMethods.SetWindowPos(hwnd, NativeMethods.HWND_TOPMOST, 0, 0, 0, 0,

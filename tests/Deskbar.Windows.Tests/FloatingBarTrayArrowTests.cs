@@ -201,6 +201,26 @@ public class FloatingBarTrayArrowTests
         Assert.Equal(Up, State(chevron));
     });
 
+    // The overflow counts as in front for the bar's z-order (StepBelowOverflow) exactly while the chevron says it is open.
+    // Whether the bar then sits behind it is TrayOverflowCover's decision, tested on its own in Core.
+    [Fact]
+    public void The_overflow_is_in_front_for_the_bars_z_order_until_something_else_is() => Run((bar, _) =>
+    {
+        using var overflow = new ClassedWindow(Overflow);
+        using var taskbar = new ClassedWindow(Taskbar);
+
+        bar.NoteForeground(overflow.Handle);
+        Assert.Equal(overflow.Handle, bar.OverflowInFront);
+        bar.NoteForeground(taskbar.Handle);
+        Assert.Equal(0, bar.OverflowInFront);
+
+        bar.RememberTrayOverflow(0x7E57);
+        Assert.Equal(0x7E57, bar.OverflowInFront);
+        bar.NoteBarPressed();
+        bar.NoteForeground(0);
+        Assert.Equal(0, bar.OverflowInFront);
+    });
+
     // However it closes, the arrow and its words (tooltip and accessible name) turn back together. The ToolTip stays the
     // same object throughout, so one that is showing at that moment changes with them.
     [Fact]

@@ -8,6 +8,7 @@ using System.Windows.Media;
 using System.Windows.Media.Animation;
 using System.Windows.Shapes;
 using System.Windows.Threading;
+using Deskbar.Core.Geometry;
 using Deskbar.Core.Persistence;
 using Deskbar.Windows.Monitoring;
 
@@ -609,6 +610,7 @@ public partial class FloatingBar
         var flyout = ShellKeys.Recognise(hwnd) ?? (hwnd != 0 && hwnd == trayOverflow ? ShellFlyout.Tray : null);
         NoteFlyoutInFront(NoteStartSearch(hwnd, flyout));
         TurnTrayChevron(IsTrayOverflow(hwnd));
+        NoteOverflowInFront(IsTrayOverflow(hwnd) ? hwnd : 0);
         NoteLanguageTarget(hwnd, isFlyout: flyout is not null);
     }
 
@@ -685,6 +687,69 @@ public partial class FloatingBar
         trayOverflow = opened;
         NoteFlyoutInFront(ShellFlyout.Tray);
         TurnTrayChevron(IsTrayOverflow(opened));
+        NoteOverflowInFront(IsTrayOverflow(opened) ? opened : 0);
+    }
+
+    // THE OVERFLOW OVER THE BAR. Measured on the owner's PC (Windows 11 build 26300, two screens, the LEFT one the main one, the
+    // taskbar on both, the bar docked on the right edge of the left one): Win+B focuses the main taskbar's tray, so Windows
+    // anchors the hidden-icons flyout to the chevron in the bottom-right corner of the LEFT screen, exactly where the bar is
+    // docked, and the flyout then straddles the seam into the right screen. The bar re-asserts HWND_TOPMOST on every foreground change and every
+    // second (ReclaimTopmost), and the flyout is only another window in the same band, so the bar climbed OVER its right half:
+    // its icons could not be clicked, it flickered as the two took the top from each other, and it closed by itself.
+    //
+    // Why it closed, from the code and NOT measured: a click on the covered half lands on the BAR, which takes the foreground,
+    // and the flyout closes when it loses it, as any press on the bar closes a flyout (NoteBarPressed). Why the arrow got
+    // confused, same status: that press turns the chevron up (NoteBarPressed) while the flyout may still be on screen for a
+    // moment, and a click then reads as "nothing open" and sends Win+B and Space again.
+    //
+    // So while the overflow is in front and its rectangle overlaps the bar's, the bar sits directly BEHIND it (StepBelowOverflow)
+    // and ReclaimTopmost does not climb back. It is not moved, hidden or resized, and the flyout, a window of the shell's, is not
+    // touched. It comes back on top when the overflow is no longer in front, or no longer visible.
+    nint overflowInFront;
+
+    // For the tests: the overflow window the bar believes is in front, or 0.
+    internal nint OverflowInFront => overflowInFront;
+
+    // Remembers the overflow window as in front, or 0 when something else is. A change is acted on now, because the 1 s tick is
+    // too late: the flyout would sit under the bar for up to a second, or the bar stay behind a flyout that has gone.
+    void NoteOverflowInFront(nint overflow)
+    {
+        if (overflow == overflowInFront) return;
+        overflowInFront = overflow;
+        ReclaimTopmost(overflow);
+    }
+
+    // Whether the bar is currently sitting behind the overflow, for the trace.
+    bool belowOverflow;
+
+    // True when the bar has stepped below the overflow, so ReclaimTopmost does not climb back on top.
+    bool StepBelowOverflow(nint bar)
+    {
+        var overflow = overflowInFront;
+        if (overflow == 0 || !NativeMethods.GetWindowRect(overflow, out var over)
+            || !NativeMethods.GetWindowRect(bar, out var mine)
+            || !TrayOverflowCover.ShouldStepBelow(true, NativeMethods.IsWindowVisible(overflow),
+                new(over.Left, over.Top, over.Right, over.Bottom), new(mine.Left, mine.Top, mine.Right, mine.Bottom)))
+        {
+            if (belowOverflow)
+            {
+                belowOverflow = false;
+                ClickTrace.Write("tray overflow: bar back on top");
+            }
+            return false;
+        }
+
+        // Directly behind the overflow, and nothing else: the same call StepAsideIfCovered makes for an ordinary window. Behind a
+        // topmost window the bar stays in the topmost band, so it is still above everything ordinary; behind an ordinary one it
+        // leaves the band, which is where the flyout is. SWP_NOACTIVATE, so the flyout keeps the focus it has.
+        NativeMethods.SetWindowPos(bar, overflow, 0, 0, 0, 0,
+            NativeMethods.SWP_NOMOVE | NativeMethods.SWP_NOSIZE | NativeMethods.SWP_NOACTIVATE);
+        if (!belowOverflow)
+        {
+            belowOverflow = true;
+            ClickTrace.Write($"tray overflow: bar steps below {overflow:X} class={TopLevelWindows.ClassOf(overflow)}");
+        }
+        return true;
     }
 
     internal void NoteFlyoutInFront(ShellFlyout? flyout)
