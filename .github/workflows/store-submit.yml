@@ -2,7 +2,7 @@
 # releases without anyone uploading a file by hand.
 #
 # WHEN THIS RUNS
-#   - After every Release run that finishes (workflow_run). A release that bumped the version has
+#   - After every Release run that finishes (workflow_run). A release that was made has
 #     just packed and smoke-tested a Store package, and this submits it.
 #   - Once a day (schedule). The catch-up: a release that landed while an earlier submission was
 #     still in certification was skipped, and this submits the newest package once that earlier
@@ -57,7 +57,7 @@ concurrency:
 jobs:
   submit:
     # After a Release run only when it succeeded: a failed run's package is not one to submit, and
-    # the script would pass it over anyway. A run that only skipped (no version bump) succeeds too,
+    # the script would pass it over anyway. A run that only skipped (nothing to release) succeeds too,
     # and then simply finds the Store already up to date.
     if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
 

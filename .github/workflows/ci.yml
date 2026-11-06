@@ -7,14 +7,14 @@
 #
 # WHY PULL REQUESTS ONLY, and not pushes to main as well. Pull requests here merge with "Rebase and
 # merge", and a branch that is already on top of main is fast-forwarded: the commit that lands on
-# main is the very commit this workflow tested on the pull request. All 15 merges before this was
-# written were (#252 to #267), so a run on main built and tested the same commit a second time. A
-# merge that bumps the version also starts release.yml, which builds and tests that commit yet
-# again before it publishes anything, so every release merge ran three identical builds. Now a
-# merge starts at most one run, the release. The `rebased` job below is what keeps "already
-# tested" true: a branch that is behind its base gets a red check, because merging it would
-# rewrite its commits into ones nobody tested. Ported from app.rurua.ge's build.yml, where the
-# same check exists for the same reason.
+# main is the very commit this workflow tested on the pull request. A push to main then starts
+# release.yml, which builds and tests that commit again before it publishes anything, so a run
+# on main here would only be a third identical build.
+#
+# NO CHECK THAT A BRANCH IS REBASED OR BUMPS A VERSION. Both used to exist (the `rebased` and
+# `bumped` jobs) because every pull request edited VersionPrefix and so conflicted with every
+# merge. The version now comes from git history (version.json, see CLAUDE.md) and pull requests
+# never touch it, so an out-of-date branch merges as cleanly as any other.
 name: CI
 
 on:
@@ -24,54 +24,17 @@ permissions:
   contents: read
 
 jobs:
-  # FIRST, AND ON A CHEAP LINUX RUNNER, so a branch that is behind fails in seconds rather than
-  # after a Windows build. The build job waits for it.
-  #
-  # The question is asked about the base branch AS IT IS NOW, through the compare API, rather than
-  # the base commit recorded in the event, so a branch that fell behind while its run sat in the
-  # queue is caught too. The base is the pull request's own base, not main by name: a pull request
-  # stacked on another one targets that one's branch, and has to be on top of it, not of main.
-  # "identical" and "ahead" mean the head contains the base; "behind" and "diverged" mean it does
-  # not. The fix is the refresh-pr skill: rebase, push with a lease.
-  #
-  # Base moving on AFTER this ran does not turn the check red again, since nothing reruns it. The
-  # merge button's own "out of date" notice covers that moment, and so does the watch every
-  # session keeps on its open pull request's base (see CLAUDE.md), which runs refresh-pr and so
-  # pushes, which reruns this.
-  rebased:
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Require a branch rebased onto its base
-        shell: bash
-        env:
-          GH_TOKEN: ${{ github.token }}
-          # Through env rather than pasted into the script, so a branch name cannot become shell.
-          # HEAD is the branch head, not GitHub's synthetic refs/pull/N/merge commit: the head is
-          # the commit that reaches main when the merge fast-forwards.
-          BASE: ${{ github.base_ref }}
-          HEAD: ${{ github.event.pull_request.head.sha }}
-        run: |
-          set -euo pipefail
-
-          status=$(gh api "repos/$GITHUB_REPOSITORY/compare/$BASE...$HEAD" --jq .status)
-          case "$status" in
-            identical|ahead)
-              echo "The branch head $HEAD contains $BASE ($status)." ;;
-            *)
-              echo "::error::This branch is not rebased onto $BASE (compare says $status). Rebase it onto origin/$BASE and push with --force-with-lease (the refresh-pr skill does both)."
-              exit 1 ;;
-          esac
-
   build-and-test:
-    needs: rebased
-
     # MUST be Windows: WPF app targeting net10.0-windows, and the tests construct real windows.
     runs-on: windows-latest
 
     steps:
       - name: Check out the repository
         uses: actions/checkout@v7
+        with:
+          # The version is the commit count since version.json changed (Nerdbank.GitVersioning),
+          # and the build fails on a shallow clone. Full history.
+          fetch-depth: 0
 
       - name: Install the .NET SDK
         uses: actions/setup-dotnet@v6
