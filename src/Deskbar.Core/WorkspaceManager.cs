@@ -2796,7 +2796,13 @@ public sealed class WorkspaceManager(
         // wearing "RDP" would be learned as a session called RDP, and the wrong home would stick.
         var ours = ledger.AppliedName(window.Handle).Map(applied => applied == window.Title).GetValueOrDefault(false)
                    || State.RenameRules.Any(rule => rule.ShortName.Equals(window.Title, StringComparison.OrdinalIgnoreCase));
-        var token = ours ? Maybe<string>.None : TitleToken.For(window.ProcessName, window.Title);
+        // The app's learned folders go along so a title that names ONLY the folder ("hris.ifc.ge -
+        // Visual Studio Code", an editor restored with no tab open) can still be read as one. Only a
+        // name that matches a home already learned counts; see the end of TitleToken.For for why.
+        var known = State.ContainerHomes
+            .Where(home => home.ProcessName.Equals(window.ProcessName, StringComparison.OrdinalIgnoreCase))
+            .Select(home => home.Token);
+        var token = ours ? Maybe<string>.None : TitleToken.For(window.ProcessName, window.Title, known);
 
         // Petre's Remote Desktop Manager sessions place on open for some windows and not others, and
         // the log cannot currently say why: it records the DECISIONS (learned, placed) and nothing

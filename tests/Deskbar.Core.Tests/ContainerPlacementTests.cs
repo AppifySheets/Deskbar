@@ -407,6 +407,45 @@ public class ContainerPlacementTests
         Assert.Equal(taskSpaces.DesktopId, desktops.WindowPlacements[new WindowHandle(0x916)]);
     }
 
+    // Petre, 2026-11-07: "check why vscode windows didn't go to their corresponding deskbars". VS Code
+    // restored five windows with a folder open and no editor tab, so each was titled with the folder
+    // alone, "hris.ifc.ge - Visual Studio Code", and the tier read that as no folder at all. The
+    // windows stayed piled on whichever desktop was current although every folder had a learned home.
+    [Fact]
+    public void A_window_restored_with_no_editor_open_still_goes_home()
+    {
+        var manager = Started();
+        Appears(monitor, Code(0x921, LoadedTaskSpaces));
+        Assert.True(manager.AssignWindow(new WindowHandle(0x921), taskSpaces.Id).IsSuccess);
+        Closed(monitor, Code(0x921, LoadedTaskSpaces));
+
+        // The restart brings back more than one editor, as it did on his machine (eleven). With another
+        // live window sharing the identity the roster stands down, so the folder is the ONLY thing that
+        // can place this window; with one window alone the roster would answer and hide the bug.
+        desktops.WindowPlacements[new WindowHandle(0x924)] = framework.DesktopId!.Value;
+        Appears(monitor, Code(0x924, LoadedDice));
+
+        // Same folder, no tab, dumped on framework where he happened to be standing.
+        desktops.WindowPlacements[new WindowHandle(0x922)] = framework.DesktopId!.Value;
+        Appears(monitor, Code(0x922, "TaskSpaces - Visual Studio Code"));
+
+        Assert.Equal(taskSpaces.DesktopId, desktops.WindowPlacements[new WindowHandle(0x922)]);
+    }
+
+    // The other half, and the limit of the fix: a folder nobody has taught yet, shown with no tab
+    // open, is indistinguishable from a file opened with no folder. It must teach nothing, or a file
+    // name would become a home. It is learned the ordinary way once a tab puts the folder second.
+    [Fact]
+    public void A_folder_only_title_for_an_unknown_folder_teaches_nothing()
+    {
+        var manager = Started();
+        Appears(monitor, Code(0x923, "notes.txt - Visual Studio Code"));
+
+        Assert.True(manager.AssignWindow(new WindowHandle(0x923), taskSpaces.Id).IsSuccess);
+
+        Assert.Empty(store.Stored.ContainerHomes);
+    }
+
     // Petre, when TitleToken was first written: "so i open vscode, then i load a folder in it, that
     // should take it to the correct workspace." A window exists before its folder has loaded, so the
     // title change is the only moment the folder can be acted on.

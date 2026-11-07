@@ -95,7 +95,10 @@ public static class TitleToken
     public static bool ContainerFollowsTabs(string processName) =>
         Apps.TryGetValue(processName, out var shape) && shape == Shape.Bracketed;
 
-    public static Maybe<string> For(string processName, string title)
+    // `known` is the containers already learned for this app (ContainerHomes), and it only ever
+    // widens what a ONE-part title can mean; see the end of this method. Leaving it out keeps the
+    // strict reading, which is what learning and Matches want.
+    public static Maybe<string> For(string processName, string title, IEnumerable<string>? known = null)
     {
         if (string.IsNullOrWhiteSpace(title) || !Apps.TryGetValue(processName, out var shape))
             return Maybe<string>.None;
@@ -126,15 +129,46 @@ public static class TitleToken
                     ? Maybe<string>.None
                     : Clean(title);
 
-        var segments = Delimiters.Split(title)
+        var raw = Delimiters.Split(title)
             .Select(segment => segment.Trim())
             .Where(segment => segment.Length > 0)
+            .ToList();
+        var segments = raw
             .Where(segment => !AppNameTails.Contains(segment, StringComparer.OrdinalIgnoreCase))
             .ToList();
 
         // Fewer than two segments means the title carries a name but no container: a bare
         // "Visual Studio Code", or "Untitled-1 - Visual Studio Code" with no folder open.
         // Guessing there would learn a FILE name as though it were a project.
+        //
+        // ...EXCEPT when that one name is a folder this app has already been taught. VS Code titles a
+        // window "<folder> - Visual Studio Code" when a folder is open and no editor tab is, which is
+        // exactly how a window comes back after a restart if its tabs did not restore. Measured on
+        // Petre's machine, 2026-11-07 (Petre: "check why vscode windows didn't go to their
+        // corresponding deskbars"):
+        //
+        //   10:01  read "Service downtime question - hris.ifc.ge - Visual Studio Code" -> hris.ifc.ge
+        //          container Code/hris.ifc.ge -> HRIS
+        //   13:09  read "hris.ifc.ge - Visual Studio Code" -> none
+        //
+        // Same window, same folder, a home already learned for it, and five windows left piled on
+        // whichever desktop was current. The one-part title is the folder at its plainest, so refusing
+        // it made placement depend on which tab VS Code happened to restore.
+        //
+        // The file-name worry above still holds, and it is why this is a MATCH against known homes and
+        // never a read of any one-part title: a new file name is not a known folder, so it still reads
+        // as nothing and still teaches nothing. The one wrong answer left is a file named exactly like
+        // one of the app's learned folders, opened with no folder loaded. Two more conditions keep it
+        // narrow: only the folder-last shape (VS Code and Visual Studio), whose app names are what
+        // AppNameTails strips, and only when the app's name WAS in the title, so a bare "hris.ifc.ge"
+        // (say, our own folder-name rename left behind by a run that died) is not taken as one.
+        if (segments.Count == 1
+            && shape == Shape.TrailingContainer
+            && raw.Count > segments.Count
+            && known is not null
+            && known.Contains(segments[0], StringComparer.OrdinalIgnoreCase))
+            return Clean(segments[0]);
+
         return segments.Count < 2
             ? Maybe<string>.None
             : Clean(shape == Shape.TrailingContainer ? segments[^1] : segments[0]);

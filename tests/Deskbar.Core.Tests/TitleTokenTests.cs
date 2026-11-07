@@ -38,6 +38,38 @@ public class TitleTokenTests
     public void An_unsaved_file_with_no_folder_open_has_no_container() =>
         Assert.False(TitleToken.For("Code", "Untitled-1 - Visual Studio Code").HasValue);
 
+    // ---- A folder open and no editor tab: "<folder> - Visual Studio Code" ------------
+
+    // Petre, 2026-11-07: "check why vscode windows didn't go to their corresponding deskbars". Five
+    // windows came back from a restart with no tab open, titled with the folder alone, and were left
+    // piled on one desktop although a home was learned for every one of them. A one-part title that
+    // matches a folder this app was already taught is that folder.
+    [Fact]
+    public void A_folder_with_no_editor_open_is_read_when_that_folder_is_already_known() =>
+        Assert.Equal("hris.ifc.ge", TitleToken.For("Code", "hris.ifc.ge - Visual Studio Code", ["hris.ifc.ge"]).Value);
+
+    [Fact]
+    public void A_known_folder_matches_regardless_of_case() =>
+        Assert.Equal("TaskSpaces", TitleToken.For("Code", "TaskSpaces - Visual Studio Code", ["taskspaces"]).Value);
+
+    // The reason the old rule existed still stands: a file name is not a project. Only a KNOWN folder
+    // widens the reading, so an unsaved buffer reads as nothing even when the app has homes.
+    [Fact]
+    public void A_one_part_title_that_is_not_a_known_folder_is_still_nothing() =>
+        Assert.False(TitleToken.For("Code", "Untitled-1 - Visual Studio Code", ["hris.ifc.ge", "TaskSpaces"]).HasValue);
+
+    // Without the app's name the title is not one VS Code wrote in that shape. Our own folder-name
+    // rename is exactly such a title, and a run that died can leave it behind.
+    [Fact]
+    public void A_known_folder_without_the_app_name_is_not_read() =>
+        Assert.False(TitleToken.For("Code", "hris.ifc.ge", ["hris.ifc.ge"]).HasValue);
+
+    // JetBrains put the project FIRST, so a lone name there is a different question entirely; the
+    // widening is for the folder-last shape only.
+    [Fact]
+    public void The_widening_does_not_reach_the_project_first_shape() =>
+        Assert.False(TitleToken.For("rider64", "TaskSpaces", ["TaskSpaces"]).HasValue);
+
     [Fact]
     public void Visual_Studio_yields_the_solution() =>
         Assert.Equal("TaskSpaces", TitleToken.For("devenv", "Program.cs - TaskSpaces - Microsoft Visual Studio").Value);
