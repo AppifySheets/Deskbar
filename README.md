@@ -933,19 +933,24 @@ Before the first signed release:
   reverts it. Delete both with `gh release delete vX --yes --cleanup-tag`.
 
 1. Write the pull request as usual, with a `## Release notes` section in its description,
-   written for the people updating: the release takes its notes from that section, up to
-   the next `##` heading. Nothing is bumped and the title carries no version: the version is
+   written for the people updating: the release that ships the change puts that section, up to
+   the next `##` heading, in its notes, beside the sections of every other pull request it
+   ships. Nothing is bumped and the title carries no version: the version is
    `version.json`'s `major.minor` plus the git height (commits since `version.json` last
    changed), so every commit on `main` has its own number, such as 2.4.7. Label the pull request
    `no-release` when the change must not ship on its own yet; it then goes out with the next
    release. A minor bump (2.5.0) is a pull request that edits `version.json`.
-2. Merge it. The merge starts the Release workflow by itself. It skips quietly when the merged
-   pull request has the `no-release` label, when nothing under `src/` changed, or when that
-   version already has a release. Otherwise it builds the version git computes for the merge
-   and creates release `vx.y.z` with an unsigned exe, named `Deskbar-x.y.z-win-x64.exe`. Two
-   merges close together each get their own number, but a run waiting behind a running build can
-   be replaced by a newer one, so the numbers can have gaps; the skipped change ships in the next
-   release. To build by hand instead, for example to retry a failed run, open Actions, pick
+2. Merge it. A merge that changes something under `src/` starts the Release workflow by itself;
+   any other merge starts nothing. The workflow looks at everything merged since the last
+   published release. It skips quietly when the merged commit is already in a release, or when
+   every change under `src/` since then is labelled `no-release`. Otherwise it builds the version
+   git computes for the merge and creates release `vx.y.z` with an unsigned exe, named
+   `Deskbar-x.y.z-win-x64.exe`, whose notes collect the `## Release notes` sections of every pull
+   request since the last release. Several merges close together release ONCE, from the newest:
+   a newer merge cancels the build still running for an older one, and the newer release's notes
+   name the older pull requests too, so nothing is lost and the version numbers simply skip. The
+   build also skips the tests when CI already passed them on the exact commit that was merged.
+   To build by hand instead, for example to retry a failed run, open Actions, pick
    Release and choose Run workflow on `main` (there is no input): it builds the version `main`'s
    head computes, refuses a version that already has a release, and always stops at a draft.
    A build from any other branch is `x.y.z+<hash>` and not a release; the workflow refuses it.
