@@ -945,7 +945,8 @@ Before the first signed release:
    and creates release `vx.y.z` with an unsigned exe, named `Deskbar-x.y.z-win-x64.exe`. Merges
    close together each get their own number and release, built side by side, and "Latest" goes
    to the highest version whichever finishes first. To retry a merge's release that failed or was
-   cancelled, re-run its Release run: it stays a merge's run, so it publishes as one. To build by hand instead, open Actions, pick
+   cancelled, re-run its Release run: it stays a merge's run, so it publishes as one. To build by
+   hand instead, open Actions, pick
    Release and choose Run workflow on `main` (there is no input): it builds the version `main`'s
    head computes, refuses a version that already has a release, and always stops at a draft.
    A build from any other branch is `x.y.z+<hash>` and not a release; the workflow refuses it.

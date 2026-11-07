@@ -388,9 +388,10 @@ jobs:
         #
         # "LATEST" GOES TO THE HIGHEST VERSION, not to this one. Builds run side by side and an older
         # one can finish last, and the app's update check reads releases/latest, so `--latest` here
-        # could point every user back at an older version. Asked after publishing, so of two builds
-        # finishing together the one that asks second sees both. Failing to set it only warns: the
-        # release is out, and the next one sets it again.
+        # could point every user back at an older version. Asked after publishing, so a build that
+        # finishes later sees the earlier one. Two finishing within the same second can still leave
+        # the lower one as Latest, until the next release. Failing to set it only warns: the release
+        # is out, and the next one sets it again.
         if: github.event_name == 'push' && vars.SIGNING_CERT_THUMBPRINT == ''
         shell: pwsh
         env:
