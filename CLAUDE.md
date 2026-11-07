@@ -24,7 +24,11 @@ object.
 - **Every merge to main that changes `src/` releases itself** (Petre: "release on merge so").
   The push to main runs `release.yml`, which builds the version git computes for that commit
   (see the version decision below) and, while `SIGNING_CERT_THUMBPRINT`
-  is unset, publishes it unsigned with the notes from the PR's `## Release notes` section. So
+  is unset, publishes it unsigned with notes collected from the `## Release notes` section of
+  every PR merged since the last published release. A burst of merges releases once, from the
+  newest commit: a newer merge cancels the older build, and nothing is lost because the newer
+  release's notes cover the older PRs (`scripts/ReleaseNotes.psm1`, Petre's call on 2026-11-07,
+  "cheaper, less time on ci"). So
   write that section for users in every PR that changes `src/`, and do not start a release by
   hand after a merge; check the run instead (`gh run list --workflow Release`). Once the variable
   is set, a merge only drafts, and `scripts/sign-release.ps1` on Petre's machine signs and
