@@ -942,10 +942,10 @@ Before the first signed release:
 2. Merge it. The merge starts the Release workflow by itself. It skips quietly when the merged
    pull request has the `no-release` label, when nothing under `src/` changed, or when that
    version already has a release. Otherwise it builds the version git computes for the merge
-   and creates release `vx.y.z` with an unsigned exe, named `Deskbar-x.y.z-win-x64.exe`. Two
-   merges close together each get their own number, but a run waiting behind a running build can
-   be replaced by a newer one, so the numbers can have gaps; the skipped change ships in the next
-   release. To build by hand instead, for example to retry a failed run, open Actions, pick
+   and creates release `vx.y.z` with an unsigned exe, named `Deskbar-x.y.z-win-x64.exe`. Merges
+   close together each get their own number and release, built side by side, and "Latest" goes
+   to the highest version whichever finishes first. To retry a merge's release that failed or was
+   cancelled, re-run its Release run: it stays a merge's run, so it publishes as one. To build by hand instead, open Actions, pick
    Release and choose Run workflow on `main` (there is no input): it builds the version `main`'s
    head computes, refuses a version that already has a release, and always stops at a draft.
    A build from any other branch is `x.y.z+<hash>` and not a release; the workflow refuses it.

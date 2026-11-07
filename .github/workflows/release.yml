@@ -31,9 +31,13 @@
 # build fail ("Shallow clone lacks the objects required to calculate version height"), on
 # purpose: a wrong version would be worse than no build.
 #
-# TWO MERGES CLOSE TOGETHER each get their own version and run, but the `build` job's concurrency
-# group holds only one waiting run, so a middle one can be dropped. That version gets no release
-# and its changes ship in the next one: a gap in the numbers, nothing lost.
+# MERGES CLOSE TOGETHER each get their own version, build and release, side by side. They used to
+# share one concurrency group, which holds only one waiting run, and on 2026-11-07 four merges in
+# 46 seconds lost two of their four releases. Worse, `decide` finishes in no fixed order (30 to 54
+# seconds there), so 2.4.10 replaced the waiting 2.4.13, the newest: main's head was in no release,
+# and with no later merge nothing would ever have shipped it. So versions never wait for each
+# other now (see the `build` job's concurrency), and "Latest" goes to the highest version rather
+# than to whichever build finished last (see the publish step).
 #
 # THE STORE PACKAGE. The build job also packs the Microsoft Store .msix of the same commit
 # (scripts/pack-store.ps1) and keeps it as a workflow artifact, never a release asset; the
@@ -200,11 +204,12 @@ jobs:
     needs: decide
     if: needs.decide.outputs.go == 'true'
 
-    # One release build at a time: two merges in quick succession would otherwise race to create
-    # releases. A running build is never cancelled; GitHub keeps one waiting run per group, so a
-    # third merge can replace a second one that was still waiting (see TWO MERGES at the top).
+    # One build per VERSION, so a re-run cannot race a run still building the same tag. Different
+    # versions have different tags and assets and share nothing, so they run side by side: a group
+    # shared between them keeps one waiting run and cancels the rest (see MERGES CLOSE TOGETHER at
+    # the top).
     concurrency:
-      group: release-build
+      group: release-${{ needs.decide.outputs.version }}
       cancel-in-progress: false
 
     # MUST be Windows: this is a WPF app targeting net10.0-windows, and the test suite
@@ -380,6 +385,12 @@ jobs:
         # (GitHub does not start workflows from that token's events). With signing not enforced
         # the guard's only check is that an executable is attached, so that is checked here,
         # against the release as GitHub now holds it, before publishing.
+        #
+        # "LATEST" GOES TO THE HIGHEST VERSION, not to this one. Builds run side by side and an older
+        # one can finish last, and the app's update check reads releases/latest, so `--latest` here
+        # could point every user back at an older version. Asked after publishing, so of two builds
+        # finishing together the one that asks second sees both. Failing to set it only warns: the
+        # release is out, and the next one sets it again.
         if: github.event_name == 'push' && vars.SIGNING_CERT_THUMBPRINT == ''
         shell: pwsh
         env:
@@ -391,9 +402,16 @@ jobs:
             "::error::$env:TAG has no executable attached, so it stays a draft."
             exit 1
           }
-          gh release edit $env:TAG --draft=false --latest
+          gh release edit $env:TAG --draft=false --latest=false
           if ($LASTEXITCODE -ne 0) { "::error::Could not publish $env:TAG; it is still a draft."; exit 1 }
           "::warning::Published $env:TAG with $($exes -join ', '), unsigned: signing is not enforced (SIGNING_CERT_THUMBPRINT is not set)."
+
+          $published = @(gh api "repos/${{ github.repository }}/releases" --paginate --jq '.[] | select(.draft == false and .prerelease == false) | .tag_name')
+          $highest = $published | Where-Object { $_ -cmatch '\Av[0-9]+\.[0-9]+\.[0-9]+\z' } |
+            Sort-Object { [version]$_.Substring(1) } -Descending | Select-Object -First 1
+          if ($highest) { gh release edit $highest --latest }
+          if (-not $highest -or $LASTEXITCODE -ne 0) { "::warning::Could not mark the highest release as Latest (found '$highest')." } else { "Latest is $highest." }
+          exit 0
 
       - name: Pack the Store package
         # The Microsoft Store build of the same commit, beside the direct exe above: an .msix
