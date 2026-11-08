@@ -48,12 +48,23 @@ public class SplitMoveTests
     [Fact] public void With_a_gap_the_gap_stays_exact() =>
         Assert.Equal(8, GapBetweenColumnsAfter(Apply((0, 0), Edges.Right, new(8, 8, 696, 592), gap: 8).Value));
 
-    // Odd gap: near and far differ (3 and 4), so swapping them would show here.
-    [Fact] public void With_an_odd_gap_a_right_edge_drag_keeps_the_gap_exact() =>
-        Assert.Equal(7, GapBetweenColumnsAfter(Apply((0, 0), Edges.Right, new(7, 7, 696, 593), gap: 7).Value, gap: 7));
+    // Odd gap (7: near 3, far 4). GridLayout.Arrange insets both tiles itself, so the gap is 7 whatever
+    // split SplitMove returns; what pins SplitMove's odd-pixel rule is the ROUND TRIP: the tile laid
+    // out again must end exactly where the user released the dragged edge. If SplitMove gave the odd
+    // pixel the other way these would read 695 and 704.
+    [Fact] public void With_an_odd_gap_a_right_edge_drag_lands_where_it_was_released()
+    {
+        var tiles = GridLayout.Arrange(Area, 2, 7, Apply((0, 0), Edges.Right, new(7, 7, 696, 593), gap: 7).Value);
+        Assert.Equal(696, tiles[0].Right);
+        Assert.Equal(7, tiles[1].Left - tiles[0].Right);
+    }
 
-    [Fact] public void With_an_odd_gap_a_left_edge_drag_keeps_the_gap_exact() =>
-        Assert.Equal(7, GapBetweenColumnsAfter(Apply((1, 0), Edges.Left, new(703, 7, 993, 593), gap: 7).Value, gap: 7));
+    [Fact] public void With_an_odd_gap_a_left_edge_drag_lands_where_it_was_released()
+    {
+        var tiles = GridLayout.Arrange(Area, 2, 7, Apply((1, 0), Edges.Left, new(703, 7, 993, 593), gap: 7).Value);
+        Assert.Equal(703, tiles[1].Left);
+        Assert.Equal(7, tiles[1].Left - tiles[0].Right);
+    }
 
     [Fact] public void A_corner_moves_the_column_split_and_that_columns_row_split()
     {
