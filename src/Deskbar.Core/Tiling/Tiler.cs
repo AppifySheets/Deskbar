@@ -32,7 +32,10 @@ namespace Deskbar.Core.Tiling;
 // and only then moves it, so the window's Settled arrives in between with Snap's half-screen frame; while the
 // drop is pending that Settled is ignored and no re-tile places the window, and WorkspaceManager.WindowMoved
 // takes it out of the grid when the move happens. Null (tests, and an app without a bar) means never.
-public sealed class Tiler(WorkspaceManager manager, IVirtualDesktopService desktops, IWindowMonitor monitor,
+//
+// Partial: resizable tiles (moving a split by dragging a separation, and keeping the sizes) live in
+// Tiler.Resize.cs. This file only calls into it from SlotsOf, Keep, OnSettled and PlaceIfNeeded.
+public sealed partial class Tiler(WorkspaceManager manager, IVirtualDesktopService desktops, IWindowMonitor monitor,
     ITileSurface surface, Func<bool> isPro, Action<string>? trace = null, Func<DateTimeOffset>? clock = null,
     Func<WindowHandle, bool>? dropPending = null) : IDisposable
 {
@@ -62,8 +65,10 @@ public sealed class Tiler(WorkspaceManager manager, IVirtualDesktopService deskt
     Maybe<StateKey> stateKey = Maybe<StateKey>.None;
 
     // The few facts a StateChanged pulse can change that matter to tiling. Everything else the manager persists
-    // (a rename, a fold, a colour) leaves it equal, and such a pulse reads no windows at all.
-    sealed record StateKey(Maybe<Guid> Workspace, bool Tiled, bool Experiment, int Gap, bool Pro);
+    // (a rename, a fold, a colour) leaves it equal, and such a pulse reads no windows at all. Sizes is the current
+    // workspace's stored tile sizes, so "Even out tiles", untile and the pipe's `even` (which only change state)
+    // re-tile; a ValueList, so it compares by contents.
+    sealed record StateKey(Maybe<Guid> Workspace, bool Tiled, bool Experiment, int Gap, bool Pro, ValueList<ScreenTileSizes> Sizes);
 
     // What a window was last given and what it accepted. Accepted is the visible frame read back after the
     // Place: the slot itself, or the size an app insisted on (a minimum size larger than its slot). It is the
@@ -262,12 +267,17 @@ public sealed class Tiler(WorkspaceManager manager, IVirtualDesktopService deskt
 
     // StateChanged fires on every persist and on several window events, and a full evaluate asks WorkspaceOf
     // (a COM DesktopOf call) of every known window on the UI thread. So a pulse evaluates only when one of the
-    // facts in StateKey moved: the workspace here, its Tiled flag, the experiment, the gap, or Pro. Changes to
-    // which windows are in the grid reach the Tiler through window events and Settled instead.
+    // facts in StateKey moved: the workspace here, its Tiled flag, the experiment, the gap, Pro, or its tile sizes.
+    // Changes to which windows are in the grid reach the Tiler through window events and Settled instead.
+    //
+    // Every screen is re-tiled. For the first five facts that is what Evaluate did anyway (each one changes or
+    // clears `context`, which makes the re-tile full); the sizes change no window list, so without it "Even out
+    // tiles" would re-tile nothing. The Tiler's own SetTileSizes (a split moved, or sizes refitted to a new count)
+    // comes back through here too, and that re-tile places nothing: every window is already in its slot.
     void OnStateChanged()
     {
         if (stateKey.HasValue && stateKey.Value == CurrentStateKey()) return;
-        Evaluate(everyScreen: false);
+        Evaluate(everyScreen: true);
     }
 
     StateKey CurrentStateKey()
@@ -275,7 +285,7 @@ public sealed class Tiler(WorkspaceManager manager, IVirtualDesktopService deskt
         var state = manager.State;
         var here = currentDesktop.Bind(desktop => state.Workspaces.TryFirst(w => w.DesktopId == desktop));
         return new StateKey(here.Map(w => w.Id), here.Map(w => w.Tiled).GetValueOrDefault(false),
-            state.ExperimentalTiling, state.TileGap, isPro());
+            state.ExperimentalTiling, state.TileGap, isPro(), here.Map(w => w.TileSizes).GetValueOrDefault([]));
     }
 
     // A watched window stopped moving with the buttons up (spec, "By hand"). In order:
@@ -290,10 +300,14 @@ public sealed class Tiler(WorkspaceManager manager, IVirtualDesktopService deskt
     //      Nothing, unless a re-tile held it while it was settling (PlaceIfNeeded) and its slot changed since:
     //      then it goes into the slot it has now.
     //   5. Un-maximized on the screen it tiles on: straight back into its slot.
-    //   6. Otherwise SettledMove.Decide: swap with the tile under its centre, back into its slot, or join the
+    //   6. One or two adjacent edges dragged by hand: a split moves, or the window snaps back when no moved edge
+    //      faces a neighbour (MovedASplit, Tiler.Resize.cs).
+    //   7. Otherwise SettledMove.Decide: swap with the tile under its centre, back into its slot, or join the
     //      grid of the screen it is now on.
     void OnSettled(WindowHandle window)
     {
+        // Taken first, whatever happens below: this Settled is the one any pending echo of our own Place was for.
+        var echo = EchoOfOurPlace(window);
         if (dropping(window))
         {
             trace?.Invoke($"tile: {window.Value:X} settled during a drop on the bar, ignored");
@@ -316,7 +330,7 @@ public sealed class Tiler(WorkspaceManager manager, IVirtualDesktopService deskt
         var board = Board;
         var screens = surface.Screens().ToDictionary(s => s.Number);
         var screenNow = surface.ScreenOf(window);
-        var slots = screens.TryGetValue(screenNow, out var screen) ? SlotsOf(screen, board.On(screenNow)) : new Dictionary<WindowHandle, WindowRect>();
+        var slots = screens.TryGetValue(screenNow, out var screen) ? SlotsOf(workspace, screen, board.On(screenNow)) : new Dictionary<WindowHandle, WindowRect>();
 
         // Step 4. PlaceIfNeeded does nothing when the slot is the one this frame was accepted for, so for the
         // ordinary echo of our own Place this moves nothing; it moves the window only when a re-tile held it.
@@ -333,6 +347,10 @@ public sealed class Tiler(WorkspaceManager manager, IVirtualDesktopService deskt
             return;
         }
 
+        // Step 6. A resize by hand is handled there in full; anything else goes on to the move rules unchanged.
+        if (MovedASplit(workspace, window, frame, screenNow, screens, board, slots, echo))
+            return;
+
         switch (SettledMove.Decide(window, frame, screenNow, board, slots))
         {
             case MoveOutcome.Swap swap:
@@ -345,7 +363,8 @@ public sealed class Tiler(WorkspaceManager manager, IVirtualDesktopService deskt
                 break;
             case MoveOutcome.JoinScreen join:
                 var from = board.ScreenOf(window).GetValueOrDefault(join.Screen);
-                boards[workspace.Id] = board.Join(join.Screen, window);
+                // Through Keep, like every other board change, so the screen it left notes it as its leaver.
+                Keep(workspace, board.Join(join.Screen, window));
                 Retile(workspace, [from, join.Screen]);
                 break;
         }
@@ -455,6 +474,8 @@ public sealed class Tiler(WorkspaceManager manager, IVirtualDesktopService deskt
     // Stores a workspace's new board and does what every board change owes the windows on it.
     void Keep(Workspace workspace, TileBoard board)
     {
+        // Before the old board is replaced: the cell of a window leaving a screen decides which row's share goes.
+        NoteLeavers(workspace.Id, board);
         boards[workspace.Id] = board;
 
         // Leaving a grid is a structural change too: a window that comes back starts with a clean put-back count.
@@ -514,7 +535,7 @@ public sealed class Tiler(WorkspaceManager manager, IVirtualDesktopService deskt
             return;
         }
 
-        var slots = SlotsOf(screen, windows);
+        var slots = SlotsOf(workspace, screen, windows);
         // Ruling 2: a work area too small for its grid (GridLayout does not guard it) produces tiles of zero
         // or negative size. Placing those would crush windows into nothing, so the screen is skipped for this
         // re-tile: none of its windows move, and the board keeps them for when there is room.
@@ -546,16 +567,20 @@ public sealed class Tiler(WorkspaceManager manager, IVirtualDesktopService deskt
         trace?.Invoke(line);
     }
 
-    // The slot of each window on a screen, by window; empty when the grid does not fit (see RetileScreen).
-    IReadOnlyDictionary<WindowHandle, WindowRect> SlotsOf(TileScreen screen, IReadOnlyList<WindowHandle> windows)
+    // The slot of each window on a screen, by window; empty when the grid does not fit (see RetileScreen). The grid
+    // takes the sizes dragged on this screen (SizesOn: equal when there are none, which is the equal grid exactly),
+    // fitted to this many windows.
+    IReadOnlyDictionary<WindowHandle, WindowRect> SlotsOf(Workspace workspace, TileScreen screen, IReadOnlyList<WindowHandle> windows)
     {
-        // The gap is set at 100% scaling and scaled by the screen's DPI, so it looks the same on every screen.
-        var gap = (int)Math.Round(manager.State.TileGap * screen.Dpi / 96.0, MidpointRounding.AwayFromZero);
-        var tiles = GridLayout.Arrange(screen.WorkArea, windows.Count, gap);
+        var tiles = GridLayout.Arrange(screen.WorkArea, windows.Count, GapOn(screen), SizesOn(workspace, screen, windows.Count));
         return tiles.Any(t => t.Width <= 0 || t.Height <= 0)
             ? new Dictionary<WindowHandle, WindowRect>()
             : windows.Zip(tiles).ToDictionary(p => p.First, p => p.Second);
     }
+
+    // The gap is set at 100% scaling and scaled by the screen's DPI, so it looks the same on every screen.
+    int GapOn(TileScreen screen) =>
+        (int)Math.Round(manager.State.TileGap * screen.Dpi / 96.0, MidpointRounding.AwayFromZero);
 
     // A settled window goes back into its slot, unless the backstop says this has become a fight. An app that
     // snaps itself back (or insists on its own place) would otherwise be placed, move itself, settle and be
@@ -622,6 +647,7 @@ public sealed class Tiler(WorkspaceManager manager, IVirtualDesktopService deskt
             {
                 var accepted = surface.VisibleFrameOf(window).GetValueOrDefault(slot);
                 given[window] = new Given(slot, accepted);
+                AwaitEcho(window, frame, accepted);
                 if (accepted != slot)
                     trace?.Invoke($"tile: {window.Value:X} kept {Show(accepted)}, wanted {Show(slot)}");
             })
