@@ -34,6 +34,38 @@ public sealed partial class Tiler
     // window's next Settled whatever that Settled turns out to be, and dropped when the window leaves every grid.
     readonly HashSet<WindowHandle> awaitingEcho = [];
 
+    // A screen that comes back (or appears) gets its windows back ONE AT A TIME: Windows moves them, and each
+    // joins by its own Settled. Each re-tile in between lays out a smaller grid, and storing that fit would lose
+    // columns and rows for good (at one window, the whole entry), breaking the spec's promise that a screen with
+    // the same bounds gets its sizes back. So for this long after ScreensChanged shows a screen key that was not
+    // there before, fits for that key are laid out but not stored (controller ruling). A split moved by hand in
+    // that time is still stored: that is the user's own change.
+    static readonly TimeSpan ReturningScreenGrace = TimeSpan.FromSeconds(3);
+
+    // The screen keys the last look at the screens found; null until RememberScreens first runs (Start).
+    IReadOnlySet<string>? screenKeys;
+
+    // Until when each newly seen screen key is in its grace period.
+    readonly Dictionary<string, DateTimeOffset> graceUntil = [];
+
+    // Called on Start (to know what was there) and on every ScreensChanged. A key not seen at the last look starts
+    // its grace period; on Start nothing is new, since nothing was there to come back.
+    void RememberScreens()
+    {
+        var keys = surface.Screens().Select(KeyOf).ToHashSet();
+        var at = now();
+        if (screenKeys is not null)
+            keys.Where(k => !screenKeys.Contains(k)).ToList().ForEach(k =>
+            {
+                graceUntil[k] = at + ReturningScreenGrace;
+                trace?.Invoke($"tile: screen {k} appeared, its sizes are not refitted until {ReturningScreenGrace.TotalSeconds:0}s have passed");
+            });
+        graceUntil.Keys.Where(k => graceUntil[k] <= at).ToList().ForEach(k => graceUntil.Remove(k));
+        screenKeys = keys;
+    }
+
+    bool InGrace(string key) => graceUntil.TryGetValue(key, out var until) && now() < until;
+
     // The key a screen's sizes are stored under: its monitor bounds as "L,T,R,B". The bounds rather than the
     // number, so a renumbering after a screen is plugged in never hands one screen's sizes to another. Invariant
     // culture, because a screen left of the main one has negative coordinates and some cultures write the minus
@@ -50,7 +82,8 @@ public sealed partial class Tiler
     //
     // Zero windows is answered with no fit at all: fitting to an empty grid gives "equal", which would erase the
     // entry of a screen whose windows are only away for a moment (OnSettled asks about the screen a window settled
-    // on, which may hold no tiles).
+    // on, which may hold no tiles). Nor is a fit stored while the screen is in its grace period after coming back
+    // (see ReturningScreenGrace): it is laid out from the stored sizes, which stay as they were.
     TileSizes SizesOn(Workspace workspace, TileScreen screen, int count)
     {
         var shape = GridLayout.Shape(count);
@@ -68,7 +101,7 @@ public sealed partial class Tiler
         if (stored.HasNoValue) return TileSizes.Equal(shape);
 
         var fitted = stored.Value.Fit(shape, leaving);
-        if (fitted != stored.Value)
+        if (fitted != stored.Value && !InGrace(key))
             manager.SetTileSizes(workspace.Id, key, fitted)
                 .Tap(() => trace?.Invoke($"tile: {workspace.Name} screen {screen.Number}: sizes refitted to {count} windows, {Show(fitted)}"))
                 .TapError(error => trace?.Invoke($"tile: {workspace.Name} screen {screen.Number}: storing refitted sizes failed: {error}"));

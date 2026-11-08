@@ -135,11 +135,19 @@ public sealed partial class Tiler(WorkspaceManager manager, IVirtualDesktopServi
             Evaluate(everyScreen: false);
         })));
         subscriptions.Add(surface.Settled.Subscribe(w => Run($"settled {w.Value:X}", () => OnSettled(w))));
-        // A screen plugged in or out, or a work area that changed: every screen is re-tiled.
-        subscriptions.Add(surface.ScreensChanged.Subscribe(_ => Run("screens changed", () => Evaluate(everyScreen: true))));
+        // A screen plugged in or out, or a work area that changed: every screen is re-tiled. A screen that came
+        // back first starts its grace period (RememberScreens, Tiler.Resize.cs), so its sizes survive its windows
+        // rejoining one at a time.
+        subscriptions.Add(surface.ScreensChanged.Subscribe(_ => Run("screens changed", () =>
+        {
+            RememberScreens();
+            Evaluate(everyScreen: true);
+        })));
         subscriptions.Add(manager.StateChanged.Subscribe(_ => Run("state changed", OnStateChanged)));
         subscriptions.Add(manager.WindowMoved.Subscribe(w => Run($"window {w.Value:X} moved to another desktop", () => OnWindowMoved(w))));
 
+        // The screens there are now, so the first ScreensChanged can tell which screen came back.
+        Run("remember screens", RememberScreens);
         // The first evaluate reads the current desktop and, if it is tiled, tiles it.
         Refresh();
     }
