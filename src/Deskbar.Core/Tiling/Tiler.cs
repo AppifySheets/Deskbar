@@ -46,6 +46,12 @@ public sealed class Tiler(WorkspaceManager manager, IVirtualDesktopService deskt
     // Windows already given rounded corners, so DWM is asked once per window rather than on every re-tile.
     readonly HashSet<WindowHandle> rounded = [];
 
+    // Windows last seen maximized while in a grid. When one of them settles un-maximized it goes straight back
+    // into its slot (spec: "When it is restored, it goes back into its slot"), rather than being judged like a
+    // drop: a window maximized before tiling began restores to wherever it used to be, and if that happened to
+    // be over another tile it would otherwise swap.
+    readonly HashSet<WindowHandle> maximized = [];
+
     // The last trace line per workspace and screen, so the trace writes only when a layout changed.
     readonly Dictionary<(Guid Workspace, int Screen), string> lastLines = [];
 
@@ -153,6 +159,7 @@ public sealed class Tiler(WorkspaceManager manager, IVirtualDesktopService deskt
             // A dead hwnd can be recycled for an unrelated window; forget what we knew about this one.
             given.Remove(e.Window.Handle);
             rounded.Remove(e.Window.Handle);
+            maximized.Remove(e.Window.Handle);
         }
         if (e.Kind is WindowEventKind.Appeared or WindowEventKind.Hidden or WindowEventKind.Disappeared or WindowEventKind.MinimizeChanged)
             Evaluate(everyScreen: false);
@@ -165,7 +172,8 @@ public sealed class Tiler(WorkspaceManager manager, IVirtualDesktopService deskt
     //      and the rest close up, again by re-evaluating; it is not placed.
     //   3. Maximized: it keeps its slot and stays maximized; nothing moves.
     //   4. Its frame is the one it accepted from our last Place: our own move coming back. Nothing.
-    //   5. Otherwise SettledMove.Decide: swap with the tile under its centre, back into its slot, or join the
+    //   5. Un-maximized on the screen it tiles on: straight back into its slot.
+    //   6. Otherwise SettledMove.Decide: swap with the tile under its centre, back into its slot, or join the
     //      grid of the screen it is now on.
     void OnSettled(WindowHandle window)
     {
@@ -174,8 +182,14 @@ public sealed class Tiler(WorkspaceManager manager, IVirtualDesktopService deskt
             Evaluate(everyScreen: false);
             return;
         }
-        if (surface.IsMaximized(window) || !surface.VisibleFrameOf(window).TryGetValue(out var frame))
+        if (surface.IsMaximized(window))
+        {
+            maximized.Add(window);
             return;
+        }
+        if (!surface.VisibleFrameOf(window).TryGetValue(out var frame))
+            return;
+        var restored = maximized.Remove(window);
         if (given.TryGetValue(window, out var last) && last.Accepted == frame)
             return;
 
@@ -183,6 +197,12 @@ public sealed class Tiler(WorkspaceManager manager, IVirtualDesktopService deskt
         var screens = surface.Screens().ToDictionary(s => s.Number);
         var screenNow = surface.ScreenOf(window);
         var slots = screens.TryGetValue(screenNow, out var screen) ? SlotsOf(screen, board.On(screenNow)) : new Dictionary<WindowHandle, WindowRect>();
+
+        if (restored && slots.TryGetValue(window, out var home))
+        {
+            PlaceIfNeeded(window, home, force: true);
+            return;
+        }
 
         switch (SettledMove.Decide(window, frame, screenNow, board, slots))
         {
@@ -324,7 +344,9 @@ public sealed class Tiler(WorkspaceManager manager, IVirtualDesktopService deskt
             return;
         }
 
-        // A maximized window's slot still counts (the tiles beneath do not reflow) but it is never placed.
+        // A maximized window's slot still counts (the tiles beneath do not reflow) but it is never placed. It is
+        // noted, so that when it is restored it goes back into this slot (see `maximized`).
+        windows.Where(surface.IsMaximized).ToList().ForEach(w => maximized.Add(w));
         windows.Where(w => !surface.IsMaximized(w)).ToList()
             .ForEach(w => PlaceIfNeeded(w, slots[w], force: false));
 
