@@ -283,6 +283,24 @@ public sealed class TilerTests : IDisposable
         Assert.Equal(Area, surface.Frames[W(2)]);
     }
 
+    // Maximized before tiling began, so restoring it puts it back where it used to be, which here is over
+    // W(3)'s tile. Spec: "When it is restored, it goes back into its slot", so no swap.
+    [Fact]
+    public void A_restored_window_goes_back_into_its_slot()
+    {
+        new[] { 1, 2, 3 }.ToList().ForEach(n => Exists(W(n), alpha));
+        surface.Maximized.Add(W(2));
+        surface.Frames[W(2)] = Area;
+        Start();
+        Assert.DoesNotContain(W(2), PlacedWindows);
+        var order = tiler.Board.On(1);
+
+        surface.Maximized.Remove(W(2));
+        Settles(W(2), Grid(3)[order.ToList().IndexOf(W(3))]);
+
+        AssertTiled(order);
+    }
+
     [Fact]
     public void A_maximized_window_that_closes_frees_its_slot()
     {
