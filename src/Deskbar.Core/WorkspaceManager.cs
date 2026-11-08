@@ -1682,6 +1682,30 @@ public sealed class WorkspaceManager(
             Workspaces = State.Workspaces.Select(w => w.Id == id ? w with { Folded = folded } : w).ToList(),
         }));
 
+    // Marks a workspace as tiled or not (Workspace.Tiled). Whether tiling then acts is TilingGate's call.
+    public Result SetWorkspaceTiled(Guid id, bool tiled) =>
+        Workspace(id).Tap(_ => Persist(State with
+        {
+            Workspaces = State.Workspaces.Select(w => w.Id == id ? w with { Tiled = tiled } : w).ToList(),
+        }));
+
+    // The gap between tiles (AppState.TileGap), 0 to 64 pixels at 100% scaling. Refused outside that range
+    // rather than clamped, so a caller never believes it set something it did not. A no-op when unchanged,
+    // for the reason SetCheckForUpdates gives.
+    public Result SetTileGap(int gap) =>
+        gap is < 0 or > 64
+            ? Result.Failure("The tile gap must be between 0 and 64 pixels.")
+            : State.TileGap == gap
+                ? Result.Success()
+                : Result.Success().Tap(() => Persist(State with { TileGap = gap }));
+
+    // The tiling experiment's master switch (AppState.ExperimentalTiling). Every workspace's Tiled flag is
+    // kept when it goes off. A no-op when unchanged, for the reason SetCheckForUpdates gives.
+    public Result SetExperimentalTiling(bool on) =>
+        State.ExperimentalTiling == on
+            ? Result.Success()
+            : Result.Success().Tap(() => Persist(State with { ExperimentalTiling = on }));
+
     public Result SetGroupFolded(Guid groupId, bool folded) =>
         State.Groups.Any(g => g.Id == groupId)
             ? Result.Success().Tap(() => Persist(State with
