@@ -58,6 +58,17 @@ public partial class FloatingBar
             // the menu is being BUILT, when IsChecked is assigned above.
             tile.Click += (_, _) => Report(manager.SetWorkspaceTiled(workspaceId, !TiledNow()));
             menu.Items.Add(tile);
+
+            // "Even out tiles", directly under "Tile windows", only once there is something to even out: the
+            // workspace is tiled AND a split was dragged (any stored entry is non-equal, because SetTileSizes
+            // never stores equal sizes). Petre: "keep my sizes", so this is the one way back to equal columns
+            // and rows; the Tiler re-tiles by itself when the stored sizes change, so the click only clears them.
+            if (TiledNow() && (manager.State.Workspaces.FirstOrDefault(w => w.Id == workspaceId)?.TileSizes.Count ?? 0) > 0)
+            {
+                var even = new MenuItem { Header = "Even out tiles", Icon = MenuGlyph("⊟") };
+                even.Click += (_, _) => Report(manager.EvenOutTiles(workspaceId));
+                menu.Items.Add(even);
+            }
             return;
         }
 
