@@ -309,6 +309,17 @@ public sealed record AppState(
     // an option". Off by default, and only meaningful with DockBar on and a second screen beside the bar's.
     public bool DockAcrossScreens { get; init; }
 
+    // The space left between tiled windows and around the grid's edge, in pixels at 100% scaling (the tiler
+    // scales it by each monitor's DPI). Read as written: SetTileGap keeps it within 0..64, and a state.json
+    // without the key loads the default, so no migration.
+    public const int DefaultTileGap = 8;
+    public int TileGap { get; init; } = DefaultTileGap;
+
+    // Tiling is EXPERIMENTAL and off by default. Petre: "disabled by default, until i have tested it well".
+    // While off: no tiling, no move hook, no tiling item in the row menu, and `tile` refuses. Stored as
+    // written, false for every state.json that lacks the key, so every existing install has the experiment off.
+    public bool ExperimentalTiling { get; init; }
+
     // The groups workspaces belong to (#42 anchored, #84 anchorless). Membership lives on the
     // workspace as GroupId; this holds the group's own name and its anchor, if it has one.
     //
