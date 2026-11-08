@@ -34,6 +34,9 @@ public sealed class TilerResizeTests : IDisposable
     // How many of surface.Placed have already come back as their own Settled (see Echo).
     int echoed;
 
+    // The Tiler's clock, moved by hand for the grace period of a returning screen.
+    DateTimeOffset time = new(2026, 11, 8, 12, 0, 0, TimeSpan.Zero);
+
     WorkspaceManager manager = null!;
     Tiler tiler = null!;
 
@@ -115,7 +118,7 @@ public sealed class TilerResizeTests : IDisposable
         };
         manager = new WorkspaceManager(desktops, monitor, titles, store);
         Assert.True(manager.Start().IsSuccess);
-        tiler = new Tiler(manager, desktops, monitor, surface, () => true, traced.Add, () => DateTimeOffset.UnixEpoch, dropping.Contains);
+        tiler = new Tiler(manager, desktops, monitor, surface, () => true, traced.Add, () => time, dropping.Contains);
         tiler.Start();
         Echo();
     }
@@ -318,6 +321,65 @@ public sealed class TilerResizeTests : IDisposable
         Assert.Equal(new WindowRect(1928, 8, 3257, 1032), surface.Frames[W(2)]);
         Assert.Equal(new WindowRect(3265, 8, 3832, 1032), surface.Frames[W(3)]);
         Assert.Equal(sizes, Stored(Area2Key));
+    }
+
+    // Screen 2 holds five windows in three columns (1 + 2 + 2) with sizes stored for it; screen 1 holds W(1).
+    // The screen drops out and Windows moves its windows onto screen 1; then it comes back with the same bounds
+    // and Windows moves them back ONE AT A TIME, each arriving as its own Settled 200 ms after the last. In
+    // between, each re-tile of screen 2 lays out a smaller grid (1, 2, 3, 4 windows), and storing those fits would
+    // lose columns and rows (at one window, the whole entry). Controller ruling: for 3 seconds after a screen key
+    // appears, its fits are laid out but not stored.
+    static readonly TileSizes ThreeColumns = new([0.5, 0.3, 0.2], [[1.0], [0.6, 0.4], [0.3, 0.7]]);
+    static readonly IReadOnlyList<WindowHandle> Returning = new[] { 2, 3, 4, 5, 6 }.Select(W).ToList();
+
+    void ScreenDropsOutAndItsWindowsComeBackOneByOne()
+    {
+        surface.ScreenList.Add(FakeTileSurface.Screen(2, Area2));
+        Exists(W(1), alpha);
+        Returning.ToList().ForEach(w => Exists(w, alpha, screen: 2));
+        Start(sizes: [new ScreenTileSizes(Area2Key, ThreeColumns)]);
+        Assert.Equal(GridLayout.Arrange(Area2, 5, Gap, ThreeColumns), FramesOf(Returning));
+
+        surface.ScreenList.RemoveAll(s => s.Number == 2);
+        Returning.ToList().ForEach(w => surface.ScreenOfWindow[w] = 1);
+        surface.ScreensChangedSubject.OnNext(Unit.Default);
+        Echo();
+        Assert.Equal(6, tiler.Board.On(1).Count);
+
+        time += TimeSpan.FromMinutes(1);
+        surface.ScreenList.Add(FakeTileSurface.Screen(2, Area2));
+        surface.ScreensChangedSubject.OnNext(Unit.Default);
+        Returning.ToList().ForEach(w =>
+        {
+            time += TimeSpan.FromMilliseconds(200);
+            Settles(w, new WindowRect(2000, 100, 2600, 700), screen: 2);
+            Echo();
+            Assert.Equal(ThreeColumns, Stored(Area2Key));
+        });
+    }
+
+    [Fact]
+    public void A_screen_that_returns_window_by_window_keeps_its_sizes()
+    {
+        ScreenDropsOutAndItsWindowsComeBackOneByOne();
+
+        Assert.Equal(ThreeColumns, Stored(Area2Key));
+        Assert.Equal(Returning, tiler.Board.On(2));
+        Assert.Equal(GridLayout.Arrange(Area2, 5, Gap, ThreeColumns), FramesOf(Returning));
+    }
+
+    [Fact]
+    public void After_the_grace_period_a_closing_window_reshapes_the_stored_sizes_again()
+    {
+        ScreenDropsOutAndItsWindowsComeBackOneByOne();
+        time += TimeSpan.FromSeconds(3.1);
+
+        // W(4) is slot 2 of 1 + 2 + 2: column 1, row 1.
+        Closes(W(4));
+
+        Assert.Equal(ThreeColumns.Fit(GridLayout.Shape(4), (1, 1)), Stored(Area2Key));
+        var order = new[] { 2, 3, 5, 6 }.Select(W).ToList();
+        Assert.Equal(GridLayout.Arrange(Area2, 4, Gap, Stored(Area2Key)), FramesOf(order));
     }
 
     // "Even out tiles" only changes state and pulses StateChanged; the sizes in the Tiler's state key make that
