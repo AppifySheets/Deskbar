@@ -11,6 +11,7 @@ using Deskbar.Core.Persistence;
 using Deskbar.Core.Rehydration;
 using Deskbar.Core.Renaming;
 using Deskbar.Core.Rules;
+using Deskbar.Core.Tiling;
 
 namespace Deskbar.Core;
 
@@ -1693,10 +1694,40 @@ public sealed class WorkspaceManager(
         }));
 
     // Marks a workspace as tiled or not (Workspace.Tiled). Whether tiling then acts is TilingGate's call.
+    // Untiling also forgets the workspace's stored sizes (Workspace.TileSizes), in the same persist: leaving
+    // the grid is the user saying they are done with it. Turning the EXPERIMENT off is different and keeps them.
     public Result SetWorkspaceTiled(Guid id, bool tiled) =>
         Workspace(id).Tap(_ => Persist(State with
         {
-            Workspaces = State.Workspaces.Select(w => w.Id == id ? w with { Tiled = tiled } : w).ToList(),
+            Workspaces = State.Workspaces
+                .Select(w => w.Id == id ? w with { Tiled = tiled, TileSizes = tiled ? w.TileSizes : [] } : w)
+                .ToList(),
+        }));
+
+    // Stores one screen's tile sizes on a workspace, replacing that screen's entry. Sizes that are all equal
+    // REMOVE the entry instead, since "equal" is what a screen with no entry already gets.
+    public Result SetTileSizes(Guid id, string screen, TileSizes sizes) =>
+        Workspace(id).Tap(_ => Persist(State with
+        {
+            Workspaces = State.Workspaces
+                .Select(w => w.Id == id
+                    ? w with
+                    {
+                        TileSizes = w.TileSizes
+                            .Where(s => s.Screen != screen)
+                            .Concat(sizes.IsEqual ? [] : [new ScreenTileSizes(screen, sizes)])
+                            .ToList(),
+                    }
+                    : w)
+                .ToList(),
+        }));
+
+    // "Even out tiles": forgets every stored size of a workspace, so its grids go back to equal columns and
+    // rows. Succeeds, and persists, when there was nothing stored.
+    public Result EvenOutTiles(Guid id) =>
+        Workspace(id).Tap(_ => Persist(State with
+        {
+            Workspaces = State.Workspaces.Select(w => w.Id == id ? w with { TileSizes = [] } : w).ToList(),
         }));
 
     // The gap between tiles (AppState.TileGap), 0 to 64 pixels at 100% scaling. Refused outside that range
