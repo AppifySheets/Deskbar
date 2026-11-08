@@ -45,11 +45,16 @@ namespace Deskbar.Core.Control;
 //
 // `setStatsDetached` detaches the stats line into its window of its own, or puts it back (`stats detach|attach`).
 // The window is the app's, so the app hands in how, as for `bar minimize`; left null, `stats` refuses.
+//
+// `isPro` answers whether this build is Deskbar Pro, for `tile` only (tiling is a Pro feature). Entitlement
+// is the Windows side's business, so the app hands it in; left null it means NOT Pro, so a caller that
+// passes nothing never gets tiling.
 public sealed partial class RemoteControl(WorkspaceManager manager, Func<bool, Result>? setBarVisible = null, Func<ProgramLaunch, Result<int?>>? launch = null,
     Func<Result<string>>? dump = null, Func<Maybe<string>>? defaultBrowser = null,
     Func<(string Version, string? Exe, bool Packaged)>? identity = null,
     Func<string, Result>? showFind = null,
-    Func<bool, Result>? setStatsDetached = null)
+    Func<bool, Result>? setStatsDetached = null,
+    Func<bool>? isPro = null)
 {
     static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web) { WriteIndented = true };
 
@@ -80,6 +85,8 @@ public sealed partial class RemoteControl(WorkspaceManager manager, Func<bool, R
         ("reorder", [var workspace, var where]) => Reorder(workspace, where),
         ("fold", [var workspace]) => SetRowFolded(workspace, true),
         ("unfold", [var workspace]) => SetRowFolded(workspace, false),
+        ("tile", [var workspace]) => SetRowTiled(workspace, true),
+        ("untile", [var workspace]) => SetRowTiled(workspace, false),
         ("color", [var workspace, var colour]) => Colour(workspace, colour),
         ("delete", [var workspace]) => Delete(workspace, closeWindows: false),
         ("delete", [var workspace, "--close-windows"]) => Delete(workspace, closeWindows: true),

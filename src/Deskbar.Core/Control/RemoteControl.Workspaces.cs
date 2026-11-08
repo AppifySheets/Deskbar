@@ -86,6 +86,18 @@ public sealed partial class RemoteControl
             w => Reply(manager.SetWorkspaceFolded(w.Id, folded), () => Describe(w.Id)),
             ControlReply.Fail);
 
+    // `tile` is refused while the experiment is off, then in the free tier, in that order (the experiment is
+    // the bigger fact: Petre wants it "disabled by default, until i have tested it well"). `untile` is never
+    // refused: releasing a workspace must always work, whatever the switch or the tier says.
+    ControlReply SetRowTiled(string workspace, bool tiled) =>
+        WorkspaceNamed(workspace).Match(
+            w => tiled && !manager.State.ExperimentalTiling
+                ? ControlReply.Fail("Tiling is experimental and turned off. Turn it on in Manage.")
+                : tiled && isPro?.Invoke() != true
+                    ? ControlReply.Fail("Tiling needs Deskbar Pro.")
+                    : Reply(manager.SetWorkspaceTiled(w.Id, tiled), () => Describe(w.Id)),
+            ControlReply.Fail);
+
     // SetWorkspaceColor already hands a grouped workspace's colour to its group, as the menu does.
     ControlReply Colour(string workspace, string colour) =>
         WorkspaceNamed(workspace).Bind(w => ParseColour(colour).Bind(c => manager.SetWorkspaceColor(w.Id, c)).Map(() => w.Id))
