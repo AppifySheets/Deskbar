@@ -227,6 +227,12 @@ jobs:
             exit 1
           }
           "No release tagged $env:TAG yet."
+          # The exit is not decoration. GitHub's pwsh wrapper ends every step with
+          # `exit $LASTEXITCODE`, and here the last native command is the `gh release view` above,
+          # which exits 1 exactly when there is NO release: the outcome this step wants. Without
+          # this line the step printed "No release tagged v2.4.15 yet." and then failed, so every
+          # manual run stopped here (run 42465891436, 2026-11-08).
+          exit 0
 
       - name: Build
         # -warnaserror: the branch builds clean today, and a release is exactly the wrong
@@ -267,6 +273,10 @@ jobs:
             "tested=false" >> $env:GITHUB_OUTPUT
             "No passing build-and-test on ${{ github.sha }}; the tests run here."
           }
+          # A failed `gh api` lookup leaves $LASTEXITCODE non-zero, and GitHub's pwsh wrapper would
+          # end the step with it, failing the build instead of running the tests as the comment
+          # above promises. Same trap as the manual run's release check.
+          exit 0
 
       - name: Test
         if: steps.tested.outputs.tested != 'true'
