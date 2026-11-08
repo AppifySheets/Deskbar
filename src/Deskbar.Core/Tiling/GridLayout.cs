@@ -28,7 +28,7 @@ public static class GridLayout
             return [];
 
         // The gap runs around the outside as well as between tiles, so shrink the area first.
-        var inner = new WindowRect(area.Left + gap, area.Top + gap, area.Right - gap, area.Bottom - gap);
+        var inner = InnerArea(area, gap);
         var shape = Shape(count);
         var xs = Edges(inner.Width, sizes.Columns);
 
@@ -87,13 +87,22 @@ public static class GridLayout
         return new[] { 0 }.Concat(inner).Append(span).ToList();
     }
 
+    // The area inside the outer gap. SplitMove uses it too, so both agree on where fractions start.
+    public static WindowRect InnerArea(WindowRect area, int gap) =>
+        new(area.Left + gap, area.Top + gap, area.Right - gap, area.Bottom - gap);
+
+    // How a shared edge's gap is split: the tile on the left/top takes Near, the one on the
+    // right/bottom takes Far, so for an odd gap the odd pixel goes to Far and two neighbours are
+    // always exactly `gap` apart. SplitMove uses it too, so the exact-gap guarantee lives in one place.
+    public static (int Near, int Far) HalfGaps(int gap) =>
+        (gap / 2, gap - gap / 2);
+
     // Shrinks a cell on its INNER edges only (the outer edges already carry the full gap from the
     // shrunk area). Each side of a shared edge takes half; for an odd gap the odd pixel goes to the
     // tile on the left/top of the edge, so two neighbours are always exactly `gap` apart.
     static WindowRect Inset(WindowRect cell, int gap, bool hasLeft, bool hasRight, bool hasTop, bool hasBottom)
     {
-        var near = gap / 2;
-        var far = gap - near;
+        var (near, far) = HalfGaps(gap);
         return new WindowRect(
             cell.Left + (hasLeft ? near : 0),
             cell.Top + (hasTop ? near : 0),

@@ -48,6 +48,13 @@ public class SplitMoveTests
     [Fact] public void With_a_gap_the_gap_stays_exact() =>
         Assert.Equal(8, GapBetweenColumnsAfter(Apply((0, 0), Edges.Right, new(8, 8, 696, 592), gap: 8).Value));
 
+    // Odd gap: near and far differ (3 and 4), so swapping them would show here.
+    [Fact] public void With_an_odd_gap_a_right_edge_drag_keeps_the_gap_exact() =>
+        Assert.Equal(7, GapBetweenColumnsAfter(Apply((0, 0), Edges.Right, new(7, 7, 696, 593), gap: 7).Value, gap: 7));
+
+    [Fact] public void With_an_odd_gap_a_left_edge_drag_keeps_the_gap_exact() =>
+        Assert.Equal(7, GapBetweenColumnsAfter(Apply((1, 0), Edges.Left, new(703, 7, 993, 593), gap: 7).Value, gap: 7));
+
     [Fact] public void A_corner_moves_the_column_split_and_that_columns_row_split()
     {
         var sizes = SplitMove.Apply(TileSizes.Equal([2, 1]), [2, 1], Area, 0, (0, 0), Edges.Right | Edges.Bottom, new(0, 0, 700, 200)).Value;

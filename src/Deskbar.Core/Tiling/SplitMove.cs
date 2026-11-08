@@ -21,14 +21,13 @@ public static class SplitMove
         TileSizes sizes, IReadOnlyList<int> shape, WindowRect area, int gap,
         (int Column, int Row) cell, Edges moved, WindowRect frame)
     {
-        // Same shrink as GridLayout.Arrange: the gap runs around the outside too.
-        var inner = new WindowRect(area.Left + gap, area.Top + gap, area.Right - gap, area.Bottom - gap);
+        // Same shrink and gap split as GridLayout.Arrange (shared helpers): the gap runs around the outside too.
+        var inner = GridLayout.InnerArea(area, gap);
         // A shared edge is split in two: the tile on the near side keeps gap/2 of it and the far side
         // gap - gap/2. The split sits in the middle of the gap, so from a tile's released edge it is
         // `far` further on (right/bottom edge) or `near` back (left/top edge). Laying the grid out again
         // from the new fractions then leaves exactly `gap` between the two tiles.
-        var near = gap / 2;
-        var far = gap - near;
+        var (near, far) = GridLayout.HalfGaps(gap);
 
         // (index of the split between entries i and i+1, its position in pixels), when the edge is inner.
         var column = moved.HasFlag(Edges.Right) && cell.Column < shape.Count - 1 ? Maybe.From((Index: cell.Column, Position: frame.Right + far))
