@@ -26,8 +26,31 @@ namespace Deskbar.Core.Tiling;
 // window can pump messages while it waits, and a handler that re-entered itself mid-re-tile would work from
 // a half-updated board. A re-entrant call is queued and runs when the current one finishes.
 public sealed class Tiler(WorkspaceManager manager, IVirtualDesktopService desktops, IWindowMonitor monitor,
-    ITileSurface surface, Func<bool> isPro, Action<string>? trace = null) : IDisposable
+    ITileSurface surface, Func<bool> isPro, Action<string>? trace = null, Func<DateTimeOffset>? clock = null) : IDisposable
 {
+    // The put-back backstop (spec: "a short per-window quiet period as a backstop"; anti-goal: a re-tile loop
+    // with an app that insists on its own size or place). A window put back into its slot this many times
+    // within this window of time is left where it settles until its next structural change.
+    const int PutBacksBeforeGivingUp = 3;
+    static readonly TimeSpan PutBackWindow = TimeSpan.FromSeconds(2);
+
+    readonly Func<DateTimeOffset> now = clock ?? (() => DateTimeOffset.UtcNow);
+
+    // When each window was last put back after a Settled, newest last; only the recent ones are kept.
+    readonly Dictionary<WindowHandle, IReadOnlyList<DateTimeOffset>> putBacks = [];
+
+    // Windows the backstop has given up on. Their accepted frame is wherever they settled, and nothing places
+    // them again until a STRUCTURAL change hands them a different slot: they join, leave, swap, change screen,
+    // or the grid around them changes count (PlaceIfNeeded sees a slot that differs from the one they had).
+    readonly HashSet<WindowHandle> leftAlone = [];
+
+    // What the manager's state said about tiling at the last evaluate (see OnStateChanged).
+    Maybe<StateKey> stateKey = Maybe<StateKey>.None;
+
+    // The few facts a StateChanged pulse can change that matter to tiling. Everything else the manager persists
+    // (a rename, a fold, a colour) leaves it equal, and such a pulse reads no windows at all.
+    sealed record StateKey(Maybe<Guid> Workspace, bool Tiled, bool Experiment, int Gap, bool Pro);
+
     // What a window was last given and what it accepted. Accepted is the visible frame read back after the
     // Place: the slot itself, or the size an app insisted on (a minimum size larger than its slot). It is the
     // SELF-MOVE GUARD: Deskbar's own SetWindowPos raises LOCATIONCHANGE like any other move, so a Settled whose
@@ -95,7 +118,7 @@ public sealed class Tiler(WorkspaceManager manager, IVirtualDesktopService deskt
         subscriptions.Add(surface.Settled.Subscribe(w => Run($"settled {w.Value:X}", () => OnSettled(w))));
         // A screen plugged in or out, or a work area that changed: every screen is re-tiled.
         subscriptions.Add(surface.ScreensChanged.Subscribe(_ => Run("screens changed", () => Evaluate(everyScreen: true))));
-        subscriptions.Add(manager.StateChanged.Subscribe(_ => Run("state changed", () => Evaluate(everyScreen: false))));
+        subscriptions.Add(manager.StateChanged.Subscribe(_ => Run("state changed", OnStateChanged)));
 
         // The first evaluate reads the current desktop and, if it is tiled, tiles it.
         Refresh();
@@ -160,9 +183,29 @@ public sealed class Tiler(WorkspaceManager manager, IVirtualDesktopService deskt
             given.Remove(e.Window.Handle);
             rounded.Remove(e.Window.Handle);
             maximized.Remove(e.Window.Handle);
+            putBacks.Remove(e.Window.Handle);
+            leftAlone.Remove(e.Window.Handle);
         }
         if (e.Kind is WindowEventKind.Appeared or WindowEventKind.Hidden or WindowEventKind.Disappeared or WindowEventKind.MinimizeChanged)
             Evaluate(everyScreen: false);
+    }
+
+    // StateChanged fires on every persist and on several window events, and a full evaluate asks WorkspaceOf
+    // (a COM DesktopOf call) of every known window on the UI thread. So a pulse evaluates only when one of the
+    // facts in StateKey moved: the workspace here, its Tiled flag, the experiment, the gap, or Pro. Changes to
+    // which windows are in the grid reach the Tiler through window events and Settled instead.
+    void OnStateChanged()
+    {
+        if (stateKey.HasValue && stateKey.Value == CurrentStateKey()) return;
+        Evaluate(everyScreen: false);
+    }
+
+    StateKey CurrentStateKey()
+    {
+        var state = manager.State;
+        var here = currentDesktop.Bind(desktop => state.Workspaces.TryFirst(w => w.DesktopId == desktop));
+        return new StateKey(here.Map(w => w.Id), here.Map(w => w.Tiled).GetValueOrDefault(false),
+            state.ExperimentalTiling, state.TileGap, isPro());
     }
 
     // A watched window stopped moving with the buttons up (spec, "By hand"). In order:
@@ -200,7 +243,7 @@ public sealed class Tiler(WorkspaceManager manager, IVirtualDesktopService deskt
 
         if (restored && slots.TryGetValue(window, out var home))
         {
-            PlaceIfNeeded(window, home, force: true);
+            PutBack(window, home, frame);
             return;
         }
 
@@ -211,9 +254,8 @@ public sealed class Tiler(WorkspaceManager manager, IVirtualDesktopService deskt
                 Retile(workspace, [screenNow]);
                 break;
             case MoveOutcome.BackToSlot:
-                // Forced: its last accepted frame may be its slot too, and it is not there now.
                 if (slots.TryGetValue(window, out var slot))
-                    PlaceIfNeeded(window, slot, force: true);
+                    PutBack(window, slot, frame);
                 break;
             case MoveOutcome.JoinScreen join:
                 var from = board.ScreenOf(window).GetValueOrDefault(join.Screen);
@@ -248,6 +290,7 @@ public sealed class Tiler(WorkspaceManager manager, IVirtualDesktopService deskt
     {
         var state = manager.State;
         var pro = isPro();
+        stateKey = CurrentStateKey();
 
         // Forget the boards of workspaces the gate no longer acts on: untiled, or the experiment or Pro gone.
         boards.Keys
@@ -264,9 +307,9 @@ public sealed class Tiler(WorkspaceManager manager, IVirtualDesktopService deskt
             return;
         }
 
-        var now = (workspace.Id, state.TileGap);
-        var full = everyScreen || !context.HasValue || context.Value != now;
-        context = now;
+        var tiling = (workspace.Id, state.TileGap);
+        var full = everyScreen || !context.HasValue || context.Value != tiling;
+        context = tiling;
 
         var before = boards.TryGetValue(workspace.Id, out var known) ? known : null;
         var windows = manager.KnownWindows
@@ -279,6 +322,11 @@ public sealed class Tiler(WorkspaceManager manager, IVirtualDesktopService deskt
             .ToList();
         var board = before is null ? TileBoard.FirstFill(windows) : Reconciled(before, windows);
         boards[workspace.Id] = board;
+
+        // Leaving a grid is a structural change too: a window that comes back starts with a clean put-back count.
+        var gridded = boards.Values.SelectMany(b => b.Screens.Values).SelectMany(w => w).ToHashSet();
+        putBacks.Keys.Where(w => !gridded.Contains(w)).ToList().ForEach(w => putBacks.Remove(w));
+        leftAlone.RemoveWhere(w => !gridded.Contains(w));
 
         // Rounded once, as each window first joins a grid (spec, "Rounded corners").
         board.Screens.Values.SelectMany(w => w).Where(w => !rounded.Contains(w)).ToList()
@@ -368,11 +416,45 @@ public sealed class Tiler(WorkspaceManager manager, IVirtualDesktopService deskt
             : windows.Zip(tiles).ToDictionary(p => p.First, p => p.Second);
     }
 
+    // A settled window goes back into its slot, unless the backstop says this has become a fight. An app that
+    // snaps itself back (or insists on its own place) would otherwise be placed, move itself, settle and be
+    // placed again for ever. The fourth put-back within PutBackWindow is not made: the window keeps where it
+    // settled, that becomes its accepted frame, and it is left alone until its slot next changes.
+    void PutBack(WindowHandle window, WindowRect slot, WindowRect frame)
+    {
+        var at = now();
+        var recent = (putBacks.TryGetValue(window, out var times) ? times : [])
+            .Where(t => at - t < PutBackWindow)
+            .ToList();
+
+        if (leftAlone.Contains(window) || recent.Count >= PutBacksBeforeGivingUp)
+        {
+            if (leftAlone.Add(window))
+                trace?.Invoke($"tile: {window.Value:X} put back {recent.Count} times in {PutBackWindow.TotalSeconds:0}s, left at {Show(frame)}");
+            given[window] = new Given(slot, frame);
+            return;
+        }
+
+        putBacks[window] = recent.Append(at).ToList();
+        // Forced: its last accepted frame may be its slot too, and it is not there now.
+        PlaceIfNeeded(window, slot, force: true);
+    }
+
     // Puts a window on its slot unless it is there already, or unless it is exactly where it ended up the last
     // time it was given this same slot (an app that will not shrink: placed once, accepted, not retried).
     // `force` drops the second exception, for a window the user moved and that has to go back.
     void PlaceIfNeeded(WindowHandle window, WindowRect slot, bool force)
     {
+        // A window the backstop left alone stays where it is while its slot is the same one; a different slot is
+        // a structural change (a join, a leave, a swap, another screen, a new count), and it is tiled again from
+        // a clean count.
+        if (leftAlone.Contains(window))
+        {
+            if (given.TryGetValue(window, out var held) && held.Slot == slot) return;
+            leftAlone.Remove(window);
+            putBacks.Remove(window);
+        }
+
         var frame = surface.VisibleFrameOf(window);
         if (frame.HasValue && frame.Value == slot)
         {

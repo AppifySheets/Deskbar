@@ -315,11 +315,18 @@ public sealed class FakeTileSurface : ITileSurface
 
     public IReadOnlyList<TileScreen> Screens() => ScreenList.ToList();
     public int ScreenOf(WindowHandle window) => ScreenOfWindow.TryGetValue(window, out var screen) ? screen : ScreenList[0].Number;
-    public bool CanTile(WindowHandle window) => !CannotTile.Contains(window);
+    // How often the per-window questions were asked, so a test can prove a pulse read no windows at all.
+    public int CanTileCalls { get; private set; }
+    public int FrameReads { get; private set; }
+
+    public bool CanTile(WindowHandle window) { CanTileCalls++; return !CannotTile.Contains(window); }
     public bool IsMaximized(WindowHandle window) => Maximized.Contains(window);
     public bool IsMinimized(WindowHandle window) => Minimized.Contains(window);
-    public Maybe<WindowRect> VisibleFrameOf(WindowHandle window) =>
-        Frames.TryGetValue(window, out var frame) ? frame : Maybe<WindowRect>.None;
+    public Maybe<WindowRect> VisibleFrameOf(WindowHandle window)
+    {
+        FrameReads++;
+        return Frames.TryGetValue(window, out var frame) ? frame : Maybe<WindowRect>.None;
+    }
 
     public Result Place(WindowHandle window, WindowRect visibleFrame)
     {
