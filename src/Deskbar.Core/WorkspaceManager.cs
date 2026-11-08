@@ -1716,7 +1716,7 @@ public sealed class WorkspaceManager(
                         TileSizes = w.TileSizes
                             .Where(s => s.Screen != screen)
                             .Concat(sizes.IsEqual ? [] : [new ScreenTileSizes(screen, sizes)])
-                            .ToList(),
+                            .ToValueList(),
                     }
                     : w)
                 .ToList(),
