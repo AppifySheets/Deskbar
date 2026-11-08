@@ -333,4 +333,94 @@ public class TileSurfaceTests
         Assert.Empty(settled);
         window.Close();
     });
+
+    // Tile resize: a change counts as a resize only if a mouse button was down during it (Petre: "i want to be
+    // able to resize tiles by dragging the separation"). A drag ENDS with the button released, so the button is
+    // already up at the quiet tick; the surface has to remember it from the location changes. Here the seam says
+    // "down" while the nudge is heard and "up" by the time the window settles, which is exactly a drag and drop.
+    // ByHand is read INSIDE the Settled emission, because that is where the Tiler asks it.
+    [Fact]
+    public void A_change_with_a_button_down_settles_by_hand() => StaThread.Run(() =>
+    {
+        var window = Shown();
+        var handle = HandleOf(window);
+        var down = true;
+        using var surface = new TileSurface(_ => false) { ButtonsDown = () => down };
+        var byHand = new List<bool>();
+        using var _ = surface.Settled.Subscribe(w => byHand.Add(surface.ByHand(w)));
+        surface.Watch(new HashSet<WindowHandle> { handle });
+
+        Nudge(handle, 5);
+        // The hook's callback arrives through the message queue: the button must still be down when it is heard.
+        PumpUntil(() => surface.IsSettling(handle), TimeSpan.FromSeconds(3));
+        down = false;
+        PumpUntil(() => byHand.Count > 0, TimeSpan.FromSeconds(3));
+
+        Assert.Equal([true], byHand);
+        window.Close();
+    });
+
+    // An app moving itself, a keyboard snap, Deskbar's own Place: no button anywhere, so not by hand, and the
+    // Tiler keeps its existing rules for it.
+    [Fact]
+    public void A_change_without_a_button_does_not() => StaThread.Run(() =>
+    {
+        var window = Shown();
+        var handle = HandleOf(window);
+        using var surface = new TileSurface(_ => false) { ButtonsDown = () => false };
+        var byHand = new List<bool>();
+        using var _ = surface.Settled.Subscribe(w => byHand.Add(surface.ByHand(w)));
+        surface.Watch(new HashSet<WindowHandle> { handle });
+
+        Nudge(handle, 5);
+        PumpUntil(() => byHand.Count > 0, TimeSpan.FromSeconds(3));
+
+        Assert.Equal([false], byHand);
+        window.Close();
+    });
+
+    // The remembered button belongs to ONE change. A drag that settled by hand, followed by the window moving on
+    // its own (the Tiler's put-back, an app resizing itself), must not carry the hand over into the second
+    // settle, or the put-back would be taken for another resize.
+    [Fact]
+    public void The_next_change_starts_without_the_hand() => StaThread.Run(() =>
+    {
+        var window = Shown();
+        var handle = HandleOf(window);
+        var down = true;
+        using var surface = new TileSurface(_ => false) { ButtonsDown = () => down };
+        var byHand = new List<bool>();
+        using var _ = surface.Settled.Subscribe(w => byHand.Add(surface.ByHand(w)));
+        surface.Watch(new HashSet<WindowHandle> { handle });
+
+        Nudge(handle, 5);
+        PumpUntil(() => surface.IsSettling(handle), TimeSpan.FromSeconds(3));
+        down = false;
+        PumpUntil(() => byHand.Count > 0, TimeSpan.FromSeconds(3));
+        Nudge(handle, 5);
+        PumpUntil(() => byHand.Count > 1, TimeSpan.FromSeconds(3));
+
+        Assert.Equal([true, false], byHand);
+        window.Close();
+    });
+
+    // Sizes are kept per screen keyed by the monitor's bounds, so every screen carries them, and the monitor
+    // rectangle always contains the work area (the work area is the monitor less the taskbar and docked bars).
+    [Fact]
+    public void Screens_carry_their_monitor_bounds() => StaThread.Run(() =>
+    {
+        using var surface = new TileSurface(_ => false);
+
+        var screens = surface.Screens();
+
+        Assert.NotEmpty(screens);
+        Assert.All(screens, s =>
+        {
+            Assert.True(s.Bounds.Width > 0 && s.Bounds.Height > 0, $"screen {s.Number} has empty bounds {s.Bounds}");
+            Assert.True(
+                s.Bounds.Left <= s.WorkArea.Left && s.Bounds.Top <= s.WorkArea.Top
+                && s.Bounds.Right >= s.WorkArea.Right && s.Bounds.Bottom >= s.WorkArea.Bottom,
+                $"screen {s.Number}: bounds {s.Bounds} do not contain work area {s.WorkArea}");
+        });
+    });
 }

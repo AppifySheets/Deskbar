@@ -560,7 +560,7 @@ public sealed class TilerTests : IDisposable
     [Fact]
     public void Settled_on_another_screen_joins_that_screen()
     {
-        surface.ScreenList.Add(new TileScreen(2, Area2, 96));
+        surface.ScreenList.Add(FakeTileSurface.Screen(2, Area2));
         Exists(W(1), alpha);
         Exists(W(2), alpha);
         Exists(W(3), alpha, screen: 2);
@@ -913,7 +913,7 @@ public sealed class TilerTests : IDisposable
     [Fact]
     public void Windows_from_a_screen_that_went_away_join_the_screen_they_are_on()
     {
-        surface.ScreenList.Add(new TileScreen(2, Area2, 96));
+        surface.ScreenList.Add(FakeTileSurface.Screen(2, Area2));
         Exists(W(1), alpha);
         Exists(W(2), alpha, screen: 2);
         Exists(W(3), alpha, screen: 2);
@@ -934,7 +934,7 @@ public sealed class TilerTests : IDisposable
     [Fact]
     public void A_screen_too_small_for_its_grid_is_skipped()
     {
-        surface.ScreenList.Add(new TileScreen(2, new WindowRect(1920, 0, 1940, 20), 96));
+        surface.ScreenList.Add(FakeTileSurface.Screen(2, new WindowRect(1920, 0, 1940, 20)));
         Exists(W(1), alpha);
         Exists(W(2), alpha, screen: 2);
         Exists(W(3), alpha, screen: 2);
@@ -950,7 +950,7 @@ public sealed class TilerTests : IDisposable
     [Fact]
     public void The_gap_scales_with_the_screens_dpi()
     {
-        surface.ScreenList[0] = new TileScreen(1, Area, 144);
+        surface.ScreenList[0] = FakeTileSurface.Screen(1, Area, 144);
         new[] { 1, 2 }.ToList().ForEach(n => Exists(W(n), alpha));
 
         Start();
