@@ -25,6 +25,9 @@ public sealed class TilerTests : IDisposable
     // Read through a lambda by the Tiler, so a test can make Pro lapse by flipping it.
     bool pro = true;
 
+    // The Tiler's clock, moved by hand for the put-back backstop.
+    DateTimeOffset time = new(2026, 11, 8, 12, 0, 0, TimeSpan.Zero);
+
     WorkspaceManager manager = null!;
     Tiler tiler = null!;
 
@@ -93,7 +96,7 @@ public sealed class TilerTests : IDisposable
         };
         manager = new WorkspaceManager(desktops, monitor, titles, store);
         Assert.True(manager.Start().IsSuccess);
-        tiler = new Tiler(manager, desktops, monitor, surface, () => pro, traced.Add);
+        tiler = new Tiler(manager, desktops, monitor, surface, () => pro, traced.Add, () => time);
         tiler.Start();
     }
 
@@ -514,6 +517,61 @@ public sealed class TilerTests : IDisposable
         Assert.Contains(traced, line => line.Contains("1") && line.Contains("kept"));
     }
 
+    // The backstop (spec: "a short per-window quiet period as a backstop"). An app that puts itself back where
+    // it wants to be after every Place would otherwise be fought for ever.
+    [Fact]
+    public void An_app_that_keeps_snapping_back_is_left_alone_after_three_put_backs()
+    {
+        new[] { 1, 2, 3 }.ToList().ForEach(n => Exists(W(n), alpha));
+        Start();
+        surface.Placed.Clear();
+        var slot = Grid(3)[0];
+        var insisted = slot with { Right = slot.Right - 150, Bottom = slot.Bottom - 200 };
+
+        Enumerable.Range(0, 3).ToList().ForEach(_ =>
+        {
+            time += TimeSpan.FromMilliseconds(400);
+            Settles(W(1), insisted);
+        });
+        Assert.Equal(3, PlacedWindows.Count(w => w == W(1)));
+
+        // The fourth within 2 seconds: no Place, and where it settled is now accepted.
+        time += TimeSpan.FromMilliseconds(400);
+        Settles(W(1), insisted);
+        Assert.Equal(3, PlacedWindows.Count(w => w == W(1)));
+        Assert.Equal(insisted, surface.Frames[W(1)]);
+        Assert.Contains(traced, line => line.Contains("left at"));
+
+        // Nor on a later re-tile or another Settled, while its slot stays the same...
+        tiler.Refresh();
+        time += TimeSpan.FromSeconds(5);
+        Settles(W(1), insisted with { Left = insisted.Left + 10 });
+        Assert.Equal(3, PlacedWindows.Count(w => w == W(1)));
+
+        // ...until a structural change gives it another slot.
+        Opens(W(4), alpha);
+        Assert.Equal(Grid(4)[0], surface.Frames[W(1)]);
+    }
+
+    [Fact]
+    public void Put_backs_spread_over_time_are_not_counted_together()
+    {
+        new[] { 1, 2, 3 }.ToList().ForEach(n => Exists(W(n), alpha));
+        Start();
+        surface.Placed.Clear();
+        var slot = Grid(3)[0];
+        var insisted = slot with { Right = slot.Right - 150, Bottom = slot.Bottom - 200 };
+
+        Enumerable.Range(0, 4).ToList().ForEach(_ =>
+        {
+            time += TimeSpan.FromMilliseconds(2100);
+            Settles(W(1), insisted);
+        });
+
+        Assert.Equal(4, PlacedWindows.Count(w => w == W(1)));
+        Assert.Equal(slot, surface.Frames[W(1)]);
+    }
+
     [Fact]
     public void A_window_closing_mid_retile_leaves_the_rest_tiled()
     {
@@ -592,6 +650,24 @@ public sealed class TilerTests : IDisposable
         Assert.Equal(GridLayout.Arrange(Area, 2, 12), new[] { W(1), W(2) }.Select(w => surface.Frames[w]).ToList());
     }
 
+    // StateChanged fires on every persist; one that changes nothing about tiling must not ask about any window
+    // (WorkspaceOf is a COM call per window on the UI thread).
+    [Fact]
+    public void A_state_pulse_that_changes_nothing_tiling_reads_no_windows()
+    {
+        new[] { 1, 2, 3 }.ToList().ForEach(n => Exists(W(n), alpha));
+        Start();
+        var canTile = surface.CanTileCalls;
+        var reads = surface.FrameReads;
+
+        Assert.True(manager.RenameWorkspace(beta.Id, "Gamma").IsSuccess);
+        Assert.True(manager.SetWorkspaceFolded(alpha.Id, true).IsSuccess);
+
+        Assert.Equal(canTile, surface.CanTileCalls);
+        Assert.Equal(reads, surface.FrameReads);
+    }
+
+    // ...while one that does change it (the gap) still re-tiles.
     [Fact]
     public void Changing_the_gap_retiles()
     {
