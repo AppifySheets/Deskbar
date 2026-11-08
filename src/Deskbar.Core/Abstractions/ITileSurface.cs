@@ -36,6 +36,12 @@ public interface ITileSurface
     bool IsMaximized(WindowHandle window);
     bool IsMinimized(WindowHandle window);
 
+    // Is this window still moving? True while it has a pending quiet timer: it moved within the last quiet
+    // interval, or it is waiting for the mouse buttons to come up. The Tiler does not place a window that is
+    // settling, because that window is under the user's pointer (a title-bar drag, an AltSnap drag) or in the
+    // middle of a move of its own, and a Place would make it jump. Its own Settled follows and puts it right.
+    bool IsSettling(WindowHandle window);
+
     // Where the window visibly is. None for a window that has gone between the question and the answer.
     Maybe<WindowRect> VisibleFrameOf(WindowHandle window);
 

@@ -59,6 +59,11 @@ public sealed class TileSurface : ITileSurface, IDisposable
     // app can change those at any time, and reading them is a few user32 calls.
     readonly Dictionary<nint, bool> movable = [];
 
+    // Set by Dispose (final review, item 3). After it, Watch is a no-op, so nothing can put the LOCATIONCHANGE
+    // hook back (a Tiler that outlived this surface, a refresh landing during logoff), and Place fails, so
+    // nothing is moved during a logoff either.
+    bool disposed;
+
     public TileSurface(Func<WindowHandle, bool> isOurs)
     {
         this.isOurs = isOurs;
@@ -68,6 +73,10 @@ public sealed class TileSurface : ITileSurface, IDisposable
     // Whether a mouse button is down right now, asked before a quiet window is reported as settled. The one
     // seam in this class: a test cannot press a button on the machine running it, so it substitutes this.
     internal Func<bool> ButtonsDown { get; init; } = MouseButtonDown;
+
+    // Whether the LOCATIONCHANGE hook is installed right now. For tests: a hook is the one thing a disposed
+    // surface must never put back.
+    internal bool IsHooked => hook != 0;
 
     public IObservable<WindowHandle> Settled => settled.AsObservable();
 
@@ -148,6 +157,11 @@ public sealed class TileSurface : ITileSurface, IDisposable
     public bool IsMaximized(WindowHandle window) => IsZoomed(window.Value);
     public bool IsMinimized(WindowHandle window) => IsIconic(window.Value);
 
+    // A window has a quiet timer from its first LOCATIONCHANGE until it settles (OnQuiet) or stops being watched
+    // (Forget), and the timer keeps running while a button is down. So "has a timer" is exactly "moved within
+    // the last quiet interval, or held by a button": the window the Tiler must not place (ITileSurface).
+    public bool IsSettling(WindowHandle window) => quiet.ContainsKey(window);
+
     // --- Where windows are, and moving them ---------------------------------------------------------------------
 
     // None for a window that has gone, and for a MINIMIZED one: its rectangles are the iconic ones, off at
@@ -175,6 +189,7 @@ public sealed class TileSurface : ITileSurface, IDisposable
     // SWP_NOZORDER | SWP_NOACTIVATE: a re-tile never raises a tile over a maximized window and never takes focus.
     public Result Place(WindowHandle window, WindowRect visibleFrame)
     {
+        if (disposed) return Result.Failure("tiling has stopped.");
         if (!IsWindow(window.Value)) return Result.Failure("that window has gone.");
         // The Tiler never asks this of a maximized or minimized window; refused anyway, because SetWindowPos on
         // one writes a rectangle that a restore then throws away.
@@ -221,6 +236,9 @@ public sealed class TileSurface : ITileSurface, IDisposable
     // hook goes away (spec, "Keeping it tidy").
     public void Watch(IReadOnlySet<WindowHandle> windows)
     {
+        // Disposed: the hook is gone for good (see `disposed`).
+        if (disposed) return;
+
         // A copy, never the caller's set: the Tiler may reuse or change the one it passed.
         watched = windows.ToHashSet();
 
@@ -342,6 +360,9 @@ public sealed class TileSurface : ITileSurface, IDisposable
 
     public void Dispose()
     {
+        if (disposed) return;
+        disposed = true;
+        watched = new HashSet<WindowHandle>();
         if (hook != 0) Unhook();
         quiet.Values.ToList().ForEach(t => t.Stop());
         quiet.Clear();

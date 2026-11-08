@@ -322,6 +322,12 @@ public sealed class FakeTileSurface : ITileSurface
     public bool CanTile(WindowHandle window) { CanTileCalls++; return !CannotTile.Contains(window); }
     public bool IsMaximized(WindowHandle window) => Maximized.Contains(window);
     public bool IsMinimized(WindowHandle window) => Minimized.Contains(window);
+
+    // Windows still moving: dragged by hand, or moved within the last quiet interval. A test puts a window in
+    // here to stand for "the user has it under the pointer", and takes it out before its Settled.
+    public HashSet<WindowHandle> Settling { get; } = [];
+    public bool IsSettling(WindowHandle window) => Settling.Contains(window);
+
     public Maybe<WindowRect> VisibleFrameOf(WindowHandle window)
     {
         FrameReads++;

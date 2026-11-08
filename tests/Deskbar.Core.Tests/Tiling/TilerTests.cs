@@ -28,6 +28,9 @@ public sealed class TilerTests : IDisposable
     // The Tiler's clock, moved by hand for the put-back backstop.
     DateTimeOffset time = new(2026, 11, 8, 12, 0, 0, TimeSpan.Zero);
 
+    // The windows whose drop on a bar row is pending, as the bar would report them (FloatingBar's header drop).
+    readonly HashSet<WindowHandle> dropping = [];
+
     WorkspaceManager manager = null!;
     Tiler tiler = null!;
 
@@ -96,7 +99,7 @@ public sealed class TilerTests : IDisposable
         };
         manager = new WorkspaceManager(desktops, monitor, titles, store);
         Assert.True(manager.Start().IsSuccess);
-        tiler = new Tiler(manager, desktops, monitor, surface, () => pro, traced.Add, () => time);
+        tiler = new Tiler(manager, desktops, monitor, surface, () => pro, traced.Add, () => time, dropping.Contains);
         tiler.Start();
     }
 
@@ -497,6 +500,38 @@ public sealed class TilerTests : IDisposable
         Assert.Equal(new HashSet<WindowHandle> { W(1), W(3) }, surface.Watched[^1]);
     }
 
+    // Final review, item 1. Spec: "A drop on one of the bar's workspace rows is the bar's gesture (move to that
+    // workspace) and wins over a tile swap." The bar puts the window back, waits for Snap, puts it back again
+    // and only then moves it, so its Settled (with Snap's half-screen frame, centre over another tile) arrives
+    // first. While the bar says its drop is pending, that Settled swaps nothing and no re-tile places it; the
+    // move then takes it out of the grid and the rest close up.
+    [Fact]
+    public void A_window_whose_bar_drop_is_pending_does_not_swap_and_its_move_closes_the_grid()
+    {
+        new[] { 1, 2, 3 }.ToList().ForEach(n => Exists(W(n), alpha));
+        Start();
+        surface.Placed.Clear();
+
+        // Released on a bar row; Snap left it with its centre over W(3)'s tile.
+        dropping.Add(W(1));
+        var over = Grid(3)[2];
+        Settles(W(1), over with { Left = over.Left + 40, Right = over.Right - 40 });
+
+        Assert.Equal([W(1), W(2), W(3)], tiler.Board.On(1));
+        Assert.Empty(surface.Placed);
+
+        // A structural re-tile while the drop is still pending does not place it either.
+        Opens(W(4), alpha);
+        Assert.DoesNotContain(W(1), PlacedWindows);
+
+        // The bar's drop moves it to Beta (WindowMoved), then the bar clears the mark.
+        Assert.True(manager.MoveToDesktop(W(1), beta.DesktopId!.Value).IsSuccess);
+        dropping.Remove(W(1));
+
+        Assert.DoesNotContain(W(1), PlacedWindows);
+        AssertTiled([W(2), W(3), W(4)]);
+    }
+
     [Fact]
     public void A_window_moved_onto_the_tiled_workspace_joins_it()
     {
@@ -582,6 +617,95 @@ public sealed class TilerTests : IDisposable
         Assert.Equal(Grid(4)[0], surface.Frames[W(1)]);
     }
 
+    // Final review, item 2: a structural re-tile (another window opening on the same screen) must not place a
+    // window the user is dragging, or it jumps out from under the pointer. Its own Settled puts it right.
+    [Fact]
+    public void A_window_being_dragged_is_not_placed_by_a_retile_and_its_settle_puts_it_right()
+    {
+        new[] { 1, 2, 3 }.ToList().ForEach(n => Exists(W(n), alpha));
+        Start();
+        surface.Placed.Clear();
+
+        // W(1) is under the pointer, part way through a drag.
+        surface.Settling.Add(W(1));
+        surface.Frames[W(1)] = new WindowRect(300, 200, 900, 700);
+        Opens(W(4), alpha);
+
+        Assert.DoesNotContain(W(1), PlacedWindows);
+        Assert.Equal([W(1), W(2), W(3), W(4)], tiler.Board.On(1));
+
+        // Let go a little off its new slot: it goes into it.
+        surface.Settling.Remove(W(1));
+        var slot = Grid(4)[0];
+        Settles(W(1), slot with { Left = slot.Left + 20, Right = slot.Right + 20 });
+
+        AssertTiled([W(1), W(2), W(3), W(4)]);
+    }
+
+    // A window Deskbar has just placed is settling too, for one quiet interval (its own LOCATIONCHANGE). A
+    // re-tile in that interval holds it, and its Settled then reports exactly the frame it was given, which the
+    // self-move guard would otherwise read as "nothing happened". It goes on into the slot it has now.
+    [Fact]
+    public void A_window_held_while_settling_from_its_own_place_goes_to_its_new_slot_when_it_settles()
+    {
+        new[] { 1, 2, 3 }.ToList().ForEach(n => Exists(W(n), alpha));
+        Start();
+        surface.Placed.Clear();
+
+        surface.Settling.Add(W(1));
+        Opens(W(4), alpha);
+        Assert.DoesNotContain(W(1), PlacedWindows);
+
+        surface.Settling.Remove(W(1));
+        Settles(W(1), Grid(3)[0]);
+
+        AssertTiled([W(1), W(2), W(3), W(4)]);
+    }
+
+    // Final review, item 4: dropping a board forgets what the backstop decided. Untiling and tiling again is a
+    // fresh start, so a window the backstop had left alone is placed in its slot.
+    [Fact]
+    public void A_window_left_alone_is_placed_again_after_untiling_and_tiling_again()
+    {
+        new[] { 1, 2, 3 }.ToList().ForEach(n => Exists(W(n), alpha));
+        Start();
+        var slot = Grid(3)[0];
+        var insisted = slot with { Right = slot.Right - 150, Bottom = slot.Bottom - 200 };
+        Enumerable.Range(0, 4).ToList().ForEach(_ =>
+        {
+            time += TimeSpan.FromMilliseconds(400);
+            Settles(W(1), insisted);
+        });
+        Assert.Equal(insisted, surface.Frames[W(1)]);
+
+        Assert.True(manager.SetWorkspaceTiled(alpha.Id, false).IsSuccess);
+        Assert.True(manager.SetWorkspaceTiled(alpha.Id, true).IsSuccess);
+
+        AssertTiled([W(1), W(2), W(3)]);
+    }
+
+    // Item 4 again: a window maximized while tiled, then un-maximized while the experiment was off, is not
+    // "being restored" when the experiment comes back on. Dragged over another tile, it swaps.
+    [Fact]
+    public void A_window_maximized_before_the_experiment_went_off_swaps_when_dragged_after_it_is_back_on()
+    {
+        new[] { 1, 2, 3 }.ToList().ForEach(n => Exists(W(n), alpha));
+        Start();
+        surface.Maximized.Add(W(2));
+        Settles(W(2), Area);
+
+        Assert.True(manager.SetExperimentalTiling(false).IsSuccess);
+        surface.Maximized.Remove(W(2));
+        surface.Frames[W(2)] = Grid(3)[1];
+        Assert.True(manager.SetExperimentalTiling(true).IsSuccess);
+        AssertTiled([W(1), W(2), W(3)]);
+
+        var over = Grid(3)[2];
+        Settles(W(2), over with { Left = over.Left + 40, Right = over.Right - 40 });
+
+        AssertTiled([W(1), W(3), W(2)]);
+    }
+
     [Fact]
     public void Put_backs_spread_over_time_are_not_counted_together()
     {
@@ -659,6 +783,24 @@ public sealed class TilerTests : IDisposable
 
         AssertTiled([W(1), W(2), W(3)]);
         Assert.Contains(traced, line => line.Contains("round corners of 3 threw"));
+    }
+
+    // Final review, item 3: a licence refresh can land after SessionEnding or ExitApp disposed the Tiler. It
+    // must not move a window or put the LOCATIONCHANGE hook back.
+    [Fact]
+    public void Refresh_after_dispose_places_nothing()
+    {
+        new[] { 1, 2 }.ToList().ForEach(n => Exists(W(n), alpha));
+        Start();
+        tiler.Dispose();
+        surface.Placed.Clear();
+
+        // The manager hears the new window; the disposed Tiler is not listening, but a Refresh would find it.
+        Opens(W(3), alpha);
+        tiler.Refresh();
+
+        Assert.Empty(surface.Placed);
+        Assert.Empty(surface.Watched[^1]);
     }
 
     // --- screens -----------------------------------------------------------------------------------------

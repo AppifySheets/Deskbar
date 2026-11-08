@@ -169,8 +169,10 @@ public partial class App : Application
 
     // Tiling (docs/superpowers/specs/2026-11-08-tiling-design.md). Called from OnStartup on the UI thread, once,
     // and only once the manager has STARTED: the manager's own desktop-change handling (which sends borrowed
-    // windows home) subscribes in manager.Start(), and an Rx subject calls its subscribers in the order they
-    // subscribed, so on a desktop switch the manager settles first and the Tiler then sees the result.
+    // windows home) subscribes in manager.Start(). CurrentChanged is a FromEventPattern over Windows' own
+    // CurrentChanged event, so each subscription adds its own handler to that event, and an event's multicast
+    // delegate calls its handlers in the order they were added: on a desktop switch the manager settles first
+    // and the Tiler then sees the result.
     //
     // Both objects are built on the UI thread on purpose (TileSurface's class header): the surface captures the
     // dispatcher for its debounce timers, and its LOCATIONCHANGE hook is installed by the Tiler from this thread
@@ -191,7 +193,11 @@ public partial class App : Application
         tiler = new Core.Tiling.Tiler(manager, desktops, monitor, tileSurface,
             () => Entitlement.Current.IsPro,
             // A `tile:` line per decision when tracing is on, given the way the manager's trace is.
-            trace: ClickTrace.On ? ClickTrace.Write : null);
+            trace: ClickTrace.On ? ClickTrace.Write : null,
+            // A title-bar drop on a bar row wins over a tile swap (spec): while the bar is carrying one out, the
+            // Tiler ignores that window's Settled and does not place it (FloatingBar.IsHeaderDropPending). Read
+            // through the field, so a bar that does not exist (compatibility mode never gets here) answers no.
+            dropPending: w => floatingBar?.IsHeaderDropPending(w) == true);
         tiler.Start();
     }
 
@@ -1771,9 +1777,13 @@ public partial class App : Application
         // first is the tidy, deterministic thing to do. The asymmetry is intentional.
         SessionEnding += (_, _) =>
         {
-            // The grid stands down too: windows closing for the logoff must not make the rest re-tile.
+            // The grid stands down too: windows closing for the logoff must not make the rest re-tile. Nulled
+            // as ExitApp does, so a licence refresh that lands after this (RefreshEntitlement posts its Refresh
+            // through the dispatcher) finds no Tiler to poke.
             tiler?.Dispose();
+            tiler = null;
             tileSurface?.Dispose();
+            tileSurface = null;
             monitor.Dispose();
             manager.RestoreAllTitles();
         };
