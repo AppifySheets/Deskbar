@@ -52,6 +52,13 @@ public sealed class TileSurface : ITileSurface, IDisposable
     // One restartable timer per watched window that has moved and not yet settled.
     readonly Dictionary<WindowHandle, DispatcherTimer> quiet = [];
 
+    // The windows whose current (or last settled) change had a mouse button down at one of its location
+    // changes: the "by hand" half of the resize test (ITileSurface.ByHand). Remembered from the MOVES, because
+    // a drag ends with the button released, so at the quiet tick the button is always up. Cleared when the
+    // window's NEXT change starts (its first location change with no timer pending), never when Settled is
+    // raised: the Tiler asks ByHand while it handles that Settled, and the answer must still be there.
+    readonly HashSet<WindowHandle> byHand = [];
+
     // The answer to "does this window accept SetWindowPos from us", per hwnd, for the window's life. CanTile
     // is asked of every known window on each structural event, and the probe is a SetWindowPos, which sends
     // the window messages and waits for its thread to answer; the answer cannot change (a window does not
@@ -92,9 +99,9 @@ public sealed class TileSurface : ITileSurface, IDisposable
     // means one screen to the bar and to the grid (controller ruling: one numbering, not a copy of it).
     public IReadOnlyList<TileScreen> Screens() =>
         ScreenLayout.MonitorNumbers().Numbers
-            .Select(m => (Number: m.Value, Work: WorkAreaOf(m.Key), Dpi: DpiOf(m.Key)))
-            .Where(m => m.Work.HasValue)
-            .Select(m => new TileScreen(m.Number, m.Work.Value, m.Dpi))
+            .Select(m => (Number: m.Value, Areas: AreasOf(m.Key), Dpi: DpiOf(m.Key)))
+            .Where(m => m.Areas.HasValue)
+            .Select(m => new TileScreen(m.Number, m.Areas.Value.Work, m.Dpi, m.Areas.Value.Bounds))
             .OrderBy(s => s.Number)
             .ToList();
 
@@ -106,13 +113,18 @@ public sealed class TileSurface : ITileSurface, IDisposable
         ScreenLayout.MonitorNumbers().Numbers.TryGetValue(
             MonitorFromWindow(window.Value, MONITOR_DEFAULTTONEAREST), out var number) ? number : 0;
 
-    static Maybe<WindowRect> WorkAreaOf(nint monitor)
+    // The work area and the whole monitor (TileScreen.Bounds, what tile sizes are kept by) from ONE
+    // GetMonitorInfo, so the two always describe the same monitor at the same moment and the bounds contain the
+    // work area.
+    static Maybe<(WindowRect Work, WindowRect Bounds)> AreasOf(nint monitor)
     {
         var info = new MONITORINFO { cbSize = Marshal.SizeOf<MONITORINFO>() };
         return GetMonitorInfo(monitor, ref info)
-            ? new WindowRect(info.rcWork.Left, info.rcWork.Top, info.rcWork.Right, info.rcWork.Bottom)
-            : Maybe<WindowRect>.None;
+            ? (RectOf(info.rcWork), RectOf(info.rcMonitor))
+            : Maybe<(WindowRect, WindowRect)>.None;
     }
+
+    static WindowRect RectOf(RECT r) => new(r.Left, r.Top, r.Right, r.Bottom);
 
     // The monitor's effective DPI, which is what scales the gap. 96 (100%) if Windows will not say, which only
     // makes the gap the unscaled default rather than failing the screen.
@@ -161,6 +173,9 @@ public sealed class TileSurface : ITileSurface, IDisposable
     // (Forget), and the timer keeps running while a button is down. So "has a timer" is exactly "moved within
     // the last quiet interval, or held by a button": the window the Tiler must not place (ITileSurface).
     public bool IsSettling(WindowHandle window) => quiet.ContainsKey(window);
+
+    // See `byHand`: set from the moves of the change, so it still answers after the button came up for the drop.
+    public bool ByHand(WindowHandle window) => byHand.Contains(window);
 
     // --- Where windows are, and moving them ---------------------------------------------------------------------
 
@@ -242,8 +257,10 @@ public sealed class TileSurface : ITileSurface, IDisposable
         // A copy, never the caller's set: the Tiler may reuse or change the one it passed.
         watched = windows.ToHashSet();
 
-        // A window no longer watched has no business settling: its pending timer is dropped.
+        // A window no longer watched has no business settling: its pending timer is dropped, and its remembered
+        // hand with it (nobody will ask, and the set must not grow with every window that ever tiled).
         quiet.Keys.Where(w => !watched.Contains(w)).ToList().ForEach(Forget);
+        byHand.RemoveWhere(w => !watched.Contains(w));
 
         if (watched.Count > 0 && hook == 0)
             // Fails only if Windows is out of resources; then nothing settles until the next Watch tries again.
@@ -273,14 +290,23 @@ public sealed class TileSurface : ITileSurface, IDisposable
     }
 
     // Each move restarts the window's quiet timer, so it fires only once the window has been still for Quiet.
+    // Runs only for watched windows (the callback's filter has already turned everything else away), so the
+    // button check below is two GetAsyncKeyState calls per move of a tiled window, nothing per other window.
     void Restart(WindowHandle window)
     {
         if (!quiet.TryGetValue(window, out var timer))
         {
+            // No timer pending: this move STARTS a new change, so the hand of the previous one (already settled
+            // and already handled by the Tiler) no longer applies. A put-back after a drag is not a second drag.
+            byHand.Remove(window);
             timer = new DispatcherTimer(DispatcherPriority.Normal, dispatcher) { Interval = Quiet };
             timer.Tick += (_, _) => OnQuiet(window, timer);
             quiet[window] = timer;
         }
+        // A button down at ANY move of the change makes the whole change by hand. Asked here, while the drag is
+        // still going on, because by the quiet tick the button that did it has been released. Either button,
+        // so AltSnap's right-drag resize counts.
+        if (ButtonsDown()) byHand.Add(window);
         timer.Stop();
         timer.Start();
     }
@@ -366,6 +392,7 @@ public sealed class TileSurface : ITileSurface, IDisposable
         if (hook != 0) Unhook();
         quiet.Values.ToList().ForEach(t => t.Stop());
         quiet.Clear();
+        byHand.Clear();
         settled.OnCompleted();
     }
 }

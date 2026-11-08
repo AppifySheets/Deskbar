@@ -7,7 +7,12 @@ namespace Deskbar.Core.Abstractions;
 // One screen as the tiling grid sees it: its number (the same number ITileSurface.ScreenOf answers for a
 // window), its WORK area in physical pixels (the taskbar and a docked bar already taken out, spec "Which
 // windows tile"), and its DPI, which scales the gap so it looks the same on every screen.
-public sealed record TileScreen(int Number, WindowRect WorkArea, int Dpi);
+//
+// Bounds is the whole monitor (MONITORINFO.rcMonitor), from the same lookup as the work area, so it always
+// contains it. It is what tile sizes are kept by (Petre: "keep my sizes", "places"): the screen NUMBER can
+// change when a screen is unplugged and Windows renumbers, and the work area changes whenever the taskbar or
+// the bar docks, but where the monitor sits on the desktop changes only when the user rearranges screens.
+public sealed record TileScreen(int Number, WindowRect WorkArea, int Dpi, WindowRect Bounds);
 
 // Everything the Tiler needs from Windows, and nothing it does not. The Tiler (Deskbar.Core.Tiling) decides
 // WHEN and WHERE windows go; this answers what the windows are like and does the moving. Kept apart for the
@@ -63,6 +68,17 @@ public interface ITileSurface
     // buttons up. Covers every way a window moves: a title-bar drag, an AltSnap drag, a keyboard snap,
     // maximize and un-maximize, an app resizing itself, and Deskbar's own Place.
     IObservable<WindowHandle> Settled { get; }
+
+    // Was a mouse button down at ANY location change of the change that last settled for this window? The
+    // half of the resize test that the geometry cannot answer: a window whose edges moved with no button down
+    // was resized by its app, a keyboard snap or Deskbar itself, not dragged by the user (Petre: "i want to be
+    // able to resize tiles by dragging the separation"). Asked of the end of the change it would always be
+    // false, because a drag ends with the button released; so it is remembered from the moves themselves.
+    // Either button counts, so AltSnap's right-drag resize is by hand too.
+    //
+    // Valid while the Tiler handles that window's Settled (which is raised synchronously), and afterwards until
+    // the window's next change starts, which resets it. False for a window that has never settled.
+    bool ByHand(WindowHandle window);
 
     // The monitor set or a work area changed: a screen plugged in or out, the taskbar moved, the bar docked.
     IObservable<Unit> ScreensChanged { get; }
