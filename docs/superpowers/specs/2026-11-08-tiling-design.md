@@ -41,6 +41,12 @@ arithmetic below is described from its behaviour so it can be written fresh.
   but none is built now.
 - Resizing tiles. Grid tiles stay equal, as in komorebi's grid.
 - Keyboard focus movement, window stacks or tabs, per-app rule files, its own workspace system.
+- Alt-dragging (hold a modifier and drag anywhere in a window to move or resize it). Petre uses
+  [AltSnap](https://github.com/RamonUnch/AltSnap) for that (GPL-3.0, free at work too). Building it
+  into Deskbar would need a low-level mouse hook, which Deskbar has turned down twice
+  (`IInputActivity`, `WorkspaceSwitchGesture`), plus AltSnap's years of edge cases: the Alt-up menu
+  bar, VS Code's Alt+Click, mixed-DPI screens, games. Do not copy AltSnap's code; the GPL would come
+  with it. Tiling must work with AltSnap instead (see "By hand").
 
 ## Anti-goals (it fails even if it works)
 
@@ -158,12 +164,21 @@ Pro is the Store package; the GitHub exe is the free tier (`ProEntitlement.Decid
 
 ### By hand
 
-- Drag a tiled window and drop it on another tile: the two swap slots.
-- Drop it anywhere else on the same screen: it snaps back into its slot.
-- Drop it on another screen: it joins that screen's grid at the end, and both screens re-tile.
-- Resize a tiled window by an edge: it snaps back.
-- Detection: `MoveStarted` and `Moved` (`EVENT_SYSTEM_MOVESIZEEND`) frame the gesture. The drop target
-  is the tile under the cursor at the end of the drag.
+One rule covers every way a window can be moved: a title-bar drag, an AltSnap Alt-drag, a keyboard
+snap, or another tool. When a tiled window settles after a move that Deskbar did not make:
+
+- If the centre of its visible frame is over another tile on the same screen, the two swap slots.
+- If it is on the same screen but not over another tile (its own slot, a gap, an edge), it goes back
+  into its slot.
+- If it is now on another screen, it joins that screen's grid at the end, and both screens re-tile.
+- Resizing a tiled window, by an edge or by AltSnap's right-drag, also sends it back to its slot.
+
+Detection: a title-bar drag is framed by `MoveStarted` and `Moved` (`EVENT_SYSTEM_MOVESIZEEND`), so
+it settles at the end of the drag. AltSnap moves windows with `SetWindowPos` and raises neither, so
+its drags arrive only as LOCATIONCHANGE; "settled" there means no further change for the debounce
+interval. Do not act while the left or right mouse button is still down (`GetAsyncKeyState`), or a
+slow AltSnap drag that pauses would be swapped or snapped back mid-drag. Using the window's centre
+rather than the cursor is what makes this work for moves that have no cursor (keyboard snaps).
 
 ### Rounded corners
 
