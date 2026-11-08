@@ -149,6 +149,22 @@ public sealed class TileSizesSettingTests : IDisposable
         Assert.Equal(Uneven, SizesOf(manager.State, a).Single().Sizes);
     }
 
+    // Workspace is a record, so its equality must see the sizes, by contents and not by list instance.
+    [Fact]
+    public void Workspaces_compare_by_their_sizes()
+    {
+        var id = Guid.NewGuid();
+        var bare = new Workspace(id, "W", null);
+        var one = bare with { TileSizes = [new ScreenTileSizes(Left, Uneven)] };
+        var same = bare with { TileSizes = new[] { new ScreenTileSizes(Left, new TileSizes([0.3, 0.7], [[1.0], [0.25, 0.75]])) }.ToValueList() };
+        var other = bare with { TileSizes = [new ScreenTileSizes(Left, OtherUneven)] };
+
+        Assert.Equal(one, same);
+        Assert.Equal(one.GetHashCode(), same.GetHashCode());
+        Assert.NotEqual(one, other);
+        Assert.NotEqual(one, bare);
+    }
+
     [Fact]
     public void An_unknown_workspace_is_a_failure()
     {

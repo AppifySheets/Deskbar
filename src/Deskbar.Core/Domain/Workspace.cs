@@ -71,7 +71,11 @@ public sealed record Workspace(Guid Id, string Name, Guid? DesktopId, string? Co
     //
     // Init property defaulting to empty, so a state.json written before this has no key and loads with no
     // stored sizes (every grid equal, as before), with no migration.
-    public IReadOnlyList<ScreenTileSizes> TileSizes { get; init; } = [];
+    //
+    // A ValueList, not a plain list: a record compares a list member by reference, so two workspaces holding
+    // the same sizes would be unequal. ValueList compares by contents, which keeps the record's generated
+    // equality right for every property, this one and any added later.
+    public ValueList<ScreenTileSizes> TileSizes { get; init; } = [];
 
     // The group this workspace belongs to, or null for one that stands on its own.
     //
@@ -97,22 +101,4 @@ public sealed record Workspace(Guid Id, string Name, Guid? DesktopId, string? Co
     // silently un-nest every workspace on the first load after an upgrade, which is data loss that
     // looks like a rendering bug.
     public Guid? ParentId { get; init; }
-
-    // A record compares a list member by REFERENCE, so two workspaces that differ only in which list instance
-    // holds the same TileSizes (one loaded from state.json, one built in code) would be unequal. Equality is
-    // therefore written out: every member as the generated one compares it, TileSizes by contents.
-    // KEEP IN STEP: a property added above must be added here, or it silently stops counting for equality.
-    public bool Equals(Workspace? other) =>
-        other is not null
-        && Id == other.Id && Name == other.Name && DesktopId == other.DesktopId
-        && Color == other.Color && Shortcut == other.Shortcut
-        && Folded == other.Folded && Tiled == other.Tiled
-        && GroupId == other.GroupId && ParentId == other.ParentId
-        && TileSizes.SequenceEqual(other.TileSizes);
-
-    public override int GetHashCode() =>
-        HashCode.Combine(
-            HashCode.Combine(Id, Name, DesktopId, Color, Shortcut, Folded, Tiled),
-            HashCode.Combine(GroupId, ParentId),
-            TileSizes.Aggregate(0, (hash, s) => HashCode.Combine(hash, s)));
 }
