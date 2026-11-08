@@ -17,9 +17,10 @@ namespace Deskbar.Core.Tiling;
 //
 // Everything here runs inside the Tiler's serialised Run, under the same gate as the rest (OnSettled reaches
 // MovedASplit only while TilingGate acts, the window is on the board and no bar drop is pending). Storing sizes
-// goes through WorkspaceManager.SetTileSizes, which pulses StateChanged; the sizes are in the Tiler's StateKey,
-// so that pulse queues one evaluate after the current handler, and it places nothing because every window is
-// already in its slot.
+// goes through StoreSizes, which calls WorkspaceManager.SetTileSizes (that pulses StateChanged) and then takes the
+// new sizes into the Tiler's StateKey as already seen. The sizes are in the key so that "Even out tiles", untile
+// and the pipe's `even` re-tile; the Tiler's own store must not, because the re-tile it would cause is a full
+// evaluate (WorkspaceOf, a COM call, for every known window) that places nothing (final review, item 2).
 public sealed partial class Tiler
 {
     // The cell (in the grid as it was BEFORE) of a window that left a screen's grid, per workspace and screen
@@ -50,15 +51,21 @@ public sealed partial class Tiler
 
     // Called on Start (to know what was there) and on every ScreensChanged. A key not seen at the last look starts
     // its grace period; on Start nothing is new, since nothing was there to come back.
+    //
+    // The bookkeeping runs whether or not anything is tiled (tiling can be switched on inside the grace period),
+    // but the trace line only while tiling acts here: with the experiment off it would claim, on every dock and
+    // undock, that sizes are being held back when nothing is being tiled at all (final review, item 6).
     void RememberScreens()
     {
         var keys = surface.Screens().Select(KeyOf).ToHashSet();
         var at = now();
+        var tiling = Acting().HasValue;
         if (screenKeys is not null)
             keys.Where(k => !screenKeys.Contains(k)).ToList().ForEach(k =>
             {
                 graceUntil[k] = at + ReturningScreenGrace;
-                trace?.Invoke($"tile: screen {k} appeared, its sizes are not refitted until {ReturningScreenGrace.TotalSeconds:0}s have passed");
+                if (tiling)
+                    trace?.Invoke($"tile: screen {k} appeared, its sizes are not refitted until {ReturningScreenGrace.TotalSeconds:0}s have passed");
             });
         graceUntil.Keys.Where(k => graceUntil[k] <= at).ToList().ForEach(k => graceUntil.Remove(k));
         screenKeys = keys;
@@ -77,13 +84,21 @@ public sealed partial class Tiler
     // The sizes a screen's grid of `count` windows is laid out with. A screen with nothing stored is equal (and
     // the sized Arrange with equal sizes is the equal grid exactly, so nothing changes for it). Stored sizes are
     // fitted to the grid's shape now, using the screen's pending leaver; when that changed them (a window joined
-    // or left since they were stored) the fitted ones are stored, so the next change starts from them. Sizes that
-    // fit to equal (one window left on the screen) remove the entry, as SetTileSizes does with any equal sizes.
+    // or left since they were stored) the fitted ones are stored, so the next change starts from them.
     //
-    // Zero windows is answered with no fit at all: fitting to an empty grid gives "equal", which would erase the
-    // entry of a screen whose windows are only away for a moment (OnSettled asks about the screen a window settled
-    // on, which may hold no tiles). Nor is a fit stored while the screen is in its grace period after coming back
-    // (see ReturningScreenGrace): it is laid out from the stored sizes, which stay as they were.
+    // A REFIT NEVER REMOVES AN ENTRY (final review, item 1). Sizes that fit to equal (a screen down to one window,
+    // the most common case being two tiles and one minimized or closed) are laid out but not stored, because
+    // SetTileSizes removes the entry for equal sizes and the user's split would be gone when the second window
+    // came back. Petre: "keep my sizes". The entry keeps its last real shape, and only "Even out tiles", untile,
+    // deleting the workspace or a hand drag back to exactly equal (MovedASplit) ever remove it.
+    //
+    // Zero windows is answered with no fit at all, without touching the stored sizes or the pending leaver: there is
+    // no grid to lay out (OnSettled asks about the screen a window settled on, which may hold no tiles). Nor is a fit
+    // stored while the screen is in its grace period after coming back (see ReturningScreenGrace): it is laid out
+    // from the stored sizes, which stay as they were.
+    //
+    // It has side effects (it takes the pending leaver, and may store), so a caller asks it once per layout and
+    // passes the answer on rather than asking again (see OnSettled).
     TileSizes SizesOn(Workspace workspace, TileScreen screen, int count)
     {
         var shape = GridLayout.Shape(count);
@@ -101,12 +116,24 @@ public sealed partial class Tiler
         if (stored.HasNoValue) return TileSizes.Equal(shape);
 
         var fitted = stored.Value.Fit(shape, leaving);
-        if (fitted != stored.Value && !InGrace(key))
-            manager.SetTileSizes(workspace.Id, key, fitted)
+        if (fitted != stored.Value && !fitted.IsEqual && !InGrace(key))
+            StoreSizes(workspace, key, fitted)
                 .Tap(() => trace?.Invoke($"tile: {workspace.Name} screen {screen.Number}: sizes refitted to {count} windows, {Show(fitted)}"))
                 .TapError(error => trace?.Invoke($"tile: {workspace.Name} screen {screen.Number}: storing refitted sizes failed: {error}"));
         return fitted;
     }
+
+    // Every store the Tiler makes itself goes through here. SetTileSizes persists and pulses StateChanged, and the
+    // stored sizes are in the Tiler's StateKey, so without the second step that pulse would run a full evaluate
+    // (a COM WorkspaceOf for every known window) that places nothing (final review, item 2). So after a successful
+    // store the key's Sizes are brought up to date, and the pulse compares equal and returns early.
+    //
+    // Only the Sizes part of the key is refreshed, not the whole key: any OTHER fact that moved (tiling switched
+    // off, the gap changed, while a placement pumped messages) must still make its own pulse evaluate. A key that
+    // is None (a handler threw, see Guarded) stays None, so the next pulse still repairs everything.
+    Result StoreSizes(Workspace workspace, string key, TileSizes sizes) =>
+        manager.SetTileSizes(workspace.Id, key, sizes)
+            .Tap(() => stateKey = stateKey.Map(k => k with { Sizes = CurrentStateKey().Sizes }));
 
     // Called by Keep just before `after` replaces the workspace's board. For each screen of the old board that
     // lost a window and still has some, the first leaver's cell (by its slot in the old order) becomes that
@@ -122,9 +149,9 @@ public sealed partial class Tiler
         if (boards.TryGetValue(workspace, out var before))
             before.Screens.ToList().ForEach(s =>
             {
-                var now = after.On(s.Key);
-                var gone = s.Value.Select((w, slot) => (Window: w, Slot: slot)).Where(p => !now.Contains(p.Window)).ToList();
-                if (now.Count == 0)
+                var staying = after.On(s.Key);
+                var gone = s.Value.Select((w, slot) => (Window: w, Slot: slot)).Where(p => !staying.Contains(p.Window)).ToList();
+                if (staying.Count == 0)
                     leavers.Remove((workspace, s.Key));
                 else if (gone.Count > 0)
                     leavers[(workspace, s.Key)] = GridLayout.CellOf(gone[0].Slot, GridLayout.Shape(s.Value.Count));
@@ -155,15 +182,21 @@ public sealed partial class Tiler
     //   - the echo of our own Place (ruling 2), a window with no accepted frame yet, one off its own screen (a
     //     resize that crossed onto another screen is a move to that screen), or one still settling;
     //   - SettledResize.Classify finding a move rather than a resize, or no button down during the change.
+    //
+    // `sizes` is the screen's fit that OnSettled already laid `slots` out with (None when the screen is unknown).
+    // It is passed in, never asked for again (final review, item 4): SizesOn takes the pending leaver, so a second
+    // call could fit differently (dropping the bottom row instead of the leaver's) and the split would be moved on
+    // a layout the user never saw.
     bool MovedASplit(Workspace workspace, WindowHandle window, WindowRect frame, int screenNow,
         IReadOnlyDictionary<int, TileScreen> screens, TileBoard board,
-        IReadOnlyDictionary<WindowHandle, WindowRect> slots, bool echo)
+        IReadOnlyDictionary<WindowHandle, WindowRect> slots, Maybe<TileSizes> sizes, bool echo)
     {
         if (echo
             || surface.IsSettling(window)
             || !given.TryGetValue(window, out var last)
             || !slots.TryGetValue(window, out var slot)
             || !screens.TryGetValue(screenNow, out var screen)
+            || !sizes.TryGetValue(out var shown)
             || !board.ScreenOf(window).Map(home => home == screenNow).GetValueOrDefault(false))
             return false;
 
@@ -173,14 +206,18 @@ public sealed partial class Tiler
         var windows = board.On(screenNow);
         var shape = GridLayout.Shape(windows.Count);
         var cell = GridLayout.CellOf(windows.ToList().IndexOf(window), shape);
-        var sizes = SizesOn(workspace, screen, windows.Count);
 
-        SplitMove.Apply(sizes, shape, screen.WorkArea, GapOn(screen), cell, moved, frame).Match(
+        SplitMove.Apply(shown, shape, screen.WorkArea, GapOn(screen), cell, moved, frame).Match(
             next =>
             {
-                manager.SetTileSizes(workspace.Id, KeyOf(screen), next)
-                    .Tap(() => trace?.Invoke($"tile: {workspace.Name} screen {screen.Number}: {window.Value:X} resized by its {moved} edge, sizes {Show(next)}"))
-                    .TapError(error => trace?.Invoke($"tile: {workspace.Name} screen {screen.Number}: storing the moved split failed: {error}"));
+                // A drag held against the 10% clamp, or one that comes out at the split there already, changes
+                // nothing: no store (final review, item 3). The re-tile below still runs and puts the window back.
+                if (next == shown)
+                    trace?.Invoke($"tile: {workspace.Name} screen {screen.Number}: {window.Value:X} resized by its {moved} edge, split unchanged");
+                else
+                    StoreSizes(workspace, KeyOf(screen), next)
+                        .Tap(() => trace?.Invoke($"tile: {workspace.Name} screen {screen.Number}: {window.Value:X} resized by its {moved} edge, sizes {Show(next)}"))
+                        .TapError(error => trace?.Invoke($"tile: {workspace.Name} screen {screen.Number}: storing the moved split failed: {error}"));
                 // One placement per window whose slot changed; the resized window is usually in its new slot already.
                 Retile(workspace, [screenNow]);
             },
