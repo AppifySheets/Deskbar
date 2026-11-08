@@ -6858,6 +6858,10 @@ public partial class FloatingBar : Window
         Add(folded ? "▾" : "▸", folded ? "Unfold row" : "Fold row",
             () => Report(manager.SetWorkspaceFolded(workspaceId, !folded)));
 
+        // Tiling (FloatingBar.Tiling.cs): nothing while the experiment is off, "Tile windows" for Pro, the
+        // Deskbar Pro wording otherwise.
+        AddTilingItems(menu, workspaceId, Add);
+
         // Where the current workspace's titled list is ("let's try both"): its own row expands into it, or
         // it sits at the bottom of the bar. One item that flips, naming what it would switch TO. On every
         // workspace's menu, since the list follows whichever workspace you are on.
