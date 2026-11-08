@@ -343,7 +343,14 @@ public sealed class FakeTileSurface : ITileSurface
         return Result.Success();
     }
 
-    public void RoundCorners(WindowHandle window) => Rounded.Add(window);
+    // RoundCorners throws once for these and then forgets them, the way a DWM call on a dying window can.
+    public HashSet<WindowHandle> ThrowOnRound { get; } = [];
+
+    public void RoundCorners(WindowHandle window)
+    {
+        if (ThrowOnRound.Remove(window)) throw new InvalidOperationException("round corners threw (test)");
+        Rounded.Add(window);
+    }
     public void Watch(IReadOnlySet<WindowHandle> windows) => Watched.Add(windows.ToHashSet());
 
     public IObservable<WindowHandle> Settled => SettledSubject.AsObservable();
