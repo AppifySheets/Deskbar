@@ -35,7 +35,9 @@ public static class ValueList
     public static ValueList<T> ToValueList<T>(this IEnumerable<T> items) => new(items);
 }
 
-// Reads and writes a ValueList as a plain JSON array, so the file looks the same as with a List.
+// Reads and writes a ValueList as a plain JSON array, so the file looks the same as with a List. A JSON `null`
+// (a hand-edited state.json) reads as an EMPTY list, never as null: code reads these lists without a null check,
+// and the Tiler's state key would throw on one (final review, item 8).
 public sealed class ValueListConverterFactory : JsonConverterFactory
 {
     public override bool CanConvert(Type typeToConvert) =>
@@ -48,9 +50,14 @@ public sealed class ValueListConverterFactory : JsonConverterFactory
 
 public sealed class ValueListConverter<T> : JsonConverter<ValueList<T>>
 {
-    public override ValueList<T>? Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options) =>
-        JsonSerializer.Deserialize<List<T>>(ref reader, options)?.ToValueList();
+    // Without this, System.Text.Json answers a JSON null with null itself and never calls Read. With it, Read sees
+    // the null token too, and Write sees a null value.
+    public override bool HandleNull => true;
 
-    public override void Write(Utf8JsonWriter writer, ValueList<T> value, JsonSerializerOptions options) =>
-        JsonSerializer.Serialize(writer, value.ToList(), options);
+    public override ValueList<T> Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options) =>
+        (JsonSerializer.Deserialize<List<T>>(ref reader, options) ?? []).ToValueList();
+
+    // A null in memory is written as an empty array, the same thing it would load back as.
+    public override void Write(Utf8JsonWriter writer, ValueList<T>? value, JsonSerializerOptions options) =>
+        JsonSerializer.Serialize(writer, value?.ToList() ?? [], options);
 }

@@ -87,6 +87,36 @@ public sealed class TileSizesSettingTests : IDisposable
         Assert.Empty(loaded.Workspaces.Single().TileSizes);
     }
 
+    // A hand-edited state.json (or one written by something else) can say "TileSizes": null. It loads as an empty
+    // list, never as null, which the Tiler's state key would throw on (final review, item 8).
+    [Fact]
+    public void A_state_file_with_null_sizes_loads_empty()
+    {
+        Directory.CreateDirectory(dir);
+        File.WriteAllText(Path.Combine(dir, "state.json"),
+            $$$"""{"Workspaces":[{"Id":"{{{Guid.NewGuid()}}}","Name":"Old","DesktopId":null,"TileSizes":null}],"WorkspaceRules":[],"RenameRules":[],"Inventory":{}}""");
+
+        var loaded = new JsonPersistenceStore(dir).Load().Value;
+
+        Assert.NotNull(loaded.Workspaces.Single().TileSizes);
+        Assert.Empty(loaded.Workspaces.Single().TileSizes);
+    }
+
+    // Replacing a screen's entry keeps it where it was in the list (final review, item 2): the list is part of the
+    // Tiler's state key, so moving an entry to the end would change the key even when nothing else did.
+    [Fact]
+    public void Setting_a_screen_again_keeps_its_place_in_the_list()
+    {
+        var (manager, a) = Started();
+        manager.SetTileSizes(a, Left, Uneven);
+        manager.SetTileSizes(a, Right, OtherUneven);
+
+        manager.SetTileSizes(a, Left, OtherUneven);
+
+        Assert.Equal([Left, Right], SizesOf(manager.State, a).Select(s => s.Screen));
+        Assert.Equal(OtherUneven, SizesOf(manager.State, a)[0].Sizes);
+    }
+
     [Fact]
     public void Setting_equal_sizes_removes_the_entry()
     {

@@ -1706,21 +1706,22 @@ public sealed class WorkspaceManager(
 
     // Stores one screen's tile sizes on a workspace, replacing that screen's entry. Sizes that are all equal
     // REMOVE the entry instead, since "equal" is what a screen with no entry already gets.
+    //
+    // A replaced entry keeps its place in the list, and only a screen with no entry yet is added at the end. The
+    // list is part of the Tiler's state key (Tiler.StateKey), so moving an entry to the end would change the key
+    // although nothing but that entry's own sizes did (final review, item 2).
     public Result SetTileSizes(Guid id, string screen, TileSizes sizes) =>
         Workspace(id).Tap(_ => Persist(State with
         {
             Workspaces = State.Workspaces
-                .Select(w => w.Id == id
-                    ? w with
-                    {
-                        TileSizes = w.TileSizes
-                            .Where(s => s.Screen != screen)
-                            .Concat(sizes.IsEqual ? [] : [new ScreenTileSizes(screen, sizes)])
-                            .ToValueList(),
-                    }
-                    : w)
+                .Select(w => w.Id == id ? w with { TileSizes = WithSizes(w.TileSizes, screen, sizes) } : w)
                 .ToList(),
         }));
+
+    static ValueList<ScreenTileSizes> WithSizes(ValueList<ScreenTileSizes> entries, string screen, TileSizes sizes) =>
+        sizes.IsEqual ? entries.Where(s => s.Screen != screen).ToValueList()
+        : entries.Any(s => s.Screen == screen) ? entries.Select(s => s.Screen == screen ? new ScreenTileSizes(screen, sizes) : s).ToValueList()
+        : entries.Append(new ScreenTileSizes(screen, sizes)).ToValueList();
 
     // "Even out tiles": forgets every stored size of a workspace, so its grids go back to equal columns and
     // rows. Succeeds, and persists, when there was nothing stored.
