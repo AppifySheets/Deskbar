@@ -161,12 +161,32 @@ public sealed class Tiler(WorkspaceManager manager, IVirtualDesktopService deskt
         finally { running = false; }
     }
 
+    //
+    // A throw can stop a re-tile halfway, after the board was already stored, and the partial re-tile that
+    // follows ordinary events only revisits screens whose window list changed. So the catch also forgets the
+    // context and the state key: whatever runs next (an event, a pulse, a Refresh) re-tiles every screen and
+    // repairs whatever the throw left half done. Per-window calls have their own guard as well (PerWindow), so
+    // one bad window does not stop the rest in the first place; this is the backstop for a throw anywhere else.
     void Guarded(string what, Action act)
     {
         try { act(); }
         catch (Exception ex)
         {
+            context = Maybe<(Guid, int)>.None;
+            stateKey = Maybe<StateKey>.None;
             trace?.Invoke($"tile: {what} threw {ex.GetType().Name}: {ex.Message}\n{ex.StackTrace}");
+        }
+    }
+
+    // One window's share of a loop over several. A window that throws (it died mid-call, DWM refused) is traced
+    // and skipped, and the loop carries on with the next one: one bad window must never leave the rest of its
+    // screen where they were.
+    void PerWindow(WindowHandle window, string what, Action act)
+    {
+        try { act(); }
+        catch (Exception ex)
+        {
+            trace?.Invoke($"tile: {what} {window.Value:X} threw {ex.GetType().Name}: {ex.Message}\n{ex.StackTrace}");
         }
     }
 
@@ -374,9 +394,14 @@ public sealed class Tiler(WorkspaceManager manager, IVirtualDesktopService deskt
         putBacks.Keys.Where(w => !gridded.Contains(w)).ToList().ForEach(w => putBacks.Remove(w));
         leftAlone.RemoveWhere(w => !gridded.Contains(w));
 
-        // Rounded once, as each window first joins a grid (spec, "Rounded corners").
+        // Rounded once, as each window first joins a grid (spec, "Rounded corners"). Marked before the call, so a
+        // window whose DWM call throws is tried once and traced once, not on every evaluate after.
         board.Screens.Values.SelectMany(w => w).Where(w => !rounded.Contains(w)).ToList()
-            .ForEach(w => { surface.RoundCorners(w); rounded.Add(w); });
+            .ForEach(w =>
+            {
+                rounded.Add(w);
+                PerWindow(w, "round corners of", () => surface.RoundCorners(w));
+            });
 
         WatchOnly(board.Screens.Values.SelectMany(w => w).ToHashSet());
     }
@@ -432,13 +457,22 @@ public sealed class Tiler(WorkspaceManager manager, IVirtualDesktopService deskt
         }
 
         // A maximized window's slot still counts (the tiles beneath do not reflow) but it is never placed. It is
-        // noted, so that when it is restored it goes back into this slot (see `maximized`).
-        windows.Where(surface.IsMaximized).ToList().ForEach(w => maximized.Add(w));
-        windows.Where(w => !surface.IsMaximized(w)).ToList()
-            .ForEach(w => PlaceIfNeeded(w, slots[w], force: false));
+        // noted, so that when it is restored it goes back into this slot (see `maximized`). Each window is asked
+        // and placed under its own guard, so a throw for one still leaves the others in their slots.
+        var maximizedNow = new HashSet<WindowHandle>();
+        windows.ToList().ForEach(w => PerWindow(w, "place", () =>
+        {
+            if (surface.IsMaximized(w))
+            {
+                maximizedNow.Add(w);
+                maximized.Add(w);
+                return;
+            }
+            PlaceIfNeeded(w, slots[w], force: false);
+        }));
 
         var line = $"tile: {workspace.Name} screen {screen.Number}: " +
-                   string.Join(" ", windows.Select(w => $"{w.Value:X}@{Show(slots[w])}{(surface.IsMaximized(w) ? "(max)" : "")}"));
+                   string.Join(" ", windows.Select(w => $"{w.Value:X}@{Show(slots[w])}{(maximizedNow.Contains(w) ? "(max)" : "")}"));
         if (lastLines.TryGetValue((workspace.Id, screen.Number), out var last) && last == line) return;
         lastLines[(workspace.Id, screen.Number)] = line;
         trace?.Invoke(line);

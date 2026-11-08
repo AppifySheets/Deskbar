@@ -629,6 +629,38 @@ public sealed class TilerTests : IDisposable
         Assert.Contains(traced, line => line.Contains("threw"));
     }
 
+    // Review fix: the throw is the LAST event, so nothing after it could repair a half-done re-tile. W(2) needs
+    // a new slot when W(3) joins (the right column splits in two) and its Place throws; W(3), after it in the
+    // loop, is still placed, and W(1) keeps its slot.
+    [Fact]
+    public void A_place_that_throws_as_the_last_event_leaves_the_rest_of_the_screen_tiled()
+    {
+        new[] { 1, 2 }.ToList().ForEach(n => Exists(W(n), alpha));
+        Start();
+        surface.ThrowOnPlace.Add(W(2));
+
+        Opens(W(3), alpha);
+
+        var grid = Grid(3);
+        Assert.Equal([W(1), W(2), W(3)], tiler.Board.On(1));
+        Assert.Equal(grid[0], surface.Frames[W(1)]);
+        Assert.Equal(grid[2], surface.Frames[W(3)]);
+        Assert.Contains(traced, line => line.Contains("place 2 threw"));
+    }
+
+    [Fact]
+    public void A_round_corners_that_throws_still_lets_the_window_join()
+    {
+        new[] { 1, 2 }.ToList().ForEach(n => Exists(W(n), alpha));
+        Start();
+        surface.ThrowOnRound.Add(W(3));
+
+        Opens(W(3), alpha);
+
+        AssertTiled([W(1), W(2), W(3)]);
+        Assert.Contains(traced, line => line.Contains("round corners of 3 threw"));
+    }
+
     // --- screens -----------------------------------------------------------------------------------------
 
     [Fact]
