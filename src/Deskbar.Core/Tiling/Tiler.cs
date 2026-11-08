@@ -25,8 +25,16 @@ namespace Deskbar.Core.Tiling;
 // Settled all arrive there). Calls are still SERIALISED through Run, because a move into another process's
 // window can pump messages while it waits, and a handler that re-entered itself mid-re-tile would work from
 // a half-updated board. A re-entrant call is queued and runs when the current one finishes.
+//
+// `dropPending` is the bar's answer to "is this window being dropped on one of my workspace rows right now"
+// (FloatingBar's header drop, wired by App). The spec: "A drop on one of the bar's workspace rows is the bar's
+// gesture (move to that workspace) and wins over a tile swap." The bar puts the window back, waits for Snap,
+// and only then moves it, so the window's Settled arrives in between with Snap's half-screen frame; while the
+// drop is pending that Settled is ignored and no re-tile places the window, and WorkspaceManager.WindowMoved
+// takes it out of the grid when the move happens. Null (tests, and an app without a bar) means never.
 public sealed class Tiler(WorkspaceManager manager, IVirtualDesktopService desktops, IWindowMonitor monitor,
-    ITileSurface surface, Func<bool> isPro, Action<string>? trace = null, Func<DateTimeOffset>? clock = null) : IDisposable
+    ITileSurface surface, Func<bool> isPro, Action<string>? trace = null, Func<DateTimeOffset>? clock = null,
+    Func<WindowHandle, bool>? dropPending = null) : IDisposable
 {
     // The put-back backstop (spec: "a short per-window quiet period as a backstop"; anti-goal: a re-tile loop
     // with an app that insists on its own size or place). A window put back into its slot this many times
@@ -35,6 +43,12 @@ public sealed class Tiler(WorkspaceManager manager, IVirtualDesktopService deskt
     static readonly TimeSpan PutBackWindow = TimeSpan.FromSeconds(2);
 
     readonly Func<DateTimeOffset> now = clock ?? (() => DateTimeOffset.UtcNow);
+    readonly Func<WindowHandle, bool> dropping = dropPending ?? (_ => false);
+
+    // Set by Dispose. A licence refresh can land after SessionEnding or ExitApp disposed the Tiler (it is
+    // posted through the dispatcher), and a disposed Tiler must not place a window or hand the surface a set to
+    // watch, which would put the LOCATIONCHANGE hook back. Every entry point goes through Run, which checks it.
+    bool disposed;
 
     // When each window was last put back after a Settled, newest last; only the recent ones are kept.
     readonly Dictionary<WindowHandle, IReadOnlyList<DateTimeOffset>> putBacks = [];
@@ -135,10 +149,14 @@ public sealed class Tiler(WorkspaceManager manager, IVirtualDesktopService deskt
 
     public void Dispose()
     {
+        if (disposed) return;
         subscriptions.ForEach(s => s.Dispose());
         subscriptions.Clear();
         // Leave no hook behind: the surface's LOCATIONCHANGE hook exists only while something is tiled.
         Guarded("dispose", () => WatchOnly(new HashSet<WindowHandle>()));
+        // From here on nothing runs: Refresh and any queued handler are ignored (see `disposed`).
+        disposed = true;
+        pending.Clear();
     }
 
     // --- serialising and surviving ------------------------------------------------------------------------
@@ -148,14 +166,18 @@ public sealed class Tiler(WorkspaceManager manager, IVirtualDesktopService deskt
     // native callback. One exception from the surface (a window dying mid-call, a DWM call failing) would
     // otherwise leave the Tiler deaf until the app restarted. So every handler is wrapped: a failure costs that
     // one event, the next event re-evaluates from scratch, and the trace names what threw.
+    //
+    // Nothing runs once the Tiler is disposed, including work queued before the Dispose that a running call has
+    // not reached yet (a handler can dispose the Tiler mid-loop only in theory, but the check costs nothing).
     void Run(string what, Action act)
     {
+        if (disposed) return;
         pending.Enqueue((what, act));
         if (running) return;
         running = true;
         try
         {
-            while (pending.TryDequeue(out var next))
+            while (!disposed && pending.TryDequeue(out var next))
                 Guarded(next.What, next.Act);
         }
         finally { running = false; }
@@ -257,17 +279,26 @@ public sealed class Tiler(WorkspaceManager manager, IVirtualDesktopService deskt
     }
 
     // A watched window stopped moving with the buttons up (spec, "By hand"). In order:
+    //   0. Its drop on a bar row is pending (see `dropPending`): the bar's gesture wins, so nothing at all. The
+    //      move that follows raises WindowMoved, which takes it out of the grid.
     //   1. Not on the board: ruling 3, SettledMove.Decide is never asked about it. It joins at the end if it
     //      now qualifies (the bar brought it here, it became tileable), which an ordinary re-evaluate does.
     //   2. No longer qualifies: the bar dropped it on another workspace, it was minimized. It leaves the grid
     //      and the rest close up, again by re-evaluating; it is not placed.
     //   3. Maximized: it keeps its slot and stays maximized; nothing moves.
-    //   4. Its frame is the one it accepted from our last Place: our own move coming back. Nothing.
+    //   4. Its frame is the one it accepted from our last Place: our own move coming back, not a move by hand.
+    //      Nothing, unless a re-tile held it while it was settling (PlaceIfNeeded) and its slot changed since:
+    //      then it goes into the slot it has now.
     //   5. Un-maximized on the screen it tiles on: straight back into its slot.
     //   6. Otherwise SettledMove.Decide: swap with the tile under its centre, back into its slot, or join the
     //      grid of the screen it is now on.
     void OnSettled(WindowHandle window)
     {
+        if (dropping(window))
+        {
+            trace?.Invoke($"tile: {window.Value:X} settled during a drop on the bar, ignored");
+            return;
+        }
         if (!Acting().TryGetValue(out var workspace) || !Board.ScreenOf(window).HasValue || !Qualifies(window, workspace))
         {
             Evaluate(everyScreen: false);
@@ -281,13 +312,20 @@ public sealed class Tiler(WorkspaceManager manager, IVirtualDesktopService deskt
         if (!surface.VisibleFrameOf(window).TryGetValue(out var frame))
             return;
         var restored = maximized.Remove(window);
-        if (given.TryGetValue(window, out var last) && last.Accepted == frame)
-            return;
 
         var board = Board;
         var screens = surface.Screens().ToDictionary(s => s.Number);
         var screenNow = surface.ScreenOf(window);
         var slots = screens.TryGetValue(screenNow, out var screen) ? SlotsOf(screen, board.On(screenNow)) : new Dictionary<WindowHandle, WindowRect>();
+
+        // Step 4. PlaceIfNeeded does nothing when the slot is the one this frame was accepted for, so for the
+        // ordinary echo of our own Place this moves nothing; it moves the window only when a re-tile held it.
+        if (given.TryGetValue(window, out var last) && last.Accepted == frame)
+        {
+            if (slots.TryGetValue(window, out var current))
+                PlaceIfNeeded(window, current, force: false);
+            return;
+        }
 
         if (restored && slots.TryGetValue(window, out var home))
         {
@@ -325,9 +363,13 @@ public sealed class Tiler(WorkspaceManager manager, IVirtualDesktopService deskt
             .Where(w => TilingGate.Acts(w, pro, state.ExperimentalTiling));
     }
 
-    // Does this window take part in `workspace`'s grid right now?
+    // Does this window take part in `workspace`'s grid right now? Asked of every known window on each structural
+    // event, so the cheap questions go first: IsListed is a set lookup and IsMinimized one user32 call, while
+    // LivesOn is two COM calls (IsPinned and DesktopOf). CanTile comes last, after LivesOn, so its one-off
+    // SetWindowPos probe is only ever made of windows that live here. The same four questions as before, in a
+    // cheaper order; the answer is the same.
     bool Qualifies(WindowHandle window, Workspace workspace) =>
-        LivesOn(window, workspace) && Eligible(window);
+        monitor.IsListed(window) && !surface.IsMinimized(window) && LivesOn(window, workspace) && surface.CanTile(window);
 
     // "Lives here" (spec: the test is the one WorkspaceOf answers, so pinned and borrowed windows float).
     bool LivesOn(WindowHandle window, Workspace workspace) =>
@@ -346,11 +388,13 @@ public sealed class Tiler(WorkspaceManager manager, IVirtualDesktopService deskt
         stateKey = CurrentStateKey();
 
         // Forget the boards of workspaces the gate no longer acts on: untiled, or the experiment or Pro gone.
-        boards.Keys
+        var dropped = boards.Keys
             .Where(id => !state.Workspaces.TryFirst(w => w.Id == id)
                 .Map(w => TilingGate.Acts(w, pro, state.ExperimentalTiling)).GetValueOrDefault(false))
-            .ToList()
-            .ForEach(id => boards.Remove(id));
+            .ToList();
+        var droppedWindows = dropped.SelectMany(id => boards[id].Screens.Values).SelectMany(w => w).ToList();
+        dropped.ForEach(id => boards.Remove(id));
+        Forget(droppedWindows);
 
         if (!Acting().TryGetValue(out var workspace))
         {
@@ -382,6 +426,30 @@ public sealed class Tiler(WorkspaceManager manager, IVirtualDesktopService deskt
                 .Where(s => !board.On(s).SequenceEqual(before.On(s)))
                 .ToList();
         Retile(workspace, changed);
+    }
+
+    // A dropped board's windows lose what the Tiler had decided about them while they were tiled (final review,
+    // item 4). Turning tiling back on is a fresh start (TileBoard.FirstFill, from where the windows are), and
+    // stale per-window state would make it act on the old one:
+    //   - leftAlone and given: a window the backstop gave up on would be skipped while its slot came out the
+    //     same, and `given` alone would skip it too (its accepted frame is where it was left, and the "will not
+    //     shrink" check reads that as accepted). So both go, and the window is placed like any other.
+    //   - putBacks: the backstop's count starts clean.
+    //   - maximized: a window maximized while tiled and restored while tiling was off is not "being restored"
+    //     when tiling comes back; left in, its next drag over another tile would be read as a restore and put
+    //     back instead of swapping.
+    // A window still on another remembered board keeps its state, since that board still counts on it.
+    // `rounded` stays: rounded corners are never undone (spec, "Rounded corners").
+    void Forget(IReadOnlyList<WindowHandle> windows)
+    {
+        var stillGridded = boards.Values.SelectMany(b => b.Screens.Values).SelectMany(w => w).ToHashSet();
+        windows.Where(w => !stillGridded.Contains(w)).ToList().ForEach(w =>
+        {
+            leftAlone.Remove(w);
+            putBacks.Remove(w);
+            maximized.Remove(w);
+            given.Remove(w);
+        });
     }
 
     // Stores a workspace's new board and does what every board change owes the windows on it.
@@ -518,6 +586,18 @@ public sealed class Tiler(WorkspaceManager manager, IVirtualDesktopService deskt
     // `force` drops the second exception, for a window the user moved and that has to go back.
     void PlaceIfNeeded(WindowHandle window, WindowRect slot, bool force)
     {
+        // Never a window that is still moving (final review, item 2): a structural re-tile (another window
+        // opening or closing on this screen) would otherwise yank a window the user is dragging by its title
+        // bar or with AltSnap out from under the pointer. Nor one whose drop on a bar row is pending (item 1):
+        // the bar is about to move it to another workspace. Its `given` is left as it was, so its Settled is
+        // judged against what it was last given: a move by hand is decided like any drop, and the echo of our
+        // own last Place goes on into the slot it has now (OnSettled, step 4).
+        if (surface.IsSettling(window) || dropping(window))
+        {
+            trace?.Invoke($"tile: {window.Value:X} is {(dropping(window) ? "being dropped on the bar" : "still moving")}, not placed at {Show(slot)}");
+            return;
+        }
+
         // A window the backstop left alone stays where it is while its slot is the same one; a different slot is
         // a structural change (a join, a leave, a swap, another screen, a new count), and it is tiled again from
         // a clean count.

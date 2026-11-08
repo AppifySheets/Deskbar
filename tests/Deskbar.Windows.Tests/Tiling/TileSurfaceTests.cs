@@ -273,6 +273,48 @@ public class TileSurfaceTests
         window.Close();
     });
 
+    // Final review, item 2: the Tiler asks IsSettling before it places a window, so a window that moved within
+    // the last quiet interval (or is held by a button still down) is not yanked out from under the pointer. True
+    // right after a watched window moves; false once it has settled.
+    [Fact]
+    public void A_watched_window_is_settling_after_a_move_until_it_settles() => StaThread.Run(() =>
+    {
+        var window = Shown();
+        var handle = HandleOf(window);
+        using var surface = new TileSurface(_ => false) { ButtonsDown = () => false };
+        var settled = new List<WindowHandle>();
+        using var _ = surface.Settled.Subscribe(settled.Add);
+        surface.Watch(new HashSet<WindowHandle> { handle });
+        Assert.False(surface.IsSettling(handle));
+
+        Nudge(handle, 5);
+        // The hook's callback arrives through the message queue, so pump until it has been heard.
+        PumpUntil(() => surface.IsSettling(handle), TimeSpan.FromSeconds(3));
+        Assert.True(surface.IsSettling(handle));
+
+        PumpUntil(() => settled.Count > 0, TimeSpan.FromSeconds(3));
+        Assert.Equal([handle], settled);
+        Assert.False(surface.IsSettling(handle));
+        window.Close();
+    });
+
+    // Final review, item 3: a Watch after Dispose (a Tiler that outlived its surface, a refresh landing during
+    // logoff) must not put the LOCATIONCHANGE hook back, and Place must not move anything.
+    [Fact]
+    public void Nothing_is_hooked_or_placed_after_dispose() => StaThread.Run(() =>
+    {
+        var window = Shown();
+        var handle = HandleOf(window);
+        var surface = new TileSurface(_ => false);
+        surface.Dispose();
+
+        surface.Watch(new HashSet<WindowHandle> { handle });
+
+        Assert.False(surface.IsHooked);
+        Assert.True(surface.Place(handle, new WindowRect(100, 100, 500, 400)).IsFailure);
+        window.Close();
+    });
+
     // An empty set removes the hook, and a window that is not watched never settles.
     [Fact]
     public void An_unwatched_window_never_settles() => StaThread.Run(() =>
