@@ -29,8 +29,12 @@ public sealed record TileBoard(IReadOnlyDictionary<int, IReadOnlyList<WindowHand
 
     // Adds the window to the end of `screen`'s order. It leaves wherever it was first, another screen
     // or an earlier place on this one, so a window never holds two slots.
+    //
+    // The screen's list is read from the board AFTER the leave, not from this one: reading it before
+    // kept the window's old entry, so rejoining its own screen listed it twice and the Tiler's slot
+    // dictionary threw on every evaluate.
     public TileBoard Join(int screen, WindowHandle w) =>
-        Leave(w).With(screen, On(screen).Append(w).ToList());
+        Leave(w) is var left ? left.With(screen, left.On(screen).Append(w).ToList()) : this;
 
     // Removes the window wherever it is; the windows after it move up one slot. A screen left empty
     // is dropped, so Screens never carries empty lists.

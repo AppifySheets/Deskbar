@@ -28,6 +28,22 @@ public class TileBoardTests
         Assert.Equal(2, board.ScreenOf(A).Value);
     }
 
+    // Regression: Join used to read the screen's list before the leave took effect, so a window joining
+    // the screen it was already on was listed twice and the Tiler's slot dictionary threw.
+    [Fact]
+    public void Joining_the_screen_it_is_already_on_moves_it_to_the_end_once()
+    {
+        var board = TileBoard.Empty.Join(1, A).Join(1, B).Join(1, A);
+        Assert.Equal([B, A], board.On(1));
+    }
+
+    [Fact]
+    public void Joining_the_screen_it_is_already_on_never_duplicates()
+    {
+        var board = TileBoard.Empty.Join(1, A).Join(1, B).Join(1, A);
+        Assert.Equal(1, board.Screens.Values.SelectMany(w => w).Count(w => w == A));
+    }
+
     [Fact]
     public void Leave_closes_the_gap()
     {
