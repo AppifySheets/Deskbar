@@ -64,6 +64,11 @@ public partial class ManageWindow : Window
         DockBar.IsChecked = manager.State.DockBar;
         // Same again: SetClaudeSkill ignores an unchanged value.
         ClaudeSkill.IsChecked = manager.State.ClaudeSkill;
+        // Tiling, the same pattern: SetExperimentalTiling ignores an unchanged value, and the Checked it raises is
+        // also what frees the gap row. The gap box shows the stored number; nothing is written until Apply.
+        ExperimentalTiling.IsChecked = manager.State.ExperimentalTiling;
+        TileGapPanel.IsEnabled = manager.State.ExperimentalTiling;
+        TileGapBox.Text = manager.State.TileGap.ToString();
         // #82. Read from the assembly at runtime, never written as a literal here: the whole reason
         // the question needs answering in the UI is that #71 leaves several versioned exes side by
         // side, and a number typed into the source would report the build it was written in rather
@@ -420,6 +425,29 @@ public partial class ManageWindow : Window
     // The app writes or removes the skill from the state pulse this sends (see where App wires ClaudeSkill.Sync).
     void OnClaudeSkillToggled(object s, RoutedEventArgs e) =>
         manager.SetClaudeSkill(ClaudeSkill.IsChecked == true).TapError(err => MessageBox.Show(err));
+
+    // The tiling experiment's master switch (docs/superpowers/specs/2026-11-08-tiling-design.md). The Tiler hears
+    // the state pulse this sends and starts or stops on its own; switching it off moves nothing and keeps every
+    // workspace's Tiled flag for next time. The gap row follows the box, since a gap means nothing while off.
+    void OnExperimentalTilingToggled(object s, RoutedEventArgs e)
+    {
+        var on = ExperimentalTiling.IsChecked == true;
+        TileGapPanel.IsEnabled = on;
+        manager.SetExperimentalTiling(on).TapError(err => MessageBox.Show(err));
+    }
+
+    // The gap between tiles, 0 to 64 pixels at 100% scaling (the Tiler scales it by each screen's DPI). A word
+    // that is not a number is refused here; a number out of range is refused by SetTileGap with its own reason.
+    // Either way the box goes back to the stored value, so it never shows a gap that is not in force.
+    void OnApplyTileGap(object s, RoutedEventArgs e) =>
+        (int.TryParse(TileGapBox.Text.Trim(), out var gap)
+                ? manager.SetTileGap(gap)
+                : Result.Failure("The tile gap must be a whole number of pixels between 0 and 64."))
+            .TapError(err =>
+            {
+                MessageBox.Show(err);
+                TileGapBox.Text = manager.State.TileGap.ToString();
+            });
 
     // --- the Settings tab (#151) -----------------------------------------------------------------
     //

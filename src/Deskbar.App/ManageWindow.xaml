@@ -46,6 +46,23 @@
             <TextBlock x:Name="StartupNote" TextWrapping="Wrap" Margin="20,2,0,0" Opacity="0.75"
                        Visibility="Collapsed"/>
         </StackPanel>
+        <!-- Tiling (AppState.ExperimentalTiling, AppState.TileGap; docs/superpowers/specs/2026-11-08-tiling-design.md).
+             Declared before DockBar so it is drawn just under it: bottom-docked children stack upwards in the
+             order they are declared. Off by default; Petre: "disabled by default, until i have tested it well".
+             The box is the experiment's master switch, and a workspace is then tiled from its own row menu. The
+             gap row is greyed out while the box is unticked (the code behind keeps IsEnabled in step), and the
+             number is applied with its button, as the shortcut boxes are, so a half-typed value is never stored. -->
+        <StackPanel DockPanel.Dock="Bottom" Margin="8,8,8,0">
+            <CheckBox x:Name="ExperimentalTiling" Content="Tiling (experimental)"
+                      Checked="OnExperimentalTilingToggled" Unchecked="OnExperimentalTilingToggled"/>
+            <TextBlock TextWrapping="Wrap" Margin="20,2,0,0" Opacity="0.75"
+                       Text="Tiles a workspace's windows in a grid. Turn on per workspace from its row menu. Deskbar Pro."/>
+            <StackPanel x:Name="TileGapPanel" Orientation="Horizontal" Margin="20,4,0,0" IsEnabled="False">
+                <TextBlock Text="Gap between tiled windows (pixels at 100% scaling)" VerticalAlignment="Center"/>
+                <TextBox x:Name="TileGapBox" Width="48" Margin="8,0,0,0"/>
+                <Button x:Name="TileGapApply" Content="Apply" Margin="8,0,0,0" Padding="12,0" Click="OnApplyTileGap"/>
+            </StackPanel>
+        </StackPanel>
         <!-- Docking the bar as an app bar (AppState.DockBar). Off by default; Petre: "make this a config
              setting and disable by default". Beside the other choices about how the app sits on the
              desk rather than in a tab, because it is one of those. -->
