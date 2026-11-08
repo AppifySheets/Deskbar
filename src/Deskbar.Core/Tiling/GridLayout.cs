@@ -15,18 +15,43 @@ namespace Deskbar.Core.Tiling;
 //   the last row, so the grid always reaches the far edge of the area.
 public static class GridLayout
 {
-    public static IReadOnlyList<WindowRect> Arrange(WindowRect area, int count, int gap)
+    // Equal columns and rows: the grid as it was before sizes existed.
+    public static IReadOnlyList<WindowRect> Arrange(WindowRect area, int count, int gap) =>
+        Arrange(area, count, gap, TileSizes.Equal(Shape(count)));
+
+    // The grid with the column and row fractions the user has dragged (see TileSizes). With even
+    // sizes the result is identical to the equal grid. Integer remainders still go to the last
+    // column and last row, so the grid always reaches the far edge of the area.
+    public static IReadOnlyList<WindowRect> Arrange(WindowRect area, int count, int gap, TileSizes sizes)
     {
         if (count <= 0)
             return [];
 
         // The gap runs around the outside as well as between tiles, so shrink the area first.
         var inner = new WindowRect(area.Left + gap, area.Top + gap, area.Right - gap, area.Bottom - gap);
-        var columns = (int)Math.Ceiling(Math.Sqrt(count));
-        var columnWidth = inner.Width / columns;
+        var shape = Shape(count);
+        var xs = Edges(inner.Width, sizes.Columns);
 
-        // How many tiles each column holds, filled left to right from what is still unplaced.
-        var sizes = Enumerable.Range(0, columns)
+        return shape
+            .SelectMany((rows, column) =>
+            {
+                var ys = Edges(inner.Height, sizes.Rows[column]);
+                return Enumerable.Range(0, rows).Select(row => Inset(
+                    new WindowRect(inner.Left + xs[column], inner.Top + ys[row], inner.Left + xs[column + 1], inner.Top + ys[row + 1]),
+                    gap, hasLeft: column > 0, hasRight: column < shape.Count - 1, hasTop: row > 0, hasBottom: row < rows - 1));
+            })
+            .ToList();
+    }
+
+    // How many tiles each column holds for n windows: columns = ceil(sqrt(n)), filled left to
+    // right from what is still unplaced, so the later columns are the fuller ones.
+    public static IReadOnlyList<int> Shape(int count)
+    {
+        if (count <= 0)
+            return [];
+
+        var columns = (int)Math.Ceiling(Math.Sqrt(count));
+        return Enumerable.Range(0, columns)
             .Aggregate(
                 (Remaining: count, Sizes: new List<int>()),
                 (state, i) =>
@@ -36,27 +61,30 @@ public static class GridLayout
                     return (state.Remaining - take, state.Sizes);
                 })
             .Sizes;
-
-        return sizes
-            .SelectMany((rows, column) => Column(inner, column, columns, columnWidth, rows, gap))
-            .ToList();
     }
 
-    // One column's tiles, top to bottom.
-    static IEnumerable<WindowRect> Column(WindowRect inner, int column, int columns, int columnWidth, int rows, int gap)
+    // The (column, row) a slot sits in, given the shape. Slots run column by column, top to bottom.
+    public static (int Column, int Row) CellOf(int slot, IReadOnlyList<int> shape)
     {
-        var rowHeight = inner.Height / rows;
-        var left = inner.Left + column * columnWidth;
-        // The last column and last row run to the edge, absorbing the integer remainder.
-        var right = column == columns - 1 ? inner.Right : left + columnWidth;
+        var column = Enumerable.Range(0, shape.Count).First(c => slot < shape.Take(c + 1).Sum());
+        return (column, slot - shape.Take(column).Sum());
+    }
 
-        return Enumerable.Range(0, rows).Select(row =>
+    // The n+1 boundaries (offsets from the start of the span) of n entries with the given fractions.
+    // Even fractions use floor(span / n) per entry, exactly as the equal grid always did; uneven
+    // ones round the running total. The last boundary is always the span's end, so the integer
+    // remainder lands in the last entry.
+    static IReadOnlyList<int> Edges(int span, IReadOnlyList<double> fractions)
+    {
+        var n = fractions.Count;
+        var even = fractions.All(f => Math.Abs(f - 1.0 / n) < 1e-9);
+        var running = 0.0;
+        var inner = fractions.Take(n - 1).Select((f, i) =>
         {
-            var top = inner.Top + row * rowHeight;
-            var bottom = row == rows - 1 ? inner.Bottom : top + rowHeight;
-            return Inset(new WindowRect(left, top, right, bottom), gap,
-                hasLeft: column > 0, hasRight: column < columns - 1, hasTop: row > 0, hasBottom: row < rows - 1);
+            running += f;
+            return even ? (i + 1) * (span / n) : (int)Math.Round(running * span);
         });
+        return new[] { 0 }.Concat(inner).Append(span).ToList();
     }
 
     // Shrinks a cell on its INNER edges only (the outer edges already carry the full gap from the
