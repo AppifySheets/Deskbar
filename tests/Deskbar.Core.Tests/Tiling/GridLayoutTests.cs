@@ -45,4 +45,23 @@ public class GridLayoutTests
     [Fact]
     public void No_windows_no_tiles() =>
         Assert.Empty(GridLayout.Arrange(Area, 0, 8));
+
+    // Sized grid: columns and rows follow their fractions instead of splitting equally.
+    [Fact]
+    public void Sized_columns_follow_their_fractions() =>
+        Assert.Equal([new WindowRect(0, 0, 700, 600), new WindowRect(700, 0, 1000, 600)],
+            GridLayout.Arrange(new(0, 0, 1000, 600), 2, 0, new TileSizes([0.7, 0.3], [[1.0], [1.0]])));
+
+    [Fact]
+    public void Sized_rows_follow_their_fractions() =>
+        Assert.Equal([new WindowRect(500, 0, 1000, 150), new WindowRect(500, 150, 1000, 600)],
+            GridLayout.Arrange(new(0, 0, 1000, 600), 3, 0, new TileSizes([0.5, 0.5], [[1.0], [0.25, 0.75]])).Skip(1));
+
+    [Fact]
+    public void Equal_sizes_give_the_same_grid_as_before() =>
+        Assert.Equal(GridLayout.Arrange(new(0, 0, 1000, 600), 5, 8),
+            GridLayout.Arrange(new(0, 0, 1000, 600), 5, 8, TileSizes.Equal(GridLayout.Shape(5))));
+
+    [Fact]
+    public void Cell_of_a_slot() => Assert.Equal((2, 1), GridLayout.CellOf(4, [1, 2, 2]));
 }
