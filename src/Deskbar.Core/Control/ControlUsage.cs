@@ -51,6 +51,7 @@ public static class ControlUsage
             new("unfold", "<workspace>", "Unfold row"),
             new("tile", "<workspace>", "Tile windows (Deskbar Pro): a grid per screen, kept tidy as windows come and go"),
             new("untile", "<workspace>", "Stop tiling; windows stay where they are"),
+            new("even", "<workspace>", "Even out tiles: equal columns and rows again"),
             new("color", "<workspace> <colour>", "Colour (a grouped workspace sets its group's colour)"),
             new("delete", "<workspace> [--close-windows]", "Delete workspace…; refuses while windows are open unless --close-windows"),
             new("switch", "<workspace>", "go to that workspace, as clicking its row does"),
