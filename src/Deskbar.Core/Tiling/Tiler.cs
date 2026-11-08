@@ -281,10 +281,22 @@ public sealed partial class Tiler(WorkspaceManager manager, IVirtualDesktopServi
     // Every screen is re-tiled. For the first five facts that is what Evaluate did anyway (each one changes or
     // clears `context`, which makes the re-tile full); the sizes change no window list, so without it "Even out
     // tiles" would re-tile nothing. The Tiler's own SetTileSizes (a split moved, or sizes refitted to a new count)
-    // comes back through here too, and that re-tile places nothing: every window is already in its slot.
+    // pulses too, but StoreSizes has already taken its sizes into the key, so that pulse compares equal and
+    // returns here without reading a single window (final review, item 2).
+    //
+    // A reset writes one trace line (the spec asks for one per reset; final review, item 7): the same workspace had
+    // sizes at the last look and has none now. That is "Even out tiles", the pipe's `even` or untile, since the
+    // Tiler itself never removes an entry except by a hand drag back to exactly equal, which StoreSizes has
+    // already taken into the key.
     void OnStateChanged()
     {
-        if (stateKey.HasValue && stateKey.Value == CurrentStateKey()) return;
+        var current = CurrentStateKey();
+        if (stateKey.HasValue && stateKey.Value == current) return;
+        if (stateKey.TryGetValue(out var previous)
+            && current.Workspace.HasValue && previous.Workspace == current.Workspace
+            && previous.Sizes.Count > 0 && current.Sizes.Count == 0)
+            manager.State.Workspaces.TryFirst(w => w.Id == current.Workspace.Value)
+                .Tap(w => trace?.Invoke($"tile: {w.Name} sizes evened out"));
         Evaluate(everyScreen: true);
     }
 
@@ -338,7 +350,15 @@ public sealed partial class Tiler(WorkspaceManager manager, IVirtualDesktopServi
         var board = Board;
         var screens = surface.Screens().ToDictionary(s => s.Number);
         var screenNow = surface.ScreenOf(window);
-        var slots = screens.TryGetValue(screenNow, out var screen) ? SlotsOf(workspace, screen, board.On(screenNow)) : new Dictionary<WindowHandle, WindowRect>();
+        var onScreen = board.On(screenNow);
+        // The screen's sizes, fitted ONCE for this Settled (final review, item 4). SizesOn has side effects (it
+        // takes the screen's pending leaver and may store), so the same fit lays out the slots here and is handed
+        // to MovedASplit, which moves a split on exactly the layout these slots describe.
+        var sizes = screens.TryGetValue(screenNow, out var screen)
+            ? Maybe.From(SizesOn(workspace, screen, onScreen.Count))
+            : Maybe<TileSizes>.None;
+        var slots = sizes.Map(fitted => SlotsOf(screens[screenNow], onScreen, fitted))
+            .GetValueOrDefault(new Dictionary<WindowHandle, WindowRect>());
 
         // Step 4. PlaceIfNeeded does nothing when the slot is the one this frame was accepted for, so for the
         // ordinary echo of our own Place this moves nothing; it moves the window only when a re-tile held it.
@@ -356,7 +376,7 @@ public sealed partial class Tiler(WorkspaceManager manager, IVirtualDesktopServi
         }
 
         // Step 6. A resize by hand is handled there in full; anything else goes on to the move rules unchanged.
-        if (MovedASplit(workspace, window, frame, screenNow, screens, board, slots, echo))
+        if (MovedASplit(workspace, window, frame, screenNow, screens, board, slots, sizes, echo))
             return;
 
         switch (SettledMove.Decide(window, frame, screenNow, board, slots))
@@ -476,6 +496,10 @@ public sealed partial class Tiler(WorkspaceManager manager, IVirtualDesktopServi
             putBacks.Remove(w);
             maximized.Remove(w);
             given.Remove(w);
+            // A Place whose echo never came back before tiling went off (the hook goes with it, so it never will).
+            // Left in, the mark would swallow the window's first real drag after tiling returns as "our own echo"
+            // and snap it back (final review, item 5).
+            awaitingEcho.Remove(w);
         });
     }
 
@@ -578,9 +602,13 @@ public sealed partial class Tiler(WorkspaceManager manager, IVirtualDesktopServi
     // The slot of each window on a screen, by window; empty when the grid does not fit (see RetileScreen). The grid
     // takes the sizes dragged on this screen (SizesOn: equal when there are none, which is the equal grid exactly),
     // fitted to this many windows.
-    IReadOnlyDictionary<WindowHandle, WindowRect> SlotsOf(Workspace workspace, TileScreen screen, IReadOnlyList<WindowHandle> windows)
+    IReadOnlyDictionary<WindowHandle, WindowRect> SlotsOf(Workspace workspace, TileScreen screen, IReadOnlyList<WindowHandle> windows) =>
+        SlotsOf(screen, windows, SizesOn(workspace, screen, windows.Count));
+
+    // The same, with sizes the caller already fitted (OnSettled, which also hands them to MovedASplit).
+    IReadOnlyDictionary<WindowHandle, WindowRect> SlotsOf(TileScreen screen, IReadOnlyList<WindowHandle> windows, TileSizes sizes)
     {
-        var tiles = GridLayout.Arrange(screen.WorkArea, windows.Count, GapOn(screen), SizesOn(workspace, screen, windows.Count));
+        var tiles = GridLayout.Arrange(screen.WorkArea, windows.Count, GapOn(screen), sizes);
         return tiles.Any(t => t.Width <= 0 || t.Height <= 0)
             ? new Dictionary<WindowHandle, WindowRect>()
             : windows.Zip(tiles).ToDictionary(p => p.First, p => p.Second);
