@@ -207,7 +207,10 @@ public sealed class ScreenLayout : IScreenLayout
     //
     // rcMonitor, not rcWork: the taskbar's cutout has nothing to do with which screen is further
     // left, and rcWork would make two identically-placed screens differ for no reason.
-    static (Dictionary<nint, int> Numbers, Maybe<int> Primary, Dictionary<int, MonitorBounds> Placement) MonitorNumbers()
+    //
+    // Internal so TileSurface numbers screens with THIS method rather than a copy of it: the bar and
+    // the tiling grid must agree on which screen is which, and two numberings would drift apart.
+    internal static (Dictionary<nint, int> Numbers, Maybe<int> Primary, Dictionary<int, MonitorBounds> Placement) MonitorNumbers()
     {
         var numbers = new Dictionary<nint, int>();
         var placement = new Dictionary<int, MonitorBounds>();
