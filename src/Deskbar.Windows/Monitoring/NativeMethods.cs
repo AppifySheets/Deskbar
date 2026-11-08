@@ -329,4 +329,50 @@ public static class NativeMethods
     public const int VK_ESCAPE = 0x1B;
     public const int VK_LWIN = 0x5B, VK_RWIN = 0x5C;    // Win has two keys; either counts as held
     public const int KeyDownBit = 0x8000;               // GetAsyncKeyState's "down right now" bit
+
+    // --- Tiling (TileSurface) ------------------------------------------------------------------------------
+
+    // The mouse buttons, for TileSurface's "has the drag really ended" check. GetAsyncKeyState reads the
+    // PHYSICAL buttons, not the logical ones they are mapped to, which does not matter there because both are
+    // asked: with the buttons swapped, a drag still holds one of the two.
+    public const int VK_LBUTTON = 0x01, VK_RBUTTON = 0x02;
+
+    // Where a window VISIBLY is. GetWindowRect includes the invisible resize border Windows 10 and 11 draw
+    // around a sizable window (seven pixels on the left, right and bottom at 100%), so a grid built on it has
+    // visible gaps that are wider than asked and differ per app. DWM's extended frame bounds are the frame the
+    // user sees, in physical pixels like every other rectangle here.
+    //
+    // Its own name rather than a second DwmGetWindowAttribute overload: the existing int overload is called
+    // with `out var` (DebugDump, the cloaked check), and an overload differing only in the out type would make
+    // every one of those calls ambiguous. EntryPoint pins it to the same export.
+    [DllImport("dwmapi.dll", EntryPoint = "DwmGetWindowAttribute")]
+    public static extern int DwmGetWindowAttributeRect(nint hwnd, uint attribute, out RECT value, int size);
+    public const uint DWMWA_EXTENDED_FRAME_BOUNDS = 9;
+
+    // Rounded corners for a tiled window (spec, "Rounded corners"). Windows 11 only: Windows 10 has no such
+    // attribute and answers with an error HRESULT, which the caller ignores.
+    [DllImport("dwmapi.dll")] public static extern int DwmSetWindowAttribute(nint hwnd, uint attribute, ref int value, int size);
+    public const uint DWMWA_WINDOW_CORNER_PREFERENCE = 33;
+    public const int DWMWCP_ROUND = 2;
+
+    // Fires for EVERY move or resize of EVERY object on the machine, the caret and the cursor included, and
+    // continuously during a drag. That is why it is hooked only while something is tiled, and why TileSurface's
+    // callback throws away everything but a watched window's own event in its first line.
+    public const uint EVENT_OBJECT_LOCATIONCHANGE = 0x800B;
+
+    // The window can be resized by its border. A window without it (a fixed-size dialog, a splash screen)
+    // cannot be given a slot's size, so it does not tile.
+    public const int GWL_STYLE = -16;
+    public const long WS_THICKFRAME = 0x00040000;
+
+    // A window whose thread has stopped answering messages for five seconds or more. SetWindowPos into
+    // another process's window SENDS it messages and waits for the answer, so asking it of a hung window
+    // would freeze our UI thread with it. TileSurface checks this before every SetWindowPos it makes.
+    [DllImport("user32.dll")] public static extern bool IsHungAppWindow(nint hwnd);
+
+    // Broadcast to every top-level window when a system parameter changes; wParam names which. TileSurface
+    // listens for SPI_SETWORKAREA, the work area of a screen changing (the taskbar moved or resized, an
+    // app bar docked), which DisplaySettingsChanged does not report.
+    public const int WM_SETTINGCHANGE = 0x001A;
+    public const int SPI_SETWORKAREA = 0x002F;
 }
