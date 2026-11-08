@@ -119,6 +119,7 @@ public sealed class Tiler(WorkspaceManager manager, IVirtualDesktopService deskt
         // A screen plugged in or out, or a work area that changed: every screen is re-tiled.
         subscriptions.Add(surface.ScreensChanged.Subscribe(_ => Run("screens changed", () => Evaluate(everyScreen: true))));
         subscriptions.Add(manager.StateChanged.Subscribe(_ => Run("state changed", OnStateChanged)));
+        subscriptions.Add(manager.WindowMoved.Subscribe(w => Run($"window {w.Value:X} moved to another desktop", () => OnWindowMoved(w))));
 
         // The first evaluate reads the current desktop and, if it is tiled, tiles it.
         Refresh();
@@ -188,6 +189,33 @@ public sealed class Tiler(WorkspaceManager manager, IVirtualDesktopService deskt
         }
         if (e.Kind is WindowEventKind.Appeared or WindowEventKind.Hidden or WindowEventKind.Disappeared or WindowEventKind.MinimizeChanged)
             Evaluate(everyScreen: false);
+    }
+
+    // The manager moved a window to another desktop (WorkspaceManager.WindowMoved). Nothing else announces
+    // that: no window event and no LOCATIONCHANGE, because the window keeps its rectangle. The spec counts a
+    // drop on one of the bar's workspace rows as the bar's gesture, and the grid it leaves closes up.
+    // WorkspaceOf is asked once, for this window only:
+    //   - on the board and no longer living here: it leaves and its screen re-tiles without it;
+    //   - not on the board, living here now and eligible: it joins at the end, like a new window;
+    //   - anything else: nothing.
+    void OnWindowMoved(WindowHandle window)
+    {
+        if (!Acting().TryGetValue(out var workspace) || !boards.TryGetValue(workspace.Id, out var board))
+            return;
+        var livesHere = LivesOn(window, workspace);
+
+        if (board.ScreenOf(window).TryGetValue(out var screen))
+        {
+            if (livesHere) return;
+            Keep(workspace, board.Leave(window));
+            Retile(workspace, [screen]);
+            return;
+        }
+
+        if (!livesHere || !Eligible(window) || !surface.VisibleFrameOf(window).HasValue) return;
+        var to = surface.ScreenOf(window);
+        Keep(workspace, board.Join(to, window));
+        Retile(workspace, [to]);
     }
 
     // StateChanged fires on every persist and on several window events, and a full evaluate asks WorkspaceOf
@@ -279,10 +307,15 @@ public sealed class Tiler(WorkspaceManager manager, IVirtualDesktopService deskt
 
     // Does this window take part in `workspace`'s grid right now?
     bool Qualifies(WindowHandle window, Workspace workspace) =>
-        manager.WorkspaceOf(window).Map(w => w.Id == workspace.Id).GetValueOrDefault(false)
-        && monitor.IsListed(window)
-        && !surface.IsMinimized(window)
-        && surface.CanTile(window);
+        LivesOn(window, workspace) && Eligible(window);
+
+    // "Lives here" (spec: the test is the one WorkspaceOf answers, so pinned and borrowed windows float).
+    bool LivesOn(WindowHandle window, Workspace workspace) =>
+        manager.WorkspaceOf(window).Map(w => w.Id == workspace.Id).GetValueOrDefault(false);
+
+    // Everything else a window needs to be in a grid: on the taskbar, not minimized, and tileable.
+    bool Eligible(WindowHandle window) =>
+        monitor.IsListed(window) && !surface.IsMinimized(window) && surface.CanTile(window);
 
     // `everyScreen` re-tiles every screen whatever changed (the screens themselves changed). Otherwise only the
     // screens whose window list changed are re-tiled, unless the context changed (see `context`).
@@ -321,6 +354,19 @@ public sealed class Tiler(WorkspaceManager manager, IVirtualDesktopService deskt
             .Select(w => (w.Window, w.Screen, Frame: w.Frame.Value))
             .ToList();
         var board = before is null ? TileBoard.FirstFill(windows) : Reconciled(before, windows);
+        Keep(workspace, board);
+
+        var changed = full || before is null
+            ? board.Screens.Keys.ToList()
+            : board.Screens.Keys.Union(before.Screens.Keys)
+                .Where(s => !board.On(s).SequenceEqual(before.On(s)))
+                .ToList();
+        Retile(workspace, changed);
+    }
+
+    // Stores a workspace's new board and does what every board change owes the windows on it.
+    void Keep(Workspace workspace, TileBoard board)
+    {
         boards[workspace.Id] = board;
 
         // Leaving a grid is a structural change too: a window that comes back starts with a clean put-back count.
@@ -333,13 +379,6 @@ public sealed class Tiler(WorkspaceManager manager, IVirtualDesktopService deskt
             .ForEach(w => { surface.RoundCorners(w); rounded.Add(w); });
 
         WatchOnly(board.Screens.Values.SelectMany(w => w).ToHashSet());
-
-        var changed = full || before is null
-            ? board.Screens.Keys.ToList()
-            : board.Screens.Keys.Union(before.Screens.Keys)
-                .Where(s => !board.On(s).SequenceEqual(before.On(s)))
-                .ToList();
-        Retile(workspace, changed);
     }
 
     // The remembered board brought up to date: windows that no longer qualify leave (the rest close up),

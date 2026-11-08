@@ -482,6 +482,35 @@ public sealed class TilerTests : IDisposable
         Assert.Equal(new HashSet<WindowHandle> { W(2), W(3) }, surface.Watched[^1]);
     }
 
+    // A desktop change raises no window event and no Settled; WorkspaceManager.WindowMoved is all there is.
+    [Fact]
+    public void A_window_the_bar_moves_to_another_workspace_leaves_the_grid()
+    {
+        new[] { 1, 2, 3 }.ToList().ForEach(n => Exists(W(n), alpha));
+        Start();
+        surface.Placed.Clear();
+
+        Assert.True(manager.MoveToDesktop(W(2), beta.DesktopId!.Value).IsSuccess);
+
+        Assert.DoesNotContain(W(2), PlacedWindows);
+        AssertTiled([W(1), W(3)]);
+        Assert.Equal(new HashSet<WindowHandle> { W(1), W(3) }, surface.Watched[^1]);
+    }
+
+    [Fact]
+    public void A_window_moved_onto_the_tiled_workspace_joins_it()
+    {
+        new[] { 1, 2 }.ToList().ForEach(n => Exists(W(n), alpha));
+        Exists(W(3), beta);
+        Start();
+        Assert.DoesNotContain(W(3), tiler.Board.On(1));
+
+        Assert.True(manager.MoveToDesktop(W(3), alpha.DesktopId!.Value).IsSuccess);
+
+        AssertTiled([W(1), W(2), W(3)]);
+        Assert.Contains(W(3), surface.Rounded);
+    }
+
     // Ruling 3: a Settled for a window that is not on the board joins it only if it now qualifies.
     [Fact]
     public void A_settled_window_that_now_lives_here_joins_at_the_end()
