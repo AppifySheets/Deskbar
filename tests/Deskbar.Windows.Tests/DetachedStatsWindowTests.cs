@@ -3,19 +3,22 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
 using System.Windows.Input;
+using System.Windows.Interop;
 using CSharpFunctionalExtensions;
 using Deskbar.App;
 using Deskbar.Core;
 using Deskbar.Core.Abstractions;
 using Deskbar.Core.Persistence;
+using Deskbar.Windows.Monitoring;
 using Deskbar.Windows.Performance;
 
 namespace Deskbar.Windows.Tests;
 
 // The stats line in a window of its own (DetachedStatsWindow). The owner wanted the numbers while a game or another
 // full-screen window covers the bar. Every window here gets a FakeStats, so nothing depends on the load of whoever
-// runs the suite, and sits at -32000 so nothing shows on a screen. The drag itself (DragMove is a native loop), the
-// topmost behaviour over a game and the pin across desktops need a real desktop and are checked by hand.
+// runs the suite, and sits at -32000 so nothing shows on a screen. The middle drag is driven through the two entry
+// points its handlers use (as the bar's tests do), so a real middle press, a drag across screens of different scale,
+// the topmost behaviour over a game and the pin across desktops need a real desktop and are checked by hand.
 public class DetachedStatsWindowTests
 {
     sealed class FakeStats : ISystemStats
@@ -53,19 +56,29 @@ public class DetachedStatsWindowTests
         window.UpdateLayout();
     }
 
-    // Each cell: the value alone on top, in a shrink-only Viewbox, then the graph with the label inside it.
-    static IEnumerable<(string Label, string Value)> Cells(DetachedStatsWindow window) =>
+    // Each cell: a top row with the name at the left and the value (in a shrink-only Viewbox) at the right, then the
+    // graph, which holds the sparkline alone.
+    static IEnumerable<(Grid Top, Grid Graph)> Rows(DetachedStatsWindow window) =>
         Strip(window).Children.OfType<StackPanel>()
             .Where(cell => cell.Visibility == Visibility.Visible)
-            .Select(cell => (Box: (Viewbox)cell.Children[0], Graph: (Grid)cell.Children[1]))
-            .Select(c => (Label: c.Graph.Children.OfType<TextBlock>().Single().Text, Value: ((TextBlock)c.Box.Child).Text));
+            .Select(cell => (Top: (Grid)cell.Children[0], Graph: (Grid)cell.Children[1]));
 
-    static void Press(DetachedStatsWindow window, RoutedEvent routed) =>
-        window.RaiseEvent(new MouseButtonEventArgs(Mouse.PrimaryDevice, Environment.TickCount, MouseButton.Left)
+    static IEnumerable<(string Label, string Value)> Cells(DetachedStatsWindow window) =>
+        Rows(window).Select(r => (Label: r.Top.Children.OfType<TextBlock>().Single().Text,
+            Value: ((TextBlock)r.Top.Children.OfType<Viewbox>().Single().Child).Text));
+
+    static void Press(DetachedStatsWindow window, RoutedEvent routed, MouseButton button = MouseButton.Left) =>
+        window.RaiseEvent(new MouseButtonEventArgs(Mouse.PrimaryDevice, Environment.TickCount, button)
         {
             RoutedEvent = routed,
             Source = window,
         });
+
+    static NativeMethods.RECT RectOf(DetachedStatsWindow window)
+    {
+        Assert.True(NativeMethods.GetWindowRect(new WindowInteropHelper(window).Handle, out var rect));
+        return rect;
+    }
 
     [Fact]
     public void A_sample_paints_four_cells_with_their_values() => StaThread.Run(() =>
@@ -95,8 +108,37 @@ public class DetachedStatsWindowTests
         window.CloseForGood();
     });
 
+    // The numbers' names are in the top row beside the values; the graph holds the sparkline and nothing drawn over
+    // it, because a reader who cannot tell a name from the coloured fill under it could not read it there.
     [Fact]
-    public void A_click_without_movement_opens_task_manager() => StaThread.Run(() =>
+    public void Names_sit_beside_the_values_not_over_the_graph() => StaThread.Run(() =>
+    {
+        var stats = new FakeStats();
+        var window = Window(stats);
+        Push(window, stats, Sample());
+
+        var rows = Rows(window).ToList();
+        Assert.Equal(4, rows.Count);
+        foreach (var (top, graph) in rows)
+        {
+            Assert.Empty(graph.Children.OfType<TextBlock>());
+            Assert.Single(graph.Children.OfType<Canvas>());
+
+            var name = top.Children.OfType<TextBlock>().Single();
+            var value = top.Children.OfType<Viewbox>().Single();
+            Assert.Equal(0, Grid.GetColumn(name));
+            Assert.Equal(1, Grid.GetColumn(value));
+            Assert.Equal(HorizontalAlignment.Left, name.HorizontalAlignment);
+            Assert.Equal(HorizontalAlignment.Right, value.HorizontalAlignment);
+            // Same row, name left of the value.
+            Assert.True(name.TranslatePoint(new Point(name.ActualWidth, 0), window).X
+                <= value.TranslatePoint(new Point(0, 0), window).X);
+        }
+        window.CloseForGood();
+    });
+
+    [Fact]
+    public void A_left_click_opens_task_manager() => StaThread.Run(() =>
     {
         var stats = new FakeStats();
         var opened = 0;
@@ -109,6 +151,53 @@ public class DetachedStatsWindowTests
 
         // A release that no press of ours began (the end of a drag, or a menu closing) is not a click.
         Press(window, UIElement.PreviewMouseLeftButtonUpEvent);
+        Assert.Equal(1, opened);
+        window.CloseForGood();
+    });
+
+    // Only the middle button moves the window. Driven through the entry points the handlers use, with the cursor
+    // wherever the test says (the bar's FloatingBarMiddleDragTests do the same). A left press followed by a move
+    // leaves the window where it was, and only the release opens Task Manager.
+    [Fact]
+    public void A_middle_drag_moves_the_window_and_a_left_press_does_not() => StaThread.Run(() =>
+    {
+        var stats = new FakeStats();
+        var opened = 0;
+        var window = Window(stats, () => opened++);
+        Push(window, stats, Sample());
+        var before = RectOf(window);
+        var (cursorX, cursorY) = (before.Left + 20, before.Top + 10);
+
+        // A left press and a mouse move: nothing moves, nothing opens.
+        Press(window, UIElement.PreviewMouseLeftButtonDownEvent);
+        window.RaiseEvent(new MouseEventArgs(Mouse.PrimaryDevice, Environment.TickCount)
+        {
+            RoutedEvent = UIElement.PreviewMouseMoveEvent,
+            Source = window,
+        });
+        var afterLeft = RectOf(window);
+        Assert.Equal((before.Left, before.Top), (afterLeft.Left, afterLeft.Top));
+        Assert.Equal(0, opened);
+        Press(window, UIElement.PreviewMouseLeftButtonUpEvent);
+        Assert.Equal(1, opened);
+
+        // The middle drag: the window moves by exactly the cursor's travel, in pixels, and keeps its size.
+        Assert.True(window.GrabWindowAt(cursorX, cursorY));
+        window.MoveWindowTo(cursorX + 120, cursorY + 45);
+
+        var after = RectOf(window);
+        Assert.Equal((before.Left + 120, before.Top + 45), (after.Left, after.Top));
+        Assert.Equal((before.Right - before.Left, before.Bottom - before.Top), (after.Right - after.Left, after.Bottom - after.Top));
+        Assert.Equal(1, opened); // moving it opened nothing more
+
+        // What the drop saves: WPF's own Left and Top have followed a move it did not make itself.
+        var scale = System.Windows.Media.VisualTreeHelper.GetDpi(window);
+        Assert.InRange(window.Left * scale.DpiScaleX, after.Left - 1, after.Left + 1);
+        Assert.InRange(window.Top * scale.DpiScaleY, after.Top - 1, after.Top + 1);
+
+        // A middle release with no drag begun neither moves the window nor opens anything.
+        Press(window, UIElement.PreviewMouseUpEvent, MouseButton.Middle);
+        Assert.Equal((after.Left, after.Top), (RectOf(window).Left, RectOf(window).Top));
         Assert.Equal(1, opened);
         window.CloseForGood();
     });
