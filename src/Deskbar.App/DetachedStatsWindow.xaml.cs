@@ -55,9 +55,8 @@ public partial class DetachedStatsWindow : Window
     bool closingForGood;
 
     // A left press is in progress, and where it began (in this window, so it is not thrown off by the window
-    // moving under the pointer). `dragging` is true while DragMove's native loop owns the window.
+    // moving under the pointer).
     Point? pressAt;
-    bool dragging;
 
     public DetachedStatsWindow(WorkspaceManager manager, ISystemStats stats, Action openTaskManager)
     {
@@ -165,21 +164,15 @@ public partial class DetachedStatsWindow : Window
         tip.Text = StatsStrip.TipText(sample, TaskManagerTip);
         // Cheap, and once a second is enough for a change of the text size on Manage to reach it.
         Strip.ApplyTextSize(TextSize());
-        ReclaimTopmost();
     }
 
-    // Topmost is a band, not a rank: the taskbar and every other topmost window climb over this one, so it
-    // re-asserts HWND_TOPMOST, the way the bar's ReclaimTopmost does, once a second (the rate samples arrive at).
-    // SWP_NOACTIVATE is the load-bearing flag: without it this would take focus from whatever was just clicked.
-    // Not while hidden, and not mid-drag, where a SetWindowPos would fight DragMove's native loop.
-    void ReclaimTopmost()
-    {
-        if (!IsVisible || dragging) return;
-        var hwnd = new WindowInteropHelper(this).Handle;
-        if (hwnd == nint.Zero) return;
-        NativeMethods.SetWindowPos(hwnd, NativeMethods.HWND_TOPMOST, 0, 0, 0, 0,
-            NativeMethods.SWP_NOMOVE | NativeMethods.SWP_NOSIZE | NativeMethods.SWP_NOACTIVATE);
-    }
+    // NO RE-CLAIMING OF THE TOP. Topmost is a band, not a rank, and the bar re-asserts HWND_TOPMOST once a second
+    // (FloatingBar.ReclaimTopmost) because the taskbar climbs over it. This window did the same at first, and the
+    // owner's first live test found the cost: parked over the system tray, the window and the taskbar took turns on
+    // top, once a second, because the shell re-raises the taskbar inside the band too, and overlapping the bar it
+    // would have fought the bar's own re-claim the same way. One window per band may insist; this one is not it.
+    // So it is an ordinary topmost window: above every normal window, which is what it is for, and below whichever
+    // topmost window was raised last, which is what a user expects of a small gadget dropped on the tray.
 
     void OnPreviewMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
     {
@@ -199,15 +192,7 @@ public partial class DetachedStatsWindow : Window
         // handler below, and pressAt is cleared in case it did.
         pressAt = null;
         ReleaseMouseCapture();
-        dragging = true;
-        try
-        {
-            DragMove(); // blocks until the mouse button is released
-        }
-        finally
-        {
-            dragging = false;
-        }
+        DragMove(); // blocks until the mouse button is released
         manager.SaveDetachedStats(new DetachedStatsState(true, Left, Top));
     }
 
