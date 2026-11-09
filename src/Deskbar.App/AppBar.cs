@@ -33,6 +33,15 @@ sealed class AppBar
 
     public bool Registered { get; private set; }
 
+    // Whether the shell may be holding a strip for this window: set by every Dock, cleared only by Remove. Kept
+    // apart from Registered on purpose. Registered is what ABM_NEW last answered, and that answer can be wrong
+    // about the shell: ABM_NEW returns FALSE for a window that is ALREADY registered (Microsoft's docs, ABM_NEW),
+    // and TaskbarCreated (see Hook) clears Registered on a guess that Explorer forgot us. When the guess was
+    // wrong, the strip stayed reserved while Registered said false, and Remove, which used to check Registered,
+    // never sent ABM_REMOVE. Petre, from an RDP session: "undocking still keeps the space". Remove keys on this
+    // instead, so undocking always gives back whatever Dock may have taken.
+    bool claimed;
+
     // `onPositionChanged`: the shell says something moved that may affect us (the taskbar, another app bar,
     // a resolution change); the owner should dock again, which re-asks for a position. `onFullScreen`: a
     // full-screen app opened (true) or closed (false), when an app bar is expected to step out of the
@@ -59,10 +68,22 @@ sealed class AppBar
     public Rect Dock(Edge edge, Rect screen, int widthPx)
     {
         var data = Data();
+        claimed = true;
         if (!Registered)
         {
             data.uCallbackMessage = callbackMessage;
             Registered = SHAppBarMessage(ABM_NEW, ref data) != 0;
+
+            // FALSE can mean "already registered": the shell kept us across a TaskbarCreated that was not an
+            // Explorer restart. Drop that old registration and make a fresh one, so Registered matches the shell
+            // again and Hook goes on answering its notifications. A second FALSE is a real failure, left as is
+            // and visible in the dock trace line (registered=False).
+            if (!Registered)
+            {
+                ClickTrace.Write("app bar: ABM_NEW refused (already registered?), removing and registering again");
+                SHAppBarMessage(ABM_REMOVE, ref data);
+                Registered = SHAppBarMessage(ABM_NEW, ref data) != 0;
+            }
         }
 
         data.uEdge = (uint)edge;
@@ -81,13 +102,17 @@ sealed class AppBar
         return data.rc;
     }
 
-    // Gives the strip back. Safe to call when not registered.
+    // Gives the strip back. Safe to call when nothing was docked. Keyed on `claimed`, not on Registered, for the
+    // reason `claimed` gives: a window the shell still holds must get its ABM_REMOVE even when the last ABM_NEW
+    // said no. Still skipped when Dock never ran since the last Remove, because DockTo calls Remove on the seam
+    // half on every re-dock, and those re-docks come from the shell's own notifications.
     public void Remove()
     {
-        if (!Registered) return;
+        if (!claimed) return;
         var data = Data();
         SHAppBarMessage(ABM_REMOVE, ref data);
         Registered = false;
+        claimed = false;
     }
 
     // Where the shell says the Windows taskbar is, and whether it auto-hides, for the debug dump. Null when the
