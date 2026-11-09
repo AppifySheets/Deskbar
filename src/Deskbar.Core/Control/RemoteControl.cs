@@ -42,10 +42,14 @@ namespace Deskbar.Core.Control;
 //
 // `showFind` opens quick find with the given text already typed (`find`). The box is a window of the app's, so
 // the app hands the opener in; left null, `find` refuses.
+//
+// `setStatsDetached` detaches the stats line into its window of its own, or puts it back (`stats detach|attach`).
+// The window is the app's, so the app hands in how, as for `bar minimize`; left null, `stats` refuses.
 public sealed partial class RemoteControl(WorkspaceManager manager, Func<bool, Result>? setBarVisible = null, Func<ProgramLaunch, Result<int?>>? launch = null,
     Func<Result<string>>? dump = null, Func<Maybe<string>>? defaultBrowser = null,
     Func<(string Version, string? Exe, bool Packaged)>? identity = null,
-    Func<string, Result>? showFind = null)
+    Func<string, Result>? showFind = null,
+    Func<bool, Result>? setStatsDetached = null)
 {
     static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web) { WriteIndented = true };
 
@@ -106,6 +110,7 @@ public sealed partial class RemoteControl(WorkspaceManager manager, Func<bool, R
         ("restart-app", [var hwnd]) => RestartApp(hwnd),
 
         ("bar", [var state]) => Bar(state),
+        ("stats", [var state]) => Stats(state),
         ("window-lines", [var mode]) => WindowLines(mode),
         ("collapsed-click", [var mode]) => CollapsedClick(mode),
         ("full-screen", [var mode]) => FullScreen(mode),

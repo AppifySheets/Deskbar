@@ -86,6 +86,8 @@ public static class ControlUsage
         new("Bar", [
             new("bar", "minimize|restore|dock|undock|across|edge",
                 "Minimize bar, or bring it back; turn the Dock to screen edge setting on or off; dock across the line between two screens, or back to one screen's edge"),
+            new("stats", "detach|attach",
+                "Detach stats into a window (the CPU, memory, disk and GPU line in a small always-on-top window), or Put stats back on the bar"),
             new("window-lines", "split|whole",
                 "Right third of window lines switches workspace, or Whole window lines bring the window up"),
             new("collapsed-click", "bar|icon",

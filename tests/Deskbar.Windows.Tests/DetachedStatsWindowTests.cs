@@ -113,20 +113,79 @@ public class DetachedStatsWindowTests
         window.CloseForGood();
     });
 
-    // A closed WPF window can never be shown again, so Alt+F4 on this one only hides it; putting the stats back
-    // on the bar and detaching them again must not throw.
+    // A closed WPF window can never be shown again, so a close request (Alt+F4) never closes this one: it becomes
+    // "put the stats back on the bar" (the next test). In this window-only test nobody is listening, and App is
+    // the one that hides the window, so IsVisible stays true after Close(); the point is that the window is still
+    // alive, so detaching again must not throw.
     [Fact]
-    public void A_close_request_only_hides_the_window() => StaThread.Run(() =>
+    public void A_close_request_does_not_close_the_window() => StaThread.Run(() =>
     {
         var window = Window(new FakeStats());
         Assert.True(window.IsVisible);
 
         window.Close();
-        Assert.False(window.IsVisible);
+        Assert.True(window.IsVisible);
 
+        window.Hide();
         window.Show();
         Assert.True(window.IsVisible);
         window.CloseForGood();
+    });
+
+    // Alt+F4 reaches the window once a click or a drag has activated it. Hiding it there would leave the state
+    // saying "shown" and the bar's line hidden, so it asks to go back to the bar, like the menu item.
+    [Fact]
+    public void A_close_request_asks_to_return_to_the_bar() => StaThread.Run(() =>
+    {
+        var window = Window(new FakeStats());
+        var returned = 0;
+        window.ReturnRequested += () => returned++;
+
+        window.Close();
+
+        Assert.Equal(1, returned);
+        window.Show(); // still alive: a closed WPF window would throw here
+        Assert.True(window.IsVisible);
+        window.CloseForGood();
+    });
+
+    // A hand-edited state.json can hold anything. WPF throws for a Left or Top outside the Int32 range, and the
+    // restore at startup has no try/catch, so these once crashed the app on every launch.
+    [Theory]
+    [InlineData(double.PositiveInfinity, 100)]
+    [InlineData(100, double.NegativeInfinity)]
+    [InlineData(1e300, 1e300)]
+    [InlineData(-1e300, 0)]
+    [InlineData(double.NaN, double.NaN)]
+    public void A_stored_position_that_is_not_a_number_does_not_throw(double left, double top) => StaThread.Run(() =>
+    {
+        var window = Window(new FakeStats());
+
+        window.ShowAt(new DetachedStatsState(true, left, top));
+        var (x, y) = (window.Left, window.Top);
+        window.CloseForGood(); // it is on a screen now, so it goes at once
+
+        Assert.True(double.IsFinite(x) && double.IsFinite(y), $"({x}, {y})");
+    });
+
+    // DragMove has no clamp, so a window is easily left with its top-left corner just outside the screen. The bar
+    // goes to the NEAREST monitor; this window used to jump to the primary's top right instead.
+    [Fact]
+    public void A_corner_just_past_the_screen_edge_stays_on_that_screen() => StaThread.Run(() =>
+    {
+        var window = Window(new FakeStats());
+
+        window.ShowAt(new DetachedStatsState(true, -50, 300));
+        var (x, y) = (window.Left, window.Top);
+        window.CloseForGood();
+
+        var monitor = Monitoring.NativeMethods.MonitorFromPoint(new Monitoring.NativeMethods.POINT { X = -50, Y = 300 }, Monitoring.NativeMethods.MONITOR_DEFAULTTONEAREST);
+        var info = new Monitoring.NativeMethods.MONITORINFO { cbSize = System.Runtime.InteropServices.Marshal.SizeOf<Monitoring.NativeMethods.MONITORINFO>() };
+        Assert.True(Monitoring.NativeMethods.GetMonitorInfo(monitor, ref info));
+        Monitoring.NativeMethods.GetDpiForMonitor(monitor, Monitoring.NativeMethods.MDT_EFFECTIVE_DPI, out var dpiX, out _);
+
+        Assert.True(x >= info.rcMonitor.Left / (dpiX / 96.0), $"Left {x}");
+        Assert.Equal(300, y);
     });
 
     [Fact]
