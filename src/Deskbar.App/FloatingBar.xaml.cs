@@ -784,6 +784,9 @@ public partial class FloatingBar : Window
 
             // Manual in both axes: the height is the screen's now, not the content's.
             SizeToContent = SizeToContent.Manual;
+            // Onto this screen's scale first: the DIPs below are this screen's, and WPF reads them at the WINDOW's
+            // scale, so a bar still at another screen's scale docked a screen-width off (ScaleHop has the numbers).
+            TakeScaleOf(monitor, granted.L / scaleX, granted.T / scaleY);
             Left = granted.L / scaleX;
             Top = granted.T / scaleY;
             Width = (granted.R - granted.L) / scaleX;
@@ -7525,6 +7528,12 @@ public partial class FloatingBar : Window
             return;
         }
 
+        // Onto the scale of the screen the bar is going to, before its size is read or a DIP written for it
+        // (ScaleHop has why: on a desk of mixed scales a bar saved on the 100% screen came back at the 150% one's
+        // scale, one screen-width past where it was saved and on no monitor). The same point MonitorBounds was
+        // just given, so the same screen.
+        TakeScaleOfScreenAt(stored?.Left ?? 0, stored?.Top ?? 0);
+
         // Petre: "when adding more windows, the floating window should grow to the left, not
         // to the right... it'll be stacked next to the right edge of the screen".
         //
@@ -7690,6 +7699,46 @@ public partial class FloatingBar : Window
         // does. Edge snapping now snaps to the screen's own edges, which is arguably what "snap
         // to edges" should always have meant.
         return (info.rcMonitor.Left / scaleX, info.rcMonitor.Top / scaleY, info.rcMonitor.Right / scaleX, info.rcMonitor.Bottom / scaleY);
+    }
+
+    // MonitorBounds' DIPs are the SCREEN's, divided by its own DPI, and that is right for the GetDpiForMonitor reason
+    // above. But WPF turns Left and Top into pixels at the WINDOW's DPI, so they only land where they were meant to
+    // while the window is at that screen's scale. These two put it there first, for the screen holding the given
+    // point (the point MonitorBounds is given, so the same screen) or for a given screen. ScaleHop has the maths and
+    // the measurement; nothing moves when the scales already agree.
+    void TakeScaleOfScreenAt(double probeX, double probeY) =>
+        TakeScaleOf(NativeMethods.MonitorFromPoint(new NativeMethods.POINT { X = (int)probeX, Y = (int)probeY },
+            NativeMethods.MONITOR_DEFAULTTONEAREST), probeX, probeY);
+
+    // Moves the window, in pixels, to (left, top) in the screen's DIPs. Windows sends the rescale inside SetWindowPos
+    // and WPF answers it there (see SettleOnOneScreen); the layout pass after it gives ActualWidth and ActualHeight at
+    // the new scale before the caller reads them. With `moving` held meanwhile, so the resize does not wake
+    // OnSizeChanged's growth anchor, which would place the bar from the old scale's DIPs just before the caller
+    // places it from the new.
+    void TakeScaleOf(nint monitor, double left, double top)
+    {
+        var hwnd = new WindowInteropHelper(this).Handle;
+        if (hwnd == nint.Zero || !NativeMethods.GetWindowRect(hwnd, out var rect)) return;
+        var info = new NativeMethods.MONITORINFO { cbSize = Marshal.SizeOf<NativeMethods.MONITORINFO>() };
+        if (!NativeMethods.GetMonitorInfo(monitor, ref info)) return;
+        NativeMethods.GetDpiForMonitor(monitor, NativeMethods.MDT_EFFECTIVE_DPI, out var dpi, out _);
+        var screen = new MiddleDrag.Screen(info.rcMonitor.Left, info.rcMonitor.Top, info.rcMonitor.Right, info.rcMonitor.Bottom, (int)dpi);
+        var windowDpi = (int)NativeMethods.GetDpiForWindow(hwnd);
+        if (ScaleHop.Target(left, top, rect.Right - rect.Left, rect.Bottom - rect.Top, windowDpi, screen) is not { } at) return;
+
+        if (ClickTrace.On) ClickTrace.Write($"scale hop: window at dpi {windowDpi}, its screen at {dpi}, moved to {at.Left},{at.Top} first");
+        var wasMoving = moving;
+        moving = true;
+        try
+        {
+            NativeMethods.SetWindowPos(hwnd, nint.Zero, at.Left, at.Top, 0, 0,
+                NativeMethods.SWP_NOSIZE | NativeMethods.SWP_NOZORDER | NativeMethods.SWP_NOACTIVATE);
+            UpdateLayout();
+        }
+        finally
+        {
+            moving = wasMoving;
+        }
     }
 
     // --- the display layout (#150) ---------------------------------------------------------------
