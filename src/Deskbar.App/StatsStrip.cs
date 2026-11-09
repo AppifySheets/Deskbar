@@ -61,7 +61,13 @@ internal sealed class StatsStrip : UniformGrid
 
     readonly StatCell cpuCell, memoryCell, diskCell, gpuCell;
 
-    internal StatsStrip()
+    // TWO LAYOUTS, because the bar and the detached window have different room and different readers. The bar's
+    // cells are narrow (55 to 68 DIP), so there the value has the top line alone and the name sits inside the
+    // graph (the owner's decision, below). The window's cells are 70 DIP wide, enough for both on one line, and
+    // its reader cannot tell a name from the coloured fill under it: "when resources are in use I can't really see
+    // CPU or MEM or any characters". With `namesBesideValues` the name is top left and the value top right, and
+    // nothing is drawn over the graph.
+    internal StatsStrip(bool namesBesideValues = false)
     {
         cpuCell = new StatCell("CPU", CpuHue);
         memoryCell = new StatCell("MEM", MemoryHue);
@@ -94,6 +100,26 @@ internal sealed class StatsStrip : UniformGrid
                 StretchDirection = StretchDirection.DownOnly,
                 HorizontalAlignment = HorizontalAlignment.Right,
             };
+            if (namesBesideValues)
+            {
+                // The name takes what it needs (Auto) and the value the rest (*), shrinking only if even that is
+                // too little, so the pair can never push the value out of its cell. The graph holds the
+                // sparkline alone.
+                cell.Name.Margin = new Thickness(0, 0, 4, 0);
+                Grid.SetColumn(cell.Name, 0);
+                Grid.SetColumn(value, 1);
+                var top = new Grid
+                {
+                    ColumnDefinitions =
+                    {
+                        new ColumnDefinition { Width = GridLength.Auto },
+                        new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) },
+                    },
+                    Children = { cell.Name, value },
+                };
+                Children.Add(new StackPanel { Margin = new Thickness(3, 0, 3, 0), Children = { top, new Grid { Children = { cell.Spark } } } });
+                return;
+            }
             var graph = new Grid { Children = { cell.Spark, cell.Name } };
             Children.Add(new StackPanel { Margin = new Thickness(3, 0, 3, 0), Children = { value, graph } });
         });

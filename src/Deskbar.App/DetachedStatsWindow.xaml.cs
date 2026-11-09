@@ -26,8 +26,10 @@ namespace Deskbar.App;
 // it. Borderless-windowed games, which is what most modern games use by default, are fine, and so is any other
 // full-screen window (a video, a browser). It is not worked around.
 //
-// Left press and move drags; a left click without movement opens Task Manager, like the bar's line. One gesture is
-// never both: a press that dragged is not a click.
+// The MIDDLE button moves the window, like the bar (the owner: "make it draggable only with middle mouse click like
+// deskbar is"); a left click opens Task Manager, like the bar's line. The left button never drags, so a click can
+// never be mistaken for a move and a move never opens anything. The middle drag is the bar's (FloatingBar's
+// MiddleDragging has the long reasoning), kept in physical pixels through MiddleDrag.
 public partial class DetachedStatsWindow : Window
 {
     const string TaskManagerTip = "Click for Task Manager";
@@ -46,7 +48,8 @@ public partial class DetachedStatsWindow : Window
     readonly Action openTaskManager;
     readonly TextBlock tip = new();
     // Four cells of 70 DIP.
-    readonly StatsStrip Strip = new() { Width = 280 };
+    // The window has the room for the name beside the value (StatsStrip has why the bar does not).
+    readonly StatsStrip Strip = new(namesBesideValues: true) { Width = 280 };
     readonly IDisposable subscription;
 
     // Set only when the app is going away. Until then a close request (Alt+F4, a taskbar close) is turned into a
@@ -54,9 +57,16 @@ public partial class DetachedStatsWindow : Window
     // would throw and take the app down (the same rule, and the same story, as QuickFindWindow).
     bool closingForGood;
 
-    // A left press is in progress, and where it began (in this window, so it is not thrown off by the window
-    // moving under the pointer).
-    Point? pressAt;
+    // A left press of ours is in progress: its release ON the window is a click. A release without one (a menu
+    // closing, the end of a middle drag's capture) is not, and nor is a release after the pointer has left the
+    // window, which is what a button does: the press is forgotten on MouseLeave (constructor).
+    bool leftPressed;
+
+    // The middle drag, as the bar keeps it (FloatingBar.MiddleDragging): the cursor at the press in physical pixels,
+    // where on the window it took hold, and whether the threshold has been crossed.
+    Point? middleStart;
+    MiddleDrag.Grab middleGrab;
+    bool middleDragging;
 
     public DetachedStatsWindow(WorkspaceManager manager, ISystemStats stats, Action openTaskManager)
     {
@@ -74,6 +84,9 @@ public partial class DetachedStatsWindow : Window
         back.Click += (_, _) => ReturnRequested?.Invoke();
         menu.Items.Add(back);
         ContextMenu = menu;
+
+        // Press, slide off, release: not a click, the way a button reads it.
+        MouseLeave += (_, _) => leftPressed = false;
 
         subscription = stats.Samples.Subscribe(sample => Dispatcher.BeginInvoke(() => OnSample(sample)));
         Closed += (_, _) => subscription.Dispose();
@@ -176,32 +189,79 @@ public partial class DetachedStatsWindow : Window
 
     void OnPreviewMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
     {
-        pressAt = e.GetPosition(this);
-        // Captured so the move that crosses the threshold is seen even if the pointer has already left the window.
-        CaptureMouse();
-    }
-
-    void OnPreviewMouseMove(object sender, MouseEventArgs e)
-    {
-        if (e.LeftButton != MouseButtonState.Pressed || pressAt is not { } start) return;
-        var now = e.GetPosition(this);
-        if (Math.Abs(now.X - start.X) < SystemParameters.MinimumHorizontalDragDistance
-            && Math.Abs(now.Y - start.Y) < SystemParameters.MinimumVerticalDragDistance) return;
-
-        // It is a drag now, and so no longer a click: the release DragMove's loop consumes never reaches the
-        // handler below, and pressAt is cleared in case it did.
-        pressAt = null;
-        ReleaseMouseCapture();
-        DragMove(); // blocks until the mouse button is released
-        manager.SaveDetachedStats(new DetachedStatsState(true, Left, Top));
+        // Not captured: a release that happens elsewhere should not be a click, and MouseLeave forgets the press.
+        leftPressed = true;
     }
 
     void OnPreviewMouseLeftButtonUp(object sender, MouseButtonEventArgs e)
     {
-        ReleaseMouseCapture();
-        // A press that never moved past the threshold is a click.
-        if (pressAt is null) return;
-        pressAt = null;
+        if (!leftPressed) return;
+        leftPressed = false;
         openTaskManager();
+    }
+
+    // THE MIDDLE BUTTON MOVES THE WINDOW. DragMove cannot do it: it drives Windows' own move loop, which is defined
+    // in terms of the LEFT button (called with the left button up it throws). So the window is moved by hand, and
+    // the bar's two traps apply unchanged. The cursor comes from GetCursorPos, not from e.GetPosition, which is
+    // measured against the window this code is moving, so the travel would shrink to nothing as the window caught
+    // up. And the whole drag is in PHYSICAL pixels, moved with SetWindowPos, never by writing Left and Top: a DIP is
+    // not a fixed place once the screens differ in scale, and the window flickered between two screens that way
+    // (MiddleDrag has the numbers).
+    void OnPreviewMouseDown(object sender, MouseButtonEventArgs e)
+    {
+        if (e.ChangedButton != MouseButton.Middle) return;
+        NativeMethods.GetCursorPos(out var cursor);
+        GrabWindowAt(cursor.X, cursor.Y);
+    }
+
+    void OnPreviewMouseMove(object sender, MouseEventArgs e)
+    {
+        if (e.MiddleButton != MouseButtonState.Pressed || middleStart is not { } start) return;
+
+        NativeMethods.GetCursorPos(out var cursor);
+        if (!middleDragging)
+        {
+            if (Math.Abs(cursor.X - start.X) < SystemParameters.MinimumHorizontalDragDistance
+                && Math.Abs(cursor.Y - start.Y) < SystemParameters.MinimumVerticalDragDistance) return;
+            middleDragging = true;
+            // So the moves keep arriving when the pointer outruns the window.
+            CaptureMouse();
+        }
+
+        MoveWindowTo(cursor.X, cursor.Y);
+    }
+
+    void OnPreviewMouseUp(object sender, MouseButtonEventArgs e)
+    {
+        if (e.ChangedButton != MouseButton.Middle) return;
+        middleStart = null;
+        if (!middleDragging) return;
+        middleDragging = false;
+        ReleaseMouseCapture();
+        // Left and Top follow a move WPF did not make itself, so they are where the window landed.
+        manager.SaveDetachedStats(new DetachedStatsState(true, Left, Top));
+    }
+
+    // The window's size is read FRESH on every move: the move that carries it onto a screen of another scale makes
+    // WPF resize it, and the next move places it from its new size (MiddleDrag.Target). Internal so a test can drive
+    // it without a real mouse, like the bar's.
+    internal void MoveWindowTo(int cursorX, int cursorY)
+    {
+        var hwnd = new WindowInteropHelper(this).Handle;
+        if (!NativeMethods.GetWindowRect(hwnd, out var rect)) return;
+        var (left, top) = MiddleDrag.Target(middleGrab, cursorX, cursorY, rect.Right - rect.Left, rect.Bottom - rect.Top);
+        NativeMethods.SetWindowPos(hwnd, nint.Zero, left, top, 0, 0,
+            NativeMethods.SWP_NOSIZE | NativeMethods.SWP_NOZORDER | NativeMethods.SWP_NOACTIVATE);
+    }
+
+    // Records where the cursor took hold of the window. False when Windows will not give its rectangle, which leaves
+    // no drag armed.
+    internal bool GrabWindowAt(int cursorX, int cursorY)
+    {
+        middleStart = null;
+        if (!NativeMethods.GetWindowRect(new WindowInteropHelper(this).Handle, out var rect)) return false;
+        middleStart = new Point(cursorX, cursorY);
+        middleGrab = MiddleDrag.Press(cursorX, cursorY, rect.Left, rect.Top, rect.Right - rect.Left, rect.Bottom - rect.Top);
+        return true;
     }
 }
