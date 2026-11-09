@@ -4002,6 +4002,14 @@ public sealed class WorkspaceManager(
             ? Result.Success()
             : Result.Success().Tap(() => Persist(State with { FloatingBarOverFullScreen = over }));
 
+    // Whether the stats line is detached into its own window, and where that window sits
+    // (AppState.DetachedStats). A no-op when unchanged, like the settings above. The bar follows the state pulse
+    // this sends, so its own stats line hides and returns with it.
+    public Result SaveDetachedStats(DetachedStatsState state) =>
+        State.DetachedStats == state
+            ? Result.Success()
+            : Result.Success().Tap(() => Persist(State with { DetachedStats = state }));
+
     // Whether the app writes its Claude Code skill (AppState.ClaudeSkill). A no-op when unchanged, like the
     // settings above; the app writes or removes the file on the state pulse this sends.
     public Result SetClaudeSkill(bool on) =>

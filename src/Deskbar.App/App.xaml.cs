@@ -48,6 +48,9 @@ public partial class App : Application
     QuickFind? quickFind;             // the search box for every window, tab and app (Win+Alt+Space by default)
     Chord boundQuickFind;             // the chord quick find's hotkey is currently registered on
     FloatingBar? floatingBar; // Task 11: created lazily on first show
+    Windows.Performance.SystemStats? systemStats; // the stats counters, ONE instance shared by the bar's line and the detached window (one timer for both)
+    DetachedStatsWindow? detachedStats; // the stats line detached into its own always-on-top window, created on first use
+    bool detachedStatsPinned;           // its hwnd is pinned to every desktop once, after its first show (see ShowDetachedStats)
     TimeTracker? timeTracker; // #53: active time per workspace, in its own file beside state.json
 
     // Held for the whole process lifetime, in a FIELD so the GC cannot collect it and quietly
@@ -1339,6 +1342,7 @@ public partial class App : Application
             // The volume dial's source, the default playback device's master volume (FloatingBar.Volume.cs).
             // ...and the dock line's, the taskbar's pinned apps (FloatingBar.Pins.cs).
             // ...and the tab counts and sound ring's (FloatingBar.Activity.cs).
+            systemStats = new Windows.Performance.SystemStats();
             floatingBar = new FloatingBar(manager)
             {
                 Volume = new Windows.Audio.SystemVolume(),
@@ -1352,7 +1356,10 @@ public partial class App : Application
                 // ...and the now-playing line's: Windows' own media sessions (FloatingBar.Media.cs).
                 Media = new Windows.Audio.MediaControl(ClickTrace.Write),
                 // ...and the stats line's above it: the counters Task Manager reads (FloatingBar.Stats.cs).
-                Stats = new Windows.Performance.SystemStats(),
+                Stats = systemStats,
+                // ...and its right-click "Detach stats into a window": the window of its own (ShowDetachedStats). The
+                // first time, it opens at the top right of the main screen, clear of the bar's usual corner.
+                DetachStats = () => ShowDetachedStats(manager.State.DetachedStats ?? new(true, SystemParameters.WorkArea.Right - 300, 12)),
                 // The tray's own commands, for the bar's background menu, so both menus run the same code.
                 AppActions = new FloatingBar.AppCommands(OpenManage, CheckForUpdateNow, ExitApp, () => pendingUpdate, SaveDebugDump, RestartApp),
                 // ...and the Search button's: quick find, built further down, so reached through the field.
@@ -1393,6 +1400,9 @@ public partial class App : Application
                 StartMinimized();
             else
                 ShowBarAndPin();
+
+            // The stats window the last session left detached comes back where it was.
+            if (manager.State.DetachedStats is { Shown: true } detached) ShowDetachedStats(detached);
 
             // Petre: "if i activate the taskbar, it hides the floating window". Topmost is a
             // shared band, not a rank, so the taskbar (and StartAllBack's menu) climbs over
@@ -1860,6 +1870,48 @@ public partial class App : Application
                 "Deskbar", MessageBoxButton.OK, MessageBoxImage.Warning));
     }
 
+    // --- the detached stats window ----------------------------------------------------------------------
+    //
+    // The bar's stats line, pulled out into a small always-on-top window (DetachedStatsWindow). App owns it for the
+    // reasons it owns the bar's hwnd work: the window has to be registered with Ignore and pinned across desktops,
+    // and neither is the window's business. While it is shown, the bar hides its own line (AppState.DetachedStats).
+
+    // Shows the window at `at`, creating it the first time, and records that it is up.
+    void ShowDetachedStats(DetachedStatsState at)
+    {
+        if (detachedStats is null)
+        {
+            detachedStats = new DetachedStatsWindow(manager!, systemStats!, () => floatingBar?.OpenTaskManager());
+            // Ignore BEFORE the first Show, as for the bar: WindowMonitor does not skip our own process, and a
+            // window shown first would list itself in the bar.
+            monitor!.Ignore(detachedStats.EnsureHandle());
+            detachedStats.ReturnRequested += ReturnStats;
+        }
+
+        detachedStats.ShowAt(at);
+
+        // Pinned to every desktop once, and AFTER the first Show, like the bar (see PinFloatingBar): a window that
+        // has never been shown is on no desktop and cannot be pinned. A failure is traced, not shown: the window
+        // still works, it just stays on the desktop it was opened on.
+        if (!detachedStatsPinned)
+        {
+            detachedStatsPinned = true;
+            desktops!.Pin(new WindowHandle(detachedStats.EnsureHandle()))
+                .TapError(err => ClickTrace.Write($"detached stats pin failed: {err}"));
+        }
+
+        manager!.SaveDetachedStats(at with { Shown = true });
+    }
+
+    // "Put stats back on the bar": the window goes and the bar's own line returns on the state pulse this sends.
+    // The position stays in the state, for the next detach.
+    void ReturnStats()
+    {
+        if (detachedStats is not { } window) return;
+        window.Hide();
+        manager!.SaveDetachedStats((manager.State.DetachedStats ?? new DetachedStatsState(false, window.Left, window.Top)) with { Shown = false });
+    }
+
     // --- minimizing the bar to a taskbar button (#173) --------------------------------------
     //
     // Petre: "i want ability to minimize the floating bar, which gets minimized in every workspace
@@ -2010,6 +2062,7 @@ public partial class App : Application
         monitor?.Dispose();
         hotkeys?.Dispose(); // unregisters RegisterHotKey chords before the process exits
         quickFind?.Dispose();
+        detachedStats?.CloseForGood();
         switcher?.Dispose(); // stops the release poll and closes the picker window
         trayIcon?.Dispose();
         // Released explicitly on the orderly exit path so a relaunch a moment later is never

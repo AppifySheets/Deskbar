@@ -9,6 +9,7 @@ using CSharpFunctionalExtensions;
 using Deskbar.App;
 using Deskbar.Core;
 using Deskbar.Core.Abstractions;
+using Deskbar.Core.Persistence;
 using Deskbar.Windows.Performance;
 using Xunit.Abstractions;
 
@@ -28,12 +29,18 @@ public class FloatingBarStatsTests(ITestOutputHelper output)
     static SystemSample Sample(double cpu = 23, double memory = 61, double disk = 4, double? gpu = 12) =>
         new(cpu, memory, 20UL << 30, 32UL << 30, disk, gpu is { } g ? g : Maybe<double>.None, 120L << 30, 953L << 30);
 
-    static FloatingBar Bar(ISystemStats? stats, Action? openTaskManager = null)
+    static WorkspaceManager Manager()
     {
         var desktops = new PulsingDesktops { CurrentId = Guid.NewGuid() };
         desktops.Desktops.Add(new DesktopInfo(desktops.CurrentId, "Work"));
         var manager = new WorkspaceManager(desktops, new StubMonitor(), new StubTitles(), new StubStore());
         Assert.True(manager.Start().IsSuccess);
+        return manager;
+    }
+
+    static FloatingBar Bar(ISystemStats? stats, Action? openTaskManager = null, WorkspaceManager? manager = null, Action? detachStats = null)
+    {
+        manager ??= Manager();
         var bar = new FloatingBar(manager)
         {
             Left = -32000,
@@ -41,6 +48,7 @@ public class FloatingBarStatsTests(ITestOutputHelper output)
             SendShellKeys = _ => { },
             Stats = stats,
             OpenTaskManager = openTaskManager ?? (() => { }),
+            DetachStats = detachStats,
         };
         bar.ShowBar();
         bar.UpdateLayout();
@@ -160,6 +168,52 @@ public class FloatingBarStatsTests(ITestOutputHelper output)
         Button(bar).RaiseEvent(new RoutedEventArgs(ButtonBase.ClickEvent));
         Assert.Equal(1, opened);
         Assert.Equal("System stats", AutomationProperties.GetName(Button(bar)));
+        bar.Close();
+    });
+
+    // The stats line can be detached into a window of its own (DetachedStatsWindow). While it is, the bar's line is
+    // gone, the moment the state says so and not a sample later, and it comes back the same way.
+    [Fact]
+    public void The_line_is_hidden_while_the_stats_are_detached() => StaThread.Run(() =>
+    {
+        var stats = new FakeStats();
+        var manager = Manager();
+        var bar = Bar(stats, manager: manager);
+        Push(bar, stats, Sample());
+        Assert.Equal(Visibility.Visible, Line(bar).Visibility);
+
+        manager.SaveDetachedStats(new DetachedStatsState(true, 0, 0));
+        bar.UpdateLayout();
+        Assert.Equal(Visibility.Collapsed, Line(bar).Visibility);
+
+        // The bar goes on recording, and a new sample does not bring the line back while it is detached.
+        Push(bar, stats, Sample(cpu: 50));
+        Assert.Equal(Visibility.Collapsed, Line(bar).Visibility);
+
+        manager.SaveDetachedStats(new DetachedStatsState(false, 0, 0));
+        bar.UpdateLayout();
+        Assert.Equal(Visibility.Visible, Line(bar).Visibility);
+        Assert.Equal("50%", Values(bar).First());
+        bar.Close();
+    });
+
+    // The line's own menu, ahead of the bar's background menu: one item that detaches. The item calls the seam App
+    // hands the bar, so the click is counted here rather than a window opened, and it never starts Task Manager.
+    [Fact]
+    public void A_right_click_on_the_line_offers_to_detach() => StaThread.Run(() =>
+    {
+        var stats = new FakeStats();
+        var detached = 0;
+        var opened = 0;
+        var bar = Bar(stats, () => opened++, detachStats: () => detached++);
+        Push(bar, stats, Sample());
+
+        var menu = Assert.IsType<ContextMenu>(Button(bar).ContextMenu);
+        var item = Assert.IsType<MenuItem>(Assert.Single(menu.Items));
+        Assert.Equal("Detach stats into a window", item.Header);
+        item.RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
+        Assert.Equal(1, detached);
+        Assert.Equal(0, opened);
         bar.Close();
     });
 
