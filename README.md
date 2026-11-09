@@ -624,7 +624,7 @@ Everything the bar's menus do has a command, and each one runs the same code as 
 | Desktops | `name-desktop <id or number> <name>` |
 | Starting | `start <ws> [--create [placement]] [--cwd <folder>] -- <program> [arguments...]`, `open <link> [--from <folder>]` |
 | Windows | `move <ws> [--create [placement]] [--no-follow] (--title <text> \| --hwnd <h>)...`, `rename-window`, `rename-app`, `rename-pattern`, `name-by-folder <hwnd> on\|off`, `restore-title`, `pin`, `unpin` |
-| Bar | `bar minimize\|restore\|dock\|undock\|across\|edge` |
+| Bar | `bar minimize\|restore\|dock\|undock\|across\|edge`, `stats detach\|attach` |
 
 A few more, with `$ts` standing for the batch file:
 
