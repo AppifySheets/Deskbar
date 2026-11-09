@@ -156,6 +156,9 @@ public partial class FloatingBar : Window
             // The docking setting, followed here so every way of changing it (Manage, the remote
             // command) reaches the bar the same way.
             FollowDockSetting();
+            // The stats line goes while the stats are detached into their own window, and comes back with them
+            // (FloatingBar.Stats.cs). Here so it happens on the pulse, not at the next sample.
+            ApplyStatsVisibility();
             if (IsVisible) Rebuild();
         }));
 

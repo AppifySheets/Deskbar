@@ -317,6 +317,12 @@ public sealed record AppState(
     // different way.
     public IReadOnlyList<Group> Groups { get; init; } = [];
 
+    // The stats line (CPU, memory, disk, GPU) pulled out of the bar into its own small always-on-top window, and where
+    // that window sits (DIPs, screen coordinates). The owner wants the numbers while a game or another full-screen window
+    // covers the bar. Null means the stats were never detached, which is every state.json written before this key and
+    // every fresh install: the line stays on the bar. Shown false keeps the position for the next time it is detached.
+    public DetachedStatsState? DetachedStats { get; init; }
+
     // The version of the build that last saved this file, e.g. "2.1.44". JsonPersistenceStore stamps it on every
     // Save and StateVersionGate.Check refuses to load a file whose stamp is from a newer MAJOR version than the
     // running build. Within a major an older copy (the lagging Microsoft Store build) loads a newer file and
@@ -501,3 +507,7 @@ public sealed record FloatingBarState(double Left, double Top, bool Visible)
     // Same init-property/no-migration pattern as the rest of this record.
     public string? DockedEdge { get; init; }
 }
+
+// Where the detached stats window sits and whether it is up (AppState.DetachedStats). Left/Top are the window's own
+// Window.Left/Top in DIPs, clamped into whichever monitor holds that point every time it is shown.
+public sealed record DetachedStatsState(bool Shown, double Left, double Top);

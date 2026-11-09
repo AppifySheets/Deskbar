@@ -195,6 +195,48 @@ public sealed class JsonPersistenceStoreTests : IDisposable
         Assert.Empty(loaded.Value.PersistedRenames);
     }
 
+    // The stats line detached into its own window (AppState.DetachedStats): the shown flag and the window's place
+    // go through the manager into the file and come back, and saving the same thing again writes nothing.
+    [Fact]
+    public void SaveDetachedStats_round_trips_through_the_store()
+    {
+        var store = new JsonPersistenceStore(dir);
+        var manager = new WorkspaceManager(new FakeDesktops(), new FakeMonitor(), new FakeTitles(), store);
+        Assert.True(manager.Start().IsSuccess);
+        Assert.Null(manager.State.DetachedStats);
+        var pulses = 0;
+        using var pulse = manager.StateChanged.Subscribe(_ => pulses++);
+
+        var detached = new DetachedStatsState(true, 1500.5, 12);
+        Assert.True(manager.SaveDetachedStats(detached).IsSuccess);
+        Assert.Equal(detached, manager.State.DetachedStats);
+        Assert.Equal(detached, store.Load().Value.DetachedStats);
+        Assert.Equal(1, pulses);
+
+        // Unchanged: no write, no pulse.
+        Assert.True(manager.SaveDetachedStats(detached).IsSuccess);
+        Assert.Equal(1, pulses);
+
+        // Put back on the bar: the place is kept for the next time.
+        Assert.True(manager.SaveDetachedStats(detached with { Shown = false }).IsSuccess);
+        Assert.Equal(new DetachedStatsState(false, 1500.5, 12), store.Load().Value.DetachedStats);
+    }
+
+    [Fact]
+    public void An_old_state_file_without_the_key_loads_null()
+    {
+        // Every state.json written before the detached stats window has no such key: the stats line stays on the
+        // bar, and nothing is fabricated.
+        Directory.CreateDirectory(dir);
+        File.WriteAllText(Path.Combine(dir, "state.json"),
+            """{"Workspaces":[],"WorkspaceRules":[],"RenameRules":[],"Inventory":{}}""");
+
+        var loaded = new JsonPersistenceStore(dir).Load();
+
+        Assert.True(loaded.IsSuccess);
+        Assert.Null(loaded.Value.DetachedStats);
+    }
+
     [Fact]
     public void Old_state_file_without_FloatingBar_loads_as_null_ie_hidden_at_default_position()
     {

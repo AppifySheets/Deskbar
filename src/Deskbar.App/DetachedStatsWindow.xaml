@@ -1,0 +1,20 @@
+<Window x:Class="Deskbar.App.DetachedStatsWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Deskbar stats"
+        WindowStyle="None" AllowsTransparency="True" Background="Transparent"
+        Topmost="True" ShowInTaskbar="False" ShowActivated="False" ResizeMode="NoResize"
+        SizeToContent="WidthAndHeight"
+        PreviewMouseLeftButtonDown="OnPreviewMouseLeftButtonDown"
+        PreviewMouseMove="OnPreviewMouseMove"
+        PreviewMouseLeftButtonUp="OnPreviewMouseLeftButtonUp">
+    <!-- THE DETACHED STATS WINDOW (see DetachedStatsWindow.xaml.cs). Borderless and transparent like the bar,
+         set in XAML because WPF throws when these are assigned imperatively in the wrong order. The Border has the
+         bar's own background, corner radius and padding (FloatingBar.xaml's Root), so the four cells sit on the
+         same near-black they were drawn for. The strip is 280 wide: four cells of 70 DIP, a little more room than
+         the bar's 55-68. Press and move drags the window, a click opens Task Manager: both are handled at WINDOW
+         level, the way the bar does, so there is no button here to swallow the press. -->
+    <Border x:Name="Root" CornerRadius="8" Background="#E6141518" Padding="4">
+        <!-- The StatsStrip is added in code: it has an internal constructor, which XAML cannot call. -->
+    </Border>
+</Window>
