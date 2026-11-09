@@ -284,6 +284,11 @@ public static class NativeMethods
     [DllImport("shcore.dll")] public static extern int GetDpiForMonitor(nint hMonitor, int dpiType, out uint dpiX, out uint dpiY);
     public const int MDT_EFFECTIVE_DPI = 0;
 
+    // The scale Windows has given a WINDOW, which is what WPF turns the window's DIPs into pixels at. It can
+    // differ from the scale of the screen the window is being placed on, and the bar compares the two before a
+    // placement (see ScaleHop). Asked of Windows rather than of WPF, for the reason GetDpiForMonitor gives above.
+    [DllImport("user32.dll")] public static extern uint GetDpiForWindow(nint hwnd);
+
     public const int SW_RESTORE = 9; // NEVER SW_HIDE anywhere in this codebase (spec)
     // The window-menu equivalents of SW_RESTORE and SW_MINIMIZE, which still reach an elevated window when
     // ShowWindowAsync is refused (see WindowActivator.Show).
