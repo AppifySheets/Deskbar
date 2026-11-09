@@ -1252,7 +1252,16 @@ public partial class App : Application
             // is built later, with the hotkeys, and is missing in compatibility mode.
             showFind: text => quickFind is { } find
                 ? Result.Success().Tap(() => find.Show(text))
-                : Result.Failure("Quick find is not available in this mode."));
+                : Result.Failure("Quick find is not available in this mode."),
+            // `stats detach|attach` are the stats line's menu item and the window's, from outside. Read when the
+            // command arrives, as for the bar's toggle: there is no bar in compatibility mode.
+            setStatsDetached: detached => floatingBar is null
+                ? Result.Failure("There is no bar to change (compatibility mode).")
+                : Result.Success().Tap(() =>
+                {
+                    if (detached) ShowDetachedStats(manager.State.DetachedStats ?? FirstDetachedStatsPlace());
+                    else ReturnStats();
+                }));
         controlServer = new ControlPipeServer(ControlCommandLine.PipeName,
             args => Dispatcher.InvokeAsync(() =>
             {
@@ -1359,7 +1368,7 @@ public partial class App : Application
                 Stats = systemStats,
                 // ...and its right-click "Detach stats into a window": the window of its own (ShowDetachedStats). The
                 // first time, it opens at the top right of the main screen, clear of the bar's usual corner.
-                DetachStats = () => ShowDetachedStats(manager.State.DetachedStats ?? new(true, SystemParameters.WorkArea.Right - 300, 12)),
+                DetachStats = () => ShowDetachedStats(manager.State.DetachedStats ?? FirstDetachedStatsPlace()),
                 // The tray's own commands, for the bar's background menu, so both menus run the same code.
                 AppActions = new FloatingBar.AppCommands(OpenManage, CheckForUpdateNow, ExitApp, () => pendingUpdate, SaveDebugDump, RestartApp),
                 // ...and the Search button's: quick find, built further down, so reached through the field.
@@ -1875,6 +1884,10 @@ public partial class App : Application
     // The bar's stats line, pulled out into a small always-on-top window (DetachedStatsWindow). App owns it for the
     // reasons it owns the bar's hwnd work: the window has to be registered with Ignore and pinned across desktops,
     // and neither is the window's business. While it is shown, the bar hides its own line (AppState.DetachedStats).
+
+    // Where the window opens the first time, before it has ever been placed: the top right of the main screen, clear
+    // of the bar's usual corner. Shared by the stats line's menu item and `stats detach`.
+    static DetachedStatsState FirstDetachedStatsPlace() => new(true, SystemParameters.WorkArea.Right - 300, 12);
 
     // Shows the window at `at`, creating it the first time, and records that it is up.
     void ShowDetachedStats(DetachedStatsState at)

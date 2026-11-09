@@ -131,6 +131,16 @@ public sealed partial class RemoteControl
         _ => ControlReply.Fail(ControlUsage.LineFor("bar")),
     };
 
+    // The stats line's detach (its right-click menu) and the window's "Put stats back on the bar". The window is the
+    // app's, so the app hands in how to do it, as for `bar minimize`; null in tests and in compatibility mode.
+    ControlReply Stats(string state) => state.ToLowerInvariant() switch
+    {
+        "detach" or "attach" when setStatsDetached is null => ControlReply.Fail("The stats window cannot be controlled from here."),
+        "detach" => Reply(setStatsDetached!(true), () => new { stats = "detached" }),
+        "attach" => Reply(setStatsDetached!(false), () => new { stats = "on the bar" }),
+        _ => ControlReply.Fail(ControlUsage.LineFor("stats")),
+    };
+
     // The split window lines setting (AppState.SplitWindowLines), the remote twin of the menu item that flips it.
     ControlReply WindowLines(string mode) => mode.ToLowerInvariant() switch
     {

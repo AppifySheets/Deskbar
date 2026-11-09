@@ -51,7 +51,8 @@ internal sealed class StatsStrip : UniformGrid
             Margin = new Thickness(2, 0, 0, 0),
             IsHitTestVisible = false,
         };
-        public TextBlock Value { get; } = new() { Foreground = StatValueInk };
+        // An en dash until the first sample, so a freshly shown window has no blank cells for the first second.
+        public TextBlock Value { get; } = new() { Foreground = StatValueInk, Text = "–" };
         public Canvas Spark { get; } = new() { Height = SparkHeight, ClipToBounds = true };
         public Polygon Fill { get; } = new() { Fill = FrozenBrush(Color.FromArgb(0x38, hue.R, hue.G, hue.B)) };
         public Polyline Line { get; } = new() { Stroke = FrozenBrush(hue), StrokeThickness = 1.4, StrokeLineJoin = PenLineJoin.Round };

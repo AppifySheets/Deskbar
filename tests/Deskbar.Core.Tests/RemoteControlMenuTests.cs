@@ -500,6 +500,31 @@ public class RemoteControlMenuTests
         Assert.Equal([false, true], asked);
     }
 
+    // Detaching the stats is the app's business (a window of its own), handed in like the bar's toggle.
+    [Fact]
+    public void Stats_detach_and_attach_go_to_whatever_the_app_handed_in()
+    {
+        var manager = Started();
+        var asked = new List<bool>();
+        var control = new RemoteControl(manager, setStatsDetached: detached => { asked.Add(detached); return Result.Success(); });
+
+        Ok(control.Execute(["stats", "detach"]));
+        Ok(control.Execute(["stats", "attach"]));
+
+        Assert.Equal([true, false], asked);
+        Assert.Equal(ControlReply.Failed, control.Execute(["stats", "sideways"]).ExitCode);
+        Assert.Equal([true, false], asked);
+    }
+
+    [Fact]
+    public void Stats_refuses_without_a_window()
+    {
+        var control = new RemoteControl(Started());
+
+        Assert.Equal(ControlReply.Failed, control.Execute(["stats", "detach"]).ExitCode);
+        Assert.Equal(ControlReply.Failed, control.Execute(["stats", "attach"]).ExitCode);
+    }
+
     // Docking is a setting (Manage's checkbox, off by default); `bar dock|undock` flips it, and the bar
     // follows the setting on its own.
     [Fact]
@@ -564,7 +589,7 @@ public class RemoteControlMenuTests
              "unfold", "color", "delete", "switch", "group-create", "group-join", "group-leave", "group-rename",
              "group-color", "group-fold", "group-unfold", "group-reorder", "ungroup", "name-desktop", "rename-window", "rename-app", "rename-pattern",
              "name-by-folder", "restore-title", "pin", "unpin", "close-window", "force-close", "close-all", "restart-app", "bar",
-             "window-lines", "collapsed-click", "full-screen", "dump"],
+             "stats", "window-lines", "collapsed-click", "full-screen", "dump"],
             verb => Assert.Contains($"\n  {verb}", help));
     }
 

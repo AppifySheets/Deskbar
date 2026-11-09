@@ -405,7 +405,8 @@ Docked or not, the bar carries enough of the taskbar that you can leave Windows'
   of the last minute. Click it to open Task Manager. Right-click it and choose **Detach stats into a
   window** to move it into a small always-on-top window you can drag anywhere; the bar's own line
   hides while it is detached, and the window comes back where you left it after a restart.
-  Right-click the window and choose **Put stats back on the bar** to undo it. The window stays over
+  Right-click the window and choose **Put stats back on the bar** to undo it
+  (`deskbar.cmd stats detach`, `deskbar.cmd stats attach`). The window stays over
   borderless-windowed games and other full-screen windows, but no window can show over a game in
   exclusive full-screen mode.
 - **Now playing.** While something is playing, a line above the pins shows the player's icon, the
