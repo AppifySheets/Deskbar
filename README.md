@@ -403,12 +403,13 @@ Docked or not, the bar carries enough of the taskbar that you can leave Windows'
   on the taskbar, because Windows gives other programs no way to pin.
 - **System stats.** The top line of the footer shows CPU, memory, disk and GPU use, each with a graph
   of the last minute. Click it to open Task Manager. Right-click it and choose **Detach stats into a
-  window** to move it into a small always-on-top window you can drag anywhere; the bar's own line
-  hides while it is detached, and the window comes back where you left it after a restart.
-  Right-click the window and choose **Put stats back on the bar** to undo it
-  (`deskbar.cmd stats detach`, `deskbar.cmd stats attach`). The window stays over
-  borderless-windowed games and other full-screen windows, but no window can show over a game in
-  exclusive full-screen mode.
+  window** to move it into a small always-on-top window; drag it anywhere with the middle mouse
+  button, and click it for Task Manager. The bar's own line hides while it is detached, and the
+  window comes back where you left it after a restart. Right-click the window and choose **Put stats
+  back on the bar** to undo it (`deskbar.cmd stats detach`, `deskbar.cmd stats attach`). The window
+  sits above ordinary windows, borderless-windowed games and full-screen videos included; another
+  always-on-top window raised after it, the taskbar for one, can sit in front of it, and no window
+  can show over a game in exclusive full-screen mode.
 - **Now playing.** While something is playing, a line above the pins shows the player's icon, the
   title, the artist and the app, with previous, play/pause and next. Clicking the title brings the
   player forward.
