@@ -88,6 +88,18 @@ public partial class DetachedStatsWindow : Window
         // Press, slide off, release: not a click, the way a button reads it.
         MouseLeave += (_, _) => leftPressed = false;
 
+        // A drag whose capture is taken away (Alt+Tab, a menu opening, another window grabbing the mouse) never
+        // sees its middle release. Without this it stayed "dragging": the next middle press skipped the threshold,
+        // and where the window had been left was not saved. The ordinary release clears the flag before it lets go
+        // of the capture, so this does nothing then.
+        LostMouseCapture += (_, _) =>
+        {
+            if (!middleDragging) return;
+            middleDragging = false;
+            middleStart = null;
+            manager.SaveDetachedStats(new DetachedStatsState(true, Left, Top));
+        };
+
         subscription = stats.Samples.Subscribe(sample => Dispatcher.BeginInvoke(() => OnSample(sample)));
         Closed += (_, _) => subscription.Dispose();
     }
@@ -224,6 +236,9 @@ public partial class DetachedStatsWindow : Window
             if (Math.Abs(cursor.X - start.X) < SystemParameters.MinimumHorizontalDragDistance
                 && Math.Abs(cursor.Y - start.Y) < SystemParameters.MinimumVerticalDragDistance) return;
             middleDragging = true;
+            // A left press held through this drag is no longer a click: its release over the window, which the
+            // capture keeps the pointer "on", would open Task Manager at the end of a move.
+            leftPressed = false;
             // So the moves keep arriving when the pointer outruns the window.
             CaptureMouse();
         }
