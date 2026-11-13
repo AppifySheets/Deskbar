@@ -32,7 +32,13 @@
     <!-- Darker and more opaque with the accent rail style (Petre: "try b"): the rows are no longer tinted,
          so the bar's own background is what they sit on, and at 60% the desktop behind showed through
          enough to muddy the rails. -->
-    <Border x:Name="Root" CornerRadius="8" Background="#E6141518" Padding="4">
+    <!-- Fully opaque now (Petre, shown a busy wallpaper bleeding through: "transparent background?", then
+         "yes"). At 90% a high-contrast wallpaper, white text or a QR code, still read through behind the
+         window titles, and a bar docked full height at a screen edge gains nothing from showing the desktop.
+         The window keeps AllowsTransparency and a Transparent background only so the CornerRadius corners
+         outside this Border stay clear; nothing inside the Border is see-through any more. Do not add an
+         opacity setting to bring it back: that reopens the same legibility problem. -->
+    <Border x:Name="Root" CornerRadius="8" Background="#FF141518" Padding="4">
         <!-- No "Hide floating bar" menu any more. Petre: "show floating bar doesn't make
              sense anymore, it's crucial for the app's design." Once the switcher panel and the
              Windows tab were gone this bar became the only surface that lists windows and

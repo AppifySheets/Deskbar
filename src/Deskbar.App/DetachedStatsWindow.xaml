@@ -17,7 +17,8 @@
          the bar's 55-68, enough for a name beside its value. A middle press and move drags the window, a left
          click opens Task Manager: both are handled at WINDOW level, the way the bar does, so there is no button
          here to swallow the press. -->
-    <Border x:Name="Root" CornerRadius="8" Background="#E6141518" Padding="4">
+    <!-- Opaque, matching the bar's Root since it went fully opaque (a wallpaper read through behind the text). -->
+    <Border x:Name="Root" CornerRadius="8" Background="#FF141518" Padding="4">
         <!-- The StatsStrip is added in code: it has an internal constructor, which XAML cannot call. -->
     </Border>
 </Window>
