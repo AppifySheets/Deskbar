@@ -132,4 +132,62 @@ public class FloatingBarTilingMenuTests
 
         Assert.False(harness.Manager.State.Workspaces.Single(w => w.Name == "Sparrow").Tiled);
     });
+
+    // "Even out tiles" (docs/superpowers/specs/2026-11-08-tile-resize-design.md): a split dragged by hand is
+    // stored per screen, and this item forgets them all. Any stored entry is non-equal (SetTileSizes never
+    // stores equal sizes), so "has stored sizes" is the whole test for "has a moved split".
+    static readonly Deskbar.Core.Tiling.TileSizes Uneven = new([0.3, 0.7], [[1.0], [0.25, 0.75]]);
+
+    // A tiled Sparrow with experiment on and, when asked, one moved split on a screen.
+    static Harness TiledSparrow(bool moved)
+    {
+        var harness = Harness.Build();
+        Assert.True(harness.Manager.SetExperimentalTiling(true).IsSuccess);
+        Assert.True(harness.Manager.SetWorkspaceTiled(Id(harness, "Sparrow"), true).IsSuccess);
+        if (moved)
+            Assert.True(harness.Manager.SetTileSizes(Id(harness, "Sparrow"), "0,0,1920,1080", Uneven).IsSuccess);
+        return harness;
+    }
+
+    [Fact]
+    public void Even_out_is_offered_once_a_split_has_moved() => StaThread.Run(() =>
+    {
+        var harness = TiledSparrow(moved: true);
+        using var bar = ShowBar(harness, pro: true);
+
+        var headers = Headers(bar, "Sparrow").ToList();
+
+        // Directly under "Tile windows".
+        Assert.Equal(headers.IndexOf("Tile windows") + 1, headers.IndexOf("Even out tiles"));
+    });
+
+    [Fact]
+    public void Even_out_is_not_offered_with_equal_tiles() => StaThread.Run(() =>
+    {
+        var harness = TiledSparrow(moved: false);
+        using var bar = ShowBar(harness, pro: true);
+
+        Assert.DoesNotContain("Even out tiles", Headers(bar, "Sparrow"));
+    });
+
+    [Fact]
+    public void Even_out_is_not_offered_while_the_experiment_is_off() => StaThread.Run(() =>
+    {
+        var harness = TiledSparrow(moved: true);
+        Assert.True(harness.Manager.SetExperimentalTiling(false).IsSuccess);
+        using var bar = ShowBar(harness, pro: true);
+
+        Assert.DoesNotContain("Even out tiles", Headers(bar, "Sparrow"));
+    });
+
+    [Fact]
+    public void Even_out_clears_the_sizes_when_clicked() => StaThread.Run(() =>
+    {
+        var harness = TiledSparrow(moved: true);
+        using var bar = ShowBar(harness, pro: true);
+
+        Click(Items(bar, "Sparrow").Single(i => i.Header?.ToString() == "Even out tiles"));
+
+        Assert.Empty(harness.Manager.State.Workspaces.Single(w => w.Name == "Sparrow").TileSizes);
+    });
 }

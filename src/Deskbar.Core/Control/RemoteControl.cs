@@ -87,6 +87,7 @@ public sealed partial class RemoteControl(WorkspaceManager manager, Func<bool, R
         ("unfold", [var workspace]) => SetRowFolded(workspace, false),
         ("tile", [var workspace]) => SetRowTiled(workspace, true),
         ("untile", [var workspace]) => SetRowTiled(workspace, false),
+        ("even", [var workspace]) => EvenOutRow(workspace),
         ("color", [var workspace, var colour]) => Colour(workspace, colour),
         ("delete", [var workspace]) => Delete(workspace, closeWindows: false),
         ("delete", [var workspace, "--close-windows"]) => Delete(workspace, closeWindows: true),

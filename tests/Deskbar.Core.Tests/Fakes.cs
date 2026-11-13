@@ -287,8 +287,12 @@ public sealed class FakeScreenLayout : IScreenLayout
 // for that window, which is how an app that will not shrink into its slot is described.
 public sealed class FakeTileSurface : ITileSurface
 {
-    // One 1920x1040 work area at 100% scaling unless a test says otherwise.
-    public List<TileScreen> ScreenList { get; } = [new TileScreen(1, new WindowRect(0, 0, 1920, 1040), 96)];
+    // One 1920x1040 work area at 100% scaling unless a test says otherwise. The monitor's bounds default to the
+    // work area: a fake screen has no taskbar, and only the bounds' identity matters (tile sizes are kept by them).
+    public List<TileScreen> ScreenList { get; } = [Screen(1, new WindowRect(0, 0, 1920, 1040))];
+
+    // A screen whose monitor bounds are its work area, which is what every test means unless it says otherwise.
+    public static TileScreen Screen(int number, WindowRect workArea, int dpi = 96) => new(number, workArea, dpi, workArea);
 
     // Which screen each window is on; a window not in here is on the first screen.
     public Dictionary<WindowHandle, int> ScreenOfWindow { get; } = [];
@@ -327,6 +331,11 @@ public sealed class FakeTileSurface : ITileSurface
     // here to stand for "the user has it under the pointer", and takes it out before its Settled.
     public HashSet<WindowHandle> Settling { get; } = [];
     public bool IsSettling(WindowHandle window) => Settling.Contains(window);
+
+    // Windows whose last settle the test says was by hand (a button down during it). A test adds a window here
+    // before its Settled to stand for a drag, and leaves it out for an app or Deskbar moving it.
+    public HashSet<WindowHandle> MovedByHand { get; } = [];
+    public bool ByHand(WindowHandle window) => MovedByHand.Contains(window);
 
     public Maybe<WindowRect> VisibleFrameOf(WindowHandle window)
     {

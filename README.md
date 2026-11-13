@@ -293,7 +293,8 @@ not; leave it and it folds again.
 
 **Tile windows** (Deskbar Pro, experimental) lays the workspace's windows out in a grid on each
 screen while you are on it. It is off by default: tick **Tiling (experimental)** on Manage, where
-the gap between tiles is set too, and the item appears on every row's menu.
+the gap between tiles is set too, and the item appears on every row's menu. Drag a separation
+between two tiles to resize them, and **Even out tiles** puts the sizes back.
 
 **Colour.** Nine swatches sit in one strip inside the menu, with the current choice ringed. Below
 them, **Custom…** opens Windows' own colour dialog starting on the row's current colour;

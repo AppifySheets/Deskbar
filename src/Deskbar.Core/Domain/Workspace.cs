@@ -1,6 +1,11 @@
 using System.Text.Json.Serialization;
+using Deskbar.Core.Tiling;
 
 namespace Deskbar.Core.Domain;
+
+// One screen's stored tile sizes. Screen is an opaque key: the Tiler builds it from the screen's monitor
+// bounds as "L,T,R,B", and this layer only stores and clears by it.
+public sealed record ScreenTileSizes(string Screen, TileSizes Sizes);
 
 // A named group of windows, backed 1:1 by a Windows virtual desktop.
 // DesktopId is the *live* desktop's GUID -- persisted so we can re-bind to the same
@@ -55,6 +60,22 @@ public sealed record Workspace(Guid Id, string Name, Guid? DesktopId, string? Co
     // Init property defaulting to false, so a state.json written before tiling has no key and loads untiled,
     // with no migration.
     public bool Tiled { get; init; }
+
+    // The column and row sizes the user dragged this workspace's grid to, one entry per screen. Petre: "i want
+    // to be able to resize tiles by dragging the separation" and "keep my sizes".
+    //
+    // On the workspace for the reason Tiled is: it survives a restart with no second store to keep in step,
+    // and it is a fact about this workspace's grid. A screen that drops out keeps its entry, so plugging it
+    // back in restores the sizes. Only "Even out tiles", untiling and deleting the workspace remove them;
+    // turning the experiment off does not.
+    //
+    // Init property defaulting to empty, so a state.json written before this has no key and loads with no
+    // stored sizes (every grid equal, as before), with no migration.
+    //
+    // A ValueList, not a plain list: a record compares a list member by reference, so two workspaces holding
+    // the same sizes would be unequal. ValueList compares by contents, which keeps the record's generated
+    // equality right for every property, this one and any added later.
+    public ValueList<ScreenTileSizes> TileSizes { get; init; } = [];
 
     // The group this workspace belongs to, or null for one that stands on its own.
     //
