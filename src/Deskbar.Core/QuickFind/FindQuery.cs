@@ -20,6 +20,23 @@ public sealed record FindQuery(IReadOnlyList<string> Pieces)
     public bool Matches(string haystack) =>
         !IsEmpty && Pieces.All(piece => haystack.Contains(piece, StringComparison.OrdinalIgnoreCase));
 
+    // Whether ANY piece appears in the text. Ranking asks this of a tab's own title and workspace, so a tab is
+    // not found through the title of the window holding it alone (see FindRanking).
+    public bool MatchesAny(string haystack) =>
+        Pieces.Any(piece => haystack.Contains(piece, StringComparison.OrdinalIgnoreCase));
+
+    // Whether what was typed is the program's NAME and not just letters inside it: every piece is a whole word
+    // of the text. "code" names "Visual Studio Code" (and its exe, Code); "inv" does not name "Invoice Ninja".
+    // Only this lets a row that opens a new window take the top of the list, because a half-typed word is far
+    // more often the start of a title than a request for another window.
+    public bool Names(string program)
+    {
+        var words = new string(program.Select(c => char.IsLetterOrDigit(c) ? c : ' ').ToArray())
+            .Split(' ', StringSplitOptions.RemoveEmptyEntries)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        return !IsEmpty && Pieces.All(words.Contains);
+    }
+
     // For ranking: a title that STARTS with what was typed first is a better guess than one that merely
     // contains it ("inv" prefers "Invoices 2026" to "My invoices"). Only the first piece, because that is the
     // word Petre began with, the one he thinks of as the name.

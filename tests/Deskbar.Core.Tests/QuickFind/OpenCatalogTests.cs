@@ -34,12 +34,14 @@ public class OpenCatalogTests
     }
 
     [Fact]
-    public void A_browser_window_with_tabs_is_listed_by_its_tabs_only()
+    public void A_browser_window_with_tabs_is_listed_by_its_tabs_and_stands_behind_them()
     {
-        var found = Catalog(
+        var all = Catalog(
             [Window(2, "msedge", "Invoice - Microsoft Edge")],
             new Dictionary<nint, IReadOnlyList<string>> { [2] = ["Invoice", "Mail"] });
-        Assert.All(found, r => Assert.Equal(FindKind.Tab, r.Kind));
+        // The window is there only for a search that finds none of its tabs (FindRanking drops it otherwise).
+        Assert.True(Assert.Single(all, r => r.Kind == FindKind.Window).TabsStandIn);
+        var found = all.Where(r => r.Kind == FindKind.Tab).ToList();
         Assert.Equal(["Invoice", "Mail"], found.Select(r => r.Title));
         Assert.Equal([0, 1], found.Select(r => r.TabIndex!.Value));
         Assert.All(found, r => Assert.Equal("Invoice - Microsoft Edge", r.Detail));
@@ -74,7 +76,7 @@ public class OpenCatalogTests
         var found = Catalog(
             [Window(2, "msedge", "Invoice - Microsoft Edge")],
             new Dictionary<nint, IReadOnlyList<string>> { [2] = ["Invoice"] });
-        Assert.True(FindQuery.Parse("acc inv").Matches(Assert.Single(found).SearchText));
+        Assert.True(FindQuery.Parse("acc inv").Matches(Assert.Single(found, r => r.Kind == FindKind.Tab).SearchText));
     }
 
     [Fact]

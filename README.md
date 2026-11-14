@@ -469,7 +469,14 @@ workspace: window titles, every browser tab and every VS Code editor tab (open C
 sessions included, since each is a tab named after the session). Type a few letters of anything
 in the title, in any order: `inv 10` finds "Invoice 2026-10". Results sit under the workspace they are in, in its colour, the workspaces you
 used most recently first. Enter takes you there, Esc closes the box. A browser window is listed by
-its tabs, so you find the page, not the window that happens to show it.
+its tabs, so you find the page, not the window that happens to show it. A tab is found by its own
+title or its workspace, so `code` does not list every tab of every VS Code window.
+
+A program that is already running is offered once more as a **new window** row, which opens another
+window of it on the desktop you are on, as a middle click on its taskbar button does. Type the
+program's name (`code`, `edge`) while it has several windows open and that row is first, so Enter
+opens the new window. With one window open, Enter still goes to that window and the new window row
+sits below.
 
 `deskbar find inv 10` opens it with the text already typed. Change the chord on Manage →
 **Shortcuts**; it can never be the switcher's. These two chords are the only ones Deskbar

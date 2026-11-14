@@ -20,6 +20,7 @@ public sealed record StartMenuApp(string Name, string ParsingName, string? Targe
 //   Starting        exe names a start is still waiting for (WorkspaceManager.AwaitedProcesses)
 //   PathExists      whether a local file or folder exists
 //   DestinationOf   where a start of this program and command line would land, as the row shows it
+//   Here            where Petre is, which is where a new window of a running program opens
 //   IsSelf          Deskbar's own Start menu entry
 public sealed record LaunchFacts(
     IReadOnlyList<InventoryEntry> Roster,
@@ -29,6 +30,7 @@ public sealed record LaunchFacts(
     IReadOnlySet<string> Starting,
     Func<string, bool> PathExists,
     Func<string, string?, FindPlace> DestinationOf,
+    FindPlace Here,
     Func<StartMenuApp, bool> IsSelf);
 
 // WHAT QUICK FIND COULD START (docs/superpowers/specs/2026-11-04-quick-find-design.md, "Launching"). Petre:
@@ -47,7 +49,15 @@ public sealed record LaunchFacts(
 //     like `rider64 X.sln`, never an option's value or an exe repeated on the line.
 //   * RUNNING means any window of a process with the same EXE NAME (a newer Rider in another folder is still
 //     Rider), or a window carrying the entry's AppUserModelID (PWAs, framed apps), or a start still waiting
-//     for its window. Such programs get no row: Enter must never start a second copy.
+//     for its window. Such programs get no "not running" row: Enter must never start a second copy by accident.
+//   * A program running under its own exe keeps its Start menu entry as a NEW WINDOW row (Petre, with sixteen
+//     VS Code windows open: "i want just a new code window, i should be able to do that"). It is launched
+//     through the same shell entry, which for a program already running opens another window, as a middle
+//     click on its taskbar button does (measured with VS Code: a new empty window on the desktop in front).
+//     The row says where Petre is, not where the program was remembered, and expects nothing: the window
+//     comes from the copy already running, and placement memory stands down for a program that has another
+//     window open. Where the row ranks is FindRanking's decision. A PWA or framed app open under another
+//     process, and a program with no Start menu entry, still get no row.
 //   * Packaged programs are held to their row's workspace by the exe their window really belongs to
 //     (ms-teams, Photos), known from the roster; ApplicationFrameHost entries say nothing and are skipped.
 //   * Deskbar never lists itself: starting its own Store package here would perform the autostart takeover.
@@ -78,8 +88,8 @@ public static class LaunchCatalog
     static FindResult? MenuRow(StartMenuApp app, IReadOnlyList<InventoryEntry>? remembered, LaunchFacts facts, IReadOnlySet<string> runningExes)
     {
         var exe = app.TargetPath ?? remembered?[0].ProcessPath;
-        if (exe is not null && runningExes.Contains(Path.GetFileName(exe))) return null;
         if (facts.RunningAppIds.Contains(app.ParsingName)) return null;
+        if (exe is not null && runningExes.Contains(Path.GetFileName(exe))) return NewWindowRow(app, exe, facts);
 
         var home = remembered is null ? null : Representative(remembered, facts);
         var place = home is null ? facts.DestinationOf(app.TargetPath ?? app.ParsingName, null) : facts.DestinationOf(home.ProcessPath, home.CommandLine);
@@ -88,6 +98,18 @@ public static class LaunchCatalog
             exe is null ? null : Path.GetFileNameWithoutExtension(exe));
         return Row($"s:{app.ParsingName}", remembered is null ? FindKind.StartMenu : FindKind.Remembered, app.Name, launch,
             app.TargetPath ?? home?.ProcessPath, place, searchExtra: exe is null ? "" : Path.GetFileNameWithoutExtension(exe));
+    }
+
+    // Another window of a program that is running. No expected process: nothing has to be held to a workspace,
+    // the window opens on the desktop in front. OpenWindows counts the program's windows by exe name, the same
+    // test that called it running, for FindRanking's "several windows open" rule.
+    static FindResult NewWindowRow(StartMenuApp app, string exe, LaunchFacts facts)
+    {
+        var exeFile = Path.GetFileName(exe);
+        var open = facts.Running.Count(w => w.ProcessPath is { } path && Path.GetFileName(path).Equals(exeFile, StringComparison.OrdinalIgnoreCase));
+        var launch = new LaunchTarget(new ProgramLaunch("explorer.exe", [$@"shell:AppsFolder\{app.ParsingName}"], null), null);
+        return Row($"n:{app.ParsingName}", FindKind.NewWindow, app.Name, launch, app.TargetPath ?? exe, facts.Here,
+            searchExtra: Path.GetFileNameWithoutExtension(exe), detail: "new window") with { OpenWindows = open };
     }
 
     // A remembered program the Start menu does not list: started by its exe, bare. Only while that exe still
@@ -143,11 +165,9 @@ public static class LaunchCatalog
         entries.FirstOrDefault(e => CommandLines.ArgumentsOf(e.CommandLine, e.ProcessPath).Length == 0) ?? entries.FirstOrDefault();
 
     static FindResult Row(string key, FindKind kind, string title, LaunchTarget launch, string? iconPath, FindPlace place,
-        string? detailPrefix = null, string searchExtra = "")
-    {
-        var detail = detailPrefix is null ? "not running" : $"{detailPrefix}, not running";
-        return new FindResult(key, kind, title, place, $"{title} {searchExtra}".Trim(), Detail: detail, IconPath: iconPath, Launch: launch);
-    }
+        string? detailPrefix = null, string searchExtra = "", string? detail = null) =>
+        new(key, kind, title, place, $"{title} {searchExtra}".Trim(),
+            Detail: detail ?? (detailPrefix is null ? "not running" : $"{detailPrefix}, not running"), IconPath: iconPath, Launch: launch);
 
     static bool IsProgram(StartMenuApp app) =>
         !app.Name.Contains("uninstall", StringComparison.OrdinalIgnoreCase)
