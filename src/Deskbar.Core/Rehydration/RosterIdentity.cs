@@ -147,6 +147,12 @@ public static class RosterIdentity
     //              on the workspace he was on and land in Personal 200 ms later. Its exe lives under a
     //              versioned Microsoft.ScreenSketch_... folder, which is why the list keys on the file
     //              name and not the path.
+    //   Notepad    a scratch pad started from wherever the thought occurs. Petre: "why did notepad jump to
+    //              another bar?" Started from the Run box on iam.ge, it was on HRIS 43 ms later: a Notepad
+    //              with no file had been placed there once, and "notepad.exe|" is the identity of every
+    //              Notepad started without one. The cost, accepted: `notepad some.txt` had an identity of
+    //              its own per file and loses that memory too. The file name covers both the Store Notepad
+    //              (under a versioned Microsoft.WindowsNotepad_... folder) and the classic one in system32.
     //
     // Deliberately NOT included: the Store apps that report their own exe, WhatsApp and Teams among them.
     // They are rostered under their own paths and keep their own memory. ApplicationFrameHost IS included
@@ -157,7 +163,7 @@ public static class RosterIdentity
         "chrome", "msedge", "brave", "vivaldi", "opera", "firefox",
         "WindowsTerminal", "OpenConsole", "conhost", "cmd", "powershell", "pwsh",
         "PickerHost", "CredentialUIBroker",
-        "Taskmgr", "SnippingTool",
+        "Taskmgr", "SnippingTool", "Notepad",
         "ApplicationFrameHost",
     };
 

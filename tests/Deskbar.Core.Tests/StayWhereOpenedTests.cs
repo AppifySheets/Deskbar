@@ -89,6 +89,10 @@ public class StayWhereOpenedTests(ITestOutputHelper output)
     [InlineData(@"C:\WINDOWS\system32\ApplicationFrameHost.exe")]
     // The path as Petre's state.json recorded it; the hotkey's own command line is covered below.
     [InlineData(@"C:\Program Files\WindowsApps\Microsoft.ScreenSketch_11.2608.41.0_x64__8wekyb3d8bbwe\SnippingTool\SnippingTool.exe")]
+    // The path as Petre's state.json recorded it; the roster entry itself is replayed below.
+    [InlineData(@"C:\Program Files\WindowsApps\Microsoft.WindowsNotepad_11.2607.14.0_x64__8wekyb3d8bbwe\Notepad\Notepad.exe")]
+    // The classic one, for a machine without the Store Notepad. The file name is the same.
+    [InlineData(@"C:\WINDOWS\system32\notepad.exe")]
     public void These_apps_stay_where_they_were_opened(string path) =>
         Assert.True(RosterIdentity.StaysWhereOpened(path, $"\"{path}\""));
 
@@ -297,6 +301,32 @@ public class StayWhereOpenedTests(ITestOutputHelper output)
 
         Log();
         Assert.DoesNotContain(new WindowHandle(0x59069E), desktops.WindowPlacements.Keys);
+    }
+
+    // Petre: "why did notepad jump to another bar?" He started Notepad from the Run box while on iam.ge and it
+    // was on HRIS 43 ms later, with no line in the trace (memory is the tier that writes none). A Notepad with
+    // no file had been placed on HRIS once, and the roster sent every later one there. That entry is replayed
+    // here, and the window must stay on the desktop it opened on.
+    [Fact]
+    public void A_rostered_notepad_opens_where_it_was_started()
+    {
+        const string notepadPath = @"C:\Program Files\WindowsApps\Microsoft.WindowsNotepad_11.2607.14.0_x64__8wekyb3d8bbwe\Notepad\Notepad.exe";
+        const string notepadCmd = "\"" + notepadPath + "\" ";
+        var hris = new Workspace(Guid.NewGuid(), "HRIS", null);
+        Started(AppState.Empty with
+        {
+            Workspaces = [hris],
+            Inventory = new Dictionary<Guid, IReadOnlyList<InventoryEntry>>
+            {
+                [hris.Id] = [new InventoryEntry(notepadPath, notepadCmd, "Untitled - Notepad")],
+            },
+        });
+
+        monitor.Subject.OnNext(new WindowEvent(WindowEventKind.Appeared,
+            new WindowInfo(new WindowHandle(0x10C0272), 33308, "Notepad", notepadPath, "Untitled - Notepad", notepadCmd)));
+
+        Log();
+        Assert.DoesNotContain(new WindowHandle(0x10C0272), desktops.WindowPlacements.Keys);
     }
 
     // Same state, same moment: the web app and Beeper still go home.
