@@ -5855,7 +5855,19 @@ public partial class FloatingBar : Window
     // The timer runs only during a drag, at about 30 checks a second, and does nothing else.
 
     // A row that takes a title-bar drop: its container, keys and resting background, and what a drop does.
-    sealed record HeaderDropTarget(Grid Container, string GroupKey, string Label, Brush Idle, Action<WindowHandle, int?> Drop);
+    // Internal for HeaderDropPendingTests, which hands FinishHeaderDrop a target of its own.
+    internal sealed record HeaderDropTarget(Grid Container, string GroupKey, string Label, Brush Idle, Action<WindowHandle, int?> Drop);
+
+    // The windows whose drop on a row is being carried out right now, from the release on the bar until the
+    // move has returned (FinishHeaderDrop). Tiling reads it (App wires IsHeaderDropPending into the Tiler): the
+    // spec says "A drop on one of the bar's workspace rows is the bar's gesture (move to that workspace) and
+    // wins over a tile swap", and the window settles (Snap leaves it at half the screen) during the third of a
+    // second the drop waits, so without this the Tiler would swap it with the tile under it first. Counted
+    // rather than a set, so a second drop of the same window that overlaps the first is not cut short when the
+    // first one finishes.
+    readonly Dictionary<WindowHandle, int> headerDropsPending = [];
+
+    public bool IsHeaderDropPending(WindowHandle window) => headerDropsPending.ContainsKey(window);
 
     readonly List<HeaderDropTarget> headerDropTargets = [];
 
@@ -5961,16 +5973,29 @@ public partial class FloatingBar : Window
     // not wait for us, and it can land after the first put-back, so the window is put back again once Snap
     // has had its turn. Only then is it moved to the other workspace, re-maximized first if it was
     // maximized, so it maximizes on the screen it was on.
-    async Task FinishHeaderDrop(WindowHandle window, WindowRect start, bool wasMaximized, HeaderDropTarget target, int? screen)
+    //
+    // The whole of it, from the first line (still inside the drag's end, before anything awaits) until the
+    // drop has returned, is marked pending for tiling (see headerDropsPending). The mark is taken off in a
+    // finally, so a drop that throws part way leaves no window stuck as "being dropped".
+    internal async Task FinishHeaderDrop(WindowHandle window, WindowRect start, bool wasMaximized, HeaderDropTarget target, int? screen)
     {
-        manager.PutWindowBack(window, start)
-            .TapError(error => ClickTrace.Write($"header drop: could not put the window back: {error}"));
-        await Task.Delay(350);
-        manager.PutWindowBack(window, start)
-            .TapError(error => ClickTrace.Write($"header drop: could not put the window back after snap: {error}"));
-        if (wasMaximized) NativeMethods.ShowWindowAsync(window.Value, NativeMethods.SW_MAXIMIZE);
-        if (ClickTrace.On) ClickTrace.Write($"header drop hwnd={window.Value:X} row={target.Label} screen={screen?.ToString() ?? "none"}");
-        target.Drop(window, screen);
+        headerDropsPending[window] = headerDropsPending.GetValueOrDefault(window) + 1;
+        try
+        {
+            manager.PutWindowBack(window, start)
+                .TapError(error => ClickTrace.Write($"header drop: could not put the window back: {error}"));
+            await Task.Delay(350);
+            manager.PutWindowBack(window, start)
+                .TapError(error => ClickTrace.Write($"header drop: could not put the window back after snap: {error}"));
+            if (wasMaximized) NativeMethods.ShowWindowAsync(window.Value, NativeMethods.SW_MAXIMIZE);
+            if (ClickTrace.On) ClickTrace.Write($"header drop hwnd={window.Value:X} row={target.Label} screen={screen?.ToString() ?? "none"}");
+            target.Drop(window, screen);
+        }
+        finally
+        {
+            if (headerDropsPending[window] > 1) headerDropsPending[window]--;
+            else headerDropsPending.Remove(window);
+        }
     }
 
     // Lights the row under the cursor, if this is a move rather than a resize and the cursor is on the bar.
@@ -6857,6 +6882,10 @@ public partial class FloatingBar : Window
         // it cannot go stale in a way the user could reach.
         Add(folded ? "▾" : "▸", folded ? "Unfold row" : "Fold row",
             () => Report(manager.SetWorkspaceFolded(workspaceId, !folded)));
+
+        // Tiling (FloatingBar.Tiling.cs): nothing while the experiment is off, "Tile windows" for Pro, the
+        // Deskbar Pro wording otherwise.
+        AddTilingItems(menu, workspaceId, Add);
 
         // Where the current workspace's titled list is ("let's try both"): its own row expands into it, or
         // it sits at the bottom of the bar. One item that flips, naming what it would switch TO. On every

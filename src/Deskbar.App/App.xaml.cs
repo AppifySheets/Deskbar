@@ -52,6 +52,11 @@ public partial class App : Application
     DetachedStatsWindow? detachedStats; // the stats line detached into its own always-on-top window, created on first use
     bool detachedStatsPinned;           // its hwnd is pinned to every desktop once, after its first show (see ShowDetachedStats)
     TimeTracker? timeTracker; // #53: active time per workspace, in its own file beside state.json
+    // Tiling (docs/superpowers/specs/2026-11-08-tiling-design.md): the Tiler decides, the surface does the
+    // Win32. Both live for the process, both are null in compatibility mode (there are no desktops to tile),
+    // and ExitApp disposes the Tiler and then the surface, so the LOCATIONCHANGE hook goes with them.
+    Core.Tiling.Tiler? tiler;
+    Windows.Tiling.TileSurface? tileSurface;
 
     // Held for the whole process lifetime, in a FIELD so the GC cannot collect it and quietly
     // release the lock while we are still running. See OnStartup for why it exists.
@@ -146,9 +151,54 @@ public partial class App : Application
             // app runs is noticed within five minutes. Fire-and-forget: RefreshAsync never throws (see
             // Entitlement), and nothing here waits for it. barHandle is the bar's hwnd, which owns the
             // Store context; it is zero in compatibility mode, where there is no bar.
-            _ = Entitlement.RefreshAsync(barHandle);
+            RefreshEntitlement();
         };
         updateTimer.Start();
+    }
+
+    // Reads the Pro verdict again (Entitlement.RefreshAsync), then tells the Tiler, because Pro is the one
+    // input to tiling that the manager does not hold: a trial that ends stops the grid, a purchase starts it,
+    // without waiting for the next window event. RefreshAsync finishes on a thread-pool thread (the licence
+    // read does not come back to the dispatcher), and the Tiler runs only on the UI thread, so the Refresh is
+    // posted through the dispatcher. Fire-and-forget like the call it wraps: RefreshAsync never throws, and
+    // Tiler.Refresh guards itself. `tiler` is read when the refresh lands, so a refresh racing startup or exit
+    // finds it null and does nothing.
+    void RefreshEntitlement() =>
+        _ = Entitlement.RefreshAsync(barHandle)
+            .ContinueWith(_ => Dispatcher.InvokeAsync(() => tiler?.Refresh()), TaskScheduler.Default);
+
+    // Tiling (docs/superpowers/specs/2026-11-08-tiling-design.md). Called from OnStartup on the UI thread, once,
+    // and only once the manager has STARTED: the manager's own desktop-change handling (which sends borrowed
+    // windows home) subscribes in manager.Start(). CurrentChanged is a FromEventPattern over Windows' own
+    // CurrentChanged event, so each subscription adds its own handler to that event, and an event's multicast
+    // delegate calls its handlers in the order they were added: on a desktop switch the manager settles first
+    // and the Tiler then sees the result.
+    //
+    // Both objects are built on the UI thread on purpose (TileSurface's class header): the surface captures the
+    // dispatcher for its debounce timers, and its LOCATIONCHANGE hook is installed by the Tiler from this thread
+    // when something is tiled, so the callbacks arrive here. App never calls Watch itself. With the experiment
+    // off (the default) the Tiler only ever narrows the hook to the empty set, so no hook is installed at all.
+    //
+    // Nothing else to wire: the Tiler subscribes to the manager's StateChanged and WindowMoved, the monitor's
+    // events, the desktops' CurrentChanged and the surface's Settled and ScreensChanged itself, so the row menu,
+    // Manage and `deskbar.cmd tile` reach it through the state they change. Pro is the only input it reads from
+    // outside, through the delegate below and a Refresh after each licence refresh (RefreshEntitlement).
+    void StartTiling()
+    {
+        if (compatibilityMode || manager is null || monitor is null || desktops is null) return;
+
+        // "Ours" is decided the way the bar already decides it (FloatingBar.IsOwnWindow: the window's process
+        // is this process), so Deskbar never tiles its own bar, Manage, or a dialog of its own.
+        tileSurface = new Windows.Tiling.TileSurface(w => FloatingBar.IsOwnWindow(w.Value));
+        tiler = new Core.Tiling.Tiler(manager, desktops, monitor, tileSurface,
+            () => Entitlement.Current.IsPro,
+            // A `tile:` line per decision when tracing is on, given the way the manager's trace is.
+            trace: ClickTrace.On ? ClickTrace.Write : null,
+            // A title-bar drop on a bar row wins over a tile swap (spec): while the bar is carrying one out, the
+            // Tiler ignores that window's Settled and does not place it (FloatingBar.IsHeaderDropPending). Read
+            // through the field, so a bar that does not exist (compatibility mode never gets here) answers no.
+            dropPending: w => floatingBar?.IsHeaderDropPending(w) == true);
+        tiler.Start();
     }
 
     // Fire-and-forget on purpose: nothing waits for the answer and nothing reports its absence.
@@ -733,8 +783,9 @@ public partial class App : Application
 
     // Split out for #110's failure path, which has no ReleaseInfo to name a page with: a check that
     // could not be made knows nothing about any release, and the releases page is still the way
-    // through.
-    static void OpenUrl(string url)
+    // through. Internal since tiling: the bar's free-tier "Tile windows (Deskbar Pro)" opens the Store page
+    // through it too (FloatingBar.Tiling.cs), so the app keeps one way of opening a link.
+    internal static void OpenUrl(string url)
     {
         try
         {
@@ -1261,7 +1312,10 @@ public partial class App : Application
                 {
                     if (detached) ShowDetachedStats(manager.State.DetachedStats ?? FirstDetachedStatsPlace());
                     else ReturnStats();
-                }));
+                }),
+            // `tile` is refused in the free tier, as the row menu's item is. Entitlement's cached verdict, read when
+            // the command arrives, so a licence refresh in between is honoured.
+            isPro: () => Entitlement.Current.IsPro);
         controlServer = new ControlPipeServer(ControlCommandLine.PipeName,
             args => Dispatcher.InvokeAsync(() =>
             {
@@ -1486,7 +1540,10 @@ public partial class App : Application
         // barHandle is zero, which StoreContextHolder handles by leaving the context untied to a window (a
         // licence read needs none). Fire-and-forget:
         // RefreshAsync never throws, and startup does not wait on the Store.
-        _ = Entitlement.RefreshAsync(barHandle);
+        //
+        // The Tiler is built first, so the Refresh that follows this first verdict has a Tiler to reach.
+        StartTiling();
+        RefreshEntitlement();
 
         // The hover-to-peek switcher panel USED to be summoned from here, with a 400ms
         // DispatcherTimer, a drift radius to reject drive-by cursor passes, and a proximity
@@ -1720,6 +1777,13 @@ public partial class App : Application
         // first is the tidy, deterministic thing to do. The asymmetry is intentional.
         SessionEnding += (_, _) =>
         {
+            // The grid stands down too: windows closing for the logoff must not make the rest re-tile. Nulled
+            // as ExitApp does, so a licence refresh that lands after this (RefreshEntitlement posts its Refresh
+            // through the dispatcher) finds no Tiler to poke.
+            tiler?.Dispose();
+            tiler = null;
+            tileSurface?.Dispose();
+            tileSurface = null;
             monitor.Dispose();
             manager.RestoreAllTitles();
         };
@@ -2071,6 +2135,13 @@ public partial class App : Application
 
         // First, so no remote command can start moving windows while the rest is being taken down.
         controlServer?.Dispose();
+        // Then tiling, before anything else is torn down, so no re-tile runs against a half-closed app. The Tiler
+        // first (it unsubscribes and narrows the hook to nothing), then the surface (which removes whatever hook
+        // is left and stops its timers). Nulled so a licence refresh landing after this finds no Tiler to poke.
+        tiler?.Dispose();
+        tiler = null;
+        tileSurface?.Dispose();
+        tileSurface = null;
         manager?.RestoreAllTitles();  // leave every window as we found it
         monitor?.Dispose();
         hotkeys?.Dispose(); // unregisters RegisterHotKey chords before the process exits

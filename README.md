@@ -291,6 +291,10 @@ flashing for you, so folding never hides a message. Clicking the name still swit
 window dropped on it still moves there. The workspace you are on always shows its icons, folded or
 not; leave it and it folds again.
 
+**Tile windows** (Deskbar Pro, experimental) lays the workspace's windows out in a grid on each
+screen while you are on it. It is off by default: tick **Tiling (experimental)** on Manage, where
+the gap between tiles is set too, and the item appears on every row's menu.
+
 **Colour.** Nine swatches sit in one strip inside the menu, with the current choice ringed. Below
 them, **Custom…** opens Windows' own colour dialog starting on the row's current colour;
 **Transparent** opts the row out of tinting; **By position** hands the colour back to the palette.

@@ -66,6 +66,8 @@ public sealed class WorkspaceManager(
     readonly Func<DateTimeOffset> now = clock ?? (() => DateTimeOffset.Now);
     readonly int ownProcess = ownProcessId ?? Environment.ProcessId;
     readonly Subject<Unit> stateChanged = new();
+    // See WindowMoved.
+    readonly Subject<WindowHandle> windowMoved = new();
     // ORDERED, and the order is the order the bar draws icons in. Petre: "rearranging icons when i
     // activate a program makes no sense at this point", then "go with the first-seen order, with the
     // possibility of dragging those icons". So a window takes its place when it is first seen (see
@@ -179,6 +181,14 @@ public sealed class WorkspaceManager(
         currentDesktopId.Bind(desktop => State.Workspaces.TryFirst(w => w.DesktopId == desktop).Map(w => w.Id));
 
     public IObservable<Unit> StateChanged => stateChanged.AsObservable();
+
+    // A window this app has just moved to another desktop, raised only when the move succeeded (see
+    // MoveWindowTo, the one doorway every such move goes through). It exists because a desktop change is
+    // SILENT: moving a window between virtual desktops raises no window event (no show, no hide, no title
+    // change) and no LOCATIONCHANGE, since the window keeps its rectangle. The Tiler has to hear about it, or a
+    // window the bar sends elsewhere would leave a hole in the grid it came from, and one sent onto a tiled
+    // workspace would float there until something unrelated happened.
+    public IObservable<WindowHandle> WindowMoved => windowMoved.AsObservable();
     public IReadOnlyList<WindowInfo> KnownWindows => knownWindows.Values.ToList();
 
     // The title a window had before this app shortened it, or None when it was never renamed.
@@ -924,7 +934,7 @@ public sealed class WorkspaceManager(
     Result Place(WindowInfo window, Guid workspaceId, bool roster = true) =>
         Workspace(workspaceId)
             .Bind(w => w.DesktopId is { } desktopId
-                ? desktops.MoveWindow(window.Handle, desktopId)
+                ? MoveWindowTo(window.Handle, desktopId)
                 : Result.Failure("Workspace has no desktop (compatibility mode)."))
             .Tap(() =>
             {
@@ -1209,7 +1219,7 @@ public sealed class WorkspaceManager(
             // Order matters and is the whole trick: unpin first, then put it back. Unpinning alone
             // would leave the window on whichever desktop is current -- which, on a switch out of a
             // nested workspace, is the wrong one.
-            desktops.Unpin(b.Key).Tap(() => desktops.MoveWindow(b.Key, b.Value));
+            desktops.Unpin(b.Key).Tap(() => MoveWindowTo(b.Key, b.Value));
         });
         borrowed.Clear();
         PersistBorrowed();
@@ -1243,7 +1253,7 @@ public sealed class WorkspaceManager(
         if (State.InheritedPins.Count == 0) return;
         State.InheritedPins.ToList().ForEach(pin =>
             desktops.Unpin(new WindowHandle((nint)pin.Window))
-                .Tap(() => desktops.MoveWindow(new WindowHandle((nint)pin.Window), pin.HomeDesktop)));
+                .Tap(() => MoveWindowTo(new WindowHandle((nint)pin.Window), pin.HomeDesktop)));
         Persist(State with { InheritedPins = [] });
     }
 
@@ -1681,6 +1691,30 @@ public sealed class WorkspaceManager(
         {
             Workspaces = State.Workspaces.Select(w => w.Id == id ? w with { Folded = folded } : w).ToList(),
         }));
+
+    // Marks a workspace as tiled or not (Workspace.Tiled). Whether tiling then acts is TilingGate's call.
+    public Result SetWorkspaceTiled(Guid id, bool tiled) =>
+        Workspace(id).Tap(_ => Persist(State with
+        {
+            Workspaces = State.Workspaces.Select(w => w.Id == id ? w with { Tiled = tiled } : w).ToList(),
+        }));
+
+    // The gap between tiles (AppState.TileGap), 0 to 64 pixels at 100% scaling. Refused outside that range
+    // rather than clamped, so a caller never believes it set something it did not. A no-op when unchanged,
+    // for the reason SetCheckForUpdates gives.
+    public Result SetTileGap(int gap) =>
+        gap is < 0 or > 64
+            ? Result.Failure("The tile gap must be between 0 and 64 pixels.")
+            : State.TileGap == gap
+                ? Result.Success()
+                : Result.Success().Tap(() => Persist(State with { TileGap = gap }));
+
+    // The tiling experiment's master switch (AppState.ExperimentalTiling). Every workspace's Tiled flag is
+    // kept when it goes off. A no-op when unchanged, for the reason SetCheckForUpdates gives.
+    public Result SetExperimentalTiling(bool on) =>
+        State.ExperimentalTiling == on
+            ? Result.Success()
+            : Result.Success().Tap(() => Persist(State with { ExperimentalTiling = on }));
 
     public Result SetGroupFolded(Guid groupId, bool folded) =>
         State.Groups.Any(g => g.Id == groupId)
@@ -3209,7 +3243,7 @@ public sealed class WorkspaceManager(
     public Result MoveToDesktop(WindowHandle window, Guid desktopId) =>
         desktops.IsPinned(window)
             .Bind(pinned => pinned ? desktops.Unpin(window) : Result.Success())
-            .Bind(() => desktops.MoveWindow(window, desktopId))
+            .Bind(() => MoveWindowTo(window, desktopId))
             // No longer lent to a nested workspace, for the same reason as in Assign.
             .Tap(() => { if (borrowed.Remove(window)) PersistBorrowed(); })
             .Tap(() =>
@@ -3223,6 +3257,13 @@ public sealed class WorkspaceManager(
                 // persists and pulses, replacing the bare pulse this path used to do.
                 RememberPlacement(window, pinned: false);
             });
+
+    // The one doorway for moving a window to another desktop: every move this class makes goes through here,
+    // so WindowMoved hears about all of them, and only about the ones that happened. A refused move announces
+    // nothing. The callers' own .Tap/.Bind chains around it are unchanged; this adds the announcement and
+    // nothing else.
+    Result MoveWindowTo(WindowHandle window, Guid desktopId) =>
+        desktops.MoveWindow(window, desktopId).Tap(() => windowMoved.OnNext(window));
 
     // Deskbar's own windows, now that WindowMonitor reports them (it used to hook with
     // WINEVENT_SKIPOWNPROCESS, which is why the Manage window was missing from the bar).

@@ -198,7 +198,9 @@ public partial class FloatingBar
     bool IsTypingWindow(nint hwnd, bool isFlyout) =>
         hwnd != 0 && !isFlyout && !ShellKeys.IsTaskSwitching(hwnd) && !IsOwnWindow(hwnd);
 
-    static bool IsOwnWindow(nint hwnd) =>
+    // Internal since tiling: App hands it to the TileSurface as "ours", so the bar and the grid agree on which
+    // windows are Deskbar's own instead of each deciding it a different way.
+    internal static bool IsOwnWindow(nint hwnd) =>
         Windows.Monitoring.NativeMethods.GetWindowThreadProcessId(hwnd, out var process) != 0 && process == (uint)Environment.ProcessId;
 
     nint LanguageWindow() => languageTarget != 0 ? languageTarget : ForegroundWindow();

@@ -1,4 +1,5 @@
-﻿using System.Reactive.Linq;
+﻿using System.Reactive;
+using System.Reactive.Linq;
 using System.Reactive.Subjects;
 using CSharpFunctionalExtensions;
 using Deskbar.Core.Abstractions;
@@ -279,5 +280,86 @@ public sealed class FakeScreenLayout : IScreenLayout
             new HashSet<WindowHandle>(),
             frontToBack.Select((x, i) => (x.Window, i)).ToDictionary(x => x.Window, x => x.i),
             primary);
+}
+
+// The tiling surface (ITileSurface) as a test describes it. Windows have frames and screens because the test
+// says so; Place records the call and moves the frame to what was asked, unless the test pinned a minimum size
+// for that window, which is how an app that will not shrink into its slot is described.
+public sealed class FakeTileSurface : ITileSurface
+{
+    // One 1920x1040 work area at 100% scaling unless a test says otherwise.
+    public List<TileScreen> ScreenList { get; } = [new TileScreen(1, new WindowRect(0, 0, 1920, 1040), 96)];
+
+    // Which screen each window is on; a window not in here is on the first screen.
+    public Dictionary<WindowHandle, int> ScreenOfWindow { get; } = [];
+    public Dictionary<WindowHandle, WindowRect> Frames { get; } = [];
+    public HashSet<WindowHandle> Maximized { get; } = [];
+    public HashSet<WindowHandle> Minimized { get; } = [];
+    public HashSet<WindowHandle> CannotTile { get; } = [];
+
+    // Place fails for these, the way it does for a window that closed between the question and the move.
+    public HashSet<WindowHandle> RefusePlace { get; } = [];
+
+    // Place throws once for these and then forgets them, to prove one exception does not deafen the Tiler.
+    public HashSet<WindowHandle> ThrowOnPlace { get; } = [];
+
+    // The smallest size each window agrees to, by width and height.
+    public Dictionary<WindowHandle, (int Width, int Height)> MinimumSize { get; } = [];
+
+    public List<(WindowHandle Window, WindowRect Frame)> Placed { get; } = [];
+    public List<WindowHandle> Rounded { get; } = [];
+    public List<IReadOnlySet<WindowHandle>> Watched { get; } = [];
+
+    public Subject<WindowHandle> SettledSubject { get; } = new();
+    public Subject<Unit> ScreensChangedSubject { get; } = new();
+
+    public IReadOnlyList<TileScreen> Screens() => ScreenList.ToList();
+    public int ScreenOf(WindowHandle window) => ScreenOfWindow.TryGetValue(window, out var screen) ? screen : ScreenList[0].Number;
+    // How often the per-window questions were asked, so a test can prove a pulse read no windows at all.
+    public int CanTileCalls { get; private set; }
+    public int FrameReads { get; private set; }
+
+    public bool CanTile(WindowHandle window) { CanTileCalls++; return !CannotTile.Contains(window); }
+    public bool IsMaximized(WindowHandle window) => Maximized.Contains(window);
+    public bool IsMinimized(WindowHandle window) => Minimized.Contains(window);
+
+    // Windows still moving: dragged by hand, or moved within the last quiet interval. A test puts a window in
+    // here to stand for "the user has it under the pointer", and takes it out before its Settled.
+    public HashSet<WindowHandle> Settling { get; } = [];
+    public bool IsSettling(WindowHandle window) => Settling.Contains(window);
+
+    public Maybe<WindowRect> VisibleFrameOf(WindowHandle window)
+    {
+        FrameReads++;
+        return Frames.TryGetValue(window, out var frame) ? frame : Maybe<WindowRect>.None;
+    }
+
+    public Result Place(WindowHandle window, WindowRect visibleFrame)
+    {
+        if (ThrowOnPlace.Remove(window)) throw new InvalidOperationException("place threw (test)");
+        if (RefusePlace.Contains(window)) return Result.Failure("place refused (test)");
+        Placed.Add((window, visibleFrame));
+        Frames[window] = MinimumSize.TryGetValue(window, out var min)
+            ? visibleFrame with
+            {
+                Right = visibleFrame.Left + Math.Max(visibleFrame.Width, min.Width),
+                Bottom = visibleFrame.Top + Math.Max(visibleFrame.Height, min.Height),
+            }
+            : visibleFrame;
+        return Result.Success();
+    }
+
+    // RoundCorners throws once for these and then forgets them, the way a DWM call on a dying window can.
+    public HashSet<WindowHandle> ThrowOnRound { get; } = [];
+
+    public void RoundCorners(WindowHandle window)
+    {
+        if (ThrowOnRound.Remove(window)) throw new InvalidOperationException("round corners threw (test)");
+        Rounded.Add(window);
+    }
+    public void Watch(IReadOnlySet<WindowHandle> windows) => Watched.Add(windows.ToHashSet());
+
+    public IObservable<WindowHandle> Settled => SettledSubject.AsObservable();
+    public IObservable<Unit> ScreensChanged => ScreensChangedSubject.AsObservable();
 }
 

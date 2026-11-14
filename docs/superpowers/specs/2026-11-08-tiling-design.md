@@ -64,7 +64,7 @@ arithmetic below is described from its behaviour so it can be written fresh.
 ### Turning it on
 
 - An item on the workspace row's menu in the bar (`FloatingBar.WorkspaceMenu`): "Tile windows",
-  ticked while on. Clicking it again turns tiling off.
+  ticked while on. It is there only while the experiment is on (see below). Clicking it again turns tiling off.
 - A control-pipe twin, so it obeys the rule that every menu command has one and `ControlUsage` lists
   it: `tile <workspace>` and `untile <workspace>`, in the "Workspace row menu" section, mirroring
   `fold`/`unfold`.
@@ -72,6 +72,23 @@ arithmetic below is described from its behaviour so it can be written fresh.
   survives restarts in `state.json` with no migration; a file without the key loads untiled.
 - My call: turning tiling off leaves windows exactly where they are. Nothing remembers or restores
   the pre-tiling positions.
+
+### Experimental, and off by default
+
+Petre: "let's make this an experimental feature and disabled by default, until i have tested it
+well". So tiling ships behind a switch that nobody has turned on.
+
+- One switch: a "Tiling (experimental)" checkbox on Manage, stored as `AppState.ExperimentalTiling`,
+  false by default and false for every existing `state.json`. Not an environment variable, because
+  the Store copy never sees one (CLAUDE.md, `DESKBAR_APPDATA` trap), and Petre tests on the Store copy.
+- While it is off: nothing tiles, the LOCATIONCHANGE hook is never installed, the row menu has no
+  tiling item at all (no Pro wording either: an untested feature is not advertised), and `tile` on
+  the pipe refuses with a message saying to turn it on in Manage. `untile` always works.
+- Turning it off stops tiling and leaves every window where it is. Each workspace's `Tiled` flag is
+  kept, so turning it back on resumes where it was.
+- Tiling acts only when all three hold: the experiment is on, the workspace is tiled, and the copy
+  is Pro.
+- Graduating it later (default on, or the checkbox removed) is its own small PR, once Petre says so.
 
 ### Deskbar Pro
 

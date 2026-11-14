@@ -45,6 +45,17 @@ public sealed record Workspace(Guid Id, string Name, Guid? DesktopId, string? Co
     [JsonPropertyName("Minimized")]
     public bool Folded { get; init; }
 
+    // Whether this workspace's windows are kept tiled in a grid (docs/superpowers/specs/2026-11-08-tiling-design.md).
+    //
+    // A property OF THE WORKSPACE for the reason Folded is: it survives a restart without a second store to
+    // keep in step, and it is a fact about the workspace ("I work in a grid here"), not about the bar or any
+    // window. Tiling acts only when this is on AND the experiment is on AND the build is Pro; see TilingGate.
+    // Turning the experiment off leaves this flag as it is, so switching it back on restores every grid.
+    //
+    // Init property defaulting to false, so a state.json written before tiling has no key and loads untiled,
+    // with no migration.
+    public bool Tiled { get; init; }
+
     // The group this workspace belongs to, or null for one that stands on its own.
     //
     // App-level metadata over flat OS desktops, which is the same move this app already makes by
