@@ -9,15 +9,20 @@ namespace Deskbar.Core.QuickFind;
 //
 // A place is its workspace when it has one and its label otherwise ("Desktop 1", "all desktops"). Things that
 // would have to be started get a group of their own even on the same workspace, headed "<name>, would start
-// here", so an open window and a program that is not running never sit under one header looking alike.
+// here", so an open window and a program that is not running never sit under one header looking alike. A new
+// window of a running program (FindKind.NewWindow) gets a third, "<name>, new window opens here": it can be
+// the top result while the not-running programs of the same workspace sit at the bottom, and one header for
+// both would pull those up with it.
 public sealed record FindGroup(string Header, FindPlace Place, bool Open, IReadOnlyList<FindResult> Results);
 
 public static class FindGrouping
 {
     public static IReadOnlyList<FindGroup> Group(IReadOnlyList<FindResult> ranked) =>
-        ranked.GroupBy(r => (Place: r.Place.WorkspaceId?.ToString() ?? r.Place.Label, r.IsOpen))
+        ranked.GroupBy(r => (Place: r.Place.WorkspaceId?.ToString() ?? r.Place.Label, r.IsOpen, NewWindow: r.Kind == FindKind.NewWindow))
             .Select(g => new FindGroup(
-                g.Key.IsOpen ? g.First().Place.Label : $"{g.First().Place.Label}, would start here",
+                g.Key.IsOpen ? g.First().Place.Label
+                : g.Key.NewWindow ? $"{g.First().Place.Label}, new window opens here"
+                : $"{g.First().Place.Label}, would start here",
                 g.First().Place,
                 g.Key.IsOpen,
                 g.ToList()))

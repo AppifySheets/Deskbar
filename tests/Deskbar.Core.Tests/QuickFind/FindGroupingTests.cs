@@ -36,6 +36,22 @@ public class FindGroupingTests
         Assert.False(groups[1].Open);
     }
 
+    // A new window of a running program is neither open nor "not running", so it sits under a header of its own,
+    // apart from the programs that would have to be started on the same workspace.
+    [Fact]
+    public void A_new_window_gets_its_own_group_saying_where_it_opens()
+    {
+        var groups = FindGrouping.Group(
+        [
+            Row("n", Accounting, "Accounting", FindKind.NewWindow),
+            Row("w", Accounting, "Accounting"),
+            Row("r", Accounting, "Accounting", FindKind.Remembered),
+        ]);
+        Assert.Equal(["Accounting, new window opens here", "Accounting", "Accounting, would start here"], groups.Select(g => g.Header));
+        Assert.Equal(["n"], groups[0].Results.Select(r => r.Key));
+        Assert.False(groups[0].Open);
+    }
+
     [Fact]
     public void Rows_in_display_order_put_the_top_result_first() =>
         Assert.Equal(["a1", "a2", "h1"], FindGrouping.Group([Row("a1", Accounting, "Accounting"), Row("h1", Home, "Home"), Row("a2", Accounting, "Accounting")])

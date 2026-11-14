@@ -13,10 +13,11 @@ namespace Deskbar.Core.QuickFind;
 //   isBrowser      whether a window's tabs stand in for the window itself
 //   originalTitle  the title before a rename rule shortened it, so "VS" is still found by its folder
 //
-// One rule decides the shape: a BROWSER window that has a reading is listed through its tabs only. Its
-// window title is just its active tab's title plus "Microsoft Edge", so listing both would show the same
-// thing twice (the plan's Review Focus, item 3). A browser window with no reading yet, or an installed web
-// app (which reads no tabs), is listed as a window. A VS Code window is listed AND its tabs are: its title
+// One rule decides the shape: a BROWSER window that has a reading is listed through its tabs. Its window
+// title is just its active tab's title plus "Microsoft Edge", so showing both would show the same thing twice
+// (the plan's Review Focus, item 3). The window is still handed over, marked TabsStandIn, and FindRanking
+// shows it only when a search finds none of its tabs: that is what "edge" finds, one row per Edge window.
+// A browser window with no reading yet, or an installed web app (which reads no tabs), is listed as a window. A VS Code window is listed AND its tabs are: its title
 // names the folder, which is what Petre types to find the window, and its tabs name files and Claude sessions.
 public static class OpenCatalog
 {
@@ -52,7 +53,7 @@ public static class OpenCatalog
             Detail: title,
             IconPath: window.ProcessPath));
 
-        return browser && tabs.Count > 0 ? asTabs : asTabs.Prepend(asWindow);
+        return asTabs.Prepend(browser && tabs.Count > 0 ? asWindow with { TabsStandIn = true } : asWindow);
     }
 
     static string Join(params string[] parts) => string.Join(' ', parts.Where(p => p.Length > 0));

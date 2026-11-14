@@ -102,6 +102,9 @@ public static class QuickFindSources
             manager.AwaitedProcesses,
             pathExists,
             (program, commandLine) => Destination(manager, manager.LaunchPlacement(program, commandLine)),
+            // Where a new window of a running program opens: with nothing remembered asked for, Destination
+            // answers the workspace Petre is on, or "this desktop" on an unnamed one.
+            Destination(manager, null),
             IsDeskbar));
 
     // Deskbar's own Start menu entry, Store package or loose exe (final review, M7): starting the Store package
@@ -135,7 +138,9 @@ public static class QuickFindSources
     public static Result Launch(WorkspaceManager manager, FindResult result)
     {
         if (result.Launch is not { } target) return Result.Failure("Nothing to start.");
-        var started = result.Place.WorkspaceId is { } workspace
+        // A new window of a running program is simply started: it opens where Petre is, which is what its row
+        // said, so there is no workspace to switch to and no window to expect.
+        var started = result.Kind != FindKind.NewWindow && result.Place.WorkspaceId is { } workspace
             ? (Current(manager) == workspace ? Result.Success() : manager.Switch(workspace))
                 .Bind(() => manager.StartIn(workspace, target, ProgramStarter.Start))
             : ProgramStarter.Start(target.Launch);

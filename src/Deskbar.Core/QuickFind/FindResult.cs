@@ -8,7 +8,11 @@ namespace Deskbar.Core.QuickFind;
 // Window and Tab are things already open; Enter goes to them. Remembered and StartMenu are programs that are
 // not running; Enter starts them where the row says (pull request C of the plan). The order of this enum is
 // NOT the ranking: FindRanking decides that, and keeps windows and tabs in one group.
-public enum FindKind { Window, Tab, Remembered, StartMenu }
+//
+// NewWindow is a program that IS running, offered once more: Enter opens another window of it where Petre is,
+// as a middle click on its taskbar button does. Petre, with sixteen VS Code windows open: "i want just a new
+// code window, i should be able to do that".
+public enum FindKind { Window, Tab, Remembered, StartMenu, NewWindow }
 
 // Where a result is, as the row says it on the right. Petre: "each window should say where it is". The
 // workspace is carried as an id as well as a label so the row can be drawn in that workspace's lane colour and
@@ -33,6 +37,12 @@ public sealed record LaunchTarget(ProgramLaunch Launch, string? ExpectedProcess)
 // SearchText is what the query is matched against: the title plus where it is plus Detail, so "acc inv" finds
 // invoices on the Accounting workspace. Detail is the line a row shows under or beside its title: the browser
 // window a tab is in, or "not running".
+//
+// Two facts ranking needs and nothing else reads:
+//   OpenWindows  on a NewWindow row, how many windows of that program are open. With several there is no
+//                single window to go to, so naming the program puts this row first (FindRanking).
+//   TabsStandIn  on a browser window whose tabs are listed too: the window is shown only when a search finds
+//                none of its tabs, so a tab and the window holding it never both appear.
 public sealed record FindResult(
     string Key,
     FindKind Kind,
@@ -43,7 +53,9 @@ public sealed record FindResult(
     int? TabIndex = null,
     string? Detail = null,
     string? IconPath = null,
-    LaunchTarget? Launch = null)
+    LaunchTarget? Launch = null,
+    int OpenWindows = 0,
+    bool TabsStandIn = false)
 {
     public bool IsOpen => Kind is FindKind.Window or FindKind.Tab;
 }

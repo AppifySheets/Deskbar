@@ -20,6 +20,9 @@ public class LaunchCatalogTests
 
     static readonly FindPlace Here = new(Guid.Empty, "Here");
 
+    // The workspace in front, where a new window of a running program opens.
+    static readonly FindPlace Front = new(Guid.Parse("11111111-1111-1111-1111-111111111111"), "Front");
+
     static readonly IReadOnlySet<string> Existing = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
         { @"C:\src\X.sln", @"C:\src\Y.sln", @"C:\data", Rider, NewRider, Notepad, Cmd };
 
@@ -38,6 +41,7 @@ public class LaunchCatalogTests
             starting ?? new HashSet<string>(),
             Existing.Contains,
             destinationOf ?? ((_, _) => Here),
+            Front,
             app => app.ParsingName.StartsWith("Petre.Deskbar_", StringComparison.Ordinal)));
 
     static WindowInfo Running(string path, string? commandLine = null) =>
@@ -109,9 +113,35 @@ public class LaunchCatalogTests
         Assert.Contains($"{Rider} C:\\src\\X.sln", asked);
     }
 
+    // Petre: "i want just a new code window, i should be able to do that". A running program is not offered as
+    // "not running" again, but its Start menu entry can still open another window of it, the way a middle
+    // click on its taskbar button does. It opens where Petre is, not where the program was remembered, and
+    // nothing is expected of it: the window comes from the copy already running.
     [Fact]
-    public void A_running_program_has_no_row() =>
-        Assert.Empty(Catalog([new InventoryEntry(Notepad, null, "notes")], [Entry("Notepad++", Notepad)], [Running(Notepad)]));
+    public void A_running_program_offers_a_new_window_where_you_are()
+    {
+        var row = Assert.Single(Catalog([new InventoryEntry(Notepad, null, "notes")], [Entry("Notepad++", Notepad)],
+            [Running(Notepad), Running(Notepad)]));
+
+        Assert.Equal(FindKind.NewWindow, row.Kind);
+        Assert.Equal("Notepad++", row.Title);
+        Assert.Equal("new window", row.Detail);
+        Assert.Equal(Front, row.Place);
+        Assert.Equal(2, row.OpenWindows);
+        Assert.Equal([@"shell:AppsFolder\{6D809377}\Notepad++.lnk"], row.Launch!.Launch.Arguments);
+        Assert.Null(row.Launch.ExpectedProcess);
+        Assert.Equal("Notepad++ notepad++", row.SearchText);
+    }
+
+    // A program with no Start menu entry is started by its exe, and what a second bare start of an arbitrary exe
+    // does is not known, so it still gets no row while it runs.
+    [Fact]
+    public void A_running_program_without_a_start_menu_entry_has_no_row() =>
+        Assert.Empty(Catalog([new InventoryEntry(Notepad, null, "notes")], running: [Running(Notepad)]));
+
+    [Fact]
+    public void Another_version_of_the_program_offers_a_new_window_too() =>
+        Assert.Equal(FindKind.NewWindow, Assert.Single(Catalog([], [Entry("Rider", Rider)], [Running(NewRider)])).Kind);
 
     // Review I4: a newer version of the same program counts as running, and so does its open solution.
     [Fact]
