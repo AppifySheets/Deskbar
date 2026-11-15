@@ -88,8 +88,13 @@ public static class LaunchCatalog
     static FindResult? MenuRow(StartMenuApp app, IReadOnlyList<InventoryEntry>? remembered, LaunchFacts facts, IReadOnlySet<string> runningExes)
     {
         var exe = app.TargetPath ?? remembered?[0].ProcessPath;
-        if (facts.RunningAppIds.Contains(app.ParsingName)) return null;
+        // The exe is asked FIRST. Edge and Chrome windows carry their Start menu entry's own id ("MSEdge",
+        // "Chrome", measured on Petre's machine), so asking the id first took the browser for a web app open
+        // under another process and gave it no row: "edge" offered no new window while "code" did, VS Code
+        // windows carrying no id at all. A web app's entry never gets here with a running exe: its target is
+        // nothing or the browser's proxy exe, neither of which owns a window, so it falls to the id below.
         if (exe is not null && runningExes.Contains(Path.GetFileName(exe))) return NewWindowRow(app, exe, facts);
+        if (facts.RunningAppIds.Contains(app.ParsingName)) return null;
 
         var home = remembered is null ? null : Representative(remembered, facts);
         var place = home is null ? facts.DestinationOf(app.TargetPath ?? app.ParsingName, null) : facts.DestinationOf(home.ProcessPath, home.CommandLine);

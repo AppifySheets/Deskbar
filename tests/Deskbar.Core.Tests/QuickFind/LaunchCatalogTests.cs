@@ -139,6 +139,31 @@ public class LaunchCatalogTests
     public void A_running_program_without_a_start_menu_entry_has_no_row() =>
         Assert.Empty(Catalog([new InventoryEntry(Notepad, null, "notes")], running: [Running(Notepad)]));
 
+    // Petre, after "code" worked: "let's have a similar thing for other apps, like edge. i want to be able to
+    // start a new one". Edge's windows carry the id of Edge's own Start menu entry, "MSEdge" (Chrome's carry
+    // "Chrome"), which must not be read as a web app open under another process.
+    [Fact]
+    public void A_browser_whose_windows_carry_its_own_start_menu_id_offers_a_new_window()
+    {
+        const string edge = @"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe";
+        var row = Assert.Single(Catalog([], [Entry("Microsoft Edge", edge, "MSEdge")], [Running(edge), Running(edge)],
+            runningAppIds: new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "MSEdge" }));
+
+        Assert.Equal(FindKind.NewWindow, row.Kind);
+        Assert.Equal([@"shell:AppsFolder\MSEdge"], row.Launch!.Launch.Arguments);
+    }
+
+    // A web app installed from that browser is open in the browser's process. Its entry points at the browser's
+    // proxy exe, which owns no window, so it is still known by its id and still gets no row while open.
+    [Fact]
+    public void A_web_app_open_in_a_running_browser_still_has_no_row()
+    {
+        const string edge = @"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe";
+        const string proxy = @"C:\Program Files (x86)\Microsoft\Edge\Application\msedge_proxy.exe";
+        Assert.Empty(Catalog([], [Entry("Outlook", proxy, "outlook.cloud.microsoft-6A7975FB_abc!App")], [Running(edge)],
+            runningAppIds: new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "outlook.cloud.microsoft-6A7975FB_abc!App" }));
+    }
+
     [Fact]
     public void Another_version_of_the_program_offers_a_new_window_too() =>
         Assert.Equal(FindKind.NewWindow, Assert.Single(Catalog([], [Entry("Rider", Rider)], [Running(NewRider)])).Kind);
