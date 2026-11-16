@@ -88,6 +88,43 @@ public class LaunchedByPlacementTests
         Assert.Equal(gepha, WorkspaceOf(manager, browser));
     }
 
+    // MEASURED on Petre's machine, 2026-11-16: "check why edge was opening from the gph deskbar workspace in
+    // iam.ge", the link clicked in Teams. Every Edge window belongs to ONE browser process, and that process
+    // had been started the day before by a link clicked in VS Code, so its parent was Code for as long as it
+    // lived. A link clicked in Teams starts a short-lived msedge that hands the URL over and exits; the new
+    // window is the old process's, the walk found "VS Code started this", and the window left the desktop it
+    // was opened on for the VS Code window last used:
+    //
+    //   launched-by msedge(58264) launcher=30480 workspace=iam.ge moved=True
+    //
+    // A process that was already running long before its window appeared was not started for that window, so
+    // its parent says nothing about who asked for it.
+    [Fact]
+    public void A_new_window_of_a_long_running_process_is_not_launched_by_whoever_started_the_process()
+    {
+        var manager = Started();
+        EditorOpenedIt(0x2, 900);
+        processes.Processes[900] = processes.Processes[900] with { Started = DateTimeOffset.Now.AddHours(-22) };
+
+        var browser = Appears(manager, 0x2, 900);
+
+        Assert.Equal(personal, WorkspaceOf(manager, browser)); // where it opened, untouched
+    }
+
+    // The other side of the same line: the process the editor has just started, whose first window appears a
+    // moment later, is the case #94 was written for and still moves.
+    [Fact]
+    public void A_window_of_a_process_that_has_just_started_still_joins_its_launcher()
+    {
+        var manager = Started();
+        EditorOpenedIt(0x2, 900);
+        processes.Processes[900] = processes.Processes[900] with { Started = DateTimeOffset.Now.AddSeconds(-3) };
+
+        var browser = Appears(manager, 0x2, 900);
+
+        Assert.Equal(gepha, WorkspaceOf(manager, browser));
+    }
+
     // The side effect this must NOT have. RosterAdd strips an identity from every other workspace so
     // exactly one can claim it, which is the mechanism behind Petre's "i'm starting the edge browser and
     // it immediately goes to personal". An inference about one window must not rewrite where he says

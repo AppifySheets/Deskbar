@@ -5,7 +5,11 @@ namespace Deskbar.Core.Domain;
 //
 // Name WITHOUT the extension, matching WindowInfo.ProcessName ("chrome", not "chrome.exe"), so the two
 // can be compared without either side remembering to trim.
-public sealed record ProcessFacts(int ProcessId, string Name, int ParentProcessId)
+//
+// Started is when the process was created, or null when whoever built the facts does not know (the tests'
+// fakes, mostly). LaunchedBy.StartedForItsWindow reads it to tell a process started for the window that has
+// just appeared from one that had been running all along; the real ProcessTree always fills it in.
+public sealed record ProcessFacts(int ProcessId, string Name, int ParentProcessId, DateTimeOffset? Started = null)
 {
     // The one process that owns the window of several Store apps at once (Calculator, Settings): ending it
     // closes every app it hosts, so Force close, Close all and Restart all must not treat it as "the app".

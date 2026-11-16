@@ -80,7 +80,11 @@ public sealed class ProcessTree : IProcessTree
         var parent = Read(facts.ParentProcessId);
         var plausible = parent is { } up && up.Created <= facts.Created;
 
-        return new ProcessFacts(processId, facts.Name, plausible ? facts.ParentProcessId : 0);
+        // The creation time goes along too (GetProcessTimes reports a UTC FILETIME), so the launched-by rule
+        // can tell a process started for the window that just appeared from one that was already running:
+        // see LaunchedBy.StartedForItsWindowWithin.
+        return new ProcessFacts(processId, facts.Name, plausible ? facts.ParentProcessId : 0,
+            DateTimeOffset.FromFileTime(facts.Created));
     }
 
     readonly record struct Snapshot(string Name, int ParentProcessId, long Created);

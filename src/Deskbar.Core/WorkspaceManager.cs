@@ -3274,11 +3274,14 @@ public sealed class WorkspaceManager(
     //
     // The walk up the process chain, and the rule about what counts as a launcher, are in
     // LaunchedBy, which is pure and where the measured shape of the problem is written down. What is
-    // decided here is what to do with the answer, and there are three parts to that:
+    // decided here is what to do with the answer, and there are four parts to that:
     //
-    //   * The launcher must live in exactly ONE workspace. An app with windows in two of them gives no
-    //     single answer, and the same reasoning already governs placement memory: "put it back" needs
-    //     somewhere to put it. Nothing happens rather than a coin toss.
+    //   * The launcher's workspace is the one holding its window you were LAST IN, since one VS Code
+    //     process has a window on nearly every workspace (WorkspaceOfLauncher). Nothing happens when none
+    //     of them was ever active, rather than a coin toss.
+    //   * The window's process must have been started FOR this window, meaning it is new. A browser
+    //     that was already running owns every later window whoever asked for it, and its parent is
+    //     whoever started the browser first (LaunchedBy.StartedForItsWindowWithin).
     //   * A launcher on the CURRENT desktop is skipped entirely, because Windows already opens new
     //     windows there. Skipping costs nothing and avoids recording anything at all for the ordinary
     //     case, which is the overwhelming majority: you are usually looking at the app you clicked in.
@@ -3463,6 +3466,19 @@ public sealed class WorkspaceManager(
         // workspace looks different from it -- the safe direction, since the placement is a move to
         // where the launcher already is and at worst it moves the window to the desktop it is on.
         var current = desktops.CurrentDesktop().GetValueOrDefault();
+
+        // A process that was running long before this window appeared was not started for it, so its parent
+        // says who started the app at some point, not who asked for this window. That is every later window
+        // of a single-instance browser: see LaunchedBy.StartedForItsWindowWithin for the measured case, a
+        // link clicked in Teams that followed a VS Code window to another workspace. No launcher is looked
+        // for, and the window stays where Windows opened it.
+        var stale = processes.Of(window.ProcessId).Map(p => !LaunchedBy.StartedForItsWindow(p, now())).GetValueOrDefault(false);
+        if (stale)
+        {
+            trace?.Invoke($"launched-by {window.ProcessName}({window.ProcessId}) launcher=none " +
+                          "(the process was already running, so its parent did not ask for this window) moved=False");
+            return Maybe<Decision>.None;
+        }
 
         var launcher = LaunchedBy.Launcher(window.ProcessId, processes.Of, OwnsTrackedWindow);
         var workspace = launcher.Bind(WorkspaceOfLauncher);

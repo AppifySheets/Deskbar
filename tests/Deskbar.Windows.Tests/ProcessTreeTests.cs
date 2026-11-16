@@ -24,6 +24,19 @@ public class ProcessTreeTests
         Assert.Equal(Process.GetCurrentProcess().ProcessName, facts.Value.Name, ignoreCase: true);
     }
 
+    // When the process started, which the launched-by rule reads to tell a process started for the window that
+    // has just appeared from one that was already running (LaunchedBy.StartedForItsWindowWithin). The oracle is
+    // .NET's own read of this process's start time; a second of slack covers the two rounding differently.
+    [Fact]
+    public void It_reports_when_this_process_started()
+    {
+        var started = tree.Of(Environment.ProcessId).Value.Started;
+
+        Assert.NotNull(started);
+        var expected = new DateTimeOffset(Process.GetCurrentProcess().StartTime);
+        Assert.True((started.Value - expected).Duration() < TimeSpan.FromSeconds(1), $"{started} is not {expected}");
+    }
+
     // The case the whole feature rests on, with the strongest oracle available: WE started this child,
     // so its parent is known rather than inferred.
     [Fact]

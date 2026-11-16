@@ -47,6 +47,29 @@ public static class LaunchedBy
         "shellexperiencehost", "applicationframehost", // also ProcessFacts.IsFrameHost, its own check
     };
 
+    // How old a process may be when its window appears and still count as started for that window.
+    //
+    // The parent chain answers "who started this PROCESS", and that is only the same question as "who asked
+    // for this WINDOW" while the process is new. A single-instance app breaks the link: every Edge window
+    // belongs to one browser process, and a link clicked anywhere starts a short-lived msedge that hands the
+    // URL over and exits, so the window that appears is owned by a process whose parent was fixed when the
+    // browser first started. Measured 2026-11-16: Edge had been started the day before by a link clicked in
+    // VS Code, and a link clicked in Teams on the GPH workspace was sent to iam.ge, where the VS Code window
+    // last used happened to be:
+    //
+    //   launched-by msedge(58264) launcher=30480 workspace=iam.ge moved=True
+    //
+    // The same length as WorkspaceManager.ExpectationLifetime and for the same reason: long enough for an
+    // editor or a browser to open cold on a busy machine, short enough that a process which was already
+    // running is not mistaken for one that was just started.
+    public static readonly TimeSpan StartedForItsWindowWithin = TimeSpan.FromSeconds(30);
+
+    // Whether the process was started for the window that has just appeared, as opposed to having been
+    // running already. A process whose start is unknown passes: the real ProcessTree always knows it, so
+    // unknown only means a caller that does not model time, and refusing those would turn the whole tier off.
+    public static bool StartedForItsWindow(ProcessFacts process, DateTimeOffset now) =>
+        process.Started is not { } started || now - started <= StartedForItsWindowWithin;
+
     // The nearest ancestor process that owns a window this app is tracking, or None.
     //
     // "Owns a window we track" is what makes an ancestor a LAUNCHER rather than plumbing: a windowless
