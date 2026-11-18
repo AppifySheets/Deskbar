@@ -150,6 +150,8 @@ public partial class FloatingBar
     {
         ShellStart.Children.Add(ShellButton(ShellFlyout.Start, "Start", StartGlyph()));
         ShellStart.Children.Add(FindButton(Glyph(SearchShape, size: HeaderGlyphSize)));
+        // Tiling's button (FloatingBar.Tiling.cs), collapsed until the experiment is on and a rebuild says so.
+        ShellStart.Children.Add(TileButton());
 
         // The same pair again, where the right half of the header begins, shown only across the seam (see
         // LayOutHeader). Their own buttons, wired the same way, so a press on either pair behaves identically,
@@ -167,6 +169,7 @@ public partial class FloatingBar
             {
                 ShellButton(ShellFlyout.Start, "Start", StartGlyph()),
                 FindButton(Glyph(SearchShape, size: HeaderGlyphSize)),
+                TileButton(),
             },
         };
         BarHeader.Children.Add(AtRightHalf(shellStartTwin));

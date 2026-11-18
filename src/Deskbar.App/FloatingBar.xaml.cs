@@ -2280,6 +2280,8 @@ public partial class FloatingBar : Window
             var liveTarget = overview.Workspaces.FirstOrDefault(w => w.IsCurrent)?.Workspace.Id
                 ?? overview.OtherDesktops.FirstOrDefault(d => d.IsCurrent && d.DesktopId != Guid.Empty)?.DesktopId;
             liveListTarget = liveTarget;
+            // The header's tiling button follows the workspace you are on (FloatingBar.Tiling.cs).
+            UpdateTileButtons(overview.Workspaces.FirstOrDefault(w => w.IsCurrent)?.Workspace);
 
             // WHICH ROWS ARE EXPANDED, when rows expand (AppState.ExpandCurrentWorkspace): the current one,
             // plus, while the pointer is over the bar, every row that has been expanded since it arrived.

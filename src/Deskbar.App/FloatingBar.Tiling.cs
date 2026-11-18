@@ -1,5 +1,6 @@
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Media;
 
 namespace Deskbar.App;
 
@@ -64,6 +65,103 @@ public partial class FloatingBar
         add("⊞", "Tile windows (Deskbar Pro)", OfferPro);
         if (TiledNow())
             add("⊟", "Stop tiling", () => Report(manager.SetWorkspaceTiled(workspaceId, false)));
+    }
+
+    // --- the header's tiling button ---------------------------------------------------------------------------
+    //
+    // Petre, testing tiling live: "maybe add a button at the top of the bar", then from a mockup, "Header, beside
+    // Search": one button for the workspace you are ON, beside Start and Search, that tiles it or stops tiling it.
+    //
+    //   * Shown only while Manage's "Tiling (experimental)" box is ticked, like the row menu's item, and only on a
+    //     named workspace (an unnamed desktop has no Tiled flag to flip).
+    //   * Lit while that workspace is tiled: the hover square kept, as Start and Search show while their flyout
+    //     is open, so "on" reads the same everywhere in the header. The glyph fills in too.
+    //   * The glyph is a layout mark, one tall pane beside two stacked ones. Not a 2x2 grid: Start is Windows' four
+    //     tiles in blue, right beside it, and a second grid would read as a second Start button.
+    //   * The free tier gets the row menu's answer: an untiled workspace is offered Pro, and a workspace left
+    //     tiled after Pro lapsed is untiled, which is the one thing still worth doing there.
+    //
+    // Two buttons, the header's and the seam twin's (FloatingBar.Shell.cs, BuildShellStrip), kept identical.
+
+    readonly List<Button> tileButtons = [];
+
+    // The buttons, for the tests.
+    internal IReadOnlyList<Button> TileButtons => tileButtons;
+
+    // The workspace the buttons act on: the one you are on, as of the last rebuild. Null on an unnamed desktop.
+    Guid? tileTarget;
+
+    // What the buttons last showed, so a rebuild that changes nothing about them touches nothing.
+    (bool Shown, bool Tiled, string Name)? tileShown;
+
+    const string TilePanes = "M1.5,2 L7,2 L7,14 L1.5,14 Z M9,2 L14.5,2 L14.5,7.25 L9,7.25 Z M9,8.75 L14.5,8.75 L14.5,14 L9,14 Z";
+
+    Button TileButton()
+    {
+        var button = BareShellButton("Tile windows", TileGlyph(tiled: false));
+        button.Visibility = Visibility.Collapsed;
+        button.Click += (_, _) => OnTileButton();
+        // Worked out again as it opens, as Search's tip is: Pro can change (a licence refresh, a trial ending)
+        // without anything pulsing the state, so a tip painted at the last rebuild could name the wrong tier.
+        button.ToolTipOpening += (_, _) => button.ToolTip = TileTip();
+        tileButtons.Add(button);
+        return button;
+    }
+
+    // What the button would do now, in words. Read from the state and Pro as they are this moment.
+    internal string TileTip()
+    {
+        var current = manager.State.Workspaces.FirstOrDefault(w => w.Id == tileTarget);
+        return current is null ? "Tile windows"
+            : current.Tiled ? $"Stop tiling {current.Name}"
+            : IsPro() ? $"Tile windows on {current.Name}"
+            : "Tile windows (Deskbar Pro)";
+    }
+
+    // Outlined while the workspace is not tiled, filled while it is.
+    static UIElement TileGlyph(bool tiled) => tiled
+        ? new Viewbox
+        {
+            Width = HeaderGlyphSize,
+            Height = HeaderGlyphSize,
+            IsHitTestVisible = false,
+            Child = new Canvas { Width = 16, Height = 16, Children = { new System.Windows.Shapes.Path { Data = Geometry.Parse(TilePanes), Fill = ShellGlyphBrush } } },
+        }
+        : Glyph(TilePanes, size: HeaderGlyphSize);
+
+    // Called by every rebuild with the workspace you are on (Rebuild, beside liveListTarget), so the buttons follow
+    // a switch, the row menu, `deskbar.cmd tile` and Manage's box alike: all of them pulse the state.
+    void UpdateTileButtons(Core.Domain.Workspace? current)
+    {
+        tileTarget = current?.Id;
+        var now = (Shown: manager.State.ExperimentalTiling && current is not null, Tiled: current?.Tiled == true, Name: current?.Name ?? "");
+        if (tileShown == now) return;
+        tileShown = now;
+
+        var tip = TileTip();
+        tileButtons.ForEach(button =>
+        {
+            button.Visibility = now.Shown ? Visibility.Visible : Visibility.Collapsed;
+            button.Content = TileGlyph(now.Tiled);
+            button.Background = now.Tiled ? ShellOpenBrush : Brushes.Transparent;
+            button.ToolTip = tip;
+            System.Windows.Automation.AutomationProperties.SetName(button, tip);
+        });
+    }
+
+    // The flag is read at CLICK time, as the row menu's item reads it, so a rebuild between the last paint and the
+    // click can never flip it the wrong way.
+    void OnTileButton()
+    {
+        // Same as Start and Search: this click is the press's whole meaning, so the header row it sits in must not
+        // treat the release as a click of its own.
+        MarkPressConsumed();
+        if (tileTarget is not { } id) return;
+        var tiled = manager.State.Workspaces.FirstOrDefault(w => w.Id == id)?.Tiled == true;
+        if (IsPro() || tiled)
+            Report(manager.SetWorkspaceTiled(id, !tiled));
+        else
+            OfferPro();
     }
 
     // The free tier's answer. Owned by the bar for the reason Report gives: the bar is Topmost, so an ownerless
