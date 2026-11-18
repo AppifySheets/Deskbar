@@ -56,7 +56,7 @@
             <CheckBox x:Name="ExperimentalTiling" Content="Tiling (experimental)"
                       Checked="OnExperimentalTilingToggled" Unchecked="OnExperimentalTilingToggled"/>
             <TextBlock TextWrapping="Wrap" Margin="20,2,0,0" Opacity="0.75"
-                       Text="Tiles a workspace's windows in a grid. Turn on per workspace from its row menu. Deskbar Pro."/>
+                       Text="Tiles a workspace's windows in a grid. Turn on per workspace from its row menu."/>
             <StackPanel x:Name="TileGapPanel" Orientation="Horizontal" Margin="20,4,0,0" IsEnabled="False">
                 <TextBlock Text="Gap between tiled windows (pixels at 100% scaling)" VerticalAlignment="Center"/>
                 <TextBox x:Name="TileGapBox" Width="48" Margin="8,0,0,0"/>

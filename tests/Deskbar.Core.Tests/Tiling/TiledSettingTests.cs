@@ -121,4 +121,12 @@ public sealed class TiledSettingTests : IDisposable
     public void The_gate_needs_experiment_tiled_and_pro(bool experiment, bool tiled, bool pro, bool expected) =>
         Assert.Equal(expected, TilingGate.Acts(
             new Workspace(Guid.NewGuid(), "W", null) { Tiled = tiled }, pro, experiment));
+
+    // Tiling is free for now (Petre, 2026-11-18): a copy that is not Pro may tile too. When tiling goes back
+    // behind Pro, TilingGate.Free turns false and this test is the one to change with it.
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void Tiling_is_allowed_with_or_without_pro_while_it_is_free(bool pro) =>
+        Assert.True(TilingGate.Free && TilingGate.Allowed(pro));
 }
