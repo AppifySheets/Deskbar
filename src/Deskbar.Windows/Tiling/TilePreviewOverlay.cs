@@ -24,10 +24,13 @@ namespace Deskbar.Windows.Tiling;
 // nothing anyone sees. Physical pixels throughout, as CreateWindowEx and SetWindowPos both take them.
 sealed class TilePreviewOverlay : IDisposable
 {
-    // Where the dragged tile lands is tinted more strongly than where the tile it swaps with goes; both light enough
-    // that the windows underneath stay readable.
-    internal const byte DraggedAlpha = 0x50;
-    internal const byte SwappedAlpha = 0x28;
+    // AN OUTLINE, NOTHING ELSE. Petre, on the first translucent version: "the old rectangle, that's being left, is
+    // too bright; also make the new rectangle just the border", then "no need for the blue glow". So only where the
+    // dragged tile LANDS is drawn, as a ring BorderWidth wide; the place it leaves, and where a swapped tile goes,
+    // get nothing (TilePreview.Dragged false is skipped). The ring is the window's REGION (SetWindowRgn), so the
+    // window does not exist inside it at all: no painting code, and the tile underneath is untouched.
+    internal const byte BorderAlpha = 0xD0;
+    internal const int BorderWidth = 4;
 
     // The bar's own light blue (FloatingBar's StartBlue, #4CC2FF), as a COLORREF (0x00BBGGRR).
     const uint Tint = 0x00FFC24C;
@@ -39,8 +42,10 @@ sealed class TilePreviewOverlay : IDisposable
     // The handles, for the tests.
     internal IReadOnlyList<nint> Windows => windows;
 
-    public void Show(IReadOnlyList<TilePreview> tiles)
+    public void Show(IReadOnlyList<TilePreview> all)
     {
+        // Only the landing place is drawn (see BorderAlpha).
+        var tiles = all.Where(t => t.Dragged).ToList();
         // Fewer rectangles than before: the extra ones go.
         while (windows.Count > tiles.Count)
         {
@@ -63,8 +68,9 @@ sealed class TilePreviewOverlay : IDisposable
         var hwnd = CreateWindowExW(WS_EX_LAYERED | WS_EX_TRANSPARENT | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE | WS_EX_TOPMOST,
             ClassName, "Deskbar tile preview", WS_POPUP, f.Left, f.Top, f.Width, f.Height, 0, 0, GetModuleHandleW(null), 0);
         if (hwnd == 0) return 0;
-        // The alpha before the window is first shown, so it never appears opaque even for a frame.
-        _ = SetLayeredWindowAttributes(hwnd, 0, AlphaOf(tile), LWA_ALPHA);
+        // The alpha and the ring before the window is first shown, so it never appears filled even for a frame.
+        _ = SetLayeredWindowAttributes(hwnd, 0, BorderAlpha, LWA_ALPHA);
+        Ring(hwnd, f.Width, f.Height);
         _ = ShowWindow(hwnd, SW_SHOWNOACTIVATE);
         return hwnd;
     }
@@ -72,11 +78,34 @@ sealed class TilePreviewOverlay : IDisposable
     static void Move(nint hwnd, TilePreview tile)
     {
         var f = tile.Frame;
-        _ = SetLayeredWindowAttributes(hwnd, 0, AlphaOf(tile), LWA_ALPHA);
         _ = SetWindowPos(hwnd, HWND_TOPMOST, f.Left, f.Top, f.Width, f.Height, SWP_NOACTIVATE);
+        Ring(hwnd, f.Width, f.Height);
     }
 
-    static byte AlphaOf(TilePreview tile) => tile.Dragged ? DraggedAlpha : SwappedAlpha;
+    // The window's region becomes a ring BorderWidth wide around its edge (window coordinates). SetWindowRgn takes
+    // ownership of the region, so only the inner one, used to cut the hole, is deleted here.
+    static void Ring(nint hwnd, int width, int height)
+    {
+        var outer = CreateRectRgn(0, 0, width, height);
+        var inner = CreateRectRgn(BorderWidth, BorderWidth, Math.Max(BorderWidth, width - BorderWidth), Math.Max(BorderWidth, height - BorderWidth));
+        _ = CombineRgn(outer, outer, inner, RGN_DIFF);
+        _ = DeleteObject(inner);
+        _ = SetWindowRgn(hwnd, outer, true);
+    }
+
+    const int RGN_DIFF = 4;
+
+    [DllImport("gdi32.dll")]
+    static extern nint CreateRectRgn(int left, int top, int right, int bottom);
+
+    [DllImport("gdi32.dll")]
+    static extern int CombineRgn(nint destination, nint a, nint b, int mode);
+
+    [DllImport("gdi32.dll")]
+    static extern bool DeleteObject(nint obj);
+
+    [DllImport("user32.dll")]
+    static extern int SetWindowRgn(nint hwnd, nint region, bool redraw);
 
     // The window class, registered once per process: a solid brush in the tint, painted by DefWindowProc on
     // WM_ERASEBKGND, so the window needs no painting code of its own.

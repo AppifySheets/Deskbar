@@ -50,7 +50,9 @@ public class TilePreviewOverlayTests
         GetWindowRect(new WindowInteropHelper(black).Handle, out var r);
         using var overlay = new TilePreviewOverlay();
 
-        overlay.Show([new TilePreview(new WindowRect(r.Left, r.Top, r.Right, r.Bottom), Dragged: true)]);
+        // Where the tile lands, and the place it leaves: only the first is drawn (Petre: "no need for the blue glow").
+        var frame = new WindowRect(r.Left, r.Top, r.Right, r.Bottom);
+        overlay.Show([new TilePreview(frame, Dragged: true), new TilePreview(frame, Dragged: false)]);
         Pump(TimeSpan.FromMilliseconds(300));
 
         var hwnd = Assert.Single(overlay.Windows);
@@ -58,10 +60,10 @@ public class TilePreviewOverlayTests
         Assert.Equal(WS_EX_TRANSPARENT | WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW | WS_EX_LAYERED,
             ex & (WS_EX_TRANSPARENT | WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW | WS_EX_LAYERED));
 
-        // The light blue (#4CC2FF) at about 30% over black: clearly blue, nowhere near the solid tint.
-        var pixel = PixelAt((r.Left + r.Right) / 2, (r.Top + r.Bottom) / 2);
-        var blue = (int)((pixel >> 16) & 0xFF);
-        Assert.InRange(blue, 40, 140);
+        // An outline only: the middle is the black window underneath, untouched, and the ring is clearly blue.
+        static int Blue(uint pixel) => (int)((pixel >> 16) & 0xFF);
+        Assert.InRange(Blue(PixelAt((r.Left + r.Right) / 2, (r.Top + r.Bottom) / 2)), 0, 10);
+        Assert.InRange(Blue(PixelAt(r.Left + 1, (r.Top + r.Bottom) / 2)), 150, 255);
 
         overlay.Show([]);
         Assert.Empty(overlay.Windows);
