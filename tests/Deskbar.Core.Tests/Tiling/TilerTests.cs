@@ -343,6 +343,75 @@ public sealed class TilerTests : IDisposable
         AssertTiled(order);
     }
 
+    // Petre, turning tiling on over a maximized browser: "activating tile windows should unmaximize all windows".
+    // Turning it on restores every maximized window there, and each drops into its slot when it settles.
+    [Fact]
+    public void Turning_tiling_on_restores_maximized_windows_into_their_slots()
+    {
+        new[] { 1, 2, 3 }.ToList().ForEach(n => Exists(W(n), alpha));
+        surface.Maximized.Add(W(2));
+        Start(alphaTiled: false);
+
+        Assert.True(manager.SetWorkspaceTiled(alpha.Id, true).IsSuccess);
+
+        Assert.Equal([W(2)], surface.Restored);
+        // The restore is asynchronous: the window settles wherever it used to be, and goes into its slot.
+        Settles(W(2), new WindowRect(400, 300, 900, 700));
+        AssertTiled([W(1), W(2), W(3)]);
+    }
+
+    // Un-maximizing a window on another desktop makes Windows follow it there (spec, anti-goals), so a workspace
+    // tiled from afar is restored only when Petre arrives at it, and only that once.
+    [Fact]
+    public void Tiling_a_workspace_you_are_not_on_restores_its_maximized_windows_when_you_arrive()
+    {
+        Exists(W(1), alpha);
+        new[] { 2, 3 }.ToList().ForEach(n => Exists(W(n), beta));
+        surface.Maximized.Add(W(3));
+        Start();
+
+        Assert.True(manager.SetWorkspaceTiled(beta.Id, true).IsSuccess);
+        Assert.Empty(surface.Restored);
+
+        SwitchTo(beta);
+        Assert.Equal([W(3)], surface.Restored);
+
+        // Maximized again by hand and the next visit leaves it alone: the restore belongs to turning tiling on.
+        surface.Maximized.Add(W(3));
+        SwitchTo(alpha);
+        SwitchTo(beta);
+        Assert.Equal([W(3)], surface.Restored);
+    }
+
+    // Petre: "opening a new window in a tiled bar should automatically unmaximize it and put it into the tile". A
+    // browser that remembers being maximized opens maximized; on a tiled workspace it is restored into its slot.
+    // Maximizing a tile by hand later still keeps it maximized (A_maximized_window_keeps_its_slot_and_is_not_placed).
+    [Fact]
+    public void A_window_that_opens_maximized_is_restored_into_its_slot()
+    {
+        new[] { 1, 2 }.ToList().ForEach(n => Exists(W(n), alpha));
+        Start();
+
+        surface.Maximized.Add(W(3));
+        Opens(W(3), alpha);
+
+        Assert.Equal([W(3)], surface.Restored);
+        Settles(W(3), new WindowRect(400, 300, 900, 700));
+        AssertTiled([W(1), W(2), W(3)]);
+    }
+
+    // A workspace that was already tiled when Deskbar started was not turned on just now: its maximized windows
+    // stay maximized, as the user left them.
+    [Fact]
+    public void A_restart_does_not_restore_maximized_windows()
+    {
+        new[] { 1, 2 }.ToList().ForEach(n => Exists(W(n), alpha));
+        surface.Maximized.Add(W(2));
+        Start();
+
+        Assert.Empty(surface.Restored);
+    }
+
     [Fact]
     public void A_maximized_window_that_closes_frees_its_slot()
     {

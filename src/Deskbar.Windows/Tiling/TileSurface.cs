@@ -221,6 +221,12 @@ public sealed class TileSurface : ITileSurface, IDisposable
             : Result.Failure("Windows would not move that window.");
     }
 
+    // Un-maximizes a window when tiling is turned on over it. ShowWindowAsync, never ShowWindow: the window belongs
+    // to another process, and a synchronous call would wait on that process's thread (CLAUDE.md, "ShowWindowAsync
+    // is asynchronous"). The Tiler expects exactly that: the window is still maximized when this returns, and its
+    // Settled, once it has restored, is what puts it into its slot.
+    public void Restore(WindowHandle window) => _ = ShowWindowAsync(window.Value, SW_RESTORE);
+
     // Windows 11's rounded corners, asked for once as a window joins a grid. Windows 10 has no such attribute and
     // answers with an error, which is ignored: square corners there are simply what Windows 10 looks like.
     public void RoundCorners(WindowHandle window)

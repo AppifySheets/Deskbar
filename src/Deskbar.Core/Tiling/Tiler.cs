@@ -3,6 +3,7 @@ using System.Reactive.Linq;
 using CSharpFunctionalExtensions;
 using Deskbar.Core.Abstractions;
 using Deskbar.Core.Domain;
+using Deskbar.Core.Persistence;
 
 namespace Deskbar.Core.Tiling;
 
@@ -99,6 +100,18 @@ public sealed class Tiler(WorkspaceManager manager, IVirtualDesktopService deskt
     // drop: a window maximized before tiling began restores to wherever it used to be, and if that happened to
     // be over another tile it would otherwise swap.
     readonly HashSet<WindowHandle> maximized = [];
+
+    // TURNING TILING ON UN-MAXIMIZES. Petre, on tiling a workspace with a maximized browser over the grid:
+    // "activating tile windows should unmaximize all windows". The design otherwise leaves a maximized window
+    // maximized (it keeps its slot and covers the tiles), and that still holds afterwards: this is only for the
+    // moment the workspace's Tiled flag turns on.
+    //
+    // `tiledLast` is which workspaces were tiled at the last evaluate; None until the first one, so the workspaces
+    // already tiled when Deskbar starts were not "just turned on" and a restart restores nothing. A workspace that
+    // turns on waits in `restoreOnArrival` until the Tiler acts on it, because un-maximizing a window on another
+    // desktop makes Windows follow it there (spec, anti-goals). It is restored once; untiling it first cancels it.
+    Maybe<IReadOnlySet<Guid>> tiledLast = Maybe<IReadOnlySet<Guid>>.None;
+    readonly HashSet<Guid> restoreOnArrival = [];
 
     // The last trace line per workspace and screen, so the trace writes only when a layout changed.
     readonly Dictionary<(Guid Workspace, int Screen), string> lastLines = [];
@@ -248,6 +261,16 @@ public sealed class Tiler(WorkspaceManager manager, IVirtualDesktopService deskt
         }
         if (e.Kind is WindowEventKind.Appeared or WindowEventKind.Hidden or WindowEventKind.Disappeared or WindowEventKind.MinimizeChanged)
             Evaluate(everyScreen: false);
+
+        // A window that OPENS maximized on a tiled workspace is restored into the slot it just joined. Petre:
+        // "opening a new window in a tiled bar should automatically unmaximize it and put it into the tile". A
+        // browser remembers being maximized and comes back that way, covering the grid it was meant to join. Only
+        // on Appeared: a tile maximized by hand afterwards stays maximized, as the design says.
+        if (e.Kind == WindowEventKind.Appeared
+            && Acting().TryGetValue(out var workspace)
+            && Board.ScreenOf(e.Window.Handle).HasValue
+            && surface.IsMaximized(e.Window.Handle))
+            Unmaximize(e.Window.Handle, $"{workspace.Name}: it opened maximized");
     }
 
     // The manager moved a window to another desktop (WorkspaceManager.WindowMoved). Nothing else announces
@@ -412,6 +435,7 @@ public sealed class Tiler(WorkspaceManager manager, IVirtualDesktopService deskt
         var droppedWindows = dropped.SelectMany(id => boards[id].Screens.Values).SelectMany(w => w).ToList();
         dropped.ForEach(id => boards.Remove(id));
         Forget(droppedWindows);
+        NoteTiledJustNow(state);
 
         if (!Acting().TryGetValue(out var workspace))
         {
@@ -436,6 +460,7 @@ public sealed class Tiler(WorkspaceManager manager, IVirtualDesktopService deskt
             .ToList();
         var board = before is null ? TileBoard.FirstFill(windows) : Reconciled(before, windows);
         Keep(workspace, board);
+        RestoreIfJustTiled(workspace, board);
 
         var changed = full || before is null
             ? board.Screens.Keys.ToList()
@@ -443,6 +468,38 @@ public sealed class Tiler(WorkspaceManager manager, IVirtualDesktopService deskt
                 .Where(s => !board.On(s).SequenceEqual(before.On(s)))
                 .ToList();
         Retile(workspace, changed);
+    }
+
+    // Which workspaces turned tiled since the last evaluate (see `restoreOnArrival`). The flag alone, not the gate:
+    // the experiment or Pro coming back is not Petre activating tiling on a workspace.
+    void NoteTiledJustNow(AppState state)
+    {
+        var tiledNow = state.Workspaces.Where(w => w.Tiled).Select(w => w.Id).ToHashSet();
+        tiledLast.Tap(last => tiledNow.Where(id => !last.Contains(id)).ToList().ForEach(id => restoreOnArrival.Add(id)));
+        restoreOnArrival.RemoveWhere(id => !tiledNow.Contains(id));
+        tiledLast = Maybe.From<IReadOnlySet<Guid>>(tiledNow);
+    }
+
+    // The board's maximized windows are un-maximized, once, the first time the Tiler acts on a workspace that
+    // was just turned tiled.
+    void RestoreIfJustTiled(Workspace workspace, TileBoard board)
+    {
+        if (!restoreOnArrival.Remove(workspace.Id)) return;
+        board.Screens.Values.SelectMany(w => w)
+            .Where(surface.IsMaximized)
+            .ToList()
+            .ForEach(w => Unmaximize(w, $"{workspace.Name}: tiling was just turned on"));
+    }
+
+    // Un-maximizes a window on the grid so it drops into its slot. Noted in `maximized` HERE, before the restore,
+    // and not left to Retile noticing it: the restore is asynchronous in Windows but need not be, and if the window
+    // were already restored when Retile looked, its Settled would be judged as a drag and could swap with whatever
+    // tile it settled over, instead of going into its own slot.
+    void Unmaximize(WindowHandle window, string why)
+    {
+        trace?.Invoke($"tile: {window.Value:X} un-maximized, {why}");
+        maximized.Add(window);
+        PerWindow(window, "restore", () => surface.Restore(window));
     }
 
     // A dropped board's windows lose what the Tiler had decided about them while they were tiled (final review,

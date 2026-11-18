@@ -368,6 +368,16 @@ public sealed class FakeTileSurface : ITileSurface
         WatchThreads.Add(Environment.CurrentManagedThreadId);
     }
 
+    // Un-maximizes the window the way Windows would once its asynchronous restore lands: it is no longer maximized.
+    // Its frame is left alone, so a test settles it where it wants, as the real restore leaves it at its old place.
+    public List<WindowHandle> Restored { get; } = [];
+
+    public void Restore(WindowHandle window)
+    {
+        Restored.Add(window);
+        Maximized.Remove(window);
+    }
+
     public IObservable<WindowHandle> Settled => SettledSubject.AsObservable();
     public IObservable<Unit> ScreensChanged => ScreensChangedSubject.AsObservable();
 }

@@ -50,6 +50,11 @@ public interface ITileSurface
     // A failure is ordinary (the window closed, or it is elevated) and the Tiler carries on with the rest.
     Result Place(WindowHandle window, WindowRect visibleFrame);
 
+    // Un-maximizes the window (ShowWindowAsync SW_RESTORE). Asynchronous: the window is still maximized when this
+    // returns, and its Settled follows once it has restored. Only ever asked of a window on the desktop being
+    // looked at, because un-maximizing one on another desktop makes Windows follow it there (spec, anti-goals).
+    void Restore(WindowHandle window);
+
     // Asks DWM to round the window's corners (DWMWA_WINDOW_CORNER_PREFERENCE, DWMWCP_ROUND). Called once
     // per window as it joins a grid; never undone (spec, "Rounded corners").
     void RoundCorners(WindowHandle window);
