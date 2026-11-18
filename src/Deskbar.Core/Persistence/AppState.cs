@@ -304,6 +304,16 @@ public sealed record AppState(
     // in FloatingBarState.DockedEdge while docked.
     public bool DockBar { get; init; }
 
+    // Whether Deskbar holds Windows' "Show flashing on taskbar apps" off while it runs, and puts it back when it
+    // stops (TaskbarFlashing in Core, TaskbarFlashingSwitch in the app). Petre, whose auto-hidden taskbar "keeps
+    // popping up when i don't need it" because a flashing app holds it up: "set the flashing off, so that without
+    // deskbar taskbar still does its thing".
+    //
+    // OFF by default: it changes a Windows setting, and nobody should find one changed without having ticked a
+    // box. Manage suggests it instead, under the box, when the taskbar is on auto-hide. This is only the wish;
+    // what the switch was before Deskbar took hold is in a marker file, not here (TaskbarFlashing.MarkerName).
+    public bool QuietTaskbar { get; init; }
+
     // Docked ACROSS the line between two screens rather than on one screen's edge. Petre: "let's try docking it
     // so that it shows in the middle of the two monitors", "so left half is on the left, right on the right, as
     // an option". Off by default, and only meaningful with DockBar on and a second screen beside the bar's.

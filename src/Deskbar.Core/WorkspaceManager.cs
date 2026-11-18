@@ -2025,6 +2025,15 @@ public sealed class WorkspaceManager(
             ? Result.Success()
             : Result.Success().Tap(() => Persist(State with { DockBar = docked }));
 
+    // Whether Deskbar holds Windows' taskbar flashing off while it runs (AppState.QuietTaskbar). The app flips
+    // the Windows setting from the pulse Persist sends (see where App wires TaskbarFlashingSwitch.Sync), so this
+    // only records the wish. A no-op when unchanged, for the reason SetCheckForUpdates gives: Manage sets its
+    // box from the state when it opens, and that raises Checked.
+    public Result SetQuietTaskbar(bool quiet) =>
+        State.QuietTaskbar == quiet
+            ? Result.Success()
+            : Result.Success().Tap(() => Persist(State with { QuietTaskbar = quiet }));
+
     // Across the seam between two screens, or on one screen's edge (AppState.DockAcrossScreens). Asking for the
     // seam turns docking on as well, in the same write, since the one means nothing without the other.
     public Result SetDockAcrossScreens(bool across) =>

@@ -1357,6 +1357,18 @@ public partial class App : Application
             .DistinctUntilChanged()
             .Subscribe(ClaudeSkill.Sync);
 
+        // Windows' "Show flashing on taskbar apps", held off while this copy runs when Manage's box says so
+        // (AppState.QuietTaskbar; docs/superpowers/specs/2026-11-18-taskbar-flashing-switch-design.md): now, and
+        // whenever the box changes. Put back with Sync(false) on every orderly way out (ExitApp, SessionEnding).
+        // This first call is also what recovers from a crash: it finds the marker the dead copy left and keeps
+        // its value. DistinctUntilChanged matters at exit too: a state pulse that arrives after the switch was
+        // put back (titles being restored) carries an unchanged setting and so cannot take hold again.
+        TaskbarFlashingSwitch.Sync(manager.State.QuietTaskbar);
+        manager.StateChanged
+            .Select(_ => manager.State.QuietTaskbar)
+            .DistinctUntilChanged()
+            .Subscribe(TaskbarFlashingSwitch.Sync);
+
         trayIcon = new TaskbarIcon
         {
             // The real app icon, replacing the generic SystemIcons.Application placeholder.
@@ -1793,6 +1805,9 @@ public partial class App : Application
             tileSurface = null;
             monitor.Dispose();
             manager.RestoreAllTitles();
+            // Sign-out puts Windows' taskbar flashing back too, so a session that starts without Deskbar (start
+            // with Windows unticked) has its flash. With Deskbar starting at sign-in it takes hold again there.
+            TaskbarFlashingSwitch.Sync(false);
         };
     }
 
@@ -2150,6 +2165,9 @@ public partial class App : Application
         tileSurface?.Dispose();
         tileSurface = null;
         manager?.RestoreAllTitles();  // leave every window as we found it
+        // ...and Windows' taskbar flashing as we found it (see where Sync is wired in OnStartup). Petre: "if i
+        // stop deskbar, it should bring back the taskbar". A no-op unless this copy was holding the switch.
+        TaskbarFlashingSwitch.Sync(false);
         monitor?.Dispose();
         hotkeys?.Dispose(); // unregisters RegisterHotKey chords before the process exits
         quickFind?.Dispose();

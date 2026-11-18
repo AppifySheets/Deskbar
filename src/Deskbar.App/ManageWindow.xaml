@@ -69,6 +69,18 @@
         <CheckBox x:Name="DockBar" DockPanel.Dock="Bottom" Margin="8,0,8,0"
                   Content="Dock the bar to the edge of its screen, like the taskbar (windows keep clear of it)"
                   Checked="OnDockBarToggled" Unchecked="OnDockBarToggled"/>
+        <!-- Windows' "Show flashing on taskbar apps", held off while Deskbar runs and put back when it stops
+             (AppState.QuietTaskbar; docs/superpowers/specs/2026-11-18-taskbar-flashing-switch-design.md). A flashing
+             app holds an auto-hidden taskbar up until it is clicked, and the bar's amber dot already shows the
+             flash. Off by default; the note under the box suggests it, and only when the taskbar is on auto-hide
+             and Windows flashes (TaskbarFlashing.Note). Declared after DockBar, so it sits just above it. -->
+        <StackPanel DockPanel.Dock="Bottom" Margin="8,0,8,4">
+            <CheckBox x:Name="QuietTaskbar"
+                      Content="Stop apps flashing on Windows' taskbar while Deskbar runs (the bar's amber dot shows them instead)"
+                      Checked="OnQuietTaskbarToggled" Unchecked="OnQuietTaskbarToggled"/>
+            <TextBlock x:Name="QuietTaskbarNote" TextWrapping="Wrap" Margin="20,2,0,0" Opacity="0.75"
+                       Visibility="Collapsed"/>
+        </StackPanel>
         <!-- The Claude Code skill (AppState.ClaudeSkill, ClaudeSkill.cs). Petre: "add a skill for claude per user".
              Here with the other choices about how the app sits on the machine; on by default, and it only ever
              writes when Claude Code's own folder exists. -->

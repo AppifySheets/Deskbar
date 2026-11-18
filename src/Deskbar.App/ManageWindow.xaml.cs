@@ -64,6 +64,10 @@ public partial class ManageWindow : Window
         DockBar.IsChecked = manager.State.DockBar;
         // Same again: SetClaudeSkill ignores an unchanged value.
         ClaudeSkill.IsChecked = manager.State.ClaudeSkill;
+        // And again: SetQuietTaskbar ignores an unchanged value. The note is set here as well as in the handler,
+        // because an unticked box raises no Checked when the window opens.
+        QuietTaskbar.IsChecked = manager.State.QuietTaskbar;
+        ShowQuietTaskbarNote();
         // Tiling, the same pattern: SetExperimentalTiling ignores an unchanged value, and the Checked it raises is
         // also what frees the gap row. The gap box shows the stored number; nothing is written until Apply.
         ExperimentalTiling.IsChecked = manager.State.ExperimentalTiling;
@@ -421,6 +425,28 @@ public partial class ManageWindow : Window
     // The bar follows the setting from the state pulse this sends (FloatingBar.FollowDockSetting).
     void OnDockBarToggled(object s, RoutedEventArgs e) =>
         manager.SetDockBar(DockBar.IsChecked == true).TapError(err => MessageBox.Show(err));
+
+    // The app flips Windows' setting from the state pulse this sends (see where App wires
+    // TaskbarFlashingSwitch.Sync); this window never writes the registry itself, which is also what keeps the
+    // tests that build it away from the real setting.
+    void OnQuietTaskbarToggled(object s, RoutedEventArgs e)
+    {
+        manager.SetQuietTaskbar(QuietTaskbar.IsChecked == true).TapError(err => MessageBox.Show(err));
+        ShowQuietTaskbarNote();
+    }
+
+    // The suggestion under the box: shown while the box is unticked, the taskbar is on auto-hide and Windows
+    // flashes, which is exactly when a flashing app holds the taskbar up (TaskbarFlashing.Note). Both readings
+    // are read-only. AppBar.Taskbar is null when no shell answers, and then there is no taskbar to hold up.
+    void ShowQuietTaskbarNote()
+    {
+        var note = Deskbar.Core.Shell.TaskbarFlashing.Note(
+            ticked: QuietTaskbar.IsChecked == true,
+            autoHide: AppBar.Taskbar()?.AutoHide == true,
+            flashingOn: TaskbarFlashingSwitch.FlashingOn);
+        QuietTaskbarNote.Text = note;
+        QuietTaskbarNote.Visibility = note.Length == 0 ? Visibility.Collapsed : Visibility.Visible;
+    }
 
     // The app writes or removes the skill from the state pulse this sends (see where App wires ClaudeSkill.Sync).
     void OnClaudeSkillToggled(object s, RoutedEventArgs e) =>
