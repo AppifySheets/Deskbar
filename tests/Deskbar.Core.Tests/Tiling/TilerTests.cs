@@ -445,6 +445,36 @@ public sealed class TilerTests : IDisposable
         Assert.Equal(stacked, new[] { W(1), W(2) }.Select(w => surface.Frames[w]).ToList());
     }
 
+    // Petre: "windows + left right keys don't seem to move windows to other screen". Win+Left snaps the window to
+    // the left half of its screen with no button down; the Tiler reads that as a direction. From the left column of
+    // the right screen it goes to the left screen; from the right column it swaps one column left.
+    [Fact]
+    public void Win_Left_from_the_leftmost_column_moves_the_tile_to_the_screen_on_the_left()
+    {
+        surface.ScreenList.Add(FakeTileSurface.Screen(2, Area2));
+        Exists(W(1), alpha);
+        new[] { 2, 3 }.ToList().ForEach(n => Exists(W(n), alpha, screen: 2));
+        Start();
+
+        // W2 is the left tile of screen 2; Windows snaps it to the left half of that screen.
+        Settles(W(2), new WindowRect(Area2.Left, Area2.Top, Area2.Left + Area2.Width / 2, Area2.Bottom), screen: 2);
+
+        Assert.Equal([W(1), W(2)], tiler.Board.On(1));
+        Assert.Equal([W(3)], tiler.Board.On(2));
+    }
+
+    [Fact]
+    public void Win_Left_from_an_inner_column_swaps_with_the_tile_beside_it()
+    {
+        new[] { 1, 2 }.ToList().ForEach(n => Exists(W(n), alpha));
+        Start();
+
+        // W2, the right tile, snapped to the left half: it trades places with W1.
+        Settles(W(2), new WindowRect(Area.Left, Area.Top, Area.Left + Area.Width / 2, Area.Bottom));
+
+        AssertTiled([W(2), W(1)]);
+    }
+
     // Without a mouse (a keyboard snap, an app moving itself) the centre still decides, as before.
     [Fact]
     public void A_move_without_the_mouse_is_still_judged_by_its_centre()

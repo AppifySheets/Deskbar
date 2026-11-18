@@ -379,8 +379,18 @@ public sealed class TileSurface : ITileSurface, IDisposable
 
     // Both buttons, because either can hold a drag (and GetAsyncKeyState reads the physical buttons, so swapped
     // buttons are covered by asking both).
+    //
+    // AND ALT. Petre: "when i dragged with alt drag, it behaved differently". AltSnap (his settings, measured in
+    // %APPDATA%\AltSnap\AltSnap.ini: Hotkeys=A4 A5, the left and right Alt keys; LMB=Move, RMB=Resize) takes the
+    // click with a low-level mouse hook and swallows it, and a swallowed click never reaches the async key state.
+    // So during an Alt-drag no button read as down: the drag settled at every pause, was put back mid-drag three
+    // times, and the backstop then gave up on the window ("put back 3 times in 2s" in the trace). Alt held is what
+    // is left of an Alt-drag that the surface can see, so it counts as a drag in progress, like a button.
     static bool MouseButtonDown() =>
-        (GetAsyncKeyState(VK_LBUTTON) & KeyDownBit) != 0 || (GetAsyncKeyState(VK_RBUTTON) & KeyDownBit) != 0;
+        (GetAsyncKeyState(VK_LBUTTON) & KeyDownBit) != 0 || (GetAsyncKeyState(VK_RBUTTON) & KeyDownBit) != 0
+        || (GetAsyncKeyState(VK_LMENU) & KeyDownBit) != 0 || (GetAsyncKeyState(VK_RMENU) & KeyDownBit) != 0;
+
+    const int VK_LMENU = 0xA4, VK_RMENU = 0xA5;
 
     void Unhook()
     {

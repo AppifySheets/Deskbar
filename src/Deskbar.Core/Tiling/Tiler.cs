@@ -380,7 +380,7 @@ public sealed partial class Tiler(WorkspaceManager manager, IVirtualDesktopServi
                 + $"board screen={Board.ScreenOf(window).Map(s => s.ToString()).GetValueOrDefault("none")}, "
                 + $"frame={surface.VisibleFrameOf(window).Map(Show).GetValueOrDefault("none")}, "
                 + $"given={(given.TryGetValue(window, out var g) ? Show(g.Accepted) : "none")}, echo={echo}, "
-                + $"maximized={surface.IsMaximized(window)}");
+                + $"maximized={surface.IsMaximized(window)}, byHand={surface.ByHand(window)}");
 
         // A live drag (Tiler.Drag.cs): the dragged window's own Settled ends it and hides the preview; a
         // neighbour's, while the dragged window has not settled yet, is the echo of a live placement and waits.
@@ -455,6 +455,17 @@ public sealed partial class Tiler(WorkspaceManager manager, IVirtualDesktopServi
                 decidedSlots = SlotsOf(own, board.On(decidedOn), ShownSizes(workspace, own, board.On(decidedOn).Count));
             outcome = SettledMove.DecideAt(window, pointer.X, pointer.Y,
                 ScreenAt(screens.Values, pointer.X, pointer.Y).GetValueOrDefault(screenNow), board, decidedSlots);
+        }
+        // Win+Left / Win+Right (no button down, the frame exactly half the screen): a direction, not a place
+        // (SettledMove.SnapSide has the measurement). One column over, or the next screen from the outermost one.
+        else if (board.ScreenOf(window).Map(h => h == screenNow).GetValueOrDefault(false)
+                 && screens.TryGetValue(screenNow, out var snapScreen)
+                 && SettledMove.SnapSide(frame, snapScreen.WorkArea).TryGetValue(out var side))
+        {
+            outcome = SettledMove.Snapped(window, side, screenNow, board,
+                ShownSizes(workspace, snapScreen, board.On(screenNow).Count).Shape, slots,
+                ScreenBeside(screens.Values, snapScreen, side));
+            trace?.Invoke($"tile: {window.Value:X} snapped {side} by keyboard: {outcome}");
         }
         else
             outcome = SettledMove.Decide(window, frame, screenNow, board, slots);

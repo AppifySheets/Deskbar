@@ -197,6 +197,12 @@ public sealed partial class Tiler
     (int X, int Y) PointOf(WindowRect frame) =>
         surface.Pointer().GetValueOrDefault((frame.Left + frame.Width / 2, frame.Top + frame.Height / 2));
 
+    // The nearest screen wholly to the left or right of `screen`, for a keyboard snap off its outer column.
+    static Maybe<int> ScreenBeside(IEnumerable<TileScreen> screens, TileScreen screen, TileArrange.Zone side) =>
+        side == TileArrange.Zone.Left
+            ? screens.Where(s => s.Bounds.Right <= screen.Bounds.Left).OrderByDescending(s => s.Bounds.Right).TryFirst().Map(s => s.Number)
+            : screens.Where(s => s.Bounds.Left >= screen.Bounds.Right).OrderBy(s => s.Bounds.Left).TryFirst().Map(s => s.Number);
+
     // The screen whose bounds hold the point.
     static Maybe<int> ScreenAt(IEnumerable<TileScreen> screens, int x, int y) =>
         screens.TryFirst(s => s.Bounds.Left <= x && x < s.Bounds.Right && s.Bounds.Top <= y && y < s.Bounds.Bottom)
