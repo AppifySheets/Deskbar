@@ -115,8 +115,29 @@ public partial class FloatingBar
         // Worked out again as it opens, as Search's tip is: Pro can change (a licence refresh, a trial ending)
         // without anything pulsing the state, so a tip painted at the last rebuild could name the wrong tier.
         button.ToolTipOpening += (_, _) => button.ToolTip = TileTip();
+        // Right-click: "Even out tiles", the row menu's item, for the workspace you are on. Filled as it opens,
+        // from the state as it is then; with nothing to offer no menu opens at all, rather than an empty one.
+        button.ContextMenu = new ContextMenu();
+        button.ContextMenuOpening += (_, e) =>
+        {
+            FillTileMenu(button.ContextMenu);
+            if (button.ContextMenu.Items.Count == 0) e.Handled = true;
+        };
         tileButtons.Add(button);
         return button;
+    }
+
+    // The button's right-click menu. "Even out tiles" on the same terms as the row menu: Pro, the workspace tiled,
+    // and a split dragged (an equal layout stores nothing, so there is nothing to even out until then).
+    internal void FillTileMenu(ContextMenu menu)
+    {
+        menu.Items.Clear();
+        if (tileTarget is not { } id || !IsPro()) return;
+        var current = manager.State.Workspaces.FirstOrDefault(w => w.Id == id);
+        if (current is not { Tiled: true } || current.TileSizes.Count == 0) return;
+        var even = new MenuItem { Header = "Even out tiles", Icon = MenuGlyph("⊟") };
+        even.Click += (_, _) => Report(manager.EvenOutTiles(id));
+        menu.Items.Add(even);
     }
 
     // What the button would do now, in words. Read from the state and Pro as they are this moment.

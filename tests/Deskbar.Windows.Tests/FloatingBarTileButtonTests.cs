@@ -93,4 +93,30 @@ public class FloatingBarTileButtonTests
         Assert.Equal(Visibility.Visible, Button(bar).Visibility);
         Assert.Equal("Tile windows (Deskbar Pro)", bar.Bar.TileTip());
     });
+
+    // Right-click offers "Even out tiles" once a split has been dragged (a stored size), and clicking it forgets the
+    // sizes, as the row menu's item does. With nothing to even out the menu stays empty, so none opens.
+    [Fact]
+    public void Right_click_offers_Even_out_tiles_once_a_split_was_dragged() => StaThread.Run(() =>
+    {
+        var harness = Harness.Build();
+        var gepha = harness.Manager.State.Workspaces.Single(w => w.Name == "GEPHA").Id;
+        Assert.True(harness.Manager.SetExperimentalTiling(true).IsSuccess);
+        Assert.True(harness.Manager.SetWorkspaceTiled(gepha, true).IsSuccess);
+        using var bar = ShowBar(harness, pro: true);
+        Settle(bar);
+        var menu = new ContextMenu();
+
+        bar.Bar.FillTileMenu(menu);
+        Assert.Empty(menu.Items);
+
+        Assert.True(harness.Manager.SetTileSizes(gepha, "0,0,1920,1080", new([0.3, 0.7], [[1.0], [0.25, 0.75]])).IsSuccess);
+        Settle(bar);
+        bar.Bar.FillTileMenu(menu);
+        var even = Assert.Single(menu.Items.OfType<MenuItem>());
+        Assert.Equal("Even out tiles", even.Header);
+
+        even.RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
+        Assert.Empty(harness.Manager.State.Workspaces.Single(w => w.Name == "GEPHA").TileSizes);
+    });
 }
