@@ -368,6 +368,16 @@ public sealed partial class Tiler(WorkspaceManager manager, IVirtualDesktopServi
     {
         // Taken first, whatever happens below: this Settled is the one any pending echo of our own Place was for.
         var echo = EchoOfOurPlace(window);
+
+        // One line per Settled, naming every input the early returns below decide on. Without it a Settled that
+        // ends in one of them leaves no trace at all, and "the tiler never heard the move" cannot be told apart
+        // from "it heard and chose to do nothing" (Petre's live test, 2026-11-18: a hand resize stuck with no line).
+        if (trace is not null)
+            trace($"tile: {window.Value:X} settled: acting={Acting().Map(w => w.Name).GetValueOrDefault("none")}, "
+                + $"board screen={Board.ScreenOf(window).Map(s => s.ToString()).GetValueOrDefault("none")}, "
+                + $"frame={surface.VisibleFrameOf(window).Map(Show).GetValueOrDefault("none")}, "
+                + $"given={(given.TryGetValue(window, out var g) ? Show(g.Accepted) : "none")}, echo={echo}, "
+                + $"maximized={surface.IsMaximized(window)}");
         if (dropping(window))
         {
             trace?.Invoke($"tile: {window.Value:X} settled during a drop on the bar, ignored");
@@ -775,6 +785,10 @@ public sealed partial class Tiler(WorkspaceManager manager, IVirtualDesktopServi
     {
         if (watched.SetEquals(windows)) return;
         watched = windows;
+        // The hook is out of context, so its callbacks arrive through the message queue of the thread that installs
+        // it. Named here so a hook installed on a thread with no message loop (and so never heard) shows in the trace.
+        trace?.Invoke($"tile: watching {windows.Count} window(s) from thread {Environment.CurrentManagedThreadId} "
+            + $"({Thread.CurrentThread.GetApartmentState()}, {(Thread.CurrentThread.IsThreadPoolThread ? "pool" : "own")})");
         surface.Watch(windows);
     }
 
