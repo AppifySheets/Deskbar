@@ -29,7 +29,9 @@ public static class GridLayout
 
         // The gap runs around the outside as well as between tiles, so shrink the area first.
         var inner = InnerArea(area, gap);
-        var shape = Shape(count);
+        // The sizes' own shape when they describe this many windows: a drop into a tile's edge zone can make any
+        // shape (TileArrange), and the sizes carry it. Otherwise the automatic one, as always.
+        var shape = sizes.Shape.Sum() == count ? sizes.Shape : Shape(count);
         var xs = Edges(inner.Width, sizes.Columns);
 
         return shape

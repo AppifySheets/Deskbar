@@ -14,6 +14,10 @@ public abstract record MoveOutcome
 
     // The window now sits on a different screen: it joins that screen's grid.
     public sealed record JoinScreen(int Screen) : MoveOutcome;
+
+    // Dropped on an EDGE of another tile: it goes beside that tile on that side, and the shape changes
+    // (TileArrange.Drop).
+    public sealed record Beside(WindowHandle Target, TileArrange.Zone Side) : MoveOutcome;
 }
 
 // The rule for a settled move, kept out of the Win32 plumbing so it can be tested. It decides by the
@@ -46,8 +50,15 @@ public static class SettledMove
         TileBoard board,
         IReadOnlyDictionary<WindowHandle, WindowRect> slots) =>
         board.ScreenOf(moved).TryGetValue(out var home) && home == screenAt
-            ? At(moved, x, y, slots)
+            ? Zoned(At(moved, x, y, slots), x, y, slots)
             : new MoveOutcome.JoinScreen(screenAt);
+
+    // A hit on another tile's EDGE zone puts the window beside it (drop zones, TileArrange); its middle swaps.
+    // Only for a drop by hand at the pointer: a window's centre has no aim, so Decide keeps plain swaps.
+    static MoveOutcome Zoned(MoveOutcome hit, int x, int y, IReadOnlyDictionary<WindowHandle, WindowRect> slots) =>
+        hit is MoveOutcome.Swap swap && TileArrange.ZoneOf(slots[swap.With], x, y) is var zone && zone != TileArrange.Zone.Middle
+            ? new MoveOutcome.Beside(swap.With, zone)
+            : hit;
 
     // Same screen: the tile containing the centre decides.
     static MoveOutcome Within(WindowHandle moved, WindowRect frame, IReadOnlyDictionary<WindowHandle, WindowRect> slots) =>

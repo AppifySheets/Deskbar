@@ -469,6 +469,16 @@ public sealed partial class Tiler(WorkspaceManager manager, IVirtualDesktopServi
                 if (decidedSlots.TryGetValue(window, out var slot))
                     PutBack(window, slot, frame);
                 break;
+            // Dropped on another tile's edge zone: beside it on that side (TileArrange). The new shape is stored with
+            // the sizes, BEFORE the re-tile, so the layout reads it; the board takes the new order.
+            case MoveOutcome.Beside beside when screens.TryGetValue(decidedOn, out var besideScreen):
+                var arranged = Rearranged(workspace, besideScreen, window, beside);
+                Keep(workspace, board.Reordered(decidedOn, arranged.Order));
+                StoreSizes(workspace, KeyOf(besideScreen), arranged.Sizes)
+                    .Tap(() => trace?.Invoke($"tile: {workspace.Name} screen {decidedOn}: {window.Value:X} dropped {beside.Side} of {beside.Target.Value:X}, sizes {Show(arranged.Sizes)}"))
+                    .TapError(error => trace?.Invoke($"tile: {workspace.Name} screen {decidedOn}: storing the new arrangement failed: {error}"));
+                Retile(workspace, [decidedOn]);
+                break;
             case MoveOutcome.JoinScreen join:
                 var from = board.ScreenOf(window).GetValueOrDefault(join.Screen);
                 // Through Keep, like every other board change, so the screen it left notes it as its leaver.

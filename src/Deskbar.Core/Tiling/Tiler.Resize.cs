@@ -115,8 +115,11 @@ public sealed partial class Tiler
             .Map(s => s.Sizes);
         if (stored.HasNoValue) return TileSizes.Equal(shape);
 
-        var fitted = stored.Value.Fit(shape, leaving);
-        if (fitted != stored.Value && !fitted.IsEqual && !InGrace(key))
+        // Refit keeps a shape made by a drop (TileArrange) while windows come and go; on the automatic shape it is
+        // TileSizes.Fit, as before. Stored unless plain: even sizes on the automatic shape are what nothing stored
+        // means already, but even sizes on a custom shape are not.
+        var fitted = TileArrange.Refit(stored.Value, count, leaving);
+        if (fitted != stored.Value && !TileArrange.IsPlain(fitted) && !InGrace(key))
             StoreSizes(workspace, key, fitted)
                 .Tap(() => trace?.Invoke($"tile: {workspace.Name} screen {screen.Number}: sizes refitted to {count} windows, {Show(fitted)}"))
                 .TapError(error => trace?.Invoke($"tile: {workspace.Name} screen {screen.Number}: storing refitted sizes failed: {error}"));
@@ -154,7 +157,7 @@ public sealed partial class Tiler
                 if (staying.Count == 0)
                     leavers.Remove((workspace, s.Key));
                 else if (gone.Count > 0)
-                    leavers[(workspace, s.Key)] = GridLayout.CellOf(gone[0].Slot, GridLayout.Shape(s.Value.Count));
+                    leavers[(workspace, s.Key)] = GridLayout.CellOf(gone[0].Slot, ShapeOn(workspace, s.Key, s.Value.Count));
             });
         else
             leavers.Keys.Where(k => k.Workspace == workspace).ToList().ForEach(k => leavers.Remove(k));
@@ -204,7 +207,7 @@ public sealed partial class Tiler
         if (moved == Edges.None) return false;
 
         var windows = board.On(screenNow);
-        var shape = GridLayout.Shape(windows.Count);
+        var shape = shown.Shape;
         var cell = GridLayout.CellOf(windows.ToList().IndexOf(window), shape);
 
         SplitMove.Apply(shown, shape, screen.WorkArea, GapOn(screen), cell, moved, frame).Match(

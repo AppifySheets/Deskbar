@@ -413,11 +413,36 @@ public sealed class TilerTests : IDisposable
         var grid = Grid(4);
 
         // W3 held by its title bar and pulled down over W2: most of it is below the screen.
-        surface.PointerAt = (grid[1].Left + 100, grid[1].Top + 20);
+        surface.PointerAt = ((grid[1].Left + grid[1].Right) / 2, (grid[1].Top + grid[1].Bottom) / 2);
         surface.MovedByHand.Add(W(3));
         Settles(W(3), new WindowRect(grid[1].Left, grid[1].Top, grid[1].Left + 900, grid[1].Top + 1600));
 
         AssertTiled([W(1), W(3), W(2), W(4)]);
+    }
+
+    // Petre: "i still can't drag below another window". Two tiles side by side; the right one is dropped on the
+    // bottom quarter of the left one: one column, the left window on top, the dropped one under it. The shape is
+    // kept, so the next re-tile does not put them back side by side.
+    [Fact]
+    public void A_drop_on_the_bottom_of_a_tile_stacks_the_window_under_it_and_keeps_that()
+    {
+        new[] { 1, 2 }.ToList().ForEach(n => Exists(W(n), alpha));
+        Start();
+        var grid = Grid(2);
+
+        surface.PointerAt = ((grid[0].Left + grid[0].Right) / 2, grid[0].Bottom - 20);
+        surface.MovedByHand.Add(W(2));
+        Settles(W(2), new WindowRect(200, 600, 900, 1500));
+        surface.MovedByHand.Remove(W(2));
+
+        var stacked = GridLayout.Arrange(Area, 2, Gap, TileSizes.Equal([2]));
+        Assert.Equal([W(1), W(2)], tiler.Board.On(1));
+        Assert.Equal(stacked, new[] { W(1), W(2) }.Select(w => surface.Frames[w]).ToList());
+        Assert.Equal([2], manager.State.Workspaces.Single(w => w.Id == alpha.Id).TileSizes.Single().Sizes.Shape);
+
+        // A refresh lays them out the same way.
+        tiler.Refresh();
+        Assert.Equal(stacked, new[] { W(1), W(2) }.Select(w => surface.Frames[w]).ToList());
     }
 
     // Without a mouse (a keyboard snap, an app moving itself) the centre still decides, as before.
@@ -428,7 +453,7 @@ public sealed class TilerTests : IDisposable
         Start();
         var grid = Grid(4);
 
-        surface.PointerAt = (grid[1].Left + 100, grid[1].Top + 20);
+        surface.PointerAt = ((grid[1].Left + grid[1].Right) / 2, (grid[1].Top + grid[1].Bottom) / 2);
         Settles(W(3), new WindowRect(grid[1].Left, grid[1].Top, grid[1].Left + 900, grid[1].Top + 1600));
 
         AssertTiled([W(1), W(2), W(3), W(4)]);
@@ -444,7 +469,7 @@ public sealed class TilerTests : IDisposable
         var grid = Grid(4);
 
         surface.Settling.Add(W(3));
-        surface.PointerAt = (grid[1].Left + 100, grid[1].Top + 20);
+        surface.PointerAt = ((grid[1].Left + grid[1].Right) / 2, (grid[1].Top + grid[1].Bottom) / 2);
         surface.Frames[W(3)] = new WindowRect(grid[1].Left, grid[1].Top, grid[1].Left + 900, grid[1].Top + 1600);
         surface.MovingSubject.OnNext(W(3));
 

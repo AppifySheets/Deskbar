@@ -51,6 +51,12 @@ public sealed record TileBoard(IReadOnlyDictionary<int, IReadOnlyList<WindowHand
             ? With(screen, On(screen).Select(x => x == a ? b : x == b ? a : x).ToList())
             : this;
 
+    // The same windows of one screen in a new order: a drop beside another tile (TileArrange.Drop). Refused, the
+    // board returned unchanged, unless `order` holds exactly the windows the screen has, so a rearrangement can
+    // never add or lose a window.
+    public TileBoard Reordered(int screen, IReadOnlyList<WindowHandle> order) =>
+        order.Count == On(screen).Count && order.ToHashSet().SetEquals(On(screen)) ? With(screen, order) : this;
+
     public Maybe<int> ScreenOf(WindowHandle w) =>
         Screens.Where(s => s.Value.Contains(w)).Select(s => Maybe.From(s.Key)).FirstOrDefault();
 

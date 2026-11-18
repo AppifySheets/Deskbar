@@ -1719,7 +1719,7 @@ public sealed class WorkspaceManager(
         }));
 
     static ValueList<ScreenTileSizes> WithSizes(ValueList<ScreenTileSizes> entries, string screen, TileSizes sizes) =>
-        sizes.IsEqual ? entries.Where(s => s.Screen != screen).ToValueList()
+        Tiling.TileArrange.IsPlain(sizes) ? entries.Where(s => s.Screen != screen).ToValueList()
         : entries.Any(s => s.Screen == screen) ? entries.Select(s => s.Screen == screen ? new ScreenTileSizes(screen, sizes) : s).ToValueList()
         : entries.Append(new ScreenTileSizes(screen, sizes)).ToValueList();
 

@@ -25,6 +25,10 @@ public sealed record TileSizes(IReadOnlyList<double> Columns, IReadOnlyList<IRea
     public static TileSizes Equal(IReadOnlyList<int> shape) =>
         new(EvenList(shape.Count), shape.Select(EvenList).ToList());
 
+    // How many rows each column holds: the grid SHAPE these sizes describe. Usually the automatic one
+    // (GridLayout.Shape), but a drop into a tile's edge zone (TileArrange) can make any other.
+    public IReadOnlyList<int> Shape => Rows.Select(r => r.Count).ToList();
+
     // True when every list is even, within the tolerance.
     public bool IsEqual =>
         IsEven(Columns) && Rows.All(IsEven);

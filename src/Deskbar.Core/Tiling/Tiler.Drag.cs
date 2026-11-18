@@ -67,9 +67,9 @@ public sealed partial class Tiler
     void LiveResize(Workspace workspace, TileScreen screen, WindowHandle window, Edges moved, WindowRect frame)
     {
         var windows = Board.On(screen.Number);
-        var shape = GridLayout.Shape(windows.Count);
-        var cell = GridLayout.CellOf(windows.ToList().IndexOf(window), shape);
         var shown = ShownSizes(workspace, screen, windows.Count);
+        var shape = shown.Shape;
+        var cell = GridLayout.CellOf(windows.ToList().IndexOf(window), shape);
         SplitMove.Apply(shown, shape, screen.WorkArea, GapOn(screen), cell, moved, frame).Tap(next =>
             SlotsOf(screen, windows, next)
                 .Where(s => s.Key != window)
@@ -108,10 +108,30 @@ public sealed partial class Tiler
             MoveOutcome.JoinScreen join when screens.TryGetValue(join.Screen, out var there) =>
                 JoinedSlot(workspace, there, window).Map(slot => new[] { new TilePreview(slot, Dragged: true) })
                     .GetValueOrDefault([]),
+            // Beside another tile: where the window lands in the new shape, and that tile's new, smaller place.
+            MoveOutcome.Beside beside when homeScreen is not null => BesidePreview(workspace, homeScreen, window, beside),
             _ => homeSlots.TryGetValue(window, out var own) ? [new TilePreview(own, Dragged: true)] : [],
         };
         surface.Preview(previews);
         previewShown = previews.Length > 0;
+    }
+
+    // The rearrangement a Beside drop would make (TileArrange.Drop), with its slots. The drop and the preview both
+    // come here, so what the preview shows is what the drop does.
+    (IReadOnlyList<WindowHandle> Order, TileSizes Sizes, IReadOnlyDictionary<WindowHandle, WindowRect> Slots) Rearranged(
+        Workspace workspace, TileScreen screen, WindowHandle window, MoveOutcome.Beside beside)
+    {
+        var order = Board.On(screen.Number);
+        var (next, sizes) = TileArrange.Drop(order, ShownSizes(workspace, screen, order.Count), window, beside.Target, beside.Side);
+        return (next, sizes, SlotsOf(screen, next, sizes));
+    }
+
+    TilePreview[] BesidePreview(Workspace workspace, TileScreen screen, WindowHandle window, MoveOutcome.Beside beside)
+    {
+        var slots = Rearranged(workspace, screen, window, beside).Slots;
+        return slots.TryGetValue(window, out var mine) && slots.TryGetValue(beside.Target, out var theirs)
+            ? [new TilePreview(mine, Dragged: true), new TilePreview(theirs, Dragged: false)]
+            : [];
     }
 
     // The slot a window would get joining `screen`'s grid at the end, as JoinScreen does.
@@ -156,15 +176,22 @@ public sealed partial class Tiler
 
     // The sizes the screen shows right now: the stored ones fitted to this count, or equal. Unlike SizesOn this
     // stores nothing and takes no pending leaver, because a drag changes neither the windows nor the count.
-    TileSizes ShownSizes(Workspace workspace, TileScreen screen, int count)
-    {
-        var shape = GridLayout.Shape(count);
-        var key = KeyOf(screen);
-        return manager.State.Workspaces.TryFirst(w => w.Id == workspace.Id)
+    TileSizes ShownSizes(Workspace workspace, TileScreen screen, int count) =>
+        StoredOn(workspace.Id, KeyOf(screen))
+            .Map(s => TileArrange.Refit(s, count, Maybe<(int Column, int Row)>.None))
+            .GetValueOrDefault(TileSizes.Equal(GridLayout.Shape(count)));
+
+    // The shape a screen (by number) of a workspace has for `count` windows: its stored shape if that fits the
+    // count, otherwise the automatic one. For NoteLeavers, which knows screens only by number.
+    IReadOnlyList<int> ShapeOn(Guid workspace, int screen, int count) =>
+        TileArrange.ShapeFor(
+            surface.Screens().TryFirst(s => s.Number == screen).Bind(s => StoredOn(workspace, KeyOf(s))),
+            count);
+
+    Maybe<TileSizes> StoredOn(Guid workspace, string key) =>
+        manager.State.Workspaces.TryFirst(w => w.Id == workspace)
             .Bind(w => w.TileSizes.TryFirst(s => s.Screen == key))
-            .Map(s => s.Sizes.Fit(shape, Maybe<(int Column, int Row)>.None))
-            .GetValueOrDefault(TileSizes.Equal(shape));
-    }
+            .Map(s => s.Sizes);
 
     // The pointer, or the frame's centre if Windows will not say where the pointer is.
     (int X, int Y) PointOf(WindowRect frame) =>
