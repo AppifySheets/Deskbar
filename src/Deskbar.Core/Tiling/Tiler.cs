@@ -22,7 +22,8 @@ namespace Deskbar.Core.Tiling;
 //     window and the home workspace for a borrowed one), that the surface says can tile, and that are not
 //     minimized. Everything else floats above the grid.
 //   - A maximized window keeps its slot (the tiles beneath do not reflow) and is never placed.
-//   - Slot order is join order; a new or restored window goes to the end (TileBoard).
+//   - Slot order is join order; a new window goes to the end (TileBoard). A restored one goes back to the place it
+//     left when it was minimized (Tiler.Minimize.cs).
 //
 // Threading: every entry point runs on the UI thread, and the Tiler makes sure of it rather than trusting its
 // sources. `inputs` is the UI thread's scheduler (App passes one; tests leave it null, and then nothing is
@@ -272,6 +273,7 @@ public sealed partial class Tiler(WorkspaceManager manager, IVirtualDesktopServi
             rounded.Remove(e.Window.Handle);
             maximized.Remove(e.Window.Handle);
             ForgetDrag(e.Window.Handle);
+            away.Remove(e.Window.Handle);
             putBacks.Remove(e.Window.Handle);
             leftAlone.Remove(e.Window.Handle);
         }
@@ -280,6 +282,8 @@ public sealed partial class Tiler(WorkspaceManager manager, IVirtualDesktopServi
             RaiseTogether(e.Window.Handle);
             return;
         }
+        // Remembered BEFORE the evaluate takes it out of the grid, so it can come back to its place.
+        if (e.Kind == WindowEventKind.MinimizeChanged) NoteMinimized(e.Window.Handle);
         if (e.Kind is WindowEventKind.Appeared or WindowEventKind.Hidden or WindowEventKind.Disappeared or WindowEventKind.MinimizeChanged)
             Evaluate(everyScreen: false);
 
@@ -574,6 +578,8 @@ public sealed partial class Tiler(WorkspaceManager manager, IVirtualDesktopServi
             .Select(w => (w.Window, w.Screen, Frame: w.Frame.Value))
             .ToList();
         var board = before is null ? TileBoard.FirstFill(windows) : Reconciled(before, windows);
+        // A minimized tile that just came back takes its old place, not the end (Tiler.Minimize.cs).
+        if (before is not null) board = ReturnedToTheirPlaces(workspace, before, board);
         Keep(workspace, board);
         RestoreIfJustTiled(workspace, board);
 

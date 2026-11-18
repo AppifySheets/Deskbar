@@ -287,8 +287,10 @@ public sealed class TilerTests : IDisposable
         AssertTiled([W(2), W(3)]);
     }
 
+    // It used to rejoin at the END (the first design). Petre: "i'd like to bring back the window from the top back to
+    // the top", so it now comes back to the slot it left (Tiler.Minimize.cs).
     [Fact]
-    public void A_minimized_window_leaves_and_rejoins_at_the_end()
+    public void A_minimized_window_leaves_and_rejoins_where_it_was()
     {
         new[] { 1, 2, 3 }.ToList().ForEach(n => Exists(W(n), alpha));
         Start();
@@ -297,7 +299,7 @@ public sealed class TilerTests : IDisposable
         AssertTiled([W(2), W(3)]);
 
         Minimizes(W(1), false);
-        AssertTiled([W(2), W(3), W(1)]);
+        AssertTiled([W(1), W(2), W(3)]);
     }
 
     [Fact]
@@ -495,6 +497,56 @@ public sealed class TilerTests : IDisposable
     // another window, untiled, maximized, is another one, it would not bring up anything". Activating a tile brings
     // every other tile of the workspace up just behind it; activating anything else brings up nothing.
     void Activates(WindowHandle h) => monitor.Subject.OnNext(new WindowEvent(WindowEventKind.Activated, Info(h)));
+
+    // Petre: "minimizing and maximizing windows shouldn't change their position, if possible. i'd like to bring back
+    // the window from the top back to the top", "after it restores". A minimized tile gives its slot up as before,
+    // and coming back it takes the same place again: exactly, when the screen still holds the same other windows.
+    [Fact]
+    public void A_minimized_tile_comes_back_to_the_same_place()
+    {
+        new[] { 1, 2, 3, 4 }.ToList().ForEach(n => Exists(W(n), alpha));
+        Start();
+
+        // W3 is the top right of the 2x2 grid.
+        Minimizes(W(3), true);
+        AssertTiled([W(1), W(2), W(4)]);
+
+        Minimizes(W(3), false);
+        AssertTiled([W(1), W(2), W(3), W(4)]);
+    }
+
+    // The same with a shape made by a drop: the top of a two-window stack comes back to the top of the stack, not
+    // beside the other window.
+    [Fact]
+    public void A_minimized_tile_comes_back_into_its_stack()
+    {
+        new[] { 1, 2 }.ToList().ForEach(n => Exists(W(n), alpha));
+        Start();
+        Assert.True(manager.SetTileSizes(alpha.Id, "0,0,1920,1040", TileSizes.Equal([2])).IsSuccess);
+        var stacked = GridLayout.Arrange(Area, 2, Gap, TileSizes.Equal([2]));
+        Assert.Equal(stacked, new[] { W(1), W(2) }.Select(w => surface.Frames[w]).ToList());
+
+        Minimizes(W(1), true);
+        Minimizes(W(1), false);
+
+        Assert.Equal([W(1), W(2)], tiler.Board.On(1));
+        Assert.Equal(stacked, new[] { W(1), W(2) }.Select(w => surface.Frames[w]).ToList());
+    }
+
+    // The screen changed while it was away (another window opened): it goes back to its old position in the order,
+    // not to the end.
+    [Fact]
+    public void A_minimized_tile_keeps_its_place_in_the_order_when_the_screen_changed_meanwhile()
+    {
+        new[] { 1, 2, 3, 4 }.ToList().ForEach(n => Exists(W(n), alpha));
+        Start();
+
+        Minimizes(W(2), true);
+        Opens(W(5), alpha);
+        Minimizes(W(2), false);
+
+        Assert.Equal([W(1), W(2), W(3), W(4), W(5)], tiler.Board.On(1));
+    }
 
     [Fact]
     public void Activating_a_tile_brings_the_other_tiles_up_behind_it()
