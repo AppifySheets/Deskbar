@@ -275,6 +275,11 @@ public sealed partial class Tiler(WorkspaceManager manager, IVirtualDesktopServi
             putBacks.Remove(e.Window.Handle);
             leftAlone.Remove(e.Window.Handle);
         }
+        if (e.Kind == WindowEventKind.Activated)
+        {
+            RaiseTogether(e.Window.Handle);
+            return;
+        }
         if (e.Kind is WindowEventKind.Appeared or WindowEventKind.Hidden or WindowEventKind.Disappeared or WindowEventKind.MinimizeChanged)
             Evaluate(everyScreen: false);
 

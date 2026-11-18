@@ -276,6 +276,16 @@ public sealed class TileSurface : ITileSurface, IDisposable
 
     // Windows 11's rounded corners, asked for once as a window joins a grid. Windows 10 has no such attribute and
     // answers with an error, which is ignored: square corners there are simply what Windows 10 looks like.
+    // Each window placed directly behind `front` (hWndInsertAfter = front), SWP_NOACTIVATE so focus stays where the
+    // user put it, and no move or size. Done in reverse so the list's first window ends up nearest the front.
+    // A refusal (an elevated window, one that just closed) is ordinary and skipped.
+    public void RaiseBehind(WindowHandle front, IReadOnlyList<WindowHandle> windows)
+    {
+        if (disposed) return;
+        windows.Reverse().ToList().ForEach(w =>
+            SetWindowPos(w.Value, front.Value, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE));
+    }
+
     public void RoundCorners(WindowHandle window)
     {
         var preference = DWMWCP_ROUND;

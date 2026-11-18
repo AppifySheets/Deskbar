@@ -197,6 +197,21 @@ public sealed partial class Tiler
     (int X, int Y) PointOf(WindowRect frame) =>
         surface.Pointer().GetValueOrDefault((frame.Left + frame.Width / 2, frame.Top + frame.Height / 2));
 
+    // TILES COME UP TOGETHER. Petre: "if i change to a window that's part of a tile, it should activate all other
+    // tiled windows", and "if another window, untiled, maximized, is another one, it would not bring up anything".
+    // Activating a tile (a click, Alt+Tab, the bar) puts every other tile of the workspace, on every screen, directly
+    // behind it, above any floating window, so the grid is whole again. Nothing is activated or moved, so this makes
+    // no further activation and no settle. A window that is not a tile (floating, pinned, borrowed) brings up
+    // nothing, nor does a maximized tile (it covers its screen anyway), and a maximized tile is left where it is.
+    void RaiseTogether(WindowHandle active)
+    {
+        if (!Acting().HasValue || !Board.ScreenOf(active).HasValue || surface.IsMaximized(active)) return;
+        var others = Board.Screens.Values.SelectMany(w => w)
+            .Where(w => w != active && !surface.IsMaximized(w))
+            .ToList();
+        if (others.Count > 0) PerWindow(active, "raise the tiles behind", () => surface.RaiseBehind(active, others));
+    }
+
     // The nearest screen wholly to the left or right of `screen`, for a keyboard snap off its outer column.
     static Maybe<int> ScreenBeside(IEnumerable<TileScreen> screens, TileScreen screen, TileArrange.Zone side) =>
         side == TileArrange.Zone.Left

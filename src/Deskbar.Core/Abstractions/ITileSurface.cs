@@ -98,6 +98,10 @@ public interface ITileSurface
     // The last one may be dropped by the throttle; the window's Settled always follows and decides the end.
     IObservable<WindowHandle> Moving { get; }
 
+    // Puts `windows` directly behind `front` in the z-order, without activating or moving any of them: the tiles of
+    // a workspace come up together when one of them is activated (Tiler.Drag.cs). Never takes focus from `front`.
+    void RaiseBehind(WindowHandle front, IReadOnlyList<WindowHandle> windows);
+
     // Where the mouse pointer is, in physical pixels like every rectangle here. None if Windows will not say.
     Maybe<(int X, int Y)> Pointer();
 

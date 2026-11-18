@@ -491,6 +491,54 @@ public sealed class TilerTests : IDisposable
         AssertTiled([W(2), W(1)]);
     }
 
+    // Petre: "if i change to a window that's part of a tile, it should activate all other tiled windows", and "if
+    // another window, untiled, maximized, is another one, it would not bring up anything". Activating a tile brings
+    // every other tile of the workspace up just behind it; activating anything else brings up nothing.
+    void Activates(WindowHandle h) => monitor.Subject.OnNext(new WindowEvent(WindowEventKind.Activated, Info(h)));
+
+    [Fact]
+    public void Activating_a_tile_brings_the_other_tiles_up_behind_it()
+    {
+        new[] { 1, 2, 3 }.ToList().ForEach(n => Exists(W(n), alpha));
+        Start();
+
+        Activates(W(2));
+
+        var raised = Assert.Single(surface.Raised);
+        Assert.Equal(W(2), raised.Front);
+        Assert.Equal([W(1), W(3)], raised.Windows);
+    }
+
+    [Fact]
+    public void Activating_a_window_that_is_not_a_tile_brings_up_nothing()
+    {
+        new[] { 1, 2 }.ToList().ForEach(n => Exists(W(n), alpha));
+        Exists(W(9), alpha);
+        desktops.PinnedWindows.Add(W(9)); // floats: pinned windows never tile
+        Start();
+
+        Activates(W(9));
+
+        Assert.Empty(surface.Raised);
+    }
+
+    // A maximized tile already covers the screen; bringing the others up under it would change nothing to see.
+    // And a maximized tile left behind stays where it is, so the grid on top of it is not hidden.
+    [Fact]
+    public void A_maximized_tile_neither_raises_the_others_nor_is_raised()
+    {
+        new[] { 1, 2, 3 }.ToList().ForEach(n => Exists(W(n), alpha));
+        Start();
+        surface.Maximized.Add(W(3));
+        Settles(W(3), Area);
+
+        Activates(W(3));
+        Assert.Empty(surface.Raised);
+
+        Activates(W(1));
+        Assert.Equal([W(2)], Assert.Single(surface.Raised).Windows);
+    }
+
     // Without a mouse (a keyboard snap, an app moving itself) the centre still decides, as before.
     [Fact]
     public void A_move_without_the_mouse_is_still_judged_by_its_centre()

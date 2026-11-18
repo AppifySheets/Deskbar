@@ -399,6 +399,10 @@ public sealed class FakeTileSurface : ITileSurface
     public Maybe<(int X, int Y)> PointerAt { get; set; } = Maybe<(int X, int Y)>.None;
     public Maybe<(int X, int Y)> Pointer() => PointerAt;
 
+    // Every "bring these up behind that one", in order.
+    public List<(WindowHandle Front, IReadOnlyList<WindowHandle> Windows)> Raised { get; } = [];
+    public void RaiseBehind(WindowHandle front, IReadOnlyList<WindowHandle> windows) => Raised.Add((front, windows.ToList()));
+
     // Every preview asked for, in order; an empty one is a hide.
     public List<IReadOnlyList<TilePreview>> Previews { get; } = [];
     public void Preview(IReadOnlyList<TilePreview> tiles) => Previews.Add(tiles.ToList());
