@@ -1,3 +1,5 @@
+using System.Reactive.Concurrency;
+using System.Reactive.Linq;
 using CSharpFunctionalExtensions;
 using Deskbar.Core.Abstractions;
 using Deskbar.Core.Domain;
@@ -21,8 +23,17 @@ namespace Deskbar.Core.Tiling;
 //   - A maximized window keeps its slot (the tiles beneath do not reflow) and is never placed.
 //   - Slot order is join order; a new or restored window goes to the end (TileBoard).
 //
-// Threading: every entry point runs on the UI thread (window events, desktop changes and the surface's
-// Settled all arrive there). Calls are still SERIALISED through Run, because a move into another process's
+// Threading: every entry point runs on the UI thread, and the Tiler makes sure of it rather than trusting its
+// sources. `inputs` is the UI thread's scheduler (App passes one; tests leave it null, and then nothing is
+// re-scheduled). Every subscription in Start is observed on it, because two of the sources do NOT arrive on the
+// UI thread: Windows raises its desktop change on a thread of its own, and the manager pulses StateChanged (and
+// may move windows home) from inside that same notification. Measured on Petre's machine on 2026-11-18: the
+// Tiler handed the surface its windows from thread 14 (MTA, no message loop), and the surface's LOCATIONCHANGE
+// hook, which is heard only on the thread that installs it, was never heard at all. A hand resize stuck and a
+// moved tile stayed where it was dropped. ALL inputs go through the one scheduler, not just those two, so they
+// are queued in the order they happened and none can overtake another.
+//
+// Calls are still SERIALISED through Run, because a move into another process's
 // window can pump messages while it waits, and a handler that re-entered itself mid-re-tile would work from
 // a half-updated board. A re-entrant call is queued and runs when the current one finishes.
 //
@@ -34,7 +45,7 @@ namespace Deskbar.Core.Tiling;
 // takes it out of the grid when the move happens. Null (tests, and an app without a bar) means never.
 public sealed class Tiler(WorkspaceManager manager, IVirtualDesktopService desktops, IWindowMonitor monitor,
     ITileSurface surface, Func<bool> isPro, Action<string>? trace = null, Func<DateTimeOffset>? clock = null,
-    Func<WindowHandle, bool>? dropPending = null) : IDisposable
+    Func<WindowHandle, bool>? dropPending = null, IScheduler? inputs = null) : IDisposable
 {
     // The put-back backstop (spec: "a short per-window quiet period as a backstop"; anti-goal: a re-tile loop
     // with an app that insists on its own size or place). A window put back into its slot this many times
@@ -123,21 +134,27 @@ public sealed class Tiler(WorkspaceManager manager, IVirtualDesktopService deskt
         // or the experiment switched (all persisted through WorkspaceManager, all pulsing StateChanged) take
         // effect without the App relaying them. The App only calls Refresh after a licence refresh, because
         // Pro is the one input the manager does not hold.
-        subscriptions.Add(monitor.Events.Subscribe(e => Run($"window event {e.Kind} for {e.Window.Handle.Value:X}", () => OnWindowEvent(e))));
-        subscriptions.Add(desktops.CurrentChanged.Subscribe(id => Run($"desktop change to {id}", () =>
+        // Every source through OnInputs, so each handler runs on the UI thread whatever thread raised it (see
+        // "Threading" in the class header).
+        subscriptions.Add(OnInputs(monitor.Events).Subscribe(e => Run($"window event {e.Kind} for {e.Window.Handle.Value:X}", () => OnWindowEvent(e))));
+        subscriptions.Add(OnInputs(desktops.CurrentChanged).Subscribe(id => Run($"desktop change to {id}", () =>
         {
             currentDesktop = id;
             Evaluate(everyScreen: false);
         })));
-        subscriptions.Add(surface.Settled.Subscribe(w => Run($"settled {w.Value:X}", () => OnSettled(w))));
+        subscriptions.Add(OnInputs(surface.Settled).Subscribe(w => Run($"settled {w.Value:X}", () => OnSettled(w))));
         // A screen plugged in or out, or a work area that changed: every screen is re-tiled.
-        subscriptions.Add(surface.ScreensChanged.Subscribe(_ => Run("screens changed", () => Evaluate(everyScreen: true))));
-        subscriptions.Add(manager.StateChanged.Subscribe(_ => Run("state changed", OnStateChanged)));
-        subscriptions.Add(manager.WindowMoved.Subscribe(w => Run($"window {w.Value:X} moved to another desktop", () => OnWindowMoved(w))));
+        subscriptions.Add(OnInputs(surface.ScreensChanged).Subscribe(_ => Run("screens changed", () => Evaluate(everyScreen: true))));
+        subscriptions.Add(OnInputs(manager.StateChanged).Subscribe(_ => Run("state changed", OnStateChanged)));
+        subscriptions.Add(OnInputs(manager.WindowMoved).Subscribe(w => Run($"window {w.Value:X} moved to another desktop", () => OnWindowMoved(w))));
 
         // The first evaluate reads the current desktop and, if it is tiled, tiles it.
         Refresh();
     }
+
+    // A source observed on the UI thread's scheduler, or as it is when there is none (tests drive the Tiler
+    // synchronously and need nothing re-scheduled).
+    IObservable<T> OnInputs<T>(IObservable<T> source) => inputs is null ? source : source.ObserveOn(inputs);
 
     // Re-reads the gate (Pro included) and brings the current desktop in line with it. Cheap and idempotent:
     // with nothing changed it moves nothing.

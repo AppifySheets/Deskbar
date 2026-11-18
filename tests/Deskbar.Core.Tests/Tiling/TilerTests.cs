@@ -1,4 +1,5 @@
 using System.Reactive;
+using System.Reactive.Concurrency;
 using Deskbar.Core.Abstractions;
 using Deskbar.Core.Domain;
 using Deskbar.Core.Persistence;
@@ -88,7 +89,7 @@ public sealed class TilerTests : IDisposable
 
     // Starts the manager and the Tiler with Alpha current. Alpha starts tiled, the experiment on and Pro on,
     // unless a test says otherwise.
-    void Start(bool alphaTiled = true, bool betaTiled = false, bool experiment = true)
+    void Start(bool alphaTiled = true, bool betaTiled = false, bool experiment = true, IScheduler? inputs = null)
     {
         new[] { alpha, beta }.ToList().ForEach(w => desktops.Desktops.Add(new DesktopInfo(w.DesktopId!.Value, w.Name)));
         desktops.CurrentDesktopId = alpha.DesktopId!.Value;
@@ -99,7 +100,7 @@ public sealed class TilerTests : IDisposable
         };
         manager = new WorkspaceManager(desktops, monitor, titles, store);
         Assert.True(manager.Start().IsSuccess);
-        tiler = new Tiler(manager, desktops, monitor, surface, () => pro, traced.Add, () => time, dropping.Contains);
+        tiler = new Tiler(manager, desktops, monitor, surface, () => pro, traced.Add, () => time, dropping.Contains, inputs);
         tiler.Start();
     }
 
@@ -119,6 +120,41 @@ public sealed class TilerTests : IDisposable
     }
 
     IReadOnlyList<WindowHandle> PlacedWindows => surface.Placed.Select(p => p.Window).ToList();
+
+    // --- threading ------------------------------------------------------------------------------------------
+
+    // Windows raises its desktop change on a thread of its own (measured on Petre's machine, 2026-11-18: the Tiler
+    // installed its hook from thread 14, MTA, with no message loop). The surface's LOCATIONCHANGE hook is heard only
+    // on the thread that installs it, so a Watch made there left every tile deaf: a hand resize stuck, a moved tile
+    // stayed where it was dropped. Every input has to reach the Tiler on its own scheduler (the UI thread in the app).
+    [Fact]
+    public async Task A_desktop_change_from_another_thread_is_handled_on_the_tilers_scheduler()
+    {
+        Exists(W(1), alpha);
+        Exists(W(2), beta);
+        using var ui = new EventLoopScheduler();
+        var uiThread = OnScheduler(ui, () => Environment.CurrentManagedThreadId);
+        Start(betaTiled: true, inputs: ui);
+        surface.WatchThreads.Clear();
+
+        // Raised on a pool thread, as Windows raises it on its own.
+        await Task.Run(() => SwitchTo(beta));
+        OnScheduler(ui, () => 0);
+
+        Assert.Contains(surface.Watched, set => set.SetEquals([W(2)]));
+        Assert.NotEmpty(surface.WatchThreads);
+        Assert.All(surface.WatchThreads, thread => Assert.Equal(uiThread, thread));
+    }
+
+    // Runs `work` on `scheduler` and waits for it, so everything queued there before it has run too.
+    static T OnScheduler<T>(IScheduler scheduler, Func<T> work)
+    {
+        var result = default(T);
+        using var done = new ManualResetEventSlim();
+        scheduler.Schedule(() => { result = work(); done.Set(); });
+        Assert.True(done.Wait(TimeSpan.FromSeconds(5)));
+        return result!;
+    }
 
     // --- turning it on and off ---------------------------------------------------------------------------
 

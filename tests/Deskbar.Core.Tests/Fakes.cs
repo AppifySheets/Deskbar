@@ -357,7 +357,16 @@ public sealed class FakeTileSurface : ITileSurface
         if (ThrowOnRound.Remove(window)) throw new InvalidOperationException("round corners threw (test)");
         Rounded.Add(window);
     }
-    public void Watch(IReadOnlySet<WindowHandle> windows) => Watched.Add(windows.ToHashSet());
+    // The thread of every Watch call, because the real surface's hook is heard only on the thread that installs it
+    // (TileSurface.Watch): a test can prove the Tiler calls Watch where it was told to, whatever thread the event
+    // that led to it came in on.
+    public List<int> WatchThreads { get; } = [];
+
+    public void Watch(IReadOnlySet<WindowHandle> windows)
+    {
+        Watched.Add(windows.ToHashSet());
+        WatchThreads.Add(Environment.CurrentManagedThreadId);
+    }
 
     public IObservable<WindowHandle> Settled => SettledSubject.AsObservable();
     public IObservable<Unit> ScreensChanged => ScreensChangedSubject.AsObservable();

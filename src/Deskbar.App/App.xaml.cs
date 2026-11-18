@@ -176,7 +176,9 @@ public partial class App : Application
     //
     // Both objects are built on the UI thread on purpose (TileSurface's class header): the surface captures the
     // dispatcher for its debounce timers, and its LOCATIONCHANGE hook is installed by the Tiler from this thread
-    // when something is tiled, so the callbacks arrive here. App never calls Watch itself. With the experiment
+    // when something is tiled, so the callbacks arrive here. Being built here is not enough for that: the Tiler's
+    // inputs include Windows' desktop change, raised on a thread of its own, so the Tiler is handed this thread's
+    // scheduler (`inputs` below) and observes every input on it. App never calls Watch itself. With the experiment
     // off (the default) the Tiler only ever narrows the hook to the empty set, so no hook is installed at all.
     //
     // Nothing else to wire: the Tiler subscribes to the manager's StateChanged and WindowMoved, the monitor's
@@ -197,7 +199,12 @@ public partial class App : Application
             // A title-bar drop on a bar row wins over a tile swap (spec): while the bar is carrying one out, the
             // Tiler ignores that window's Settled and does not place it (FloatingBar.IsHeaderDropPending). Read
             // through the field, so a bar that does not exist (compatibility mode never gets here) answers no.
-            dropPending: w => floatingBar?.IsHeaderDropPending(w) == true);
+            dropPending: w => floatingBar?.IsHeaderDropPending(w) == true,
+            // Every input observed on THIS (the UI) thread. Windows raises its desktop change on a thread of its own,
+            // and a Watch made there installs the surface's hook where no message loop will ever deliver it (the
+            // Tiler's class header has the measurement). Without this, tiles never heard a hand resize or a move.
+            inputs: new System.Reactive.Concurrency.SynchronizationContextScheduler(
+                new System.Windows.Threading.DispatcherSynchronizationContext(Dispatcher)));
         tiler.Start();
     }
 
