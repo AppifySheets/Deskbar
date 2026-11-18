@@ -75,6 +75,22 @@ public sealed class TileSizesSettingTests : IDisposable
         Assert.Equal(Uneven, loaded.Single().Sizes);
     }
 
+    // An opening (TileSizes.Opening) is stored with the sizes, so the room kept for the next window outlives a restart.
+    [Fact]
+    public void An_opening_survives_a_real_json_round_trip()
+    {
+        var id = Guid.NewGuid();
+        var opened = new TileSizes([0.5, 0.5], [[1.0], [0.4, 0.6]]) { Opening = 1 };
+        var state = AppState.Empty with
+        {
+            Workspaces = [new Workspace(id, "Old", null) { TileSizes = [new ScreenTileSizes(Left, opened)] }],
+        };
+        var jsonStore = new JsonPersistenceStore(dir);
+        Assert.True(jsonStore.Save(state).IsSuccess);
+
+        Assert.Equal(opened, SizesOf(jsonStore.Load().Value, id).Single().Sizes);
+    }
+
     [Fact]
     public void A_state_file_without_sizes_loads_empty()
     {

@@ -288,18 +288,112 @@ public sealed class TilerResizeTests : IDisposable
         Assert.Empty(StoredSizes);
     }
 
+    // A small pull on an outer edge is a nudge: it snaps back as outer edges always did, and nothing is stored.
     [Fact]
-    public void An_outer_edge_resize_snaps_back()
+    public void An_outer_edge_nudge_snaps_back()
     {
         StartTwo();
         surface.Placed.Clear();
         var slot = GridLayout.Arrange(Area, 2, Gap)[0];
 
-        // The left window's LEFT edge is on the screen side of the grid: there is no split behind it.
-        ResizedByHand(W(1), slot with { Left = 200 });
+        // The left window's LEFT edge is on the screen side of the grid: there is no split behind it. 52 px of a
+        // 1904 px inner width is under the 10% an opening needs.
+        ResizedByHand(W(1), slot with { Left = 60 });
 
         Assert.Equal([(W(1), slot)], surface.Placed);
         Assert.Empty(StoredSizes);
+    }
+
+    // --- openings: room kept for the next window ---------------------------------------------------------
+
+    // Petre: "if i resize a window in a tiled setting, i want to keep the opening for the new window to jump into".
+    // Measured first: the right tile's top edge pulled down to y 911 and 735 snapped back to the top both times.
+    // Now the room stays open, and the next window to open goes into it. Pulling the right tile's top edge to 400
+    // leaves 392 of the 1024 px inner height open above it (a row share of 392/1024), so the tile starts one half
+    // gap below the opening's row, at 404, and the window that opens next fills 8..396.
+    [Fact]
+    public void Pulling_an_outer_edge_in_leaves_an_opening_the_next_window_takes()
+    {
+        StartTwo();
+        var right = GridLayout.Arrange(Area, 2, Gap)[1];
+
+        ResizedByHand(W(2), right with { Top = 400 });
+        Echo();
+
+        var opened = Stored(AreaKey);
+        Assert.Equal(1, opened.Opening);
+        Assert.Equal(392.0 / 1024, opened.Rows[1][0], 9);
+        Assert.Equal(right with { Top = 404 }, surface.Frames[W(2)]);
+        Assert.Equal(GridLayout.Arrange(Area, 2, Gap)[0], surface.Frames[W(1)]);
+
+        Opens(W(3), alpha);
+        Echo();
+
+        Assert.Equal(right with { Bottom = 396 }, surface.Frames[W(3)]);
+        Assert.Equal(right with { Top = 404 }, surface.Frames[W(2)]);
+        Assert.Equal(GridLayout.Arrange(Area, 2, Gap)[0], surface.Frames[W(1)]);
+        Assert.Null(Stored(AreaKey).Opening);
+        Assert.Contains(traced, l => l.Contains("took the opening"));
+    }
+
+    // Pulling the edge back over most of the opening gives the room back: the opening closes and, the sizes being
+    // even again, the stored entry goes.
+    [Fact]
+    public void Pulling_the_edge_back_over_the_opening_closes_it()
+    {
+        StartTwo();
+        var right = GridLayout.Arrange(Area, 2, Gap)[1];
+        ResizedByHand(W(2), right with { Top = 400 });
+        Echo();
+
+        ResizedByHand(W(2), right with { Top = 60 });
+        Echo();
+
+        Assert.Empty(StoredSizes);
+        Assert.Equal(right, surface.Frames[W(2)]);
+    }
+
+    // A tile of the same screen dragged into the opening moves there, and the place it left closes up: the left tile
+    // dropped into the opening above the right one leaves one column, itself on top where the opening was.
+    [Fact]
+    public void A_tile_dragged_into_the_opening_moves_there()
+    {
+        StartTwo();
+        var right = GridLayout.Arrange(Area, 2, Gap)[1];
+        ResizedByHand(W(2), right with { Top = 400 });
+        Echo();
+
+        surface.PointerAt = (1400, 200);
+        ResizedByHand(W(1), new WindowRect(1100, 100, 1700, 500));
+        Echo();
+
+        Assert.Equal(new WindowRect(8, 8, 1912, 396), surface.Frames[W(1)]);
+        Assert.Equal(new WindowRect(8, 404, 1912, 1032), surface.Frames[W(2)]);
+        Assert.Null(Stored(AreaKey).Opening);
+    }
+
+    // Another tile closing keeps the opening: only the leaver's cell goes, so the next window still has its room.
+    [Fact]
+    public void A_window_closing_keeps_the_opening()
+    {
+        StartTwo();
+        var right = GridLayout.Arrange(Area, 2, Gap)[1];
+        ResizedByHand(W(2), right with { Top = 400 });
+        Echo();
+
+        Closes(W(1));
+        Echo();
+
+        // One column now, the opening still above the tile.
+        var sizes = Stored(AreaKey);
+        Assert.Equal(0, sizes.Opening);
+        Assert.Equal([2], sizes.Shape);
+        Assert.Equal(new WindowRect(8, 404, 1912, 1032), surface.Frames[W(2)]);
+
+        Opens(W(3), alpha);
+        Echo();
+
+        Assert.Equal(new WindowRect(8, 8, 1912, 396), surface.Frames[W(3)]);
     }
 
     // Ruling 2: Deskbar placed the window and the app then adjusted itself within the same change, while a mouse

@@ -19,6 +19,9 @@ public abstract record MoveOutcome
     // Dropped on an EDGE of another tile: it goes beside that tile on that side, and the shape changes
     // (TileArrange.Drop).
     public sealed record Beside(WindowHandle Target, TileArrange.Zone Side) : MoveOutcome;
+
+    // Dropped into its own screen's OPENING (TileSizes.Opening): it moves there, and the place it left closes up.
+    public sealed record IntoOpening : MoveOutcome;
 }
 
 // The rule for a settled move, kept out of the Win32 plumbing so it can be tested. It decides by the
@@ -101,10 +104,18 @@ public static class SettledMove
         int screenAt,
         TileBoard board,
         IReadOnlyDictionary<WindowHandle, WindowRect> slots,
-        IReadOnlyDictionary<WindowHandle, WindowRect>? slotsThere = null) =>
+        IReadOnlyDictionary<WindowHandle, WindowRect>? slotsThere = null,
+        Maybe<WindowRect> openingHere = default) =>
         board.ScreenOf(moved).TryGetValue(out var home) && home == screenAt
-            ? Zoned(At(moved, x, y, slots), x, y, slots)
+            ? Zoned(At(moved, x, y, slots), x, y, slots) switch
+            {
+                // Over no tile but over the screen's opening (`openingHere`, the home screen's): into it.
+                MoveOutcome.BackToSlot when openingHere.TryGetValue(out var hole) && Contains(hole, x, y) => new MoveOutcome.IntoOpening(),
+                var hit => hit,
+            }
             : Across(moved, x, y, screenAt, slotsThere ?? new Dictionary<WindowHandle, WindowRect>());
+
+    static bool Contains(WindowRect r, int x, int y) => r.Left <= x && x < r.Right && r.Top <= y && y < r.Bottom;
 
     // On ANOTHER screen the same rules, against that screen's tiles (`slotsThere`): the middle of a tile trades
     // places with it across the screens, an edge zone puts the window beside it there. Over no tile at all (an

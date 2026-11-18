@@ -1,3 +1,4 @@
+using CSharpFunctionalExtensions;
 using Deskbar.Core.Domain;
 
 namespace Deskbar.Core.Tiling;
@@ -22,7 +23,22 @@ public static class GridLayout
     // The grid with the column and row fractions the user has dragged (see TileSizes). With even
     // sizes the result is identical to the equal grid. Integer remainders still go to the last
     // column and last row, so the grid always reaches the far edge of the area.
-    public static IReadOnlyList<WindowRect> Arrange(WindowRect area, int count, int gap, TileSizes sizes)
+    //
+    // Sizes with an OPENING for this many windows (TileSizes.Opening) lay out one cell more and leave the opening's
+    // cell out, so the windows keep their slots in order around it.
+    public static IReadOnlyList<WindowRect> Arrange(WindowRect area, int count, int gap, TileSizes sizes) =>
+        sizes.HasOpeningFor(count)
+            ? Cells(area, count + 1, gap, sizes).Where((_, slot) => slot != sizes.Opening).ToList()
+            : Cells(area, count, gap, sizes);
+
+    // Where a screen's opening is, when its sizes have one for `count` windows.
+    public static Maybe<WindowRect> OpeningOf(WindowRect area, int count, int gap, TileSizes sizes) =>
+        sizes.HasOpeningFor(count) && sizes.Opening is { } open
+            ? Cells(area, count + 1, gap, sizes)[open]
+            : Maybe<WindowRect>.None;
+
+    // Every cell of the grid, `count` of them, whether a window holds it or not.
+    static IReadOnlyList<WindowRect> Cells(WindowRect area, int count, int gap, TileSizes sizes)
     {
         if (count <= 0)
             return [];

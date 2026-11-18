@@ -48,19 +48,28 @@ public static class TileArrange
         !sizes.Shape.SequenceEqual(GridLayout.Shape(sizes.Shape.Sum()));
 
     // Nothing worth storing: even sizes on the automatic shape (what the grid is with nothing stored at all).
-    public static bool IsPlain(TileSizes sizes) => sizes.IsEqual && !IsCustom(sizes);
+    public static bool IsPlain(TileSizes sizes) => sizes.IsEqual && !IsCustom(sizes) && sizes.Opening is null;
 
     // Stored sizes brought to `count` windows. On the automatic shape this is TileSizes.Fit, as before. A custom
     // shape survives windows coming and going: a window that leaves takes its own cell with it (a column left empty
     // goes too), and one that joins goes to the bottom of the LAST column, which is where the board puts a joining
     // window (TileBoard.Join appends, and the order fills columns left to right). Anything else falls back to Fit.
+    //
+    // An OPENING stays while other windows leave: `leaving` is then the leaver's CELL (CellOf below counts the opening),
+    // and only that cell goes. Any other change closes the opening first and fits what is left. A window that joins
+    // never reaches here with an opening open: Tiler.Keep puts it into the opening (Filled) before anything is laid out.
     public static TileSizes Refit(TileSizes stored, int count, Maybe<(int Column, int Row)> leaving)
     {
+        if (stored.Opening is not null)
+            return stored.HasOpeningFor(count) ? stored
+                : stored.Shape.Sum() == count + 2 && leaving.HasValue && Holds(stored, leaving.Value) && Slot(stored, leaving.Value) != stored.Opening
+                    ? RemoveCell(stored, leaving.Value)
+                    : Refit(Closed(stored), count, Maybe<(int Column, int Row)>.None);
+
         var have = stored.Shape.Sum();
         if (have == count) return stored;
         if (!IsCustom(stored)) return stored.Fit(GridLayout.Shape(count), leaving);
-        if (have == count + 1 && leaving.HasValue && leaving.Value.Column < stored.Rows.Count
-            && leaving.Value.Row < stored.Rows[leaving.Value.Column].Count)
+        if (have == count + 1 && leaving.HasValue && Holds(stored, leaving.Value))
             return RemoveCell(stored, leaving.Value);
         if (have < count)
         {
@@ -77,6 +86,8 @@ public static class TileArrange
     public static (IReadOnlyList<WindowHandle> Order, TileSizes Sizes) Drop(
         IReadOnlyList<WindowHandle> order, TileSizes sizes, WindowHandle dragged, WindowHandle target, Zone zone)
     {
+        // A rearrangement closes the screen's opening: the drop makes its own room.
+        sizes = sizes.HasOpeningFor(order.Count) ? Closed(sizes) : sizes;
         var shape = sizes.Shape;
         if (zone == Zone.Middle || dragged == target || shape.Sum() != order.Count || !order.Contains(target))
             return (order, sizes);
@@ -106,15 +117,133 @@ public static class TileArrange
     }
 
     // Takes one cell out. Its row's share goes to the other rows of its column in proportion; a column left with
-    // no rows goes, and its share goes to the other columns in proportion.
+    // no rows goes, and its share goes to the other columns in proportion. An opening after the cell moves up one
+    // slot with it; taking out the opening's own cell closes it.
     public static TileSizes RemoveCell(TileSizes sizes, (int Column, int Row) cell)
     {
+        var slot = Slot(sizes, cell);
+        var opening = sizes.Opening is { } open && open != slot ? open > slot ? open - 1 : open : (int?)null;
         var rows = sizes.Rows[cell.Column];
-        if (rows.Count > 1)
-            return sizes with { Rows = sizes.Rows.Select((r, c) => c == cell.Column ? Without(r, cell.Row) : r).ToList() };
-        return new TileSizes(
-            Without(sizes.Columns, cell.Column),
-            sizes.Rows.Where((_, c) => c != cell.Column).ToList());
+        return rows.Count > 1
+            ? sizes with { Rows = sizes.Rows.Select((r, c) => c == cell.Column ? Without(r, cell.Row) : r).ToList(), Opening = opening }
+            : new TileSizes(Without(sizes.Columns, cell.Column), sizes.Rows.Where((_, c) => c != cell.Column).ToList()) { Opening = opening };
+    }
+
+    // --- openings: room kept for the next window (TileSizes.Opening) ---------------------------------------------
+
+    // No opening is made narrower than this share of the screen's inner span, and the tile that makes it keeps at
+    // least as much: a pull smaller than this is a nudge and snaps back, as an outer edge always did.
+    const double MinOpening = 0.1;
+
+    // The cell of the window at `slot` (its index in the screen's order, `count` windows) in these sizes: the opening,
+    // when there is one, holds a cell of its own that no window's slot counts.
+    public static (int Column, int Row) CellOf(TileSizes sizes, int slot, int count) =>
+        sizes.HasOpeningFor(count)
+            ? GridLayout.CellOf(slot >= sizes.Opening ? slot + 1 : slot, sizes.Shape)
+            : GridLayout.CellOf(slot, ShapeFor(Maybe.From(sizes), count));
+
+    // A tile at `cell` whose OUTER edge was pulled in (one that faces the screen's edge, so SplitMove has no split to
+    // move) leaves an opening there: a new row above or below it in its column for the top or bottom edge, a new
+    // column beside its column for the left or right edge, as deep as the pull. None when the screen has an opening
+    // already (one at a time), or the pull is under MinOpening (a nudge). With two outer edges pulled (a corner), the
+    // deeper pull wins.
+    public static Maybe<TileSizes> Open(TileSizes sizes, int count, WindowRect area, int gap, (int Column, int Row) cell, Edges moved, WindowRect frame)
+    {
+        if (sizes.Opening is not null || sizes.Shape.Sum() != count) return Maybe<TileSizes>.None;
+        var inner = GridLayout.InnerArea(area, gap);
+        var shape = sizes.Shape;
+        var columnStart = shape.Take(cell.Column).Sum();
+        var row = sizes.Rows[cell.Column][cell.Row];
+        var column = sizes.Columns[cell.Column];
+
+        // Per outer edge that was pulled: its depth as a share of the inner span, the share the tile has on that axis
+        // (rows are shares of the column's height, columns of the width), and how to make the opening that deep.
+        var pulls = new List<(double Depth, double Room, Func<double, TileSizes> Make)>();
+        if (moved.HasFlag(Edges.Top) && cell.Row == 0)
+            pulls.Add(((frame.Top - inner.Top) / (double)inner.Height, row, d =>
+                WithRows(sizes, cell.Column, Carve(sizes.Rows[cell.Column], cell.Row, d, after: false)) with { Opening = columnStart + cell.Row }));
+        if (moved.HasFlag(Edges.Bottom) && cell.Row == shape[cell.Column] - 1)
+            pulls.Add(((inner.Bottom - frame.Bottom) / (double)inner.Height, row, d =>
+                WithRows(sizes, cell.Column, Carve(sizes.Rows[cell.Column], cell.Row, d, after: true)) with { Opening = columnStart + cell.Row + 1 }));
+        if (moved.HasFlag(Edges.Left) && cell.Column == 0)
+            pulls.Add(((frame.Left - inner.Left) / (double)inner.Width, column, d =>
+                WithColumn(sizes, cell.Column, d, right: false) with { Opening = columnStart }));
+        if (moved.HasFlag(Edges.Right) && cell.Column == shape.Count - 1)
+            pulls.Add(((inner.Right - frame.Right) / (double)inner.Width, column, d =>
+                WithColumn(sizes, cell.Column, d, right: true) with { Opening = columnStart + shape[cell.Column] }));
+
+        // The tile keeps at least MinOpening of its own share; a tile too small to give that much up makes none.
+        return pulls
+            .Where(p => p.Depth >= MinOpening && p.Room >= 2 * MinOpening)
+            .OrderByDescending(p => p.Depth)
+            .Select(p => Maybe.From(p.Make(Math.Min(p.Depth, p.Room - MinOpening))))
+            .FirstOrDefault(Maybe<TileSizes>.None);
+    }
+
+    // The screen's opening closed: its cell goes, and its share goes to the tiles around it in proportion.
+    public static TileSizes Closed(TileSizes sizes) =>
+        sizes.Opening is { } open && open >= 0 && open < sizes.Shape.Sum()
+            ? RemoveCell(sizes, GridLayout.CellOf(open, sizes.Shape))
+            : sizes with { Opening = null };
+
+    // True when the tile at `cell` was pulled back over the opening next to it: its edge facing the opening let go
+    // within a quarter of the opening's depth from the opening's far side. That gives the room back, the opening
+    // closes. Left and right only close an opening that is a whole column: beside a column of several tiles the edge
+    // faces the column, not the opening.
+    public static bool Closes(TileSizes sizes, int count, WindowRect area, int gap, (int Column, int Row) cell, Edges moved, WindowRect frame)
+    {
+        if (sizes.Opening is not { } open || !GridLayout.OpeningOf(area, count, gap, sizes).TryGetValue(out var hole))
+            return false;
+        var at = GridLayout.CellOf(open, sizes.Shape);
+        var wholeColumn = sizes.Shape[at.Column] == 1;
+        return (moved.HasFlag(Edges.Top) && at.Column == cell.Column && at.Row == cell.Row - 1 && frame.Top <= hole.Top + hole.Height / 4)
+            || (moved.HasFlag(Edges.Bottom) && at.Column == cell.Column && at.Row == cell.Row + 1 && frame.Bottom >= hole.Bottom - hole.Height / 4)
+            || (moved.HasFlag(Edges.Left) && wholeColumn && at.Column == cell.Column - 1 && frame.Left <= hole.Left + hole.Width / 4)
+            || (moved.HasFlag(Edges.Right) && wholeColumn && at.Column == cell.Column + 1 && frame.Right >= hole.Right - hole.Width / 4);
+    }
+
+    // `newcomer` joins a screen whose windows are `order`: into the opening when the sizes have one for `order`, and
+    // the opening is then filled (gone); otherwise at the end, with the sizes as they were.
+    public static (IReadOnlyList<WindowHandle> Order, TileSizes Sizes) Filled(IReadOnlyList<WindowHandle> order, TileSizes sizes, WindowHandle newcomer) =>
+        sizes.HasOpeningFor(order.Count) && sizes.Opening is { } open
+            ? (Insert(order.ToList(), open, newcomer), sizes with { Opening = null })
+            : (order.Append(newcomer).ToList(), sizes);
+
+    // A tile of this screen dragged into its opening: it leaves its own cell (the tiles around share that) and fills
+    // the opening. Unchanged when there is no opening or the window is not on the screen.
+    public static (IReadOnlyList<WindowHandle> Order, TileSizes Sizes) IntoOpening(IReadOnlyList<WindowHandle> order, TileSizes sizes, WindowHandle window) =>
+        sizes.HasOpeningFor(order.Count) && order.Contains(window)
+            ? Filled(order.Where(w => w != window).ToList(), RemoveCell(sizes, CellOf(sizes, order.ToList().IndexOf(window), order.Count)), window)
+            : (order, sizes);
+
+    static bool Holds(TileSizes sizes, (int Column, int Row) cell) =>
+        cell.Column >= 0 && cell.Column < sizes.Rows.Count && cell.Row >= 0 && cell.Row < sizes.Rows[cell.Column].Count;
+
+    // The slot (column by column) of a cell.
+    static int Slot(TileSizes sizes, (int Column, int Row) cell) =>
+        sizes.Shape.Take(cell.Column).Sum() + cell.Row;
+
+    static TileSizes WithRows(TileSizes sizes, int column, IReadOnlyList<double> rows) =>
+        sizes with { Rows = sizes.Rows.Select((r, c) => c == column ? rows : r).ToList() };
+
+    // A new single-row column of `depth` beside `column`, which gives that much of its width up.
+    static TileSizes WithColumn(TileSizes sizes, int column, double depth, bool right)
+    {
+        var columns = sizes.Columns.ToList();
+        columns[column] -= depth;
+        columns.Insert(right ? column + 1 : column, depth);
+        var rows = sizes.Rows.ToList();
+        rows.Insert(right ? column + 1 : column, [1.0]);
+        return sizes with { Columns = columns, Rows = rows };
+    }
+
+    // Entry `index` gives `depth` up to a new entry after or before it.
+    static IReadOnlyList<double> Carve(IReadOnlyList<double> list, int index, double depth, bool after)
+    {
+        var copy = list.ToList();
+        copy[index] -= depth;
+        copy.Insert(after ? index + 1 : index, depth);
+        return copy;
     }
 
     // A new row beside `row` in `column`, taking half of that row's height.

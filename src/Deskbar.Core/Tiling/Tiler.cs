@@ -464,7 +464,8 @@ public sealed partial class Tiler(WorkspaceManager manager, IVirtualDesktopServi
                 decidedSlots = SlotsOf(own, board.On(decidedOn), ShownSizes(workspace, own, board.On(decidedOn).Count));
             var pointerOn = ScreenAt(screens.Values, pointer.X, pointer.Y).GetValueOrDefault(screenNow);
             outcome = SettledMove.DecideAt(window, pointer.X, pointer.Y, pointerOn, board, decidedSlots,
-                SlotsThere(workspace, screens, pointerOn, decidedOn));
+                SlotsThere(workspace, screens, pointerOn, decidedOn),
+                screens.TryGetValue(decidedOn, out var homeScreen) ? OpeningOn(workspace, homeScreen) : Maybe<WindowRect>.None);
         }
         // Win+Left / Win+Right (no button down, the frame exactly half the screen): a direction, not a place
         // (SettledMove.SnapSide has the measurement). One column over, or the next screen from the outermost one.
@@ -508,6 +509,15 @@ public sealed partial class Tiler(WorkspaceManager manager, IVirtualDesktopServi
                     .Tap(() => trace?.Invoke($"tile: {workspace.Name} screen {targetOn}: {window.Value:X} dropped {beside.Side} of {beside.Target.Value:X}, sizes {Show(arranged.Sizes)}"))
                     .TapError(error => trace?.Invoke($"tile: {workspace.Name} screen {targetOn}: storing the new arrangement failed: {error}"));
                 Retile(workspace, [leftFrom, targetOn]);
+                break;
+            // Into its own screen's opening (TileArrange.IntoOpening): the new order and sizes, sizes stored first.
+            case MoveOutcome.IntoOpening when screens.TryGetValue(decidedOn, out var openScreen):
+                var into = TileArrange.IntoOpening(board.On(decidedOn), ShownSizes(workspace, openScreen, board.On(decidedOn).Count), window);
+                Keep(workspace, board.Reordered(decidedOn, into.Order));
+                StoreSizes(workspace, KeyOf(openScreen), into.Sizes)
+                    .Tap(() => trace?.Invoke($"tile: {workspace.Name} screen {decidedOn}: {window.Value:X} dropped into the opening, sizes {Show(into.Sizes)}"))
+                    .TapError(error => trace?.Invoke($"tile: {workspace.Name} screen {decidedOn}: storing the filled opening failed: {error}"));
+                Retile(workspace, [decidedOn]);
                 break;
             case MoveOutcome.JoinScreen join:
                 var from = board.ScreenOf(window).GetValueOrDefault(join.Screen);
@@ -662,6 +672,8 @@ public sealed partial class Tiler(WorkspaceManager manager, IVirtualDesktopServi
     // Stores a workspace's new board and does what every board change owes the windows on it.
     void Keep(Workspace workspace, TileBoard board)
     {
+        board = IntoOpenings(workspace, board);
+
         // Before the old board is replaced: the cell of a window leaving a screen decides which row's share goes.
         NoteLeavers(workspace.Id, board);
         boards[workspace.Id] = board;
@@ -681,6 +693,35 @@ public sealed partial class Tiler(WorkspaceManager manager, IVirtualDesktopServi
             });
 
         WatchOnly(board.Screens.Values.SelectMany(w => w).ToHashSet());
+    }
+
+    // A window that JOINS a screen with an opening (TileSizes.Opening) goes into it rather than to the end. Petre: "keep
+    // the opening for the new window to jump into". Every way onto a screen comes through Keep (a new window, one moved
+    // here from another workspace, one dragged over from another screen), so this one place covers them all. The
+    // opening is filled only when the windows that stayed are exactly the ones it was laid out around; with more
+    // arriving at once the first takes it and the rest join at the end. The filled sizes are stored before anything is
+    // laid out, so the re-tile reads them.
+    TileBoard IntoOpenings(Workspace workspace, TileBoard after)
+    {
+        var before = boards.TryGetValue(workspace.Id, out var b) ? b : TileBoard.Empty;
+        var screens = surface.Screens().ToDictionary(s => s.Number);
+        return after.Screens.Keys.ToList().Aggregate(after, (board, n) =>
+        {
+            var windows = board.On(n);
+            var stayed = windows.Where(w => before.On(n).Contains(w)).ToList();
+            var arrived = windows.Where(w => !stayed.Contains(w)).ToList();
+            if (arrived.Count == 0
+                || !screens.TryGetValue(n, out var screen)
+                || !StoredOn(workspace.Id, KeyOf(screen)).TryGetValue(out var stored)
+                || !stored.HasOpeningFor(stayed.Count))
+                return board;
+
+            var (order, sizes) = TileArrange.Filled(stayed, stored, arrived[0]);
+            StoreSizes(workspace, KeyOf(screen), sizes)
+                .Tap(() => trace?.Invoke($"tile: {workspace.Name} screen {n}: {arrived[0].Value:X} took the opening at slot {stored.Opening}"))
+                .TapError(error => trace?.Invoke($"tile: {workspace.Name} screen {n}: storing the filled opening failed: {error}"));
+            return board.Reordered(n, order.Concat(arrived.Skip(1)).ToList());
+        });
     }
 
     // The remembered board brought up to date: windows that no longer qualify leave (the rest close up),

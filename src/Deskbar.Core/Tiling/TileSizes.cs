@@ -29,6 +29,17 @@ public sealed record TileSizes(IReadOnlyList<double> Columns, IReadOnlyList<IRea
     // (GridLayout.Shape), but a drop into a tile's edge zone (TileArrange) can make any other.
     public IReadOnlyList<int> Shape => Rows.Select(r => r.Count).ToList();
 
+    // AN OPENING: the cell (by its slot, counted column by column like every slot) that holds no window. Petre: "if i
+    // resize a window in a tiled setting, i want to keep the opening for the new window to jump into". Pulling a
+    // tile's OUTER edge in used to snap it back; now it leaves an empty cell there (TileArrange.Open), and the next
+    // window to join that screen goes into it (TileArrange.Filled). The sizes then describe one cell more than the
+    // screen has windows. Null for none, and stored with the sizes, so the opening outlives a restart.
+    public int? Opening { get; init; }
+
+    // These sizes lay out `count` windows around their opening: there is one, and exactly one cell more than windows.
+    public bool HasOpeningFor(int count) =>
+        Opening is { } open && Shape.Sum() == count + 1 && open >= 0 && open <= count;
+
     // True when every list is even, within the tolerance.
     public bool IsEqual =>
         IsEven(Columns) && Rows.All(IsEven);
@@ -44,6 +55,7 @@ public sealed record TileSizes(IReadOnlyList<double> Columns, IReadOnlyList<IRea
     //   - when columns rise, the new column is added on the right with 1/n, the rest scale in
     //     proportion;
     //   - a row count that drops with no known leaver drops the bottom rows.
+    // Fit lays out windows only, so the result never has an opening (TileArrange.Refit closes one before it fits).
     public TileSizes Fit(IReadOnlyList<int> shape, Maybe<(int Column, int Row)> leaving) =>
         new(
             Resize(Columns, shape.Count, Maybe<int>.None),
@@ -57,15 +69,23 @@ public sealed record TileSizes(IReadOnlyList<double> Columns, IReadOnlyList<IRea
 
     public bool Equals(TileSizes? other) =>
         other is not null
+        && Opening == other.Opening
         && Columns.SequenceEqual(other.Columns)
         && Rows.Count == other.Rows.Count
         && Rows.Zip(other.Rows, (a, b) => a.SequenceEqual(b)).All(same => same);
 
     public override int GetHashCode() =>
         Rows.Aggregate(
-            Columns.Aggregate(new HashCode(), (hash, c) => { hash.Add(c); return hash; }),
+            Columns.Aggregate(Seeded(Opening), (hash, c) => { hash.Add(c); return hash; }),
             (hash, row) => row.Aggregate(hash, (h, r) => { h.Add(r); return h; }))
             .ToHashCode();
+
+    static HashCode Seeded(int? opening)
+    {
+        var hash = new HashCode();
+        hash.Add(opening);
+        return hash;
+    }
 
     static IReadOnlyList<double> EvenList(int count) =>
         Enumerable.Repeat(1.0 / count, count).ToList();

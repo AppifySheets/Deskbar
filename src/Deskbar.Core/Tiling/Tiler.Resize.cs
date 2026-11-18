@@ -157,7 +157,7 @@ public sealed partial class Tiler
                 if (staying.Count == 0)
                     leavers.Remove((workspace, s.Key));
                 else if (gone.Count > 0)
-                    leavers[(workspace, s.Key)] = GridLayout.CellOf(gone[0].Slot, ShapeOn(workspace, s.Key, s.Value.Count));
+                    leavers[(workspace, s.Key)] = CellOn(workspace, s.Key, gone[0].Slot, s.Value.Count);
             });
         else
             leavers.Keys.Where(k => k.Workspace == workspace).ToList().ForEach(k => leavers.Remove(k));
@@ -208,7 +208,18 @@ public sealed partial class Tiler
 
         var windows = board.On(screenNow);
         var shape = shown.Shape;
-        var cell = GridLayout.CellOf(windows.ToList().IndexOf(window), shape);
+        var cell = TileArrange.CellOf(shown, windows.ToList().IndexOf(window), windows.Count);
+
+        // Pulled back over the screen's opening: the room goes back to the tiles and the opening closes.
+        if (TileArrange.Closes(shown, windows.Count, screen.WorkArea, GapOn(screen), cell, moved, frame))
+        {
+            var closed = TileArrange.Closed(shown);
+            StoreSizes(workspace, KeyOf(screen), closed)
+                .Tap(() => trace?.Invoke($"tile: {workspace.Name} screen {screen.Number}: {window.Value:X} pulled its {moved} edge back over the opening, closed, sizes {Show(closed)}"))
+                .TapError(error => trace?.Invoke($"tile: {workspace.Name} screen {screen.Number}: storing the closed opening failed: {error}"));
+            Retile(workspace, [screenNow]);
+            return true;
+        }
 
         SplitMove.Apply(shown, shape, screen.WorkArea, GapOn(screen), cell, moved, frame).Match(
             next =>
@@ -224,15 +235,27 @@ public sealed partial class Tiler
                 // One placement per window whose slot changed; the resized window is usually in its new slot already.
                 Retile(workspace, [screenNow]);
             },
-            // Only outer edges moved: there is no split behind them (spec: "dragging it snaps back, as today").
-            () => PutBack(window, slot, frame));
+            // Only outer edges moved: there is no split behind them. The spec snapped the tile back; now the room it
+            // gave up stays open for the next window (TileArrange.Open). Petre: "if i resize a window in a tiled
+            // setting, i want to keep the opening for the new window to jump into". Measured first: pulling the top
+            // edge of a full-height right tile down to y 911 and 735 snapped it back to the top both times.
+            // A nudge, or a screen that already has its one opening, still snaps back.
+            () => TileArrange.Open(shown, windows.Count, screen.WorkArea, GapOn(screen), cell, moved, frame).Match(
+                opened =>
+                {
+                    StoreSizes(workspace, KeyOf(screen), opened)
+                        .Tap(() => trace?.Invoke($"tile: {workspace.Name} screen {screen.Number}: {window.Value:X} pulled its {moved} edge in, opening at slot {opened.Opening}, sizes {Show(opened)}"))
+                        .TapError(error => trace?.Invoke($"tile: {workspace.Name} screen {screen.Number}: storing the opening failed: {error}"));
+                    Retile(workspace, [screenNow]);
+                },
+                () => PutBack(window, slot, frame)));
         return true;
     }
 
     // Sizes for the trace: column fractions, then each column's row fractions, to three places.
     static string Show(TileSizes sizes) =>
         string.Create(CultureInfo.InvariantCulture,
-            $"columns {Fractions(sizes.Columns)} rows {string.Join(" ", sizes.Rows.Select(Fractions))}");
+            $"columns {Fractions(sizes.Columns)} rows {string.Join(" ", sizes.Rows.Select(Fractions))}{(sizes.Opening is { } open ? $" opening {open}" : "")}");
 
     static string Fractions(IReadOnlyList<double> fractions) =>
         "[" + string.Join(",", fractions.Select(f => f.ToString("0.###", CultureInfo.InvariantCulture))) + "]";

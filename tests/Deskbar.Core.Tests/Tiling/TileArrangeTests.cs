@@ -91,4 +91,120 @@ public sealed class TileArrangeTests
         Assert.True(TileArrange.IsPlain(TileSizes.Equal([1, 1])));
         Assert.False(TileArrange.IsPlain(TileSizes.Equal([2])));
     }
+
+    // --- openings (TileSizes.Opening) ------------------------------------------------------------------------
+
+    static readonly WindowRect Screen = new(0, 0, 1920, 1040);
+    const int Gap = 8;
+
+    // Two columns; the right tile's top edge pulled down to 400 of an inner area that starts at 8 and is 1024 high.
+    static TileSizes OpenedAboveTheRightTile() =>
+        TileArrange.Open(TileSizes.Equal([1, 1]), 2, Screen, Gap, (1, 0), Edges.Top, new WindowRect(964, 400, 1912, 1032)).Value;
+
+    [Fact]
+    public void Pulling_a_top_edge_in_opens_a_row_above_the_tile()
+    {
+        var sizes = OpenedAboveTheRightTile();
+
+        Assert.Equal(1, sizes.Opening);
+        Assert.Equal([1, 2], sizes.Shape);
+        Assert.Equal(392.0 / 1024, sizes.Rows[1][0], 9);
+        Assert.Equal(1 - 392.0 / 1024, sizes.Rows[1][1], 9);
+        Assert.True(sizes.HasOpeningFor(2));
+        Assert.False(TileArrange.IsPlain(sizes));
+    }
+
+    [Fact]
+    public void Pulling_a_left_edge_in_opens_a_column_before_the_tile()
+    {
+        var sizes = TileArrange.Open(TileSizes.Equal([1, 1]), 2, Screen, Gap, (0, 0), Edges.Left, new WindowRect(400, 8, 956, 1032)).Value;
+
+        Assert.Equal(0, sizes.Opening);
+        Assert.Equal([1, 1, 1], sizes.Shape);
+        Assert.Equal(392.0 / 1904, sizes.Columns[0], 9);
+        Assert.Equal(0.5 - 392.0 / 1904, sizes.Columns[1], 9);
+    }
+
+    [Fact]
+    public void A_nudge_or_a_second_opening_opens_nothing()
+    {
+        Assert.True(TileArrange.Open(TileSizes.Equal([1, 1]), 2, Screen, Gap, (1, 0), Edges.Top, new WindowRect(964, 40, 1912, 1032)).HasNoValue);
+        Assert.True(TileArrange.Open(OpenedAboveTheRightTile(), 2, Screen, Gap, (0, 0), Edges.Top, new WindowRect(8, 400, 956, 1032)).HasNoValue);
+    }
+
+    [Fact]
+    public void The_grid_leaves_the_opening_empty()
+    {
+        var tiles = GridLayout.Arrange(Screen, 2, Gap, OpenedAboveTheRightTile());
+
+        Assert.Equal([new WindowRect(8, 8, 956, 1032), new WindowRect(964, 404, 1912, 1032)], tiles);
+        Assert.Equal(new WindowRect(964, 8, 1912, 396), GridLayout.OpeningOf(Screen, 2, Gap, OpenedAboveTheRightTile()).Value);
+    }
+
+    [Fact]
+    public void A_newcomer_fills_the_opening_and_it_is_gone()
+    {
+        var (order, sizes) = TileArrange.Filled([W(1), W(2)], OpenedAboveTheRightTile(), W(3));
+
+        Assert.Equal([W(1), W(3), W(2)], order);
+        Assert.Null(sizes.Opening);
+        Assert.Equal([1, 2], sizes.Shape);
+    }
+
+    [Fact]
+    public void Without_an_opening_a_newcomer_joins_at_the_end()
+    {
+        var (order, sizes) = TileArrange.Filled([W(1), W(2)], TileSizes.Equal([1, 1]), W(3));
+
+        Assert.Equal([W(1), W(2), W(3)], order);
+        Assert.Equal(TileSizes.Equal([1, 1]), sizes);
+    }
+
+    [Fact]
+    public void A_leaver_takes_only_its_cell_and_the_opening_stays()
+    {
+        var opened = OpenedAboveTheRightTile();
+
+        // W(1), the left column, leaves: its cell is (0, 0), counted in the sizes that hold the opening.
+        var leaver = TileArrange.CellOf(opened, 0, 2);
+        var sizes = TileArrange.Refit(opened, 1, Maybe.From(leaver));
+
+        Assert.Equal((0, 0), leaver);
+        Assert.Equal(0, sizes.Opening);
+        Assert.Equal([2], sizes.Shape);
+        Assert.Equal(opened.Rows[1], sizes.Rows[0]);
+    }
+
+    [Fact]
+    public void The_window_after_the_opening_is_counted_past_it()
+    {
+        Assert.Equal((1, 1), TileArrange.CellOf(OpenedAboveTheRightTile(), 1, 2));
+    }
+
+    [Fact]
+    public void Closing_gives_the_room_back()
+    {
+        Assert.Equal(TileSizes.Equal([1, 1]), TileArrange.Closed(OpenedAboveTheRightTile()));
+    }
+
+    [Fact]
+    public void A_drop_beside_a_tile_closes_the_opening_first()
+    {
+        var (order, sizes) = TileArrange.Drop([W(1), W(2)], OpenedAboveTheRightTile(), W(2), W(1), TileArrange.Zone.Bottom);
+
+        Assert.Equal([W(1), W(2)], order);
+        Assert.Null(sizes.Opening);
+        Assert.Equal([2], sizes.Shape);
+    }
+
+    [Fact]
+    public void A_tile_moved_into_the_opening_leaves_its_own_place()
+    {
+        var (order, sizes) = TileArrange.IntoOpening([W(1), W(2)], OpenedAboveTheRightTile(), W(1));
+
+        Assert.Equal([W(1), W(2)], order);
+        Assert.Null(sizes.Opening);
+        Assert.Equal([2], sizes.Shape);
+        Assert.Equal([1.0], sizes.Columns);
+    }
 }

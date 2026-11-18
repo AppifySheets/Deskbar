@@ -69,7 +69,7 @@ public sealed partial class Tiler
         var windows = Board.On(screen.Number);
         var shown = ShownSizes(workspace, screen, windows.Count);
         var shape = shown.Shape;
-        var cell = GridLayout.CellOf(windows.ToList().IndexOf(window), shape);
+        var cell = TileArrange.CellOf(shown, windows.ToList().IndexOf(window), windows.Count);
         SplitMove.Apply(shown, shape, screen.WorkArea, GapOn(screen), cell, moved, frame).Tap(next =>
             SlotsOf(screen, windows, next)
                 .Where(s => s.Key != window)
@@ -102,7 +102,8 @@ public sealed partial class Tiler
             : new Dictionary<WindowHandle, WindowRect>();
 
         var thereSlots = SlotsThere(workspace, screens, target, home);
-        var outcome = SettledMove.DecideAt(window, x, y, target, Board, homeSlots, thereSlots);
+        var hole = homeScreen is null ? Maybe<WindowRect>.None : OpeningOn(workspace, homeScreen);
+        var outcome = SettledMove.DecideAt(window, x, y, target, Board, homeSlots, thereSlots, hole);
         var previews = outcome switch
         {
             // A swap lands in the other tile's slot, on this screen or the one the pointer is on.
@@ -114,6 +115,8 @@ public sealed partial class Tiler
             // Beside another tile, on whichever screen that tile is: where the window lands in the new shape.
             MoveOutcome.Beside beside when Board.ScreenOf(beside.Target).TryGetValue(out var on) && screens.TryGetValue(on, out var besideScreen) =>
                 BesidePreview(workspace, besideScreen, window, beside),
+            // Into the opening: the window takes the opening's place (the room it leaves is shared out after).
+            MoveOutcome.IntoOpening when hole.TryGetValue(out var room) => [new TilePreview(room, Dragged: true)],
             _ => homeSlots.TryGetValue(window, out var own) ? [new TilePreview(own, Dragged: true)] : [],
         };
 
@@ -154,14 +157,21 @@ public sealed partial class Tiler
         return slots.TryGetValue(window, out var mine) ? [new TilePreview(mine, Dragged: true)] : [];
     }
 
-    // The slot a window would get joining `screen`'s grid at the end, as JoinScreen does.
+    // The slot a window would get joining `screen`'s grid, as JoinScreen does: the screen's opening when it has one
+    // (Keep puts it there), otherwise the end.
     Maybe<WindowRect> JoinedSlot(Workspace workspace, TileScreen screen, WindowHandle window)
     {
-        var windows = Board.On(screen.Number).Where(w => w != window).Append(window).ToList();
-        return SlotsOf(screen, windows, ShownSizes(workspace, screen, windows.Count)).TryGetValue(window, out var slot)
+        var others = Board.On(screen.Number).Where(w => w != window).ToList();
+        var (windows, sizes) = TileArrange.Filled(others, ShownSizes(workspace, screen, others.Count), window);
+        return SlotsOf(screen, windows, sizes.Opening is null && sizes.Shape.Sum() == windows.Count ? sizes : ShownSizes(workspace, screen, windows.Count))
+            .TryGetValue(window, out var slot)
             ? slot
             : Maybe<WindowRect>.None;
     }
+
+    // Where the screen's opening is right now, if it has one.
+    Maybe<WindowRect> OpeningOn(Workspace workspace, TileScreen screen) =>
+        GridLayout.OpeningOf(screen.WorkArea, Board.On(screen.Number).Count, GapOn(screen), ShownSizes(workspace, screen, Board.On(screen.Number).Count));
 
     void HidePreview()
     {
@@ -201,12 +211,12 @@ public sealed partial class Tiler
             .Map(s => TileArrange.Refit(s, count, Maybe<(int Column, int Row)>.None))
             .GetValueOrDefault(TileSizes.Equal(GridLayout.Shape(count)));
 
-    // The shape a screen (by number) of a workspace has for `count` windows: its stored shape if that fits the
-    // count, otherwise the automatic one. For NoteLeavers, which knows screens only by number.
-    IReadOnlyList<int> ShapeOn(Guid workspace, int screen, int count) =>
-        TileArrange.ShapeFor(
-            surface.Screens().TryFirst(s => s.Number == screen).Bind(s => StoredOn(workspace, KeyOf(s))),
-            count);
+    // The cell of the window at `slot` on a screen (by number) of a workspace with `count` windows, in the stored
+    // sizes (counting their opening) or the automatic shape. For NoteLeavers, which knows screens only by number.
+    (int Column, int Row) CellOn(Guid workspace, int screen, int slot, int count) =>
+        surface.Screens().TryFirst(s => s.Number == screen).Bind(s => StoredOn(workspace, KeyOf(s)))
+            .Map(stored => TileArrange.CellOf(stored, slot, count))
+            .GetValueOrDefault(GridLayout.CellOf(slot, GridLayout.Shape(count)));
 
     Maybe<TileSizes> StoredOn(Guid workspace, string key) =>
         manager.State.Workspaces.TryFirst(w => w.Id == workspace)
