@@ -463,6 +463,22 @@ public sealed class TilerTests : IDisposable
         Assert.Equal([W(3)], tiler.Board.On(2));
     }
 
+    // A right-column tile nudged a few pixels by its own app is NOT Win+Right, though it is close to the right half
+    // of the screen: it goes back to its slot and never leaves for the next screen.
+    [Fact]
+    public void A_tile_nudged_by_its_app_is_not_read_as_a_keyboard_snap()
+    {
+        surface.ScreenList.Add(FakeTileSurface.Screen(2, Area2));
+        new[] { 1, 2 }.ToList().ForEach(n => Exists(W(n), alpha));
+        Start();
+        var right = Grid(2)[1];
+
+        Settles(W(2), right with { Left = right.Left + 5, Right = right.Right + 5 });
+
+        AssertTiled([W(1), W(2)]);
+        Assert.Empty(tiler.Board.On(2));
+    }
+
     [Fact]
     public void Win_Left_from_an_inner_column_swaps_with_the_tile_beside_it()
     {

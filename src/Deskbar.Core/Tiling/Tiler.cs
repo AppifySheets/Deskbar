@@ -460,7 +460,9 @@ public sealed partial class Tiler(WorkspaceManager manager, IVirtualDesktopServi
         // (SettledMove.SnapSide has the measurement). One column over, or the next screen from the outermost one.
         else if (board.ScreenOf(window).Map(h => h == screenNow).GetValueOrDefault(false)
                  && screens.TryGetValue(screenNow, out var snapScreen)
-                 && SettledMove.SnapSide(frame, snapScreen.WorkArea).TryGetValue(out var side))
+                 && SettledMove.SnapSide(frame, snapScreen.WorkArea).TryGetValue(out var side)
+                 // With no gap a tile IS half the screen; a window still at its own slot made no snap.
+                 && !(slots.TryGetValue(window, out var ownSlot) && ownSlot == frame))
         {
             outcome = SettledMove.Snapped(window, side, screenNow, board,
                 ShownSizes(workspace, snapScreen, board.On(screenNow).Count).Shape, slots,

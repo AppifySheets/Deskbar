@@ -43,9 +43,14 @@ public static class SettledMove
     // snapped it left AGAIN instead of moving it to the next screen. On a tiled screen the half Windows snaps to is
     // meaningless, so the snap is read as what the key says: a direction. Left or Right when `frame` is the left or
     // right half of `workArea` (within a small tolerance, for DWM's rounding), None for anything else.
+    //
+    // The tolerance is TIGHT on purpose. Windows' snap is exact (measured: frame 0,0,1920,2160 on a 3840x2160 work
+    // area, no gap), while a tile always sits inside the gap. A looser one (1% of the width, the first version) read
+    // a right-column tile nudged a few pixels by its app as Win+Right, and from the outer column that would have sent
+    // it to the next screen (measured too: a test window the running build tiled, "snapped Right by keyboard").
     public static Maybe<TileArrange.Zone> SnapSide(WindowRect frame, WindowRect workArea)
     {
-        var tolerance = Math.Max(8, workArea.Width / 100);
+        const int tolerance = 3;
         bool Near(int a, int b) => Math.Abs(a - b) <= tolerance;
         var middle = workArea.Left + workArea.Width / 2;
         if (!Near(frame.Top, workArea.Top) || !Near(frame.Bottom, workArea.Bottom)) return Maybe<TileArrange.Zone>.None;
