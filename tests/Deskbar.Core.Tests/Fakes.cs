@@ -389,5 +389,18 @@ public sealed class FakeTileSurface : ITileSurface
 
     public IObservable<WindowHandle> Settled => SettledSubject.AsObservable();
     public IObservable<Unit> ScreensChanged => ScreensChangedSubject.AsObservable();
+
+    // A drag in progress: a test raises Moving with the window's frame where the drag has it now.
+    public Subject<WindowHandle> MovingSubject { get; } = new();
+    public IObservable<WindowHandle> Moving => MovingSubject.AsObservable();
+
+    // Where the pointer is; None (the default) stands for "Windows will not say", so every older test keeps the
+    // centre rule it was written against.
+    public Maybe<(int X, int Y)> PointerAt { get; set; } = Maybe<(int X, int Y)>.None;
+    public Maybe<(int X, int Y)> Pointer() => PointerAt;
+
+    // Every preview asked for, in order; an empty one is a hide.
+    public List<IReadOnlyList<TilePreview>> Previews { get; } = [];
+    public void Preview(IReadOnlyList<TilePreview> tiles) => Previews.Add(tiles.ToList());
 }
 

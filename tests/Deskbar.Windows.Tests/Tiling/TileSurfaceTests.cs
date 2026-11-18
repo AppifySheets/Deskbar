@@ -197,6 +197,45 @@ public class TileSurfaceTests
         window.Close();
     });
 
+    // While a tile is dragged (Tiler.Drag.cs) the surface reports its moves as they happen, so the tiles beside a
+    // separation can follow live and a move can show where it lands. Only with a button down: a keyboard snap or an
+    // app moving itself is not a drag, and must never show a preview or move a neighbour.
+    [Fact]
+    public void A_move_with_a_button_down_is_reported_as_moving() => StaThread.Run(() =>
+    {
+        var window = Shown();
+        var handle = HandleOf(window);
+        using var surface = new TileSurface(_ => false) { ButtonsDown = () => true };
+        var moving = new List<WindowHandle>();
+        using var _ = surface.Moving.Subscribe(moving.Add);
+        surface.Watch(new HashSet<WindowHandle> { handle });
+
+        Nudge(handle, 5);
+        PumpUntil(() => moving.Count > 0, TimeSpan.FromSeconds(3));
+
+        Assert.Equal(handle, moving.First());
+        window.Close();
+    });
+
+    [Fact]
+    public void A_move_with_the_buttons_up_is_not_reported_as_moving() => StaThread.Run(() =>
+    {
+        var window = Shown();
+        var handle = HandleOf(window);
+        using var surface = new TileSurface(_ => false) { ButtonsDown = () => false };
+        var moving = new List<WindowHandle>();
+        var settled = new List<WindowHandle>();
+        using var a = surface.Moving.Subscribe(moving.Add);
+        using var b = surface.Settled.Subscribe(settled.Add);
+        surface.Watch(new HashSet<WindowHandle> { handle });
+
+        Nudge(handle, 5);
+        PumpUntil(() => settled.Count > 0, TimeSpan.FromSeconds(3));
+
+        Assert.Empty(moving);
+        window.Close();
+    });
+
     // The Tiler's second requirement: Settled is debounced. A burst of moves closer together than the quiet
     // interval is ONE settle, and it comes only after the window has been still for that interval.
     [Fact]

@@ -87,6 +87,38 @@ public sealed class TileSurface : ITileSurface, IDisposable
 
     public IObservable<WindowHandle> Settled => settled.AsObservable();
 
+    // --- While a tile is being dragged (ITileSurface.Moving, Pointer, Preview; Tiler.Drag.cs) ------------------
+
+    // At most one Moving per window per this interval. A drag raises a location change per pixel, and each Moving
+    // may place the tiles beside a dragged separation; about 30 a second keeps the neighbours visibly following
+    // without asking every app to redraw at the pointer's full rate.
+    static readonly TimeSpan MovingEvery = TimeSpan.FromMilliseconds(33);
+
+    readonly Subject<WindowHandle> moving = new();
+    readonly Dictionary<WindowHandle, long> lastMoving = [];
+    readonly TilePreviewOverlay preview = new();
+
+    public IObservable<WindowHandle> Moving => moving.AsObservable();
+
+    // Physical pixels: the app is per-monitor DPI aware (Deskbar.App's manifest), so GetCursorPos is not scaled.
+    public Maybe<(int X, int Y)> Pointer() =>
+        GetCursorPos(out var point) ? (point.X, point.Y) : Maybe<(int X, int Y)>.None;
+
+    public void Preview(IReadOnlyList<TilePreview> tiles)
+    {
+        if (disposed) return;
+        preview.Show(tiles);
+    }
+
+    // Raised from Restart, only while a button is down, throttled per window.
+    void RaiseMoving(WindowHandle window)
+    {
+        var now = Environment.TickCount64;
+        if (lastMoving.TryGetValue(window, out var at) && now - at < MovingEvery.TotalMilliseconds) return;
+        lastMoving[window] = now;
+        moving.OnNext(window);
+    }
+
     // A screen plugged in or out or rearranged (DisplaySettingsChanged), or a work area changed without the
     // display settings changing at all: the taskbar moved, resized or auto-hid, an app bar docked
     // (WM_SETTINGCHANGE with SPI_SETWORKAREA). Both only say "something changed"; the Tiler asks Screens()
@@ -267,6 +299,7 @@ public sealed class TileSurface : ITileSurface, IDisposable
         // hand with it (nobody will ask, and the set must not grow with every window that ever tiled).
         quiet.Keys.Where(w => !watched.Contains(w)).ToList().ForEach(Forget);
         byHand.RemoveWhere(w => !watched.Contains(w));
+        lastMoving.Keys.Where(w => !watched.Contains(w)).ToList().ForEach(w => lastMoving.Remove(w));
 
         if (watched.Count > 0 && hook == 0)
             // Fails only if Windows is out of resources; then nothing settles until the next Watch tries again.
@@ -312,7 +345,12 @@ public sealed class TileSurface : ITileSurface, IDisposable
         // A button down at ANY move of the change makes the whole change by hand. Asked here, while the drag is
         // still going on, because by the quiet tick the button that did it has been released. Either button,
         // so AltSnap's right-drag resize counts.
-        if (ButtonsDown()) byHand.Add(window);
+        if (ButtonsDown())
+        {
+            byHand.Add(window);
+            // The drag is still going on: the Tiler moves the tiles beside a separation, or previews a move.
+            RaiseMoving(window);
+        }
         timer.Stop();
         timer.Start();
     }
@@ -399,6 +437,9 @@ public sealed class TileSurface : ITileSurface, IDisposable
         quiet.Values.ToList().ForEach(t => t.Stop());
         quiet.Clear();
         byHand.Clear();
+        lastMoving.Clear();
+        preview.Dispose();
         settled.OnCompleted();
+        moving.OnCompleted();
     }
 }

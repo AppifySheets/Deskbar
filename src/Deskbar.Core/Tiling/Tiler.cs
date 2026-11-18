@@ -161,6 +161,8 @@ public sealed partial class Tiler(WorkspaceManager manager, IVirtualDesktopServi
             Evaluate(everyScreen: false);
         })));
         subscriptions.Add(OnInputs(surface.Settled).Subscribe(w => Run($"settled {w.Value:X}", () => OnSettled(w))));
+        // A tile still being dragged: live resize or a move preview (Tiler.Drag.cs).
+        subscriptions.Add(OnInputs(surface.Moving).Subscribe(w => Run($"moving {w.Value:X}", () => OnMoving(w))));
         // A screen plugged in or out, or a work area that changed: every screen is re-tiled. A screen that came
         // back first starts its grace period (RememberScreens, Tiler.Resize.cs), so its sizes survive its windows
         // rejoining one at a time.
@@ -269,6 +271,7 @@ public sealed partial class Tiler(WorkspaceManager manager, IVirtualDesktopServi
             given.Remove(e.Window.Handle);
             rounded.Remove(e.Window.Handle);
             maximized.Remove(e.Window.Handle);
+            ForgetDrag(e.Window.Handle);
             putBacks.Remove(e.Window.Handle);
             leftAlone.Remove(e.Window.Handle);
         }
@@ -378,6 +381,14 @@ public sealed partial class Tiler(WorkspaceManager manager, IVirtualDesktopServi
                 + $"frame={surface.VisibleFrameOf(window).Map(Show).GetValueOrDefault("none")}, "
                 + $"given={(given.TryGetValue(window, out var g) ? Show(g.Accepted) : "none")}, echo={echo}, "
                 + $"maximized={surface.IsMaximized(window)}");
+
+        // A live drag (Tiler.Drag.cs): the dragged window's own Settled ends it and hides the preview; a
+        // neighbour's, while the dragged window has not settled yet, is the echo of a live placement and waits.
+        if (EndOrIgnoreDuringDrag(window))
+        {
+            trace?.Invoke($"tile: {window.Value:X} settled during another tile's drag, ignored");
+            return;
+        }
         if (dropping(window))
         {
             trace?.Invoke($"tile: {window.Value:X} settled during a drop on the bar, ignored");
@@ -429,14 +440,33 @@ public sealed partial class Tiler(WorkspaceManager manager, IVirtualDesktopServi
         if (MovedASplit(workspace, window, frame, screenNow, screens, board, slots, sizes, echo))
             return;
 
-        switch (SettledMove.Decide(window, frame, screenNow, board, slots))
+        // A drop by hand is judged where the pointer let go (SettledMove.DecideAt has the reason), on the screen the
+        // pointer is on; anything else (a keyboard snap, an app moving itself) by the window's centre, as before.
+        // A swap or a put-back happens on the window's OWN screen (DecideAt joins whenever the pointer is on
+        // another), so with the pointer the decision is made against that screen's slots, which are not the frame's
+        // screen's when a window held by its title bar hangs mostly over the next screen.
+        var decidedOn = screenNow;
+        var decidedSlots = slots;
+        MoveOutcome outcome;
+        if (surface.ByHand(window) && surface.Pointer().TryGetValue(out var pointer))
+        {
+            decidedOn = board.ScreenOf(window).GetValueOrDefault(screenNow);
+            if (decidedOn != screenNow && screens.TryGetValue(decidedOn, out var own))
+                decidedSlots = SlotsOf(own, board.On(decidedOn), ShownSizes(workspace, own, board.On(decidedOn).Count));
+            outcome = SettledMove.DecideAt(window, pointer.X, pointer.Y,
+                ScreenAt(screens.Values, pointer.X, pointer.Y).GetValueOrDefault(screenNow), board, decidedSlots);
+        }
+        else
+            outcome = SettledMove.Decide(window, frame, screenNow, board, slots);
+
+        switch (outcome)
         {
             case MoveOutcome.Swap swap:
                 boards[workspace.Id] = board.Swap(window, swap.With);
-                Retile(workspace, [screenNow]);
+                Retile(workspace, [decidedOn]);
                 break;
             case MoveOutcome.BackToSlot:
-                if (slots.TryGetValue(window, out var slot))
+                if (decidedSlots.TryGetValue(window, out var slot))
                     PutBack(window, slot, frame);
                 break;
             case MoveOutcome.JoinScreen join:

@@ -400,6 +400,64 @@ public sealed class TilerTests : IDisposable
         AssertTiled([W(1), W(2), W(3)]);
     }
 
+    // --- a drop by hand is judged at the pointer, and previewed before it ------------------------------------
+
+    // Petre, dragging a tile down by its title bar: "it still goes back to the right". Its centre was below the
+    // screen, under no tile. A drop by hand is judged where the pointer is. Four tiles fill columns first:
+    // W1 top left, W2 bottom left, W3 top right, W4 bottom right.
+    [Fact]
+    public void A_drop_by_hand_swaps_with_the_tile_under_the_pointer_even_with_the_centre_off_screen()
+    {
+        new[] { 1, 2, 3, 4 }.ToList().ForEach(n => Exists(W(n), alpha));
+        Start();
+        var grid = Grid(4);
+
+        // W3 held by its title bar and pulled down over W2: most of it is below the screen.
+        surface.PointerAt = (grid[1].Left + 100, grid[1].Top + 20);
+        surface.MovedByHand.Add(W(3));
+        Settles(W(3), new WindowRect(grid[1].Left, grid[1].Top, grid[1].Left + 900, grid[1].Top + 1600));
+
+        AssertTiled([W(1), W(3), W(2), W(4)]);
+    }
+
+    // Without a mouse (a keyboard snap, an app moving itself) the centre still decides, as before.
+    [Fact]
+    public void A_move_without_the_mouse_is_still_judged_by_its_centre()
+    {
+        new[] { 1, 2, 3, 4 }.ToList().ForEach(n => Exists(W(n), alpha));
+        Start();
+        var grid = Grid(4);
+
+        surface.PointerAt = (grid[1].Left + 100, grid[1].Top + 20);
+        Settles(W(3), new WindowRect(grid[1].Left, grid[1].Top, grid[1].Left + 900, grid[1].Top + 1600));
+
+        AssertTiled([W(1), W(2), W(3), W(4)]);
+    }
+
+    // While the tile is moved, the surface shows where it will land (filled) and where the tile it swaps with goes
+    // (outline). Letting go hides it.
+    [Fact]
+    public void Moving_a_tile_previews_the_swap_under_the_pointer_and_the_drop_hides_it()
+    {
+        new[] { 1, 2, 3, 4 }.ToList().ForEach(n => Exists(W(n), alpha));
+        Start();
+        var grid = Grid(4);
+
+        surface.Settling.Add(W(3));
+        surface.PointerAt = (grid[1].Left + 100, grid[1].Top + 20);
+        surface.Frames[W(3)] = new WindowRect(grid[1].Left, grid[1].Top, grid[1].Left + 900, grid[1].Top + 1600);
+        surface.MovingSubject.OnNext(W(3));
+
+        Assert.Equal([new TilePreview(grid[1], Dragged: true), new TilePreview(grid[2], Dragged: false)], surface.Previews.Last());
+
+        surface.Settling.Remove(W(3));
+        surface.MovedByHand.Add(W(3));
+        Settles(W(3), surface.Frames[W(3)]);
+
+        Assert.Empty(surface.Previews.Last());
+        AssertTiled([W(1), W(3), W(2), W(4)]);
+    }
+
     // A workspace that was already tiled when Deskbar started was not turned on just now: its maximized windows
     // stay maximized, as the user left them.
     [Fact]

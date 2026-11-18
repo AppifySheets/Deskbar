@@ -32,13 +32,32 @@ public static class SettledMove
             ? Within(moved, frame, slots)
             : new MoveOutcome.JoinScreen(screenNow);
 
-    // Same screen: the tile containing the centre decides. Rectangles are half-open (Right and Bottom
-    // are exclusive), so a centre exactly on a shared edge belongs to the tile on its right/below.
-    static MoveOutcome Within(WindowHandle moved, WindowRect frame, IReadOnlyDictionary<WindowHandle, WindowRect> slots)
+    // The same rule judged at a POINT: where the pointer was when a drag by hand ended. Petre, dragging the right
+    // tile down to the bottom of the screen: "it still goes back to the right". Held by its title bar and pulled
+    // down, the window's centre was below the screen (measured: y 2595 and 2999 on a 2148 px work area), under no
+    // tile at all, so it went back. The pointer is where the user is looking and what they meant; the centre is
+    // kept for moves made without a mouse (a keyboard snap), which have no pointer to speak of.
+    // `screenAt` is the screen the point is on.
+    public static MoveOutcome DecideAt(
+        WindowHandle moved,
+        int x,
+        int y,
+        int screenAt,
+        TileBoard board,
+        IReadOnlyDictionary<WindowHandle, WindowRect> slots) =>
+        board.ScreenOf(moved).TryGetValue(out var home) && home == screenAt
+            ? At(moved, x, y, slots)
+            : new MoveOutcome.JoinScreen(screenAt);
+
+    // Same screen: the tile containing the centre decides.
+    static MoveOutcome Within(WindowHandle moved, WindowRect frame, IReadOnlyDictionary<WindowHandle, WindowRect> slots) =>
+        At(moved, frame.Left + frame.Width / 2, frame.Top + frame.Height / 2, slots);
+
+    // The tile containing the point. Rectangles are half-open (Right and Bottom are exclusive), so a point exactly
+    // on a shared edge belongs to the tile on its right/below.
+    static MoveOutcome At(WindowHandle moved, int x, int y, IReadOnlyDictionary<WindowHandle, WindowRect> slots)
     {
-        var cx = frame.Left + frame.Width / 2;
-        var cy = frame.Top + frame.Height / 2;
-        var hit = slots.Where(s => s.Value.Left <= cx && cx < s.Value.Right && s.Value.Top <= cy && cy < s.Value.Bottom)
+        var hit = slots.Where(s => s.Value.Left <= x && x < s.Value.Right && s.Value.Top <= y && y < s.Value.Bottom)
             .Select(s => s.Key)
             .Where(w => w != moved)
             .ToList();

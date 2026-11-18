@@ -145,6 +145,49 @@ public sealed class TilerResizeTests : IDisposable
 
     // --- moving a split ----------------------------------------------------------------------------------
 
+    // LIVE (Tiler.Drag.cs). Petre: "can you resize, or show me how it would end up on the screen, before i let it
+    // go?" While the separation is still being dragged, the tile beside it follows at once, laid out from the same
+    // arithmetic the drop uses; nothing is stored until the drop, and the drop then moves nothing more.
+    [Fact]
+    public void While_a_separation_is_dragged_the_neighbour_follows_live_and_the_drop_stores_it()
+    {
+        StartTwo();
+        surface.Placed.Clear();
+
+        // Mid-drag: the button is still down (Settling), the left tile's right edge at 1337.
+        surface.Settling.Add(W(1));
+        surface.Frames[W(1)] = new WindowRect(8, 8, 1337, 1032);
+        surface.MovingSubject.OnNext(W(1));
+
+        Assert.Equal([(W(2), new WindowRect(1345, 8, 1912, 1032))], surface.Placed);
+        Assert.Empty(StoredSizes);
+
+        // The neighbour's echo arrives before the dragged window settles: it waits, and is not put back.
+        surface.SettledSubject.OnNext(W(2));
+        Assert.Single(surface.Placed);
+
+        // Let go where it is: the split is stored, and nothing moves again.
+        surface.Settling.Remove(W(1));
+        ResizedByHand(W(1), new WindowRect(8, 8, 1337, 1032));
+        Assert.Single(surface.Placed);
+        Assert.Equal(1333.0 / 1904, Stored(AreaKey).Columns[0], 9);
+    }
+
+    // The dragged window itself is never placed during the drag: it is under the pointer.
+    [Fact]
+    public void A_live_resize_never_places_the_window_being_dragged()
+    {
+        StartTwo();
+        surface.Placed.Clear();
+
+        surface.Settling.Add(W(2));
+        surface.Frames[W(2)] = new WindowRect(700, 8, 1912, 1032);
+        surface.MovingSubject.OnNext(W(2));
+
+        Assert.DoesNotContain(W(2), surface.Placed.Select(p => p.Window));
+        Assert.Equal(new WindowRect(8, 8, 692, 1032), surface.Frames[W(1)]);
+    }
+
     [Fact]
     public void A_hand_resize_of_a_separation_moves_the_split_and_retiles()
     {

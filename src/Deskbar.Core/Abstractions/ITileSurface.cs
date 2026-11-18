@@ -87,4 +87,25 @@ public interface ITileSurface
 
     // The monitor set or a work area changed: a screen plugged in or out, the taskbar moved, the bar docked.
     IObservable<Unit> ScreensChanged { get; }
+
+    // --- while a tile is being dragged (Tiler.Drag.cs) ---------------------------------------------------------
+    // Petre: "can you resize, or show me how it would end up on the screen, before i let it go?", then from a
+    // mockup, "Live resize + move preview": the tiles beside a dragged separation follow it as it moves, and a
+    // tile being moved shows where it will land.
+
+    // A watched window moved while a mouse button was down: the drag is still going on. Throttled to about 30 a
+    // second per window, because a drag raises a location change for every pixel and each one may place windows.
+    // The last one may be dropped by the throttle; the window's Settled always follows and decides the end.
+    IObservable<WindowHandle> Moving { get; }
+
+    // Where the mouse pointer is, in physical pixels like every rectangle here. None if Windows will not say.
+    Maybe<(int X, int Y)> Pointer();
+
+    // Shows translucent rectangles over the screen where a dragged tile, and the tile it would swap with, will
+    // land. Never activated, never hit by a click, never on the bar. An empty list hides them.
+    void Preview(IReadOnlyList<TilePreview> tiles);
 }
+
+// One rectangle of a drag's preview. `Dragged` is the window under the pointer's own landing place (drawn filled);
+// otherwise it is the tile it would swap with, going to the dragged window's old slot (drawn as an outline).
+public sealed record TilePreview(WindowRect Frame, bool Dragged);
