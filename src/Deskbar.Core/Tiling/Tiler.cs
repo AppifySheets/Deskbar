@@ -462,8 +462,9 @@ public sealed partial class Tiler(WorkspaceManager manager, IVirtualDesktopServi
             decidedOn = board.ScreenOf(window).GetValueOrDefault(screenNow);
             if (decidedOn != screenNow && screens.TryGetValue(decidedOn, out var own))
                 decidedSlots = SlotsOf(own, board.On(decidedOn), ShownSizes(workspace, own, board.On(decidedOn).Count));
-            outcome = SettledMove.DecideAt(window, pointer.X, pointer.Y,
-                ScreenAt(screens.Values, pointer.X, pointer.Y).GetValueOrDefault(screenNow), board, decidedSlots);
+            var pointerOn = ScreenAt(screens.Values, pointer.X, pointer.Y).GetValueOrDefault(screenNow);
+            outcome = SettledMove.DecideAt(window, pointer.X, pointer.Y, pointerOn, board, decidedSlots,
+                SlotsThere(workspace, screens, pointerOn, decidedOn));
         }
         // Win+Left / Win+Right (no button down, the frame exactly half the screen): a direction, not a place
         // (SettledMove.SnapSide has the measurement). One column over, or the next screen from the outermost one.
@@ -483,9 +484,12 @@ public sealed partial class Tiler(WorkspaceManager manager, IVirtualDesktopServi
 
         switch (outcome)
         {
+            // A swap on the same screen, or across two (each takes the other's screen and place): Exchange does both.
+            // Keep, so a cross-screen exchange is seen by the leaver bookkeeping like any other board change.
             case MoveOutcome.Swap swap:
-                boards[workspace.Id] = board.Swap(window, swap.With);
-                Retile(workspace, [decidedOn]);
+                var otherScreen = board.ScreenOf(swap.With).GetValueOrDefault(decidedOn);
+                Keep(workspace, board.Exchange(window, swap.With));
+                Retile(workspace, [decidedOn, otherScreen]);
                 break;
             case MoveOutcome.BackToSlot:
                 if (decidedSlots.TryGetValue(window, out var slot))
@@ -493,13 +497,17 @@ public sealed partial class Tiler(WorkspaceManager manager, IVirtualDesktopServi
                 break;
             // Dropped on another tile's edge zone: beside it on that side (TileArrange). The new shape is stored with
             // the sizes, BEFORE the re-tile, so the layout reads it; the board takes the new order.
-            case MoveOutcome.Beside beside when screens.TryGetValue(decidedOn, out var besideScreen):
+            // The target may be on another screen (dragged across): that screen takes the window in, and the one it
+            // left gives its cell up through Keep's leaver bookkeeping.
+            case MoveOutcome.Beside beside when board.ScreenOf(beside.Target).TryGetValue(out var targetOn)
+                                               && screens.TryGetValue(targetOn, out var besideScreen):
                 var arranged = Rearranged(workspace, besideScreen, window, beside);
-                Keep(workspace, board.Reordered(decidedOn, arranged.Order));
+                var leftFrom = board.ScreenOf(window).GetValueOrDefault(targetOn);
+                Keep(workspace, board.Into(targetOn, arranged.Order));
                 StoreSizes(workspace, KeyOf(besideScreen), arranged.Sizes)
-                    .Tap(() => trace?.Invoke($"tile: {workspace.Name} screen {decidedOn}: {window.Value:X} dropped {beside.Side} of {beside.Target.Value:X}, sizes {Show(arranged.Sizes)}"))
-                    .TapError(error => trace?.Invoke($"tile: {workspace.Name} screen {decidedOn}: storing the new arrangement failed: {error}"));
-                Retile(workspace, [decidedOn]);
+                    .Tap(() => trace?.Invoke($"tile: {workspace.Name} screen {targetOn}: {window.Value:X} dropped {beside.Side} of {beside.Target.Value:X}, sizes {Show(arranged.Sizes)}"))
+                    .TapError(error => trace?.Invoke($"tile: {workspace.Name} screen {targetOn}: storing the new arrangement failed: {error}"));
+                Retile(workspace, [leftFrom, targetOn]);
                 break;
             case MoveOutcome.JoinScreen join:
                 var from = board.ScreenOf(window).GetValueOrDefault(join.Screen);

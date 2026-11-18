@@ -51,6 +51,30 @@ public sealed record TileBoard(IReadOnlyDictionary<int, IReadOnlyList<WindowHand
             ? With(screen, On(screen).Select(x => x == a ? b : x == b ? a : x).ToList())
             : this;
 
+    // Two windows trade places, on the same screen or across two: each takes the other's screen and position.
+    // Unchanged when either is not on the board.
+    public TileBoard Exchange(WindowHandle a, WindowHandle b) =>
+        ScreenOf(a).TryGetValue(out var sa) && ScreenOf(b).TryGetValue(out var sb)
+            ? sa == sb
+                ? Swap(a, b)
+                : With(sa, On(sa).Select(x => x == a ? b : x).ToList()) is var first
+                    ? first.With(sb, first.On(sb).Select(x => x == b ? a : x).ToList())
+                    : this
+            : this;
+
+    // One screen takes `order`, which is the windows it has plus any brought over from another screen (each leaves
+    // where it was). A drop beside a tile, on its own screen or dragged across (TileArrange.Drop). Unchanged unless
+    // `order` holds every window the screen has, so an arrangement can never lose one.
+    public TileBoard Into(int screen, IReadOnlyList<WindowHandle> order)
+    {
+        var arriving = order.Where(w => !On(screen).Contains(w)).ToList();
+        var left = arriving.Aggregate(this, (board, w) => board.Leave(w));
+        return order.Distinct().Count() == order.Count && left.On(screen).All(order.Contains)
+            && order.Count == left.On(screen).Count + arriving.Count
+            ? left.With(screen, order)
+            : this;
+    }
+
     // The same windows of one screen in a new order: a drop beside another tile (TileArrange.Drop). Refused, the
     // board returned unchanged, unless `order` holds exactly the windows the screen has, so a rearrangement can
     // never add or lose a window.

@@ -100,10 +100,22 @@ public static class SettledMove
         int y,
         int screenAt,
         TileBoard board,
-        IReadOnlyDictionary<WindowHandle, WindowRect> slots) =>
+        IReadOnlyDictionary<WindowHandle, WindowRect> slots,
+        IReadOnlyDictionary<WindowHandle, WindowRect>? slotsThere = null) =>
         board.ScreenOf(moved).TryGetValue(out var home) && home == screenAt
             ? Zoned(At(moved, x, y, slots), x, y, slots)
-            : new MoveOutcome.JoinScreen(screenAt);
+            : Across(moved, x, y, screenAt, slotsThere ?? new Dictionary<WindowHandle, WindowRect>());
+
+    // On ANOTHER screen the same rules, against that screen's tiles (`slotsThere`): the middle of a tile trades
+    // places with it across the screens, an edge zone puts the window beside it there. Over no tile at all (an
+    // empty screen, a gap) it joins that screen's grid at the end, as before. Petre, dragging across: "on the right
+    // it only highlighted the right circle", because every drop on another screen joined at the end.
+    static MoveOutcome Across(WindowHandle moved, int x, int y, int screenAt, IReadOnlyDictionary<WindowHandle, WindowRect> slotsThere) =>
+        Zoned(At(moved, x, y, slotsThere), x, y, slotsThere) switch
+        {
+            MoveOutcome.BackToSlot => new MoveOutcome.JoinScreen(screenAt),
+            var hit => hit,
+        };
 
     // A hit on another tile's EDGE zone puts the window beside it (drop zones, TileArrange); its middle swaps.
     // Only for a drop by hand at the pointer: a window's centre has no aim, so Decide keeps plain swaps.

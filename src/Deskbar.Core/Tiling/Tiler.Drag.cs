@@ -101,20 +101,42 @@ public sealed partial class Tiler
             ? SlotsOf(homeScreen, Board.On(home), ShownSizes(workspace, homeScreen, Board.On(home).Count))
             : new Dictionary<WindowHandle, WindowRect>();
 
-        var previews = SettledMove.DecideAt(window, x, y, target, Board, homeSlots) switch
+        var thereSlots = SlotsThere(workspace, screens, target, home);
+        var outcome = SettledMove.DecideAt(window, x, y, target, Board, homeSlots, thereSlots);
+        var previews = outcome switch
         {
-            MoveOutcome.Swap swap when homeSlots.TryGetValue(swap.With, out var theirs) && homeSlots.TryGetValue(window, out var mine) =>
-                new[] { new TilePreview(theirs, Dragged: true), new TilePreview(mine, Dragged: false) },
+            // A swap lands in the other tile's slot, on this screen or the one the pointer is on.
+            MoveOutcome.Swap swap when homeSlots.TryGetValue(swap.With, out var theirs) || thereSlots.TryGetValue(swap.With, out theirs) =>
+                new[] { new TilePreview(theirs, Dragged: true) },
             MoveOutcome.JoinScreen join when screens.TryGetValue(join.Screen, out var there) =>
                 JoinedSlot(workspace, there, window).Map(slot => new[] { new TilePreview(slot, Dragged: true) })
                     .GetValueOrDefault([]),
-            // Beside another tile: where the window lands in the new shape, and that tile's new, smaller place.
-            MoveOutcome.Beside beside when homeScreen is not null => BesidePreview(workspace, homeScreen, window, beside),
+            // Beside another tile, on whichever screen that tile is: where the window lands in the new shape.
+            MoveOutcome.Beside beside when Board.ScreenOf(beside.Target).TryGetValue(out var on) && screens.TryGetValue(on, out var besideScreen) =>
+                BesidePreview(workspace, besideScreen, window, beside),
             _ => homeSlots.TryGetValue(window, out var own) ? [new TilePreview(own, Dragged: true)] : [],
         };
+
+        // One line whenever the preview CHANGES (never per Moving), so a preview that lands somewhere unexpected can
+        // be read back: what the pointer was over and what was chosen.
+        var line = $"{outcome} at {string.Join(" ", previews.Where(p => p.Dragged).Select(p => Show(p.Frame)))}";
+        if (line != lastPreviewLine)
+        {
+            lastPreviewLine = line;
+            trace?.Invoke($"tile: {window.Value:X} preview: pointer {x},{y} on screen {target}: {line}");
+        }
         surface.Preview(previews);
         previewShown = previews.Length > 0;
     }
+
+    string? lastPreviewLine;
+
+    // The tiles of the screen the pointer is on, when that is not the dragged window's own screen; empty otherwise
+    // (and for an empty screen). Read without side effects, like everything a preview reads.
+    IReadOnlyDictionary<WindowHandle, WindowRect> SlotsThere(Workspace workspace, IReadOnlyDictionary<int, TileScreen> screens, int pointerOn, int home) =>
+        pointerOn != home && screens.TryGetValue(pointerOn, out var there) && Board.On(pointerOn).Count > 0
+            ? SlotsOf(there, Board.On(pointerOn), ShownSizes(workspace, there, Board.On(pointerOn).Count))
+            : new Dictionary<WindowHandle, WindowRect>();
 
     // The rearrangement a Beside drop would make (TileArrange.Drop), with its slots. The drop and the preview both
     // come here, so what the preview shows is what the drop does.
@@ -129,9 +151,7 @@ public sealed partial class Tiler
     TilePreview[] BesidePreview(Workspace workspace, TileScreen screen, WindowHandle window, MoveOutcome.Beside beside)
     {
         var slots = Rearranged(workspace, screen, window, beside).Slots;
-        return slots.TryGetValue(window, out var mine) && slots.TryGetValue(beside.Target, out var theirs)
-            ? [new TilePreview(mine, Dragged: true), new TilePreview(theirs, Dragged: false)]
-            : [];
+        return slots.TryGetValue(window, out var mine) ? [new TilePreview(mine, Dragged: true)] : [];
     }
 
     // The slot a window would get joining `screen`'s grid at the end, as JoinScreen does.

@@ -78,12 +78,13 @@ public static class TileArrange
         IReadOnlyList<WindowHandle> order, TileSizes sizes, WindowHandle dragged, WindowHandle target, Zone zone)
     {
         var shape = sizes.Shape;
-        if (zone == Zone.Middle || dragged == target || shape.Sum() != order.Count
-            || !order.Contains(dragged) || !order.Contains(target))
+        if (zone == Zone.Middle || dragged == target || shape.Sum() != order.Count || !order.Contains(target))
             return (order, sizes);
 
-        // Out of its own place first, so the target's cell is read in the shape that is left.
-        var lifted = RemoveCell(sizes, GridLayout.CellOf(order.ToList().IndexOf(dragged), shape));
+        // Out of its own place first, so the target's cell is read in the shape that is left. A window coming from
+        // ANOTHER screen (dragged across, Petre: "on the right it only highlighted the right circle") has no place
+        // here to leave; its own screen gives its cell up as any leaver's.
+        var lifted = order.Contains(dragged) ? RemoveCell(sizes, GridLayout.CellOf(order.ToList().IndexOf(dragged), shape)) : sizes;
         var rest = order.Where(w => w != dragged).ToList();
         var at = GridLayout.CellOf(rest.IndexOf(target), lifted.Shape);
         var columnStart = lifted.Shape.Take(at.Column).Sum();

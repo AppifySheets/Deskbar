@@ -591,6 +591,65 @@ public sealed class TilerTests : IDisposable
         Assert.Equal([W(2)], Assert.Single(surface.Raised).Windows);
     }
 
+    // ACROSS SCREENS the same rules apply to the other screen's tiles. Petre: "on the right it only highlighted the
+    // right circle": every drop on another screen used to join at the end. W1 and W2 on screen 1, W3 and W4 on 2.
+    void StartTwoByTwoScreens()
+    {
+        surface.ScreenList.Add(FakeTileSurface.Screen(2, Area2));
+        new[] { 1, 2 }.ToList().ForEach(n => Exists(W(n), alpha));
+        new[] { 3, 4 }.ToList().ForEach(n => Exists(W(n), alpha, screen: 2));
+        Start();
+    }
+
+    void DroppedAt(WindowHandle h, int x, int y, int screen)
+    {
+        surface.PointerAt = (x, y);
+        surface.MovedByHand.Add(h);
+        Settles(h, new WindowRect(x - 100, y - 20, x + 700, y + 600), screen);
+        surface.MovedByHand.Remove(h);
+    }
+
+    [Fact]
+    public void Dropped_on_the_middle_of_a_tile_on_another_screen_the_two_trade_places()
+    {
+        StartTwoByTwoScreens();
+        var there = Grid(2, Area2);
+
+        DroppedAt(W(1), (there[0].Left + there[0].Right) / 2, (there[0].Top + there[0].Bottom) / 2, screen: 2);
+
+        Assert.Equal([W(3), W(2)], tiler.Board.On(1));
+        Assert.Equal([W(1), W(4)], tiler.Board.On(2));
+    }
+
+    [Fact]
+    public void Dropped_on_the_bottom_of_a_tile_on_another_screen_it_stacks_under_it_there()
+    {
+        StartTwoByTwoScreens();
+        var there = Grid(2, Area2);
+
+        DroppedAt(W(1), (there[0].Left + there[0].Right) / 2, there[0].Bottom - 20, screen: 2);
+
+        Assert.Equal([W(2)], tiler.Board.On(1));
+        Assert.Equal([W(3), W(1), W(4)], tiler.Board.On(2));
+        Assert.Equal(GridLayout.Arrange(Area2, 3, Gap, new TileSizes([0.5, 0.5], [[0.5, 0.5], [1.0]])),
+            new[] { W(3), W(1), W(4) }.Select(w => surface.Frames[w]).ToList());
+    }
+
+    [Fact]
+    public void The_preview_on_another_screen_follows_the_pointer()
+    {
+        StartTwoByTwoScreens();
+        var there = Grid(2, Area2);
+
+        surface.Settling.Add(W(1));
+        surface.PointerAt = ((there[1].Left + there[1].Right) / 2, (there[1].Top + there[1].Bottom) / 2);
+        surface.Frames[W(1)] = new WindowRect(there[1].Left, there[1].Top, there[1].Left + 600, there[1].Top + 400);
+        surface.ScreenOfWindow[W(1)] = 2;
+        surface.MovingSubject.OnNext(W(1));
+
+        Assert.Equal([new TilePreview(there[1], Dragged: true)], surface.Previews.Last());
+    }
+
     // Without a mouse (a keyboard snap, an app moving itself) the centre still decides, as before.
     [Fact]
     public void A_move_without_the_mouse_is_still_judged_by_its_centre()
@@ -619,7 +678,7 @@ public sealed class TilerTests : IDisposable
         surface.Frames[W(3)] = new WindowRect(grid[1].Left, grid[1].Top, grid[1].Left + 900, grid[1].Top + 1600);
         surface.MovingSubject.OnNext(W(3));
 
-        Assert.Equal([new TilePreview(grid[1], Dragged: true), new TilePreview(grid[2], Dragged: false)], surface.Previews.Last());
+        Assert.Equal([new TilePreview(grid[1], Dragged: true)], surface.Previews.Last());
 
         surface.Settling.Remove(W(3));
         surface.MovedByHand.Add(W(3));
