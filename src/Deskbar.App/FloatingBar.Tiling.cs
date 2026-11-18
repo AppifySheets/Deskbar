@@ -17,9 +17,10 @@ public partial class FloatingBar
     // the Store, and a machine without the Store app (LTSC, some managed installs) still has a browser.
     const string ProStorePage = "https://apps.microsoft.com/detail/9PJX26NGFPNF";
 
-    // Whether this copy is Deskbar Pro. Entitlement's cached verdict in the app; a seam for the tests, which
-    // cannot fake a Store licence, and nothing else.
-    internal Func<bool> IsPro { get; init; } = () => Entitlement.Current.IsPro;
+    // Whether this copy may tile: Deskbar Pro, or any copy while tiling is free (TilingGate.Free, for now, which
+    // makes every branch below take the Pro side). Entitlement's cached verdict in the app; a seam for the tests,
+    // which cannot fake a Store licence, and nothing else.
+    internal Func<bool> IsPro { get; init; } = () => Core.Tiling.TilingGate.Allowed(Entitlement.Current.IsPro);
 
     // Nothing at all while the experiment is off (AppState.ExperimentalTiling, Manage's "Tiling
     // (experimental)" box). Petre: "disabled by default, until i have tested it well". That includes a

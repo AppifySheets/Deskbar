@@ -193,7 +193,8 @@ public partial class App : Application
         // is this process), so Deskbar never tiles its own bar, Manage, or a dialog of its own.
         tileSurface = new Windows.Tiling.TileSurface(w => FloatingBar.IsOwnWindow(w.Value));
         tiler = new Core.Tiling.Tiler(manager, desktops, monitor, tileSurface,
-            () => Entitlement.Current.IsPro,
+            // Whether this copy may tile: Pro, or anyone while tiling is free (TilingGate.Free, for now).
+            () => Core.Tiling.TilingGate.Allowed(Entitlement.Current.IsPro),
             // A `tile:` line per decision when tracing is on, given the way the manager's trace is.
             trace: ClickTrace.On ? ClickTrace.Write : null,
             // A title-bar drop on a bar row wins over a tile swap (spec): while the bar is carrying one out, the
@@ -1320,9 +1321,10 @@ public partial class App : Application
                     if (detached) ShowDetachedStats(manager.State.DetachedStats ?? FirstDetachedStatsPlace());
                     else ReturnStats();
                 }),
-            // `tile` is refused in the free tier, as the row menu's item is. Entitlement's cached verdict, read when
-            // the command arrives, so a licence refresh in between is honoured.
-            isPro: () => Entitlement.Current.IsPro);
+            // `tile` is refused in the free tier, as the row menu's item is, unless tiling is free (TilingGate.Free,
+            // for now). Entitlement's cached verdict, read when the command arrives, so a licence refresh in between
+            // is honoured.
+            isPro: () => Core.Tiling.TilingGate.Allowed(Entitlement.Current.IsPro));
         controlServer = new ControlPipeServer(ControlCommandLine.PipeName,
             args => Dispatcher.InvokeAsync(() =>
             {
