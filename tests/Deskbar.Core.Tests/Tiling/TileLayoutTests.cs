@@ -37,6 +37,7 @@ public class TileLayoutTests
     // grid lays out pixel-identical" still compares against what the old build put on screen, not against the tree
     // code it is meant to check. Shrink by the outer gap, divide the width by the column fractions and each column's
     // height by its row fractions (Edges), then inset each cell on its inner edges by half the gap.
+    // Not fully independent: it still shares GridLayout.InnerArea, HalfGaps and Shape with the code under test.
     static class OldGrid
     {
         public static TileSizes Equal(IReadOnlyList<int> shape) =>

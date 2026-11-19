@@ -19,8 +19,9 @@ namespace Deskbar.Core.Tiling;
 // MovedASplit only while TilingGate acts, the window is on the board and no bar drop is pending). Storing a layout
 // goes through StoreLayout, which calls WorkspaceManager.SetTileLayout (that pulses StateChanged) and then takes the
 // new layouts into the Tiler's StateKey as already seen. The layouts are in the key so that "Even out tiles",
-// "Reset to grid", untile and the pipe's `even` and `reset-grid` re-tile; the Tiler's own store must not, because the re-tile it would cause is a full
-// evaluate (WorkspaceOf, a COM call, for every known window) that places nothing (final review, item 2).
+// "Reset to grid", untile and the pipe's `even` and `reset-grid` re-tile; the Tiler's own store must not, because
+// the re-tile it would cause is a full evaluate (WorkspaceOf, a COM call, for every known window) that places
+// nothing (final review, item 2).
 //
 // "Sizes" in the comments and the trace below is the stored layout: the word predates the tree, and the trace keeps
 // it so a log read across the change still reads the same.

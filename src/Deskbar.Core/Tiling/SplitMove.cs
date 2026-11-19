@@ -23,11 +23,11 @@ public static class SplitMove
     //
     // The boundary goes to the released edge plus `far` (right, bottom) or minus `near` (left, top), so laying the
     // layout out again leaves exactly `gap` between the two tiles (GridLayout.HalfGaps). It is stored as a fraction
-    // of THAT split's rect, laid out with the same Edges arithmetic the layout uses (GridLayout.ChildRects). Only the two children either side of it change, and neither goes under MinShare of
-    // that split. A corner moves one split per axis; the two cannot disturb each other, because moving an Across
-    // boundary never changes any split's height and moving a Down boundary never changes any width. A moved outer
-    // edge alongside an inner one is ignored. The opening, if any, is untouched. A leaf the layout does not have is a
-    // caller bug and throws (TileLayout.PathTo).
+    // of THAT split's rect, laid out with the same Edges arithmetic the layout uses (GridLayout.ChildRects). Only the
+    // two children either side of it change, and neither goes under MinShare of that split. A corner moves one split
+    // per axis; the two cannot disturb each other, because moving an Across boundary never changes any split's height
+    // and moving a Down boundary never changes any width. A moved outer edge alongside an inner one is ignored. The
+    // opening, if any, is untouched. A leaf the layout does not have is a caller bug and throws (TileLayout.PathTo).
     public static Maybe<TileLayout> Apply(TileLayout layout, WindowRect area, int gap, int leaf, Edges moved, WindowRect frame)
     {
         var inner = GridLayout.InnerArea(area, gap);

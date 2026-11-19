@@ -202,16 +202,29 @@ Tiling's layout is a split tree since the split tree change (spec
 the trace on (`%APPDATA%\Deskbar\trace.on`, log `%TEMP%\deskbar-trace.log`), on a workspace tiled with the tile
 button. `$ts` is `%APPDATA%\Deskbar\deskbar.cmd`. A, B and C are three windows of the workspace.
 
-T1. Drop beside a stacked tile. Make the left half A over B and the right half C: drop C on the bottom quarter of
-    A if the grid did not start that way, then drop the third window on the right quarter of the stack. Now drag C
-    onto the right quarter of A. While you hold it, the preview shows A and C side by side on the top half and B
-    full width underneath. Let go: that is the layout (A | C over B). B grew to the full width and A kept its
-    height; nothing else moved. Before the split tree, C could only become a new column.
+T1. Drop beside a stacked tile.
+    1. Start from the automatic grid for three windows: one tall tile on the left, two stacked on the right. If the
+       workspace has a stored layout, use "Reset to grid" first (T3).
+    2. Call the left tile A, the top-right tile C, and the bottom-right tile B.
+    3. Drag B by its title bar and let go with the pointer in the bottom quarter of A, near the middle of A's width
+       and above the bottom 6% of the screen (that strip is the bottom band, T2). Now the left half is A over B
+       and the right half is C, full height.
+    4. Drag C and let go with the pointer in the right quarter of A. While you hold it, the preview shows A and C
+       side by side on the top half and B full width underneath. Let go: that is the layout (A | C over B). B grew to
+       the full width and A kept its height; nothing else moved. Before the split tree, C could only become a new
+       column.
+    5. Drag C into the right band (the outer 6% of the screen's width), letting go in the BOTTOM half of the screen,
+       over B. Letting go in the top half is over C's own place, which is a nudge and puts it back. The left half is
+       A over B again and C is the right half.
+    6. Drag C and let go with the pointer in the right quarter of B. The preview, then the layout: A full width on
+       top, B and C side by side underneath.
 T2. Screen-edge bands. Drag a tile to the screen's left edge, inside the outer 6% of the screen and not over the
-    middle of another tile. The preview shows a full-height column on the left, and letting go makes it, taking
-    half the width of what it lands beside. Repeat for the right, top (a full-width row) and bottom edges, and once
-    into a corner: the nearer edge wins. Does 6% feel too thin or too thick? It is one constant
-    (`TileArrange.Band`).
+    middle of another tile. Let go over another tile's part of the band, not over the dragged tile's own place: a
+    release inside its own place is a nudge and puts it back. The preview shows a full-height column on the left,
+    and letting go makes it, taking half the width of what it lands beside. Repeat for the right, top (a full-width
+    row) and bottom edges, and once into a corner: the nearer edge wins. Does 6% feel too thin or too thick? The
+    depth is not a setting: it is a constant in code, `TileArrange.Band` in
+    `src/Deskbar.Core/Tiling/TileArrange.Layout.cs`, for a developer to change and rebuild.
 T3. Even out, then Reset to grid. From T1's A | C over B, drag the separation between A and C well off the middle.
     Right-click the workspace's row: "Even out tiles" sits directly under "Tile windows". The tile button's
     right-click menu offers the same item above "Keep the space when a window closes". Click it: every split is

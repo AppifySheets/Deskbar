@@ -117,8 +117,8 @@ public partial class FloatingBar
         // without anything pulsing the state, so a tip painted at the last rebuild could name the wrong tier.
         button.ToolTipOpening += (_, _) => button.ToolTip = TileTip();
         // Right-click: the row menu's tidy item ("Even out tiles" or "Reset to grid") and the keep-space switch, for
-        // the workspace you are on. Filled as it opens,
-        // from the state as it is then; with nothing to offer no menu opens at all, rather than an empty one.
+        // the workspace you are on. Filled as it opens, from the state as it is then; with nothing to offer no menu
+        // opens at all, rather than an empty one.
         button.ContextMenu = new ContextMenu();
         button.ContextMenuOpening += (_, e) =>
         {
