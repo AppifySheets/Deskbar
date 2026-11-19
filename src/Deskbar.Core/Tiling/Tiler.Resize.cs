@@ -175,7 +175,8 @@ public sealed partial class Tiler
     // lost a window and still has some, the first leaver's cell (by its slot in the old order) becomes that
     // screen's pending leaver. TileSizes.Fit can use one leaver per change; when several windows go at once the
     // rest are taken from the bottom, which is Fit's documented fallback. A screen left empty forgets its leaver,
-    // because no fit follows (RetileScreen skips an empty screen) and a stale one must not meet a later grid.
+    // because no fit follows (RetileScreen skips an empty screen) and a stale one must not meet a later grid. It
+    // loses its stored opening too, for the same reason (CloseOpeningOfEmptied).
     // A brand-new board (none before: first fill, or tiling turned back on) starts with no leavers at all.
     //
     // The entry also says whether that first leaver was closing (in `closing`, so its workspace keeps the space),
@@ -191,7 +192,10 @@ public sealed partial class Tiler
                 var staying = after.On(s.Key);
                 var gone = s.Value.Select((w, slot) => (Window: w, Slot: slot)).Where(p => !staying.Contains(p.Window)).ToList();
                 if (staying.Count == 0)
+                {
                     leavers.Remove((workspace, s.Key));
+                    if (gone.Count > 0) CloseOpeningOfEmptied(workspace, s.Key);
+                }
                 else if (gone.Count > 0)
                     leavers[(workspace, s.Key)] = (CellOn(workspace, s.Key, gone[0].Slot, s.Value.Count), closing.Contains(gone[0].Window));
             });
@@ -203,6 +207,32 @@ public sealed partial class Tiler
         var gridded = boards.Where(b => b.Key != workspace).Select(b => b.Value).Append(after)
             .SelectMany(b => b.Screens.Values).SelectMany(w => w).ToHashSet();
         awaitingEcho.RemoveWhere(w => !gridded.Contains(w));
+    }
+
+    // A screen whose last tile just left keeps no opening (review finding on change 3; the design: "the last tile on
+    // a screen closing leaves nothing to keep"). An opening is room kept beside OTHER tiles. On an empty screen
+    // nothing can fill it: IntoOpenings and Arrived look for an opening for the windows that stayed, which is
+    // HasOpeningFor(0) and false for any opening with tiles around it. The next window then joins, and Refit keeps
+    // the stored sizes as they are, because they do have an opening for one window. So it would be laid out beside
+    // an empty cell. This happens with the switch on (two tiles, both close, the first keeps its space) and with an
+    // opening pulled open by hand (TileArrange.Open) when the screen's last tile leaves.
+    //
+    // Only the opening goes (TileArrange.Closed): any split dragged on that screen stays for the windows that come
+    // back. Stored through StoreSizes like every store the Tiler makes. If what is left is plain, SetTileSizes
+    // removes the entry. Not during a returning screen's grace period, where nothing is stored (see
+    // ReturningScreenGrace), and not for a screen the surface no longer reports: a screen that was unplugged keeps
+    // its sizes for when it comes back.
+    void CloseOpeningOfEmptied(Guid id, int number)
+    {
+        if (!manager.State.Workspaces.TryFirst(w => w.Id == id).TryGetValue(out var workspace)
+            || !surface.Screens().TryFirst(s => s.Number == number).TryGetValue(out var screen))
+            return;
+        var key = KeyOf(screen);
+        if (InGrace(key) || !StoredOn(id, key).TryGetValue(out var stored) || stored.Opening is null) return;
+        var closed = TileArrange.Closed(stored);
+        StoreSizes(workspace, key, closed)
+            .Tap(() => trace?.Invoke($"tile: {workspace.Name} screen {number}: emptied, its opening closed, sizes {Show(closed)}"))
+            .TapError(error => trace?.Invoke($"tile: {workspace.Name} screen {number}: storing the emptied screen's closed opening failed: {error}"));
     }
 
     // Called by PlaceIfNeeded after a successful Place. The Place raises LOCATIONCHANGE, so a Settled for this

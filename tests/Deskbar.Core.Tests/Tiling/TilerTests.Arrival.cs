@@ -404,6 +404,28 @@ public sealed partial class TilerTests
         AssertTiled([W(2)]);
     }
 
+    // Review finding: W2 closing keeps its space, then W1 closing empties the screen. The kept opening must go with
+    // it, or W3 would be laid out in half the screen beside an empty half that nothing can fill.
+    [Fact]
+    public void When_the_last_tile_closes_the_kept_space_goes_with_it()
+    {
+        new[] { 1, 2 }.ToList().ForEach(n => Exists(W(n), alpha));
+        Start();
+        Assert.True(manager.SetTileKeepsSpace(alpha.Id, true).IsSuccess);
+
+        Closes(W(2));
+        Assert.Equal(TileSizes.Equal([1, 1]) with { Opening = 1 }, StoredOnAlpha().GetValueOrThrow());
+        Closes(W(1));
+        Assert.True(StoredOnAlpha().HasNoValue);
+        Assert.Contains(traced, line => line.StartsWith("tile: ") && line.Contains("emptied, its opening closed"));
+
+        Opens(W(3), alpha);
+
+        AssertTiled([W(3)]);
+        Assert.Equal(Area.Width - 2 * Gap, surface.Frames[W(3)].Width);
+        Assert.True(StoredOnAlpha().HasNoValue);
+    }
+
     // The switch is off by default: a close closes up (change 1), and no opening is stored.
     [Fact]
     public void With_the_switch_off_a_close_closes_up()
