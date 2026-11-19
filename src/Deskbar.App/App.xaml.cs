@@ -55,6 +55,9 @@ public partial class App : Application
     DetachedStatsWindow? detachedStats; // the stats line detached into its own always-on-top window, created on first use
     bool detachedStatsPinned;           // its hwnd is pinned to every desktop once, after its first show (see ShowDetachedStats)
     TimeTracker? timeTracker; // #53: active time per workspace, in its own file beside state.json
+    // Parked tasks and their timers (docs/superpowers/specs/2026-11-19-tasks-in-the-bar-design.md). Built with the
+    // time tracker, ticked by the 1 s timer, and handed to the remote control; later tasks read it for the UI.
+    Core.Tasks.TaskService? tasks;
     // Tiling (docs/superpowers/specs/2026-11-08-tiling-design.md): the Tiler decides, the surface does the
     // Win32. Both live for the process, both are null in compatibility mode (there are no desktops to tile),
     // and ExitApp disposes the Tiler and then the surface, so the LOCATIONCHANGE hook goes with them.
@@ -1201,6 +1204,13 @@ public partial class App : Application
         // mixing it into state.json would mean rewriting all of that on every workspace rename.
         timeTracker = new TimeTracker(new JsonTimeStore(stateDir), new InputActivity(), () => DateTime.Now);
 
+        // Tasks in the bar (docs/superpowers/specs/2026-11-19-tasks-in-the-bar-design.md): parked tasks and their
+        // timers, in tasks.json beside state.json. A failed load is traced and leaves the board empty, never fatal.
+        // It is ticked from the 1 s timer below, which only starts after manager.Start() has run.
+        tasks = new Core.Tasks.TaskService(new Core.Tasks.JsonTaskStore(stateDir), () => DateTimeOffset.UtcNow,
+            trace: ClickTrace.On ? ClickTrace.Write : null);
+        tasks.Load().TapError(err => ClickTrace.Write($"tasks.json not loaded: {err}"));
+
         // Spec §Error handling: if the COM API is unrecognized (post-Windows-Update),
         // degrade to listing workspaces with a banner -- never crash, never move windows.
         compatibilityMode = desktops.Initialize().IsFailure;
@@ -1329,7 +1339,8 @@ public partial class App : Application
             // `tile` is refused in the free tier, as the row menu's item is, unless tiling is free (TilingGate.Free,
             // for now). Entitlement's cached verdict, read when the command arrives, so a licence refresh in between
             // is honoured.
-            isPro: () => Core.Tiling.TilingGate.Allowed(Entitlement.Current.IsPro));
+            isPro: () => Core.Tiling.TilingGate.Allowed(Entitlement.Current.IsPro),
+            tasks: tasks);
         controlServer = new ControlPipeServer(ControlCommandLine.PipeName,
             args => Dispatcher.InvokeAsync(() =>
             {
@@ -1375,6 +1386,16 @@ public partial class App : Application
             .Select(_ => manager.State.QuietTaskbar)
             .DistinctUntilChanged()
             .Subscribe(TaskbarFlashingSwitch.Sync);
+
+        // Tasks and workspaces kept in step (design doc above). Subscribed after Start(), so the pulses of
+        // loading state do not prune against a half-built list.
+        //  - tasks.Changed -> the bar's marks (due / running) are refreshed from the board.
+        //  - manager.StateChanged -> tasks whose workspace was deleted are pruned.
+        // No loop: Prune pulses Changed only when it actually freed something, and SetTaskMarks pulses
+        // StateChanged only when the marks differ from the ones it holds. So a pulse that changes nothing
+        // ends the chain after one hop, and each real change moves the chain at most one step further.
+        tasks!.Changed.Subscribe(_ => manager.SetTaskMarks(tasks.DueWorkspaces(), tasks.RunningWorkspaces()));
+        manager.StateChanged.Subscribe(_ => tasks.Prune(manager.State.Workspaces.Select(w => w.Id).ToHashSet()));
 
         trayIcon = new TaskbarIcon
         {
@@ -1603,6 +1624,11 @@ public partial class App : Application
                 // eyes: a highlight pointing at the wrong window is misinformation, not a
                 // missing feature, so up to five seconds of it is far worse than up to one.
                 manager.ResyncActiveWindow();
+                // ...and the tasks: arrival dwell and timers running out. This timer starts after manager.Start()
+                // (it is created below the Start block), so CurrentWorkspaceId is resolved before the first tick.
+                // Marks are refreshed every tick too, because a timer running out changes no board state to pulse.
+                tasks.Tick(manager.CurrentWorkspaceId);
+                manager.SetTaskMarks(tasks.DueWorkspaces(), tasks.RunningWorkspaces());
                 // ...and which shell flyout the bar shows as open, which an event can also leave wrong: Esc shuts Start, Windows gives
                 // the foreground to the bar itself, whose windows the monitor never reports, and nothing says the flyout is gone
                 // (FloatingBar.ResyncShellFlyouts). Three field reads unless the bar shows one open.
