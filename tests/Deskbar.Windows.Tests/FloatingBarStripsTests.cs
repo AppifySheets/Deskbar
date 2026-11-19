@@ -92,6 +92,12 @@ public class FloatingBarStripsTests
 
         Assert.Equal(RestUnderline, ColourOf(Underline(resting).Background));
         Assert.NotEqual(ActiveFill, ColourOf(((Panel)resting.Content).Background));
+
+        // The line runs along the tab's TOP: a maximized window's focus ring frame draws its top line right under the
+        // strip in the same colour, and a line along the bottom merged with it ("fullscreen masks which window is
+        // active in the strip").
+        Assert.Equal(VerticalAlignment.Top, Underline(active).VerticalAlignment);
+        Assert.Equal(VerticalAlignment.Top, Underline(resting).VerticalAlignment);
     });
 
     // A grouped workspace's tag wears the GROUP's colour, the one the bar paints that workspace's row in.

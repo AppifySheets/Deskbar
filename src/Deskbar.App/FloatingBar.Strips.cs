@@ -136,7 +136,7 @@ public partial class FloatingBar
 
     // One window's tab: IconButton, exactly as the bar's own buttons are built, under the titled list's group key, then
     // dressed as a tab. Icon on the left (with the pin badge for a pinned window, as in the titled list), the title in
-    // the titled list's strength (TitleBrush), a 2 DIP underline along the bottom, and for the window you are in the
+    // the titled list's strength (TitleBrush), a 2 DIP line along the top, and for the window you are in the
     // lighter fill and the underline in `accent`, the workspace's colour.
     //
     // The bare chrome rather than the marked one the titled list uses: the mockup's fill and underline are the tab's
@@ -176,11 +176,16 @@ public partial class FloatingBar
         line.Children.Add(icon);
         line.Children.Add(title);
 
+        // Along the tab's TOP edge, though the mockup had it along the bottom (and the tag still says underline). The
+        // focus ring (WindowRings) frames a maximized window just inside the work area, so its top line runs right under
+        // the strip in the same workspace colour as the active tab's line: the two merged into one full-width line and
+        // Petre could no longer tell which tab was active ("fullscreen masks which window is active in the strip"). His
+        // answer: "maybe give them lines at the top, not bottom". The strip's whole height now lies between the two.
         var underline = new Border
         {
             Tag = StripUnderlineTag,
             Height = 2,
-            VerticalAlignment = VerticalAlignment.Bottom,
+            VerticalAlignment = VerticalAlignment.Top,
             Background = row.IsActive ? accent ?? StripUnderlineRest : StripUnderlineRest,
             IsHitTestVisible = false,
         };
