@@ -2178,9 +2178,10 @@ public partial class FloatingBar : Window
 
         // The window list on the screens and the bar behind its taskbar button: only the strips are filled, the
         // bar's own rows wait for ShowBar's rebuild (FloatingBar.Strips.cs). Still inside this rebuild's guard.
+        // Not on a relayout (`fresh` false), for the reason given where the full rebuild fills them below.
         if (StripsAlone)
         {
-            FillStripsAlone(queried.Value);
+            if (fresh) FillStripsAlone(queried.Value);
             return;
         }
 
@@ -2580,7 +2581,14 @@ public partial class FloatingBar : Window
 
             // Every screen's strip gets that screen's tabs, when the list is on the screens; nothing otherwise
             // (FloatingBar.Strips.cs). Here, inside this rebuild's guard, never in a rebuild of its own.
-            FillStrips(overview);
+            //
+            // Only on a FRESH rebuild, never on a relayout (final review, second finding). Relayout runs this method
+            // at mouse-move rate while the bar is being resized, from the overview already held, and a strip's tabs
+            // do not depend on the bar's width at all: refilling them there rebuilt every tab on every screen for
+            // every step of the drag, for nothing. The one thing a relayout costs the tabs: the clear above forgot
+            // their ageing overlays, so they stop greying until the next fresh rebuild, which the next window event
+            // brings; a minute's ageing late on a tab nobody is looking at while dragging the bar's edge.
+            if (fresh) FillStrips(overview);
 
             groupRows
                 .SelectMany((row, i) => i == 0 ? new[] { row } : new[] { Separator(), row })
@@ -6205,7 +6213,12 @@ public partial class FloatingBar : Window
     // you are standing in and therefore needs no picture.
     // wholeRow: the icon sits on a collapsed row that is clicked as a whole (see GroupRow), so its click is
     // the row's switch rather than a jump to this one window, and hovering it rings the row's landing icon.
-    UIElement IconButton(string groupLabel, string groupKey, WindowRow row, Guid? rowKey = null, bool wholeRow = false)
+    // onScreen: the caller knows the window is on the desktop you are looking at, whatever `rowKey` says, so its
+    // hover card carries no picture. A screen strip's tab (FloatingBar.Strips.cs, StripTab): every tab is the current
+    // workspace's window, the current unnamed desktop's (which has no workspace id to pass as `rowKey`), or a pinned
+    // one, on every desktop. Without it a tab's card captured a picture of a window right in front of you, which
+    // Petre's rule for the card forbids (see HoverCard).
+    UIElement IconButton(string groupLabel, string groupKey, WindowRow row, Guid? rowKey = null, bool wholeRow = false, bool onScreen = false)
     {
         var button = new Button
         {
@@ -6256,7 +6269,7 @@ public partial class FloatingBar : Window
         // Hover -> the card, and the footer no longer carries the title (#135).
         // Whether this is the current workspace's row is read when the pointer ARRIVES, not when the button
         // is built: currentRow is settled by the same rebuild, and reading it late costs nothing.
-        button.MouseEnter += (_, _) => ArmHoverCard(groupLabel, row, button, here: rowKey is not null && rowKey == currentRow);
+        button.MouseEnter += (_, _) => ArmHoverCard(groupLabel, row, button, here: onScreen || (rowKey is not null && rowKey == currentRow));
         button.MouseLeave += (_, _) => ClearInfo();
 
         // ...and hover -> ring (#67). The pointer resting on an icon makes THAT window the thing a
@@ -7108,9 +7121,10 @@ public partial class FloatingBar : Window
     }
 
     // The split window lines setting (AppState.SplitWindowLines), on every workspace's menu and the bar's own,
-    // right under the window list item it belongs with. Petre: "make this a setting, enabled by default". One
-    // item that flips, naming what it would switch TO, like the window list item above it. Its control pipe
-    // twin is `window-lines split|whole` (ControlUsage).
+    // right under the "Window list" submenu it belongs with. Petre: "make this a setting, enabled by default". One
+    // item that flips, naming what it would switch TO; the window list used to be such a flip too, and is now a
+    // submenu of three places (AddWindowListItems above), so this one no longer mirrors it. Its control pipe twin is
+    // `window-lines split|whole` (ControlUsage).
     void AddSplitItem(Action<string, string, Action> add)
     {
         var split = manager.State.SplitWindowLines;
