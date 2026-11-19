@@ -30,10 +30,10 @@ namespace Deskbar.App;
 //     forwards its presses and releases here (NoteStripPress, NoteStripRelease), the press-state half only: the other
 //     half of those handlers moves or resizes the bar.
 //   * THE HOVER CARD. ShowHoverCard places the card beside the bar, level with the anchor measured in the bar's
-//     coordinates, so a tab's card opened at the bar, on whichever screen that is. The probe notes expected that
-//     measurement to throw for an element in another window; measured in FloatingBarStripsTests, it does not (WPF
-//     translates through screen coordinates), it only puts the card in the wrong place. A tab's card opens below the
-//     tab instead (PlaceHoverCardBelowStripTab). The watch that closes the card
+//     coordinates, so a tab's card opened at the bar, on whichever screen that is. That measurement does not throw for
+//     an element in another window (WPF translates through screen coordinates, measured in FloatingBarStripsTests); it
+//     only puts the card in the wrong place. A tab's card opens below its strip, under the tab, placed against the
+//     strip's window (PlaceHoverCardBelowStripTab). The watch that closes the card
 //     asks Mouse.DirectlyOver, which WPF answers for every window on this thread, so a pointer over a strip's tab is
 //     already a pointer the watch can see; it needs nothing more.
 //
@@ -309,17 +309,23 @@ public partial class FloatingBar
         FlushDeferredRebuild();
     }
 
-    // The card for a tab, which lives in a strip's window: placed against the tab itself, below it, the side with room
-    // on a strip along a screen's top edge. False for an anchor in the bar, which ShowHoverCard places as it always has.
-    // Also false for an anchor in no window at all (a rebuild replaced it), which keeps that case exactly as it was.
+    // The card for a tab, which lives in a strip's window: below the strip, the side with room on a strip along a
+    // screen's top edge, and moved right by the tab's place in the strip so it opens under the tab. False for an anchor
+    // in the bar, which ShowHoverCard places as it always has. Also false for an anchor in no window at all (a rebuild
+    // replaced it), which keeps that case exactly as it was.
     //
-    // The tab can be thrown away by a rebuild while its card is up, which leaves the card pointing at a removed element;
-    // the hover watch closes it two misses later, as it closes any card whose icon has gone.
+    // Against the STRIP'S WINDOW, not the tab, for the reason the bar's card is placed against the bar: a rebuild throws
+    // every tab away, and a rebuild while the pointer rests on a tab is routine (a title or focus change). The new tab
+    // under the pointer is the same window, so the hover watch keeps the card open and the dwell does not re-arm; a card
+    // placed against the old tab would stay pointing at a detached element, which WPF goes on repositioning. The strip
+    // outlives every rebuild. The offset is read when the card opens, as the bar reads its vertical one; a rebuild that
+    // keeps the order keeps the tab where it was.
     bool PlaceHoverCardBelowStripTab(Popup popup, FrameworkElement anchor)
     {
         if (IsAncestorOf(anchor) || Window.GetWindow(anchor) is not { } host || ReferenceEquals(host, this)) return false;
-        popup.PlacementTarget = anchor;
+        popup.PlacementTarget = host;
         popup.Placement = PlacementMode.Bottom;
+        popup.HorizontalOffset = anchor.TranslatePoint(new Point(0, 0), host).X;
         popup.VerticalOffset = 0;
         return true;
     }

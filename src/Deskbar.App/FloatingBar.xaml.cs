@@ -5201,6 +5201,7 @@ public partial class FloatingBar : Window
         {
             // Against the bar again, since the same popup may have been placed against a tab last time.
             hoverPopup.PlacementTarget = this;
+            hoverPopup.HorizontalOffset = 0; // a tab's card moves it right by the tab's place in its strip
             // Level with the icon being hovered, in the bar's own coordinates, so the card appears beside what
             // it describes rather than at the bar's top corner.
             hoverPopup.VerticalOffset = anchor.TranslatePoint(new Point(0, 0), this).Y;
