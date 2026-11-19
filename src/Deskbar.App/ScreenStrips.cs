@@ -118,6 +118,15 @@ public sealed class ScreenStrips
     //
     // A removed strip: Undock, which gives the band back and hides the window, then Close. In that order, so a band is
     // never left reserved with no window in it.
+    //
+    // NOTHING ESCAPES IT (final review, first finding). A reconcile runs at a display change, an unlock and a replug,
+    // which are exactly the moments Win32 and WPF throw: `create`, EnsureHandle, Show, Hide, a Close on a window already
+    // closed, the moves in ClearUnder. Anything that left here reached DispatcherUnhandledException, which FailFasts and
+    // relaunches the app, and a throw inside the state stream's subscription stopped that pulse reaching every later
+    // subscriber. So every step that can throw is caught and traced ("strip reconcile threw ...", the shape of
+    // FloatingBar.Guarded), per strip, so one screen's failure leaves the other screens their strips, and whatever is
+    // half done is left for the next reconcile or the 1 s guard. Every caller (App's start, the state stream, the
+    // settled layout) is covered by this one guard rather than each wrapping its own.
     public void Reconcile()
     {
         if (removedForGood) return;
@@ -133,7 +142,12 @@ public sealed class ScreenStrips
             do
             {
                 reconcileAgain = false;
-                if (ReconcileOnce()) changed.OnNext(Unit.Default);
+                // Changed is raised when the strips differ from before the pass, and not from a "did it change" answer
+                // the pass returns: a pass that threw half way may still have opened or closed some, and the bar has to
+                // hear about those too.
+                var before = Current;
+                Guarded("strip reconcile", ReconcileOnce);
+                if (!before.SequenceEqual(Current)) Guarded("strip reconcile", () => changed.OnNext(Unit.Default));
             } while (reconcileAgain && !removedForGood);
         }
         finally
@@ -142,21 +156,34 @@ public sealed class ScreenStrips
         }
     }
 
-    // One pass of the plan. True when a strip came or went.
-    bool ReconcileOnce()
+    // One pass of the plan.
+    void ReconcileOnce()
     {
         var plan = StripPlan.Reconcile(wanted(), screens(), Current.Select(strip => strip.Screen).ToList());
-        if (plan.Add.Count == 0 && plan.Remove.Count == 0) return false;
+        if (plan.Add.Count == 0 && plan.Remove.Count == 0) return;
 
         var leaving = Current.Where(strip => plan.Remove.Contains(strip.Screen)).ToList();
         // Out of Current before they go, so nothing that runs while they are being closed hands them to the bar.
         Current = Current.Except(leaving).ToList();
-        leaving.ForEach(Remove);
+        leaving.ForEach(strip => Guarded("strip reconcile", () => Remove(strip)));
 
-        // One at a time into Current, each as soon as it is open, so Current is true at every moment a pumped message
-        // could read it.
-        plan.Add.ToList().ForEach(screen => Current = Current.Append(Open(screen)).ToList());
-        return true;
+        // Each one goes into Current inside Open, as soon as it exists, so Current is true at every moment a pumped
+        // message could read it. removedForGood is read before EACH one: the pin is a COM call that pumps messages, so
+        // RemoveAll can run in the middle of this pass, and a strip opened after it would hold its band with nothing
+        // left to give it back.
+        plan.Add.ToList().ForEach(screen =>
+        {
+            if (!removedForGood) Guarded("strip reconcile", () => Open(screen));
+        });
+    }
+
+    // A step of the strip set that cannot take the app down: an exception is written to the trace and the step is
+    // abandoned, as FloatingBar.Guarded does for the bar's timers. Written down rather than swallowed, because a strip
+    // that silently stops appearing is its own kind of bug.
+    static void Guarded(string what, Action step)
+    {
+        try { step(); }
+        catch (Exception e) { ClickTrace.Write($"{what} threw {e.GetType().Name}: {e.Message}"); }
     }
 
     // A trace line, built only when tracing is on, so the strip set costs nothing with it off (see ScreenStrip.Tracing).
@@ -165,13 +192,19 @@ public sealed class ScreenStrips
         if (ClickTrace.On) ClickTrace.Write(line());
     }
 
-    ScreenStrip Open(MonitorBounds screen)
+    // Into Current straight after `create` and `ignore`, BEFORE the dock: a step after the dock can throw (ClearUnder's
+    // moves, the pin), and a strip docked and shown but not yet in Current would be invisible to the next reconcile,
+    // which would open a second strip on the same screen (the spec's second anti-goal), and to RemoveAll, which would
+    // leave its band reserved. In Current, a strip whose dock threw is the guard's to dock on Tick, like one whose dock
+    // was refused.
+    void Open(MonitorBounds screen)
     {
         var strip = create(screen);
         // EnsureHandle creates the window without showing it, and runs the strip's OnSourceInitialized, which makes it
         // a tool window before anything can list it.
         var hwnd = new WindowInteropHelper(strip).EnsureHandle();
         ignore(hwnd);
+        Current = Current.Append(strip).ToList();
         Say(() => $"strip on {strip.Screen.Left},{strip.Screen.Top}: registered, screen {strip.Screen.Left},{strip.Screen.Top} to {strip.Screen.Right},{strip.Screen.Bottom}");
         // A failed dock is not fatal and not retried here: the strip stays in the set, docked-but-waiting, and its own
         // guard (KeepStrip, on Tick) docks it once its screen can be read. The strip traces its own refusal (ScreenStrip.
@@ -180,7 +213,6 @@ public sealed class ScreenStrips
         // here, so once per created strip (see ClearUnder).
         strip.Dock().Tap(() => ClearUnder(strip));
         PinIfShown(strip);
-        return strip;
     }
 
     // THE WINDOWS UNDER A NEW STRIP. The shell resizes maximized windows to the new work area, but it leaves a restored
@@ -270,16 +302,29 @@ public sealed class ScreenStrips
     // is among the connected ones and never docks it anywhere else), then its place at the top of the topmost band.
     // And the pin for a strip that was shown after its first dock (see Open), or whose pin failed (see `pinned`). Not
     // gated on the bar being visible.
+    //
+    // Nothing at all with no strip, before even the screens are asked for: the beat runs every second for everyone,
+    // and most people never put the window list on the screens. The spec says the merge changes nothing for them, and a
+    // monitor enumeration a second is not nothing.
+    //
+    // Guarded per strip, for the reason Reconcile is (a display change is when these calls throw), and for two more
+    // that belong to the beat: App's timer runs the bar's ReclaimTopmost, KeepDockedStrip, ResyncActiveWindow and
+    // FlushIfIdle after this, and a throw here would skip every one of them; and one strip's throw must not keep the
+    // beat from the strips after it.
     public void Tick()
     {
-        var connected = screens();
-        Current.ToList().ForEach(strip =>
+        if (Current.Count == 0) return;
+        Guarded("strip tick", () =>
         {
-            strip.KeepStrip(connected);
-            strip.ReclaimTopmost();
-            PinIfShown(strip);
-            // After the guard, so a repair shows in the line it just changed. Written only when it differs.
-            strip.TraceGeometry();
+            var connected = screens();
+            Current.ToList().ForEach(strip => Guarded("strip tick", () =>
+            {
+                strip.KeepStrip(connected);
+                strip.ReclaimTopmost();
+                PinIfShown(strip);
+                // After the guard, so a repair shows in the line it just changed. Written only when it differs.
+                strip.TraceGeometry();
+            }));
         });
     }
 
@@ -290,7 +335,9 @@ public sealed class ScreenStrips
         removedForGood = true;
         var all = Current;
         Current = [];
-        all.ToList().ForEach(Remove);
+        // Guarded per strip like a reconcile's removals: one strip that throws on its way out must not keep the others'
+        // bands reserved after the app has gone.
+        all.ToList().ForEach(strip => Guarded("strip remove", () => Remove(strip)));
     }
 
     // The debug dump's section: one line per strip (ScreenStrip.Describe), or a line saying why there are none.
