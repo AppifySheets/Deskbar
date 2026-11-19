@@ -70,6 +70,19 @@ public sealed class JsonPersistenceStoreTests : IDisposable
         Assert.True(loaded.ExpandCurrentWorkspace);
     }
 
+    // The screens choice round-trips through state.json, and WindowListAtBottom survives next to it so that a
+    // build that does not know the screens still lands where he was.
+    [Fact]
+    public void The_screens_place_is_remembered_beside_the_bottom_choice()
+    {
+        var store = new JsonPersistenceStore(dir);
+        store.Save(AppState.Empty with { WindowListAtBottom = true, WindowListOnScreens = true });
+
+        var loaded = new JsonPersistenceStore(dir).Load().Value;
+        Assert.Equal(WindowListPlace.Screens, loaded.WindowListPlace);
+        Assert.True(loaded.WindowListAtBottom);
+    }
+
     // Petre: "make this a setting, enabled by default". A file written before the setting existed has no key
     // for it and must load with the split ON, which is why it is stored as its negation (AppState.WholeWindowLines);
     // turning it off is remembered.
