@@ -278,13 +278,14 @@ switch turned it on. An empty log, or one with no `--- trace on` line, was not r
   ordinal family and by what key, and which source answered for each icon at what size.
 - **Screen strips** (`ScreenStrip.TraceGeometry`, `ScreenStrips`): per strip, its screen,
   what it asked the shell for and what it was granted, the screen's work area, whether the
-  registration stands and how often the guard took it back, written when that line changes.
-  Plus one line per registration, dock, refused dock (with the reason; counted apart from
-  repairs), repair, removal and window moved off a new strip's band. A strip that disappears
-  and comes back shows as a removal and a registration for the same screen.
+  registration stands and how often the guard took it back. That geometry line is written only
+  when it changes. The event lines (registration, dock, refused dock with its reason and counted
+  apart from repairs, repair, removal, a window moved off a new strip's band) are written once
+  per event. A strip that disappears and comes back shows as a removal and a registration for
+  the same screen. Nothing is built while tracing is off.
 
-The last three write only when their output CHANGES, so the log stays readable with tracing on
-all day. Leave them in; this is the third visit to two of these bugs.
+The last three write only when their output CHANGES (the strips' event lines are one per
+event), so the log stays readable with tracing on all day. Leave them in; this is the third visit to two of these bugs.
 
 ## Traps that have already cost time
 
