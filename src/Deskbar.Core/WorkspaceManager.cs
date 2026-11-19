@@ -4082,13 +4082,20 @@ public sealed class WorkspaceManager(
         return merged;
     }
 
-    // Whether the current workspace's row expands into its titled list or the list sits at the bottom of
-    // the bar (AppState.ExpandCurrentWorkspace). A no-op when unchanged, like the other settings, so nothing
-    // writes state.json for a value that did not move.
-    public Result SetExpandCurrentWorkspace(bool expand) =>
-        State.ExpandCurrentWorkspace == expand
+    // Where the current workspace's titled list is: its own row, the bottom of the bar, or a strip along the
+    // top of every screen (AppState.WindowListPlace). A no-op when unchanged, like the other settings, so
+    // nothing writes state.json for a value that did not move. Moving to the screens leaves WindowListAtBottom
+    // as it was, so a build that does not know the screens lands where he was before choosing them.
+    public Result SetWindowListPlace(WindowListPlace place) =>
+        State.WindowListPlace == place
             ? Result.Success()
-            : Result.Success().Tap(() => Persist(State with { WindowListAtBottom = !expand }));
+            : Result.Success().Tap(() => Persist(State with
+            {
+                WindowListOnScreens = place == WindowListPlace.Screens,
+                WindowListAtBottom = place == WindowListPlace.Screens
+                    ? State.WindowListAtBottom
+                    : place == WindowListPlace.Bottom,
+            }));
 
     // Whether an expanded bar's window lines split for the click (AppState.SplitWindowLines). A no-op when
     // unchanged, like the setting above.

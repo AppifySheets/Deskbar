@@ -192,8 +192,24 @@ public sealed record AppState(
     // chosen the bottom list gets the row once, and chooses again.
     public bool WindowListAtBottom { get; init; }
 
-    // The reading every caller wants, kept under its old name so they did not all have to change. Not stored.
-    [JsonIgnore] public bool ExpandCurrentWorkspace => !WindowListAtBottom;
+    // The third place for the list: a strip along the top of every screen (WindowListPlace.Screens). A NEW
+    // name with false as its default, for the reason WindowListAtBottom is: every existing state.json lacks
+    // the key and so reads false, which leaves each install where it was. It is a second bool rather than a
+    // third value of the first because an older build, which knows only WindowListAtBottom, must still read
+    // a file this build wrote: WindowListAtBottom is left untouched when the screens are chosen, so that
+    // build lands on whichever of row or bottom he had before.
+    public bool WindowListOnScreens { get; init; }
+
+    // The one reading of the two bools above: the screens when set, else the bottom, else the row. Not stored.
+    [JsonIgnore]
+    public WindowListPlace WindowListPlace =>
+        WindowListOnScreens ? WindowListPlace.Screens
+        : WindowListAtBottom ? WindowListPlace.Bottom
+        : WindowListPlace.Row;
+
+    // The reading most callers want, kept under its old name so they did not all have to change: only the
+    // row expands the current workspace's own line. Not stored.
+    [JsonIgnore] public bool ExpandCurrentWorkspace => WindowListPlace == WindowListPlace.Row;
 
     // Whether an expanded bar's window lines are SPLIT for the click: the left two thirds bring the window up,
     // the right third switches to the workspace (the bar's LineOf). Petre: "just don't activate it on the right

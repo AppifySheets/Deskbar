@@ -6894,7 +6894,7 @@ public partial class FloatingBar : Window
         // workspace's menu, since the list follows whichever workspace you are on.
         var expanding = manager.State.ExpandCurrentWorkspace;
         Add("☰", expanding ? "Window list at the bottom of the bar" : "Expand the current workspace",
-            () => Report(manager.SetExpandCurrentWorkspace(!expanding)));
+            () => Report(manager.SetWindowListPlace(expanding ? WindowListPlace.Bottom : WindowListPlace.Row)));
         AddSplitItem(Add);
 
         // Petre: "add color picker in the right click context menu" (#68).
@@ -7032,7 +7032,7 @@ public partial class FloatingBar : Window
         menu.Items.Add(new Separator());
         var expanding = manager.State.ExpandCurrentWorkspace;
         Add("☰", expanding ? "Window list at the bottom of the bar" : "Expand the current workspace",
-            () => Report(manager.SetExpandCurrentWorkspace(!expanding)));
+            () => Report(manager.SetWindowListPlace(expanding ? WindowListPlace.Bottom : WindowListPlace.Row)));
         AddSplitItem(Add);
 
         AddBarItems(menu);
