@@ -24,8 +24,10 @@ namespace Deskbar.App;
 // screens and the check below speaks for one edge.
 public partial class FloatingBar
 {
-    static readonly TimeSpan SettleFor = TimeSpan.FromSeconds(3);
-    static readonly TimeSpan RetryEvery = TimeSpan.FromSeconds(10);
+    // Internal, not private: each screen strip's guard (ScreenStrip.KeepStrip) runs on the same two clocks, so a strip
+    // and the docked bar on one screen are judged by one rule.
+    internal static readonly TimeSpan SettleFor = TimeSpan.FromSeconds(3);
+    internal static readonly TimeSpan RetryEvery = TimeSpan.FromSeconds(10);
 
     // When the bar last docked or re-docked (DockTo sets it), and when this last re-registered. UTC, as durations
     // are all that is read from them.
