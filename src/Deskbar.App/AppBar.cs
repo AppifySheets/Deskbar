@@ -24,7 +24,11 @@ namespace Deskbar.App;
 // is installed once.
 sealed class AppBar
 {
-    public enum Edge : uint { Left = 0, Right = 2 }
+    // The values are the shell's ABE_ constants. Top (ABE_TOP, uEdge = 1) is for the screen strips, the window
+    // list along the top of every screen. Measured on Petre's two 4K screens at 150%: a top bar asked for
+    // [0,0,3840,48] got exactly that from QUERYPOS and SETPOS, the work area became [0,48,3840,2160], and went
+    // back on remove.
+    public enum Edge : uint { Left = 0, Top = 1, Right = 2 }
 
     readonly nint hwnd;
     readonly uint callbackMessage;
@@ -62,10 +66,11 @@ sealed class AppBar
     // showed exactly that state (registered, work area the full width); a restarted Explorer is one way to it.
     readonly uint taskbarCreated;
 
-    // Reserves a strip `widthPx` wide on `edge` of the monitor `screen` (physical pixels), registering
-    // first if needed, and returns the rectangle the shell granted: the full height of the screen, beside
+    // Reserves a strip `thicknessPx` thick on `edge` of the monitor `screen` (physical pixels), registering
+    // first if needed, and returns the rectangle the shell granted: the full height of the screen for a left or
+    // right strip (thickness is its width), the full width for a top strip (thickness is its height), beside
     // anything already docked on that edge. The caller moves the window there.
-    public Rect Dock(Edge edge, Rect screen, int widthPx)
+    public Rect Dock(Edge edge, Rect screen, int thicknessPx)
     {
         var data = Data();
         claimed = true;
@@ -87,16 +92,28 @@ sealed class AppBar
         }
 
         data.uEdge = (uint)edge;
-        data.rc = edge == Edge.Left
-            ? new Rect(screen.L, screen.T, screen.L + widthPx, screen.B)
-            : new Rect(screen.R - widthPx, screen.T, screen.R, screen.B);
+        data.rc = edge switch
+        {
+            Edge.Left => new Rect(screen.L, screen.T, screen.L + thicknessPx, screen.B),
+            Edge.Top => new Rect(screen.L, screen.T, screen.R, screen.T + thicknessPx),
+            _ => new Rect(screen.R - thicknessPx, screen.T, screen.R, screen.B),
+        };
 
-        // Ask, then keep the width: QUERYPOS moves the inner edge if something already sits on this one,
-        // and may leave the rectangle narrower or wider than asked, so the far side is re-derived from
+        // Ask, then keep the thickness: QUERYPOS moves the inner edge if something already sits on this one,
+        // and may leave the rectangle thinner or thicker than asked, so the far side is re-derived from
         // the edge the shell settled on.
+        //
+        // Only that axis. Measured (probe notes, screen strips, section 1): the shell gives a top bar the full
+        // width and starts a side bar BELOW it, in either registration order. So for Top, L and R stay as QUERYPOS
+        // returned them and only B is re-derived; for Left and Right, T and B stay as QUERYPOS returned them,
+        // which is how a side bar ends up under a top strip. Do not "tidy" any of them back to the screen's.
         SHAppBarMessage(ABM_QUERYPOS, ref data);
-        if (edge == Edge.Left) data.rc.R = data.rc.L + widthPx;
-        else data.rc.L = data.rc.R - widthPx;
+        switch (edge)
+        {
+            case Edge.Left: data.rc.R = data.rc.L + thicknessPx; break;
+            case Edge.Top: data.rc.B = data.rc.T + thicknessPx; break;
+            default: data.rc.L = data.rc.R - thicknessPx; break;
+        }
 
         SHAppBarMessage(ABM_SETPOS, ref data);
         return data.rc;
