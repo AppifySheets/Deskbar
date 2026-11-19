@@ -34,4 +34,20 @@ public class DockGuardTests
     [InlineData(0, false)]
     public void The_bars_own_screen_gives_the_usual_verdict(int workRight, bool held) =>
         Assert.Equal(held, FloatingBar.StripHeld("right", R(-395, 246, 0, 2406), monitor: R(-3840, 246, 0, 2406), work: R(-3840, 246, workRight, 2406)));
+
+    // The screen strips (the window list along the top of every screen) are app bars on the top edge. Measured on
+    // Petre's 4K screens at 150%: a top bar at [0,0,3840,48] took the work area to [0,48,3840,2160]. So a top strip
+    // is held when the work area starts at or below the strip's bottom.
+    [Fact]
+    public void Top_strip_is_held_when_the_work_area_starts_below_it() =>
+        Assert.True(FloatingBar.StripHeld("top", R(0, 0, 3840, 48), monitor: R(0, 0, 3840, 2160), work: R(0, 48, 3840, 2160)));
+
+    [Fact]
+    public void Top_strip_is_not_held_when_the_work_area_reaches_under_it() =>
+        Assert.False(FloatingBar.StripHeld("top", R(0, 0, 3840, 48), monitor: R(0, 0, 3840, 2160), work: R(0, 0, 3840, 2160)));
+
+    // A strip on the left screen judged against the right screen's work area says nothing: no verdict, as for the sides.
+    [Fact]
+    public void Top_strip_on_another_screen_gives_no_verdict() =>
+        Assert.Null(FloatingBar.StripHeld("top", R(-3840, 0, 0, 48), monitor: R(0, 0, 3840, 2160), work: R(0, 48, 3840, 2160)));
 }

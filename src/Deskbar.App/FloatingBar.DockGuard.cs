@@ -82,11 +82,15 @@ public partial class FloatingBar
 
     // The work area keeps clear of a strip on the left when it starts at or past the strip's right edge, and of one
     // on the right when it ends at or before the strip's left edge. "At or past" rather than "exactly at" because
-    // something else docked on the same edge, further in, pushes the work area further still.
+    // something else docked on the same edge, further in, pushes the work area further still. A strip on the top
+    // (the screen strips, see AppBar.Edge.Top) is held when the work area starts at or below its bottom: measured
+    // on Petre's 4K screens at 150%, a top bar at [0,0,3840,48] took the work area to [0,48,3840,2160], and the
+    // same "at or past" reasoning covers a taskbar or another bar docked on the top too.
     internal static bool StripHeld(string edge, NativeMethods.RECT bar, NativeMethods.RECT work) => edge switch
     {
         "left" => work.Left >= bar.Right,
         "right" => work.Right <= bar.Left,
+        "top" => work.Top >= bar.Bottom,
         _ => true,
     };
 
