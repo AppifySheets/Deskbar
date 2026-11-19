@@ -18,8 +18,9 @@ public sealed class TileArrivalTests
     static TileSizes Sized(double[] columns, double[][] rows) =>
         new(columns, rows.Select(r => (IReadOnlyList<double>)r).ToList());
 
-    static Maybe<TileSplit> Choose(int count, TileSizes sizes, Maybe<WindowHandle> lastUsed) =>
-        TileArrival.Choose(Order(count), sizes, Tiles(count, sizes), lastUsed);
+    // `skip` stands for the screen's maximized tiles; none unless a test says otherwise.
+    static Maybe<TileSplit> Choose(int count, TileSizes sizes, Maybe<WindowHandle> lastUsed, IReadOnlySet<WindowHandle>? skip = null) =>
+        TileArrival.Choose(Order(count), sizes, Tiles(count, sizes), lastUsed, skip ?? new HashSet<WindowHandle>());
 
     [Fact]
     public void One_wide_tile_is_split_to_its_right() =>
@@ -64,5 +65,18 @@ public sealed class TileArrivalTests
     [Fact]
     public void Nothing_to_split_on_an_empty_screen() =>
         Assert.Equal(Maybe<TileSplit>.None,
-            TileArrival.Choose([], TileSizes.Equal([]), [], Maybe.From(W(1))));
+            TileArrival.Choose([], TileSizes.Equal([]), [], Maybe.From(W(1)), new HashSet<WindowHandle>()));
+
+    // A maximized tile covers its screen: halving its slot would put the newcomer behind it. W(2) would win the tie
+    // as the later slot, but it is skipped, so W(1) is split instead.
+    [Fact]
+    public void A_skipped_tile_is_never_the_largest_target() =>
+        Assert.Equal(Maybe.From(new TileSplit(W(1), TileArrange.Zone.Bottom)),
+            Choose(2, TileSizes.Equal([1, 1]), Maybe<WindowHandle>.None, new HashSet<WindowHandle> { W(2) }));
+
+    // Every tile skipped (the only tile is maximized): a window still has to go somewhere, so skip is ignored.
+    [Fact]
+    public void When_every_tile_is_skipped_the_rule_ignores_skip() =>
+        Assert.Equal(Maybe.From(new TileSplit(W(1), TileArrange.Zone.Right)),
+            Choose(1, TileSizes.Equal([1]), Maybe.From(W(1)), new HashSet<WindowHandle> { W(1) }));
 }
