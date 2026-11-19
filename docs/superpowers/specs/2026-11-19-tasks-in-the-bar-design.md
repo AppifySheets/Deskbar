@@ -61,11 +61,15 @@ A task:
 | DoneAt      | `Maybe<DateTimeOffset>` |
 | History     | the timers it has had, each as start, length and how it ended (came back, done, cancelled), for later totals |
 
-One live task per workspace (Petre agreed, 2026-11-19). A workspace has at most one task that is not done. A
-minutes button pressed for a workspace that already has an Open, Running or Due task puts the new timer on that
-task instead of creating another, and the title box starts with that task's title rather than the window's. So
-parking the same workspace ten times a day leaves one row, not ten. Free tasks (no workspace) are not limited.
-Changing a task's workspace to one that already has a live task is refused with a short reason in the window.
+Any number of tasks per workspace (Petre, 2026-11-19: "i also want to be able to allocate tasks that i create to
+particular desks", "more than one task per desk"; this replaced an earlier "one live task per workspace"). Tasks
+are created in the window and allocated to a workspace or to none, and can be moved between workspaces freely.
+
+Parking without piling up rows (my call): the title box starts with the title of the workspace's most recently
+changed live task, or the window's title when it has none. A minutes button on a title that matches a live task
+on that workspace (trimmed, ignoring case) puts the timer on that task; any other title makes a new task. So
+parking the same thread ten times a day leaves one row, and a new thread on the same desk is one edit of the
+title away.
 
 States, derived from the fields and the clock, never stored:
 
