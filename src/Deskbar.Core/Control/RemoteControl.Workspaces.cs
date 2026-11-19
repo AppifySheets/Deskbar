@@ -107,14 +107,12 @@ public sealed partial class RemoteControl
             ControlReply.Fail);
 
     // `keep-space <workspace> on|off` sets whether a closed tile's space is kept for the next window. A tiling
-    // command, so refused exactly as `even` is, same two messages in the same order (experiment, then Pro).
+    // command, so refused exactly as `even` is, with the same message: only where this copy may not tile.
     ControlReply SetRowKeepsSpace(string workspace, bool keep) =>
         WorkspaceNamed(workspace).Match(
-            w => !manager.State.ExperimentalTiling
-                ? ControlReply.Fail("Tiling is experimental and turned off. Turn it on in Manage.")
-                : isPro?.Invoke() != true
-                    ? ControlReply.Fail("Tiling needs Deskbar Pro.")
-                    : Reply(manager.SetTileKeepsSpace(w.Id, keep), () => Describe(w.Id)),
+            w => isPro?.Invoke() != true
+                ? ControlReply.Fail("Tiling needs Deskbar Pro.")
+                : Reply(manager.SetTileKeepsSpace(w.Id, keep), () => Describe(w.Id)),
             ControlReply.Fail);
 
     // SetWorkspaceColor already hands a grouped workspace's colour to its group, as the menu does.
