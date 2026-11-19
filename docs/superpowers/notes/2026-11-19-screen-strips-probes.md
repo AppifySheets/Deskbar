@@ -49,8 +49,9 @@ Answered from the code rather than a live spike (a ruling, see the plan's ledger
   report its presses and releases to the bar, and only the press-state half of those handlers: the rest
   of them start moving or resizing the bar.
 - **The hover card breaks.** `ShowHoverCard` places the popup against the bar and computes its offset
-  with `anchor.TranslatePoint(..., this)`, which throws for an anchor in another window. A tab's card
-  needs the tab as its placement target, below it. The watch that closes the card must also count the
+  with `anchor.TranslatePoint(..., this)`. Read from the code, that looked like it would throw for an
+  anchor in another window; when task 7 measured it, it did not throw, and the card opened beside the
+  bar instead of beside the tab. Either way a tab's card needs the tab as its placement target, below it. The watch that closes the card must also count the
   strips as places the pointer may be.
 - The candidate ring (`ApplyCandidate`) and the fade read only the bar's own rows and state. A hovered
   tab rings nothing on the bar, which is fine.
