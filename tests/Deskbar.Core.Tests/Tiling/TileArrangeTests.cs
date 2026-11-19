@@ -84,6 +84,23 @@ public sealed class TileArrangeTests
         Assert.Equal(GridLayout.Shape(3), TileArrange.Refit(TileSizes.Equal([1, 1]), 3, Maybe<(int, int)>.None).Shape);
     }
 
+    // Petre: "on closing, i sometimes want not to move other windows". A leaver takes only its own cell, on the
+    // automatic shape too (it used to refit to GridLayout.Shape(3) = [1, 2]).
+    [Fact]
+    public void A_leaver_on_the_automatic_shape_takes_only_its_own_cell()
+    {
+        var refit = TileArrange.Refit(TileSizes.Equal([2, 2]), 3, Maybe.From((Column: 1, Row: 1)));
+        Assert.Equal([2, 1], refit.Shape);
+        Assert.Equal(new TileSizes([0.5, 0.5], [[0.5, 0.5], [1.0]]), refit);
+    }
+
+    [Fact]
+    public void A_leaver_alone_in_its_column_takes_the_column_and_the_rest_keep_their_rows()
+    {
+        var refit = TileArrange.Refit(TileSizes.Equal([1, 2]), 2, Maybe.From((Column: 0, Row: 0)));
+        Assert.Equal(new TileSizes([1.0], [[0.5, 0.5]]), refit);
+    }
+
     // Even sizes on a custom shape are still worth storing; even sizes on the automatic shape are not.
     [Fact]
     public void Only_even_sizes_on_the_automatic_shape_are_plain()

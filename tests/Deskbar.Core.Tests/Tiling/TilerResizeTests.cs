@@ -642,7 +642,9 @@ public sealed class TilerResizeTests : IDisposable
         // W(4) is slot 2 of 1 + 2 + 2: column 1, row 1.
         Closes(W(4));
 
-        Assert.Equal(ThreeColumns.Fit(GridLayout.Shape(4), (1, 1)), Stored(Area2Key));
+        // Only W4's cell goes (tiling-predictable-placement, change 1): ThreeColumns is custom, so this was Fit
+        // before and is now RemoveCell, leaving 1 + 1 + 2.
+        Assert.Equal(TileArrange.RemoveCell(ThreeColumns, (1, 1)), Stored(Area2Key));
         var order = new[] { 2, 3, 5, 6 }.Select(W).ToList();
         Assert.Equal(GridLayout.Arrange(Area2, 4, Gap, Stored(Area2Key)), FramesOf(order));
     }

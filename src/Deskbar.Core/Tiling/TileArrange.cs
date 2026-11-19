@@ -50,9 +50,9 @@ public static class TileArrange
     // Nothing worth storing: even sizes on the automatic shape (what the grid is with nothing stored at all).
     public static bool IsPlain(TileSizes sizes) => sizes.IsEqual && !IsCustom(sizes) && sizes.Opening is null;
 
-    // Stored sizes brought to `count` windows. On the automatic shape this is TileSizes.Fit, as before. A custom
-    // shape survives windows coming and going: a window that leaves takes its own cell with it (a column left empty
-    // goes too), and one that joins goes to the bottom of the LAST column, which is where the board puts a joining
+    // Stored sizes brought to `count` windows. The shape survives windows leaving on every shape, the automatic one
+    // included: a window that leaves takes its own cell with it (a column left empty goes too). On the automatic
+    // shape anything else is TileSizes.Fit, as before. A custom shape also survives a window joining: one that joins goes to the bottom of the LAST column, which is where the board puts a joining
     // window (TileBoard.Join appends, and the order fills columns left to right). Anything else falls back to Fit.
     //
     // An OPENING stays while other windows leave: `leaving` is then the leaver's CELL (CellOf below counts the opening),
@@ -68,9 +68,12 @@ public static class TileArrange
 
         var have = stored.Shape.Sum();
         if (have == count) return stored;
-        if (!IsCustom(stored)) return stored.Fit(GridLayout.Shape(count), leaving);
+        // A leaver takes only its own cell, on EVERY shape (the automatic one too). Petre: "on closing, i sometimes
+        // want not to move other windows". Rebuilding the automatic grid from the new count moved tiles between
+        // columns (a 2x2 losing its bottom-right tile became 1+2 and the bottom-left tile jumped across).
         if (have == count + 1 && leaving.HasValue && Holds(stored, leaving.Value))
             return RemoveCell(stored, leaving.Value);
+        if (!IsCustom(stored)) return stored.Fit(GridLayout.Shape(count), leaving);
         if (have < count)
         {
             var shape = stored.Shape.ToList();

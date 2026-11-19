@@ -113,13 +113,16 @@ public sealed partial class Tiler
         var stored = manager.State.Workspaces.TryFirst(w => w.Id == workspace.Id)
             .Bind(w => w.TileSizes.TryFirst(s => s.Screen == key))
             .Map(s => s.Sizes);
-        if (stored.HasNoValue) return TileSizes.Equal(shape);
+        // Nothing stored means the automatic grid, which is TileSizes.Equal(Shape(count + 1)) one window ago. With a
+        // leaver pending, that earlier grid loses only the leaver's cell (Petre: "on closing, i sometimes want not to
+        // move other windows"), the same rule Refit applies to stored sizes. With no leaver it is the equal grid.
+        var start = stored.HasValue ? stored.Value : leaving.HasValue ? TileSizes.Equal(GridLayout.Shape(count + 1)) : TileSizes.Equal(shape);
 
-        // Refit keeps a shape made by a drop (TileArrange) while windows come and go; on the automatic shape it is
-        // TileSizes.Fit, as before. Stored unless plain: even sizes on the automatic shape are what nothing stored
-        // means already, but even sizes on a custom shape are not.
-        var fitted = TileArrange.Refit(stored.Value, count, leaving);
-        if (fitted != stored.Value && !TileArrange.IsPlain(fitted) && !InGrace(key))
+        // Refit keeps a shape while windows leave, and a shape made by a drop while they join (TileArrange); anything
+        // else on the automatic shape is TileSizes.Fit. Stored unless plain: even sizes on the automatic shape are
+        // what nothing stored means already, but even sizes on a custom shape are not.
+        var fitted = TileArrange.Refit(start, count, leaving);
+        if (fitted != start && !TileArrange.IsPlain(fitted) && !InGrace(key))
             StoreSizes(workspace, key, fitted)
                 .Tap(() => trace?.Invoke($"tile: {workspace.Name} screen {screen.Number}: sizes refitted to {count} windows, {Show(fitted)}"))
                 .TapError(error => trace?.Invoke($"tile: {workspace.Name} screen {screen.Number}: storing refitted sizes failed: {error}"));
