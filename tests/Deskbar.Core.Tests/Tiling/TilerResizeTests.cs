@@ -3,6 +3,7 @@ using Deskbar.Core.Abstractions;
 using Deskbar.Core.Domain;
 using Deskbar.Core.Persistence;
 using Deskbar.Core.Tiling;
+using static Deskbar.Core.Tests.Tiling.Trees;
 
 namespace Deskbar.Core.Tests.Tiling;
 
@@ -117,13 +118,13 @@ public sealed class TilerResizeTests : IDisposable
 
     // Alpha current and tiled (unless `tiled` says otherwise), Pro on, `sizes` already stored on Alpha. The
     // Places of the first tidy-up are echoed, so the tests start from a grid at rest.
-    void Start(bool tiled = true, ValueList<ScreenTileSizes>? sizes = null)
+    void Start(bool tiled = true, ValueList<ScreenTileLayout>? layouts = null)
     {
         new[] { alpha, beta }.ToList().ForEach(w => desktops.Desktops.Add(new DesktopInfo(w.DesktopId!.Value, w.Name)));
         desktops.CurrentDesktopId = alpha.DesktopId!.Value;
         store.Stored = AppState.Empty with
         {
-            Workspaces = [alpha with { Tiled = tiled, TileSizes = sizes ?? [] }, beta],
+            Workspaces = [alpha with { Tiled = tiled, TileLayouts = layouts ?? [] }, beta],
         };
         manager = new WorkspaceManager(desktops, monitor, titles, store);
         Assert.True(manager.Start().IsSuccess);
@@ -140,9 +141,9 @@ public sealed class TilerResizeTests : IDisposable
         Assert.Equal(GridLayout.Arrange(Area, 2, Gap), new[] { W(1), W(2) }.Select(w => surface.Frames[w]).ToList());
     }
 
-    ValueList<ScreenTileSizes> StoredSizes => manager.State.Workspaces.Single(w => w.Id == alpha.Id).TileSizes;
+    ValueList<ScreenTileLayout> StoredLayouts => manager.State.Workspaces.Single(w => w.Id == alpha.Id).TileLayouts;
 
-    TileSizes Stored(string key) => StoredSizes.Single(s => s.Screen == key).Sizes;
+    TileLayout Stored(string key) => StoredLayouts.Single(s => s.Screen == key).Layout;
 
     IReadOnlyList<WindowRect> FramesOf(IEnumerable<WindowHandle> windows) => windows.Select(w => surface.Frames[w]).ToList();
 
@@ -163,7 +164,7 @@ public sealed class TilerResizeTests : IDisposable
         surface.MovingSubject.OnNext(W(1));
 
         Assert.Equal([(W(2), new WindowRect(1345, 8, 1912, 1032))], surface.Placed);
-        Assert.Empty(StoredSizes);
+        Assert.Empty(StoredLayouts);
 
         // The neighbour's echo arrives before the dragged window settles: it waits, and is not put back.
         surface.SettledSubject.OnNext(W(2));
@@ -173,7 +174,7 @@ public sealed class TilerResizeTests : IDisposable
         surface.Settling.Remove(W(1));
         ResizedByHand(W(1), new WindowRect(8, 8, 1337, 1032));
         Assert.Single(surface.Placed);
-        Assert.Equal(1333.0 / 1904, Stored(AreaKey).Columns[0], 9);
+        Assert.Equal(1333.0 / 1904, Stored(AreaKey).Root.ShareAt(0), 9);
     }
 
     // The dragged window itself is never placed during the drag: it is under the pointer.
@@ -202,13 +203,13 @@ public sealed class TilerResizeTests : IDisposable
         // Both sides of the separation take the new split, exactly one gap apart, and the sizes are stored.
         Assert.Equal(new WindowRect(8, 8, 1337, 1032), surface.Frames[W(1)]);
         Assert.Equal(new WindowRect(1345, 8, 1912, 1032), surface.Frames[W(2)]);
-        Assert.Equal(1333.0 / 1904, Stored(AreaKey).Columns[0], 9);
+        Assert.Equal(1333.0 / 1904, Stored(AreaKey).Root.ShareAt(0), 9);
         Assert.Equal(GridLayout.Arrange(Area, 2, Gap, Stored(AreaKey)), FramesOf([W(1), W(2)]));
     }
 
     // The stored sizes are in the Tiler's state key (ruling 3), so "Even out tiles" re-tiles. The Tiler's OWN store
     // must not pay for that with a second full evaluate, which asks WorkspaceOf (COM) of every known window: after
-    // its own SetTileSizes the Tiler takes the new key as seen, so its own pulse compares equal (final review, item
+    // its own SetTileLayout the Tiler takes the new key as seen, so its own pulse compares equal (final review, item
     // 2). OnSettled asks CanTile once, of the window that settled; a full evaluate would ask of both windows again.
     // The same holds for a refit when a window joins: one evaluate (the Appeared one), not a second for the store.
     [Fact]
@@ -235,7 +236,7 @@ public sealed class TilerResizeTests : IDisposable
         // The Appeared evaluate asks of the three windows once; the store's pulse asks nothing more.
         asked = surface.CanTileCalls;
         Opens(W(3), alpha);
-        Assert.Equal(3, Stored(AreaKey).Columns.Count);
+        Assert.Equal(3, ((TileBranch)Stored(AreaKey).Root).Children.Count);
         Assert.Equal(3, surface.CanTileCalls - asked);
     }
 
@@ -247,7 +248,7 @@ public sealed class TilerResizeTests : IDisposable
         StartTwo();
         ResizedByHand(W(1), new WindowRect(8, 8, 100, 1032));
         Echo();
-        Assert.Equal(0.1, Stored(AreaKey).Columns[0], 9);
+        Assert.Equal(0.1, Stored(AreaKey).Root.ShareAt(0), 9);
         var slot = GridLayout.Arrange(Area, 2, Gap, Stored(AreaKey))[0];
         Assert.Equal(slot, surface.Frames[W(1)]);
         var saves = store.SaveCount;
@@ -274,8 +275,8 @@ public sealed class TilerResizeTests : IDisposable
         Assert.Equal(new WindowRect(1300, 8, 1912, 700), surface.Frames[W(2)]);
         Assert.Equal(new WindowRect(1300, 708, 1912, 1032), surface.Frames[W(3)]);
         var sizes = Stored(AreaKey);
-        Assert.Equal(1288.0 / 1904, sizes.Columns[0], 9);
-        Assert.Equal(696.0 / 1024, sizes.Rows[1][0], 9);
+        Assert.Equal(1288.0 / 1904, sizes.Root.ShareAt(0), 9);
+        Assert.Equal(696.0 / 1024, sizes.Root.ShareAt(1, 0), 9);
     }
 
     // A corner with one INNER edge and one OUTER edge does both halves: the inner edge moves its split, and the outer
@@ -294,9 +295,9 @@ public sealed class TilerResizeTests : IDisposable
         Echo();
 
         var sizes = Stored(AreaKey);
-        Assert.Equal(1296.0 / 1904, sizes.Columns[0], 9);
+        Assert.Equal(1296.0 / 1904, sizes.Root.ShareAt(0), 9);
         Assert.Equal(0, sizes.Opening);
-        Assert.Equal(392.0 / 1024, sizes.Rows[0][0], 9);
+        Assert.Equal(392.0 / 1024, sizes.Root.ShareAt(0, 0), 9);
         Assert.Equal(new WindowRect(8, 404, 1300, 1032), surface.Frames[W(1)]);
         Assert.Equal(new WindowRect(1308, 8, 1912, 1032), surface.Frames[W(2)]);
     }
@@ -312,7 +313,7 @@ public sealed class TilerResizeTests : IDisposable
         Echo();
 
         var sizes = Stored(AreaKey);
-        Assert.Equal(1296.0 / 1904, sizes.Columns[0], 9);
+        Assert.Equal(1296.0 / 1904, sizes.Root.ShareAt(0), 9);
         Assert.Null(sizes.Opening);
         Assert.Equal(new WindowRect(8, 8, 1300, 1032), surface.Frames[W(1)]);
     }
@@ -328,7 +329,7 @@ public sealed class TilerResizeTests : IDisposable
         Settles(W(1), slot with { Right = 1337 });
 
         Assert.Equal([(W(1), slot)], surface.Placed);
-        Assert.Empty(StoredSizes);
+        Assert.Empty(StoredLayouts);
     }
 
     // A small pull on an outer edge is a nudge: it snaps back as outer edges always did, and nothing is stored.
@@ -344,7 +345,7 @@ public sealed class TilerResizeTests : IDisposable
         ResizedByHand(W(1), slot with { Left = 60 });
 
         Assert.Equal([(W(1), slot)], surface.Placed);
-        Assert.Empty(StoredSizes);
+        Assert.Empty(StoredLayouts);
     }
 
     // --- openings: room kept for the next window ---------------------------------------------------------
@@ -365,7 +366,7 @@ public sealed class TilerResizeTests : IDisposable
 
         var opened = Stored(AreaKey);
         Assert.Equal(1, opened.Opening);
-        Assert.Equal(392.0 / 1024, opened.Rows[1][0], 9);
+        Assert.Equal(392.0 / 1024, opened.Root.ShareAt(1, 0), 9);
         Assert.Equal(right with { Top = 404 }, surface.Frames[W(2)]);
         Assert.Equal(GridLayout.Arrange(Area, 2, Gap)[0], surface.Frames[W(1)]);
 
@@ -392,7 +393,7 @@ public sealed class TilerResizeTests : IDisposable
         ResizedByHand(W(2), right with { Top = 60 });
         Echo();
 
-        Assert.Empty(StoredSizes);
+        Assert.Empty(StoredLayouts);
         Assert.Equal(right, surface.Frames[W(2)]);
     }
 
@@ -430,7 +431,7 @@ public sealed class TilerResizeTests : IDisposable
         // One column now, the opening still above the tile.
         var sizes = Stored(AreaKey);
         Assert.Equal(0, sizes.Opening);
-        Assert.Equal([2], sizes.Shape);
+        Assert.True(sizes.SameShapeAs(Columns([1.0], [0.5, 0.5])));
         Assert.Equal(new WindowRect(8, 404, 1912, 1032), surface.Frames[W(2)]);
 
         Opens(W(3), alpha);
@@ -455,7 +456,7 @@ public sealed class TilerResizeTests : IDisposable
         ResizedByHand(W(2), slot with { Bottom = slot.Bottom - 150 });
 
         Assert.Equal([(W(2), slot)], surface.Placed);
-        Assert.Empty(StoredSizes);
+        Assert.Empty(StoredLayouts);
     }
 
     // --- keeping sizes -----------------------------------------------------------------------------------
@@ -476,8 +477,9 @@ public sealed class TilerResizeTests : IDisposable
         Assert.Equal(new WindowRect(1345, 8, 1912, 516), surface.Frames[W(2)]);
         Assert.Equal(new WindowRect(1345, 524, 1912, 1032), surface.Frames[W(3)]);
         var sizes = Stored(AreaKey);
-        Assert.Equal(1333.0 / 1904, sizes.Columns[0], 9);
-        Assert.Equal(new[] { 0.5, 0.5 }, sizes.Rows[1]);
+        Assert.Equal(1333.0 / 1904, sizes.Root.ShareAt(0), 9);
+        Assert.Equal(0.5, sizes.Root.ShareAt(1, 0), 9);
+        Assert.Equal(0.5, sizes.Root.ShareAt(1, 1), 9);
     }
 
     // The most common layout there is: two windows, the split moved to about 0.7. One of them is minimized, so the
@@ -537,18 +539,16 @@ public sealed class TilerResizeTests : IDisposable
     public void Closing_a_middle_window_keeps_the_other_rows_proportions()
     {
         Enumerable.Range(1, 8).ToList().ForEach(n => Exists(W(n), alpha));
-        var before = new TileSizes([0.3, 0.35, 0.35], [[0.5, 0.5], [0.5, 0.2, 0.3], [0.2, 0.3, 0.5]]);
-        Start(sizes: [new ScreenTileSizes(AreaKey, before)]);
+        var before = Columns([0.3, 0.35, 0.35], [0.5, 0.5], [0.5, 0.2, 0.3], [0.2, 0.3, 0.5]);
+        Start(layouts: [new ScreenTileLayout(AreaKey, before)]);
         Assert.Equal(GridLayout.Arrange(Area, 8, Gap, before), FramesOf(Enumerable.Range(1, 8).Select(W)));
 
         Closes(W(4));
 
         var after = Stored(AreaKey);
-        Assert.Equal(before.Columns, after.Columns);
-        Assert.Equal(before.Rows[0], after.Rows[0]);
-        Assert.Equal(0.625, after.Rows[1][0], 9);
-        Assert.Equal(0.375, after.Rows[1][1], 9);
-        Assert.Equal(before.Rows[2], after.Rows[2]);
+        Assert.Equal(0.625, after.Root.ShareAt(1, 0), 9);
+        Assert.Equal(0.375, after.Root.ShareAt(1, 1), 9);
+        Assert.Equal(Text(Columns([0.3, 0.35, 0.35], [0.5, 0.5], [0.625, 0.375], [0.2, 0.3, 0.5])), Text(after));
         var order = new[] { 1, 2, 3, 5, 6, 7, 8 }.Select(W).ToList();
         Assert.Equal(order, tiler.Board.On(1));
         Assert.Equal(GridLayout.Arrange(Area, 7, Gap, after), FramesOf(order));
@@ -595,7 +595,7 @@ public sealed class TilerResizeTests : IDisposable
     // between, each re-tile of screen 2 lays out a smaller grid (1, 2, 3, 4 windows), and storing those fits would
     // lose columns and rows (at one window, the whole entry). Controller ruling: for 3 seconds after a screen key
     // appears, its fits are laid out but not stored.
-    static readonly TileSizes ThreeColumns = new([0.5, 0.3, 0.2], [[1.0], [0.6, 0.4], [0.3, 0.7]]);
+    static readonly TileLayout ThreeColumns = Columns([0.5, 0.3, 0.2], [1.0], [0.6, 0.4], [0.3, 0.7]);
     static readonly IReadOnlyList<WindowHandle> Returning = new[] { 2, 3, 4, 5, 6 }.Select(W).ToList();
 
     void ScreenDropsOutAndItsWindowsComeBackOneByOne()
@@ -603,7 +603,7 @@ public sealed class TilerResizeTests : IDisposable
         surface.ScreenList.Add(FakeTileSurface.Screen(2, Area2));
         Exists(W(1), alpha);
         Returning.ToList().ForEach(w => Exists(w, alpha, screen: 2));
-        Start(sizes: [new ScreenTileSizes(Area2Key, ThreeColumns)]);
+        Start(layouts: [new ScreenTileLayout(Area2Key, ThreeColumns)]);
         Assert.Equal(GridLayout.Arrange(Area2, 5, Gap, ThreeColumns), FramesOf(Returning));
 
         surface.ScreenList.RemoveAll(s => s.Number == 2);
@@ -635,7 +635,7 @@ public sealed class TilerResizeTests : IDisposable
     }
 
     // Pins that the grace period ENDS: once it is over, a refit is stored again. (Which row's share goes is
-    // TileSizes.Fit's business and is pinned by Closing_a_middle_window_keeps_the_other_rows_proportions; here the
+    // TileLayout.Remove's business and is pinned by Closing_a_middle_window_keeps_the_other_rows_proportions; here the
     // expected value only uses the same leaver so the two agree.)
     [Fact]
     public void After_the_grace_period_a_closing_window_reshapes_the_stored_sizes_again()
@@ -643,12 +643,12 @@ public sealed class TilerResizeTests : IDisposable
         ScreenDropsOutAndItsWindowsComeBackOneByOne();
         time += TimeSpan.FromSeconds(3.1);
 
-        // W(4) is slot 2 of 1 + 2 + 2: column 1, row 1.
+        // W(4) is slot 2 of 1 + 2 + 2: leaf 2, the bottom of the middle column.
         Closes(W(4));
 
-        // Only W4's cell goes (tiling-predictable-placement, change 1): ThreeColumns is the automatic 1 + 2 + 2 shape
-        // with uneven sizes, which was refitted from the count by Fit before and is now RemoveCell, leaving 1 + 1 + 2.
-        Assert.Equal(TileArrange.RemoveCell(ThreeColumns, (1, 1)), Stored(Area2Key));
+        // Only W4's leaf goes (tiling-predictable-placement, change 1): ThreeColumns is the automatic 1 + 2 + 2 shape
+        // with uneven sizes; its middle column collapses to W3's leaf, leaving 1 + 1 + 2.
+        Assert.Equal(Text(ThreeColumns.Remove(2)), Text(Stored(Area2Key)));
         var order = new[] { 2, 3, 5, 6 }.Select(W).ToList();
         Assert.Equal(GridLayout.Arrange(Area2, 4, Gap, Stored(Area2Key)), FramesOf(order));
     }
@@ -671,10 +671,10 @@ public sealed class TilerResizeTests : IDisposable
         ResizedByHand(W(2), new WindowRect(1928, 8, 2700, 1032), screen: 2);
 
         var stored = Stored(Area2Key);
-        Assert.Equal(776.0 / 1904, stored.Columns[0], 9);
-        Assert.Equal(0.8 - 776.0 / 1904, stored.Columns[1], 9);
-        Assert.Equal(0.2, stored.Columns[2], 9);
-        Assert.Equal(ThreeColumns.Rows, stored.Rows);
+        Assert.Equal(776.0 / 1904, stored.Root.ShareAt(0), 9);
+        Assert.Equal(0.8 - 776.0 / 1904, stored.Root.ShareAt(1), 9);
+        Assert.Equal(0.2, stored.Root.ShareAt(2), 9);
+        Assert.Equal(((TileBranch)ThreeColumns.Root).Children.Select(c => c.Node), ((TileBranch)stored.Root).Children.Select(c => c.Node));
         Assert.Equal(GridLayout.Arrange(Area2, 5, Gap, stored), FramesOf(Returning));
     }
 
@@ -686,11 +686,11 @@ public sealed class TilerResizeTests : IDisposable
         StartTwo();
         ResizedByHand(W(1), new WindowRect(8, 8, 1337, 1032));
         Echo();
-        Assert.NotEmpty(StoredSizes);
+        Assert.NotEmpty(StoredLayouts);
 
         Assert.True(manager.EvenOutTiles(alpha.Id).IsSuccess);
 
-        Assert.Empty(StoredSizes);
+        Assert.Empty(StoredLayouts);
         Assert.Equal(GridLayout.Arrange(Area, 2, Gap), FramesOf([W(1), W(2)]));
     }
 
@@ -723,7 +723,7 @@ public sealed class TilerResizeTests : IDisposable
         ResizedByHand(W(1), new WindowRect(8, 8, 1337, 1032));
 
         Assert.Empty(surface.Placed);
-        Assert.Empty(StoredSizes);
+        Assert.Empty(StoredLayouts);
         Assert.Equal(new WindowRect(964, 8, 1912, 1032), surface.Frames[W(2)]);
     }
 
@@ -749,7 +749,7 @@ public sealed class TilerResizeTests : IDisposable
         // W(2)'s bottom edge (the row split in the right column) dragged down to 700: the split goes to 704.
         ResizedByHand(W(2), slot with { Bottom = 700 });
 
-        Assert.Equal(696.0 / 1024, Stored(AreaKey).Rows[1][0], 9);
+        Assert.Equal(696.0 / 1024, Stored(AreaKey).Root.ShareAt(1, 0), 9);
         Assert.Equal(slot with { Bottom = 700 }, surface.Frames[W(2)]);
         Assert.Equal(new WindowRect(964, 708, 1912, 1032), surface.Frames[W(3)]);
     }
@@ -778,6 +778,6 @@ public sealed class TilerResizeTests : IDisposable
         ResizedByHand(W(1), new WindowRect(8, 8, 1337, 1032));
 
         Assert.Empty(surface.Placed);
-        Assert.Empty(StoredSizes);
+        Assert.Empty(StoredLayouts);
     }
 }

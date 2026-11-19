@@ -9,7 +9,7 @@ namespace Deskbar.Core.Tiling;
 // tile could move when one window opened. Now a window that arrives takes half of ONE tile and no other tile moves:
 //
 //   1. A minimized tile coming back goes to its old place (Tiler.Minimize.cs, unchanged).
-//   2. An opening (TileSizes.Opening, room kept for the next window): the window goes into it. The screen of the
+//   2. An opening (TileLayout.Opening, room kept for the next window): the window goes into it. The screen of the
 //      tile last used is looked at first, then the screen the window opened on.
 //   3. Otherwise it splits the tile the user last activated, on THAT tile's screen, even when the app opened the
 //      window on another one (TileArrival.Choose picks the tile and the side).
@@ -110,7 +110,7 @@ public sealed partial class Tiler
     // the tile last used; the rest split the largest tile of their own screen (the design: "the first splits the
     // target (or fills the opening) and each of the rest splits the largest tile on its screen").
     //
-    // Sizes are stored here, before the caller hands the board to Keep, so the re-tile lays the new shape out. An
+    // Layouts are stored here, before the caller hands the board to Keep, so the re-tile lays the new shape out. An
     // opening is filled HERE as well (step 2), so Keep's IntoOpenings finds no opening left and never fills twice.
     TileBoard Arrived(Workspace workspace, TileBoard board, IReadOnlyList<WindowHandle> arrivals)
     {
@@ -135,8 +135,8 @@ public sealed partial class Tiler
             .GetValueOrDefault(() => Split(workspace, screens, board, window, target, lastUsed));
     }
 
-    // Step 2: the screen's opening, when its stored sizes keep one for the windows it has. Filled the way Keep's
-    // IntoOpenings fills one (TileArrange.Filled), sizes stored first. None when the screen has no opening.
+    // Step 2: the screen's opening, when its stored layout keeps one for the windows it has. Filled the way Keep's
+    // IntoOpenings fills one (TileArrange.Filled), the layout stored first. None when the screen has no opening.
     Maybe<TileBoard> IntoOpeningOn(Workspace workspace, IReadOnlyDictionary<int, TileScreen> screens, TileBoard board,
         WindowHandle window, int number, string where)
     {
@@ -145,10 +145,10 @@ public sealed partial class Tiler
         if (!StoredOn(workspace.Id, KeyOf(screen)).TryGetValue(out var stored) || !stored.HasOpeningFor(order.Count))
             return Maybe<TileBoard>.None;
 
-        var (next, sizes) = TileArrange.Filled(order, stored, window);
+        var (next, filled) = TileArrange.Filled(order, stored, window);
         var into = board.Into(number, next);
         if (!into.ScreenOf(window).HasValue) return Maybe<TileBoard>.None;
-        StoreSizes(workspace, KeyOf(screen), sizes)
+        StoreLayout(workspace, KeyOf(screen), filled)
             .Tap(() => trace?.Invoke($"tile: {workspace.Name}: {window.Value:X} arrived on screen {number}, took the opening at slot {stored.Opening} on {where}"))
             .TapError(error => trace?.Invoke($"tile: {workspace.Name}: {window.Value:X} arrived on screen {number}, storing the filled opening failed: {error}"));
         return into;
@@ -156,7 +156,7 @@ public sealed partial class Tiler
 
     // Steps 3 and 4: TileArrival.Choose picks the tile (the last-used one when both halves keep a quarter of the
     // screen, otherwise the largest) and the side, and TileArrange.Drop makes the split exactly as a drop on that
-    // tile's edge would. Laid out with the sizes the screen shows now (ShownSizes), which is what the user sees.
+    // tile's edge would. Laid out with the layout the screen shows now (ShownLayout), which is what the user sees.
     //
     // The window joins the end of the screen instead in two cases, each traced: the screen is empty (nothing to
     // split), or its grid does not fit the work area (SlotsOf is empty, controller ruling 1), where RetileScreen's
@@ -172,8 +172,8 @@ public sealed partial class Tiler
             return board.Join(number, window);
         }
         var order = board.On(number);
-        var sizes = ShownSizes(workspace, screen, order.Count);
-        var slots = SlotsOf(screen, order, sizes);
+        var layout = ShownLayout(workspace, screen, order.Count);
+        var slots = SlotsOf(screen, order, layout);
         if (order.Count > 0 && slots.Count == 0)
         {
             trace?.Invoke($"tile: {workspace.Name}: {window.Value:X} arrived on screen {number}, the grid does not fit the work area, joined the end");
@@ -182,10 +182,10 @@ public sealed partial class Tiler
 
         // The screen's maximized tiles are never split (TileArrival has the reason): the newcomer would sit behind one.
         var maximizedHere = order.Where(surface.IsMaximized).ToHashSet();
-        return TileArrival.Choose(order, sizes, order.Select(w => slots[w]).ToList(), lastUsed, maximizedHere).Match(
+        return TileArrival.Choose(order, layout, order.Select(w => slots[w]).ToList(), lastUsed, maximizedHere).Match(
             split =>
             {
-                var (next, splitSizes) = TileArrange.Drop(order, sizes, window, split.Target, split.Side);
+                var (next, splitLayout) = TileArrange.Drop(order, layout, window, split.Target, split.Side);
                 var into = board.Into(number, next);
                 // Drop hands its input back unchanged when it cannot split (it always can here, by construction); the
                 // window must never be lost from the board for that, so it joins the end instead.
@@ -194,8 +194,8 @@ public sealed partial class Tiler
                     trace?.Invoke($"tile: {workspace.Name}: {window.Value:X} arrived on screen {number}, splitting {split.Target.Value:X} {split.Side} made no room, joined the end");
                     return board.Join(number, window);
                 }
-                StoreSizes(workspace, KeyOf(screen), splitSizes)
-                    .Tap(() => trace?.Invoke($"tile: {workspace.Name}: {window.Value:X} arrived on screen {number}, split {split.Target.Value:X} {split.Side} ({Why(split, lastUsed)}), sizes {Show(splitSizes)}"))
+                StoreLayout(workspace, KeyOf(screen), splitLayout)
+                    .Tap(() => trace?.Invoke($"tile: {workspace.Name}: {window.Value:X} arrived on screen {number}, split {split.Target.Value:X} {split.Side} ({Why(split, lastUsed)}), sizes {Show(splitLayout)}"))
                     .TapError(error => trace?.Invoke($"tile: {workspace.Name}: {window.Value:X} arrived on screen {number}, storing the split failed: {error}"));
                 return into;
             },

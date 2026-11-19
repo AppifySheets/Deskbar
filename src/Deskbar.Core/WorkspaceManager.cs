@@ -1776,9 +1776,9 @@ public sealed class WorkspaceManager(
     // "Even out tiles": every stored layout keeps its shape and gets equal shares. An evened layout that is then
     // plain (the automatic shape, no opening) loses its entry, since that is what no entry means.
     //
-    // Until the Tiler stops reading the old sizes (they are empty after any load, but the Tiler still writes them),
-    // this also clears TileSizes, as it always did, so the Tiler's tests keep their meaning; the sizes side goes
-    // with the Tiler's switch to layouts.
+    // The Tiler reads and writes only TileLayouts now (ruling R1). The old TileSizes are still cleared here, as they
+    // always were, because the bar's tiling menu still offers this item while either list is non-empty (task 7 of the
+    // split tree plan moves the menu to TileLayouts and drops the old property); after any load they are empty anyway.
     public Result EvenOutTiles(Guid id) =>
         Workspace(id).Tap(_ => Persist(State with
         {

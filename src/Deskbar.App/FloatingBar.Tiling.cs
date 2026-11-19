@@ -60,7 +60,7 @@ public partial class FloatingBar
             // workspace is tiled AND a split was dragged (any stored entry is non-equal, because SetTileSizes
             // never stores equal sizes). Petre: "keep my sizes", so this is the one way back to equal columns
             // and rows; the Tiler re-tiles by itself when the stored sizes change, so the click only clears them.
-            if (TiledNow() && (manager.State.Workspaces.FirstOrDefault(w => w.Id == workspaceId)?.TileSizes.Count ?? 0) > 0)
+            if (TiledNow() && manager.State.Workspaces.FirstOrDefault(w => w.Id == workspaceId) is { } stored && HasStoredTiles(stored))
             {
                 var even = new MenuItem { Header = "Even out tiles", Icon = MenuGlyph("⊟") };
                 even.Click += (_, _) => Report(manager.EvenOutTiles(workspaceId));
@@ -143,6 +143,11 @@ public partial class FloatingBar
         return keep;
     }
 
+    // Something is stored to even out: a split tree layout (Workspace.TileLayouts, what the Tiler stores since the
+    // split tree) or an old TileSizes entry (empty after any load). Interim for the split tree plan: task 7 replaces
+    // both menus' test with TileArrange.TidyStep, which also offers "Reset to grid".
+    static bool HasStoredTiles(Deskbar.Core.Domain.Workspace workspace) => workspace.TileLayouts.Count + workspace.TileSizes.Count > 0;
+
     // The button's right-click menu, on the same terms as the row menu: Pro and the workspace tiled. "Even out
     // tiles" only once a split was dragged (an equal layout stores nothing, so there is nothing to even out until
     // then); the keep-space switch always, so a tiled workspace never opens an empty menu.
@@ -152,7 +157,7 @@ public partial class FloatingBar
         if (tileTarget is not { } id || !IsPro()) return;
         var current = manager.State.Workspaces.FirstOrDefault(w => w.Id == id);
         if (current is not { Tiled: true }) return;
-        if (current.TileSizes.Count > 0)
+        if (HasStoredTiles(current))
         {
             var even = new MenuItem { Header = "Even out tiles", Icon = MenuGlyph("⊟") };
             even.Click += (_, _) => Report(manager.EvenOutTiles(id));

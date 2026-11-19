@@ -9,7 +9,7 @@ namespace Deskbar.Core.Tiling;
 //
 //   * Dragging a separation (a tile's inner edge, its corner, or AltSnap's right-drag resize): the tiles beside it
 //     follow LIVE, laid out from the same SplitMove arithmetic the drop uses, so what you see while dragging is what
-//     you get on release. Nothing is stored until the drop; OnSettled's step 6 (MovedASplit) stores the sizes then.
+//     you get on release. Nothing is stored until the drop; OnSettled's step 6 (MovedASplit) stores the layout then.
 //   * Moving a tile (its title bar, AltSnap's Alt-drag): nothing else moves until you let go, because tiles jumping
 //     around under the pointer as it crosses them is worse than useless. Instead the surface draws where the tile
 //     will land (filled) and, for a swap, where the other tile goes (outline). The landing place is decided by the
@@ -22,7 +22,7 @@ public sealed partial class Tiler
     // The drag in progress: which window, on which workspace and screen. Set by the first Moving of a drag,
     // cleared when that window settles (OnSettled) or goes. While it is set, the Settled of a neighbour on the
     // same screen is ignored: those are the echoes of our own live placements, and a neighbour that settled before
-    // the dragged window would otherwise be put back into its PRE-drag slot (the new sizes are stored only when the
+    // the dragged window would otherwise be put back into its PRE-drag slot (the new layout is stored only when the
     // dragged window settles), and then moved again a moment later.
     (WindowHandle Window, Guid Workspace, int Screen)? dragging;
 
@@ -67,10 +67,9 @@ public sealed partial class Tiler
     void LiveResize(Workspace workspace, TileScreen screen, WindowHandle window, Edges moved, WindowRect frame)
     {
         var windows = Board.On(screen.Number);
-        var shown = ShownSizes(workspace, screen, windows.Count);
-        var shape = shown.Shape;
-        var cell = TileArrange.CellOf(shown, windows.ToList().IndexOf(window), windows.Count);
-        SplitMove.Apply(shown, shape, screen.WorkArea, GapOn(screen), cell, moved, frame).Tap(next =>
+        var shown = ShownLayout(workspace, screen, windows.Count);
+        var leaf = TileArrange.LeafOf(shown, windows.ToList().IndexOf(window), windows.Count);
+        SplitMove.Apply(shown, screen.WorkArea, GapOn(screen), leaf, moved, frame).Tap(next =>
             SlotsOf(screen, windows, next)
                 .Where(s => s.Key != window)
                 .ToList()
@@ -98,7 +97,7 @@ public sealed partial class Tiler
         var (x, y) = PointOf(frame);
         var target = ScreenAt(screens.Values, x, y).GetValueOrDefault(home);
         var homeSlots = screens.TryGetValue(home, out var homeScreen)
-            ? SlotsOf(homeScreen, Board.On(home), ShownSizes(workspace, homeScreen, Board.On(home).Count))
+            ? SlotsOf(homeScreen, Board.On(home), ShownLayout(workspace, homeScreen, Board.On(home).Count))
             : new Dictionary<WindowHandle, WindowRect>();
 
         var thereSlots = SlotsThere(workspace, screens, target, home);
@@ -138,17 +137,19 @@ public sealed partial class Tiler
     // (and for an empty screen). Read without side effects, like everything a preview reads.
     IReadOnlyDictionary<WindowHandle, WindowRect> SlotsThere(Workspace workspace, IReadOnlyDictionary<int, TileScreen> screens, int pointerOn, int home) =>
         pointerOn != home && screens.TryGetValue(pointerOn, out var there) && Board.On(pointerOn).Count > 0
-            ? SlotsOf(there, Board.On(pointerOn), ShownSizes(workspace, there, Board.On(pointerOn).Count))
+            ? SlotsOf(there, Board.On(pointerOn), ShownLayout(workspace, there, Board.On(pointerOn).Count))
             : new Dictionary<WindowHandle, WindowRect>();
 
     // The rearrangement a Beside drop would make (TileArrange.Drop), with its slots. The drop and the preview both
     // come here, so what the preview shows is what the drop does.
-    (IReadOnlyList<WindowHandle> Order, TileSizes Sizes, IReadOnlyDictionary<WindowHandle, WindowRect> Slots) Rearranged(
+    // On the tree the target leaf alone is split (TileArrange.Drop), so a drop beside a stacked tile goes beside that
+    // tile only, and the tiles of the dragged window's old split grow into the room it left.
+    (IReadOnlyList<WindowHandle> Order, TileLayout Layout, IReadOnlyDictionary<WindowHandle, WindowRect> Slots) Rearranged(
         Workspace workspace, TileScreen screen, WindowHandle window, MoveOutcome.Beside beside)
     {
         var order = Board.On(screen.Number);
-        var (next, sizes) = TileArrange.Drop(order, ShownSizes(workspace, screen, order.Count), window, beside.Target, beside.Side);
-        return (next, sizes, SlotsOf(screen, next, sizes));
+        var (next, layout) = TileArrange.Drop(order, ShownLayout(workspace, screen, order.Count), window, beside.Target, beside.Side);
+        return (next, layout, SlotsOf(screen, next, layout));
     }
 
     TilePreview[] BesidePreview(Workspace workspace, TileScreen screen, WindowHandle window, MoveOutcome.Beside beside)
@@ -162,8 +163,8 @@ public sealed partial class Tiler
     Maybe<WindowRect> JoinedSlot(Workspace workspace, TileScreen screen, WindowHandle window)
     {
         var others = Board.On(screen.Number).Where(w => w != window).ToList();
-        var (windows, sizes) = TileArrange.Filled(others, ShownSizes(workspace, screen, others.Count), window);
-        return SlotsOf(screen, windows, sizes.Opening is null && sizes.Shape.Sum() == windows.Count ? sizes : ShownSizes(workspace, screen, windows.Count))
+        var (windows, layout) = TileArrange.Filled(others, ShownLayout(workspace, screen, others.Count), window);
+        return SlotsOf(screen, windows, layout.Opening is null && layout.Count == windows.Count ? layout : ShownLayout(workspace, screen, windows.Count))
             .TryGetValue(window, out var slot)
             ? slot
             : Maybe<WindowRect>.None;
@@ -171,7 +172,7 @@ public sealed partial class Tiler
 
     // Where the screen's opening is right now, if it has one.
     Maybe<WindowRect> OpeningOn(Workspace workspace, TileScreen screen) =>
-        GridLayout.OpeningOf(screen.WorkArea, Board.On(screen.Number).Count, GapOn(screen), ShownSizes(workspace, screen, Board.On(screen.Number).Count));
+        GridLayout.OpeningOf(screen.WorkArea, Board.On(screen.Number).Count, GapOn(screen), ShownLayout(workspace, screen, Board.On(screen.Number).Count));
 
     void HidePreview()
     {
@@ -204,24 +205,27 @@ public sealed partial class Tiler
         }
     }
 
-    // The sizes the screen shows right now: the stored ones fitted to this count, or equal. Unlike SizesOn this
-    // stores nothing and takes no pending leaver, because a drag changes neither the windows nor the count.
-    TileSizes ShownSizes(Workspace workspace, TileScreen screen, int count) =>
+    // The layout the screen shows right now: the stored one fitted to this count, or the automatic one. Unlike
+    // LayoutOn this stores nothing and takes no pending leaver, because a drag changes neither the windows nor the
+    // count. Task 6's band drops and minimize return read it too.
+    TileLayout ShownLayout(Workspace workspace, TileScreen screen, int count) =>
         StoredOn(workspace.Id, KeyOf(screen))
-            .Map(s => TileArrange.Refit(s, count, Maybe<(int Column, int Row)>.None))
-            .GetValueOrDefault(TileSizes.Equal(GridLayout.Shape(count)));
+            .Map(s => TileArrange.Refit(s, count, Maybe<int>.None))
+            .GetValueOrDefault(TileLayout.Automatic(count));
 
-    // The cell of the window at `slot` on a screen (by number) of a workspace with `count` windows, in the stored
-    // sizes (counting their opening) or the automatic shape. For NoteLeavers, which knows screens only by number.
-    (int Column, int Row) CellOn(Guid workspace, int screen, int slot, int count) =>
+    // The leaf of the window at `slot` on a screen (by number) of a workspace with `count` windows, in the stored
+    // layout (counting its opening, TileArrange.LeafOf) or the automatic one, whose leaves are its slots. For
+    // NoteLeavers, which knows screens only by number.
+    int LeafOn(Guid workspace, int screen, int slot, int count) =>
         surface.Screens().TryFirst(s => s.Number == screen).Bind(s => StoredOn(workspace, KeyOf(s)))
-            .Map(stored => TileArrange.CellOf(stored, slot, count))
-            .GetValueOrDefault(GridLayout.CellOf(slot, GridLayout.Shape(count)));
+            .Map(stored => TileArrange.LeafOf(stored, slot, count))
+            .GetValueOrDefault(slot);
 
-    Maybe<TileSizes> StoredOn(Guid workspace, string key) =>
+    // The layout stored for a screen (by its key, KeyOf) on a workspace, read from the manager's current state.
+    Maybe<TileLayout> StoredOn(Guid workspace, string key) =>
         manager.State.Workspaces.TryFirst(w => w.Id == workspace)
-            .Bind(w => w.TileSizes.TryFirst(s => s.Screen == key))
-            .Map(s => s.Sizes);
+            .Bind(w => w.TileLayouts.TryFirst(s => s.Screen == key))
+            .Map(s => s.Layout);
 
     // The pointer, or the frame's centre if Windows will not say where the pointer is.
     (int X, int Y) PointOf(WindowRect frame) =>

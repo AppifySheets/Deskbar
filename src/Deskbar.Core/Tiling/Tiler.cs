@@ -23,8 +23,11 @@ namespace Deskbar.Core.Tiling;
 //   - A maximized window keeps its slot (the tiles beneath do not reflow) and is never placed.
 //   - A new window takes half of the tile the user last used, or fills an opening, and no other tile moves
 //     (Tiler.Arrival.cs). A restored one goes back to the place it left when it was minimized (Tiler.Minimize.cs).
-//   - A tile that leaves takes only its own cell. On a workspace that keeps a closed tile's space
-//     (Workspace.TileKeepsSpace), a tile that CLOSES leaves its cell as the screen's opening instead (SizesOn).
+//   - A tile that leaves takes only its own leaf of the screen's split tree (TileLayout), and the tiles of its
+//     split grow into the room. On a workspace that keeps a closed tile's space (Workspace.TileKeepsSpace), a tile
+//     that CLOSES leaves its leaf as the screen's opening instead (LayoutOn).
+//   - A drop on a tile's edge puts the window beside THAT tile only, at any depth of the tree (TileArrange.Drop;
+//     docs/superpowers/specs/2026-11-19-tiling-split-tree-design.md).
 //
 // Threading: every entry point runs on the UI thread, and the Tiler makes sure of it rather than trusting its
 // sources. `inputs` is the UI thread's scheduler (App passes one; tests leave it null, and then nothing is
@@ -79,10 +82,10 @@ public sealed partial class Tiler(WorkspaceManager manager, IVirtualDesktopServi
     Maybe<StateKey> stateKey = Maybe<StateKey>.None;
 
     // The few facts a StateChanged pulse can change that matter to tiling. Everything else the manager persists
-    // (a rename, a fold, a colour) leaves it equal, and such a pulse reads no windows at all. Sizes is the current
-    // workspace's stored tile sizes, so "Even out tiles", untile and the pipe's `even` (which only change state)
-    // re-tile; a ValueList, so it compares by contents.
-    sealed record StateKey(Maybe<Guid> Workspace, bool Tiled, int Gap, bool Pro, ValueList<ScreenTileSizes> Sizes);
+    // (a rename, a fold, a colour) leaves it equal, and such a pulse reads no windows at all. Layouts is the current
+    // workspace's stored split trees (Workspace.TileLayouts), so "Even out tiles", "Reset to grid", untile and the
+    // pipe's `even` (which only change state) re-tile; a ValueList, so it compares by contents.
+    sealed record StateKey(Maybe<Guid> Workspace, bool Tiled, int Gap, bool Pro, ValueList<ScreenTileLayout> Layouts);
 
     // What a window was last given and what it accepted. Accepted is the visible frame read back after the
     // Place: the slot itself, or the size an app insisted on (a minimum size larger than its slot). It is the
@@ -285,7 +288,7 @@ public sealed partial class Tiler(WorkspaceManager manager, IVirtualDesktopServi
             NoteLeft(e.Window.Handle, e.Time);
 
         // KEEP THE SPACE (change 3): a tile that CLOSES (Disappeared, or Hidden, which is how many apps close to the
-        // tray) on a workspace whose switch is on leaves its cell empty for the next window. Noted here, while it is
+        // tray) on a workspace whose switch is on leaves its leaf empty for the next window. Noted here, while it is
         // still on the board, so the evaluate below hands NoteLeavers a leaver marked as closed (Tiler.Resize.cs,
         // `closing`). A minimize is not a close and is never noted: it keeps change 1's rule.
         if (e.Kind is WindowEventKind.Disappeared or WindowEventKind.Hidden
@@ -359,37 +362,44 @@ public sealed partial class Tiler(WorkspaceManager manager, IVirtualDesktopServi
 
     // StateChanged fires on every persist and on several window events, and a full evaluate asks WorkspaceOf
     // (a COM DesktopOf call) of every known window on the UI thread. So a pulse evaluates only when one of the
-    // facts in StateKey moved: the workspace here, its Tiled flag, the gap, Pro, or its tile sizes.
+    // facts in StateKey moved: the workspace here, its Tiled flag, the gap, Pro, or its stored layouts.
     // Changes to which windows are in the grid reach the Tiler through window events and Settled instead.
     //
     // Every screen is re-tiled. For the first four facts that is what Evaluate did anyway (each one changes or
-    // clears `context`, which makes the re-tile full); the sizes change no window list, so without it "Even out
-    // tiles" would re-tile nothing. The Tiler's own SetTileSizes (a split moved, or sizes refitted to a new count)
-    // pulses too, but StoreSizes has already taken its sizes into the key, so that pulse compares equal and
+    // clears `context`, which makes the re-tile full); the layouts change no window list, so without it "Even out
+    // tiles" would re-tile nothing. The Tiler's own SetTileLayout (a split moved, or a layout refitted to a new count)
+    // pulses too, but StoreLayout has already taken its layout into the key, so that pulse compares equal and
     // returns here without reading a single window (final review, item 2).
     //
-    // A reset writes one trace line (the spec asks for one per reset; final review, item 7): the same workspace had
-    // sizes at the last look and has none now. That is "Even out tiles", the pipe's `even` or untile, since the
-    // Tiler itself never removes an entry except by a hand drag back to exactly equal, which StoreSizes has
-    // already taken into the key.
+    // A reset writes one trace line (the spec asks for one per reset; final review, item 7), when the same
+    // workspace's layouts changed from outside the Tiler and came out even: some were stored and none are now (Even
+    // out to the automatic layout, "Reset to grid", untile), or some split was uneven and every one is even now (Even
+    // out that keeps a hand-made shape, which the split tree added). The Tiler itself never evens a layout out; its
+    // own stores are already in the key and never reach this line.
     void OnStateChanged()
     {
         var current = CurrentStateKey();
         if (stateKey.HasValue && stateKey.Value == current) return;
         if (stateKey.TryGetValue(out var previous)
             && current.Workspace.HasValue && previous.Workspace == current.Workspace
-            && previous.Sizes.Count > 0 && current.Sizes.Count == 0)
+            && EvenedOut(previous.Layouts, current.Layouts))
             manager.State.Workspaces.TryFirst(w => w.Id == current.Workspace.Value)
                 .Tap(w => trace?.Invoke($"tile: {w.Name} sizes evened out"));
         Evaluate(everyScreen: true);
     }
+
+    // The layouts went from something to nothing, or from some uneven split to every split even (see OnStateChanged).
+    static bool EvenedOut(ValueList<ScreenTileLayout> before, ValueList<ScreenTileLayout> after) =>
+        before != after
+        && after.All(e => e.Layout.IsEven)
+        && ((before.Count > 0 && after.Count == 0) || before.Any(e => !e.Layout.IsEven));
 
     StateKey CurrentStateKey()
     {
         var state = manager.State;
         var here = currentDesktop.Bind(desktop => state.Workspaces.TryFirst(w => w.DesktopId == desktop));
         return new StateKey(here.Map(w => w.Id), here.Map(w => w.Tiled).GetValueOrDefault(false),
-            state.TileGap, isPro(), here.Map(w => w.TileSizes).GetValueOrDefault([]));
+            state.TileGap, isPro(), here.Map(w => w.TileLayouts).GetValueOrDefault([]));
     }
 
     // A watched window stopped moving with the buttons up (spec, "By hand"). In order:
@@ -453,13 +463,13 @@ public sealed partial class Tiler(WorkspaceManager manager, IVirtualDesktopServi
         var screens = surface.Screens().ToDictionary(s => s.Number);
         var screenNow = surface.ScreenOf(window);
         var onScreen = board.On(screenNow);
-        // The screen's sizes, fitted ONCE for this Settled (final review, item 4). SizesOn has side effects (it
+        // The screen's layout, fitted ONCE for this Settled (final review, item 4). LayoutOn has side effects (it
         // takes the screen's pending leaver and may store), so the same fit lays out the slots here and is handed
         // to MovedASplit, which moves a split on exactly the layout these slots describe.
-        var sizes = screens.TryGetValue(screenNow, out var screen)
-            ? Maybe.From(SizesOn(workspace, screen, onScreen.Count))
-            : Maybe<TileSizes>.None;
-        var slots = sizes.Map(fitted => SlotsOf(screens[screenNow], onScreen, fitted))
+        var layout = screens.TryGetValue(screenNow, out var screen)
+            ? Maybe.From(LayoutOn(workspace, screen, onScreen.Count))
+            : Maybe<TileLayout>.None;
+        var slots = layout.Map(fitted => SlotsOf(screens[screenNow], onScreen, fitted))
             .GetValueOrDefault(new Dictionary<WindowHandle, WindowRect>());
 
         // Step 4. PlaceIfNeeded does nothing when the slot is the one this frame was accepted for, so for the
@@ -478,7 +488,7 @@ public sealed partial class Tiler(WorkspaceManager manager, IVirtualDesktopServi
         }
 
         // Step 6. A resize by hand is handled there in full; anything else goes on to the move rules unchanged.
-        if (MovedASplit(workspace, window, frame, screenNow, screens, board, slots, sizes, echo))
+        if (MovedASplit(workspace, window, frame, screenNow, screens, board, slots, layout, echo))
             return;
 
         // A drop by hand is judged where the pointer let go (SettledMove.DecideAt has the reason), on the screen the
@@ -493,22 +503,22 @@ public sealed partial class Tiler(WorkspaceManager manager, IVirtualDesktopServi
         {
             decidedOn = board.ScreenOf(window).GetValueOrDefault(screenNow);
             if (decidedOn != screenNow && screens.TryGetValue(decidedOn, out var own))
-                decidedSlots = SlotsOf(own, board.On(decidedOn), ShownSizes(workspace, own, board.On(decidedOn).Count));
+                decidedSlots = SlotsOf(own, board.On(decidedOn), ShownLayout(workspace, own, board.On(decidedOn).Count));
             var pointerOn = ScreenAt(screens.Values, pointer.X, pointer.Y).GetValueOrDefault(screenNow);
             outcome = SettledMove.DecideAt(window, pointer.X, pointer.Y, pointerOn, board, decidedSlots,
                 SlotsThere(workspace, screens, pointerOn, decidedOn),
                 screens.TryGetValue(decidedOn, out var homeScreen) ? OpeningOn(workspace, homeScreen) : Maybe<WindowRect>.None);
         }
         // Win+Left / Win+Right (no button down, the frame exactly half the screen): a direction, not a place
-        // (SettledMove.SnapSide has the measurement). One column over, or the next screen from the outermost one.
+        // (SettledMove.SnapSide has the measurement). The tile beside it on that side, found from the slots (a tree
+        // has no columns to count), or the next screen when nothing lies on that side.
         else if (board.ScreenOf(window).Map(h => h == screenNow).GetValueOrDefault(false)
                  && screens.TryGetValue(screenNow, out var snapScreen)
                  && SettledMove.SnapSide(frame, snapScreen.WorkArea).TryGetValue(out var side)
                  // With no gap a tile IS half the screen; a window still at its own slot made no snap.
                  && !(slots.TryGetValue(window, out var ownSlot) && ownSlot == frame))
         {
-            outcome = SettledMove.Snapped(window, side, screenNow, board,
-                ShownSizes(workspace, snapScreen, board.On(screenNow).Count).Shape, slots,
+            outcome = SettledMove.Snapped(window, side, screenNow, board, slots,
                 ScreenBeside(screens.Values, snapScreen, side));
             trace?.Invoke($"tile: {window.Value:X} snapped {side} by keyboard: {outcome}");
         }
@@ -528,26 +538,26 @@ public sealed partial class Tiler(WorkspaceManager manager, IVirtualDesktopServi
                 if (decidedSlots.TryGetValue(window, out var slot))
                     PutBack(window, slot, frame);
                 break;
-            // Dropped on another tile's edge zone: beside it on that side (TileArrange). The new shape is stored with
-            // the sizes, BEFORE the re-tile, so the layout reads it; the board takes the new order.
-            // The target may be on another screen (dragged across): that screen takes the window in, and the one it
-            // left gives its cell up through Keep's leaver bookkeeping.
+            // Dropped on another tile's edge zone: beside THAT tile on that side, at whatever depth of the tree it is
+            // (TileArrange.Drop). The new layout is stored BEFORE the re-tile, so the re-tile reads it; the board takes
+            // the new order. The target may be on another screen (dragged across): that screen takes the window in,
+            // and the one it left gives its leaf up through Keep's leaver bookkeeping.
             case MoveOutcome.Beside beside when board.ScreenOf(beside.Target).TryGetValue(out var targetOn)
                                                && screens.TryGetValue(targetOn, out var besideScreen):
                 var arranged = Rearranged(workspace, besideScreen, window, beside);
                 var leftFrom = board.ScreenOf(window).GetValueOrDefault(targetOn);
                 Keep(workspace, board.Into(targetOn, arranged.Order));
-                StoreSizes(workspace, KeyOf(besideScreen), arranged.Sizes)
-                    .Tap(() => trace?.Invoke($"tile: {workspace.Name} screen {targetOn}: {window.Value:X} dropped {beside.Side} of {beside.Target.Value:X}, sizes {Show(arranged.Sizes)}"))
+                StoreLayout(workspace, KeyOf(besideScreen), arranged.Layout)
+                    .Tap(() => trace?.Invoke($"tile: {workspace.Name} screen {targetOn}: {window.Value:X} dropped {beside.Side} of {beside.Target.Value:X}, sizes {Show(arranged.Layout)}"))
                     .TapError(error => trace?.Invoke($"tile: {workspace.Name} screen {targetOn}: storing the new arrangement failed: {error}"));
                 Retile(workspace, [leftFrom, targetOn]);
                 break;
-            // Into its own screen's opening (TileArrange.IntoOpening): the new order and sizes, sizes stored first.
+            // Into its own screen's opening (TileArrange.IntoOpening): the new order and layout, the layout stored first.
             case MoveOutcome.IntoOpening when screens.TryGetValue(decidedOn, out var openScreen):
-                var into = TileArrange.IntoOpening(board.On(decidedOn), ShownSizes(workspace, openScreen, board.On(decidedOn).Count), window);
+                var into = TileArrange.IntoOpening(board.On(decidedOn), ShownLayout(workspace, openScreen, board.On(decidedOn).Count), window);
                 Keep(workspace, board.Reordered(decidedOn, into.Order));
-                StoreSizes(workspace, KeyOf(openScreen), into.Sizes)
-                    .Tap(() => trace?.Invoke($"tile: {workspace.Name} screen {decidedOn}: {window.Value:X} dropped into the opening, sizes {Show(into.Sizes)}"))
+                StoreLayout(workspace, KeyOf(openScreen), into.Layout)
+                    .Tap(() => trace?.Invoke($"tile: {workspace.Name} screen {decidedOn}: {window.Value:X} dropped into the opening, sizes {Show(into.Layout)}"))
                     .TapError(error => trace?.Invoke($"tile: {workspace.Name} screen {decidedOn}: storing the filled opening failed: {error}"));
                 Retile(workspace, [decidedOn]);
                 break;
@@ -649,11 +659,11 @@ public sealed partial class Tiler(WorkspaceManager manager, IVirtualDesktopServi
             // LEAVES FIRST (final review, C2). When windows left AND windows came in one evaluate (both happened while
             // the user was on another workspace, or a window became tileable in the evaluate a close caused), the
             // leaves are settled before anything arrives: the board without the newcomers is kept, which notes each
-            // screen's leaver, and the screens that lost a window are fitted, which takes the leaver's cell out (or
+            // screen's leaver, and the screens that lost a window are fitted, which takes the leaver's leaf out (or
             // keeps it as the opening, change 3) and stores the result. Only then do the newcomers arrive, into the
-            // grid the leave left: a kept space is an opening the first arrival fills (the design's precedence, step
-            // 2), and a split halves a tile of the shape the user sees. Placed first, the arrival used to split sizes
-            // the leaver was still in, and the leaver's cell was then taken from a grid that had changed under it.
+            // layout the leave left: a kept space is an opening the first arrival fills (the design's precedence, step
+            // 2), and a split halves a tile of the shape the user sees. Placed first, the arrival used to split a layout
+            // the leaver was still in, and the leaver's leaf was then taken from a layout that had changed under it.
             var stayed = newcomers.Aggregate(board, (b, w) => b.Leave(w));
             if (newcomers.Count > 0 && before.Screens.Any(s => s.Value.Any(w => !stayed.On(s.Key).Contains(w))))
             {
@@ -747,7 +757,7 @@ public sealed partial class Tiler(WorkspaceManager manager, IVirtualDesktopServi
     {
         board = IntoOpenings(workspace, board, returned ?? new HashSet<WindowHandle>());
 
-        // Before the old board is replaced: the cell of a window leaving a screen decides which row's share goes.
+        // Before the old board is replaced: the leaf of a window leaving a screen decides which leaf goes.
         NoteLeavers(workspace.Id, board);
         boards[workspace.Id] = board;
 
@@ -768,15 +778,15 @@ public sealed partial class Tiler(WorkspaceManager manager, IVirtualDesktopServi
         WatchOnly(board.Screens.Values.SelectMany(w => w).ToHashSet());
     }
 
-    // A window that JOINS a screen with an opening (TileSizes.Opening) goes into it rather than to the end. Petre: "keep
+    // A window that JOINS a screen with an opening (TileLayout.Opening) goes into it rather than to the end. Petre: "keep
     // the opening for the new window to jump into". Every way onto a screen comes through Keep (a new window, one moved
     // here from another workspace, one dragged over from another screen), so this one place covers them all. The
     // opening is filled only when the windows that stayed are exactly the ones it was laid out around; with more
-    // arriving at once the first takes it and the rest join at the end. The filled sizes are stored before anything is
-    // laid out, so the re-tile reads them.
+    // arriving at once the first takes it and the rest join at the end. The filled layout is stored before anything is
+    // laid out, so the re-tile reads it.
     //
     // A minimized tile that just came back (`returned`) is no arrival here: it is already in its own place, and the
-    // opening was laid out around it (TileArrange.Returned moves the opening on past its cell). It counts with the
+    // opening was laid out around it (the stored layout it came back to holds the opening past its leaf). It counts with the
     // windows that stayed, so the opening is still offered to the next new window (the design's precedence, step 1
     // before step 2; final review, I2: it used to be pulled out of its place into the kept space).
     TileBoard IntoOpenings(Workspace workspace, TileBoard after, IReadOnlySet<WindowHandle> returned)
@@ -794,8 +804,8 @@ public sealed partial class Tiler(WorkspaceManager manager, IVirtualDesktopServi
                 || !stored.HasOpeningFor(stayed.Count))
                 return board;
 
-            var (order, sizes) = TileArrange.Filled(stayed, stored, arrived[0]);
-            StoreSizes(workspace, KeyOf(screen), sizes)
+            var (order, filled) = TileArrange.Filled(stayed, stored, arrived[0]);
+            StoreLayout(workspace, KeyOf(screen), filled)
                 .Tap(() => trace?.Invoke($"tile: {workspace.Name} screen {n}: {arrived[0].Value:X} took the opening at slot {stored.Opening}"))
                 .TapError(error => trace?.Invoke($"tile: {workspace.Name} screen {n}: storing the filled opening failed: {error}"));
             return board.Reordered(n, order.Concat(arrived.Skip(1)).ToList());
@@ -876,15 +886,15 @@ public sealed partial class Tiler(WorkspaceManager manager, IVirtualDesktopServi
     }
 
     // The slot of each window on a screen, by window; empty when the grid does not fit (see RetileScreen). The grid
-    // takes the sizes dragged on this screen (SizesOn: equal when there are none, which is the equal grid exactly),
-    // fitted to this many windows.
+    // is the layout stored for this screen (LayoutOn: the automatic layout when there is none, which is the equal grid
+    // exactly), fitted to this many windows, the windows taking its leaves in slot order around any opening.
     IReadOnlyDictionary<WindowHandle, WindowRect> SlotsOf(Workspace workspace, TileScreen screen, IReadOnlyList<WindowHandle> windows) =>
-        SlotsOf(screen, windows, SizesOn(workspace, screen, windows.Count));
+        SlotsOf(screen, windows, LayoutOn(workspace, screen, windows.Count));
 
-    // The same, with sizes the caller already fitted (OnSettled, which also hands them to MovedASplit).
-    IReadOnlyDictionary<WindowHandle, WindowRect> SlotsOf(TileScreen screen, IReadOnlyList<WindowHandle> windows, TileSizes sizes)
+    // The same, with a layout the caller already fitted (OnSettled, which also hands it to MovedASplit).
+    IReadOnlyDictionary<WindowHandle, WindowRect> SlotsOf(TileScreen screen, IReadOnlyList<WindowHandle> windows, TileLayout layout)
     {
-        var tiles = GridLayout.Arrange(screen.WorkArea, windows.Count, GapOn(screen), sizes);
+        var tiles = GridLayout.Arrange(screen.WorkArea, windows.Count, GapOn(screen), layout);
         return tiles.Any(t => t.Width <= 0 || t.Height <= 0)
             ? new Dictionary<WindowHandle, WindowRect>()
             : windows.Zip(tiles).ToDictionary(p => p.First, p => p.Second);

@@ -20,7 +20,7 @@ public abstract record MoveOutcome
     // (TileArrange.Drop).
     public sealed record Beside(WindowHandle Target, TileArrange.Zone Side) : MoveOutcome;
 
-    // Dropped into its own screen's OPENING (TileSizes.Opening): it moves there, and the place it left closes up.
+    // Dropped into its own screen's OPENING (TileLayout.Opening): it moves there, and the place it left closes up.
     public sealed record IntoOpening : MoveOutcome;
 }
 
@@ -62,33 +62,40 @@ public static class SettledMove
         return Maybe<TileArrange.Zone>.None;
     }
 
-    // Where a keyboard snap to `side` takes a tile: a swap with the tile one column over (the one level with it),
-    // or, from the outermost column, the screen next door. Back to its slot when there is neither.
+    // Where a keyboard snap to `side` takes a tile: a swap with the tile beside it on that side, or, when nothing lies
+    // on that side (the tile is at the screen's edge), the screen next door. Back to its slot when there is neither.
+    //
+    // The neighbour is found by GEOMETRY from `slots`, because a split tree has no columns to count (spec,
+    // docs/superpowers/specs/2026-11-19-tiling-split-tree-design.md): only tiles lying wholly on that side of this one
+    // count, and of those the one whose height spans this tile's vertical middle, else the one nearest to that middle
+    // by height; the nearer horizontally first among equals, then slot order. For a grid of columns that is the old
+    // rule, "the tile one column over, level with it". For Petre's A and C side by side over a full-width B, Win+Right
+    // from A swaps with C, and B, spanning the whole width, has nothing beside it.
     public static MoveOutcome Snapped(
         WindowHandle moved,
         TileArrange.Zone side,
         int home,
         TileBoard board,
-        IReadOnlyList<int> shape,
         IReadOnlyDictionary<WindowHandle, WindowRect> slots,
         Maybe<int> screenBeyond)
     {
         var order = board.On(home);
-        var index = order.ToList().IndexOf(moved);
-        if (index < 0 || shape.Sum() != order.Count || !slots.TryGetValue(moved, out var mine)) return new MoveOutcome.BackToSlot();
-        var (column, _) = GridLayout.CellOf(index, shape);
-        var next = side == TileArrange.Zone.Left ? column - 1 : column + 1;
-        if (next < 0 || next >= shape.Count)
-            return screenBeyond.HasValue ? new MoveOutcome.JoinScreen(screenBeyond.Value) : new MoveOutcome.BackToSlot();
+        if (!order.Contains(moved) || !slots.TryGetValue(moved, out var mine)) return new MoveOutcome.BackToSlot();
 
-        // The tile in the next column whose height spans this tile's middle, or the nearest one to it.
         var middle = (mine.Top + mine.Bottom) / 2;
-        var start = shape.Take(next).Sum();
-        var neighbour = order.Skip(start).Take(shape[next])
-            .Where(slots.ContainsKey)
-            .OrderBy(w => slots[w].Top <= middle && middle < slots[w].Bottom ? 0 : Math.Min(Math.Abs(slots[w].Top - middle), Math.Abs(slots[w].Bottom - middle)))
+        bool Spans(WindowRect r) => r.Top <= middle && middle < r.Bottom;
+        int Height(WindowRect r) => Spans(r) ? 0 : Math.Min(Math.Abs(r.Top - middle), Math.Abs(r.Bottom - middle));
+        int Width(WindowRect r) => side == TileArrange.Zone.Left ? mine.Left - r.Right : r.Left - mine.Right;
+
+        // OrderBy is stable, so a full tie keeps slot order.
+        return order
+            .Where(w => w != moved && slots.ContainsKey(w))
+            .Where(w => side == TileArrange.Zone.Left ? slots[w].Right <= mine.Left : slots[w].Left >= mine.Right)
+            .OrderBy(w => Height(slots[w]))
+            .ThenBy(w => Width(slots[w]))
+            .Select(w => (MoveOutcome)new MoveOutcome.Swap(w))
+            .DefaultIfEmpty(screenBeyond.HasValue ? new MoveOutcome.JoinScreen(screenBeyond.Value) : new MoveOutcome.BackToSlot())
             .First();
-        return new MoveOutcome.Swap(neighbour);
     }
 
     // The same rule judged at a POINT: where the pointer was when a drag by hand ended. Petre, dragging the right

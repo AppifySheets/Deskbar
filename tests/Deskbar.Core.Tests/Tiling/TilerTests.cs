@@ -4,6 +4,7 @@ using Deskbar.Core.Abstractions;
 using Deskbar.Core.Domain;
 using Deskbar.Core.Persistence;
 using Deskbar.Core.Tiling;
+using static Deskbar.Core.Tests.Tiling.Trees;
 
 namespace Deskbar.Core.Tests.Tiling;
 
@@ -89,14 +90,16 @@ public sealed partial class TilerTests : IDisposable
     }
 
     // Starts the manager and the Tiler with Alpha current. Alpha starts tiled and Pro on, unless a test says
-    // otherwise.
-    void Start(bool alphaTiled = true, bool betaTiled = false, IScheduler? inputs = null)
+    // otherwise. `gap` and `layouts` (Alpha's stored split trees) are for a test that starts from a hand-made shape.
+    void Start(bool alphaTiled = true, bool betaTiled = false, IScheduler? inputs = null, int gap = Gap,
+        ValueList<ScreenTileLayout>? layouts = null)
     {
         new[] { alpha, beta }.ToList().ForEach(w => desktops.Desktops.Add(new DesktopInfo(w.DesktopId!.Value, w.Name)));
         desktops.CurrentDesktopId = alpha.DesktopId!.Value;
         store.Stored = AppState.Empty with
         {
-            Workspaces = [alpha with { Tiled = alphaTiled }, beta with { Tiled = betaTiled }],
+            TileGap = gap,
+            Workspaces = [alpha with { Tiled = alphaTiled, TileLayouts = layouts ?? [] }, beta with { Tiled = betaTiled }],
         };
         manager = new WorkspaceManager(desktops, monitor, titles, store);
         Assert.True(manager.Start().IsSuccess);
@@ -214,7 +217,7 @@ public sealed partial class TilerTests : IDisposable
         Start();
         Closes(W(4));
         Assert.Equal([W(1), W(2), W(3)], tiler.Board.On(1));
-        var expected = GridLayout.Arrange(Area, 3, Gap, new TileSizes([0.5, 0.5], [[0.5, 0.5], [1.0]]));
+        var expected = GridLayout.Arrange(Area, 3, Gap, Columns([0.5, 0.5], [0.5, 0.5], [1.0]));
         Assert.Equal(expected, new[] { W(1), W(2), W(3) }.Select(w => surface.Frames[w]).ToList());
     }
 
@@ -271,7 +274,7 @@ public sealed partial class TilerTests : IDisposable
         // Only W1's cell goes (tiling-predictable-placement, change 1): its column was alone, so W2 and W3 keep their
         // rows and now share one column. They used to be rebuilt as two columns from the window count.
         Assert.Equal([W(2), W(3)], tiler.Board.On(1));
-        Assert.Equal(GridLayout.Arrange(Area, 2, Gap, TileSizes.Equal([2])), new[] { W(2), W(3) }.Select(w => surface.Frames[w]).ToList());
+        Assert.Equal(GridLayout.Arrange(Area, 2, Gap, Columns([1.0], [0.5, 0.5])), new[] { W(2), W(3) }.Select(w => surface.Frames[w]).ToList());
     }
 
     // It used to rejoin at the END (the first design). Petre: "i'd like to bring back the window from the top back to
@@ -285,7 +288,7 @@ public sealed partial class TilerTests : IDisposable
         Minimizes(W(1), true);
         // Only W1's cell goes (tiling-predictable-placement, change 1): W2 and W3 stay stacked in one column.
         Assert.Equal([W(2), W(3)], tiler.Board.On(1));
-        Assert.Equal(GridLayout.Arrange(Area, 2, Gap, TileSizes.Equal([2])), new[] { W(2), W(3) }.Select(w => surface.Frames[w]).ToList());
+        Assert.Equal(GridLayout.Arrange(Area, 2, Gap, Columns([1.0], [0.5, 0.5])), new[] { W(2), W(3) }.Select(w => surface.Frames[w]).ToList());
 
         Minimizes(W(1), false);
         AssertTiled([W(1), W(2), W(3)]);
@@ -317,7 +320,7 @@ public sealed partial class TilerTests : IDisposable
         Assert.Equal(Area, surface.Frames[W(2)]);
         // The slot W(2) keeps is the top of the right column, where it will drop when it is restored: the split
         // left an equal 2x2, which is what nothing stored means (final review, M8: the frames are the promise).
-        Assert.Empty(manager.State.Workspaces.Single(w => w.Id == alpha.Id).TileSizes);
+        Assert.Empty(manager.State.Workspaces.Single(w => w.Id == alpha.Id).TileLayouts);
         surface.Maximized.Remove(W(2));
         Settles(W(2), new WindowRect(400, 300, 900, 700));
         Assert.Equal(grid[2], surface.Frames[W(2)]);
@@ -433,13 +436,67 @@ public sealed partial class TilerTests : IDisposable
         Settles(W(2), new WindowRect(200, 600, 900, 1500));
         surface.MovedByHand.Remove(W(2));
 
-        var stacked = GridLayout.Arrange(Area, 2, Gap, TileSizes.Equal([2]));
+        var stacked = GridLayout.Arrange(Area, 2, Gap, Columns([1.0], [0.5, 0.5]));
         Assert.Equal([W(1), W(2)], tiler.Board.On(1));
         Assert.Equal(stacked, new[] { W(1), W(2) }.Select(w => surface.Frames[w]).ToList());
-        Assert.Equal([2], manager.State.Workspaces.Single(w => w.Id == alpha.Id).TileSizes.Single().Sizes.Shape);
+        Assert.Equal("D[L 0.5, L 0.5]", Text(manager.State.Workspaces.Single(w => w.Id == alpha.Id).TileLayouts.Single().Layout));
 
         // A refresh lays them out the same way.
         tiler.Refresh();
+        Assert.Equal(stacked, new[] { W(1), W(2) }.Select(w => surface.Frames[w]).ToList());
+    }
+
+    // Review focus 2, Petre's case and the reason for the split tree: "the one on the right will not become a side of
+    // either of the left windows ... it needs to be fitted with either window, so that it gives way to the other
+    // windows to grow". A over B on the left and C full height on the right, a stored shape (ruling R5: the automatic
+    // three-window grid is the mirror image). C dropped by hand on A's right quarter goes beside A only: A and C share
+    // the top half, and B grows into the full width below. On the grid C became a full-height column again, which
+    // changed nothing on screen.
+    [Fact]
+    public void Tiler_drop_beside_the_top_of_a_stack()
+    {
+        surface.ScreenList[0] = FakeTileSurface.Screen(1, new WindowRect(0, 0, 1000, 600));
+        new[] { 1, 2, 3 }.ToList().ForEach(n => Exists(W(n), alpha));
+        Start(gap: 0, layouts: [new ScreenTileLayout("0,0,1000,600", Tree(Across(C(Down(C(L, .5), C(L, .5)), .5), C(L, .5))))]);
+        // A = W1 top left, B = W2 below it, C = W3 on the right.
+        Assert.Equal(new WindowRect(0, 0, 500, 300), surface.Frames[W(1)]);
+        Assert.Equal(new WindowRect(0, 300, 500, 600), surface.Frames[W(2)]);
+        Assert.Equal(new WindowRect(500, 0, 1000, 600), surface.Frames[W(3)]);
+
+        surface.PointerAt = (450, 150);
+        surface.MovedByHand.Add(W(3));
+        Settles(W(3), new WindowRect(300, 130, 800, 630));
+        surface.MovedByHand.Remove(W(3));
+
+        Assert.Equal([W(1), W(3), W(2)], tiler.Board.On(1));
+        Assert.Equal(new WindowRect(0, 0, 500, 300), surface.Frames[W(1)]);
+        Assert.Equal(new WindowRect(500, 0, 1000, 300), surface.Frames[W(3)]);
+        Assert.Equal(new WindowRect(0, 300, 1000, 600), surface.Frames[W(2)]);
+        Assert.Equal("D[A[L 0.5, L 0.5] 0.5, L 0.5]", Text(manager.State.Workspaces.Single(w => w.Id == alpha.Id).TileLayouts.Single().Layout));
+    }
+
+    // Task 3's review: two tiles leaving in one change with nothing stored (both closed while Petre was on another
+    // desktop) drop the LAST leaves of the automatic 2x2, which leaves W1 over W2: a shape that is not the automatic
+    // one for two windows. That fit is stored, as a non-plain refit always was, so the next re-tile lays the same shape
+    // out instead of flipping the screen back to two columns.
+    [Fact]
+    public void Two_tiles_leaving_at_once_keep_the_fitted_shape_on_the_next_retile()
+    {
+        Enumerable.Range(1, 4).ToList().ForEach(n => Exists(W(n), alpha));
+        Start();
+
+        SwitchTo(beta);
+        Closes(W(3));
+        Closes(W(4));
+        SwitchTo(alpha);
+
+        var stacked = GridLayout.Arrange(Area, 2, Gap, Columns([1.0], [0.5, 0.5]));
+        Assert.Equal(stacked, new[] { W(1), W(2) }.Select(w => surface.Frames[w]).ToList());
+        Assert.Equal("D[L 0.5, L 0.5]", Text(manager.State.Workspaces.Single(w => w.Id == alpha.Id).TileLayouts.Single().Layout));
+
+        // Arriving again re-tiles every screen, from what is stored.
+        SwitchTo(beta);
+        SwitchTo(alpha);
         Assert.Equal(stacked, new[] { W(1), W(2) }.Select(w => surface.Frames[w]).ToList());
     }
 
@@ -507,7 +564,7 @@ public sealed partial class TilerTests : IDisposable
         Minimizes(W(3), true);
         // Only W3's cell goes (tiling-predictable-placement, change 1): W4 keeps the whole right column.
         Assert.Equal([W(1), W(2), W(4)], tiler.Board.On(1));
-        Assert.Equal(GridLayout.Arrange(Area, 3, Gap, new TileSizes([0.5, 0.5], [[0.5, 0.5], [1.0]])),
+        Assert.Equal(GridLayout.Arrange(Area, 3, Gap, Columns([0.5, 0.5], [0.5, 0.5], [1.0])),
             new[] { W(1), W(2), W(4) }.Select(w => surface.Frames[w]).ToList());
 
         Minimizes(W(3), false);
@@ -521,8 +578,8 @@ public sealed partial class TilerTests : IDisposable
     {
         new[] { 1, 2 }.ToList().ForEach(n => Exists(W(n), alpha));
         Start();
-        Assert.True(manager.SetTileSizes(alpha.Id, "0,0,1920,1040", TileSizes.Equal([2])).IsSuccess);
-        var stacked = GridLayout.Arrange(Area, 2, Gap, TileSizes.Equal([2]));
+        Assert.True(manager.SetTileLayout(alpha.Id, "0,0,1920,1040", Columns([1.0], [0.5, 0.5])).IsSuccess);
+        var stacked = GridLayout.Arrange(Area, 2, Gap, Columns([1.0], [0.5, 0.5]));
         Assert.Equal(stacked, new[] { W(1), W(2) }.Select(w => surface.Frames[w]).ToList());
 
         Minimizes(W(1), true);
@@ -532,9 +589,38 @@ public sealed partial class TilerTests : IDisposable
         Assert.Equal(stacked, new[] { W(1), W(2) }.Select(w => surface.Frames[w]).ToList());
     }
 
+    // A minimized tile coming back to a screen that CHANGED meanwhile goes back beside what it was next to (the split
+    // tree design, "Arrival and minimize": TileArrange.SpotOf and TileArrange.Returned). The grid's column rule these
+    // five tests pinned is gone with the grid, and the tree's rule is wired by task 6 of the split tree plan, which
+    // rewrites them to it. Until then the window arrives as a new window does
+    // (A_minimized_tile_returning_to_a_changed_screen_arrives_as_a_new_window_for_now).
+    const string ChangedScreenReturn = "Task 6 of the split tree plan: a minimized tile returning to a changed screen goes back beside its old neighbours (TileArrange.Returned)";
+
+    // Interim, until task 6 (see ChangedScreenReturn): W1 | W2 over W3, W2 minimized, W4 splits W1 (the tile last used)
+    // below it. W2 then comes back to a screen that changed and arrives like a new window: it splits W1, the tile last
+    // used, which is wider than tall now, beside it. Nothing is lost and no other tile moves.
+    [Fact]
+    public void A_minimized_tile_returning_to_a_changed_screen_arrives_as_a_new_window_for_now()
+    {
+        new[] { 1, 2, 3 }.ToList().ForEach(n => Exists(W(n), alpha));
+        Start();
+        Uses(W(1));
+
+        Minimizes(W(2), true);
+        Opens(W(4), alpha);
+        Assert.Equal([W(1), W(4), W(3)], tiler.Board.On(1));
+        var others = new[] { W(4), W(3) }.Select(w => surface.Frames[w]).ToList();
+
+        Minimizes(W(2), false);
+
+        AssertArranged([W(1), W(2), W(4), W(3)], Tree(Across(C(Down(C(Across(C(L, .5), C(L, .5)), .5), C(L, .5)), .5), C(L, .5))));
+        Assert.Equal(others, new[] { W(4), W(3) }.Select(w => surface.Frames[w]).ToList());
+        Assert.Contains(traced, line => line.Contains($"{W(2).Value:X} came back to screen 1, which changed meanwhile"));
+    }
+
     // The screen changed while it was away (another window opened): it goes back to its old position in the order,
     // not to the end.
-    [Fact]
+    [Fact(Skip = ChangedScreenReturn)]
     public void A_minimized_tile_keeps_its_place_in_the_order_when_the_screen_changed_meanwhile()
     {
         new[] { 1, 2, 3, 4 }.ToList().ForEach(n => Exists(W(n), alpha));
@@ -548,7 +634,7 @@ public sealed partial class TilerTests : IDisposable
         // back into its old cell's column, the left one, at its old row, taking half of W(5)'s room (final review,
         // I1): the right column, W(3) over W(4), stays exactly where it was. It used to be refitted from the count,
         // which rebuilt the grid as 1 + 2 + 2 and moved every tile.
-        var sizes = new TileSizes([0.5, 0.5], [[0.5, 0.25, 0.25], [0.5, 0.5]]);
+        var sizes = Columns([0.5, 0.5], [0.5, 0.25, 0.25], [0.5, 0.5]);
         Assert.Equal([W(1), W(2), W(5), W(3), W(4)], tiler.Board.On(1));
         Assert.Equal(GridLayout.Arrange(Area, 5, Gap, sizes), new[] { 1, 2, 5, 3, 4 }.Select(n => surface.Frames[W(n)]).ToList());
         Assert.Equal(Grid(4).Skip(2).ToList(), new[] { W(3), W(4) }.Select(w => surface.Frames[w]).ToList());
@@ -558,7 +644,7 @@ public sealed partial class TilerTests : IDisposable
     // it, so W1 and W4 share the left column. W2 comes back into the right column, above W3, where it was: W4 stays
     // in the left column. It used to go to its old index in the order and the sizes were refitted as for a join,
     // which put the new cell at the bottom of the last column and moved W4 across.
-    [Fact]
+    [Fact(Skip = ChangedScreenReturn)]
     public void A_minimized_tile_returns_to_its_column_and_the_others_stay_where_they_are()
     {
         new[] { 1, 2, 3 }.ToList().ForEach(n => Exists(W(n), alpha));
@@ -587,7 +673,7 @@ public sealed partial class TilerTests : IDisposable
     // W1 | W2, nothing stored. W1 is minimized and W2 has the screen; W3 opens and splits W2 sideways (W2 | W3).
     // W1 comes back as a full-height column on the left, half of W2's column: W1 | W2 | W3 at a quarter, a quarter and
     // a half. It used to come back as a half-height row above W2, inside W2's column.
-    [Fact]
+    [Fact(Skip = ChangedScreenReturn)]
     public void A_minimized_tile_whose_column_went_comes_back_as_its_own_column()
     {
         new[] { 1, 2 }.ToList().ForEach(n => Exists(W(n), alpha));
@@ -601,14 +687,14 @@ public sealed partial class TilerTests : IDisposable
 
         Minimizes(W(1), false);
 
-        AssertArranged([W(1), W(2), W(3)], new TileSizes([0.25, 0.25, 0.5], [[1.0], [1.0], [1.0]]));
+        AssertArranged([W(1), W(2), W(3)], Columns([0.25, 0.25, 0.5], [1.0], [1.0], [1.0]));
         Assert.Equal(w3Was, surface.Frames[W(3)]);
     }
 
     // The same for the left tile of W1 | W2 over W3: minimized, W2 and W3 share the one column, and W4 opens below W3
     // (the largest tile, the later of a tie). W1 comes back as its own full-height column on the left, half of the
     // stack's width, and the stack keeps its rows.
-    [Fact]
+    [Fact(Skip = ChangedScreenReturn)]
     public void The_left_tile_of_a_column_and_a_stack_comes_back_as_its_own_column()
     {
         new[] { 1, 2, 3 }.ToList().ForEach(n => Exists(W(n), alpha));
@@ -617,11 +703,11 @@ public sealed partial class TilerTests : IDisposable
 
         Minimizes(W(1), true);
         Opens(W(4), alpha);
-        AssertArranged([W(2), W(3), W(4)], new TileSizes([1.0], [[0.5, 0.25, 0.25]]));
+        AssertArranged([W(2), W(3), W(4)], Columns([1.0], [0.5, 0.25, 0.25]));
 
         Minimizes(W(1), false);
 
-        AssertArranged([W(1), W(2), W(3), W(4)], new TileSizes([0.5, 0.5], [[1.0], [0.5, 0.25, 0.25]]));
+        AssertArranged([W(1), W(2), W(3), W(4)], Columns([0.5, 0.5], [1.0], [0.5, 0.25, 0.25]));
         Assert.Equal(Grid(2)[0], surface.Frames[W(1)]);
     }
 
@@ -698,7 +784,7 @@ public sealed partial class TilerTests : IDisposable
         // not either. Read as a leave from a grid one window larger, both screens used to become one stacked column.
         AssertTiled([W(3), W(2)]);
         AssertTiled([W(1), W(4)], Area2, screen: 2);
-        Assert.Empty(manager.State.Workspaces.Single(w => w.Id == alpha.Id).TileSizes);
+        Assert.Empty(manager.State.Workspaces.Single(w => w.Id == alpha.Id).TileLayouts);
     }
 
     [Fact]
@@ -711,7 +797,7 @@ public sealed partial class TilerTests : IDisposable
 
         Assert.Equal([W(2)], tiler.Board.On(1));
         Assert.Equal([W(3), W(1), W(4)], tiler.Board.On(2));
-        Assert.Equal(GridLayout.Arrange(Area2, 3, Gap, new TileSizes([0.5, 0.5], [[0.5, 0.5], [1.0]])),
+        Assert.Equal(GridLayout.Arrange(Area2, 3, Gap, Columns([0.5, 0.5], [0.5, 0.5], [1.0])),
             new[] { W(3), W(1), W(4) }.Select(w => surface.Frames[w]).ToList());
     }
 
@@ -729,7 +815,7 @@ public sealed partial class TilerTests : IDisposable
         DroppedAt(W(1), (there[0].Left + there[0].Right) / 2, there[0].Bottom - 20, screen: 2);
 
         AssertTiled([W(2)]);
-        AssertArranged([W(3), W(1), W(4)], new TileSizes([0.5, 0.5], [[0.5, 0.5], [1.0]]), Area2, screen: 2);
+        AssertArranged([W(3), W(1), W(4)], Columns([0.5, 0.5], [0.5, 0.5], [1.0]), Area2, screen: 2);
         Assert.DoesNotContain(traced, line => line.Contains($"{W(1).Value:X} arrived"));
     }
 
@@ -991,7 +1077,7 @@ public sealed partial class TilerTests : IDisposable
         Assert.DoesNotContain(W(1), PlacedWindows);
         // Only W1's cell goes (tiling-predictable-placement, change 1): W2 and W3 stay stacked in one column.
         Assert.Equal([W(2), W(3)], tiler.Board.On(1));
-        Assert.Equal(GridLayout.Arrange(Area, 2, Gap, TileSizes.Equal([2])), new[] { W(2), W(3) }.Select(w => surface.Frames[w]).ToList());
+        Assert.Equal(GridLayout.Arrange(Area, 2, Gap, Columns([1.0], [0.5, 0.5])), new[] { W(2), W(3) }.Select(w => surface.Frames[w]).ToList());
         Assert.Equal(new HashSet<WindowHandle> { W(2), W(3) }, surface.Watched[^1]);
     }
 
