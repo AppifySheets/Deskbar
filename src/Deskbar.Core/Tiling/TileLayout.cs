@@ -98,13 +98,138 @@ public sealed record TileLayout(TileNode Root)
     // The leaf's share of the INNER area on each axis: the product of the shares of the Across splits (width) and of
     // the Down splits (height) on its path. TileArrival's floor and largest-tile rules read these where they read
     // Columns[c] and Rows[c][r] today.
+    // A leaf index outside 0..Count-1 is a caller bug and throws, rather than answering a made-up share.
     public (double Width, double Height) ShareOf(int leaf) =>
-        SharesAlong(Root, leaf) ?? (1.0, 1.0);
+        InRange(leaf) ? SharesAlong(Root, leaf) : throw OutOfRange(leaf);
+
+    // ---- edits -----------------------------------------------------------------------------------------------
+
+    // Takes leaf number `leaf` out (a window left, or is being lifted for a drop). Its share goes to its siblings in
+    // proportion, so the others keep their relative sizes. A split left with one child is replaced by it (Normal), and
+    // that can cascade into the grandparent's axis and merge. The opening follows: removing the opening clears it, one
+    // above the removed leaf moves down one. Removing the only leaf leaves a lone leaf.
+    public TileLayout Remove(int leaf) =>
+        InRange(leaf)
+            ? Normal(RemoveLeaf(Root, leaf) ?? TileLeaf.Instance, Opening switch
+            {
+                { } open when open == leaf => null,
+                { } open when open > leaf => open - 1,
+                var open => open
+            })
+            : throw OutOfRange(leaf);
+
+    // Drops a NEW leaf on `side` of leaf `target` and returns the layout with the new leaf's index.
+    //   - The target's parent splits along the side's axis: the new leaf becomes the target's sibling on that side
+    //     and takes `share` of the TARGET's share (the target keeps the rest, the other siblings do not change).
+    //   - Otherwise the target becomes a split of that axis holding target (1 - share) and new (share), in side order.
+    // Both are one operation: replace the target by a two-child split along the axis and let Normal merge it into a
+    // parent of the same axis, which scales the two by the target's old share. So there is no separate "sibling" code.
+    // A lone-leaf root is the second case. Side is a screen side; Middle is not (it means "swap", and the caller
+    // handles that before it gets here).
+    public (TileLayout Layout, int Leaf) Insert(int target, TileArrange.Zone side, double share = 0.5)
+    {
+        if (!InRange(target)) throw OutOfRange(target);
+        RequireSide(side);
+        var leaf = side is TileArrange.Zone.Left or TileArrange.Zone.Top ? target : target + 1;
+        return (Normal(MapLeaf(Root, target, old => SplitNode(old, TileLeaf.Instance, side, share)), OpeningAfterInsert(leaf)), leaf);
+    }
+
+    // The screen-edge band: a new leaf along a whole side of the layout.
+    //   - The root splits along the side's axis: the new leaf is the first (Left/Top) or last (Right/Bottom) child and
+    //     takes half of the OUTER child's share, so Across[.5,.5] + Right is [.5,.25,.25] and nothing else moves.
+    //   - Otherwise the root is wrapped: a split of that axis holding the old root and the new leaf, 0.5 each.
+    public (TileLayout Layout, int Leaf) InsertAtEdge(TileArrange.Zone side)
+    {
+        RequireSide(side);
+        var first = side is TileArrange.Zone.Left or TileArrange.Zone.Top;
+        var leaf = first ? 0 : Count;
+        var root = Root is TileBranch b && b.Axis == AxisOf(side)
+            // Split just the outer child; Normal merges the pair into the root, so they share the outer child's share.
+            ? b with
+            {
+                Children = b.Children
+                    .Select((c, i) => i == (first ? 0 : b.Children.Count - 1)
+                        ? new TileChild(SplitNode(c.Node, TileLeaf.Instance, side, 0.5), c.Share)
+                        : c)
+                    .ToValueList()
+            }
+            : SplitNode(Root, TileLeaf.Instance, side, 0.5);
+        return (Normal(root, OpeningAfterInsert(leaf)), leaf);
+    }
 
     // ---- internals -------------------------------------------------------------------------------------------
 
     static TileNode Split(Axis axis, IReadOnlyList<TileNode> nodes) =>
         new TileBranch(axis, nodes.Select(n => new TileChild(n, 1.0 / nodes.Count)).ToValueList());
+
+    bool InRange(int leaf) => leaf >= 0 && leaf < Count;
+
+    static ArgumentOutOfRangeException OutOfRange(int leaf) =>
+        new(nameof(leaf), leaf, "There is no such leaf in this layout.");
+
+    // An insert at index i pushes an opening at i or above up one.
+    int? OpeningAfterInsert(int leaf) => Opening is { } open && open >= leaf ? open + 1 : Opening;
+
+    static void RequireSide(TileArrange.Zone side)
+    {
+        if (side == TileArrange.Zone.Middle)
+            throw new ArgumentException("Middle is not a side; only Left, Right, Top and Bottom place a new leaf.", nameof(side));
+    }
+
+    // Left and Right put tiles side by side; Top and Bottom stack them.
+    static Axis AxisOf(TileArrange.Zone side) =>
+        side is TileArrange.Zone.Left or TileArrange.Zone.Right ? Axis.Across : Axis.Down;
+
+    // Split THIS NODE on `side`: a two-child split along the side's axis holding `node` (1 - share) and `added`
+    // (share), in side order (Left/Top puts `added` first). Works on a leaf or a whole subtree: a leaver coming back
+    // as a subtree needs the same operation. The result is not normal until a caller passes it through Normal.
+    static TileNode SplitNode(TileNode node, TileNode added, TileArrange.Zone side, double share) =>
+        new TileBranch(AxisOf(side),
+            (side is TileArrange.Zone.Left or TileArrange.Zone.Top
+                ? new[] { new TileChild(added, share), new TileChild(node, 1 - share) }
+                : [new TileChild(node, 1 - share), new TileChild(added, share)])
+            .ToValueList());
+
+    // The child of `b` holding leaf number `leaf` (counted inside b) and how many leaves come before that child.
+    static (int Index, int Before) ChildHolding(TileBranch b, int leaf)
+    {
+        var counts = b.Children.Select(c => LeafCount(c.Node)).ToList();
+        var index = Enumerable.Range(0, counts.Count).First(i => leaf < counts.Take(i + 1).Sum());
+        return (index, counts.Take(index).Sum());
+    }
+
+    // The tree with leaf number `leaf` replaced by f(leaf node); shares along the way are untouched.
+    static TileNode MapLeaf(TileNode node, int leaf, Func<TileNode, TileNode> f)
+    {
+        if (node is not TileBranch b) return f(node);
+        var (index, before) = ChildHolding(b, leaf);
+        return b with
+        {
+            Children = b.Children
+                .Select((c, i) => i == index ? new TileChild(MapLeaf(c.Node, leaf - before, f), c.Share) : c)
+                .ToValueList()
+        };
+    }
+
+    // The tree without leaf number `leaf`, or null when that leaf was the whole node. When a child vanishes the
+    // others are rescaled to sum to 1 again, which is "its share goes to its siblings in proportion".
+    static TileNode? RemoveLeaf(TileNode node, int leaf)
+    {
+        if (node is not TileBranch b) return null;
+        var (index, before) = ChildHolding(b, leaf);
+        var inner = RemoveLeaf(b.Children[index].Node, leaf - before);
+        var kept = b.Children
+            .Select((c, i) => i == index ? (inner is null ? null : new TileChild(inner, c.Share)) : c)
+            .OfType<TileChild>()
+            .ToList();
+        if (kept.Count == 0) return null;
+        // Only a vanished child changes the sum; otherwise leave every share exactly as it was.
+        var total = kept.Sum(c => c.Share);
+        return b with
+        {
+            Children = (inner is null ? kept.Select(c => c with { Share = c.Share / total }) : kept).ToValueList()
+        };
+    }
 
     static int LeafCount(TileNode node) =>
         node is TileBranch b ? b.Children.Sum(c => LeafCount(c.Node)) : 1;
@@ -150,24 +275,16 @@ public sealed record TileLayout(TileNode Root)
                 var many => new TileBranch(branch.Axis, many.ToValueList())
             };
 
-    // Width and height shares of leaf number `leaf` inside `node`, or null when it is not in there.
-    static (double Width, double Height)? SharesAlong(TileNode node, int leaf)
+    // Width and height shares of leaf number `leaf` inside `node`. An index that is not in there throws, never (1,1).
+    static (double Width, double Height) SharesAlong(TileNode node, int leaf)
     {
         if (node is not TileBranch b)
-            return leaf == 0 ? (1.0, 1.0) : null;
+            return leaf == 0 ? (1.0, 1.0) : throw OutOfRange(leaf);
 
-        // Walk the children with the count of leaves before each, and descend into the one holding `leaf`.
-        var before = 0;
-        foreach (var child in b.Children)
-        {
-            var n = LeafCount(child.Node);
-            if (leaf < before + n)
-            {
-                var (w, h) = SharesAlong(child.Node, leaf - before) ?? (1.0, 1.0);
-                return b.Axis == Axis.Across ? (w * child.Share, h) : (w, h * child.Share);
-            }
-            before += n;
-        }
-        return null;
+        // Descend into the child holding `leaf`.
+        var (index, before) = ChildHolding(b, leaf);
+        var child = b.Children[index];
+        var (w, h) = SharesAlong(child.Node, leaf - before);
+        return b.Axis == Axis.Across ? (w * child.Share, h) : (w, h * child.Share);
     }
 }
