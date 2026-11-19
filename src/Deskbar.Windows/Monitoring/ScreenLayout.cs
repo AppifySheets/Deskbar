@@ -153,6 +153,21 @@ public sealed class ScreenLayout : IScreenLayout
             : Result.Failure("Windows would not move that window.");
     }
 
+    // Whether the shell decides this window's size: maximized (IsZoomed) or snapped (IsWindowArranged, which covers
+    // Snap layouts, Win+arrow and Win+Shift+Up, and for which IsZoomed is false). Such a window is not "restored" in
+    // Microsoft's own sense, and code that moves restored windows must leave it alone: moving a snapped window
+    // [0,0,1920,2112] down to [0,48,1920,2160] breaks the snap and puts its bottom under the taskbar (task 9 review).
+    public static bool IsShellArranged(WindowHandle window) =>
+        IsZoomed(window.Value) || NativeMethods.IsWindowArranged(window.Value);
+
+    // See IScreenLayout.Nudge. SWP_NOZORDER is the whole difference from MoveTo: the window keeps its place in the
+    // stack, so a window moved off a new strip's band does not jump in front of the one being worked in (task 9 review).
+    // SWP_NOACTIVATE as well, so focus stays where it is.
+    public Result Nudge(WindowHandle window, WindowRect rect) =>
+        SetWindowPos(window.Value, 0, rect.Left, rect.Top, rect.Width, rect.Height, SWP_NOZORDER | SWP_NOACTIVATE)
+            ? Result.Success()
+            : Result.Failure("Windows would not move that window.");
+
     // The minimized case: read the placement, replace rcNormalPosition, write it back. showCmd travels
     // unchanged, so the window is exactly as minimized afterwards as it was before.
     static Result MoveRestoreRect(WindowHandle window, WindowRect rect)

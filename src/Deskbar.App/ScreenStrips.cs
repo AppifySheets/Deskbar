@@ -30,8 +30,8 @@ namespace Deskbar.App;
 //   ignore            WindowMonitor.Ignore, before the strip's first show
 //   pinToAllDesktops  the virtual-desktop pin, after the first show; its Result decides whether it is tried again
 //   windows           the windows the bar knows about, without Deskbar's own: the ones a new strip may move off its band
-//   layout            where those windows are, which are minimized and which are on the desktop in view, and the move
-//   maximized         IsZoomed: a maximized window is the shell's to resize, never moved here
+//   layout            where those windows are, which are minimized, and the quiet move (Nudge: no raise, no show state)
+//   shellArranged     maximized or snapped (ScreenLayout.IsShellArranged): the shell sizes those, never moved here
 //
 // Not gated on the bar's visibility anywhere: the strips stay while the bar is minimized (spec, "What it does"), and
 // a strip that left with the bar would move every screen's work area twice.
@@ -44,7 +44,7 @@ public sealed class ScreenStrips
     readonly Func<nint, Result> pinToAllDesktops;
     readonly Func<IReadOnlyList<WindowHandle>> windows;
     readonly IScreenLayout layout;
-    readonly Func<WindowHandle, bool> maximized;
+    readonly Func<WindowHandle, bool> shellArranged;
 
     // Raised after a reconcile that added or removed a strip, so App can ask the bar to rebuild: a new strip is empty
     // until the bar's next rebuild hands it its tabs. Not raised by a reconcile that changed nothing, which is most of
@@ -87,7 +87,7 @@ public sealed class ScreenStrips
 
     public ScreenStrips(Func<bool> wanted, Func<IReadOnlyList<MonitorBounds>> screens, Func<MonitorBounds, ScreenStrip> create,
         Action<nint> ignore, Func<nint, Result> pinToAllDesktops,
-        Func<IReadOnlyList<WindowHandle>> windows, IScreenLayout layout, Func<WindowHandle, bool> maximized)
+        Func<IReadOnlyList<WindowHandle>> windows, IScreenLayout layout, Func<WindowHandle, bool> shellArranged)
     {
         this.wanted = wanted;
         this.screens = screens;
@@ -96,7 +96,7 @@ public sealed class ScreenStrips
         this.pinToAllDesktops = pinToAllDesktops;
         this.windows = windows;
         this.layout = layout;
-        this.maximized = maximized;
+        this.shellArranged = shellArranged;
     }
 
     // The strips there are now, one per screen, in no particular order (the bar puts them in reading order itself).
@@ -185,12 +185,17 @@ public sealed class ScreenStrips
     // the strip is created. Never again for that strip: after this, a window under it was put there by hand, and
     // moving it back every tick would fight the person dragging it.
     //
-    // Which windows: the ones the bar knows (`windows`, Deskbar's own left out), and of those only the ones in the
-    // layout snapshot's z-order, which is the desktop in view (it comes from an EnumWindows that skips cloaked windows,
-    // and every window on another virtual desktop is cloaked). A move is only meaningful there, and only there does
-    // the snapshot say which are minimized: a minimized window's rectangle is -32000 nonsense (CLAUDE.md, traps). A
-    // maximized one is skipped too, the shell having resized it already; and every move is made with
-    // mayChangeShowState false, so nothing is restored or maximized on the way.
+    // Which windows: the ones the bar knows (`windows`, Deskbar's own left out) that the layout snapshot lists, because
+    // the snapshot is what says which are minimized, and a minimized window's rectangle is -32000 nonsense (CLAUDE.md,
+    // traps). The snapshot lists windows on EVERY virtual desktop, not only the one in view: TopLevelWindows keeps
+    // shell-cloaked windows on purpose, and a window on another desktop is shell-cloaked. So those are moved too, which
+    // is right, the band being reserved on every desktop. A window the shell sizes itself, maximized or snapped
+    // (`shellArranged`), is skipped: the shell resized a maximized one already, and moving a snapped one would break
+    // the snap and push its bottom off the work area.
+    //
+    // HOW: with IScreenLayout.Nudge, never MoveTo. MoveTo raises the window to the front, which is right for the
+    // drag-to-screen gesture and wrong for a move nobody asked for: every window shifted here would jump in front of
+    // the one being worked in (task 9 review). Nudge keeps the z-order, the focus and the show state.
     //
     // How far down: to the bottom of the band the shell actually GRANTED, measured from the screen's top. Not a height
     // recomputed from a DPI here, and not the grant's height alone: a taskbar on the top edge would make the shell grant
@@ -205,12 +210,12 @@ public sealed class ScreenStrips
             var stripPx = band.B - strip.Screen.Top;
             var facts = layout.Snapshot();
             windows()
-                .Where(window => facts.ZOrder.ContainsKey(window) && !facts.Minimized.Contains(window) && !maximized(window))
+                .Where(window => facts.ZOrder.ContainsKey(window) && !facts.Minimized.Contains(window) && !shellArranged(window))
                 .SelectMany(window => layout.RectOf(window).GetValueOrDefault() is { } from && StripPlan.Clear(from, strip.Screen, stripPx) is { } to
                     ? [(Window: window, From: from, To: to)]
                     : Array.Empty<(WindowHandle Window, WindowRect From, WindowRect To)>())
                 .ToList()
-                .ForEach(move => layout.MoveTo(move.Window, move.To, mayChangeShowState: false)
+                .ForEach(move => layout.Nudge(move.Window, move.To)
                     .Tap(() => ClickTrace.Write(
                         $"strip on {strip.Screen.Left},{strip.Screen.Top}: moved {move.Window.Value:X} from {move.From.Left},{move.From.Top} to {move.To.Left},{move.To.Top}, off the band"))
                     .TapError(error => ClickTrace.Write(

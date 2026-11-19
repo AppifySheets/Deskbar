@@ -42,10 +42,11 @@ public class ScreenStripsTests
         // The strip set's clock, stepped by the test to cross the pin's retry interval without waiting for it.
         public DateTime Now { get; set; } = new(2026, 11, 19, 12, 0, 0, DateTimeKind.Utc);
 
-        // The windows the bar knows about (made up, never real handles), where each one is, and which are maximized.
-        // A move is logged as "move <name> to <left>,<top> to <right>,<bottom> showState=<mayChangeShowState>".
+        // The windows the bar knows about (made up, never real handles), where each one is, and which the shell has
+        // arranged (maximized or snapped). The strip set's quiet move is logged as "nudge <name> to <left>,<top> to
+        // <right>,<bottom>"; a MoveTo, which raises the window to the front, as "move ...", and none should ever appear.
         public List<WindowHandle> Windows { get; } = [];
-        public HashSet<WindowHandle> Maximized { get; } = [];
+        public HashSet<WindowHandle> Arranged { get; } = [];
         public FakeLayout Layout { get; }
 
         public Rig()
@@ -59,7 +60,7 @@ public class ScreenStripsTests
                 pinToAllDesktops: Pin,
                 windows: () => Windows,
                 layout: Layout,
-                maximized: Maximized.Contains)
+                shellArranged: Arranged.Contains)
             {
                 Clock = () => Now,
             };
@@ -75,7 +76,7 @@ public class ScreenStripsTests
             return window;
         }
 
-        public IReadOnlyList<string> Moves => Log.Where(line => line.StartsWith("move ")).ToList();
+        public IReadOnlyList<string> Moves => Log.Where(line => line.StartsWith("nudge ") || line.StartsWith("move ")).ToList();
 
         Result Pin(nint hwnd)
         {
@@ -107,26 +108,36 @@ public class ScreenStripsTests
             screen == Left ? "left" : screen == Middle ? "middle" : screen == Right ? "right" : "other";
     }
 
-    // The screen layout, faked: each window's rectangle, which are minimized, which are on another virtual desktop
-    // (absent from the snapshot's z-order, as a cloaked window is from the real one), and which refuse to move. A move
-    // that works updates the rectangle, as the real one would.
+    // The screen layout, faked: each window's rectangle, which are minimized, which are no longer in the snapshot (a
+    // window the bar still knows that has stopped being listed, so the snapshot cannot say whether it is minimized), and
+    // which refuse to move. Windows on other virtual desktops ARE in the real snapshot (TopLevelWindows keeps
+    // shell-cloaked windows on purpose), so the fake has no separate notion of them. A move that works updates the
+    // rectangle, as the real one would.
     sealed class FakeLayout(List<string> log) : IScreenLayout
     {
         public Dictionary<WindowHandle, string> Names { get; } = [];
         public Dictionary<WindowHandle, WindowRect> Rects { get; } = [];
         public HashSet<WindowHandle> Minimized { get; } = [];
-        public HashSet<WindowHandle> OnAnotherDesktop { get; } = [];
+        public HashSet<WindowHandle> Unlisted { get; } = [];
         public HashSet<WindowHandle> Refusing { get; } = [];
 
         public ScreenFacts Snapshot() =>
             new(new Dictionary<WindowHandle, int>(), Minimized.ToHashSet(),
-                Rects.Keys.Where(w => !OnAnotherDesktop.Contains(w)).Select((w, i) => (w, i)).ToDictionary(x => x.w, x => x.i));
+                Rects.Keys.Where(w => !Unlisted.Contains(w)).Select((w, i) => (w, i)).ToDictionary(x => x.w, x => x.i));
 
         public Maybe<WindowRect> RectOf(WindowHandle window) => Rects.TryGetValue(window, out var rect) ? rect : Maybe<WindowRect>.None;
 
         public Result MoveTo(WindowHandle window, WindowRect rect, bool mayChangeShowState)
         {
             log.Add($"move {Names[window]} to {rect.Left},{rect.Top} to {rect.Right},{rect.Bottom} showState={mayChangeShowState}");
+            if (Refusing.Contains(window)) return Result.Failure("Windows would not move that window.");
+            Rects[window] = rect;
+            return Result.Success();
+        }
+
+        public Result Nudge(WindowHandle window, WindowRect rect)
+        {
+            log.Add($"nudge {Names[window]} to {rect.Left},{rect.Top} to {rect.Right},{rect.Bottom}");
             if (Refusing.Contains(window)) return Result.Failure("Windows would not move that window.");
             Rects[window] = rect;
             return Result.Success();
@@ -344,10 +355,12 @@ public class ScreenStripsTests
     static WindowRect Under(MonitorBounds screen) => new(screen.Left + 100, screen.Top + 6, screen.Left + 500, screen.Top + 306);
 
     // The shell does not move a restored window whose title bar a new top bar covers (measured, probe notes section 1),
-    // so the set does, once, when it creates the strip: moved down to the strip's bottom edge, size kept, and never with
-    // a show-state change. Left alone: a window already below the strip, a minimized one (its rectangle is -32000
-    // nonsense), a maximized one (the shell resizes those itself), one on another virtual desktop, and one on a screen
-    // with no new strip. And once means once: a tick and a reconcile that changes nothing move nothing more.
+    // so the set does, once, when it creates the strip: moved down to the strip's bottom edge, size kept, with the quiet
+    // move (Nudge: no raise to the front, no show-state change), never MoveTo. A window on another virtual desktop is in
+    // the snapshot like any other and is moved too: the band is reserved on every desktop. Left alone: a window already
+    // below the strip, a minimized one (its rectangle is -32000 nonsense), a maximized or snapped one (the shell's to
+    // size), one the snapshot no longer lists, and one on a screen with no new strip. And once means once: a tick and a
+    // reconcile that changes nothing move nothing more.
     [Fact]
     public void A_new_strip_moves_restored_windows_under_it_once() => StaThread.Run(() =>
     {
@@ -355,19 +368,26 @@ public class ScreenStripsTests
         rig.Window("under", Under(Left));
         rig.Window("below", new WindowRect(Left.Left + 100, Left.Top + 100, Left.Left + 500, Left.Top + 400));
         rig.Layout.Minimized.Add(rig.Window("minimized", Under(Left)));
-        rig.Maximized.Add(rig.Window("maximized", new WindowRect(Left.Left - 8, Left.Top - 8, Left.Right + 8, Left.Bottom + 8)));
-        rig.Layout.OnAnotherDesktop.Add(rig.Window("elsewhere", Under(Left)));
+        rig.Arranged.Add(rig.Window("maximized", new WindowRect(Left.Left - 8, Left.Top - 8, Left.Right + 8, Left.Bottom + 8)));
+        // Snapped to the left half: not zoomed, its top at the screen's top, its bottom at the work area's.
+        rig.Arranged.Add(rig.Window("snapped", new WindowRect(Left.Left, Left.Top, Left.Left + 600, Left.Bottom - 48)));
+        rig.Layout.Unlisted.Add(rig.Window("unlisted", Under(Left)));
+        rig.Window("on another desktop", new WindowRect(Left.Left + 700, Left.Top + 20, Left.Left + 1100, Left.Top + 320));
         rig.Window("on middle", Under(Middle));
 
         rig.Set.Reconcile();
 
-        Assert.Equal(new[] { $"move under to {Left.Left + 100},{Left.Top + 48} to {Left.Left + 500},{Left.Top + 348} showState=False" }, rig.Moves);
+        Assert.Equal(new[]
+        {
+            $"nudge under to {Left.Left + 100},{Left.Top + 48} to {Left.Left + 500},{Left.Top + 348}",
+            $"nudge on another desktop to {Left.Left + 700},{Left.Top + 48} to {Left.Left + 1100},{Left.Top + 348}",
+        }, rig.Moves);
 
         // Put back under the strip by hand: the strip set has had its one go at it.
         rig.Layout.Rects[rig.Windows[0]] = Under(Left);
         rig.Set.Tick();
         rig.Set.Reconcile();
-        Assert.Single(rig.Moves);
+        Assert.Equal(2, rig.Moves.Count);
         rig.Set.RemoveAll();
     });
 
@@ -384,7 +404,7 @@ public class ScreenStripsTests
         rig.Screens = [Left, Middle];
         rig.Set.Reconcile();
 
-        Assert.Equal(new[] { $"move under middle to {Middle.Left + 100},{Middle.Top + 48} to {Middle.Left + 500},{Middle.Top + 348} showState=False" }, rig.Moves);
+        Assert.Equal(new[] { $"nudge under middle to {Middle.Left + 100},{Middle.Top + 48} to {Middle.Left + 500},{Middle.Top + 348}" }, rig.Moves);
         rig.Set.RemoveAll();
     });
 
@@ -439,7 +459,7 @@ public class ScreenStripsTests
             },
             windows: () => [],
             layout: new FakeLayout([]),
-            maximized: _ => false);
+            shellArranged: _ => false);
 
         set.Reconcile();
 

@@ -60,8 +60,8 @@ public static class StripPlan
     // the screen: shrinking a window is a bigger change than moving it, and 32 DIP off the bottom is far better than a
     // title bar nobody can reach.
     //
-    // Which windows to ask about at all (restored, not minimized, on the desktop in view) is the caller's: a minimized
-    // window's rectangle is the -32000 nonsense (CLAUDE.md, traps), and a maximized one is the shell's to resize.
+    // Which windows to ask about at all (restored: not minimized, maximized or snapped) is the caller's: a minimized
+    // window's rectangle is the -32000 nonsense (CLAUDE.md, traps), and a maximized or snapped one is the shell's to size.
     public static WindowRect? Clear(WindowRect window, MonitorBounds screen, int stripPx)
     {
         var line = screen.Top + stripPx;

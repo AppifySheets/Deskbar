@@ -1447,11 +1447,11 @@ public partial class App : Application
                 pinToAllDesktops: hwnd => desktops!.Pin(new WindowHandle(hwnd)),
                 // What a new strip moves down off its band (ScreenStrips.ClearUnder): the windows the bar knows, minus
                 // Deskbar's own (the bar and the strips are not in that list at all, being ignored, and Manage or the
-                // detached stats are the app's to place), with the real screen layout and IsZoomed for "maximized",
-                // which the shell resizes itself and must not be moved.
+                // detached stats are the app's to place), with the real screen layout, and ScreenLayout.IsShellArranged
+                // for the windows the shell sizes itself (maximized OR snapped), which must not be moved.
                 windows: () => manager.KnownWindows.Where(w => w.ProcessId != Environment.ProcessId).Select(w => w.Handle).ToList(),
                 layout: new ScreenLayout(),
-                maximized: window => NativeMethods.IsZoomed(window.Value));
+                shellArranged: ScreenLayout.IsShellArranged);
             screenStrips = stripSet;
             floatingBar = new FloatingBar(manager)
             {
