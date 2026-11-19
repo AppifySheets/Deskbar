@@ -22,7 +22,7 @@ workspace has the task, not individual windows.
 
 - Start a task with a timer of 1, 5, 10 or 30 minutes in two clicks from the bar, without leaving what he is doing.
 - See at a glance which workspaces are parked and how long until each comes back.
-- Be pulled back when a timer runs out: the row blinks, and a toast appears if the bar is out of sight.
+- Be pulled back when a timer runs out: the row blinks, and a due card appears if the bar is out of sight.
 - Keep one list that answers "what needs me next": due tasks, Claude sessions asking for him, running timers,
   then open tasks.
 - Edit tasks: rename, set or clear a timer, change or remove the workspace, mark done, delete.
@@ -125,11 +125,15 @@ the drawing code is shared.
 
 The blink and the orange stopwatch are the only signals while the bar is on screen; no sound (Petre agreed). When
 a timer comes due while the bar cannot be seen (minimized to its taskbar button, hidden, or stepped aside for a
-full-screen window), Deskbar also shows one Windows toast notification: the task's title and its workspace, and a
-click on it switches there. One toast per task coming due, never repeated. Deskbar has no notification code yet,
-so this is new infrastructure and belongs to the first pull request. An unpackaged app needs an AppUserModelID
-registered for its toasts to show (the direct copy's Start menu shortcut can carry it); the Store copy has one
-from its package. The builder measures this on the real machine before relying on it.
+full-screen window), Deskbar also shows a due card: a small topmost window of its own, bottom right of the
+primary screen's work area, that does not take the focus. It shows the task's title and its workspace; a click
+switches there and closes it, and it also closes once the task is answered any other way. One card per task
+coming due, never repeated, stacked if several come due together.
+
+A card rather than a Windows toast, changed after the design was agreed: Windows drops this app's toasts, measured
+in #123 (no AppUserModelID, so nothing to attribute a toast to), and giving the process one would regroup the
+bar's own windows on the taskbar, which `StartMenuShortcut` deliberately avoids. A card works the same in the
+direct copy and the Store copy.
 
 ## The task window (layout A, picked from the mockups)
 
