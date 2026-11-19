@@ -159,7 +159,9 @@ public partial class FloatingBar
         {
             Tag = StripTitleTag,
             Text = row.Window.DisplayName,
-            FontSize = Text(11),
+            // The titled list's own size, 9.5 through the text size setting. It started at 11, and Petre, looking at the
+            // first strips on his screens: "smaller font".
+            FontSize = Text(9.5),
             Foreground = TitleBrush(row),
             TextTrimming = TextTrimming.CharacterEllipsis,
             VerticalAlignment = VerticalAlignment.Center,
