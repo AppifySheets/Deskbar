@@ -509,7 +509,7 @@ public sealed class TilerResizeTests : IDisposable
     // The same with a window that closes for good: the entry stays exactly as the drag left it while one window is
     // left. The next window to open then splits the remaining tile, like any arrival.
     [Fact]
-    public void Closing_down_to_one_window_keeps_the_sizes_for_the_next()
+    public void Closing_down_to_one_window_keeps_the_sizes_while_one_is_left()
     {
         StartTwo();
         ResizedByHand(W(1), new WindowRect(8, 8, 1337, 1032));
@@ -646,8 +646,8 @@ public sealed class TilerResizeTests : IDisposable
         // W(4) is slot 2 of 1 + 2 + 2: column 1, row 1.
         Closes(W(4));
 
-        // Only W4's cell goes (tiling-predictable-placement, change 1): ThreeColumns is custom, so this was Fit
-        // before and is now RemoveCell, leaving 1 + 1 + 2.
+        // Only W4's cell goes (tiling-predictable-placement, change 1): ThreeColumns is the automatic 1 + 2 + 2 shape
+        // with uneven sizes, which was refitted from the count by Fit before and is now RemoveCell, leaving 1 + 1 + 2.
         Assert.Equal(TileArrange.RemoveCell(ThreeColumns, (1, 1)), Stored(Area2Key));
         var order = new[] { 2, 3, 5, 6 }.Select(W).ToList();
         Assert.Equal(GridLayout.Arrange(Area2, 4, Gap, Stored(Area2Key)), FramesOf(order));

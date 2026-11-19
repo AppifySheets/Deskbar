@@ -71,8 +71,13 @@ public sealed partial class Tiler
     // Known imprecision, accepted: the time tells only that the two happened together, not who caused the
     // activation. If the user clicks tile A and a tile closes or minimizes BY ITSELF within a quarter of a second,
     // A's activation is dropped too, and the target falls back to the window used before A.
+    //
+    // A leave with no event time (0, not from a WinEvent) matches nothing, so it changes nothing either: it must not
+    // overwrite the time of a real leave just before it, or that leave's hand-out activation would count as the user's
+    // (final review, M3).
     void NoteLeft(WindowHandle window, uint time)
     {
+        if (time == 0) return;
         leftAt = time;
         var dropped = used.Where(u => Near(u.Time, time)).ToList();
         used = used.Where(u => !Near(u.Time, time)).ToList();
@@ -160,7 +165,12 @@ public sealed partial class Tiler
         WindowHandle window, int number, Maybe<WindowHandle> lastUsed)
     {
         if (!screens.TryGetValue(number, out var screen))
+        {
+            // Every arrival decision leaves a trace line, this one too (final review, M2): the screen it was meant for
+            // is not reported (unplugged mid-evaluate), and the next evaluate re-homes it like the screen's others.
+            trace?.Invoke($"tile: {workspace.Name}: {window.Value:X} arrived on screen {number}, which is not reported, joined the end");
             return board.Join(number, window);
+        }
         var order = board.On(number);
         var sizes = ShownSizes(workspace, screen, order.Count);
         var slots = SlotsOf(screen, order, sizes);

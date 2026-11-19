@@ -1,3 +1,4 @@
+using System.Text.Json;
 using Deskbar.Core.Control;
 
 namespace Deskbar.Core.Tests.Control;
@@ -28,6 +29,8 @@ public class RemoteControlKeepSpaceTests
 
         Assert.Equal(ControlReply.Ok, reply.ExitCode);
         Assert.True(Keeps(manager));
+        // The reply shows the state the command left (final review, M5), as every workspace command's reply does.
+        Assert.True(JsonDocument.Parse(reply.Output).RootElement.GetProperty("keepsSpace").GetBoolean());
     }
 
     [Fact]
@@ -41,6 +44,7 @@ public class RemoteControlKeepSpaceTests
 
         Assert.Equal(ControlReply.Ok, reply.ExitCode);
         Assert.False(Keeps(manager));
+        Assert.False(JsonDocument.Parse(reply.Output).RootElement.GetProperty("keepsSpace").GetBoolean());
     }
 
     [Fact]

@@ -267,6 +267,15 @@ public sealed partial class Tiler(WorkspaceManager manager, IVirtualDesktopServi
     // end plus every move Moved never reports (keyboard snaps, AltSnap, an app resizing itself).
     void OnWindowEvent(WindowEvent e)
     {
+        // `closing` belongs to this one event (Tiler.Resize.cs). NoteLeavers clears it when the evaluate below reaches
+        // Keep; the finally clears it when it does not (a throw, or no board change at all), so a mark can never
+        // outlive its event and turn a later minimize of the same window into a close (final review, M4).
+        try { HandleWindowEvent(e); }
+        finally { closing.Clear(); }
+    }
+
+    void HandleWindowEvent(WindowEvent e)
+    {
         // A tile leaving its grid (it closed, went to the tray, or was minimized), noted with Windows' own time for
         // the event, while it is still on the board: Windows is about to activate whatever is next in z-order, and that
         // activation must not move the tile a new window splits (Tiler.Arrival.cs).

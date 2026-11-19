@@ -184,6 +184,10 @@ public sealed partial class RemoteControl(WorkspaceManager manager, Func<bool, R
             color = workspace.Color,
             folded = workspace.Folded,
             current = manager.CurrentWorkspaceId == workspaceId,
+            // Tiling's two per-workspace switches, so `keep-space` (and every other command) replies with the state it
+            // left them in, as the rest of this description does (final review, M5).
+            tiled = workspace.Tiled,
+            keepsSpace = workspace.TileKeepsSpace,
         };
     }
 
