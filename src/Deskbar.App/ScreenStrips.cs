@@ -3,6 +3,7 @@ using System.Reactive;
 using System.Reactive.Subjects;
 using System.Windows.Interop;
 using CSharpFunctionalExtensions;
+using Deskbar.Core.Abstractions;
 using Deskbar.Core.Domain;
 using Deskbar.Core.Geometry;
 
@@ -28,6 +29,9 @@ namespace Deskbar.App;
 //   create            a new strip for one screen, with its menu and drop wired to the bar
 //   ignore            WindowMonitor.Ignore, before the strip's first show
 //   pinToAllDesktops  the virtual-desktop pin, after the first show; its Result decides whether it is tried again
+//   windows           the windows the bar knows about, without Deskbar's own: the ones a new strip may move off its band
+//   layout            where those windows are, which are minimized and which are on the desktop in view, and the move
+//   maximized         IsZoomed: a maximized window is the shell's to resize, never moved here
 //
 // Not gated on the bar's visibility anywhere: the strips stay while the bar is minimized (spec, "What it does"), and
 // a strip that left with the bar would move every screen's work area twice.
@@ -38,6 +42,9 @@ public sealed class ScreenStrips
     readonly Func<MonitorBounds, ScreenStrip> create;
     readonly Action<nint> ignore;
     readonly Func<nint, Result> pinToAllDesktops;
+    readonly Func<IReadOnlyList<WindowHandle>> windows;
+    readonly IScreenLayout layout;
+    readonly Func<WindowHandle, bool> maximized;
 
     // Raised after a reconcile that added or removed a strip, so App can ask the bar to rebuild: a new strip is empty
     // until the bar's next rebuild hands it its tabs. Not raised by a reconcile that changed nothing, which is most of
@@ -79,13 +86,17 @@ public sealed class ScreenStrips
     bool removedForGood;
 
     public ScreenStrips(Func<bool> wanted, Func<IReadOnlyList<MonitorBounds>> screens, Func<MonitorBounds, ScreenStrip> create,
-        Action<nint> ignore, Func<nint, Result> pinToAllDesktops)
+        Action<nint> ignore, Func<nint, Result> pinToAllDesktops,
+        Func<IReadOnlyList<WindowHandle>> windows, IScreenLayout layout, Func<WindowHandle, bool> maximized)
     {
         this.wanted = wanted;
         this.screens = screens;
         this.create = create;
         this.ignore = ignore;
         this.pinToAllDesktops = pinToAllDesktops;
+        this.windows = windows;
+        this.layout = layout;
+        this.maximized = maximized;
     }
 
     // The strips there are now, one per screen, in no particular order (the bar puts them in reading order itself).
@@ -158,10 +169,53 @@ public sealed class ScreenStrips
         // A failed dock is not fatal and not retried here: the strip stays in the set, docked-but-waiting, and its own
         // guard (KeepStrip, on Tick) docks it once its screen can be read. Traced so a strip that never appeared can be
         // told from one that was never made.
-        strip.Dock().TapError(error => ClickTrace.Write($"strip dock on start: {error}"));
+        // A dock that worked takes a band some windows' title bars may now be under: those are moved down, here and only
+        // here, so once per created strip (see ClearUnder).
+        strip.Dock()
+            .Tap(() => ClearUnder(strip))
+            .TapError(error => ClickTrace.Write($"strip dock on start: {error}"));
         PinIfShown(strip);
         return strip;
     }
+
+    // THE WINDOWS UNDER A NEW STRIP. The shell resizes maximized windows to the new work area, but it leaves a restored
+    // window whose title bar the new band covers exactly where it was, and that title bar is the only handle to drag
+    // it by (measured: a window at [450,6,1350,456] stayed put under a 48 px top bar; probe notes 2026-11-19, section 1).
+    // So each such window is moved down to start at the strip's bottom edge (StripPlan.Clear has the rule), once, when
+    // the strip is created. Never again for that strip: after this, a window under it was put there by hand, and
+    // moving it back every tick would fight the person dragging it.
+    //
+    // Which windows: the ones the bar knows (`windows`, Deskbar's own left out), and of those only the ones in the
+    // layout snapshot's z-order, which is the desktop in view (it comes from an EnumWindows that skips cloaked windows,
+    // and every window on another virtual desktop is cloaked). A move is only meaningful there, and only there does
+    // the snapshot say which are minimized: a minimized window's rectangle is -32000 nonsense (CLAUDE.md, traps). A
+    // maximized one is skipped too, the shell having resized it already; and every move is made with
+    // mayChangeShowState false, so nothing is restored or maximized on the way.
+    //
+    // How far down: to the bottom of the band the shell actually GRANTED, measured from the screen's top. Not a height
+    // recomputed from a DPI here, and not the grant's height alone: a taskbar on the top edge would make the shell grant
+    // the band below it, and a window moved to "screen top + band height" would still be under the strip. No grant (the
+    // dock was refused, or granted nothing) moves nothing.
+    //
+    // A window that will not move (an elevated process, a handle that died since the snapshot) is traced and skipped;
+    // the rest still move. Each move is traced too, so "why did my window jump" has its answer in the log.
+    void ClearUnder(ScreenStrip strip) =>
+        strip.Granted.Tap(band =>
+        {
+            var stripPx = band.B - strip.Screen.Top;
+            var facts = layout.Snapshot();
+            windows()
+                .Where(window => facts.ZOrder.ContainsKey(window) && !facts.Minimized.Contains(window) && !maximized(window))
+                .SelectMany(window => layout.RectOf(window).GetValueOrDefault() is { } from && StripPlan.Clear(from, strip.Screen, stripPx) is { } to
+                    ? [(Window: window, From: from, To: to)]
+                    : Array.Empty<(WindowHandle Window, WindowRect From, WindowRect To)>())
+                .ToList()
+                .ForEach(move => layout.MoveTo(move.Window, move.To, mayChangeShowState: false)
+                    .Tap(() => ClickTrace.Write(
+                        $"strip on {strip.Screen.Left},{strip.Screen.Top}: moved {move.Window.Value:X} from {move.From.Left},{move.From.Top} to {move.To.Left},{move.To.Top}, off the band"))
+                    .TapError(error => ClickTrace.Write(
+                        $"strip on {strip.Screen.Left},{strip.Screen.Top}: could not move {move.Window.Value:X} off the band: {error}")));
+        });
 
     void Remove(ScreenStrip strip)
     {

@@ -45,4 +45,31 @@ public static class StripPlan
     // Whether a tab this wide has room for its title after the icon. Twelve DIPs beyond the
     // icon-only width is the least that shows a letter and an ellipsis rather than a clipped sliver.
     public static bool ShowsTitle(double tabWidth) => tabWidth > TabIconOnly + 12;
+
+    // Where a window must go so its title bar is not under a new strip, or null when it can stay where it is.
+    //
+    // The shell does NOT do this. It resizes maximized windows to the new work area, but a restored window whose top
+    // is under a new top-edge app bar stays there, its title bar (the only handle to drag it by) unreachable: measured,
+    // a window at [450,6,1350,456] stayed put when a 48 px top bar took [0,0,3840,48] (probe notes 2026-11-19,
+    // section 1). So the strip set moves such windows down itself, once, when it creates a strip.
+    //
+    // `stripPx` is how far below the screen's top edge the strip ends, in physical pixels like everything here. A
+    // window counts when its top is above that line and its centre is on this screen: a window centred on another
+    // screen is that screen's strip's business, whatever part of it pokes over here. The answer is the same rectangle
+    // moved down to start exactly at the strip's bottom edge, size kept. Kept even when that pushes the bottom past
+    // the screen: shrinking a window is a bigger change than moving it, and 32 DIP off the bottom is far better than a
+    // title bar nobody can reach.
+    //
+    // Which windows to ask about at all (restored, not minimized, on the desktop in view) is the caller's: a minimized
+    // window's rectangle is the -32000 nonsense (CLAUDE.md, traps), and a maximized one is the shell's to resize.
+    public static WindowRect? Clear(WindowRect window, MonitorBounds screen, int stripPx)
+    {
+        var line = screen.Top + stripPx;
+        var centreX = window.Left + window.Width / 2;
+        var centreY = window.Top + window.Height / 2;
+        var onScreen = centreX >= screen.Left && centreX < screen.Right && centreY >= screen.Top && centreY < screen.Bottom;
+        return onScreen && window.Top < line
+            ? window with { Top = line, Bottom = line + window.Height }
+            : null;
+    }
 }

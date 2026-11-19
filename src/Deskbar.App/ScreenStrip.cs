@@ -105,6 +105,12 @@ public sealed class ScreenStrip : Window
     AppBar.Rect? asked;
     AppBar.Rect? granted;
 
+    // The band the shell granted at the last dock, physical pixels, or none when no dock has been granted any room (it
+    // was refused because the screen could not be read, or the shell answered with an empty rectangle). For the strip
+    // set, which moves windows off the band once the strip is up (ScreenStrips.ClearUnder) and must use the band the
+    // shell really gave rather than recompute a height from a DPI.
+    internal Maybe<AppBar.Rect> Granted => granted is { } g && g.R > g.L && g.B > g.T ? g : Maybe<AppBar.Rect>.None;
+
     // When the strip last docked and when the guard last took it back, and how often it has, for the guard's two
     // clocks and for Describe.
     DateTime lastDocked = DateTime.MinValue;
