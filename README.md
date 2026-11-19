@@ -496,6 +496,44 @@ sits below.
 **Shortcuts**; it can never be the switcher's. These two chords are the only ones Deskbar
 registers; everything else is on the bar, one click away. Windows' own search is still `Win+S`.
 
+## Tasks
+
+The stopwatch in the bar's bottom strip, beside the language code, parks a workspace for later. Click
+it and pick 1, 5, 10 or 30 minutes to park the workspace you are on. The task takes the title of the
+workspace's latest open task, or the title of the window you were typing in when that window is on
+this workspace, or else the workspace's name. Parking the same title again reuses the task instead of
+adding a row.
+
+While a timer runs, the stopwatch shows the soonest one counting down ("4:32") next to a swatch in
+its workspace's colour, and that workspace's row gets a small blue pie that empties as the time runs
+out. When a timer runs out, the stopwatch reads "due" in orange and the row blinks the way it does
+when a Claude session asks for you. Below the four lengths the menu lists your open tasks, each with
+its own submenu: **Done**, **Clear timer**, or a new length.
+
+Coming back ends the timer. Switch to the workspace and stay there for 2 seconds, and every timer that
+was running there when you arrived ends and the task stays open. Flicking past a desktop on the way
+somewhere else does not count, nothing restarts a timer by itself, and a timer you set during those
+2 seconds is left running.
+
+If a timer runs out while the bar is out of sight (minimized, hidden, stepped aside, or under a
+full-screen app), a small card appears in the bottom right corner of the main screen and follows you
+across desktops. It never takes the focus. Click it to go to the task's workspace; a task with no
+workspace opens the stopwatch menu from the card instead. The card closes once the task is no longer
+due, and at most five are shown at a time; the rest stay due in the bar.
+
+Tasks are kept in `tasks.json` beside `state.json`, and a script or a Claude Code session can drive
+them through `deskbar.cmd task` (see [Driving it from scripts](#driving-it-from-scripts)):
+
+```powershell
+$ts = "$env:APPDATA\Deskbar\deskbar.cmd"
+& $ts task add "Wait for CI" --in 10m       # parks the caller's own workspace
+& $ts task add "Call the bank" --workspace none
+& $ts task list                             # JSON: open tasks, today's done ones, and asks
+& $ts task done 3f2a                        # an id, or a unique prefix of four or more characters
+```
+
+Untick **Tasks** under **Bottom strip** in Manage's settings to hide the stopwatch.
+
 ## Naming windows
 
 Give a window a short name so the taskbar shows `RDP` instead of
@@ -647,6 +685,7 @@ Everything the bar's menus do has a command, and each one runs the same code as 
 | Starting | `start <ws> [--create [placement]] [--cwd <folder>] -- <program> [arguments...]`, `open <link> [--from <folder>]` |
 | Windows | `move <ws> [--create [placement]] [--no-follow] (--title <text> \| --hwnd <h>)...`, `rename-window`, `rename-app`, `rename-pattern`, `name-by-folder <hwnd> on\|off`, `restore-title`, `pin`, `unpin` |
 | Bar | `bar minimize\|restore\|dock\|undock\|across\|edge`, `stats detach\|attach` |
+| Tasks | `task list`, `task add <title> [--workspace <name>\|none] [--in 1m\|5m\|10m\|30m]`, `task timer <id> (--in ... \| --clear)`, `task done`, `task rename`, `task delete` |
 
 A few more, with `$ts` standing for the batch file:
 

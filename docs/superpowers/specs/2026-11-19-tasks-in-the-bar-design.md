@@ -206,9 +206,10 @@ Every bar action gets a command, listed in `ControlUsage` under a new "Tasks" se
 dispatched command is listed covers them:
 
 ```
-task list                                   every task as JSON, with its state and time left
-task add <title> [--workspace <name>] [--in 1m|5m|10m|30m]
-task timer <id> (--in <minutes> | --clear)
+task list                                   the live tasks plus today's done ones, and every asking workspace,
+                                            as JSON: kind, id, title, workspace, state, endsAt, doneAt
+task add <title> [--workspace <name>|none] [--in 1m|5m|10m|30m]
+task timer <id> (--in 1m|5m|10m|30m | --clear)
 task done <id>
 task rename <id> <title>
 task delete <id>
