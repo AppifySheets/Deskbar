@@ -1395,7 +1395,22 @@ public partial class App : Application
         // StateChanged only when the marks differ from the ones it holds. So a pulse that changes nothing
         // ends the chain after one hop, and each real change moves the chain at most one step further.
         tasks!.Changed.Subscribe(_ => manager.SetTaskMarks(tasks.DueWorkspaces(), tasks.RunningWorkspaces()));
-        manager.StateChanged.Subscribe(_ => tasks.Prune(manager.State.Workspaces.Select(w => w.Id).ToHashSet()));
+        //
+        // Threads: manager.StateChanged is pulsed from the virtual-desktop CurrentChanged event, which is raised on
+        // a thread of its own, while the task service (and the manager's mark sets) are UI-thread only. So the prune
+        // is queued onto the dispatcher, as the control pipe does; every other way into the service (Tick, Load, the
+        // control pipe, tasks.Changed which follows from those) is already on the UI thread.
+        //
+        // Pruning frees tasks for good, so when may State.Workspaces lack a workspace that still exists? Reading
+        // WorkspaceManager: ids leave the list only in ForgetWorkspace (an explicit delete or a heard desktop close);
+        // Reconcile and rebinding rewrite the rows but keep every id, and the state is loaded before this point. The
+        // one gap is a start that failed twice (corrupt state.json, already reported to the user), which leaves the
+        // list empty. Pruning against that would erase every task, so an empty list is never a reason to prune.
+        manager.StateChanged.Subscribe(_ => Dispatcher.InvokeAsync(() =>
+        {
+            var known = manager.State.Workspaces.Select(w => w.Id).ToHashSet();
+            if (known.Count > 0) tasks.Prune(known);
+        }));
 
         trayIcon = new TaskbarIcon
         {
