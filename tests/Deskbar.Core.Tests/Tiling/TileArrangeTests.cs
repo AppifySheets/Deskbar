@@ -253,27 +253,29 @@ public sealed class TileArrangeTests
     [Fact]
     public void A_returning_tile_gets_a_new_row_in_its_old_column()
     {
-        var (order, sizes) = TileArrange.Returned([W(1), W(4), W(3)], new TileSizes([0.5, 0.5], [[0.5, 0.5], [1.0]]), W(2), (1, 0));
+        var (order, sizes) = TileArrange.Returned([W(1), W(4), W(3)], new TileSizes([0.5, 0.5], [[0.5, 0.5], [1.0]]), W(2), 1, [W(2), W(3)]);
 
         Assert.Equal([W(1), W(4), W(2), W(3)], order);
         Assert.Equal(TileSizes.Equal([2, 2]), sizes);
     }
 
-    // Its old row is past the end of the column now: it goes to the bottom, halving the last row.
+    // Its old row is past the end of the column now (W5, between W1 and it, has gone): it goes directly below W1, its
+    // nearest old neighbour above that is still there, which is the bottom, halving the last row.
     [Fact]
     public void A_returning_tile_whose_row_is_gone_goes_to_the_bottom_of_its_column()
     {
-        var (order, sizes) = TileArrange.Returned([W(1), W(3)], TileSizes.Equal([1, 1]), W(2), (0, 5));
+        var (order, sizes) = TileArrange.Returned([W(1), W(3)], TileSizes.Equal([1, 1]), W(2), 0, [W(1), W(5), W(2)]);
 
         Assert.Equal([W(1), W(2), W(3)], order);
         Assert.Equal(new TileSizes([0.5, 0.5], [[0.5, 0.5], [1.0]]), sizes);
     }
 
-    // Its old column is gone: a new column on the right, halving the last column, and nothing else moves.
+    // Its old column is gone and its index is past the last column: a new column on the right, halving the last
+    // column, and nothing else moves.
     [Fact]
     public void A_returning_tile_whose_column_is_gone_gets_a_new_column()
     {
-        var (order, sizes) = TileArrange.Returned([W(1)], TileSizes.Equal([1]), W(2), (1, 0));
+        var (order, sizes) = TileArrange.Returned([W(1)], TileSizes.Equal([1]), W(2), 1, [W(2)]);
 
         Assert.Equal([W(1), W(2)], order);
         Assert.Equal(TileSizes.Equal([1, 1]), sizes);
@@ -285,7 +287,7 @@ public sealed class TileArrangeTests
     {
         var kept = new TileSizes([0.5, 0.5], [[1.0], [0.5, 0.5]]) { Opening = 2 };
 
-        var (order, sizes) = TileArrange.Returned([W(2), W(3)], kept, W(1), (0, 0));
+        var (order, sizes) = TileArrange.Returned([W(2), W(3)], kept, W(1), 0, [W(1), W(2)]);
 
         Assert.Equal([W(1), W(2), W(3)], order);
         Assert.Equal(TileSizes.Equal([2, 2]) with { Opening = 3 }, sizes);
@@ -297,10 +299,33 @@ public sealed class TileArrangeTests
     {
         var kept = new TileSizes([0.5, 0.5], [[1.0], [0.5, 0.5]]) { Opening = 1 };
 
-        var (order, sizes) = TileArrange.Returned([W(2), W(3)], kept, W(1), (1, 1));
+        var (order, sizes) = TileArrange.Returned([W(2), W(3)], kept, W(1), 1, [W(1), W(3)]);
 
         Assert.Equal([W(2), W(1), W(3)], order);
         Assert.Equal(new TileSizes([0.5, 0.5], [[1.0], [0.5, 0.25, 0.25]]) { Opening = 1 }, sizes);
+    }
+
+    // Re-review: a tile that was alone in its column took the column with it, and W2's column slid into index 0. Its
+    // old index names W2's column now, but nobody of its old column is left, so it gets a column of its own at index 0,
+    // left of W2, taking half of W2's column. W3 keeps its column.
+    [Fact]
+    public void A_returning_tile_whose_column_went_gets_its_own_column_at_its_old_index()
+    {
+        var (order, sizes) = TileArrange.Returned([W(2), W(3)], TileSizes.Equal([1, 1]), W(1), 0, [W(1)]);
+
+        Assert.Equal([W(1), W(2), W(3)], order);
+        Assert.Equal(new TileSizes([0.25, 0.25, 0.5], [[1.0], [1.0], [1.0]]), sizes);
+    }
+
+    // Its old neighbours moved to another column index (a column to the left of theirs went): it follows them, not
+    // its old index. W1 was below W2 in column 1; column 0 has gone, so W2 is in column 0 now, and W1 goes below it.
+    [Fact]
+    public void A_returning_tile_follows_its_old_neighbours_to_the_index_their_column_has_now()
+    {
+        var (order, sizes) = TileArrange.Returned([W(2), W(3)], TileSizes.Equal([1, 1]), W(1), 1, [W(2), W(1)]);
+
+        Assert.Equal([W(2), W(1), W(3)], order);
+        Assert.Equal(new TileSizes([0.5, 0.5], [[0.5, 0.5], [1.0]]), sizes);
     }
 
     // --- where a fit starts after a window left (TileArrange.FitStart, final review C1 and M1) -------------------

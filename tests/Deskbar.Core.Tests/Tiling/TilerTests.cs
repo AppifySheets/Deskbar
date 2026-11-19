@@ -579,6 +579,52 @@ public sealed partial class TilerTests : IDisposable
         Assert.Contains(traced, line => line.Contains($"{W(2).Value:X} came back"));
     }
 
+    // Re-review of the fix wave: a tile ALONE in its column loses that column when it is minimized, and the columns to
+    // its right slide left. Its old column index then names a neighbour's column. Whether its column still exists is
+    // decided by who was in it, not by the index: nobody is left, so it gets a column of its own back, at its old
+    // index (left of whatever sits there now), taking half the width of the column it lands beside.
+    //
+    // W1 | W2, nothing stored. W1 is minimized and W2 has the screen; W3 opens and splits W2 sideways (W2 | W3).
+    // W1 comes back as a full-height column on the left, half of W2's column: W1 | W2 | W3 at a quarter, a quarter and
+    // a half. It used to come back as a half-height row above W2, inside W2's column.
+    [Fact]
+    public void A_minimized_tile_whose_column_went_comes_back_as_its_own_column()
+    {
+        new[] { 1, 2 }.ToList().ForEach(n => Exists(W(n), alpha));
+        Start();
+        AssertTiled([W(1), W(2)]);
+
+        Minimizes(W(1), true);
+        Opens(W(3), alpha);
+        AssertTiled([W(2), W(3)]);
+        var w3Was = surface.Frames[W(3)];
+
+        Minimizes(W(1), false);
+
+        AssertArranged([W(1), W(2), W(3)], new TileSizes([0.25, 0.25, 0.5], [[1.0], [1.0], [1.0]]));
+        Assert.Equal(w3Was, surface.Frames[W(3)]);
+    }
+
+    // The same for the left tile of W1 | W2 over W3: minimized, W2 and W3 share the one column, and W4 opens below W3
+    // (the largest tile, the later of a tie). W1 comes back as its own full-height column on the left, half of the
+    // stack's width, and the stack keeps its rows.
+    [Fact]
+    public void The_left_tile_of_a_column_and_a_stack_comes_back_as_its_own_column()
+    {
+        new[] { 1, 2, 3 }.ToList().ForEach(n => Exists(W(n), alpha));
+        Start();
+        AssertTiled([W(1), W(2), W(3)]);
+
+        Minimizes(W(1), true);
+        Opens(W(4), alpha);
+        AssertArranged([W(2), W(3), W(4)], new TileSizes([1.0], [[0.5, 0.25, 0.25]]));
+
+        Minimizes(W(1), false);
+
+        AssertArranged([W(1), W(2), W(3), W(4)], new TileSizes([0.5, 0.5], [[1.0], [0.5, 0.25, 0.25]]));
+        Assert.Equal(Grid(2)[0], surface.Frames[W(1)]);
+    }
+
     [Fact]
     public void Activating_a_tile_brings_the_other_tiles_up_behind_it()
     {
