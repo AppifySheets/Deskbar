@@ -318,11 +318,20 @@ public sealed class ScreenStrip : Window
         appBar?.Remove();
         // Dock's failure is not thrown away: Dock has traced it as a refusal already, and it is counted as one. Only a
         // dock that was honoured is a repair.
+        //
+        // A refused one HIDES the window (final review, third finding). The registration was given up on the line above,
+        // so after a refusal no band is reserved, and a window still shown there sits topmost over the top of the screen,
+        // on the title bars of the maximized windows the shell has just let back up, until the next try RetryEvery later:
+        // the spec's third anti-goal. Hidden, the screen is simply without its strip for that while; the next dock that
+        // works shows it again (Dock shows a window that is not up), and the strip set pins a strip once it is shown.
+        // Hiding does not undock: `docked` stays set, so this guard keeps trying.
         if (Dock().IsSuccess)
         {
             repairs++;
             Say(() => $"strip on {Screen.Left},{Screen.Top}: taken back by the guard ({repairs} so far)");
         }
+        else
+            Hide();
     }
 
     // The strip's Describe line, written to the trace when it differs from the last one written. Called on the guard's 1 s
