@@ -1444,7 +1444,14 @@ public partial class App : Application
                 ignore: hwnd => monitor.Ignore(hwnd),
                 // The pin's outcome goes back to the set, which counts a strip as pinned only once this worked and
                 // tries a failed one again on the 1 s timer (ScreenStrips.PinIfShown), tracing each failure itself.
-                pinToAllDesktops: hwnd => desktops!.Pin(new WindowHandle(hwnd)));
+                pinToAllDesktops: hwnd => desktops!.Pin(new WindowHandle(hwnd)),
+                // What a new strip moves down off its band (ScreenStrips.ClearUnder): the windows the bar knows, minus
+                // Deskbar's own (the bar and the strips are not in that list at all, being ignored, and Manage or the
+                // detached stats are the app's to place), with the real screen layout and IsZoomed for "maximized",
+                // which the shell resizes itself and must not be moved.
+                windows: () => manager.KnownWindows.Where(w => w.ProcessId != Environment.ProcessId).Select(w => w.Handle).ToList(),
+                layout: new ScreenLayout(),
+                maximized: window => NativeMethods.IsZoomed(window.Value));
             screenStrips = stripSet;
             floatingBar = new FloatingBar(manager)
             {

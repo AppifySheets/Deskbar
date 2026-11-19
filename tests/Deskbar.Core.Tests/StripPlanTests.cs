@@ -81,6 +81,29 @@ public class StripPlanTests
     public void Tabs_share_the_room_equally_between_the_icon_only_floor_and_the_cap(double room, int tabs, double expected) =>
         Assert.Equal(expected, StripPlan.TabWidth(room, tabs));
 
+    // The window measured in the probe (notes 2026-11-19, section 1): restored at [450,6,1350,456] when a 48 px top bar
+    // took [0,0,3840,48], and the shell left it there, its title bar under the bar. Moved down to start at the strip's
+    // bottom edge, its size kept.
+    [Fact]
+    public void Clear_moves_a_window_under_the_strip_down() =>
+        Assert.Equal(new WindowRect(450, 48, 1350, 498), StripPlan.Clear(new WindowRect(450, 6, 1350, 456), Desk, 48));
+
+    // Already clear of the strip, whether it starts exactly at its bottom edge or further down: left alone.
+    [Fact]
+    public void Clear_leaves_a_window_below_the_strip() =>
+        Assert.Multiple(
+            () => Assert.Null(StripPlan.Clear(new WindowRect(450, 48, 1350, 498), Desk, 48)),
+            () => Assert.Null(StripPlan.Clear(new WindowRect(450, 300, 1350, 750), Desk, 48)));
+
+    // A window whose centre is on another screen is that screen's business, even when its top is above this strip's
+    // bottom edge: Second's strip, not Desk's, decides about it.
+    [Fact]
+    public void Clear_leaves_a_window_on_another_screen() =>
+        Assert.Multiple(
+            () => Assert.Null(StripPlan.Clear(new WindowRect(2700, 6, 3600, 456), Desk, 48)),
+            // Straddling the two, mostly on Second: its centre (2600) is on Second.
+            () => Assert.Null(StripPlan.Clear(new WindowRect(2200, 6, 3000, 456), Desk, 48)));
+
     [Fact]
     public void A_title_shows_only_when_there_is_room_beyond_the_icon() =>
         Assert.Multiple(

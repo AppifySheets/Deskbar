@@ -2,6 +2,7 @@ using System.Reactive;
 using System.Windows.Interop;
 using CSharpFunctionalExtensions;
 using Deskbar.App;
+using Deskbar.Core.Abstractions;
 using Deskbar.Core.Domain;
 using Deskbar.Core.Overview;
 using Deskbar.Windows.Monitoring;
@@ -41,16 +42,40 @@ public class ScreenStripsTests
         // The strip set's clock, stepped by the test to cross the pin's retry interval without waiting for it.
         public DateTime Now { get; set; } = new(2026, 11, 19, 12, 0, 0, DateTimeKind.Utc);
 
-        public Rig() =>
+        // The windows the bar knows about (made up, never real handles), where each one is, and which are maximized.
+        // A move is logged as "move <name> to <left>,<top> to <right>,<bottom> showState=<mayChangeShowState>".
+        public List<WindowHandle> Windows { get; } = [];
+        public HashSet<WindowHandle> Maximized { get; } = [];
+        public FakeLayout Layout { get; }
+
+        public Rig()
+        {
+            Layout = new FakeLayout(Log);
             Set = new ScreenStrips(
                 wanted: () => Wanted,
                 screens: () => Screens,
                 create: Make,
                 ignore: hwnd => Log.Add($"ignore {Name(hwnd)} visible={ByHandle(hwnd).IsVisible}"),
-                pinToAllDesktops: Pin)
+                pinToAllDesktops: Pin,
+                windows: () => Windows,
+                layout: Layout,
+                maximized: Maximized.Contains)
             {
                 Clock = () => Now,
             };
+        }
+
+        // A known window at `rect`, named for the move log.
+        public WindowHandle Window(string name, WindowRect rect)
+        {
+            var window = new WindowHandle(0x1000 + Windows.Count);
+            Windows.Add(window);
+            Layout.Names[window] = name;
+            Layout.Rects[window] = rect;
+            return window;
+        }
+
+        public IReadOnlyList<string> Moves => Log.Where(line => line.StartsWith("move ")).ToList();
 
         Result Pin(nint hwnd)
         {
@@ -80,6 +105,32 @@ public class ScreenStripsTests
 
         public static string NameOf(MonitorBounds screen) =>
             screen == Left ? "left" : screen == Middle ? "middle" : screen == Right ? "right" : "other";
+    }
+
+    // The screen layout, faked: each window's rectangle, which are minimized, which are on another virtual desktop
+    // (absent from the snapshot's z-order, as a cloaked window is from the real one), and which refuse to move. A move
+    // that works updates the rectangle, as the real one would.
+    sealed class FakeLayout(List<string> log) : IScreenLayout
+    {
+        public Dictionary<WindowHandle, string> Names { get; } = [];
+        public Dictionary<WindowHandle, WindowRect> Rects { get; } = [];
+        public HashSet<WindowHandle> Minimized { get; } = [];
+        public HashSet<WindowHandle> OnAnotherDesktop { get; } = [];
+        public HashSet<WindowHandle> Refusing { get; } = [];
+
+        public ScreenFacts Snapshot() =>
+            new(new Dictionary<WindowHandle, int>(), Minimized.ToHashSet(),
+                Rects.Keys.Where(w => !OnAnotherDesktop.Contains(w)).Select((w, i) => (w, i)).ToDictionary(x => x.w, x => x.i));
+
+        public Maybe<WindowRect> RectOf(WindowHandle window) => Rects.TryGetValue(window, out var rect) ? rect : Maybe<WindowRect>.None;
+
+        public Result MoveTo(WindowHandle window, WindowRect rect, bool mayChangeShowState)
+        {
+            log.Add($"move {Names[window]} to {rect.Left},{rect.Top} to {rect.Right},{rect.Bottom} showState={mayChangeShowState}");
+            if (Refusing.Contains(window)) return Result.Failure("Windows would not move that window.");
+            Rects[window] = rect;
+            return Result.Success();
+        }
     }
 
     // The setting comes on: one strip per connected screen, each on its own screen, each docked and shown.
@@ -288,6 +339,84 @@ public class ScreenStripsTests
         rig.Set.RemoveAll();
     });
 
+    // The made-up screens' tops are at -30000, and a strip there is 48 px (32 DIP at the rig's 150%), so its bottom edge
+    // is -29952. A window whose top is above that has its title bar under the strip.
+    static WindowRect Under(MonitorBounds screen) => new(screen.Left + 100, screen.Top + 6, screen.Left + 500, screen.Top + 306);
+
+    // The shell does not move a restored window whose title bar a new top bar covers (measured, probe notes section 1),
+    // so the set does, once, when it creates the strip: moved down to the strip's bottom edge, size kept, and never with
+    // a show-state change. Left alone: a window already below the strip, a minimized one (its rectangle is -32000
+    // nonsense), a maximized one (the shell resizes those itself), one on another virtual desktop, and one on a screen
+    // with no new strip. And once means once: a tick and a reconcile that changes nothing move nothing more.
+    [Fact]
+    public void A_new_strip_moves_restored_windows_under_it_once() => StaThread.Run(() =>
+    {
+        var rig = new Rig { Screens = [Left] };
+        rig.Window("under", Under(Left));
+        rig.Window("below", new WindowRect(Left.Left + 100, Left.Top + 100, Left.Left + 500, Left.Top + 400));
+        rig.Layout.Minimized.Add(rig.Window("minimized", Under(Left)));
+        rig.Maximized.Add(rig.Window("maximized", new WindowRect(Left.Left - 8, Left.Top - 8, Left.Right + 8, Left.Bottom + 8)));
+        rig.Layout.OnAnotherDesktop.Add(rig.Window("elsewhere", Under(Left)));
+        rig.Window("on middle", Under(Middle));
+
+        rig.Set.Reconcile();
+
+        Assert.Equal(new[] { $"move under to {Left.Left + 100},{Left.Top + 48} to {Left.Left + 500},{Left.Top + 348} showState=False" }, rig.Moves);
+
+        // Put back under the strip by hand: the strip set has had its one go at it.
+        rig.Layout.Rects[rig.Windows[0]] = Under(Left);
+        rig.Set.Tick();
+        rig.Set.Reconcile();
+        Assert.Single(rig.Moves);
+        rig.Set.RemoveAll();
+    });
+
+    // A screen arriving creates one strip, and only that strip clears its screen: the strip that was already there
+    // moves nothing, even with a window back under it.
+    [Fact]
+    public void A_strip_that_already_existed_moves_nothing() => StaThread.Run(() =>
+    {
+        var rig = new Rig { Screens = [Left] };
+        rig.Set.Reconcile();
+        rig.Window("under left", Under(Left));
+        rig.Window("under middle", Under(Middle));
+
+        rig.Screens = [Left, Middle];
+        rig.Set.Reconcile();
+
+        Assert.Equal(new[] { $"move under middle to {Middle.Left + 100},{Middle.Top + 48} to {Middle.Left + 500},{Middle.Top + 348} showState=False" }, rig.Moves);
+        rig.Set.RemoveAll();
+    });
+
+    // A window that will not move (an elevated process, a dead handle) is traced and skipped; the rest still move.
+    [Fact]
+    public void A_window_that_will_not_move_does_not_stop_the_rest() => StaThread.Run(() =>
+    {
+        var rig = new Rig { Screens = [Left] };
+        rig.Layout.Refusing.Add(rig.Window("stubborn", Under(Left)));
+        rig.Window("willing", new WindowRect(Left.Left + 600, Left.Top + 10, Left.Left + 900, Left.Top + 310));
+
+        rig.Set.Reconcile();
+
+        Assert.Equal(2, rig.Moves.Count);
+        Assert.Equal(Left.Top + 48, rig.Layout.Rects[rig.Windows[1]].Top);
+        rig.Set.RemoveAll();
+    });
+
+    // A strip whose first dock was refused (its screen could not be read) has no granted band, so there is no height to
+    // clear to and nothing is moved.
+    [Fact]
+    public void A_strip_whose_dock_was_refused_moves_nothing() => StaThread.Run(() =>
+    {
+        var rig = new Rig { Screens = [Left], Readable = false };
+        rig.Window("under", Under(Left));
+
+        rig.Set.Reconcile();
+
+        Assert.Empty(rig.Moves);
+        rig.Set.RemoveAll();
+    });
+
     // A strip's Screen is matched with == against the overview's screens (FloatingBar.ScreenNumberOf, for the drop and
     // for which windows a strip lists), so the screens the app reconciles on must be those very rectangles:
     // ScreenFacts.MonitorPlacement, which is what Overview.Screens is. Read-only on the real machine: the strips made
@@ -307,7 +436,10 @@ public class ScreenStripsTests
             {
                 shown.Add(hwnd);
                 return Result.Success();
-            });
+            },
+            windows: () => [],
+            layout: new FakeLayout([]),
+            maximized: _ => false);
 
         set.Reconcile();
 
