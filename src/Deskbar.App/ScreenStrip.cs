@@ -115,7 +115,21 @@ public sealed class ScreenStrip : Window
     // clocks and for Describe.
     DateTime lastDocked = DateTime.MinValue;
     DateTime lastRepair = DateTime.MinValue;
+
+    // Repairs and refusals are counted APART, on purpose. A repair is a re-dock the guard made that the shell honoured: the
+    // shell had let go of the strip and now holds it again. A refusal is a dock the strip itself declined (its screen
+    // could not be read) or the shell answered with no room. Counted as repairs, every refused guard attempt read in
+    // Describe as "the shell dropped the strip again" when the strip had never been held to drop; the two numbers say
+    // different things, and the trace needs both.
     int repairs;
+    int refusals;
+
+    // Where the strip's trace lines go: ClickTrace in the app (the one switch, %APPDATA%\Deskbar\trace.on, and the log
+    // %TEMP%\deskbar-trace.log, CLAUDE.md "Instrumentation"), a list in the tests, which cannot read the log.
+    internal Action<string> Trace { get; init; } = ClickTrace.Write;
+
+    // The last geometry line written, so TraceGeometry writes only when the line changes.
+    string lastGeometry = "";
 
     public ScreenStrip(MonitorBounds screen)
     {
@@ -223,7 +237,7 @@ public sealed class ScreenStrip : Window
             // this one reserved. This is also what keeps the shell's re-dock notice (OnShellMovedStrips) harmless while a
             // screen is dropping out, which is exactly the display change that sends one.
             if (Scale().TryGetValue(out var scale) is false)
-                return Result.Failure($"The strip's screen {Format(new AppBar.Rect(Screen.Left, Screen.Top, Screen.Right, Screen.Bottom))} cannot be read right now.");
+                return Refuse($"The strip's screen {Format(new AppBar.Rect(Screen.Left, Screen.Top, Screen.Right, Screen.Bottom))} cannot be read right now.");
 
             var screen = new AppBar.Rect(Screen.Left, Screen.Top, Screen.Right, Screen.Bottom);
             var thicknessPx = (int)Math.Round(HeightDip * scale);
@@ -234,16 +248,27 @@ public sealed class ScreenStrip : Window
             // Nothing to place a window in. Left docked, so the guard asks again on its own clock and Undock still gives
             // back whatever the shell may hold.
             if (got.R <= got.L || got.B <= got.T)
-                return Result.Failure($"The shell granted no room for the strip on {Format(screen)}.");
+                return Refuse($"The shell granted no room for the strip on {Format(screen)}.");
 
             PlaceAt(hwnd, got, scale);
             if (!IsVisible) Show();
+            Trace($"strip on {Screen.Left},{Screen.Top}: docked, asked {Format(asked.Value)}, granted {Format(got)}");
             return Result.Success();
         }
         finally
         {
             docking = false;
         }
+    }
+
+    // A dock that did not happen: counted (see `refusals`), traced with its reason so a strip that never appeared can be
+    // told from one that was never made, and handed back as the failure. This is the one place a refusal is traced, so
+    // every caller (the strip set's first dock, the guard, the shell's notice) is covered without each tracing it.
+    Result Refuse(string reason)
+    {
+        refusals++;
+        Trace($"strip on {Screen.Left},{Screen.Top}: dock refused: {reason}");
+        return Result.Failure(reason);
     }
 
     // Gives the strip back to the shell (ABM_REMOVE), then hides the window: in that order, so a window is never left
@@ -275,10 +300,26 @@ public sealed class ScreenStrip : Window
         if (Held() is not false) return;
 
         lastRepair = now;
-        repairs++;
         // A fresh registration, as the bar's guard makes: the old one may be one the shell no longer honours.
         appBar?.Remove();
-        _ = Dock();
+        // Dock's failure is not thrown away: Dock has traced it as a refusal already, and it is counted as one. Only a
+        // dock that was honoured is a repair.
+        if (Dock().IsSuccess)
+        {
+            repairs++;
+            Trace($"strip on {Screen.Left},{Screen.Top}: taken back by the guard ({repairs} so far)");
+        }
+    }
+
+    // The strip's Describe line, written to the trace when it differs from the last one written. Called on the guard's 1 s
+    // beat (ScreenStrips.Tick), so an unchanged strip says it once and a change (a re-dock, a work area that moved, a
+    // full-screen window) is one new line. Like the bar's geometry traces (CLAUDE.md, "Instrumentation").
+    public void TraceGeometry()
+    {
+        var line = Describe();
+        if (line == lastGeometry) return;
+        lastGeometry = line;
+        Trace(line);
     }
 
     // Whether the strip is where it should be: false when the window has left its screen or the work area reaches under
@@ -337,7 +378,7 @@ public sealed class ScreenStrip : Window
         + $"work {(OwnMonitor() is { } own ? DebugDump.Format(own.Work) : "unreadable")}, "
         + $"docked {(docked ? "yes" : "no")}, registered {(appBar?.Registered == true ? "yes" : "no")}, "
         + $"{(fullScreenOpen ? "stepped aside for a full-screen window, " : "")}"
-        + $"taken back {repairs} time(s){(repairs > 0 ? $", last {lastRepair.ToLocalTime():HH:mm:ss}" : "")}";
+        + $"taken back {repairs} time(s){(repairs > 0 ? $", last {lastRepair.ToLocalTime():HH:mm:ss}" : "")}, refused {refusals} time(s)";
 
     static string Format(AppBar.Rect r) => $"{r.L},{r.T} to {r.R},{r.B} ({r.R - r.L}x{r.B - r.T})";
 

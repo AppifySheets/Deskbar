@@ -166,14 +166,13 @@ public sealed class ScreenStrips
         // a tool window before anything can list it.
         var hwnd = new WindowInteropHelper(strip).EnsureHandle();
         ignore(hwnd);
+        ClickTrace.Write($"strip on {strip.Screen.Left},{strip.Screen.Top}: registered, screen {strip.Screen.Left},{strip.Screen.Top} to {strip.Screen.Right},{strip.Screen.Bottom}");
         // A failed dock is not fatal and not retried here: the strip stays in the set, docked-but-waiting, and its own
-        // guard (KeepStrip, on Tick) docks it once its screen can be read. Traced so a strip that never appeared can be
-        // told from one that was never made.
+        // guard (KeepStrip, on Tick) docks it once its screen can be read. The strip traces its own refusal (ScreenStrip.
+        // Refuse), so a strip that never appeared can be told from one that was never made.
         // A dock that worked takes a band some windows' title bars may now be under: those are moved down, here and only
         // here, so once per created strip (see ClearUnder).
-        strip.Dock()
-            .Tap(() => ClearUnder(strip))
-            .TapError(error => ClickTrace.Write($"strip dock on start: {error}"));
+        strip.Dock().Tap(() => ClearUnder(strip));
         PinIfShown(strip);
         return strip;
     }
@@ -222,8 +221,11 @@ public sealed class ScreenStrips
                         $"strip on {strip.Screen.Left},{strip.Screen.Top}: could not move {move.Window.Value:X} off the band: {error}")));
         });
 
+    // A removal and an addition for one screen close together, in the trace, is a strip that disappeared and came back:
+    // what the manual script's lock and unlock check looks for.
     void Remove(ScreenStrip strip)
     {
+        ClickTrace.Write($"strip on {strip.Screen.Left},{strip.Screen.Top}: removed");
         strip.Undock();
         strip.Close();
         pinned = pinned.Remove(strip);
@@ -270,6 +272,8 @@ public sealed class ScreenStrips
             strip.KeepStrip(connected);
             strip.ReclaimTopmost();
             PinIfShown(strip);
+            // After the guard, so a repair shows in the line it just changed. Written only when it differs.
+            strip.TraceGeometry();
         });
     }
 
