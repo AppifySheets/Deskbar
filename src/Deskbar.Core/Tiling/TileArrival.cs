@@ -1,0 +1,70 @@
+using CSharpFunctionalExtensions;
+using Deskbar.Core.Domain;
+
+namespace Deskbar.Core.Tiling;
+
+// The tile a window splits, and on which side.
+public sealed record TileSplit(WindowHandle Target, TileArrange.Zone Side);
+
+// Which tile a window that arrives on a tiled screen splits (the design's "Change 2", predictable placement). The
+// rule, in order:
+//
+//   1. The tile of the window last used on this screen is split, when both halves would still be at least a quarter
+//      of the screen's width and a quarter of its height.
+//   2. Otherwise the largest tile is split (by its share of the screen, column share times row share; on a tie the
+//      one latest in slot order). It is split even when it is below the floor: a window always has to go somewhere.
+//   3. The side is Right when the tile is wider than tall AND alone in its column, otherwise Bottom. A Right split
+//      makes a new column, which only reads naturally beside a whole-height tile; a wide tile in a stack of rows
+//      is split below instead, so the stack does not grow a column in the middle.
+//
+// The floor compares FRACTIONS from TileSizes, never pixels. Pixels lose the gaps between tiles, and a tile of a
+// 2x2 grid would then fail a quarter it exactly has.
+//
+// Pure, like TileArrange: `tiles` is aligned with `order` (the slots GridLayout lays out), and the Tiler calls this.
+public static class TileArrival
+{
+    // A split half may not be smaller than this share of the screen on either axis. The tolerance absorbs the
+    // rounding of fractions that were halved or scaled.
+    const double Floor = 0.25;
+    const double Tolerance = 1e-9;
+
+    // None only when the screen has no windows.
+    public static Maybe<TileSplit> Choose(
+        IReadOnlyList<WindowHandle> order, TileSizes sizes, IReadOnlyList<WindowRect> tiles, Maybe<WindowHandle> lastUsed)
+    {
+        var candidates = order
+            .Select((window, slot) => (Window: window, Slot: slot, Cell: TileArrange.CellOf(sizes, slot, order.Count)))
+            .Select(t => (t.Window, t.Slot, t.Cell, Side: SideOf(sizes, tiles[t.Slot], t.Cell)))
+            .ToList();
+
+        var preferred = candidates
+            .Where(t => lastUsed.HasValue && t.Window == lastUsed.Value && PassesFloor(sizes, t.Cell, t.Side))
+            .Select(t => Maybe.From(t))
+            .FirstOrDefault(Maybe<(WindowHandle Window, int Slot, (int Column, int Row) Cell, TileArrange.Zone Side)>.None);
+
+        // The largest tile, the later slot winning a tie (OrderBy is stable, so Last of the ascending order).
+        var largest = candidates
+            .OrderBy(t => sizes.Columns[t.Cell.Column] * sizes.Rows[t.Cell.Column][t.Cell.Row], Comparer<double>.Create(Compare))
+            .Select(t => Maybe.From(t))
+            .LastOrDefault(Maybe<(WindowHandle Window, int Slot, (int Column, int Row) Cell, TileArrange.Zone Side)>.None);
+
+        return preferred.Or(largest).Map(t => new TileSplit(t.Window, t.Side));
+    }
+
+    // Right for a tile wider than tall that is alone in its column, otherwise Bottom.
+    static TileArrange.Zone SideOf(TileSizes sizes, WindowRect tile, (int Column, int Row) cell) =>
+        tile.Width > tile.Height && sizes.Rows[cell.Column].Count == 1 ? TileArrange.Zone.Right : TileArrange.Zone.Bottom;
+
+    // Both halves keep a quarter of the screen's width share and height share, by fractions.
+    static bool PassesFloor(TileSizes sizes, (int Column, int Row) cell, TileArrange.Zone side)
+    {
+        var column = sizes.Columns[cell.Column];
+        var row = sizes.Rows[cell.Column][cell.Row];
+        return side == TileArrange.Zone.Right
+            ? column / 2 >= Floor - Tolerance && row >= Floor - Tolerance
+            : column >= Floor - Tolerance && row / 2 >= Floor - Tolerance;
+    }
+
+    // Shares closer than the tolerance are a tie (they come from halving and rescaling, so exact equality is luck).
+    static int Compare(double a, double b) => Math.Abs(a - b) < Tolerance ? 0 : a.CompareTo(b);
+}
