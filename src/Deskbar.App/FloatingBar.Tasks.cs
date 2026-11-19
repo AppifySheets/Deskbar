@@ -5,6 +5,7 @@ using System.Windows.Controls.Primitives;
 using System.Windows.Media;
 using System.Windows.Shapes;
 using CSharpFunctionalExtensions;
+using Deskbar.Core.Domain;
 using Deskbar.Core.Persistence;
 using Deskbar.Core.Tasks;
 
@@ -33,8 +34,9 @@ namespace Deskbar.App;
 // costs tens of milliseconds, and a once-a-second rebuild would also restart every glide and hover.
 //
 // THE CLICK. Until the task window exists (a later pull request), the stopwatch opens a small menu (TasksMenu): park
-// the current workspace for 1, 5, 10 or 30 minutes, then the live tasks with their time left, each a click away from
-// done. App can hand over another action through OpenTasks, which is how the window will take the click over.
+// the current workspace for 1, 5, 10 or 30 minutes, then the live tasks with their time left, each with a submenu to
+// mark it done, clear its timer or set a new one. App can hand over another action through OpenTasks, which is how the
+// window will take the click over.
 public partial class FloatingBar
 {
     // The task service, handed over by App. Setting it shows the stopwatch (while the gate allows) and repaints it
@@ -94,6 +96,8 @@ public partial class FloatingBar
         "M2.8,9.4 A5.2,5.2 0 1 1 13.2,9.4 A5.2,5.2 0 1 1 2.8,9.4 Z M6.4,1.8 L9.6,1.8 M8,1.8 L8,4.2 M8,9.4 L8,6.6 M12,4.9 L13.2,3.7";
 
     Path? stopwatchGlyph;
+    // The glyph's Viewbox, the one part of the stopwatch the icon size setting scales (ScaleChromeIcons).
+    Viewbox? stopwatchViewbox;
     Border? stopwatchSwatch;
     TextBlock? stopwatchCountdown;
 
@@ -125,7 +129,7 @@ public partial class FloatingBar
             StrokeEndLineCap = PenLineCap.Round,
             StrokeLineJoin = PenLineJoin.Round,
         };
-        var glyph = new Viewbox
+        var glyph = stopwatchViewbox = new Viewbox
         {
             Width = StripGlyphSize,
             Height = StripGlyphSize,
@@ -149,6 +153,12 @@ public partial class FloatingBar
             VerticalAlignment = VerticalAlignment.Center,
             Visibility = Visibility.Collapsed,
         };
+        // Tabular numerals: every digit the same width, so "4:11" and "4:00" are as wide as each other and the
+        // countdown does not twitch every second. It matters beyond looks: the countdown's width is part of what
+        // FitClock shares out, so a width that changed each second could flip the clock's date on and off at the
+        // edge of fitting, once a tick (final review M5). Measured with Segoe UI: without this "4:11" is narrower
+        // than "4:00"; with it they match, so no MinWidth is needed on top.
+        System.Windows.Documents.Typography.SetNumeralAlignment(stopwatchCountdown, FontNumeralAlignment.Tabular);
         var face = new StackPanel
         {
             Orientation = Orientation.Horizontal,
@@ -341,11 +351,16 @@ public partial class FloatingBar
     //                                 (manager.CurrentWorkspaceId). The title is the workspace's most recently changed
     //                                 live task's, so parking the same thread again lands on the same task; else the
     //                                 window he was last typing in (languageTarget, the language switcher's memory of
-    //                                 it, which a click on the bar does not move); else the workspace's own name.
+    //                                 it, which a click on the bar does not move), but only when that window is on
+    //                                 the workspace being parked (TypedTitleOn); else the workspace's own name.
     //                                 On a desktop nobody named there is no workspace to park, so the header says how
     //                                 to get one and the lengths are disabled.
-    //   <title> · 4:32       Done     each live task, in the order the lists use (due first, then the soonest
-    //                                 running, then open by newest), with its time left; a click marks it done.
+    //   <title> · 4:32  ▸             each live task, at most MenuTasks of them, in the order the lists use (due first,
+    //                                 then the soonest running, then open by newest), with its time left. Each opens a
+    //                                 submenu (final review I4): Done; Clear timer (disabled without a timer); and the
+    //                                 four lengths, which set a new timer. Clear timer is the point: a due timer could
+    //                                 otherwise only be answered here by marking the task done, or by travelling to
+    //                                 its workspace, and a free task has no workspace to travel to.
     internal ContextMenu TasksMenu()
     {
         var menu = new ContextMenu();
@@ -355,7 +370,7 @@ public partial class FloatingBar
         var workspace = manager.CurrentWorkspaceId;
         var name = workspace.Bind(WorkspaceName);
         var title = workspace.Bind(id => tasks.Board.LatestLiveOn(id)).Map(t => t.Title)
-            .Or(() => Maybe.From(WindowTitleOf(languageTarget)).Where(t => !string.IsNullOrWhiteSpace(t)))
+            .Or(() => workspace.Bind(TypedTitleOn))
             .Or(name)
             .GetValueOrDefault("");
         menu.Items.Add(new MenuItem
@@ -387,18 +402,36 @@ public partial class FloatingBar
                 TaskState.Running => $" · {Countdown(x.Task.Timer.Value.Ends - now)}",
                 _ => "",
             };
-            var item = new MenuItem
-            {
-                Header = MenuText($"{Shorten(x.Task.Title)}{left}"),
-                InputGestureText = "Done",
-                Icon = MenuGlyph("✓"),
-                ToolTip = "Mark this task done",
-            };
-            item.Click += (_, _) => Report(tasks.Done(x.Task.Id));
+            var id = x.Task.Id;
+            var item = new MenuItem { Header = MenuText($"{Shorten(x.Task.Title)}{left}") };
+            item.Items.Add(TaskAction("Done", "✓", () => tasks.Done(id)));
+            item.Items.Add(TaskAction("Clear timer", "✕", () => tasks.ClearTimer(id), enabled: x.Task.Timer.HasValue));
+            TaskPresets.Lengths.ToList().ForEach(length =>
+                item.Items.Add(TaskAction(TaskPresets.Label(length), "◔", () => tasks.SetTimer(id, length))));
             menu.Items.Add(item);
         });
         return menu;
     }
+
+    // One entry of a listed task's submenu: a click runs the change and reports a failure the way the bar does.
+    MenuItem TaskAction(string header, string glyph, Func<Result> change, bool enabled = true)
+    {
+        var item = new MenuItem { Header = header, Icon = MenuGlyph(glyph), IsEnabled = enabled };
+        item.Click += (_, _) => Report(change());
+        return item;
+    }
+
+    // The window Petre was last typing in, as a title for parking `workspace`, but only when that window is on
+    // `workspace` (final review M3). languageTarget survives a desktop switch: it is the last window that had the
+    // keyboard, and right after a switch that is still a window on the desktop he just left, until he clicks into
+    // one here. Its title would then name a thread from the other workspace. So the window is asked where it lives
+    // (manager.WorkspaceOf, the same answer the bar's rows use), and anything else, a pinned window included, falls
+    // through to the workspace's own name.
+    Maybe<string> TypedTitleOn(Guid workspace) =>
+        languageTarget != 0
+        && manager.WorkspaceOf(new WindowHandle(languageTarget)).Map(w => w.Id == workspace).GetValueOrDefault(false)
+            ? Maybe.From(WindowTitleOf(languageTarget)).Where(t => !string.IsNullOrWhiteSpace(t))
+            : Maybe<string>.None;
 
     // Window titles run long ("Inbox - Outlook - Microsoft 365"); the menu shows the start of one.
     static string Shorten(string text) => text.Length <= 48 ? text : text[..47] + "…";

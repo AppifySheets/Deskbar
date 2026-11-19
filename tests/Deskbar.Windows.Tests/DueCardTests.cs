@@ -132,4 +132,75 @@ public class DueCardTests
         Assert.Empty(cards.OpenFor);
         cards.Dispose();
     });
+
+    // Final review I3: every card that opens is handed to afterShow once, after it is on screen, which is where App
+    // pins it to every virtual desktop (a window that has never been shown is on no desktop and cannot be pinned).
+    [Fact]
+    public void Each_new_card_is_handed_over_after_it_shows() => StaThread.Run(() =>
+    {
+        var now = Start;
+        var tasks = new TaskService(new MemoryTaskStore(), () => now);
+        tasks.Park("one", Maybe<Guid>.None, Maybe.From(TimeSpan.FromMinutes(1)));
+        tasks.Park("two", Maybe<Guid>.None, Maybe.From(TimeSpan.FromMinutes(1)));
+        var shown = new List<(DueCard Card, bool Visible)>();
+        using var cards = new DueCards(tasks, () => true, _ => (null, null), (_, _) => true, card => shown.Add((card, card.IsVisible)));
+
+        now += TimeSpan.FromMinutes(2);
+        tasks.Tick(Maybe<Guid>.None);
+        tasks.Tick(Maybe<Guid>.None);
+
+        Assert.Equal(cards.Cards, shown.Select(s => s.Card));
+        Assert.All(shown, s => Assert.True(s.Visible));
+    });
+
+    // Final review M7: at most five cards; a sixth task coming due adds none (it stays due in the bar).
+    [Fact]
+    public void At_most_five_cards_open() => StaThread.Run(() =>
+    {
+        var now = Start;
+        var tasks = new TaskService(new MemoryTaskStore(), () => now);
+        Enumerable.Range(1, 7).ToList().ForEach(i => tasks.Park($"task {i}", Maybe<Guid>.None, Maybe.From(TimeSpan.FromMinutes(1))));
+        using var cards = new DueCards(tasks, () => true, _ => (null, null), (_, _) => true);
+
+        now += TimeSpan.FromMinutes(2);
+        tasks.Tick(Maybe<Guid>.None);
+
+        Assert.Equal(5, cards.OpenFor.Count);
+    });
+
+    // Final review M4: the cards run inside the service's pulses, which the app's one-second timer drives, and the
+    // app leaves an unhandled dispatcher exception unhandled on purpose. So a card that throws while opening must not
+    // take the tick (and with it the app) down.
+    [Fact]
+    public void A_card_that_throws_while_opening_does_not_break_the_tick() => StaThread.Run(() =>
+    {
+        var now = Start;
+        var tasks = new TaskService(new MemoryTaskStore(), () => now);
+        tasks.Park("probe", Guid.NewGuid(), Maybe.From(TimeSpan.FromMinutes(1)));
+        using var cards = new DueCards(tasks, () => true, _ => throw new InvalidOperationException("no colour"), (_, _) => true);
+
+        now += TimeSpan.FromMinutes(2);
+        var thrown = Record.Exception(() => tasks.Tick(Maybe<Guid>.None));
+
+        Assert.Null(thrown);
+    });
+
+    // ...and the same for the close that follows a board change: here a card whose window went away underneath
+    // (closed from outside) is restacked, and showing a closed window throws.
+    [Fact]
+    public void A_card_that_throws_while_closing_does_not_break_the_change() => StaThread.Run(() =>
+    {
+        var now = Start;
+        var tasks = new TaskService(new MemoryTaskStore(), () => now);
+        var first = tasks.Park("one", Maybe<Guid>.None, Maybe.From(TimeSpan.FromMinutes(1))).Value;
+        tasks.Park("two", Maybe<Guid>.None, Maybe.From(TimeSpan.FromMinutes(1)));
+        using var cards = new DueCards(tasks, () => true, _ => (null, null), (_, _) => true);
+        now += TimeSpan.FromMinutes(2);
+        tasks.Tick(Maybe<Guid>.None);
+        cards.Cards[1].Close();
+
+        var thrown = Record.Exception(() => tasks.Done(first.Id));
+
+        Assert.Null(thrown);
+    });
 }

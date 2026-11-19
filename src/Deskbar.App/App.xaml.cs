@@ -1425,7 +1425,15 @@ public partial class App : Application
                 menu.Closed += (_, _) => dueCards?.Dismiss(card);
                 menu.IsOpen = true;
                 return false;
-            });
+            },
+            // Each card pinned to every virtual desktop once it is shown, like the bar (PinFloatingBar) and the
+            // detached stats window (ShowDetachedStats), and for their reason: a card is about a task on SOME
+            // workspace, so it must still be there after Petre switches desktops to go and answer it, not left
+            // behind on the desktop he was on when it came due. After the show, because a window that has never
+            // been shown is on no desktop and cannot be pinned. A failure is traced, not shown: the card still
+            // works on the desktop it opened on. (Final review I3, Ruling 5.)
+            card => desktops!.Pin(new WindowHandle(new System.Windows.Interop.WindowInteropHelper(card).EnsureHandle()))
+                .TapError(err => ClickTrace.Write($"due card pin failed: {err}")));
         //
         // Threads: manager.StateChanged is pulsed from the virtual-desktop CurrentChanged event, which is raised on
         // a thread of its own, while the task service (and the manager's mark sets) are UI-thread only. So the prune
@@ -2242,7 +2250,6 @@ public partial class App : Application
         RefreshTrayMenu();
     }
 
-    // Every way back: the taskbar button, the X on its thumbnail, Alt+Tab, and the tray item.
     // A "#RRGGBB" lane colour as a frozen brush (static WPF brushes must be frozen), for the due card swatch.
     static System.Windows.Media.Brush ToBrush(string hex)
     {
@@ -2251,6 +2258,7 @@ public partial class App : Application
         return brush;
     }
 
+    // Every way back: the taskbar button, the X on its thumbnail, Alt+Tab, and the tray item.
     void RestoreBar()
     {
         if (standIn is { } window)

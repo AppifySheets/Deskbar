@@ -41,12 +41,18 @@ public class FloatingBarTasksTests(ITestOutputHelper output)
         public void Dispose() => Bar.Close();
     }
 
-    static TasksBar Build()
+    // windowTitleOf stands in for reading a real window's title; left out, every window reads as untitled, so no test
+    // reads whatever the person running the suite has open.
+    static TasksBar Build(Func<nint, string>? windowTitleOf = null)
     {
         var harness = Harness.Build();
         var now = Start;
         var tasks = new TaskService(new MemoryTaskStore(), () => now);
-        var bar = new FloatingBar(harness.Manager) { Left = -32000, Top = -32000, SendShellKeys = _ => { }, PressSpace = () => { } };
+        var bar = new FloatingBar(harness.Manager)
+        {
+            Left = -32000, Top = -32000, SendShellKeys = _ => { }, PressSpace = () => { },
+            WindowTitleOf = windowTitleOf ?? (_ => ""),
+        };
         bar.Tasks = tasks;
         bar.ShowBar();
         bar.UpdateLayout();
@@ -249,7 +255,15 @@ public class FloatingBarTasksTests(ITestOutputHelper output)
         Assert.Equal(TimeSpan.FromMinutes(10), task.Timer.Value.Length);
     });
 
-    // Each live task is listed with its time left; clicking it marks it done.
+    // A listed task's submenu: Done, Clear timer, then the four lengths (final review I4).
+    static MenuItem ListedTask(ContextMenu menu, string title) =>
+        menu.Items.OfType<MenuItem>().Single(i => i.Header is string h && h.StartsWith(title, StringComparison.Ordinal));
+
+    static MenuItem Child(MenuItem item, string header) => item.Items.OfType<MenuItem>().Single(i => Equals(i.Header, header));
+
+    static void Click(MenuItem item) => item.RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
+
+    // Each live task is listed with its time left, as a submenu whose Done marks it done.
     [Fact]
     public void The_menu_lists_live_tasks_and_marks_one_done() => StaThread.Run(() =>
     {
@@ -258,12 +272,135 @@ public class FloatingBarTasksTests(ITestOutputHelper output)
         t.Advance(TimeSpan.FromSeconds(28));
 
         var menu = t.Bar.TasksMenu();
-        var item = menu.Items.OfType<MenuItem>().Single(i => i.Header is string h && h.StartsWith("Mail"));
+        var item = ListedTask(menu, "Mail");
         Assert.Contains("4:32", (string)item.Header);
+        Assert.Equal(["Done", "Clear timer", "1 min", "5 min", "10 min", "30 min"],
+            item.Items.OfType<MenuItem>().Select(i => (string)i.Header));
 
-        item.RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
+        Click(Child(item, "Done"));
 
         Assert.True(t.Tasks.Board.Tasks.Single(x => x.Id == mail.Id).DoneAt.HasValue);
+    });
+
+    // Final review I4: a due timer can be cleared from the menu, which was the only way to answer it there without
+    // marking the task done or travelling to its workspace.
+    [Fact]
+    public void The_menu_clears_a_due_timer() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        var mail = t.Tasks.Park("Mail", t.Workspace("Sparrow"), TimeSpan.FromMinutes(1)).Value;
+        t.Advance(TimeSpan.FromMinutes(2));
+
+        var item = ListedTask(t.Bar.TasksMenu(), "Mail");
+        Assert.Contains("due", (string)item.Header);
+        var clear = Child(item, "Clear timer");
+        Assert.True(clear.IsEnabled);
+
+        Click(clear);
+
+        var task = t.Tasks.Board.Tasks.Single(x => x.Id == mail.Id);
+        Assert.True(task.Timer.HasNoValue);
+        Assert.Equal(TaskState.Open, task.StateAt(t.Clock()));
+    });
+
+    // A task without a timer has nothing to clear; a length sets one on it.
+    [Fact]
+    public void The_menu_sets_a_timer_on_a_listed_task() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        var mail = t.Tasks.Park("Mail", t.Workspace("Sparrow"), Maybe<TimeSpan>.None).Value;
+
+        var item = ListedTask(t.Bar.TasksMenu(), "Mail");
+        Assert.False(Child(item, "Clear timer").IsEnabled);
+
+        Click(Child(item, "10 min"));
+
+        Assert.Equal(TimeSpan.FromMinutes(10), t.Tasks.Board.Tasks.Single(x => x.Id == mail.Id).Timer.Value.Length);
+    });
+
+    // At most eight tasks are listed; more is the task window's job.
+    [Fact]
+    public void The_menu_lists_at_most_eight_tasks() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        Enumerable.Range(1, 10).ToList().ForEach(i => t.Tasks.Park($"Task {i}", Maybe<Guid>.None, Maybe<TimeSpan>.None));
+
+        var listed = t.Bar.TasksMenu().Items.OfType<MenuItem>().Count(i => i.Header is string h && h.StartsWith("Task ", StringComparison.Ordinal));
+
+        Assert.Equal(8, listed);
+    });
+
+    // With no live task on the workspace, the park takes the title of the window last typed in, when that window is
+    // on the workspace being parked.
+    [Fact]
+    public void The_menu_parks_under_the_foreground_windows_title() => StaThread.Run(() =>
+    {
+        using var t = Build(hwnd => hwnd == 101 ? "Remote Desktop Manager - prod" : "");
+        // 101 is the harness's Remote Desktop Manager window, on GEPHA, the workspace in front.
+        t.Bar.NoteForeground(101);
+
+        Click(t.Bar.TasksMenu().Items.OfType<MenuItem>().Single(i => Equals(i.Header, "5 min")));
+
+        Assert.Equal("Remote Desktop Manager - prod", Assert.Single(t.Tasks.Board.Tasks).Title);
+    });
+
+    // Final review M3: the window last typed in can be on another desktop (it was focused there before a switch);
+    // its title says nothing about this workspace, so the park falls back to the workspace's name.
+    [Fact]
+    public void A_window_on_another_desktop_does_not_title_the_park() => StaThread.Run(() =>
+    {
+        using var t = Build(hwnd => hwnd == 202 ? "Beeper" : "");
+        // 202 is the harness's Beeper window, on Sparrow; GEPHA is in front.
+        t.Bar.NoteForeground(202);
+
+        Click(t.Bar.TasksMenu().Items.OfType<MenuItem>().Single(i => Equals(i.Header, "5 min")));
+
+        Assert.Equal("GEPHA", Assert.Single(t.Tasks.Board.Tasks).Title);
+    });
+
+    // Final review M5: the countdown uses tabular numerals, so "4:11" and "4:00" take the same width and the strip
+    // does not shift (or re-fit the clock) every second.
+    [Fact]
+    public void The_countdown_keeps_its_width_from_second_to_second() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        Assert.True(t.Tasks.Park("Mail", t.Workspace("Sparrow"), TimeSpan.FromMinutes(5)).IsSuccess);
+        var countdown = ((StackPanel)t.Bar.StripTasks!.Content).Children.OfType<TextBlock>().Single();
+        Assert.Equal(FontNumeralAlignment.Tabular, System.Windows.Documents.Typography.GetNumeralAlignment(countdown));
+        // Wide enough for everything, so FitClock keeps the countdown on screen.
+        t.Strip.Width = 800;
+
+        t.Advance(TimeSpan.FromSeconds(49));
+        t.Bar.PaintStopwatch();
+        t.Bar.UpdateLayout();
+        Assert.Equal("4:11", t.Bar.StopwatchText);
+        var ones = countdown.ActualWidth;
+        Assert.True(ones > 0, "the countdown is not on screen, so its width proves nothing");
+
+        t.Advance(TimeSpan.FromSeconds(11));
+        t.Bar.PaintStopwatch();
+        t.Bar.UpdateLayout();
+        Assert.Equal("4:00", t.Bar.StopwatchText);
+
+        output.WriteLine($"4:11 {ones:0.00}, 4:00 {countdown.ActualWidth:0.00}");
+        Assert.Equal(ones, countdown.ActualWidth, 2);
+    });
+
+    // Final review M9: the stopwatch follows the icon size setting, its glyph only; the countdown is text and stays.
+    [Fact]
+    public void The_stopwatch_glyph_follows_the_icon_size() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        var face = (StackPanel)t.Bar.StripTasks!.Content;
+        var glyph = face.Children.OfType<Viewbox>().Single();
+        var countdown = face.Children.OfType<TextBlock>().Single();
+
+        Assert.True(t.Harness.Manager.SetIconScale(1.5).IsSuccess);
+        t.Bar.UpdateLayout();
+
+        Assert.Equal(1.5, ((System.Windows.Media.ScaleTransform)glyph.LayoutTransform).ScaleX, 3);
+        Assert.True(countdown.LayoutTransform is null || countdown.LayoutTransform == System.Windows.Media.Transform.Identity);
+        Assert.True(t.Bar.StripTasks.LayoutTransform is null || t.Bar.StripTasks.LayoutTransform == System.Windows.Media.Transform.Identity);
     });
 
     // On a desktop nobody named there is no workspace to park, so the lengths are offered but disabled.

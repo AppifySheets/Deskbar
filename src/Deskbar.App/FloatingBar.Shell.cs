@@ -332,6 +332,10 @@ public partial class FloatingBar
     //                the language code: they are TEXT, and the icon setting leaves text alone.
     //   Start, search and the pinned apps, together, because the pins were sized to match Start and search
     //                ("one size with Start and search") and a setting that split them would undo that.
+    //   the stopwatch  its GLYPH only (FloatingBar.Tasks.cs, final review M9). The button also holds the countdown,
+    //                which is text like the clock's and stays its size. The button has no fixed width while it
+    //                shows a countdown, and at rest it is StripButtonWidth (28), which still holds the 17 DIP glyph
+    //                at the setting's 160% maximum (27.2), so scaling the glyph alone clips nothing.
     //
     // The whole BUTTON is scaled, not just its glyph, because the buttons have fixed sizes chosen around their
     // glyphs, and a bigger glyph in the same button would be clipped. A LayoutTransform, so the strip and the
@@ -340,7 +344,7 @@ public partial class FloatingBar
     {
         if (Math.Abs(IconScale - chromeIconScale) < 0.001) return;
         chromeIconScale = IconScale;
-        new FrameworkElement?[] { stripTray, stripQuickSettings, stripVolume, stripBell }
+        new FrameworkElement?[] { stripTray, stripQuickSettings, stripVolume, stripBell, stopwatchViewbox }
             .Concat(ShellStart.Children.OfType<FrameworkElement>())
             .Concat(shellStartTwin?.Children.OfType<FrameworkElement>() ?? [])
             .Concat(pinButtons.Values.Select(pin => pin.Button))
