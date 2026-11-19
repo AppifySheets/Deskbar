@@ -93,6 +93,8 @@ public static class ControlUsage
                 "Detach stats into a window (the CPU, memory, disk and GPU line in a small always-on-top window), or Put stats back on the bar"),
             new("window-lines", "split|whole",
                 "Right third of window lines switches workspace, or Whole window lines bring the window up"),
+            new("window-list", "row|bottom|screens",
+                "Where the current workspace's titled window list goes: in its row on the bar, at the bottom of the bar, or in a strip along the top of every screen"),
             new("collapsed-click", "bar|icon",
                 "Clicking a collapsed bar switches to its workspace, icons included, or Icons on collapsed bars bring their window up"),
             new("full-screen", "step|top",

@@ -589,7 +589,7 @@ public class RemoteControlMenuTests
              "unfold", "color", "delete", "switch", "group-create", "group-join", "group-leave", "group-rename",
              "group-color", "group-fold", "group-unfold", "group-reorder", "ungroup", "name-desktop", "rename-window", "rename-app", "rename-pattern",
              "name-by-folder", "restore-title", "pin", "unpin", "close-window", "force-close", "close-all", "restart-app", "bar",
-             "stats", "window-lines", "collapsed-click", "full-screen", "dump"],
+             "stats", "window-lines", "window-list", "collapsed-click", "full-screen", "dump"],
             verb => Assert.Contains($"\n  {verb}", help));
     }
 
@@ -610,6 +610,44 @@ public class RemoteControlMenuTests
 
         Assert.Equal(ControlReply.Failed, Run(manager, "window-lines", "sideways").ExitCode);
         Assert.True(manager.State.SplitWindowLines);
+    }
+
+    // The window list's place, remote twin of the menu choice (AppState.WindowListPlace): `screens` is the strip
+    // along the top of every screen, `row` the current workspace's expanded row.
+    [Fact]
+    public void Window_list_screens_sets_the_place()
+    {
+        var manager = Started();
+
+        Ok(Run(manager, "window-list", "screens"));
+
+        Assert.Equal(WindowListPlace.Screens, manager.State.WindowListPlace);
+    }
+
+    [Fact]
+    public void Window_list_row_sets_the_place()
+    {
+        var manager = Started();
+        Ok(Run(manager, "window-list", "bottom"));
+        Assert.Equal(WindowListPlace.Bottom, manager.State.WindowListPlace);
+
+        Ok(Run(manager, "window-list", "row"));
+
+        Assert.Equal(WindowListPlace.Row, manager.State.WindowListPlace);
+    }
+
+    // An unknown word is a usage error naming the command's own line, and changes nothing.
+    [Fact]
+    public void Window_list_with_an_unknown_word_fails_with_its_usage_line()
+    {
+        var manager = Started();
+        var before = manager.State.WindowListPlace;
+
+        var reply = Run(manager, "window-list", "sideways");
+
+        Assert.Equal(ControlReply.Failed, reply.ExitCode);
+        Assert.Contains("window-list row|bottom|screens", reply.Output);
+        Assert.Equal(before, manager.State.WindowListPlace);
     }
 
     // The collapsed bar click setting's remote twin (AppState.CollapsedBarSwitchesWhole). Petre: "make this

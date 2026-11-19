@@ -1,6 +1,7 @@
 using System.Text.RegularExpressions;
 using CSharpFunctionalExtensions;
 using Deskbar.Core.Domain;
+using Deskbar.Core.Persistence;
 
 namespace Deskbar.Core.Control;
 
@@ -171,6 +172,18 @@ public sealed partial class RemoteControl
         "split" => Reply(manager.SetSplitWindowLines(true), () => new { windowLines = "split" }),
         "whole" => Reply(manager.SetSplitWindowLines(false), () => new { windowLines = "whole" }),
         _ => ControlReply.Fail(ControlUsage.LineFor("window-lines")),
+    };
+
+    // Where the current workspace's titled window list goes (AppState.WindowListPlace), the remote twin of the
+    // menu choice: `row` is the expanded row, `bottom` the bottom of the bar, `screens` a strip along the top of
+    // every screen. Words are matched case-insensitively like `window-lines`; anything else is a usage error
+    // that changes nothing.
+    ControlReply WindowList(string place) => place.ToLowerInvariant() switch
+    {
+        "row" => Reply(manager.SetWindowListPlace(WindowListPlace.Row), () => new { windowList = "row" }),
+        "bottom" => Reply(manager.SetWindowListPlace(WindowListPlace.Bottom), () => new { windowList = "bottom" }),
+        "screens" => Reply(manager.SetWindowListPlace(WindowListPlace.Screens), () => new { windowList = "screens" }),
+        _ => ControlReply.Fail(ControlUsage.LineFor("window-list")),
     };
 
     // The collapsed bar click setting (AppState.CollapsedBarSwitchesWhole), the remote twin of the menu item that
