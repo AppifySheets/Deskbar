@@ -73,6 +73,36 @@ public class MoveToMonitorTests
         Assert.Equal(new WindowRect(-2880, 540, -960, 1620), rect);
     }
 
+    // A window that fills one screen must not land under what the other screen has reserved. Measured on
+    // the owner's two 4K screens: the primary's taskbar auto-hides, so its work area is the whole screen,
+    // and the left screen has the docked bar's 335 px strip on its right edge. A Teams window tiled over
+    // the whole primary was dragged to the left screen and arrived at -3837..-3, its right 335 px under
+    // the bar, because the move scaled monitor rectangle to monitor rectangle. It scales WORK AREA to
+    // work area, so the window ends where the strip begins.
+    [Fact]
+    public void A_window_filling_one_screen_stays_clear_of_the_strip_reserved_on_the_other()
+    {
+        var manager = Started();
+        var leftScreen = new MonitorBounds(-3840, 286, 0, 2446);
+        var primary = new MonitorBounds(0, 0, 3840, 2160);
+        screen.Facts = ScreenFacts.Empty with
+        {
+            MonitorPlacement = new Dictionary<int, MonitorBounds> { [1] = leftScreen, [2] = primary },
+            MonitorWorkAreas = new Dictionary<int, MonitorBounds>
+            {
+                [1] = leftScreen with { Right = -335 },
+                [2] = primary,
+            },
+        };
+        // What GetWindowRect reported for the tile 12,12,3828,2148: the invisible frame hangs 9 px past it.
+        screen.Rects[code.Handle] = new WindowRect(3, 12, 3837, 2157);
+
+        Assert.True(manager.MoveWindowToMonitor(code.Handle, 1).IsSuccess);
+
+        var (_, rect) = Assert.Single(screen.Moved);
+        Assert.Equal(new WindowRect(-3837, 298, -337, 2443), rect);
+    }
+
     // Dropping a window on the half of the row it is already in asks for nothing, and nudging it by a
     // rounding error would be a worse answer than doing nothing.
     [Fact]

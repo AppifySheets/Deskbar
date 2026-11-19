@@ -32,6 +32,10 @@ public static class MonitorMove
     // outside 0..1) must still arrive somewhere reachable, because the point of the gesture is to see
     // the thing you moved.
     //
+    // `source` and `target` are whatever area the caller wants the fractions taken of. The monitor move
+    // passes each screen's WORK AREA, so a window that fills one screen arrives filling what is free on
+    // the other and not under its taskbar or a docked bar (see WorkspaceManager.MoveWindowToMonitor).
+    //
     // A window WIDER OR TALLER than the target keeps as much as fits rather than being shrunk to it.
     // Shrinking would silently resize a window the user never asked to resize, and a window that
     // arrives too big can be resized by hand; one that arrives resized has lost information.

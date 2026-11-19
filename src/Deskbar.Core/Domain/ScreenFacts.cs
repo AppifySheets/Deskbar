@@ -29,7 +29,15 @@ public sealed record ScreenFacts(
     // MonitorArrangement). Optional and last for the same reason PrimaryMonitor is: null means
     // "no geometry available", which is compatibility mode and every test written before this,
     // and leaves ordering exactly as it was -- ascending by display number.
-    IReadOnlyDictionary<int, MonitorBounds>? MonitorPlacement = null)
+    IReadOnlyDictionary<int, MonitorBounds>? MonitorPlacement = null,
+    // Each display's WORK AREA (rcWork), keyed like MonitorPlacement: the display minus what the
+    // taskbar and any docked app bar have reserved, Deskbar's own docked strip included. Kept apart
+    // from MonitorPlacement because the two answer different questions. Placement says where a screen
+    // IS (ordering, the layout key, which screen a window is on) and must not change when a taskbar
+    // appears; the work area says where a window may be PUT, which is what a monitor move needs (see
+    // WorkspaceManager.MoveWindowToMonitor). Null, or a display missing from it, means "not known",
+    // and the caller falls back to the display's whole rectangle.
+    IReadOnlyDictionary<int, MonitorBounds>? MonitorWorkAreas = null)
 {
     public static readonly ScreenFacts Empty = new(
         new Dictionary<WindowHandle, int>(),
