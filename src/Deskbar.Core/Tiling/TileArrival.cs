@@ -20,6 +20,12 @@ public sealed record TileSplit(WindowHandle Target, TileArrange.Zone Side);
 // The floor compares FRACTIONS from TileSizes, never pixels. Pixels lose the gaps between tiles, and a tile of a
 // 2x2 grid would then fail a quarter it exactly has.
 //
+// SKIPPED TILES: the Tiler passes the screen's MAXIMIZED tiles in `skip`, and no rule above ever chooses one, neither
+// as the last-used tile nor as the largest. A maximized window keeps its slot but covers the whole screen, so
+// halving its slot would put the newcomer behind it, out of sight, and the maximized window would not change at all.
+// Only when every tile of the screen is skipped does the rule run as if nothing were: a window still has to go
+// somewhere, and the newcomer then lands in the slot the maximized window will come back to half of.
+//
 // Pure, like TileArrange: `tiles` is aligned with `order` (the slots GridLayout lays out), and the Tiler calls this.
 public static class TileArrival
 {
@@ -28,12 +34,16 @@ public static class TileArrival
     const double Floor = 0.25;
     const double Tolerance = 1e-9;
 
-    // None only when the screen has no windows.
+    // None only when the screen has no windows. `skip` (the maximized tiles) is honoured unless it holds every tile.
     public static Maybe<TileSplit> Choose(
-        IReadOnlyList<WindowHandle> order, TileSizes sizes, IReadOnlyList<WindowRect> tiles, Maybe<WindowHandle> lastUsed)
+        IReadOnlyList<WindowHandle> order, TileSizes sizes, IReadOnlyList<WindowRect> tiles, Maybe<WindowHandle> lastUsed,
+        IReadOnlySet<WindowHandle> skip)
     {
+        var everySkipped = order.All(skip.Contains);
+        // Slots and cells are counted over the whole order first, so a skipped tile still holds its place in the grid.
         var candidates = order
             .Select((window, slot) => (Window: window, Slot: slot, Cell: TileArrange.CellOf(sizes, slot, order.Count)))
+            .Where(t => everySkipped || !skip.Contains(t.Window))
             .Select(t => (t.Window, t.Slot, t.Cell, Side: SideOf(sizes, tiles[t.Slot], t.Cell)))
             .ToList();
 

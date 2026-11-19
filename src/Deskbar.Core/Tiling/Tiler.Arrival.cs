@@ -57,6 +57,10 @@ public sealed partial class Tiler
     // with no input in between is ignored (NoteUsed), and every activation already listed with this same tick is
     // dropped, which covers the hand-out activation that ARRIVED BEFORE the leave (Windows can raise it before the
     // window's Disappeared or MinimizeChanged reaches the Tiler).
+    //
+    // Known imprecision, accepted: the tick tells only that no input happened since, not which window the input went
+    // to. If the user clicks tile A and then a tile closes or minimizes BY ITSELF with no input in between, A's own
+    // activation carries the same tick and is dropped too, so the target falls back to the window used before A.
     void NoteLeft()
     {
         var tick = surface.LastInputTick();
@@ -147,7 +151,9 @@ public sealed partial class Tiler
             return board.Join(number, window);
         }
 
-        return TileArrival.Choose(order, sizes, order.Select(w => slots[w]).ToList(), lastUsed).Match(
+        // The screen's maximized tiles are never split (TileArrival has the reason): the newcomer would sit behind one.
+        var maximizedHere = order.Where(surface.IsMaximized).ToHashSet();
+        return TileArrival.Choose(order, sizes, order.Select(w => slots[w]).ToList(), lastUsed, maximizedHere).Match(
             split =>
             {
                 var (next, splitSizes) = TileArrange.Drop(order, sizes, window, split.Target, split.Side);

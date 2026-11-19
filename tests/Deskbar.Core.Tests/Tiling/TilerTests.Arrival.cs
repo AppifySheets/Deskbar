@@ -189,6 +189,25 @@ public sealed partial class TilerTests
         AssertArranged([W(1), W(2), W(3)], new TileSizes([0.5, 0.5], [[1.0], [0.5, 0.5]]));
     }
 
+    // W2 is maximized and would win the tie of two halves as the later slot. A maximized tile is never split (the
+    // newcomer would sit behind it), so W3 goes below W1, and W2 keeps its slot and stays maximized.
+    [Fact]
+    public void A_maximized_tile_is_never_the_one_a_new_window_splits()
+    {
+        new[] { 1, 2 }.ToList().ForEach(n => Exists(W(n), alpha));
+        Start();
+        surface.Maximized.Add(W(2));
+        Settles(W(2), Area);
+
+        Opens(W(3), alpha);
+
+        Assert.Equal([W(1), W(3), W(2)], tiler.Board.On(1));
+        var grid = GridLayout.Arrange(Area, 3, Gap, new TileSizes([0.5, 0.5], [[0.5, 0.5], [1.0]]));
+        Assert.Equal(grid[0], surface.Frames[W(1)]);
+        Assert.Equal(grid[1], surface.Frames[W(3)]);
+        Assert.Equal(Area, surface.Frames[W(2)]);
+    }
+
     // A window the bar (or the pipe's `move`) brings over from another workspace splits the tile last used too.
     [Fact]
     public void A_window_brought_from_another_workspace_splits_the_tile_last_used()
