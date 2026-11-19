@@ -124,6 +124,43 @@ beside 1.x: the check for a running 1.x ignores it, so exit the 1.x app from its
     list, and `taskspaces.cmd` is gone from `%APPDATA%\TaskSpaces`. The old folder's
     `state.json` is still there, untouched.
 
+## Screen strips
+
+The window list along the top of every screen (spec `docs/superpowers/specs/2026-11-19-screen-strips-design.md`,
+measurements `docs/superpowers/notes/2026-11-19-screen-strips-probes.md`). Run with two screens, the trace on
+(`%APPDATA%\Deskbar\trace.on`, log `%TEMP%\deskbar-trace.log`), and a build that is not Petre's only copy. Every strip
+line in the log starts with `strip on <left>,<top>`.
+
+S1.  Turn on from the menu: right-click the bar, Window list, At the top of each screen. A 32 DIP strip appears
+     along the top of every screen, the name tag of the current workspace first, then its windows as tabs. The
+     trace shows a `registered` and a `docked` line per screen. Maximized windows now start below the strip.
+S2.  Turn it on from the pipe instead (`deskbar.cmd help` lists the command) and confirm the same result. Turn it
+     off from the menu: every strip goes, and every screen's work area is back.
+S3.  Dock the bar to the left edge, then the right edge, then across the seam of the two screens. The bar sits
+     under the strip each time and never over it, and no strip moves.
+S4.  Dock the bar across the seam of two screens that are NOT level. The bar's corner covers the right end of the
+     lower screen's strip. Petre to decide how that should look.
+S5.  Maximize a window, then switch workspaces back and forth. The maximized window's top edge does not move.
+S6.  Minimize the bar. The strips stay, and no work area changes.
+S7.  Switch to a workspace on another virtual desktop. Every screen shows its strip on every desktop, with no empty
+     band of wallpaper at the top. If one is empty, the trace has a `strip pin failed` line for that screen.
+S8.  Lock and unlock with two screens. Read the trace: does a strip ever disappear and come back (a `removed` line
+     followed by a `registered` line for the same screen)? Does any maximized window's top edge move? A `dock
+     refused` line during the unlock is expected while a screen wakes; `taken back` should not climb.
+S9.  Unplug one screen. How long does its strip sit over the other screen before it goes (the time between the
+     unplug and the `removed` line)? Plug it back: the strip returns and the windows are not moved.
+S10. Play a full-screen video on one screen. Do only that screen's strips step aside, or all of them? The trace
+     geometry line of the affected strip says `stepped aside for a full-screen window`.
+S11. Snap a window to the left half, then turn strips on. The window stays snapped and its bottom edge stays on the
+     screen.
+S12. Put a restored window with its title bar at the very top of a screen, then turn strips on. It moves down by
+     the strip (the trace says `moved ... off the band`) and does not come in front of the window you are in.
+S13. Ask a Claude session for you while its window is on a strip. The tab has no orange glow. Is that a problem?
+     Petre to decide.
+S14. Connect over RDP and disconnect. Strips follow the screens that are there, and none is left over a screen that
+     is gone.
+S15. Exit from the tray. Every strip goes and every work area is back, on every screen.
+
 ## Results (2026-08-01)
 
 Status: **pending human execution.** An agent cannot observe the desktop, Task View,
