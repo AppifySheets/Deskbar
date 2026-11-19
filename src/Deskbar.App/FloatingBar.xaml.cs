@@ -6890,11 +6890,12 @@ public partial class FloatingBar : Window
         AddTilingItems(menu, workspaceId, Add);
 
         // Where the current workspace's titled list is ("let's try both"): its own row expands into it, or
-        // it sits at the bottom of the bar. One item that flips, naming what it would switch TO. On every
+        // it sits at the bottom of the bar. It began as one item that flipped, naming what it would switch TO;
+        // the screens became a third place (a strip along the top of every screen), and a flip cannot name
+        // three things, so it is now a "Window list" submenu with one checkable child per place, the current
+        // one ticked (docs/superpowers/specs/2026-11-19-screen-strips-design.md, "Choosing it"). On every
         // workspace's menu, since the list follows whichever workspace you are on.
-        var expanding = manager.State.ExpandCurrentWorkspace;
-        Add("☰", expanding ? "Window list at the bottom of the bar" : "Expand the current workspace",
-            () => Report(manager.SetWindowListPlace(expanding ? WindowListPlace.Bottom : WindowListPlace.Row)));
+        AddWindowListItems(menu);
         AddSplitItem(Add);
 
         // Petre: "add color picker in the right click context menu" (#68).
@@ -7030,9 +7031,7 @@ public partial class FloatingBar : Window
         Add("✚", "New workspace…", () => InsertAt(manager.State.Workspaces.Count, null));
 
         menu.Items.Add(new Separator());
-        var expanding = manager.State.ExpandCurrentWorkspace;
-        Add("☰", expanding ? "Window list at the bottom of the bar" : "Expand the current workspace",
-            () => Report(manager.SetWindowListPlace(expanding ? WindowListPlace.Bottom : WindowListPlace.Row)));
+        AddWindowListItems(menu);
         AddSplitItem(Add);
 
         AddBarItems(menu);
@@ -7070,6 +7069,30 @@ public partial class FloatingBar : Window
         Action? SaveDebugDump = null, Action? Restart = null);
 
     public AppCommands? AppActions { get; init; }
+
+    // The "Window list" submenu, shared by the workspace row menu and the bar's background menu so the two
+    // cannot drift: where the current workspace's titled window list sits (AppState.WindowListPlace). One
+    // checkable child per place, the current one ticked. Choosing a place stores the setting through
+    // WorkspaceManager.SetWindowListPlace; the menu is refilled on every open, so the ticks follow the state
+    // and no child needs to untick its siblings. The control pipe twin is `window-list` (ControlUsage).
+    void AddWindowListItems(ContextMenu menu)
+    {
+        var current = manager.State.WindowListPlace;
+        var parent = new MenuItem { Header = "Window list", Icon = MenuGlyph("☰") };
+        (WindowListPlace Place, string Header)[] places =
+        [
+            (WindowListPlace.Row, "In the workspace's row"),
+            (WindowListPlace.Bottom, "At the bottom of the bar"),
+            (WindowListPlace.Screens, "At the top of each screen"),
+        ];
+        places.ToList().ForEach(p =>
+        {
+            var child = new MenuItem { Header = p.Header, IsCheckable = true, IsChecked = p.Place == current };
+            child.Click += (_, _) => Report(manager.SetWindowListPlace(p.Place));
+            parent.Items.Add(child);
+        });
+        menu.Items.Add(parent);
+    }
 
     // The split window lines setting (AppState.SplitWindowLines), on every workspace's menu and the bar's own,
     // right under the window list item it belongs with. Petre: "make this a setting, enabled by default". One
