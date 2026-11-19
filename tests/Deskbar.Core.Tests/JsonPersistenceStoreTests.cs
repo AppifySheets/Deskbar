@@ -70,6 +70,35 @@ public sealed class JsonPersistenceStoreTests : IDisposable
         Assert.True(loaded.ExpandCurrentWorkspace);
     }
 
+    // Builds 2.4.77 to 2.5.0 wrote "QuietTaskbar": false into every state.json, chosen or not. It must load as
+    // NO choice, so the default (follow auto-hide) reaches those files; that is why the setting moved to a new
+    // key (see AppState.QuietTaskbarChoice). The old key rides along in Extra, for a downgrade.
+    [Theory]
+    [InlineData("false")]
+    [InlineData("true")]
+    public void The_old_quiet_taskbar_key_loads_as_no_choice(string old)
+    {
+        Directory.CreateDirectory(dir);
+        File.WriteAllText(Path.Combine(dir, "state.json"),
+            $$"""{"Workspaces":[],"WorkspaceRules":[],"RenameRules":[],"Inventory":{},"QuietTaskbar":{{old}}}""");
+
+        var loaded = new JsonPersistenceStore(dir).Load().Value;
+        Assert.Null(loaded.QuietTaskbarChoice);
+        Assert.True(loaded.Extra!.ContainsKey("QuietTaskbar"));
+    }
+
+    // A choice made with Manage's box, either way, comes back as that choice and not as "no choice".
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void A_quiet_taskbar_choice_roundtrips(bool choice)
+    {
+        var store = new JsonPersistenceStore(dir);
+        Assert.True(store.Save(SampleState() with { QuietTaskbarChoice = choice }).IsSuccess);
+
+        Assert.Equal(choice, store.Load().Value.QuietTaskbarChoice);
+    }
+
     // The screens choice round-trips through state.json, and WindowListAtBottom survives next to it so that a
     // build that does not know the screens still lands where he was.
     [Fact]

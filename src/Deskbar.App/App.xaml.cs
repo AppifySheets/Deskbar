@@ -95,6 +95,12 @@ public partial class App : Application
     // stays until the user is on the new version. Nothing is downloaded and nothing is replaced;
     // the app is portable on purpose and the link hands the decision back to the user.
 
+    // The watch that keeps Windows' taskbar flashing in step with Manage's box and with auto-hide (see where it is
+    // wired in OnStartup). Disposed on every orderly way out, just before the switch is put back. The poll is
+    // slow on purpose: auto-hide changes by hand, rarely, and a few seconds' lag on it costs nothing.
+    IDisposable? quietTaskbarWatch;
+    static readonly TimeSpan QuietTaskbarPoll = TimeSpan.FromSeconds(5);
+
     // Held so the timer cannot be collected, and so the tray menu can be rebuilt with it.
     System.Windows.Threading.DispatcherTimer? updateTimer;
     ReleaseInfo? availableUpdate;
@@ -1376,15 +1382,19 @@ public partial class App : Application
             .DistinctUntilChanged()
             .Subscribe(ClaudeSkill.Sync);
 
-        // Windows' "Show flashing on taskbar apps", held off while this copy runs when Manage's box says so
-        // (AppState.QuietTaskbar; docs/superpowers/specs/2026-11-18-taskbar-flashing-switch-design.md): now, and
-        // whenever the box changes. Put back with Sync(false) on every orderly way out (ExitApp, SessionEnding).
-        // This first call is also what recovers from a crash: it finds the marker the dead copy left and keeps
-        // its value. DistinctUntilChanged matters at exit too: a state pulse that arrives after the switch was
-        // put back (titles being restored) carries an unchanged setting and so cannot take hold again.
-        TaskbarFlashingSwitch.Sync(manager.State.QuietTaskbar);
-        manager.StateChanged
-            .Select(_ => manager.State.QuietTaskbar)
+        // Windows' "Show flashing on taskbar apps", held off while this copy runs when Manage's box says so, and by
+        // default whenever the taskbar auto-hides (AppState.QuietTaskbarChoice, TaskbarFlashing.Wanted;
+        // docs/superpowers/specs/2026-11-18-taskbar-flashing-switch-design.md): now, whenever the box changes, and
+        // whenever auto-hide is switched in Windows' settings, which no state pulse reports. That last one is a
+        // poll: one SHAppBarMessage every few seconds, read on this thread (ObserveOn) like the state.
+        //
+        // Put back with Sync(false) on every orderly way out (ExitApp, SessionEnding), which dispose this watch
+        // first, so a poll tick that lands after the switch was put back cannot take hold again. The StartWith
+        // call is also what recovers from a crash: it finds the marker the dead copy left and keeps its value.
+        quietTaskbarWatch = manager.StateChanged.Select(_ => 0L)
+            .Merge(Observable.Interval(QuietTaskbarPoll).ObserveOn(new System.Windows.Threading.DispatcherSynchronizationContext(Dispatcher)))
+            .StartWith(0L)
+            .Select(_ => Deskbar.Core.Shell.TaskbarFlashing.Wanted(manager.State.QuietTaskbarChoice, TaskbarFlashingSwitch.TaskbarAutoHides))
             .DistinctUntilChanged()
             .Subscribe(TaskbarFlashingSwitch.Sync);
 
@@ -1954,6 +1964,8 @@ public partial class App : Application
             manager.RestoreAllTitles();
             // Sign-out puts Windows' taskbar flashing back too, so a session that starts without Deskbar (start
             // with Windows unticked) has its flash. With Deskbar starting at sign-in it takes hold again there.
+            // The watch goes first, so its poll cannot take hold again behind this.
+            quietTaskbarWatch?.Dispose();
             TaskbarFlashingSwitch.Sync(false);
         };
     }
@@ -2342,7 +2354,9 @@ public partial class App : Application
         tileSurface = null;
         manager?.RestoreAllTitles();  // leave every window as we found it
         // ...and Windows' taskbar flashing as we found it (see where Sync is wired in OnStartup). Petre: "if i
-        // stop deskbar, it should bring back the taskbar". A no-op unless this copy was holding the switch.
+        // stop deskbar, it should bring back the taskbar". A no-op unless this copy was holding the switch. The
+        // watch goes first, so its poll cannot take hold again behind this.
+        quietTaskbarWatch?.Dispose();
         TaskbarFlashingSwitch.Sync(false);
         monitor?.Dispose();
         hotkeys?.Dispose(); // unregisters RegisterHotKey chords before the process exits

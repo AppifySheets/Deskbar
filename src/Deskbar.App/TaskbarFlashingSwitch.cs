@@ -32,6 +32,11 @@ static class TaskbarFlashingSwitch
     public static bool FlashingOn =>
         Registry.CurrentUser.OpenSubKey(AdvancedKey)?.GetValue(ValueName) is not 0;
 
+    // Whether Windows' taskbar auto-hides now, which decides the default when nobody has ticked or unticked
+    // Manage's box (TaskbarFlashing.Wanted). Read-only. False when no shell answers: then there is no taskbar
+    // for a flash to hold up.
+    public static bool TaskbarAutoHides => AppBar.Taskbar()?.AutoHide == true;
+
     // The app's entry point. Only Deskbar itself may change the setting, decided by the entry assembly as
     // StartupRegistration does and for the reason it gives: three test classes build a ManageWindow, and a test
     // host that ticked the box would otherwise switch off flashing on the machine of whoever runs the suite.

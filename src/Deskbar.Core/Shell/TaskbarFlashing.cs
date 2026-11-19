@@ -17,8 +17,8 @@ namespace Deskbar.Core.Shell;
 // This file is the decision, pure: from three facts, what to write to the registry and what to remember. The
 // App layer (TaskbarFlashingSwitch) gathers the facts and carries the step out.
 //
-// Wanted: the setting is on (AppState.QuietTaskbar) and Deskbar is staying up. False when the box is unticked
-// and on every orderly way out (Exit, Restart, sign-out), which is what "puts it back" means.
+// Wanted: the setting is on (TaskbarFlashing.Wanted, from AppState.QuietTaskbarChoice and auto-hide) and Deskbar
+// is staying up. False when it is off and on every orderly way out (Exit, Restart, sign-out), which is what "puts it back" means.
 // Remembered: what the switch was before Deskbar took hold, read from the marker file; null when Deskbar is
 // not holding it. FlashingOn: what the registry says now.
 public sealed record TaskbarFlashingFacts(bool Wanted, bool? Remembered, bool FlashingOn);
@@ -34,8 +34,14 @@ public static class TaskbarFlashing
     // shutdown, when nothing should depend on the manager still being able to persist.
     public const string MarkerName = "taskbar-flashing.before";
 
-    // The suggestion under Manage's box. Deskbar suggests the setting and does not switch it on unasked: it
-    // changes a Windows setting, and nobody should find one changed without having ticked something.
+    // Whether Deskbar should hold flashing off: the choice made with Manage's box, or, when nobody has made one,
+    // whether the taskbar auto-hides (AppState.QuietTaskbarChoice says why). One rule, used by the app's switch,
+    // by Manage's box and by WorkspaceManager.SetQuietTaskbar, so the three cannot disagree about what the box
+    // shows and what the switch does.
+    public static bool Wanted(bool? choice, bool autoHide) => choice ?? autoHide;
+
+    // The suggestion under Manage's box, for someone who unticked it while the taskbar auto-hides. With no choice
+    // made, an auto-hidden taskbar ticks the box by default (Wanted), so this only reaches a deliberate untick.
     public const string NoteText =
         "Your taskbar is on auto-hide. An app that flashes brings it up and keeps it there until you click that app. Ticking this stops that.";
 

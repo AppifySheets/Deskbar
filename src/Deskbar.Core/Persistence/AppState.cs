@@ -325,10 +325,20 @@ public sealed record AppState(
     // popping up when i don't need it" because a flashing app holds it up: "set the flashing off, so that without
     // deskbar taskbar still does its thing".
     //
-    // OFF by default: it changes a Windows setting, and nobody should find one changed without having ticked a
-    // box. Manage suggests it instead, under the box, when the taskbar is on auto-hide. This is only the wish;
-    // what the switch was before Deskbar took hold is in a marker file, not here (TaskbarFlashing.MarkerName).
-    public bool QuietTaskbar { get; init; }
+    // NULL means nobody chose, and then it FOLLOWS AUTO-HIDE: on while Windows' taskbar auto-hides, off while it
+    // is always shown (TaskbarFlashing.Wanted). Petre, 2026-11-19, after his taskbar kept coming up with the box
+    // unticked: "can you do a default for that if the taskbar is hidden?". A flash only holds an auto-hidden
+    // taskbar up, so that is the one case where the default does anything anyone can see, and Deskbar puts the
+    // Windows setting back when it stops, so nothing stays changed. True or false is a choice made with Manage's
+    // box, and it then holds whatever auto-hide does.
+    //
+    // A NEW KEY, not the old bool `QuietTaskbar` made nullable. Builds 2.4.77 to 2.5.0 wrote `"QuietTaskbar":
+    // false` into every state.json whether anyone unticked anything or not, so a stored false there cannot be
+    // told apart from a real choice, and reading it as one would keep the default from ever reaching the people
+    // it is for. The old key is no longer read; it rides along in Extra, so a downgrade still finds it. This is
+    // only the wish; what the switch was before Deskbar took hold is in a marker file, not here
+    // (TaskbarFlashing.MarkerName).
+    public bool? QuietTaskbarChoice { get; init; }
 
     // Docked ACROSS the line between two screens rather than on one screen's edge. Petre: "let's try docking it
     // so that it shows in the middle of the two monitors", "so left half is on the left, right on the right, as

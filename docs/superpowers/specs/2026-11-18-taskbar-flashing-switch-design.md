@@ -76,3 +76,21 @@ flash and no amber dot whenever Deskbar is not running.
 ## Left to the builder
 
 The wording of the note, and where the box sits among Manage's bottom checkboxes.
+
+## 2026-11-19: on by default on an auto-hidden taskbar
+
+Petre, a day after it shipped, with his taskbar still coming up and the box unticked: "can you do a default
+for that if the taskbar is hidden?". This reverses "off by default" and the anti-goal about changing a
+setting nobody ticked a box for, on his call. What makes it acceptable is the rest of the design: Deskbar puts
+the setting back on every orderly exit, and a flash only holds an auto-hidden taskbar up, so the default
+changes something visible only where it is wanted.
+
+- `AppState.QuietTaskbarChoice` (bool?) replaces `AppState.QuietTaskbar` (bool). Null means no choice, and
+  then the switch follows auto-hide (`TaskbarFlashing.Wanted`). A new key because 2.4.77 to 2.5.0 wrote
+  `"QuietTaskbar": false` into every state.json, so a stored false there is not a choice. The old key is no
+  longer read and rides along in `Extra`.
+- Manage's box shows the effective value. Ticking or unticking it stores a choice; opening Manage does not
+  (`SetQuietTaskbar` compares with what the box shows, not with the stored null).
+- The app re-reads auto-hide every 5 seconds, since switching it in Windows' settings sends no state pulse.
+  The watch is disposed before the switch is put back on exit.
+- The note under the box now reaches only someone who unticked it on an auto-hidden taskbar.

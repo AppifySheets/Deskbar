@@ -43,10 +43,16 @@ public partial class ManageWindow : Window
     // that must exist.
     readonly TimeTracker? timeTracker;
 
-    public ManageWindow(WorkspaceManager manager, bool compatibilityMode, TimeTracker? timeTracker = null)
+    // Whether Windows' taskbar auto-hides, which decides what the flashing box shows while nobody has made a
+    // choice with it (TaskbarFlashing.Wanted). The real reading by default; the tests pass a fixed answer, so
+    // what they assert does not depend on the taskbar of the machine running them.
+    readonly Func<bool> taskbarAutoHides;
+
+    public ManageWindow(WorkspaceManager manager, bool compatibilityMode, TimeTracker? timeTracker = null, Func<bool>? taskbarAutoHides = null)
     {
         this.manager = manager;
         this.timeTracker = timeTracker;
+        this.taskbarAutoHides = taskbarAutoHides ?? (() => TaskbarFlashingSwitch.TaskbarAutoHides);
         InitializeComponent();
         if (compatibilityMode) CompatBanner.Visibility = Visibility.Visible;
         ShowStartup();
@@ -64,9 +70,10 @@ public partial class ManageWindow : Window
         DockBar.IsChecked = manager.State.DockBar;
         // Same again: SetClaudeSkill ignores an unchanged value.
         ClaudeSkill.IsChecked = manager.State.ClaudeSkill;
-        // And again: SetQuietTaskbar ignores an unchanged value. The note is set here as well as in the handler,
-        // because an unticked box raises no Checked when the window opens.
-        QuietTaskbar.IsChecked = manager.State.QuietTaskbar;
+        // And again: SetQuietTaskbar ignores a value that matches what the box shows, so opening the window with no
+        // choice made and the box ticked by default (an auto-hidden taskbar) records nothing. The note is set here
+        // as well as in the handler, because an unticked box raises no Checked when the window opens.
+        QuietTaskbar.IsChecked = Deskbar.Core.Shell.TaskbarFlashing.Wanted(manager.State.QuietTaskbarChoice, this.taskbarAutoHides());
         ShowQuietTaskbarNote();
         // Tiling's one setting, the gap: the box shows the stored number, and nothing is written until Apply.
         TileGapBox.Text = manager.State.TileGap.ToString();
@@ -428,7 +435,7 @@ public partial class ManageWindow : Window
     // tests that build it away from the real setting.
     void OnQuietTaskbarToggled(object s, RoutedEventArgs e)
     {
-        manager.SetQuietTaskbar(QuietTaskbar.IsChecked == true).TapError(err => MessageBox.Show(err));
+        manager.SetQuietTaskbar(QuietTaskbar.IsChecked == true, taskbarAutoHides()).TapError(err => MessageBox.Show(err));
         ShowQuietTaskbarNote();
     }
 
@@ -439,7 +446,7 @@ public partial class ManageWindow : Window
     {
         var note = Deskbar.Core.Shell.TaskbarFlashing.Note(
             ticked: QuietTaskbar.IsChecked == true,
-            autoHide: AppBar.Taskbar()?.AutoHide == true,
+            autoHide: taskbarAutoHides(),
             flashingOn: TaskbarFlashingSwitch.FlashingOn);
         QuietTaskbarNote.Text = note;
         QuietTaskbarNote.Visibility = note.Length == 0 ? Visibility.Collapsed : Visibility.Visible;

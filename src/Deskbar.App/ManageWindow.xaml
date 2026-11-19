@@ -68,10 +68,12 @@
                   Content="Dock the bar to the edge of its screen, like the taskbar (windows keep clear of it)"
                   Checked="OnDockBarToggled" Unchecked="OnDockBarToggled"/>
         <!-- Windows' "Show flashing on taskbar apps", held off while Deskbar runs and put back when it stops
-             (AppState.QuietTaskbar; docs/superpowers/specs/2026-11-18-taskbar-flashing-switch-design.md). A flashing
-             app holds an auto-hidden taskbar up until it is clicked, and the bar's amber dot already shows the
-             flash. Off by default; the note under the box suggests it, and only when the taskbar is on auto-hide
-             and Windows flashes (TaskbarFlashing.Note). Declared after DockBar, so it sits just above it. -->
+             (AppState.QuietTaskbarChoice; docs/superpowers/specs/2026-11-18-taskbar-flashing-switch-design.md). A
+             flashing app holds an auto-hidden taskbar up until it is clicked, and the bar's amber dot already shows
+             the flash. Until the box is ticked or unticked by hand it follows auto-hide (TaskbarFlashing.Wanted):
+             ticked while the taskbar auto-hides, unticked while it is always shown. The note under the box suggests
+             it to someone who unticked it on an auto-hidden taskbar while Windows flashes (TaskbarFlashing.Note).
+             Declared after DockBar, so it sits just above it. -->
         <StackPanel DockPanel.Dock="Bottom" Margin="8,0,8,4">
             <CheckBox x:Name="QuietTaskbar"
                       Content="Stop apps flashing on Windows' taskbar while Deskbar runs (the bar's amber dot shows them instead)"

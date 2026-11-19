@@ -402,12 +402,13 @@ with rounded corners, wherever you dropped it.
 
 Docked or not, the bar carries enough of the taskbar that you can leave Windows' own on auto-hide.
 
-An auto-hidden taskbar still comes up, and stays up, whenever an app flashes its button, until you
-click that app. Tick **Stop apps flashing on Windows' taskbar while Deskbar runs** in Manage to stop
-that: Deskbar turns off Windows' "Show flashing on taskbar apps" while it runs and puts it back to
-what it was when you exit, so the taskbar flashes as before whenever Deskbar is not running. The
-amber dot on the bar still shows which app wants you. Manage suggests the box when your taskbar is
-on auto-hide.
+An auto-hidden taskbar comes up, and stays up, whenever an app flashes its button, until you click
+that app. So while your taskbar is on auto-hide, Deskbar turns off Windows' "Show flashing on
+taskbar apps" for as long as it runs, and puts it back to what it was when you exit, so the taskbar
+flashes as before whenever Deskbar is not running. The amber dot on the bar still shows which app
+wants you. The box **Stop apps flashing on Windows' taskbar while Deskbar runs** in Manage shows
+this. It starts ticked on an auto-hidden taskbar and unticked on one that is always shown, and once
+you tick or untick it yourself, your choice holds whatever auto-hide does.
 
 - **Pins.** A line showing the taskbar's pinned apps in the taskbar's order. Click one to jump to
   its window in this workspace, or to start it here if it has none. A short bar under a pin means
