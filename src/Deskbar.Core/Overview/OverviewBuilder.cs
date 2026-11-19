@@ -278,6 +278,8 @@ public static class OverviewBuilder
         if (unplacedRows.Count > 0)
             otherDesktops = [.. otherDesktops, new DesktopGroup(Guid.Empty, "Unplaced", false, unplacedRows)];
 
-        return new(pinnedRows, workspaceGroups, otherDesktops);
+        // The screens themselves go along with the rows, from the same sweep that numbered every row's Monitor, so a
+        // surface can tie a screen's rectangle to its number without a second sweep that might disagree with this one.
+        return new(pinnedRows, workspaceGroups, otherDesktops, facts.MonitorPlacement);
     }
 }

@@ -87,4 +87,10 @@ public sealed record WorkspaceGroup(Workspace Workspace, bool IsCurrent, IReadOn
 // windows group under that name, never under a generic "Unassigned" (Petre's ask).
 public sealed record DesktopGroup(Guid DesktopId, string Name, bool IsCurrent, IReadOnlyList<WindowRow> Windows);
 
-public sealed record Overview(IReadOnlyList<WindowRow> Pinned, IReadOnlyList<WorkspaceGroup> Workspaces, IReadOnlyList<DesktopGroup> OtherDesktops);
+// Screens: every display Windows reports, by the display number each row's Monitor holds, with its rectangle in
+// physical pixels (ScreenFacts.MonitorPlacement, from the same sweep). Every display, not only those holding windows:
+// the screen strips (FloatingBar.Strips.cs) know a screen only by its rectangle, and a drop on the strip of a screen
+// with no windows on it still needs that screen's number to land there. Null where there is no screen layout
+// (compatibility mode, and the tests that predate it); optional and last so every existing construction compiles.
+public sealed record Overview(IReadOnlyList<WindowRow> Pinned, IReadOnlyList<WorkspaceGroup> Workspaces, IReadOnlyList<DesktopGroup> OtherDesktops,
+    IReadOnlyDictionary<int, MonitorBounds>? Screens = null);

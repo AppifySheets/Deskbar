@@ -55,7 +55,7 @@ public partial class FloatingBar
             {
                 if (ClickTrace.On)
                     ClickTrace.Write($"toggle settled hwnd={window.Value:X} minimized={now} after {clock.ElapsedMilliseconds}ms");
-                if (IsVisible) Rebuild();
+                if (RebuildWanted) Rebuild();
             });
     }
 
