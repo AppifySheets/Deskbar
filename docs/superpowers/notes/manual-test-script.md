@@ -151,6 +151,10 @@ S9.  Unplug one screen. How long does its strip sit over the other screen before
      unplug and the `removed` line)? Plug it back: the strip returns and the windows are not moved.
 S10. Play a full-screen video on one screen. Do only that screen's strips step aside, or all of them? The trace
      geometry line of the affected strip says `stepped aside for a full-screen window`.
+     Then the other way round: start the full-screen video first, and lock and unlock (or unplug and replug that
+     screen) while it plays, so the strip is created with the video already up. The shell sends ABN_FULLSCREENAPP
+     only when full screen starts or ends, so a strip made in the middle of it may never hear of the video. Does the
+     new strip sit on top of the video? Its trace geometry line has no `stepped aside` part if it was never told.
 S11. Snap a window to the left half, then turn strips on. The window stays snapped and its bottom edge stays on the
      screen.
 S12. Put a restored window with its title bar at the very top of a screen, then turn strips on. It moves down by
