@@ -140,6 +140,27 @@ public sealed partial class TilerTests
         AssertArranged([W(1), W(2), W(4)], new TileSizes([0.5, 0.5], [[1.0], [0.5, 0.5]]));
     }
 
+    // Final review M3: a leave with no event time (0, not from a WinEvent) must not wipe out the time of the real
+    // close just before it. W4 closes at a real time, W3 closes with none, and Windows hands focus to W1 30 ms after
+    // W4's close: still not the user's. W2 stays the target and W5 goes below it; had the hand-out counted, W5 would
+    // be above W2, below W1.
+    [Fact]
+    public void A_leave_with_no_event_time_does_not_hide_the_hand_out_of_the_close_before_it()
+    {
+        Enumerable.Range(1, 4).ToList().ForEach(n => Exists(W(n), alpha));
+        Start();
+        Uses(W(2));
+        Uses(W(4));
+
+        var closed = Later();
+        Closes(W(4), closed);
+        Closes(W(3));
+        HandedFocus(W(1), closed + 30);
+        Opens(W(5), alpha);
+
+        AssertArranged([W(1), W(2), W(5)], new TileSizes([1.0], [[0.5, 0.25, 0.25]]));
+    }
+
     // A click a second after a close is the user's: W1 becomes the target, and W4 goes below it.
     [Fact]
     public void A_user_click_long_after_a_close_counts()
@@ -249,6 +270,20 @@ public sealed partial class TilerTests
         Assert.Equal(grid[0], surface.Frames[W(1)]);
         Assert.Equal(grid[1], surface.Frames[W(3)]);
         Assert.Equal(Area, surface.Frames[W(2)]);
+    }
+
+    // Final review M2: every arrival decision leaves a trace line, also when the screen the window opened on is not
+    // one the surface reports (unplugged mid-evaluate). It joins that screen, and the line says why.
+    [Fact]
+    public void An_arrival_on_a_screen_that_is_not_reported_is_traced()
+    {
+        Exists(W(1), alpha);
+        Start();
+
+        Opens(W(3), alpha, screen: 2);
+
+        Assert.Equal([W(3)], tiler.Board.On(2));
+        Assert.Single(traced, line => line.StartsWith("tile: ") && line.Contains($"{W(3).Value:X} arrived on screen 2, which is not reported"));
     }
 
     // A window the bar (or the pipe's `move`) brings over from another workspace splits the tile last used too.

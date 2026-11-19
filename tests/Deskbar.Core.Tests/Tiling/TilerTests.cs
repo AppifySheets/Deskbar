@@ -315,6 +315,12 @@ public sealed partial class TilerTests : IDisposable
         Assert.Equal(grid[1], surface.Frames[W(4)]);
         Assert.Equal(grid[3], surface.Frames[W(3)]);
         Assert.Equal(Area, surface.Frames[W(2)]);
+        // The slot W(2) keeps is the top of the right column, where it will drop when it is restored: the split
+        // left an equal 2x2, which is what nothing stored means (final review, M8: the frames are the promise).
+        Assert.Empty(manager.State.Workspaces.Single(w => w.Id == alpha.Id).TileSizes);
+        surface.Maximized.Remove(W(2));
+        Settles(W(2), new WindowRect(400, 300, 900, 700));
+        Assert.Equal(grid[2], surface.Frames[W(2)]);
     }
 
     // Maximized before tiling began, so restoring it puts it back where it used to be, which here is over
@@ -661,6 +667,41 @@ public sealed partial class TilerTests : IDisposable
         Assert.Equal([W(3), W(1), W(4)], tiler.Board.On(2));
         Assert.Equal(GridLayout.Arrange(Area2, 3, Gap, new TileSizes([0.5, 0.5], [[0.5, 0.5], [1.0]])),
             new[] { W(3), W(1), W(4) }.Select(w => surface.Frames[w]).ToList());
+    }
+
+    // The design's "which arrivals split": a window dragged by hand onto another screen is the user pointing at a
+    // place, so the drop rules decide it, never the split of the tile last used. W2, the tile last used, is on screen
+    // 1; W1 dropped on the bottom of W3 stacks under W3 on screen 2. Had it gone through Arrived it would have come
+    // back to screen 1 and split W2.
+    [Fact]
+    public void A_tile_dragged_by_hand_to_another_screen_goes_where_it_was_dropped_not_into_a_split()
+    {
+        StartTwoByTwoScreens();
+        Uses(W(2));
+        var there = Grid(2, Area2);
+
+        DroppedAt(W(1), (there[0].Left + there[0].Right) / 2, there[0].Bottom - 20, screen: 2);
+
+        AssertTiled([W(2)]);
+        AssertArranged([W(3), W(1), W(4)], new TileSizes([0.5, 0.5], [[0.5, 0.5], [1.0]]), Area2, screen: 2);
+        Assert.DoesNotContain(traced, line => line.Contains($"{W(1).Value:X} arrived"));
+    }
+
+    // The same onto a screen with no tiles: the drop joins that screen (SettledMove's JoinScreen), and W1 has the
+    // whole of it, while W2, the tile last used, keeps the whole of screen 1.
+    [Fact]
+    public void A_tile_dragged_by_hand_onto_an_empty_screen_joins_it_and_splits_nothing()
+    {
+        surface.ScreenList.Add(FakeTileSurface.Screen(2, Area2));
+        new[] { 1, 2 }.ToList().ForEach(n => Exists(W(n), alpha));
+        Start();
+        Uses(W(2));
+
+        DroppedAt(W(1), Area2.Left + 600, 500, screen: 2);
+
+        AssertTiled([W(2)]);
+        AssertTiled([W(1)], Area2, screen: 2);
+        Assert.DoesNotContain(traced, line => line.Contains($"{W(1).Value:X} arrived"));
     }
 
     [Fact]

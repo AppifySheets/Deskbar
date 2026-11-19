@@ -44,7 +44,8 @@ public sealed partial class Tiler
 
     // Windows that are closing right now on a workspace that keeps a closed tile's space. OnWindowEvent adds one on
     // Disappeared or Hidden of a window on the board, before the evaluate that takes it off; NoteLeavers reads it
-    // into the leaver entry and then clears it, so it never outlives the one board change it was noted for. Never
+    // into the leaver entry and then clears it, so it never outlives the one board change it was noted for, and
+    // OnWindowEvent clears it again when its event is done, for an evaluate that threw or changed no board. Never
     // filled for a minimize: minimizing is not a close (the design says so, and a minimized tile comes back to its
     // own place through Tiler.Minimize.cs, not into an opening).
     readonly HashSet<WindowHandle> closing = [];
