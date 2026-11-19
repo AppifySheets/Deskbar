@@ -159,6 +159,12 @@ public sealed class ScreenStrips
         return true;
     }
 
+    // A trace line, built only when tracing is on, so the strip set costs nothing with it off (see ScreenStrip.Tracing).
+    static void Say(Func<string> line)
+    {
+        if (ClickTrace.On) ClickTrace.Write(line());
+    }
+
     ScreenStrip Open(MonitorBounds screen)
     {
         var strip = create(screen);
@@ -166,7 +172,7 @@ public sealed class ScreenStrips
         // a tool window before anything can list it.
         var hwnd = new WindowInteropHelper(strip).EnsureHandle();
         ignore(hwnd);
-        ClickTrace.Write($"strip on {strip.Screen.Left},{strip.Screen.Top}: registered, screen {strip.Screen.Left},{strip.Screen.Top} to {strip.Screen.Right},{strip.Screen.Bottom}");
+        Say(() => $"strip on {strip.Screen.Left},{strip.Screen.Top}: registered, screen {strip.Screen.Left},{strip.Screen.Top} to {strip.Screen.Right},{strip.Screen.Bottom}");
         // A failed dock is not fatal and not retried here: the strip stays in the set, docked-but-waiting, and its own
         // guard (KeepStrip, on Tick) docks it once its screen can be read. The strip traces its own refusal (ScreenStrip.
         // Refuse), so a strip that never appeared can be told from one that was never made.
@@ -215,9 +221,9 @@ public sealed class ScreenStrips
                     : Array.Empty<(WindowHandle Window, WindowRect From, WindowRect To)>())
                 .ToList()
                 .ForEach(move => layout.Nudge(move.Window, move.To)
-                    .Tap(() => ClickTrace.Write(
+                    .Tap(() => Say(() =>
                         $"strip on {strip.Screen.Left},{strip.Screen.Top}: moved {move.Window.Value:X} from {move.From.Left},{move.From.Top} to {move.To.Left},{move.To.Top}, off the band"))
-                    .TapError(error => ClickTrace.Write(
+                    .TapError(error => Say(() =>
                         $"strip on {strip.Screen.Left},{strip.Screen.Top}: could not move {move.Window.Value:X} off the band: {error}")));
         });
 
@@ -225,7 +231,7 @@ public sealed class ScreenStrips
     // what the manual script's lock and unlock check looks for.
     void Remove(ScreenStrip strip)
     {
-        ClickTrace.Write($"strip on {strip.Screen.Left},{strip.Screen.Top}: removed");
+        Say(() => $"strip on {strip.Screen.Left},{strip.Screen.Top}: removed");
         strip.Undock();
         strip.Close();
         pinned = pinned.Remove(strip);
@@ -251,8 +257,8 @@ public sealed class ScreenStrips
                     pinned = pinned.Add(strip);
                     lastPinTry = lastPinTry.Remove(strip);
                 })
-                .TapError(error => ClickTrace.Write(
-                    $"strip pin failed on {strip.Screen.Left},{strip.Screen.Top}: {error}; trying again in {FloatingBar.RetryEvery.TotalSeconds:N0} s"));
+                .TapError(error => Say(() =>
+                        $"strip pin failed on {strip.Screen.Left},{strip.Screen.Top}: {error}; trying again in {FloatingBar.RetryEvery.TotalSeconds:N0} s"));
         }
         finally
         {

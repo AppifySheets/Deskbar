@@ -128,6 +128,20 @@ public sealed class ScreenStrip : Window
     // %TEMP%\deskbar-trace.log, CLAUDE.md "Instrumentation"), a list in the tests, which cannot read the log.
     internal Action<string> Trace { get; init; } = ClickTrace.Write;
 
+    // Whether tracing is on. Asked BEFORE a line is built: the 1 s beat reaches TraceGeometry for every strip, and
+    // Describe is a native monitor query plus a long string, so with tracing off (nearly always) building the line only
+    // for ClickTrace.Write to throw it away would cost that every second. The tests set it true to read what is traced.
+    internal Func<bool> Tracing { get; init; } = () => ClickTrace.On;
+
+    // How often Describe has run, so a test can show that tracing off never builds a line.
+    internal int DescribeCalls { get; private set; }
+
+    // One event line, built only when tracing is on.
+    void Say(Func<string> line)
+    {
+        if (Tracing()) Trace(line());
+    }
+
     // The last geometry line written, so TraceGeometry writes only when the line changes.
     string lastGeometry = "";
 
@@ -252,7 +266,7 @@ public sealed class ScreenStrip : Window
 
             PlaceAt(hwnd, got, scale);
             if (!IsVisible) Show();
-            Trace($"strip on {Screen.Left},{Screen.Top}: docked, asked {Format(asked.Value)}, granted {Format(got)}");
+            Say(() => $"strip on {Screen.Left},{Screen.Top}: docked, asked {Format(asked.Value)}, granted {Format(got)}");
             return Result.Success();
         }
         finally
@@ -267,7 +281,7 @@ public sealed class ScreenStrip : Window
     Result Refuse(string reason)
     {
         refusals++;
-        Trace($"strip on {Screen.Left},{Screen.Top}: dock refused: {reason}");
+        Say(() => $"strip on {Screen.Left},{Screen.Top}: dock refused: {reason}");
         return Result.Failure(reason);
     }
 
@@ -307,7 +321,7 @@ public sealed class ScreenStrip : Window
         if (Dock().IsSuccess)
         {
             repairs++;
-            Trace($"strip on {Screen.Left},{Screen.Top}: taken back by the guard ({repairs} so far)");
+            Say(() => $"strip on {Screen.Left},{Screen.Top}: taken back by the guard ({repairs} so far)");
         }
     }
 
@@ -316,6 +330,7 @@ public sealed class ScreenStrip : Window
     // full-screen window) is one new line. Like the bar's geometry traces (CLAUDE.md, "Instrumentation").
     public void TraceGeometry()
     {
+        if (!Tracing()) return;
         var line = Describe();
         if (line == lastGeometry) return;
         lastGeometry = line;
@@ -372,7 +387,13 @@ public sealed class ScreenStrip : Window
 
     // One line for the debug dump and, later, the trace: the screen, what was asked and granted, the screen's work area
     // as Windows reports it now, whether the shell registration stands, and how often the guard has taken it back.
-    public string Describe() =>
+    public string Describe()
+    {
+        DescribeCalls++;
+        return DescribeLine();
+    }
+
+    string DescribeLine() =>
         $"strip on {Format(new AppBar.Rect(Screen.Left, Screen.Top, Screen.Right, Screen.Bottom))}: "
         + $"asked {(asked is { } a ? Format(a) : "nothing")}, granted {(granted is { } g ? Format(g) : "nothing")}, "
         + $"work {(OwnMonitor() is { } own ? DebugDump.Format(own.Work) : "unreadable")}, "

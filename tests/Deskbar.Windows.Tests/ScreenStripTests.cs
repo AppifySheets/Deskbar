@@ -352,6 +352,7 @@ public class ScreenStripTests
         {
             Scale = () => At150,
             DockWith = (_, s, px) => new(s.L, s.T, s.R, s.T + px),
+            Tracing = () => true,
             Trace = lines.Add,
         };
         Assert.True(strip.Dock().IsSuccess);
@@ -369,6 +370,30 @@ public class ScreenStripTests
         strip.Close();
     });
 
+    // With tracing off (the default for everyone), the 1 s beat must cost nothing: no Describe (a native monitor query and
+    // a long string) and no line, from the geometry trace or from any event.
+    [Fact]
+    public void With_tracing_off_nothing_is_built_or_written() => StaThread.Run(() =>
+    {
+        var lines = new List<string>();
+        var strip = new ScreenStrip(Offscreen)
+        {
+            Scale = () => At150,
+            DockWith = (_, s, px) => new(s.L, s.T, s.R, s.T + px),
+            Tracing = () => false,
+            Trace = lines.Add,
+        };
+        Assert.True(strip.Dock().IsSuccess);
+
+        strip.TraceGeometry();
+        strip.TraceGeometry();
+
+        Assert.Empty(lines);
+        Assert.Equal(0, strip.DescribeCalls);
+        strip.Undock();
+        strip.Close();
+    });
+
     // A dock that worked is one line with what was asked and what was granted.
     [Fact]
     public void A_dock_that_worked_is_traced_with_what_was_granted() => StaThread.Run(() =>
@@ -378,6 +403,7 @@ public class ScreenStripTests
         {
             Scale = () => At150,
             DockWith = (_, s, px) => new(s.L, s.T, s.R, s.T + px),
+            Tracing = () => true,
             Trace = lines.Add,
         };
 
@@ -404,6 +430,7 @@ public class ScreenStripTests
             Clock = () => now,
             // Granted off the strip's own screen, so the guard has a strip to take back once it may.
             DockWith = (_, s, px) => new(s.L + 5000, s.T, s.R + 5000, s.T + px),
+            Tracing = () => true,
             Trace = lines.Add,
         };
         Assert.True(strip.Dock().IsSuccess);
@@ -432,6 +459,7 @@ public class ScreenStripTests
             Scale = () => At150,
             Clock = () => now,
             DockWith = (_, s, px) => new(s.L + 5000, s.T, s.R + 5000, s.T + px),
+            Tracing = () => true,
             Trace = lines.Add,
         };
         Assert.True(traced.Dock().IsSuccess);
