@@ -133,9 +133,14 @@ sealed class WindowRings : IDisposable
     // The rectangle a frame should cover, or null where Windows' own border shows (a window that is neither maximized
     // nor full screen). Physical pixels: the app is per-monitor DPI aware, so these are what SetWindowPos speaks.
     //
-    //   * Maximized: the VISIBLE rectangle (DWMWA_EXTENDED_FRAME_BOUNDS), cut to its screen. A maximized window's
-    //     GetWindowRect hangs 7 to 11 px over every edge (FullScreenCover's measurements), and a line drawn there
-    //     would be off the screen or on the next one.
+    //   * Maximized: the VISIBLE rectangle (DWMWA_EXTENDED_FRAME_BOUNDS), cut to its screen's WORK AREA. A maximized
+    //     window's GetWindowRect hangs 7 to 11 px over every edge (FullScreenCover's measurements), and a line drawn
+    //     there would be off the screen or on the next one. The work area rather than the whole screen because a window
+    //     maximized before a strip or a docked bar took its band keeps its old size, under that band: Petre's Edge
+    //     window was 0,38,3489,2160 against a work area of 0,54,3472,2160, so the frame's top ran under the strip, its
+    //     right edge under the docked bar, and next to nothing of it showed ("not all windows get right border").
+    //   * Maximized and covering the screen EXACTLY: a browser in F11 keeps IsZoomed (FullScreenCover's measurements).
+    //     That is full screen, and the strips step behind it, so it takes the whole screen like any full-screen window.
     //   * Full screen: a window that is not maximized and covers its whole screen, FullScreenCover's test (a video
     //     player, a game). The screen's rectangle.
     //   * Minimized: nothing to outline; a minimized window's rectangle is nonsense (CLAUDE.md, Traps).
@@ -152,17 +157,20 @@ sealed class WindowRings : IDisposable
         var info = new NativeMethods.MONITORINFO { cbSize = System.Runtime.InteropServices.Marshal.SizeOf<NativeMethods.MONITORINFO>() };
         if (monitor == 0 || !NativeMethods.GetMonitorInfo(monitor, ref info)) return null;
         var screen = info.rcMonitor;
+        var work = info.rcWork;
 
         if (NativeMethods.IsZoomed(window))
         {
-            var cut = NativeMethods.DwmGetWindowAttributeRect(window, NativeMethods.DWMWA_EXTENDED_FRAME_BOUNDS, out var visible,
-                          System.Runtime.InteropServices.Marshal.SizeOf<NativeMethods.RECT>()) == 0
+            var known = NativeMethods.DwmGetWindowAttributeRect(window, NativeMethods.DWMWA_EXTENDED_FRAME_BOUNDS, out var visible,
+                System.Runtime.InteropServices.Marshal.SizeOf<NativeMethods.RECT>()) == 0;
+            if (known && Same(visible, screen)) return screen;
+            var cut = known
                 ? new NativeMethods.RECT
                 {
-                    Left = Math.Max(visible.Left, screen.Left), Top = Math.Max(visible.Top, screen.Top),
-                    Right = Math.Min(visible.Right, screen.Right), Bottom = Math.Min(visible.Bottom, screen.Bottom),
+                    Left = Math.Max(visible.Left, work.Left), Top = Math.Max(visible.Top, work.Top),
+                    Right = Math.Min(visible.Right, work.Right), Bottom = Math.Min(visible.Bottom, work.Bottom),
                 }
-                : screen;
+                : work;
             return cut.Right > cut.Left && cut.Bottom > cut.Top ? cut : null;
         }
 
@@ -171,6 +179,9 @@ sealed class WindowRings : IDisposable
             ? screen
             : null;
     }
+
+    static bool Same(NativeMethods.RECT a, NativeMethods.RECT b) =>
+        a.Left == b.Left && a.Top == b.Top && a.Right == b.Right && a.Bottom == b.Bottom;
 
     // Windows' own border in `colour` (#RRGGBB), or back to Windows' default with null.
     static void Border(nint window, string? colour)
