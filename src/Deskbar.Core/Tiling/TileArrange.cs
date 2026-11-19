@@ -183,6 +183,19 @@ public static class TileArrange
             .FirstOrDefault(Maybe<TileSizes>.None);
     }
 
+    // KEEP THE SPACE (tiling-predictable-placement design, change 3). With the workspace's switch on, a tile that
+    // CLOSES does not take its cell with it: the cell stays, empty, as the screen's opening, and the next window to
+    // arrive goes into it (Tiler.Arrival.cs, step 2). The sizes are otherwise untouched, so every other tile is laid
+    // out exactly where it was: the slots behind the leaver move up one, and CellOf maps a slot at or after the
+    // opening one cell on, which is the cell each of those windows already had.
+    //
+    // `sizes` describe the grid as it was before the close, one cell per window then, and `cell` is the leaver's cell
+    // in them. A cell the sizes do not have (it cannot happen from the Tiler, which reads the cell off these same
+    // sizes, but a wrong slot must never become an opening no grid can lay out) keeps nothing: the sizes come back
+    // as they were. An opening is never plain (IsPlain), so SetTileSizes stores it even on an otherwise even grid.
+    public static TileSizes KeptOpen(TileSizes sizes, (int Column, int Row) cell) =>
+        Holds(sizes, cell) ? sizes with { Opening = Slot(sizes, cell) } : sizes;
+
     // The screen's opening closed: its cell goes, and its share goes to the tiles around it in proportion.
     public static TileSizes Closed(TileSizes sizes) =>
         sizes.Opening is { } open && open >= 0 && open < sizes.Shape.Sum()

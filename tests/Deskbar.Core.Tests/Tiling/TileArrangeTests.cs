@@ -94,6 +94,27 @@ public sealed class TileArrangeTests
         Assert.Equal(new TileSizes([0.5, 0.5], [[0.5, 0.5], [1.0]]), refit);
     }
 
+    // Keep-the-space (tiling-predictable-placement, change 3): a closed tile's cell stays and becomes the opening, so
+    // the sizes still describe the old grid and lay the remaining windows out exactly where they were.
+    [Fact]
+    public void Keeping_a_cell_open_makes_it_the_opening()
+    {
+        var kept = TileArrange.KeptOpen(TileSizes.Equal([2, 2]), (1, 1));
+
+        Assert.Equal(TileSizes.Equal([2, 2]) with { Opening = 3 }, kept);
+        Assert.True(kept.HasOpeningFor(3));
+        // An opening is never plain, so SetTileSizes stores it even on an otherwise even grid.
+        Assert.False(TileArrange.IsPlain(kept));
+    }
+
+    // A cell the sizes do not have names no slot; nothing is kept.
+    [Fact]
+    public void Keeping_a_cell_the_sizes_do_not_have_changes_nothing()
+    {
+        Assert.Equal(TileSizes.Equal([2, 2]), TileArrange.KeptOpen(TileSizes.Equal([2, 2]), (2, 0)));
+        Assert.Equal(TileSizes.Equal([2, 2]), TileArrange.KeptOpen(TileSizes.Equal([2, 2]), (0, 2)));
+    }
+
     [Fact]
     public void A_leaver_alone_in_its_column_takes_the_column_and_the_rest_keep_their_rows()
     {

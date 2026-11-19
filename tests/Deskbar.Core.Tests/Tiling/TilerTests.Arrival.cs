@@ -1,3 +1,4 @@
+using CSharpFunctionalExtensions;
 using Deskbar.Core.Domain;
 using Deskbar.Core.Tiling;
 
@@ -262,5 +263,158 @@ public sealed partial class TilerTests
         Assert.True(manager.MoveToDesktop(W(3), alpha.DesktopId!.Value).IsSuccess);
 
         AssertArranged([W(1), W(3), W(2)], new TileSizes([0.5, 0.5], [[0.5, 0.5], [1.0]]));
+    }
+
+    // --- keep the space when a window closes (change 3) -------------------------------------------------------
+
+    // The window went to the tray: the shell drops it from its taskbar list (FakeMonitor.IsListed reads
+    // InitialWindows) and WindowMonitor raises Hidden. The window is still alive, so it is not marked dead.
+    void Hides(WindowHandle h, uint time = 0)
+    {
+        monitor.InitialWindows.RemoveAll(w => w.Handle == h);
+        monitor.Subject.OnNext(new WindowEvent(WindowEventKind.Hidden, Info(h), time));
+    }
+
+    // Alpha's stored sizes for the first fake screen, if it has any.
+    Maybe<TileSizes> StoredOnAlpha() =>
+        manager.State.Workspaces.First(w => w.Id == alpha.Id).TileSizes
+            .TryFirst(s => s.Screen == AreaKey)
+            .Map(s => s.Sizes);
+
+    // A 2x2 of W1..W4 on Alpha (W1 top left, W2 below it, W3 top right, W4 bottom right), keep-the-space on or off.
+    void TwoByTwo(bool keepsSpace)
+    {
+        Enumerable.Range(1, 4).ToList().ForEach(n => Exists(W(n), alpha));
+        Start();
+        Assert.True(manager.SetTileKeepsSpace(alpha.Id, keepsSpace).IsSuccess);
+        AssertTiled([W(1), W(2), W(3), W(4)]);
+    }
+
+    IReadOnlyList<WindowRect> FramesOf(params int[] windows) => windows.Select(n => surface.Frames[W(n)]).ToList();
+
+    [Fact]
+    public void A_closing_tile_leaves_its_space_and_nothing_else_moves()
+    {
+        TwoByTwo(keepsSpace: true);
+        var before = FramesOf(1, 2, 3);
+
+        Closes(W(4));
+
+        Assert.Equal([W(1), W(2), W(3)], tiler.Board.On(1));
+        Assert.Equal(before, FramesOf(1, 2, 3));
+        Assert.Equal(Grid(4).Take(3).ToList(), FramesOf(1, 2, 3));
+        Assert.Equal(TileSizes.Equal([2, 2]) with { Opening = 3 }, StoredOnAlpha().GetValueOrThrow());
+        Assert.Single(traced, line => line.StartsWith("tile: ") && line.Contains("space kept"));
+    }
+
+    [Fact]
+    public void The_next_window_fills_the_kept_space()
+    {
+        TwoByTwo(keepsSpace: true);
+        var w4Was = surface.Frames[W(4)];
+        Closes(W(4));
+        // W1 last used: without the kept space W5 would split W1 and go below it. The opening comes first.
+        Uses(W(1));
+
+        Opens(W(5), alpha);
+
+        Assert.Equal([W(1), W(2), W(3), W(5)], tiler.Board.On(1));
+        Assert.Equal(w4Was, surface.Frames[W(5)]);
+        AssertTiled([W(1), W(2), W(3), W(5)]);
+        // Filled, the grid is even again, and even sizes on the automatic shape are not stored at all.
+        Assert.True(StoredOnAlpha().HasNoValue);
+    }
+
+    // Review focus 5: many apps close to the tray, which is Hidden, not Disappeared. The space is kept, and when the
+    // window shows again it is an arrival like any other, so it goes into the opening, which is the place it left.
+    [Fact]
+    public void A_tile_hidden_to_the_tray_keeps_its_space_and_fills_it_when_it_shows_again()
+    {
+        TwoByTwo(keepsSpace: true);
+        var w4Was = surface.Frames[W(4)];
+        var others = FramesOf(1, 2, 3);
+
+        Hides(W(4));
+
+        Assert.Equal([W(1), W(2), W(3)], tiler.Board.On(1));
+        Assert.Equal(others, FramesOf(1, 2, 3));
+        Assert.Equal(TileSizes.Equal([2, 2]) with { Opening = 3 }, StoredOnAlpha().GetValueOrThrow());
+
+        // Shown again: listed again and Appeared, somewhere Windows chose, not its old place.
+        Opens(W(4), alpha);
+
+        Assert.Equal([W(1), W(2), W(3), W(4)], tiler.Board.On(1));
+        Assert.Equal(w4Was, surface.Frames[W(4)]);
+        Assert.Equal(others, FramesOf(1, 2, 3));
+        Assert.True(StoredOnAlpha().HasNoValue);
+    }
+
+    // A minimize is not a close: change 1's rule, W4's cell goes and W3 takes the whole right column.
+    [Fact]
+    public void Minimizing_does_not_keep_the_space()
+    {
+        TwoByTwo(keepsSpace: true);
+
+        Minimizes(W(4), true);
+
+        var closedUp = new TileSizes([0.5, 0.5], [[0.5, 0.5], [1.0]]);
+        AssertArranged([W(1), W(2), W(3)], closedUp);
+        Assert.Equal([2, 1], StoredOnAlpha().GetValueOrThrow().Shape);
+        Assert.Equal(closedUp, StoredOnAlpha().GetValueOrThrow());
+        Assert.DoesNotContain(traced, line => line.Contains("space kept"));
+    }
+
+    // One opening per screen: the second close removes its own cell as in change 1, and the first opening stays
+    // where W4 was. W1's column had two rows, so W2 has the whole left column now.
+    [Fact]
+    public void A_second_close_while_a_space_is_kept_closes_up_as_usual()
+    {
+        TwoByTwo(keepsSpace: true);
+        var w3Was = surface.Frames[W(3)];
+        var w4Was = surface.Frames[W(4)];
+
+        Closes(W(4));
+        Closes(W(1));
+
+        var expected = new TileSizes([0.5, 0.5], [[1.0], [0.5, 0.5]]) { Opening = 2 };
+        Assert.Equal(expected, StoredOnAlpha().GetValueOrThrow());
+        AssertArranged([W(2), W(3)], expected);
+        Assert.Equal(w3Was, surface.Frames[W(3)]);
+        Assert.Equal(w4Was, GridLayout.OpeningOf(Area, 2, Gap, expected).GetValueOrThrow());
+        Assert.Single(traced, line => line.Contains("space kept"));
+    }
+
+    // Review focus 4: the last tile closing leaves an empty screen, which has no grid to keep a space in.
+    [Fact]
+    public void The_last_tile_on_a_screen_closing_keeps_nothing()
+    {
+        Exists(W(1), alpha);
+        Start();
+        Assert.True(manager.SetTileKeepsSpace(alpha.Id, true).IsSuccess);
+
+        Closes(W(1));
+
+        Assert.Empty(tiler.Board.On(1));
+        Assert.True(StoredOnAlpha().HasNoValue);
+        Assert.DoesNotContain(traced, line => line.Contains("threw"));
+        Assert.DoesNotContain(traced, line => line.Contains("space kept"));
+
+        // Nothing left over: the next window has the whole screen.
+        Opens(W(2), alpha);
+        AssertTiled([W(2)]);
+    }
+
+    // The switch is off by default: a close closes up (change 1), and no opening is stored.
+    [Fact]
+    public void With_the_switch_off_a_close_closes_up()
+    {
+        TwoByTwo(keepsSpace: false);
+
+        Closes(W(4));
+
+        var closedUp = new TileSizes([0.5, 0.5], [[0.5, 0.5], [1.0]]);
+        AssertArranged([W(1), W(2), W(3)], closedUp);
+        Assert.Equal(closedUp, StoredOnAlpha().GetValueOrThrow());
+        Assert.Null(StoredOnAlpha().GetValueOrThrow().Opening);
     }
 }
