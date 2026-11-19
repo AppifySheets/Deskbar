@@ -37,6 +37,47 @@ public static class GridLayout
             ? Cells(area, count + 1, gap, sizes)[open]
             : Maybe<WindowRect>.None;
 
+    // ---- the split tree (TileLayout), beside the TileSizes versions above until the Tiler is switched over ----
+
+    // The tree's cells for `count` windows: `Count - 1` rects with the opening left out when the layout has an
+    // opening for this many windows, otherwise every leaf. Callers pass a layout whose Count matches.
+    public static IReadOnlyList<WindowRect> Arrange(WindowRect area, int count, int gap, TileLayout layout) =>
+        layout.HasOpeningFor(count)
+            ? CellsOf(area, gap, layout).Where((_, slot) => slot != layout.Opening).ToList()
+            : CellsOf(area, gap, layout);
+
+    // Where the opening is, when the layout has one for `count` windows.
+    public static Maybe<WindowRect> OpeningOf(WindowRect area, int count, int gap, TileLayout layout) =>
+        layout.HasOpeningFor(count) && layout.Opening is { } open
+            ? CellsOf(area, gap, layout)[open]
+            : Maybe<WindowRect>.None;
+
+    // Every leaf's rect in slot order, the opening included. Same steps as Cells, in the same order, so a migrated
+    // grid is pixel-identical: shrink by the outer gap, divide each split's span with Edges, then inset each leaf
+    // on every edge that is not on the inner area's border.
+    public static IReadOnlyList<WindowRect> CellsOf(WindowRect area, int gap, TileLayout layout)
+    {
+        var inner = InnerArea(area, gap);
+        return Place(layout.Root, inner)
+            .Select(cell => Inset(cell, gap,
+                hasLeft: cell.Left > inner.Left, hasRight: cell.Right < inner.Right,
+                hasTop: cell.Top > inner.Top, hasBottom: cell.Bottom < inner.Bottom))
+            .ToList();
+    }
+
+    // The un-inset rects of a node's leaves inside `rect`, depth-first.
+    static IEnumerable<WindowRect> Place(TileNode node, WindowRect rect)
+    {
+        if (node is not TileBranch branch)
+            return [rect];
+
+        var across = branch.Axis == Axis.Across;
+        var edges = Edges(across ? rect.Width : rect.Height, branch.Children.Select(c => c.Share).ToList());
+        return branch.Children.SelectMany((child, i) => Place(child.Node, across
+            ? new WindowRect(rect.Left + edges[i], rect.Top, rect.Left + edges[i + 1], rect.Bottom)
+            : new WindowRect(rect.Left, rect.Top + edges[i], rect.Right, rect.Top + edges[i + 1])));
+    }
+
     // Every cell of the grid, `count` of them, whether a window holds it or not.
     static IReadOnlyList<WindowRect> Cells(WindowRect area, int count, int gap, TileSizes sizes)
     {
@@ -92,7 +133,7 @@ public static class GridLayout
     // Even fractions use floor(span / n) per entry, exactly as the equal grid always did; uneven
     // ones round the running total. The last boundary is always the span's end, so the integer
     // remainder lands in the last entry.
-    static IReadOnlyList<int> Edges(int span, IReadOnlyList<double> fractions)
+    internal static IReadOnlyList<int> Edges(int span, IReadOnlyList<double> fractions)
     {
         var n = fractions.Count;
         var even = fractions.All(f => Math.Abs(f - 1.0 / n) < 1e-9);
