@@ -58,6 +58,7 @@ public partial class App : Application
     // Parked tasks and their timers (docs/superpowers/specs/2026-11-19-tasks-in-the-bar-design.md). Built with the
     // time tracker, ticked by the 1 s timer, and handed to the remote control; later tasks read it for the UI.
     Core.Tasks.TaskService? tasks;
+    DueCards? dueCards;
     // Tiling (docs/superpowers/specs/2026-11-08-tiling-design.md): the Tiler decides, the surface does the
     // Win32. Both live for the process, both are null in compatibility mode (there are no desktops to tile),
     // and ExitApp disposes the Tiler and then the surface, so the LOCATIONCHANGE hook goes with them.
@@ -1395,6 +1396,28 @@ public partial class App : Application
         // StateChanged only when the marks differ from the ones it holds. So a pulse that changes nothing
         // ends the chain after one hop, and each real change moves the chain at most one step further.
         tasks!.Changed.Subscribe(_ => manager.SetTaskMarks(tasks.DueWorkspaces(), tasks.RunningWorkspaces()));
+
+        // The due card (DueCard, DueCards): when a task comes due while the bar cannot be seen (minimized, hidden,
+        // stepped aside or a full-screen app open), a small non-activating card says so, since Windows toasts are
+        // unavailable to us (issue #123). A click goes to the task's workspace; a free task opens the stopwatch
+        // menu instead, after showing the bar again if it was minimized. Spec: "When the bar cannot be seen".
+        dueCards = new DueCards(
+            tasks,
+            () => floatingBar?.OutOfSight ?? false,
+            id => manager.State.Workspaces.TryFirst(w => w.Id == id) is { HasValue: true } found
+                ? (found.Value.Name, ToBrush(LaneColour.Of(manager.State, found.Value)))
+                : (null, null),
+            task =>
+            {
+                if (task.WorkspaceId.HasValue)
+                {
+                    manager.Switch(task.WorkspaceId.Value);
+                    return;
+                }
+
+                if (floatingBar?.Minimized == true) RestoreBar();
+                floatingBar?.OpenTasksMenu();
+            });
         //
         // Threads: manager.StateChanged is pulsed from the virtual-desktop CurrentChanged event, which is raised on
         // a thread of its own, while the task service (and the manager's mark sets) are UI-thread only. So the prune
@@ -2212,6 +2235,14 @@ public partial class App : Application
     }
 
     // Every way back: the taskbar button, the X on its thumbnail, Alt+Tab, and the tray item.
+    // A "#RRGGBB" lane colour as a frozen brush (static WPF brushes must be frozen), for the due card swatch.
+    static System.Windows.Media.Brush ToBrush(string hex)
+    {
+        var brush = new System.Windows.Media.SolidColorBrush((System.Windows.Media.Color)System.Windows.Media.ColorConverter.ConvertFromString(hex));
+        brush.Freeze();
+        return brush;
+    }
+
     void RestoreBar()
     {
         if (standIn is { } window)

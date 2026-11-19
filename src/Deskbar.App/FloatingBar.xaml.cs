@@ -965,6 +965,12 @@ public partial class FloatingBar : Window
     // by App at startup to decide which of the two states to start in.
     public bool Minimized { get; private set; }
 
+    // Whether nobody can see the bar right now: minimized behind its taskbar button, hidden, stepped aside for a
+    // full-screen window (floating bar dropped out of topmost), or docked while a full-screen app is open
+    // (ABN_FULLSCREENAPP). The due card (DueCard) opens only in these cases, since otherwise the bar's own pie and
+    // stopwatch already say a task came due.
+    internal bool OutOfSight => Minimized || !IsVisible || steppedAside || fullScreenAppOpen;
+
     // Hide, and record it. NOT Close and NOT a new window: the handle has to survive, because it is
     // the one WindowMonitor.Ignore was given at startup and the one ReclaimTopmost addresses.
     // Persisting immediately rather than on exit means a crash or a kill leaves the state Petre

@@ -323,7 +323,7 @@ public partial class FloatingBar
 
     // --- the menu, until the task window exists ----------------------------------------------------------------
 
-    void OpenTasksMenu()
+    internal void OpenTasksMenu()
     {
         if (stripTasks is null) return;
         var menu = TasksMenu();
