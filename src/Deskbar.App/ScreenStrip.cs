@@ -68,7 +68,13 @@ public sealed class ScreenStrip : Window
     // The screen's scale (1.5 at 150%). In the app it is read from the screen itself with GetDpiForMonitor, for the
     // reason NativeMethods gives (a window's own DPI can be stale just after a show). Faked in the tests, so the
     // pixel arithmetic does not depend on the scale of the machine running them.
-    internal Func<double> Scale { get; init; }
+    //
+    // No value when the screen cannot be read (it dropped out for a moment, as a waking screen does on unlock). There is
+    // deliberately no stand-in: the window's own scale is the only other one at hand, and after Windows has moved the
+    // window off the vanished screen it is ANOTHER screen's. A strip docked with it on a mixed-scale desk registered at
+    // the wrong thickness (32 px on a 150% screen), and the guard can never see that: the work area starts below a strip
+    // too thin just as it does below the right one. So Dock refuses instead (review of task 6, fix round 1).
+    internal Func<Maybe<double>> Scale { get; init; }
 
     // The time the guard reads, UTC. Faked in the tests to step over the settle time without waiting for it.
     internal Func<DateTime> Clock { get; init; } = () => DateTime.UtcNow;
@@ -185,8 +191,9 @@ public sealed class ScreenStrip : Window
         });
     }
 
-    // The screen's width in its own DIPs.
-    double WidthDip() => (Screen.Right - Screen.Left) / Scale();
+    // The screen's width in its own DIPs. Only for sizing tabs, so while the screen cannot be read the window's own scale
+    // is good enough here: a tab a little too wide or narrow until the next rebuild reserves nothing, unlike a dock.
+    double WidthDip() => (Screen.Right - Screen.Left) / Scale().GetValueOrDefault(VisualTreeHelper.GetDpi(this).DpiScaleX);
 
     // Reserves the top of this strip's screen, HeightDip thick in that screen's pixels, and puts the window exactly in
     // what the shell granted, then shows it if it is not up yet. Also the way to RE-dock: on the shell's notices, and
@@ -205,7 +212,13 @@ public sealed class ScreenStrip : Window
             lastDocked = Clock();
             docked = true;
 
-            var scale = Scale();
+            // Its own screen cannot be read: wait, never dock at a guessed scale (see Scale). Left docked, so the guard
+            // docks again on its own clock once the screen is back, and Undock still gives back whatever a dock before
+            // this one reserved. This is also what keeps the shell's re-dock notice (OnShellMovedStrips) harmless while a
+            // screen is dropping out, which is exactly the display change that sends one.
+            if (Scale().TryGetValue(out var scale) is false)
+                return Result.Failure($"The strip's screen {Format(new AppBar.Rect(Screen.Left, Screen.Top, Screen.Right, Screen.Bottom))} cannot be read right now.");
+
             var screen = new AppBar.Rect(Screen.Left, Screen.Top, Screen.Right, Screen.Bottom);
             var thicknessPx = (int)Math.Round(HeightDip * scale);
             asked = new AppBar.Rect(screen.L, screen.T, screen.R, screen.T + thicknessPx);
@@ -276,8 +289,10 @@ public sealed class ScreenStrip : Window
 
     // The shell said something on an edge moved (another app bar, the taskbar, a resolution change), or Explorer
     // restarted: ask again. Queued, because the notice arrives inside the shell's own message. It does not loop: a
-    // SETPOS that grants the rectangle already held sends no further notice (measured, probe notes section 1).
-    void OnShellMovedStrips() =>
+    // SETPOS that grants the rectangle already held sends no further notice (measured, probe notes section 1). Nor does
+    // it dock while the strip's screen cannot be read: Dock refuses then. Internal so a test can send the notice without
+    // the shell, which only sends it to a registered app bar.
+    internal void OnShellMovedStrips() =>
         Dispatcher.BeginInvoke(new Action(() =>
         {
             if (docked) _ = Dock();
@@ -354,12 +369,12 @@ public sealed class ScreenStrip : Window
             : null;
     }
 
-    // The screen's own scale, from the screen itself. When it cannot be read (it dropped out for a moment) the window's
-    // own scale stands in: still a sensible thickness, and the guard docks again once the screen is back.
-    double ScaleOfScreen() =>
+    // The screen's own scale, from the screen itself, or no value when it cannot be read (it dropped out for a moment).
+    // Nothing stands in for it, for the reason Scale gives.
+    Maybe<double> ScaleOfScreen() =>
         OwnMonitor() is { } own && NativeMethods.GetDpiForMonitor(own.Handle, NativeMethods.MDT_EFFECTIVE_DPI, out var dpi, out _) == 0 && dpi > 0
             ? dpi / 96.0
-            : VisualTreeHelper.GetDpi(this).DpiScaleY;
+            : Maybe<double>.None;
 
     // A drag carrying a window icon, in WindowDragSource's format. Anything else (a file, some text) is refused.
     internal static bool Accepts(IDataObject data) => data.GetDataPresent(DraggedWindow.DragFormat);

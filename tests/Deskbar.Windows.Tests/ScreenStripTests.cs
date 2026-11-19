@@ -3,6 +3,7 @@ using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Interop;
 using System.Windows.Media;
+using CSharpFunctionalExtensions;
 using Deskbar.App;
 using Deskbar.Core.Domain;
 using Deskbar.Core.Geometry;
@@ -222,6 +223,77 @@ public class ScreenStripTests
         now += TimeSpan.FromMinutes(5);
         strip.KeepStrip([]);
         Assert.Equal(2, asked.Count);
+
+        strip.Undock();
+        strip.Close();
+    });
+
+    // A strip whose screen cannot be read (it dropped out for a moment on unlock) must not dock: the only scale left to
+    // convert its 32 DIP with is the window's, which after Windows moved it off the vanished screen is ANOTHER screen's,
+    // and a strip registered 32 px thick on a 150% screen would look held to the guard for ever after. Here with the
+    // real scale seam: the made-up screen is no monitor at all, so it is never readable.
+    [Fact]
+    public void A_strip_whose_screen_cannot_be_read_does_not_dock() => StaThread.Run(() =>
+    {
+        var asked = new List<Ask>();
+        var strip = new ScreenStrip(Offscreen)
+        {
+            DockWith = (edge, screen, px) =>
+            {
+                asked.Add(new Ask(edge, screen, px));
+                return new AppBar.Rect(screen.L, screen.T, screen.R, screen.T + px);
+            },
+        };
+
+        Assert.True(strip.Dock().IsFailure);
+        Assert.Empty(asked);
+        Assert.False(strip.IsVisible);
+        strip.Close();
+    });
+
+    // The way a screen dropping out really reaches a docked strip: the display change makes the shell send its
+    // re-dock notice (ABN_POSCHANGED). Docked while the screen was readable, then the screen goes: the notice docks
+    // nothing. Once the screen is back the guard, on its own clock, docks again at the screen's own scale.
+    [Fact]
+    public void A_shell_notice_while_the_screen_cannot_be_read_docks_nothing_and_the_guard_docks_once_it_is_back() => StaThread.Run(() =>
+    {
+        var asked = new List<Ask>();
+        var now = new DateTime(2026, 11, 19, 12, 0, 0, DateTimeKind.Utc);
+        var readable = true;
+        var strip = new ScreenStrip(Offscreen)
+        {
+            Scale = () => readable ? At150 : Maybe<double>.None,
+            Clock = () => now,
+            DockWith = (edge, screen, px) =>
+            {
+                asked.Add(new Ask(edge, screen, px));
+                return new AppBar.Rect(screen.L, screen.T, screen.R, screen.T + px);
+            },
+        };
+        Assert.True(strip.Dock().IsSuccess);
+        Assert.Single(asked);
+
+        // The screen drops out and the shell says something on an edge moved. Queued, as the real notice is handled.
+        readable = false;
+        strip.OnShellMovedStrips();
+        strip.Dispatcher.Invoke(() => { }, System.Windows.Threading.DispatcherPriority.Background);
+        Assert.Single(asked);
+
+        // Windows moves the window off the vanished screen, as it does: the guard would take the strip back, and must
+        // not while the screen cannot be read. The window being elsewhere is what gives the guard work here.
+        var hwnd = new WindowInteropHelper(strip).Handle;
+        Assert.True(NativeMethods.SetWindowPos(hwnd, 0, Offscreen.Left + 5000, Offscreen.Top, 0, 0,
+            NativeMethods.SWP_NOSIZE | NativeMethods.SWP_NOZORDER | NativeMethods.SWP_NOACTIVATE));
+        now += TimeSpan.FromSeconds(30);
+        strip.KeepStrip([Offscreen]);
+        Assert.Single(asked);
+
+        // Back: the guard, once its retry interval has passed, docks again, 48 px thick at the screen's own scale.
+        readable = true;
+        now += TimeSpan.FromSeconds(30);
+        strip.KeepStrip([Offscreen]);
+        Assert.Equal(2, asked.Count);
+        Assert.Equal(48, asked[1].ThicknessPx);
 
         strip.Undock();
         strip.Close();
