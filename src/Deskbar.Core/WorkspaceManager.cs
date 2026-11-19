@@ -2682,7 +2682,19 @@ public sealed class WorkspaceManager(
         if (from is not { } source || !placement.TryGetValue(source, out var origin))
             return Result.Failure("Cannot tell which monitor that window is on.");
 
-        var landing = MonitorMove.Fit(rect, origin, target);
+        // Scaled WORK AREA to work area, not screen to screen. Which screen the window is on (above) is a
+        // question about the screens' whole rectangles; where it may be put is a question about what is
+        // left of them once the taskbar and any docked app bar, Deskbar's own strip among them, have
+        // taken their share. Screen to screen put a window that filled a screen with no taskbar under
+        // the 335 px strip docked on the other one:
+        //
+        //   monitor move done [other desktop]: 110FBC screen 2->1, asked -3837,298 3834x2145
+        //
+        // on a screen whose work area ends at -335. A screen with no known work area counts whole.
+        MonitorBounds WorkAreaOf(int number, MonitorBounds whole) =>
+            facts.MonitorWorkAreas is { } areas && areas.TryGetValue(number, out var area) ? area : whole;
+
+        var landing = MonitorMove.Fit(rect, WorkAreaOf(source, origin), WorkAreaOf(monitorNumber, target));
         var moved = screenLayout.MoveTo(window, landing, mayChangeShowState: here);
 
         // VERIFIED by reading the rectangle back, which is the only honest test. SetWindowPos reports

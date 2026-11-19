@@ -16,7 +16,7 @@ public sealed class ScreenLayout : IScreenLayout
 {
     public ScreenFacts Snapshot()
     {
-        var (numbers, primary, placement) = MonitorNumbers();
+        var (numbers, primary, placement, workAreas) = MonitorNumbers();
 
         // EnumWindows hands back windows FRONT TO BACK, so the index in this list is the
         // z-order outright -- no extra call needed. (Enumerate() filters to taskbar candidates
@@ -38,7 +38,7 @@ public sealed class ScreenLayout : IScreenLayout
             if (IsIconic(window.Value)) minimized.Add(window);
         });
 
-        return new ScreenFacts(monitorOf, minimized, zOrder, primary, placement);
+        return new ScreenFacts(monitorOf, minimized, zOrder, primary, placement, workAreas);
     }
 
     // #89. Physical pixels, not DIPs: this is what SetWindowPos speaks, and MonitorMove does its
@@ -210,10 +210,15 @@ public sealed class ScreenLayout : IScreenLayout
     //
     // Internal so TileSurface numbers screens with THIS method rather than a copy of it: the bar and
     // the tiling grid must agree on which screen is which, and two numberings would drift apart.
-    internal static (Dictionary<nint, int> Numbers, Maybe<int> Primary, Dictionary<int, MonitorBounds> Placement) MonitorNumbers()
+    //
+    // WorkAreas is rcWork for the same displays, and it is a SEPARATE answer on purpose: Placement is
+    // where a screen is, WorkAreas is where a window may be put on it (ScreenFacts.MonitorWorkAreas).
+    internal static (Dictionary<nint, int> Numbers, Maybe<int> Primary, Dictionary<int, MonitorBounds> Placement,
+        Dictionary<int, MonitorBounds> WorkAreas) MonitorNumbers()
     {
         var numbers = new Dictionary<nint, int>();
         var placement = new Dictionary<int, MonitorBounds>();
+        var workAreas = new Dictionary<int, MonitorBounds>();
         var primary = Maybe<int>.None;
         // The delegate is only used for the duration of this call -- unlike the WinEvent hook
         // in WindowMonitor, EnumDisplayMonitors is synchronous, so there is nothing for the GC
@@ -225,13 +230,15 @@ public sealed class ScreenLayout : IScreenLayout
             numbers[monitor] = number;
             placement[number] = new MonitorBounds(
                 info.rcMonitor.Left, info.rcMonitor.Top, info.rcMonitor.Right, info.rcMonitor.Bottom);
+            workAreas[number] = new MonitorBounds(
+                info.rcWork.Left, info.rcWork.Top, info.rcWork.Right, info.rcWork.Bottom);
             // Asked of Windows rather than assumed to be display 1. Measured on the setup this
             // was built against: the PRIMARY there is DISPLAY2, not DISPLAY1 -- so "main
             // monitor" and "monitor 1" are genuinely different questions.
             if ((info.dwFlags & MONITORINFOF_PRIMARY) != 0) primary = number;
             return true;
         }, 0);
-        return (numbers, primary, placement);
+        return (numbers, primary, placement, workAreas);
     }
 
     // "\\.\DISPLAY12" -> 12. Null for anything that does not end in digits, which is not a
