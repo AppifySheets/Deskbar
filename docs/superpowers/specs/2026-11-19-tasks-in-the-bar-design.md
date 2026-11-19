@@ -55,7 +55,8 @@ A task:
 | Id          | Guid |
 | Title       | free text, editable |
 | WorkspaceId | `Maybe<Guid>`: the workspace it belongs to, or none |
-| Created     | when it was made |
+| Created     | when it was made (UTC) |
+| UpdatedAt   | when anything about it last changed (UTC), for a later sync |
 | Timer       | `Maybe<(DateTimeOffset Started, TimeSpan Length)>`: the running or expired timer, if any |
 | DoneAt      | `Maybe<DateTimeOffset>` |
 | History     | the timers it has had, each as start, length and how it ended (came back, done, cancelled), for later totals |
@@ -176,6 +177,20 @@ Tasks live in `tasks.json` beside `state.json` in `AppPaths.NewStateDir`, writte
 `state.json` should not be rewritten for each timer. A task whose workspace was deleted keeps its title and
 becomes a free task. Done tasks stay in the file (the history is what later totals would read); the list shows
 only today's.
+
+### Later: a cloud task list
+
+Petre (2026-11-19): "we'll later have a cloud-based task manager that i will be able to interact with from my phone
+as well". Nothing of it is built now, but three cheap choices keep that door open:
+
+- The controller reads and writes tasks only through an `ITaskStore` interface; `tasks.json` is its first
+  implementation, and a syncing store can replace it without touching the bar or the window.
+- Every time is stored as a UTC `DateTimeOffset`, and every task carries `UpdatedAt`, which a sync needs to settle
+  edits made on two devices.
+- Ids are Guids made on the device, so a task created on the phone never collides with one made here.
+
+Not done now, on purpose: tombstones for deleted tasks, a stored copy of the workspace's name for a device that
+does not know the workspace, and any account or network code. Those belong to the cloud design.
 
 ## Remote control
 
