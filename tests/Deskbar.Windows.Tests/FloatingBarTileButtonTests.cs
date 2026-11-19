@@ -7,7 +7,8 @@ namespace Deskbar.Windows.Tests;
 
 // The tiling button in the bar's header, beside Start and Search. Petre, testing tiling live: "maybe add a button
 // at the top of the bar", then picked it from a mockup: one button for the workspace you are on, lit while that
-// workspace is tiled, shown only while Manage's "Tiling (experimental)" box is ticked.
+// workspace is tiled. Since 2026-11-19 it is always shown on a named workspace: Manage's "Tiling (experimental)"
+// box is gone, and this button is how a workspace is tiled.
 //
 // The harness: GEPHA (current) and Sparrow, one window each (see Harness in FloatingBarRebuildTests). The bar's
 // IsPro seam stands in for Entitlement, as in FloatingBarTilingMenuTests.
@@ -30,23 +31,24 @@ public class FloatingBarTileButtonTests
 
     static void Click(Button button) => button.RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Primitives.ButtonBase.ClickEvent));
 
-    // The default: nothing about tiling on the bar, Pro or not.
+    // The default, with nothing switched on anywhere: the button is there, Pro or not. Petre: "enable tiling in
+    // the settings and remove it as an option; it's enough to have a button at the top".
     [Theory]
     [InlineData(true)]
     [InlineData(false)]
-    public void With_the_experiment_off_there_is_no_tile_button(bool pro) => StaThread.Run(() =>
+    public void The_tile_button_is_there_without_any_setting(bool pro) => StaThread.Run(() =>
     {
         var harness = Harness.Build();
         using var bar = ShowBar(harness, pro);
+        Settle(bar);
 
-        Assert.All(bar.Bar.TileButtons, b => Assert.Equal(Visibility.Collapsed, b.Visibility));
+        Assert.Equal(Visibility.Visible, Button(bar).Visibility);
     });
 
     [Fact]
     public void Clicking_it_tiles_the_workspace_you_are_on_and_again_stops() => StaThread.Run(() =>
     {
         var harness = Harness.Build();
-        Assert.True(harness.Manager.SetExperimentalTiling(true).IsSuccess);
         using var bar = ShowBar(harness, pro: true);
         Settle(bar);
         Assert.Equal(Visibility.Visible, Button(bar).Visibility);
@@ -70,7 +72,6 @@ public class FloatingBarTileButtonTests
     public void It_is_lit_while_the_workspace_you_are_on_is_tiled() => StaThread.Run(() =>
     {
         var harness = Harness.Build();
-        Assert.True(harness.Manager.SetExperimentalTiling(true).IsSuccess);
         using var bar = ShowBar(harness, pro: true);
         Settle(bar);
         var unlit = Button(bar).Background;
@@ -86,7 +87,6 @@ public class FloatingBarTileButtonTests
     public void Free_tier_is_told_it_comes_with_Deskbar_Pro() => StaThread.Run(() =>
     {
         var harness = Harness.Build();
-        Assert.True(harness.Manager.SetExperimentalTiling(true).IsSuccess);
         using var bar = ShowBar(harness, pro: false);
         Settle(bar);
 
@@ -101,7 +101,6 @@ public class FloatingBarTileButtonTests
     {
         var harness = Harness.Build();
         var gepha = harness.Manager.State.Workspaces.Single(w => w.Name == "GEPHA").Id;
-        Assert.True(harness.Manager.SetExperimentalTiling(true).IsSuccess);
         Assert.True(harness.Manager.SetWorkspaceTiled(gepha, true).IsSuccess);
         using var bar = ShowBar(harness, pro: true);
         Settle(bar);

@@ -86,28 +86,23 @@ public sealed partial class RemoteControl
             w => Reply(manager.SetWorkspaceFolded(w.Id, folded), () => Describe(w.Id)),
             ControlReply.Fail);
 
-    // `tile` is refused while the experiment is off, then in the free tier, in that order (the experiment is
-    // the bigger fact: Petre wants it "disabled by default, until i have tested it well"). `untile` is never
-    // refused: releasing a workspace must always work, whatever the switch or the tier says.
+    // `tile` is refused only where this copy may not tile (isPro is TilingGate.Allowed, so never while tiling
+    // is free). `untile` is never refused: releasing a workspace must always work, whatever the tier says.
+    // There is no on/off switch to refuse on any more (TilingGate, 2026-11-19).
     ControlReply SetRowTiled(string workspace, bool tiled) =>
         WorkspaceNamed(workspace).Match(
-            w => tiled && !manager.State.ExperimentalTiling
-                ? ControlReply.Fail("Tiling is experimental and turned off. Turn it on in Manage.")
-                : tiled && isPro?.Invoke() != true
-                    ? ControlReply.Fail("Tiling needs Deskbar Pro.")
-                    : Reply(manager.SetWorkspaceTiled(w.Id, tiled), () => Describe(w.Id)),
+            w => tiled && isPro?.Invoke() != true
+                ? ControlReply.Fail("Tiling needs Deskbar Pro.")
+                : Reply(manager.SetWorkspaceTiled(w.Id, tiled), () => Describe(w.Id)),
             ControlReply.Fail);
 
-    // `even` forgets a workspace's stored tile sizes. Refused like `tile` is, with the same two messages in the
-    // same order: it is a tiling command, so it is experimental and Pro. On a workspace with no stored sizes,
-    // tiled or not, it succeeds and changes nothing.
+    // `even` forgets a workspace's stored tile sizes. Refused like `tile` is, with the same message: it is a
+    // tiling command. On a workspace with no stored sizes, tiled or not, it succeeds and changes nothing.
     ControlReply EvenOutRow(string workspace) =>
         WorkspaceNamed(workspace).Match(
-            w => !manager.State.ExperimentalTiling
-                ? ControlReply.Fail("Tiling is experimental and turned off. Turn it on in Manage.")
-                : isPro?.Invoke() != true
-                    ? ControlReply.Fail("Tiling needs Deskbar Pro.")
-                    : Reply(manager.EvenOutTiles(w.Id), () => Describe(w.Id)),
+            w => isPro?.Invoke() != true
+                ? ControlReply.Fail("Tiling needs Deskbar Pro.")
+                : Reply(manager.EvenOutTiles(w.Id), () => Describe(w.Id)),
             ControlReply.Fail);
 
     // SetWorkspaceColor already hands a grouped workspace's colour to its group, as the menu does.

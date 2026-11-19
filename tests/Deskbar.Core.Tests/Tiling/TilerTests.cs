@@ -87,16 +87,15 @@ public sealed class TilerTests : IDisposable
         surface.SettledSubject.OnNext(h);
     }
 
-    // Starts the manager and the Tiler with Alpha current. Alpha starts tiled, the experiment on and Pro on,
-    // unless a test says otherwise.
-    void Start(bool alphaTiled = true, bool betaTiled = false, bool experiment = true, IScheduler? inputs = null)
+    // Starts the manager and the Tiler with Alpha current. Alpha starts tiled and Pro on, unless a test says
+    // otherwise.
+    void Start(bool alphaTiled = true, bool betaTiled = false, IScheduler? inputs = null)
     {
         new[] { alpha, beta }.ToList().ForEach(w => desktops.Desktops.Add(new DesktopInfo(w.DesktopId!.Value, w.Name)));
         desktops.CurrentDesktopId = alpha.DesktopId!.Value;
         store.Stored = AppState.Empty with
         {
             Workspaces = [alpha with { Tiled = alphaTiled }, beta with { Tiled = betaTiled }],
-            ExperimentalTiling = experiment,
         };
         manager = new WorkspaceManager(desktops, monitor, titles, store);
         Assert.True(manager.Start().IsSuccess);
@@ -202,35 +201,6 @@ public sealed class TilerTests : IDisposable
 
         Assert.Empty(surface.Placed);
         Assert.Empty(tiler.Board.Screens);
-        Assert.Empty(surface.Watched[^1]);
-    }
-
-    [Fact]
-    public void Nothing_tiles_and_nothing_is_watched_while_the_experiment_is_off()
-    {
-        new[] { 1, 2 }.ToList().ForEach(n => Exists(W(n), alpha));
-        Start(experiment: false);
-
-        Opens(W(3), alpha);
-        tiler.Refresh();
-        manager.SetTileGap(12);
-
-        Assert.Empty(surface.Placed);
-        Assert.All(surface.Watched, w => Assert.Empty(w));
-    }
-
-    [Fact]
-    public void Turning_the_experiment_off_moves_nothing()
-    {
-        new[] { 1, 2 }.ToList().ForEach(n => Exists(W(n), alpha));
-        Start();
-        surface.Placed.Clear();
-
-        Assert.True(manager.SetExperimentalTiling(false).IsSuccess);
-        Opens(W(3), alpha);
-        Closes(W(1));
-
-        Assert.Empty(surface.Placed);
         Assert.Empty(surface.Watched[^1]);
     }
 
@@ -1077,20 +1047,24 @@ public sealed class TilerTests : IDisposable
         AssertTiled([W(1), W(2), W(3)]);
     }
 
-    // Item 4 again: a window maximized while tiled, then un-maximized while the experiment was off, is not
-    // "being restored" when the experiment comes back on. Dragged over another tile, it swaps.
+    // Item 4 again: a window maximized while tiled, then un-maximized while tiling stood down (Pro lapsed), is
+    // not "being restored" when tiling acts again. Dragged over another tile, it swaps. This used to switch
+    // Manage's "Tiling (experimental)" box off and on; that box is gone (2026-11-19), and Pro is the gate input
+    // left that stands tiling down without touching the workspace's Tiled flag.
     [Fact]
-    public void A_window_maximized_before_the_experiment_went_off_swaps_when_dragged_after_it_is_back_on()
+    public void A_window_maximized_before_tiling_stood_down_swaps_when_dragged_after_it_acts_again()
     {
         new[] { 1, 2, 3 }.ToList().ForEach(n => Exists(W(n), alpha));
         Start();
         surface.Maximized.Add(W(2));
         Settles(W(2), Area);
 
-        Assert.True(manager.SetExperimentalTiling(false).IsSuccess);
+        pro = false;
+        tiler.Refresh();
         surface.Maximized.Remove(W(2));
         surface.Frames[W(2)] = Grid(3)[1];
-        Assert.True(manager.SetExperimentalTiling(true).IsSuccess);
+        pro = true;
+        tiler.Refresh();
         AssertTiled([W(1), W(2), W(3)]);
 
         var over = Grid(3)[2];

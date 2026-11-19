@@ -22,15 +22,12 @@ public partial class FloatingBar
     // which cannot fake a Store licence, and nothing else.
     internal Func<bool> IsPro { get; init; } = () => Core.Tiling.TilingGate.Allowed(Entitlement.Current.IsPro);
 
-    // Nothing at all while the experiment is off (AppState.ExperimentalTiling, Manage's "Tiling
-    // (experimental)" box). Petre: "disabled by default, until i have tested it well". That includes a
-    // workspace still marked tiled from before the box was unticked: the flag is kept for when it is ticked
-    // again, and the menu says nothing about it meanwhile.
+    // Always offered: there is no on/off switch for tiling any more (Manage's "Tiling (experimental)" box went
+    // on 2026-11-19, see TilingGate).
     //
-    // Pro and the experiment are read when the menu is FILLED, the first time it opens (FloatingBar.LazyMenus).
-    // Rows are rebuilt on every state pulse, so the experiment cannot go stale in a reachable way; Pro can
-    // change between a fill and a click only when a trial ends at that very moment, and the click then does
-    // what the menu said, which the Tiler's own gate (TilingGate) still refuses to act on.
+    // Pro is read when the menu is FILLED, the first time it opens (FloatingBar.LazyMenus). It can change
+    // between a fill and a click only when a trial ends at that very moment, and the click then does what the
+    // menu said, which the Tiler's own gate (TilingGate) still refuses to act on.
     //
     //   Pro         a checkable "Tile windows", ticked when Workspace.Tiled is set. Click flips the flag.
     //   free tier   "Tile windows (Deskbar Pro)", which explains where tiling comes from and offers the Store.
@@ -40,8 +37,6 @@ public partial class FloatingBar
     //               the flag would come back to life on a later purchase; this clears it.
     void AddTilingItems(ContextMenu menu, Guid workspaceId, Action<string, string, Action> add)
     {
-        if (!manager.State.ExperimentalTiling) return;
-
         // Read at CLICK time for the flip, as WorkspaceMenu's IndexOf is, so a rebuild between the fill and the
         // click can never invert the wrong value. False for a workspace that has gone, which SetWorkspaceTiled
         // then reports as missing.
@@ -84,8 +79,9 @@ public partial class FloatingBar
     // Petre, testing tiling live: "maybe add a button at the top of the bar", then from a mockup, "Header, beside
     // Search": one button for the workspace you are ON, beside Start and Search, that tiles it or stops tiling it.
     //
-    //   * Shown only while Manage's "Tiling (experimental)" box is ticked, like the row menu's item, and only on a
-    //     named workspace (an unnamed desktop has no Tiled flag to flip).
+    //   * Shown on every named workspace (an unnamed desktop has no Tiled flag to flip). Since 2026-11-19 it is
+    //     THE way to turn tiling on: Manage's "Tiling (experimental)" box is gone (Petre: "enable tiling in the
+    //     settings and remove it as an option; it's enough to have a button at the top").
     //   * Lit while that workspace is tiled: the hover square kept, as Start and Search show while their flyout
     //     is open, so "on" reads the same everywhere in the header. The glyph fills in too.
     //   * The glyph is a layout mark, one tall pane beside two stacked ones. Not a 2x2 grid: Start is Windows' four
@@ -163,11 +159,11 @@ public partial class FloatingBar
         : Glyph(TilePanes, size: HeaderGlyphSize);
 
     // Called by every rebuild with the workspace you are on (Rebuild, beside liveListTarget), so the buttons follow
-    // a switch, the row menu, `deskbar.cmd tile` and Manage's box alike: all of them pulse the state.
+    // a switch, the row menu and `deskbar.cmd tile` alike: all of them pulse the state.
     void UpdateTileButtons(Core.Domain.Workspace? current)
     {
         tileTarget = current?.Id;
-        var now = (Shown: manager.State.ExperimentalTiling && current is not null, Tiled: current?.Tiled == true, Name: current?.Name ?? "");
+        var now = (Shown: current is not null, Tiled: current?.Tiled == true, Name: current?.Name ?? "");
         if (tileShown == now) return;
         tileShown = now;
 

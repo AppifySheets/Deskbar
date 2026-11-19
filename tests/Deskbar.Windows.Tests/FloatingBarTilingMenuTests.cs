@@ -4,10 +4,9 @@ using Deskbar.App;
 
 namespace Deskbar.Windows.Tests;
 
-// The row menu's tiling item (docs/superpowers/specs/2026-11-08-tiling-design.md). Tiling is an experiment
-// Petre wants "disabled by default, until i have tested it well", so while Manage's "Tiling (experimental)"
-// box is unticked the row menu has no tiling item at all. Once it is ticked, a Pro copy gets a checkable
-// "Tile windows", and a free copy gets the same words with "(Deskbar Pro)" after them, which explains rather
+// The row menu's tiling item (docs/superpowers/specs/2026-11-08-tiling-design.md). There is no on/off switch
+// for tiling (Manage's "Tiling (experimental)" box went on 2026-11-19), so the item is always there. A Pro
+// copy gets a checkable "Tile windows", and a free copy gets the same words with "(Deskbar Pro)" after them, which explains rather
 // than tiles. A workspace left tiled after Pro lapsed also offers "Stop tiling", so the flag can be cleared.
 //
 // Reached the way WPF reaches it: FloatingBar.MenuOf on the workspace row, which fills the lazy menu. The
@@ -39,38 +38,10 @@ public class FloatingBarTilingMenuTests
 
     static void Click(MenuItem item) => item.RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
 
-    // The default, and the whole of what Petre sees until he ticks the box: nothing about tiling, Pro or not.
-    [Theory]
-    [InlineData(true)]
-    [InlineData(false)]
-    public void With_the_experiment_off_the_row_menu_has_no_tiling_item(bool pro) => StaThread.Run(() =>
-    {
-        var harness = Harness.Build();
-        using var bar = ShowBar(harness, pro);
-
-        var headers = Headers(bar, "Sparrow");
-
-        Assert.Contains("Rename…", headers); // the menu itself is there
-        Assert.DoesNotContain(headers, h => h.Contains("Tile", StringComparison.OrdinalIgnoreCase) || h.Contains("tiling"));
-    });
-
-    // ...including on a workspace still marked tiled from before the experiment was switched off: the flag is
-    // kept (WorkspaceManager.SetExperimentalTiling), and the menu stays silent about it.
-    [Fact]
-    public void With_the_experiment_off_a_tiled_workspace_offers_nothing_either() => StaThread.Run(() =>
-    {
-        var harness = Harness.Build();
-        Assert.True(harness.Manager.SetWorkspaceTiled(Id(harness, "Sparrow"), true).IsSuccess);
-        using var bar = ShowBar(harness, pro: false);
-
-        Assert.DoesNotContain(Headers(bar, "Sparrow"), h => h.Contains("Tile", StringComparison.OrdinalIgnoreCase) || h.Contains("tiling"));
-    });
-
     [Fact]
     public void Pro_gets_a_checkable_Tile_windows_that_shows_the_stored_flag() => StaThread.Run(() =>
     {
         var harness = Harness.Build();
-        Assert.True(harness.Manager.SetExperimentalTiling(true).IsSuccess);
         Assert.True(harness.Manager.SetWorkspaceTiled(Id(harness, "Sparrow"), true).IsSuccess);
         using var bar = ShowBar(harness, pro: true);
 
@@ -90,7 +61,6 @@ public class FloatingBarTilingMenuTests
     public void Clicking_Tile_windows_flips_the_workspaces_flag() => StaThread.Run(() =>
     {
         var harness = Harness.Build();
-        Assert.True(harness.Manager.SetExperimentalTiling(true).IsSuccess);
         using var bar = ShowBar(harness, pro: true);
 
         Click(Items(bar, "Sparrow").Single(i => i.Header?.ToString() == "Tile windows"));
@@ -104,7 +74,6 @@ public class FloatingBarTilingMenuTests
     public void Free_tier_gets_the_Deskbar_Pro_wording_and_no_checkbox() => StaThread.Run(() =>
     {
         var harness = Harness.Build();
-        Assert.True(harness.Manager.SetExperimentalTiling(true).IsSuccess);
         using var bar = ShowBar(harness, pro: false);
 
         var items = Items(bar, "Sparrow");
@@ -120,7 +89,6 @@ public class FloatingBarTilingMenuTests
     public void A_tiled_workspace_without_Pro_offers_Stop_tiling_which_clears_the_flag() => StaThread.Run(() =>
     {
         var harness = Harness.Build();
-        Assert.True(harness.Manager.SetExperimentalTiling(true).IsSuccess);
         Assert.True(harness.Manager.SetWorkspaceTiled(Id(harness, "Sparrow"), true).IsSuccess);
         using var bar = ShowBar(harness, pro: false);
 
@@ -138,11 +106,10 @@ public class FloatingBarTilingMenuTests
     // stores equal sizes), so "has stored sizes" is the whole test for "has a moved split".
     static readonly Deskbar.Core.Tiling.TileSizes Uneven = new([0.3, 0.7], [[1.0], [0.25, 0.75]]);
 
-    // A tiled Sparrow with experiment on and, when asked, one moved split on a screen.
+    // A tiled Sparrow and, when asked, one moved split on a screen.
     static Harness TiledSparrow(bool moved)
     {
         var harness = Harness.Build();
-        Assert.True(harness.Manager.SetExperimentalTiling(true).IsSuccess);
         Assert.True(harness.Manager.SetWorkspaceTiled(Id(harness, "Sparrow"), true).IsSuccess);
         if (moved)
             Assert.True(harness.Manager.SetTileSizes(Id(harness, "Sparrow"), "0,0,1920,1080", Uneven).IsSuccess);
@@ -165,16 +132,6 @@ public class FloatingBarTilingMenuTests
     public void Even_out_is_not_offered_with_equal_tiles() => StaThread.Run(() =>
     {
         var harness = TiledSparrow(moved: false);
-        using var bar = ShowBar(harness, pro: true);
-
-        Assert.DoesNotContain("Even out tiles", Headers(bar, "Sparrow"));
-    });
-
-    [Fact]
-    public void Even_out_is_not_offered_while_the_experiment_is_off() => StaThread.Run(() =>
-    {
-        var harness = TiledSparrow(moved: true);
-        Assert.True(harness.Manager.SetExperimentalTiling(false).IsSuccess);
         using var bar = ShowBar(harness, pro: true);
 
         Assert.DoesNotContain("Even out tiles", Headers(bar, "Sparrow"));

@@ -325,10 +325,8 @@ public sealed record AppState(
     public const int DefaultTileGap = 8;
     public int TileGap { get; init; } = DefaultTileGap;
 
-    // Tiling is EXPERIMENTAL and off by default. Petre: "disabled by default, until i have tested it well".
-    // While off: no tiling, no move hook, no tiling item in the row menu, and `tile` refuses. Stored as
-    // written, false for every state.json that lacks the key, so every existing install has the experiment off.
-    public bool ExperimentalTiling { get; init; }
+    // There is no tiling on/off switch any more: ExperimentalTiling was removed on 2026-11-19 and tiling is
+    // always available (see TilingGate). Its key in an older state.json is simply ignored on load.
 
     // The groups workspaces belong to (#42 anchored, #84 anchorless). Membership lives on the
     // workspace as GroupId; this holds the group's own name and its anchor, if it has one.

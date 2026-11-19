@@ -54,8 +54,7 @@ public sealed record Workspace(Guid Id, string Name, Guid? DesktopId, string? Co
     //
     // A property OF THE WORKSPACE for the reason Folded is: it survives a restart without a second store to
     // keep in step, and it is a fact about the workspace ("I work in a grid here"), not about the bar or any
-    // window. Tiling acts only when this is on AND the experiment is on AND the build is Pro; see TilingGate.
-    // Turning the experiment off leaves this flag as it is, so switching it back on restores every grid.
+    // window. Tiling acts only when this is on AND the copy may tile; see TilingGate.
     //
     // Init property defaulting to false, so a state.json written before tiling has no key and loads untiled,
     // with no migration.
@@ -66,8 +65,7 @@ public sealed record Workspace(Guid Id, string Name, Guid? DesktopId, string? Co
     //
     // On the workspace for the reason Tiled is: it survives a restart with no second store to keep in step,
     // and it is a fact about this workspace's grid. A screen that drops out keeps its entry, so plugging it
-    // back in restores the sizes. Only "Even out tiles", untiling and deleting the workspace remove them;
-    // turning the experiment off does not.
+    // back in restores the sizes. Only "Even out tiles", untiling and deleting the workspace remove them.
     //
     // Init property defaulting to empty, so a state.json written before this has no key and loads with no
     // stored sizes (every grid equal, as before), with no migration.

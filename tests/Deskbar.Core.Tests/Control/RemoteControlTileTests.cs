@@ -2,16 +2,15 @@ using Deskbar.Core.Control;
 
 namespace Deskbar.Core.Tests.Control;
 
-// `tile` and `untile` on the control pipe: the twins of the row menu's tiling item. Refusals are checked in
-// the order the brief fixes: experiment off first, then not Pro. `untile` always works, so nobody is ever
+// `tile` and `untile` on the control pipe: the twins of the row menu's tiling item. The one refusal left is
+// "not Pro" (there is no on/off switch since 2026-11-19, see TilingGate). `untile` always works, so nobody is ever
 // stuck with a workspace they cannot release.
 public class RemoteControlTileTests
 {
-    static WorkspaceManager Manager(bool experiment)
+    static WorkspaceManager Manager()
     {
         var manager = new WorkspaceManager(new FakeDesktops(), new FakeMonitor(), new FakeTitles(), new FakeStore());
         manager.AddWorkspace("Work");
-        if (experiment) manager.SetExperimentalTiling(true);
         return manager;
     }
 
@@ -20,7 +19,7 @@ public class RemoteControlTileTests
     [Fact]
     public void Tile_marks_the_workspace_tiled_in_pro()
     {
-        var manager = Manager(experiment: true);
+        var manager = Manager();
 
         var reply = new RemoteControl(manager, isPro: () => true).Execute(["tile", "Work"]);
 
@@ -29,21 +28,9 @@ public class RemoteControlTileTests
     }
 
     [Fact]
-    public void Tile_refuses_while_the_experiment_is_off()
-    {
-        var manager = Manager(experiment: false);
-
-        var reply = new RemoteControl(manager, isPro: () => true).Execute(["tile", "Work"]);
-
-        Assert.NotEqual(ControlReply.Ok, reply.ExitCode);
-        Assert.Contains("Turn it on in Manage", reply.Output);
-        Assert.False(Tiled(manager));
-    }
-
-    [Fact]
     public void Tile_refuses_in_the_free_tier()
     {
-        var manager = Manager(experiment: true);
+        var manager = Manager();
 
         var reply = new RemoteControl(manager, isPro: () => false).Execute(["tile", "Work"]);
 
@@ -55,18 +42,17 @@ public class RemoteControlTileTests
     [Fact]
     public void Tile_without_an_isPro_callback_is_not_pro()
     {
-        var manager = Manager(experiment: true);
+        var manager = Manager();
 
         Assert.NotEqual(ControlReply.Ok, new RemoteControl(manager).Execute(["tile", "Work"]).ExitCode);
         Assert.False(Tiled(manager));
     }
 
     [Fact]
-    public void Untile_works_in_the_free_tier_and_with_the_experiment_off()
+    public void Untile_works_in_the_free_tier()
     {
-        var manager = Manager(experiment: true);
+        var manager = Manager();
         new RemoteControl(manager, isPro: () => true).Execute(["tile", "Work"]);
-        manager.SetExperimentalTiling(false);
 
         var reply = new RemoteControl(manager, isPro: () => false).Execute(["untile", "Work"]);
 
@@ -77,7 +63,7 @@ public class RemoteControlTileTests
     [Fact]
     public void Tile_an_unknown_workspace_fails()
     {
-        var reply = new RemoteControl(Manager(experiment: true), isPro: () => true).Execute(["tile", "Nope"]);
+        var reply = new RemoteControl(Manager(), isPro: () => true).Execute(["tile", "Nope"]);
 
         Assert.NotEqual(ControlReply.Ok, reply.ExitCode);
         Assert.Contains("Nope", reply.Output);
