@@ -34,4 +34,10 @@ public enum WindowEventKind { Appeared, TitleChanged, Hidden, Disappeared, Activ
 
 // What WindowMonitor emits. TitleChanged matters twice: rename rules may now match,
 // and apps that rewrite their own titles must have our short name re-applied.
-public sealed record WindowEvent(WindowEventKind Kind, WindowInfo Window);
+//
+// Time is Windows' own time for the event: the WinEvent callback's dwmsEventTime, in milliseconds on the
+// GetTickCount clock (it wraps about every 49.7 days, so compare differences, never order). It says WHEN the change
+// happened in Windows, however late the out-of-context callback reaches us. The tiler compares it to tell an
+// activation Windows hands out right after a tile closes from one the user made (Tiler.Arrival.cs). 0 means the
+// event did not come from a WinEvent: WindowMonitor's resync and sweeps make some up themselves, and so do tests.
+public sealed record WindowEvent(WindowEventKind Kind, WindowInfo Window, uint Time = 0);

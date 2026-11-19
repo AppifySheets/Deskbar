@@ -12,16 +12,24 @@ public sealed partial class TilerTests
     // The key the first fake screen's sizes are stored under (its bounds, "L,T,R,B").
     const string AreaKey = "0,0,1920,1040";
 
-    // The user activates a window: input happened first, so the tick moves on.
+    // Windows' event clock (WindowEvent.Time, GetTickCount milliseconds), moved by hand. Starts well away from 0,
+    // which means "not from a WinEvent".
+    uint clock = 100_000;
+
+    // The user activates a window: a second after whatever happened last, far outside the hand-out window.
     void Uses(WindowHandle h)
     {
-        surface.InputTick++;
-        monitor.Subject.OnNext(new WindowEvent(WindowEventKind.Activated, Info(h)));
+        clock += 1000;
+        monitor.Subject.OnNext(new WindowEvent(WindowEventKind.Activated, Info(h), clock));
     }
 
-    // Windows activates a window by itself (after a close or minimize): no input since.
-    void HandedFocus(WindowHandle h) =>
-        monitor.Subject.OnNext(new WindowEvent(WindowEventKind.Activated, Info(h)));
+    // Windows activates a window by itself (after a close or minimize), a few milliseconds from it: `time` is the
+    // activation's own event time.
+    void HandedFocus(WindowHandle h, uint time) =>
+        monitor.Subject.OnNext(new WindowEvent(WindowEventKind.Activated, Info(h), time));
+
+    // The next moment on Windows' event clock, a second on: the time of a close or minimize.
+    uint Later() => clock += 1000;
 
     // The board order of a screen and every window's frame, against the grid laid out with these sizes.
     void AssertArranged(IReadOnlyList<WindowHandle> order, TileSizes sizes, WindowRect? area = null, int screen = 1)
@@ -76,7 +84,7 @@ public sealed partial class TilerTests
         AssertArranged([W(1), W(2), W(3)], new TileSizes([0.5, 0.5], [[1.0], [0.5, 0.5]]));
     }
 
-    // Review focus 2: closing W3 makes Windows activate another window (here W1) with no input in between. That
+    // Review focus 2: closing W3 makes Windows activate another window (here W1) 30 ms later. That
     // activation is not the user's, so the target stays W2, the last tile the user chose. Had it counted, W4 would
     // be below W1: [W1, W4, W2].
     [Fact]
@@ -88,15 +96,15 @@ public sealed partial class TilerTests
         Uses(W(2));
         Uses(W(3));
 
-        surface.InputTick++; // the click on W3's close button
-        Closes(W(3));
-        HandedFocus(W(1));
+        var closed = Later();
+        Closes(W(3), closed);
+        HandedFocus(W(1), closed + 30);
         Opens(W(4), alpha);
 
         AssertArranged([W(1), W(2), W(4)], new TileSizes([0.5, 0.5], [[1.0], [0.5, 0.5]]));
     }
 
-    // The same when the hand-out activation arrives before the window's Disappeared.
+    // The same when Windows' hand-out activation comes 30 ms BEFORE the window's Disappeared.
     [Fact]
     public void Focus_Windows_hands_out_after_a_close_does_not_count_when_it_comes_before()
     {
@@ -105,12 +113,46 @@ public sealed partial class TilerTests
         Uses(W(2));
         Uses(W(3));
 
-        surface.InputTick++; // the click on W3's close button
-        HandedFocus(W(1));
-        Closes(W(3));
+        var closed = Later();
+        HandedFocus(W(1), closed - 30);
+        Closes(W(3), closed);
         Opens(W(4), alpha);
 
         AssertArranged([W(1), W(2), W(4)], new TileSizes([0.5, 0.5], [[1.0], [0.5, 0.5]]));
+    }
+
+    // Minimizing a tile hands focus out the same way, and that activation does not count either: W4 goes below W2,
+    // the tile the user chose. Had it counted, W4 would be below W1.
+    [Fact]
+    public void Focus_Windows_hands_out_after_a_minimize_does_not_count()
+    {
+        new[] { 1, 2, 3 }.ToList().ForEach(n => Exists(W(n), alpha));
+        Start();
+        Uses(W(2));
+        Uses(W(3));
+
+        var minimized = Later();
+        Minimizes(W(3), true, minimized);
+        HandedFocus(W(1), minimized + 30);
+        Opens(W(4), alpha);
+
+        AssertArranged([W(1), W(2), W(4)], new TileSizes([0.5, 0.5], [[1.0], [0.5, 0.5]]));
+    }
+
+    // A click a second after a close is the user's: W1 becomes the target, and W4 goes below it.
+    [Fact]
+    public void A_user_click_long_after_a_close_counts()
+    {
+        new[] { 1, 2, 3 }.ToList().ForEach(n => Exists(W(n), alpha));
+        Start();
+        Uses(W(2));
+        Uses(W(3));
+
+        Closes(W(3), Later());
+        Uses(W(1));
+        Opens(W(4), alpha);
+
+        AssertArranged([W(1), W(4), W(2)], new TileSizes([0.5, 0.5], [[0.5, 0.5], [1.0]]));
     }
 
     // A window that is not a tile (here one that cannot tile) leaves the target as it was.

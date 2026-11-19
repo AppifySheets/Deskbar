@@ -237,7 +237,7 @@ public sealed class WindowMonitor : IWindowMonitor, IDisposable
             switch (@event)
             {
                 case EVENT_OBJECT_SHOW:
-                    TryAppear(hwnd);
+                    TryAppear(hwnd, time);
                     break;
 
                 // Finding 3 (reviewer, Important): HIDE on a window we still track -- and
@@ -251,7 +251,7 @@ public sealed class WindowMonitor : IWindowMonitor, IDisposable
                 // Note: moving a window to another virtual desktop CLOAKS it (DWM), it does
                 // not fire HIDE -- so our own desktop moves never produce a false Hidden either.
                 case EVENT_OBJECT_HIDE when known.TryGetValue(hwnd, out var w) && hidden.Add(hwnd):
-                    events.OnNext(new WindowEvent(WindowEventKind.Hidden, w));
+                    events.OnNext(new WindowEvent(WindowEventKind.Hidden, w, time));
                     break;
 
                 // DESTROY always means gone for real, whether or not HIDE preceded it (some
@@ -263,7 +263,7 @@ public sealed class WindowMonitor : IWindowMonitor, IDisposable
                     // Traced so a close that DID arrive can be told from one that never did: a lingering row
                     // with no "destroy" line before it was a dropped event, one with the line was something else.
                     trace?.Invoke($"destroy {hwnd:X} ({gone.ProcessName})");
-                    events.OnNext(new WindowEvent(WindowEventKind.Disappeared, gone));
+                    events.OnNext(new WindowEvent(WindowEventKind.Disappeared, gone, time));
                     break;
 
                 // Title changed on a window we track -> updated snapshot. WindowRenamer's own
@@ -272,12 +272,12 @@ public sealed class WindowMonitor : IWindowMonitor, IDisposable
                     var updated = tracked with { Title = WindowInfoFactory.TitleOf(hwnd) };
                     if (updated.Title == tracked.Title) break; // spurious NAMECHANGE, ignore
                     known[hwnd] = updated;
-                    events.OnNext(new WindowEvent(WindowEventKind.TitleChanged, updated));
+                    events.OnNext(new WindowEvent(WindowEventKind.TitleChanged, updated, time));
                     break;
 
                 // A window can become taskbar-worthy late (title set only after SHOW).
                 case EVENT_OBJECT_NAMECHANGE:
-                    TryAppear(hwnd);
+                    TryAppear(hwnd, time);
                     break;
 
                 // Focus moved to a window we track. Only tracked windows qualify: foreground
@@ -287,7 +287,7 @@ public sealed class WindowMonitor : IWindowMonitor, IDisposable
                 // nothing, deliberately -- the highlight then stays on the last real window,
                 // which is the useful answer to "which window am I in".
                 case EVENT_SYSTEM_FOREGROUND when known.TryGetValue(hwnd, out var activated):
-                    events.OnNext(new WindowEvent(WindowEventKind.Activated, activated));
+                    events.OnNext(new WindowEvent(WindowEventKind.Activated, activated, time));
                     break;
 
                 // Focus landed on a window we do not know YET. Adopt it first, then activate --
@@ -305,9 +305,9 @@ public sealed class WindowMonitor : IWindowMonitor, IDisposable
                 // so the taskbar and the Start menu still adopt nothing and still emit nothing,
                 // and the highlight still stays put when focus goes somewhere untracked.
                 case EVENT_SYSTEM_FOREGROUND:
-                    TryAppear(hwnd);
+                    TryAppear(hwnd, time);
                     if (known.TryGetValue(hwnd, out var adopted))
-                        events.OnNext(new WindowEvent(WindowEventKind.Activated, adopted));
+                        events.OnNext(new WindowEvent(WindowEventKind.Activated, adopted, time));
                     break;
 
                 // The user finished dragging or resizing a window. Petre: "when i drag a window
@@ -318,7 +318,7 @@ public sealed class WindowMonitor : IWindowMonitor, IDisposable
                 // read fresh by ScreenLayout on every overview build, so all that was ever
                 // missing was a reason to build one. This is that reason and nothing more.
                 case EVENT_SYSTEM_MOVESIZEEND when known.TryGetValue(hwnd, out var moved):
-                    events.OnNext(new WindowEvent(WindowEventKind.Moved, moved));
+                    events.OnNext(new WindowEvent(WindowEventKind.Moved, moved, time));
                     break;
 
                 // ...and the start of that drag. Petre: "can i drag and drop the current window, with its
@@ -326,7 +326,7 @@ public sealed class WindowMonitor : IWindowMonitor, IDisposable
                 // window dragged by its own title bar can be dropped on a workspace row. It decides nothing
                 // here either; the manager ignores it, and only the bar listens (see App).
                 case EVENT_SYSTEM_MOVESIZESTART when known.TryGetValue(hwnd, out var starting):
-                    events.OnNext(new WindowEvent(WindowEventKind.MoveStarted, starting));
+                    events.OnNext(new WindowEvent(WindowEventKind.MoveStarted, starting, time));
                     break;
 
                 // A window went down or came back up. Petre: "the icon doesn't always dim when
@@ -343,7 +343,7 @@ public sealed class WindowMonitor : IWindowMonitor, IDisposable
                 // window is iconic is read fresh by ScreenLayout on every overview build. This is
                 // only the reason to build one.
                 case EVENT_SYSTEM_MINIMIZESTART or EVENT_SYSTEM_MINIMIZEEND when known.TryGetValue(hwnd, out var toggled):
-                    events.OnNext(new WindowEvent(WindowEventKind.MinimizeChanged, toggled));
+                    events.OnNext(new WindowEvent(WindowEventKind.MinimizeChanged, toggled, time));
                     break;
             }
         }
@@ -361,7 +361,8 @@ public sealed class WindowMonitor : IWindowMonitor, IDisposable
     // Appeared, deduplicated: SHOW fires repeatedly for the same hwnd. A hwnd we'd
     // previously flagged Hidden is the one exception to "known == ignore this SHOW": it
     // came back, so clear the hidden flag and re-announce it as Appeared (Finding 3).
-    void TryAppear(nint hwnd)
+    // `time` is the WinEvent's own time when a callback asks (WindowEvent.Time); Resync passes nothing, so 0.
+    void TryAppear(nint hwnd, uint time = 0)
     {
         if (hidden.Remove(hwnd))
         {
@@ -373,7 +374,7 @@ public sealed class WindowMonitor : IWindowMonitor, IDisposable
                 .Tap(info =>
                 {
                     known[hwnd] = info;
-                    events.OnNext(new WindowEvent(WindowEventKind.Appeared, info));
+                    events.OnNext(new WindowEvent(WindowEventKind.Appeared, info, time));
                 });
             return;
         }
@@ -381,7 +382,7 @@ public sealed class WindowMonitor : IWindowMonitor, IDisposable
         WindowInfoFactory.FromHwnd(hwnd).Tap(info =>
         {
             known[hwnd] = info;
-            events.OnNext(new WindowEvent(WindowEventKind.Appeared, info));
+            events.OnNext(new WindowEvent(WindowEventKind.Appeared, info, time));
         });
     }
 

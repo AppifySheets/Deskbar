@@ -265,6 +265,14 @@ public sealed partial class Tiler(WorkspaceManager manager, IVirtualDesktopServi
     // end plus every move Moved never reports (keyboard snaps, AltSnap, an app resizing itself).
     void OnWindowEvent(WindowEvent e)
     {
+        // A tile leaving its grid (it closed, went to the tray, or was minimized), noted with Windows' own time for
+        // the event, while it is still on the board: Windows is about to activate whatever is next in z-order, and that
+        // activation must not move the tile a new window splits (Tiler.Arrival.cs).
+        if ((e.Kind is WindowEventKind.Disappeared or WindowEventKind.Hidden
+             || (e.Kind == WindowEventKind.MinimizeChanged && surface.IsMinimized(e.Window.Handle)))
+            && Board.ScreenOf(e.Window.Handle).HasValue)
+            NoteLeft(e.Window.Handle, e.Time);
+
         if (e.Kind == WindowEventKind.Disappeared)
         {
             // A dead hwnd can be recycled for an unrelated window; forget what we knew about this one.
@@ -280,7 +288,7 @@ public sealed partial class Tiler(WorkspaceManager manager, IVirtualDesktopServi
         if (e.Kind == WindowEventKind.Activated)
         {
             // Recorded first, for every window: the tile a new window splits is the one last used (Tiler.Arrival.cs).
-            NoteUsed(e.Window.Handle);
+            NoteUsed(e.Window.Handle, e.Time);
             RaiseTogether(e.Window.Handle);
             return;
         }
