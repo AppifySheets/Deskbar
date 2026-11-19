@@ -30,13 +30,14 @@ namespace Deskbar.App;
 // are in the file, which is the point of it, and also why it is written only when asked.
 static class DebugDump
 {
-    public static Result<string> Save(FloatingBar? bar, WorkspaceManager manager) =>
+    // `strips` is the screen strips' set (ScreenStrips), null where there is none (compatibility mode, and the tests).
+    public static Result<string> Save(FloatingBar? bar, WorkspaceManager manager, ScreenStrips? strips = null) =>
         Result.Try(() =>
         {
             var folder = Path.Combine(AppPaths.NewStateDir, "dumps");
             Directory.CreateDirectory(folder);
             var path = Path.Combine(folder, $"deskbar-dump-{DateTime.Now:yyyyMMdd-HHmmss}.txt");
-            File.WriteAllText(path, Compose(bar, manager));
+            File.WriteAllText(path, Compose(bar, manager, strips));
             ClickTrace.Write($"debug dump written: {path}");
             return path;
         }, e => $"Could not write the debug dump: {e.Message}");
@@ -52,7 +53,7 @@ static class DebugDump
         DetachedLauncher.StartVerbatim("explorer.exe", $"/select,\"{path}\"", null)
             .MapError(e => $"The dump is at {path}, but Explorer could not be opened: {e}");
 
-    internal static string Compose(FloatingBar? bar, WorkspaceManager manager)
+    internal static string Compose(FloatingBar? bar, WorkspaceManager manager, ScreenStrips? strips = null)
     {
         var text = new StringBuilder();
         // Read once and shared: the window list names each window's screen by the same numbers.
@@ -61,6 +62,10 @@ static class DebugDump
         Section(text, "Screens (physical pixels; work = what is left after the taskbar and docked bars)", () => DescribeScreens(screens));
         Section(text, "Windows taskbar, as the shell reports it", DescribeTaskbar);
         Section(text, "The bar", () => bar?.DescribeForDump() ?? "  no bar (compatibility mode)\n");
+        // Each screen strip: its screen, the band asked for and granted, the work area now, and how often its guard has
+        // taken it back (ScreenStrip.Describe). Right after the bar, whose docked strip shares the screens' edges.
+        Section(text, "Screen strips (the window list along the top of each screen)", () =>
+            string.Concat((strips?.Describe() ?? ["none (compatibility mode)"]).Select(line => $"  {line}\n")));
         Section(text, "Visible top-level windows, top of the z-order first", () => DescribeZOrder(screens, bar?.DumpHandle ?? 0));
         Section(text, "Workspaces", () => DescribeWorkspaces(manager));
         Section(text, $"Trace log, last {TraceLines} lines ({ClickTrace.LogPath})", TraceTail);

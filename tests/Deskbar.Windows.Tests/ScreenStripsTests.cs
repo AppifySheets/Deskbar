@@ -1,0 +1,269 @@
+using System.Reactive;
+using System.Windows.Interop;
+using CSharpFunctionalExtensions;
+using Deskbar.App;
+using Deskbar.Core.Domain;
+using Deskbar.Core.Overview;
+using Deskbar.Windows.Monitoring;
+
+namespace Deskbar.Windows.Tests;
+
+// The strip set (ScreenStrips): exactly one ScreenStrip per connected screen while the window list is on the screens,
+// none otherwise (spec docs/superpowers/specs/2026-11-19-screen-strips-design.md, "The parts", the strip set).
+//
+// No test here registers a real app bar, moves a real window or shows one on a real screen. Every strip comes from
+// the test's own `create`, which fakes the dock (DockWith) and the scale, on made-up screens far off every real
+// monitor, so a strip that is shown is shown nowhere anyone can see. The one test that reads the real screens grants
+// its strips no room, so they are never placed or shown.
+public class ScreenStripsTests
+{
+    // Three side-by-side made-up screens, 1200 x 800 px each, nowhere near a real one (see ScreenStripTests for why
+    // they are kept small).
+    static readonly MonitorBounds Left = new(-30000, -30000, -28800, -29200);
+    static readonly MonitorBounds Middle = new(-28800, -30000, -27600, -29200);
+    static readonly MonitorBounds Right = new(-27600, -30000, -26400, -29200);
+
+    // What the strip set did, in order, as the fakes saw it: "ignore", "pin", "closing" lines naming the strip's screen.
+    sealed class Rig
+    {
+        public bool Wanted { get; set; } = true;
+        public IReadOnlyList<MonitorBounds> Screens { get; set; } = [Left, Middle];
+        public List<string> Log { get; } = [];
+        public List<ScreenStrip> Made { get; } = [];
+        public ScreenStrips Set { get; }
+
+        // Whether a strip's own screen can be read; false makes its dock refuse, as on a screen that dropped out.
+        public bool Readable { get; set; } = true;
+
+        public Rig() =>
+            Set = new ScreenStrips(
+                wanted: () => Wanted,
+                screens: () => Screens,
+                create: Make,
+                ignore: hwnd => Log.Add($"ignore {Name(hwnd)} visible={ByHandle(hwnd).IsVisible}"),
+                pinToAllDesktops: hwnd => Log.Add($"pin {Name(hwnd)} visible={ByHandle(hwnd).IsVisible}"));
+
+        ScreenStrip Make(MonitorBounds screen)
+        {
+            var strip = new ScreenStrip(screen)
+            {
+                Scale = () => Readable ? 1.5 : Maybe<double>.None,
+                DockWith = (_, s, px) => new(s.L, s.T, s.R, s.T + px),
+            };
+            // At Closing the strip is still alive and Describe still answers: "docked no" there means Undock ran first,
+            // and IsVisible false means the window was already off the screen when the close began.
+            strip.Closing += (_, _) =>
+                Log.Add($"closing {NameOf(strip.Screen)} docked={(strip.Describe().Contains("docked no") ? "no" : "yes")} visible={strip.IsVisible}");
+            Made.Add(strip);
+            return strip;
+        }
+
+        ScreenStrip ByHandle(nint hwnd) => Made.Single(s => new WindowInteropHelper(s).Handle == hwnd);
+
+        string Name(nint hwnd) => NameOf(ByHandle(hwnd).Screen);
+
+        public static string NameOf(MonitorBounds screen) =>
+            screen == Left ? "left" : screen == Middle ? "middle" : screen == Right ? "right" : "other";
+    }
+
+    // The setting comes on: one strip per connected screen, each on its own screen, each docked and shown.
+    [Fact]
+    public void Turning_the_setting_on_creates_one_strip_per_screen() => StaThread.Run(() =>
+    {
+        var rig = new Rig { Wanted = false };
+        rig.Set.Reconcile();
+        Assert.Empty(rig.Set.Current);
+
+        rig.Wanted = true;
+        rig.Set.Reconcile();
+
+        Assert.Equal(new[] { Left, Middle }, rig.Set.Current.Select(s => s.Screen).OrderBy(s => s.Left));
+        Assert.All(rig.Set.Current, strip => Assert.True(strip.IsVisible));
+        Assert.All(rig.Set.Current, strip => Assert.Contains("docked yes", strip.Describe()));
+
+        // A second reconcile on the same screens changes nothing: the same two windows, no third.
+        var before = rig.Set.Current.ToList();
+        rig.Set.Reconcile();
+        Assert.Equal(before, rig.Set.Current);
+        Assert.Equal(2, rig.Made.Count);
+        rig.Set.RemoveAll();
+    });
+
+    // The setting goes off: every strip gives its band back (Undock) BEFORE its window closes, so no screen is ever
+    // left with a reserved band and nothing in it.
+    [Fact]
+    public void Turning_it_off_undocks_then_closes_each() => StaThread.Run(() =>
+    {
+        var rig = new Rig();
+        rig.Set.Reconcile();
+        rig.Log.Clear();
+
+        rig.Wanted = false;
+        rig.Set.Reconcile();
+
+        Assert.Empty(rig.Set.Current);
+        Assert.Equal(new[] { "closing left docked=no visible=False", "closing middle docked=no visible=False" }, rig.Log.Order());
+    });
+
+    // The bar's own order (App, around the bar's construction): the handle goes to WindowMonitor.Ignore before the
+    // first show, or the strip's first EVENT_OBJECT_SHOW lists it in the bar; the pin to every desktop comes after
+    // the show, because a window never shown is on no desktop and the pin fails (PinFloatingBar).
+    [Fact]
+    public void A_new_strip_is_ignored_before_it_is_shown_and_pinned_after() => StaThread.Run(() =>
+    {
+        var rig = new Rig { Screens = [Left] };
+
+        rig.Set.Reconcile();
+
+        Assert.Equal(new[] { "ignore left visible=False", "pin left visible=True" }, rig.Log);
+        rig.Set.RemoveAll();
+    });
+
+    // A strip whose first dock could not show it (its screen could not be read at that moment) is pinned once it is
+    // up, on the tick after, rather than never: an unpinned strip would vanish on a desktop switch while its band
+    // stayed reserved.
+    [Fact]
+    public void A_strip_shown_later_is_pinned_on_the_next_tick() => StaThread.Run(() =>
+    {
+        var rig = new Rig { Screens = [Left], Readable = false };
+
+        rig.Set.Reconcile();
+        Assert.Equal(new[] { "ignore left visible=False" }, rig.Log);
+
+        rig.Readable = true;
+        Assert.True(rig.Set.Current.Single().Dock().IsSuccess);
+        rig.Set.Tick();
+        rig.Set.Tick();
+
+        Assert.Equal(new[] { "ignore left visible=False", "pin left visible=True" }, rig.Log);
+        rig.Set.RemoveAll();
+    });
+
+    // A settle can land on the moment Windows reports no usable screen at all (spec "Constraints"). That is not every
+    // screen leaving: the strips stay, the same windows, until a real arrangement arrives.
+    [Fact]
+    public void A_settle_with_no_screens_keeps_the_strips() => StaThread.Run(() =>
+    {
+        var rig = new Rig();
+        rig.Set.Reconcile();
+        var before = rig.Set.Current.ToList();
+        rig.Log.Clear();
+
+        rig.Screens = [];
+        rig.Set.Reconcile();
+
+        Assert.Equal(before, rig.Set.Current);
+        Assert.Empty(rig.Log);
+        Assert.All(before, strip => Assert.True(strip.IsVisible));
+        rig.Set.RemoveAll();
+    });
+
+    // A screen unplugged: its strip is undocked and closed, the others are left exactly as they were (the same
+    // windows, not rebuilt), and a screen that arrives gets a strip of its own.
+    [Fact]
+    public void A_screen_that_left_takes_its_strip_with_it() => StaThread.Run(() =>
+    {
+        var rig = new Rig();
+        rig.Set.Reconcile();
+        var left = rig.Set.Current.Single(s => s.Screen == Left);
+        rig.Log.Clear();
+
+        rig.Screens = [Left, Right];
+        rig.Set.Reconcile();
+
+        Assert.Contains("closing middle docked=no visible=False", rig.Log);
+        Assert.DoesNotContain(rig.Log, line => line.StartsWith("closing left"));
+        Assert.Equal(new[] { Left, Right }, rig.Set.Current.Select(s => s.Screen).OrderBy(s => s.Left));
+        Assert.Same(left, rig.Set.Current.Single(s => s.Screen == Left));
+        rig.Set.RemoveAll();
+    });
+
+    // Exit and Restart: every strip undocked, then closed, and the set empty.
+    [Fact]
+    public void RemoveAll_undocks_every_strip() => StaThread.Run(() =>
+    {
+        var rig = new Rig { Screens = [Left, Middle, Right] };
+        rig.Set.Reconcile();
+        rig.Log.Clear();
+
+        rig.Set.RemoveAll();
+
+        Assert.Empty(rig.Set.Current);
+        Assert.Equal(new[] { "closing left docked=no visible=False", "closing middle docked=no visible=False", "closing right docked=no visible=False" },
+            rig.Log.Order());
+    });
+
+    // ...and for good: a settle or a state pulse that arrives while the app is going away must not dock a new strip
+    // that nothing would ever undock.
+    [Fact]
+    public void Nothing_comes_back_after_RemoveAll() => StaThread.Run(() =>
+    {
+        var rig = new Rig();
+        rig.Set.Reconcile();
+        rig.Set.RemoveAll();
+
+        rig.Set.Reconcile();
+
+        Assert.Empty(rig.Set.Current);
+        Assert.Equal(2, rig.Made.Count);
+    });
+
+    // The bar is asked to rebuild after a reconcile that changed something (so new strips get their tabs), and only
+    // then: a reconcile that changed nothing must not cost a rebuild.
+    [Fact]
+    public void Changed_fires_only_when_a_strip_came_or_went() => StaThread.Run(() =>
+    {
+        var rig = new Rig();
+        var changes = new List<Unit>();
+        using var _ = rig.Set.Changed.Subscribe(changes.Add);
+
+        rig.Set.Reconcile();
+        rig.Set.Reconcile();
+        Assert.Single(changes);
+
+        rig.Screens = [Left];
+        rig.Set.Reconcile();
+        Assert.Equal(2, changes.Count);
+        rig.Set.RemoveAll();
+    });
+
+    // The debug dump's lines: one per strip, from the strip's own Describe.
+    [Fact]
+    public void Describe_has_a_line_per_strip() => StaThread.Run(() =>
+    {
+        var rig = new Rig();
+        Assert.Single(rig.Set.Describe());
+
+        rig.Set.Reconcile();
+
+        Assert.Equal(2, rig.Set.Describe().Count());
+        Assert.All(rig.Set.Describe(), line => Assert.StartsWith("strip on ", line));
+        rig.Set.RemoveAll();
+    });
+
+    // A strip's Screen is matched with == against the overview's screens (FloatingBar.ScreenNumberOf, for the drop and
+    // for which windows a strip lists), so the screens the app reconciles on must be those very rectangles:
+    // ScreenFacts.MonitorPlacement, which is what Overview.Screens is. Read-only on the real machine: the strips made
+    // here are granted no room, so none is ever placed or shown.
+    [Fact]
+    public void A_strip_made_from_the_real_screens_maps_to_a_screen_number() => StaThread.Run(() =>
+    {
+        var placement = new ScreenLayout().Snapshot().MonitorPlacement ?? new Dictionary<int, MonitorBounds>();
+        var overview = new Overview([], [], [], placement);
+        var shown = new List<nint>();
+        var set = new ScreenStrips(
+            wanted: () => true,
+            screens: ScreenLayout.Screens,
+            create: screen => new ScreenStrip(screen) { Scale = () => 1.0, DockWith = (_, s, _) => new(s.L, s.T, s.L, s.T) },
+            ignore: _ => { },
+            pinToAllDesktops: shown.Add);
+
+        set.Reconcile();
+
+        Assert.Equal(placement.Count, set.Current.Count);
+        Assert.All(set.Current, strip => Assert.True(FloatingBar.ScreenNumberOf(overview, strip.Screen).HasValue));
+        Assert.All(set.Current, strip => Assert.False(strip.IsVisible));
+        Assert.Empty(shown);
+        set.RemoveAll();
+    });
+}

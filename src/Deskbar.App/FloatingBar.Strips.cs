@@ -251,8 +251,9 @@ public partial class FloatingBar
     // The display number of the screen with this rectangle, from the overview's list of screens (Overview.Screens),
     // which is the same sweep that numbered every row's Monitor. Every connected screen is in it, not only those
     // holding a window, which is what lets a drop on the strip of an empty screen land there. None for a screen the
-    // sweep did not report (it left, or there is no screen layout).
-    static Maybe<int> ScreenNumberOf(Overview overview, MonitorBounds screen) =>
+    // sweep did not report (it left, or there is no screen layout). Internal so a test can show that a strip made from
+    // the screens the strip set reconciles on (ScreenLayout.Screens) always finds its number here.
+    internal static Maybe<int> ScreenNumberOf(Overview overview, MonitorBounds screen) =>
         (overview.Screens ?? new Dictionary<int, MonitorBounds>()).Where(p => p.Value == screen).Select(p => p.Key).TryFirst();
 
     // A window icon dropped on a strip (ScreenStrip.Dropped, which the strip set points here). It lands on that strip's
@@ -354,4 +355,19 @@ public partial class FloatingBar
     // timer. Its own method rather than part of ReclaimTopmost, which stands down while the bar is hidden: the strips
     // stay while the bar is minimized and must keep their place in the band then too.
     internal void ReclaimStripTopmost() => Strips().ToList().ForEach(strip => strip.ReclaimTopmost());
+
+    // The strip set changed (a strip came or went; ScreenStrips.Changed): a new strip is empty until a rebuild hands it
+    // its tabs, and a bar whose strips all went draws its list in its own place again. RebuildWanted, as every rebuild
+    // trigger asks: a hidden bar rebuilds only while there are strips to fill, and ShowBar rebuilds before it shows.
+    internal void RequestRebuild()
+    {
+        if (RebuildWanted) Rebuild();
+    }
+
+    // The end of a settled display change (SettleLayout), for the strip set, which reconciles on the same settle as
+    // the bar so both act on the last arrangement of a burst and never on a transient one (spec "Constraints"). An
+    // observable rather than a call into the strip set, so the bar knows nothing of who owns the strips.
+    readonly System.Reactive.Subjects.Subject<System.Reactive.Unit> layoutSettled = new();
+
+    public IObservable<System.Reactive.Unit> LayoutSettled => layoutSettled;
 }
