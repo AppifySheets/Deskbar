@@ -104,6 +104,14 @@ public sealed class TileSurface : ITileSurface, IDisposable
     public Maybe<(int X, int Y)> Pointer() =>
         GetCursorPos(out var point) ? (point.X, point.Y) : Maybe<(int X, int Y)>.None;
 
+    // The input tick the Tiler compares for equality (ITileSurface.LastInputTick). A failed call answers 0, which
+    // only ever equals another failed call: at worst one activation Windows handed out counts as the user's.
+    public uint LastInputTick()
+    {
+        var info = new LASTINPUTINFO { cbSize = (uint)Marshal.SizeOf<LASTINPUTINFO>() };
+        return GetLastInputInfo(ref info) ? info.dwTime : 0;
+    }
+
     public void Preview(IReadOnlyList<TilePreview> tiles)
     {
         if (disposed) return;
