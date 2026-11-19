@@ -177,12 +177,12 @@ for the row it would land on.
 
 **The current workspace's row expands** into a list of its windows, icon and title, one window per
 line. The active window's title is white, the rest are dimmer, and pinned windows carry a pin
-glyph. Rows you expand while the pointer is on the bar stay expanded until it leaves. If you would
-rather keep the rows uniform, **Window list at the bottom of the bar** (on any row's menu or the
-bar's background menu) moves the list to a strip under the rows instead. Titles are cut to fit;
-widen the bar to see more of them. The same menu has a third place, **At the top of each screen**:
-a thin strip along the top of every screen holds the current workspace's windows, and maximized
-windows stop below it.
+glyph. Rows you expand while the pointer is on the bar stay expanded until it leaves. The
+**Window list** submenu, on any row's menu and on the bar's background menu, picks where the list
+goes: **In the workspace's row** (the default), **At the bottom of the bar**, where it sits in a
+strip under the rows and the rows stay uniform, or **At the top of each screen**, where a thin
+strip along the top of every screen holds that screen's windows of the current workspace and
+maximized windows stop below it. Titles are cut to fit; widen the bar to see more of them.
 
 <table align="center">
   <tr>
@@ -265,7 +265,7 @@ here would do: "move to Work, screen 2".
 - The bar grows and shrinks at its bottom edge; its top stays where you put it.
 - **Right-click an icon** for the renaming items (below). **Right-click a row** for everything
   about that workspace. **Right-click empty bar** for the app-wide items: New workspace, docking,
-  the window-list toggle, Minimize bar, Manage, Check for updates, any waiting update, and Exit.
+  the Window list submenu, Minimize bar, Manage, Check for updates, any waiting update, and Exit.
 
 <p align="center">
   <img src="docs/images/menu-background.png" alt="The menu from right-clicking empty bar: New workspace, Window list at the bottom of the bar, Undock from screen edge, Dock across both screens, Minimize bar, Manage, Check for updates, Exit." />
@@ -279,7 +279,7 @@ on Manage → Settings. A fully opaque setting means it never dims.
 ### The workspace row menu
 
 Right-click a row for: **Rename…**; **Insert before…**, **Insert after…** and **Add child…**;
-the group items (next section); **Fold row**, which flips to **Unfold row**; the window-list toggle; the colour strip; **Move up**, **Move down**, **Move to top**
+the group items (next section); **Fold row**, which flips to **Unfold row**; the **Window list** submenu; the colour strip; **Move up**, **Move down**, **Move to top**
 and **Move to end**, which work within the row's group; **Delete workspace…**; and the bar items,
 **Dock to screen edge**, **Dock across both screens** and **Minimize bar**.
 
