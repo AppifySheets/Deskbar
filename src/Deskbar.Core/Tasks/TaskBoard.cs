@@ -33,9 +33,9 @@ public sealed record TaskBoard(IReadOnlyList<TaskItem> Tasks)
     public Maybe<TaskItem> LatestLiveOn(Guid workspace) =>
         LiveOn(workspace).OrderByDescending(t => t.UpdatedAt).FirstOrDefault() is { } latest ? latest : Maybe<TaskItem>.None;
 
-    /// <summary>Starts a timer now; one already on the task is recorded as Replaced.</summary>
+    /// <summary>Starts a timer now; one already on the task is recorded as Replaced. A done task refuses it.</summary>
     public Result<TaskBoard> SetTimer(Guid id, TimeSpan length, DateTimeOffset now) =>
-        Change(id, t => Restarted(t, length, now));
+        ChangeLive(id, t => Restarted(t, length, now));
 
     public Result<TaskBoard> ClearTimer(Guid id, DateTimeOffset now) =>
         Change(id, t => Stamped(Ended(t, TimerEnd.Cleared, now), now));
@@ -46,9 +46,9 @@ public sealed record TaskBoard(IReadOnlyList<TaskItem> Tasks)
     public Result<TaskBoard> MoveTo(Guid id, Maybe<Guid> workspace, DateTimeOffset now) =>
         Change(id, t => t with { WorkspaceId = workspace, UpdatedAt = now });
 
-    /// <summary>Marks the task done; a timer on it ends as Done.</summary>
+    /// <summary>Marks the task done; a timer on it ends as Done. A task already done refuses it.</summary>
     public Result<TaskBoard> Done(Guid id, DateTimeOffset now) =>
-        Change(id, t => Ended(t, TimerEnd.Done, now) with { DoneAt = now, UpdatedAt = now });
+        ChangeLive(id, t => Ended(t, TimerEnd.Done, now) with { DoneAt = now, UpdatedAt = now });
 
     public Result<TaskBoard> Delete(Guid id) =>
         Tasks.Any(t => t.Id == id)
@@ -56,11 +56,19 @@ public sealed record TaskBoard(IReadOnlyList<TaskItem> Tasks)
             : Result.Failure<TaskBoard>(NoTask(id.ToString()));
 
     /// <summary>
-    /// Petre arrived on the workspace and stayed: every live task there with a timer, Running or Due alike,
-    /// ends it as CameBack and becomes Open.
+    /// Petre arrived on the workspace at <paramref name="arrivedAt"/> and stayed: every live task there whose timer
+    /// was already set when he arrived, Running or Due alike, ends it as CameBack and becomes Open.
     /// </summary>
-    public TaskBoard CameBack(Guid workspace, DateTimeOffset now) =>
-        new(Tasks.Select(t => t.IsLive && t.Timer.HasValue && t.WorkspaceId.HasValue && t.WorkspaceId.Value == workspace
+    /// <remarks>
+    /// A timer started AFTER the arrival is left alone (final review I1). The dwell means coming back is decided
+    /// two seconds after the arrival, and in those two seconds Petre may park the very workspace he is on: he
+    /// arrived, glanced, and set a timer before leaving again. That timer is not what he came back to answer, so
+    /// ending it at the end of the dwell would throw away what he had just done. One started at the instant of
+    /// the arrival still counts as set before it (<c>&lt;=</c>): nothing he did after arriving could have made it.
+    /// </remarks>
+    public TaskBoard CameBack(Guid workspace, DateTimeOffset arrivedAt, DateTimeOffset now) =>
+        new(Tasks.Select(t => t.IsLive && t.Timer.HasValue && t.Timer.Value.Started <= arrivedAt
+                              && t.WorkspaceId.HasValue && t.WorkspaceId.Value == workspace
             ? Stamped(Ended(t, TimerEnd.CameBack, now), now)
             : t).ToArray());
 
@@ -130,4 +138,17 @@ public sealed record TaskBoard(IReadOnlyList<TaskItem> Tasks)
         Tasks.Any(t => t.Id == id)
             ? new TaskBoard(Tasks.Select(t => t.Id == id ? change(t) : t).ToArray())
             : Result.Failure<TaskBoard>(NoTask(id.ToString()));
+
+    /// <summary>
+    /// <see cref="Change"/> for the changes only a live task can take (final review M2). A done task with a timer
+    /// would be Done and timed at once, which StateAt cannot show (Done wins) and which would come due nowhere;
+    /// doing it twice would move DoneAt and drop it out of today's list. Both reach here from `deskbar.cmd task
+    /// timer` and `task done`, so the refusal is the one line the command prints.
+    /// </summary>
+    Result<TaskBoard> ChangeLive(Guid id, Func<TaskItem, TaskItem> change) =>
+        Tasks.FirstOrDefault(t => t.Id == id) is { IsLive: false }
+            ? Result.Failure<TaskBoard>(TaskIsDone)
+            : Change(id, change);
+
+    const string TaskIsDone = "The task is done.";
 }

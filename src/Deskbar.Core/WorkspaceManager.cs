@@ -680,8 +680,11 @@ public sealed class WorkspaceManager(
         return true;
     }
 
-    // The asks the task list can read and dismiss.
-    public IReadOnlyCollection<Guid> AskingWorkspaces => askingWorkspaces;
+    // The asks the task list can read and dismiss. A snapshot, never the live set (final review M6): the set changes on
+    // the desktop-switch path (OnDesktopChanged drops the ask of the workspace you arrive on) and through
+    // ClearAttention, so a caller still enumerating the live set when either ran would throw "Collection was
+    // modified", or read a list that changed under it.
+    public IReadOnlyCollection<Guid> AskingWorkspaces => [.. askingWorkspaces];
 
     // Removes a workspace's ask without arriving there. True when there was one (pulses StateChanged).
     public bool ClearAttention(Guid workspaceId)

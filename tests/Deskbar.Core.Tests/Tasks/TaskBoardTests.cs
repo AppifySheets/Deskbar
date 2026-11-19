@@ -73,7 +73,7 @@ public class TaskBoardTests
     public void Coming_back_ends_a_running_or_due_timer_and_leaves_the_task_open()
     {
         var (b1, _) = TaskBoard.Empty.Park("x", ws, TimeSpan.FromMinutes(1), t0, id1).Value;
-        var task = b1.CameBack(ws, t0.AddSeconds(30)).Tasks.Single();
+        var task = b1.CameBack(ws, t0.AddSeconds(28), t0.AddSeconds(30)).Tasks.Single();
         Assert.Equal(TaskState.Open, task.StateAt(t0.AddMinutes(5)));
         Assert.Equal(TimerEnd.CameBack, task.History.Single().How);
     }
@@ -82,8 +82,31 @@ public class TaskBoardTests
     public void Coming_back_ends_every_timer_on_the_workspace()
     {
         var b = TaskBoard.Empty.Park("a", ws, TimeSpan.FromMinutes(5), t0, id1).Value.Board
-            .Park("b", ws, TimeSpan.FromMinutes(30), t0, id2).Value.Board.CameBack(ws, t0.AddMinutes(1));
+            .Park("b", ws, TimeSpan.FromMinutes(30), t0, id2).Value.Board.CameBack(ws, t0.AddSeconds(58), t0.AddMinutes(1));
         Assert.All(b.Tasks, t => Assert.Equal(TaskState.Open, t.StateAt(t0.AddHours(1))));
+    }
+
+    // A timer started after the arrival (during the dwell) is not what coming back answers; one started at the very
+    // instant of the arrival still is.
+    [Fact]
+    public void Coming_back_leaves_a_timer_started_after_the_arrival()
+    {
+        var b = TaskBoard.Empty.Park("before", ws, TimeSpan.FromMinutes(5), t0, id1).Value.Board
+            .Park("after", ws, TimeSpan.FromMinutes(5), t0.AddSeconds(1), id2).Value.Board
+            .CameBack(ws, t0, t0.AddSeconds(2));
+        Assert.Equal(TaskState.Open, b.Tasks.Single(t => t.Id == id1).StateAt(t0.AddSeconds(2)));
+        Assert.Equal(TaskState.Running, b.Tasks.Single(t => t.Id == id2).StateAt(t0.AddSeconds(2)));
+    }
+
+    // Final review M2: a done task cannot take a timer or be done again; both are reachable from `deskbar.cmd task`.
+    [Fact]
+    public void A_done_task_refuses_a_timer_and_a_second_done()
+    {
+        var b = TaskBoard.Empty.Park("a", ws, Maybe<TimeSpan>.None, t0, id1).Value.Board.Done(id1, t0).Value;
+        var timer = b.SetTimer(id1, TimeSpan.FromMinutes(5), t0.AddMinutes(1));
+        var again = b.Done(id1, t0.AddMinutes(1));
+        Assert.Equal("The task is done.", timer.Error);
+        Assert.Equal("The task is done.", again.Error);
     }
 
     [Fact]

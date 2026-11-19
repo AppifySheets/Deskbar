@@ -212,6 +212,24 @@ public class RemoteControlTaskTests
         AssertRefusedAndUnchanged(Run(manager, "task", "rename", "ffffff", "x"), before);
     }
 
+    // Final review M2: a done task takes no timer and cannot be done twice; each is exit 1 with the board's reason.
+    [Fact]
+    public void A_done_task_refuses_a_timer_and_a_second_done()
+    {
+        var manager = Started();
+        var id = Prefix(Added(manager));
+        Assert.Equal(ControlReply.Ok, Run(manager, "task", "done", id).ExitCode);
+        var before = tasks.Board;
+
+        var timer = Run(manager, "task", "timer", id, "--in", "5m");
+        var again = Run(manager, "task", "done", id);
+
+        AssertRefusedAndUnchanged(timer, before);
+        AssertRefusedAndUnchanged(again, before);
+        Assert.Equal("The task is done.", timer.Output.Trim());
+        Assert.Equal("The task is done.", again.Output.Trim());
+    }
+
     [Fact]
     public void Ambiguous_prefix_fails()
     {

@@ -87,7 +87,9 @@ public sealed class TaskService(ITaskStore store, Func<DateTimeOffset> now, Func
             && at - arrival.At >= Dwell)
         {
             pending = Maybe<(Guid, DateTimeOffset)>.None;
-            Commit(Board.CameBack(arrival.Workspace, at));
+            // The arrival's own time, not now: a timer Petre set during the dwell is newer than the arrival and
+            // must survive it (TaskBoard.CameBack, final review I1).
+            Commit(Board.CameBack(arrival.Workspace, arrival.At, at));
         }
 
         var due = Board.Tasks.Where(t => t.StateAt(at) == TaskState.Due).ToArray();

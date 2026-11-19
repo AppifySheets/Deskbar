@@ -83,6 +83,24 @@ public sealed class TaskServiceTests
         Assert.Equal(TaskState.Open, Only(s, "Review").StateAt(clock));
     }
 
+    // Final review I1: Petre arrives on the workspace, parks it a second later (the timer starts INSIDE the dwell),
+    // and the arrival that matures a second after that must not end the timer he has just set. Only timers that
+    // were already running when he arrived are what coming back answers.
+    [Fact]
+    public void A_timer_set_during_the_dwell_survives_the_arrival()
+    {
+        var s = NewService();
+        s.Tick(On(other));
+        s.Tick(On(ws));
+        At(TimeSpan.FromSeconds(1));
+        s.Park("Review", On(ws), TimeSpan.FromMinutes(5));
+        s.Tick(On(ws));
+        At(TimeSpan.FromSeconds(1.5));
+        s.Tick(On(ws));
+        Assert.Equal(TaskState.Running, Only(s, "Review").StateAt(clock));
+        Assert.Empty(Only(s, "Review").History);
+    }
+
     [Fact]
     public void Due_while_present_stays_due_until_an_arrival()
     {

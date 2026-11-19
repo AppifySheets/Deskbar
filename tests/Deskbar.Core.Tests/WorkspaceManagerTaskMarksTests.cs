@@ -86,4 +86,20 @@ public class WorkspaceManagerTaskMarksTests
         Assert.False(Group(manager, "iam.ge").WantsAttention);
         Assert.False(manager.ClearAttention(other));
     }
+
+    // Final review M6: AskingWorkspaces is a snapshot. A caller holding it while an ask is cleared (or one arrives
+    // through the desktop event on another thread) must not see it change under a running enumeration.
+    [Fact]
+    public void AskingWorkspaces_is_a_snapshot()
+    {
+        var manager = Started();
+        StandOn(manager, "Deskbar");
+        var other = IdOf(manager, "iam.ge");
+        Assert.True(manager.RequestAttention(other, CSharpFunctionalExtensions.Maybe<WindowHandle>.None).Value);
+
+        var asking = manager.AskingWorkspaces;
+        Assert.True(manager.ClearAttention(other));
+
+        Assert.Equal([other], asking);
+    }
 }

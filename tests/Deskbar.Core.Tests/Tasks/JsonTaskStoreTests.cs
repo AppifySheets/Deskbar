@@ -81,6 +81,145 @@ public sealed class JsonTaskStoreTests : IDisposable
         Assert.Equal(a.Tasks.Count, loaded.Value.Tasks.Count);
     }
 
+    string TasksPath => Path.Combine(dir, "tasks.json");
+
+    // The quarantined copies of tasks.json (and of its previous copy) a failed Load moved aside: <prefix>.<stamp>.bak,
+    // the stamp starting with the year, which tells tasks.json's own copies from tasks.json.previous's.
+    string[] Quarantined(string prefix) =>
+        Directory.GetFiles(dir, prefix + ".*.bak").Where(f => Path.GetFileName(f).StartsWith(prefix + ".2", StringComparison.Ordinal)).ToArray();
+
+    // Final review I2: with both copies unreadable, Load fails and the board starts empty, so the next two saves
+    // would write over both files. The unreadable files are moved aside on the failed Load, so what was in them
+    // survives every later save.
+    [Fact]
+    public void Both_copies_unreadable_are_kept_aside_before_the_next_save()
+    {
+        var store = new JsonTaskStore(dir);
+        store.Save(Sample());
+        store.Save(Sample());
+        File.WriteAllText(TasksPath, "{latest, not json");
+        File.WriteAllText(TasksPath + ".previous", "{previous, not json");
+
+        var loaded = store.Load();
+        Assert.True(loaded.IsFailure);
+
+        Assert.True(store.Save(Sample()).IsSuccess);
+        Assert.True(store.Save(Sample()).IsSuccess);
+
+        var latest = Assert.Single(Quarantined("tasks.json"));
+        Assert.Equal("{latest, not json", File.ReadAllText(latest));
+        var previous = Assert.Single(Quarantined("tasks.json.previous"));
+        Assert.Equal("{previous, not json", File.ReadAllText(previous));
+        Assert.Contains(Path.GetFileName(latest), loaded.Error);
+    }
+
+    // The same with no previous copy at all: an unreadable tasks.json on its own is still kept.
+    [Fact]
+    public void An_unreadable_file_without_a_previous_copy_is_kept_aside()
+    {
+        Directory.CreateDirectory(dir);
+        File.WriteAllText(TasksPath, "\0\0\0\0");
+        var store = new JsonTaskStore(dir);
+
+        Assert.True(store.Load().IsFailure);
+        Assert.True(store.Save(Sample()).IsSuccess);
+
+        Assert.Equal("\0\0\0\0", File.ReadAllText(Assert.Single(Quarantined("tasks.json"))));
+    }
+
+    [Fact]
+    public void A_save_that_cannot_write_is_a_failure()
+    {
+        // The store's folder is a FILE, so creating the folder (and writing into it) cannot succeed.
+        Directory.CreateDirectory(dir);
+        var blocked = Path.Combine(dir, "not-a-folder");
+        File.WriteAllText(blocked, "");
+
+        var saved = new JsonTaskStore(blocked).Save(Sample());
+
+        Assert.True(saved.IsFailure);
+        Assert.Contains("tasks.json", saved.Error);
+    }
+
+    // Final review M1: a timer's end is written by name, so the file is readable and a reordered enum cannot
+    // renumber it.
+    [Fact]
+    public void How_a_timer_ended_is_written_by_name()
+    {
+        new JsonTaskStore(dir).Save(Sample());
+
+        var text = File.ReadAllText(TasksPath);
+
+        Assert.Contains("\"how\": \"Replaced\"", text);
+        Assert.Contains("\"how\": \"Done\"", text);
+    }
+
+    // A name this build does not know (written by a newer one) reads as Cleared instead of failing the whole file,
+    // and the numbers files were written with before names still read.
+    [Fact]
+    public void An_unknown_end_reads_as_cleared_and_numbers_still_read()
+    {
+        Directory.CreateDirectory(dir);
+        File.WriteAllText(TasksPath, HandWritten(title: "\"Old\"", how1: "\"Abandoned\"", how2: "3"));
+
+        var loaded = new JsonTaskStore(dir).Load();
+
+        Assert.True(loaded.IsSuccess, loaded.IsFailure ? loaded.Error : "");
+        var history = loaded.Value.Tasks.Single().History;
+        Assert.Equal([TimerEnd.Cleared, TimerEnd.Replaced], history.Select(h => h.How));
+    }
+
+    // Times are UTC on the way in too, so a hand-edited file in local time means the same instants.
+    [Fact]
+    public void Times_are_read_as_UTC()
+    {
+        Directory.CreateDirectory(dir);
+        File.WriteAllText(TasksPath, HandWritten(title: "\"Old\"", how1: "\"Done\"", how2: "\"Done\""));
+
+        var task = new JsonTaskStore(dir).Load().Value.Tasks.Single();
+
+        Assert.Equal(TimeSpan.Zero, task.Created.Offset);
+        Assert.Equal(TimeSpan.Zero, task.UpdatedAt.Offset);
+        Assert.Equal(TimeSpan.Zero, task.Timer.Value.Started.Offset);
+        Assert.All(task.History, h => Assert.Equal(TimeSpan.Zero, h.Started.Offset));
+        Assert.All(task.History, h => Assert.Equal(TimeSpan.Zero, h.Ended.Offset));
+        Assert.Equal(new DateTimeOffset(2026, 11, 19, 5, 0, 0, TimeSpan.Zero), task.Created);
+    }
+
+    // Final review M8: a hand-edited file with a null title loads as an empty title, never a crash.
+    [Fact]
+    public void A_null_title_loads_as_empty()
+    {
+        Directory.CreateDirectory(dir);
+        File.WriteAllText(TasksPath, HandWritten(title: "null", how1: "\"Done\"", how2: "\"Done\""));
+
+        var loaded = new JsonTaskStore(dir).Load();
+
+        Assert.True(loaded.IsSuccess, loaded.IsFailure ? loaded.Error : "");
+        Assert.Equal("", loaded.Value.Tasks.Single().Title);
+    }
+
+    // One task in local (+04:00) time with a running timer and two history records, as a person might edit it.
+    static string HandWritten(string title, string how1, string how2) => $$"""
+        {
+          "tasks": [
+            {
+              "id": "aaaaaaaa-0000-0000-0000-000000000001",
+              "title": {{title}},
+              "workspaceId": null,
+              "created": "2026-11-19T09:00:00+04:00",
+              "updatedAt": "2026-11-19T09:00:00+04:00",
+              "timer": { "started": "2026-11-19T09:00:00+04:00", "lengthSeconds": 300 },
+              "doneAt": null,
+              "history": [
+                { "started": "2026-11-19T08:00:00+04:00", "lengthSeconds": 60, "ended": "2026-11-19T08:01:00+04:00", "how": {{how1}} },
+                { "started": "2026-11-19T08:10:00+04:00", "lengthSeconds": 60, "ended": "2026-11-19T08:11:00+04:00", "how": {{how2}} }
+              ]
+            }
+          ]
+        }
+        """;
+
     [Fact]
     public void Times_are_written_in_UTC()
     {
