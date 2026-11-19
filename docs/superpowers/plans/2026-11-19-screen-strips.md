@@ -201,8 +201,12 @@ PowerShell probes call `SetProcessDpiAwarenessContext(-4)` first and declare P/I
   - `void SetTabs(string name, Brush? colour, IReadOnlyList<FrameworkElement> tabs)`: the name tag
     (neutral grey `#FF3A3F49` when `colour` is null), then the tabs, each given
     `StripPlan.TabWidth(room, tabs.Count)`. Replaces what was there; safe to call with an empty list.
-  - `Result Dock()`, `void Undock()` (sends `ABM_REMOVE`, then hides), `void KeepStrip()` (the 1 s
-    check: same `SettleFor` 3 s and `RetryEvery` 10 s as the docked bar, no action on a null verdict),
+  - `Result Dock()`, `void Undock()` (sends `ABM_REMOVE`, then hides), `void KeepStrip(IReadOnlyList<MonitorBounds> connected)`
+    (the 1 s check: same `SettleFor` 3 s and `RetryEvery` 10 s as the docked bar. Measured in task 0:
+    it never asks Windows which screen it is on. It re-docks when its window is not inside its own
+    `Screen`, or `StripHeld("top", …)` is false against its own screen's work area, and only while
+    `Screen` is in `connected`; otherwise it does nothing),
+  - Re-docks on `ABN_POSCHANGED` like the bar (an unchanged grant sends no further notification, task 0).
     `void ReclaimTopmost()`, `void StepAside(bool fullScreen)`.
   - `Action<WindowHandle>? Dropped { get; init; }`, raised for a window icon dropped anywhere on the
     strip (the payload format is `WindowDragSource`'s).
@@ -246,7 +250,16 @@ PowerShell probes call `SetProcessDpiAwarenessContext(-4)` first and declare P/I
     For each strip, the rows of the current workspace (or current unnamed desktop) whose monitor is
     that strip's screen, pinned rows included, in the order the titled list uses; then `SetTabs` with
     the workspace's name and colour. With the place elsewhere it does nothing.
-  - `void ReclaimStripTopmost()` and the forwarding task 0 step 2 called for.
+  - `void ReclaimStripTopmost()`.
+  - The forwarding task 0 found necessary (notes, section 2): `internal void NoteStripPress()` and
+    `internal void NoteStripRelease()`, the press-state half of the bar's preview handlers only
+    (`pressSeen`, `pressConsumedByChild`, `pressedRowKey`, `orphanRelease`, `dragJustFinished`), never
+    `dragStart` or `resizing`; each strip calls them from its own `PreviewMouseLeftButtonDown` and
+    `PreviewMouseLeftButtonUp`. `ShowHoverCard` places the card against the anchor, `Placement =
+    Bottom`, when the anchor is not inside the bar (`!IsAncestorOf(anchor)`), and the hover watch treats
+    a pointer over any strip like a pointer over the bar.
+  - Tests added for these: `A_strip_press_then_release_is_not_an_orphan`,
+    `A_hover_card_for_a_tab_opens_below_the_tab_without_throwing`.
   - Drop on a strip: named workspace calls `manager.AssignWindow(handle, workspaceId, screenIndex)`;
     unnamed desktop calls `manager.MoveWindowToMonitor(handle, monitorNumber)`.
 - Behaviour changes in `RebuildCore`: with the place `Screens`, no row is expanded and `CurrentList`
@@ -306,19 +319,23 @@ PowerShell probes call `SetProcessDpiAwarenessContext(-4)` first and declare P/I
 - Modify: `src/Deskbar.App/FloatingBar.xaml.cs` (`DockTo` at 743 and its seam half), `src/Deskbar.App/ScreenStrips.cs`
 - Test: `tests/Deskbar.Windows.Tests/FloatingBarDockedEdgeTests.cs`
 
-**Interfaces:**
-- Consumes: the registration order task 0 step 1 measured.
-- Produces: with strips on, a bar docked left, right or across the seam occupies its screen from the
-  strip's bottom edge down. Whichever of the two must register second re-docks after the other, in
-  `ScreenStrips.Reconcile` and in the bar's own re-dock (`ABN_POSCHANGED`), without the two re-docking
-  each other in a loop: a re-dock that grants the rectangle already held raises nothing.
+**Interfaces (amended by task 0):** the shell already puts a side bar below a top bar in either order,
+and the running bar already follows (measured, notes section 1), so no registration order is coded.
+What is left:
+- Produces: `static WindowRect? StripPlan.Clear(WindowRect window, MonitorBounds screen, int stripPx)`
+  in `Deskbar.Core` (task 4's file): for a restored window whose top is above `screen.Top + stripPx`
+  and whose centre is on that screen, the same rectangle moved down to start at `screen.Top + stripPx`;
+  otherwise null. `ScreenStrips.Reconcile` applies it, once per created strip, to every restored,
+  not-minimized window on that screen through `IScreenLayout.MoveTo(window, rect, mayChangeShowState: false)`.
+  The window list and rects come in through a constructor argument so the tests fake them.
 
-- [ ] **Step 1: Failing tests.** `A_docked_bar_starts_below_the_strip_on_its_screen` (faked grants);
-  `A_redock_that_changes_nothing_does_not_ask_the_other_to_redock`.
+- [ ] **Step 1: Failing tests.** In `StripPlanTests`: `Clear_moves_a_window_under_the_strip_down`,
+  `Clear_leaves_a_window_below_the_strip`, `Clear_leaves_a_window_on_another_screen`. In
+  `ScreenStripsTests`: `A_new_strip_moves_restored_windows_under_it_once`,
+  `A_strip_that_already_existed_moves_nothing`.
 - [ ] **Step 2: Run, expect fail.**
-- [ ] **Step 3: Implement** per the measured order. If the measurement said a restored window under a
-  new strip is not moved by the shell, `Reconcile` moves such windows down by the strip's pixel height
-  once per created strip, through `IScreenLayout.MoveTo`, with a test `A_restored_window_under_a_new_strip_moves_down`.
+- [ ] **Step 3: Implement.** Also check by reading `DockTo` and its seam half that each keeps the top
+  and bottom its QUERYPOS returns (the left-screen half did, measured); fix and test whichever does not.
 - [ ] **Step 4: Run, expect pass.**
 - [ ] **Step 5: Commit** `feat: the docked bar sits under the strip`.
 
