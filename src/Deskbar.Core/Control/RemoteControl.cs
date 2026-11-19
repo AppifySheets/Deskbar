@@ -120,6 +120,7 @@ public sealed partial class RemoteControl(WorkspaceManager manager, Func<bool, R
         ("bar", [var state]) => Bar(state),
         ("stats", [var state]) => Stats(state),
         ("window-lines", [var mode]) => WindowLines(mode),
+        ("window-list", [var place]) => WindowList(place),
         ("collapsed-click", [var mode]) => CollapsedClick(mode),
         ("full-screen", [var mode]) => FullScreen(mode),
         ("claude-skill", [var onOff]) => ClaudeSkill(onOff),
