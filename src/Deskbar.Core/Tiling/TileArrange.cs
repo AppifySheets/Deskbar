@@ -141,25 +141,46 @@ public static class TileArrange
     // design left the rule to the builder: "the cell should go where the index puts it, not to the bottom of the last
     // column ... pick the simplest rule that keeps the other tiles where they are." The rule:
     //
-    //   - Its old column is still there: a new row in that column at its old row (or at the bottom when the column now
-    //     has fewer rows), taking half the height of the row it lands on, as a drop on that tile's top edge would (the
-    //     bottom edge of the last row, at the bottom). Every other column keeps its width and rows.
-    //   - Its old column is gone: a new column on the right, taking half of the last column's width.
+    //   - Its old column is still there: a new row in that column, directly below the nearest window that was above it
+    //     there and still is (or directly above the nearest one that was below it), taking half the height of the row
+    //     it lands on, as a drop on that tile's top edge would (the bottom edge of the last row, at the bottom). Every
+    //     other column keeps its width and rows.
+    //   - Its old column is gone: a new column of its own at its old column index, left of the column that sits at
+    //     that index now (or right of the last column when there are fewer), taking half that column's width.
+    //
+    // WHETHER THE OLD COLUMN IS STILL THERE is decided by WHO WAS IN IT, never by its index (re-review of the fix
+    // wave). A tile alone in its column takes the column with it when it is minimized (RemoveCell drops a column with
+    // one row), and the columns to its right slide left, so its old index then names a neighbour's column: W1 | W2,
+    // W1 minimized, W3 splitting W2, came back as W1 over W2 | W3 instead of a column of its own. `oldColumn` is the
+    // windows of its old column top to bottom, itself among them; the column is still there when any of the others
+    // is on the screen, and it is wherever they are now, whichever index that has become.
     //
     // `order` and `sizes` are the screen as it is now (`sizes` describe `order`, with or without an opening), and
-    // `cell` is the window's cell in the grid it left. The order follows the cell, not the other way round: the window
-    // goes into the order at the slot of its new cell, so the board and the grid agree. An opening keeps its own cell
-    // and moves on one slot when the new cell comes before it, so a kept space stays where it was on the screen.
+    // `column` is the window's column index in the grid it left. The order follows the cell, not the other way round:
+    // the window goes into the order at the slot of its new cell, so the board and the grid agree. An opening keeps its
+    // own cell and moves on one slot when the new cell comes before it, so a kept space stays where it was on screen.
     public static (IReadOnlyList<WindowHandle> Order, TileSizes Sizes) Returned(
-        IReadOnlyList<WindowHandle> order, TileSizes sizes, WindowHandle window, (int Column, int Row) cell)
+        IReadOnlyList<WindowHandle> order, TileSizes sizes, WindowHandle window, int column, IReadOnlyList<WindowHandle> oldColumn)
     {
         if (sizes.Columns.Count == 0) return ([window], TileSizes.Equal([1]));
         var shape = sizes.Shape;
-        var (grown, at) = cell.Column < shape.Count
-            ? Math.Min(cell.Row, shape[cell.Column]) is var row && row < shape[cell.Column]
-                ? (InsertRow(sizes, cell.Column, row, below: false), shape.Take(cell.Column).Sum() + row)
-                : (InsertRow(sizes, cell.Column, row - 1, below: true), shape.Take(cell.Column).Sum() + row)
-            : (InsertColumn(sizes, shape.Count - 1, right: true), shape.Sum());
+        // Where a window of the screen sits now, counting the opening's cell (CellOf).
+        (int Column, int Row) Now(WindowHandle w) => CellOf(sizes, order.ToList().IndexOf(w), order.Count);
+        var mine = oldColumn.ToList().IndexOf(window);
+        var above = oldColumn.Take(Math.Max(mine, 0)).Where(order.Contains).Select(Now).ToList();
+        var below = oldColumn.Skip(mine + 1).Where(order.Contains).Select(Now).ToList();
+        // The cell it goes into in the column its old neighbours are in now, if any of them is still on the screen.
+        var anchor = above.Count > 0 ? Maybe.From((Column: above[^1].Column, Row: above[^1].Row + 1))
+            : below.Count > 0 ? Maybe.From(below[0])
+            : Maybe<(int Column, int Row)>.None;
+        var newColumn = Math.Min(column, shape.Count);
+        var (grown, at) = anchor.TryGetValue(out var cell)
+            ? cell.Row < shape[cell.Column]
+                ? (InsertRow(sizes, cell.Column, cell.Row, below: false), shape.Take(cell.Column).Sum() + cell.Row)
+                : (InsertRow(sizes, cell.Column, cell.Row - 1, below: true), shape.Take(cell.Column).Sum() + cell.Row)
+            : newColumn < shape.Count
+                ? (InsertColumn(sizes, newColumn, right: false), shape.Take(newColumn).Sum())
+                : (InsertColumn(sizes, shape.Count - 1, right: true), shape.Sum());
         // InsertColumn builds new sizes and InsertRow keeps the old opening slot, so the opening is set here for both.
         var opening = sizes.Opening is { } open ? open >= at ? open + 1 : open : (int?)null;
         var index = opening < at ? at - 1 : at;

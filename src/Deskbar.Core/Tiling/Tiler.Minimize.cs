@@ -11,8 +11,9 @@ namespace Deskbar.Core.Tiling;
 // So the moment a tile is minimized, its screen's order and stored sizes are remembered. When it comes back:
 //   * the screen still holds exactly the same other windows: the order and the sizes come back as they were, so a
 //     top tile is on top again, and a stack made by a drop is a stack again;
-//   * the screen changed meanwhile (a window opened or closed there): its cell goes back into its old column at its
-//     old row, or into a new column on the right when that column is gone (TileArrange.Returned), and the order
+//   * the screen changed meanwhile (a window opened or closed there): its cell goes back into its old column beside
+//     the neighbours it had there, or into a column of its own at its old index when none of them is left
+//     (TileArrange.Returned; a tile alone in its column took the column with it), and the order
 //     follows the cell. Every other column keeps its width and its rows (final review, I1: it used to go to its old
 //     index in the order with the sizes refitted as for a join, which put the new cell at the bottom of the last
 //     column and could move a tile from one column to another).
@@ -70,13 +71,20 @@ public sealed partial class Tiler
 
             // The screen changed meanwhile: its cell goes back where it was (TileArrange.Returned), read from the grid
             // it left (the sizes stored then, or the equal grid, which is what nothing stored meant), into the grid
-            // the screen shows now.
+            // the screen shows now. Its old column is handed over by its MEMBERS (the windows that shared it, top to
+            // bottom, itself among them), because whether that column still exists is decided by who is left in it,
+            // not by its index, which a column that went with the tile hands to the neighbour that slid into it.
             var left = gone.Sizes.GetValueOrDefault(TileSizes.Equal(GridLayout.Shape(gone.Order.Count)));
             var cell = TileArrange.CellOf(left, gone.Order.ToList().IndexOf(w), gone.Order.Count);
-            var (order, sizes) = TileArrange.Returned(others, ShownSizes(workspace, screen, others.Count), w, cell);
+            var oldColumn = gone.Order
+                .Where((_, slot) => TileArrange.CellOf(left, slot, gone.Order.Count).Column == cell.Column)
+                .ToList();
+            var (order, sizes) = TileArrange.Returned(others, ShownSizes(workspace, screen, others.Count), w, cell.Column, oldColumn);
             var into = current.Into(gone.Screen, order);
             StoreSizes(workspace, KeyOf(screen), sizes)
-                .Tap(() => trace?.Invoke($"tile: {w.Value:X} came back to column {cell.Column}, row {cell.Row} on screen {gone.Screen}, slot {into.On(gone.Screen).ToList().IndexOf(w)}, sizes {Show(sizes)}"))
+                .Tap(() => trace?.Invoke($"tile: {w.Value:X} came back from column {cell.Column}, row {cell.Row} on screen {gone.Screen}, "
+                    + $"{(oldColumn.Any(x => x != w && others.Contains(x)) ? "into the column its neighbours are in" : "as a column of its own")}, "
+                    + $"slot {into.On(gone.Screen).ToList().IndexOf(w)}, sizes {Show(sizes)}"))
                 .TapError(error => trace?.Invoke($"tile: {w.Value:X} came back to screen {gone.Screen}, storing its sizes failed: {error}"));
             return into;
         });
