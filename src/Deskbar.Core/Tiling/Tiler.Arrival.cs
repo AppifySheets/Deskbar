@@ -1,0 +1,181 @@
+using CSharpFunctionalExtensions;
+using Deskbar.Core.Abstractions;
+using Deskbar.Core.Domain;
+
+namespace Deskbar.Core.Tiling;
+
+// A NEW WINDOW SPLITS THE TILE YOU LAST USED (docs/superpowers/specs/2026-11-19-tiling-predictable-placement-design.md,
+// "Change 2"). A window used to join the end of its screen, and the grid was rebuilt from the new count, so every
+// tile could move when one window opened. Now a window that arrives takes half of ONE tile and no other tile moves:
+//
+//   1. A minimized tile coming back goes to its old place (Tiler.Minimize.cs, unchanged).
+//   2. An opening (TileSizes.Opening, room kept for the next window): the window goes into it. The screen of the
+//      tile last used is looked at first, then the screen the window opened on.
+//   3. Otherwise it splits the tile the user last activated, on THAT tile's screen, even when the app opened the
+//      window on another one (TileArrival.Choose picks the tile and the side).
+//   4. Otherwise (no tile last used, or the second and later windows of one evaluate) it splits the largest tile
+//      of its own screen. TileArrival.Choose does that fallback too, also when the last-used tile is too small.
+//
+// "Last used" is the order windows were activated in, kept for every window and filtered when a target is picked:
+// a new window usually activates itself BEFORE it joins the board, and once it has joined it is the last-used tile
+// like any other. Activations Windows hands out by itself do not count: when a tile closes or is minimized,
+// Windows activates whatever is next in z-order, which can be a tile on another screen the user never touched. An
+// activation with no user input since a tile last left the grid is that hand-out (ITileSurface.LastInputTick).
+//
+// Which arrivals split: a window that appeared on the workspace or became tileable there (Evaluate), and one
+// brought from another workspace (OnWindowMoved). Not a window dragged by hand (the drop rules decide it), not a
+// window re-homed because its screen went away, and not the first fill (TileBoard.FirstFill orders by position).
+public sealed partial class Tiler
+{
+    // How many activations are remembered. The target is the first one still on the board, so a short list is
+    // plenty; it only has to outlast the floating windows and dialogs activated since the last tile.
+    const int UsedKept = 32;
+
+    // Windows in the order they were last activated, most recent first, each with the input tick it was activated
+    // at. Read by LastUsed, written by NoteUsed and NoteLeft, and a window that disappears is taken off.
+    IReadOnlyList<(WindowHandle Window, uint Tick)> used = [];
+
+    // The input tick at the moment a tile last left a grid (NoteLeft). An activation at the same tick had no
+    // input since, so Windows handed it out. None until a tile first leaves.
+    Maybe<uint> leftAt = Maybe<uint>.None;
+
+    // A window was activated (OnWindowEvent, before RaiseTogether). It goes to the front of the list, unless there
+    // has been no input since a tile left the grid: then Windows activated it by itself after the close or minimize,
+    // and the user's choice of tile stands. Every window is recorded, tiles or not; LastUsed filters.
+    void NoteUsed(WindowHandle window)
+    {
+        var tick = surface.LastInputTick();
+        if (leftAt.HasValue && leftAt.Value == tick)
+        {
+            trace?.Invoke($"tile: {window.Value:X} activated with no input since a tile left, not counted as used");
+            return;
+        }
+        used = used.Where(u => u.Window != window).Prepend((window, tick)).Take(UsedKept).ToList();
+    }
+
+    // A tile left a grid (NoteLeavers, Tiler.Resize.cs). The input tick now is saved, so an activation that FOLLOWS
+    // with no input in between is ignored (NoteUsed), and every activation already listed with this same tick is
+    // dropped, which covers the hand-out activation that ARRIVED BEFORE the leave (Windows can raise it before the
+    // window's Disappeared or MinimizeChanged reaches the Tiler).
+    void NoteLeft()
+    {
+        var tick = surface.LastInputTick();
+        leftAt = tick;
+        used = used.Where(u => u.Tick != tick).ToList();
+    }
+
+    // A window that disappeared is no longer anyone's target; its handle may be recycled for another window.
+    void ForgetUsed(WindowHandle window) =>
+        used = used.Where(u => u.Window != window).ToList();
+
+    // The tile a new window splits: the most recently activated window that is on `board`, is not the arriving
+    // window itself and is not maximized (a maximized tile covers its screen, and halving it would be invisible).
+    // A floating, pinned or borrowed window is never on the board, so activating one leaves the target as it was.
+    Maybe<WindowHandle> LastUsed(TileBoard board, WindowHandle except) =>
+        used.Select(u => u.Window)
+            .Where(w => w != except && board.ScreenOf(w).HasValue && !surface.IsMaximized(w))
+            .TryFirst();
+
+    // Places windows that just arrived on the workspace's board. `board` already holds them, each on the screen it
+    // opened on (Reconciled or TileBoard.Join put it at the end there); they are taken off and placed again, one at a
+    // time in the order given, so each later one sees the earlier ones in their new places. Only the first is offered
+    // the tile last used; the rest split the largest tile of their own screen (the design: "the first splits the
+    // target (or fills the opening) and each of the rest splits the largest tile on its screen").
+    //
+    // Sizes are stored here, before the caller hands the board to Keep, so the re-tile lays the new shape out. An
+    // opening is filled HERE as well (step 2), so Keep's IntoOpenings finds no opening left and never fills twice.
+    TileBoard Arrived(Workspace workspace, TileBoard board, IReadOnlyList<WindowHandle> arrivals)
+    {
+        if (arrivals.Count == 0) return board;
+        var screens = surface.Screens().ToDictionary(s => s.Number);
+        var own = arrivals.ToDictionary(w => w, w => board.ScreenOf(w).GetValueOrDefault(surface.ScreenOf(w)));
+        var without = arrivals.Aggregate(board, (b, w) => b.Leave(w));
+        var target = LastUsed(without, arrivals[0]);
+        return arrivals
+            .Select((window, i) => (Window: window, Offered: i == 0 ? target : Maybe<WindowHandle>.None))
+            .Aggregate(without, (b, a) => Arrive(workspace, screens, b, a.Window, own[a.Window], a.Offered));
+    }
+
+    // One window's arrival: the target screen is the last-used tile's screen, or the window's own. An opening there,
+    // then an opening on its own screen, then a split of a tile on the target screen.
+    TileBoard Arrive(Workspace workspace, IReadOnlyDictionary<int, TileScreen> screens, TileBoard board,
+        WindowHandle window, int own, Maybe<WindowHandle> lastUsed)
+    {
+        var target = lastUsed.Bind(board.ScreenOf).GetValueOrDefault(own);
+        return IntoOpeningOn(workspace, screens, board, window, target, lastUsed.HasValue ? "the screen of the tile last used" : "its own screen")
+            .Or(() => target != own ? IntoOpeningOn(workspace, screens, board, window, own, "its own screen") : Maybe<TileBoard>.None)
+            .GetValueOrDefault(() => Split(workspace, screens, board, window, target, lastUsed));
+    }
+
+    // Step 2: the screen's opening, when its stored sizes keep one for the windows it has. Filled the way Keep's
+    // IntoOpenings fills one (TileArrange.Filled), sizes stored first. None when the screen has no opening.
+    Maybe<TileBoard> IntoOpeningOn(Workspace workspace, IReadOnlyDictionary<int, TileScreen> screens, TileBoard board,
+        WindowHandle window, int number, string where)
+    {
+        if (!screens.TryGetValue(number, out var screen)) return Maybe<TileBoard>.None;
+        var order = board.On(number);
+        if (!StoredOn(workspace.Id, KeyOf(screen)).TryGetValue(out var stored) || !stored.HasOpeningFor(order.Count))
+            return Maybe<TileBoard>.None;
+
+        var (next, sizes) = TileArrange.Filled(order, stored, window);
+        var into = board.Into(number, next);
+        if (!into.ScreenOf(window).HasValue) return Maybe<TileBoard>.None;
+        StoreSizes(workspace, KeyOf(screen), sizes)
+            .Tap(() => trace?.Invoke($"tile: {workspace.Name}: {window.Value:X} arrived on screen {number}, took the opening at slot {stored.Opening} on {where}"))
+            .TapError(error => trace?.Invoke($"tile: {workspace.Name}: {window.Value:X} arrived on screen {number}, storing the filled opening failed: {error}"));
+        return into;
+    }
+
+    // Steps 3 and 4: TileArrival.Choose picks the tile (the last-used one when both halves keep a quarter of the
+    // screen, otherwise the largest) and the side, and TileArrange.Drop makes the split exactly as a drop on that
+    // tile's edge would. Laid out with the sizes the screen shows now (ShownSizes), which is what the user sees.
+    //
+    // The window joins the end of the screen instead in two cases, each traced: the screen is empty (nothing to
+    // split), or its grid does not fit the work area (SlotsOf is empty, controller ruling 1), where RetileScreen's
+    // too-small guard then skips the screen as it always has.
+    TileBoard Split(Workspace workspace, IReadOnlyDictionary<int, TileScreen> screens, TileBoard board,
+        WindowHandle window, int number, Maybe<WindowHandle> lastUsed)
+    {
+        if (!screens.TryGetValue(number, out var screen))
+            return board.Join(number, window);
+        var order = board.On(number);
+        var sizes = ShownSizes(workspace, screen, order.Count);
+        var slots = SlotsOf(screen, order, sizes);
+        if (order.Count > 0 && slots.Count == 0)
+        {
+            trace?.Invoke($"tile: {workspace.Name}: {window.Value:X} arrived on screen {number}, the grid does not fit the work area, joined the end");
+            return board.Join(number, window);
+        }
+
+        return TileArrival.Choose(order, sizes, order.Select(w => slots[w]).ToList(), lastUsed).Match(
+            split =>
+            {
+                var (next, splitSizes) = TileArrange.Drop(order, sizes, window, split.Target, split.Side);
+                var into = board.Into(number, next);
+                // Drop hands its input back unchanged when it cannot split (it always can here, by construction); the
+                // window must never be lost from the board for that, so it joins the end instead.
+                if (!into.ScreenOf(window).HasValue)
+                {
+                    trace?.Invoke($"tile: {workspace.Name}: {window.Value:X} arrived on screen {number}, splitting {split.Target.Value:X} {split.Side} made no room, joined the end");
+                    return board.Join(number, window);
+                }
+                StoreSizes(workspace, KeyOf(screen), splitSizes)
+                    .Tap(() => trace?.Invoke($"tile: {workspace.Name}: {window.Value:X} arrived on screen {number}, split {split.Target.Value:X} {split.Side} ({Why(split, lastUsed)}), sizes {Show(splitSizes)}"))
+                    .TapError(error => trace?.Invoke($"tile: {workspace.Name}: {window.Value:X} arrived on screen {number}, storing the split failed: {error}"));
+                return into;
+            },
+            () =>
+            {
+                trace?.Invoke($"tile: {workspace.Name}: {window.Value:X} arrived on screen {number}, which was empty, joined it");
+                return board.Join(number, window);
+            });
+    }
+
+    // Which rule chose the split's tile, for the trace.
+    static string Why(TileSplit split, Maybe<WindowHandle> lastUsed) =>
+        lastUsed.HasValue
+            ? split.Target == lastUsed.Value
+                ? "the tile last used"
+                : $"the largest tile, the tile last used ({lastUsed.Value.Value:X}) is too small to split"
+            : "the largest tile, no tile last used";
+}

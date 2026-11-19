@@ -150,9 +150,15 @@ public sealed partial class Tiler
     //
     // It also forgets the pending echo of a window that is on no grid any more, so a stale one cannot swallow a
     // drag after the window comes back without being placed.
+    //
+    // And when any screen lost a window, it tells the arrival bookkeeping (NoteLeft, Tiler.Arrival.cs): Windows is
+    // about to activate whatever is next in z-order, and that activation must not move the tile a new window splits.
     void NoteLeavers(Guid workspace, TileBoard after)
     {
         if (boards.TryGetValue(workspace, out var before))
+        {
+            if (before.Screens.Any(s => s.Value.Any(w => !after.On(s.Key).Contains(w))))
+                NoteLeft();
             before.Screens.ToList().ForEach(s =>
             {
                 var staying = after.On(s.Key);
@@ -162,6 +168,7 @@ public sealed partial class Tiler
                 else if (gone.Count > 0)
                     leavers[(workspace, s.Key)] = CellOn(workspace, s.Key, gone[0].Slot, s.Value.Count);
             });
+        }
         else
             leavers.Keys.Where(k => k.Workspace == workspace).ToList().ForEach(k => leavers.Remove(k));
 

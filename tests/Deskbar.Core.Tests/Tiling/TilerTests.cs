@@ -10,7 +10,7 @@ namespace Deskbar.Core.Tests.Tiling;
 // The Tiler: when and where a tiled workspace's windows move. Driven entirely through fakes: a started
 // WorkspaceManager over FakeDesktops/FakeMonitor (as FoldTests builds one) and a FakeTileSurface standing in
 // for Windows. Every test reads the outcome off the surface: what was placed, where, and what was watched.
-public sealed class TilerTests : IDisposable
+public sealed partial class TilerTests : IDisposable
 {
     readonly FakeDesktops desktops = new();
     readonly FakeMonitor monitor = new();
@@ -303,15 +303,16 @@ public sealed class TilerTests : IDisposable
         Assert.Empty(surface.Placed);
         Assert.Equal([W(1), W(2), W(3)], tiler.Board.On(1));
 
-        // A fourth window re-tiles the screen; W(2) keeps slot 1 and is left maximized.
+        // A fourth window re-tiles the screen; W(2) keeps its slot and is left maximized.
         Opens(W(4), alpha);
 
+        // W(4) splits the largest tile, W(1), below it (predictable placement, change 2), not the end of a 2x2.
         Assert.DoesNotContain(W(2), PlacedWindows);
-        Assert.Equal([W(1), W(2), W(3), W(4)], tiler.Board.On(1));
+        Assert.Equal([W(1), W(4), W(2), W(3)], tiler.Board.On(1));
         var grid = Grid(4);
         Assert.Equal(grid[0], surface.Frames[W(1)]);
-        Assert.Equal(grid[2], surface.Frames[W(3)]);
-        Assert.Equal(grid[3], surface.Frames[W(4)]);
+        Assert.Equal(grid[1], surface.Frames[W(4)]);
+        Assert.Equal(grid[3], surface.Frames[W(3)]);
         Assert.Equal(Area, surface.Frames[W(2)]);
     }
 
@@ -536,7 +537,8 @@ public sealed class TilerTests : IDisposable
         Opens(W(5), alpha);
         Minimizes(W(2), false);
 
-        Assert.Equal([W(1), W(2), W(3), W(4), W(5)], tiler.Board.On(1));
+        // W(5) split the largest tile, W(1), rather than joining the end (predictable placement, change 2).
+        Assert.Equal([W(1), W(2), W(5), W(3), W(4)], tiler.Board.On(1));
     }
 
     [Fact]
@@ -915,7 +917,8 @@ public sealed class TilerTests : IDisposable
         dropping.Remove(W(1));
 
         Assert.DoesNotContain(W(1), PlacedWindows);
-        AssertTiled([W(2), W(3), W(4)]);
+        // W(4) had split the largest tile, W(1), below it (predictable placement, change 2), so it heads the order.
+        AssertTiled([W(4), W(2), W(3)]);
     }
 
     [Fact]
@@ -1018,14 +1021,15 @@ public sealed class TilerTests : IDisposable
         Opens(W(4), alpha);
 
         Assert.DoesNotContain(W(1), PlacedWindows);
-        Assert.Equal([W(1), W(2), W(3), W(4)], tiler.Board.On(1));
+        // W(4) splits the largest tile, W(1), below it (predictable placement, change 2), not the end of a 2x2.
+        Assert.Equal([W(1), W(4), W(2), W(3)], tiler.Board.On(1));
 
         // Let go a little off its new slot: it goes into it.
         surface.Settling.Remove(W(1));
         var slot = Grid(4)[0];
         Settles(W(1), slot with { Left = slot.Left + 20, Right = slot.Right + 20 });
 
-        AssertTiled([W(1), W(2), W(3), W(4)]);
+        AssertTiled([W(1), W(4), W(2), W(3)]);
     }
 
     // A window Deskbar has just placed is settling too, for one quiet interval (its own LOCATIONCHANGE). A
@@ -1045,7 +1049,8 @@ public sealed class TilerTests : IDisposable
         surface.Settling.Remove(W(1));
         Settles(W(1), Grid(3)[0]);
 
-        AssertTiled([W(1), W(2), W(3), W(4)]);
+        // W(4) split the largest tile, W(1), below it (predictable placement, change 2), not the end of a 2x2.
+        AssertTiled([W(1), W(4), W(2), W(3)]);
     }
 
     // Final review, item 4: dropping a board forgets what the backstop decided. Untiling and tiling again is a
@@ -1139,7 +1144,8 @@ public sealed class TilerTests : IDisposable
         Opens(W(3), alpha);
         Opens(W(4), alpha);
 
-        AssertTiled([W(1), W(2), W(3), W(4)]);
+        // W(3) split W(2) below, then W(4) the largest tile, W(1), below (predictable placement, change 2).
+        AssertTiled([W(1), W(4), W(2), W(3)]);
         Assert.Contains(traced, line => line.Contains("threw"));
     }
 
