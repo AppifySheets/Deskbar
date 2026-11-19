@@ -1442,8 +1442,9 @@ public partial class App : Application
                 screens: ScreenLayout.Screens,
                 create: NewScreenStrip,
                 ignore: hwnd => monitor.Ignore(hwnd),
-                pinToAllDesktops: hwnd => desktops!.Pin(new WindowHandle(hwnd))
-                    .TapError(err => ClickTrace.Write($"strip pin failed: {err}")));
+                // The pin's outcome goes back to the set, which counts a strip as pinned only once this worked and
+                // tries a failed one again on the 1 s timer (ScreenStrips.PinIfShown), tracing each failure itself.
+                pinToAllDesktops: hwnd => desktops!.Pin(new WindowHandle(hwnd)));
             screenStrips = stripSet;
             floatingBar = new FloatingBar(manager)
             {
