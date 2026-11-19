@@ -589,7 +589,7 @@ public class RemoteControlMenuTests
              "unfold", "color", "delete", "switch", "group-create", "group-join", "group-leave", "group-rename",
              "group-color", "group-fold", "group-unfold", "group-reorder", "ungroup", "name-desktop", "rename-window", "rename-app", "rename-pattern",
              "name-by-folder", "restore-title", "pin", "unpin", "close-window", "force-close", "close-all", "restart-app", "bar",
-             "stats", "window-lines", "window-list", "collapsed-click", "full-screen", "dump"],
+             "stats", "window-lines", "window-list", "collapsed-click", "full-screen", "task", "dump"],
             verb => Assert.Contains($"\n  {verb}", help));
     }
 

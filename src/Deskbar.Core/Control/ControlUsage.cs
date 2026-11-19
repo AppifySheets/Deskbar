@@ -43,6 +43,17 @@ public static class ControlUsage
                 + "      folder if not given) blinks on the bar and that window's icon glows, until the user goes there.\n"
                 + "      Nothing happens when the user is already on that workspace"),
         ]),
+        new("Tasks", [
+            new("task", "list", "every task and every workspace asking for you, as JSON: kind, id, title, workspace, state, endsAt, doneAt"),
+            new("task", "add <title> [--workspace <name>|none] [--in 1m|5m|10m|30m]",
+                "park a task, optionally with a timer; without --workspace it goes on the workspace of the VS Code\n"
+                + "      window whose folder holds --from (the caller's own folder if not given). A live task with the\n"
+                +"      same title on that workspace is reused rather than added again"),
+            new("task", "timer <id> (--in 1m|5m|10m|30m | --clear)", "start a timer on a task, replacing any running one, or clear it"),
+            new("task", "done <id>", "mark a task done"),
+            new("task", "rename <id> <title>", "rename a task"),
+            new("task", "delete <id>", "delete a task; the reply is the task as it was"),
+        ]),
         new("Workspace row menu", [
             new("rename", "<workspace> <new name>", "Rename…"),
             new("add-child", "<parent> <name>", "Add child… (nests a new workspace that borrows the parent's windows)"),
@@ -118,7 +129,7 @@ public static class ControlUsage
     const string Caller = "deskbar.cmd";
 
     public static string LineFor(string verb) =>
-        All.Where(c => c.Verb == verb).Select(c => $"usage: {Caller} {c.Verb} {c.Arguments}".TrimEnd()).FirstOrDefault() ?? "";
+        string.Join("\n", All.Where(c => c.Verb == verb).Select(c => $"usage: {Caller} {c.Verb} {c.Arguments}".TrimEnd()));
 
     const string Footer =
         """

@@ -129,7 +129,7 @@ public static class ControlArguments
     // `attention` need the caller's folder, and only the asking process knows it: the running app has its own current
     // folder, and the pipe carries the arguments alone. So either one that does not name a folder gets the client's,
     // which is the folder of the shell that ran deskbar.cmd. Every other command goes through untouched.
-    static readonly string[] AboutTheCaller = ["open", "attention"];
+    static readonly string[] AboutTheCaller = ["open", "attention", "task"];
 
     public static IReadOnlyList<string> WithCallerFolder(IReadOnlyList<string> args, string callerFolder) =>
         args.Count > 0 && AboutTheCaller.Contains(args[0], StringComparer.OrdinalIgnoreCase) && !args.Contains("--from")

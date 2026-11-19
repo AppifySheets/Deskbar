@@ -31,6 +31,9 @@ public sealed class TaskService(ITaskStore store, Func<DateTimeOffset> now, Func
 
     public TaskBoard Board { get; private set; } = TaskBoard.Empty;
 
+    /// <summary>The service's clock, so callers (the control pipe's `task list`) and tests agree on "now".</summary>
+    public DateTimeOffset Now => now();
+
     /// <summary>Pulses after every change to the board, loaded or edited, so views refresh.</summary>
     public IObservable<Unit> Changed => changed;
 

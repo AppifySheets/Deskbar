@@ -1,6 +1,7 @@
 using System.Text.Json;
 using CSharpFunctionalExtensions;
 using Deskbar.Core.Domain;
+using Deskbar.Core.Tasks;
 
 namespace Deskbar.Core.Control;
 
@@ -49,12 +50,15 @@ namespace Deskbar.Core.Control;
 // `isPro` answers whether this build is Deskbar Pro, for `tile` only (tiling is a Pro feature). Entitlement
 // is the Windows side's business, so the app hands it in; left null it means NOT Pro, so a caller that
 // passes nothing never gets tiling.
+//
+// `tasks` is the task service for `task` (RemoteControl.Tasks.cs). Left null, every `task` command refuses.
 public sealed partial class RemoteControl(WorkspaceManager manager, Func<bool, Result>? setBarVisible = null, Func<ProgramLaunch, Result<int?>>? launch = null,
     Func<Result<string>>? dump = null, Func<Maybe<string>>? defaultBrowser = null,
     Func<(string Version, string? Exe, bool Packaged)>? identity = null,
     Func<string, Result>? showFind = null,
     Func<bool, Result>? setStatsDetached = null,
-    Func<bool>? isPro = null)
+    Func<bool>? isPro = null,
+    TaskService? tasks = null)
 {
     static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web) { WriteIndented = true };
 
@@ -79,6 +83,7 @@ public sealed partial class RemoteControl(WorkspaceManager manager, Func<bool, R
         ("open", _) => ControlArguments.ParseOpen(rest).Match(Open, ControlReply.Fail),
         ("attention", []) => Attention(null),
         ("attention", ["--from", var folder]) => Attention(folder),
+        ("task", _) => Task(rest),
 
         ("rename", [var workspace, var name]) => Rename(workspace, name),
         ("add-child", [var parent, var name]) => AddChild(parent, name),
