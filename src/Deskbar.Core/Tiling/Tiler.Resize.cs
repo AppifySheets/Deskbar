@@ -31,7 +31,16 @@ public sealed partial class Tiler
     // tile's space (Workspace.TileKeepsSpace). SizesOn then keeps the cell as the screen's opening instead of removing
     // it (tiling-predictable-placement design, change 3). False for every other way of leaving: a minimize, a move to
     // another workspace or screen, a window that stopped qualifying, or any leave while the switch is off.
-    readonly Dictionary<(Guid Workspace, int Screen), ((int Column, int Row) Cell, bool Closed)> leavers = [];
+    //
+    // `OldCount` is how many windows the screen held when the cell was read (final review, C1). A screen can lose a
+    // window and gain another in one change (a cross-screen swap), and then its count, and so its grid, is what it
+    // was: the cell is no leaver for the fit at all. And with nothing stored, the grid the cell was read from is the
+    // equal grid of OldCount windows, not of "one more than now" (TileArrange.FitStart).
+    readonly Dictionary<(Guid Workspace, int Screen), Leaver> leavers = [];
+
+    // One screen's pending leaver: its cell in the grid as it was, whether it closed with the switch on, and how many
+    // windows that grid held (see `leavers`).
+    sealed record Leaver((int Column, int Row) Cell, bool Closed, int OldCount);
 
     // Windows that are closing right now on a workspace that keeps a closed tile's space. OnWindowEvent adds one on
     // Disappeared or Hidden of a window on the board, before the evaluate that takes it off; NoteLeavers reads it
@@ -118,27 +127,29 @@ public sealed partial class Tiler
 
         var pending = leavers.Remove((workspace.Id, screen.Number), out var leaver)
             ? Maybe.From(leaver)
-            : Maybe<((int Column, int Row) Cell, bool Closed)>.None;
-        var leaving = pending.Map(l => l.Cell);
+            : Maybe<Leaver>.None;
         var key = KeyOf(screen);
         // Read from the manager, not from `workspace`: that record was taken when the event arrived, and a split
         // moved in this same handler has to be laid out with the sizes it just stored.
         var stored = manager.State.Workspaces.TryFirst(w => w.Id == workspace.Id)
             .Bind(w => w.TileSizes.TryFirst(s => s.Screen == key))
             .Map(s => s.Sizes);
-        // Nothing stored means the automatic grid, which is TileSizes.Equal(Shape(count + 1)) one window ago. With a
-        // leaver pending, that earlier grid loses only the leaver's cell (Petre: "on closing, i sometimes want not to
-        // move other windows"), the same rule Refit applies to stored sizes. With no leaver it is the equal grid.
-        var start = stored.HasValue ? stored.Value : leaving.HasValue ? TileSizes.Equal(GridLayout.Shape(count + 1)) : TileSizes.Equal(shape);
+        // Nothing stored means the automatic grid. With a leaver pending, that is the equal grid of the count the
+        // leaver's cell was read from, and it loses only the leaver's cell (Petre: "on closing, i sometimes want not to
+        // move other windows"), the same rule Refit applies to stored sizes. A leaver whose screen's count did not drop
+        // (a cross-screen swap) is no leaver at all (final review, C1). TileArrange.FitStart has the rule.
+        var (start, leaving) = TileArrange.FitStart(stored, count, pending.Map(l => l.Cell),
+            pending.Map(l => l.OldCount).GetValueOrDefault(count));
 
         // KEEP THE SPACE (change 3): a tile that CLOSED on a workspace with the switch on leaves its cell as the screen's
-        // opening, and no other tile moves. Only when the start describes exactly the grid before the close (one cell
-        // per window then, no opening yet), which is the grid the leaver's cell was read from. A screen that already
-        // has its one opening closes up as in change 1: Refit's `count + 2` branch takes only the second leaver's cell
-        // and the first opening stays. Not in a returning screen's grace period, where nothing SizesOn makes is
-        // stored: an opening laid out but not stored would vanish at the next re-tile, so the close takes the change 1
-        // path there, as it would have before the switch existed.
-        if (pending.TryGetValue(out var left) && left.Closed && start.Opening is null
+        // opening, and no other tile moves. Only when exactly that one window left (final review, M1: with two gone at
+        // once the start is a grid nobody saw with this count) and the start describes exactly the grid before the
+        // close (one cell per window then, no opening yet), which is the grid the leaver's cell was read from. A
+        // screen that already has its one opening closes up as in change 1: Refit's `count + 2` branch takes only the
+        // second leaver's cell and the first opening stays. Not in a returning screen's grace period, where nothing
+        // SizesOn makes is stored: an opening laid out but not stored would vanish at the next re-tile, so the close
+        // takes the change 1 path there, as it would have before the switch existed.
+        if (pending.TryGetValue(out var left) && left.Closed && left.OldCount == count + 1 && start.Opening is null
             && start.Shape.Sum() == count + 1 && !InGrace(key)
             && TileArrange.KeptOpen(start, left.Cell) is var kept && kept.HasOpeningFor(count))
         {
@@ -180,7 +191,9 @@ public sealed partial class Tiler
     // A brand-new board (none before: first fill, or tiling turned back on) starts with no leavers at all.
     //
     // The entry also says whether that first leaver was closing (in `closing`, so its workspace keeps the space),
-    // and the set is cleared here, whichever way this board change went.
+    // and the set is cleared here, whichever way this board change went. And it carries the screen's count before
+    // the change, so a screen that lost one window and gained another (a cross-screen swap) is not fitted as if it
+    // had shrunk (final review, C1).
     //
     // It also forgets the pending echo of a window that is on no grid any more, so a stale one cannot swallow a
     // drag after the window comes back without being placed.
@@ -197,7 +210,8 @@ public sealed partial class Tiler
                     if (gone.Count > 0) CloseOpeningOfEmptied(workspace, s.Key);
                 }
                 else if (gone.Count > 0)
-                    leavers[(workspace, s.Key)] = (CellOn(workspace, s.Key, gone[0].Slot, s.Value.Count), closing.Contains(gone[0].Window));
+                    leavers[(workspace, s.Key)] = new Leaver(CellOn(workspace, s.Key, gone[0].Slot, s.Value.Count),
+                        closing.Contains(gone[0].Window), s.Value.Count);
             });
         else
             leavers.Keys.Where(k => k.Workspace == workspace).ToList().ForEach(k => leavers.Remove(k));
