@@ -936,6 +936,30 @@ public sealed partial class TilerTests : IDisposable
             new[] { W(3), W(1), W(4) }.Select(w => surface.Frames[w]).ToList());
     }
 
+    // Task 6 review: screen 2 keeps an opening (W3 | W4 | open, thirds) and W1 is dragged from screen 1 onto the bottom
+    // zone of W3. The drop makes its own room (TileArrange.Drop closes the opening, then splits W3), so W1 goes under
+    // W3 and W4 keeps its column. The layout is stored BEFORE Keep: stored after, Keep's IntoOpenings still saw the old
+    // opening, counted W1 as an arrival and put it in the opening's slot of the ORDER, while the stored layout was the
+    // drop's, so the order and the layout disagreed and W1 and W4 landed in each other's leaves.
+    [Fact]
+    public void A_drop_beside_a_tile_on_another_screen_with_an_opening_lands_beside_its_target()
+    {
+        StartTwoByTwoScreens();
+        var kept = Tree(Across(C(L, 1 / 3.0), C(L, 1 / 3.0), C(L, 1 / 3.0)), opening: 2);
+        Assert.True(manager.SetTileLayout(alpha.Id, "1920,0,3840,1040", kept).IsSuccess);
+        var there = GridLayout.Arrange(Area2, 2, Gap, kept);
+        Assert.Equal(there, new[] { W(3), W(4) }.Select(w => surface.Frames[w]).ToList());
+
+        DroppedAt(W(1), (there[0].Left + there[0].Right) / 2, there[0].Bottom - 100, screen: 2);
+
+        var (order, layout) = TileArrange.Drop([W(3), W(4)], kept, W(1), W(3), TileArrange.Zone.Bottom);
+        Assert.Equal([W(3), W(1), W(4)], order);
+        Assert.Equal("A[D[L 0.5, L 0.5] 0.5, L 0.5]", Text(layout));
+        AssertTiled([W(2)]);
+        AssertArranged(order, layout, Area2, screen: 2);
+        Assert.Equal(Text(layout), Text(manager.State.Workspaces.Single(w => w.Id == alpha.Id).TileLayouts.Single(s => s.Screen == "1920,0,3840,1040").Layout));
+    }
+
     // The design's "which arrivals split": a window dragged by hand onto another screen is the user pointing at a
     // place, so the drop rules decide it, never the split of the tile last used. W2, the tile last used, is on screen
     // 1; W1 dropped on the bottom of W3 stacks under W3 on screen 2. Had it gone through Arrived it would have come

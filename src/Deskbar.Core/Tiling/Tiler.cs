@@ -543,17 +543,23 @@ public sealed partial class Tiler(WorkspaceManager manager, IVirtualDesktopServi
                     PutBack(window, slot, frame);
                 break;
             // Dropped on another tile's edge zone: beside THAT tile on that side, at whatever depth of the tree it is
-            // (TileArrange.Drop). The new layout is stored BEFORE the re-tile, so the re-tile reads it; the board takes
-            // the new order. The target may be on another screen (dragged across): that screen takes the window in,
+            // (TileArrange.Drop). The target may be on another screen (dragged across): that screen takes the window in,
             // and the one it left gives its leaf up through Keep's leaver bookkeeping.
+            //
+            // The new layout is stored FIRST, before Keep, as for a band drop (task 6 review). Keep's IntoOpenings reads
+            // the stored layout: stored after, it still saw an opening the drop had closed, took the window dragged in
+            // from another screen for an arrival and moved it to the opening's slot of the ORDER, while the layout
+            // stored next was the drop's, so the order and the layout disagreed and windows landed in each other's
+            // leaves. Stored first, the drop's layout has no opening, IntoOpenings leaves the order alone, and the
+            // re-tile reads the layout the order was made for.
             case MoveOutcome.Beside beside when board.ScreenOf(beside.Target).TryGetValue(out var targetOn)
                                                && screens.TryGetValue(targetOn, out var besideScreen):
                 var arranged = Rearranged(workspace, besideScreen, window, beside);
                 var leftFrom = board.ScreenOf(window).GetValueOrDefault(targetOn);
-                Keep(workspace, board.Into(targetOn, arranged.Order));
                 StoreLayout(workspace, KeyOf(besideScreen), arranged.Layout)
                     .Tap(() => trace?.Invoke($"tile: {workspace.Name} screen {targetOn}: {window.Value:X} dropped {beside.Side} of {beside.Target.Value:X}, sizes {Show(arranged.Layout)}"))
                     .TapError(error => trace?.Invoke($"tile: {workspace.Name} screen {targetOn}: storing the new arrangement failed: {error}"));
+                Keep(workspace, board.Into(targetOn, arranged.Order));
                 Retile(workspace, [leftFrom, targetOn]);
                 break;
             // In the screen-edge band of the screen under the pointer (TileArrange.DropAtEdge): a full-height column or a
