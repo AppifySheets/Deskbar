@@ -26,7 +26,19 @@ public sealed partial class Tiler
     // The cell (in the grid as it was BEFORE) of a window that left a screen's grid, per workspace and screen
     // number: TileSizes.Fit gives that row's share to the rows around it, where without it the bottom row would
     // go. Used by the next fit of that screen and then forgotten (SizesOn takes it).
-    readonly Dictionary<(Guid Workspace, int Screen), (int Column, int Row)> leavers = [];
+    //
+    // `Closed` says the leaver CLOSED (its window disappeared or went to the tray) while its workspace keeps a closed
+    // tile's space (Workspace.TileKeepsSpace). SizesOn then keeps the cell as the screen's opening instead of removing
+    // it (tiling-predictable-placement design, change 3). False for every other way of leaving: a minimize, a move to
+    // another workspace or screen, a window that stopped qualifying, or any leave while the switch is off.
+    readonly Dictionary<(Guid Workspace, int Screen), ((int Column, int Row) Cell, bool Closed)> leavers = [];
+
+    // Windows that are closing right now on a workspace that keeps a closed tile's space. OnWindowEvent adds one on
+    // Disappeared or Hidden of a window on the board, before the evaluate that takes it off; NoteLeavers reads it
+    // into the leaver entry and then clears it, so it never outlives the one board change it was noted for. Never
+    // filled for a minimize: minimizing is not a close (the design says so, and a minimized tile comes back to its
+    // own place through Tiler.Minimize.cs, not into an opening).
+    readonly HashSet<WindowHandle> closing = [];
 
     // Windows the Tiler has placed whose own Settled has not come back yet (controller ruling 2). That Settled
     // ends a change that Deskbar's SetWindowPos began, so even when the surface says a button was down during it
@@ -104,9 +116,10 @@ public sealed partial class Tiler
         var shape = GridLayout.Shape(count);
         if (count == 0) return TileSizes.Equal(shape);
 
-        var leaving = leavers.Remove((workspace.Id, screen.Number), out var cell)
-            ? Maybe.From(cell)
-            : Maybe<(int Column, int Row)>.None;
+        var pending = leavers.Remove((workspace.Id, screen.Number), out var leaver)
+            ? Maybe.From(leaver)
+            : Maybe<((int Column, int Row) Cell, bool Closed)>.None;
+        var leaving = pending.Map(l => l.Cell);
         var key = KeyOf(screen);
         // Read from the manager, not from `workspace`: that record was taken when the event arrived, and a split
         // moved in this same handler has to be laid out with the sizes it just stored.
@@ -117,6 +130,23 @@ public sealed partial class Tiler
         // leaver pending, that earlier grid loses only the leaver's cell (Petre: "on closing, i sometimes want not to
         // move other windows"), the same rule Refit applies to stored sizes. With no leaver it is the equal grid.
         var start = stored.HasValue ? stored.Value : leaving.HasValue ? TileSizes.Equal(GridLayout.Shape(count + 1)) : TileSizes.Equal(shape);
+
+        // KEEP THE SPACE (change 3): a tile that CLOSED on a workspace with the switch on leaves its cell as the screen's
+        // opening, and no other tile moves. Only when the start describes exactly the grid before the close (one cell
+        // per window then, no opening yet), which is the grid the leaver's cell was read from. A screen that already
+        // has its one opening closes up as in change 1: Refit's `count + 2` branch takes only the second leaver's cell
+        // and the first opening stays. Not in a returning screen's grace period, where nothing SizesOn makes is
+        // stored: an opening laid out but not stored would vanish at the next re-tile, so the close takes the change 1
+        // path there, as it would have before the switch existed.
+        if (pending.TryGetValue(out var left) && left.Closed && start.Opening is null
+            && start.Shape.Sum() == count + 1 && !InGrace(key)
+            && TileArrange.KeptOpen(start, left.Cell) is var kept && kept.HasOpeningFor(count))
+        {
+            StoreSizes(workspace, key, kept)
+                .Tap(() => trace?.Invoke($"tile: {workspace.Name} screen {screen.Number}: a tile closed, its space kept at slot {kept.Opening}, sizes {Show(kept)}"))
+                .TapError(error => trace?.Invoke($"tile: {workspace.Name} screen {screen.Number}: storing the kept space failed: {error}"));
+            return kept;
+        }
 
         // Refit keeps a shape while windows leave, and a shape made by a drop while they join (TileArrange); anything
         // else on the automatic shape is TileSizes.Fit. Stored unless plain: even sizes on the automatic shape are
@@ -148,6 +178,9 @@ public sealed partial class Tiler
     // because no fit follows (RetileScreen skips an empty screen) and a stale one must not meet a later grid.
     // A brand-new board (none before: first fill, or tiling turned back on) starts with no leavers at all.
     //
+    // The entry also says whether that first leaver was closing (in `closing`, so its workspace keeps the space),
+    // and the set is cleared here, whichever way this board change went.
+    //
     // It also forgets the pending echo of a window that is on no grid any more, so a stale one cannot swallow a
     // drag after the window comes back without being placed.
     void NoteLeavers(Guid workspace, TileBoard after)
@@ -160,10 +193,12 @@ public sealed partial class Tiler
                 if (staying.Count == 0)
                     leavers.Remove((workspace, s.Key));
                 else if (gone.Count > 0)
-                    leavers[(workspace, s.Key)] = CellOn(workspace, s.Key, gone[0].Slot, s.Value.Count);
+                    leavers[(workspace, s.Key)] = (CellOn(workspace, s.Key, gone[0].Slot, s.Value.Count), closing.Contains(gone[0].Window));
             });
         else
             leavers.Keys.Where(k => k.Workspace == workspace).ToList().ForEach(k => leavers.Remove(k));
+        // Read once, by this board change, whatever it turned out to be (see `closing`).
+        closing.Clear();
 
         var gridded = boards.Where(b => b.Key != workspace).Select(b => b.Value).Append(after)
             .SelectMany(b => b.Screens.Values).SelectMany(w => w).ToHashSet();

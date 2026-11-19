@@ -23,6 +23,8 @@ namespace Deskbar.Core.Tiling;
 //   - A maximized window keeps its slot (the tiles beneath do not reflow) and is never placed.
 //   - A new window takes half of the tile the user last used, or fills an opening, and no other tile moves
 //     (Tiler.Arrival.cs). A restored one goes back to the place it left when it was minimized (Tiler.Minimize.cs).
+//   - A tile that leaves takes only its own cell. On a workspace that keeps a closed tile's space
+//     (Workspace.TileKeepsSpace), a tile that CLOSES leaves its cell as the screen's opening instead (SizesOn).
 //
 // Threading: every entry point runs on the UI thread, and the Tiler makes sure of it rather than trusting its
 // sources. `inputs` is the UI thread's scheduler (App passes one; tests leave it null, and then nothing is
@@ -272,6 +274,15 @@ public sealed partial class Tiler(WorkspaceManager manager, IVirtualDesktopServi
              || (e.Kind == WindowEventKind.MinimizeChanged && surface.IsMinimized(e.Window.Handle)))
             && Board.ScreenOf(e.Window.Handle).HasValue)
             NoteLeft(e.Window.Handle, e.Time);
+
+        // KEEP THE SPACE (change 3): a tile that CLOSES (Disappeared, or Hidden, which is how many apps close to the
+        // tray) on a workspace whose switch is on leaves its cell empty for the next window. Noted here, while it is
+        // still on the board, so the evaluate below hands NoteLeavers a leaver marked as closed (Tiler.Resize.cs,
+        // `closing`). A minimize is not a close and is never noted: it keeps change 1's rule.
+        if (e.Kind is WindowEventKind.Disappeared or WindowEventKind.Hidden
+            && Board.ScreenOf(e.Window.Handle).HasValue
+            && Acting().Map(w => w.TileKeepsSpace).GetValueOrDefault(false))
+            closing.Add(e.Window.Handle);
 
         if (e.Kind == WindowEventKind.Disappeared)
         {
