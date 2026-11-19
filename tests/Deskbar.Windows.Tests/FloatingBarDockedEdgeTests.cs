@@ -151,4 +151,17 @@ public class FloatingBarDockedEdgeTests(ITestOutputHelper output)
         bar.Bar.EdgeHover(new Point(-1, -1), "left");
         Assert.Same(resting, label.Foreground);
     });
+
+    // A PIN, not a design (task 9 review, controller's ruling, fix round 1). Docked across the seam, the bar's window
+    // spans from the higher of the two granted tops to the lower bottom (FloatingBar.SeamSpan), which was free while
+    // nothing else sat on a screen's top edge. With the screen strips it is not: on two screens that are not level, the
+    // window's half on the lower screen covers the right-hand end of that screen's strip. Petre's desk from the probe
+    // notes, strips 48 px: the left screen [-3840,286,0,2446] grants its half from y=334, the primary [0,0,3840,2160]
+    // from y=48, so the window starts at 48 and covers y 286..334 of the left screen's strip.
+    //
+    // How it should look instead (a bare band, a window region, or as it is) is Petre's call at the live check, so the
+    // geometry is left alone and today's answer is pinned here. When he rules, these expected values change with it.
+    [Fact]
+    public void Across_unlevel_screens_with_strips_the_seam_window_starts_at_the_higher_grant_for_now() =>
+        Assert.Equal((48, 2446, 286, 286), FloatingBar.SeamSpan(334, 2446, 48, 2160));
 }
