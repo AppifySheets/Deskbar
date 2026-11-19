@@ -4130,7 +4130,7 @@ public sealed class WorkspaceManager(
             ? Result.Success()
             : Result.Success().Tap(() => Persist(State with
             {
-                WindowListOnScreens = place == WindowListPlace.Screens,
+                WindowListOffScreens = place != WindowListPlace.Screens,
                 WindowListAtBottom = place == WindowListPlace.Screens
                     ? State.WindowListAtBottom
                     : place == WindowListPlace.Bottom,

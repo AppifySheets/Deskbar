@@ -56,10 +56,11 @@ public sealed class JsonPersistenceStoreTests : IDisposable
     }
 
     // Petre: "make window list at the bottom of the bar non-default". Every file written before then holds an
-    // explicit "ExpandCurrentWorkspace": false, the bottom list, and must now load as the expanded row. That is
-    // why the setting was renamed rather than its default flipped (see AppState.WindowListAtBottom).
+    // explicit "ExpandCurrentWorkspace": false, the bottom list, and must not keep it: that is why the setting was
+    // renamed rather than its default flipped (see AppState.WindowListAtBottom). Since the screens became the
+    // default, such a file loads with the strips, like every other existing file.
     [Fact]
-    public void A_file_that_had_the_bottom_list_by_default_loads_with_the_row_expanded()
+    public void A_file_that_had_the_bottom_list_by_default_loads_with_the_screens()
     {
         Directory.CreateDirectory(dir);
         File.WriteAllText(Path.Combine(dir, "state.json"),
@@ -67,7 +68,30 @@ public sealed class JsonPersistenceStoreTests : IDisposable
 
         var loaded = new JsonPersistenceStore(dir).Load().Value;
         Assert.False(loaded.WindowListAtBottom);
-        Assert.True(loaded.ExpandCurrentWorkspace);
+        Assert.Equal(WindowListPlace.Screens, loaded.WindowListPlace);
+    }
+
+    // Petre: "let's make the strip the default for all users, with the next update". 2.4.126 wrote its choice
+    // explicitly, so nearly every file it saved says "WindowListOnScreens": false, the row. That key is no longer
+    // read, and such a file loads with the strips (see AppState.WindowListOffScreens).
+    [Fact]
+    public void A_file_from_2_4_126_with_the_strips_off_loads_with_the_screens()
+    {
+        Directory.CreateDirectory(dir);
+        File.WriteAllText(Path.Combine(dir, "state.json"),
+            """{"Workspaces":[],"WorkspaceRules":[],"RenameRules":[],"Inventory":{},"WindowListAtBottom":false,"WindowListOnScreens":false}""");
+
+        Assert.Equal(WindowListPlace.Screens, new JsonPersistenceStore(dir).Load().Value.WindowListPlace);
+    }
+
+    // ...and choosing another place after that is remembered.
+    [Fact]
+    public void Turning_the_strips_off_is_remembered()
+    {
+        var store = new JsonPersistenceStore(dir);
+        store.Save(AppState.Empty with { WindowListOffScreens = true });
+
+        Assert.Equal(WindowListPlace.Row, new JsonPersistenceStore(dir).Load().Value.WindowListPlace);
     }
 
     // Builds 2.4.77 to 2.5.0 wrote "QuietTaskbar": false into every state.json, chosen or not. It must load as
@@ -105,7 +129,7 @@ public sealed class JsonPersistenceStoreTests : IDisposable
     public void The_screens_place_is_remembered_beside_the_bottom_choice()
     {
         var store = new JsonPersistenceStore(dir);
-        store.Save(AppState.Empty with { WindowListAtBottom = true, WindowListOnScreens = true });
+        store.Save(AppState.Empty with { WindowListAtBottom = true, WindowListOffScreens = false });
 
         var loaded = new JsonPersistenceStore(dir).Load().Value;
         Assert.Equal(WindowListPlace.Screens, loaded.WindowListPlace);

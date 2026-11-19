@@ -213,7 +213,9 @@ page says "Sorry, we couldn't find that page": switch accounts, do not debug the
   really gets its parent's windows.
 - **The window list has three places, and one of them is a strip on every screen**
   (`AppState.WindowListPlace`: the workspace's row, the bottom of the bar, or the screens).
-  On the screens, each connected screen gets a `ScreenStrip`, 32 DIP high along its top edge,
+  **The screens are the default** for every install, existing ones included (Petre, 2026-11-19: "let's make the
+  strip the default for all users"), stored as `WindowListOffScreens` so files that lack the key land there.
+  On the screens, each connected screen gets a `ScreenStrip`, 24 DIP high along its top edge,
   registered with the shell as an app bar so maximized windows, Snap and new windows start
   below it. The docked bar then sits under the strip, not over it. The bar builds the tabs, with
   the same code as a window button, and the strips only host them, so a tab cannot drift from a

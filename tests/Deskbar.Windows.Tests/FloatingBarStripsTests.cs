@@ -519,6 +519,9 @@ public class FloatingBarStripsTests
                 {
                     Workspaces = [gepha, sparrow],
                     Groups = groupColour is null ? [] : [team],
+                    // Off at the start, although the strips are the default, so that the tests' own
+                    // SetWindowListPlace(Screens) is a real change: that change is what makes the bar fill them.
+                    WindowListOffScreens = true,
                 },
             };
             var manager = new WorkspaceManager(desktops, monitor, new StubTitles(), store, screenLayout: screens);

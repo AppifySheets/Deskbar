@@ -789,6 +789,8 @@ public class FloatingBarLaneShadeTests(ITestOutputHelper output)
                 Workspaces = [busy, empty],
                 FloatingBar = new FloatingBarState(0, 0, true) { Width = 160 },
                 WindowListAtBottom = !expandRow,
+                // The strips are the default; these tests are about the bar's own row and bottom list.
+                WindowListOffScreens = true,
                 WholeWindowLines = wholeLines,
             },
         };

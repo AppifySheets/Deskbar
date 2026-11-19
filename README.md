@@ -175,14 +175,14 @@ and the one before that in dots, so the row that one tap of `Win+Ctrl+Tab` will 
 visible without pressing anything. Hovering a row rings it in amber, the same ring the chord uses
 for the row it would land on.
 
-**The current workspace's row expands** into a list of its windows, icon and title, one window per
-line. The active window's title is white, the rest are dimmer, and pinned windows carry a pin
-glyph. Rows you expand while the pointer is on the bar stay expanded until it leaves. The
-**Window list** submenu, on any row's menu and on the bar's background menu, picks where the list
-goes: **In the workspace's row** (the default), **At the bottom of the bar**, where it sits in a
-strip under the rows and the rows stay uniform, or **At the top of each screen**, where a thin
-strip along the top of every screen holds that screen's windows of the current workspace and
-maximized windows stop below it. Titles are cut to fit; widen the bar to see more of them.
+**The current workspace's windows, with their titles, sit in a thin strip along the top of every
+screen**: each screen's strip holds that screen's windows of the workspace you are in, and
+maximized windows stop below it. The active window's title is white, the rest are dimmer, and
+pinned windows carry a pin glyph. The **Window list** submenu, on any row's menu and on the bar's
+background menu, picks where the list goes: **At the top of each screen** (the default), **In the
+workspace's row**, where the current workspace's row expands into one window per line, or **At the
+bottom of the bar**, where it sits in a strip under the rows and the rows stay uniform. In the bar,
+titles are cut to fit; widen the bar to see more of them.
 
 <table align="center">
   <tr>

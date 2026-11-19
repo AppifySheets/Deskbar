@@ -67,7 +67,7 @@ public class FloatingBarRebuildTests
         var monitor = new StubMonitor();
         monitor.Initial.AddRange([rdm, beeper]);
 
-        var store = new StubStore { Stored = AppState.Empty with { Workspaces = [gepha, sparrow] } };
+        var store = new StubStore { Stored = AppState.Empty with { Workspaces = [gepha, sparrow], WindowListOffScreens = true } };
         var manager = new WorkspaceManager(desktops, monitor, new StubTitles(), store);
         Assert.True(manager.Start().IsSuccess);
 
@@ -1071,6 +1071,8 @@ sealed class Harness
                     : extraWorkspace ? [gepha, sparrow, archive]
                     : [gepha, sparrow],
                 Groups = grouped ? [team] : [],
+                // The strips are the default; the harness is about the bar itself (see StubStore).
+                WindowListOffScreens = true,
             },
         };
         var manager = new WorkspaceManager(desktops, monitor, new StubTitles(), store);
@@ -1215,7 +1217,11 @@ sealed class StubTitles : IWindowTitles
 
 sealed class StubStore : IPersistenceStore
 {
-    public AppState Stored { get; set; } = AppState.Empty;
+    // The strips along the top of each screen are the app's default (AppState.WindowListOffScreens), but the bar
+    // tests were written for, and are about, the bar itself with the current workspace's row expanded. So a stub
+    // store starts with the strips off; a test about the strips turns them on with SetWindowListPlace, which is also
+    // what makes the bar fill them.
+    public AppState Stored { get; set; } = AppState.Empty with { WindowListOffScreens = true };
     public Result<AppState> Load() => Stored;
 
     public Result Save(AppState state)

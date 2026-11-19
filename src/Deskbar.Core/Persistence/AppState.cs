@@ -192,18 +192,27 @@ public sealed record AppState(
     // chosen the bottom list gets the row once, and chooses again.
     public bool WindowListAtBottom { get; init; }
 
-    // The third place for the list: a strip along the top of every screen (WindowListPlace.Screens). A NEW
-    // name with false as its default, for the reason WindowListAtBottom is: every existing state.json lacks
-    // the key and so reads false, which leaves each install where it was. It is a second bool rather than a
-    // third value of the first because an older build, which knows only WindowListAtBottom, must still read
-    // a file this build wrote: WindowListAtBottom is left untouched when the screens are chosen, so that
-    // build lands on whichever of row or bottom he had before.
-    public bool WindowListOnScreens { get; init; }
+    // The third place for the list: a strip along the top of every screen (WindowListPlace.Screens), and THE
+    // DEFAULT, for every install, new or old. Petre, the day the strips shipped (2.4.126): "let's make the strip
+    // the default for all users, with the next update".
+    //
+    // Stored as its NEGATION, which is the migration, for the reason WindowListAtBottom gives above. 2.4.126
+    // stored the choice as "WindowListOnScreens", and every file it wrote holds that key explicitly (false for
+    // nearly everyone), so flipping that bool's default would have changed nothing. This NEW name with false as
+    // its default is read as false by every existing file, which has no such key, so every install lands on the
+    // screens; the old key is simply no longer read. The cost, as last time: anyone who had chosen the row or the
+    // bottom gets the screens once, and chooses again.
+    //
+    // A second bool rather than a third value of the first still holds: an older build, which knows only
+    // WindowListAtBottom, reads a file this build wrote and lands on the row or the bottom, whichever was chosen
+    // last, because WindowListAtBottom is left untouched when the screens are chosen.
+    public bool WindowListOffScreens { get; init; }
 
-    // The one reading of the two bools above: the screens when set, else the bottom, else the row. Not stored.
+    // The one reading of the two bools above: the screens unless turned off, else the bottom, else the row. Not
+    // stored.
     [JsonIgnore]
     public WindowListPlace WindowListPlace =>
-        WindowListOnScreens ? WindowListPlace.Screens
+        !WindowListOffScreens ? WindowListPlace.Screens
         : WindowListAtBottom ? WindowListPlace.Bottom
         : WindowListPlace.Row;
 

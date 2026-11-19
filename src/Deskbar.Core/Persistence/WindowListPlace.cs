@@ -1,7 +1,7 @@
 namespace Deskbar.Core.Persistence;
 
 // Where the current workspace's titled window list is drawn. Not stored as such: AppState keeps two bools
-// (WindowListAtBottom, WindowListOnScreens) and derives this, so state.json from every older build keeps its
+// (WindowListAtBottom, WindowListOffScreens) and derives this, so state.json from every older build keeps its
 // meaning. See AppState.WindowListPlace.
 public enum WindowListPlace
 {
