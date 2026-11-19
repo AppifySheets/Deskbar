@@ -273,6 +273,17 @@ public sealed class FakeScreenLayout : IScreenLayout
         return Result.Success();
     }
 
+    // The quiet move (no raise, no show-state change). Recorded apart from Moved, so a test can tell which was used.
+    public List<(WindowHandle Window, WindowRect Rect)> Nudged { get; } = [];
+
+    public Result Nudge(WindowHandle window, WindowRect rect)
+    {
+        if (RefuseMoves) return Result.Failure("refused");
+        Nudged.Add((window, rect));
+        Rects[window] = rect;
+        return Result.Success();
+    }
+
     // Front-to-back, which is the order EnumWindows reports and therefore the order the real
     // ScreenLayout indexes.
     public static ScreenFacts On(int primary, params (WindowHandle Window, int Monitor)[] frontToBack) =>

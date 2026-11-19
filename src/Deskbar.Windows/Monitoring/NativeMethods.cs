@@ -181,6 +181,31 @@ public static class NativeMethods
     // it, at which point it snaps back. It has to be restored, moved, and maximized again.
     [DllImport("user32.dll", SetLastError = true)] public static extern bool GetWindowRect(nint hwnd, out RECT rect);
     [DllImport("user32.dll")] public static extern bool IsZoomed(nint hwnd);
+
+    // A SNAPPED window (Snap layouts, Win+arrow, or stretched to full height with Win+Shift+Up) is "arranged": a state
+    // of its own, like maximized, and IsZoomed is FALSE for it. Microsoft's own "is it restored?" test is
+    // !IsIconic && !IsZoomed && !IsWindowArranged (learn.microsoft.com, IsWindowArranged). Exported by user32 from
+    // Windows 10 1903, with no header or import library, so a Windows without it would throw EntryPointNotFoundException
+    // at the first call. Asked through IsWindowArranged below, which reads that as "not arranged" and stops asking.
+    [DllImport("user32.dll", CharSet = CharSet.Unicode, EntryPoint = "IsWindowArranged")]
+    static extern bool IsWindowArrangedExport(nint hwnd);
+
+    // Cleared the first time the export turns out to be missing, so the exception is paid once, not on every window.
+    static bool arrangedExportPresent = true;
+
+    public static bool IsWindowArranged(nint hwnd)
+    {
+        if (!arrangedExportPresent) return false;
+        try
+        {
+            return IsWindowArrangedExport(hwnd);
+        }
+        catch (EntryPointNotFoundException)
+        {
+            arrangedExportPresent = false;
+            return false;
+        }
+    }
     public const int SW_MAXIMIZE = 3;
     [DllImport("user32.dll")] public static extern bool ShowWindowAsync(nint hwnd, int cmdShow);
     // #107, a MINIMIZED window sent to the other monitor: "minimized windows don't move monitors when

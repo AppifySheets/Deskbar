@@ -530,6 +530,10 @@ public class FloatingBarStripsTests
             return Result.Success();
         }
 
+        // The strip set's quiet move, which nothing in these tests makes: refused, so a test that did reach it would
+        // see a failure rather than a silent success.
+        public Result Nudge(WindowHandle window, WindowRect rect) => Result.Failure("not used by the bar's tests");
+
         // Whether a move put this window on this screen.
         public bool LandedOn(WindowHandle window, MonitorBounds screen) =>
             moved.Any(m => m.Window == window && m.Rect.Left >= screen.Left && m.Rect.Right <= screen.Right);

@@ -1020,4 +1020,5 @@ sealed class StubScreens : IScreenLayout
     public ScreenFacts Snapshot() => Facts;
     public Maybe<WindowRect> RectOf(WindowHandle window) => Maybe<WindowRect>.None;
     public Result MoveTo(WindowHandle window, WindowRect rect, bool mayChangeShowState) => Result.Success();
+    public Result Nudge(WindowHandle window, WindowRect rect) => Result.Success();
 }

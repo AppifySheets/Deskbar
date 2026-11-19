@@ -37,4 +37,14 @@ public interface IScreenLayout
     // nothing else is touched: if it takes, good, and if it does not, the caller queues it for when the
     // window is somewhere it can be handled properly.
     Result MoveTo(WindowHandle window, WindowRect rect, bool mayChangeShowState);
+
+    // Puts a RESTORED window at `rect` and changes nothing else: not its place in the z-order, not its focus, not its
+    // show state. For a move nobody asked for, which MoveTo is wrong for: MoveTo raises the window to the front on
+    // purpose (Petre, of the drag-to-screen gesture: "move it to the topmost window, not background"), and a window
+    // the app shifts on its own must stay behind whatever he is working in. The first caller is a new screen strip
+    // moving windows off its band (ScreenStrips.ClearUnder, spec 2026-11-19-screen-strips-design.md).
+    //
+    // Restored only: the caller has already left out maximized, snapped and minimized windows, whose rectangles are
+    // the shell's (a maximized or snapped window's) or nonsense (a minimized one's, at -32000).
+    Result Nudge(WindowHandle window, WindowRect rect);
 }
