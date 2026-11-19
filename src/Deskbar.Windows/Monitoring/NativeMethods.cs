@@ -214,6 +214,12 @@ public static class NativeMethods
     [DllImport("user32.dll")] public static extern bool GetCursorPos(out POINT point);
     [StructLayout(LayoutKind.Sequential)] public struct POINT { public int X; public int Y; }
 
+    // When the session last saw keyboard or mouse input (dwTime, a GetTickCount value). The tiler tells a user's
+    // activation from one Windows hands out after a close by it (ITileSurface.LastInputTick). cbSize must be set to
+    // the struct's size before the call, or the call fails.
+    [DllImport("user32.dll")] public static extern bool GetLastInputInfo(ref LASTINPUTINFO info);
+    [StructLayout(LayoutKind.Sequential)] public struct LASTINPUTINFO { public uint cbSize; public uint dwTime; }
+
     // Task 7 fix round 1 (reviewer, Important): the switcher panel used to clamp its
     // position to (0,0) -- the PRIMARY monitor's origin -- which is wrong on any layout with
     // a monitor placed LEFT of primary (negative virtual-screen coordinates put the panel on

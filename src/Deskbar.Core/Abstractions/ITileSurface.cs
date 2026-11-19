@@ -104,6 +104,13 @@ public interface ITileSurface
     // Where the mouse pointer is, in physical pixels like every rectangle here. None if Windows will not say.
     Maybe<(int X, int Y)> Pointer();
 
+    // When the user last pressed a key, clicked or moved the mouse: GetLastInputInfo's tick count (milliseconds,
+    // wrapping, compared only for equality). The Tiler uses it to tell an activation the USER made from one Windows
+    // hands out by itself: when a tile closes or is minimized, Windows activates whatever is next in z-order, and no
+    // input happens in between. An activation with the same input tick as the moment a tile left the grid is that
+    // hand-out, and does not move the target a new window splits (Tiler.Arrival.cs). No timer is involved.
+    uint LastInputTick();
+
     // Shows translucent rectangles over the screen where a dragged tile, and the tile it would swap with, will
     // land. Never activated, never hit by a click, never on the bar. An empty list hides them.
     void Preview(IReadOnlyList<TilePreview> tiles);
