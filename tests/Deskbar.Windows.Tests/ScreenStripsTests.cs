@@ -49,16 +49,35 @@ public class ScreenStripsTests
         public HashSet<WindowHandle> Arranged { get; } = [];
         public FakeLayout Layout { get; }
 
+        // Throws, the way Win32 and WPF throw at a display change or an unlock (the final review's first finding):
+        // `create` for these screens, the dock of a strip on these screens, the list of windows a new strip clears
+        // (which runs only after a dock that worked), and the clock of a strip on these screens (the guard's first
+        // read, so its KeepStrip throws).
+        public HashSet<MonitorBounds> CreateThrows { get; } = [];
+        public HashSet<MonitorBounds> DockThrows { get; } = [];
+        public bool WindowsThrow { get; set; }
+        public HashSet<MonitorBounds> ClockThrows { get; } = [];
+
+        // Run inside a pin, after its line is logged: what a message pumped by the pin's COM call could do.
+        public Action? OnPin { get; set; }
+
+        // How often the strip set asked for the connected screens.
+        public int ScreenCalls { get; private set; }
+
         public Rig()
         {
             Layout = new FakeLayout(Log);
             Set = new ScreenStrips(
                 wanted: () => Wanted,
-                screens: () => Screens,
+                screens: () =>
+                {
+                    ScreenCalls++;
+                    return Screens;
+                },
                 create: Make,
                 ignore: hwnd => Log.Add($"ignore {Name(hwnd)} visible={ByHandle(hwnd).IsVisible}"),
                 pinToAllDesktops: Pin,
-                windows: () => Windows,
+                windows: () => WindowsThrow ? throw new InvalidOperationException("the window list threw") : Windows,
                 layout: Layout,
                 shellArranged: Arranged.Contains)
             {
@@ -82,15 +101,18 @@ public class ScreenStripsTests
         {
             var ok = PinAnswers.Count == 0 || PinAnswers.Dequeue();
             Log.Add($"pin{(ok ? "" : " failed")} {Name(hwnd)} visible={ByHandle(hwnd).IsVisible}");
+            OnPin?.Invoke();
             return ok ? Result.Success() : Result.Failure("the desktop service is not ready");
         }
 
         ScreenStrip Make(MonitorBounds screen)
         {
+            if (CreateThrows.Contains(screen)) throw new InvalidOperationException("create threw");
             var strip = new ScreenStrip(screen)
             {
                 Scale = () => Readable ? 1.5 : Maybe<double>.None,
-                DockWith = (_, s, px) => new(s.L, s.T, s.R, s.T + px),
+                Clock = () => ClockThrows.Contains(screen) ? throw new InvalidOperationException("the clock threw") : DateTime.UtcNow,
+                DockWith = (_, s, px) => DockThrows.Contains(screen) ? throw new InvalidOperationException("the dock threw") : new(s.L, s.T, s.R, s.T + px),
             };
             // At Closing the strip is still alive and Describe still answers: "docked no" there means Undock ran first,
             // and IsVisible false means the window was already off the screen when the close began.
@@ -435,6 +457,123 @@ public class ScreenStripsTests
 
         Assert.Empty(rig.Moves);
         rig.Set.RemoveAll();
+    });
+
+    // THROWS AT THE WORST MOMENT (final review, first finding). A reconcile runs at a display change, an unlock and a
+    // replug, which is exactly when Win32 and WPF throw. Anything that escaped reached DispatcherUnhandledException,
+    // which FailFasts and relaunches the app. So a reconcile catches and traces, and one screen's failure does not
+    // keep the other screens from their strips.
+    [Fact]
+    public void A_create_that_throws_does_not_escape_Reconcile_and_the_other_screens_still_get_strips() => StaThread.Run(() =>
+    {
+        var rig = new Rig();
+        rig.CreateThrows.Add(Left);
+
+        Assert.Null(Record.Exception(rig.Set.Reconcile));
+        Assert.Equal(new[] { Middle }, rig.Set.Current.Select(s => s.Screen));
+
+        // The next reconcile, with create working again, makes the missing one, and only that one.
+        rig.CreateThrows.Clear();
+        rig.Set.Reconcile();
+        Assert.Equal(new[] { Left, Middle }, rig.Set.Current.Select(s => s.Screen).OrderBy(s => s.Left));
+        Assert.Equal(2, rig.Made.Count);
+        rig.Set.RemoveAll();
+    });
+
+    // A dock that throws (the shell's SendMessage, the window's EnsureHandle) does not escape either, and the strip it
+    // was docking is already in Current, so the next reconcile does not make a second one for the same screen.
+    [Fact]
+    public void A_dock_that_throws_does_not_escape_Reconcile_or_make_a_second_strip() => StaThread.Run(() =>
+    {
+        var rig = new Rig { Screens = [Left] };
+        rig.DockThrows.Add(Left);
+
+        Assert.Null(Record.Exception(rig.Set.Reconcile));
+        Assert.Equal(Left, Assert.Single(rig.Set.Current).Screen);
+
+        rig.DockThrows.Clear();
+        rig.Set.Reconcile();
+        Assert.Single(rig.Set.Current);
+        Assert.Single(rig.Made);
+        rig.Set.RemoveAll();
+    });
+
+    // The ordering half of the finding: a throw AFTER a dock that worked (here the clearing of the windows under the new
+    // strip) must not leave a docked, shown strip outside Current, or the next reconcile opens a second strip on that
+    // screen (the spec's second anti-goal). Whether the first reconcile's throw escapes is the tests above; this one
+    // only looks at what is left on the screen.
+    [Fact]
+    public void A_throw_after_a_dock_that_worked_leaves_one_strip_for_its_screen() => StaThread.Run(() =>
+    {
+        var rig = new Rig { Screens = [Left] };
+        rig.Window("under", Under(Left));
+        rig.WindowsThrow = true;
+        _ = Record.Exception(rig.Set.Reconcile);
+
+        rig.WindowsThrow = false;
+        rig.Set.Reconcile();
+
+        Assert.Equal(Left, Assert.Single(rig.Set.Current).Screen);
+        Assert.Single(rig.Made);
+        Assert.Single(rig.Made, strip => strip.IsVisible);
+        rig.Set.RemoveAll();
+    });
+
+    // The app going away in the middle of a reconcile (RemoveAll run by a message the pin's COM call pumped): the strip
+    // being opened is in Current already, so RemoveAll undocks it, and the rest of that pass opens nothing more. A strip
+    // docked after RemoveAll would hold its band with nothing left to give it back.
+    [Fact]
+    public void RemoveAll_pumped_mid_reconcile_stops_the_pass_and_leaves_nothing_docked() => StaThread.Run(() =>
+    {
+        var rig = new Rig();
+        rig.OnPin = () =>
+        {
+            rig.OnPin = null;
+            rig.Set.RemoveAll();
+        };
+
+        rig.Set.Reconcile();
+
+        Assert.Empty(rig.Set.Current);
+        Assert.Single(rig.Made);
+        Assert.All(rig.Made, strip => Assert.False(strip.IsVisible));
+    });
+
+    // The 1 s beat: one strip whose guard throws does not keep the beat from the next strip. Here the next one has a
+    // pin to retry, and the retry is what shows the beat reached it.
+    [Fact]
+    public void A_strip_whose_guard_throws_does_not_stop_Tick_reaching_the_next() => StaThread.Run(() =>
+    {
+        var rig = new Rig();
+        rig.PinAnswers.Enqueue(true);
+        rig.PinAnswers.Enqueue(false);
+        rig.Set.Reconcile();
+        var first = rig.Set.Current[0];
+        var second = rig.Set.Current[1];
+        Assert.Equal($"pin failed {Rig.NameOf(second.Screen)} visible=True", rig.Log.Last());
+
+        rig.ClockThrows.Add(first.Screen);
+        rig.Now += FloatingBar.RetryEvery + TimeSpan.FromSeconds(1);
+
+        Assert.Null(Record.Exception(rig.Set.Tick));
+        Assert.Equal($"pin {Rig.NameOf(second.Screen)} visible=True", rig.Log.Last());
+        rig.ClockThrows.Clear();
+        rig.Set.RemoveAll();
+    });
+
+    // Most people never put the window list on the screens, and the spec says the merge changes nothing for them. The
+    // 1 s beat runs for everyone, so with no strip it must not even ask for the screens.
+    [Fact]
+    public void Tick_with_no_strips_does_not_enumerate_the_screens() => StaThread.Run(() =>
+    {
+        var rig = new Rig { Wanted = false };
+        rig.Set.Reconcile();
+        var before = rig.ScreenCalls;
+
+        rig.Set.Tick();
+        rig.Set.Tick();
+
+        Assert.Equal(before, rig.ScreenCalls);
     });
 
     // A strip's Screen is matched with == against the overview's screens (FloatingBar.ScreenNumberOf, for the drop and

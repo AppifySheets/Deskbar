@@ -1523,6 +1523,10 @@ public partial class App : Application
             // arrangement. Each reconcile that made or closed a strip asks the bar to rebuild, so a new strip gets its
             // tabs and a closed one's windows go back to the bar's own list. Dispatcher.Invoke for the state stream
             // as the bar's own subscription does: it runs inline on this thread and marshals from any other.
+            //
+            // None of the three is wrapped here, on purpose: Reconcile catches and traces every throw itself (see
+            // ScreenStrips.Reconcile), so a display change cannot take the app down through any of them, and a throw
+            // cannot stop the state pulse reaching the subscribers after this one.
             stripSet.Changed.Subscribe(_ => floatingBar.RequestRebuild());
             manager.StateChanged
                 .Select(_ => manager.State.WindowListPlace == WindowListPlace.Screens)
@@ -1581,6 +1585,8 @@ public partial class App : Application
                 // The screen strips on the same beat, first for the reason given at the foreground subscription: each
                 // strip's guard (the shell can stop holding a strip without a word, as for the docked bar), its topmost
                 // re-assertion, and the pin for a strip first shown after its dock. Not gated on the bar's visibility.
+                // Tick catches and traces its own throws, per strip (ScreenStrips.Tick), so the bar's lines below
+                // always run.
                 stripSet.Tick();
                 floatingBar.ReclaimTopmost();
                 // Docked, the strip is checked on the same beat: the shell can stop holding it without a word
