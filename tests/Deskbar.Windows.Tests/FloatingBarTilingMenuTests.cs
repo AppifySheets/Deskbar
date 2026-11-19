@@ -147,4 +147,63 @@ public class FloatingBarTilingMenuTests
 
         Assert.Empty(harness.Manager.State.Workspaces.Single(w => w.Name == "Sparrow").TileSizes);
     });
+
+    const string KeepSpace = "Keep the space when a window closes";
+
+    // The keep-space switch (Workspace.TileKeepsSpace): after the other tiling items, so after "Even out tiles"
+    // when that is offered and directly after "Tile windows" when it is not.
+    [Theory]
+    [InlineData(true, "Even out tiles")]
+    [InlineData(false, "Tile windows")]
+    public void Keep_space_is_offered_on_a_tiled_workspace_after_the_tiling_items(bool moved, string lastTilingItem) => StaThread.Run(() =>
+    {
+        var harness = TiledSparrow(moved);
+        using var bar = ShowBar(harness, pro: true);
+
+        var headers = Headers(bar, "Sparrow").ToList();
+
+        Assert.Equal(headers.IndexOf(lastTilingItem) + 1, headers.IndexOf(KeepSpace));
+    });
+
+    [Fact]
+    public void Keep_space_is_not_offered_on_an_untiled_workspace() => StaThread.Run(() =>
+    {
+        var harness = Harness.Build();
+        Assert.True(harness.Manager.SetExperimentalTiling(true).IsSuccess);
+        using var bar = ShowBar(harness, pro: true);
+
+        Assert.DoesNotContain(KeepSpace, Headers(bar, "Sparrow"));
+    });
+
+    [Fact]
+    public void Keep_space_is_not_offered_without_Pro_or_with_the_experiment_off() => StaThread.Run(() =>
+    {
+        var harness = TiledSparrow(moved: false);
+        using (var free = ShowBar(harness, pro: false))
+            Assert.DoesNotContain(KeepSpace, Headers(free, "Sparrow"));
+
+        Assert.True(harness.Manager.SetExperimentalTiling(false).IsSuccess);
+        using var off = ShowBar(harness, pro: true);
+        Assert.DoesNotContain(KeepSpace, Headers(off, "Sparrow"));
+    });
+
+    [Fact]
+    public void Keep_space_is_ticked_when_on_and_clicking_flips_it() => StaThread.Run(() =>
+    {
+        var harness = TiledSparrow(moved: false);
+        using var bar = ShowBar(harness, pro: true);
+
+        var item = Items(bar, "Sparrow").Single(i => i.Header?.ToString() == KeepSpace);
+        Assert.True(item.IsCheckable);
+        Assert.False(item.IsChecked);
+
+        Click(item);
+        Assert.True(harness.Manager.State.Workspaces.Single(w => w.Name == "Sparrow").TileKeepsSpace);
+
+        // The menu is filled again from the state, ticked now, and a second click turns it back off.
+        var again = Items(bar, "Sparrow").Single(i => i.Header?.ToString() == KeepSpace);
+        Assert.True(again.IsChecked);
+        Click(again);
+        Assert.False(harness.Manager.State.Workspaces.Single(w => w.Name == "Sparrow").TileKeepsSpace);
+    });
 }

@@ -66,6 +66,13 @@ public partial class FloatingBar
                 even.Click += (_, _) => Report(manager.EvenOutTiles(workspaceId));
                 menu.Items.Add(even);
             }
+
+            // The keep-space switch, last of the tiling items and only while the workspace is tiled (it means
+            // nothing otherwise). Petre: a closed window's space can stay open for the next one. Ticked from
+            // Workspace.TileKeepsSpace as the menu is filled; the flip is read at CLICK time, and Click is used
+            // rather than Checked/Unchecked, for the reasons given above for "Tile windows".
+            if (TiledNow())
+                menu.Items.Add(KeepSpaceItem(workspaceId));
             return;
         }
 
@@ -124,17 +131,34 @@ public partial class FloatingBar
         return button;
     }
 
-    // The button's right-click menu. "Even out tiles" on the same terms as the row menu: Pro, the workspace tiled,
-    // and a split dragged (an equal layout stores nothing, so there is nothing to even out until then).
+    // The checkable "Keep the space when a window closes", shared by the row menu and the tile button's menu.
+    // IsChecked is read from the state when the item is built; the flip is read at CLICK time (so a rebuild between
+    // the fill and the click cannot invert the wrong value), and Click is used, not Checked/Unchecked, which fire
+    // while the menu is being built when IsChecked is assigned.
+    MenuItem KeepSpaceItem(Guid workspaceId)
+    {
+        bool KeepsNow() => manager.State.Workspaces.FirstOrDefault(w => w.Id == workspaceId)?.TileKeepsSpace == true;
+        var keep = new MenuItem { Header = "Keep the space when a window closes", IsCheckable = true, IsChecked = KeepsNow() };
+        keep.Click += (_, _) => Report(manager.SetTileKeepsSpace(workspaceId, !KeepsNow()));
+        return keep;
+    }
+
+    // The button's right-click menu, on the same terms as the row menu: Pro and the workspace tiled. "Even out
+    // tiles" only once a split was dragged (an equal layout stores nothing, so there is nothing to even out until
+    // then); the keep-space switch always, so a tiled workspace never opens an empty menu.
     internal void FillTileMenu(ContextMenu menu)
     {
         menu.Items.Clear();
         if (tileTarget is not { } id || !IsPro()) return;
         var current = manager.State.Workspaces.FirstOrDefault(w => w.Id == id);
-        if (current is not { Tiled: true } || current.TileSizes.Count == 0) return;
-        var even = new MenuItem { Header = "Even out tiles", Icon = MenuGlyph("⊟") };
-        even.Click += (_, _) => Report(manager.EvenOutTiles(id));
-        menu.Items.Add(even);
+        if (current is not { Tiled: true }) return;
+        if (current.TileSizes.Count > 0)
+        {
+            var even = new MenuItem { Header = "Even out tiles", Icon = MenuGlyph("⊟") };
+            even.Click += (_, _) => Report(manager.EvenOutTiles(id));
+            menu.Items.Add(even);
+        }
+        menu.Items.Add(KeepSpaceItem(id));
     }
 
     // What the button would do now, in words. Read from the state and Pro as they are this moment.

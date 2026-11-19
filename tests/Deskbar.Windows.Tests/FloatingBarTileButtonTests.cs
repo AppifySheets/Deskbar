@@ -95,9 +95,10 @@ public class FloatingBarTileButtonTests
     });
 
     // Right-click offers "Even out tiles" once a split has been dragged (a stored size), and clicking it forgets the
-    // sizes, as the row menu's item does. With nothing to even out the menu stays empty, so none opens.
+    // sizes, as the row menu's item does. A tiled workspace always offers the keep-space switch, so the menu is
+    // never empty there; "Even out tiles" comes first, and only once a split was dragged.
     [Fact]
-    public void Right_click_offers_Even_out_tiles_once_a_split_was_dragged() => StaThread.Run(() =>
+    public void Right_click_offers_keep_space_on_a_tiled_workspace_and_Even_out_tiles_once_a_split_was_dragged() => StaThread.Run(() =>
     {
         var harness = Harness.Build();
         var gepha = harness.Manager.State.Workspaces.Single(w => w.Name == "GEPHA").Id;
@@ -107,15 +108,24 @@ public class FloatingBarTileButtonTests
         var menu = new ContextMenu();
 
         bar.Bar.FillTileMenu(menu);
-        Assert.Empty(menu.Items);
+        // Ruling 2 (old empty tile-button menu): a tiled workspace now always offers keep-space, so the menu is not empty.
+        var keep = Assert.Single(menu.Items.OfType<MenuItem>());
+        Assert.Equal("Keep the space when a window closes", keep.Header);
+        Assert.True(keep.IsCheckable);
 
         Assert.True(harness.Manager.SetTileSizes(gepha, "0,0,1920,1080", new([0.3, 0.7], [[1.0], [0.25, 0.75]])).IsSuccess);
         Settle(bar);
         bar.Bar.FillTileMenu(menu);
-        var even = Assert.Single(menu.Items.OfType<MenuItem>());
-        Assert.Equal("Even out tiles", even.Header);
+        Assert.Equal(["Even out tiles", "Keep the space when a window closes"],
+            menu.Items.OfType<MenuItem>().Select(i => i.Header?.ToString()).ToList());
+        var even = menu.Items.OfType<MenuItem>().First();
 
         even.RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
         Assert.Empty(harness.Manager.State.Workspaces.Single(w => w.Name == "GEPHA").TileSizes);
+
+        // The switch flips from the same menu.
+        bar.Bar.FillTileMenu(menu);
+        menu.Items.OfType<MenuItem>().Single(i => i.IsCheckable).RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
+        Assert.True(harness.Manager.State.Workspaces.Single(w => w.Name == "GEPHA").TileKeepsSpace);
     });
 }
