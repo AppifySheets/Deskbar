@@ -150,7 +150,7 @@ public partial class FloatingBar
     {
         ShellStart.Children.Add(ShellButton(ShellFlyout.Start, "Start", StartGlyph()));
         ShellStart.Children.Add(FindButton(Glyph(SearchShape, size: HeaderGlyphSize)));
-        // Tiling's button (FloatingBar.Tiling.cs), collapsed until the experiment is on and a rebuild says so.
+        // Tiling's button (FloatingBar.Tiling.cs), collapsed until a rebuild finds a named workspace.
         ShellStart.Children.Add(TileButton());
 
         // The same pair again, where the right half of the header begins, shown only across the seam (see

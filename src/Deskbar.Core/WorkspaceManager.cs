@@ -1741,13 +1741,6 @@ public sealed class WorkspaceManager(
                 ? Result.Success()
                 : Result.Success().Tap(() => Persist(State with { TileGap = gap }));
 
-    // The tiling experiment's master switch (AppState.ExperimentalTiling). Every workspace's Tiled flag is
-    // kept when it goes off. A no-op when unchanged, for the reason SetCheckForUpdates gives.
-    public Result SetExperimentalTiling(bool on) =>
-        State.ExperimentalTiling == on
-            ? Result.Success()
-            : Result.Success().Tap(() => Persist(State with { ExperimentalTiling = on }));
-
     public Result SetGroupFolded(Guid groupId, bool folded) =>
         State.Groups.Any(g => g.Id == groupId)
             ? Result.Success().Tap(() => Persist(State with

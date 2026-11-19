@@ -53,7 +53,7 @@ public sealed partial class Tiler
     // its grace period; on Start nothing is new, since nothing was there to come back.
     //
     // The bookkeeping runs whether or not anything is tiled (tiling can be switched on inside the grace period),
-    // but the trace line only while tiling acts here: with the experiment off it would claim, on every dock and
+    // but the trace line only while tiling acts here: with nothing tiled it would claim, on every dock and
     // undock, that sizes are being held back when nothing is being tiled at all (final review, item 6).
     void RememberScreens()
     {

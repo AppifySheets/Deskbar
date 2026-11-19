@@ -295,7 +295,7 @@ public sealed class TileSurface : ITileSurface, IDisposable
     // --- Hearing windows move ----------------------------------------------------------------------------------
 
     // One LOCATIONCHANGE hook, present only while the set is not empty. That is how tiling costs nothing while
-    // the experiment is off or the desktop being looked at is not tiled: the Tiler passes an empty set and the
+    // the desktop being looked at is not tiled: the Tiler passes an empty set and the
     // hook goes away (spec, "Keeping it tidy").
     public void Watch(IReadOnlySet<WindowHandle> windows)
     {

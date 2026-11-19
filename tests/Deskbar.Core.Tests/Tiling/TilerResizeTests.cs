@@ -111,20 +111,23 @@ public sealed class TilerResizeTests : IDisposable
         placed.ForEach(w => surface.SettledSubject.OnNext(w));
     }
 
-    // Alpha current and tiled, the experiment and Pro on, `sizes` already stored on Alpha. The Places of the
-    // first tidy-up are echoed, so the tests start from a grid at rest.
-    void Start(bool experiment = true, ValueList<ScreenTileSizes>? sizes = null)
+    // Whether this copy may tile, as the Tiler asks it. A test turns it off (and calls Refresh, as the App does
+    // after a licence refresh) to stand tiling down without touching Alpha's Tiled flag or its sizes.
+    bool pro = true;
+
+    // Alpha current and tiled (unless `tiled` says otherwise), Pro on, `sizes` already stored on Alpha. The
+    // Places of the first tidy-up are echoed, so the tests start from a grid at rest.
+    void Start(bool tiled = true, ValueList<ScreenTileSizes>? sizes = null)
     {
         new[] { alpha, beta }.ToList().ForEach(w => desktops.Desktops.Add(new DesktopInfo(w.DesktopId!.Value, w.Name)));
         desktops.CurrentDesktopId = alpha.DesktopId!.Value;
         store.Stored = AppState.Empty with
         {
-            Workspaces = [alpha with { Tiled = true, TileSizes = sizes ?? [] }, beta],
-            ExperimentalTiling = experiment,
+            Workspaces = [alpha with { Tiled = tiled, TileSizes = sizes ?? [] }, beta],
         };
         manager = new WorkspaceManager(desktops, monitor, titles, store);
         Assert.True(manager.Start().IsSuccess);
-        tiler = new Tiler(manager, desktops, monitor, surface, () => true, traced.Add, () => time, dropping.Contains);
+        tiler = new Tiler(manager, desktops, monitor, surface, () => pro, traced.Add, () => time, dropping.Contains);
         tiler.Start();
         Echo();
     }
@@ -704,10 +707,11 @@ public sealed class TilerResizeTests : IDisposable
     // --- the guards --------------------------------------------------------------------------------------
 
     [Fact]
-    public void Nothing_moves_a_split_while_the_experiment_is_off()
+    public void Nothing_moves_a_split_while_tiling_stands_down()
     {
         StartTwo();
-        Assert.True(manager.SetExperimentalTiling(false).IsSuccess);
+        pro = false;
+        tiler.Refresh();
         surface.Placed.Clear();
 
         ResizedByHand(W(1), new WindowRect(8, 8, 1337, 1032));
@@ -717,8 +721,9 @@ public sealed class TilerResizeTests : IDisposable
         Assert.Equal(new WindowRect(964, 8, 1912, 1032), surface.Frames[W(2)]);
     }
 
-    // Switching tiling off forgets the echo marks too (final review, item 5). W(2) and W(3) are placed when W(3)
-    // opens, and tiling goes off before their echoes come back (the hook goes with it, so they never will). When
+    // Tiling standing down forgets the echo marks too (final review, item 5). It used to be switched off with
+    // Manage's "Tiling (experimental)" box, gone since 2026-11-19; Pro lapsing is the same stand-down today.
+    // W(2) and W(3) are placed when W(3) opens, and tiling goes off before their echoes come back (the hook goes with it, so they never will). When
     // tiling comes back every window is already in its slot, so nothing is placed and no new mark is set; a stale
     // mark would then swallow the first real drag as an echo and snap it back.
     [Fact]
@@ -729,8 +734,10 @@ public sealed class TilerResizeTests : IDisposable
         var slot = GridLayout.Arrange(Area, 3, Gap)[1];
         Assert.Equal(slot, surface.Frames[W(2)]);
 
-        Assert.True(manager.SetExperimentalTiling(false).IsSuccess);
-        Assert.True(manager.SetExperimentalTiling(true).IsSuccess);
+        pro = false;
+        tiler.Refresh();
+        pro = true;
+        tiler.Refresh();
         Assert.Equal(GridLayout.Arrange(Area, 3, Gap), FramesOf(tiler.Board.On(1)));
 
         // W(2)'s bottom edge (the row split in the right column) dragged down to 700: the split goes to 704.
@@ -741,13 +748,13 @@ public sealed class TilerResizeTests : IDisposable
         Assert.Equal(new WindowRect(964, 708, 1912, 1032), surface.Frames[W(3)]);
     }
 
-    // A screen plugged in while the experiment is off: nothing is tiled, so the trace says nothing about refitting
+    // A screen plugged in while Alpha is not tiled: nothing is tiled, so the trace says nothing about refitting
     // (final review, item 6). The bookkeeping still happens, quietly.
     [Fact]
     public void A_screen_appearing_while_nothing_is_tiled_writes_no_trace()
     {
         Exists(W(1), alpha);
-        Start(experiment: false);
+        Start(tiled: false);
 
         surface.ScreenList.Add(FakeTileSurface.Screen(2, Area2));
         surface.ScreensChangedSubject.OnNext(Unit.Default);

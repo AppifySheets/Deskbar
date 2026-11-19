@@ -68,10 +68,7 @@ public partial class ManageWindow : Window
         // because an unticked box raises no Checked when the window opens.
         QuietTaskbar.IsChecked = manager.State.QuietTaskbar;
         ShowQuietTaskbarNote();
-        // Tiling, the same pattern: SetExperimentalTiling ignores an unchanged value, and the Checked it raises is
-        // also what frees the gap row. The gap box shows the stored number; nothing is written until Apply.
-        ExperimentalTiling.IsChecked = manager.State.ExperimentalTiling;
-        TileGapPanel.IsEnabled = manager.State.ExperimentalTiling;
+        // Tiling's one setting, the gap: the box shows the stored number, and nothing is written until Apply.
         TileGapBox.Text = manager.State.TileGap.ToString();
         // #82. Read from the assembly at runtime, never written as a literal here: the whole reason
         // the question needs answering in the UI is that #71 leaves several versioned exes side by
@@ -451,16 +448,6 @@ public partial class ManageWindow : Window
     // The app writes or removes the skill from the state pulse this sends (see where App wires ClaudeSkill.Sync).
     void OnClaudeSkillToggled(object s, RoutedEventArgs e) =>
         manager.SetClaudeSkill(ClaudeSkill.IsChecked == true).TapError(err => MessageBox.Show(err));
-
-    // The tiling experiment's master switch (docs/superpowers/specs/2026-11-08-tiling-design.md). The Tiler hears
-    // the state pulse this sends and starts or stops on its own; switching it off moves nothing and keeps every
-    // workspace's Tiled flag for next time. The gap row follows the box, since a gap means nothing while off.
-    void OnExperimentalTilingToggled(object s, RoutedEventArgs e)
-    {
-        var on = ExperimentalTiling.IsChecked == true;
-        TileGapPanel.IsEnabled = on;
-        manager.SetExperimentalTiling(on).TapError(err => MessageBox.Show(err));
-    }
 
     // The gap between tiles, 0 to 64 pixels at 100% scaling (the Tiler scales it by each screen's DPI). A word
     // that is not a number is refused here; a number out of range is refused by SetTileGap with its own reason.
