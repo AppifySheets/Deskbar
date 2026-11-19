@@ -121,10 +121,16 @@ public static class SettledMove
     // screen's work area with its gap) wins over any tile under it, and the window becomes a full-height column or a
     // full-width row of that whole screen (MoveOutcome.AtEdge). The order (ruling R6):
     //   - on the window's own screen: its opening first (an opening along an edge lies under that edge's band, and a
-    //     drop there has always filled it), then the band, then the tiles;
+    //     drop there has always filled it), then its OWN slot (back to it), then the band, then the tiles;
     //   - on another screen: the band, then that screen's tiles, then a join at the end.
     // No band when it could change nothing: a tile alone on its own screen has nowhere to go but where it is, and an
     // empty screen has nothing to be beside (a plain join gives it the whole screen anyway).
+    //
+    // Why its own slot comes before the band (whole-branch review, item 1): a title bar lies in the top band, so a
+    // window nudged by its title bar and let go over its own tile was read as a top band drop. Measured: A in A | B
+    // (1920 x 1080, gap 8), let go at (400, 25), gave AtEdge(1, Top) and the two columns became D[A, B]. Before the
+    // bands that release was BackToSlot, and it is again. The cost: a stacked tile cannot be sent to the band of an
+    // edge its own slot touches by letting go inside that slot; it is let go over a neighbour's part of the band.
     public static MoveOutcome DecideAt(
         WindowHandle moved,
         int x,
@@ -138,6 +144,7 @@ public static class SettledMove
         board.ScreenOf(moved).TryGetValue(out var home) && home == screenAt
             // Over the screen's opening (`openingHere`, the home screen's): into it. No tile lies over an opening.
             ? openingHere.TryGetValue(out var hole) && Contains(hole, x, y) ? new MoveOutcome.IntoOpening()
+                : slots.TryGetValue(moved, out var own) && Contains(own, x, y) ? new MoveOutcome.BackToSlot()
                 : board.On(home).Count > 1 && Band(innerAt, x, y).TryGetValue(out var side) ? new MoveOutcome.AtEdge(screenAt, side)
                 : Zoned(At(moved, x, y, slots), x, y, slots)
             : Across(moved, x, y, screenAt, slotsThere ?? new Dictionary<WindowHandle, WindowRect>(), innerAt);

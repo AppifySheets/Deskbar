@@ -166,4 +166,18 @@ public class TileLayoutEditTests
         Assert.Throws<ArgumentOutOfRangeException>(() => layout.Remove(2));
         Assert.Throws<ArgumentOutOfRangeException>(() => layout.Insert(-1, TileArrange.Zone.Left));
     }
+
+    // AppendBelowLast (Refit's joiner): the last row of the last column, the column scaled by k/(k+1), nested deeper
+    // than the root too; the new leaf is the last, so an opening before it keeps its index.
+    [Fact]
+    public void AppendBelowLast_joins_the_last_column_evenly_and_keeps_the_opening()
+    {
+        var layout = Tree(Down(C(L, .5), C(Across(C(L, .5), C(Down(C(L, .25), C(L, .75)), .5)), .5)), opening: 1);
+
+        var appended = AssertNormal(layout.AppendBelowLast());
+
+        Is("D[L 0.5, A[L 0.5, D[L 0.166667, L 0.5, L 0.333333] 0.5] 0.5]", appended);
+        Assert.Equal(1, appended.Opening);
+        Assert.Equal(5, appended.Count);
+    }
 }

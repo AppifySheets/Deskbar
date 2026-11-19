@@ -50,9 +50,11 @@ public static partial class TileArrange
     //   - One leaf too many and a known leaver: that leaver's leaf goes, its share to its siblings (TileLayout.Remove),
     //     so nothing else moves. Petre: "on closing, i sometimes want not to move other windows".
     //   - CHANGED on purpose, no known leaver: the LAST leaves go, one by one, each as a leaver's would; and with too
-    //     few leaves the last leaf is split at the bottom, once per missing window. The grid rebuilt the automatic
-    //     shape of the new count instead; the tree mirrors "drop the bottom rows, rightmost column" and "a joiner goes
-    //     to the bottom of the last column" without throwing a hand-made shape away.
+    //     few leaves a new last leaf goes below the last one, once per missing window (TileLayout.AppendBelowLast: the
+    //     last row of the last column, the column evened by k/(k+1) as TileSizes.Add did, or a bottom half of the last
+    //     leaf when there is no column). The grid rebuilt the automatic shape of the new count instead; the tree
+    //     mirrors "drop the bottom rows, rightmost column" and "a joiner goes to the bottom of the last column" without
+    //     throwing a hand-made shape away.
     //
     // A leaver index the layout does not have (read from a layout that is gone) is no leaver: the last-leaves rule
     // runs, and nothing throws. Zero windows leave the lone leaf, which is TileLayout.Automatic(0).
@@ -68,7 +70,7 @@ public static partial class TileArrange
         return stored.Count == count ? stored
             : stored.Count == count + 1 && known ? stored.Remove(leavingLeaf.Value)
             : stored.Count > count && stored.Count > 1 ? Refit(stored.Remove(stored.Count - 1), count, Maybe<int>.None)
-            : stored.Count < count ? Refit(stored.Insert(stored.Count - 1, Zone.Bottom).Layout, count, Maybe<int>.None)
+            : stored.Count < count ? Refit(stored.AppendBelowLast(), count, Maybe<int>.None)
             : stored;
     }
 

@@ -38,6 +38,30 @@ public sealed class TileArrangeLayoutTests
         Is("D[L 0.5, A[L 0.5, L 0.5] 0.5]", layout);
     }
 
+    // The manual test script's T1 (docs/superpowers/notes/manual-test-script.md), step by step, so the steps are the
+    // code's: from the automatic three (A tall on the left, C over B on the right), B dropped on A's bottom quarter
+    // gives A over B | C; C beside A gives A | C over B; C in the right band gives A over B | C back; C beside B gives
+    // A full width on top, B and C side by side underneath.
+    [Fact]
+    public void The_manual_script_t1_steps_give_the_layouts_it_names()
+    {
+        var (order, layout) = TileArrange.Drop([A, Cw, B], TileLayout.Automatic(3), B, A, TileArrange.Zone.Bottom);
+        Assert.Equal([A, B, Cw], order);
+        Is("A[D[L 0.5, L 0.5] 0.5, L 0.5]", layout);
+
+        (order, layout) = TileArrange.Drop(order, layout, Cw, A, TileArrange.Zone.Right);
+        Assert.Equal([A, Cw, B], order);
+        Is("D[A[L 0.5, L 0.5] 0.5, L 0.5]", layout);
+
+        (order, layout) = TileArrange.DropAtEdge(order, layout, Cw, TileArrange.Zone.Right);
+        Assert.Equal([A, B, Cw], order);
+        Is("A[D[L 0.5, L 0.5] 0.5, L 0.5]", layout);
+
+        (order, layout) = TileArrange.Drop(order, layout, Cw, B, TileArrange.Zone.Right);
+        Assert.Equal([A, B, Cw], order);
+        Is("D[L 0.5, A[L 0.5, L 0.5] 0.5]", layout);
+    }
+
     // Unchanged behaviour: beside a full-height tile is still a full-height column.
     [Fact]
     public void Drop_beside_a_full_height_tile_makes_a_column()
@@ -212,10 +236,36 @@ public sealed class TileArrangeLayoutTests
         Is("D[L 0.5, L 0.5]", TileArrange.Refit(TileLayout.Automatic(4), 2, Maybe<int>.None));
 
     // Changed on purpose: a joiner goes below the last leaf, once per window, where the grid fitted the automatic
-    // shape of the new count (three columns for five).
+    // shape of the new count (three columns for five). The last leaf sits in a Down column, so the joiner becomes that
+    // column's last row and the column evens out (thirds), as TileSizes.Add did; it does not halve the last row.
     [Fact]
     public void Refit_adds_below_the_last_leaf_instead_of_regridding() =>
-        Is("A[D[L 0.5, L 0.5] 0.5, D[L 0.5, L 0.25, L 0.25] 0.5]", TileArrange.Refit(TileLayout.Automatic(4), 5, Maybe<int>.None));
+        Is("A[D[L 0.5, L 0.5] 0.5, D[L 0.333333, L 0.333333, L 0.333333] 0.5]", TileArrange.Refit(TileLayout.Automatic(4), 5, Maybe<int>.None));
+
+    // Joiners with no known leaver halved the last leaf once per window, so a 3-leaf layout refit to 7 windows gave
+    // rows of 258, 125, 59 and 62 px (whole-branch review, item 2). Each joiner now joins the last column as its last
+    // row with 1/(k+1) of it, the other k rows scaled by k/(k+1), so the column stays even however many join. The left
+    // tile keeps its share: only the column the joiners go to changes. Three leaves plus three joiners give the last
+    // column five rows; plus four, six.
+    [Theory]
+    [InlineData(6, 5)]
+    [InlineData(7, 6)]
+    public void Joiners_even_out_the_last_column_instead_of_halving_the_last_row(int count, int rows)
+    {
+        var start = Tree(Across(C(L, .5), C(Down(C(L, .5), C(L, .5)), .5)));
+        var even = string.Join(", ", Enumerable.Repeat($"L {Math.Round(1.0 / rows, 6)}", rows));
+
+        Is($"A[L 0.5, D[{even}] 0.5]", TileArrange.Refit(start, count, Maybe<int>.None));
+    }
+
+    // The last leaf's parent splits Across, or the last leaf is the whole layout: there is no column to join, so the
+    // last leaf is split at the bottom, half and half.
+    [Fact]
+    public void A_joiner_beside_an_across_last_leaf_splits_it_at_the_bottom()
+    {
+        Is("A[L 0.6, D[L 0.5, L 0.5] 0.4]", TileArrange.Refit(Tree(Across(C(L, .6), C(L, .4))), 3, Maybe<int>.None));
+        Is("D[L 0.5, L 0.5]", TileArrange.Refit(TileLayout.Automatic(1), 2, Maybe<int>.None));
+    }
 
     // Ported: a custom shape survives a window leaving and one joining. Joining the automatic two-column layout gives
     // the automatic three-window layout, as the grid did.
@@ -225,7 +275,7 @@ public sealed class TileArrangeLayoutTests
         var stacked = Tree(Down(C(L, .5), C(L, .5)));
         Assert.True(TileArrange.IsCustom(stacked));
 
-        Is("D[L 0.5, L 0.25, L 0.25]", TileArrange.Refit(stacked, 3, Maybe<int>.None));
+        Is("D[L 0.333333, L 0.333333, L 0.333333]", TileArrange.Refit(stacked, 3, Maybe<int>.None));
         Is("L", TileArrange.Refit(stacked, 1, Maybe.From(1)));
         Assert.Equal(TileLayout.Automatic(3), TileArrange.Refit(TileLayout.Automatic(2), 3, Maybe<int>.None));
     }

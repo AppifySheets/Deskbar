@@ -146,6 +146,35 @@ public sealed record TileLayout(TileNode Root)
         return (Normal(MapNode(Root, first, leaves, old => SplitNode(old, TileLeaf.Instance, side, share)), OpeningAfterInsert(leaf)), leaf);
     }
 
+    // A joiner with no better place (TileArrange.Refit, no known leaver): a new LAST leaf, below the last leaf.
+    //   - The last leaf's parent splits Down (a column of rows): the new leaf becomes that split's last child with
+    //     1/(k+1) of it, k being its children before the add, and every other child is scaled by k/(k+1). That is the
+    //     old TileSizes.Add rule, so repeated joins keep the column even: a column of two that three join is five
+    //     rows of a fifth, where halving the last leaf each time left rows of 1/2, 1/4, 1/8, 1/16, 1/16 (whole-branch
+    //     review, item 2: tiles 258, 125, 59 and 62 px tall).
+    //   - Otherwise (the parent splits Across, or the last leaf is the whole layout) there is no column to join, so the
+    //     last leaf is split at the bottom, half and half (Insert).
+    // The new leaf's index is the old Count, so an opening (always below it) does not move. Normal form holds: the
+    // Down split only grows, and an Insert goes through Normal.
+    public TileLayout AppendBelowLast()
+    {
+        var last = Count - 1;
+        var path = PathTo(last);
+        if (path.Count == 0 || path[^1].Branch.Axis != Axis.Down)
+            return Insert(last, TileArrange.Zone.Bottom).Layout;
+
+        var column = path[^1];
+        var k = column.Branch.Children.Count;
+        var grown = column.Branch with
+        {
+            Children = column.Branch.Children
+                .Select(c => c with { Share = c.Share * k / (k + 1) })
+                .Append(new TileChild(TileLeaf.Instance, 1.0 / (k + 1)))
+                .ToValueList()
+        };
+        return Normal(MapNode(Root, column.First, LeafCount(column.Branch), _ => grown), OpeningAfterInsert(Count));
+    }
+
     // The screen-edge band: a new leaf along a whole side of the layout.
     //   - The root splits along the side's axis: the new leaf is the first (Left/Top) or last (Right/Bottom) child and
     //     takes half of the OUTER child's share, so Across[.5,.5] + Right is [.5,.25,.25] and nothing else moves.

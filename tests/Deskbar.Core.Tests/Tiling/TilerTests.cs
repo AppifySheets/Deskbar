@@ -475,6 +475,38 @@ public sealed partial class TilerTests : IDisposable
         Assert.Equal("D[A[L 0.5, L 0.5] 0.5, L 0.5]", Text(manager.State.Workspaces.Single(w => w.Id == alpha.Id).TileLayouts.Single().Layout));
     }
 
+    // A drop whose layout cannot be stored must not take the new order (whole-branch review, item 5): Keep ran after a
+    // failed StoreLayout, so the board took the drop's order while the layout stayed the old one, and the re-tile put
+    // windows in each other's leaves. Now the failure is traced, the order stays, and the window goes back to its slot.
+    // The store is made to fail the only way SetTileLayout can: the workspace is gone by the time the drop is stored
+    // (removed while the Tiler reads the pointer, mid-drop).
+    [Fact]
+    public void A_drop_whose_layout_cannot_be_stored_puts_the_window_back()
+    {
+        surface.ScreenList[0] = FakeTileSurface.Screen(1, new WindowRect(0, 0, 1000, 600));
+        new[] { 1, 2, 3 }.ToList().ForEach(n => Exists(W(n), alpha));
+        Start(gap: 0, layouts: [new ScreenTileLayout("0,0,1000,600", Tree(Across(C(Down(C(L, .5), C(L, .5)), .5), C(L, .5))))]);
+        var placedBefore = surface.Placed.Count;
+        surface.OnPointer = () =>
+        {
+            surface.OnPointer = null;
+            Assert.True(manager.RemoveWorkspace(alpha.Id).IsSuccess);
+        };
+
+        surface.PointerAt = (450, 150);
+        surface.MovedByHand.Add(W(3));
+        Settles(W(3), new WindowRect(300, 130, 800, 630));
+        surface.MovedByHand.Remove(W(3));
+
+        Assert.Contains(traced, line => line.Contains("storing the new arrangement failed"));
+        Assert.DoesNotContain(traced, line => line.Contains("dropped Right of"));
+        // Back in its own slot, and nobody else moved.
+        Assert.Equal(new WindowRect(500, 0, 1000, 600), surface.Frames[W(3)]);
+        Assert.Equal(new WindowRect(0, 0, 500, 300), surface.Frames[W(1)]);
+        Assert.Equal(new WindowRect(0, 300, 500, 600), surface.Frames[W(2)]);
+        Assert.Equal([(W(3), new WindowRect(500, 0, 1000, 600))], surface.Placed.Skip(placedBefore).ToList());
+    }
+
     // --- screen-edge bands (spec, "Drops", step 1) ---------------------------------------------------------------
 
     // Three windows stacked on a 1000 x 600 screen with no gap (a stored Down of thirds). C, the bottom one, dropped by

@@ -408,7 +408,16 @@ public sealed class FakeTileSurface : ITileSurface
     // Where the pointer is; None (the default) stands for "Windows will not say", so every older test keeps the
     // centre rule it was written against.
     public Maybe<(int X, int Y)> PointerAt { get; set; } = Maybe<(int X, int Y)>.None;
-    public Maybe<(int X, int Y)> Pointer() => PointerAt;
+
+    // Run when the Tiler asks where the pointer is, which it does in the middle of judging a drop: a test uses it to
+    // change the world at exactly that moment (a store about to fail, for one).
+    public Action? OnPointer { get; set; }
+
+    public Maybe<(int X, int Y)> Pointer()
+    {
+        OnPointer?.Invoke();
+        return PointerAt;
+    }
 
     // Every "bring these up behind that one", in order.
     public List<(WindowHandle Front, IReadOnlyList<WindowHandle> Windows)> Raised { get; } = [];

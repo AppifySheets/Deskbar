@@ -552,13 +552,23 @@ public sealed partial class Tiler(WorkspaceManager manager, IVirtualDesktopServi
             // stored next was the drop's, so the order and the layout disagreed and windows landed in each other's
             // leaves. Stored first, the drop's layout has no opening, IntoOpenings leaves the order alone, and the
             // re-tile reads the layout the order was made for.
+            //
+            // A FAILED store keeps nothing (whole-branch review, item 5): the new order belongs to the new layout, and
+            // taken without it the re-tile would lay the drop's order out on the old layout, windows in each other's
+            // leaves. So the failure is traced, the board stays as it was, and the window goes back to its slot
+            // (Undropped). The same holds for the band and opening drops below.
             case MoveOutcome.Beside beside when board.ScreenOf(beside.Target).TryGetValue(out var targetOn)
                                                && screens.TryGetValue(targetOn, out var besideScreen):
                 var arranged = Rearranged(workspace, besideScreen, window, beside);
                 var leftFrom = board.ScreenOf(window).GetValueOrDefault(targetOn);
-                StoreLayout(workspace, KeyOf(besideScreen), arranged.Layout)
+                var besideStored = StoreLayout(workspace, KeyOf(besideScreen), arranged.Layout)
                     .Tap(() => trace?.Invoke($"tile: {workspace.Name} screen {targetOn}: {window.Value:X} dropped {beside.Side} of {beside.Target.Value:X}, sizes {Show(arranged.Layout)}"))
                     .TapError(error => trace?.Invoke($"tile: {workspace.Name} screen {targetOn}: storing the new arrangement failed: {error}"));
+                if (besideStored.IsFailure)
+                {
+                    Undropped(window, frame, decidedSlots);
+                    break;
+                }
                 Keep(workspace, board.Into(targetOn, arranged.Order));
                 Retile(workspace, [leftFrom, targetOn]);
                 break;
@@ -576,19 +586,31 @@ public sealed partial class Tiler(WorkspaceManager manager, IVirtualDesktopServi
                     break;
                 }
                 var bandFrom = board.ScreenOf(window).GetValueOrDefault(edge.Screen);
-                StoreLayout(workspace, KeyOf(edgeScreen), banded.Layout)
+                var bandStored = StoreLayout(workspace, KeyOf(edgeScreen), banded.Layout)
                     .Tap(() => trace?.Invoke($"tile: {workspace.Name} screen {edge.Screen}: {window.Value:X} dropped in the {edge.Side} band, sizes {Show(banded.Layout)}"))
                     .TapError(error => trace?.Invoke($"tile: {workspace.Name} screen {edge.Screen}: storing the band drop failed: {error}"));
+                if (bandStored.IsFailure)
+                {
+                    Undropped(window, frame, decidedSlots);
+                    break;
+                }
                 Keep(workspace, board.Into(edge.Screen, banded.Order));
                 Retile(workspace, [bandFrom, edge.Screen]);
                 break;
-            // Into its own screen's opening (TileArrange.IntoOpening): the new order and layout, the layout stored first.
+            // Into its own screen's opening (TileArrange.IntoOpening): the new order and layout, the layout stored
+            // first, as for the drops above, so a failed store leaves the order alone. (The window stays on its own
+            // screen, so there is no arrival for IntoOpenings to read either way.)
             case MoveOutcome.IntoOpening when screens.TryGetValue(decidedOn, out var openScreen):
                 var into = TileArrange.IntoOpening(board.On(decidedOn), ShownLayout(workspace, openScreen, board.On(decidedOn).Count), window);
-                Keep(workspace, board.Reordered(decidedOn, into.Order));
-                StoreLayout(workspace, KeyOf(openScreen), into.Layout)
+                var intoStored = StoreLayout(workspace, KeyOf(openScreen), into.Layout)
                     .Tap(() => trace?.Invoke($"tile: {workspace.Name} screen {decidedOn}: {window.Value:X} dropped into the opening, sizes {Show(into.Layout)}"))
                     .TapError(error => trace?.Invoke($"tile: {workspace.Name} screen {decidedOn}: storing the filled opening failed: {error}"));
+                if (intoStored.IsFailure)
+                {
+                    Undropped(window, frame, decidedSlots);
+                    break;
+                }
+                Keep(workspace, board.Reordered(decidedOn, into.Order));
                 Retile(workspace, [decidedOn]);
                 break;
             case MoveOutcome.JoinScreen join:
@@ -953,6 +975,16 @@ public sealed partial class Tiler(WorkspaceManager manager, IVirtualDesktopServi
     // snaps itself back (or insists on its own place) would otherwise be placed, move itself, settle and be
     // placed again for ever. The fourth put-back within PutBackWindow is not made: the window keeps where it
     // settled, that becomes its accepted frame, and it is left alone until its slot next changes.
+    // A drop whose layout could not be stored (OnSettled): the board was left as it was, so the screen as it was is
+    // still right, and only the dropped window is out of place. It goes back to its slot on its own screen (`slots`,
+    // the slots the drop was judged against), exactly as a BackToSlot would put it.
+    void Undropped(WindowHandle window, WindowRect frame, IReadOnlyDictionary<WindowHandle, WindowRect> slots)
+    {
+        trace?.Invoke($"tile: {window.Value:X} goes back to its slot, the drop was not stored");
+        if (slots.TryGetValue(window, out var slot))
+            PutBack(window, slot, frame);
+    }
+
     void PutBack(WindowHandle window, WindowRect slot, WindowRect frame)
     {
         var at = now();

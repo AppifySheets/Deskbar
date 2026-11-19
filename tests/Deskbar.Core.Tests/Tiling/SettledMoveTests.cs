@@ -142,9 +142,26 @@ public class SettledMoveTests
 
         Assert.IsType<MoveOutcome.IntoOpening>(
             SettledMove.DecideAt(A, 10, 300, 1, Board, slots, openingHere: new WindowRect(0, 0, 200, 600), innerAt: Inner));
-        // Past the opening, still in the band of another edge: the band.
+        // Past the opening, in the band of another edge and over the NEIGHBOUR's tile: the band. (Over A's own slot it
+        // would be BackToSlot, see the nudge test below.)
         Assert.Equal(new MoveOutcome.AtEdge(1, TileArrange.Zone.Top),
-            SettledMove.DecideAt(A, 500, 10, 1, Board, slots, openingHere: new WindowRect(0, 0, 200, 600), innerAt: Inner));
+            SettledMove.DecideAt(A, 800, 10, 1, Board, slots, openingHere: new WindowRect(0, 0, 200, 600), innerAt: Inner));
+    }
+
+    // A title-bar nudge restacked the screen (whole-branch review, item 1). Measured: A in A | B on 1920 x 1080 with
+    // an 8 px gap, let go at (400, 25), over A's OWN slot and inside the top band, gave AtEdge(1, Top), and the two
+    // columns became D[A, B]. Before the bands that release was BackToSlot, and it is again: on the home screen a
+    // pointer inside the dragged window's own slot is checked after the opening and before the band. Over the
+    // neighbour, the top band still wins.
+    [Fact]
+    public void DecideAt_a_nudge_inside_its_own_slot_goes_back_even_in_a_band()
+    {
+        var area = new WindowRect(0, 0, 1920, 1080);
+        var slots = new[] { A, B }.Zip(GridLayout.Arrange(area, 2, 8)).ToDictionary(p => p.First, p => p.Second);
+        var inner = GridLayout.InnerArea(area, 8);
+
+        Assert.IsType<MoveOutcome.BackToSlot>(SettledMove.DecideAt(A, 400, 25, 1, Board, slots, innerAt: inner));
+        Assert.Equal(new MoveOutcome.AtEdge(1, TileArrange.Zone.Top), SettledMove.DecideAt(A, 1400, 25, 1, Board, slots, innerAt: inner));
     }
 
     // On ANOTHER screen the band is read first, against that screen's inner area, and names that screen.
