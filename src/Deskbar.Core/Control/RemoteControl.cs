@@ -93,6 +93,7 @@ public sealed partial class RemoteControl(WorkspaceManager manager, Func<bool, R
         ("tile", [var workspace]) => SetRowTiled(workspace, true),
         ("untile", [var workspace]) => SetRowTiled(workspace, false),
         ("even", [var workspace]) => EvenOutRow(workspace),
+        ("reset-grid", [var workspace]) => ResetGridRow(workspace),
         // Only the literal words on and off match; anything else falls through to the "Wrong arguments" reply with the usage line.
         ("keep-space", [var workspace, "on"]) => SetRowKeepsSpace(workspace, true),
         ("keep-space", [var workspace, "off"]) => SetRowKeepsSpace(workspace, false),

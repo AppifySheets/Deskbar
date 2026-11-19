@@ -195,6 +195,36 @@ Tasks in the bar (spec `docs/superpowers/specs/2026-11-19-tasks-in-the-bar-desig
 50. Change the icon size on Manage's Settings tab: the stopwatch glyph grows with it, the
     countdown text does not, and the countdown does not shift from second to second.
 
+## Tiling on the split tree
+
+Tiling's layout is a split tree since the split tree change (spec
+`docs/superpowers/specs/2026-11-19-tiling-split-tree-design.md`). Run on a Pro copy (or while tiling is free), with
+the trace on (`%APPDATA%\Deskbar\trace.on`, log `%TEMP%\deskbar-trace.log`), on a workspace tiled with the tile
+button. `$ts` is `%APPDATA%\Deskbar\deskbar.cmd`. A, B and C are three windows of the workspace.
+
+T1. Drop beside a stacked tile. Make the left half A over B and the right half C: drop C on the bottom quarter of
+    A if the grid did not start that way, then drop the third window on the right quarter of the stack. Now drag C
+    onto the right quarter of A. While you hold it, the preview shows A and C side by side on the top half and B
+    full width underneath. Let go: that is the layout (A | C over B). B grew to the full width and A kept its
+    height; nothing else moved. Before the split tree, C could only become a new column.
+T2. Screen-edge bands. Drag a tile to the screen's left edge, inside the outer 6% of the screen and not over the
+    middle of another tile. The preview shows a full-height column on the left, and letting go makes it, taking
+    half the width of what it lands beside. Repeat for the right, top (a full-width row) and bottom edges, and once
+    into a corner: the nearer edge wins. Does 6% feel too thin or too thick? It is one constant
+    (`TileArrange.Band`).
+T3. Even out, then Reset to grid. From T1's A | C over B, drag the separation between A and C well off the middle.
+    Right-click the workspace's row: "Even out tiles" sits directly under "Tile windows". The tile button's
+    right-click menu offers the same item above "Keep the space when a window closes". Click it: every split is
+    equal again and the shape is still A | C over B; the trace has one `tile: <workspace> sizes evened out` line.
+    Open either menu again: the item now reads "Reset to grid". Click it: the screen goes back to the automatic
+    grid. Open again: neither item is there. Then repeat the pair from the pipe, `$ts even <workspace>` and
+    `$ts reset-grid <workspace>`: the same two steps, and both exit 0.
+T4. A restart keeps a hand-made layout. Make A | C over B again and drag one split off the middle. Exit from the
+    tray and start Deskbar again, then go to that workspace: the same shape and the same split, nothing re-gridded.
+    `state.json` has the tree under the workspace's `TileLayouts` and `"TileSizes": []`.
+T5. Upgrade from a build before the split tree, on a profile that build tiled with a dragged split. After the
+    update the grid looks exactly as it did, to the pixel, and Even out offers itself as before.
+
 ## Results (2026-08-01)
 
 Status: **pending human execution.** An agent cannot observe the desktop, Task View,

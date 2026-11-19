@@ -3,12 +3,12 @@ using Deskbar.Core.Tiling;
 
 namespace Deskbar.Core.Domain;
 
-// One screen's stored tile sizes. Screen is an opaque key: the Tiler builds it from the screen's monitor
-// bounds as "L,T,R,B", and this layer only stores and clears by it.
+// LEGACY: one screen's columns-of-rows tile sizes, as older builds stored them. Only migration reads it
+// (JsonPersistenceStore turns each into a ScreenTileLayout on load).
 public sealed record ScreenTileSizes(string Screen, TileSizes Sizes);
 
-// One screen's stored split tree layout, keyed like ScreenTileSizes. It replaces the sizes: JsonPersistenceStore
-// migrates an old entry into one of these on load.
+// One screen's stored split tree layout. Screen is an opaque key: the Tiler builds it from the screen's monitor
+// bounds as "L,T,R,B", and this layer only stores and clears by it.
 public sealed record ScreenTileLayout(string Screen, TileLayout Layout);
 
 // A named group of windows, backed 1:1 by a Windows virtual desktop.
@@ -64,26 +64,30 @@ public sealed record Workspace(Guid Id, string Name, Guid? DesktopId, string? Co
     // with no migration.
     public bool Tiled { get; init; }
 
-    // The column and row sizes the user dragged this workspace's grid to, one entry per screen. Petre: "i want
-    // to be able to resize tiles by dragging the separation" and "keep my sizes".
-    //
-    // On the workspace for the reason Tiled is: it survives a restart with no second store to keep in step,
-    // and it is a fact about this workspace's grid. A screen that drops out keeps its entry, so plugging it
-    // back in restores the sizes. Only "Even out tiles", untiling and deleting the workspace remove them.
-    //
-    // Init property defaulting to empty, so a state.json written before this has no key and loads with no
-    // stored sizes (every grid equal, as before), with no migration.
+    // LEGACY: the columns-of-rows sizes older builds stored here, one entry per screen. Only migration reads it:
+    // Load turns each entry into a TileLayouts entry (JsonPersistenceStore.MigrateTileSizes) and empties this, so a
+    // saved state always writes it as []. Kept as a property, rather than dropped, so a state.json from an older
+    // build still has somewhere to land.
     //
     // A ValueList, not a plain list: a record compares a list member by reference, so two workspaces holding
-    // the same sizes would be unequal. ValueList compares by contents, which keeps the record's generated
+    // the same entries would be unequal. ValueList compares by contents, which keeps the record's generated
     // equality right for every property, this one and any added later.
     public ValueList<ScreenTileSizes> TileSizes { get; init; } = [];
 
-    // The split tree layouts (TileLayout), per screen, that replace TileSizes. A NEW property rather than a tree
-    // handed to ScreenTileSizes.Sizes: an older build reading a tree there would crash on load, whereas it just
-    // ignores an unknown key (design, "Storing and migration"). Load migrates TileSizes into this and leaves
-    // TileSizes empty, so a saved state only ever carries trees here. Same rules as TileSizes: a plain layout is
-    // never stored, untiling and Reset to grid clear it, and nothing else does.
+    // This workspace's tiling layouts as split trees (TileLayout), one entry per screen: the shape a drop made and
+    // the splits the user dragged. Petre: "i want to be able to resize tiles by dragging the separation" and "keep my
+    // sizes".
+    //
+    // On the workspace for the reason Tiled is: it survives a restart with no second store to keep in step, and it is
+    // a fact about this workspace's layout. A screen that drops out keeps its entry, so plugging it back in restores
+    // the layout. A plain layout (even, the automatic shape, no opening) is never stored, because no entry means
+    // exactly that. "Even out tiles" evens every entry and keeps its shape (dropping one that is then plain); only
+    // "Reset to grid", untiling and deleting the workspace forget them.
+    //
+    // A NEW property rather than a tree handed to ScreenTileSizes.Sizes: an older build reading a tree there would
+    // crash on load, whereas it just ignores an unknown key (design, "Storing and migration"). Init property
+    // defaulting to empty, so a state.json without the key loads with nothing stored; a null list loads as empty
+    // too (ValueListConverter).
     public ValueList<ScreenTileLayout> TileLayouts { get; init; } = [];
 
     // Whether a tiled window that closes leaves its space empty for the next window to open into, instead of
@@ -91,7 +95,7 @@ public sealed record Workspace(Guid Id, string Name, Guid? DesktopId, string? Co
     //
     // Init-only and false by default: a state.json written before this has no key and loads with it off, with
     // no migration, which is how tiling behaved before the switch existed. Untiling deliberately leaves it
-    // alone, so a user who tiles again finds their choice as they left it (unlike TileSizes, it is a
+    // alone, so a user who tiles again finds their choice as they left it (unlike TileLayouts, it is a
     // preference, not a layout).
     public bool TileKeepsSpace { get; init; }
 

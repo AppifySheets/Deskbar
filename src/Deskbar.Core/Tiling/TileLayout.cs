@@ -5,7 +5,7 @@ using Deskbar.Core.Domain;
 namespace Deskbar.Core.Tiling;
 
 // A screen's tiling layout as a SPLIT TREE (spec: docs/superpowers/specs/2026-11-19-tiling-split-tree-design.md).
-// It sits BESIDE TileSizes for now: nothing that reads TileSizes changes, and later tasks switch the Tiler over.
+// It replaced the columns-of-rows grid (TileSizes, now read only by state.json's migration through FromGrid).
 //
 // Why a tree: "columns of rows" cannot say "A and C side by side on top, B full width underneath", so a drop
 // beside a stacked tile had nowhere to go. A tree can: every split divides its span between children, and a child
@@ -44,7 +44,7 @@ public sealed record TileChild(TileNode Node, double Share);
 //     own share. Three columns are ONE Across of three, exactly as today's Columns list.
 public sealed record TileLayout(TileNode Root)
 {
-    // Two shares closer than this are the same (also what "even" means), as in TileSizes.
+    // Two shares closer than this are the same (also what "even" means), as in the old grid.
     const double Tolerance = 1e-9;
 
     // The leaf (by its index in depth-first order) that holds no window; null for none. Petre: "keep the opening for

@@ -4,8 +4,9 @@ using Deskbar.Core.Tiling;
 namespace Deskbar.Core.Tests.Control;
 
 // `even` on the control pipe: the twin of the row menu's "Even out tiles". It is refused like `tile` is, with
-// the same message, where the copy may not tile. On a workspace with no stored sizes
-// it succeeds and changes nothing.
+// the same message, where the copy may not tile. On a workspace with no stored layouts it succeeds and changes
+// nothing. What it does to a stored layout (equal splits, the shape kept) is pinned in RemoteControlTileTests, beside
+// its second step `reset-grid`.
 public class RemoteControlEvenTests
 {
     static WorkspaceManager Manager()
@@ -18,13 +19,16 @@ public class RemoteControlEvenTests
     static Guid Work(WorkspaceManager manager) => manager.State.Workspaces.Single(w => w.Name == "Work").Id;
 
     static int Stored(WorkspaceManager manager) =>
-        manager.State.Workspaces.Single(w => w.Name == "Work").TileSizes.Count;
+        manager.State.Workspaces.Single(w => w.Name == "Work").TileLayouts.Count;
 
+    // The automatic shape for two windows (two columns) with the split dragged off the middle.
     static void Store(WorkspaceManager manager) =>
-        manager.SetTileSizes(Work(manager), "0,0,1920,1080", new TileSizes([0.3, 0.7], [[1.0], [0.25, 0.75]]));
+        manager.SetTileLayout(Work(manager), "0,0,1920,1080", TileLayout.Normal(
+            new TileBranch(Axis.Across, [new TileChild(TileLeaf.Instance, 0.3), new TileChild(TileLeaf.Instance, 0.7)]), null));
 
+    // Evened, the automatic shape is what no entry means, so the entry goes.
     [Fact]
-    public void Even_clears_the_sizes_in_pro()
+    public void Even_on_the_automatic_shape_forgets_it_in_pro()
     {
         var manager = Manager();
         Store(manager);
@@ -49,7 +53,7 @@ public class RemoteControlEvenTests
     }
 
     [Fact]
-    public void Even_on_a_workspace_with_no_sizes_succeeds()
+    public void Even_on_a_workspace_with_nothing_stored_succeeds()
     {
         var manager = Manager();
 

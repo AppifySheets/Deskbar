@@ -538,4 +538,86 @@ public sealed class JsonPersistenceStoreTests : IDisposable
 
         Assert.Equal(layout, loaded.TileLayouts.Single().Layout);
     }
+
+    // An old entry with an opening: the opening rides along as the layout's opening, so room kept for the next
+    // window outlives the upgrade (ported from the TileSizes setting tests).
+    [Fact]
+    public void Old_sizes_with_an_opening_load_as_a_layout_with_it()
+    {
+        var opened = new Deskbar.Core.Tiling.TileSizes([0.5, 0.5], [[1.0], [0.4, 0.6]]) { Opening = 1 };
+        var old = new Workspace(Guid.NewGuid(), "Old", null) { TileSizes = [new ScreenTileSizes("0,0,1920,1080", opened)] };
+        Assert.True(new JsonPersistenceStore(dir).Save(AppState.Empty with { Workspaces = [old] }).IsSuccess);
+
+        var layout = new JsonPersistenceStore(dir).Load().Value.Workspaces.Single().TileLayouts.Single().Layout;
+
+        Assert.Equal(Deskbar.Core.Tiling.TileLayout.FromGrid(opened), layout);
+        Assert.Equal(1, layout.Opening);
+    }
+
+    // The tiling keys as a hand-edited state.json can have them. Missing or null, each list loads EMPTY, never null:
+    // the Tiler's state key and the menus read them without a null check (ValueListConverter, final review item 8).
+    [Theory]
+    [InlineData("")]
+    [InlineData(",\"TileSizes\":null")]
+    [InlineData(",\"TileLayouts\":null")]
+    [InlineData(",\"TileSizes\":null,\"TileLayouts\":null")]
+    public void Missing_or_null_tiling_lists_load_empty(string keys)
+    {
+        Directory.CreateDirectory(dir);
+        File.WriteAllText(Path.Combine(dir, "state.json"),
+            $$$"""{"Workspaces":[{"Id":"{{{Guid.NewGuid()}}}","Name":"Old","DesktopId":null{{{keys}}}}],"WorkspaceRules":[],"RenameRules":[],"Inventory":{}}""");
+
+        var loaded = new JsonPersistenceStore(dir).Load();
+
+        Assert.True(loaded.IsSuccess);
+        var workspace = loaded.Value.Workspaces.Single();
+        Assert.NotNull(workspace.TileSizes);
+        Assert.Empty(workspace.TileSizes);
+        Assert.NotNull(workspace.TileLayouts);
+        Assert.Empty(workspace.TileLayouts);
+    }
+
+    // An old TileSizes entry that cannot describe a grid is DROPPED by the migration, and the rest of the file loads.
+    // A throw inside the parse would make DurableFile take the whole file for corrupt and fall back to
+    // state.json.previous, losing every other change since. The good entry beside it still migrates.
+    [Theory]
+    [InlineData("""{"Columns":[0.5,0.5],"Rows":[[1.0]]}""")]                 // fewer row lists than columns
+    [InlineData("""{"Columns":[0.5,0.5],"Rows":[[1.0],[1.0],[1.0]]}""")]     // more row lists than columns
+    [InlineData("""{"Columns":[0.5,0.5],"Rows":[[1.0],null]}""")]            // a null row list
+    [InlineData("""{"Columns":null,"Rows":[[1.0]]}""")]                      // no columns
+    [InlineData("""{"Columns":[1.0],"Rows":null}""")]                        // no rows
+    [InlineData("null")]                                                     // no sizes at all
+    public void A_malformed_old_sizes_entry_is_dropped_and_the_rest_loads(string sizes)
+    {
+        Directory.CreateDirectory(dir);
+        var good = """{"Screen":"good","Sizes":{"Columns":[0.3,0.7],"Rows":[[1.0],[0.25,0.75]]}}""";
+        File.WriteAllText(Path.Combine(dir, "state.json"),
+            $$$"""{"Workspaces":[{"Id":"{{{Guid.NewGuid()}}}","Name":"Old","DesktopId":null,"TileSizes":[{"Screen":"bad","Sizes":{{{sizes}}}},{{{good}}},null]}],"WorkspaceRules":[],"RenameRules":[],"Inventory":{}}""");
+        var fellBack = new List<string>();
+
+        var loaded = new JsonPersistenceStore(dir, fellBack.Add).Load();
+
+        Assert.True(loaded.IsSuccess);
+        Assert.Empty(fellBack);
+        var workspace = loaded.Value.Workspaces.Single();
+        Assert.Equal("Old", workspace.Name);
+        Assert.Empty(workspace.TileSizes);
+        var entry = Assert.Single(workspace.TileLayouts);
+        Assert.Equal("good", entry.Screen);
+        Assert.Equal(Deskbar.Core.Tiling.TileLayout.FromGrid(OldGrid), entry.Layout);
+    }
+
+    // A null entry in TileLayouts (hand-edited) is dropped too, rather than reaching the Tiler.
+    [Fact]
+    public void A_null_layout_entry_is_dropped()
+    {
+        Directory.CreateDirectory(dir);
+        File.WriteAllText(Path.Combine(dir, "state.json"),
+            $$$"""{"Workspaces":[{"Id":"{{{Guid.NewGuid()}}}","Name":"Old","DesktopId":null,"TileLayouts":[null,{"Screen":"s","Layout":null}]}],"WorkspaceRules":[],"RenameRules":[],"Inventory":{}}""");
+
+        var loaded = new JsonPersistenceStore(dir).Load();
+
+        Assert.True(loaded.IsSuccess);
+        Assert.Empty(loaded.Value.Workspaces.Single().TileLayouts);
+    }
 }

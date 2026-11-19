@@ -586,7 +586,7 @@ public class RemoteControlMenuTests
 
         Assert.All(
             ["workspaces", "windows", "desktops", "create", "move", "rename", "add-child", "reorder", "fold",
-             "unfold", "color", "delete", "switch", "group-create", "group-join", "group-leave", "group-rename",
+             "unfold", "color", "delete", "switch", "tile", "untile", "even", "reset-grid", "keep-space", "group-create", "group-join", "group-leave", "group-rename",
              "group-color", "group-fold", "group-unfold", "group-reorder", "ungroup", "name-desktop", "rename-window", "rename-app", "rename-pattern",
              "name-by-folder", "restore-title", "pin", "unpin", "close-window", "force-close", "close-all", "restart-app", "bar",
              "stats", "window-lines", "window-list", "collapsed-click", "full-screen", "task", "dump"],

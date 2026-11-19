@@ -1,6 +1,8 @@
 using System.Windows;
 using System.Windows.Controls;
 using Deskbar.App;
+using Deskbar.Core.Domain;
+using Deskbar.Core.Tiling;
 
 namespace Deskbar.Windows.Tests;
 
@@ -101,63 +103,93 @@ public class FloatingBarTilingMenuTests
         Assert.False(harness.Manager.State.Workspaces.Single(w => w.Name == "Sparrow").Tiled);
     });
 
-    // "Even out tiles" (docs/superpowers/specs/2026-11-08-tile-resize-design.md): a split dragged by hand is
-    // stored per screen, and this item forgets them all. Any stored entry is non-equal (SetTileSizes never
-    // stores equal sizes), so "has stored sizes" is the whole test for "has a moved split".
-    static readonly Deskbar.Core.Tiling.TileSizes Uneven = new([0.3, 0.7], [[1.0], [0.25, 0.75]]);
+    // The tidy item: "Even out tiles" or "Reset to grid", never both (docs/superpowers/specs/2026-11-19-tiling-split-tree-
+    // design.md, "Even out tiles"). Which one the menu offers comes from what the workspace has stored
+    // (Workspace.TileLayouts, read through TileArrange.TidyStep): a split dragged off even offers Even out, which evens
+    // the splits and keeps the shape; a hand-made shape whose splits are all even offers Reset to grid, which forgets
+    // it; nothing stored offers neither.
+    //
+    // A | C over B: two tiles side by side on top, one full width underneath, with the top pair split unevenly. Not the
+    // automatic shape for three windows, so it stays stored once evened.
+    static readonly TileLayout UnevenShape = TileLayout.Normal(
+        new TileBranch(Axis.Down, [
+            new TileChild(new TileBranch(Axis.Across, [new TileChild(TileLeaf.Instance, 0.3), new TileChild(TileLeaf.Instance, 0.7)]), 0.6),
+            new TileChild(TileLeaf.Instance, 0.4)]),
+        null);
 
-    // A tiled Sparrow and, when asked, one moved split on a screen.
-    static Harness TiledSparrow(bool moved)
+    // The same shape with every split even: what Even out leaves behind.
+    static readonly TileLayout EvenShape = UnevenShape.Evened();
+
+    const string Screen = "0,0,1920,1080";
+
+    // A tiled Sparrow and, when given, one screen's stored layout.
+    static Harness TiledSparrow(TileLayout? stored = null)
     {
         var harness = Harness.Build();
         Assert.True(harness.Manager.SetWorkspaceTiled(Id(harness, "Sparrow"), true).IsSuccess);
-        if (moved)
-            Assert.True(harness.Manager.SetTileSizes(Id(harness, "Sparrow"), "0,0,1920,1080", Uneven).IsSuccess);
+        if (stored is not null)
+            Assert.True(harness.Manager.SetTileLayout(Id(harness, "Sparrow"), Screen, stored).IsSuccess);
         return harness;
     }
 
+    static IReadOnlyList<ScreenTileLayout> Stored(Harness harness) =>
+        harness.Manager.State.Workspaces.Single(w => w.Name == "Sparrow").TileLayouts;
+
+    // Even out keeps the shape, so the next look at the menu offers the second step, Reset to grid.
     [Fact]
-    public void Even_out_is_offered_once_a_split_has_moved() => StaThread.Run(() =>
+    public void Menu_offers_even_out_while_a_split_is_uneven() => StaThread.Run(() =>
     {
-        var harness = TiledSparrow(moved: true);
+        var harness = TiledSparrow(UnevenShape);
         using var bar = ShowBar(harness, pro: true);
 
         var headers = Headers(bar, "Sparrow").ToList();
-
         // Directly under "Tile windows".
         Assert.Equal(headers.IndexOf("Tile windows") + 1, headers.IndexOf("Even out tiles"));
-    });
-
-    [Fact]
-    public void Even_out_is_not_offered_with_equal_tiles() => StaThread.Run(() =>
-    {
-        var harness = TiledSparrow(moved: false);
-        using var bar = ShowBar(harness, pro: true);
-
-        Assert.DoesNotContain("Even out tiles", Headers(bar, "Sparrow"));
-    });
-
-    [Fact]
-    public void Even_out_clears_the_sizes_when_clicked() => StaThread.Run(() =>
-    {
-        var harness = TiledSparrow(moved: true);
-        using var bar = ShowBar(harness, pro: true);
+        Assert.DoesNotContain("Reset to grid", headers);
 
         Click(Items(bar, "Sparrow").Single(i => i.Header?.ToString() == "Even out tiles"));
 
-        Assert.Empty(harness.Manager.State.Workspaces.Single(w => w.Name == "Sparrow").TileSizes);
+        Assert.Equal(EvenShape, Assert.Single(Stored(harness)).Layout);
+        Assert.Contains("Reset to grid", Headers(bar, "Sparrow"));
+    });
+
+    [Fact]
+    public void Menu_offers_reset_to_grid_once_even_with_a_custom_shape() => StaThread.Run(() =>
+    {
+        var harness = TiledSparrow(EvenShape);
+        using var bar = ShowBar(harness, pro: true);
+
+        var headers = Headers(bar, "Sparrow").ToList();
+        Assert.Equal(headers.IndexOf("Tile windows") + 1, headers.IndexOf("Reset to grid"));
+        Assert.DoesNotContain("Even out tiles", headers);
+
+        Click(Items(bar, "Sparrow").Single(i => i.Header?.ToString() == "Reset to grid"));
+
+        Assert.Empty(Stored(harness));
+    });
+
+    [Fact]
+    public void Menu_offers_neither_with_nothing_stored() => StaThread.Run(() =>
+    {
+        var harness = TiledSparrow();
+        using var bar = ShowBar(harness, pro: true);
+
+        var headers = Headers(bar, "Sparrow");
+        Assert.DoesNotContain("Even out tiles", headers);
+        Assert.DoesNotContain("Reset to grid", headers);
     });
 
     const string KeepSpace = "Keep the space when a window closes";
 
-    // The keep-space switch (Workspace.TileKeepsSpace): after the other tiling items, so after "Even out tiles"
-    // when that is offered and directly after "Tile windows" when it is not.
+    // The keep-space switch (Workspace.TileKeepsSpace): after the other tiling items, so after the tidy item when
+    // that is offered and directly after "Tile windows" when it is not.
     [Theory]
-    [InlineData(true, "Even out tiles")]
-    [InlineData(false, "Tile windows")]
-    public void Keep_space_is_offered_on_a_tiled_workspace_after_the_tiling_items(bool moved, string lastTilingItem) => StaThread.Run(() =>
+    [InlineData(true, false, "Even out tiles")]
+    [InlineData(false, true, "Reset to grid")]
+    [InlineData(false, false, "Tile windows")]
+    public void Keep_space_is_offered_on_a_tiled_workspace_after_the_tiling_items(bool uneven, bool even, string lastTilingItem) => StaThread.Run(() =>
     {
-        var harness = TiledSparrow(moved);
+        var harness = TiledSparrow(uneven ? UnevenShape : even ? EvenShape : null);
         using var bar = ShowBar(harness, pro: true);
 
         var headers = Headers(bar, "Sparrow").ToList();
@@ -177,7 +209,7 @@ public class FloatingBarTilingMenuTests
     [Fact]
     public void Keep_space_is_not_offered_without_Pro() => StaThread.Run(() =>
     {
-        var harness = TiledSparrow(moved: false);
+        var harness = TiledSparrow();
         using var free = ShowBar(harness, pro: false);
 
         Assert.DoesNotContain(KeepSpace, Headers(free, "Sparrow"));
@@ -186,7 +218,7 @@ public class FloatingBarTilingMenuTests
     [Fact]
     public void Keep_space_is_ticked_when_on_and_clicking_flips_it() => StaThread.Run(() =>
     {
-        var harness = TiledSparrow(moved: false);
+        var harness = TiledSparrow();
         using var bar = ShowBar(harness, pro: true);
 
         var item = Items(bar, "Sparrow").Single(i => i.Header?.ToString() == KeepSpace);

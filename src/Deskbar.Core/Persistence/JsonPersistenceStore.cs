@@ -44,19 +44,40 @@ public sealed class JsonPersistenceStore(string baseDirectory, Action<string>? t
     //
     // A hand-trimmed or very old file can lack the Workspaces key, which deserializes to null despite the type, so
     // that is passed through untouched rather than crashing the load.
+    //
+    // NOTHING HERE MAY THROW. This runs inside DurableFile.Read's parse, and a throw there reads as a corrupt file:
+    // the load falls back to state.json.previous and every change since that copy is lost, for the sake of one tiling
+    // entry. So an entry that cannot be a layout is DROPPED instead (that screen goes back to the automatic grid,
+    // which is all it costs): a null entry, null sizes, and sizes that are not a grid (IsGrid). A null TileSizes or
+    // TileLayouts list already loads as empty (ValueListConverter); the `?? []` below only keeps this method safe on
+    // its own for a workspace built in code.
     static AppState MigrateTileSizes(AppState state) =>
         state.Workspaces is null ? state : state with
         {
-            Workspaces = state.Workspaces
-                .Select(w => w.TileSizes.Count == 0 || w.TileLayouts.Count > 0
-                    ? w
-                    : w with
-                    {
-                        TileLayouts = w.TileSizes.Select(s => new ScreenTileLayout(s.Screen, TileLayout.FromGrid(s.Sizes))).ToValueList(),
-                        TileSizes = [],
-                    })
-                .ToList(),
+            Workspaces = state.Workspaces.Select(MigrateTileSizes).ToList(),
         };
+
+    static Workspace MigrateTileSizes(Workspace w)
+    {
+        var sizes = w.TileSizes ?? [];
+        var layouts = (w.TileLayouts ?? []).Where(e => e?.Layout?.Root is not null).ToValueList();
+        return w with
+        {
+            TileLayouts = layouts.Count > 0
+                ? layouts
+                : sizes.Where(s => s is not null && IsGrid(s.Sizes))
+                    .Select(s => new ScreenTileLayout(s.Screen, TileLayout.FromGrid(s.Sizes)))
+                    .ToValueList(),
+            TileSizes = [],
+        };
+    }
+
+    // Sizes TileLayout.FromGrid can read: columns, one non-null row list per column. Anything else (rows shorter or
+    // longer than the columns, a null list) is a hand edit or a bug, not a layout anyone made.
+    static bool IsGrid(TileSizes? sizes) =>
+        sizes is { Columns: not null, Rows: not null }
+        && sizes.Rows.Count == sizes.Columns.Count
+        && sizes.Rows.All(row => row is not null);
 
     // Flushed to the disk, then swapped in with the old file kept as state.json.previous (DurableFile.Write), so
     // neither a crash mid-write nor the machine restarting can leave nothing readable behind.

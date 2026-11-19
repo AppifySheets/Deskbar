@@ -716,6 +716,28 @@ public sealed class TilerResizeTests : IDisposable
         Assert.Contains("tile: Alpha sizes evened out", traced);
     }
 
+    // The other half of OnStateChanged's trace (EvenedOut): an Even out that KEEPS a hand-made shape. The layout is
+    // still stored afterwards, so "something to nothing" does not fire; "some split uneven, now every split even" does.
+    // A | C over B with the top pair split 0.3 / 0.7 and the rows 0.6 / 0.4, evened to halves everywhere: the screen is
+    // re-tiled to the evened shape, and one line says so.
+    [Fact]
+    public void Evening_out_a_hand_made_shape_keeps_it_traces_once_and_retiles()
+    {
+        new[] { 1, 2, 3 }.ToList().ForEach(n => Exists(W(n), alpha));
+        var shape = Tree(Down(C(Across(C(L, 0.3), C(L, 0.7)), 0.6), C(L, 0.4)));
+        Start(layouts: [new ScreenTileLayout(AreaKey, shape)]);
+        Assert.Equal(GridLayout.Arrange(Area, 3, Gap, shape), FramesOf([W(1), W(2), W(3)]));
+        Assert.DoesNotContain(traced, l => l.Contains("evened out"));
+
+        Assert.True(manager.EvenOutTiles(alpha.Id).IsSuccess);
+
+        var evened = shape.Evened();
+        Assert.Equal(Text(evened), Text(Stored(AreaKey)));
+        Assert.Single(traced, l => l.Contains("evened out"));
+        Assert.Contains("tile: Alpha sizes evened out", traced);
+        Assert.Equal(GridLayout.Arrange(Area, 3, Gap, evened), FramesOf([W(1), W(2), W(3)]));
+    }
+
     // --- the guards --------------------------------------------------------------------------------------
 
     [Fact]

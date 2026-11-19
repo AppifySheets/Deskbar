@@ -3,10 +3,10 @@ using Deskbar.Core.Domain;
 
 namespace Deskbar.Core.Tiling;
 
-// TileArrange on the SPLIT TREE (TileLayout), overloads beside the TileSizes methods in TileArrange.cs. The Tiler
-// still calls the TileSizes ones; a later task switches it over and deletes them. Spec:
-// docs/superpowers/specs/2026-11-19-tiling-split-tree-design.md. Every rule here is the grid's rule restated on the
-// tree, except where the spec changes it on purpose, and each of those says so.
+// TileArrange on the SPLIT TREE (TileLayout): every rule the Tiler applies to a stored layout. Spec:
+// docs/superpowers/specs/2026-11-19-tiling-split-tree-design.md. Every rule here is the old columns-of-rows grid's
+// rule restated on the tree, except where the spec changes it on purpose, and each of those says so. The grid
+// versions are gone; "the grid's" in the comments below means how the rule read on it.
 //
 // Leaves are addressed by their index in depth-first order (TileLayout's "slot order"). A window's leaf is its slot
 // in the screen's order, counted past the opening when the layout has one (LeafOf), exactly as the grid's CellOf
@@ -94,7 +94,7 @@ public static partial class TileArrange
     // That is what fixes Petre's case: in Across[Down[A, B], C], C dropped right of A is lifted (the stack becomes
     // the whole screen), and A is split, giving Down[Across[A, C], B]. The grid could only make C a new column.
     //
-    // Unchanged, as in the grid version: Middle (the swap is SettledMove's), `dragged == target`, a layout that does
+    // Unchanged, as on the old grid: Middle (the swap is SettledMove's), `dragged == target`, a layout that does
     // not hold one leaf per window, or a target not on this screen. A window dragged in from ANOTHER screen has
     // nothing to lift here; its own screen gives its leaf up as any leaver's.
     public static (IReadOnlyList<WindowHandle> Order, TileLayout Layout) Drop(

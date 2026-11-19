@@ -97,13 +97,21 @@ public sealed partial class RemoteControl
                 : Reply(manager.SetWorkspaceTiled(w.Id, tiled), () => Describe(w.Id)),
             ControlReply.Fail);
 
-    // `even` forgets a workspace's stored tile sizes. Refused like `tile` is, with the same message: it is a
-    // tiling command. On a workspace with no stored sizes, tiled or not, it succeeds and changes nothing.
-    ControlReply EvenOutRow(string workspace) =>
+    // `even` and `reset-grid` are the two steps of the row menu's tidy item (FloatingBar.Tiling.cs, TidyItem). `even`
+    // gives every stored split equal shares and keeps the shape the user made (WorkspaceManager.EvenOutTiles);
+    // `reset-grid` forgets the stored layouts, so the screens go back to the automatic grid (ResetTileGrid). The menu
+    // offers one step at a time; the pipe takes either whenever it is asked, as the menu's two items would do. Both are
+    // refused like `tile` is, with the same message: they are tiling commands. On a workspace with nothing stored,
+    // tiled or not, both succeed and change nothing.
+    ControlReply EvenOutRow(string workspace) => TilingRow(workspace, manager.EvenOutTiles);
+
+    ControlReply ResetGridRow(string workspace) => TilingRow(workspace, manager.ResetTileGrid);
+
+    ControlReply TilingRow(string workspace, Func<Guid, Result> act) =>
         WorkspaceNamed(workspace).Match(
             w => isPro?.Invoke() != true
                 ? ControlReply.Fail("Tiling needs Deskbar Pro.")
-                : Reply(manager.EvenOutTiles(w.Id), () => Describe(w.Id)),
+                : Reply(act(w.Id), () => Describe(w.Id)),
             ControlReply.Fail);
 
     // `keep-space <workspace> on|off` sets whether a closed tile's space is kept for the next window. A tiling

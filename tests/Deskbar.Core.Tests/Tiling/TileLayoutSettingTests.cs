@@ -5,9 +5,9 @@ using Deskbar.Core.Tiling;
 
 namespace Deskbar.Core.Tests.Tiling;
 
-// Stored split tree layouts: Workspace.TileLayouts, per screen, beside the old Workspace.TileSizes. A plain layout
-// (even, the automatic shape, no opening) removes its entry, Even out keeps the shape and equalises the shares,
-// Reset to grid and untiling forget every layout. Load turns an old TileSizes entry into a layout.
+// Stored split tree layouts: Workspace.TileLayouts, per screen. A plain layout (even, the automatic shape, no
+// opening) removes its entry, Even out keeps the shape and equalises the shares, Reset to grid and untiling forget
+// every layout. Load turns an old TileSizes entry into a layout (pinned in JsonPersistenceStoreTests).
 public sealed class TileLayoutSettingTests : IDisposable
 {
     const string Left = "0,0,1920,1080";
@@ -98,30 +98,16 @@ public sealed class TileLayoutSettingTests : IDisposable
         Assert.Equal([Right], LayoutsOf(store.Stored, a).Select(s => s.Screen));
     }
 
-    // Ruling R1: until the Tiler stops reading TileSizes, Even out still clears them too.
-    [Fact]
-    public void EvenOutTiles_still_clears_the_old_sizes()
-    {
-        var (manager, a) = Started();
-        manager.SetTileSizes(a, Left, new TileSizes([0.3, 0.7], [[1.0], [0.25, 0.75]]));
-
-        Assert.True(manager.EvenOutTiles(a).IsSuccess);
-
-        Assert.Empty(store.Stored.Workspaces.Single().TileSizes);
-    }
-
     [Fact]
     public void ResetTileGrid_forgets_every_layout()
     {
         var (manager, a) = Started();
         manager.SetTileLayout(a, Left, UnevenAutomatic);
         manager.SetTileLayout(a, Right, UnevenCustom);
-        manager.SetTileSizes(a, Left, new TileSizes([0.3, 0.7], [[1.0], [0.25, 0.75]]));
 
         Assert.True(manager.ResetTileGrid(a).IsSuccess);
 
         Assert.Empty(LayoutsOf(store.Stored, a));
-        Assert.Empty(store.Stored.Workspaces.Single().TileSizes);
     }
 
     [Fact]
@@ -153,7 +139,27 @@ public sealed class TileLayoutSettingTests : IDisposable
         var (manager, _) = Started();
 
         Assert.True(manager.SetTileLayout(Guid.NewGuid(), Left, UnevenCustom).IsFailure);
+        Assert.True(manager.EvenOutTiles(Guid.NewGuid()).IsFailure);
         Assert.True(manager.ResetTileGrid(Guid.NewGuid()).IsFailure);
+    }
+
+    // Workspace is a record, so its equality must see the layouts by contents, not by list or tree instance (ported
+    // from the TileSizes setting tests): the Tiler's state key and the bar's rebuild both compare workspaces.
+    [Fact]
+    public void Workspaces_compare_by_their_layouts()
+    {
+        var bare = new Workspace(Guid.NewGuid(), "W", null);
+        var one = bare with { TileLayouts = [new ScreenTileLayout(Left, UnevenCustom)] };
+        var rebuilt = TileLayout.Normal(
+            new TileBranch(Axis.Across, [new TileChild(new TileBranch(Axis.Down, [new TileChild(Leaf, 0.5), new TileChild(Leaf, 0.5)]), 0.7), new TileChild(Leaf, 0.3)]),
+            null);
+        var same = bare with { TileLayouts = new[] { new ScreenTileLayout(Left, rebuilt) }.ToValueList() };
+        var other = bare with { TileLayouts = [new ScreenTileLayout(Left, UnevenAutomatic)] };
+
+        Assert.Equal(one, same);
+        Assert.Equal(one.GetHashCode(), same.GetHashCode());
+        Assert.NotEqual(one, other);
+        Assert.NotEqual(one, bare);
     }
 
     // A layout survives state.json, tree, shares and opening, and Workspace equality sees it by contents.

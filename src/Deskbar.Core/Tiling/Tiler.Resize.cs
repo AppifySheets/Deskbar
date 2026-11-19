@@ -19,7 +19,7 @@ namespace Deskbar.Core.Tiling;
 // MovedASplit only while TilingGate acts, the window is on the board and no bar drop is pending). Storing a layout
 // goes through StoreLayout, which calls WorkspaceManager.SetTileLayout (that pulses StateChanged) and then takes the
 // new layouts into the Tiler's StateKey as already seen. The layouts are in the key so that "Even out tiles",
-// untile and the pipe's `even` re-tile; the Tiler's own store must not, because the re-tile it would cause is a full
+// "Reset to grid", untile and the pipe's `even` and `reset-grid` re-tile; the Tiler's own store must not, because the re-tile it would cause is a full
 // evaluate (WorkspaceOf, a COM call, for every known window) that places nothing (final review, item 2).
 //
 // "Sizes" in the comments and the trace below is the stored layout: the word predates the tree, and the trace keeps
@@ -114,8 +114,9 @@ public sealed partial class Tiler
     // A REFIT NEVER REMOVES AN ENTRY (final review, item 1). A layout that fits to a plain one (a screen down to one
     // window, the most common case being two tiles and one minimized or closed) is laid out but not stored, because
     // SetTileLayout removes the entry for a plain layout and the user's split would be gone when the second window
-    // came back. Petre: "keep my sizes". The entry keeps its last real shape, and only "Even out tiles", untile,
-    // deleting the workspace or a hand drag back to exactly equal (MovedASplit) ever remove it.
+    // came back. Petre: "keep my sizes". The entry keeps its last real shape, and only "Reset to grid", "Even out tiles"
+    // on the automatic shape (evened, it is plain), untile, deleting the workspace or a hand drag back to exactly equal
+    // (MovedASplit) ever remove it.
     //
     // A fit that is NOT plain is stored, stored layout or not. With nothing stored and two windows gone at once the
     // fit drops the last leaves of the automatic layout (TileArrange.Refit), which is a custom shape (four down to

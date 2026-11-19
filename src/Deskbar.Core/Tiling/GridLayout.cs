@@ -3,41 +3,23 @@ using Deskbar.Core.Domain;
 
 namespace Deskbar.Core.Tiling;
 
-// The arithmetic of the tiling grid: where each of n windows goes inside one screen's work area.
-// Pure geometry in physical pixels (Right and Bottom exclusive, like WindowRect everywhere), so it
-// is testable without Windows. Later tasks call Arrange once per screen and then hand the slots
-// out to windows; the SLOT ORDER is what they rely on: column by column, top to bottom inside a
-// column.
+// The arithmetic of the tiling layout: where each of n windows goes inside one screen's work area,
+// given the screen's split tree (TileLayout). Pure geometry in physical pixels (Right and Bottom
+// exclusive, like WindowRect everywhere), so it is testable without Windows. The Tiler calls Arrange
+// once per screen and then hands the slots out to windows; the SLOT ORDER is what it relies on: the
+// leaves depth-first, which for the automatic grid is column by column, top to bottom inside a column.
 //
-// The grid rule (from the tiling spec):
+// The automatic grid's rule (from the tiling spec), what TileLayout.Automatic builds from Shape:
 //   columns = ceil(sqrt(n)); column i of the remaining takes floor(remaining windows / remaining
 //   columns), so the later columns are the fuller ones (3 windows: 1 + 2, 5 windows: 1 + 2 + 2).
 //   Columns are equal width and rows equal height; integer remainders go to the last column and
 //   the last row, so the grid always reaches the far edge of the area.
 public static class GridLayout
 {
-    // Equal columns and rows: the grid as it was before sizes existed.
+    // The automatic layout for `count` windows (TileLayout.Automatic: equal columns and rows in GridLayout.Shape), what
+    // a screen with nothing stored is laid out as. No windows, no tiles.
     public static IReadOnlyList<WindowRect> Arrange(WindowRect area, int count, int gap) =>
-        Arrange(area, count, gap, TileSizes.Equal(Shape(count)));
-
-    // The grid with the column and row fractions the user has dragged (see TileSizes). With even
-    // sizes the result is identical to the equal grid. Integer remainders still go to the last
-    // column and last row, so the grid always reaches the far edge of the area.
-    //
-    // Sizes with an OPENING for this many windows (TileSizes.Opening) lay out one cell more and leave the opening's
-    // cell out, so the windows keep their slots in order around it.
-    public static IReadOnlyList<WindowRect> Arrange(WindowRect area, int count, int gap, TileSizes sizes) =>
-        sizes.HasOpeningFor(count)
-            ? Cells(area, count + 1, gap, sizes).Where((_, slot) => slot != sizes.Opening).ToList()
-            : Cells(area, count, gap, sizes);
-
-    // Where a screen's opening is, when its sizes have one for `count` windows.
-    public static Maybe<WindowRect> OpeningOf(WindowRect area, int count, int gap, TileSizes sizes) =>
-        sizes.HasOpeningFor(count) && sizes.Opening is { } open
-            ? Cells(area, count + 1, gap, sizes)[open]
-            : Maybe<WindowRect>.None;
-
-    // ---- the split tree (TileLayout), beside the TileSizes versions above until the Tiler is switched over ----
+        count <= 0 ? [] : Arrange(area, count, gap, TileLayout.Automatic(count));
 
     // The tree's cells for `count` windows: `Count - 1` rects with the opening left out when the layout has an
     // opening for this many windows, otherwise every leaf. Callers pass a layout whose Count matches.
@@ -52,9 +34,9 @@ public static class GridLayout
             ? CellsOf(area, gap, layout)[open]
             : Maybe<WindowRect>.None;
 
-    // Every leaf's rect in slot order, the opening included. Same steps as Cells, in the same order, so a migrated
-    // grid is pixel-identical: shrink by the outer gap, divide each split's span with Edges, then inset each leaf
-    // on every edge that is not on the inner area's border.
+    // Every leaf's rect in slot order, the opening included. The same steps the columns-of-rows grid took, in the same
+    // order, so a migrated grid is pixel-identical: shrink by the outer gap, divide each split's span with Edges, then
+    // inset each leaf on every edge that is not on the inner area's border.
     public static IReadOnlyList<WindowRect> CellsOf(WindowRect area, int gap, TileLayout layout)
     {
         var inner = InnerArea(area, gap);
@@ -85,30 +67,6 @@ public static class GridLayout
             .ToList();
     }
 
-    // Every cell of the grid, `count` of them, whether a window holds it or not.
-    static IReadOnlyList<WindowRect> Cells(WindowRect area, int count, int gap, TileSizes sizes)
-    {
-        if (count <= 0)
-            return [];
-
-        // The gap runs around the outside as well as between tiles, so shrink the area first.
-        var inner = InnerArea(area, gap);
-        // The sizes' own shape when they describe this many windows: a drop into a tile's edge zone can make any
-        // shape (TileArrange), and the sizes carry it. Otherwise the automatic one, as always.
-        var shape = sizes.Shape.Sum() == count ? sizes.Shape : Shape(count);
-        var xs = Edges(inner.Width, sizes.Columns);
-
-        return shape
-            .SelectMany((rows, column) =>
-            {
-                var ys = Edges(inner.Height, sizes.Rows[column]);
-                return Enumerable.Range(0, rows).Select(row => Inset(
-                    new WindowRect(inner.Left + xs[column], inner.Top + ys[row], inner.Left + xs[column + 1], inner.Top + ys[row + 1]),
-                    gap, hasLeft: column > 0, hasRight: column < shape.Count - 1, hasTop: row > 0, hasBottom: row < rows - 1));
-            })
-            .ToList();
-    }
-
     // How many tiles each column holds for n windows: columns = ceil(sqrt(n)), filled left to
     // right from what is still unplaced, so the later columns are the fuller ones.
     public static IReadOnlyList<int> Shape(int count)
@@ -127,13 +85,6 @@ public static class GridLayout
                     return (state.Remaining - take, state.Sizes);
                 })
             .Sizes;
-    }
-
-    // The (column, row) a slot sits in, given the shape. Slots run column by column, top to bottom.
-    public static (int Column, int Row) CellOf(int slot, IReadOnlyList<int> shape)
-    {
-        var column = Enumerable.Range(0, shape.Count).First(c => slot < shape.Take(c + 1).Sum());
-        return (column, slot - shape.Take(column).Sum());
     }
 
     // The n+1 boundaries (offsets from the start of the span) of n entries with the given fractions.

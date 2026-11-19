@@ -3,51 +3,17 @@ using Deskbar.Core.Domain;
 
 namespace Deskbar.Core.Tiling;
 
-// Moves a split of the tiling grid when the user drags a tile's edge. Petre: "i want to be able
-// to resize tiles by dragging the separation". Pure arithmetic on TileSizes, no Windows.
+// Moves a split of the tiling layout when the user drags a tile's edge. Petre: "i want to be able
+// to resize tiles by dragging the separation". Pure arithmetic on the split tree (TileLayout), no Windows.
 //
-// The edge a tile's neighbour shares is a SPLIT: dragging the right edge of column 0 and the left
-// edge of column 1 move the same split. Edges on the outside of the grid have no split; a drag of
-// one alone returns None and the caller snaps the window back.
+// The edge a tile's neighbour shares is a SPLIT: dragging the right edge of the left tile and the left
+// edge of the right one move the same split. Edges on the outside of the layout have no split; a drag of
+// one alone returns None and the caller snaps the window back (or opens a space, TileArrange.Open).
 public static class SplitMove
 {
-    // No column or row may be narrower than this share of the work area's inner span. On the split tree: no child
-    // narrower than this share of its own split. TileArrange.Returned clamps a returning window's share to it too.
+    // No child of a split may be narrower than this share of that split's own span. TileArrange.Returned clamps a
+    // returning window's share to it too.
     internal const double MinShare = 0.1;
-
-    // The new sizes after `cell` (column, row) was dragged by `moved` and settled at `frame`, or
-    // None when no moved edge faces a split. Moved outer edges alongside an inner one are ignored.
-    // A corner moves the column split and that column's row split.
-    public static Maybe<TileSizes> Apply(
-        TileSizes sizes, IReadOnlyList<int> shape, WindowRect area, int gap,
-        (int Column, int Row) cell, Edges moved, WindowRect frame)
-    {
-        // Same shrink and gap split as GridLayout.Arrange (shared helpers): the gap runs around the outside too.
-        var inner = GridLayout.InnerArea(area, gap);
-        // A shared edge is split in two: the tile on the near side keeps gap/2 of it and the far side
-        // gap - gap/2. The split sits in the middle of the gap, so from a tile's released edge it is
-        // `far` further on (right/bottom edge) or `near` back (left/top edge). Laying the grid out again
-        // from the new fractions then leaves exactly `gap` between the two tiles.
-        var (near, far) = GridLayout.HalfGaps(gap);
-
-        // (index of the split between entries i and i+1, its position in pixels), when the edge is inner.
-        var column = moved.HasFlag(Edges.Right) && cell.Column < shape.Count - 1 ? Maybe.From((Index: cell.Column, Position: frame.Right + far))
-            : moved.HasFlag(Edges.Left) && cell.Column > 0 ? Maybe.From((Index: cell.Column - 1, Position: frame.Left - near))
-            : Maybe<(int Index, int Position)>.None;
-        var row = moved.HasFlag(Edges.Bottom) && cell.Row < shape[cell.Column] - 1 ? Maybe.From((Index: cell.Row, Position: frame.Bottom + far))
-            : moved.HasFlag(Edges.Top) && cell.Row > 0 ? Maybe.From((Index: cell.Row - 1, Position: frame.Top - near))
-            : Maybe<(int Index, int Position)>.None;
-
-        return column.HasNoValue && row.HasNoValue
-            ? Maybe<TileSizes>.None
-            : new TileSizes(
-                column.Match(c => Split(sizes.Columns, c.Index, (c.Position - inner.Left) / (double)inner.Width), () => sizes.Columns),
-                sizes.Rows.Select((rows, i) => i == cell.Column
-                    ? row.Match(r => Split(rows, r.Index, (r.Position - inner.Top) / (double)inner.Height), () => rows)
-                    : rows).ToList());
-    }
-
-    // ---- the split tree (TileLayout), beside the TileSizes version above until the Tiler is switched over ----
 
     // The new layout after leaf `leaf` was dragged by `moved` and settled at `frame`, or None when no moved edge
     // belongs to a split (spec, "Dragging a separation"). Per axis, the moved edge's split is found by walking up from
@@ -55,9 +21,9 @@ public static class SplitMove
     // (TileLayout.SplitBeside). In Down[Across[A, C], B], A's bottom edge is therefore the ROOT's boundary between
     // the top pair and B, and C's bottom moves with it: on screen they are one line, so they are one split.
     //
-    // The boundary goes to the released edge plus `far` (right, bottom) or minus `near` (left, top), as in the grid
-    // version, as a fraction of THAT split's rect, laid out with the same Edges arithmetic the layout uses
-    // (GridLayout.ChildRects). Only the two children either side of it change, and neither goes under MinShare of
+    // The boundary goes to the released edge plus `far` (right, bottom) or minus `near` (left, top), so laying the
+    // layout out again leaves exactly `gap` between the two tiles (GridLayout.HalfGaps). It is stored as a fraction
+    // of THAT split's rect, laid out with the same Edges arithmetic the layout uses (GridLayout.ChildRects). Only the two children either side of it change, and neither goes under MinShare of
     // that split. A corner moves one split per axis; the two cannot disturb each other, because moving an Across
     // boundary never changes any split's height and moving a Down boundary never changes any width. A moved outer
     // edge alongside an inner one is ignored. The opening, if any, is untouched. A leaf the layout does not have is a
@@ -84,7 +50,7 @@ public static class SplitMove
                 return (i, before ? path[i].Child - 1 : path[i].Child, (released - start) / (double)Math.Max(1, span));
             });
 
-        // As in the grid version: the far edge wins when both edges of an axis are flagged and both are inner.
+        // The far edge wins when both edges of an axis are flagged and both are inner.
         var across = moved.HasFlag(Edges.Right) && Boundary(TileArrange.Zone.Right, frame.Right + far) is { HasValue: true } right ? right
             : moved.HasFlag(Edges.Left) ? Boundary(TileArrange.Zone.Left, frame.Left - near)
             : Maybe<(int Step, int Index, double Position)>.None;
@@ -120,8 +86,7 @@ public static class SplitMove
         };
 
     // Puts the boundary between entries `index` and `index + 1` at `position` (a fraction of the
-    // span the entries divide, from its start: the inner area's for the grid, the split's own for the
-    // tree). Only those two entries change; they keep their combined share and neither goes below MinShare.
+    // span the entries divide, from its start: the split's own). Only those two entries change; they keep their combined share and neither goes below MinShare.
     static IReadOnlyList<double> Split(IReadOnlyList<double> fractions, int index, double position)
     {
         var before = fractions.Take(index).Sum();

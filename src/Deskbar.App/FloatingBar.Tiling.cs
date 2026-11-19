@@ -1,6 +1,9 @@
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
+using CSharpFunctionalExtensions;
+using Deskbar.Core.Domain;
+using Deskbar.Core.Tiling;
 
 namespace Deskbar.App;
 
@@ -56,16 +59,10 @@ public partial class FloatingBar
             tile.Click += (_, _) => Report(manager.SetWorkspaceTiled(workspaceId, !TiledNow()));
             menu.Items.Add(tile);
 
-            // "Even out tiles", directly under "Tile windows", only once there is something to even out: the
-            // workspace is tiled AND a split was dragged (any stored entry is non-equal, because SetTileSizes
-            // never stores equal sizes). Petre: "keep my sizes", so this is the one way back to equal columns
-            // and rows; the Tiler re-tiles by itself when the stored sizes change, so the click only clears them.
-            if (TiledNow() && manager.State.Workspaces.FirstOrDefault(w => w.Id == workspaceId) is { } stored && HasStoredTiles(stored))
-            {
-                var even = new MenuItem { Header = "Even out tiles", Icon = MenuGlyph("⊟") };
-                even.Click += (_, _) => Report(manager.EvenOutTiles(workspaceId));
-                menu.Items.Add(even);
-            }
+            // The tidy item, "Even out tiles" or "Reset to grid", directly under "Tile windows" and only while the
+            // workspace is tiled (TidyItem says which, and when there is neither).
+            if (TiledNow() && manager.State.Workspaces.FirstOrDefault(w => w.Id == workspaceId) is { } stored)
+                TidyItem(stored).Tap(item => menu.Items.Add(item));
 
             // The keep-space switch, last of the tiling items and only while the workspace is tiled (it means
             // nothing otherwise). Petre: a closed window's space can stay open for the next one. Ticked from
@@ -119,7 +116,8 @@ public partial class FloatingBar
         // Worked out again as it opens, as Search's tip is: Pro can change (a licence refresh, a trial ending)
         // without anything pulsing the state, so a tip painted at the last rebuild could name the wrong tier.
         button.ToolTipOpening += (_, _) => button.ToolTip = TileTip();
-        // Right-click: "Even out tiles", the row menu's item, for the workspace you are on. Filled as it opens,
+        // Right-click: the row menu's tidy item ("Even out tiles" or "Reset to grid") and the keep-space switch, for
+        // the workspace you are on. Filled as it opens,
         // from the state as it is then; with nothing to offer no menu opens at all, rather than an empty one.
         button.ContextMenu = new ContextMenu();
         button.ContextMenuOpening += (_, e) =>
@@ -143,26 +141,46 @@ public partial class FloatingBar
         return keep;
     }
 
-    // Something is stored to even out: a split tree layout (Workspace.TileLayouts, what the Tiler stores since the
-    // split tree) or an old TileSizes entry (empty after any load). Interim for the split tree plan: task 7 replaces
-    // both menus' test with TileArrange.TidyStep, which also offers "Reset to grid".
-    static bool HasStoredTiles(Deskbar.Core.Domain.Workspace workspace) => workspace.TileLayouts.Count + workspace.TileSizes.Count > 0;
+    // THE TIDY ITEM, shared by the row menu and the tile button's menu: one item, in two steps (spec
+    // docs/superpowers/specs/2026-11-19-tiling-split-tree-design.md, "Even out tiles"). Petre picked "Even, then
+    // reset" over "even only" and over the item as it was, which forgot every stored size in one click:
+    //
+    //   a split is uneven       "Even out tiles": every split equal, the shape you made kept (EvenOutTiles). The
+    //                           Tiler re-tiles by itself when the stored layouts change, so the click only stores.
+    //   all even, a hand-made   "Reset to grid": the stored layouts forgotten, so the screens go back to the
+    //   shape still stored      automatic grid (ResetTileGrid). Since Even out keeps the shape, this is now the one
+    //                           way back to the grid short of untiling.
+    //   nothing stored          nothing: the screens already are the automatic grid, evenly split.
+    //
+    // TileArrange.TidyStep decides, from the workspace's stored layouts (Workspace.TileLayouts) as they are when the
+    // menu is filled, and the click does what the label said. Same glyph for both: it is one item that changes its
+    // words. An even automatic layout is never stored (TileArrange.IsPlain), so "all even and something stored" really
+    // does mean a shape the user made.
+    Maybe<MenuItem> TidyItem(Workspace workspace) =>
+        TileArrange.TidyStep(workspace.TileLayouts.Select(l => l.Layout)) switch
+        {
+            TileArrange.TileTidy.EvenOut => TidyMenuItem("Even out tiles", () => manager.EvenOutTiles(workspace.Id)),
+            TileArrange.TileTidy.ResetGrid => TidyMenuItem("Reset to grid", () => manager.ResetTileGrid(workspace.Id)),
+            _ => Maybe<MenuItem>.None,
+        };
 
-    // The button's right-click menu, on the same terms as the row menu: Pro and the workspace tiled. "Even out
-    // tiles" only once a split was dragged (an equal layout stores nothing, so there is nothing to even out until
-    // then); the keep-space switch always, so a tiled workspace never opens an empty menu.
+    MenuItem TidyMenuItem(string header, Func<Result> act)
+    {
+        var item = new MenuItem { Header = header, Icon = MenuGlyph("⊟") };
+        item.Click += (_, _) => Report(act());
+        return item;
+    }
+
+    // The button's right-click menu, on the same terms as the row menu: Pro and the workspace tiled. The tidy item
+    // first when there is one (TidyItem), then the keep-space switch always, so a tiled workspace never opens an
+    // empty menu.
     internal void FillTileMenu(ContextMenu menu)
     {
         menu.Items.Clear();
         if (tileTarget is not { } id || !IsPro()) return;
         var current = manager.State.Workspaces.FirstOrDefault(w => w.Id == id);
         if (current is not { Tiled: true }) return;
-        if (HasStoredTiles(current))
-        {
-            var even = new MenuItem { Header = "Even out tiles", Icon = MenuGlyph("⊟") };
-            even.Click += (_, _) => Report(manager.EvenOutTiles(id));
-            menu.Items.Add(even);
-        }
+        TidyItem(current).Tap(item => menu.Items.Add(item));
         menu.Items.Add(KeepSpaceItem(id));
     }
 
@@ -189,7 +207,7 @@ public partial class FloatingBar
 
     // Called by every rebuild with the workspace you are on (Rebuild, beside liveListTarget), so the buttons follow
     // a switch, the row menu and `deskbar.cmd tile` alike: all of them pulse the state.
-    void UpdateTileButtons(Core.Domain.Workspace? current)
+    void UpdateTileButtons(Workspace? current)
     {
         tileTarget = current?.Id;
         var now = (Shown: current is not null, Tiled: current?.Tiled == true, Name: current?.Name ?? "");

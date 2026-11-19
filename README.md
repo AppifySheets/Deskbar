@@ -293,10 +293,17 @@ flashing for you, so folding never hides a message. Clicking the name still swit
 window dropped on it still moves there. The workspace you are on always shows its icons, folded or
 not; leave it and it folds again.
 
-**Tile windows** (Deskbar Pro) lays the workspace's windows out in a grid on each screen while you
-are on it. Turn it on with the tile button at the top of the bar, beside Search, or from the row's
-menu; the gap between tiles is set on Manage. Drag a separation between two tiles to resize them,
-and **Even out tiles** puts the sizes back.
+**Tile windows** (Deskbar Pro) lays the workspace's windows out on each screen while you are on it,
+starting from a grid. Turn it on with the tile button at the top of the bar, beside Search, or from
+the row's menu; the gap between tiles is set on Manage. Drop a tile on the edge of another to put it
+above, below or beside that one, which takes half of its room and leaves the rest alone, so two
+tiles can sit side by side over a third that spans the screen. Drop it close to the screen's own
+edge and it gets that whole side. Dropping on the middle of a tile swaps the two. Drag a separation
+between two tiles to resize them. The layout you make is kept, across restarts too.
+
+To tidy up, the row's menu and the tile button's right-click menu offer **Even out tiles** while a
+split is off centre: every split goes back to equal and your shape stays. After that the item reads
+**Reset to grid**, which forgets the shape and goes back to the automatic grid.
 
 **Colour.** Nine swatches sit in one strip inside the menu, with the current choice ringed. Below
 them, **Custom…** opens Windows' own colour dialog starting on the row's current colour;
