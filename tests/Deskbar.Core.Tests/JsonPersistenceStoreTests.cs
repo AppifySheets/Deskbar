@@ -1,4 +1,5 @@
 using CSharpFunctionalExtensions;
+using System.Text.Json.Nodes;
 using Deskbar.Core.Domain;
 using Deskbar.Core.Persistence;
 using Deskbar.Core.Rules;
@@ -586,6 +587,9 @@ public sealed class JsonPersistenceStoreTests : IDisposable
     [InlineData("""{"Columns":[0.5,0.5],"Rows":[[1.0],null]}""")]            // a null row list
     [InlineData("""{"Columns":null,"Rows":[[1.0]]}""")]                      // no columns
     [InlineData("""{"Columns":[1.0],"Rows":null}""")]                        // no rows
+    [InlineData("""{"Columns":[],"Rows":[]}""")]                             // an empty shape
+    [InlineData("""{"Columns":[1.0],"Rows":[[]]}""")]                        // a column with no rows
+    [InlineData("""{"Columns":[0.5,0.5],"Rows":[[1.0],[]]}""")]              // one of the columns with no rows
     [InlineData("null")]                                                     // no sizes at all
     public void A_malformed_old_sizes_entry_is_dropped_and_the_rest_loads(string sizes)
     {
@@ -619,5 +623,67 @@ public sealed class JsonPersistenceStoreTests : IDisposable
 
         Assert.True(loaded.IsSuccess);
         Assert.Empty(loaded.Value.Workspaces.Single().TileLayouts);
+    }
+
+    // A tree entry that cannot be read is DROPPED on its own (whole-branch review, item 4). TileNode's discriminator is
+    // "kind", and a missing or unknown one made the whole Deserialize throw, which DurableFile reads as a corrupt file:
+    // it moved state.json aside and loaded state.json.previous, losing every other change since for one tiling entry.
+    // A tree that parses but is no layout (shares that do not sum to 1 in a split, a share at or below 0, a split with
+    // no children) is dropped too, rather than reaching the Tiler. The good entry beside it loads, every other part of
+    // the state is kept, and no fallback happens.
+    [Theory]
+    [InlineData("""{"Screen":"bad","Layout":{"Root":{"Axis":"Across","Children":[]}}}""")]                       // no kind
+    [InlineData("""{"Screen":"bad","Layout":{"Root":{"kind":"blob"}}}""")]                                         // unknown kind
+    [InlineData("""{"Screen":"bad","Layout":{"Root":{"kind":"split","Axis":"Down","Children":[{"Node":{"kind":"what"},"Share":1}]}}}""")] // a bad kind deeper down
+    [InlineData("""{"Screen":"bad","Layout":{"Root":{"kind":"split","Axis":"Across","Children":[{"Node":{"kind":"leaf"},"Share":0.5},{"Node":{"kind":"leaf"},"Share":0.4}]}}}""")] // shares sum to 0.9
+    [InlineData("""{"Screen":"bad","Layout":{"Root":{"kind":"split","Axis":"Across","Children":[{"Node":{"kind":"leaf"},"Share":-0.5},{"Node":{"kind":"leaf"},"Share":1.5}]}}}""")] // a negative share
+    [InlineData("""{"Screen":"bad","Layout":{"Root":{"kind":"split","Axis":"Across","Children":[{"Node":{"kind":"leaf"},"Share":0},{"Node":{"kind":"leaf"},"Share":1}]}}}""")] // a zero share
+    [InlineData("""{"Screen":"bad","Layout":{"Root":{"kind":"split","Axis":"Down"}}}""")]                         // no children
+    [InlineData("""{"Screen":"bad","Layout":{"Root":{"kind":"split","Axis":"Down","Children":[null]}}}""")]       // a null child
+    [InlineData("""{"Screen":"bad","Layout":{"Root":{"kind":"split","Axis":"Down","Children":[{"Share":1}]}}}""")] // a child with no node
+    public void A_tree_entry_that_cannot_be_read_is_dropped_and_the_rest_loads(string bad)
+    {
+        var good = Deskbar.Core.Tiling.TileLayout.FromGrid(OldGrid);
+        var state = SampleState();
+        var work = state.Workspaces[0] with { TileLayouts = [new ScreenTileLayout("good", good)] };
+        Assert.True(new JsonPersistenceStore(dir).Save(state with { Workspaces = [work, state.Workspaces[1]] }).IsSuccess);
+
+        // The bad entry goes in by hand, first, before the good one.
+        var file = JsonNode.Parse(File.ReadAllText(StateFile))!;
+        file["Workspaces"]![0]!["TileLayouts"]!.AsArray().Insert(0, JsonNode.Parse(bad));
+        File.WriteAllText(StateFile, file.ToJsonString());
+        var fellBack = new List<string>();
+
+        var loaded = new JsonPersistenceStore(dir, fellBack.Add).Load();
+
+        Assert.True(loaded.IsSuccess, loaded.IsFailure ? loaded.Error : "");
+        Assert.Empty(fellBack);
+        Assert.Empty(Directory.GetFiles(dir, "*.bak"));
+        var entry = Assert.Single(loaded.Value.Workspaces[0].TileLayouts);
+        Assert.Equal("good", entry.Screen);
+        Assert.Equal(good, entry.Layout);
+        // Everything else came through.
+        Assert.Equal(["Work", "Personal"], Names(loaded.Value));
+        Assert.Equal(state.WorkspaceRules.Single().Pattern, loaded.Value.WorkspaceRules.Single().Pattern);
+        Assert.Equal(state.RenameRules, loaded.Value.RenameRules);
+        Assert.Equal(state.FloatingBar, loaded.Value.FloatingBar);
+        Assert.Equal("Win+Tab", loaded.Value.SwitcherShortcut);
+    }
+
+    // A tree stored outside normal form (a hand edit: a split of one child, a split inside one of its own axis) loads
+    // as its normal form, which lays out the same.
+    [Fact]
+    public void A_loaded_tree_is_brought_to_normal_form()
+    {
+        Directory.CreateDirectory(dir);
+        File.WriteAllText(StateFile,
+            $$$$"""{"Workspaces":[{"Id":"{{{{Guid.NewGuid()}}}}","Name":"W","DesktopId":null,"TileLayouts":[{"Screen":"s","Layout":{"Root":{"kind":"split","Axis":"Across","Children":[{"Node":{"kind":"leaf"},"Share":0.5},{"Node":{"kind":"split","Axis":"Across","Children":[{"Node":{"kind":"leaf"},"Share":0.5},{"Node":{"kind":"split","Axis":"Down","Children":[{"Node":{"kind":"leaf"},"Share":1}]},"Share":0.5}]},"Share":0.5}]}}}]}],"WorkspaceRules":[],"RenameRules":[],"Inventory":{}}""");
+
+        var layout = new JsonPersistenceStore(dir).Load().Value.Workspaces.Single().TileLayouts.Single().Layout;
+
+        Assert.Equal(Deskbar.Core.Tiling.TileLayout.Normal(
+            new Deskbar.Core.Tiling.TileBranch(Deskbar.Core.Tiling.Axis.Across,
+                new[] { .5, .25, .25 }.Select(s => new Deskbar.Core.Tiling.TileChild(Deskbar.Core.Tiling.TileLeaf.Instance, s)).ToValueList()),
+            null), layout);
     }
 }
