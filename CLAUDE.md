@@ -43,8 +43,9 @@ object.
 - **Integration tests mutate the real machine**. They create/switch/delete real virtual
   desktops, and one spawns `winver`. Run them deliberately, never as a routine check while
   Petre is working.
-- Work happens **directly in this repo**. Do not create git worktrees; a previous one split
-  session history under a second project key and hid the code from the main checkout.
+- **All work happens in a git worktree**, one per topic, never in the main checkout (Petre,
+  2026-11-19: "all work has to be done in a worktree"). Several sessions work in this repo at once,
+  and in a shared checkout one session's branch switch or uncommitted files land in another's work.
 
 ## How Petre works, and what that means for you
 
