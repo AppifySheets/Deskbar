@@ -1,6 +1,8 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using CSharpFunctionalExtensions;
+using Deskbar.Core.Domain;
+using Deskbar.Core.Tiling;
 
 namespace Deskbar.Core.Persistence;
 
@@ -26,7 +28,7 @@ public sealed class JsonPersistenceStore(string baseDirectory, Action<string>? t
     // surface (we refuse to silently overwrite user data).
     public Result<AppState> Load() =>
         DurableFile.Read(StatePath,
-            text => JsonSerializer.Deserialize<AppState>(text, Options) ?? throw new JsonException("state.json deserialized to null"),
+            text => MigrateTileSizes(JsonSerializer.Deserialize<AppState>(text, Options) ?? throw new JsonException("state.json deserialized to null")),
             AppState.Empty, trace)
         // The gate runs AFTER the read, never inside the parse: a throw there would look like a corrupt file and
         // make DurableFile move the newer file aside and fall back to .previous, which is the opposite of
@@ -34,6 +36,27 @@ public sealed class JsonPersistenceStore(string baseDirectory, Action<string>? t
         .Bind(state => runningVersion is null
             ? Result.Success(state)
             : StateVersionGate.Check(state.WrittenBy, runningVersion).Map(() => state));
+
+    // Tiling moved from columns-of-rows sizes to a split tree. A workspace written by an older build has TileSizes
+    // and no TileLayouts: each entry becomes the tree TileLayout.FromGrid builds, and TileSizes is emptied so the
+    // next save writes none (an older build handed a tree in TileSizes would crash, which is why the trees have a
+    // property of their own). A workspace that already has layouts keeps them: they are newer than any sizes.
+    //
+    // A hand-trimmed or very old file can lack the Workspaces key, which deserializes to null despite the type, so
+    // that is passed through untouched rather than crashing the load.
+    static AppState MigrateTileSizes(AppState state) =>
+        state.Workspaces is null ? state : state with
+        {
+            Workspaces = state.Workspaces
+                .Select(w => w.TileSizes.Count == 0 || w.TileLayouts.Count > 0
+                    ? w
+                    : w with
+                    {
+                        TileLayouts = w.TileSizes.Select(s => new ScreenTileLayout(s.Screen, TileLayout.FromGrid(s.Sizes))).ToValueList(),
+                        TileSizes = [],
+                    })
+                .ToList(),
+        };
 
     // Flushed to the disk, then swapped in with the old file kept as state.json.previous (DurableFile.Write), so
     // neither a crash mid-write nor the machine restarting can leave nothing readable behind.

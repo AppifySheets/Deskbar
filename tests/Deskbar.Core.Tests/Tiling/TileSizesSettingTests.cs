@@ -69,10 +69,13 @@ public sealed class TileSizesSettingTests : IDisposable
         var jsonStore = new JsonPersistenceStore(dir);
         Assert.True(jsonStore.Save(state).IsSuccess);
 
-        var loaded = SizesOf(jsonStore.Load().Value, id);
+        // Load migrates sizes into split tree layouts (JsonPersistenceStore.MigrateTileSizes), so they come back
+        // as the FromGrid tree and the old property is empty.
+        var loaded = jsonStore.Load().Value.Workspaces.Single(w => w.Id == id);
 
-        Assert.Equal(Left, loaded.Single().Screen);
-        Assert.Equal(Uneven, loaded.Single().Sizes);
+        Assert.Empty(loaded.TileSizes);
+        Assert.Equal(Left, loaded.TileLayouts.Single().Screen);
+        Assert.Equal(TileLayout.FromGrid(Uneven), loaded.TileLayouts.Single().Layout);
     }
 
     // An opening (TileSizes.Opening) is stored with the sizes, so the room kept for the next window outlives a restart.
@@ -88,7 +91,8 @@ public sealed class TileSizesSettingTests : IDisposable
         var jsonStore = new JsonPersistenceStore(dir);
         Assert.True(jsonStore.Save(state).IsSuccess);
 
-        Assert.Equal(opened, SizesOf(jsonStore.Load().Value, id).Single().Sizes);
+        // Migrated on load, the opening riding along as the layout's opening.
+        Assert.Equal(TileLayout.FromGrid(opened), jsonStore.Load().Value.Workspaces.Single(w => w.Id == id).TileLayouts.Single().Layout);
     }
 
     [Fact]

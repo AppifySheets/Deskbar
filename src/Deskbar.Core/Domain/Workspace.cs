@@ -7,6 +7,10 @@ namespace Deskbar.Core.Domain;
 // bounds as "L,T,R,B", and this layer only stores and clears by it.
 public sealed record ScreenTileSizes(string Screen, TileSizes Sizes);
 
+// One screen's stored split tree layout, keyed like ScreenTileSizes. It replaces the sizes: JsonPersistenceStore
+// migrates an old entry into one of these on load.
+public sealed record ScreenTileLayout(string Screen, TileLayout Layout);
+
 // A named group of windows, backed 1:1 by a Windows virtual desktop.
 // DesktopId is the *live* desktop's GUID -- persisted so we can re-bind to the same
 // desktop after an app restart, but desktops don't survive reboots, so reconcile
@@ -74,6 +78,13 @@ public sealed record Workspace(Guid Id, string Name, Guid? DesktopId, string? Co
     // the same sizes would be unequal. ValueList compares by contents, which keeps the record's generated
     // equality right for every property, this one and any added later.
     public ValueList<ScreenTileSizes> TileSizes { get; init; } = [];
+
+    // The split tree layouts (TileLayout), per screen, that replace TileSizes. A NEW property rather than a tree
+    // handed to ScreenTileSizes.Sizes: an older build reading a tree there would crash on load, whereas it just
+    // ignores an unknown key (design, "Storing and migration"). Load migrates TileSizes into this and leaves
+    // TileSizes empty, so a saved state only ever carries trees here. Same rules as TileSizes: a plain layout is
+    // never stored, untiling and Reset to grid clear it, and nothing else does.
+    public ValueList<ScreenTileLayout> TileLayouts { get; init; } = [];
 
     // Whether a tiled window that closes leaves its space empty for the next window to open into, instead of
     // the grid closing up around the gap. Only the Tiler acts on it, and only while the workspace is tiled.

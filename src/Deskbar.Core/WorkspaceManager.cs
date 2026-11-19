@@ -1734,7 +1734,7 @@ public sealed class WorkspaceManager(
         Workspace(id).Tap(_ => Persist(State with
         {
             Workspaces = State.Workspaces
-                .Select(w => w.Id == id ? w with { Tiled = tiled, TileSizes = tiled ? w.TileSizes : [] } : w)
+                .Select(w => w.Id == id ? w with { Tiled = tiled, TileSizes = tiled ? w.TileSizes : [], TileLayouts = tiled ? w.TileLayouts : [] } : w)
                 .ToList(),
         }));
 
@@ -1757,12 +1757,52 @@ public sealed class WorkspaceManager(
         : entries.Any(s => s.Screen == screen) ? entries.Select(s => s.Screen == screen ? new ScreenTileSizes(screen, sizes) : s).ToValueList()
         : entries.Append(new ScreenTileSizes(screen, sizes)).ToValueList();
 
-    // "Even out tiles": forgets every stored size of a workspace, so its grids go back to equal columns and
-    // rows. Succeeds, and persists, when there was nothing stored.
+    // Stores one screen's split tree layout, replacing that screen's entry in place (the list is part of the Tiler's
+    // state key, see SetTileSizes). A plain layout (TileArrange.IsPlain) REMOVES the entry: it is what a screen
+    // with no entry already gets.
+    public Result SetTileLayout(Guid id, string screen, TileLayout layout) =>
+        Workspace(id).Tap(_ => Persist(State with
+        {
+            Workspaces = State.Workspaces
+                .Select(w => w.Id == id ? w with { TileLayouts = WithLayout(w.TileLayouts, screen, layout) } : w)
+                .ToList(),
+        }));
+
+    static ValueList<ScreenTileLayout> WithLayout(ValueList<ScreenTileLayout> entries, string screen, TileLayout layout) =>
+        Tiling.TileArrange.IsPlain(layout) ? entries.Where(s => s.Screen != screen).ToValueList()
+        : entries.Any(s => s.Screen == screen) ? entries.Select(s => s.Screen == screen ? new ScreenTileLayout(screen, layout) : s).ToValueList()
+        : entries.Append(new ScreenTileLayout(screen, layout)).ToValueList();
+
+    // "Even out tiles": every stored layout keeps its shape and gets equal shares. An evened layout that is then
+    // plain (the automatic shape, no opening) loses its entry, since that is what no entry means.
+    //
+    // Until the Tiler stops reading the old sizes (they are empty after any load, but the Tiler still writes them),
+    // this also clears TileSizes, as it always did, so the Tiler's tests keep their meaning; the sizes side goes
+    // with the Tiler's switch to layouts.
     public Result EvenOutTiles(Guid id) =>
         Workspace(id).Tap(_ => Persist(State with
         {
-            Workspaces = State.Workspaces.Select(w => w.Id == id ? w with { TileSizes = [] } : w).ToList(),
+            Workspaces = State.Workspaces
+                .Select(w => w.Id == id
+                    ? w with
+                    {
+                        TileSizes = [],
+                        TileLayouts = w.TileLayouts
+                            .Select(e => e with { Layout = e.Layout.Evened() })
+                            .Where(e => !Tiling.TileArrange.IsPlain(e.Layout))
+                            .ToValueList(),
+                    }
+                    : w)
+                .ToList(),
+        }));
+
+    // "Reset to grid": forgets every stored layout (and size) of a workspace, so its screens go back to the
+    // automatic grid. Succeeds, and persists, when there was nothing stored. This is what Even out did before it
+    // learned to keep the shape.
+    public Result ResetTileGrid(Guid id) =>
+        Workspace(id).Tap(_ => Persist(State with
+        {
+            Workspaces = State.Workspaces.Select(w => w.Id == id ? w with { TileSizes = [], TileLayouts = [] } : w).ToList(),
         }));
 
     // Sets Workspace.TileKeepsSpace: whether a closed tile's space is kept for the next window. Persists like

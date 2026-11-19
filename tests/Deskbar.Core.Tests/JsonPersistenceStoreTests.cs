@@ -481,4 +481,61 @@ public sealed class JsonPersistenceStoreTests : IDisposable
         Assert.Equal(all, store.Load().Value.HiddenStripItems);
         Assert.Contains("\"Clock\"", File.ReadAllText(Path.Combine(dir, "state.json")));
     }
+
+    // A state.json an older build wrote: TileSizes holds the grid, TileLayouts has no key. Save writes it as such
+    // (migration is Load's job), so this is the same text the old build produced.
+    static readonly Deskbar.Core.Tiling.TileSizes OldGrid = new([0.3, 0.7], [[1.0], [0.25, 0.75]]);
+
+    string WriteOldState()
+    {
+        var old = new Workspace(Guid.NewGuid(), "Old", null) { TileSizes = [new ScreenTileSizes("0,0,1920,1080", OldGrid)] };
+        Assert.True(new JsonPersistenceStore(dir).Save(AppState.Empty with { Workspaces = [old] }).IsSuccess);
+        return Path.Combine(dir, "state.json");
+    }
+
+    [Fact]
+    public void Old_sizes_load_as_layouts()
+    {
+        WriteOldState();
+
+        var loaded = new JsonPersistenceStore(dir).Load().Value.Workspaces.Single();
+
+        Assert.Empty(loaded.TileSizes);
+        var entry = Assert.Single(loaded.TileLayouts);
+        Assert.Equal("0,0,1920,1080", entry.Screen);
+        Assert.Equal(Deskbar.Core.Tiling.TileLayout.FromGrid(OldGrid), entry.Layout);
+    }
+
+    // An older build reading a tree in TileSizes would crash, so a saved state never carries sizes: the trees live
+    // only in TileLayouts (design, "Storing and migration").
+    [Fact]
+    public void Saved_state_keeps_the_old_property_empty()
+    {
+        var path = WriteOldState();
+        var persistence = new JsonPersistenceStore(dir);
+
+        Assert.True(persistence.Save(persistence.Load().Value).IsSuccess);
+
+        var text = File.ReadAllText(path);
+        Assert.Contains("\"TileSizes\": []", text);
+        Assert.Contains("\"TileLayouts\"", text);
+        Assert.Contains("\"kind\"", text);
+    }
+
+    // A state that already has layouts is not migrated again: its (newer) layouts win over any stale sizes.
+    [Fact]
+    public void Existing_layouts_are_not_overwritten_by_old_sizes()
+    {
+        var layout = Deskbar.Core.Tiling.TileLayout.Automatic(2);
+        var w = new Workspace(Guid.NewGuid(), "W", null)
+        {
+            TileSizes = [new ScreenTileSizes("s", OldGrid)],
+            TileLayouts = [new ScreenTileLayout("s", layout)],
+        };
+        Assert.True(new JsonPersistenceStore(dir).Save(AppState.Empty with { Workspaces = [w] }).IsSuccess);
+
+        var loaded = new JsonPersistenceStore(dir).Load().Value.Workspaces.Single();
+
+        Assert.Equal(layout, loaded.TileLayouts.Single().Layout);
+    }
 }
