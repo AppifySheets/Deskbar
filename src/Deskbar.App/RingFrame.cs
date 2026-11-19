@@ -28,10 +28,11 @@ namespace Deskbar.App;
 // The owner (WindowRings) tells it where, in what colour and above which window, and checks it every second.
 sealed class RingFrame : Window
 {
-    // Thicker than Windows' 1 px border on purpose: this line sits on the screen's very edge, where 1 px is lost
-    // against the bezel. In DIPs, so it scales with the screen like everything else of the bar's.
-    const double Thickness = 2;
-
+    // As thick as Windows' own border on that window, in physical pixels (WindowRings reads it from
+    // DWMWA_VISIBLE_FRAME_BORDER_THICKNESS), so a maximized window's ring and a normal window's look the same. It was a
+    // fixed 2 DIP at first, 4 to 5 px at Petre's 225%, against Windows' 2 px: "tiny bit less", "with native windows
+    // resources". Converted to DIPs at the target's scale in Place, since WPF draws in DIPs, and snapped to whole
+    // pixels so 2 px stays a crisp 2 px rather than a blur across three.
     readonly Border line;
 
     public RingFrame()
@@ -52,7 +53,9 @@ sealed class RingFrame : Window
         Width = 1;
         Height = 1;
         Title = "Deskbar focus ring";
-        line = new Border { BorderThickness = new Thickness(Thickness), Background = Brushes.Transparent, IsHitTestVisible = false };
+        UseLayoutRounding = true;
+        SnapsToDevicePixels = true;
+        line = new Border { BorderThickness = new Thickness(1), Background = Brushes.Transparent, IsHitTestVisible = false, SnapsToDevicePixels = true };
         Content = line;
     }
 
@@ -81,9 +84,12 @@ sealed class RingFrame : Window
     // when the target is on a screen at another scale than the one the frame was last on (ScreenStrip.PlaceAt has the
     // story). Moving onto such a screen makes Windows rescale the frame, so the rectangle is set again if it came out
     // different.
-    public void Place(NativeMethods.RECT rect, string colour, nint target)
+    // `pixels` is the line's thickness in physical pixels, at the scale of the target's screen.
+    public void Place(NativeMethods.RECT rect, string colour, nint target, int pixels)
     {
         line.BorderBrush = BrushOf(colour);
+        var dpi = NativeMethods.GetDpiForWindow(target);
+        line.BorderThickness = new Thickness(pixels * 96.0 / (dpi == 0 ? 96 : dpi));
         var hwnd = Handle;
 
         // Into the target's band first: WPF's Topmost is the one switch between the two bands, and setting it again to

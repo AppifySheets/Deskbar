@@ -89,7 +89,7 @@ sealed class WindowRings : IDisposable
             // Windows' border shows nothing here, so it is put back first if it was ours.
             if (had is { Frame: null }) Border(window, null);
             var frame = had?.Frame ?? TakeFrame();
-            frame.Place(rect, colour, window);
+            frame.Place(rect, colour, window, BorderPixels(window));
             shown[window] = (colour, frame);
             if (had?.Frame is null || had?.Colour != colour)
                 Trace($"ring 0x{window:X}: frame {colour} {rect.Left},{rect.Top},{rect.Right},{rect.Bottom}");
@@ -179,6 +179,16 @@ sealed class WindowRings : IDisposable
             ? screen
             : null;
     }
+
+    // How thick Windows draws its own border on this window, in physical pixels: 2 on every window measured at 225%,
+    // maximized ones included (where it reports the thickness but draws nothing). 1 where Windows has no answer
+    // (Windows 10, which has no such attribute).
+    static int BorderPixels(nint window) =>
+        NativeMethods.DwmGetWindowAttribute(window, DWMWA_VISIBLE_FRAME_BORDER_THICKNESS, out var pixels, sizeof(int)) == 0 && pixels > 0
+            ? pixels
+            : 1;
+
+    const uint DWMWA_VISIBLE_FRAME_BORDER_THICKNESS = 37;
 
     static bool Same(NativeMethods.RECT a, NativeMethods.RECT b) =>
         a.Left == b.Left && a.Top == b.Top && a.Right == b.Right && a.Bottom == b.Bottom;
