@@ -165,7 +165,9 @@ public sealed class ScreenStrip : Window
         nameText = new TextBlock
         {
             Foreground = Brushes.White,
-            FontSize = 12,
+            // 10, down from 12 with the tab titles (Petre: "smaller font"); a step above the titles' 9.5 and semibold,
+            // so the workspace's name still reads as the strip's label.
+            FontSize = 10,
             FontWeight = FontWeights.SemiBold,
             VerticalAlignment = VerticalAlignment.Center,
             TextTrimming = TextTrimming.CharacterEllipsis,
