@@ -2,8 +2,8 @@ using Deskbar.Core.Control;
 
 namespace Deskbar.Core.Tests.Control;
 
-// `keep-space <workspace> on|off` on the control pipe: the twin of the row menu's "Keep the space of a closed
-// tile". It is a tiling command, so it is refused like `even` is, with the same two messages in the same order
+// `keep-space <workspace> on|off` on the control pipe: the twin of the row menu's "Keep the space when a
+// window closes". It is a tiling command, so it is refused like `even` is, with the same two messages in the same order
 // (experiment first, then Pro). Any word other than on or off matches no dispatch arm and is answered the way
 // a known verb with the wrong arguments is.
 public class RemoteControlKeepSpaceTests
