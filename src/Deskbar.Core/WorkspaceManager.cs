@@ -680,17 +680,48 @@ public sealed class WorkspaceManager(
         return true;
     }
 
+    // The asks the task list can read and dismiss.
+    public IReadOnlyCollection<Guid> AskingWorkspaces => askingWorkspaces;
+
+    // Removes a workspace's ask without arriving there. True when there was one (pulses StateChanged).
+    public bool ClearAttention(Guid workspaceId)
+    {
+        var removed = askingWorkspaces.Remove(workspaceId);
+        if (removed) stateChanged.OnNext(Unit.Default);
+        return removed;
+    }
+
+    // TASK MARKS (spec "tasks in the bar"): a due task blinks its workspace's row like an ask, and a running task's
+    // timer rides on its workspace's group for the bar to draw. Like asks they are live state stamped AFTER the build
+    // (see Asking), owned by the task service and handed over whole by SetTaskMarks. Arriving on a workspace does NOT
+    // clear a due mark here: the task service ends the timer after a dwell and calls SetTaskMarks again.
+    HashSet<Guid> dueWorkspaces = [];
+    Dictionary<Guid, Tasks.TaskTimer> runningTimers = [];
+
+    // Replaces both marks; pulses StateChanged only when their CONTENT changed (set equality, key and value equality).
+    public void SetTaskMarks(IReadOnlySet<Guid> due, IReadOnlyDictionary<Guid, Tasks.TaskTimer> running)
+    {
+        var changed = !dueWorkspaces.SetEquals(due)
+                      || runningTimers.Count != running.Count
+                      || running.Any(kv => !runningTimers.TryGetValue(kv.Key, out var mine) || mine != kv.Value);
+        if (!changed) return;
+        dueWorkspaces = [.. due];
+        runningTimers = new Dictionary<Guid, Tasks.TaskTimer>(running);
+        stateChanged.OnNext(Unit.Default);
+    }
+
     // The overview as built, with the two facts above stamped on: the asking workspaces' groups and the asking
     // windows' rows. Done after the build rather than through it, because both are about this session's live state
     // and nothing in the build needs them.
     Overview.Overview Asking(Overview.Overview built) =>
-        askingWorkspaces.Count == 0 && askingWindows.Count == 0
+        askingWorkspaces.Count == 0 && askingWindows.Count == 0 && dueWorkspaces.Count == 0 && runningTimers.Count == 0
             ? built
             : built with
             {
                 Workspaces = built.Workspaces.Select(g => g with
                 {
-                    WantsAttention = askingWorkspaces.Contains(g.Workspace.Id),
+                    WantsAttention = askingWorkspaces.Contains(g.Workspace.Id) || dueWorkspaces.Contains(g.Workspace.Id),
+                    Timer = runningTimers.TryGetValue(g.Workspace.Id, out var timer) ? timer : Maybe<Tasks.TaskTimer>.None,
                     Running = g.Running.Select(r => askingWindows.Contains(r.Window.Handle) ? r with { Asks = true } : r).ToList(),
                 }).ToList(),
             };

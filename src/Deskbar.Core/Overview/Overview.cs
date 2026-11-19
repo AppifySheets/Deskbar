@@ -80,8 +80,10 @@ public sealed record WindowRow(
 // WantsAttention: a session working in this workspace asked for the user and the user has not come here since, so
 // the row blinks (Petre: "it should alert the deskbar, which should alert me by having that bar on the deskbar
 // blink"). Set by WorkspaceManager, see Asking.
+// Timer: the task timer running on this workspace, for the bar to draw (spec "tasks in the bar"). A DUE task also
+// sets WantsAttention, so it blinks like an ask. Stamped by Asking too, from WorkspaceManager.SetTaskMarks.
 public sealed record WorkspaceGroup(Workspace Workspace, bool IsCurrent, IReadOnlyList<WindowRow> Running, IReadOnlyList<InventoryEntry> NotRunning,
-    bool WantsAttention = false);
+    bool WantsAttention = false, Maybe<Tasks.TaskTimer> Timer = default);
 
 // A desktop that is NOT a Deskbar workspace still has a name ("Desktop 1") -- its
 // windows group under that name, never under a generic "Unassigned" (Petre's ask).
