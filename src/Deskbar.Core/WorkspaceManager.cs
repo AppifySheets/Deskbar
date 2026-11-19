@@ -1731,6 +1731,14 @@ public sealed class WorkspaceManager(
             Workspaces = State.Workspaces.Select(w => w.Id == id ? w with { TileSizes = [] } : w).ToList(),
         }));
 
+    // Sets Workspace.TileKeepsSpace: whether a closed tile's space is kept for the next window. Persists like
+    // SetWorkspaceTiled does, even when the value is unchanged. Untiling does not clear it (see the property).
+    public Result SetTileKeepsSpace(Guid id, bool keep) =>
+        Workspace(id).Tap(_ => Persist(State with
+        {
+            Workspaces = State.Workspaces.Select(w => w.Id == id ? w with { TileKeepsSpace = keep } : w).ToList(),
+        }));
+
     // The gap between tiles (AppState.TileGap), 0 to 64 pixels at 100% scaling. Refused outside that range
     // rather than clamped, so a caller never believes it set something it did not. A no-op when unchanged,
     // for the reason SetCheckForUpdates gives.

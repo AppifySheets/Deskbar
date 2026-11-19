@@ -75,6 +75,15 @@ public sealed record Workspace(Guid Id, string Name, Guid? DesktopId, string? Co
     // equality right for every property, this one and any added later.
     public ValueList<ScreenTileSizes> TileSizes { get; init; } = [];
 
+    // Whether a tiled window that closes leaves its space empty for the next window to open into, instead of
+    // the grid closing up around the gap. Only the Tiler acts on it, and only while the workspace is tiled.
+    //
+    // Init-only and false by default: a state.json written before this has no key and loads with it off, with
+    // no migration, which is how tiling behaved before the switch existed. Untiling deliberately leaves it
+    // alone, so a user who tiles again finds their choice as they left it (unlike TileSizes, it is a
+    // preference, not a layout).
+    public bool TileKeepsSpace { get; init; }
+
     // The group this workspace belongs to, or null for one that stands on its own.
     //
     // App-level metadata over flat OS desktops, which is the same move this app already makes by
