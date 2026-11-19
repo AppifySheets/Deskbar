@@ -7909,6 +7909,9 @@ public partial class FloatingBar : Window
             return;
         }
         Guarded(ReadjustToDisplayLayout, "layout");
+        // ...and the screen strips follow the same settle (FloatingBar.Strips.cs, LayoutSettled). After the bar's own
+        // readjustment, and not on the re-armed early return above, which is not a settle yet.
+        layoutSettled.OnNext(System.Reactive.Unit.Default);
     }
 
     // Whether a DpiChanged that reached the window is the window's own scale changing. Petre: "showing hiding".

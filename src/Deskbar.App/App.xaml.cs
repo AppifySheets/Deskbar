@@ -48,6 +48,9 @@ public partial class App : Application
     QuickFind? quickFind;             // the search box for every window, tab and app (Win+Alt+Space by default)
     Chord boundQuickFind;             // the chord quick find's hotkey is currently registered on
     FloatingBar? floatingBar; // Task 11: created lazily on first show
+    // The window list along the top of every screen (ScreenStrips, spec 2026-11-19-screen-strips-design.md): built with
+    // the bar, null in compatibility mode, emptied for good by ExitApp before any window closes.
+    ScreenStrips? screenStrips;
     Windows.Performance.SystemStats? systemStats; // the stats counters, ONE instance shared by the bar's line and the detached window (one timer for both)
     DetachedStatsWindow? detachedStats; // the stats line detached into its own always-on-top window, created on first use
     bool detachedStatsPinned;           // its hwnd is pinned to every desktop once, after its first show (see ShowDetachedStats)
@@ -699,6 +702,8 @@ public partial class App : Application
         // Stand down so the new instance can take the mutex. Shutdown rather than Environment.Exit:
         // the ordinary exit path restores every renamed window title and disposes the tray icon,
         // and skipping it would leave the user's windows wearing names we gave them.
+        // The screen strips give their bands back first, as ExitApp has them do: the new version docks its own.
+        screenStrips?.RemoveAll();
         Shutdown();
         EndIfShutdownHangs();
     }
@@ -785,7 +790,7 @@ public partial class App : Application
     // "Save debug dump" from the tray or the bar's menu (see DebugDump): write the file, then open Explorer
     // with it selected. A failure is said out loud, because whoever clicked is waiting for a window.
     void SaveDebugDump() =>
-        DebugDump.Save(floatingBar, manager!)
+        DebugDump.Save(floatingBar, manager!, screenStrips)
             .Bind(DebugDump.Reveal)
             .TapError(error => MessageBox.Show(error, "Deskbar", MessageBoxButton.OK, MessageBoxImage.Warning));
 
@@ -1301,7 +1306,7 @@ public partial class App : Application
             ProgramStarter.Start,
             // `dump` writes the same file as the menus' "Save debug dump" but opens no window: the caller
             // reads the path from the reply. The bar is read when the command arrives, as above.
-            () => DebugDump.Save(floatingBar, manager!),
+            () => DebugDump.Save(floatingBar, manager!, screenStrips),
             // `open` starts a new window of the default browser in a background workspace (RemoteControl.Open).
             DefaultBrowser.Exe,
             // `version` reports which build answers; "packaged" comes from the Store packaging design's
@@ -1427,6 +1432,19 @@ public partial class App : Application
             // ...and the dock line's, the taskbar's pinned apps (FloatingBar.Pins.cs).
             // ...and the tab counts and sound ring's (FloatingBar.Activity.cs).
             systemStats = new Windows.Performance.SystemStats();
+            // The screen strips (ScreenStrips), built BEFORE the bar because the bar's Strips reads them, and handed
+            // the bar through the field: a strip's right-click and drop are the bar's (OpenStripMenu, DropOnStrip), and
+            // no strip is created until the first Reconcile below, by which time the bar exists. The screens are the
+            // sweep that numbers them (ScreenLayout.Screens), so a strip's Screen matches Overview.Screens exactly.
+            // Ignore and the pin are the bar's own two steps, in the bar's order (see where its hwnd is created).
+            var stripSet = new ScreenStrips(
+                wanted: () => manager.State.WindowListPlace == WindowListPlace.Screens,
+                screens: ScreenLayout.Screens,
+                create: NewScreenStrip,
+                ignore: hwnd => monitor.Ignore(hwnd),
+                pinToAllDesktops: hwnd => desktops!.Pin(new WindowHandle(hwnd))
+                    .TapError(err => ClickTrace.Write($"strip pin failed: {err}")));
+            screenStrips = stripSet;
             floatingBar = new FloatingBar(manager)
             {
                 Volume = new Windows.Audio.SystemVolume(),
@@ -1451,6 +1469,8 @@ public partial class App : Application
                 // ...and the captions' time today (FloatingBar.WorkspaceTime.cs): the Time tab's own reading
                 // of the same tracker, so the two cannot disagree.
                 TimeToday = id => timeTracker?.Time.On(id, DateOnly.FromDateTime(DateTime.Now)) ?? TimeSpan.Zero,
+                // ...and the screen strips it fills on every rebuild (FloatingBar.Strips.cs).
+                Strips = () => stripSet.Current,
             };
             // The bar's hwnd is created HERE, before it is ever shown, for two reasons that
             // both hang off the same handle:
@@ -1485,6 +1505,24 @@ public partial class App : Application
             else
                 ShowBarAndPin();
 
+            // The screen strips, now that the bar exists to fill them. Whether the bar came up shown or minimized: the
+            // strips are the window list and stay while the bar is behind its taskbar button (spec, "What it does").
+            //
+            // Three moments reconcile them: here at start; the setting changing (every way of changing it, the menu,
+            // Manage or `window-list`, lands in the state, so the state stream is the one place to follow it, and only
+            // a change of the on/off answer reconciles, not every window pulse); and the bar's settled display layout,
+            // the same 1.2 s debounce the bar acts on, so a burst of display changes is acted on once, on its last
+            // arrangement. Each reconcile that made or closed a strip asks the bar to rebuild, so a new strip gets its
+            // tabs and a closed one's windows go back to the bar's own list. Dispatcher.Invoke for the state stream
+            // as the bar's own subscription does: it runs inline on this thread and marshals from any other.
+            stripSet.Changed.Subscribe(_ => floatingBar.RequestRebuild());
+            manager.StateChanged
+                .Select(_ => manager.State.WindowListPlace == WindowListPlace.Screens)
+                .DistinctUntilChanged()
+                .Subscribe(_ => floatingBar.Dispatcher.Invoke(stripSet.Reconcile));
+            floatingBar.LayoutSettled.Subscribe(_ => stripSet.Reconcile());
+            stripSet.Reconcile();
+
             // The stats window the last session left detached comes back where it was.
             if (manager.State.DetachedStats is { Shown: true } detached) ShowDetachedStats(detached);
 
@@ -1494,6 +1532,11 @@ public partial class App : Application
             // foreground change is the fix -- see FloatingBar.ReclaimTopmost. Subscribed here
             // rather than inside the bar because the monitor is the composition root's to hand
             // out, and the bar has no business knowing what a WinEvent hook is.
+            //
+            // The screen strips join it, and FIRST, so the bar is the last window put at the top of the band: a floating
+            // bar dragged up over a strip stays above it. Never gated on the bar being visible, which the bar's own
+            // ReclaimTopmost is: the strips stay while the bar is minimized and must keep their place then too.
+            monitor.ForegroundChanged.Subscribe(_ => floatingBar.ReclaimStripTopmost());
             monitor.ForegroundChanged.Subscribe(_ => floatingBar.ReclaimTopmost());
 
             // The same stream tells the bar's Start and tray buttons which shell flyout is open, so a click
@@ -1527,6 +1570,10 @@ public partial class App : Application
             var topmost = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromSeconds(1) };
             topmost.Tick += (_, _) =>
             {
+                // The screen strips on the same beat, first for the reason given at the foreground subscription: each
+                // strip's guard (the shell can stop holding a strip without a word, as for the docked bar), its topmost
+                // re-assertion, and the pin for a strip first shown after its dock. Not gated on the bar's visibility.
+                stripSet.Tick();
                 floatingBar.ReclaimTopmost();
                 // Docked, the strip is checked on the same beat: the shell can stop holding it without a word
                 // (see FloatingBar.KeepDockedStrip). One GetMonitorInfo a second, and nothing more unless lost.
@@ -1967,6 +2014,23 @@ public partial class App : Application
                 "Deskbar", MessageBoxButton.OK, MessageBoxImage.Warning));
     }
 
+    // --- the screen strips -------------------------------------------------------------------------------
+    //
+    // One strip for one screen, as the strip set creates it (ScreenStrips' `create`). Its right-click opens the bar's
+    // own menu and an icon dropped on it lands on its screen (FloatingBar.Strips.cs); both are init-only on the strip,
+    // so they are wired here, at birth. The drop names the strip itself, which a lambda in the strip's own initializer
+    // cannot capture, hence the declaration first. Presses need nothing here: the bar wires them on its first fill.
+    ScreenStrip NewScreenStrip(MonitorBounds screen)
+    {
+        ScreenStrip? strip = null;
+        strip = new ScreenStrip(screen)
+        {
+            MenuRequested = () => floatingBar?.OpenStripMenu(),
+            Dropped = window => floatingBar?.DropOnStrip(strip!, window),
+        };
+        return strip;
+    }
+
     // --- the detached stats window ----------------------------------------------------------------------
     //
     // The bar's stats line, pulled out into a small always-on-top window (DetachedStatsWindow). App owns it for the
@@ -2159,6 +2223,10 @@ public partial class App : Application
 
         // First, so no remote command can start moving windows while the rest is being taken down.
         controlServer?.Dispose();
+        // Then the screen strips, before any window closes: each gives its band back to the shell (Undock) and then
+        // closes, so no screen keeps a reserved band with nothing in it, and for good, so a settle or a state pulse
+        // landing during the rest of the shutdown cannot dock a new one. Restart comes through here too.
+        screenStrips?.RemoveAll();
         // Then tiling, before anything else is torn down, so no re-tile runs against a half-closed app. The Tiler
         // first (it unsubscribes and narrows the hook to nothing), then the surface (which removes whatever hook
         // is left and stops its timers). Nulled so a licence refresh landing after this finds no Tiler to poke.

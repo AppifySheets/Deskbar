@@ -191,6 +191,15 @@ public sealed class ScreenLayout : IScreenLayout
         return settled();
     }
 
+    // Every connected screen's rectangle (rcMonitor, physical pixels), in display-number order, for the screen strips
+    // (Deskbar.App's ScreenStrips): one strip per value. From MonitorNumbers on purpose, the sweep that fills
+    // ScreenFacts.MonitorPlacement and so Overview.Screens, because the bar finds a strip's screen number by comparing
+    // the strip's rectangle with those values (==). A second enumeration of its own could disagree, by a screen it
+    // reads and this one skips (a device name with no number), and a strip whose screen has no number lists nothing
+    // and takes no drop. Cheap enough for the 1 s timer: user32 calls only, no window walk.
+    public static IReadOnlyList<MonitorBounds> Screens() =>
+        MonitorNumbers().Placement.OrderBy(p => p.Key).Select(p => p.Value).ToList();
+
     // HMONITOR -> the number Windows shows under Display Settings > Identify.
     //
     // Read out of szDevice ("\\.\DISPLAY1", "\\.\DISPLAY2", ...) rather than taken from the
