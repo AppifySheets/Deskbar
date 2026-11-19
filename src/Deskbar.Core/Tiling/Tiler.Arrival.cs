@@ -20,7 +20,8 @@ namespace Deskbar.Core.Tiling;
 // a new window usually activates itself BEFORE it joins the board, and once it has joined it is the last-used tile
 // like any other. Activations Windows hands out by itself do not count: when a tile closes or is minimized,
 // Windows activates whatever is next in z-order, which can be a tile on another screen the user never touched. An
-// activation with no user input since a tile last left the grid is that hand-out (ITileSurface.LastInputTick).
+// activation whose Windows event time (WindowEvent.Time) lies within HandOutWindowMs of a tile leaving, before or
+// after it, is that hand-out.
 //
 // Which arrivals split: a window that appeared on the workspace or became tileable there (Evaluate), and one
 // brought from another workspace (OnWindowMoved). Not a window dragged by hand (the drop rules decide it), not a
@@ -31,42 +32,60 @@ public sealed partial class Tiler
     // plenty; it only has to outlast the floating windows and dialogs activated since the last tile.
     const int UsedKept = 32;
 
-    // Windows in the order they were last activated, most recent first, each with the input tick it was activated
-    // at. Read by LastUsed, written by NoteUsed and NoteLeft, and a window that disappears is taken off.
-    IReadOnlyList<(WindowHandle Window, uint Tick)> used = [];
+    // How close in time an activation and a tile leaving must be for the activation to be Windows' hand-out rather
+    // than the user's. A person cannot close a tile and then click another one within a quarter of a second, while
+    // Windows activates the next window in z-order within milliseconds of the close or minimize. Both times are
+    // Windows' own event times (WindowEvent.Time), so it does not matter how late either event reaches the Tiler,
+    // or whether the mouse kept moving in between. The value is to be checked live against the trace.
+    const uint HandOutWindowMs = 250;
 
-    // The input tick at the moment a tile last left a grid (NoteLeft). An activation at the same tick had no
-    // input since, so Windows handed it out. None until a tile first leaves.
+    // Windows in the order they were last activated, most recent first, each with the Windows event time of that
+    // activation (0 when the event did not come from a WinEvent). Read by LastUsed, written by NoteUsed and NoteLeft,
+    // and a window that disappears is taken off.
+    IReadOnlyList<(WindowHandle Window, uint Time)> used = [];
+
+    // The Windows event time of the last tile that left a grid (NoteLeft). None until a tile first leaves.
     Maybe<uint> leftAt = Maybe<uint>.None;
 
-    // A window was activated (OnWindowEvent, before RaiseTogether). It goes to the front of the list, unless there
-    // has been no input since a tile left the grid: then Windows activated it by itself after the close or minimize,
-    // and the user's choice of tile stands. Every window is recorded, tiles or not; LastUsed filters.
-    void NoteUsed(WindowHandle window)
+    // A window was activated (OnWindowEvent, before RaiseTogether). It goes to the front of the list, unless the
+    // activation is within HandOutWindowMs of a tile leaving: then Windows activated it by itself after the close or
+    // minimize, and the user's choice of tile stands. This covers an activation that FOLLOWS the leave; one that came
+    // first is dropped by NoteLeft. Every window is recorded, tiles or not; LastUsed filters.
+    void NoteUsed(WindowHandle window, uint time)
     {
-        var tick = surface.LastInputTick();
-        if (leftAt.HasValue && leftAt.Value == tick)
+        if (leftAt.TryGetValue(out var left) && Near(time, left))
         {
-            trace?.Invoke($"tile: {window.Value:X} activated with no input since a tile left, not counted as used");
+            trace?.Invoke($"tile: {window.Value:X} activated {Apart(time, left)} ms from a tile leaving, handed out by Windows, not counted as used");
             return;
         }
-        used = used.Where(u => u.Window != window).Prepend((window, tick)).Take(UsedKept).ToList();
+        used = used.Where(u => u.Window != window).Prepend((window, time)).Take(UsedKept).ToList();
     }
 
-    // A tile left a grid (NoteLeavers, Tiler.Resize.cs). The input tick now is saved, so an activation that FOLLOWS
-    // with no input in between is ignored (NoteUsed), and every activation already listed with this same tick is
-    // dropped, which covers the hand-out activation that ARRIVED BEFORE the leave (Windows can raise it before the
-    // window's Disappeared or MinimizeChanged reaches the Tiler).
+    // A tile is leaving its grid: it closed (Disappeared), went to the tray (Hidden) or was minimized. Called from
+    // OnWindowEvent with that event's time, before the evaluate that takes it off the board, and only for a window on
+    // the board. Moves between screens and windows re-homed when a screen goes are not leaves here: Windows activates
+    // nothing for them. The time is saved, so an activation that follows within HandOutWindowMs is ignored
+    // (NoteUsed), and every listed activation within HandOutWindowMs of it is dropped, which covers the hand-out
+    // activation that ARRIVED BEFORE the leave (Windows can raise it before the window's own event reaches us).
     //
-    // Known imprecision, accepted: the tick tells only that no input happened since, not which window the input went
-    // to. If the user clicks tile A and then a tile closes or minimizes BY ITSELF with no input in between, A's own
-    // activation carries the same tick and is dropped too, so the target falls back to the window used before A.
-    void NoteLeft()
+    // Known imprecision, accepted: the time tells only that the two happened together, not who caused the
+    // activation. If the user clicks tile A and a tile closes or minimizes BY ITSELF within a quarter of a second,
+    // A's activation is dropped too, and the target falls back to the window used before A.
+    void NoteLeft(WindowHandle window, uint time)
     {
-        var tick = surface.LastInputTick();
-        leftAt = tick;
-        used = used.Where(u => u.Tick != tick).ToList();
+        leftAt = time;
+        var dropped = used.Where(u => Near(u.Time, time)).ToList();
+        used = used.Where(u => !Near(u.Time, time)).ToList();
+        dropped.ForEach(u => trace?.Invoke($"tile: {u.Window.Value:X} was activated {Apart(u.Time, time)} ms from {window.Value:X} leaving, handed out by Windows, not counted as used"));
     }
+
+    // Two Windows event times within HandOutWindowMs of each other, in either order. The GetTickCount clock wraps, so
+    // the difference is taken both ways with unsigned wrap-around. 0 is "not from a WinEvent" and never matches.
+    static bool Near(uint a, uint b) =>
+        a != 0 && b != 0 && (unchecked(a - b) <= HandOutWindowMs || unchecked(b - a) <= HandOutWindowMs);
+
+    // How far apart two event times are, for the trace.
+    static uint Apart(uint a, uint b) => Math.Min(unchecked(a - b), unchecked(b - a));
 
     // A window that disappeared is no longer anyone's target; its handle may be recycled for another window.
     void ForgetUsed(WindowHandle window) =>

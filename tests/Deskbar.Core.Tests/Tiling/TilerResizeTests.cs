@@ -468,8 +468,7 @@ public sealed class TilerResizeTests : IDisposable
         Echo();
 
         // W(2) is the tile last used, so W(3) splits it (predictable placement, change 2; it used to join the end).
-        surface.InputTick++;
-        monitor.Subject.OnNext(new WindowEvent(WindowEventKind.Activated, Info(W(2))));
+        monitor.Subject.OnNext(new WindowEvent(WindowEventKind.Activated, Info(W(2)), 1000));
         Opens(W(3), alpha);
 
         // The left column keeps its width; the right column splits into two equal rows.

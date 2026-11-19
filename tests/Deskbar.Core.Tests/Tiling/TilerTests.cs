@@ -65,18 +65,19 @@ public sealed partial class TilerTests : IDisposable
         monitor.Subject.OnNext(new WindowEvent(WindowEventKind.Appeared, Info(h)));
     }
 
-    void Closes(WindowHandle h)
+    // `time` is Windows' own event time (WindowEvent.Time); 0, "not from a WinEvent", unless a test needs one.
+    void Closes(WindowHandle h, uint time = 0)
     {
         monitor.InitialWindows.RemoveAll(w => w.Handle == h);
         monitor.Dead.Add(h);
         desktops.WindowPlacements.Remove(h);
-        monitor.Subject.OnNext(new WindowEvent(WindowEventKind.Disappeared, Info(h)));
+        monitor.Subject.OnNext(new WindowEvent(WindowEventKind.Disappeared, Info(h), time));
     }
 
-    void Minimizes(WindowHandle h, bool minimized)
+    void Minimizes(WindowHandle h, bool minimized, uint time = 0)
     {
         if (minimized) surface.Minimized.Add(h); else surface.Minimized.Remove(h);
-        monitor.Subject.OnNext(new WindowEvent(WindowEventKind.MinimizeChanged, Info(h)));
+        monitor.Subject.OnNext(new WindowEvent(WindowEventKind.MinimizeChanged, Info(h), time));
     }
 
     // The user (or a snap, or the app) left the window at `frame` and let go.

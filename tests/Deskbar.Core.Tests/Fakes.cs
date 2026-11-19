@@ -399,11 +399,6 @@ public sealed class FakeTileSurface : ITileSurface
     public Maybe<(int X, int Y)> PointerAt { get; set; } = Maybe<(int X, int Y)>.None;
     public Maybe<(int X, int Y)> Pointer() => PointerAt;
 
-    // The last input's tick (ITileSurface.LastInputTick). A test moves it on to stand for the user pressing a key or
-    // clicking, and leaves it alone for an activation Windows hands out by itself.
-    public uint InputTick { get; set; }
-    public uint LastInputTick() => InputTick;
-
     // Every "bring these up behind that one", in order.
     public List<(WindowHandle Front, IReadOnlyList<WindowHandle> Windows)> Raised { get; } = [];
     public void RaiseBehind(WindowHandle front, IReadOnlyList<WindowHandle> windows) => Raised.Add((front, windows.ToList()));
