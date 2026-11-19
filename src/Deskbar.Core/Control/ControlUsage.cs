@@ -113,6 +113,8 @@ public static class ControlUsage
                 "Step aside for full-screen windows (the floating bar goes behind a video or game on its screen), or Stay on top of full-screen windows"),
             new("claude-skill", "on|off",
                 "Manage's \"Teach Claude Code\" setting: keep ~/.claude/skills/deskbar/SKILL.md written, or remove it"),
+            new("focus-ring", "on|off",
+                "Outline the focused window in its workspace's colour, and the window in front on each other screen in dim white"),
         ]),
         new("Diagnostics", [
             new("dump", "", "Save debug dump: write a diagnostics file (screens, the bar, every window in z-order) and print its path"),

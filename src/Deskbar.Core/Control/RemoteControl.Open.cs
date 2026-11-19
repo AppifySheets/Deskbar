@@ -128,4 +128,13 @@ public sealed partial class RemoteControl
             "off" or "false" or "no" => Reply(manager.SetClaudeSkill(false), () => new { claudeSkill = "off" }),
             _ => ControlReply.Fail(ControlUsage.LineFor("claude-skill")),
         };
+
+    // The focus ring (AppState.FocusRing), the remote twin of Manage's checkbox.
+    ControlReply FocusRing(string onOff) =>
+        onOff.ToLowerInvariant() switch
+        {
+            "on" or "true" or "yes" => Reply(manager.SetFocusRing(true), () => new { focusRing = "on" }),
+            "off" or "false" or "no" => Reply(manager.SetFocusRing(false), () => new { focusRing = "off" }),
+            _ => ControlReply.Fail(ControlUsage.LineFor("focus-ring")),
+        };
 }

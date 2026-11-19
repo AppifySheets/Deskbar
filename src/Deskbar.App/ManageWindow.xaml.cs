@@ -70,6 +70,8 @@ public partial class ManageWindow : Window
         DockBar.IsChecked = manager.State.DockBar;
         // Same again: SetClaudeSkill ignores an unchanged value.
         ClaudeSkill.IsChecked = manager.State.ClaudeSkill;
+        // ...and SetFocusRing.
+        FocusRing.IsChecked = manager.State.FocusRing;
         // And again: SetQuietTaskbar ignores a value that matches what the box shows, so opening the window with no
         // choice made and the box ticked by default (an auto-hidden taskbar) records nothing. The note is set here
         // as well as in the handler, because an unticked box raises no Checked when the window opens.
@@ -455,6 +457,10 @@ public partial class ManageWindow : Window
     // The app writes or removes the skill from the state pulse this sends (see where App wires ClaudeSkill.Sync).
     void OnClaudeSkillToggled(object s, RoutedEventArgs e) =>
         manager.SetClaudeSkill(ClaudeSkill.IsChecked == true).TapError(err => MessageBox.Show(err));
+
+    // The bar draws or clears the outlines on the next rebuild (FloatingBar.ShowFocusRings).
+    void OnFocusRingToggled(object s, RoutedEventArgs e) =>
+        manager.SetFocusRing(FocusRing.IsChecked == true).TapError(err => MessageBox.Show(err));
 
     // The gap between tiles, 0 to 64 pixels at 100% scaling (the Tiler scales it by each screen's DPI). A word
     // that is not a number is refused here; a number out of range is refused by SetTileGap with its own reason.

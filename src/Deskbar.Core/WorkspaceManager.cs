@@ -4173,6 +4173,14 @@ public sealed class WorkspaceManager(
             ? Result.Success()
             : Result.Success().Tap(() => Persist(State with { NoClaudeSkill = !on }));
 
+    // The focus ring (AppState.FocusRing): Manage's checkbox and `focus-ring on|off`. A no-op when unchanged, like
+    // SetClaudeSkill, so Manage can set its box on open without writing state.json. The bar draws or clears the
+    // outlines on the state pulse Persist sends.
+    public Result SetFocusRing(bool on) =>
+        State.FocusRing == on
+            ? Result.Success()
+            : Result.Success().Tap(() => Persist(State with { NoFocusRing = !on }));
+
     // --- overview / switcher-facing operations -----------------------------------
 
     // Ground truth for "which workspace is this window in": ASK THE OS which desktop

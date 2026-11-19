@@ -88,6 +88,7 @@ public partial class FloatingBar
     {
         ForgetAgingIcons();
         frontsElsewhere = FrontsElsewhere.Of(overview);
+        ShowFocusRings(overview);
         NoteActivity(overview);
         pinnedNow = overview.Pinned;
         FillStrips(overview);

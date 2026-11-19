@@ -84,6 +84,12 @@
         <!-- The Claude Code skill (AppState.ClaudeSkill, ClaudeSkill.cs). Petre: "add a skill for claude per user".
              Here with the other choices about how the app sits on the machine; on by default, and it only ever
              writes when Claude Code's own folder exists. -->
+        <!-- The focus ring (AppState.FocusRing, FocusRings in Core, WindowRings). Petre: "can you give each active
+             window a ring, same in color as in the bar?", then "go with proposed": on by default, a box here.
+             Declared before the Claude box, so it sits just below it. -->
+        <CheckBox x:Name="FocusRing" DockPanel.Dock="Bottom" Margin="8,4,8,0"
+                  Content="Outline the window you are in with its workspace's colour, and the window in front on each other screen in dim white"
+                  Checked="OnFocusRingToggled" Unchecked="OnFocusRingToggled"/>
         <CheckBox x:Name="ClaudeSkill" DockPanel.Dock="Bottom" Margin="8,8,8,0"
                   Content="Teach Claude Code about Deskbar (a skill in ~/.claude/skills/deskbar and two hooks in ~/.claude/settings.json: sessions open windows in their own workspace and make it blink when they need you)"
                   Checked="OnClaudeSkillToggled" Unchecked="OnClaudeSkillToggled"/>

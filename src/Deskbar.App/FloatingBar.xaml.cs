@@ -2220,6 +2220,8 @@ public partial class FloatingBar : Window
             // The windows in front on a screen other than their row's active or landing window, for the quieter
             // marker (FrontsElsewhere, FloatingBar.Marker.cs), worked out before any icon below is built.
             frontsElsewhere = FrontsElsewhere.Of(overview);
+            // ...and the same windows' outlines on the screen itself, with the focused one (FloatingBar.FocusRing.cs).
+            ShowFocusRings(overview);
             // The blink runs only while some row is asking (FloatingBar.Asking.cs).
             SyncAsking(overview);
 

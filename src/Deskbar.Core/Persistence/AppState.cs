@@ -257,6 +257,15 @@ public sealed record AppState(
     // The reading the app wants. Not stored.
     [JsonIgnore] public bool ClaudeSkill => !NoClaudeSkill;
 
+    // Whether the focused window, and the window in front on each other screen, get an outline on the screen itself
+    // (FocusRings in Core, WindowRings in the app). Petre: "can you give each active window a ring, same in color as
+    // in the bar?", then "go with proposed", where the proposal was on by default with a box in Manage. Stored as its
+    // NEGATION for the reason NoClaudeSkill is: every existing state.json lacks the key and reads false, which is on.
+    public bool NoFocusRing { get; init; }
+
+    // The reading the app wants. Not stored.
+    [JsonIgnore] public bool FocusRing => !NoFocusRing;
+
     // Petre: "i want it configurable" -- the Alt+Tab-style workspace switcher's chord.
     //
     // Stored as the TEXT the user typed, not as a parsed Chord: state.json stays readable

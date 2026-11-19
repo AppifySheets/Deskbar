@@ -51,6 +51,9 @@ public partial class App : Application
     // The window list along the top of every screen (ScreenStrips, spec 2026-11-19-screen-strips-design.md): built with
     // the bar, null in compatibility mode, emptied for good by ExitApp before any window closes.
     ScreenStrips? screenStrips;
+    // The focus rings' drawing (WindowRings), handed to the bar; disposed by ExitApp so every window's border goes back
+    // to Windows' default. Null in compatibility mode, like the bar.
+    WindowRings? windowRings;
     Windows.Performance.SystemStats? systemStats; // the stats counters, ONE instance shared by the bar's line and the detached window (one timer for both)
     DetachedStatsWindow? detachedStats; // the stats line detached into its own always-on-top window, created on first use
     bool detachedStatsPinned;           // its hwnd is pinned to every desktop once, after its first show (see ShowDetachedStats)
@@ -1538,8 +1541,14 @@ public partial class App : Application
                 layout: new ScreenLayout(),
                 shellArranged: ScreenLayout.IsShellArranged);
             screenStrips = stripSet;
+            // The focus rings (WindowRings): a frame it makes for a maximized or full-screen window takes the strips'
+            // two steps, ignored before its first show and pinned to every desktop after it.
+            windowRings = new WindowRings(
+                ignore: hwnd => monitor.Ignore(hwnd),
+                pinToAllDesktops: hwnd => desktops!.Pin(new WindowHandle(hwnd)));
             floatingBar = new FloatingBar(manager)
             {
+                Rings = windowRings,
                 Volume = new Windows.Audio.SystemVolume(),
                 // ...and the device list its click opens (FloatingBar.Volume.cs).
                 AudioOutputs = new Windows.Audio.AudioDevices(),
@@ -2345,6 +2354,9 @@ public partial class App : Application
         // closes, so no screen keeps a reserved band with nothing in it, and for good, so a settle or a state pulse
         // landing during the rest of the shutdown cannot dock a new one. Restart comes through here too.
         screenStrips?.RemoveAll();
+        // ...and the focus rings: every border this app coloured goes back to Windows' default, and the frames close.
+        // Before the bar closes, and for good: a rebuild during the rest of the shutdown finds them disposed.
+        windowRings?.Dispose();
         // Then tiling, before anything else is torn down, so no re-tile runs against a half-closed app. The Tiler
         // first (it unsubscribes and narrows the hook to nothing), then the surface (which removes whatever hook
         // is left and stops its timers). Nulled so a licence refresh landing after this finds no Tiler to poke.
