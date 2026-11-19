@@ -341,6 +341,110 @@ public class ScreenStripTests
         strip.Close();
     });
 
+    // THE TRACE (CLAUDE.md, "Instrumentation"). The geometry line is written when it CHANGES, so the log stays readable
+    // with tracing on all day: the guard's 1 s beat asks for it every second and an unchanged strip says it once.
+    // `Describe` lines are told from the event lines by their "work " part.
+    [Fact]
+    public void An_unchanged_strip_writes_its_geometry_once() => StaThread.Run(() =>
+    {
+        var lines = new List<string>();
+        var strip = new ScreenStrip(Offscreen)
+        {
+            Scale = () => At150,
+            DockWith = (_, s, px) => new(s.L, s.T, s.R, s.T + px),
+            Trace = lines.Add,
+        };
+        Assert.True(strip.Dock().IsSuccess);
+
+        strip.TraceGeometry();
+        strip.TraceGeometry();
+        strip.TraceGeometry();
+
+        Assert.Single(lines.Where(line => line.Contains(", work ")).Where(line => line.Contains("docked yes")));
+
+        // A change is written again: the shell registration going away shows in the line.
+        strip.Undock();
+        strip.TraceGeometry();
+        Assert.Contains(lines, line => line.Contains("docked no"));
+        strip.Close();
+    });
+
+    // A dock that worked is one line with what was asked and what was granted.
+    [Fact]
+    public void A_dock_that_worked_is_traced_with_what_was_granted() => StaThread.Run(() =>
+    {
+        var lines = new List<string>();
+        var strip = new ScreenStrip(Offscreen)
+        {
+            Scale = () => At150,
+            DockWith = (_, s, px) => new(s.L, s.T, s.R, s.T + px),
+            Trace = lines.Add,
+        };
+
+        Assert.True(strip.Dock().IsSuccess);
+
+        var line = Assert.Single(lines);
+        Assert.Contains("docked", line);
+        Assert.Contains("(1200x48)", line);
+        strip.Undock();
+        strip.Close();
+    });
+
+    // A dock the strip REFUSED (its screen cannot be read) is traced as a refusal with its reason, and is not a repair:
+    // a refusal counted as "taken back" would read as the shell having dropped a strip it never held.
+    [Fact]
+    public void A_refused_dock_is_traced_with_its_reason_and_is_not_counted_as_a_repair() => StaThread.Run(() =>
+    {
+        var lines = new List<string>();
+        var now = new DateTime(2026, 11, 19, 12, 0, 0, DateTimeKind.Utc);
+        var readable = true;
+        var strip = new ScreenStrip(Offscreen)
+        {
+            Scale = () => readable ? At150 : Maybe<double>.None,
+            Clock = () => now,
+            // Granted off the strip's own screen, so the guard has a strip to take back once it may.
+            DockWith = (_, s, px) => new(s.L + 5000, s.T, s.R + 5000, s.T + px),
+            Trace = lines.Add,
+        };
+        Assert.True(strip.Dock().IsSuccess);
+
+        readable = false;
+        now += TimeSpan.FromSeconds(30);
+        strip.KeepStrip([Offscreen]);
+
+        Assert.Contains(lines, line => line.Contains("refused") && line.Contains("cannot be read"));
+        Assert.DoesNotContain(lines, line => line.Contains("taken back"));
+        var described = strip.Describe();
+        Assert.Contains("taken back 0 time(s)", described);
+        Assert.Contains("refused 1 time(s)", described);
+        strip.Undock();
+        strip.Close();
+    });
+
+    // A repair that docked is traced, and counted as one.
+    [Fact]
+    public void A_repair_is_traced_and_counted() => StaThread.Run(() =>
+    {
+        var lines = new List<string>();
+        var now = new DateTime(2026, 11, 19, 12, 0, 0, DateTimeKind.Utc);
+        var traced = new ScreenStrip(Offscreen)
+        {
+            Scale = () => At150,
+            Clock = () => now,
+            DockWith = (_, s, px) => new(s.L + 5000, s.T, s.R + 5000, s.T + px),
+            Trace = lines.Add,
+        };
+        Assert.True(traced.Dock().IsSuccess);
+
+        now += TimeSpan.FromSeconds(30);
+        traced.KeepStrip([Offscreen]);
+
+        Assert.Contains(lines, line => line.Contains("taken back"));
+        Assert.Contains("taken back 1 time(s)", traced.Describe());
+        traced.Undock();
+        traced.Close();
+    });
+
     // The window itself: borderless, never on the taskbar or in Alt+Tab (a tool window, for the reason the bar gives
     // in OnSourceInitialized), topmost, on the bar's own background.
     [Fact]
