@@ -180,7 +180,9 @@ line. The active window's title is white, the rest are dimmer, and pinned window
 glyph. Rows you expand while the pointer is on the bar stay expanded until it leaves. If you would
 rather keep the rows uniform, **Window list at the bottom of the bar** (on any row's menu or the
 bar's background menu) moves the list to a strip under the rows instead. Titles are cut to fit;
-widen the bar to see more of them.
+widen the bar to see more of them. The same menu has a third place, **At the top of each screen**:
+a thin strip along the top of every screen holds the current workspace's windows, and maximized
+windows stop below it.
 
 <table align="center">
   <tr>

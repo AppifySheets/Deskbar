@@ -210,6 +210,19 @@ page says "Sorry, we couldn't find that page": switch accounts, do not debug the
 - **Workspaces can be grouped** (#83, #84): a group has one colour settable from any of its
   rows, one caption, a shared lane and a bracket down its left edge. A nested workspace
   really gets its parent's windows.
+- **The window list has three places, and one of them is a strip on every screen**
+  (`AppState.WindowListPlace`: the workspace's row, the bottom of the bar, or the screens).
+  On the screens, each connected screen gets a `ScreenStrip`, 32 DIP high along its top edge,
+  registered with the shell as an app bar so maximized windows, Snap and new windows start
+  below it. The docked bar then sits under the strip, not over it. The bar builds the tabs, with
+  the same code as a window button, and the strips only host them, so a tab cannot drift from a
+  button. `ScreenStrips` owns the set and `StripPlan` (in Core) decides which strips exist. The
+  strips stay while the bar is minimized, because taking them away would move every screen's
+  work area twice. A strip is tied to its screen's rectangle and never asks Windows which
+  screen it is on: the nearest-screen answer is the wrong one while a screen wakes. Design:
+  `docs/superpowers/specs/2026-11-19-screen-strips-design.md`; measurements:
+  `docs/superpowers/notes/2026-11-19-screen-strips-probes.md`. Read the comments in
+  `ScreenStrip.cs` and `ScreenStrips.cs` before changing the dock, the guard or the pin.
 - **The ordinal colour band groups windows by their ARTWORK**, fingerprinted from the icon's
   pixels (#105). Three cheaper keys were measured wrong on Petre's machine and the reasoning
   is in `IconCache.ArtworkKeyOf`: process name, the command line's `--app-id`, and the
@@ -248,7 +261,7 @@ page says "Sorry, we couldn't find that page": switch accounts, do not debug the
 ## Instrumentation, and start with it
 
 Every wrong answer in this project has been a guess, and every right one has come from a
-measurement. Three traces exist for that reason, all behind ONE switch: create the marker
+measurement. Four traces exist for that reason, all behind ONE switch: create the marker
 file `%APPDATA%\Deskbar\trace.on` and restart. The log is
 `%TEMP%\deskbar-trace.log`, appended across restarts, and its first line names which
 switch turned it on. An empty log, or one with no `--- trace on` line, was not recording.
@@ -263,8 +276,14 @@ switch turned it on. An empty log, or one with no `--- trace on` line, was not r
   each.
 - **Bands and icons** (`FloatingBar.DumpBands`, `IconCache.Trace`): which windows share an
   ordinal family and by what key, and which source answered for each icon at what size.
+- **Screen strips** (`ScreenStrip.TraceGeometry`, `ScreenStrips`): per strip, its screen,
+  what it asked the shell for and what it was granted, the screen's work area, whether the
+  registration stands and how often the guard took it back, written when that line changes.
+  Plus one line per registration, dock, refused dock (with the reason; counted apart from
+  repairs), repair, removal and window moved off a new strip's band. A strip that disappears
+  and comes back shows as a removal and a registration for the same screen.
 
-The last two write only when their output CHANGES, so the log stays readable with tracing on
+The last three write only when their output CHANGES, so the log stays readable with tracing on
 all day. Leave them in; this is the third visit to two of these bugs.
 
 ## Traps that have already cost time

@@ -360,7 +360,7 @@ public class ScreenStripTests
         strip.TraceGeometry();
         strip.TraceGeometry();
 
-        Assert.Single(lines.Where(line => line.Contains(", work ")).Where(line => line.Contains("docked yes")));
+        Assert.Single(lines, line => line.Contains(", work ") && line.Contains("docked yes"));
 
         // A change is written again: the shell registration going away shows in the line.
         strip.Undock();
