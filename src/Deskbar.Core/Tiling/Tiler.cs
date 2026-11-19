@@ -621,11 +621,29 @@ public sealed partial class Tiler(WorkspaceManager manager, IVirtualDesktopServi
         var board = before is null ? TileBoard.FirstFill(windows) : Reconciled(before, windows);
         if (before is not null)
         {
-            // The windows new to this board, in board order (screen by screen). Taken BEFORE ReturnedToTheirPlaces,
-            // which empties `away`: a minimized tile coming back is not an arrival, it goes back to its old place.
-            var arrivals = board.Screens.OrderBy(s => s.Key).SelectMany(s => s.Value)
-                .Where(w => !before.ScreenOf(w).HasValue && !away.ContainsKey(w))
+            // The windows new to this board, in board order (screen by screen).
+            var newcomers = board.Screens.OrderBy(s => s.Key).SelectMany(s => s.Value)
+                .Where(w => !before.ScreenOf(w).HasValue)
                 .ToList();
+            // Taken BEFORE ReturnedToTheirPlaces, which empties `away`: a minimized tile coming back is not an
+            // arrival, it goes back to its old place.
+            var arrivals = newcomers.Where(w => !away.ContainsKey(w)).ToList();
+
+            // LEAVES FIRST (final review, C2). When windows left AND windows came in one evaluate (both happened while
+            // the user was on another workspace, or a window became tileable in the evaluate a close caused), the
+            // leaves are settled before anything arrives: the board without the newcomers is kept, which notes each
+            // screen's leaver, and the screens that lost a window are fitted, which takes the leaver's cell out (or
+            // keeps it as the opening, change 3) and stores the result. Only then do the newcomers arrive, into the
+            // grid the leave left: a kept space is an opening the first arrival fills (the design's precedence, step
+            // 2), and a split halves a tile of the shape the user sees. Placed first, the arrival used to split sizes
+            // the leaver was still in, and the leaver's cell was then taken from a grid that had changed under it.
+            var stayed = newcomers.Aggregate(board, (b, w) => b.Leave(w));
+            if (newcomers.Count > 0 && before.Screens.Any(s => s.Value.Any(w => !stayed.On(s.Key).Contains(w))))
+            {
+                Keep(workspace, stayed);
+                SettleLeaves(workspace, stayed);
+            }
+
             // A minimized tile that just came back takes its old place, not the end (Tiler.Minimize.cs); every other
             // newcomer fills an opening or splits the tile last used (Tiler.Arrival.cs). The first fill is left alone:
             // it orders the windows by where they already are.

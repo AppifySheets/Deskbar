@@ -426,6 +426,83 @@ public sealed partial class TilerTests
         Assert.True(StoredOnAlpha().HasNoValue);
     }
 
+    // --- a leave and an arrival in one evaluate (final review, C2) ---------------------------------------------
+    //
+    // The leave is settled first (its cell goes, or is kept as the opening), and only then does the newcomer arrive,
+    // into the grid the leave left. The arrival used to be placed first, on sizes the leaver was still in, and the
+    // leaver's cell was taken out afterwards from a grid that had changed under it.
+
+    // The final reviewer's probe: W4 closes and W5 opens on Alpha while the user is on Beta. W4's cell goes, so W3 has
+    // the whole right column, and W5 splits W1, the tile last used: wide but not alone in its column, so below it.
+    [Fact]
+    public void A_close_and_an_arrival_in_one_evaluate_keep_the_shape_and_split_the_tile_last_used()
+    {
+        Enumerable.Range(1, 4).ToList().ForEach(n => Exists(W(n), alpha));
+        Start();
+        Uses(W(1));
+        var w3Was = surface.Frames[W(3)];
+
+        SwitchTo(beta);
+        Closes(W(4));
+        Opens(W(5), alpha);
+        SwitchTo(alpha);
+
+        var expected = new TileSizes([0.5, 0.5], [[0.25, 0.25, 0.5], [1.0]]);
+        AssertArranged([W(1), W(5), W(2), W(3)], expected);
+        Assert.Equal(expected, StoredOnAlpha().GetValueOrThrow());
+        // W3 only grew down into W4's room; it never changed column.
+        Assert.Equal(w3Was.Left, surface.Frames[W(3)].Left);
+        Assert.Equal(w3Was.Right, surface.Frames[W(3)].Right);
+    }
+
+    // With keep-the-space on, the closed tile's space is the opening the arrival fills (precedence step 2), so the
+    // newcomer lands exactly where W4 was and nothing else moves. W5 becomes tileable in the same evaluate that takes
+    // W4 off the grid, which is how a close and an arrival meet while the user is on the workspace.
+    [Fact]
+    public void A_close_and_an_arrival_in_one_evaluate_fill_the_kept_space()
+    {
+        Enumerable.Range(1, 5).ToList().ForEach(n => Exists(W(n), alpha));
+        surface.CannotTile.Add(W(5));
+        Start();
+        Assert.True(manager.SetTileKeepsSpace(alpha.Id, true).IsSuccess);
+        AssertTiled([W(1), W(2), W(3), W(4)]);
+        Uses(W(1));
+        var w4Was = surface.Frames[W(4)];
+        var others = FramesOf(1, 2, 3);
+
+        surface.CannotTile.Remove(W(5));
+        Closes(W(4));
+
+        AssertTiled([W(1), W(2), W(3), W(5)]);
+        Assert.Equal(w4Was, surface.Frames[W(5)]);
+        Assert.Equal(others, FramesOf(1, 2, 3));
+        Assert.Single(traced, line => line.Contains("space kept"));
+        Assert.Contains(traced, line => line.Contains("took the opening"));
+    }
+
+    // A shape made by hand survives a leave and an arrival together. Three columns of one tile each plus W2 in the
+    // middle column above W3: W2 closes and W5 opens while the user is away. Only W2's cell goes (W3 keeps the whole
+    // middle column) and W5 then splits W1, the tile last used, taller than wide, so below it.
+    [Fact]
+    public void A_custom_shape_survives_a_close_and_an_arrival_in_one_evaluate()
+    {
+        Enumerable.Range(1, 4).ToList().ForEach(n => Exists(W(n), alpha));
+        Start();
+        var custom = new TileSizes([0.4, 0.3, 0.3], [[1.0], [0.5, 0.5], [1.0]]);
+        Assert.True(manager.SetTileSizes(alpha.Id, AreaKey, custom).IsSuccess);
+        AssertArranged([W(1), W(2), W(3), W(4)], custom);
+        Uses(W(1));
+
+        SwitchTo(beta);
+        Closes(W(2));
+        Opens(W(5), alpha);
+        SwitchTo(alpha);
+
+        var expected = new TileSizes([0.4, 0.3, 0.3], [[0.5, 0.5], [1.0], [1.0]]);
+        AssertArranged([W(1), W(5), W(3), W(4)], expected);
+        Assert.Equal(expected, StoredOnAlpha().GetValueOrThrow());
+    }
+
     // The switch is off by default: a close closes up (change 1), and no opening is stored.
     [Fact]
     public void With_the_switch_off_a_close_closes_up()
