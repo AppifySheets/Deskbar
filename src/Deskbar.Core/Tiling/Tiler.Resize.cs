@@ -223,6 +223,20 @@ public sealed partial class Tiler
         awaitingEcho.RemoveWhere(w => !gridded.Contains(w));
     }
 
+    // Fits every screen of `stayed` that has a leaver pending, so the leave is settled (its cell gone, or kept as the
+    // screen's opening) and stored BEFORE anything arrives. Evaluate calls it when windows left and arrived in one
+    // change (final review, C2); the arrivals then read these sizes (ShownSizes, the opening) as the grid the user
+    // sees. The fits themselves are dropped: SizesOn stores what it made, and the re-tile after the arrivals lays out
+    // whatever is stored then. A screen the surface no longer reports, or one left empty, has nothing to fit.
+    void SettleLeaves(Workspace workspace, TileBoard stayed)
+    {
+        var screens = surface.Screens().ToDictionary(s => s.Number);
+        leavers.Keys.Where(k => k.Workspace == workspace.Id).Select(k => k.Screen).ToList()
+            .Where(n => screens.ContainsKey(n) && stayed.On(n).Count > 0)
+            .ToList()
+            .ForEach(n => SizesOn(workspace, screens[n], stayed.On(n).Count));
+    }
+
     // A screen whose last tile just left keeps no opening (review finding on change 3; the design: "the last tile on
     // a screen closing leaves nothing to keep"). An opening is room kept beside OTHER tiles. On an empty screen
     // nothing can fill it: IntoOpenings and Arrived look for an opening for the windows that stayed, which is
