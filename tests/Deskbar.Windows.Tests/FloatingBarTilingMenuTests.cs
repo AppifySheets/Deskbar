@@ -169,22 +169,18 @@ public class FloatingBarTilingMenuTests
     public void Keep_space_is_not_offered_on_an_untiled_workspace() => StaThread.Run(() =>
     {
         var harness = Harness.Build();
-        Assert.True(harness.Manager.SetExperimentalTiling(true).IsSuccess);
         using var bar = ShowBar(harness, pro: true);
 
         Assert.DoesNotContain(KeepSpace, Headers(bar, "Sparrow"));
     });
 
     [Fact]
-    public void Keep_space_is_not_offered_without_Pro_or_with_the_experiment_off() => StaThread.Run(() =>
+    public void Keep_space_is_not_offered_without_Pro() => StaThread.Run(() =>
     {
         var harness = TiledSparrow(moved: false);
-        using (var free = ShowBar(harness, pro: false))
-            Assert.DoesNotContain(KeepSpace, Headers(free, "Sparrow"));
+        using var free = ShowBar(harness, pro: false);
 
-        Assert.True(harness.Manager.SetExperimentalTiling(false).IsSuccess);
-        using var off = ShowBar(harness, pro: true);
-        Assert.DoesNotContain(KeepSpace, Headers(off, "Sparrow"));
+        Assert.DoesNotContain(KeepSpace, Headers(free, "Sparrow"));
     });
 
     [Fact]
