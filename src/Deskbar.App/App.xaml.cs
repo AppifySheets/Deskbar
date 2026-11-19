@@ -1549,6 +1549,9 @@ public partial class App : Application
             floatingBar = new FloatingBar(manager)
             {
                 Rings = windowRings,
+                // The tile badge's question (FloatingBar.WindowState.cs): is this window on the current workspace's
+                // tile board. The Tiler is built after the bar, so the lambda reads the field when asked.
+                IsTiled = handle => tiler?.Board.Screens.Values.Any(column => column.Contains(handle)) ?? false,
                 Volume = new Windows.Audio.SystemVolume(),
                 // ...and the device list its click opens (FloatingBar.Volume.cs).
                 AudioOutputs = new Windows.Audio.AudioDevices(),
@@ -1687,6 +1690,9 @@ public partial class App : Application
                 // always run.
                 stripSet.Tick();
                 floatingBar.ReclaimTopmost();
+                // The maximized and tile badges follow a maximize, a restore or a new tile within a second: a rebuild
+                // only when a badge drawn is out of date (FloatingBar.WindowState.cs).
+                floatingBar.RefreshWindowFits();
                 // Docked, the strip is checked on the same beat: the shell can stop holding it without a word
                 // (see FloatingBar.KeepDockedStrip). One GetMonitorInfo a second, and nothing more unless lost.
                 floatingBar.KeepDockedStrip();

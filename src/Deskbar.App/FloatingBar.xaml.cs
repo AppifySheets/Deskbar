@@ -2200,6 +2200,7 @@ public partial class FloatingBar : Window
         CurrentList.Children.Clear(); // the titled list below the rows, rebuilt with them
         headerDropTargets.Clear();    // re-registered by every row as it is built (see GroupRow)
         ForgetAgingIcons();           // the aging overlays belong to the rows about to be replaced
+        ForgetWindowFits();           // ...and the maximized and tile badges (FloatingBar.WindowState.cs)
         ForgetWorkspaceTimes();       // ...and so do the captions' time marks
         ForgetTaskPies();             // ...and the task pies, and the row colours the stopwatch's swatch reads
         // The rows these pointed at have just been thrown away, so every entry is now a Border
@@ -6326,11 +6327,12 @@ public partial class FloatingBar : Window
         // placeholder covers whatever is left.
         // ...then the tab cards and the sound ring round it all (FloatingBar.Activity.cs).
         // The artwork itself ages to grey as the window goes unused (FloatingBar.Aging.cs).
-        button.Content = WithActivity(WithState(
+        // ...and a corner badge says whether the window is maximized or in a tile (FloatingBar.WindowState.cs).
+        button.Content = WithActivity(WithWindowFit(WithState(
             icon is not null
                 ? Aged(icon, row)
                 : Placeholder(row.Window),
-            row), row);
+            row), row), row);
         // The icon size setting (IconScaling): the ARTWORK is scaled, overlays and all, and not the button. On an
         // icon row that is the whole button anyway, and on a titled line (Titled wraps this same content) it
         // keeps the window's title at its own size, which belongs to the text size setting instead. A

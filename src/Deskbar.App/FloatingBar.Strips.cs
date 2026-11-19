@@ -87,6 +87,7 @@ public partial class FloatingBar
     void FillStripsAlone(Overview overview)
     {
         ForgetAgingIcons();
+        ForgetWindowFits(); // the maximized and tile badges belong to the tabs about to be replaced (FloatingBar.WindowState.cs)
         frontsElsewhere = FrontsElsewhere.Of(overview);
         ShowFocusRings(overview);
         NoteActivity(overview);

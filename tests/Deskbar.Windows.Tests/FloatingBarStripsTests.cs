@@ -115,6 +115,49 @@ public class FloatingBarStripsTests
         Assert.DoesNotContain(Descendants(TabFor(h.StripB, h.Code.Title)), d => d is FrameworkElement { Tag: FloatingBar.PinBadgeTag });
     });
 
+    // Petre: "show a sign next to each window that will tell me if it's maximized or part of a tile", option B: a badge
+    // on the icon's bottom-left corner (FloatingBar.WindowState.cs). Maximized wins over tiled; neither, no badge.
+    [Fact]
+    public void A_maximized_or_tiled_window_carries_its_badge_and_others_none() => StaThread.Run(() =>
+    {
+        using var h = StripHarness.Build();
+        h.Maximized.Add(h.Code.Handle);
+        h.Tiled.Add(h.Code.Handle);
+        h.Tiled.Add(h.Rdm.Handle);
+        h.Fill();
+
+        FloatingBar.WindowFit? Badge(ScreenStrip strip, string title) =>
+            Descendants(TabFor(strip, title)).OfType<FrameworkElement>().Any(d => d.Tag is FloatingBar.WindowFitBadgeTag)
+                ? Descendants(TabFor(strip, title)).OfType<System.Windows.Shapes.Path>().Any(p => p.Stroke is not null && p.Fill is null)
+                    ? FloatingBar.WindowFit.Maximized
+                    : FloatingBar.WindowFit.Tiled
+                : null;
+
+        Assert.Equal(FloatingBar.WindowFit.Maximized, Badge(h.StripB, h.Code.Title));
+        Assert.Equal(FloatingBar.WindowFit.Tiled, Badge(h.StripA, h.Rdm.Title));
+        Assert.Null(Badge(h.StripB, h.Pinned.Title));
+    });
+
+    // A window maximized by its own title bar raises nothing the bar rebuilds on, so the 1 s tick checks the badges it
+    // drew and rebuilds only when one is out of date.
+    [Fact]
+    public void The_tick_redraws_a_badge_that_went_out_of_date_and_nothing_else() => StaThread.Run(() =>
+    {
+        using var h = StripHarness.Build();
+        h.Fill();
+        var before = TabFor(h.StripB, h.Code.Title);
+
+        h.Bar.RefreshWindowFits();
+        Assert.Same(before, TabFor(h.StripB, h.Code.Title));
+
+        h.Maximized.Add(h.Code.Handle);
+        h.Bar.RefreshWindowFits();
+
+        var after = TabFor(h.StripB, h.Code.Title);
+        Assert.NotSame(before, after);
+        Assert.Contains(Descendants(after), d => d is FrameworkElement { Tag: FloatingBar.WindowFitBadgeTag });
+    });
+
     // The strips are the window list, so they stay current while the bar stands behind its taskbar button; the bar
     // itself skips its own rows then.
     [Fact]
@@ -468,6 +511,11 @@ public class FloatingBarStripsTests
         public required Guid SparrowDesktop { get; init; }
         public required Guid UnnamedDesktop { get; init; }
 
+        // Which windows the bar is told are maximized or in a tile (FloatingBar.IsMaximized, IsTiled): the tests have no
+        // real windows to maximize and no Tiler, so they say it here.
+        public required HashSet<WindowHandle> Maximized { get; init; }
+        public required HashSet<WindowHandle> Tiled { get; init; }
+
         public IReadOnlyList<ScreenStrip> Strips => [StripA, StripB, StripC];
         public Panel Rows => (Panel)Bar.FindName("Rows")!;
         public Panel CurrentList => (Panel)Bar.FindName("CurrentList")!;
@@ -528,11 +576,19 @@ public class FloatingBarStripsTests
             Assert.True(manager.Start().IsSuccess);
 
             var strips = new[] { Strip(ScreenA), Strip(ScreenB), Strip(ScreenC) };
-            var bar = new FloatingBar(manager) { Left = -32000, Top = -32000, Strips = () => strips };
+            var maximized = new HashSet<WindowHandle>();
+            var tiled = new HashSet<WindowHandle>();
+            var bar = new FloatingBar(manager)
+            {
+                Left = -32000, Top = -32000, Strips = () => strips,
+                IsMaximized = handle => maximized.Contains(handle),
+                IsTiled = handle => tiled.Contains(handle),
+            };
             bar.Show();
 
             return new StripHarness
             {
+                Maximized = maximized, Tiled = tiled,
                 Desktops = desktops, Monitor = monitor, Manager = manager, Screens = screens, Bar = bar,
                 StripA = strips[0], StripB = strips[1], StripC = strips[2],
                 Rdm = rdm, Code = code, Beeper = beeper, Pinned = pinned, Notepad = notepad,
