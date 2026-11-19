@@ -105,6 +105,17 @@ public sealed partial class RemoteControl
                 : Reply(manager.EvenOutTiles(w.Id), () => Describe(w.Id)),
             ControlReply.Fail);
 
+    // `keep-space <workspace> on|off` sets whether a closed tile's space is kept for the next window. A tiling
+    // command, so refused exactly as `even` is, same two messages in the same order (experiment, then Pro).
+    ControlReply SetRowKeepsSpace(string workspace, bool keep) =>
+        WorkspaceNamed(workspace).Match(
+            w => !manager.State.ExperimentalTiling
+                ? ControlReply.Fail("Tiling is experimental and turned off. Turn it on in Manage.")
+                : isPro?.Invoke() != true
+                    ? ControlReply.Fail("Tiling needs Deskbar Pro.")
+                    : Reply(manager.SetTileKeepsSpace(w.Id, keep), () => Describe(w.Id)),
+            ControlReply.Fail);
+
     // SetWorkspaceColor already hands a grouped workspace's colour to its group, as the menu does.
     ControlReply Colour(string workspace, string colour) =>
         WorkspaceNamed(workspace).Bind(w => ParseColour(colour).Bind(c => manager.SetWorkspaceColor(w.Id, c)).Map(() => w.Id))

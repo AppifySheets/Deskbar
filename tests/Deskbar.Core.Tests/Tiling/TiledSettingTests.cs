@@ -63,6 +63,35 @@ public sealed class TiledSettingTests : IDisposable
     }
 
     [Fact]
+    public void Keep_space_is_off_by_default_and_persists_when_turned_on()
+    {
+        var (manager, a, _) = Started();
+        Assert.False(manager.State.Workspaces.Single(w => w.Id == a).TileKeepsSpace);
+        Assert.False(LoadedWithoutKeys().Workspaces.Single().TileKeepsSpace);
+
+        Assert.True(manager.SetTileKeepsSpace(a, true).IsSuccess);
+
+        Assert.True(manager.State.Workspaces.Single(w => w.Id == a).TileKeepsSpace);
+        Assert.True(store.Stored.Workspaces.Single(w => w.Id == a).TileKeepsSpace);
+    }
+
+    [Fact]
+    public void Untiling_does_not_clear_keep_space()
+    {
+        var (manager, a, _) = Started();
+        manager.SetWorkspaceTiled(a, true);
+        manager.SetTileKeepsSpace(a, true);
+
+        manager.SetWorkspaceTiled(a, false);
+
+        Assert.True(manager.State.Workspaces.Single(w => w.Id == a).TileKeepsSpace);
+    }
+
+    [Fact]
+    public void Keep_space_on_a_missing_workspace_fails() =>
+        Assert.True(Started().manager.SetTileKeepsSpace(Guid.NewGuid(), true).IsFailure);
+
+    [Fact]
     public void A_state_file_without_the_key_loads_untiled() =>
         Assert.DoesNotContain(LoadedWithoutKeys().Workspaces, w => w.Tiled);
 
