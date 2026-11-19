@@ -28,11 +28,10 @@ namespace Deskbar.App;
 // The owner (WindowRings) tells it where, in what colour and above which window, and checks it every second.
 sealed class RingFrame : Window
 {
-    // As thick as Windows' own border on that window, in physical pixels (WindowRings reads it from
-    // DWMWA_VISIBLE_FRAME_BORDER_THICKNESS), so a maximized window's ring and a normal window's look the same. It was a
-    // fixed 2 DIP at first, 4 to 5 px at Petre's 225%, against Windows' 2 px: "tiny bit less", "with native windows
-    // resources". Converted to DIPs at the target's scale in Place, since WPF draws in DIPs, and snapped to whole
-    // pixels so 2 px stays a crisp 2 px rather than a blur across three.
+    // The line's thickness is given in PHYSICAL pixels (WindowRings asks for one). It was a fixed 2 DIP at first, 4 to 5 px
+    // at Petre's 225%, then Windows' own border thickness (2 px there), then "can you do 1px?". Converted to DIPs at the
+    // target's scale in Place, since WPF draws in DIPs, and snapped to whole pixels so 1 px stays a crisp 1 px rather
+    // than a blur across two.
     readonly Border line;
 
     public RingFrame()

@@ -189,8 +189,9 @@ public partial class FloatingBar
         {
             Tag = StripUnderlineTag,
             Margin = new Thickness(2),
-            // 1 DIP, snapped: 2 px at Petre's 225%, the thickness of Windows' own border and of the window's ring. It was
-            // 1.5 DIP, which measured 3 px plus an anti-aliased fourth: "tiny bit less?".
+            // ONE PHYSICAL PIXEL, set once the ring knows its screen's scale (OnePixel, on Loaded). It went 1.5 DIP (3 px
+            // plus an anti-aliased fourth at Petre's 225%), then 1 DIP (2 px, Windows' own border), then "can you do
+            // 1px?", like the window's ring frame (RingFrame).
             BorderThickness = new Thickness(1),
             SnapsToDevicePixels = true,
             UseLayoutRounding = true,
@@ -199,6 +200,8 @@ public partial class FloatingBar
             Background = row.IsActive ? StripActiveFill : Brushes.Transparent,
             IsHitTestVisible = false,
         };
+
+        ring.Loaded += (_, _) => ring.BorderThickness = new Thickness(1 / VisualTreeHelper.GetDpi(ring).DpiScaleX);
 
         // Transparent rather than null, so the whole tab answers the pointer, not only its icon and text.
         var body = new Grid { Height = ScreenStrip.HeightDip, Background = Brushes.Transparent };
