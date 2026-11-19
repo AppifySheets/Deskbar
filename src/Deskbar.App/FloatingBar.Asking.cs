@@ -54,11 +54,26 @@ public partial class FloatingBar
     //
     // Every window the bar can draw counts, pinned ones and those on unnamed desktops included, because a flashed
     // window can be any of them; a session's ask only ever lands on a workspace's row.
+    //
+    // A DUE TASK counts too (spec 2026-11-19-tasks-in-the-bar, "The bar": the stopwatch pulses orange with this same
+    // brush). A due task ON a workspace already sets that row's WantsAttention, but a FREE task has no row, so the
+    // overview alone would leave the stopwatch orange and still. And a timer running out changes nothing the overview
+    // carries for a free task, so no rebuild comes to restart the pulse: the stopwatch's paint on the clock's tick
+    // calls RunAsking with the overview's answer, kept here, or'd with its own.
     void SyncAsking(Core.Overview.Overview overview)
     {
-        var any = overview.Workspaces.Any(g => g.WantsAttention || g.Running.Any(Glows))
+        overviewAsks = overview.Workspaces.Any(g => g.WantsAttention || g.Running.Any(Glows))
             || overview.Pinned.Any(Glows)
             || overview.OtherDesktops.Any(d => d.Windows.Any(Glows));
+        RunAsking(overviewAsks || AnyTaskDue);
+    }
+
+    // What the last overview said about asking, for RunAsking's callers that have no overview (the stopwatch's tick).
+    bool overviewAsks;
+
+    // Starts or stops the shared pulse; does nothing when it is already in the state asked for.
+    void RunAsking(bool any)
+    {
         if (any == askingRunning) return;
         askingRunning = any;
 

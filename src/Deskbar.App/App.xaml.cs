@@ -1515,6 +1515,10 @@ public partial class App : Application
                 TimeToday = id => timeTracker?.Time.On(id, DateOnly.FromDateTime(DateTime.Now)) ?? TimeSpan.Zero,
                 // ...and the screen strips it fills on every rebuild (FloatingBar.Strips.cs).
                 Strips = () => stripSet.Current,
+                // ...and the tasks (FloatingBar.Tasks.cs): the stopwatch in the strip and the rows' pies draw this
+                // service's board, and the stopwatch's menu parks and finishes tasks through it. The same instance the
+                // 1 s timer ticks and the control pipe edits, so all three agree.
+                Tasks = tasks,
             };
             // The bar's hwnd is created HERE, before it is ever shown, for two reasons that
             // both hang off the same handle:

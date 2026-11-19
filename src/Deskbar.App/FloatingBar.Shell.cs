@@ -197,6 +197,9 @@ public partial class FloatingBar
         stripClock = clock;
         // Hidden until there is more than one input language to switch between (FloatingBar.Language.cs).
         stripLanguage = LanguageButton();
+        // The tasks stopwatch, just inward of the language code (FloatingBar.Tasks.cs). Collapsed until the app hands
+        // the bar its TaskService.
+        stripTasks = StopwatchButton();
         LayOutStrip(acrossSeam: false);
 
         UpdateClock(clock);
@@ -221,7 +224,7 @@ public partial class FloatingBar
     // about 24 DIP, which is what the code needs. The height stays, since the clock's two lines set it.
     const double StripGlyphSize = 17, StripWifiSize = 16, StripButtonWidth = 28, StripButtonHeight = 36;
 
-    Button? stripTray, stripQuickSettings, stripVolume, stripBell, stripSliver, stripClock, stripLanguage;
+    Button? stripTray, stripQuickSettings, stripVolume, stripBell, stripSliver, stripClock, stripLanguage, stripTasks;
     bool stripAcrossSeam;
     StackPanel? shellStartTwin;
 
@@ -252,6 +255,11 @@ public partial class FloatingBar
     // The language switcher sits just inside the clock, where Windows puts its own language indicator, on
     // either layout. It is collapsed with a single input language, and a collapsed child takes no room.
     //
+    // The tasks stopwatch sits just inside the language code (spec 2026-11-19-tasks-in-the-bar, "The bar": "just
+    // left of the language code"). Right-docked children are laid out from the edge inwards in the order added,
+    // so it comes after the language code in the list, and across the seam before the bell, which keeps the bell
+    // where it was relative to the clock's group.
+    //
     // An item switched off in Manage > Settings (AppState.HiddenStripItems, see StripItem) is simply not added,
     // so the rest close up and nothing of it takes room. Petre: "i don't want wifi there", "and i don't think i
     // want notifications either", "make it a setting, what to show". Left out of the strip rather than
@@ -263,7 +271,9 @@ public partial class FloatingBar
         stripHidden = manager.State.HiddenStripItems.ToHashSet();
         ShellStrip.Children.Clear();
         Button[] left = acrossSeam ? [stripTray!, stripQuickSettings!, stripVolume!] : [stripTray!, stripQuickSettings!, stripVolume!, stripBell!];
-        Button[] right = acrossSeam ? [stripSliver!, stripClock!, stripLanguage!, stripBell!] : [stripSliver!, stripClock!, stripLanguage!];
+        Button[] right = acrossSeam
+            ? [stripSliver!, stripClock!, stripLanguage!, stripTasks!, stripBell!]
+            : [stripSliver!, stripClock!, stripLanguage!, stripTasks!];
         left.Where(ShownInStrip).ToList().ForEach(b =>
         {
             DockPanel.SetDock(b, Dock.Left);
@@ -274,6 +284,8 @@ public partial class FloatingBar
             DockPanel.SetDock(b, Dock.Right);
             ShellStrip.Children.Add(b);
         });
+        // The stopwatch's Visibility follows the setting as well (and the tasks gate), see ShowStopwatch.
+        ShowStopwatch();
         // Which buttons share the strip with the clock just changed, so whether its date fits may have too.
         FitClock();
     }
@@ -291,6 +303,7 @@ public partial class FloatingBar
         : button == stripLanguage ? StripItem.Language
         : button == stripClock ? StripItem.Clock
         : button == stripSliver ? StripItem.ShowDesktop
+        : button == stripTasks ? StripItem.Tasks
         : null;
 
     // Everything that has to respect the seam (see LayOutStrip, the pins' PackedPinPanel and the now-playing
@@ -399,35 +412,59 @@ public partial class FloatingBar
     // too, and the switcher keeps its room. The clock's place in that order is not the fix, because it is
     // also its place on screen (just right of the language code, where Windows draws them). The other way to
     // make room is the setting above it: switch off what is not wanted (wifi, the bell).
+    //
+    // THE STOPWATCH'S COUNTDOWN GOES RIGHT AFTER THE DATE (spec 2026-11-19-tasks-in-the-bar, "When the strip runs
+    // out of room"). So the order things give way in, narrowest strip last: the date, then the countdown text
+    // ("4:32", leaving the stopwatch's glyph and swatch), then the clock. The glyph itself is never dropped here,
+    // because it is the only way into the feature; the language code keeps its first place as before.
     void FitClock()
     {
         if (clockTime is null || clockDate is null || stripClock is null || ShellStrip.ActualWidth <= 0) return;
-        // Switched off in Settings: nothing to fit.
-        if (!ShellStrip.Children.Contains(stripClock)) return;
         var infinite = new Size(double.PositiveInfinity, double.PositiveInfinity);
         double Natural(UIElement element)
         {
             element.Measure(infinite);
             return element.DesiredSize.Width;
         }
-        // Every button by its MEASURED width, which includes the icon size setting's LayoutTransform (see
+        // The stopwatch split into what always stays (glyph, swatch, padding) and the countdown, which this method
+        // shows or hides. Its rest is its measured width less the countdown's while that is showing; the countdown
+        // is reckoned from its TEXT, for the same reason as the date below: a collapsed line measures 0 wide.
+        var watchShown = stripTasks is not null && stopwatchCountdown is not null
+                         && ShellStrip.Children.Contains(stripTasks) && stripTasks.Visibility != Visibility.Collapsed;
+        var watchFull = watchShown ? Natural(stripTasks!) : 0;
+        var watchRest = watchShown && stopwatchCountdown!.Visibility != Visibility.Collapsed
+            ? watchFull - stopwatchCountdown.DesiredSize.Width
+            : watchFull;
+        var countdown = watchShown && stopwatchCountdown!.Text.Length > 0
+            ? TextWidth(stopwatchCountdown) + stopwatchCountdown.Margin.Left + stopwatchCountdown.Margin.Right
+            : 0;
+        // Every other button by its MEASURED width, which includes the icon size setting's LayoutTransform (see
         // ScaleChromeIcons); its Width property is the size before that scale, so reading it would be wrong at
         // any icon size but 100%.
-        var others = ShellStrip.Children.OfType<FrameworkElement>()
-            .Where(b => b != stripClock && b.Visibility != Visibility.Collapsed)
-            .Sum(Natural);
+        var rest = ShellStrip.Children.OfType<FrameworkElement>()
+            .Where(b => b != stripClock && b != stripTasks && b.Visibility != Visibility.Collapsed)
+            .Sum(Natural) + watchRest;
+        var others = rest + countdown;
+        // Switched off in Settings: no clock to fit, only the countdown against what the rest leaves.
+        if (!ShellStrip.Children.Contains(stripClock))
+        {
+            ShowCountdown(others <= ShellStrip.ActualWidth);
+            return;
+        }
         // The clock's lines by their TEXT, not by measuring the elements: a collapsed date measures 0 wide, so
         // measuring it would make the next check think the date fits, show it, and hide it again, every minute.
         var withDate = stripClock.Padding.Left + stripClock.Padding.Right + Math.Max(TextWidth(clockTime), TextWidth(clockDate));
         var timeOnly = stripClock.Padding.Left + stripClock.Padding.Right + TextWidth(clockTime);
         var fits = others + withDate <= ShellStrip.ActualWidth;
-        var timeFits = others + timeOnly <= ShellStrip.ActualWidth;
+        var countdownFits = others + timeOnly <= ShellStrip.ActualWidth;
+        var timeFits = rest + timeOnly <= ShellStrip.ActualWidth;
         lastClockFit = (ShellStrip.ActualWidth, others, withDate);
         clockDate.Visibility = fits ? Visibility.Visible : Visibility.Collapsed;
+        ShowCountdown(countdownFits);
         stripClock.Visibility = timeFits ? Visibility.Visible : Visibility.Collapsed;
-        var verdict = fits ? "date shown" : timeFits ? "date hidden" : "clock hidden";
+        var verdict = fits ? "date shown" : countdownFits ? "date hidden" : timeFits ? "countdown hidden" : "clock hidden";
         if (ClickTrace.On && clockVerdict != verdict)
-            ClickTrace.Write($"clock: {verdict}, strip={ShellStrip.ActualWidth:0.0} others={others:0.0} clock with date={withDate:0.0} time only={timeOnly:0.0}");
+            ClickTrace.Write($"clock: {verdict}, strip={ShellStrip.ActualWidth:0.0} others={others:0.0} (countdown {countdown:0.0}) clock with date={withDate:0.0} time only={timeOnly:0.0}");
         clockVerdict = verdict;
     }
 

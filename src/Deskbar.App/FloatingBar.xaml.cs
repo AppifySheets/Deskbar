@@ -2195,6 +2195,7 @@ public partial class FloatingBar : Window
         headerDropTargets.Clear();    // re-registered by every row as it is built (see GroupRow)
         ForgetAgingIcons();           // the aging overlays belong to the rows about to be replaced
         ForgetWorkspaceTimes();       // ...and so do the captions' time marks
+        ForgetTaskPies();             // ...and the task pies, and the row colours the stopwatch's swatch reads
         // The rows these pointed at have just been thrown away, so every entry is now a Border
         // that is no longer in the tree. Repopulated as the new rows are built.
         rowRings.Clear();
@@ -2395,6 +2396,9 @@ public partial class FloatingBar : Window
                 if (g.Workspace.Id == liveTarget) currentTint = LaneTint(colour, colourSlot);
                 // ...and the bright version of that colour for the bar down the list's side (see ListSpine).
                 if (g.Workspace.Id == liveTarget) currentAccent = ListSpine(colour, colourSlot);
+                // ...and the row's rail colour, for the stopwatch's swatch when this workspace's timer is the one it
+                // shows (FloatingBar.Tasks.cs), so the swatch and the row it points at are one colour.
+                NoteWorkspaceAccent(g.Workspace.Id, LaneAccent(colour, colourSlot >= 0 ? colourSlot : ownSlot));
 
                 // A member is drawn as nested unless it is the anchor. In an ANCHORLESS group every
                 // member is nested, because none of them is the parent: the group's name carries
@@ -2432,7 +2436,9 @@ public partial class FloatingBar : Window
                         ? ListSpine(colour, colourSlot >= 0 ? colourSlot : ownSlot)
                         : LaneAccent(colour, colourSlot >= 0 ? colourSlot : ownSlot),
                     titledList: Expanded(g.Workspace.Id),
-                    asking: g.WantsAttention);
+                    asking: g.WantsAttention,
+                    // The soonest running task timer on this workspace, drawn as a pie in the caption (Tasks.cs).
+                    timer: g.Timer);
                 Phase($"row {g.Workspace.Name}");
                 return built;
             }
@@ -3694,7 +3700,7 @@ public partial class FloatingBar : Window
     // not a desktop at all.
     // `titledList` draws the current workspace's titled list at the bottom of the bar (see RebuildCore)
     // instead of an icon row.
-    UIElement GroupRow(string visualLabel, string groupLabel, bool isCurrent, Func<Result>? switchTo, string groupKey, Action<WindowHandle, int?>? onDrop, IEnumerable<WindowRow> rows, Brush? tint = null, Guid? rowKey = null, bool folded = false, bool nested = false, Brush? spine = null, bool pinned = false, Guid? desktopId = null, UIElement? captionContent = null, bool titledList = false, bool asking = false)
+    UIElement GroupRow(string visualLabel, string groupLabel, bool isCurrent, Func<Result>? switchTo, string groupKey, Action<WindowHandle, int?>? onDrop, IEnumerable<WindowRow> rows, Brush? tint = null, Guid? rowKey = null, bool folded = false, bool nested = false, Brush? spine = null, bool pinned = false, Guid? desktopId = null, UIElement? captionContent = null, bool titledList = false, bool asking = false, Maybe<Core.Tasks.TaskTimer> timer = default)
     {
         // Background MUST be non-null for a panel to take part in hit testing at all --
         // a null Background leaves gaps between icons that swallow nothing and report no
@@ -3888,7 +3894,7 @@ public partial class FloatingBar : Window
         // either, which changes nothing -- RowLabel already returns null for a row with no
         // destination, and the pinned row has never had one.
         var (label, setHover) = captionContent is null
-            ? RowLabel(visualLabel, isCurrent, switchTo, caption: true, currentColour: spine, timeFor: rowKey, fold: foldMark, asking: asking)
+            ? RowLabel(visualLabel, isCurrent, switchTo, caption: true, currentColour: spine, timeFor: rowKey, fold: foldMark, asking: asking, timer: timer)
             : (captionContent, (Action<bool>?)null);
 
         // Collected as they are built, because the hover wiring below needs the BUTTONS and
@@ -4111,7 +4117,7 @@ public partial class FloatingBar : Window
         // by the same hover. Only for a real caption, not the pinned row's header.
         if (AcrossSeam && captionContent is null)
         {
-            var (twin, twinHover) = RowLabel(visualLabel, isCurrent, switchTo, caption: true, currentColour: spine, timeFor: rowKey, fold: foldMark);
+            var (twin, twinHover) = RowLabel(visualLabel, isCurrent, switchTo, caption: true, currentColour: spine, timeFor: rowKey, fold: foldMark, timer: timer);
             if (twin is FrameworkElement twinCaption && label is FrameworkElement firstCaption) twinCaption.Margin = firstCaption.Margin;
             var holder = AtRightHalf(twin);
             Grid.SetRow(holder, 0);
@@ -5495,7 +5501,7 @@ public partial class FloatingBar : Window
     // `fold`: set when the row is drawn FOLDED (see GroupRow), and then the name is followed by how many windows
     // the row is hiding and, when one of them wants you, the attention dot. Null on every row drawn in full.
     (UIElement Element, Action<bool>? SetHover) RowLabel(string text, bool isCurrent, Func<Result>? switchTo, bool caption = false,
-        Brush? currentColour = null, Guid? timeFor = null, (int Windows, bool Attention)? fold = null, bool asking = false)
+        Brush? currentColour = null, Guid? timeFor = null, (int Windows, bool Attention)? fold = null, bool asking = false, Maybe<Core.Tasks.TaskTimer> timer = default)
     {
         // Petre: "when switching workspaces, because the caption of the workspace gets bolded,
         // it increases the width of the floating window a little if that workspace is full,
@@ -5572,6 +5578,10 @@ public partial class FloatingBar : Window
         // name it counts.
         if (fold is { } folded)
             marks.Add(FoldMark(folded.Windows, folded.Attention, textBlock.FontSize, lineHeight));
+        // ...and last, so it sits right against the name: a running task timer's pie, emptying as the time runs out
+        // (FloatingBar.Tasks.cs). Registered there for the clock's tick, which repaints it in place.
+        if (caption && timer.HasValue)
+            marks.Add(TaskPie(timer.Value));
 
         UIElement content = textBlock;
         if (marks.Count > 0)
