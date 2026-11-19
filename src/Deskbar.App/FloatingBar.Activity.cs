@@ -128,7 +128,11 @@ public partial class FloatingBar
                 Foreground = TabCountInk,
                 HorizontalAlignment = HorizontalAlignment.Right,
                 VerticalAlignment = VerticalAlignment.Top,
-                Margin = new Thickness(0, -6, -3, 0),
+                // Hangs only a little past the icon's top right corner. At 6 DIP up and 3 out, the digits sat on
+                // the edge of whatever held the icon: a screen strip's top edge clipped them, and in the bar they
+                // ran into the row's frame (Petre: "move it a bit off the edge"). The margin stays negative, so
+                // the count never widens or heightens the cell.
+                Margin = new Thickness(0, -3, -2, 0),
                 IsHitTestVisible = false,
             });
         if (loud)
