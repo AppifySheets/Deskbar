@@ -66,11 +66,15 @@ public static class SettledMove
     // on that side (the tile is at the screen's edge), the screen next door. Back to its slot when there is neither.
     //
     // The neighbour is found by GEOMETRY from `slots`, because a split tree has no columns to count (spec,
-    // docs/superpowers/specs/2026-11-19-tiling-split-tree-design.md): only tiles lying wholly on that side of this one
-    // count, and of those the one whose height spans this tile's vertical middle, else the one nearest to that middle
-    // by height; the nearer horizontally first among equals, then slot order. For a grid of columns that is the old
-    // rule, "the tile one column over, level with it". For Petre's A and C side by side over a full-width B, Win+Right
-    // from A swaps with C, and B, spanning the whole width, has nothing beside it.
+    // docs/superpowers/specs/2026-11-19-tiling-split-tree-design.md). The candidates are the tiles lying wholly on that
+    // side of this one AND overlapping it vertically. The NEAREST horizontally wins, so a snap never jumps a column;
+    // among those, the one whose height spans this tile's vertical middle, else the one nearest to it by height; then
+    // slot order. For a grid of columns that is the old rule, "the tile one column over, level with it". For Petre's A
+    // and C side by side over a full-width B, Win+Right from A swaps with C, and B has nothing wholly beside it.
+    //
+    // Horizontal distance comes FIRST because of the gap (task 5 review): in A[L, D[L,L], L] with an 8 px gap the left
+    // tile's middle (y 520) falls in the gap between the middle column's rows (8..516 and 524..1032), so neither spans
+    // it, while the full-height right tile does. Ranked by height first, Win+Right jumped over the middle column.
     public static MoveOutcome Snapped(
         WindowHandle moved,
         TileArrange.Zone side,
@@ -84,6 +88,7 @@ public static class SettledMove
 
         var middle = (mine.Top + mine.Bottom) / 2;
         bool Spans(WindowRect r) => r.Top <= middle && middle < r.Bottom;
+        bool Overlaps(WindowRect r) => r.Top < mine.Bottom && mine.Top < r.Bottom;
         int Height(WindowRect r) => Spans(r) ? 0 : Math.Min(Math.Abs(r.Top - middle), Math.Abs(r.Bottom - middle));
         int Width(WindowRect r) => side == TileArrange.Zone.Left ? mine.Left - r.Right : r.Left - mine.Right;
 
@@ -91,8 +96,9 @@ public static class SettledMove
         return order
             .Where(w => w != moved && slots.ContainsKey(w))
             .Where(w => side == TileArrange.Zone.Left ? slots[w].Right <= mine.Left : slots[w].Left >= mine.Right)
-            .OrderBy(w => Height(slots[w]))
-            .ThenBy(w => Width(slots[w]))
+            .Where(w => Overlaps(slots[w]))
+            .OrderBy(w => Width(slots[w]))
+            .ThenBy(w => Height(slots[w]))
             .Select(w => (MoveOutcome)new MoveOutcome.Swap(w))
             .DefaultIfEmpty(screenBeyond.HasValue ? new MoveOutcome.JoinScreen(screenBeyond.Value) : new MoveOutcome.BackToSlot())
             .First();
