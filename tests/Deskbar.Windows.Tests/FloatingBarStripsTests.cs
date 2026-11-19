@@ -86,18 +86,15 @@ public class FloatingBarStripsTests
         var resting = TabFor(h.StripB, h.Pinned.Title);
         var accent = ((SolidColorBrush)h.StripB.NameTag.Background).Color;
 
-        Assert.Equal(accent, ColourOf(Underline(active).Background));
-        Assert.Equal(ActiveFill, ColourOf(((Panel)active.Content).Background));
+        // A ring round the tab, not an underline: a maximized window's focus ring frame draws its top line right under
+        // the strip in the same colour, and an underline merged with it ("fullscreen masks which window is active in
+        // the strip"). The fill is inside the ring.
+        Assert.Equal(accent, ColourOf(Underline(active).BorderBrush));
+        Assert.Equal(ActiveFill, ColourOf(Underline(active).Background));
         Assert.Equal(Colors.White, ColourOf(Title(active).Foreground));
 
-        Assert.Equal(RestUnderline, ColourOf(Underline(resting).Background));
-        Assert.NotEqual(ActiveFill, ColourOf(((Panel)resting.Content).Background));
-
-        // The line runs along the tab's TOP: a maximized window's focus ring frame draws its top line right under the
-        // strip in the same colour, and a line along the bottom merged with it ("fullscreen masks which window is
-        // active in the strip").
-        Assert.Equal(VerticalAlignment.Top, Underline(active).VerticalAlignment);
-        Assert.Equal(VerticalAlignment.Top, Underline(resting).VerticalAlignment);
+        Assert.Equal(RestUnderline, ColourOf(Underline(resting).BorderBrush));
+        Assert.NotEqual(ActiveFill, ColourOf(Underline(resting).Background));
     });
 
     // A grouped workspace's tag wears the GROUP's colour, the one the bar paints that workspace's row in.
@@ -179,7 +176,7 @@ public class FloatingBarStripsTests
 
         var tabAfter = TabFor(h.StripB, h.Code.Title);
         Assert.NotSame(tabBefore, tabAfter);
-        Assert.Equal(ActiveFill, ColourOf(((Panel)tabAfter.Content).Background));
+        Assert.Equal(ActiveFill, ColourOf(Underline(tabAfter).Background));
         Assert.Equal(rowsBefore, h.Rows.Children.Cast<UIElement>().ToList());
     });
 

@@ -137,8 +137,8 @@ public partial class FloatingBar
 
     // One window's tab: IconButton, exactly as the bar's own buttons are built, under the titled list's group key, then
     // dressed as a tab. Icon on the left (with the pin badge for a pinned window, as in the titled list), the title in
-    // the titled list's strength (TitleBrush), a 2 DIP line along the top, and for the window you are in the
-    // lighter fill and the underline in `accent`, the workspace's colour.
+    // the titled list's strength (TitleBrush), a grey ring round the tab, and for the window you are in the
+    // lighter fill and the ring in `accent`, the workspace's colour.
     //
     // The bare chrome rather than the marked one the titled list uses: the mockup's fill and underline are the tab's
     // "you are in this window", and the marker's ring, glow and bar on top of them would say it three more times. Every
@@ -177,24 +177,30 @@ public partial class FloatingBar
         line.Children.Add(icon);
         line.Children.Add(title);
 
-        // Along the tab's TOP edge, though the mockup had it along the bottom (and the tag still says underline). The
-        // focus ring (WindowRings) frames a maximized window just inside the work area, so its top line runs right under
-        // the strip in the same workspace colour as the active tab's line: the two merged into one full-width line and
-        // Petre could no longer tell which tab was active ("fullscreen masks which window is active in the strip"). His
-        // answer: "maybe give them lines at the top, not bottom". The strip's whole height now lies between the two.
-        var underline = new Border
+        // A RING round each tab, grey at rest and in the workspace's colour round the window you are in, with the lighter
+        // fill inside it. The mockup had a 2 DIP underline instead (the tag still says so). The focus ring (WindowRings)
+        // frames a maximized window just inside the work area, so its top line runs right under the strip in the same
+        // colour as the active tab's underline: the two merged into one full-width line and Petre could no longer tell
+        // which tab was active ("fullscreen masks which window is active in the strip"). He offered lines at the top or
+        // rings, tried the lines, then "let's try rings on buttons in the strip".
+        //
+        // Inset 2 DIP from every edge of the tab, so two neighbours' rings never touch and the bottom of the ring stays
+        // clear of the frame's line under the strip. Behind the icon and title (added first), so its fill is under them.
+        var ring = new Border
         {
             Tag = StripUnderlineTag,
-            Height = 2,
-            VerticalAlignment = VerticalAlignment.Top,
-            Background = row.IsActive ? accent ?? StripUnderlineRest : StripUnderlineRest,
+            Margin = new Thickness(2),
+            BorderThickness = new Thickness(1.5),
+            CornerRadius = new CornerRadius(4),
+            BorderBrush = row.IsActive ? accent ?? StripUnderlineRest : StripUnderlineRest,
+            Background = row.IsActive ? StripActiveFill : Brushes.Transparent,
             IsHitTestVisible = false,
         };
 
-        // Transparent rather than null at rest, so the whole tab answers the pointer, not only its icon and text.
-        var body = new Grid { Height = ScreenStrip.HeightDip, Background = row.IsActive ? StripActiveFill : Brushes.Transparent };
+        // Transparent rather than null, so the whole tab answers the pointer, not only its icon and text.
+        var body = new Grid { Height = ScreenStrip.HeightDip, Background = Brushes.Transparent };
+        body.Children.Add(ring);
         body.Children.Add(line);
-        body.Children.Add(underline);
 
         button.Content = body;
         button.Template = BareStretchButton;
