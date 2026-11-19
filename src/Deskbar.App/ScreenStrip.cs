@@ -167,8 +167,8 @@ public sealed class ScreenStrip : Window
         {
             Foreground = Brushes.White,
             // The tab titles' size (FloatingBar.StripTab), semibold so the workspace's name still reads as the strip's
-            // label. It went 12, 10 and 9.5 ("smaller font" twice, then "too small now"), and settled with the titles.
-            FontSize = 11,
+            // label. It went 12, 10 and 9.5 ("smaller font" twice, then "too small now"), and settled with the titles at 12.
+            FontSize = 12,
             FontWeight = FontWeights.SemiBold,
             VerticalAlignment = VerticalAlignment.Center,
             TextTrimming = TextTrimming.CharacterEllipsis,
