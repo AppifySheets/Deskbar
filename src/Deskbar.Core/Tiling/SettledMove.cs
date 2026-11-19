@@ -22,6 +22,11 @@ public abstract record MoveOutcome
 
     // Dropped into its own screen's OPENING (TileLayout.Opening): it moves there, and the place it left closes up.
     public sealed record IntoOpening : MoveOutcome;
+
+    // Dropped in the screen-edge BAND on `Side` of screen `Screen`'s inner area (TileArrange.ScreenBand): it becomes a
+    // full-height column or full-width row along that side of the whole screen (TileArrange.DropAtEdge). The screen is
+    // named because a band drop on another screen than the window's own has to say which (ruling R6).
+    public sealed record AtEdge(int Screen, TileArrange.Zone Side) : MoveOutcome;
 }
 
 // The rule for a settled move, kept out of the Win32 plumbing so it can be tested. It decides by the
@@ -110,6 +115,16 @@ public static class SettledMove
     // tile at all, so it went back. The pointer is where the user is looking and what they meant; the centre is
     // kept for moves made without a mouse (a keyboard snap), which have no pointer to speak of.
     // `screenAt` is the screen the point is on.
+    //
+    // SCREEN-EDGE BANDS (spec, docs/superpowers/specs/2026-11-19-tiling-split-tree-design.md, "Drops", step 1): a band
+    // along each edge of the inner area of the screen under the point (`innerAt`, GridLayout.InnerArea of that
+    // screen's work area with its gap) wins over any tile under it, and the window becomes a full-height column or a
+    // full-width row of that whole screen (MoveOutcome.AtEdge). The order (ruling R6):
+    //   - on the window's own screen: its opening first (an opening along an edge lies under that edge's band, and a
+    //     drop there has always filled it), then the band, then the tiles;
+    //   - on another screen: the band, then that screen's tiles, then a join at the end.
+    // No band when it could change nothing: a tile alone on its own screen has nowhere to go but where it is, and an
+    // empty screen has nothing to be beside (a plain join gives it the whole screen anyway).
     public static MoveOutcome DecideAt(
         WindowHandle moved,
         int x,
@@ -118,15 +133,18 @@ public static class SettledMove
         TileBoard board,
         IReadOnlyDictionary<WindowHandle, WindowRect> slots,
         IReadOnlyDictionary<WindowHandle, WindowRect>? slotsThere = null,
-        Maybe<WindowRect> openingHere = default) =>
+        Maybe<WindowRect> openingHere = default,
+        Maybe<WindowRect> innerAt = default) =>
         board.ScreenOf(moved).TryGetValue(out var home) && home == screenAt
-            ? Zoned(At(moved, x, y, slots), x, y, slots) switch
-            {
-                // Over no tile but over the screen's opening (`openingHere`, the home screen's): into it.
-                MoveOutcome.BackToSlot when openingHere.TryGetValue(out var hole) && Contains(hole, x, y) => new MoveOutcome.IntoOpening(),
-                var hit => hit,
-            }
-            : Across(moved, x, y, screenAt, slotsThere ?? new Dictionary<WindowHandle, WindowRect>());
+            // Over the screen's opening (`openingHere`, the home screen's): into it. No tile lies over an opening.
+            ? openingHere.TryGetValue(out var hole) && Contains(hole, x, y) ? new MoveOutcome.IntoOpening()
+                : board.On(home).Count > 1 && Band(innerAt, x, y).TryGetValue(out var side) ? new MoveOutcome.AtEdge(screenAt, side)
+                : Zoned(At(moved, x, y, slots), x, y, slots)
+            : Across(moved, x, y, screenAt, slotsThere ?? new Dictionary<WindowHandle, WindowRect>(), innerAt);
+
+    // The band under the point, when the screen's inner area is known.
+    static Maybe<TileArrange.Zone> Band(Maybe<WindowRect> inner, int x, int y) =>
+        inner.Bind(area => TileArrange.ScreenBand(area, x, y));
 
     static bool Contains(WindowRect r, int x, int y) => r.Left <= x && x < r.Right && r.Top <= y && y < r.Bottom;
 
@@ -134,12 +152,16 @@ public static class SettledMove
     // places with it across the screens, an edge zone puts the window beside it there. Over no tile at all (an
     // empty screen, a gap) it joins that screen's grid at the end, as before. Petre, dragging across: "on the right
     // it only highlighted the right circle", because every drop on another screen joined at the end.
-    static MoveOutcome Across(WindowHandle moved, int x, int y, int screenAt, IReadOnlyDictionary<WindowHandle, WindowRect> slotsThere) =>
-        Zoned(At(moved, x, y, slotsThere), x, y, slotsThere) switch
-        {
-            MoveOutcome.BackToSlot => new MoveOutcome.JoinScreen(screenAt),
-            var hit => hit,
-        };
+    // A band of that screen comes first, as on the window's own (spec, "Drops", step 1), unless the screen has no tile.
+    static MoveOutcome Across(WindowHandle moved, int x, int y, int screenAt, IReadOnlyDictionary<WindowHandle, WindowRect> slotsThere,
+        Maybe<WindowRect> innerAt) =>
+        slotsThere.Count > 0 && Band(innerAt, x, y).TryGetValue(out var side)
+            ? new MoveOutcome.AtEdge(screenAt, side)
+            : Zoned(At(moved, x, y, slotsThere), x, y, slotsThere) switch
+            {
+                MoveOutcome.BackToSlot => new MoveOutcome.JoinScreen(screenAt),
+                var hit => hit,
+            };
 
     // A hit on another tile's EDGE zone puts the window beside it (drop zones, TileArrange); its middle swaps.
     // Only for a drop by hand at the pointer: a window's centre has no aim, so Decide keeps plain swaps.

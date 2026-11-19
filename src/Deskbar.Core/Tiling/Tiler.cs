@@ -27,7 +27,10 @@ namespace Deskbar.Core.Tiling;
 //     split grow into the room. On a workspace that keeps a closed tile's space (Workspace.TileKeepsSpace), a tile
 //     that CLOSES leaves its leaf as the screen's opening instead (LayoutOn).
 //   - A drop on a tile's edge puts the window beside THAT tile only, at any depth of the tree (TileArrange.Drop;
-//     docs/superpowers/specs/2026-11-19-tiling-split-tree-design.md).
+//     docs/superpowers/specs/2026-11-19-tiling-split-tree-design.md). A drop in the band along an edge of a screen
+//     makes it a full-height column or full-width row of that whole screen (TileArrange.DropAtEdge).
+//   - The first fill (a start, or tiling switched on) matches the windows to a stored layout's cells by where they
+//     sit, so a hand-made shape survives a restart (TileBoard.FirstFill).
 //
 // Threading: every entry point runs on the UI thread, and the Tiler makes sure of it rather than trusting its
 // sources. `inputs` is the UI thread's scheduler (App passes one; tests leave it null, and then nothing is
@@ -507,7 +510,8 @@ public sealed partial class Tiler(WorkspaceManager manager, IVirtualDesktopServi
             var pointerOn = ScreenAt(screens.Values, pointer.X, pointer.Y).GetValueOrDefault(screenNow);
             outcome = SettledMove.DecideAt(window, pointer.X, pointer.Y, pointerOn, board, decidedSlots,
                 SlotsThere(workspace, screens, pointerOn, decidedOn),
-                screens.TryGetValue(decidedOn, out var homeScreen) ? OpeningOn(workspace, homeScreen) : Maybe<WindowRect>.None);
+                screens.TryGetValue(decidedOn, out var homeScreen) ? OpeningOn(workspace, homeScreen) : Maybe<WindowRect>.None,
+                InnerOf(screens, pointerOn));
         }
         // Win+Left / Win+Right (no button down, the frame exactly half the screen): a direction, not a place
         // (SettledMove.SnapSide has the measurement). The tile beside it on that side, found from the slots (a tree
@@ -551,6 +555,26 @@ public sealed partial class Tiler(WorkspaceManager manager, IVirtualDesktopServi
                     .Tap(() => trace?.Invoke($"tile: {workspace.Name} screen {targetOn}: {window.Value:X} dropped {beside.Side} of {beside.Target.Value:X}, sizes {Show(arranged.Layout)}"))
                     .TapError(error => trace?.Invoke($"tile: {workspace.Name} screen {targetOn}: storing the new arrangement failed: {error}"));
                 Retile(workspace, [leftFrom, targetOn]);
+                break;
+            // In the screen-edge band of the screen under the pointer (TileArrange.DropAtEdge): a full-height column or a
+            // full-width row of that whole screen, on its own screen or dragged across. The new layout is stored FIRST,
+            // so Keep's IntoOpenings already sees it (the drop closed any opening there, and the window is no arrival to
+            // pull into one) and the re-tile lays it out; the screen it left gives its leaf up through Keep's leaver
+            // bookkeeping. Should the arrangement not hold the window (it cannot, by SettledMove's guards: a band is
+            // never offered on an empty screen or for a lone tile), it goes back to its slot rather than being lost.
+            case MoveOutcome.AtEdge edge when screens.TryGetValue(edge.Screen, out var edgeScreen):
+                var banded = Banded(workspace, edgeScreen, window, edge);
+                if (!banded.Order.Contains(window))
+                {
+                    if (decidedSlots.TryGetValue(window, out var stay)) PutBack(window, stay, frame);
+                    break;
+                }
+                var bandFrom = board.ScreenOf(window).GetValueOrDefault(edge.Screen);
+                StoreLayout(workspace, KeyOf(edgeScreen), banded.Layout)
+                    .Tap(() => trace?.Invoke($"tile: {workspace.Name} screen {edge.Screen}: {window.Value:X} dropped in the {edge.Side} band, sizes {Show(banded.Layout)}"))
+                    .TapError(error => trace?.Invoke($"tile: {workspace.Name} screen {edge.Screen}: storing the band drop failed: {error}"));
+                Keep(workspace, board.Into(edge.Screen, banded.Order));
+                Retile(workspace, [bandFrom, edge.Screen]);
                 break;
             // Into its own screen's opening (TileArrange.IntoOpening): the new order and layout, the layout stored first.
             case MoveOutcome.IntoOpening when screens.TryGetValue(decidedOn, out var openScreen):
@@ -637,7 +661,9 @@ public sealed partial class Tiler(WorkspaceManager manager, IVirtualDesktopServi
             .Where(w => w.Frame.HasValue)
             .Select(w => (w.Window, w.Screen, Frame: w.Frame.Value))
             .ToList();
-        var board = before is null ? TileBoard.FirstFill(windows) : Reconciled(before, windows);
+        // The first fill matches windows to the cells of each screen's stored layout when it has one for that many
+        // windows (TileBoard.FirstFill has the reason), so a hand-made shape survives a restart.
+        var board = before is null ? TileBoard.FirstFill(windows, StoredCells(workspace)) : Reconciled(before, windows);
         // Minimized tiles that came back in this evaluate. Keep's IntoOpenings never pulls one into an opening: it went
         // back to its own place first (the design's precedence, step 1; final review, I2).
         IReadOnlySet<WindowHandle> returned = new HashSet<WindowHandle>();
@@ -689,6 +715,19 @@ public sealed partial class Tiler(WorkspaceManager manager, IVirtualDesktopServi
                 .Where(s => !board.On(s).SequenceEqual(before.On(s)))
                 .ToList();
         Retile(workspace, changed);
+    }
+
+    // For the first fill: the window rectangles of the layout stored for screen `number`, in slot order, when it lays
+    // out exactly `count` windows as it is (one leaf per window, or one each plus its opening); None otherwise, and the
+    // first fill sorts that screen by position. Read without side effects (no pending leaver, nothing stored).
+    Func<int, int, Maybe<IReadOnlyList<WindowRect>>> StoredCells(Workspace workspace)
+    {
+        var screens = surface.Screens().ToDictionary(s => s.Number);
+        return (number, count) => screens.TryGetValue(number, out var screen)
+            ? StoredOn(workspace.Id, KeyOf(screen))
+                .Where(stored => stored.HasOpeningFor(count) || (stored.Opening is null && stored.Count == count))
+                .Map(stored => GridLayout.Arrange(screen.WorkArea, count, GapOn(screen), stored))
+            : Maybe<IReadOnlyList<WindowRect>>.None;
     }
 
     // Which workspaces turned tiled since the last evaluate (see `restoreOnArrival`). The flag alone, not the gate:

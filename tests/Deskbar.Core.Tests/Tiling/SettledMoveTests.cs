@@ -112,4 +112,64 @@ public class SettledMoveTests
     [Fact]
     public void A_snap_left_with_a_gap_takes_the_stacked_column_beside_it_not_the_one_beyond() =>
         Assert.Equal(new MoveOutcome.Swap(B), SettledMove.Snapped(D, TileArrange.Zone.Left, 1, ThreeColumns, ThreeColumnSlots, Maybe<int>.None));
+
+    // --- screen-edge bands (spec, "Drops", step 1) -----------------------------------------------------------------
+    //
+    // A drop by hand in the band along an edge of the inner area of the screen under the pointer makes the window a
+    // full-height column or full-width row on that side of the whole screen. Screen 1 is A | B on 1000 x 600 with no
+    // gap, so the inner area is the work area; the bands are 60 px deep at the sides and 36 px at the top and bottom.
+    static readonly WindowRect Inner = new(0, 0, 1000, 600);
+
+    // x 990 is over B's tile, but in the right band, which wins over any tile under it.
+    [Fact]
+    public void DecideAt_in_the_right_band_is_AtEdge() =>
+        Assert.Equal(new MoveOutcome.AtEdge(1, TileArrange.Zone.Right),
+            SettledMove.DecideAt(A, 990, 300, 1, Board, Slots, innerAt: Inner));
+
+    [Fact]
+    public void DecideAt_off_the_bands_is_judged_by_the_tiles_as_before()
+    {
+        Assert.Equal(new MoveOutcome.Swap(B), SettledMove.DecideAt(A, 750, 300, 1, Board, Slots, innerAt: Inner));
+        Assert.Equal(new MoveOutcome.Beside(B, TileArrange.Zone.Right), SettledMove.DecideAt(A, 900, 300, 1, Board, Slots, innerAt: Inner));
+    }
+
+    // The home screen reads the opening FIRST (ruling R6): an opening along the left edge lies under the left band,
+    // and a drop there fills the opening, as it did before bands existed.
+    [Fact]
+    public void DecideAt_opening_wins_over_a_band()
+    {
+        var slots = new Dictionary<WindowHandle, WindowRect> { [A] = new(200, 0, 600, 600), [B] = new(600, 0, 1000, 600) };
+
+        Assert.IsType<MoveOutcome.IntoOpening>(
+            SettledMove.DecideAt(A, 10, 300, 1, Board, slots, openingHere: new WindowRect(0, 0, 200, 600), innerAt: Inner));
+        // Past the opening, still in the band of another edge: the band.
+        Assert.Equal(new MoveOutcome.AtEdge(1, TileArrange.Zone.Top),
+            SettledMove.DecideAt(A, 500, 10, 1, Board, slots, openingHere: new WindowRect(0, 0, 200, 600), innerAt: Inner));
+    }
+
+    // On ANOTHER screen the band is read first, against that screen's inner area, and names that screen.
+    [Fact]
+    public void DecideAt_in_a_band_of_another_screen_is_AtEdge_there()
+    {
+        var there = new Dictionary<WindowHandle, WindowRect> { [C] = new(1000, 0, 2000, 600) };
+
+        Assert.Equal(new MoveOutcome.AtEdge(2, TileArrange.Zone.Left),
+            SettledMove.DecideAt(A, 1010, 300, 2, Board, Slots, there, innerAt: new WindowRect(1000, 0, 2000, 600)));
+    }
+
+    // An empty screen has nothing to be beside: a band there is a plain join.
+    [Fact]
+    public void DecideAt_in_a_band_of_an_empty_screen_joins_it() =>
+        Assert.Equal(new MoveOutcome.JoinScreen(2),
+            SettledMove.DecideAt(A, 1010, 300, 2, Board, Slots, new Dictionary<WindowHandle, WindowRect>(), innerAt: new WindowRect(1000, 0, 2000, 600)));
+
+    // A tile alone on its screen has nowhere to go but where it is: no band, back to its slot.
+    [Fact]
+    public void DecideAt_a_lone_tile_in_a_band_of_its_own_screen_goes_back()
+    {
+        var alone = TileBoard.Empty.Join(1, A);
+
+        Assert.IsType<MoveOutcome.BackToSlot>(
+            SettledMove.DecideAt(A, 990, 300, 1, alone, new Dictionary<WindowHandle, WindowRect> { [A] = Inner }, innerAt: Inner));
+    }
 }

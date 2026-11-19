@@ -255,38 +255,50 @@ public static partial class TileArrange
     // had, whatever else the parent held. (Pairwise is the brief's rule; the spec says "its own fraction in that
     // parent split", which for a split of two is the same number.)
     //
-    // None for a lone leaf (nothing to come back beside), a window not on the screen, or a layout that does not
-    // describe the screen's windows.
+    // WALKING UP past the opening (task 5 review): when the window's only sibling in its parent is the opening's leaf
+    // (A in Down[Across[A, open], B]), the parent split is read instead, one level up, with the window's whole subtree
+    // as "own": A remembers B below the Across it sat in, and the Across's share of that pair, so it comes back above
+    // B. In normal form one level is always enough (a split has two children or more, and there is one opening), but
+    // the walk goes on up for as long as it has to.
+    //
+    // None for a lone leaf (nothing to come back beside), a lone window beside the opening (nothing but the opening on
+    // the screen), a window not on the screen, or a layout that does not describe the screen's windows.
     public static Maybe<ReturnSpot> SpotOf(IReadOnlyList<WindowHandle> order, TileLayout layout, WindowHandle window)
     {
         var slot = order.ToList().IndexOf(window);
         if (slot < 0 || !Describes(order, layout))
             return Maybe<ReturnSpot>.None;
         var path = layout.PathTo(LeafOf(layout, slot, order.Count));
-        if (path.Count == 0)
-            return Maybe<ReturnSpot>.None;
-
-        var parent = path[^1];
-        var children = parent.Branch.Children;
         var opening = layout.HasOpeningFor(order.Count) ? layout.Opening : null;
-        // Nearest before first, then nearest after, skipping a child that is the opening's leaf.
-        return Enumerable.Range(0, parent.Child).Reverse()
-            .Concat(Enumerable.Range(parent.Child + 1, children.Count - parent.Child - 1))
-            .Where(i => !(children[i].Node is TileLeaf && parent.FirstOf(i) == opening))
+
+        // From the window's own split up to the root: the first with a sibling that is not the opening.
+        return Enumerable.Range(0, path.Count).Reverse()
+            .Select(level => SiblingIn(path[level], opening).Map(i => SpotIn(order, layout, path[level], i)))
+            .FirstOrDefault(spot => spot.HasValue, Maybe<ReturnSpot>.None);
+    }
+
+    // The child of `parent` next to the one on the window's path: nearest before first, then nearest after, skipping
+    // the opening's leaf.
+    static Maybe<int> SiblingIn(TileLayout.PathStep parent, int? opening) =>
+        Enumerable.Range(0, parent.Child).Reverse()
+            .Concat(Enumerable.Range(parent.Child + 1, parent.Branch.Children.Count - parent.Child - 1))
+            .Where(i => !(parent.Branch.Children[i].Node is TileLeaf && parent.FirstOf(i) == opening))
             .Select(i => Maybe.From(i))
-            .FirstOrDefault(Maybe<int>.None)
-            .Map(i =>
-            {
-                var across = parent.Branch.Axis == Axis.Across;
-                var side = i < parent.Child ? across ? Zone.Right : Zone.Bottom : across ? Zone.Left : Zone.Top;
-                var siblings = Enumerable.Range(parent.FirstOf(i), TileLayout.LeafCount(children[i].Node))
-                    .Select(l => WindowIn(order, layout, l))
-                    .Where(w => w.HasValue)
-                    .Select(w => w.Value)
-                    .ToList();
-                var own = children[parent.Child].Share;
-                return new ReturnSpot(siblings, side, own / (own + children[i].Share));
-            });
+            .FirstOrDefault(Maybe<int>.None);
+
+    // The spot beside child `sibling` of `parent`, for the window whose subtree is the parent's child on the path.
+    static ReturnSpot SpotIn(IReadOnlyList<WindowHandle> order, TileLayout layout, TileLayout.PathStep parent, int sibling)
+    {
+        var children = parent.Branch.Children;
+        var across = parent.Branch.Axis == Axis.Across;
+        var side = sibling < parent.Child ? across ? Zone.Right : Zone.Bottom : across ? Zone.Left : Zone.Top;
+        var siblings = Enumerable.Range(parent.FirstOf(sibling), TileLayout.LeafCount(children[sibling].Node))
+            .Select(l => WindowIn(order, layout, l))
+            .Where(w => w.HasValue)
+            .Select(w => w.Value)
+            .ToList();
+        var own = children[parent.Child].Share;
+        return new ReturnSpot(siblings, side, own / (own + children[sibling].Share));
     }
 
     // `window` comes back to a screen whose windows are `order`, laid out with `layout`, beside what it was next to.
@@ -302,11 +314,18 @@ public static partial class TileArrange
     // None when no sibling is on the screen (the caller then arrives the window as a new one), when the window is on
     // the screen already, or when the layout does not describe `order`. An opening after the new leaf moves on one and
     // stays open; the window's place in the order skips an opening before it.
+    //
+    // A STALE opening (task 5 review: one leaf per window and an Opening still named, so the "opening" is a window's
+    // leaf; HasOpeningFor says no) is no opening: the mark is dropped first. Kept, it shifted the window's place in the
+    // order by one (C put between A and B while its leaf was the last), and a later Refit would read it as an opening
+    // to close and take a window's leaf with it.
     public static Maybe<(IReadOnlyList<WindowHandle> Order, TileLayout Layout)> Returned(
         IReadOnlyList<WindowHandle> order, TileLayout layout, WindowHandle window, ReturnSpot spot)
     {
+        layout = layout.Opening is not null && !layout.HasOpeningFor(order.Count) ? layout with { Opening = null } : layout;
         if (order.Contains(window) || !Describes(order, layout))
             return Maybe<(IReadOnlyList<WindowHandle>, TileLayout)>.None;
+        var open = layout.HasOpeningFor(order.Count);
 
         return Subtrees(layout.Root, 0)
             .Where(t => Enumerable.Range(t.First, t.Leaves)
@@ -319,7 +338,7 @@ public static partial class TileArrange
             {
                 var (next, leaf) = layout.InsertBeside(t.First, t.Leaves, spot.Side,
                     Math.Clamp(spot.Share, SplitMove.MinShare, 1 - SplitMove.MinShare));
-                var slot = next.Opening is { } open && open < leaf ? leaf - 1 : leaf;
+                var slot = open && next.Opening < leaf ? leaf - 1 : leaf;
                 return (Insert(order.ToList(), slot, window), next);
             });
     }

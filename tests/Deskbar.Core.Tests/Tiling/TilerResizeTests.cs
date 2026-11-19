@@ -535,11 +535,17 @@ public sealed class TilerResizeTests : IDisposable
     // 0.5, 0.2 and 0.3. When it closes, that column has two rows and they keep their 5:3 proportion (0.625 and
     // 0.375); without knowing which row left, the bottom row would have gone instead. The other columns and the
     // column widths do not change.
+    //
+    // The windows start in their cells. CHANGED on purpose (task 6): the first fill matches windows to a stored
+    // layout's cells by position (TileBoard.FirstFill), so windows left at the test's made-up places would be matched
+    // by overlap, not taken in W1..W8 order; a restart finds them where they were tiled.
     [Fact]
     public void Closing_a_middle_window_keeps_the_other_rows_proportions()
     {
         Enumerable.Range(1, 8).ToList().ForEach(n => Exists(W(n), alpha));
         var before = Columns([0.3, 0.35, 0.35], [0.5, 0.5], [0.5, 0.2, 0.3], [0.2, 0.3, 0.5]);
+        GridLayout.Arrange(Area, 8, Gap, before).Select((cell, i) => (cell, i)).ToList()
+            .ForEach(c => surface.Frames[W(c.i + 1)] = c.cell);
         Start(layouts: [new ScreenTileLayout(AreaKey, before)]);
         Assert.Equal(GridLayout.Arrange(Area, 8, Gap, before), FramesOf(Enumerable.Range(1, 8).Select(W)));
 

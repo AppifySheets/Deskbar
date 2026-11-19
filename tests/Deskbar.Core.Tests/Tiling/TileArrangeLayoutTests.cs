@@ -564,6 +564,21 @@ public sealed class TileArrangeLayoutTests
         Assert.Equal(1 / 3.0, spot.Share, 9);
     }
 
+    // Task 5 review: A's only sibling in its parent is the opening (A in Down[Across[A, open], B]). The spot walks up
+    // one level and takes the parent's sibling instead, so A comes back above B, with the pair share of the Across it
+    // sat in. It used to have no spot, and the return fell back to arriving as a new window.
+    [Fact]
+    public void A_tile_beside_only_the_opening_takes_its_parents_sibling()
+    {
+        var layout = Tree(Down(C(Across(C(L, .5), C(L, .5)), .4), C(L, .6)), opening: 1);
+
+        var spot = TileArrange.SpotOf([A, B], layout, A).Value;
+
+        Assert.Equal([B], spot.Siblings);
+        Assert.Equal(TileArrange.Zone.Top, spot.Side);
+        Assert.Equal(0.4, spot.Share, 9);
+    }
+
     [Fact]
     public void A_lone_tile_or_a_window_not_on_the_screen_has_no_spot()
     {
@@ -635,6 +650,21 @@ public sealed class TileArrangeLayoutTests
         Assert.Equal([A, B, Cw], order);
         Is("A[D[L 0.25, L 0.25, L 0.5] 0.5, L 0.5] open 3", layout);
         Assert.True(layout.HasOpeningFor(3));
+    }
+
+    // Task 5 review: a STALE opening (the layout has one leaf per window and still names an opening, so the opening is
+    // a window's leaf) is no opening. The window's place in the order is not counted past it, and the stale mark goes,
+    // so a later Refit cannot read it as an opening to close and take a window's leaf with it. It used to put C at
+    // slot 1, between A and B, while its leaf was the last.
+    [Fact]
+    public void A_stale_opening_is_ignored_when_a_tile_comes_back()
+    {
+        var stale = Tree(Across(C(L, .5), C(L, .5)), opening: 0);
+
+        var (order, layout) = TileArrange.Returned([A, B], stale, Cw, new TileArrange.ReturnSpot([B], TileArrange.Zone.Right, 0.5)).Value;
+
+        Assert.Equal([A, B, Cw], order);
+        Is("A[L 0.5, L 0.25, L 0.25]", layout);
     }
 
     // An opening before the returning leaf keeps its index, and the window's place in the order skips it.

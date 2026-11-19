@@ -102,7 +102,7 @@ public sealed partial class Tiler
 
         var thereSlots = SlotsThere(workspace, screens, target, home);
         var hole = homeScreen is null ? Maybe<WindowRect>.None : OpeningOn(workspace, homeScreen);
-        var outcome = SettledMove.DecideAt(window, x, y, target, Board, homeSlots, thereSlots, hole);
+        var outcome = SettledMove.DecideAt(window, x, y, target, Board, homeSlots, thereSlots, hole, InnerOf(screens, target));
         var previews = outcome switch
         {
             // A swap lands in the other tile's slot, on this screen or the one the pointer is on.
@@ -114,6 +114,11 @@ public sealed partial class Tiler
             // Beside another tile, on whichever screen that tile is: where the window lands in the new shape.
             MoveOutcome.Beside beside when Board.ScreenOf(beside.Target).TryGetValue(out var on) && screens.TryGetValue(on, out var besideScreen) =>
                 BesidePreview(workspace, besideScreen, window, beside),
+            // In a screen-edge band, on whichever screen the pointer is: the column or row the window becomes.
+            MoveOutcome.AtEdge edge when screens.TryGetValue(edge.Screen, out var edgeScreen) =>
+                Banded(workspace, edgeScreen, window, edge).Slots.TryGetValue(window, out var column)
+                    ? [new TilePreview(column, Dragged: true)]
+                    : [],
             // Into the opening: the window takes the opening's place (the room it leaves is shared out after).
             MoveOutcome.IntoOpening when hole.TryGetValue(out var room) => [new TilePreview(room, Dragged: true)],
             _ => homeSlots.TryGetValue(window, out var own) ? [new TilePreview(own, Dragged: true)] : [],
@@ -151,6 +156,22 @@ public sealed partial class Tiler
         var (next, layout) = TileArrange.Drop(order, ShownLayout(workspace, screen, order.Count), window, beside.Target, beside.Side);
         return (next, layout, SlotsOf(screen, next, layout));
     }
+
+    // The rearrangement a band drop would make (TileArrange.DropAtEdge), with its slots: the drop and the preview both
+    // come here too. The screen's windows are lifted from in place, so a window dragged in from another screen has
+    // nothing to lift there; its own screen gives its leaf up as any leaver's.
+    (IReadOnlyList<WindowHandle> Order, TileLayout Layout, IReadOnlyDictionary<WindowHandle, WindowRect> Slots) Banded(
+        Workspace workspace, TileScreen screen, WindowHandle window, MoveOutcome.AtEdge edge)
+    {
+        var order = Board.On(screen.Number);
+        var (next, layout) = TileArrange.DropAtEdge(order, ShownLayout(workspace, screen, order.Count), window, edge.Side);
+        return (next, layout, SlotsOf(screen, next, layout));
+    }
+
+    // The inner area (inside the outer gap) of the screen with this number, where its screen-edge bands are measured
+    // (SettledMove.DecideAt); None for a screen that is not reported.
+    Maybe<WindowRect> InnerOf(IReadOnlyDictionary<int, TileScreen> screens, int number) =>
+        screens.TryGetValue(number, out var screen) ? GridLayout.InnerArea(screen.WorkArea, GapOn(screen)) : Maybe<WindowRect>.None;
 
     TilePreview[] BesidePreview(Workspace workspace, TileScreen screen, WindowHandle window, MoveOutcome.Beside beside)
     {
@@ -207,7 +228,7 @@ public sealed partial class Tiler
 
     // The layout the screen shows right now: the stored one fitted to this count, or the automatic one. Unlike
     // LayoutOn this stores nothing and takes no pending leaver, because a drag changes neither the windows nor the
-    // count. Task 6's band drops and minimize return read it too.
+    // count. Band drops (Banded) and a minimized tile's spot and return (Tiler.Minimize.cs) read it too.
     TileLayout ShownLayout(Workspace workspace, TileScreen screen, int count) =>
         StoredOn(workspace.Id, KeyOf(screen))
             .Map(s => TileArrange.Refit(s, count, Maybe<int>.None))

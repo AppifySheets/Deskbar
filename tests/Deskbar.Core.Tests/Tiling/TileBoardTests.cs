@@ -1,3 +1,4 @@
+using CSharpFunctionalExtensions;
 using Deskbar.Core.Domain;
 using Deskbar.Core.Tiling;
 
@@ -77,6 +78,75 @@ public class TileBoardTests
             (A, 1, new WindowRect(0, 0, 500, 600)),
             (B, 1, new WindowRect(500, 0, 1000, 300)),
         ]);
+        Assert.Equal([A, B, C], board.On(1));
+    }
+
+    // --- first fill by position against a stored shape (spec, "Arrival and minimize", the first fill bullet) ------
+
+    // Down[Across[A, C], B] on 1000 x 600 with no gap: A top left, C top right, B the full-width bottom row. Its slot
+    // order is A, C, B. Sorting by Left then Top would give A, B, C and swap B and C on every restart.
+    static readonly IReadOnlyList<WindowRect> HandMade =
+        [new(0, 0, 500, 300), new(500, 0, 1000, 300), new(0, 300, 1000, 600)];
+
+    static Func<int, int, Maybe<IReadOnlyList<WindowRect>>> CellsOn(IReadOnlyList<WindowRect> cells) =>
+        (_, count) => count == cells.Count ? Maybe.From(cells) : Maybe<IReadOnlyList<WindowRect>>.None;
+
+    [Fact]
+    public void FirstFill_keeps_a_hand_made_shape()
+    {
+        var board = TileBoard.FirstFill(
+        [
+            (B, 1, new WindowRect(0, 300, 1000, 600)),
+            (C, 1, new WindowRect(500, 0, 1000, 300)),
+            (A, 1, new WindowRect(0, 0, 500, 300)),
+        ], CellsOn(HandMade));
+
+        Assert.Equal([A, C, B], board.On(1));
+    }
+
+    // No stored cells (or a count that does not match them): the sort by Left then Top, as before.
+    [Fact]
+    public void FirstFill_without_cells_sorts_as_before()
+    {
+        var windows = new[]
+        {
+            (C, 1, new WindowRect(500, 300, 1000, 600)),
+            (A, 1, new WindowRect(0, 0, 500, 600)),
+            (B, 1, new WindowRect(500, 0, 1000, 300)),
+        };
+
+        Assert.Equal([A, B, C], TileBoard.FirstFill(windows, (_, _) => Maybe<IReadOnlyList<WindowRect>>.None).On(1));
+        Assert.Equal([A, B, C], TileBoard.FirstFill(windows, CellsOn([new(0, 0, 1000, 600)])).On(1));
+    }
+
+    // The largest overlap is taken first, so a window lying across two cells goes where most of it is, and the one it
+    // crowded out takes what is left. C covers most of A's cell and a little of B's; A covers a little of A's cell.
+    [Fact]
+    public void FirstFill_takes_the_largest_overlap_first()
+    {
+        var board = TileBoard.FirstFill(
+        [
+            (A, 1, new WindowRect(0, 0, 100, 100)),
+            (C, 1, new WindowRect(0, 0, 500, 320)),
+            (B, 1, new WindowRect(500, 0, 1000, 300)),
+        ], CellsOn(HandMade));
+
+        // C takes A's cell (150000 px), B takes its own (150000, after C by Left then Top), A the bottom row (0 left).
+        Assert.Equal([C, B, A], board.On(1));
+    }
+
+    // A window over no cell at all (off screen, or minimized to a stray place) takes a cell left over, in Left then
+    // Top order among such windows, the cells in slot order.
+    [Fact]
+    public void FirstFill_gives_windows_over_no_cell_the_cells_left_over()
+    {
+        var board = TileBoard.FirstFill(
+        [
+            (A, 1, new WindowRect(-900, -900, -800, -800)),
+            (B, 1, new WindowRect(500, 0, 1000, 300)),
+            (C, 1, new WindowRect(-700, -900, -600, -800)),
+        ], CellsOn(HandMade));
+
         Assert.Equal([A, B, C], board.On(1));
     }
 }

@@ -547,7 +547,7 @@ public sealed partial class TilerTests
     // Final review I2, the design's precedence step 1: a minimized tile coming back goes to its old place BEFORE any
     // opening. W1 (top left) is minimized, then W4 closes with the switch on and keeps its space bottom right. W1
     // comes back top left, and W4's space stays open for the next window. It used to be pulled into the opening.
-    [Fact(Skip = ChangedScreenReturn)]
+    [Fact]
     public void A_minimized_tile_comes_back_to_its_place_and_not_into_a_kept_space()
     {
         TwoByTwo(keepsSpace: true);
