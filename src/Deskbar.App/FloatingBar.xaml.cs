@@ -159,7 +159,9 @@ public partial class FloatingBar : Window
             // The stats line goes while the stats are detached into their own window, and comes back with them
             // (FloatingBar.Stats.cs). Here so it happens on the pulse, not at the next sample.
             ApplyStatsVisibility();
-            if (IsVisible) Rebuild();
+            // RebuildWanted, not IsVisible: with the window list on the screens a hidden bar still fills the strips
+            // (FloatingBar.Strips.cs).
+            if (RebuildWanted) Rebuild();
         }));
 
         // Petre: "Same as before, edge icon shows up instead of [the] music icon, it never
@@ -189,7 +191,7 @@ public partial class FloatingBar : Window
         // over RDP at 250%, a click that landed in one waited, and the second click ran right behind it.
         iconWatch.Tick += (_, _) =>
         {
-            if (!IconCache.HasPendingIcons || !IsVisible)
+            if (!IconCache.HasPendingIcons || !RebuildWanted)
             {
                 iconWatch.Stop();
                 return;
@@ -201,7 +203,7 @@ public partial class FloatingBar : Window
         };
         // A store app's icon arrives on a pool thread, so the bar is woken from there and redraws on its own thread.
         // Rebuild guards its own re-entrancy. If the bar is hidden, the next rebuild takes the answer.
-        Action hostedIcon = () => Dispatcher.BeginInvoke(new Action(() => { if (IsVisible) Rebuild(); }));
+        Action hostedIcon = () => Dispatcher.BeginInvoke(new Action(() => { if (RebuildWanted) Rebuild(); }));
         IconCache.HostedIconArrived += hostedIcon;
         Closed += (_, _) => IconCache.HostedIconArrived -= hostedIcon;
         // appBar.Remove gives the docked strip back on a normal exit. A crash is covered by the shell
@@ -1319,7 +1321,7 @@ public partial class FloatingBar : Window
     {
         if (!rebuildRequested || rebuilding) return;
         rebuildRequested = false;
-        Dispatcher.BeginInvoke(new Action(() => { if (IsVisible) Rebuild(); }));
+        Dispatcher.BeginInvoke(new Action(() => { if (RebuildWanted) Rebuild(); }));
     }
 
     // Petre: "drag and drop doesn't work now."
@@ -1978,7 +1980,9 @@ public partial class FloatingBar : Window
         // release. Deferring is safe in a way that skipping would not be: the same
         // rebuildRequested flag the re-entrancy guard uses already means "there is news to serve
         // later", and the release path below serves it.
-        if (Mouse.LeftButton == MouseButtonState.Pressed && IsMouseOver)
+        // ...over the bar or over a screen strip, whose tabs a rebuild throws away just the same
+        // (FloatingBar.Strips.cs). The strip's release serves the deferred pulse, as the bar's does.
+        if (Mouse.LeftButton == MouseButtonState.Pressed && (IsMouseOver || PointerOnStrip()))
         {
             // Traced so a redraw that waits here shows up (see FloatingBar.MinimizeTrace.cs).
             if (ClickTrace.On) ClickTrace.Write("rebuild deferred: button down over the bar");
@@ -2070,7 +2074,7 @@ public partial class FloatingBar : Window
         // the UI thread in back-to-back COM-heavy rebuilds.
         if (!rebuildRequested) return;
         rebuildRequested = false;
-        Dispatcher.BeginInvoke(new Action(() => { if (IsVisible) Rebuild(); }));
+        Dispatcher.BeginInvoke(new Action(() => { if (RebuildWanted) Rebuild(); }));
     }
 
     // The last overview drawn, kept so a RE-LAYOUT can happen without asking the OS anything (#120).
@@ -2169,6 +2173,14 @@ public partial class FloatingBar : Window
         if (queried.IsFailure)
         {
             if (ClickTrace.On) ClickTrace.Write($"rebuild kept the old rows: overview query failed: {queried.Error}");
+            return;
+        }
+
+        // The window list on the screens and the bar behind its taskbar button: only the strips are filled, the
+        // bar's own rows wait for ShowBar's rebuild (FloatingBar.Strips.cs). Still inside this rebuild's guard.
+        if (StripsAlone)
+        {
+            FillStripsAlone(queried.Value);
             return;
         }
 
@@ -2373,22 +2385,9 @@ public partial class FloatingBar : Window
                 // one moves away, without needing another overview query to ask again.
                 if (g.IsCurrent) currentRow = g.Workspace.Id;
 
-                var ownSlot = overview.Workspaces.ToList().FindIndex(w => w.Workspace.Id == g.Workspace.Id);
-                // The slot the row's colour comes from: its group's, or its own when ungrouped.
-                var colourSlot = group is not null ? ColourSlotOf(group) : ownSlot;
-                // And the colour in force, which for a member comes from the GROUP (#90): a group is one
-                // colour whichever row set it, so a member's own Workspace.Color is ignored while it is inside
-                // a box and waiting for it if it ever leaves.
-                //
-                // ...in the member's own SHADE of it (WorkspacePalette.Shade), by its place in the group: "let
-                // them be different shades of that color". The first member keeps the group's colour exactly,
-                // and the group's caption, bracket and outline stay on that colour too, so the family still
-                // reads as one. Resolved to a hex here, so everything below (tint, rail, the current name)
-                // takes the shade without knowing about it. A group set to "none" stays none.
-                var memberStep = group is null ? 0 : Math.Max(0, manager.State.MembersOf(group.Id).ToList().FindIndex(m => m.Id == g.Workspace.Id));
-                var colour = group is null ? g.Workspace.Color
-                    : WorkspacePalette.IsNone(group.Color) ? group.Color
-                    : WorkspacePalette.Shade(WorkspacePalette.For(group.Color, colourSlot), memberStep);
+                // The row's colour, its palette slot and its own list position, worked out by RowColour
+                // (FloatingBar.Strips.cs), which the screen strips' name tag also asks, so the two cannot disagree.
+                var (colour, colourSlot, ownSlot) = RowColour(overview, g, group);
 
                 // The current workspace's colour, for the titled list at the bottom of the bar (see where it is
                 // built below), which wears the colour of the row it lists, shade included.
@@ -2548,7 +2547,10 @@ public partial class FloatingBar : Window
             // Only when rows do NOT expand (AppState.WindowListAtBottom, no longer the default). When they do,
             // the current workspace's own row is the list (see `expanded` above) and there is nothing to add
             // here. Petre has both to compare: "let's try both".
-            var list = manager.State.ExpandCurrentWorkspace
+            //
+            // Nor when the list is on the screens (WindowListPlace.Screens): the strips along the top of each screen
+            // are the list then, filled just below, and the bar keeps only its icon rows.
+            var list = manager.State.WindowListPlace != WindowListPlace.Bottom
                 ? null
                 : overview.Workspaces.FirstOrDefault(w => w.Workspace.Id == liveTarget) is { } here
                     ? GroupRow(here.Workspace.Name, here.Workspace.Name, isCurrent: false, switchTo: null,
@@ -2575,6 +2577,10 @@ public partial class FloatingBar : Window
                 CurrentList.Children.Add(Separator());
                 CurrentList.Children.Add(list);
             }
+
+            // Every screen's strip gets that screen's tabs, when the list is on the screens; nothing otherwise
+            // (FloatingBar.Strips.cs). Here, inside this rebuild's guard, never in a rebuild of its own.
+            FillStrips(overview);
 
             groupRows
                 .SelectMany((row, i) => i == 0 ? new[] { row } : new[] { Separator(), row })
@@ -5148,7 +5154,7 @@ public partial class FloatingBar : Window
         if (stillThere) ShowHoverCard(waiting.Label, waiting.Row, waiting.Anchor, waiting.Here);
     }
 
-    void ShowHoverCard(string groupLabel, WindowRow row, FrameworkElement anchor, bool here)
+    internal void ShowHoverCard(string groupLabel, WindowRow row, FrameworkElement anchor, bool here)
     {
         // Already showing this window: do NOTHING. This is the line that stops the blinking, because a
         // rebuild re-runs MouseEnter for the icon under the pointer and re-capturing would rebuild the
@@ -5189,15 +5195,22 @@ public partial class FloatingBar : Window
         if (clock is not null)
             ClickTrace.Write($"hover card {row.Window.ProcessName} built in {clock.Elapsed.TotalMilliseconds:F0}ms");
 
-        // Level with the icon being hovered, in the bar's own coordinates, so the card appears beside what
-        // it describes rather than at the bar's top corner.
-        hoverPopup.VerticalOffset = anchor.TranslatePoint(new Point(0, 0), this).Y;
-        // ...and on the SIDE of the bar nearer the icon. Petre, docked across two screens: "it should show me
-        // the preview window as close to the icon as possible; now it's showing on the left monitor, always".
-        // Left of the bar was the only side there was, which on a seam-docked bar is the left screen even
-        // for an icon on the right half. Set on every show, because the same popup serves both halves.
-        var middle = anchor.TranslatePoint(new Point(anchor.ActualWidth / 2, 0), this).X;
-        hoverPopup.Placement = HoverSide(AcrossSeam, middle, ActualWidth);
+        // A tab on a screen strip lives in another window, where placing the card beside the bar would put it at
+        // the bar, perhaps on another screen: its card opens below the tab instead (FloatingBar.Strips.cs).
+        if (!PlaceHoverCardBelowStripTab(hoverPopup, anchor))
+        {
+            // Against the bar again, since the same popup may have been placed against a tab last time.
+            hoverPopup.PlacementTarget = this;
+            // Level with the icon being hovered, in the bar's own coordinates, so the card appears beside what
+            // it describes rather than at the bar's top corner.
+            hoverPopup.VerticalOffset = anchor.TranslatePoint(new Point(0, 0), this).Y;
+            // ...and on the SIDE of the bar nearer the icon. Petre, docked across two screens: "it should show me
+            // the preview window as close to the icon as possible; now it's showing on the left monitor, always".
+            // Left of the bar was the only side there was, which on a seam-docked bar is the left screen even
+            // for an icon on the right half. Set on every show, because the same popup serves both halves.
+            var middle = anchor.TranslatePoint(new Point(anchor.ActualWidth / 2, 0), this).X;
+            hoverPopup.Placement = HoverSide(AcrossSeam, middle, ActualWidth);
+        }
         hoverPopup.IsOpen = true;
         StartHoverWatch();
     }
@@ -6092,9 +6105,8 @@ public partial class FloatingBar : Window
         {
             Text = row.Window.DisplayName,
             FontSize = Text(9.5),
-            Foreground = row.IsActive ? TitleActive
-                : row.IsFrontmostOnMonitor.HasValue && !row.IsFrontmostOnMonitor.Value ? TitleBehind
-                : TitleResting,
+            // The one rule for a title's strength, shared with the screen strips' tabs (TitleBrush).
+            Foreground = TitleBrush(row),
             TextTrimming = TextTrimming.CharacterEllipsis,
             VerticalAlignment = VerticalAlignment.Center,
             // LEFT, never the default Stretch, and the reason is the cap below. WPF centres an element its
