@@ -262,6 +262,60 @@ public class FloatingBarStripsTests
         }
     });
 
+    // Petre's rule for the hover card: the picture is for a window you cannot see, so a window in the workspace you
+    // are on gets its text alone. Every tab is such a window (the current workspace's, the current unnamed desktop's,
+    // or a pinned one, which is on every desktop), so a tab's card never carries a picture, and the capture behind
+    // one is never made. Armed through the tab's own MouseEnter, then shown from what was armed, because the dwell's
+    // own check asks where the real pointer is.
+    [Fact]
+    public void A_tabs_hover_card_has_no_picture() => StaThread.Run(() =>
+    {
+        using var h = StripHarness.Build();
+        h.Fill();
+        h.StripB.Left = -32000;
+        h.StripB.Top = -32000;
+        h.StripB.Show();
+
+        new[] { TabFor(h.StripB, h.Code.Title), TabFor(h.StripB, h.Pinned.Title) }.ToList().ForEach(tab =>
+        {
+            tab.RaiseEvent(new MouseEventArgs(Mouse.PrimaryDevice, 0) { RoutedEvent = UIElement.MouseEnterEvent });
+            var armed = h.Bar.Dwelling!.Value;
+            Assert.Same(tab, armed.Anchor);
+            Assert.True(armed.Here, $"{System.Windows.Automation.AutomationProperties.GetName(tab)} was armed for a picture");
+
+            h.Bar.ShowHoverCard(armed.Label, armed.Row, armed.Anchor, armed.Here);
+            var popup = h.Bar.HoverPopup!;
+            try
+            {
+                Assert.DoesNotContain(Descendants(popup.Child), d => d is Image);
+            }
+            finally
+            {
+                popup.IsOpen = false;
+            }
+        });
+    });
+
+    // A resize of the bar re-flows its own rows at mouse-move rate (Relayout), and a strip's tabs do not depend on the
+    // bar's width at all, so a relayout must not rebuild every strip's tabs on every step of the drag.
+    [Fact]
+    public void A_relayout_leaves_the_strips_tabs_alone() => StaThread.Run(() =>
+    {
+        using var h = StripHarness.Build();
+        h.Fill();
+        h.Bar.UpdateLayout();
+        var tab = TabFor(h.StripB, h.Code.Title);
+        var rows = h.Rows.Children.Cast<UIElement>().ToList();
+
+        // A width of its own, as a resize drag gives the bar: only then does a width change re-flow it (OnSizeChanged).
+        h.Bar.SizeToContent = SizeToContent.Height;
+        h.Bar.Width = h.Bar.ActualWidth + 120;
+        h.Bar.UpdateLayout();
+
+        Assert.NotEqual(rows, h.Rows.Children.Cast<UIElement>().ToList()); // precondition: the relayout did redraw the bar
+        Assert.Same(tab, TabFor(h.StripB, h.Code.Title));
+    });
+
     // A tab too narrow for a letter of its title shows its icon alone. The strip sets the width; the tab follows it.
     [Fact]
     public void A_narrow_tab_hides_its_title() => StaThread.Run(() =>

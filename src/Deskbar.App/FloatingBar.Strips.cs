@@ -148,7 +148,8 @@ public partial class FloatingBar
     // once, before any layout pass, and holds nothing once the tab is thrown away.
     FrameworkElement StripTab(string groupLabel, WindowRow row, Brush? accent)
     {
-        var button = (Button)IconButton(groupLabel, CurrentListGroupKey, row);
+        // onScreen: every tab's window is on the desktop in view, so its hover card has no picture (see IconButton).
+        var button = (Button)IconButton(groupLabel, CurrentListGroupKey, row, onScreen: true);
         var art = (UIElement)button.Content;
         button.Content = null;
         var icon = pinnedNow.Any(p => p.Window.Handle == row.Window.Handle) ? WithPinBadge(art) : art;
@@ -333,6 +334,10 @@ public partial class FloatingBar
 
     // The hover card's popup, for the tests.
     internal Popup? HoverPopup => hoverPopup;
+
+    // What the last MouseEnter armed the hover card with, for the tests: the dwell that shows it asks where the real
+    // pointer is, which a test cannot place, so a test reads what was armed and shows the card from that.
+    internal (string Label, WindowRow Row, FrameworkElement Anchor, bool Here)? Dwelling => dwelling;
 
     // The bar's background menu, opened at the pointer over a strip (ScreenStrip.MenuRequested, which the strip set
     // points here): a right-click on the name tag or the strip's free space. It holds the window list choice, so the way
