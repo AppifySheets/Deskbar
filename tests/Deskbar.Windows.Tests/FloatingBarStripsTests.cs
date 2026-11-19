@@ -194,10 +194,10 @@ public class FloatingBarStripsTests
         Assert.Equal(1, h.Desktops.DesktopOfCalls - asked);
     });
 
-    // The hover card for a tab opens below the tab, placed against it. The bar's placement measures the anchor in the
-    // bar's own coordinates and opens the card beside the bar: for a tab, on another screen's edge entirely. The probe
-    // notes expected that measurement to throw for an element in another window; measured here, it does not (WPF
-    // translates through screen coordinates), it only lands the card in the wrong place, which is what this pins.
+    // The hover card for a tab opens below the tab. The bar's placement measures the anchor in the bar's own
+    // coordinates and opens the card beside the bar: for a tab, on another screen's edge entirely. That measurement
+    // does not throw for an element in another window (WPF translates through screen coordinates, measured here); it
+    // only lands the card in the wrong place, which is what this pins.
     [Fact]
     public void A_hover_card_for_a_tab_opens_below_the_tab_without_throwing() => StaThread.Run(() =>
     {
@@ -215,8 +215,46 @@ public class FloatingBarStripsTests
         try
         {
             Assert.True(popup.IsOpen);
-            Assert.Same(tab, popup.PlacementTarget);
+            // Against the strip's window, which outlives the tab (see the test below), at the tab's place in it.
+            Assert.Same(h.StripA, popup.PlacementTarget);
             Assert.Equal(PlacementMode.Bottom, popup.Placement);
+            Assert.Equal(tab.TranslatePoint(new Point(0, 0), h.StripA).X, popup.HorizontalOffset, 3);
+        }
+        finally
+        {
+            popup.IsOpen = false;
+        }
+    });
+
+    // A rebuild while the card is up (a title or focus change, routine while the pointer rests on a tab) hands the strip
+    // new tabs. The card's window is still the one shown, so the hover watch keeps it open, and it must not be left
+    // placed against the tab that was thrown away: it stays on the strip's window, under where the tab is now.
+    [Fact]
+    public void A_hover_card_for_a_tab_stays_on_its_strip_through_a_rebuild() => StaThread.Run(() =>
+    {
+        using var h = StripHarness.Build();
+        h.Fill();
+        h.StripB.Left = -32000;
+        h.StripB.Top = -32000;
+        h.StripB.Show();
+        h.StripB.UpdateLayout();
+        // The second tab on its strip, so where it sits is more than the strip's left edge.
+        var tab = TabFor(h.StripB, h.Pinned.Title);
+        h.Bar.ShowHoverCard("GEPHA", (WindowRow)tab.DataContext, tab, here: false);
+        var popup = h.Bar.HoverPopup!;
+        try
+        {
+            h.Monitor.Pump.OnNext(new WindowEvent(WindowEventKind.Activated, h.Code));
+            h.StripB.UpdateLayout();
+            var now = TabFor(h.StripB, h.Pinned.Title);
+            Assert.NotSame(tab, now); // precondition: the rebuild really replaced the tab
+
+            Assert.True(popup.IsOpen);
+            Assert.Same(h.StripB, Window.GetWindow((DependencyObject)popup.PlacementTarget));
+            Assert.Equal(PlacementMode.Bottom, popup.Placement);
+            var x = now.TranslatePoint(new Point(0, 0), h.StripB).X;
+            Assert.True(x > 0, $"tab at {x}");
+            Assert.Equal(x, popup.HorizontalOffset, 3);
         }
         finally
         {
