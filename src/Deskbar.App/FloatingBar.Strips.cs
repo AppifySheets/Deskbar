@@ -189,7 +189,11 @@ public partial class FloatingBar
         {
             Tag = StripUnderlineTag,
             Margin = new Thickness(2),
-            BorderThickness = new Thickness(1.5),
+            // 1 DIP, snapped: 2 px at Petre's 225%, the thickness of Windows' own border and of the window's ring. It was
+            // 1.5 DIP, which measured 3 px plus an anti-aliased fourth: "tiny bit less?".
+            BorderThickness = new Thickness(1),
+            SnapsToDevicePixels = true,
+            UseLayoutRounding = true,
             CornerRadius = new CornerRadius(4),
             BorderBrush = row.IsActive ? accent ?? StripUnderlineRest : StripUnderlineRest,
             Background = row.IsActive ? StripActiveFill : Brushes.Transparent,
