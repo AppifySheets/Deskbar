@@ -222,8 +222,19 @@ public sealed partial class Tiler
         }
 
         SplitMove.Apply(shown, shape, screen.WorkArea, GapOn(screen), cell, moved, frame).Match(
-            next =>
+            split =>
             {
+                // A CORNER can be half inner, half outer: the top-right corner of a full-height left tile moves the
+                // column split with its right edge, while its top edge faces the screen's edge. SplitMove ignores
+                // that outer edge, so on its own the tile went back to full height. Petre: "resizing a tiled window
+                // with the corner doesn't currently change height or width of the window; it should". So the outer
+                // edge is offered to TileArrange.Open on the moved split, as it would be had it moved alone: a pull
+                // deep enough leaves an opening, a nudge (or a screen that has its opening already) changes nothing.
+                // Open only ever acts on an edge that faces the screen's edge, so passing the whole `moved` is safe:
+                // the inner edge SplitMove took is not reconsidered. The split leaves the shape as it was, so `cell`
+                // still names the dragged tile in it.
+                var next = TileArrange.Open(split, windows.Count, screen.WorkArea, GapOn(screen), cell, moved, frame)
+                    .GetValueOrDefault(split);
                 // A drag held against the 10% clamp, or one that comes out at the split there already, changes
                 // nothing: no store (final review, item 3). The re-tile below still runs and puts the window back.
                 if (next == shown)

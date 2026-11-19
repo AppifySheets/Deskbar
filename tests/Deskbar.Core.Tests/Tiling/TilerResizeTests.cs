@@ -274,6 +274,45 @@ public sealed class TilerResizeTests : IDisposable
         Assert.Equal(696.0 / 1024, sizes.Rows[1][0], 9);
     }
 
+    // A corner with one INNER edge and one OUTER edge does both halves: the inner edge moves its split, and the outer
+    // edge leaves an opening as it would on its own. Petre: "resizing a tiled window with the corner doesn't currently
+    // change height or width of the window; it should". Measured in his trace: a full-height tile's top-right corner
+    // dragged down and right moved the column split, but the top edge was dropped and the tile went back to full height.
+    // Here the left tile's top-right corner goes to (1300, 400): the right edge puts the split at 1304 (one half gap
+    // beyond it), the top edge leaves 392 of the 1024 px inner height open above the tile.
+    [Fact]
+    public void A_corner_with_an_outer_edge_moves_the_split_and_leaves_an_opening()
+    {
+        StartTwo();
+        var left = GridLayout.Arrange(Area, 2, Gap)[0];
+
+        ResizedByHand(W(1), left with { Top = 400, Right = 1300 });
+        Echo();
+
+        var sizes = Stored(AreaKey);
+        Assert.Equal(1296.0 / 1904, sizes.Columns[0], 9);
+        Assert.Equal(0, sizes.Opening);
+        Assert.Equal(392.0 / 1024, sizes.Rows[0][0], 9);
+        Assert.Equal(new WindowRect(8, 404, 1300, 1032), surface.Frames[W(1)]);
+        Assert.Equal(new WindowRect(1308, 8, 1912, 1032), surface.Frames[W(2)]);
+    }
+
+    // The same corner with the outer edge only nudged: the split moves and the nudge snaps back, as before.
+    [Fact]
+    public void A_corner_with_an_outer_edge_nudge_only_moves_the_split()
+    {
+        StartTwo();
+        var left = GridLayout.Arrange(Area, 2, Gap)[0];
+
+        ResizedByHand(W(1), left with { Top = 40, Right = 1300 });
+        Echo();
+
+        var sizes = Stored(AreaKey);
+        Assert.Equal(1296.0 / 1904, sizes.Columns[0], 9);
+        Assert.Null(sizes.Opening);
+        Assert.Equal(new WindowRect(8, 8, 1300, 1032), surface.Frames[W(1)]);
+    }
+
     [Fact]
     public void An_app_resizing_itself_snaps_back_and_moves_no_split()
     {
