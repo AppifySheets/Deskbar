@@ -139,23 +139,32 @@ sealed class WindowRings : IDisposable
     //   * Full screen: a window that is not maximized and covers its whole screen, FullScreenCover's test (a video
     //     player, a game). The screen's rectangle.
     //   * Minimized: nothing to outline; a minimized window's rectangle is nonsense (CLAUDE.md, Traps).
+    //   * Cloaked: on another desktop now. The frame is pinned to every desktop, so in the second between a desktop
+    //     switch and the bar's rebuild it would otherwise outline nothing on the desktop just arrived on.
+    //   * Maximized on a screen that is gone: measured on the first live run, with the second screen disconnected, an
+    //     Edge window stayed maximized at -3851,311,-357,2457, wholly off the one screen left, and the frame came out
+    //     with its right edge left of its left one. A window with nothing visible on its screen gets no frame.
     static NativeMethods.RECT? FullFrame(nint window)
     {
         if (NativeMethods.IsIconic(window)) return null;
+        if (NativeMethods.DwmGetWindowAttribute(window, NativeMethods.DWMWA_CLOAKED, out var cloaked, sizeof(int)) == 0 && cloaked != 0) return null;
         var monitor = NativeMethods.MonitorFromWindow(window, NativeMethods.MONITOR_DEFAULTTONEAREST);
         var info = new NativeMethods.MONITORINFO { cbSize = System.Runtime.InteropServices.Marshal.SizeOf<NativeMethods.MONITORINFO>() };
         if (monitor == 0 || !NativeMethods.GetMonitorInfo(monitor, ref info)) return null;
         var screen = info.rcMonitor;
 
         if (NativeMethods.IsZoomed(window))
-            return NativeMethods.DwmGetWindowAttributeRect(window, NativeMethods.DWMWA_EXTENDED_FRAME_BOUNDS, out var visible,
-                       System.Runtime.InteropServices.Marshal.SizeOf<NativeMethods.RECT>()) == 0
+        {
+            var cut = NativeMethods.DwmGetWindowAttributeRect(window, NativeMethods.DWMWA_EXTENDED_FRAME_BOUNDS, out var visible,
+                          System.Runtime.InteropServices.Marshal.SizeOf<NativeMethods.RECT>()) == 0
                 ? new NativeMethods.RECT
                 {
                     Left = Math.Max(visible.Left, screen.Left), Top = Math.Max(visible.Top, screen.Top),
                     Right = Math.Min(visible.Right, screen.Right), Bottom = Math.Min(visible.Bottom, screen.Bottom),
                 }
                 : screen;
+            return cut.Right > cut.Left && cut.Bottom > cut.Top ? cut : null;
+        }
 
         return NativeMethods.GetWindowRect(window, out var rect)
                && rect.Left <= screen.Left && rect.Top <= screen.Top && rect.Right >= screen.Right && rect.Bottom >= screen.Bottom
