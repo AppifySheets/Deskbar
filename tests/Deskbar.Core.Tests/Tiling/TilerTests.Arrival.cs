@@ -503,6 +503,27 @@ public sealed partial class TilerTests
         Assert.Equal(expected, StoredOnAlpha().GetValueOrThrow());
     }
 
+    // Final review I2, the design's precedence step 1: a minimized tile coming back goes to its old place BEFORE any
+    // opening. W1 (top left) is minimized, then W4 closes with the switch on and keeps its space bottom right. W1
+    // comes back top left, and W4's space stays open for the next window. It used to be pulled into the opening.
+    [Fact]
+    public void A_minimized_tile_comes_back_to_its_place_and_not_into_a_kept_space()
+    {
+        TwoByTwo(keepsSpace: true);
+        var w1Was = surface.Frames[W(1)];
+
+        Minimizes(W(1), true);
+        Closes(W(4));
+        Minimizes(W(1), false);
+
+        var kept = TileSizes.Equal([2, 2]) with { Opening = 3 };
+        AssertArranged([W(1), W(2), W(3)], kept);
+        Assert.Equal(w1Was, surface.Frames[W(1)]);
+        Assert.Equal(Grid(4).Take(3).ToList(), FramesOf(1, 2, 3));
+        Assert.Equal(kept, StoredOnAlpha().GetValueOrThrow());
+        Assert.DoesNotContain(traced, line => line.Contains("took the opening"));
+    }
+
     // The switch is off by default: a close closes up (change 1), and no opening is stored.
     [Fact]
     public void With_the_switch_off_a_close_closes_up()

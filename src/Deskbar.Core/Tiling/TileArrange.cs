@@ -137,6 +137,35 @@ public static class TileArrange
         };
     }
 
+    // A MINIMIZED TILE COMING BACK to a screen that changed while it was away (Tiler.Minimize.cs; final review I1). The
+    // design left the rule to the builder: "the cell should go where the index puts it, not to the bottom of the last
+    // column ... pick the simplest rule that keeps the other tiles where they are." The rule:
+    //
+    //   - Its old column is still there: a new row in that column at its old row (or at the bottom when the column now
+    //     has fewer rows), taking half the height of the row it lands on, as a drop on that tile's top edge would (the
+    //     bottom edge of the last row, at the bottom). Every other column keeps its width and rows.
+    //   - Its old column is gone: a new column on the right, taking half of the last column's width.
+    //
+    // `order` and `sizes` are the screen as it is now (`sizes` describe `order`, with or without an opening), and
+    // `cell` is the window's cell in the grid it left. The order follows the cell, not the other way round: the window
+    // goes into the order at the slot of its new cell, so the board and the grid agree. An opening keeps its own cell
+    // and moves on one slot when the new cell comes before it, so a kept space stays where it was on the screen.
+    public static (IReadOnlyList<WindowHandle> Order, TileSizes Sizes) Returned(
+        IReadOnlyList<WindowHandle> order, TileSizes sizes, WindowHandle window, (int Column, int Row) cell)
+    {
+        if (sizes.Columns.Count == 0) return ([window], TileSizes.Equal([1]));
+        var shape = sizes.Shape;
+        var (grown, at) = cell.Column < shape.Count
+            ? Math.Min(cell.Row, shape[cell.Column]) is var row && row < shape[cell.Column]
+                ? (InsertRow(sizes, cell.Column, row, below: false), shape.Take(cell.Column).Sum() + row)
+                : (InsertRow(sizes, cell.Column, row - 1, below: true), shape.Take(cell.Column).Sum() + row)
+            : (InsertColumn(sizes, shape.Count - 1, right: true), shape.Sum());
+        // InsertColumn builds new sizes and InsertRow keeps the old opening slot, so the opening is set here for both.
+        var opening = sizes.Opening is { } open ? open >= at ? open + 1 : open : (int?)null;
+        var index = opening < at ? at - 1 : at;
+        return (Insert(order.ToList(), Math.Min(index, order.Count), window), grown with { Opening = opening });
+    }
+
     static IReadOnlyList<WindowHandle> Insert(List<WindowHandle> list, int index, WindowHandle w)
     {
         var copy = list.ToList();

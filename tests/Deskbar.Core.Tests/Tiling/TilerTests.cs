@@ -538,8 +538,39 @@ public sealed partial class TilerTests : IDisposable
         Opens(W(5), alpha);
         Minimizes(W(2), false);
 
-        // W(5) split the largest tile, W(1), rather than joining the end (predictable placement, change 2).
+        // W(5) split the largest tile, W(1), rather than joining the end (predictable placement, change 2). W(2) comes
+        // back into its old cell's column, the left one, at its old row, taking half of W(5)'s room (final review,
+        // I1): the right column, W(3) over W(4), stays exactly where it was. It used to be refitted from the count,
+        // which rebuilt the grid as 1 + 2 + 2 and moved every tile.
+        var sizes = new TileSizes([0.5, 0.5], [[0.5, 0.25, 0.25], [0.5, 0.5]]);
         Assert.Equal([W(1), W(2), W(5), W(3), W(4)], tiler.Board.On(1));
+        Assert.Equal(GridLayout.Arrange(Area, 5, Gap, sizes), new[] { 1, 2, 5, 3, 4 }.Select(n => surface.Frames[W(n)]).ToList());
+        Assert.Equal(Grid(4).Skip(2).ToList(), new[] { W(3), W(4) }.Select(w => surface.Frames[w]).ToList());
+    }
+
+    // Final review I1: W1 | W2 over W3. W2 is minimized (W3 takes the whole right column), then W4 splits W1 below
+    // it, so W1 and W4 share the left column. W2 comes back into the right column, above W3, where it was: W4 stays
+    // in the left column. It used to go to its old index in the order and the sizes were refitted as for a join,
+    // which put the new cell at the bottom of the last column and moved W4 across.
+    [Fact]
+    public void A_minimized_tile_returns_to_its_column_and_the_others_stay_where_they_are()
+    {
+        new[] { 1, 2, 3 }.ToList().ForEach(n => Exists(W(n), alpha));
+        Start();
+        Uses(W(1));
+
+        Minimizes(W(2), true);
+        Opens(W(4), alpha);
+        Assert.Equal([W(1), W(4), W(3)], tiler.Board.On(1));
+        var w1Was = surface.Frames[W(1)];
+        var w4Was = surface.Frames[W(4)];
+
+        Minimizes(W(2), false);
+
+        AssertTiled([W(1), W(4), W(2), W(3)]);
+        Assert.Equal(w1Was, surface.Frames[W(1)]);
+        Assert.Equal(w4Was, surface.Frames[W(4)]);
+        Assert.Contains(traced, line => line.Contains($"{W(2).Value:X} came back"));
     }
 
     [Fact]
