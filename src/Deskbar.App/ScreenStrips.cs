@@ -27,7 +27,7 @@ namespace Deskbar.App;
 //                     (ScreenLayout.Screens), so a strip's Screen is == to a value of Overview.Screens
 //   create            a new strip for one screen, with its menu and drop wired to the bar
 //   ignore            WindowMonitor.Ignore, before the strip's first show
-//   pinToAllDesktops  the virtual-desktop pin, after the first show
+//   pinToAllDesktops  the virtual-desktop pin, after the first show; its Result decides whether it is tried again
 //
 // Not gated on the bar's visibility anywhere: the strips stay while the bar is minimized (spec, "What it does"), and
 // a strip that left with the bar would move every screen's work area twice.
@@ -37,16 +37,35 @@ public sealed class ScreenStrips
     readonly Func<IReadOnlyList<MonitorBounds>> screens;
     readonly Func<MonitorBounds, ScreenStrip> create;
     readonly Action<nint> ignore;
-    readonly Action<nint> pinToAllDesktops;
+    readonly Func<nint, Result> pinToAllDesktops;
 
     // Raised after a reconcile that added or removed a strip, so App can ask the bar to rebuild: a new strip is empty
     // until the bar's next rebuild hands it its tabs. Not raised by a reconcile that changed nothing, which is most of
     // them (every settle on the same desk), so those cost no rebuild.
     readonly Subject<Unit> changed = new();
 
-    // The strips pinned to every desktop so far. Pinned once each, and only once shown: a window that has never been
-    // shown is on no desktop, and the pin fails with "Element not found" (App.PinFloatingBar has the story).
+    // The strips pinned to every desktop so far: recorded only once a pin has WORKED. Pinned once each, and only once
+    // shown: a window that has never been shown is on no desktop, and the pin fails with "Element not found"
+    // (App.PinFloatingBar has the story).
+    //
+    // A pin that failed is tried again by Tick, at most once every FloatingBar.RetryEvery (the docked bar's guard's
+    // interval), until it works. It has to be: the band a strip reserves is the shell's, on every desktop, but an
+    // unpinned strip is cloaked on every desktop but the one it was made on, so each of the others shows an empty band
+    // of wallpaper at the top of that screen, and nothing else repairs it (the strip's guard sees its window inside its
+    // screen and the work area intact, and calls it held). The second anti-goal exactly (review of task 8). Strips are
+    // made on unlock, on a replug and on the setting toggled, often after a long idle, which is when the desktop COM
+    // object is known to go stale (#148), and the pin also answers a transient "not ready".
     ImmutableHashSet<ScreenStrip> pinned = ImmutableHashSet<ScreenStrip>.Empty;
+
+    // A pin in flight. The pin is a COM call, which pumps messages, so the 1 s timer can tick inside it; that Tick must
+    // not pin the same strip a second time while the first call is still out.
+    ImmutableHashSet<ScreenStrip> pinning = ImmutableHashSet<ScreenStrip>.Empty;
+
+    // When each unpinned strip's pin was last tried, for the retry interval.
+    ImmutableDictionary<ScreenStrip, DateTime> lastPinTry = ImmutableDictionary<ScreenStrip, DateTime>.Empty;
+
+    // The time the retry interval is read against, UTC. Faked in the tests to step over the interval without waiting.
+    internal Func<DateTime> Clock { get; init; } = () => DateTime.UtcNow;
 
     // A reconcile in progress, and another one asked for while it ran. The pin is a virtual-desktop COM call, and COM
     // calls on an STA thread pump the message queue (CLAUDE.md, traps), so a settle or a state pulse queued on the
@@ -60,7 +79,7 @@ public sealed class ScreenStrips
     bool removedForGood;
 
     public ScreenStrips(Func<bool> wanted, Func<IReadOnlyList<MonitorBounds>> screens, Func<MonitorBounds, ScreenStrip> create,
-        Action<nint> ignore, Action<nint> pinToAllDesktops)
+        Action<nint> ignore, Func<nint, Result> pinToAllDesktops)
     {
         this.wanted = wanted;
         this.screens = screens;
@@ -83,7 +102,8 @@ public sealed class ScreenStrips
     //
     // A new strip: its handle to `ignore` BEFORE its first show, or WindowMonitor sees its EVENT_OBJECT_SHOW and the
     // bar lists the strip as a window; then Dock, which shows it; then the pin, after the show. A strip whose dock
-    // could not show it (its screen could not be read just then) is pinned by Tick once it is up.
+    // could not show it (its screen could not be read just then) is pinned by Tick once it is up, and a pin that failed
+    // is tried again by Tick until it works.
     //
     // A removed strip: Undock, which gives the band back and hides the window, then Close. In that order, so a band is
     // never left reserved with no window in it.
@@ -148,18 +168,41 @@ public sealed class ScreenStrips
         strip.Undock();
         strip.Close();
         pinned = pinned.Remove(strip);
+        lastPinTry = lastPinTry.Remove(strip);
     }
 
+    // Pins a shown strip that is not pinned yet, unless a pin for it is in flight or the last try was within
+    // RetryEvery. "In flight" is set BEFORE the COM call and "pinned" only AFTER it worked; a failure is traced, as the
+    // docked bar traces each of its attempts, and left for a later Tick.
     void PinIfShown(ScreenStrip strip)
     {
-        if (!strip.IsVisible || pinned.Contains(strip)) return;
-        pinned = pinned.Add(strip);
-        pinToAllDesktops(new WindowInteropHelper(strip).Handle);
+        if (!strip.IsVisible || pinned.Contains(strip) || pinning.Contains(strip)) return;
+        var now = Clock();
+        if (lastPinTry.TryGetValue(strip, out var last) && now - last < FloatingBar.RetryEvery) return;
+
+        lastPinTry = lastPinTry.SetItem(strip, now);
+        pinning = pinning.Add(strip);
+        try
+        {
+            pinToAllDesktops(new WindowInteropHelper(strip).Handle)
+                .Tap(() =>
+                {
+                    pinned = pinned.Add(strip);
+                    lastPinTry = lastPinTry.Remove(strip);
+                })
+                .TapError(error => ClickTrace.Write(
+                    $"strip pin failed on {strip.Screen.Left},{strip.Screen.Top}: {error}; trying again in {FloatingBar.RetryEvery.TotalSeconds:N0} s"));
+        }
+        finally
+        {
+            pinning = pinning.Remove(strip);
+        }
     }
 
     // The 1 s beat, from App's topmost timer: each strip's guard (KeepStrip, which acts only while the strip's screen
     // is among the connected ones and never docks it anywhere else), then its place at the top of the topmost band.
-    // And the pin for a strip that was shown after its first dock (see Open). Not gated on the bar being visible.
+    // And the pin for a strip that was shown after its first dock (see Open), or whose pin failed (see `pinned`). Not
+    // gated on the bar being visible.
     public void Tick()
     {
         var connected = screens();

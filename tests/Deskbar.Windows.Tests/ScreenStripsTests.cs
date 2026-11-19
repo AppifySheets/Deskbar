@@ -35,13 +35,29 @@ public class ScreenStripsTests
         // Whether a strip's own screen can be read; false makes its dock refuse, as on a screen that dropped out.
         public bool Readable { get; set; } = true;
 
+        // What the next pins answer, first to last; once used up, every pin succeeds. A failure is logged as "pin failed".
+        public Queue<bool> PinAnswers { get; } = new();
+
+        // The strip set's clock, stepped by the test to cross the pin's retry interval without waiting for it.
+        public DateTime Now { get; set; } = new(2026, 11, 19, 12, 0, 0, DateTimeKind.Utc);
+
         public Rig() =>
             Set = new ScreenStrips(
                 wanted: () => Wanted,
                 screens: () => Screens,
                 create: Make,
                 ignore: hwnd => Log.Add($"ignore {Name(hwnd)} visible={ByHandle(hwnd).IsVisible}"),
-                pinToAllDesktops: hwnd => Log.Add($"pin {Name(hwnd)} visible={ByHandle(hwnd).IsVisible}"));
+                pinToAllDesktops: Pin)
+            {
+                Clock = () => Now,
+            };
+
+        Result Pin(nint hwnd)
+        {
+            var ok = PinAnswers.Count == 0 || PinAnswers.Dequeue();
+            Log.Add($"pin{(ok ? "" : " failed")} {Name(hwnd)} visible={ByHandle(hwnd).IsVisible}");
+            return ok ? Result.Success() : Result.Failure("the desktop service is not ready");
+        }
 
         ScreenStrip Make(MonitorBounds screen)
         {
@@ -136,6 +152,37 @@ public class ScreenStripsTests
         rig.Set.Tick();
 
         Assert.Equal(new[] { "ignore left visible=False", "pin left visible=True" }, rig.Log);
+        rig.Set.RemoveAll();
+    });
+
+    // A pin that fails (the desktop COM object gone stale after idle, #148, or "not ready") must not count as pinned: an
+    // unpinned strip is cloaked on every other desktop while its band stays reserved there, an empty band nothing would
+    // ever repair. So Tick tries again, at most once every FloatingBar.RetryEvery as the docked bar's guard does, and
+    // once a pin has worked it is never made again.
+    [Fact]
+    public void A_failed_pin_is_retried_on_a_throttle_until_it_works() => StaThread.Run(() =>
+    {
+        var rig = new Rig { Screens = [Left] };
+        rig.PinAnswers.Enqueue(false);
+
+        rig.Set.Reconcile();
+        Assert.Equal(new[] { "ignore left visible=False", "pin failed left visible=True" }, rig.Log);
+
+        // Within the retry interval: no second attempt.
+        rig.Now += FloatingBar.RetryEvery - TimeSpan.FromSeconds(1);
+        rig.Set.Tick();
+        Assert.Equal(2, rig.Log.Count);
+
+        // Past it: tried again, and this time it works.
+        rig.Now += TimeSpan.FromSeconds(2);
+        rig.Set.Tick();
+        Assert.Equal(new[] { "ignore left visible=False", "pin failed left visible=True", "pin left visible=True" }, rig.Log);
+
+        // Pinned now: never again, however long it runs.
+        rig.Now += FloatingBar.RetryEvery * 3;
+        rig.Set.Tick();
+        rig.Set.Tick();
+        Assert.Equal(3, rig.Log.Count);
         rig.Set.RemoveAll();
     });
 
@@ -256,7 +303,11 @@ public class ScreenStripsTests
             screens: ScreenLayout.Screens,
             create: screen => new ScreenStrip(screen) { Scale = () => 1.0, DockWith = (_, s, _) => new(s.L, s.T, s.L, s.T) },
             ignore: _ => { },
-            pinToAllDesktops: shown.Add);
+            pinToAllDesktops: hwnd =>
+            {
+                shown.Add(hwnd);
+                return Result.Success();
+            });
 
         set.Reconcile();
 
