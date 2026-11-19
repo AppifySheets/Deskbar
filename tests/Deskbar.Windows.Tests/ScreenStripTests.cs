@@ -28,14 +28,21 @@ public class ScreenStripTests
     const double At150 = 1.5;
     const double WidthDip = 1200 / At150;
 
+    // For the one test that reads the strip window's REAL rectangle back from Windows. 1200 px was still too wide for
+    // the CI runner: its virtual screen is 1024 px, Windows capped the window at 1044 px (the largest a top-level
+    // window may be there, borders included), and the test read 1044 where it placed 1200 (CI on Deskbar #355). A
+    // real strip is exactly its own screen's width, so it never meets that cap; only a made-up screen wider than the
+    // machine's desktop does. 640 x 400 px fits any desktop a test can run on.
+    static readonly MonitorBounds Narrow = new(-30000, -30000, -29360, -29600);
+
     static readonly Color Neutral = Color.FromArgb(0xFF, 0x3A, 0x3F, 0x49);
 
     sealed record Ask(AppBar.Edge Edge, AppBar.Rect Screen, int ThicknessPx);
 
     // A strip whose docking is recorded and granted by the test: by default exactly what it asked for, as the shell
     // grants a top bar on a screen with nothing else on its top edge (measured, probe notes section 1).
-    static ScreenStrip Strip(List<Ask>? asked = null, Func<DateTime>? clock = null, Func<AppBar.Rect, int, AppBar.Rect>? grant = null) =>
-        new(Offscreen)
+    static ScreenStrip Strip(List<Ask>? asked = null, Func<DateTime>? clock = null, Func<AppBar.Rect, int, AppBar.Rect>? grant = null, MonitorBounds? screen = null) =>
+        new(screen ?? Offscreen)
         {
             Scale = () => At150,
             Clock = clock ?? (() => DateTime.UtcNow),
@@ -179,18 +186,18 @@ public class ScreenStripTests
     public void Dock_asks_for_the_top_of_its_own_screen_in_pixels() => StaThread.Run(() =>
     {
         var asked = new List<Ask>();
-        var strip = Strip(asked);
+        var strip = Strip(asked, screen: Narrow);
 
         Assert.True(strip.Dock().IsSuccess);
 
         var ask = Assert.Single(asked);
         Assert.Equal(AppBar.Edge.Top, ask.Edge);
-        Assert.Equal(new AppBar.Rect(Offscreen.Left, Offscreen.Top, Offscreen.Right, Offscreen.Bottom), ask.Screen);
+        Assert.Equal(new AppBar.Rect(Narrow.Left, Narrow.Top, Narrow.Right, Narrow.Bottom), ask.Screen);
         Assert.Equal(48, ask.ThicknessPx);
 
         Assert.True(strip.IsVisible);
         var rect = RectOf(strip);
-        Assert.Equal((Offscreen.Left, Offscreen.Top, Offscreen.Right, Offscreen.Top + 48), (rect.Left, rect.Top, rect.Right, rect.Bottom));
+        Assert.Equal((Narrow.Left, Narrow.Top, Narrow.Right, Narrow.Top + 48), (rect.Left, rect.Top, rect.Right, rect.Bottom));
 
         strip.Undock();
         Assert.False(strip.IsVisible);
