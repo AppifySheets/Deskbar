@@ -1407,16 +1407,24 @@ public partial class App : Application
             id => manager.State.Workspaces.TryFirst(w => w.Id == id) is { HasValue: true } found
                 ? (found.Value.Name, ToBrush(LaneColour.Of(manager.State, found.Value)))
                 : (null, null),
-            task =>
+            (task, card) =>
             {
                 if (task.WorkspaceId.HasValue)
                 {
                     manager.Switch(task.WorkspaceId.Value);
-                    return;
+                    return true;
                 }
 
-                if (floatingBar?.Minimized == true) RestoreBar();
-                floatingBar?.OpenTasksMenu();
+                // A free task has no workspace to go to, so the click opens the stopwatch menu. It is anchored to
+                // the CARD, not the bar's strip: the bar may be minimized, hidden, stepped aside or behind a
+                // full-screen app, and the card is by definition where the user is looking. The card stays until
+                // the menu closes, since closing it would take the menu's placement target away.
+                if (floatingBar?.TasksMenu() is not { } menu) return true;
+                menu.PlacementTarget = card;
+                menu.Placement = System.Windows.Controls.Primitives.PlacementMode.Top;
+                menu.Closed += (_, _) => dueCards?.Dismiss(card);
+                menu.IsOpen = true;
+                return false;
             });
         //
         // Threads: manager.StateChanged is pulsed from the virtual-desktop CurrentChanged event, which is raised on

@@ -41,7 +41,7 @@ public sealed partial class DueCard : Window
             ? $"Came due at {task.Timer.Value.Ends.ToLocalTime():HH:mm}"
             : "Came due";
         SourceInitialized += (_, _) => StampStyles();
-        MouseLeftButtonUp += (_, _) => onClick();
+        MouseLeftButtonUp += (_, _) => Click();
     }
 
     // WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW, added to whatever WPF chose.
@@ -52,6 +52,9 @@ public sealed partial class DueCard : Window
         NativeMethods.SetWindowLongPtr(hwnd, NativeMethods.GWL_EXSTYLE,
             (nint)(((long)style) | WS_EX_NOACTIVATE | NativeMethods.WS_EX_TOOLWINDOW));
     }
+
+    /// <summary>What a click does, also the seam tests use in place of a real mouse press.</summary>
+    internal void Click() => onClick();
 
     /// <summary>The window's extended style, for tests.</summary>
     internal long ExStyle => (long)NativeMethods.GetWindowLongPtr(new WindowInteropHelper(this).Handle, NativeMethods.GWL_EXSTYLE);

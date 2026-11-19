@@ -80,7 +80,7 @@ public class DueCardTests
         var now = Start;
         var tasks = new TaskService(new MemoryTaskStore(), () => now);
         var parked = tasks.Park("probe", Maybe<Guid>.None, Maybe.From(TimeSpan.FromMinutes(1))).Value;
-        using var cards = new DueCards(tasks, () => true, _ => (null, null), _ => { });
+        using var cards = new DueCards(tasks, () => true, _ => (null, null), (_, _) => true);
 
         now += TimeSpan.FromMinutes(2);
         tasks.Tick(Maybe<Guid>.None);
@@ -100,11 +100,36 @@ public class DueCardTests
         var now = Start;
         var tasks = new TaskService(new MemoryTaskStore(), () => now);
         tasks.Park("probe", Maybe<Guid>.None, Maybe.From(TimeSpan.FromMinutes(1)));
-        using var cards = new DueCards(tasks, () => false, _ => (null, null), _ => { });
+        using var cards = new DueCards(tasks, () => false, _ => (null, null), (_, _) => true);
 
         now += TimeSpan.FromMinutes(2);
         tasks.Tick(Maybe<Guid>.None);
 
         Assert.Empty(cards.OpenFor);
+    });
+
+    // A free task has no workspace, so its click opens the stopwatch menu. The handler must get the card (to anchor
+    // the menu to it, whatever state the bar is in), and returning false keeps the card until the menu closes.
+    [Fact]
+    public void Clicking_a_free_tasks_card_hands_the_card_over_and_can_keep_it_open() => StaThread.Run(() =>
+    {
+        var now = Start;
+        var tasks = new TaskService(new MemoryTaskStore(), () => now);
+        tasks.Park("probe", Maybe<Guid>.None, Maybe.From(TimeSpan.FromMinutes(1)));
+        DueCard? target = null;
+        DueCards? cards = null;
+        cards = new DueCards(tasks, () => true, _ => (null, null), (_, card) => { target = card; return false; });
+
+        now += TimeSpan.FromMinutes(2);
+        tasks.Tick(Maybe<Guid>.None);
+        var shown = Assert.Single(cards.Cards);
+        shown.Click();
+
+        Assert.Same(shown, target);
+        Assert.Single(cards.OpenFor); // kept open for the menu
+
+        cards.Dismiss(shown); // what the menu's Closed does
+        Assert.Empty(cards.OpenFor);
+        cards.Dispose();
     });
 }

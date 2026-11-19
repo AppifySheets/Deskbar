@@ -9,7 +9,8 @@ namespace Deskbar.App;
 // "out of sight" switch:
 //  - a card opens only when a task comes due (TaskService.CameDue) while the bar is out of sight;
 //  - one card per task: a second CameDue for a task that already has a card adds nothing;
-//  - a click acts (go to the workspace, or open the stopwatch menu for a free task) and then closes the card;
+//  - a click acts (go to the workspace, or open the stopwatch menu from the card for a free task) and closes the card,
+//    at once, or when the menu closes;
 //  - after every board change, each card whose task is no longer Due closes (done, deleted, timer cleared, or ended
 //    by coming back to the workspace);
 //  - whenever a card goes, the rest are restacked so the stack has no holes.
@@ -19,12 +20,12 @@ public sealed class DueCards : IDisposable
     readonly TaskService tasks;
     readonly Func<bool> outOfSight;
     readonly Func<Guid, (string? Name, Brush? Colour)> workspaceOf;
-    readonly Action<TaskItem> click;
+    readonly Func<TaskItem, DueCard, bool> click;
     readonly List<DueCard> cards = [];
     readonly CompositeDisposable subscriptions = [];
 
     public DueCards(TaskService tasks, Func<bool> outOfSight, Func<Guid, (string? Name, Brush? Colour)> workspaceOf,
-        Action<TaskItem> click)
+        Func<TaskItem, DueCard, bool> click)
     {
         this.tasks = tasks;
         this.outOfSight = outOfSight;
@@ -46,8 +47,10 @@ public sealed class DueCards : IDisposable
         DueCard? card = null;
         card = new DueCard(task, name, colour, () =>
         {
-            click(task);
-            Close(card!);
+            // The handler gets the card so it can anchor a menu to it, and says whether the card is finished. A
+            // handler that opened a menu returns false and calls Dismiss when the menu closes: closing the card
+            // under an open menu would take its placement target away.
+            if (click(task, card!)) Close(card!);
         });
         cards.Add(card);
         card.ShowStacked(cards.Count - 1);
@@ -60,6 +63,9 @@ public sealed class DueCards : IDisposable
             .ToList()
             .ForEach(Close);
     }
+
+    /// <summary>Closes a card the click handler kept open (its menu has closed) and restacks the rest.</summary>
+    internal void Dismiss(DueCard card) => Close(card);
 
     void Close(DueCard card)
     {
