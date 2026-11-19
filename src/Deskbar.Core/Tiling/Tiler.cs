@@ -13,9 +13,8 @@ namespace Deskbar.Core.Tiling;
 // fakes in TilerTests.
 //
 // The rules it keeps, each from the spec:
-//   - It acts only where TilingGate.Acts says so: the experiment is on, the workspace is tiled, the copy is
-//     Pro (Petre: "disabled by default, until i have tested it well"). While it does not act it moves nothing
-//     and watches nothing, so turning any of the three off leaves every window where it is.
+//   - It acts only where TilingGate.Acts says so: the workspace is tiled and the copy may tile. While it does
+//     not act it moves nothing and watches nothing, so turning either off leaves every window where it is.
 //   - Only the desktop being looked at is tiled. Another desktop's windows are never moved, restored or
 //     un-maximized; arriving at a tiled workspace re-tiles it once, which picks up what changed while away.
 //   - Only windows that LIVE on the workspace tile (WorkspaceManager.WorkspaceOf, which is None for a pinned
@@ -81,7 +80,7 @@ public sealed partial class Tiler(WorkspaceManager manager, IVirtualDesktopServi
     // (a rename, a fold, a colour) leaves it equal, and such a pulse reads no windows at all. Sizes is the current
     // workspace's stored tile sizes, so "Even out tiles", untile and the pipe's `even` (which only change state)
     // re-tile; a ValueList, so it compares by contents.
-    sealed record StateKey(Maybe<Guid> Workspace, bool Tiled, bool Experiment, int Gap, bool Pro, ValueList<ScreenTileSizes> Sizes);
+    sealed record StateKey(Maybe<Guid> Workspace, bool Tiled, int Gap, bool Pro, ValueList<ScreenTileSizes> Sizes);
 
     // What a window was last given and what it accepted. Accepted is the visible frame read back after the
     // Place: the slot itself, or the size an app insisted on (a minimum size larger than its slot). It is the
@@ -149,8 +148,8 @@ public sealed partial class Tiler(WorkspaceManager manager, IVirtualDesktopServi
 
     public void Start()
     {
-        // Ruling 1: the Tiler listens to the manager itself, so a workspace tiled or untiled, the gap changed
-        // or the experiment switched (all persisted through WorkspaceManager, all pulsing StateChanged) take
+        // Ruling 1: the Tiler listens to the manager itself, so a workspace tiled or untiled or the gap changed
+        // (all persisted through WorkspaceManager, all pulsing StateChanged) take
         // effect without the App relaying them. The App only calls Refresh after a licence refresh, because
         // Pro is the one input the manager does not hold.
         // Every source through OnInputs, so each handler runs on the UI thread whatever thread raised it (see
@@ -327,10 +326,10 @@ public sealed partial class Tiler(WorkspaceManager manager, IVirtualDesktopServi
 
     // StateChanged fires on every persist and on several window events, and a full evaluate asks WorkspaceOf
     // (a COM DesktopOf call) of every known window on the UI thread. So a pulse evaluates only when one of the
-    // facts in StateKey moved: the workspace here, its Tiled flag, the experiment, the gap, Pro, or its tile sizes.
+    // facts in StateKey moved: the workspace here, its Tiled flag, the gap, Pro, or its tile sizes.
     // Changes to which windows are in the grid reach the Tiler through window events and Settled instead.
     //
-    // Every screen is re-tiled. For the first five facts that is what Evaluate did anyway (each one changes or
+    // Every screen is re-tiled. For the first four facts that is what Evaluate did anyway (each one changes or
     // clears `context`, which makes the re-tile full); the sizes change no window list, so without it "Even out
     // tiles" would re-tile nothing. The Tiler's own SetTileSizes (a split moved, or sizes refitted to a new count)
     // pulses too, but StoreSizes has already taken its sizes into the key, so that pulse compares equal and
@@ -357,7 +356,7 @@ public sealed partial class Tiler(WorkspaceManager manager, IVirtualDesktopServi
         var state = manager.State;
         var here = currentDesktop.Bind(desktop => state.Workspaces.TryFirst(w => w.DesktopId == desktop));
         return new StateKey(here.Map(w => w.Id), here.Map(w => w.Tiled).GetValueOrDefault(false),
-            state.ExperimentalTiling, state.TileGap, isPro(), here.Map(w => w.TileSizes).GetValueOrDefault([]));
+            state.TileGap, isPro(), here.Map(w => w.TileSizes).GetValueOrDefault([]));
     }
 
     // A watched window stopped moving with the buttons up (spec, "By hand"). In order:
@@ -537,7 +536,7 @@ public sealed partial class Tiler(WorkspaceManager manager, IVirtualDesktopServi
         var pro = isPro();
         return currentDesktop
             .Bind(desktop => state.Workspaces.TryFirst(w => w.DesktopId == desktop))
-            .Where(w => TilingGate.Acts(w, pro, state.ExperimentalTiling));
+            .Where(w => TilingGate.Acts(w, pro));
     }
 
     // Does this window take part in `workspace`'s grid right now? Asked of every known window on each structural
@@ -564,10 +563,10 @@ public sealed partial class Tiler(WorkspaceManager manager, IVirtualDesktopServi
         var pro = isPro();
         stateKey = CurrentStateKey();
 
-        // Forget the boards of workspaces the gate no longer acts on: untiled, or the experiment or Pro gone.
+        // Forget the boards of workspaces the gate no longer acts on: untiled, or Pro gone.
         var dropped = boards.Keys
             .Where(id => !state.Workspaces.TryFirst(w => w.Id == id)
-                .Map(w => TilingGate.Acts(w, pro, state.ExperimentalTiling)).GetValueOrDefault(false))
+                .Map(w => TilingGate.Acts(w, pro)).GetValueOrDefault(false))
             .ToList();
         var droppedWindows = dropped.SelectMany(id => boards[id].Screens.Values).SelectMany(w => w).ToList();
         dropped.ForEach(id => boards.Remove(id));
@@ -610,7 +609,7 @@ public sealed partial class Tiler(WorkspaceManager manager, IVirtualDesktopServi
     }
 
     // Which workspaces turned tiled since the last evaluate (see `restoreOnArrival`). The flag alone, not the gate:
-    // the experiment or Pro coming back is not Petre activating tiling on a workspace.
+    // Pro coming back is not Petre activating tiling on a workspace.
     void NoteTiledJustNow(AppState state)
     {
         var tiledNow = state.Workspaces.Where(w => w.Tiled).Select(w => w.Id).ToHashSet();

@@ -6,8 +6,8 @@ using Deskbar.Core.Tiling;
 namespace Deskbar.Core.Tests.Tiling;
 
 // Stored tile sizes: Workspace.TileSizes, kept per screen. SetTileSizes stores or replaces one screen's
-// entry (equal sizes remove it), EvenOutTiles and untiling clear the lot, and turning the experiment off
-// keeps them ("keep my sizes").
+// entry (equal sizes remove it), EvenOutTiles and untiling clear the lot, and nothing else does
+// ("keep my sizes").
 public sealed class TileSizesSettingTests : IDisposable
 {
     const string Left = "0,0,1920,1080";
@@ -180,19 +180,6 @@ public sealed class TileSizesSettingTests : IDisposable
         manager.SetWorkspaceTiled(a, true);
 
         Assert.Single(SizesOf(manager.State, a));
-    }
-
-    [Fact]
-    public void Turning_the_experiment_off_keeps_the_sizes()
-    {
-        var (manager, a) = Started();
-        manager.SetWorkspaceTiled(a, true);
-        manager.SetTileSizes(a, Left, Uneven);
-        manager.SetExperimentalTiling(true);
-
-        manager.SetExperimentalTiling(false);
-
-        Assert.Equal(Uneven, SizesOf(manager.State, a).Single().Sizes);
     }
 
     // Workspace is a record, so its equality must see the sizes, by contents and not by list instance.

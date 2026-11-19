@@ -181,8 +181,8 @@ public partial class App : Application
     // dispatcher for its debounce timers, and its LOCATIONCHANGE hook is installed by the Tiler from this thread
     // when something is tiled, so the callbacks arrive here. Being built here is not enough for that: the Tiler's
     // inputs include Windows' desktop change, raised on a thread of its own, so the Tiler is handed this thread's
-    // scheduler (`inputs` below) and observes every input on it. App never calls Watch itself. With the experiment
-    // off (the default) the Tiler only ever narrows the hook to the empty set, so no hook is installed at all.
+    // scheduler (`inputs` below) and observes every input on it. App never calls Watch itself. While the desktop
+    // being looked at is not tiled the Tiler narrows the hook to the empty set, so no hook is installed at all.
     //
     // Nothing else to wire: the Tiler subscribes to the manager's StateChanged and WindowMoved, the monitor's
     // events, the desktops' CurrentChanged and the surface's Settled and ScreensChanged itself, so the row menu,

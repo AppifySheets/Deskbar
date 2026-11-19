@@ -65,8 +65,7 @@ public interface ITileSurface
     void RoundCorners(WindowHandle window);
 
     // The windows whose moves matter: the LOCATIONCHANGE hook is narrowed to these. An EMPTY set removes the
-    // hook entirely, which is what keeps it off while the experiment is off or the desktop being looked at
-    // is not tiled (spec, "Keeping it tidy").
+    // hook entirely, which is what keeps it off while the desktop being looked at is not tiled (spec, "Keeping it tidy").
     void Watch(IReadOnlySet<WindowHandle> windows);
 
     // A watched window stopped moving (no further change for the debounce interval) with both mouse

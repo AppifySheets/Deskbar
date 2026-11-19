@@ -5,8 +5,8 @@ using Deskbar.Core.Tiling;
 
 namespace Deskbar.Core.Tests.Tiling;
 
-// The tiling settings: a workspace's Tiled flag, the gap, the experiment switch and the gate that combines
-// them. Whether tiling then moves windows is the app's business; this layer only records and decides.
+// The tiling settings: a workspace's Tiled flag, the gap and the gate that decides
+// whether tiling acts. Whether tiling then moves windows is the app's business; this layer only records and decides.
 public sealed class TiledSettingTests : IDisposable
 {
     readonly FakeDesktops desktops = new();
@@ -28,12 +28,22 @@ public sealed class TiledSettingTests : IDisposable
         return (manager, a.Id, b.Id);
     }
 
-    // Loads a state.json written before tiling existed: no "Tiled", "TileGap" or "ExperimentalTiling" key.
+    // Loads a state.json written before tiling existed: no "Tiled" or "TileGap" key.
     AppState LoadedWithoutKeys()
     {
         Directory.CreateDirectory(dir);
         File.WriteAllText(Path.Combine(dir, "state.json"),
             $$$"""{"Workspaces":[{"Id":"{{{Guid.NewGuid()}}}","Name":"Old","DesktopId":null}],"WorkspaceRules":[],"RenameRules":[],"Inventory":{}}""");
+        return new JsonPersistenceStore(dir).Load().Value;
+    }
+
+    // Loads a state.json written while Manage still had its "Tiling (experimental)" box: one tiled workspace
+    // and the old ExperimentalTiling key, ticked or not.
+    AppState LoadedWithTheOldSwitch(bool on)
+    {
+        Directory.CreateDirectory(dir);
+        File.WriteAllText(Path.Combine(dir, "state.json"),
+            $$$"""{"Workspaces":[{"Id":"{{{Guid.NewGuid()}}}","Name":"Old","DesktopId":null,"Tiled":true}],"WorkspaceRules":[],"RenameRules":[],"Inventory":{},"ExperimentalTiling":{{{(on ? "true" : "false")}}}}""");
         return new JsonPersistenceStore(dir).Load().Value;
     }
 
@@ -87,40 +97,22 @@ public sealed class TiledSettingTests : IDisposable
         Assert.Equal(0, store.Stored.TileGap);
     }
 
-    [Fact]
-    public void The_experiment_starts_off()
-    {
-        Assert.False(Started().manager.State.ExperimentalTiling);
-        Assert.False(LoadedWithoutKeys().ExperimentalTiling);
-    }
-
-    [Fact]
-    public void Turning_the_experiment_off_keeps_every_tiled_flag()
-    {
-        var (manager, a, _) = Started();
-        manager.SetWorkspaceTiled(a, true);
-
-        manager.SetExperimentalTiling(true);
-        Assert.True(store.Stored.ExperimentalTiling);
-        manager.SetExperimentalTiling(false);
-
-        Assert.False(manager.State.ExperimentalTiling);
-        Assert.True(manager.State.Workspaces.Single(w => w.Id == a).Tiled);
-    }
-
-    // Experiment, tiled and Pro must all hold: eight combinations, one of which acts.
+    // The ExperimentalTiling key left AppState on 2026-11-19 (TilingGate). A state.json that still carries it,
+    // ticked or not, must load, with each workspace's Tiled flag as written.
     [Theory]
-    [InlineData(false, false, false, false)]
-    [InlineData(false, false, true, false)]
-    [InlineData(false, true, false, false)]
-    [InlineData(false, true, true, false)]
-    [InlineData(true, false, false, false)]
-    [InlineData(true, false, true, false)]
-    [InlineData(true, true, false, false)]
-    [InlineData(true, true, true, true)]
-    public void The_gate_needs_experiment_tiled_and_pro(bool experiment, bool tiled, bool pro, bool expected) =>
-        Assert.Equal(expected, TilingGate.Acts(
-            new Workspace(Guid.NewGuid(), "W", null) { Tiled = tiled }, pro, experiment));
+    [InlineData(true)]
+    [InlineData(false)]
+    public void A_state_written_with_the_old_switch_still_loads(bool on) =>
+        Assert.True(LoadedWithTheOldSwitch(on).Workspaces.Single().Tiled);
+
+    // Tiled and Pro must both hold: four combinations, one of which acts.
+    [Theory]
+    [InlineData(false, false, false)]
+    [InlineData(false, true, false)]
+    [InlineData(true, false, false)]
+    [InlineData(true, true, true)]
+    public void The_gate_needs_tiled_and_pro(bool tiled, bool pro, bool expected) =>
+        Assert.Equal(expected, TilingGate.Acts(new Workspace(Guid.NewGuid(), "W", null) { Tiled = tiled }, pro));
 
     // Tiling is free for now (Petre, 2026-11-18): a copy that is not Pro may tile too. When tiling goes back
     // behind Pro, TilingGate.Free turns false and this test is the one to change with it.
