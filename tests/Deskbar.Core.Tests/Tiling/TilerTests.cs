@@ -204,6 +204,19 @@ public sealed class TilerTests : IDisposable
         Assert.Empty(surface.Watched[^1]);
     }
 
+    // Petre: "on closing, i sometimes want not to move other windows". In a 2x2, closing the bottom-right tile used to
+    // rebuild the grid as 1+2 and move the bottom-left tile into the right column.
+    [Fact]
+    public void Closing_a_tile_keeps_the_other_tiles_in_their_columns()
+    {
+        Enumerable.Range(1, 4).ToList().ForEach(n => Exists(W(n), alpha));
+        Start();
+        Closes(W(4));
+        Assert.Equal([W(1), W(2), W(3)], tiler.Board.On(1));
+        var expected = GridLayout.Arrange(Area, 3, Gap, new TileSizes([0.5, 0.5], [[0.5, 0.5], [1.0]]));
+        Assert.Equal(expected, new[] { W(1), W(2), W(3) }.Select(w => surface.Frames[w]).ToList());
+    }
+
     [Fact]
     public void Untiling_moves_nothing()
     {
@@ -254,7 +267,10 @@ public sealed class TilerTests : IDisposable
 
         Closes(W(1));
 
-        AssertTiled([W(2), W(3)]);
+        // Only W1's cell goes (tiling-predictable-placement, change 1): its column was alone, so W2 and W3 keep their
+        // rows and now share one column. They used to be rebuilt as two columns from the window count.
+        Assert.Equal([W(2), W(3)], tiler.Board.On(1));
+        Assert.Equal(GridLayout.Arrange(Area, 2, Gap, TileSizes.Equal([2])), new[] { W(2), W(3) }.Select(w => surface.Frames[w]).ToList());
     }
 
     // It used to rejoin at the END (the first design). Petre: "i'd like to bring back the window from the top back to
@@ -266,7 +282,9 @@ public sealed class TilerTests : IDisposable
         Start();
 
         Minimizes(W(1), true);
-        AssertTiled([W(2), W(3)]);
+        // Only W1's cell goes (tiling-predictable-placement, change 1): W2 and W3 stay stacked in one column.
+        Assert.Equal([W(2), W(3)], tiler.Board.On(1));
+        Assert.Equal(GridLayout.Arrange(Area, 2, Gap, TileSizes.Equal([2])), new[] { W(2), W(3) }.Select(w => surface.Frames[w]).ToList());
 
         Minimizes(W(1), false);
         AssertTiled([W(1), W(2), W(3)]);
@@ -479,7 +497,10 @@ public sealed class TilerTests : IDisposable
 
         // W3 is the top right of the 2x2 grid.
         Minimizes(W(3), true);
-        AssertTiled([W(1), W(2), W(4)]);
+        // Only W3's cell goes (tiling-predictable-placement, change 1): W4 keeps the whole right column.
+        Assert.Equal([W(1), W(2), W(4)], tiler.Board.On(1));
+        Assert.Equal(GridLayout.Arrange(Area, 3, Gap, new TileSizes([0.5, 0.5], [[0.5, 0.5], [1.0]])),
+            new[] { W(1), W(2), W(4) }.Select(w => surface.Frames[w]).ToList());
 
         Minimizes(W(3), false);
         AssertTiled([W(1), W(2), W(3), W(4)]);
@@ -844,7 +865,9 @@ public sealed class TilerTests : IDisposable
         Settles(W(1), new WindowRect(700, 300, 1100, 700));
 
         Assert.DoesNotContain(W(1), PlacedWindows);
-        AssertTiled([W(2), W(3)]);
+        // Only W1's cell goes (tiling-predictable-placement, change 1): W2 and W3 stay stacked in one column.
+        Assert.Equal([W(2), W(3)], tiler.Board.On(1));
+        Assert.Equal(GridLayout.Arrange(Area, 2, Gap, TileSizes.Equal([2])), new[] { W(2), W(3) }.Select(w => surface.Frames[w]).ToList());
         Assert.Equal(new HashSet<WindowHandle> { W(2), W(3) }, surface.Watched[^1]);
     }
 
