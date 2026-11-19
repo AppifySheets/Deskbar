@@ -21,8 +21,8 @@ namespace Deskbar.Core.Tiling;
 //     window and the home workspace for a borrowed one), that the surface says can tile, and that are not
 //     minimized. Everything else floats above the grid.
 //   - A maximized window keeps its slot (the tiles beneath do not reflow) and is never placed.
-//   - Slot order is join order; a new window goes to the end (TileBoard). A restored one goes back to the place it
-//     left when it was minimized (Tiler.Minimize.cs).
+//   - A new window takes half of the tile the user last used, or fills an opening, and no other tile moves
+//     (Tiler.Arrival.cs). A restored one goes back to the place it left when it was minimized (Tiler.Minimize.cs).
 //
 // Threading: every entry point runs on the UI thread, and the Tiler makes sure of it rather than trusting its
 // sources. `inputs` is the UI thread's scheduler (App passes one; tests leave it null, and then nothing is
@@ -275,9 +275,12 @@ public sealed partial class Tiler(WorkspaceManager manager, IVirtualDesktopServi
             away.Remove(e.Window.Handle);
             putBacks.Remove(e.Window.Handle);
             leftAlone.Remove(e.Window.Handle);
+            ForgetUsed(e.Window.Handle);
         }
         if (e.Kind == WindowEventKind.Activated)
         {
+            // Recorded first, for every window: the tile a new window splits is the one last used (Tiler.Arrival.cs).
+            NoteUsed(e.Window.Handle);
             RaiseTogether(e.Window.Handle);
             return;
         }
@@ -302,7 +305,8 @@ public sealed partial class Tiler(WorkspaceManager manager, IVirtualDesktopServi
     // drop on one of the bar's workspace rows as the bar's gesture, and the grid it leaves closes up.
     // WorkspaceOf is asked once, for this window only:
     //   - on the board and no longer living here: it leaves and its screen re-tiles without it;
-    //   - not on the board, living here now and eligible: it joins at the end, like a new window;
+    //   - not on the board, living here now and eligible: it arrives like a new window (Tiler.Arrival.cs), into an
+    //     opening or splitting the tile last used, which can be on another screen than the one it is on;
     //   - anything else: nothing.
     void OnWindowMoved(WindowHandle window)
     {
@@ -320,8 +324,9 @@ public sealed partial class Tiler(WorkspaceManager manager, IVirtualDesktopServi
 
         if (!livesHere || !Eligible(window) || !surface.VisibleFrameOf(window).HasValue) return;
         var to = surface.ScreenOf(window);
-        Keep(workspace, board.Join(to, window));
-        Retile(workspace, [to]);
+        Keep(workspace, Arrived(workspace, board.Join(to, window), [window]));
+        // The screen it is on and the screen it landed on, which differ when the tile last used is on another one.
+        Retile(workspace, [to, Board.ScreenOf(window).GetValueOrDefault(to)]);
     }
 
     // StateChanged fires on every persist and on several window events, and a full evaluate asks WorkspaceOf
@@ -595,8 +600,18 @@ public sealed partial class Tiler(WorkspaceManager manager, IVirtualDesktopServi
             .Select(w => (w.Window, w.Screen, Frame: w.Frame.Value))
             .ToList();
         var board = before is null ? TileBoard.FirstFill(windows) : Reconciled(before, windows);
-        // A minimized tile that just came back takes its old place, not the end (Tiler.Minimize.cs).
-        if (before is not null) board = ReturnedToTheirPlaces(workspace, before, board);
+        if (before is not null)
+        {
+            // The windows new to this board, in board order (screen by screen). Taken BEFORE ReturnedToTheirPlaces,
+            // which empties `away`: a minimized tile coming back is not an arrival, it goes back to its old place.
+            var arrivals = board.Screens.OrderBy(s => s.Key).SelectMany(s => s.Value)
+                .Where(w => !before.ScreenOf(w).HasValue && !away.ContainsKey(w))
+                .ToList();
+            // A minimized tile that just came back takes its old place, not the end (Tiler.Minimize.cs); every other
+            // newcomer fills an opening or splits the tile last used (Tiler.Arrival.cs). The first fill is left alone:
+            // it orders the windows by where they already are.
+            board = Arrived(workspace, ReturnedToTheirPlaces(workspace, before, board), arrivals);
+        }
         Keep(workspace, board);
         RestoreIfJustTiled(workspace, board);
 
@@ -725,7 +740,8 @@ public sealed partial class Tiler(WorkspaceManager manager, IVirtualDesktopServi
 
     // The remembered board brought up to date: windows that no longer qualify leave (the rest close up),
     // windows on a screen that has gone join the screen they are on now, and windows new to the grid join at
-    // the end of their screen, in the order the manager knows them (which is the order they appeared).
+    // the end of their screen, in the order the manager knows them (which is the order they appeared). Evaluate
+    // then hands those newcomers to Arrived (Tiler.Arrival.cs), which places each one where it really goes.
     TileBoard Reconciled(TileBoard before, IReadOnlyList<(WindowHandle Window, int Screen, WindowRect Frame)> windows)
     {
         var live = windows.Select(w => w.Window).ToHashSet();

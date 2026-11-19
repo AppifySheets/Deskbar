@@ -230,11 +230,12 @@ public sealed class TilerResizeTests : IDisposable
         tiler.Refresh();
         Assert.Single(surface.Placed);
 
-        // A third window refits the stored sizes to three windows (the right column gains a row) and stores them.
+        // A third window splits the largest tile, W(1), into two columns and stores the new shape (predictable
+        // placement, change 2: it used to refit to three windows, the right column gaining a row).
         // The Appeared evaluate asks of the three windows once; the store's pulse asks nothing more.
         asked = surface.CanTileCalls;
         Opens(W(3), alpha);
-        Assert.Equal(2, Stored(AreaKey).Rows[1].Count);
+        Assert.Equal(3, Stored(AreaKey).Columns.Count);
         Assert.Equal(3, surface.CanTileCalls - asked);
     }
 
@@ -466,6 +467,9 @@ public sealed class TilerResizeTests : IDisposable
         ResizedByHand(W(1), new WindowRect(8, 8, 1337, 1032));
         Echo();
 
+        // W(2) is the tile last used, so W(3) splits it (predictable placement, change 2; it used to join the end).
+        surface.InputTick++;
+        monitor.Subject.OnNext(new WindowEvent(WindowEventKind.Activated, Info(W(2))));
         Opens(W(3), alpha);
 
         // The left column keeps its width; the right column splits into two equal rows.
@@ -503,8 +507,8 @@ public sealed class TilerResizeTests : IDisposable
         Assert.Equal(new WindowRect(1345, 8, 1912, 1032), surface.Frames[W(2)]);
     }
 
-    // The same with a window that closes for good: the next window to open on that screen takes the place the
-    // closed one had, at the split the user set.
+    // The same with a window that closes for good: the entry stays exactly as the drag left it while one window is
+    // left. The next window to open then splits the remaining tile, like any arrival.
     [Fact]
     public void Closing_down_to_one_window_keeps_the_sizes_for_the_next()
     {
@@ -520,9 +524,10 @@ public sealed class TilerResizeTests : IDisposable
         Opens(W(3), alpha);
         Echo();
 
-        Assert.Equal(split, Stored(AreaKey));
-        Assert.Equal(new WindowRect(8, 8, 1337, 1032), surface.Frames[W(1)]);
-        Assert.Equal(new WindowRect(1345, 8, 1912, 1032), surface.Frames[W(3)]);
+        // The new window takes half of W(1), the tile on screen (predictable placement, change 2). The old count
+        // rule put it back at the closed window's split; keeping that place is now change 3's opt-in kept space.
+        Assert.Equal([W(1), W(3)], tiler.Board.On(1));
+        Assert.Equal(GridLayout.Arrange(Area, 2, Gap), FramesOf([W(1), W(3)]));
     }
 
     // Eight windows: columns of 2, 3 and 3. W(4) holds the middle row of the middle column, whose rows are
