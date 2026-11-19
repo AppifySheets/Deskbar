@@ -69,7 +69,7 @@ public class ScreenStripTests
     // A screen with no windows of the current workspace still has its strip, with only the name tag, so a switch
     // never changes that screen's work area (spec, "What it does").
     [Fact]
-    public void An_empty_strip_shows_only_the_name_tag_at_32_dip() => StaThread.Run(() =>
+    public void An_empty_strip_shows_only_the_name_tag_at_24_dip() => StaThread.Run(() =>
     {
         var strip = Strip();
 
@@ -77,7 +77,7 @@ public class ScreenStripTests
 
         Assert.Same(strip.NameTag, Assert.Single(strip.Row.Children.Cast<UIElement>()));
         Assert.Equal("deskbar", ((TextBlock)strip.NameTag.Child).Text);
-        Assert.Equal(32, ScreenStrip.HeightDip);
+        Assert.Equal(24, ScreenStrip.HeightDip);
         Assert.Equal(ScreenStrip.HeightDip, strip.Height);
         Assert.Equal(ScreenStrip.HeightDip, strip.Row.Height);
         Assert.Same(Offscreen, strip.Screen);
@@ -180,7 +180,7 @@ public class ScreenStripTests
             });
     });
 
-    // The shell speaks physical pixels, so 32 DIP on a 150% screen is 48 px, and the strip asks for the top of ITS OWN
+    // The shell speaks physical pixels, so 24 DIP on a 150% screen is 36 px, and the strip asks for the top of ITS OWN
     // screen, never the screen Windows thinks the window is on. The window then sits exactly in what was granted.
     [Fact]
     public void Dock_asks_for_the_top_of_its_own_screen_in_pixels() => StaThread.Run(() =>
@@ -193,11 +193,11 @@ public class ScreenStripTests
         var ask = Assert.Single(asked);
         Assert.Equal(AppBar.Edge.Top, ask.Edge);
         Assert.Equal(new AppBar.Rect(Narrow.Left, Narrow.Top, Narrow.Right, Narrow.Bottom), ask.Screen);
-        Assert.Equal(48, ask.ThicknessPx);
+        Assert.Equal(36, ask.ThicknessPx);
 
         Assert.True(strip.IsVisible);
         var rect = RectOf(strip);
-        Assert.Equal((Narrow.Left, Narrow.Top, Narrow.Right, Narrow.Top + 48), (rect.Left, rect.Top, rect.Right, rect.Bottom));
+        Assert.Equal((Narrow.Left, Narrow.Top, Narrow.Right, Narrow.Top + 36), (rect.Left, rect.Top, rect.Right, rect.Bottom));
 
         strip.Undock();
         Assert.False(strip.IsVisible);
@@ -295,12 +295,12 @@ public class ScreenStripTests
         strip.KeepStrip([Offscreen]);
         Assert.Single(asked);
 
-        // Back: the guard, once its retry interval has passed, docks again, 48 px thick at the screen's own scale.
+        // Back: the guard, once its retry interval has passed, docks again, 36 px thick at the screen's own scale.
         readable = true;
         now += TimeSpan.FromSeconds(30);
         strip.KeepStrip([Offscreen]);
         Assert.Equal(2, asked.Count);
-        Assert.Equal(48, asked[1].ThicknessPx);
+        Assert.Equal(36, asked[1].ThicknessPx);
 
         strip.Undock();
         strip.Close();
@@ -418,7 +418,7 @@ public class ScreenStripTests
 
         var line = Assert.Single(lines);
         Assert.Contains("docked", line);
-        Assert.Contains("(1200x48)", line);
+        Assert.Contains("(1200x36)", line);
         strip.Undock();
         strip.Close();
     });

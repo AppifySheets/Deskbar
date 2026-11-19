@@ -372,7 +372,7 @@ public class ScreenStripsTests
         rig.Set.RemoveAll();
     });
 
-    // The made-up screens' tops are at -30000, and a strip there is 48 px (32 DIP at the rig's 150%), so its bottom edge
+    // The made-up screens' tops are at -30000, and a strip there is 36 px (24 DIP at the rig's 150%), so its bottom edge
     // is -29952. A window whose top is above that has its title bar under the strip.
     static WindowRect Under(MonitorBounds screen) => new(screen.Left + 100, screen.Top + 6, screen.Left + 500, screen.Top + 306);
 
@@ -401,8 +401,8 @@ public class ScreenStripsTests
 
         Assert.Equal(new[]
         {
-            $"nudge under to {Left.Left + 100},{Left.Top + 48} to {Left.Left + 500},{Left.Top + 348}",
-            $"nudge on another desktop to {Left.Left + 700},{Left.Top + 48} to {Left.Left + 1100},{Left.Top + 348}",
+            $"nudge under to {Left.Left + 100},{Left.Top + 36} to {Left.Left + 500},{Left.Top + 336}",
+            $"nudge on another desktop to {Left.Left + 700},{Left.Top + 36} to {Left.Left + 1100},{Left.Top + 336}",
         }, rig.Moves);
 
         // Put back under the strip by hand: the strip set has had its one go at it.
@@ -426,7 +426,7 @@ public class ScreenStripsTests
         rig.Screens = [Left, Middle];
         rig.Set.Reconcile();
 
-        Assert.Equal(new[] { $"nudge under middle to {Middle.Left + 100},{Middle.Top + 48} to {Middle.Left + 500},{Middle.Top + 348}" }, rig.Moves);
+        Assert.Equal(new[] { $"nudge under middle to {Middle.Left + 100},{Middle.Top + 36} to {Middle.Left + 500},{Middle.Top + 336}" }, rig.Moves);
         rig.Set.RemoveAll();
     });
 
@@ -441,7 +441,7 @@ public class ScreenStripsTests
         rig.Set.Reconcile();
 
         Assert.Equal(2, rig.Moves.Count);
-        Assert.Equal(Left.Top + 48, rig.Layout.Rects[rig.Windows[1]].Top);
+        Assert.Equal(Left.Top + 36, rig.Layout.Rects[rig.Windows[1]].Top);
         rig.Set.RemoveAll();
     });
 

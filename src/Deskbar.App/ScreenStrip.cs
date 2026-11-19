@@ -34,9 +34,10 @@ namespace Deskbar.App;
 // to the primary (FloatingBar.DockGuard.cs, 2026-11-01). Everything here reads its own screen or nothing.
 public sealed class ScreenStrip : Window
 {
-    // 32 DIP: the mockup Petre picked ("B", spec "The look"). Turned into the screen's pixels at the screen's own scale,
-    // so 48 px at 150%.
-    public const double HeightDip = 32;
+    // 24 DIP. It shipped at 32, the mockup Petre picked ("B", spec "The look"), and on his screens it was too tall:
+    // "make the fonts smaller, maybe make the strip with less padding". 24 holds the 20 DIP icon with its 1 DIP of
+    // breathing room and the 2 DIP underline. Turned into the screen's pixels at the screen's own scale, so 36 px at 150%.
+    public const double HeightDip = 24;
 
     // The bar's own background, so a strip reads as part of Deskbar; and the tag's grey for an unnamed desktop, which
     // has no workspace colour. Frozen, as every static brush must be (CLAUDE.md, traps): an unfrozen one takes the
@@ -165,9 +166,9 @@ public sealed class ScreenStrip : Window
         nameText = new TextBlock
         {
             Foreground = Brushes.White,
-            // 10, down from 12 with the tab titles (Petre: "smaller font"); a step above the titles' 9.5 and semibold,
-            // so the workspace's name still reads as the strip's label.
-            FontSize = 10,
+            // The tab titles' size (FloatingBar.StripTab), semibold so the workspace's name still reads as the strip's
+            // label. It went 12, then 10, then this: Petre, twice, "smaller font".
+            FontSize = 9.5,
             FontWeight = FontWeights.SemiBold,
             VerticalAlignment = VerticalAlignment.Center,
             TextTrimming = TextTrimming.CharacterEllipsis,

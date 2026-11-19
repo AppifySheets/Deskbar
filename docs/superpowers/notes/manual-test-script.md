@@ -131,7 +131,7 @@ measurements `docs/superpowers/notes/2026-11-19-screen-strips-probes.md`). Run w
 (`%APPDATA%\Deskbar\trace.on`, log `%TEMP%\deskbar-trace.log`), and a build that is not Petre's only copy. Every strip
 line in the log starts with `strip on <left>,<top>`.
 
-S1.  Turn on from the menu: right-click the bar, Window list, At the top of each screen. A 32 DIP strip appears
+S1.  Turn on from the menu: right-click the bar, Window list, At the top of each screen. A 24 DIP strip appears
      along the top of every screen, the name tag of the current workspace first, then its windows as tabs. The
      trace shows a `registered` and a `docked` line per screen. Maximized windows now start below the strip.
 S2.  Turn it on from the pipe instead (`deskbar.cmd help` lists the command) and confirm the same result. Turn it
