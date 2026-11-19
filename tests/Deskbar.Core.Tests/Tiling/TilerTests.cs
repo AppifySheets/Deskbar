@@ -611,8 +611,11 @@ public sealed partial class TilerTests : IDisposable
 
         DroppedAt(W(1), (there[0].Left + there[0].Right) / 2, (there[0].Top + there[0].Bottom) / 2, screen: 2);
 
-        Assert.Equal([W(3), W(2)], tiler.Board.On(1));
-        Assert.Equal([W(1), W(4)], tiler.Board.On(2));
+        // Final review C1: each screen lost a window and gained one, so its count never changed and its grid must
+        // not either. Read as a leave from a grid one window larger, both screens used to become one stacked column.
+        AssertTiled([W(3), W(2)]);
+        AssertTiled([W(1), W(4)], Area2, screen: 2);
+        Assert.Empty(manager.State.Workspaces.Single(w => w.Id == alpha.Id).TileSizes);
     }
 
     [Fact]

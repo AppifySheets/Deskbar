@@ -245,4 +245,63 @@ public sealed class TileArrangeTests
         Assert.Equal([2], sizes.Shape);
         Assert.Equal([1.0], sizes.Columns);
     }
+
+    // --- where a fit starts after a window left (TileArrange.FitStart, final review C1 and M1) -------------------
+
+    // Nothing stored, one of three windows left: the fit starts from the equal grid of THREE, the grid the leaver's
+    // cell was read from, and only that cell goes.
+    [Fact]
+    public void With_nothing_stored_one_leaver_starts_from_the_grid_it_left()
+    {
+        var (start, leaving) = TileArrange.FitStart(Maybe<TileSizes>.None, 2, Maybe.From((0, 0)), oldCount: 3);
+
+        Assert.Equal(TileSizes.Equal([1, 2]), start);
+        Assert.Equal((0, 0), leaving.GetValueOrThrow());
+        Assert.Equal(TileSizes.Equal([2]), TileArrange.Refit(start, 2, leaving));
+    }
+
+    // C1: a cross-screen swap takes one window off the screen and puts another on, so the count is what it was. The
+    // leaver is no leaver for the fit: the grid stays the equal grid of two, two columns.
+    [Fact]
+    public void A_leaver_with_the_count_unchanged_is_ignored()
+    {
+        var (start, leaving) = TileArrange.FitStart(Maybe<TileSizes>.None, 2, Maybe.From((0, 0)), oldCount: 2);
+
+        Assert.Equal(TileSizes.Equal([1, 1]), start);
+        Assert.True(leaving.HasNoValue);
+        Assert.Equal(TileSizes.Equal([1, 1]), TileArrange.Refit(start, 2, leaving));
+    }
+
+    // The leaver's cell was read from sizes that are gone by the time the screen is fitted (a stack of three, then
+    // nothing stored): (0, 2) is not a cell of the equal grid of three. Refit must not take a cell that grid lacks; it
+    // falls back to the equal grid of what is left, and throws nothing.
+    [Fact]
+    public void A_leaver_whose_cell_the_start_does_not_hold_falls_back_to_the_equal_grid()
+    {
+        var (start, leaving) = TileArrange.FitStart(Maybe<TileSizes>.None, 2, Maybe.From((0, 2)), oldCount: 3);
+
+        Assert.Equal(TileSizes.Equal(GridLayout.Shape(2)), TileArrange.Refit(start, 2, leaving));
+    }
+
+    // M1: two windows left at once with nothing stored. The fit starts from the grid the first leaver's cell was read
+    // from (four windows), and two cells go: the leaver's, then by the fallback rule, which ends in the equal grid.
+    [Fact]
+    public void Two_leavers_at_once_with_nothing_stored_end_in_the_equal_grid()
+    {
+        var (start, leaving) = TileArrange.FitStart(Maybe<TileSizes>.None, 2, Maybe.From((0, 0)), oldCount: 4);
+
+        Assert.Equal(TileSizes.Equal([2, 2]), start);
+        Assert.Equal(TileSizes.Equal(GridLayout.Shape(2)), TileArrange.Refit(start, 2, leaving));
+    }
+
+    // Stored sizes are the start whatever the leaver: they already describe the grid the user sees.
+    [Fact]
+    public void Stored_sizes_are_the_start()
+    {
+        var stored = new TileSizes([0.7, 0.3], [[1.0], [1.0]]);
+
+        var (start, _) = TileArrange.FitStart(Maybe.From(stored), 2, Maybe.From((0, 0)), oldCount: 2);
+
+        Assert.Equal(stored, start);
+    }
 }

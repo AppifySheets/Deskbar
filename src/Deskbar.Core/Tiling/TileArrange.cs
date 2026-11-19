@@ -52,8 +52,9 @@ public static class TileArrange
 
     // Stored sizes brought to `count` windows. The shape survives windows leaving on every shape, the automatic one
     // included: a window that leaves takes its own cell with it (a column left empty goes too). On the automatic
-    // shape anything else is TileSizes.Fit, as before. A custom shape also survives a window joining: one that joins goes to the bottom of the LAST column, which is where the board puts a joining
-    // window (TileBoard.Join appends, and the order fills columns left to right). Anything else falls back to Fit.
+    // shape anything else is TileSizes.Fit, as before. A custom shape also survives a window joining: one that joins
+    // goes to the bottom of the LAST column, which is where the board puts a joining window (TileBoard.Join appends,
+    // and the order fills columns left to right). Anything else falls back to Fit.
     //
     // An OPENING stays while other windows leave: `leaving` is then the leaver's CELL (CellOf below counts the opening),
     // and only that cell goes. Any other change closes the opening first and fits what is left. A window that joins
@@ -81,6 +82,30 @@ public static class TileArrange
             return stored.Fit(shape, Maybe<(int Column, int Row)>.None);
         }
         return stored.Fit(GridLayout.Shape(count), leaving);
+    }
+
+    // Where a screen's fit to `count` windows STARTS, and which leaver cell it may use (Tiler.SizesOn hands the result
+    // to KeptOpen or Refit). `cell` is the cell a window held when it left, read from the grid as it was then, which
+    // had `oldCount` windows.
+    //
+    //   - The leaver counts only when windows really left: `oldCount` above `count`. A cross-screen swap takes one
+    //     window off a screen and puts another on, so the count is unchanged and nothing left that grid (final review,
+    //     C1: read as a leave, both screens of a swap became one stacked column, and that was stored).
+    //   - Stored sizes are the start: they are the grid the user sees.
+    //   - Nothing stored means the automatic grid, and with a leaver that is the equal grid of `oldCount`, the grid
+    //     the leaver's cell was read from. Rebuilding it from `count + 1` assumed exactly one window had gone, and
+    //     with two gone at once (or a swap) it removed a cell from a grid that was never shown (final review, M1).
+    //     With no leaver it is the equal grid of `count`.
+    //
+    // Pure, so the rule is tested without the Tiler (TileArrangeTests).
+    public static (TileSizes Start, Maybe<(int Column, int Row)> Leaving) FitStart(
+        Maybe<TileSizes> stored, int count, Maybe<(int Column, int Row)> cell, int oldCount)
+    {
+        var leaving = oldCount > count ? cell : Maybe<(int Column, int Row)>.None;
+        var start = stored.HasValue ? stored.Value
+            : leaving.HasValue ? TileSizes.Equal(GridLayout.Shape(oldCount))
+            : TileSizes.Equal(GridLayout.Shape(count));
+        return (start, leaving);
     }
 
     // `dragged` dropped in `zone` of `target`'s tile, on a screen whose windows are `order` (slot order, column by
