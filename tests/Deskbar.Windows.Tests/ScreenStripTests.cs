@@ -448,6 +448,43 @@ public class ScreenStripTests
         strip.Close();
     });
 
+    // The guard gives the registration up BEFORE it docks again (a fresh one, as the bar's guard makes). A re-dock that
+    // is then refused, because the screen cannot be read or the shell grants no room, leaves no band reserved: a window
+    // still shown there sits topmost over the top of the screen and covers the title bars of the maximized windows the
+    // shell has just let back up (the spec's third anti-goal) until the next try, RetryEvery later. So a refused re-dock
+    // hides the strip, and the next dock that works shows it again. Both ways of refusing, through the two seams.
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void A_guard_redock_that_is_refused_hides_the_strip_until_a_dock_works(bool unreadableScreen) => StaThread.Run(() =>
+    {
+        var now = new DateTime(2026, 11, 19, 12, 0, 0, DateTimeKind.Utc);
+        var refuse = false;
+        var strip = new ScreenStrip(Offscreen)
+        {
+            Scale = () => refuse && unreadableScreen ? Maybe<double>.None : At150,
+            Clock = () => now,
+            // Granted off the strip's own screen while docks work, so the guard has a strip to take back once it may;
+            // an empty rectangle while refusing by the grant.
+            DockWith = (_, s, px) => refuse && !unreadableScreen ? new AppBar.Rect(s.L, s.T, s.L, s.T) : new AppBar.Rect(s.L + 5000, s.T, s.R + 5000, s.T + px),
+        };
+        Assert.True(strip.Dock().IsSuccess);
+        Assert.True(strip.IsVisible);
+
+        refuse = true;
+        now += TimeSpan.FromSeconds(30);
+        strip.KeepStrip([Offscreen]);
+        Assert.False(strip.IsVisible);
+
+        refuse = false;
+        now += TimeSpan.FromSeconds(30);
+        strip.KeepStrip([Offscreen]);
+        Assert.True(strip.IsVisible);
+
+        strip.Undock();
+        strip.Close();
+    });
+
     // A repair that docked is traced, and counted as one.
     [Fact]
     public void A_repair_is_traced_and_counted() => StaThread.Run(() =>
