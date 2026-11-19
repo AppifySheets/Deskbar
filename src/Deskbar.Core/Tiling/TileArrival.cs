@@ -61,6 +61,52 @@ public static class TileArrival
         return preferred.Or(largest).Map(t => new TileSplit(t.Window, t.Side));
     }
 
+    // ---- the split tree (TileLayout), beside the TileSizes version above until the Tiler is switched over ----
+
+    // The same three rules on a split tree (spec, "Arrival and minimize"). Each window's leaf comes from its slot
+    // (TileArrange.LeafOf skips the opening), and its shares of the screen from TileLayout.ShareOf, where the grid
+    // read Columns[c] and Rows[c][r]: the floor and the largest tile compare those fractions, never pixels.
+    //
+    // Rule 3 CHANGES on purpose: the side is Right whenever the tile is wider than tall. "Alone in its column" existed
+    // because a Right split made a whole new column, which would have narrowed every tile of the stack; on the tree,
+    // Right splits only that tile (TileLayout.Insert), so a wide tile in a stack is split beside itself.
+    //
+    // A layout that does not describe this many windows (neither one leaf per window nor an opening for them) is read
+    // as the automatic layout for the count, the one such a screen is laid out on, rather than reading shares of
+    // leaves that are not the windows'.
+    public static Maybe<TileSplit> Choose(
+        IReadOnlyList<WindowHandle> order, TileLayout layout, IReadOnlyList<WindowRect> tiles, Maybe<WindowHandle> lastUsed,
+        IReadOnlySet<WindowHandle> skip)
+    {
+        var read = layout.Count == order.Count || layout.HasOpeningFor(order.Count) ? layout : TileLayout.Automatic(order.Count);
+        var everySkipped = order.All(skip.Contains);
+        // Slots and leaves are counted over the whole order first, so a skipped tile still holds its place.
+        var candidates = order
+            .Select((window, slot) => (Window: window, Slot: slot, Share: read.ShareOf(TileArrange.LeafOf(read, slot, order.Count))))
+            .Where(t => everySkipped || !skip.Contains(t.Window))
+            .Select(t => (t.Window, t.Share, Side: tiles[t.Slot].Width > tiles[t.Slot].Height ? TileArrange.Zone.Right : TileArrange.Zone.Bottom))
+            .ToList();
+
+        var preferred = candidates
+            .Where(t => lastUsed.HasValue && t.Window == lastUsed.Value && PassesFloor(t.Share, t.Side))
+            .Select(t => Maybe.From(t))
+            .FirstOrDefault(Maybe<(WindowHandle Window, (double Width, double Height) Share, TileArrange.Zone Side)>.None);
+
+        // The largest tile by its share of the screen, the later slot winning a tie (OrderBy is stable).
+        var largest = candidates
+            .OrderBy(t => t.Share.Width * t.Share.Height, Comparer<double>.Create(Compare))
+            .Select(t => Maybe.From(t))
+            .LastOrDefault(Maybe<(WindowHandle Window, (double Width, double Height) Share, TileArrange.Zone Side)>.None);
+
+        return preferred.Or(largest).Map(t => new TileSplit(t.Window, t.Side));
+    }
+
+    // Both halves keep a quarter of the screen's width share and height share, by fractions.
+    static bool PassesFloor((double Width, double Height) share, TileArrange.Zone side) =>
+        side == TileArrange.Zone.Right
+            ? share.Width / 2 >= Floor - Tolerance && share.Height >= Floor - Tolerance
+            : share.Width >= Floor - Tolerance && share.Height / 2 >= Floor - Tolerance;
+
     // Right for a tile wider than tall that is alone in its column, otherwise Bottom.
     static TileArrange.Zone SideOf(TileSizes sizes, WindowRect tile, (int Column, int Row) cell) =>
         tile.Width > tile.Height && sizes.Rows[cell.Column].Count == 1 ? TileArrange.Zone.Right : TileArrange.Zone.Bottom;

@@ -19,7 +19,10 @@ namespace Deskbar.Core.Tiling;
 // other tile keeps the size it had.
 //
 // Pure, like GridLayout and TileSizes: the Tiler calls it, and the tests reach every rule without Windows.
-public static class TileArrange
+//
+// The same rules on the split tree (TileLayout) live in TileArrange.Layout.cs, as overloads beside these, until the
+// Tiler is switched over to the tree.
+public static partial class TileArrange
 {
     // Which part of a tile a point is over. The edge zones are a quarter of the tile deep; in a corner, the nearer
     // edge wins.

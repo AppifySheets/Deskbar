@@ -146,6 +146,17 @@ public class TileLayoutEditTests
         Assert.Throws<ArgumentException>(() => layout.InsertAtEdge(TileArrange.Zone.Middle));
     }
 
+    // A share of 0 or 1 makes a leaf of no size, and NaN or one outside (0, 1) a negative one: a caller bug, so it
+    // throws rather than storing a layout nothing can lay out.
+    [Theory]
+    [InlineData(0.0)]
+    [InlineData(1.0)]
+    [InlineData(-0.1)]
+    [InlineData(1.5)]
+    [InlineData(double.NaN)]
+    public void A_share_outside_zero_to_one_throws(double share) =>
+        Assert.Throws<ArgumentOutOfRangeException>(() => Tree(Across(C(L, .5), C(L, .5))).Insert(0, TileArrange.Zone.Left, share));
+
     [Fact]
     public void Leaf_indexes_out_of_range_throw()
     {

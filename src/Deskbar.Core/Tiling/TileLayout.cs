@@ -1,4 +1,5 @@
 using System.Text.Json.Serialization;
+using CSharpFunctionalExtensions;
 using Deskbar.Core.Domain;
 
 namespace Deskbar.Core.Tiling;
@@ -125,13 +126,24 @@ public sealed record TileLayout(TileNode Root)
     // Both are one operation: replace the target by a two-child split along the axis and let Normal merge it into a
     // parent of the same axis, which scales the two by the target's old share. So there is no separate "sibling" code.
     // A lone-leaf root is the second case. Side is a screen side; Middle is not (it means "swap", and the caller
-    // handles that before it gets here).
-    public (TileLayout Layout, int Leaf) Insert(int target, TileArrange.Zone side, double share = 0.5)
+    // handles that before it gets here). `share` must be strictly between 0 and 1: either end makes a leaf of no
+    // size, and NaN or anything outside makes a negative one. That is a caller bug (TileArrange.Open and Returned
+    // clamp before they get here), so it throws rather than storing a layout nothing can lay out.
+    public (TileLayout Layout, int Leaf) Insert(int target, TileArrange.Zone side, double share = 0.5) =>
+        InRange(target) ? InsertBeside(target, 1, side, share) : throw OutOfRange(target);
+
+    // Insert's general form: splits the SUBTREE spanning leaves first .. first + leaves - 1 on `side`, the new leaf
+    // taking `share` of that subtree's share (a sibling when the subtree's parent splits along the side's axis,
+    // otherwise a wrapper; Normal decides, exactly as for a leaf). A minimized window coming back beside a whole
+    // stack needs this (TileArrange.Returned): the stack is one node, and the window goes beside all of it.
+    // In normal form no split has one child, so a leaf range names at most one node; a range that names none throws.
+    internal (TileLayout Layout, int Leaf) InsertBeside(int first, int leaves, TileArrange.Zone side, double share)
     {
-        if (!InRange(target)) throw OutOfRange(target);
+        if (leaves < 1 || !InRange(first) || !InRange(first + leaves - 1)) throw OutOfRange(first);
         RequireSide(side);
-        var leaf = side is TileArrange.Zone.Left or TileArrange.Zone.Top ? target : target + 1;
-        return (Normal(MapLeaf(Root, target, old => SplitNode(old, TileLeaf.Instance, side, share)), OpeningAfterInsert(leaf)), leaf);
+        RequireShare(share);
+        var leaf = side is TileArrange.Zone.Left or TileArrange.Zone.Top ? first : first + leaves;
+        return (Normal(MapNode(Root, first, leaves, old => SplitNode(old, TileLeaf.Instance, side, share)), OpeningAfterInsert(leaf)), leaf);
     }
 
     // The screen-edge band: a new leaf along a whole side of the layout.
@@ -157,6 +169,42 @@ public sealed record TileLayout(TileNode Root)
         return (Normal(root, OpeningAfterInsert(leaf)), leaf);
     }
 
+    // ---- walking down to a leaf (TileArrange and SplitMove read the splits an edge belongs to) ------------------
+
+    // One step on the way from the root down to a leaf: a split, the index of its child that holds the leaf, and the
+    // index of the split's own first leaf (so a child's leaves can be numbered without walking again).
+    internal sealed record PathStep(TileBranch Branch, int Child, int First)
+    {
+        // The index of the first leaf of child `child` of this split.
+        internal int FirstOf(int child) => First + Branch.Children.Take(child).Sum(c => LeafCount(c.Node));
+    }
+
+    // The splits from the root down to leaf `leaf`, outermost first. Empty for a lone-leaf root.
+    internal IReadOnlyList<PathStep> PathTo(int leaf) =>
+        InRange(leaf) ? Steps(Root, leaf, 0).ToList() : throw OutOfRange(leaf);
+
+    static IEnumerable<PathStep> Steps(TileNode node, int leaf, int first)
+    {
+        if (node is not TileBranch b) return [];
+        var (index, before) = ChildHolding(b, leaf);
+        return Steps(b.Children[index].Node, leaf - before, first + before).Prepend(new PathStep(b, index, first));
+    }
+
+    // The step (an index into `path`) whose split an edge on `side` of the path's leaf belongs to: walking up from the
+    // leaf, the nearest split of the side's axis in which the leaf's subtree has a neighbour on that side (spec,
+    // "Dragging a separation"). None means the edge is OUTER: nothing of the layout lies beyond it, which is where an
+    // opening can be pulled (spec, "Openings"). The neighbour is the child at Child - 1 (Left, Top) or Child + 1.
+    internal static Maybe<int> SplitBeside(IReadOnlyList<PathStep> path, TileArrange.Zone side)
+    {
+        var before = side is TileArrange.Zone.Left or TileArrange.Zone.Top;
+        return Enumerable.Range(0, path.Count)
+            .Reverse()
+            .Where(i => path[i].Branch.Axis == AxisOf(side)
+                && (before ? path[i].Child > 0 : path[i].Child < path[i].Branch.Children.Count - 1))
+            .Select(i => Maybe.From(i))
+            .FirstOrDefault(Maybe<int>.None);
+    }
+
     // ---- internals -------------------------------------------------------------------------------------------
 
     static TileNode Split(Axis axis, IReadOnlyList<TileNode> nodes) =>
@@ -176,8 +224,15 @@ public sealed record TileLayout(TileNode Root)
             throw new ArgumentException("Middle is not a side; only Left, Right, Top and Bottom place a new leaf.", nameof(side));
     }
 
+    // Written as a negation so NaN fails too (every comparison with NaN is false).
+    static void RequireShare(double share)
+    {
+        if (!(share > 0 && share < 1))
+            throw new ArgumentOutOfRangeException(nameof(share), share, "A new leaf's share must be strictly between 0 and 1.");
+    }
+
     // Left and Right put tiles side by side; Top and Bottom stack them.
-    static Axis AxisOf(TileArrange.Zone side) =>
+    internal static Axis AxisOf(TileArrange.Zone side) =>
         side is TileArrange.Zone.Left or TileArrange.Zone.Right ? Axis.Across : Axis.Down;
 
     // Split THIS NODE on `side`: a two-child split along the side's axis holding `node` (1 - share) and `added`
@@ -198,15 +253,18 @@ public sealed record TileLayout(TileNode Root)
         return (index, counts.Take(index).Sum());
     }
 
-    // The tree with leaf number `leaf` replaced by f(leaf node); shares along the way are untouched.
-    static TileNode MapLeaf(TileNode node, int leaf, Func<TileNode, TileNode> f)
+    // The tree with the node spanning leaves first .. first + leaves - 1 replaced by f(node); shares along the way are
+    // untouched. The OUTERMOST node with that span is the one meant (a root spanning every leaf is wrapped whole).
+    static TileNode MapNode(TileNode node, int first, int leaves, Func<TileNode, TileNode> f)
     {
-        if (node is not TileBranch b) return f(node);
-        var (index, before) = ChildHolding(b, leaf);
+        if (first == 0 && LeafCount(node) == leaves) return f(node);
+        if (node is not TileBranch b)
+            throw new ArgumentException("No node of this layout spans exactly those leaves.", nameof(leaves));
+        var (index, before) = ChildHolding(b, first);
         return b with
         {
             Children = b.Children
-                .Select((c, i) => i == index ? new TileChild(MapLeaf(c.Node, leaf - before, f), c.Share) : c)
+                .Select((c, i) => i == index ? new TileChild(MapNode(c.Node, first - before, leaves, f), c.Share) : c)
                 .ToValueList()
         };
     }
@@ -231,7 +289,7 @@ public sealed record TileLayout(TileNode Root)
         };
     }
 
-    static int LeafCount(TileNode node) =>
+    internal static int LeafCount(TileNode node) =>
         node is TileBranch b ? b.Children.Sum(c => LeafCount(c.Node)) : 1;
 
     static IEnumerable<TileBranch> AllBranches(TileNode node) =>

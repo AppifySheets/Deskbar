@@ -66,16 +66,23 @@ public static class GridLayout
     }
 
     // The un-inset rects of a node's leaves inside `rect`, depth-first.
-    static IEnumerable<WindowRect> Place(TileNode node, WindowRect rect)
-    {
-        if (node is not TileBranch branch)
-            return [rect];
+    static IEnumerable<WindowRect> Place(TileNode node, WindowRect rect) =>
+        node is TileBranch branch
+            ? branch.Children.Zip(ChildRects(branch, rect)).SelectMany(pair => Place(pair.First.Node, pair.Second))
+            : [rect];
 
+    // The un-inset rects of a split's children inside the split's own `rect`: its span divided by the shares with
+    // Edges. SplitMove reads a split's rect through this too, so a dragged boundary is placed in the same pixels the
+    // layout draws it at.
+    internal static IReadOnlyList<WindowRect> ChildRects(TileBranch branch, WindowRect rect)
+    {
         var across = branch.Axis == Axis.Across;
         var edges = Edges(across ? rect.Width : rect.Height, branch.Children.Select(c => c.Share).ToList());
-        return branch.Children.SelectMany((child, i) => Place(child.Node, across
-            ? new WindowRect(rect.Left + edges[i], rect.Top, rect.Left + edges[i + 1], rect.Bottom)
-            : new WindowRect(rect.Left, rect.Top + edges[i], rect.Right, rect.Top + edges[i + 1])));
+        return Enumerable.Range(0, branch.Children.Count)
+            .Select(i => across
+                ? new WindowRect(rect.Left + edges[i], rect.Top, rect.Left + edges[i + 1], rect.Bottom)
+                : new WindowRect(rect.Left, rect.Top + edges[i], rect.Right, rect.Top + edges[i + 1]))
+            .ToList();
     }
 
     // Every cell of the grid, `count` of them, whether a window holds it or not.
