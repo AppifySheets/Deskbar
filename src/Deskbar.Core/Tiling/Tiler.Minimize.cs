@@ -11,8 +11,14 @@ namespace Deskbar.Core.Tiling;
 // So the moment a tile is minimized, its screen's order and stored sizes are remembered. When it comes back:
 //   * the screen still holds exactly the same other windows: the order and the sizes come back as they were, so a
 //     top tile is on top again, and a stack made by a drop is a stack again;
-//   * the screen changed meanwhile (a window opened or closed there): it goes back to its old position in the
-//     order, rather than to the end, and the sizes are refitted as for any join.
+//   * the screen changed meanwhile (a window opened or closed there): its cell goes back into its old column at its
+//     old row, or into a new column on the right when that column is gone (TileArrange.Returned), and the order
+//     follows the cell. Every other column keeps its width and its rows (final review, I1: it used to go to its old
+//     index in the order with the sizes refitted as for a join, which put the new cell at the bottom of the last
+//     column and could move a tile from one column to another).
+// A tile coming back is placed BEFORE any opening is filled and is never pulled into one (the design's precedence,
+// step 1; final review, I2): Evaluate hands these windows to Keep, whose IntoOpenings leaves them alone, so a kept
+// space stays for the next new window.
 // Maximizing already keeps the slot (OnSettled puts a restored window straight back into it).
 public sealed partial class Tiler
 {
@@ -29,35 +35,51 @@ public sealed partial class Tiler
         away[window] = new Away(workspace.Id, screen, Board.On(screen), sizes);
     }
 
-    // Called by Evaluate with the board it just reconciled, before it is kept and re-tiled. Every window that has
-    // just come back and was remembered is put back in its place; the rest of the board is untouched.
-    TileBoard ReturnedToTheirPlaces(Workspace workspace, TileBoard before, TileBoard board) =>
-        board.Screens.Values.SelectMany(w => w)
-            .Where(w => !before.ScreenOf(w).HasValue && away.ContainsKey(w))
-            .ToList()
-            .Aggregate(board, (current, w) =>
+    // Is `window`, new to the board on `screen`, a minimized tile coming back to the workspace and the screen it left?
+    // Asked by Evaluate before anything is placed. One that comes back somewhere else has no place to go back to and
+    // arrives like any new window (Evaluate forgets its entry), since nothing appends to the end of a screen any more.
+    bool ComesBack(WindowHandle window, Workspace workspace, Maybe<int> screen) =>
+        away.TryGetValue(window, out var gone) && gone.Workspace == workspace.Id && screen == Maybe.From(gone.Screen);
+
+    // Called by Evaluate with the board as the leaves left it (`stayed`: no newcomer on it yet, every leave already
+    // settled), before any new window arrives. Each window in `returning` (ComesBack said yes) is put back in its
+    // place, one at a time, so a later one sees the earlier ones where they went. The sizes each return makes are
+    // stored BEFORE the re-tile reads them.
+    TileBoard ReturnedToTheirPlaces(Workspace workspace, TileBoard stayed, IReadOnlyList<WindowHandle> returning) =>
+        returning.Aggregate(stayed, (current, w) =>
+        {
+            var gone = away[w];
+            away.Remove(w);
+            var others = current.On(gone.Screen);
+            if (others.SequenceEqual(gone.Order.Where(x => x != w)))
             {
-                var gone = away[w];
-                away.Remove(w);
-                if (gone.Workspace != workspace.Id || current.ScreenOf(w) != Maybe.From(gone.Screen)) return current;
+                // The same screen it left: everything as it was, sizes included (stored BEFORE the re-tile reads
+                // them; a size that was never stored is put back as "nothing stored", which plain sizes mean).
+                RestoreSizes(workspace, gone);
+                trace?.Invoke($"tile: {w.Value:X} came back to its place on screen {gone.Screen}");
+                return current.Join(gone.Screen, w).Reordered(gone.Screen, gone.Order);
+            }
 
-                var now = current.On(gone.Screen);
-                var others = now.Where(x => x != w).ToList();
-                if (others.SequenceEqual(gone.Order.Where(x => x != w)))
-                {
-                    // The same screen it left: everything as it was, sizes included (stored BEFORE the re-tile reads
-                    // them; a size that was never stored is put back as "nothing stored", which plain sizes mean).
-                    RestoreSizes(workspace, gone);
-                    trace?.Invoke($"tile: {w.Value:X} came back to its place on screen {gone.Screen}");
-                    return current.Reordered(gone.Screen, gone.Order);
-                }
+            // Every other window of its screen has gone (or the screen is no longer reported): nothing to keep in
+            // place, it takes the screen as any lone window does.
+            if (others.Count == 0 || !surface.Screens().TryFirst(s => s.Number == gone.Screen).TryGetValue(out var screen))
+            {
+                trace?.Invoke($"tile: {w.Value:X} came back to screen {gone.Screen}, which has no other tile of the ones it left");
+                return current.Join(gone.Screen, w);
+            }
 
-                // The screen changed meanwhile: its old position in the order, as near as the new order allows.
-                var at = Math.Min(gone.Order.ToList().IndexOf(w), others.Count);
-                others.Insert(at, w);
-                trace?.Invoke($"tile: {w.Value:X} came back to position {at} on screen {gone.Screen}");
-                return current.Reordered(gone.Screen, others);
-            });
+            // The screen changed meanwhile: its cell goes back where it was (TileArrange.Returned), read from the grid
+            // it left (the sizes stored then, or the equal grid, which is what nothing stored meant), into the grid
+            // the screen shows now.
+            var left = gone.Sizes.GetValueOrDefault(TileSizes.Equal(GridLayout.Shape(gone.Order.Count)));
+            var cell = TileArrange.CellOf(left, gone.Order.ToList().IndexOf(w), gone.Order.Count);
+            var (order, sizes) = TileArrange.Returned(others, ShownSizes(workspace, screen, others.Count), w, cell);
+            var into = current.Into(gone.Screen, order);
+            StoreSizes(workspace, KeyOf(screen), sizes)
+                .Tap(() => trace?.Invoke($"tile: {w.Value:X} came back to column {cell.Column}, row {cell.Row} on screen {gone.Screen}, slot {into.On(gone.Screen).ToList().IndexOf(w)}, sizes {Show(sizes)}"))
+                .TapError(error => trace?.Invoke($"tile: {w.Value:X} came back to screen {gone.Screen}, storing its sizes failed: {error}"));
+            return into;
+        });
 
     void RestoreSizes(Workspace workspace, Away gone) =>
         surface.Screens().TryFirst(s => s.Number == gone.Screen).Tap(screen =>

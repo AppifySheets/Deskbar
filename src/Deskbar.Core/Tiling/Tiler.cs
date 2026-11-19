@@ -619,15 +619,23 @@ public sealed partial class Tiler(WorkspaceManager manager, IVirtualDesktopServi
             .Select(w => (w.Window, w.Screen, Frame: w.Frame.Value))
             .ToList();
         var board = before is null ? TileBoard.FirstFill(windows) : Reconciled(before, windows);
+        // Minimized tiles that came back in this evaluate. Keep's IntoOpenings never pulls one into an opening: it went
+        // back to its own place first (the design's precedence, step 1; final review, I2).
+        IReadOnlySet<WindowHandle> returned = new HashSet<WindowHandle>();
         if (before is not null)
         {
             // The windows new to this board, in board order (screen by screen).
             var newcomers = board.Screens.OrderBy(s => s.Key).SelectMany(s => s.Value)
                 .Where(w => !before.ScreenOf(w).HasValue)
                 .ToList();
-            // Taken BEFORE ReturnedToTheirPlaces, which empties `away`: a minimized tile coming back is not an
-            // arrival, it goes back to its old place.
-            var arrivals = newcomers.Where(w => !away.ContainsKey(w)).ToList();
+            // Split BEFORE ReturnedToTheirPlaces, which empties `away`: a minimized tile coming back to the screen it
+            // left is not an arrival, it goes back to its old place (Tiler.Minimize.cs). Every other newcomer arrives,
+            // one that was minimized elsewhere included, and its remembered place is forgotten.
+            var reconciled = board;
+            var returning = newcomers.Where(w => ComesBack(w, workspace, reconciled.ScreenOf(w))).ToList();
+            var arrivals = newcomers.Where(w => !returning.Contains(w)).ToList();
+            arrivals.ForEach(w => away.Remove(w));
+            returned = returning.ToHashSet();
 
             // LEAVES FIRST (final review, C2). When windows left AND windows came in one evaluate (both happened while
             // the user was on another workspace, or a window became tileable in the evaluate a close caused), the
@@ -644,12 +652,16 @@ public sealed partial class Tiler(WorkspaceManager manager, IVirtualDesktopServi
                 SettleLeaves(workspace, stayed);
             }
 
-            // A minimized tile that just came back takes its old place, not the end (Tiler.Minimize.cs); every other
-            // newcomer fills an opening or splits the tile last used (Tiler.Arrival.cs). The first fill is left alone:
-            // it orders the windows by where they already are.
-            board = Arrived(workspace, ReturnedToTheirPlaces(workspace, before, board), arrivals);
+            // A minimized tile that just came back takes its old place first, not the end (Tiler.Minimize.cs, step 1);
+            // then every other newcomer, back on the screen it opened on, fills an opening or splits the tile last used
+            // (Tiler.Arrival.cs, steps 2 to 4). The first fill is left alone: it orders the windows by where they
+            // already are.
+            var placed = ReturnedToTheirPlaces(workspace, stayed, returning);
+            board = Arrived(workspace,
+                arrivals.Aggregate(placed, (b, w) => b.Join(reconciled.ScreenOf(w).GetValueOrDefault(surface.ScreenOf(w)), w)),
+                arrivals);
         }
-        Keep(workspace, board);
+        Keep(workspace, board, returned);
         RestoreIfJustTiled(workspace, board);
 
         var changed = full || before is null
@@ -720,10 +732,11 @@ public sealed partial class Tiler(WorkspaceManager manager, IVirtualDesktopServi
         });
     }
 
-    // Stores a workspace's new board and does what every board change owes the windows on it.
-    void Keep(Workspace workspace, TileBoard board)
+    // Stores a workspace's new board and does what every board change owes the windows on it. `returned` names the
+    // minimized tiles that just came back to their own places (Evaluate), which IntoOpenings must leave there.
+    void Keep(Workspace workspace, TileBoard board, IReadOnlySet<WindowHandle>? returned = null)
     {
-        board = IntoOpenings(workspace, board);
+        board = IntoOpenings(workspace, board, returned ?? new HashSet<WindowHandle>());
 
         // Before the old board is replaced: the cell of a window leaving a screen decides which row's share goes.
         NoteLeavers(workspace.Id, board);
@@ -752,14 +765,19 @@ public sealed partial class Tiler(WorkspaceManager manager, IVirtualDesktopServi
     // opening is filled only when the windows that stayed are exactly the ones it was laid out around; with more
     // arriving at once the first takes it and the rest join at the end. The filled sizes are stored before anything is
     // laid out, so the re-tile reads them.
-    TileBoard IntoOpenings(Workspace workspace, TileBoard after)
+    //
+    // A minimized tile that just came back (`returned`) is no arrival here: it is already in its own place, and the
+    // opening was laid out around it (TileArrange.Returned moves the opening on past its cell). It counts with the
+    // windows that stayed, so the opening is still offered to the next new window (the design's precedence, step 1
+    // before step 2; final review, I2: it used to be pulled out of its place into the kept space).
+    TileBoard IntoOpenings(Workspace workspace, TileBoard after, IReadOnlySet<WindowHandle> returned)
     {
         var before = boards.TryGetValue(workspace.Id, out var b) ? b : TileBoard.Empty;
         var screens = surface.Screens().ToDictionary(s => s.Number);
         return after.Screens.Keys.ToList().Aggregate(after, (board, n) =>
         {
             var windows = board.On(n);
-            var stayed = windows.Where(w => before.On(n).Contains(w)).ToList();
+            var stayed = windows.Where(w => before.On(n).Contains(w) || returned.Contains(w)).ToList();
             var arrived = windows.Where(w => !stayed.Contains(w)).ToList();
             if (arrived.Count == 0
                 || !screens.TryGetValue(n, out var screen)

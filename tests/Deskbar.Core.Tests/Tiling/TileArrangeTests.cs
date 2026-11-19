@@ -246,6 +246,63 @@ public sealed class TileArrangeTests
         Assert.Equal([1.0], sizes.Columns);
     }
 
+    // --- a minimized tile coming back to a screen that changed (TileArrange.Returned, final review I1) ----------
+
+    // W2 was the top of the right column; meanwhile W4 split W1 below it. W2's cell goes back into the right column
+    // at its old row, taking half of W3's height, and the left column is untouched.
+    [Fact]
+    public void A_returning_tile_gets_a_new_row_in_its_old_column()
+    {
+        var (order, sizes) = TileArrange.Returned([W(1), W(4), W(3)], new TileSizes([0.5, 0.5], [[0.5, 0.5], [1.0]]), W(2), (1, 0));
+
+        Assert.Equal([W(1), W(4), W(2), W(3)], order);
+        Assert.Equal(TileSizes.Equal([2, 2]), sizes);
+    }
+
+    // Its old row is past the end of the column now: it goes to the bottom, halving the last row.
+    [Fact]
+    public void A_returning_tile_whose_row_is_gone_goes_to_the_bottom_of_its_column()
+    {
+        var (order, sizes) = TileArrange.Returned([W(1), W(3)], TileSizes.Equal([1, 1]), W(2), (0, 5));
+
+        Assert.Equal([W(1), W(2), W(3)], order);
+        Assert.Equal(new TileSizes([0.5, 0.5], [[0.5, 0.5], [1.0]]), sizes);
+    }
+
+    // Its old column is gone: a new column on the right, halving the last column, and nothing else moves.
+    [Fact]
+    public void A_returning_tile_whose_column_is_gone_gets_a_new_column()
+    {
+        var (order, sizes) = TileArrange.Returned([W(1)], TileSizes.Equal([1]), W(2), (1, 0));
+
+        Assert.Equal([W(1), W(2)], order);
+        Assert.Equal(TileSizes.Equal([1, 1]), sizes);
+    }
+
+    // An opening after the returning cell moves on one slot with the cells behind it, and stays open.
+    [Fact]
+    public void A_returning_tile_before_the_opening_moves_the_opening_on()
+    {
+        var kept = new TileSizes([0.5, 0.5], [[1.0], [0.5, 0.5]]) { Opening = 2 };
+
+        var (order, sizes) = TileArrange.Returned([W(2), W(3)], kept, W(1), (0, 0));
+
+        Assert.Equal([W(1), W(2), W(3)], order);
+        Assert.Equal(TileSizes.Equal([2, 2]) with { Opening = 3 }, sizes);
+    }
+
+    // An opening before the returning cell keeps its slot, and the window's place in the order skips it.
+    [Fact]
+    public void A_returning_tile_after_the_opening_is_counted_past_it()
+    {
+        var kept = new TileSizes([0.5, 0.5], [[1.0], [0.5, 0.5]]) { Opening = 1 };
+
+        var (order, sizes) = TileArrange.Returned([W(2), W(3)], kept, W(1), (1, 1));
+
+        Assert.Equal([W(2), W(1), W(3)], order);
+        Assert.Equal(new TileSizes([0.5, 0.5], [[1.0], [0.5, 0.25, 0.25]]) { Opening = 1 }, sizes);
+    }
+
     // --- where a fit starts after a window left (TileArrange.FitStart, final review C1 and M1) -------------------
 
     // Nothing stored, one of three windows left: the fit starts from the equal grid of THREE, the grid the leaver's
