@@ -162,7 +162,10 @@ public partial class FloatingBar
             : target.Header ? DropZone.Onto
             : share > 1 - ArrangeEdgeShare ? DropZone.After
             : DropZone.Onto;
-        return (target.Drop, zone);
+        // The dragged row over its own place aims at itself, whatever it would aim at for another row, so its own place
+        // stays the no-op RowDrop makes it (review, Important: the shown member of a folded group aims at the group, and
+        // let go over its own row it moved to the top of its group).
+        return (target.Drags == dragged ? target.Drags : target.Drop, zone);
     }
 
     // The hit test, then RowDrop.Plan. What the drag draws and what the release applies both come from here.
@@ -174,9 +177,19 @@ public partial class FloatingBar
 
     // The drop itself: what the preview at this point shows, applied once. The name prompt runs only for a new group,
     // inside ApplyDrop, and a Cancel there is a success that changes nothing.
+    //
+    // A drop whose preview would draw nothing is refused (it changes nothing and succeeds, since there is nothing to tell
+    // the user that he was not already shown): the spec's promise is that the preview shows what a release will do, and a
+    // change nobody was shown breaks it. The folded-group fallback in ShownFor means this should not happen; the guard is
+    // there for the case nobody has thought of.
     internal Result ArrangeDropAt(RowRef dragged, Point inRoot)
     {
-        var (action, _) = ArrangePreviewAt(dragged, inRoot);
+        var (action, show) = ArrangePreviewAt(dragged, inRoot);
+        if (!ShowsItself(action, show))
+        {
+            if (ClickTrace.On) ClickTrace.Write($"arrange drop refused, nothing was shown for {DescribeDrop(action)}");
+            return Result.Success();
+        }
         var result = manager.ApplyDrop(action, AskGroupName);
         if (ClickTrace.On)
             ClickTrace.Write($"arrange drop {DescribeDrop(action)} ok={result.IsSuccess}{(result.IsFailure ? $" error={result.Error}" : "")}");
@@ -318,34 +331,64 @@ public partial class FloatingBar
     {
         if (BoundsIn(drag.Element, Root) is not { } gap) return null;
         var ghost = gap with { Y = gap.Y + inRoot.Y - drag.PressedAt.Y };
-        var rows = BoundsIn(Rows, Root) ?? gap;
-
-        return show switch
-        {
-            DropShow.Line line when LineFor(line, rows) is { } at => new ArrangePaint(show, gap, ghost, at, null, null),
-            DropShow.Highlight lit when ArrangeBoundsOf(lit.Target) is { } target => new ArrangePaint(show, gap, ghost, null, target, lit.Hint),
-            _ => new ArrangePaint(show, gap, ghost, null, null, null),
-        };
+        var (line, highlight, hint) = ShownFor(show);
+        return new ArrangePaint(show, gap, ghost, line, highlight, hint);
     }
+
+    // The answer half of the preview: the line, or the outline and its hint, or nothing. Also what ArrangeDropAt asks
+    // before it applies anything (a drop that showed nothing is refused).
+    //
+    // A FOLDED group draws only its line and the member you are on, so the row a join lands beside (its first member) is
+    // usually not on screen. Without a fallback that join showed nothing at all and still moved the row (review,
+    // Important). The folded line is outlined instead, the way a row being joined is: "into this group" is what it means.
+    // Not a short line under it: under a one-line group that reads as "after the group".
+    (Rect? Line, Rect? Highlight, string? Hint) ShownFor(DropShow show) =>
+        show switch
+        {
+            DropShow.Line line when LineFor(line, BoundsIn(Rows, Root)) is { } at => (at, null, null),
+            DropShow.Line line when FoldedLineOf(line.Beside) is { } folded => (null, folded, null),
+            DropShow.Highlight lit when ArrangeBoundsOf(lit.Target) is { } target => (null, target, lit.Hint),
+            DropShow.Highlight lit when FoldedLineOf(lit.Target) is { } folded => (null, folded, null),
+            _ => (null, null, null),
+        };
+
+    // Whether a drop of this answer would be seen before it happens. Nothing is always "shown": it changes nothing.
+    bool ShowsItself(DropAction action, DropShow show) =>
+        action is DropAction.Nothing || ShownFor(show) is (not null, _, _) or (_, not null, _);
+
+    // Where the folded group a workspace belongs to is drawn: its one line. Null when the row is not in a folded group.
+    Rect? FoldedLineOf(RowRef row) =>
+        row is RowRef.Workspace w
+        && manager.State.GroupOf(w.Id) is { Folded: true } group
+        && arrangeTargets.FirstOrDefault(t => t.Header && t.Drags == new RowRef.Group(group.Id)) is { } line
+        && line.Element.IsVisible
+            ? BoundsIn(line.Element, Root)
+            : null;
 
     // The insertion line: 2 DIP, centred on the edge it marks. Beside a whole group, at its box's edge; between top-level
     // rows, across the bar's full width; for a join, from inside the bracket to the member row's end.
-    Rect? LineFor(DropShow.Line line, Rect rows)
+    // `rows` is the Rows panel's box, the bar's full width; the row's own width stands in should it be unknown.
+    Rect? LineFor(DropShow.Line line, Rect? rows)
     {
         if (ArrangeBoundsOf(line.Beside) is not { } beside) return null;
         var y = line.After ? beside.Bottom : beside.Top;
+        var across = rows ?? beside;
         return line.InsideGroup
             ? new Rect(beside.Left + ArrangeJoinInset, y - 1, Math.Max(0, beside.Width - ArrangeJoinInset), 2)
-            : new Rect(rows.Left, y - 1, rows.Width, 2);
+            : new Rect(across.Left, y - 1, across.Width, 2);
     }
 
     // Where a row is drawn: a workspace's row, or a group's whole box (its header when the box is missing).
+    // Null for a row that is not on screen (a member a folded group does not draw, a collapsed row), never an empty box
+    // at the origin: a line drawn there would point somewhere the drop does not go.
     Rect? ArrangeBoundsOf(RowRef row) =>
-        row switch
+        (row switch
         {
-            RowRef.Group g when arrangeBoxes.TryGetValue(g.Id, out var box) => BoundsIn(box, Root),
-            _ => arrangeTargets.FirstOrDefault(t => t.Drags == row) is { } target ? BoundsIn(target.Element, Root) : null,
-        };
+            RowRef.Group g when arrangeBoxes.TryGetValue(g.Id, out var box) => box,
+            _ => arrangeTargets.FirstOrDefault(t => t.Drags == row)?.Element,
+        }) is { IsVisible: true } element
+            ? BoundsIn(element, Root)
+            : null;
 
     // The adorner's drawing, from arrangePaint alone. The gap first, then the copy, then the answer on top, so the line or
     // the outline is never hidden under the copy of the row.

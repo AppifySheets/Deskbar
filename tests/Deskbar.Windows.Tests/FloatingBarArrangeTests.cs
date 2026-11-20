@@ -312,6 +312,88 @@ public class FloatingBarArrangeTests
         Assert.Equal((new RowRef.Group(team), DropZone.Onto), bar.Bar.ArrangeTargetAt(gepha, At(bar.Bar, line, 0.6)));
     });
 
+    // Review, Important (a). Joining a folded group puts the row before its first member, which a folded group does not
+    // draw (only the member you are on is shown, Archive here). The preview must still show where the row goes: the
+    // folded line is outlined, as a row being joined is, with no hint since no group is being made.
+    [Fact]
+    public void Joining_a_folded_group_outlines_its_line() => StaThread.Run(() =>
+    {
+        var harness = Harness.Build(grouped: true);
+        var team = harness.Manager.State.Groups.Single().Id;
+        Assert.True(harness.Manager.SetGroupFolded(team, true).IsSuccess);
+        harness.Desktops.CurrentId = harness.Desktops.Desktops.Single(d => d.Name == "Archive").Id;
+        using var bar = harness.ShowBar();
+        Assert.True(bar.Bar.SetArranging(true).IsSuccess);
+        bar.Bar.UpdateLayout();
+        var gepha = IdOf(harness, "GEPHA");
+        var line = Descendants(bar.Rows).OfType<Border>()
+            .Single(b => System.Windows.Automation.AutomationProperties.GetName(b) == "Team (folded)");
+        Assert.DoesNotContain(Descendants(bar.Rows).OfType<Grid>(), g => System.Windows.Automation.AutomationProperties.GetName(g) == "Sparrow");
+
+        Press(AnyRow(bar.Rows, "GEPHA"));
+        bar.Bar.ArrangeMove(At(bar.Bar, line, 0.6));
+
+        var painted = bar.Bar.ArrangePainting!;
+        Assert.Equal(new DropShow.Line(new RowRef.Workspace(IdOf(harness, "Sparrow")), After: false, InsideGroup: true), painted.Show);
+        Assert.Null(painted.Line);
+        Assert.Null(painted.Hint);
+        Assert.Equal(BoundsOf(bar.Bar, line), painted.Highlight);
+
+        bar.Bar.ArrangeRelease(At(bar.Bar, line, 0.6));
+
+        Assert.Equal([gepha, IdOf(harness, "Sparrow"), IdOf(harness, "Archive")], harness.Manager.State.MembersOf(team).Select(w => w.Id));
+    });
+
+    // Review, Important (b). The member of a folded group that is shown (the one you are on) dragged a few pixels and let
+    // go over its own row: its own place, a no-op, never "the top of its group".
+    [Fact]
+    public void A_folded_groups_shown_member_over_its_own_row_changes_nothing() => StaThread.Run(() =>
+    {
+        var harness = Harness.Build(grouped: true);
+        var team = harness.Manager.State.Groups.Single().Id;
+        Assert.True(harness.Manager.SetGroupFolded(team, true).IsSuccess);
+        harness.Desktops.CurrentId = harness.Desktops.Desktops.Single(d => d.Name == "Archive").Id;
+        using var bar = harness.ShowBar();
+        Assert.True(bar.Bar.SetArranging(true).IsSuccess);
+        bar.Bar.UpdateLayout();
+        var archive = new RowRef.Workspace(IdOf(harness, "Archive"));
+        var order = harness.Manager.State.Workspaces.Select(w => w.Id).ToList();
+        var own = AnyRow(bar.Rows, "Archive");
+
+        Assert.Equal((archive, DropZone.Onto), bar.Bar.ArrangeTargetAt(archive, At(bar.Bar, own, 0.5)));
+        Assert.IsType<DropAction.Nothing>(bar.Bar.ArrangePreviewAt(archive, At(bar.Bar, own, 0.5)).Action);
+
+        Press(own);
+        bar.Bar.ArrangeMove(At(bar.Bar, own, 0.9));
+        bar.Bar.ArrangeRelease(At(bar.Bar, own, 0.9));
+
+        Assert.Equal(order, harness.Manager.State.Workspaces.Select(w => w.Id).ToList());
+    });
+
+    // The controller's guard: a drop whose preview drew nothing is refused, so nothing changes that the user was not
+    // shown. Made here by hiding the row the line would be drawn beside (Sparrow, the first member a join lands before).
+    [Fact]
+    public void A_drop_with_nothing_shown_is_refused() => StaThread.Run(() =>
+    {
+        var harness = Harness.Build(grouped: true);
+        using var bar = harness.ShowBar();
+        Assert.True(bar.Bar.SetArranging(true).IsSuccess);
+        bar.Bar.UpdateLayout();
+        var gepha = new RowRef.Workspace(IdOf(harness, "GEPHA"));
+        var team = harness.Manager.State.Groups.Single().Id;
+        var header = At(bar.Bar, HeaderOf(bar.Rows, "TEAM"), 0.6);
+        var members = harness.Manager.State.MembersOf(team).Select(w => w.Id).ToList();
+        Assert.IsType<DropAction.Place>(bar.Bar.ArrangePreviewAt(gepha, header).Action); // precondition: a real drop
+
+        ((FrameworkElement)AnyRow(bar.Rows, "Sparrow").Parent).Visibility = Visibility.Collapsed;
+        bar.Bar.UpdateLayout();
+
+        Assert.IsType<DropAction.Place>(bar.Bar.ArrangePreviewAt(gepha, header).Action); // still planned...
+        Assert.True(bar.Bar.ArrangeDropAt(gepha, header).IsSuccess);                       // ...but not applied
+
+        Assert.Equal(members, harness.Manager.State.MembersOf(team).Select(w => w.Id));
+    });
+
     // A join is drawn short, inside the group's bracket; a place among the top-level rows is drawn the bar's full width,
     // at the box's own edge when the row beside it is a whole group.
     [Fact]
