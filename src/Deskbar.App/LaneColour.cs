@@ -17,9 +17,9 @@ public static class LaneColour
 
     // The group's name for a member of a group, null for one that stands alone or that carries the very name
     // of its group. A group made from one workspace starts out with both named alike, and "Sparrow › Sparrow"
-    // says the same word twice.
+    // says the same word twice. Compared trimmed: CreateGroup trims the group's name, a workspace's is stored as typed.
     public static string? GroupNameOf(AppState state, Workspace workspace) =>
-        state.GroupOf(workspace.Id) is { } group && !string.Equals(group.Name, workspace.Name, StringComparison.OrdinalIgnoreCase)
+        state.GroupOf(workspace.Id) is { } group && !string.Equals(group.Name.Trim(), workspace.Name.Trim(), StringComparison.OrdinalIgnoreCase)
             ? group.Name
             : null;
 

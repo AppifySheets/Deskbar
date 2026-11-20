@@ -445,8 +445,7 @@ public sealed record AppState(
     //
     // The parent joins its own group, which is the part worth stating. Under ParentId the parent
     // was outside the relationship and merely pointed at from below; a group is a set, and the
-    // parent is in it. That is what lets one render path draw both kinds, and what lets an anchored
-    // group survive losing its anchor.
+    // parent is in it. The anchored group this step produces is turned into a plain group by WithoutAnchors.
     //
     // ParentId is CLEARED on every workspace once this has run. Nesting no longer exists, so the old
     // reason for leaving it (a downgrade to an older build finding its nesting where it expects it)
@@ -512,8 +511,9 @@ public sealed record AppState(
     //
     //   * the anchor moves to the front of its block, and the blocks are flattened back into the list;
     //   * a group with no colour of its own, whose first member now sits at a different list position
-    //     than its anchor did, gets the palette colour of the OLD position, so it keeps the colour it
-    //     was showing. A group whose position did not change keeps following its position.
+    //     than its colour came from (its anchor's, or its first member's for a plain group, which the
+    //     reordering can also shift), gets the palette colour of the OLD position, so it keeps the
+    //     colour it was showing. A group whose position did not change keeps following its position.
     //
     // An anchor that names no workspace (a hand-edited file) is simply dropped: there is nothing to
     // move and no colour to preserve. Returns this when no group has an anchor, which is what makes
@@ -522,12 +522,21 @@ public sealed record AppState(
     {
         if (Groups.All(g => g.AnchorWorkspaceId is null)) return this;
 
-        // Where each anchored group's colour came from: the anchor's list position, read BEFORE the list
-        // is reordered. Worked out here rather than asked of ColourSlotOf, which now answers for plain
-        // groups only. Only for an anchor that exists; -1 would otherwise be taken for a real position.
+        // Where each colourless group's colour came from, read BEFORE the list is reordered: the anchor's
+        // list position for an anchored group whose anchor exists, else the first member's (what
+        // ColourSlotOf answers, since it no longer knows anchors). EVERY such group is asked, plain ones
+        // too, because promoting an anchor shifts the rows between and can move a plain group's first
+        // member. A group with no members has no slot (-1 would be taken for a real position) and is
+        // left out. DistinctBy: a hand-edited file can hold two groups with one Id; the first wins.
+        var listed = Workspaces.ToList();
         var oldSlots = Groups
-            .Where(g => g.AnchorWorkspaceId is { } anchor && Workspaces.Any(w => w.Id == anchor))
-            .ToDictionary(g => g.Id, g => Workspaces.ToList().FindIndex(w => w.Id == g.AnchorWorkspaceId));
+            .Where(g => g.Color is null)
+            .DistinctBy(g => g.Id)
+            .Select(g => (g.Id, Slot: g.AnchorWorkspaceId is { } anchor && listed.FindIndex(w => w.Id == anchor) is var at and >= 0
+                ? at
+                : listed.FindIndex(w => w.GroupId == g.Id)))
+            .Where(x => x.Slot >= 0)
+            .ToDictionary(x => x.Id, x => x.Slot);
 
         // The rows in stored order (Blocks), each anchor explicitly first in its block. MembersOf no longer knows
         // about anchors and answers plain list order, so this is where the anchor is promoted, once.
