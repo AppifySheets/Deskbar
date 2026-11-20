@@ -14,7 +14,8 @@ namespace Deskbar.Core.Tiling;
 //   3. Otherwise it splits the tile the user last activated, on THAT tile's screen, even when the app opened the
 //      window on another one (TileArrival.Choose picks the tile and the side). Not when a by-hand move AIMED the
 //      window at a screen (a drop on one screen's half of a bar row): that screen is kept, and only the tile last
-//      used there is offered (see Arrived).
+//      used there is offered (see Arrived). The same for a window restored from minimized that arrives (it had no
+//      remembered place): it keeps the screen Windows restored it to (`unminimized`).
 //   4. Otherwise (no tile last used, or the second and later windows of one evaluate) it splits the largest tile
 //      of its own screen. TileArrival.Choose does that fallback too, also when the last-used tile is too small.
 //
@@ -125,8 +126,9 @@ public sealed partial class Tiler
     {
         if (arrivals.Count == 0) return board;
         var screens = surface.Screens().ToDictionary(s => s.Number);
-        // Taken (and so forgotten) here, once per arrival: the aim decides this arrival and no later one.
-        var aimed = arrivals.ToDictionary(w => w, manager.TakeAimedScreen);
+        // Taken (and so forgotten) here, once per arrival: the aim decides this arrival and no later one. A window
+        // restored from minimized counts as aimed at its own screen (KeptScreenOf).
+        var aimed = arrivals.ToDictionary(w => w, KeptScreenOf);
         var own = arrivals.ToDictionary(w => w,
             w => aimed[w].GetValueOrDefault(board.ScreenOf(w).GetValueOrDefault(surface.ScreenOf(w))));
         var without = arrivals.Aggregate(board, (b, w) => b.Leave(w));
@@ -141,6 +143,20 @@ public sealed partial class Tiler
                 () => Arrive(workspace, screens, b, a.Window, own[a.Window],
                     aimed[a.Window].HasValue ? LastUsedOn(b, a.Window, own[a.Window]) : a.Offered)));
     }
+
+    // The window whose restore from minimized raised the evaluate running now (set and cleared around it by
+    // HandleWindowEvent). Petre: "i had a chrome window in the deskbar workspace minimized in the left screen; i
+    // clicked on it and it moved to the right screen". It had been minimized since before this Deskbar started, so
+    // there was no remembered place (Tiler.Minimize.cs) and the restore arrived like a new window, which splits the
+    // tile last used on whatever screen that is. A restored window is not new: the user knows which screen it was
+    // on, so it is treated as aimed at the screen Windows restored it to.
+    Maybe<WindowHandle> unminimized = Maybe<WindowHandle>.None;
+
+    // The screen an arrival must stay on: the one a by-hand move aimed it at (taken from the manager, so one drop
+    // decides one arrival), or, for a window just restored from minimized, the screen it is on.
+    Maybe<int> KeptScreenOf(WindowHandle window) =>
+        manager.TakeAimedScreen(window)
+            .Or(() => unminimized == window ? surface.ScreenOf(window) : Maybe<int>.None);
 
     // The tile last used among those on screen `number` (LastUsed's rules otherwise), for an aimed arrival.
     Maybe<WindowHandle> LastUsedOn(TileBoard board, WindowHandle except, int number) =>
