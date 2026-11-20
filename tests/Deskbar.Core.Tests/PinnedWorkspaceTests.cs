@@ -194,4 +194,20 @@ public class PinnedWorkspaceTests
         Assert.Equal("ABCD", Stored(manager));
         Assert.Equal(3, manager.RowOf(b).Value); // drawn D A B C: the pinned D first, then B back between A and C
     }
+
+    // Final review, Important 2: a GROUP moved from its header moves among the rows drawn beside it, the unpinned ones,
+    // and the pinned rows keep their stored places. Stored A P G D (P pinned, G a group) is drawn P A G D; "Move group
+    // up" must make it P G A D, not reorder the stored list in a way the drawing cannot show.
+    [Fact]
+    public void A_group_moves_among_the_unpinned_rows()
+    {
+        var (manager, a, b, c, d) = Four();
+        Assert.True(manager.SetWorkspacePinned(d, false).IsSuccess); // A B(p) C D
+        var group = manager.CreateGroup("G", c).Value.Id;          // C is now the group's only member
+
+        Assert.True(manager.MoveGroup(group, -1).IsSuccess);
+
+        Assert.Equal("CBAD", Stored(manager));
+        Assert.Equal([1, 2, 3, 4], new[] { b, c, a, d }.Select(id => manager.RowOf(id).Value));
+    }
 }

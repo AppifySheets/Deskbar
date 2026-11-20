@@ -64,12 +64,21 @@ public partial class FloatingBar
 
     // Whether a rebuild trigger should rebuild: a visible bar always did, and now so does a hidden one while there are
     // strips to fill. Every trigger that used to ask IsVisible asks this.
-    bool RebuildWanted => IsVisible || (StripsOn && Strips().Count > 0);
+    //
+    // ...and so does a hidden bar while there are taskbar buttons for pinned workspaces to keep current (TaskbarJumps;
+    // final review, Important 1): with the bar minimized and the list off the screens they are the only place a
+    // pinned workspace's item is, and a button that never flipped to "back" would switch nowhere on its second click.
+    // Also while buttons are left over, so the rebuild after the last unpin takes the last one away.
+    bool RebuildWanted => IsVisible || (StripsOn && Strips().Count > 0) || JumpsWanted;
+
+    bool JumpsWanted => TaskbarJumps is { } jumps && (jumps.Windows.Count > 0 || manager.State.Workspaces.Any(w => w.Pinned));
 
     // A rebuild that fills the strips and nothing else: the list is on the screens and the bar is behind its taskbar
     // button. Minimized as well as not visible, because ShowBar rebuilds BEFORE it shows the bar, and that rebuild must
     // draw the rows the bar is about to show.
-    bool StripsAlone => StripsOn && Minimized && !IsVisible;
+    // The taskbar buttons ride on the same rebuild (FillStripsAlone fills the header's items, which hands them the
+    // buttons), so a minimized bar with buttons and no strips takes this path too, and FillStrips does nothing in it.
+    bool StripsAlone => (StripsOn || JumpsWanted) && Minimized && !IsVisible;
 
     // The pointer is over one of the strips. Rebuild defers while the left button is down here as it does over the
     // bar: a rebuild between a press and its release throws the pressed tab away, and a button that no longer exists

@@ -534,6 +534,22 @@ public class FloatingBarStripsTests
         Assert.False(h.Manager.State.Workspaces.Single(w => w.Id == sparrow).Pinned);
     });
 
+    // Final review, Important 1: with the bar minimized and the window list NOT on the screens, the taskbar buttons are
+    // the only place the items are, so the bar keeps rebuilding for them: a pin adds a button, an unpin takes it away.
+    [Fact]
+    public void A_minimized_bar_with_no_strips_keeps_the_taskbar_buttons_current() => StaThread.Run(() =>
+    {
+        var jumps = new TaskbarJumps(pin: _ => Result.Success(), ignore: _ => { }, switchTo: _ => Result.Success());
+        using var h = StripHarness.Build(taskbar: jumps);
+        h.Bar.MinimizeToTaskbar();
+
+        Assert.True(h.Manager.SetWorkspacePinned(IdOf(h, "Sparrow"), true).IsSuccess);
+        Assert.Equal("Sparrow", Assert.Single(jumps.Windows).Title);
+
+        Assert.True(h.Manager.SetWorkspacePinned(IdOf(h, "Sparrow"), false).IsSuccess);
+        Assert.Empty(jumps.Windows);
+    });
+
     // Petre: "i may also have multiple pinned workspaces, both should go to the top". The bar draws pinned rows first.
     [Fact]
     public void Pinned_rows_are_drawn_first() => StaThread.Run(() =>
@@ -656,7 +672,7 @@ public class FloatingBarStripsTests
 
         public void Fill() => Assert.True(Manager.SetWindowListPlace(WindowListPlace.Screens).IsSuccess);
 
-        public static StripHarness Build(string? groupColour = null)
+        public static StripHarness Build(string? groupColour = null, TaskbarJumps? taskbar = null)
         {
             var gephaDesktop = Guid.NewGuid();
             var sparrowDesktop = Guid.NewGuid();
@@ -714,7 +730,7 @@ public class FloatingBarStripsTests
             var tiled = new HashSet<WindowHandle>();
             var bar = new FloatingBar(manager)
             {
-                Left = -32000, Top = -32000, Strips = () => strips,
+                Left = -32000, Top = -32000, Strips = () => strips, TaskbarJumps = taskbar,
                 IsMaximized = handle => maximized.Contains(handle),
                 IsTiled = handle => tiled.Contains(handle),
             };

@@ -121,6 +121,42 @@ public class TaskbarJumpsTests
         jumps.Close();
     });
 
+    // Final review, Important 3a: the thumbnail's X, or "Close window" on the button, must not take the button away for
+    // good. Only TaskbarJumps closes one, when its workspace is unpinned.
+    [Fact]
+    public void Closing_the_window_from_the_taskbar_keeps_it() => StaThread.Run(() =>
+    {
+        var jumps = new Recorder().Jumps();
+        jumps.Show([Outside], Colour);
+        var window = jumps.Windows[0];
+
+        window.Close();
+
+        Assert.True(window.IsVisible);
+        Assert.Same(window, Assert.Single(jumps.Windows));
+        jumps.Close();
+        Assert.False(window.IsVisible);
+    });
+
+    // Final review, Important 3b: Alt+Tab activates the minimized window without restoring it, so an activation is a
+    // click too. A taskbar click raises both an activation and a restore; it still switches once.
+    [Fact]
+    public void An_activation_is_a_click_and_one_click_switches_once() => StaThread.Run(() =>
+    {
+        var recorder = new Recorder();
+        var jumps = recorder.Jumps();
+        jumps.Show([Inside], Colour);
+        var window = jumps.Windows[0];
+
+        window.Activation();                        // what Alt+Tab, or the first half of a taskbar click, does
+        window.WindowState = WindowState.Normal;    // the second half of a taskbar click
+        DispatcherPump.Flush();
+
+        Assert.Equal([Deskbar], recorder.Switched);
+        Assert.Equal(WindowState.Minimized, window.WindowState);
+        jumps.Close();
+    });
+
     // Inside the pinned workspace with nowhere to go back to: the click does nothing.
     [Fact]
     public void A_click_with_no_target_switches_nowhere() => StaThread.Run(() =>

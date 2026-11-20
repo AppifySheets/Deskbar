@@ -62,7 +62,54 @@ public sealed class TaskbarJumpWindow : Window
         base.OnStateChanged(e);
         if (!armed || WindowState == WindowState.Minimized) return;
         WindowState = WindowState.Minimized;
+        Click();
+    }
+
+    // An ACTIVATION is a click too (final review, Important 3b): Alt+Tab reaches a minimized window without changing its
+    // state, as BarStandIn's comment found, so without this, picking the button in Alt+Tab would leave the focus on an
+    // invisible window and switch nowhere. A taskbar click raises an activation AND a restore (spike log: WM_ACTIVATE
+    // first, then WM_SIZE), and Click below makes the two one click.
+    protected override void OnActivated(EventArgs e)
+    {
+        base.OnActivated(e);
+        if (armed) Activation();
+    }
+
+    internal void Activation()
+    {
+        if (WindowState != WindowState.Minimized) WindowState = WindowState.Minimized;
+        Click();
+    }
+
+    // One click per gesture: the activation and the restore of one taskbar click arrive about a millisecond apart, a
+    // person's second click no sooner than a few hundred. The switch runs from the dispatcher, after the window is
+    // minimized again.
+    long lastClick = long.MinValue / 2;
+    const long OneClickMs = 400;
+
+    void Click()
+    {
+        var now = Environment.TickCount64;
+        if (now - lastClick < OneClickMs) return;
+        lastClick = now;
         Dispatcher.BeginInvoke(() => Clicked?.Invoke());
+    }
+
+    // Closed only by TaskbarJumps (CloseForGood), when its workspace is unpinned. The thumbnail's X and the button's
+    // "Close window" are refused (final review, Important 3a): closing would take the button away until the workspace
+    // was unpinned and pinned again. App shutdown is not refused: WPF ignores Cancel while the application shuts down.
+    bool closingForGood;
+
+    internal void CloseForGood()
+    {
+        closingForGood = true;
+        Close();
+    }
+
+    protected override void OnClosing(System.ComponentModel.CancelEventArgs e)
+    {
+        base.OnClosing(e);
+        if (!closingForGood) e.Cancel = true;
     }
 
     // The label as the button's title and the icon for it, redrawn only when glyph or colour changed.

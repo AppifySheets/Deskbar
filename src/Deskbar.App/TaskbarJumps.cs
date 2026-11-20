@@ -81,6 +81,6 @@ public sealed class TaskbarJumps(Func<WindowHandle, Result> pin, Action<nint> ig
     {
         if (!windows.Remove(pinnedId, out var window)) return;
         targets.Remove(pinnedId);
-        window.Close();
+        window.CloseForGood();
     }
 }

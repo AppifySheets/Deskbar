@@ -1631,15 +1631,7 @@ public sealed class WorkspaceManager(
         // in the stored list, so the other side's rows keep their stored places: that is what puts an unpinned row
         // back where it was (Petre: "back where it was").
         if (block.Count == 1 || State.IsAnchor(id))
-        {
-            var side = Pinned(block);
-            var slots = Enumerable.Range(0, blocks.Count).Where(i => Pinned(blocks[i]) == side).ToList();
-            var peers = slots.Select(i => blocks[i]).ToList();
-            var reordered = Reordered(peers, slots.IndexOf(at), targetOf, clampIntoRange);
-            return MovedTo(reordered is null
-                ? null
-                : blocks.Select((b, i) => slots.Contains(i) ? reordered[slots.IndexOf(i)] : b).SelectMany(b => b).ToList());
-        }
+            return MovedTo(ReorderedOnItsSide(blocks, at, targetOf, clampIntoRange));
 
         // Otherwise it moves inside its own box. An anchored group's first row belongs to the anchor
         // and nothing may take it, so the members below reorder among themselves; an anchorless
@@ -1677,6 +1669,21 @@ public sealed class WorkspaceManager(
         });
 
         return blocks;
+    }
+
+    // Moves block `at` among the blocks drawn on ITS side of the bar (DrawnBlocks): the pinned rows if it is pinned,
+    // every other block if not. Each side is reordered in the stored slots it already holds, so the other side keeps
+    // its stored places, which is what lets an unpinned row go back where it was. Both a row's move and a group's
+    // header move come through here (final review, Important 2: the group's used to reorder the whole stored list,
+    // which past a pinned row changed nothing anyone could see). Null for a no-op, as Reordered.
+    static List<Workspace>? ReorderedOnItsSide(List<List<Workspace>> blocks, int at, Func<int, int> targetOf, bool clampIntoRange)
+    {
+        var side = Pinned(blocks[at]);
+        var slots = Enumerable.Range(0, blocks.Count).Where(i => Pinned(blocks[i]) == side).ToList();
+        var reordered = Reordered(slots.Select(i => blocks[i]).ToList(), slots.IndexOf(at), targetOf, clampIntoRange);
+        return reordered is null
+            ? null
+            : blocks.Select((b, i) => slots.Contains(i) ? reordered[slots.IndexOf(i)] : b).SelectMany(b => b).ToList();
     }
 
     // A block is pinned when it is one pinned workspace: only an ungrouped workspace pins (SetWorkspacePinned).
@@ -1746,7 +1753,8 @@ public sealed class WorkspaceManager(
         // A group with no members left is not drawn and so has nowhere to move from.
         if (at < 0) return Result.Success();
 
-        return MovedTo(Reordered(blocks, at, targetOf, clampIntoRange)?.SelectMany(b => b).ToList());
+        // Among the unpinned rows, which are the ones a group is drawn beside (a group is never pinned).
+        return MovedTo(ReorderedOnItsSide(blocks, at, targetOf, clampIntoRange));
     }
 
     // FOLDING a row (see Workspace.Folded) and a whole group (Group.Folded). Petre: "minimize it, to a
