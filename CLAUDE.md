@@ -209,8 +209,10 @@ page says "Sorry, we couldn't find that page": switch accounts, do not debug the
   the boundary cannot wander. Auto and shared-width gutters were both tried and rejected:
   each row then split a different width in half and the hairlines disagreed (#70, #99, #103).
 - **Workspaces can be grouped** (#83, #84): a group has one colour settable from any of its
-  rows, one caption, a shared lane and a bracket down its left edge. A nested workspace
-  really gets its parent's windows.
+  rows, one caption, a shared lane and a bracket down its left edge.
+  Child workspaces (a nested workspace borrowing its parent's windows) were removed on 2026-11-20:
+  Petre never found them useful and the borrowing pinned other programs' windows to every desktop.
+  Existing ones load as ordinary groups.
 - **The window list has three places, and one of them is a strip on every screen**
   (`AppState.WindowListPlace`: the workspace's row, the bottom of the bar, or the screens).
   **The screens are the default** for every install, existing ones included (Petre, 2026-11-19: "let's make the

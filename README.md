@@ -287,14 +287,14 @@ on Manage → Settings. A fully opaque setting means it never dims.
 
 ### The workspace row menu
 
-Right-click a row for: **Rename…**; **Insert before…**, **Insert after…** and **Add child…**;
+Right-click a row for: **Rename…**; **Insert before…** and **Insert after…**;
 the group items (next section); **Fold row**, which flips to **Unfold row**; **Pin to strip**, which
 flips to **Unpin from strip**; the **Window list** submenu; the colour strip; **Move up**, **Move down**, **Move to top**
 and **Move to end**, which work within the row's group; **Delete workspace…**; and the bar items,
 **Dock to screen edge**, **Dock across both screens** and **Minimize bar**.
 
 <p align="center">
-  <img src="docs/images/menu-row.png" alt="The row menu beside the bar: Rename, Insert before, Insert after, Add child, New group, Move into group, Minimize row, Window list at the bottom of the bar, a strip of nine colour swatches, Custom, Transparent, By position, Move up, Move down, Move to top, Move to end, Delete workspace, Undock from screen edge, Dock across both screens, Minimize bar." />
+  <img src="docs/images/menu-row.png" alt="The row menu beside the bar: Rename, Insert before, Insert after, New group, Move into group, Minimize row, Window list at the bottom of the bar, a strip of nine colour swatches, Custom, Transparent, By position, Move up, Move down, Move to top, Move to end, Delete workspace, Undock from screen edge, Dock across both screens, Minimize bar." />
 </p>
 
 **Fold row** draws the row as its name alone, for a workspace you are not working in right now. The
@@ -330,16 +330,12 @@ neighbouring desktop where you find them days later, so this app does not do tha
 ### Groups
 
 Related workspaces can be grouped. A group has one caption, one colour settable from any of its
-rows, and a line drawn down its left edge like a tree. Two kinds exist:
+rows, and a line drawn down its left edge like a tree.
 
-- **Add child…** on a row makes a workspace nested under it. The parent is the group's anchor and
-  the group is named after it. A nested workspace really gets its parent's windows: stand in the
-  child and the parent's windows are there with it.
-- **New group…** on a row, or **Move into group** when groups already exist, makes a plain group:
-  a name and a box, nothing borrowed. A plain group has a dim header row with its own menu
-  (**Rename group…**, **Ungroup**, **Fold group**, the colour strip, and **Move group up**,
-  **Move group down**, **Move group to top** and **Move group to end**, which move the whole group
-  past the rows around it).
+**New group…** on a row, or **Move into group** when groups already exist, makes a group: a name
+and a box. Every group has a dim header row with its own menu (**Rename group…**, **Ungroup**,
+**Fold group**, the colour strip, and **Move group up**, **Move group down**, **Move group to top**
+and **Move group to end**, which move the whole group past the rows around it).
 
 A row inside a group offers **Fold group '…'**, **Move out of group** and **Ungroup '…'**; the
 last names the group because it affects rows other than the one you clicked.
@@ -620,8 +616,7 @@ one axis it arranges is which desktop a window belongs to, and that it remembers
 
 Left-click the tray icon. Five tabs:
 
-- **Workspaces** adds, renames, removes and reorders them (that order is the bar's row order), and
-  nests one under another. Beside the list, **Apps that belong to this workspace** shows the
+- **Workspaces** adds, renames, removes and reorders them (that order is the bar's row order). Beside the list, **Apps that belong to this workspace** shows the
   roster, each entry as the exe plus the last title when they differ, with **Remove from this
   workspace** to forget a placement. Removing an entry never touches a running window; move the
   app back by hand and a new entry is written. Remove on a workspace here does not close its
@@ -697,7 +692,7 @@ Everything the bar's menus do has a command, and each one runs the same code as 
 | Group | Commands |
 |---|---|
 | Listing (JSON) | `workspaces`, `windows`, `desktops` |
-| Workspaces | `create <name> [placement]`, `rename`, `add-child`, `reorder <ws> up\|down\|top\|end\|<n>`, `fold`, `unfold`, `color <ws> <colour>`, `delete <ws> [--close-windows]`, `switch` |
+| Workspaces | `create <name> [placement]`, `rename`, `reorder <ws> up\|down\|top\|end\|<n>`, `fold`, `unfold`, `color <ws> <colour>`, `delete <ws> [--close-windows]`, `switch` |
 | Groups | `group-create`, `group-join`, `group-leave`, `group-rename`, `group-color`, `group-fold`, `group-unfold`, `group-reorder <group> up\|down\|top\|end\|<n>`, `ungroup` |
 | Desktops | `name-desktop <id or number> <name>` |
 | Starting | `start <ws> [--create [placement]] [--cwd <folder>] -- <program> [arguments...]`, `open <link> [--from <folder>]` |
