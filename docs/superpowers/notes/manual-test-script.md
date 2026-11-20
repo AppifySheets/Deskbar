@@ -252,6 +252,37 @@ T4. A restart keeps a hand-made layout. Make A | C over B again and drag one spl
 T5. Upgrade from a build before the split tree, on a profile that build tiled with a dragged split. After the
     update the grid looks exactly as it did, to the pixel, and Even out offers itself as before.
 
+## Arranging the bar
+
+Arrange mode (spec `docs/superpowers/specs/2026-11-20-bar-edit-mode-design.md`). Start with
+three ungrouped workspaces A, B and C, plus a group G holding D and E, and one pinned workspace.
+`$ts` is `%APPDATA%\Deskbar\deskbar.cmd`.
+
+AR1. Right-click row A and choose "Arrange workspaces". A grip appears before every row and group
+     header name, icons dim, and a strip at the bottom of the bar reads "Drag rows to arrange · Esc"
+     with a Done button. Right-click another row: the menu now says "Done arranging".
+AR2. Click a row and an icon. Nothing switches, and no window is dragged. Right-click menus still
+     open. Ctrl+drag does not move the bar; dragging its edge still resizes it.
+AR3. Drag A to the top quarter of C, then to the bottom quarter of C. A full-width line shows each
+     time, and A lands before, then after, C.
+AR4. Drag A to the bottom quarter of E, the last row in G. A short line shows inside G's bracket,
+     and A becomes G's last member.
+AR5. Drag B onto the middle of C (ungrouped). A prompt asks for a group name, prefilled "C".
+     Cancel: nothing changes. Repeat and accept: a group of B and C exists at C's place.
+AR6. Drag A onto the middle of D (in G). A joins G below D.
+AR7. Drag a row out of a group of two to a top-level gap. The group dissolves and the other member
+     stays in place.
+AR8. Drag onto a group header's top quarter: the row lands above the whole group. Onto the rest of
+     the header: it joins at the top. Fold the group and drop onto its line: it joins the group.
+     Drop below the last row: it goes to the end of the bar.
+AR9. Drag G's header past top-level rows: the whole group moves. Drag the pinned workspace below an
+     unpinned row: it stays in the pinned block. Drag an unpinned row onto it: no group forms.
+AR10. Start a drag and press Esc: the drag cancels and the mode stays on. Press Esc again: the mode
+      ends and the grips go.
+AR11. Choose "Arrange workspaces" again, then click Done: the mode ends. Again, then
+      "Done arranging" on a menu: it ends. `$ts arrange on` and `$ts arrange off` do the same, both
+      exit 0; after `arrange on`, Esc ends it only once the bar has focus.
+
 ## Results (2026-08-01)
 
 Status: **pending human execution.** An agent cannot observe the desktop, Task View,

@@ -288,7 +288,8 @@ on Manage → Settings. A fully opaque setting means it never dims.
 ### The workspace row menu
 
 Right-click a row for: **Rename…**; **Insert before…** and **Insert after…**;
-the group items (next section); **Fold row**, which flips to **Unfold row**; **Pin to strip**, which
+the group items (next section); **Arrange workspaces**, which reads **Done arranging** while the mode
+is on; **Fold row**, which flips to **Unfold row**; **Pin to strip**, which
 flips to **Unpin from strip**; the **Window list** submenu; the colour strip; **Move up**, **Move down**, **Move to top**
 and **Move to end**, which work within the row's group; **Delete workspace…**; and the bar items,
 **Dock to screen edge**, **Dock across both screens** and **Minimize bar**.
@@ -347,6 +348,31 @@ group's line has the group's menu, which is where **Unfold group** is. Folding a
 member's own fold alone, so unfolding it puts every row back the way it was. Leaving a group of two dissolves it.
 Ungrouping keeps every desktop, name and position. Deleting an anchor leaves its group as a plain
 one.
+
+### Arranging the bar
+
+**Arrange workspaces**, on any row's menu or a group header's menu, lets you reorder and group rows
+by dragging. `deskbar.cmd arrange on` and `arrange off` do the same from a script. The pipe does not
+bring the bar to the front, so `Esc` works only once the bar has focus. End the mode with `Esc`, with
+**Done** on the strip at the bottom of the bar ("Drag rows to arrange · Esc"), or with **Done
+arranging** on the menu.
+
+While it is on, a grip sits before every row and group header name. Clicks do not switch workspaces,
+icons are dimmed and do not drag windows, and the right-click menus still work. You can still resize
+the bar from its edge, but `Ctrl`+drag does not move it.
+
+The row under the pointer decides where a dragged row goes. Its top quarter drops before it and its
+bottom quarter after it: inside the group if that row is in one, shown as a short line inside the
+group's bracket, and as a full-width line between top-level rows. The middle drops onto it. Onto a
+row in a group, the dragged row joins that group below it. Onto a row in no group, a prompt asks for
+a group name, prefilled with that row's name, and makes a group of the two at that row's place;
+Cancel changes nothing. On a group header, the top quarter drops above the whole group and the rest
+joins the group at the top. A folded group is joined through its line. Below the last row means the
+end of the bar. A row that leaves a group of two dissolves it.
+
+Dragging a group header moves the whole group among the top-level rows. Pinned workspaces stay at the
+top and move only among themselves; they cannot be grouped. `Esc` during a drag cancels the drag, and
+a second `Esc` ends the mode.
 
 ### Pinned, unnamed and unplaced rows
 
@@ -697,7 +723,7 @@ Everything the bar's menus do has a command, and each one runs the same code as 
 | Desktops | `name-desktop <id or number> <name>` |
 | Starting | `start <ws> [--create [placement]] [--cwd <folder>] -- <program> [arguments...]`, `open <link> [--from <folder>]` |
 | Windows | `move <ws> [--create [placement]] [--no-follow] (--title <text> \| --hwnd <h>)...`, `rename-window`, `rename-app`, `rename-pattern`, `name-by-folder <hwnd> on\|off`, `restore-title`, `pin`, `unpin` |
-| Bar | `bar minimize\|restore\|dock\|undock\|across\|edge`, `stats detach\|attach` |
+| Bar | `bar minimize\|restore\|dock\|undock\|across\|edge`, `arrange on\|off`, `stats detach\|attach` |
 | Tasks | `task list`, `task add <title> [--workspace <name>\|none] [--in 1m\|5m\|10m\|30m]`, `task timer <id> (--in ... \| --clear)`, `task done`, `task rename`, `task delete` |
 
 A few more, with `$ts` standing for the batch file:
