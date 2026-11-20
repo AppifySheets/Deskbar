@@ -1773,16 +1773,16 @@ public sealed class WorkspaceManager(
     //
     // #83 asks for this by the name "move a workspace out of the group".
     //
-    // Leaving takes the group with it when too little is left to be a group. A group of one is not
-    // a group: the bar would draw an outline round a single row, which is decoration that means
-    // nothing.
+    // Leaving takes the group with it when too little is left to be a group. That is about membership,
+    // not drawing: a group of one left behind by someone leaving is not a grouping anyone asked for.
+    // (The bar still draws a group of one with its box and header, since CreateGroup makes those.)
     public Result LeaveGroup(Guid workspaceId) =>
         Workspace(workspaceId).Tap(_ => Persist(WithoutMember(State, workspaceId)));
 
     // Removes one workspace from whatever group it is in, and tidies up after it.
     //
-    // A group left with one member is dissolved, as above, because skipping that would leave the bar
-    // drawing a box round a single row.
+    // A group left with one member is dissolved, as above, because the one left behind never chose to
+    // be a group of one.
     static AppState WithoutMember(AppState state, Guid workspaceId)
     {
         if (state.GroupOf(workspaceId) is not { } group) return state;
@@ -2043,8 +2043,7 @@ public sealed class WorkspaceManager(
     //
     // A GROUPED workspace redirects the choice to its group (#90). Petre: "the parent can change the
     // group's colour, and so can any child... a group has one colour". Since child workspaces were
-    // removed, this means any member. So the picker on a member's
-    // row is the group's picker, and there is no such thing as a per-member colour inside a box. Its
+    // removed, this means any member. So the picker on a member's row is the group's picker, and there is no such thing as a per-member colour inside a box. Its
     // own Workspace.Color is deliberately left alone rather than overwritten, which is what lets it
     // go back to the colour it chose for itself if it ever leaves.
     public Result SetWorkspaceColor(Guid id, string? color) =>

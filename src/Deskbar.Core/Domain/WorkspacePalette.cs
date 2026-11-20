@@ -167,7 +167,7 @@ public static class WorkspacePalette
     // that color". The group stays one colour family, which is what says "these belong together", and each row
     // in it gets its own step of that colour, which says "and these are different workspaces".
     //
-    // Step 0 is the colour itself, so the first member (the anchor, in an anchored group) wears exactly the
+    // Step 0 is the colour itself, so the first member wears exactly the
     // group's colour, like the group's caption and outline. After that the steps alternate a shade LIGHTER and a
     // shade DARKER, each pair a further 30% from the base: 1 lighter, 2 darker, 3 lighter still, 4 darker still.
     // Alternating rather than one direction, so neighbours differ in both directions from the base and a group

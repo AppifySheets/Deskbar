@@ -2481,11 +2481,6 @@ public partial class FloatingBar : Window
                     .ToList();
                 members.ForEach(m => drawn.Add(m!.Workspace.Id));
 
-                // A group always gets its box: its header row carries the name, so even a group of
-                // one (which CreateGroup makes routinely) is a header plus a row rather than a row that
-                // looks unchanged. Every member is therefore built as boxed, which is what makes the box
-                // paint the lane for the whole group instead of each row painting its own.
-
                 // A FOLDED group (Group.Folded) is its one line, plus the full row of any member that is
                 // still in view: the workspace you are on, or one the pointer has opened. The same rule a
                 // folded row follows, and for the same reason: folding is "I am not working in these", and
@@ -2499,6 +2494,10 @@ public partial class FloatingBar : Window
                     return;
                 }
 
+                // A group always gets its box: its header row carries the name, so even a group of
+                // one (which CreateGroup makes routinely) is a header plus a row rather than a row that
+                // looks unchanged. Every member is therefore built as boxed, which is what makes the box
+                // paint the lane for the whole group instead of each row painting its own.
                 var rows = members.Select(m => WorkspaceRow(m!, group, boxed: true)).ToList();
 
                 // A group needs a header, because nothing inside it carries the name. Deliberately
