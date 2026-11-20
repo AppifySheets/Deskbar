@@ -230,9 +230,7 @@ public sealed partial class Tiler
     // LayoutOn this stores nothing and takes no pending leaver, because a drag changes neither the windows nor the
     // count. Band drops (Banded) and a minimized tile's spot and return (Tiler.Minimize.cs) read it too.
     TileLayout ShownLayout(Workspace workspace, TileScreen screen, int count) =>
-        StoredOn(workspace.Id, KeyOf(screen))
-            .Map(s => TileArrange.Refit(s, count, Maybe<int>.None))
-            .GetValueOrDefault(TileLayout.Automatic(count));
+        ShownOn(workspace.Id, screen, count);
 
     // The leaf of the window at `slot` on a screen (by number) of a workspace with `count` windows, in the stored
     // layout (counting its opening, TileArrange.LeafOf) or the automatic one, whose leaves are its slots. For

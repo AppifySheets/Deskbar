@@ -72,9 +72,15 @@ public sealed partial class Tiler
     // settled), before any new window arrives. Each window in `returning` (ComesBack said yes) is put back in its
     // place, one at a time, so a later one sees the earlier ones where they went. The layout each return makes is
     // stored BEFORE the re-tile reads it.
+    //
+    // Each return is a join like an arrival's (Joining, Tiler.Rejoin.cs): the screen as it was while the window was
+    // away is remembered, so minimizing it again, or closing it, puts that layout back.
     TileBoard ReturnedToTheirPlaces(Workspace workspace, TileBoard stayed, IReadOnlyList<WindowHandle> returning) =>
-        returning.Aggregate(stayed, (current, w) =>
-        {
+        returning.Aggregate(stayed, (current, w) => Joining(workspace, current, w, () => ReturnTo(workspace, current, w)));
+
+    // One window of ReturnedToTheirPlaces, back on `current`.
+    TileBoard ReturnTo(Workspace workspace, TileBoard current, WindowHandle w)
+    {
             var gone = away[w];
             away.Remove(w);
             var others = current.On(gone.Screen);
@@ -105,7 +111,7 @@ public sealed partial class Tiler
                     trace?.Invoke($"tile: {w.Value:X} came back to screen {gone.Screen}, which changed meanwhile and holds none of its old neighbours, and arrives as a new window");
                     return Arrived(workspace, current.Join(gone.Screen, w), [w]);
                 });
-        });
+    }
 
     // TileArrange.Returned on the layout the screen shows now (its windows are `current`'s, the leaves already
     // settled), the new layout stored first. None when no remembered neighbour is on the screen, or when the board
