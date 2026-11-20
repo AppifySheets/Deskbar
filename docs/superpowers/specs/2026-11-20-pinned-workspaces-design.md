@@ -1,0 +1,79 @@
+# Pinned workspaces
+
+## Intent
+
+Petre keeps a Messengers workspace and jumps into it many times a day to answer something, then goes
+back to whatever he was doing. Today that round trip means finding Messengers' row (or walking the
+switcher), then finding the way back. Petre: "i need to jump in and out of the messengers", "have a
+simple way to go back to the previous workspace".
+
+A pinned workspace gets one item on every screen strip and in the bar. Outside the workspace the item
+takes you in; inside it, the same item, in the same place, takes you back to where you came from.
+
+## Goals
+
+- One click into a pinned workspace from any workspace or unnamed desktop.
+- One click back, on the same spot, to the workspace you were in before.
+- "Before" is right however you arrived: the bar, the switcher, Win+Ctrl+arrows, Task View.
+
+## Non-goals
+
+- Pinning a workspace's windows to every desktop. Windows' own "show on all desktops" stays a
+  per-window thing, and nothing here OS-pins anything.
+- A hotkey. The switcher's Win+Ctrl+Tab tap already goes back, and a third global hotkey needs its own
+  case (CLAUDE.md).
+- The attention dot on the item when a window in the pinned workspace flashes. Worth doing, later, in
+  its own PR.
+
+## Anti-goals
+
+- The item moving under the pointer between "go" and "back". The point is one fixed spot.
+- A back target that is wrong because the switch came from outside Deskbar.
+
+## Approaches
+
+- A, chosen: one item per pinned workspace that flips. Outside it reads the workspace's name; inside,
+  "<- <previous workspace>". One spot to build a habit on.
+- B: the pinned item stays as it is, and a separate back item appears beside it while you are inside.
+  More explicit, but it adds an item and the target moves.
+- C: a back item in every workspace, no pinning. Simpler, but loses the one-click way in, which is
+  half of the loop.
+
+Petre picked A ("because i need to jump in and out of the messengers").
+
+## Design
+
+Sketch of a strip:
+
+```
+working:        [Deskbar] [Messengers]      | Code  Terminal  Chrome
+in Messengers:  [Messengers] [<- Deskbar]   | Teams  Outlook  Beeper
+                 name tag     pinned item     this workspace's windows
+```
+
+- Model: `Workspace.Pinned`, a bool init property defaulting to false, stored in state.json the way
+  `Folded` and `Tiled` are. No migration.
+- The back target: the most-recently-used list the manager already keeps (`WorkspaceMru`), fed by
+  every desktop switch whatever caused it. The target is the most recent workspace other than the
+  current one. With nothing to go back to (first visit since start), the item reads the workspace's
+  name and does nothing on click.
+  - My call: an unnamed desktop you came from does not count, since the MRU only holds workspaces.
+    Coming from an unnamed desktop, "back" goes to the last workspace instead.
+- Strips (`ScreenStrip`): the pinned items sit right after the name tag, before the tabs, in the
+  pinned workspace's colour, and take their width out of the tabs' budget. Every strip shows them.
+- Bar: the same items on the header line next to Start and search (where `PinLine` lives), so they
+  exist when the window list is not on the screens and there are no strips.
+- Pinning: "Pin to strip" / "Unpin from strip" on the workspace row's right-click menu, and its remote
+  twins `pin-workspace <workspace>` / `unpin-workspace <workspace>` in `ControlUsage` (every menu item
+  has one). My call on the names: `pin` and `unpin` are taken by windows.
+- Order of several pinned items: the workspaces' own order.
+- Clicking runs the same switch the bar's row uses, so the MRU, the follow-active rules and the
+  switch's trace stay one path.
+
+## Left to the builder
+
+- The item's exact look (padding, the arrow glyph, the current-workspace marking) within the strip's
+  existing tab style; a mockup goes to Petre before it is final (memory: mockups before visual
+  changes).
+- Tests: Core for the back-target rule and the persisted flag; Windows tests for the strip and bar
+  items in both states.
