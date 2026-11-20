@@ -9,7 +9,7 @@ namespace Deskbar.App;
 // THE BAR'S ARRANGE MODE, the mode half of "drag rows to arrange" (design:
 // docs/superpowers/specs/2026-11-20-bar-edit-mode-design.md, "Turning it on and off" and "What changes on the bar while
 // it is on"). This file is only the MODE: the flag, how it is entered and left, and what the bar looks like while it
-// is on. The drag itself is a later part and hangs off the same hooks.
+// is on. The drag itself is FloatingBar.ArrangeDrag.cs, and hangs off the same hooks.
 //
 // WHY A MODE AT ALL. A row's press already means "switch to it" and a fold toggle's press means "fold it"
 // (OnPreviewMouseLeftButtonDown, with the click-reliability work of #48 behind it). Making rows draggable on top of
@@ -25,6 +25,7 @@ namespace Deskbar.App;
 //     handlers, and WindowDragSource's canStart).
 //
 // HOW IT ENDS: the Done button, Esc, the menu item (it flips to "Done arranging"), or `arrange off` on the control pipe.
+// Each of them cancels a row drag that is still in flight first (an Esc during a drag ends only the drag, see below).
 // It is never persisted: a bar that starts up arranging, with no way to know why, would be a trap.
 //
 // ESC NEEDS THE BAR TO BE ACTIVE. The bar normally takes the foreground on a click, but a bar entered through the pipe
@@ -66,6 +67,10 @@ public partial class FloatingBar
     {
         if (on == arranging) return Result.Success();
 
+        // A drag in flight belongs to the mode: ended with it, dropping nothing (FloatingBar.ArrangeDrag.cs). Before the
+        // flag flips, so the rebuild below is not deferred by a drag that no longer has a mode to drop into.
+        if (!on) CancelArrangeDrag("the mode ended");
+
         arranging = on;
         if (ClickTrace.On) ClickTrace.Write($"arrange: {(on ? "on" : "off")}");
 
@@ -100,11 +105,15 @@ public partial class FloatingBar
     // Esc ends the mode. Wired once, in the constructor, as a PREVIEW handler so a focused button inside the bar cannot
     // swallow the key first. Only while arranging, and only marks the key handled then, so Esc keeps meaning whatever it
     // meant everywhere else (a menu, a dialog) the rest of the time.
+    //
+    // During a row drag, Esc cancels the DRAG and leaves the mode on: the user who lets go of a drag he regrets is in the
+    // middle of arranging, and throwing him out of the mode too would make him start over. A second Esc ends the mode.
     void OnArrangePreviewKeyDown(object sender, KeyEventArgs e)
     {
         if (!arranging || e.Key != Key.Escape) return;
         e.Handled = true;
-        EndArrangingOnEscape();
+        if (arrangeDrag is not null) CancelArrangeDrag("Esc");
+        else EndArrangingOnEscape();
     }
 
     // The two bar-level mouse handlers stop here while arranging, so that no row switches and no fold toggles

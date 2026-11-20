@@ -106,6 +106,7 @@ public partial class FloatingBar : Window
         // fully opaque bar until the pointer happened to cross it once.
         Opacity = IdleOpacity;
         PreviewKeyDown += OnArrangePreviewKeyDown; // Esc ends arrange mode (FloatingBar.Arrange.cs)
+        LostMouseCapture += OnArrangeLostCapture;  // ...and losing the mouse cancels a row drag (FloatingBar.ArrangeDrag.cs)
         MouseEnter += (_, _) => UpdateFade();
         MouseLeave += (_, _) => UpdateFade();
 
@@ -1121,8 +1122,13 @@ public partial class FloatingBar : Window
         // bar drag, so nothing below runs. This sits AFTER the bookkeeping above, which the row and icon release
         // handlers read, and after the resize branch, which stays available (it is not row business, and a press the
         // mode ate there would leave the resize cursor over an edge that does nothing). Ctrl+drag moving the bar stays
-        // blocked for now.
-        if (SwallowedWhileArranging(e, "press")) return;
+        // blocked for now. A press on a row or a group header is where a drag of that row begins (ArmArrangeDrag,
+        // FloatingBar.ArrangeDrag.cs).
+        if (SwallowedWhileArranging(e, "press"))
+        {
+            ArmArrangeDrag(e);
+            return;
+        }
 
         // A press in the docked edge strip is remembered by the row it was beside (see EdgeRowAt); the
         // release decides. It still arms nothing else: docked, the bar does not move.
@@ -1321,7 +1327,8 @@ public partial class FloatingBar : Window
         }
         // Arrange mode, the other half of the stop in OnPreviewMouseLeftButtonDown: after the orphan bookkeeping above
         // and after a resize in progress has been finished (a resize begun before the mode must not be left captured).
-        else if (SwallowedWhileArranging(e, "release")) { }
+        // The release of a row drag drops it there (ArrangeRelease, FloatingBar.ArrangeDrag.cs).
+        else if (SwallowedWhileArranging(e, "release")) ArrangeRelease(e.GetPosition(Root));
         // A release in the docked edge strip, beside the row its press was beside, switches to that row's
         // workspace (see EdgeRowAt). Not after a drag: that release belongs to the drag.
         else if (!dragJustFinished) EdgeRelease(e.GetPosition(this), dockedEdge);
@@ -1649,6 +1656,8 @@ public partial class FloatingBar : Window
     // row, whose switch would go nowhere (its RowTag carries none, see GroupRow).
     internal Cursor CursorAt(Point point, string? dockedEdge) =>
         GripAt(point.X, point.Y, ActualWidth, ActualHeight, dockedEdge) is not null ? Cursors.SizeWE
+        // Arranging, a row or a header is something to pick up: the move cursor (the spec's "a grip and a move cursor").
+        : OnArrangeSource(TranslatePoint(point, Root)) ? Cursors.SizeAll
         : EdgeRowAt(point, dockedEdge)?.Tag is RowTag { Switch: not null } ? Cursors.Hand
         : Cursors.Arrow;
 
@@ -1743,6 +1752,8 @@ public partial class FloatingBar : Window
     void OnPreviewMouseMove(object sender, MouseEventArgs e)
     {
         if (Resizing()) return;
+        // A row being dragged in arrange mode owns every move until it is dropped (FloatingBar.ArrangeDrag.cs).
+        if (ArrangeDragMoved(e)) return;
         // Only when nothing else owns the mouse, so the cursor cannot flip to a resize arrow in
         // the middle of dragging the bar across the screen.
         if (e.LeftButton != MouseButtonState.Pressed)
@@ -2007,6 +2018,17 @@ public partial class FloatingBar : Window
             return;
         }
 
+        // ...and while a ROW IS BEING DRAGGED in arrange mode (FloatingBar.ArrangeDrag.cs), from its press to its drop or
+        // cancel. The guard above cannot be trusted with it: the drag holds the mouse captured, and the pointer may be
+        // anywhere, off the bar included, while the rows it is measured against must stay the rows it was measured
+        // against. The drop, or the cancel, serves the deferred pulse.
+        if (arrangeDrag is not null)
+        {
+            if (ClickTrace.On) ClickTrace.Write("rebuild deferred: arrange drag in flight");
+            rebuildRequested = true;
+            return;
+        }
+
         // ...and the same deferral while a WINDOW IS BEING DRAGGED between rows (#147). Petre:
         // "blinking when dragging icons, blinking and resetting of the title at the bottom".
         //
@@ -2143,6 +2165,13 @@ public partial class FloatingBar : Window
         if (lastOverview is null) return;          // nothing drawn yet; the first rebuild will do it
         if (pressedRowKey is not null) return;     // a row press is pending -- leave its Button alone
         if (openMenu?.IsOpen == true) return;      // #77: a rebuild closes a menu whose row it destroys
+        // An arrange drag holds the rows it measures against (FloatingBar.ArrangeDrag.cs); the full rebuild its drop
+        // serves redraws at the new width too.
+        if (arrangeDrag is not null)
+        {
+            rebuildRequested = true;
+            return;
+        }
         if (rebuilding)
         {
             rebuildRequested = true;
@@ -2210,6 +2239,7 @@ public partial class FloatingBar : Window
         Rows.Children.Clear();
         CurrentList.Children.Clear(); // the titled list below the rows, rebuilt with them
         headerDropTargets.Clear();    // re-registered by every row as it is built (see GroupRow)
+        ForgetArrangeTargets();       // ...and so are the rows an arrange drag picks up and aims at (FloatingBar.ArrangeDrag.cs)
         ForgetAgingIcons();           // the aging overlays belong to the rows about to be replaced
         ForgetWindowFits();           // ...and the maximized and tile badges (FloatingBar.WindowState.cs)
         ForgetWorkspaceTimes();       // ...and so do the captions' time marks
@@ -2468,6 +2498,8 @@ public partial class FloatingBar : Window
                     // TilingGate.Acts, the Tiler's own test, so a workspace left tiled after Pro lapsed shows nothing:
                     // its flag is set but nothing arranges it.
                     tiled: Core.Tiling.TilingGate.Acts(g.Workspace, IsPro()));
+                // A row an arrange drag can pick up and aim at (FloatingBar.ArrangeDrag.cs).
+                RegisterArrangeRow(g.Workspace.Id, group, built);
                 Phase($"row {g.Workspace.Name}");
                 return built;
             }
@@ -2505,8 +2537,9 @@ public partial class FloatingBar : Window
                 if (group.Folded)
                 {
                     var shown = members.Where(m => m!.IsCurrent || Expanded(m.Workspace.Id)).Select(m => WorkspaceRow(m!, group, boxed: true));
-                    groupRows.Add(FamilyBox([FoldedGroupLine(group, members!), .. shown],
-                        LaneAccent(group.Color, ColourSlotOf(group)), LaneTint(group.Color, ColourSlotOf(group)), AcrossSeam));
+                    // ArrangeBox: the box an arrange drag of the group carries and draws lines at (FloatingBar.ArrangeDrag.cs).
+                    groupRows.Add(ArrangeBox(group.Id, FamilyBox([FoldedGroupLine(group, members!), .. shown],
+                        LaneAccent(group.Color, ColourSlotOf(group)), LaneTint(group.Color, ColourSlotOf(group)), AcrossSeam)));
                     return;
                 }
 
@@ -2521,7 +2554,7 @@ public partial class FloatingBar : Window
                 // and does nothing is worse than one that plainly is not.
                 rows.Insert(0, GroupHeader(group, ColourSlotOf(group)));
 
-                groupRows.Add(FamilyBox(rows, LaneAccent(group.Color, ColourSlotOf(group)), LaneTint(group.Color, ColourSlotOf(group)), AcrossSeam));
+                groupRows.Add(ArrangeBox(group.Id, FamilyBox(rows, LaneAccent(group.Color, ColourSlotOf(group)), LaneTint(group.Color, ColourSlotOf(group)), AcrossSeam)));
             });
 
             // ...and unbound desktops with windows (OverviewBuilder already drops empty
@@ -3425,6 +3458,7 @@ public partial class FloatingBar : Window
         }
 
         LazyMenu(header, menu => GroupMenu(group, menu)); // filled on the first right-click (FloatingBar.LazyMenus.cs)
+        RegisterArrangeHeader(group.Id, header); // an arrange drag picks the group up here (FloatingBar.ArrangeDrag.cs)
         return header;
     }
 
@@ -3574,6 +3608,7 @@ public partial class FloatingBar : Window
         };
         LazyMenu(holder, menu => GroupMenu(group, menu)); // filled on the first right-click (FloatingBar.LazyMenus.cs)
         System.Windows.Automation.AutomationProperties.SetName(holder, $"{group.Name} (folded)");
+        RegisterArrangeHeader(group.Id, holder); // a folded group's header, for an arrange drag (FloatingBar.ArrangeDrag.cs)
         return holder;
     }
 
