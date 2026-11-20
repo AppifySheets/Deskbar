@@ -1488,8 +1488,9 @@ public sealed class WorkspaceManager(
         InsertWorkspace(name, AfterLastMemberOf(groupId, State.Workspaces), groupId);
 
     // A new ungrouped workspace at a 1-based TOP-LEVEL row of the bar, counting a whole group's box as
-    // one row (see AppState.Blocks). So no row number can land it between two members of a group. It takes the
-    // place of whatever was drawn at that row, which moves down one; past the last row is the end.
+    // one row (see AppState.Blocks). So no row number can land it between two members of a group.
+    // It takes the place of whatever was drawn at that row, which moves down one; past the last row is
+    // the end.
     //
     // Inserted before the FIRST list entry of the block at that row, rather than at a sum of block
     // sizes, so it stays right even for a state.json whose groups are not contiguous in the list.
@@ -1611,8 +1612,8 @@ public sealed class WorkspaceManager(
     // outside any group had the mirror problem, swapping with somebody else's group member and
     // leaving the order of the bar's top-level rows alone.
     //
-    // So peers are the rows a row is actually drawn beside, which is one of two things (see AppState.Blocks):
-    // the other members of its box, or the bar's other top-level rows.
+    // So peers are the rows a row is actually drawn beside, which is one of two things (see
+    // AppState.Blocks): the other members of its box, or the bar's other top-level rows.
     Result MoveAmongPeers(Guid id, Func<int, int> targetOf, bool clampIntoRange)
     {
         if (!State.Workspaces.Any(w => w.Id == id)) return Result.Failure("Workspace no longer exists.");
