@@ -262,7 +262,7 @@ AR1. Right-click row A and choose "Arrange workspaces". A grip appears before ev
      header name, icons dim, and a strip at the bottom of the bar reads "Drag rows to arrange · Esc"
      with a Done button. Right-click another row: the menu now says "Done arranging".
 AR2. Click a row and an icon. Nothing switches, and no window is dragged. Right-click menus still
-     open. Ctrl+drag does not move the bar; dragging its edge still resizes it.
+     open. Ctrl+drag on a row does not move the bar; dragging its edge still resizes it.
 AR3. Drag A to the top quarter of C, then to the bottom quarter of C. A full-width line shows each
      time, and A lands before, then after, C.
 AR4. Drag A to the bottom quarter of E, the last row in G. A short line shows inside G's bracket,
@@ -282,6 +282,12 @@ AR10. Start a drag and press Esc: the drag cancels and the mode stays on. Press 
 AR11. Choose "Arrange workspaces" again, then click Done: the mode ends. Again, then
       "Done arranging" on a menu: it ends. `$ts arrange on` and `$ts arrange off` do the same, both
       exit 0; after `arrange on`, Esc ends it only once the bar has focus.
+AR12. With the mode on, click Start, search, a pinned app, the tray chevron, the clock and the bar's
+      back button: each does what it does with the mode off. A tab on a screen strip is at full
+      strength, activates its window on a click and drags its window to another row. Click the bar's
+      minimize button: the bar minimizes. Restore it: the mode is still on.
+AR13. Click Done, then minimize the bar. Right-click a strip: no "Arrange workspaces" item.
+      `$ts arrange on` fails with "The bar is minimized." and nothing changes.
 
 ## Results (2026-08-01)
 

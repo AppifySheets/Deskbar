@@ -288,11 +288,11 @@ on Manage → Settings. A fully opaque setting means it never dims.
 ### The workspace row menu
 
 Right-click a row for: **Rename…**; **Insert before…** and **Insert after…**;
-the group items (next section); **Arrange workspaces**, which reads **Done arranging** while the mode
-is on; **Fold row**, which flips to **Unfold row**; **Pin to strip**, which
+the group items (next section); **Fold row**, which flips to **Unfold row**; **Pin to strip**, which
 flips to **Unpin from strip**; the **Window list** submenu; the colour strip; **Move up**, **Move down**, **Move to top**
 and **Move to end**, which work within the row's group; **Delete workspace…**; and the bar items,
-**Dock to screen edge**, **Dock across both screens** and **Minimize bar**.
+**Arrange workspaces** (it reads **Done arranging** while the mode is on), **Dock to screen edge**,
+**Dock across both screens** and **Minimize bar**.
 
 <p align="center">
   <img src="docs/images/menu-row.png" alt="The row menu beside the bar: Rename, Insert before, Insert after, New group, Move into group, Minimize row, Window list at the bottom of the bar, a strip of nine colour swatches, Custom, Transparent, By position, Move up, Move down, Move to top, Move to end, Delete workspace, Undock from screen edge, Dock across both screens, Minimize bar." />
@@ -346,20 +346,22 @@ windows they hold between them and the attention dot if any of them wants you. E
 switches to that workspace. The workspace you are on keeps its full row under the line. A folded
 group's line has the group's menu, which is where **Unfold group** is. Folding a group leaves each
 member's own fold alone, so unfolding it puts every row back the way it was. Leaving a group of two dissolves it.
-Ungrouping keeps every desktop, name and position. Deleting an anchor leaves its group as a plain
-one.
+Ungrouping keeps every desktop, name and position.
 
 ### Arranging the bar
 
-**Arrange workspaces**, on any row's menu or a group header's menu, lets you reorder and group rows
-by dragging. `deskbar.cmd arrange on` and `arrange off` do the same from a script. The pipe does not
+**Arrange workspaces**, on any row's menu, a group header's menu or the bar's own menu, lets you
+reorder and group rows by dragging. `deskbar.cmd arrange on` and `arrange off` do the same from a
+script. Neither works while the bar is minimized: restore it first. The pipe does not
 bring the bar to the front, so `Esc` works only once the bar has focus. End the mode with `Esc`, with
 **Done** on the strip at the bottom of the bar ("Drag rows to arrange · Esc"), or with **Done
 arranging** on the menu.
 
-While it is on, a grip sits before every row and group header name. Clicks do not switch workspaces,
-icons are dimmed and do not drag windows, and the right-click menus still work. You can still resize
-the bar from its edge, but `Ctrl`+drag does not move it.
+While it is on, a grip sits before every row and group header name. Clicks on rows do not switch
+workspaces, and the rows' icons are dimmed and do not drag windows. Everything that is not a row works
+as usual: Start, search, the pinned apps, the footer, the back and minimize buttons, the right-click
+menus and the window tabs on the screens. You can still resize the bar from its edge and move it by
+anything that is not a row; `Ctrl`+drag on a row does not move it.
 
 The row under the pointer decides where a dragged row goes. Its top quarter drops before it and its
 bottom quarter after it: inside the group if that row is in one, shown as a short line inside the
