@@ -90,6 +90,8 @@ public sealed partial class RemoteControl(WorkspaceManager manager, Func<bool, R
         ("reorder", [var workspace, var where]) => Reorder(workspace, where),
         ("fold", [var workspace]) => SetRowFolded(workspace, true),
         ("unfold", [var workspace]) => SetRowFolded(workspace, false),
+        ("pin-workspace", [var workspace]) => SetRowPinned(workspace, true),
+        ("unpin-workspace", [var workspace]) => SetRowPinned(workspace, false),
         ("tile", [var workspace]) => SetRowTiled(workspace, true),
         ("untile", [var workspace]) => SetRowTiled(workspace, false),
         ("even", [var workspace]) => EvenOutRow(workspace),
@@ -191,6 +193,7 @@ public sealed partial class RemoteControl(WorkspaceManager manager, Func<bool, R
             groupPosition = group is null ? (int?)null : manager.State.MembersOf(group.Id).ToList().FindIndex(m => m.Id == workspaceId) + 1,
             color = workspace.Color,
             folded = workspace.Folded,
+            pinned = workspace.Pinned,
             current = manager.CurrentWorkspaceId == workspaceId,
             // Tiling's two per-workspace switches, so `keep-space` (and every other command) replies with the state it
             // left them in, as the rest of this description does (final review, M5).

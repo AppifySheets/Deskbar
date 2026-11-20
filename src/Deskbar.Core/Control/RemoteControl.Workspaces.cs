@@ -87,6 +87,13 @@ public sealed partial class RemoteControl
             w => Reply(manager.SetWorkspaceFolded(w.Id, folded), () => Describe(w.Id)),
             ControlReply.Fail);
 
+    // The row menu's "Pin to strip" / "Unpin from strip" (Workspace.Pinned). Named pin-workspace rather than pin,
+    // because pin and unpin already pin a WINDOW to every desktop, which this does not do.
+    ControlReply SetRowPinned(string workspace, bool pinned) =>
+        WorkspaceNamed(workspace).Match(
+            w => Reply(manager.SetWorkspacePinned(w.Id, pinned), () => Describe(w.Id)),
+            ControlReply.Fail);
+
     // `tile` is refused only where this copy may not tile (isPro is TilingGate.Allowed, so never while tiling
     // is free). `untile` is never refused: releasing a workspace must always work, whatever the tier says.
     // There is no on/off switch to refuse on any more (TilingGate, 2026-11-19).

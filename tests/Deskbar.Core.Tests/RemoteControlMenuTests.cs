@@ -136,6 +136,23 @@ public class RemoteControlMenuTests
         Assert.Equal(Named(manager, "Personal").Id, manager.State.LendsWindowsTo(Named(manager, "Bills").Id));
     }
 
+    // A pinned workspace gets an item on every strip that takes you in, and back out (FloatingBar.WorkspaceJumps.cs).
+    [Fact]
+    public void Pin_and_unpin_a_workspace()
+    {
+        var manager = Started();
+
+        var pinned = Run(manager, "pin-workspace", "Personal");
+        Ok(pinned);
+        Assert.True(Json(pinned).GetProperty("pinned").GetBoolean());
+        Assert.True(Named(manager, "Personal").Pinned);
+
+        var unpinned = Run(manager, "unpin-workspace", "Personal");
+        Ok(unpinned);
+        Assert.False(Json(unpinned).GetProperty("pinned").GetBoolean());
+        Assert.False(Named(manager, "Personal").Pinned);
+    }
+
     [Fact]
     public void Fold_and_unfold_a_row()
     {

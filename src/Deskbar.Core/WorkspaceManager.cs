@@ -1727,6 +1727,15 @@ public sealed class WorkspaceManager(
             Workspaces = State.Workspaces.Select(w => w.Id == id ? w with { Folded = folded } : w).ToList(),
         }));
 
+    // PINNING a workspace (see Workspace.Pinned): the row menu's "Pin to strip" and the pipe's pin-workspace.
+    // Shaped exactly like SetWorkspaceFolded, and idempotent for the same reason: the persist and the pulse are
+    // what make the bar, the strips and the taskbar buttons redraw their items.
+    public Result SetWorkspacePinned(Guid id, bool pinned) =>
+        Workspace(id).Tap(_ => Persist(State with
+        {
+            Workspaces = State.Workspaces.Select(w => w.Id == id ? w with { Pinned = pinned } : w).ToList(),
+        }));
+
     // Marks a workspace as tiled or not (Workspace.Tiled). Whether tiling then acts is TilingGate's call.
     // Untiling also forgets the workspace's stored layouts (Workspace.TileLayouts, and the legacy TileSizes with
     // them), in the same persist: leaving the grid is the user saying they are done with it. Pro lapsing is

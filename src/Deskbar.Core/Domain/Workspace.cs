@@ -64,6 +64,19 @@ public sealed record Workspace(Guid Id, string Name, Guid? DesktopId, string? Co
     // with no migration.
     public bool Tiled { get; init; }
 
+    // PINNED: this workspace gets an item on every screen strip, in the bar's header and on Windows' taskbar
+    // that takes you into it, and, while you are in it, back to where you came from
+    // (docs/superpowers/specs/2026-11-20-pinned-workspaces-design.md). Petre: "i'd have a messengers workspace
+    // pinned and i'd go to it each time i need to do something there, and have a simple way to go back", "i
+    // need to jump in and out of the messengers".
+    //
+    // Nothing about the workspace's WINDOWS changes: none is pinned to all desktops by this. What each item
+    // reads and where it goes is WorkspaceJumps.Of.
+    //
+    // On the workspace for the reason Folded and Tiled are, and an init property defaulting to false for the
+    // same reason: a state.json without the key loads with nothing pinned, with no migration.
+    public bool Pinned { get; init; }
+
     // LEGACY: the columns-of-rows sizes older builds stored here, one entry per screen. Only migration reads it:
     // Load turns each entry into a TileLayouts entry (JsonPersistenceStore.MigrateTileSizes) and empties this, so a
     // saved state always writes it as []. Kept as a property, rather than dropped, so a state.json from an older

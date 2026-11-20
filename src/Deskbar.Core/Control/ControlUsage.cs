@@ -15,7 +15,7 @@ public static class ControlUsage
     public static readonly IReadOnlyList<Section> Sections =
     [
         new("Listing", [
-            new("workspaces", "", "every workspace as JSON: name, group, row, colour, folded, current"),
+            new("workspaces", "", "every workspace as JSON: name, group, row, colour, folded, pinned, current"),
             new("windows", "", "every window as JSON: hwnd, title, originalTitle, process, workspace"),
             new("desktops", "", "every virtual desktop as JSON, including unnamed ones"),
             new("version", "", "the running build as JSON: version, exe, packaged"),
@@ -60,6 +60,8 @@ public static class ControlUsage
             new("reorder", "<workspace> up|down|top|end|<n>", "Move up / down / to top / to end, or to position n among its peers"),
             new("fold", "<workspace>", "Fold row (the name line only, no icons, except while you are on it)"),
             new("unfold", "<workspace>", "Unfold row"),
+            new("pin-workspace", "<workspace>", "Pin to strip: an item on every strip, the bar and the taskbar that goes in, and back out"),
+            new("unpin-workspace", "<workspace>", "Unpin from strip"),
             new("tile", "<workspace>", "Tile windows: a grid per screen, kept tidy as windows come and go"),
             new("untile", "<workspace>", "Stop tiling; windows stay where they are"),
             new("even", "<workspace>", "Even out tiles: equal splits, your shape kept"),
