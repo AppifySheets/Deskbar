@@ -372,8 +372,9 @@ public sealed record AppState(
     // There is no tiling on/off switch any more: ExperimentalTiling was removed on 2026-11-19 and tiling is
     // always available (see TilingGate). Its key in an older state.json is simply ignored on load.
 
-    // The groups workspaces belong to (#42 anchored, #84 anchorless). Membership lives on the
-    // workspace as GroupId; this holds the group's own name and its anchor, if it has one.
+    // The groups workspaces belong to. Membership lives on the workspace as GroupId; this holds the
+    // group's own name and colour. (Older files also record an anchor workspace per group, from the
+    // child workspaces that were removed; Migrated turns those into plain groups.)
     //
     // Empty by default, so a state.json written before groups loads without migration in the
     // deserializer's sense. It still needs Migrated below, because older files record nesting a

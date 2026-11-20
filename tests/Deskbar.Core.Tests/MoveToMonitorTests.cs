@@ -214,9 +214,8 @@ public class MoveToMonitorTests
         Assert.Single(screen.Moved);
     }
 
-    // A held move must not be applied to a window that is only VISITING: a window pinned to every
-    // desktop is on this one too, so "is it on this desktop" is true for windows that live
-    // elsewhere. A window whose real home is elsewhere is not moved on someone else's arrival.
+    // A held move waits until the window is on the CURRENT desktop. Arriving on some other desktop
+    // must not apply it, so a window is never moved on someone else's arrival.
     [Fact]
     public void A_held_move_waits_for_the_windows_own_desktop()
     {

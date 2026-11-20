@@ -27,14 +27,10 @@ public static class QuickFindSources
                 .Concat(overview.Pinned.Select(r => (Row: r, Place: new FindPlace(null, "all desktops"))))
                 .ToList();
 
-            // A window listed more than once is one a nested workspace borrowed (#42): ask which workspace it
-            // really belongs to. Only those, since WorkspaceOf costs COM calls and this runs every second while
-            // the box is open (final review, finding 4).
-            var borrowed = listed.GroupBy(x => x.Row.Window.Handle).Where(g => g.Count() > 1).Select(g => g.Key).ToHashSet();
+            // A window can be listed twice in one snapshot, for instance when it moves between the two reads
+            // that build the lists above, so keep the first. No window is lent to a second workspace any more,
+            // so the place a row was listed under is its place.
             var rows = listed
-                .Select(x => borrowed.Contains(x.Row.Window.Handle)
-                    ? x with { Place = manager.WorkspaceOf(x.Row.Window.Handle).Map(w => Place(state, w)).GetValueOrDefault(x.Place) }
-                    : x)
                 .DistinctBy(x => x.Row.Window.Handle)
                 .ToList();
             var places = rows.ToDictionary(x => x.Row.Window.Handle, x => x.Place);
