@@ -27,32 +27,18 @@ public class GroupMembershipTests
         return (manager, a.Id, b.Id, c.Id);
     }
 
-    // --- creating an anchorless group ---------------------------------------------------------
+    // --- creating a group ---------------------------------------------------------
 
     [Fact]
-    public void A_new_group_is_anchorless_and_holds_the_workspace_it_was_made_from()
+    public void A_new_group_holds_the_workspace_it_was_made_from()
     {
         var (manager, a, _, _) = Started();
 
         var group = manager.CreateGroup("Clients", a);
 
         Assert.True(group.IsSuccess);
-        Assert.False(group.Value.IsAnchored);
         Assert.Equal("Clients", group.Value.Name);
         Assert.Equal(group.Value.Id, manager.State.Workspaces.Single(w => w.Id == a).GroupId);
-    }
-
-    // Nothing is borrowed, which is the whole point of the construct: there is no parent workspace,
-    // so there are no windows to lend.
-    [Fact]
-    public void An_anchorless_group_lends_no_windows()
-    {
-        var (manager, a, b, _) = Started();
-        var group = manager.CreateGroup("Clients", a).Value;
-        Assert.True(manager.MoveIntoGroup(b, group.Id).IsSuccess);
-
-        Assert.Null(manager.State.LendsWindowsTo(a));
-        Assert.Null(manager.State.LendsWindowsTo(b));
     }
 
     [Fact]
@@ -83,7 +69,7 @@ public class GroupMembershipTests
     // --- moving in ----------------------------------------------------------------------------
 
     [Fact]
-    public void Moving_into_an_anchorless_group_is_pure_membership()
+    public void Moving_into_a_group_is_pure_membership()
     {
         var (manager, a, b, _) = Started();
         var group = manager.CreateGroup("Clients", a).Value;
@@ -92,20 +78,6 @@ public class GroupMembershipTests
 
         Assert.Equal(group.Id, manager.State.Workspaces.Single(w => w.Id == b).GroupId);
         Assert.Equal(2, manager.State.MembersOf(group.Id).Count);
-    }
-
-    // The payoff of one model: joining an ANCHORED group makes the workspace a child that borrows
-    // the anchor's windows, and it takes no extra code to do it.
-    [Fact]
-    public void Moving_into_an_anchored_group_starts_borrowing_from_its_anchor()
-    {
-        var (manager, a, b, c) = Started();
-        Assert.True(manager.NestWorkspace(b, a).IsSuccess);
-        var group = manager.State.GroupOf(a)!.Id;
-
-        Assert.True(manager.MoveIntoGroup(c, group).IsSuccess);
-
-        Assert.Equal(a, manager.State.LendsWindowsTo(c));
     }
 
     // Leaving the old group is part of moving, so a group of two that loses a member is dissolved
@@ -124,17 +96,6 @@ public class GroupMembershipTests
         Assert.DoesNotContain(manager.State.Groups, g => g.Id == first.Id);
         Assert.Null(manager.State.Workspaces.Single(w => w.Id == a).GroupId);
         Assert.Equal(second, manager.State.Workspaces.Single(w => w.Id == b).GroupId);
-    }
-
-    [Fact]
-    public void An_anchor_cannot_move_into_another_group()
-    {
-        var (manager, a, b, c) = Started();
-        Assert.True(manager.NestWorkspace(b, a).IsSuccess);
-        Assert.True(manager.CreateGroup("Clients", c).IsSuccess);
-        var other = manager.State.GroupOf(c)!.Id;
-
-        Assert.True(manager.MoveIntoGroup(a, other).IsFailure);
     }
 
     [Fact]
@@ -173,25 +134,6 @@ public class GroupMembershipTests
         Assert.Null(manager.State.Workspaces.Single(w => w.Id == a).GroupId);
     }
 
-    // The anchor leaving is the interesting case: the others keep their grouping and their name, and
-    // simply stop borrowing, because the workspace that was lending the windows has gone.
-    [Fact]
-    public void An_anchor_leaving_a_group_of_three_makes_it_anchorless()
-    {
-        var (manager, a, b, c) = Started();
-        Assert.True(manager.NestWorkspace(b, a).IsSuccess);
-        var group = manager.State.GroupOf(a)!.Id;
-        Assert.True(manager.MoveIntoGroup(c, group).IsSuccess);
-
-        Assert.True(manager.LeaveGroup(a).IsSuccess);
-
-        var remaining = manager.State.Groups.Single(g => g.Id == group);
-        Assert.False(remaining.IsAnchored);
-        Assert.Equal("Alpha", remaining.Name); // the name it was given, kept after the anchor left
-        Assert.Null(manager.State.LendsWindowsTo(b));
-        Assert.Equal(2, manager.State.MembersOf(group).Count);
-    }
-
     // --- ungrouping ---------------------------------------------------------------------------
 
     [Fact]
@@ -214,24 +156,13 @@ public class GroupMembershipTests
     public void Ungrouping_keeps_desktops_names_and_positions()
     {
         var (manager, a, b, _) = Started();
-        Assert.True(manager.NestWorkspace(b, a).IsSuccess);
+        var group = manager.CreateGroup("Clients", a).Value;
+        Assert.True(manager.MoveIntoGroup(b, group.Id).IsSuccess);
         var before = manager.State.Workspaces.Select(w => (w.Id, w.Name, w.DesktopId)).ToList();
 
-        Assert.True(manager.Ungroup(manager.State.GroupOf(a)!.Id).IsSuccess);
+        Assert.True(manager.Ungroup(group.Id).IsSuccess);
 
         Assert.Equal(before, manager.State.Workspaces.Select(w => (w.Id, w.Name, w.DesktopId)).ToList());
-    }
-
-    [Fact]
-    public void Ungrouping_an_anchored_group_stops_the_borrowing()
-    {
-        var (manager, a, b, _) = Started();
-        Assert.True(manager.NestWorkspace(b, a).IsSuccess);
-        Assert.Equal(a, manager.State.LendsWindowsTo(b));
-
-        Assert.True(manager.Ungroup(manager.State.GroupOf(a)!.Id).IsSuccess);
-
-        Assert.Null(manager.State.LendsWindowsTo(b));
     }
 
     [Fact]

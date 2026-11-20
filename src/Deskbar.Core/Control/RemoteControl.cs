@@ -86,7 +86,6 @@ public sealed partial class RemoteControl(WorkspaceManager manager, Func<bool, R
         ("task", _) => Task(rest),
 
         ("rename", [var workspace, var name]) => Rename(workspace, name),
-        ("add-child", [var parent, var name]) => AddChild(parent, name),
         ("reorder", [var workspace, var where]) => Reorder(workspace, where),
         ("fold", [var workspace]) => SetRowFolded(workspace, true),
         ("unfold", [var workspace]) => SetRowFolded(workspace, false),

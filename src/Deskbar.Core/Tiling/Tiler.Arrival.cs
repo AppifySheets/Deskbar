@@ -98,7 +98,7 @@ public sealed partial class Tiler
 
     // The tile a new window splits: the most recently activated window that is on `board`, is not the arriving
     // window itself and is not maximized (a maximized tile covers its screen, and halving it would be invisible).
-    // A floating, pinned or borrowed window is never on the board, so activating one leaves the target as it was.
+    // A floating or pinned window is never on the board, so activating one leaves the target as it was.
     Maybe<WindowHandle> LastUsed(TileBoard board, WindowHandle except) =>
         used.Select(u => u.Window)
             .Where(w => w != except && board.ScreenOf(w).HasValue && !surface.IsMaximized(w))

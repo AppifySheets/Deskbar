@@ -124,16 +124,19 @@ public sealed record Workspace(Guid Id, string Name, Guid? DesktopId, string? Co
     //
     // This replaced ParentId (#42's original shape), where a nested workspace pointed straight at
     // its parent workspace. That could not express #84's groups, which have a name and no parent
-    // workspace at all, so the parent moved into WorkspaceGroup.AnchorWorkspaceId and membership
-    // became a group id. AppState.Migrated converts older files, so nothing has to be re-nested by
-    // hand.
+    // workspace at all, so membership became a group id. AppState.Migrated converts older files, so
+    // nothing has to be re-grouped by hand.
     public Guid? GroupId { get; init; }
 
-    // Read by the migration only, and never written since. A state.json from before groups records
-    // nesting as ParentId on the child, and this is what lets that file still be understood.
+    // Read by the migration only, and never written with a value. A state.json from before groups
+    // records nesting as ParentId on the child, and this is what lets that file still be understood.
+    //
+    // AppState.Migrated turns it into groups and then CLEARS it: nesting no longer exists, so there is
+    // no downgrade to keep it for, and a stale value would rebuild groups the user had since ungrouped
+    // (the ParentId step runs whenever Groups is empty).
     //
     // Deliberately not used anywhere else: everything reads GroupId. Deleting this property would
-    // silently un-nest every workspace on the first load after an upgrade, which is data loss that
-    // looks like a rendering bug.
+    // silently drop every nesting in a file that has not been loaded since groups arrived, which is
+    // data loss that looks like a rendering bug.
     public Guid? ParentId { get; init; }
 }

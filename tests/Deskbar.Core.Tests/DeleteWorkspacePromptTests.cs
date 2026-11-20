@@ -104,28 +104,12 @@ public class DeleteWorkspacePromptTests
         Assert.Contains("dissolved", text);
     }
 
-    // Losing the ANCHOR is what stops the borrowing, and only the anchor lends windows -- so this is
-    // the one case where the group survives but stops doing something it used to do.
-    [Fact]
-    public void Deleting_the_anchor_says_the_others_stop_borrowing()
-    {
-        var state = With(Ws(Doomed, "Sparrow", Box), Ws(Keeper, "Keeper", Box), Ws(Third, "Third", Box)) with
-        {
-            Groups = [new Group(Box, "Work") { AnchorWorkspaceId = Doomed }],
-        };
-
-        var text = DeleteWorkspacePrompt.For(state, Doomed, []).Value;
-
-        Assert.Contains("no longer show", text);
-        Assert.Contains("2 workspaces", text);
-    }
-
     [Fact]
     public void An_ordinary_member_leaves_the_group_standing()
     {
         var state = With(Ws(Doomed, "Sparrow", Box), Ws(Keeper, "Keeper", Box), Ws(Third, "Third", Box)) with
         {
-            Groups = [new Group(Box, "Work") { AnchorWorkspaceId = Keeper }],
+            Groups = [new Group(Box, "Work")],
         };
 
         var text = DeleteWorkspacePrompt.For(state, Doomed, []).Value;

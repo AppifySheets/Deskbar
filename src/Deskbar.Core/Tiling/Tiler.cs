@@ -18,7 +18,7 @@ namespace Deskbar.Core.Tiling;
 //   - Only the desktop being looked at is tiled. Another desktop's windows are never moved, restored or
 //     un-maximized; arriving at a tiled workspace re-tiles it once, which picks up what changed while away.
 //   - Only windows that LIVE on the workspace tile (WorkspaceManager.WorkspaceOf, which is None for a pinned
-//     window and the home workspace for a borrowed one), that the surface says can tile, and that are not
+//     window), that the surface says can tile, and that are not
 //     minimized. Everything else floats above the grid.
 //   - A maximized window GIVES UP ITS SLOT, as a minimized one does, and the other tiles fill the screen. Petre,
 //     2026-11-20: "let's not give space to the maximized window". It used to keep its slot, so the tiles beneath
@@ -695,7 +695,7 @@ public sealed partial class Tiler(WorkspaceManager manager, IVirtualDesktopServi
     bool SetAside(WindowHandle window) =>
         surface.IsMaximized(window) && !restoring.Contains(window);
 
-    // "Lives here" (spec: the test is the one WorkspaceOf answers, so pinned and borrowed windows float).
+    // "Lives here" (spec: the test is the one WorkspaceOf answers, so pinned windows float).
     bool LivesOn(WindowHandle window, Workspace workspace) =>
         manager.WorkspaceOf(window).Map(w => w.Id == workspace.Id).GetValueOrDefault(false);
 

@@ -214,10 +214,9 @@ public class MoveToMonitorTests
         Assert.Single(screen.Moved);
     }
 
-    // A held move must not be applied to a window that is only VISITING: an anchored group pins its
-    // parent's windows onto the child's desktop while you stand there, so "is it on this desktop" is
-    // briefly true for windows that live elsewhere. Applied after the borrowing settles, so a window
-    // whose real home is elsewhere is not moved on someone else's arrival.
+    // A held move must not be applied to a window that is only VISITING: a window pinned to every
+    // desktop is on this one too, so "is it on this desktop" is true for windows that live
+    // elsewhere. A window whose real home is elsewhere is not moved on someone else's arrival.
     [Fact]
     public void A_held_move_waits_for_the_windows_own_desktop()
     {

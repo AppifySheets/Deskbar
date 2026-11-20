@@ -110,13 +110,13 @@ public sealed record AppState(
     // values, human-readable in state.json, and RosterIdentity.Of(entry) derives the
     // identity anyway. Init properties with empty defaults, so older state.json files load
     // without migration (same pattern as PersistedRenames and FloatingBar).
-    // Windows we OS-pinned so a nested workspace could show its parent's windows (#42), and the
-    // desktop each one came from.
-    //
-    // Persisted for exactly one reason: crash recovery. Pinning is a real change to the user's
-    // machine, and unpinning leaves a window on whatever desktop is current -- so a crash while
-    // inside a nested workspace would strand the parent's windows both pinned and homeless. With
-    // this, the next start unpins each one and puts it back where it came from.
+    // LEGACY. Windows a child workspace OS-pinned so it could show its parent's windows (#42), and the
+    // desktop each one came from. Child workspaces are gone and nothing writes this any more, but a
+    // state.json written by a version that still had them can list pins from a crash, and a pinned
+    // window with no one left to unpin it would stay on every desktop for good. So the next start
+    // still unpins each one and puts it back where it came from (WorkspaceManager.RepairInheritedPins),
+    // then clears the list. This, InheritedPin and the repair can go in a later release, once no
+    // state.json written by a version with child workspaces is still around.
     //
     // Raw hwnds rather than roster identities, and that is right HERE while being wrong everywhere
     // else in this file: those windows belong to processes that outlive our crash, so their handles
@@ -408,41 +408,22 @@ public sealed record AppState(
     // --- asking about groups ------------------------------------------------------------------
     //
     // Every surface asks these rather than working membership out for itself. The bar, the
-    // switcher, the manager's borrowing and the move logic all need the same three answers, and
-    // when they each computed their own the answers drifted: that is how #85 happened, with the
-    // bar grouping rows one way and the move operations reordering another.
+    // switcher and the move logic all need the same answers, and when they each computed their own
+    // the answers drifted: that is how #85 happened, with the bar grouping rows one way and the
+    // move operations reordering another.
 
     public Group? GroupOf(Guid workspaceId) =>
         Workspaces.FirstOrDefault(w => w.Id == workspaceId)?.GroupId is { } group
             ? Groups.FirstOrDefault(g => g.Id == group)
             : null;
 
-    // The members of a group, ANCHOR FIRST and everything else in list order.
-    //
-    // Anchor first is a rendering rule that belongs here rather than in the bar, because the same
-    // order decides which member a group's colour comes from. An anchorless group has no anchor to
-    // promote, so it is plain list order.
-    public IReadOnlyList<Workspace> MembersOf(Guid groupId)
-    {
-        var members = Workspaces.Where(w => w.GroupId == groupId).ToList();
-        return Groups.FirstOrDefault(g => g.Id == groupId)?.AnchorWorkspaceId is { } anchor
-            ? members.Where(w => w.Id == anchor).Concat(members.Where(w => w.Id != anchor)).ToList()
-            : members;
-    }
+    // The members of a group, in list order, which is the order the box draws them.
+    public IReadOnlyList<Workspace> MembersOf(Guid groupId) =>
+        Workspaces.Where(w => w.GroupId == groupId).ToList();
 
-    // The workspace whose windows this one borrows, or null when there is nothing to borrow.
-    //
-    // Null for an ungrouped workspace, for a member of an anchorless group (#84's whole point:
-    // there is no parent, so there are no windows to lend), and for the anchor itself, which
-    // already has its own windows.
-    public Guid? LendsWindowsTo(Guid workspaceId) =>
-        GroupOf(workspaceId)?.AnchorWorkspaceId is { } anchor && anchor != workspaceId ? anchor : null;
-
-    public bool IsAnchor(Guid workspaceId) => GroupOf(workspaceId)?.AnchorWorkspaceId == workspaceId;
-
-    // The list position a group's colour comes from when it has no colour of its own: its ANCHOR's,
-    // or its first member's when there is no anchor. Lane colours follow list position, and a group
-    // has one colour (#90), so it needs one position rather than one per member.
+    // The list position a group's colour comes from when it has no colour of its own: its first
+    // member's. Lane colours follow list position, and a group has one colour (#90), so it needs one
+    // position rather than one per member.
     //
     // -1 for a group with no members at all, which the callers already handle as "no colour": every
     // surface that paints a lane accepts a null brush, because a hand-edited state.json has always
@@ -451,7 +432,7 @@ public sealed record AppState(
     // Here rather than in the bar and the switcher separately, because both need the same answer and
     // #85 is what two surfaces computing their own answer looks like.
     public int ColourSlotOf(Group group) =>
-        Workspaces.ToList().FindIndex(w => w.Id == (group.AnchorWorkspaceId ?? MembersOf(group.Id).FirstOrDefault()?.Id));
+        Workspaces.ToList().FindIndex(w => w.Id == MembersOf(group.Id).FirstOrDefault()?.Id);
 
     // Turns a pre-groups state.json into one that uses groups, and is a no-op on anything already
     // migrated or on a file that never had nesting.
@@ -466,13 +447,22 @@ public sealed record AppState(
     // parent is in it. That is what lets one render path draw both kinds, and what lets an anchored
     // group survive losing its anchor.
     //
-    // ParentId is left on the records rather than cleared. Nothing reads it after this, and leaving
-    // it means a downgrade to an older build still finds its nesting where it expects it.
+    // ParentId is CLEARED on every workspace once this has run. Nesting no longer exists, so the old
+    // reason for leaving it (a downgrade to an older build finding its nesting where it expects it)
+    // is gone, and a stale ParentId is harmful: this step runs whenever Groups is empty, so a user who
+    // later ungrouped everything would have the groups rebuilt from the leftover ParentIds on the next
+    // start.
     AppState GroupsFromParentIds()
     {
-        // Already migrated, or nothing to migrate. Checked on Groups rather than on ParentId so
-        // running it twice cannot produce a second set of groups for the same parents.
-        if (Groups.Count > 0) return this;
+        // Nothing to migrate, which also makes running it twice a no-op: the first run clears every
+        // ParentId, so the second finds none and cannot build a second set of groups.
+        if (Workspaces.All(w => w.ParentId is null)) return this;
+
+        var cleared = this with { Workspaces = Workspaces.Select(w => w with { ParentId = null }).ToList() };
+
+        // Groups already exist, so they win: the ParentIds are stale (an older build left them on the
+        // records beside the groups it built from them) and are only cleared.
+        if (Groups.Count > 0) return cleared;
 
         var parents = Workspaces
             .Where(w => w.ParentId is not null)
@@ -484,7 +474,7 @@ public sealed record AppState(
             .Where(parent => Workspaces.Any(w => w.Id == parent))
             .ToList();
 
-        if (parents.Count == 0) return this;
+        if (parents.Count == 0) return cleared;
 
         var groups = parents
             .Select(parent => new Group(Guid.NewGuid(), Workspaces.Single(w => w.Id == parent).Name) { AnchorWorkspaceId = parent })
@@ -498,8 +488,8 @@ public sealed record AppState(
             Groups = groups,
             Workspaces = Workspaces
                 .Select(w => (w.ParentId ?? w.Id) is var key && groupOf.TryGetValue(key, out var group)
-                    ? w with { GroupId = group }
-                    : w)
+                    ? w with { GroupId = group, ParentId = null }
+                    : w with { ParentId = null })
                 .ToList(),
         };
     }
@@ -531,14 +521,15 @@ public sealed record AppState(
     {
         if (Groups.All(g => g.AnchorWorkspaceId is null)) return this;
 
-        // Where each anchored group's colour came from, read BEFORE the list is reordered. Only for an
-        // anchor that exists; -1 would otherwise be taken for a real position.
+        // Where each anchored group's colour came from: the anchor's list position, read BEFORE the list
+        // is reordered. Worked out here rather than asked of ColourSlotOf, which now answers for plain
+        // groups only. Only for an anchor that exists; -1 would otherwise be taken for a real position.
         var oldSlots = Groups
             .Where(g => g.AnchorWorkspaceId is { } anchor && Workspaces.Any(w => w.Id == anchor))
-            .ToDictionary(g => g.Id, ColourSlotOf);
+            .ToDictionary(g => g.Id, g => Workspaces.ToList().FindIndex(w => w.Id == g.AnchorWorkspaceId));
 
-        // The rows in stored order (Blocks), each anchor explicitly first in its block. MembersOf puts it
-        // there today; saying it here keeps this right once MembersOf stops knowing about anchors.
+        // The rows in stored order (Blocks), each anchor explicitly first in its block. MembersOf no longer knows
+        // about anchors and answers plain list order, so this is where the anchor is promoted, once.
         var workspaces = Blocks()
             .SelectMany(block => block.FirstOrDefault()?.GroupId is { } id
                     && Groups.FirstOrDefault(g => g.Id == id)?.AnchorWorkspaceId is { } anchor

@@ -223,9 +223,6 @@ public static class OverviewBuilder
                 .ToList();
         }
 
-        // Nesting needs nothing here (#42). A nested workspace's borrowed windows arrive through
-        // `desktopOf` like any other window on that desktop, because by the time you are looking at
-        // them they really are on it -- see WorkspaceManager.ApplyInheritance.
         var workspaceGroups = state.Workspaces
             .Select(ws => new WorkspaceGroup(
                 ws,

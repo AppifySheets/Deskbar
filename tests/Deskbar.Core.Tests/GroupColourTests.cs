@@ -4,7 +4,7 @@ using Deskbar.Core.Persistence;
 
 namespace Deskbar.Core.Tests;
 
-// #90 (a group has one colour, settable from the parent or any member) and #92 (a workspace moving
+// #90 (a group has one colour, settable from any member) and #92 (a workspace moving
 // into a group must not recolour the group).
 //
 // Petre: "the parent can change the group's colour, and so can any child... a group has one colour:
@@ -44,18 +44,6 @@ public class GroupColourTests
 
         Assert.Equal("#123456", manager.State.Groups.Single().Color);
         Assert.Null(manager.State.Workspaces.Single(w => w.Id == b).Color);
-    }
-
-    [Fact]
-    public void The_anchor_setting_a_colour_sets_the_groups_too()
-    {
-        var (manager, a, b, _) = Started();
-        Assert.True(manager.NestWorkspace(b, a).IsSuccess);
-
-        Assert.True(manager.SetWorkspaceColor(a, "#123456").IsSuccess);
-
-        Assert.Equal("#123456", manager.State.GroupOf(a)!.Color);
-        Assert.Null(manager.State.Workspaces.Single(w => w.Id == a).Color);
     }
 
     // An anchorless group's header is the only row of its own it has, and #84 gave it its own menu.
@@ -98,16 +86,6 @@ public class GroupColourTests
         Assert.Equal("#ABCDEF", manager.CreateGroup("Clients", a).Value.Color);
     }
 
-    [Fact]
-    public void Nesting_gives_the_new_group_the_parents_colour()
-    {
-        var (manager, a, b, _) = Started(colourOfA: "#ABCDEF");
-
-        Assert.True(manager.NestWorkspace(b, a).IsSuccess);
-
-        Assert.Equal("#ABCDEF", manager.State.GroupOf(a)!.Color);
-    }
-
     // #92, the reported bug: the group's colour is the group's, and a newcomer adopts it rather than
     // imposing its own.
     [Fact]
@@ -142,21 +120,10 @@ public class GroupColourTests
 
     // --- the position a group's colour falls back to -------------------------------------------
 
-    // With no colour of its own a group follows list position like any row, and the position is the
-    // anchor's: the group and its parent row must not be two different colours.
+    // With no colour of its own a group follows list position like any row, and the position is its
+    // first member's, which keeps "colour follows list position" true for groups as well as single rows.
     [Fact]
-    public void An_anchored_group_falls_back_to_its_anchors_position()
-    {
-        var (manager, a, b, _) = Started();
-        Assert.True(manager.NestWorkspace(b, a).IsSuccess);
-
-        Assert.Equal(0, manager.State.ColourSlotOf(manager.State.GroupOf(a)!));
-    }
-
-    // An anchorless group has no parent to inherit from, so the first member is the only stable
-    // answer, which keeps "colour follows list position" true for groups as well as single rows.
-    [Fact]
-    public void An_anchorless_group_falls_back_to_its_first_members_position()
+    public void A_group_takes_its_colour_from_its_first_members_position()
     {
         var (manager, _, b, c) = Started();
         var group = manager.CreateGroup("Clients", b).Value.Id;

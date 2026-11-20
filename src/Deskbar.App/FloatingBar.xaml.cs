@@ -2409,11 +2409,9 @@ public partial class FloatingBar : Window
                 // shows (FloatingBar.Tasks.cs), so the swatch and the row it points at are one colour.
                 NoteWorkspaceAccent(g.Workspace.Id, LaneAccent(colour, colourSlot >= 0 ? colourSlot : ownSlot));
 
-                // A member is drawn as nested unless it is the anchor. In an ANCHORLESS group every
-                // member is nested, because none of them is the parent: the group's name carries
-                // what the anchor's row would otherwise have said.
-                var isAnchor = group?.AnchorWorkspaceId == g.Workspace.Id;
-                var nested = group is not null && !isAnchor;
+                // Every member of a group is drawn as nested, indented under the group's header: the
+                // group's name carries what a parent row would otherwise have said.
+                var nested = group is not null;
 
                 // The name, plainly. The ↳ prefix that was here first is gone: Petre asked for "a
                 // better representation that it's a child", and a glyph inside a label that already
@@ -2476,20 +2474,20 @@ public partial class FloatingBar : Window
                     return;
                 }
 
-                // MembersOf puts the anchor first, so an anchored group draws its parent at the top
-                // whatever order the members happen to sit in.
+                // MembersOf answers in list order, which is the order the box draws them.
                 var members = state.MembersOf(id)
                     .Select(w => overview.Workspaces.FirstOrDefault(x => x.Workspace.Id == w.Id))
                     .Where(x => x is not null)
                     .ToList();
                 members.ForEach(m => drawn.Add(m!.Workspace.Id));
 
-                // A group of one gets no box: an outline around a single row would be decoration
-                // that means nothing, and most rows on the bar stand alone. It cannot normally
-                // happen, since leaving a group of two dissolves it, but a hand-edited state.json
-                // can produce one. Decided BEFORE the rows are built, because it is what decides
-                // whether a row paints its own lane or the box paints it for the whole group.
-                var boxed = members.Count + (group.IsAnchored ? 0 : 1) > 1;
+                // A group always gets its box: its header row carries the name, so even a group of
+                // one is a header plus a row rather than a row that looks unchanged. That group of
+                // one cannot normally happen, since leaving a group of two dissolves it, but a
+                // hand-edited state.json can produce one. Decided BEFORE the rows are built, because
+                // it is what decides whether a row paints its own lane or the box paints it for the
+                // whole group.
+                var boxed = members.Count > 0;
 
                 // A FOLDED group (Group.Folded) is its one line, plus the full row of any member that is
                 // still in view: the workspace you are on, or one the pointer has opened. The same rule a
@@ -2506,10 +2504,10 @@ public partial class FloatingBar : Window
 
                 var rows = members.Select(m => WorkspaceRow(m!, group, boxed)).ToList();
 
-                // An ANCHORLESS group needs a header, because nothing inside it carries the name.
-                // Deliberately not a switch target: there is no desktop behind it, and a row that
-                // looks clickable and does nothing is worse than one that plainly is not.
-                if (!group.IsAnchored) rows.Insert(0, GroupHeader(group, ColourSlotOf(group)));
+                // A group needs a header, because nothing inside it carries the name. Deliberately
+                // not a switch target: there is no desktop behind it, and a row that looks clickable
+                // and does nothing is worse than one that plainly is not.
+                rows.Insert(0, GroupHeader(group, ColourSlotOf(group)));
 
                 groupRows.Add(boxed
                     ? FamilyBox(rows, LaneAccent(group.Color, ColourSlotOf(group)), LaneTint(group.Color, ColourSlotOf(group)), AcrossSeam)
@@ -3333,7 +3331,7 @@ public partial class FloatingBar : Window
 
         // Nothing to join yet, and an empty submenu reads as a broken one.
         var joinable = state.Groups.Where(g => g.Id != group?.Id).ToList();
-        if (joinable.Count == 0 || state.IsAnchor(workspaceId)) return;
+        if (joinable.Count == 0) return;
 
         var into = new MenuItem { Header = "Move into group", Icon = MenuGlyph("⇥") };
         joinable.ForEach(target =>
@@ -4204,7 +4202,7 @@ public partial class FloatingBar : Window
         // right-clicking an icon is about that window, right-clicking anywhere else on the row is
         // about the workspace.
         // Both built on the first right-click, not now (FloatingBar.LazyMenus.cs).
-        if (rowKey is { } workspaceId) LazyMenu(container, menu => WorkspaceMenu(workspaceId, visualLabel, folded, nested, menu));
+        if (rowKey is { } workspaceId) LazyMenu(container, menu => WorkspaceMenu(workspaceId, visualLabel, folded, menu));
         // ...and an UNBOUND desktop's row gets a menu of its own (#149). Petre: "right-clicking on
         // the default desktop (desktop1) doesn't do anything, no context menu for it."
         //
@@ -6892,7 +6890,7 @@ public partial class FloatingBar : Window
     // 'Remove workspace' is a bad way to find that out" -- and it arrived with #73 once it could
     // refuse a workspace that still held windows. It closes those windows now instead of refusing;
     // the reasoning, and what replaced the guard, is at the item itself at the bottom of this method.
-    internal ContextMenu WorkspaceMenu(Guid workspaceId, string name, bool folded, bool nested, ContextMenu? into = null)
+    internal ContextMenu WorkspaceMenu(Guid workspaceId, string name, bool folded, ContextMenu? into = null)
     {
         var menu = into ?? new ContextMenu(); // `into`: the empty menu a lazy element already holds (FloatingBar.LazyMenus.cs)
         HoldFadeWhileOpen(menu);
@@ -6925,8 +6923,7 @@ public partial class FloatingBar : Window
         // beside a grouped row the new workspace joins the same group, instead of landing ungrouped
         // in the middle of somebody's box, which is what it used to do.
         //
-        // "Same depth" became "same group" with the group model, and that is one answer for both
-        // kinds: an anchored group and an anchorless one are joined the same way.
+        // "Same depth" became "same group" with the group model, which is one answer for every row.
         //
         // Null for a row that stands on its own, which is the previous behaviour unchanged.
         Guid? GroupOfRow() => manager.State.GroupOf(workspaceId)?.Id;
@@ -6935,13 +6932,6 @@ public partial class FloatingBar : Window
         // one past it, and InsertWorkspace clamps both.
         Add("✚", "Insert before…", () => InsertAt(IndexOf(), GroupOfRow()));
         Add("✚", "Insert after…", () => InsertAt(IndexOf() + 1, GroupOfRow()));
-        // Petre: "add child as a right click menu item" (#42). Only offered on a row that CAN be a
-        // parent -- workspaces nest one level deep, so a child row does not offer to have children
-        // of its own rather than offering it and refusing afterwards.
-        if (!nested)
-            Add("↳", "Add child…", () =>
-                PromptDialog.Ask("New nested workspace", "Name:", owner: this)
-                    .Tap(child => Report(manager.AddChildWorkspace(workspaceId, child))));
 
         AddGroupItems(menu, workspaceId, Add);
 
@@ -7480,15 +7470,15 @@ public partial class FloatingBar : Window
         VerticalAlignment = VerticalAlignment.Center,
     };
 
-    // `parentId` is the DEPTH the new workspace is created at (#74): the parent of the row the
-    // menu was invoked on, so a sibling of a nested row is nested under the same workspace, and
-    // null on a top-level row exactly as before.
-    void InsertAt(int index, Guid? parentId) =>
+    // `groupId` is the DEPTH the new workspace is created at (#74): the group of the row the menu was
+    // invoked on, so a sibling of a grouped row joins the same group, and null on a top-level row
+    // exactly as before.
+    void InsertAt(int index, Guid? groupId) =>
         PromptDialog.Ask("New workspace", "Name:", owner: this)
             // Result<Workspace> converts implicitly to Result, which is all Report needs: it only
             // ever shows the ERROR, and the new Workspace has no reader here -- the bar redraws
             // off the pulse that creating it sent.
-            .Tap(fresh => Report(manager.InsertWorkspace(fresh, index, parentId)));
+            .Tap(fresh => Report(manager.InsertWorkspace(fresh, index, groupId)));
 
     ContextMenu IconMenu(WindowRow row, ContextMenu? into = null)
     {

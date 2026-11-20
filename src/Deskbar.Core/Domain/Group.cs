@@ -4,26 +4,16 @@ namespace Deskbar.Core.Domain;
 
 // A named group of workspaces, drawn together on the bar.
 //
-// Two kinds of grouping were asked for and this is one record covering both, which was Petre's
-// call when the choice was put to him:
+// One kind of group (#84, "visual groups"): a name and nothing else. No desktop to switch to, no
+// windows to borrow, no parent icons. Membership is organisational, the members are the workspaces
+// whose GroupId is this group's Id, and they are drawn in list order inside one box under a header
+// carrying the name. Because it is only a name, #83's operations (move into a group, move out,
+// ungroup) are one implementation.
 //
-//   * ANCHORED (#42, "nested workspaces"). AnchorWorkspaceId names a member that is the parent.
-//     Its windows are borrowed onto the other members' desktops while you are standing in one of
-//     them, and the group wears the anchor's lane colour. The anchor is a member like any other,
-//     which is why it is an id rather than a separate field outside the membership list.
-//
-//   * ANCHORLESS (#84, "visual groups"). AnchorWorkspaceId is null. The group is a name and
-//     nothing else: no desktop to switch to, no windows to borrow, no parent icons. Membership is
-//     organisational.
-//
-// Modelling them together rather than side by side is what makes #83's operations (move into a
-// group, move out, ungroup) one implementation instead of two, and it is why nothing in the
-// manager or the bar has to ask which kind it is except in the two places where the anchor
-// genuinely changes behaviour: borrowing windows, and where the name comes from.
-//
-// Name is stored even for an anchored group. It starts as the anchor's name, and keeping its own
-// copy means renaming the anchor workspace does not silently rename the group, and an anchored
-// group can lose its anchor (the anchor gets deleted, or moved out) without becoming nameless.
+// There used to be a second, ANCHORED kind (#42, "nested workspaces"), whose anchor workspace lent
+// its windows to the other members. It was removed (see
+// docs/superpowers/specs/2026-11-20-bar-edit-mode-design.md); AnchorWorkspaceId below survives only
+// so an old state.json can still be read.
 public sealed record Group(Guid Id, string Name)
 {
     // LEGACY, and on its way out: child workspaces are being removed (see
@@ -37,11 +27,8 @@ public sealed record Group(Guid Id, string Name)
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public Guid? AnchorWorkspaceId { get; init; }
 
-    public bool IsAnchored => AnchorWorkspaceId is not null;
-
     // The lane colour for the whole group (#90). Petre: "a group has one colour: if any child
-    // changes it, the entire group takes that colour", and it is settable "from the parent or any
-    // child".
+    // changes it, the entire group takes that colour", and it is settable from any member.
     //
     // It lives HERE rather than being copied onto each member, which is what makes both halves of
     // that work without extra bookkeeping. Joining takes the group's colour and leaving gives a

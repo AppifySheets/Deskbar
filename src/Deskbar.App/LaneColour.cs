@@ -15,10 +15,9 @@ public static class LaneColour
             ? WorkspacePalette.For(group.Color, Math.Max(0, state.ColourSlotOf(group)))
             : WorkspacePalette.For(workspace, Math.Max(0, state.Workspaces.ToList().FindIndex(w => w.Id == workspace.Id)));
 
-    // The group's name for a member of a group, null for one that stands alone and for the group's anchor,
-    // whose row would otherwise read "Sparrow › Sparrow" (#93). Both group kinds present the same way.
+    // The group's name for a member of a group, null for one that stands alone.
     public static string? GroupNameOf(AppState state, Workspace workspace) =>
-        state.GroupOf(workspace.Id) is { } group && !state.IsAnchor(workspace.Id) ? group.Name : null;
+        state.GroupOf(workspace.Id)?.Name;
 
     // "Sparrow › dice-rolls" for a member, the bare name otherwise: Petre names children by what they are and
     // lets the group say where they sit.

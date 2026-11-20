@@ -56,7 +56,6 @@ public static class ControlUsage
         ]),
         new("Workspace row menu", [
             new("rename", "<workspace> <new name>", "Rename…"),
-            new("add-child", "<parent> <name>", "Add child… (nests a new workspace that borrows the parent's windows)"),
             new("reorder", "<workspace> up|down|top|end|<n>", "Move up / down / to top / to end, or to position n among its peers"),
             new("fold", "<workspace>", "Fold row (the name line only, no icons, except while you are on it)"),
             new("unfold", "<workspace>", "Unfold row"),

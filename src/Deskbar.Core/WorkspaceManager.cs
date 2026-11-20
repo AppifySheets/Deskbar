@@ -200,12 +200,11 @@ public sealed class WorkspaceManager(
     public Maybe<string> OriginalTitle(WindowHandle window) => ledger.OriginalTitle(window);
 
     // The workspace a window LIVES in, or None for a window on an unnamed desktop, a pinned one, or one
-    // that closed mid-question. Answered the way the bar answers it: a window borrowed for a nested
-    // workspace still belongs to the desktop it came from (see WindowsByWorkspace).
+    // that closed mid-question. Answered the way the bar answers it (see WindowsByWorkspace).
     public Maybe<Workspace> WorkspaceOf(WindowHandle window) =>
-        desktops.IsPinned(window).GetValueOrDefault(false) && !borrowed.ContainsKey(window)
+        desktops.IsPinned(window).GetValueOrDefault(false)
             ? Maybe<Workspace>.None
-            : (borrowed.TryGetValue(window, out var home) ? Result.Success(home) : desktops.DesktopOf(window))
+            : desktops.DesktopOf(window)
                 .Map(desktop => State.Workspaces.TryFirst(w => w.DesktopId == desktop))
                 .GetValueOrDefault(Maybe<Workspace>.None);
 
@@ -231,10 +230,8 @@ public sealed class WorkspaceManager(
                 // Rows that name the frame around a Store app and not the app, from before such windows
                 // stopped being remembered. Dropped once, on load.
                 ForgetFrameHostRows();
-                // Before anything else looks at where windows are: a crash while standing inside a
-                // nested workspace leaves the parent's windows pinned to every desktop, and every
-                // sweep and overview after that would be reading a machine we left in a borrowed
-                // state (#42).
+                // Before anything else looks at where windows are: a crash under a version that still had
+                // child workspaces can have left windows pinned to every desktop (see RepairInheritedPins).
                 RepairInheritedPins();
                 // Seeded before the first UI build: foreground events only report CHANGES, so
                 // without this the active-window highlight would stay blank from launch until
@@ -1127,16 +1124,14 @@ public sealed class WorkspaceManager(
         // Petre: "still that rapid changing workspaces... i want you to add protection so that rapid
         // moving from one to the other is caught by the app."
         //
-        // Everything this method does can MOVE A WINDOW or take the foreground, and both of those can make
-        // Windows change desktop: borrowing pins the anchor's windows and releasing moves them home, and
-        // restoring focus activates a window, which follows that window to its desktop if it has gone. So
-        // while the desktop is ping-ponging, the app's own reactions are the most likely thing feeding it,
-        // and the honest response is to stop reacting until it settles rather than to keep participating.
+        // Everything this method does can take the foreground or MOVE A WINDOW, and both of those can make
+        // Windows change desktop: restoring focus activates a window, which follows that window to its
+        // desktop if it has gone. So while the desktop is ping-ponging, the app's own reactions are the
+        // most likely thing feeding it, and the honest response is to stop reacting until it settles
+        // rather than to keep participating.
         //
-        // Skipping is SAFE rather than merely cautious. ApplyInheritance decides what to hold from what is
-        // held right now, so the next settled arrival releases and re-borrows correctly; a skipped focus
-        // restore leaves focus wherever Windows put it, which is what happens on any switch this app did
-        // not initiate anyway.
+        // Skipping is SAFE rather than merely cautious: a skipped focus restore leaves focus wherever
+        // Windows put it, which is what happens on any switch this app did not initiate anyway.
         if (Bouncing(arriving))
         {
             // Still pulsed, so the bar redraws for the desktop actually arrived at: standing somewhere
@@ -1145,11 +1140,7 @@ public sealed class WorkspaceManager(
             return;
         }
 
-        // Before the focus restore, because this is what puts the parent's windows ON this desktop
-        // -- and restoring focus to one of them only makes sense once it is here.
-        ApplyInheritance(arriving);
-        // After the borrowing, so a window pinned in from a parent workspace is not moved while it is
-        // only visiting. A first attempt, which may be too early to take: the resync tick retries it.
+        // A first attempt, which may be too early to take: the resync tick retries it.
         //
         // A move that LANDS takes the focus with it (#89) and the ledger's answer is skipped, because the
         // two would otherwise fight: the moved window is activated here and RestoreLastActive would
@@ -1203,96 +1194,22 @@ public sealed class WorkspaceManager(
         settledAt = at + BounceCooldown;
         trace?.Invoke($"  BOUNCE DETECTED at {NameOfDesktop(arriving)}: " +
                       $"{string.Join(" -> ", recent.Select(a => NameOfDesktop(a.Desktop)))}. " +
-                      $"Borrowing and focus restore suspended for {BounceCooldown.TotalSeconds:F0}s.");
+                      $"Focus restore suspended for {BounceCooldown.TotalSeconds:F0}s.");
         return true;
     }
 
-    // --- a nested workspace borrows its parent's windows (#42) ---------------------------------
+    // --- crash repair for a feature that no longer exists (#42) --------------------------------
     //
-    // Petre: "i want parent's windows to be present in the child workspace... but on the desktop."
-    // Not icons on a row -- actually there, alongside the child's own windows.
+    // Child workspaces used to pin their parent's windows to every desktop while you stood in a
+    // child, and wrote each pin to state.json with its home desktop so a crash could be undone. The
+    // feature is gone (see docs/superpowers/specs/2026-11-20-bar-edit-mode-design.md), but a
+    // state.json written by that version can still list pins, and a pinned window with no one left
+    // to unpin it would stay on every desktop for good. So the repair stays, and so do
+    // AppState.InheritedPins and InheritedPin. It can go in a later release, once no state.json
+    // written by a version with child workspaces is still around.
     //
-    // Windows' own pin is the only mechanism that puts one window on more than one desktop, and it
-    // is ALL-OR-NOTHING: a pinned window is on every desktop, not on a chosen few. So "the parent's
-    // windows, on its children only" is emulated by pinning them while you are inside a child and
-    // unpinning them when you leave. The over-share exists, but only for as long as you are
-    // standing in the subtree that wants it.
-    //
-    // Two facts make this survivable, and both had to be built rather than assumed:
-    //
-    //   * UNPINNING DOES NOT SEND A WINDOW HOME. It leaves it on whatever desktop is current, so
-    //     unpinning while standing in the child would quietly MOVE the parent's windows into the
-    //     child. Every release therefore unpins AND moves the window back to the desktop it was
-    //     borrowed from.
-    //   * A CRASH WOULD STRAND THEM pinned and homeless, which is precisely the failure this app
-    //     avoids by being built on desktops rather than on hiding windows. So every borrow is
-    //     written to state.json with its home desktop, and RepairInheritedPins puts them back at
-    //     the next start.
-    //
-    // Kept live as well as persisted: the set is what the next switch releases, and reading it
-    // back from state on every switch would be slower and no more correct.
-    readonly Dictionary<WindowHandle, Guid> borrowed = [];
-
-    void ApplyInheritance(Guid arriving)
-    {
-        var parentDesktop = ParentDesktopOf(arriving);
-        trace?.Invoke($"  inherit: arriving={NameOfDesktop(arriving)}, borrowsFrom=" +
-                      $"{(parentDesktop is { } from ? NameOfDesktop(from) : "nothing")}, holding={borrowed.Count}");
-
-        // Standing somewhere that borrows nothing, or somewhere that borrows from a DIFFERENT
-        // parent: either way, give back what is held before taking anything new.
-        if (borrowed.Count > 0 && borrowed.Values.FirstOrDefault() != parentDesktop) ReleaseBorrowed();
-        if (parentDesktop is not { } home || borrowed.Count > 0) return;
-
-        // Every window we know to be on the parent's desktop right now. Asked of the OS rather
-        // than of `memberships`, which records where a window was PLACED and not where it is.
-        knownWindows.Keys
-            .Where(w => desktops.DesktopOf(w).Map(d => d == home).GetValueOrDefault(false))
-            .ToList()
-            .ForEach(w => desktops.Pin(w).Tap(() => borrowed[w] = home));
-
-        PersistBorrowed();
-    }
-
-    void ReleaseBorrowed()
-    {
-        // The riskiest moment in the app for an unasked-for switch: moving a window that currently has
-        // FOCUS to another desktop makes Windows follow it there.
-        trace?.Invoke($"  release {borrowed.Count} home, foreground={monitor.Foreground().GetValueOrDefault().Value:X}, " +
-                      $"[{string.Join(", ", borrowed.Select(b => $"{b.Key.Value:X}->{NameOfDesktop(b.Value)}"))}]");
-
-        borrowed.ToList().ForEach(b =>
-        {
-            // Order matters and is the whole trick: unpin first, then put it back. Unpinning alone
-            // would leave the window on whichever desktop is current -- which, on a switch out of a
-            // nested workspace, is the wrong one.
-            desktops.Unpin(b.Key).Tap(() => MoveWindowTo(b.Key, b.Value));
-        });
-        borrowed.Clear();
-        PersistBorrowed();
-    }
-
-    void PersistBorrowed() =>
-        Persist(State with
-        {
-            InheritedPins = borrowed.Select(b => new InheritedPin(b.Key.Value, b.Value)).ToList(),
-        });
-
-    // The desktop whose windows the workspace on `desktop` borrows, or null when there is nothing
-    // to borrow.
-    //
-    // Reads AppState.LendsWindowsTo, which answers null for three different situations that all
-    // mean the same thing here: the workspace is in no group, it is in an ANCHORLESS group (#84's
-    // whole point being that there is no parent, so there are no windows to lend), or it is the
-    // anchor itself and already has its own windows.
-    Guid? ParentDesktopOf(Guid desktop) =>
-        State.Workspaces.FirstOrDefault(w => w.DesktopId == desktop) is { } workspace
-        && State.LendsWindowsTo(workspace.Id) is { } lender
-            ? State.Workspaces.FirstOrDefault(w => w.Id == lender)?.DesktopId
-            : null;
-
-    // Called once at startup. Anything still recorded as borrowed is the residue of a crash or a
-    // kill while standing inside a nested workspace: unpin it and put it back where it came from.
+    // Called once at startup. Anything still recorded is the residue of a crash or a kill while the
+    // old version was standing inside a child: unpin it and put it back where it came from.
     // A window that has since closed is simply dropped -- IsWindow is not asked, because Unpin and
     // MoveWindow both fail harmlessly for a dead handle and their Results are already ignored here.
     void RepairInheritedPins()
@@ -1461,15 +1378,14 @@ public sealed class WorkspaceManager(
     // Clamped rather than validated, because every caller derives the index from a row that was on
     // screen when the menu opened, and a workspace removed in between should land the new one at
     // the end instead of raising an error at somebody who asked for something reasonable.
-    // `parentId` makes the new workspace a SIBLING of the row it was invoked on rather than a
-    // top-level workspace (#74). Petre: "before/after is relative to the row it was invoked on, at
+    // `groupId` makes the new workspace a MEMBER of the group of the row it was invoked on rather than
+    // a top-level workspace (#74). Petre: "before/after is relative to the row it was invoked on, at
     // that row's depth."
     //
     // Null for a top-level row, which is the whole previous behaviour and why it defaults.
     //
-    // The parent is validated exactly as NestWorkspace and AddChildWorkspace validate it -- it must
-    // exist and must not itself be nested -- rather than trusted because a caller derived it from a
-    // row. A UI that only offers legal choices is not a guarantee; it is a UI.
+    // The group is validated -- it must exist -- rather than trusted because a caller derived it from
+    // a row. A UI that only offers legal choices is not a guarantee; it is a UI.
     public Result<Workspace> InsertWorkspace(string name, int index, Guid? groupId = null) =>
         Result.FailureIf(string.IsNullOrWhiteSpace(name), "Workspace name required")
             .Bind(() => Result.FailureIf(NameTaken(name, excluding: null), $"A workspace named '{name.Trim()}' already exists."))
@@ -1607,8 +1523,8 @@ public sealed class WorkspaceManager(
     // "move up / move down on a workspace inside a group doesn't work".
     //
     // They used to move it one place in the flat list, which predates grouping. The bar draws a
-    // whole group as one box, so moving the first member up swapped it with the anchor in the list
-    // and changed nothing at all on screen: it was still the first member below the anchor. A row
+    // whole group as one box, so a move that only swapped list neighbours across the box edge
+    // changed nothing at all on screen. A row
     // outside any group had the mirror problem, swapping with somebody else's group member and
     // leaving the order of the bar's top-level rows alone.
     //
@@ -1622,29 +1538,23 @@ public sealed class WorkspaceManager(
         var at = blocks.FindIndex(b => b.Exists(w => w.Id == id));
         var block = blocks[at];
 
-        // A row that HEADS its block moves the whole block, because there is nowhere for it to go
-        // inside one. An ungrouped workspace is a block of one, and an anchor is held at the top of
-        // its box by MembersOf, so for both of them "up" can only mean "up past the row above the
-        // box". The group travels with its anchor rather than being torn open.
+        // An ungrouped workspace is a block of one, so there is nowhere for it to go inside its block:
+        // "up" can only mean "up past the row above it", and it moves among the top-level rows.
         //
         // ...among the blocks DRAWN beside it (DrawnBlocks): the pinned rows are drawn first, so a pinned row moves
         // among the pinned and every other block among the rest. Each side is reordered in the SLOTS it already holds
         // in the stored list, so the other side's rows keep their stored places: that is what puts an unpinned row
         // back where it was (Petre: "back where it was").
-        if (block.Count == 1 || State.IsAnchor(id))
+        if (block.Count == 1)
             return MovedTo(ReorderedOnItsSide(blocks, at, targetOf, clampIntoRange));
 
-        // Otherwise it moves inside its own box. An anchored group's first row belongs to the anchor
-        // and nothing may take it, so the members below reorder among themselves; an anchorless
-        // group (#84) has no such row, so every member is movable and the top of the box is a place
-        // a member can reach.
-        var pinned = State.GroupOf(id)!.IsAnchored ? 1 : 0;
-        var movable = block.Skip(pinned).ToList();
-        var moved = Reordered(movable, movable.FindIndex(w => w.Id == id), targetOf, clampIntoRange);
+        // Otherwise it moves inside its own box. Every member is movable, and the top of the box is a
+        // place any of them can reach.
+        var moved = Reordered(block, block.FindIndex(w => w.Id == id), targetOf, clampIntoRange);
 
         return MovedTo(moved is null
             ? null
-            : blocks.Select((b, i) => i == at ? block.Take(pinned).Concat(moved).ToList() : b).SelectMany(b => b).ToList());
+            : blocks.Select((b, i) => i == at ? moved : b).SelectMany(b => b).ToList());
     }
 
     // Moves block `at` among the blocks drawn on ITS side of the bar (DrawnBlocks): the pinned rows if it is pinned,
@@ -1699,7 +1609,7 @@ public sealed class WorkspaceManager(
     // Persisting the flattened blocks makes the stored order the order the bar draws, which is worth
     // stating because it also TIDIES: a group whose members were scattered through the list (a join
     // from a distant row, or an old state.json) comes back contiguous. Lane colours follow list
-    // position and a group takes its colour from its anchor, so both agree with the screen
+    // position and a group takes its colour from its first member, so both agree with the screen
     // afterwards -- and a list already in drawn order is left untouched, which is the normal case.
     //
     // A null order means the move was a no-op, and that SUCCEEDS: see Reordered.
@@ -1707,9 +1617,8 @@ public sealed class WorkspaceManager(
         Result.Success().Tap(() => { if (order is not null) Persist(State with { Workspaces = order }); });
 
     // A WHOLE GROUP moved among the bar's top-level rows. Petre wanted to "move them around easily",
-    // and an anchorless group (#84) had no way to move at all: its members reorder INSIDE the box
-    // (MoveAmongPeers) and its header's menu had no moves. An anchored group could already move, by
-    // moving its anchor, which this does too, so both kinds now answer the same command.
+    // and a group's members reorder INSIDE the box (MoveAmongPeers), so the header's menu is what
+    // moves the box itself.
     //
     // The same block arithmetic MoveAmongPeers does for a block of one, applied to the group's block:
     // up/down are no-ops at the ends, top/end clamp. Members keep their order inside the box.
@@ -1852,103 +1761,8 @@ public sealed class WorkspaceManager(
             }))
             : Result.Failure("That group no longer exists.");
 
-    // Petre: "a workspace can be nested under a main (parent) workspace... it lives under the main
-    // one rather than sitting as a peer in the flat list" (#42).
-    //
-    // Three refusals, and each one is a shape the model would otherwise accept and the UI could
-    // never draw:
-    //
-    //   * ITSELF. A workspace parented to itself is a cycle of length one, and every walk over the
-    //     tree would run forever.
-    //   * A workspace that is ALREADY NESTED. One level only (see Workspace.ParentId): the bar is
-    //     ten rows tall and a second level of indentation is unreadable without collapsing, which
-    //     is an interaction nobody has asked for.
-    //   * A workspace that HAS CHILDREN. The mirror of the above -- nesting a parent under someone
-    //     else would create the second level from the other end.
-    //
-    // Deliberately NOT refused: nesting a workspace that has windows, or that is current. Both are
-    // ordinary, and neither means anything different afterwards.
-    // Now expressed as groups: nesting a child under a parent puts both into one ANCHORED group
-    // whose anchor is the parent, creating that group on the first child and reusing it after.
-    //
-    // The refusals below are the same three, restated in terms of membership rather than of a
-    // parent pointer.
-    public Result NestWorkspace(Guid child, Guid parent) =>
-        child == parent
-            ? Result.Failure("A workspace cannot be nested under itself.")
-            : Workspace(child).Bind(_ => Workspace(parent))
-                // The parent must not be somebody else's member. It may already be its own group's
-                // anchor, which is exactly the second-and-later child case.
-                .Bind(target => State.GroupOf(parent) is { } group && group.AnchorWorkspaceId != parent
-                    ? Result.Failure($"'{target.Name}' is itself in a group. Workspaces nest one level deep.")
-                    : Result.Success())
-                // ...and the child must not be an anchor, which would make its own members
-                // grandchildren of the parent.
-                .Bind(() => State.IsAnchor(child)
-                    ? Result.Failure("That workspace has workspaces nested under it. Workspaces nest one level deep.")
-                    : Result.Success())
-                .Tap(() => Persist(JoinedAnchoredGroup(child, parent)));
-
-    // The child joins the parent's group, and the group is created if the parent has none yet.
-    //
-    // One Persist for the whole thing, which is why this returns state rather than writing twice:
-    // creating the group and moving two workspaces into it is one change, and pulsing halfway
-    // through would let the bar draw a group with one member in it.
-    AppState JoinedAnchoredGroup(Guid child, Guid parent)
-    {
-        // A new group takes the parent's name AND its colour (#90), so nesting a workspace under a
-        // parent leaves the parent's row looking exactly as it did; only the child changes.
-        var group = State.GroupOf(parent)
-            ?? new Group(Guid.NewGuid(), State.Workspaces.Single(w => w.Id == parent).Name)
-            {
-                AnchorWorkspaceId = parent,
-                Color = State.Workspaces.Single(w => w.Id == parent).Color,
-            };
-
-        return State with
-        {
-            Groups = State.Groups.Any(g => g.Id == group.Id) ? State.Groups : [.. State.Groups, group],
-            Workspaces = State.Workspaces
-                .Select(w => w.Id == child || w.Id == parent ? w with { GroupId = group.Id } : w)
-                .ToList(),
-        };
-    }
-
-    // Petre: "add child as a right click menu item" (#42).
-    //
-    // Create-and-nest in one call, and inserted directly AFTER the parent's existing children
-    // rather than at the end of the list -- a child created from a row should appear under that
-    // row, not at the bottom of the bar where the eye has to go looking for it.
-    //
-    // Not a convenience wrapper the UI could have assembled itself: two persists would pulse
-    // twice, and the intermediate state -- a new top-level workspace that exists for one frame
-    // before becoming a child -- would be visible on the bar as a row that jumps.
-    public Result<Workspace> AddChildWorkspace(Guid parent, string name) =>
-        Workspace(parent)
-            .Bind(p => State.GroupOf(parent) is { } group && group.AnchorWorkspaceId != parent
-                ? Result.Failure<Workspace>($"'{p.Name}' is itself in a group. Workspaces nest one level deep.")
-                : Result.Success(p))
-            .Bind(_ => Result.FailureIf(string.IsNullOrWhiteSpace(name), "Workspace name required"))
-            .Bind(() => Result.FailureIf(NameTaken(name, excluding: null), $"A workspace named '{name.Trim()}' already exists."))
-            .Bind(() => desktops.Create(name))
-            .Map(d => new Workspace(Guid.NewGuid(), name, d.Id))
-            .Tap(child =>
-            {
-                // The parent's group is settled first, so the new workspace has somewhere to be
-                // created into and the whole thing is still ONE Persist. Two writes would pulse
-                // twice, and the state in between -- a group of one, or a workspace that exists
-                // outside it for a frame -- is a shape the bar would briefly draw.
-                var withGroup = JoinedAnchoredGroup(child.Id, parent);
-                var group = withGroup.Groups.Single(g => g.AnchorWorkspaceId == parent).Id;
-
-                var ordered = withGroup.Workspaces.ToList();
-                ordered.Insert(AfterLastMemberOf(group, ordered), child with { GroupId = group });
-
-                Persist(withGroup with { Workspaces = ordered });
-            });
-
-    // One past the group's last member, so a child created from a row lands under that row rather
-    // than at the bottom of the bar where the eye has to go looking for it.
+    // One past the group's last member, so a workspace created into a group lands under its box
+    // rather than at the bottom of the bar where the eye has to go looking for it.
     static int AfterLastMemberOf(Guid group, IReadOnlyList<Workspace> workspaces) =>
         workspaces.Select((w, at) => (w, at))
             .Where(x => x.w.GroupId == group)
@@ -1958,21 +1772,18 @@ public sealed class WorkspaceManager(
 
     // Out of the group, back to standing on its own.
     //
-    // Renamed from UnnestWorkspace: with #84's anchorless groups, "un-nest" describes only half the
-    // cases, and #83 asks for this by the name "move a workspace out of the group".
+    // #83 asks for this by the name "move a workspace out of the group".
     //
     // Leaving takes the group with it when too little is left to be a group. A group of one is not
-    // a group: the bar would draw an outline round a single row, which #42 already ruled out as
-    // decoration that means nothing.
+    // a group: the bar would draw an outline round a single row, which is decoration that means
+    // nothing.
     public Result LeaveGroup(Guid workspaceId) =>
         Workspace(workspaceId).Tap(_ => Persist(WithoutMember(State, workspaceId)));
 
     // Removes one workspace from whatever group it is in, and tidies up after it.
     //
-    // Two tidy-ups, both of which have a visible failure if skipped. A group left with one member
-    // is dissolved, as above. A group that has lost its ANCHOR keeps its members and its name and
-    // becomes anchorless: nothing is borrowed any more, which is correct, because the workspace
-    // that was lending the windows has gone.
+    // A group left with one member is dissolved, as above, because skipping that would leave the bar
+    // drawing a box round a single row.
     static AppState WithoutMember(AppState state, Guid workspaceId)
     {
         if (state.GroupOf(workspaceId) is not { } group) return state;
@@ -1988,11 +1799,7 @@ public sealed class WorkspaceManager(
                 .ToList(),
             Groups = remaining < 2
                 ? state.Groups.Where(g => g.Id != group.Id).ToList()
-                : state.Groups
-                    .Select(g => g.Id == group.Id && g.AnchorWorkspaceId == workspaceId
-                        ? g with { AnchorWorkspaceId = null }
-                        : g)
-                    .ToList(),
+                : state.Groups,
         };
     }
 
@@ -2004,10 +1811,10 @@ public sealed class WorkspaceManager(
     // Petre (#84): "workspaces are grouped together under a name... the parent is not a workspace,
     // it's only the group's name."
     //
-    // Starts ANCHORLESS with one member, because a group has to be created from somewhere and the
-    // row you right-clicked is the only member the gesture knows about. It draws immediately: an
-    // anchorless group has a header row carrying its name, so a group of one is a header plus a row
-    // rather than a row that looks unchanged.
+    // Starts with one member, because a group has to be created from somewhere and the row you
+    // right-clicked is the only member the gesture knows about. It draws immediately: a group has a
+    // header row carrying its name, so a group of one is a header plus a row rather than a row that
+    // looks unchanged.
     //
     // A workspace that is already grouped has to leave first. Silently moving it would make "new
     // group" quietly dissolve the group it came from, which is a second consequence the user did
@@ -2032,20 +1839,12 @@ public sealed class WorkspaceManager(
 
     // Petre (#83): "move a workspace into the group."
     //
-    // Works the same for both kinds, which is the payoff of one model: joining an ANCHORED group
-    // makes the workspace a child that borrows the anchor's windows, joining an ANCHORLESS one is
-    // pure membership. Neither needs a branch here.
-    //
-    // Refused for a workspace that is itself an anchor, because its own members would become
-    // grandchildren of the group it joined. One level only, the same rule NestWorkspace enforces.
+    // Pure membership: the workspace keeps its desktop and its windows and is only drawn inside the box.
     public Result MoveIntoGroup(Guid workspaceId, Guid groupId) =>
         Workspace(workspaceId)
             .Bind(w => State.Groups.FirstOrDefault(g => g.Id == groupId) is { } group
                 ? Result.Success((w, group))
                 : Result.Failure<(Workspace, Group)>("That group no longer exists."))
-            .Bind(x => State.IsAnchor(workspaceId)
-                ? Result.Failure($"'{x.Item1.Name}' has workspaces grouped under it. Workspaces nest one level deep.")
-                : Result.Success())
             .Tap(() =>
             {
                 // Out of the old group first, so leaving a group of two dissolves it exactly as a
@@ -2070,7 +1869,7 @@ public sealed class WorkspaceManager(
     //
     // Every member is freed and the group record goes. Members keep their desktops, their windows,
     // their names and their positions in the list, so the only thing that changes is that they stop
-    // being drawn together. For an anchored group that also means the borrowing stops.
+    // being drawn together.
     public Result Ungroup(Guid groupId) =>
         State.Groups.FirstOrDefault(g => g.Id == groupId) is null
             ? Result.Failure("That group no longer exists.")
@@ -2080,9 +1879,7 @@ public sealed class WorkspaceManager(
                 Workspaces = State.Workspaces.Select(w => w.GroupId == groupId ? w with { GroupId = null } : w).ToList(),
             }));
 
-    // An anchorless group's name is the only thing naming it, so it needs to be editable. An
-    // anchored group shows its anchor's row at the top instead, but it still keeps its own name (see
-    // Group), so renaming works for both.
+    // A group's name is the only thing naming it, so it needs to be editable.
     public Result RenameGroup(Guid groupId, string name) =>
         Result.FailureIf(string.IsNullOrWhiteSpace(name), "Group name required")
             .Bind(() => State.Groups.Any(g => g.Id == groupId)
@@ -2097,8 +1894,8 @@ public sealed class WorkspaceManager(
             }));
 
     // Case-insensitive and trim-tolerant, matching NameTaken for workspaces. Groups and workspaces
-    // are allowed to share a name: an anchored group is NAMED after its anchor, so forbidding it
-    // would forbid the commonest case.
+    // are allowed to share a name: a group named after one of its members is the commonest case, so
+    // forbidding it would forbid that.
     bool GroupNameTaken(string name, Guid? excluding) =>
         State.Groups.Any(g => g.Id != excluding && g.Name.Trim().Equals(name.Trim(), StringComparison.OrdinalIgnoreCase));
 
@@ -2245,8 +2042,8 @@ public sealed class WorkspaceManager(
     // bar already treats an unreadable value as "no tint" rather than as a crash (see
     // FloatingBar.Lane), which is the right answer for a file a user can edit anyway.
     //
-    // A GROUPED workspace redirects the choice to its group (#90). Petre: "the parent can change the
-    // group's colour, and so can any child... a group has one colour". So the picker on a member's
+    // A GROUPED workspace redirects the choice to its group (#90). Petre: "any child can change the
+    // group's colour... a group has one colour". So the picker on a member's
     // row is the group's picker, and there is no such thing as a per-member colour inside a box. Its
     // own Workspace.Color is deliberately left alone rather than overwritten, which is what lets it
     // go back to the colour it chose for itself if it ever leaves.
@@ -2258,8 +2055,8 @@ public sealed class WorkspaceManager(
                 Workspaces = State.Workspaces.Select(w => w.Id == id ? w with { Color = color } : w).ToList(),
             })));
 
-    // The same choice made from an anchorless group's header row, which is the only surface a group
-    // with no anchor has of its own (#84, #90).
+    // The same choice made from a group's header row, which is the only surface a group has of its
+    // own (#84, #90).
     public Result SetGroupColor(Guid groupId, string? color) =>
         State.Groups.Any(g => g.Id == groupId)
             ? Result.Success().Tap(() => Persist(State with
@@ -2344,10 +2141,8 @@ public sealed class WorkspaceManager(
             .ForEach(h => memberships.Remove(h));
 
         // Taken out of its group FIRST, which is what keeps the rest of the group coherent:
-        // WithoutMember dissolves a group left with one member and clears the anchor of a
-        // group that has just lost it. Deleting the anchor therefore leaves the others
-        // grouped and named, with nothing borrowed any more, rather than promoting them all
-        // to the top level or leaving them pointing at a workspace that is gone.
+        // WithoutMember dissolves a group left with one member, so no workspace is left pointing
+        // at a group that has gone.
         var tidied = WithoutMember(State, id);
 
         Persist(tidied with
@@ -2448,9 +2243,7 @@ public sealed class WorkspaceManager(
     //     did close stay closed, which is why the message says what is still open rather than
     //     pretending anything can be undone.
     //
-    // The close set is the overview's Running, which is the row the user is looking at. That is also
-    // what makes a borrowed window safe (#42): the overview attributes it to the workspace that
-    // LENDS it, so deleting the child that is standing on it closes nothing of its parent's.
+    // The close set is the overview's Running, which is the row the user is looking at.
     public Result DeleteWorkspaceClosingWindows(Guid id) =>
         Workspace(id).Bind(workspace => WindowsByWorkspace().Bind(overview =>
             Deletable(overview.Workspaces.FirstOrDefault(g => g.Workspace.Id == id)?.Running) switch
@@ -2648,10 +2441,6 @@ public sealed class WorkspaceManager(
         desktops.IsPinned(info.Handle)
             .Bind(pinned => pinned ? desktops.Unpin(info.Handle) : Result.Success())
             .Bind(() => Place(info, workspaceId))
-            // Once the user has placed a window by hand it is no longer lent to a nested workspace.
-            // Left in `borrowed`, the next release would send it back to the parent and undo the move
-            // that was just made. Saved at once, so a crash cannot bring it back either.
-            .Tap(() => { if (borrowed.Remove(info.Handle)) PersistBorrowed(); })
             // The one place a container learns its home (#132), because this is the one door every
             // by-hand move comes through: dragging an icon between rows, and Manage's row menu.
             // After the move rather than before, so a refused move teaches nothing.
@@ -3398,8 +3187,6 @@ public sealed class WorkspaceManager(
         desktops.IsPinned(window)
             .Bind(pinned => pinned ? desktops.Unpin(window) : Result.Success())
             .Bind(() => MoveWindowTo(window, desktopId))
-            // No longer lent to a nested workspace, for the same reason as in Assign.
-            .Tap(() => { if (borrowed.Remove(window)) PersistBorrowed(); })
             .Tap(() =>
             {
                 lastKnownDesktop[window] = desktopId;
@@ -4257,32 +4044,12 @@ public sealed class WorkspaceManager(
             var clock = System.Diagnostics.Stopwatch.StartNew();
             var pinned = windows
                 .Where(w => desktops.IsPinned(w.Handle).GetValueOrDefault(false))
-                // A window we BORROWED for a nested workspace is pinned as a mechanism, not as a
-                // statement (#42) -- so it must not surface in the 📌 row, which means "you asked
-                // for this everywhere". Without this the parent's windows would vanish out of the
-                // row you are standing in and reappear under a pin nobody asked for, which is the
-                // opposite of "present in the child workspace".
-                .Where(w => !borrowed.ContainsKey(w.Handle))
                 .Select(w => w.Handle).ToHashSet();
             var pinnedMs = clock.ElapsedMilliseconds;
             var hiddenByShell = new HashSet<WindowHandle>(); // filled while the OS is asked below, see DesktopOfRemembering
             var desktopOf = windows
                 .Where(w => !pinned.Contains(w.Handle))
-                .Select(w => (w.Handle, Desktop: borrowed.TryGetValue(w.Handle, out var home)
-                    // ...and it still belongs to the desktop it came FROM.
-                    //
-                    // This line said `current` for one build, and Petre saw the result immediately:
-                    // "sparrow loses all windows and they're moved to the child, don't do that."
-                    // Nothing had moved -- the windows were pinned, so they were on both desktops
-                    // -- but the BAR was told they belonged to whichever desktop he was standing
-                    // on, so the parent's row emptied and they piled into the child's.
-                    //
-                    // The rule that survives is the one his two corrections add up to: the bar
-                    // shows where a window LIVES, the desktop shows what is borrowed. A borrowed
-                    // window is present on the child's screen and stays in its parent's row, which
-                    // is also why the child's row is not doubled up -- the thing he rejected first.
-                    ? Result.Success(home)
-                    : DesktopOfRemembering(w.Handle, live, hiddenByShell)))
+                .Select(w => (w.Handle, Desktop: DesktopOfRemembering(w.Handle, live, hiddenByShell)))
                 .Where(x => x.Desktop.IsSuccess) // closed mid-query: just not shown this round
                 .ToDictionary(x => x.Handle, x => x.Desktop.Value);
             var desktopOfMs = clock.ElapsedMilliseconds - pinnedMs;

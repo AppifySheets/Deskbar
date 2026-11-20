@@ -525,7 +525,7 @@ public class FloatingBarStripsTests
         using var h = StripHarness.Build();
         var sparrow = IdOf(h, "Sparrow");
         MenuItem Item(string header) =>
-            h.Bar.WorkspaceMenu(sparrow, "Sparrow", folded: false, nested: false).Items.OfType<MenuItem>().Single(i => i.Header as string == header);
+            h.Bar.WorkspaceMenu(sparrow, "Sparrow", folded: false).Items.OfType<MenuItem>().Single(i => i.Header as string == header);
 
         Item("Pin to strip").RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
         Assert.True(h.Manager.State.Workspaces.Single(w => w.Id == sparrow).Pinned);
@@ -581,7 +581,7 @@ public class FloatingBarStripsTests
     public void A_grouped_row_offers_no_pin() => StaThread.Run(() =>
     {
         using var h = StripHarness.Build(groupColour: "#5B6CFF");
-        var headers = h.Bar.WorkspaceMenu(IdOf(h, "Sparrow"), "Sparrow", folded: false, nested: true).Items.OfType<MenuItem>().Select(i => i.Header as string);
+        var headers = h.Bar.WorkspaceMenu(IdOf(h, "Sparrow"), "Sparrow", folded: false).Items.OfType<MenuItem>().Select(i => i.Header as string);
 
         Assert.DoesNotContain("Pin to strip", headers);
     });

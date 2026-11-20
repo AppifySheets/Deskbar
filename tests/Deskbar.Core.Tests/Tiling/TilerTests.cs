@@ -1146,7 +1146,7 @@ public sealed partial class TilerTests : IDisposable
     // --- which windows tile ------------------------------------------------------------------------------
 
     [Fact]
-    public void Borrowed_and_pinned_windows_float()
+    public void Pinned_windows_float()
     {
         new[] { 1, 2 }.ToList().ForEach(n => Exists(W(n), alpha));
         // On every desktop, so it is on this one too, but it lives nowhere: WorkspaceOf is None.

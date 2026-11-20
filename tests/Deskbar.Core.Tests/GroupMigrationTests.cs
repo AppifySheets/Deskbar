@@ -281,15 +281,52 @@ public class GroupMigrationTests
         Assert.Null(migrated.Workspaces.Single().GroupId);
     }
 
-    // ParentId survives migration untouched, so downgrading to a build from before groups still
-    // finds its nesting where it expects it.
+    // Nesting no longer exists, so there is no downgrade to keep ParentId for. It is cleared once the
+    // groups have been built from it.
     [Fact]
-    public void The_old_parent_id_is_left_in_place_for_a_downgrade()
+    public void The_old_parent_id_is_cleared_once_groups_are_built()
     {
-        var (state, parent, first, _, _) = Nested();
+        var (state, _, _, _, _) = Nested();
 
         var migrated = state.Migrated();
 
-        Assert.Equal(parent.Id, migrated.Workspaces.Single(w => w.Id == first.Id).ParentId);
+        Assert.All(migrated.Workspaces, w => Assert.Null(w.ParentId));
+    }
+
+    // The ParentId step runs whenever Groups is empty. If ParentId survived, a user who ungrouped
+    // everything would get the groups back on the next start, rebuilt from values nothing else
+    // keeps up to date.
+    [Fact]
+    public void Ungrouped_parent_ids_do_not_come_back()
+    {
+        var (state, _, _, _, _) = Nested();
+        var migrated = state.Migrated();
+        Assert.NotEmpty(migrated.Groups);
+
+        var ungrouped = migrated with
+        {
+            Groups = [],
+            Workspaces = migrated.Workspaces.Select(w => w with { GroupId = null }).ToList(),
+        };
+
+        Assert.Empty(ungrouped.Migrated().Groups);
+    }
+
+    // A file written by a build that kept ParentId beside the groups it built from it: the groups
+    // win, and the stale ParentIds are cleared so they cannot rebuild anything later.
+    [Fact]
+    public void A_stale_parent_id_beside_existing_groups_is_cleared()
+    {
+        var (state, _, _, _, _) = Nested();
+        var withStale = state.Migrated() with { };
+        var stale = withStale with
+        {
+            Workspaces = withStale.Workspaces.Select(w => w.GroupId is null ? w : w with { ParentId = Guid.NewGuid() }).ToList(),
+        };
+
+        var migrated = stale.Migrated();
+
+        Assert.All(migrated.Workspaces, w => Assert.Null(w.ParentId));
+        Assert.Equal(withStale.Groups, migrated.Groups);
     }
 }
