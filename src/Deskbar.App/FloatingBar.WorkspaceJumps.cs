@@ -88,7 +88,12 @@ public partial class FloatingBar
             manager.State.Workspaces,
             overview.Workspaces.FirstOrDefault(w => w.IsCurrent) is { } current ? current.Workspace.Id : Maybe<Guid>.None,
             back);
-        return [.. pinned, .. WorkspaceJumps.BackItem(pinned, back).Match(item => new[] { item }, () => [])];
+        // An item that goes NOWHERE is left out, off the strips and the taskbar alike: it is the workspace you are in,
+        // whose way back is another pinned workspace's item or does not exist, and the strip's name tag already says
+        // where you are. Petre, with the Meta strip showing an inert "Meta" chip: "remove meta from meta", "also drop
+        // from the taskbar". The cost, accepted: that workspace's taskbar button goes while you are in it and comes back
+        // at the end of the taskbar when you leave.
+        return [.. pinned.Where(item => item.Target.HasValue), .. WorkspaceJumps.BackItem(pinned, back).Match(item => new[] { item }, () => [])];
     }
 
     // The pinned workspaces' buttons on Windows' taskbar (TaskbarJumps), kept in step with the strip items. Set by the

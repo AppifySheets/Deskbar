@@ -615,6 +615,23 @@ public class FloatingBarStripsTests
         Assert.DoesNotContain("Pin to strip", headers);
     });
 
+    // Petre, with the Meta strip showing an inert "Meta" chip: "remove meta from meta". An item that goes nowhere (the
+    // workspace you are in, when its way back is another pinned item or there is none) is left off the strip, where the
+    // name tag already says where you are, and, "also drop from the taskbar", off the taskbar too.
+    [Fact]
+    public void An_item_that_goes_nowhere_is_on_neither_the_strip_nor_the_taskbar() => StaThread.Run(() =>
+    {
+        var jumps = new TaskbarJumps(pin: _ => Result.Success(), ignore: _ => { }, switchTo: _ => Result.Success());
+        using var h = StripHarness.Build(taskbar: jumps);
+        Assert.True(h.Manager.SetWorkspacePinned(IdOf(h, "GEPHA"), true).IsSuccess);
+        Assert.True(h.Manager.SetWorkspacePinned(IdOf(h, "Sparrow"), true).IsSuccess);
+        h.Fill();
+
+        Assert.All(h.Strips, strip => Assert.Equal(["Sparrow"], JumpsOf(strip).Select(LabelOf)));
+        Assert.Equal(["Sparrow"], jumps.Windows.Select(w => w.Title));
+        jumps.Close();
+    });
+
     // --- helpers ------------------------------------------------------------------------------------------------
 
     static Color Hex(string hex) => (Color)ColorConverter.ConvertFromString(hex);
