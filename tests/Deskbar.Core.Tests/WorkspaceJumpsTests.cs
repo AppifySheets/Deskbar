@@ -83,4 +83,20 @@ public class WorkspaceJumpsTests
     [Fact]
     public void No_back_item_with_nowhere_to_go() =>
         Assert.True(WorkspaceJumps.BackItem(WorkspaceJumps.Of(All, Deskbar.Id, Maybe<Workspace>.None), Maybe<Workspace>.None).HasNoValue);
+
+    // Petre, with a strip showing "↩ messengers" next to "messengers": "only one". In a pinned workspace whose "back"
+    // is another PINNED workspace, that workspace's own item already goes there, so this one names itself and goes
+    // nowhere, as with nothing to go back to. It keeps its place, so nothing shifts on the strip or the taskbar.
+    [Fact]
+    public void Inside_with_back_to_another_pinned_workspace_the_item_names_itself_and_goes_nowhere()
+    {
+        var jumps = WorkspaceJumps.Of(All, Messengers.Id, Notes);
+        var inside = JumpOf(jumps, Messengers);
+
+        Assert.Equal("Messengers", inside.Label);
+        Assert.True(inside.Target.HasNoValue);
+        Assert.False(inside.IsBack);
+        Assert.Single(jumps, j => j.Target.HasValue && j.Target.Value == Notes.Id);
+        Assert.True(WorkspaceJumps.BackItem(jumps, Notes).HasNoValue);
+    }
 }

@@ -50,7 +50,12 @@ public static class WorkspaceJumps
             .Select(w => current.HasValue && current.Value == w.Id
                 // Inside: back where you came from, or, with nowhere to go (nothing else visited since start), the
                 // workspace's own name with no target, so the item stays put rather than vanishing.
-                ? back.Match(
+                //
+                // ...and the same when "back" is another PINNED workspace: its own item already goes there, and two
+                // items for one place was one too many (Petre, with a strip showing "↩ messengers" beside
+                // "messengers": "only one"). The item keeps its place rather than vanishing, so nothing shifts on the
+                // strip or the taskbar.
+                ? back.Where(to => !(to.Pinned && to.GroupId is null && workspaces.Any(p => p.Id == to.Id))).Match(
                     to => new WorkspaceJump(w.Id, $"{BackGlyph} {to.Name}", to.Id, IsBack: true),
                     () => new WorkspaceJump(w.Id, w.Name, Maybe<Guid>.None, IsBack: false))
                 : new WorkspaceJump(w.Id, w.Name, w.Id, IsBack: false))
