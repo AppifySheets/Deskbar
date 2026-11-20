@@ -47,10 +47,22 @@ public partial class FloatingBar
 
     internal bool Arranging => arranging;
 
+    // How many times entering the mode took the foreground; read by the tests, which cannot see the real foreground.
+    internal int ArrangeActivations { get; private set; }
+
+    // Test hooks for a resize held across the start of the mode (review, Important 2): the bar's own resize state is
+    // private and is begun by a real press on a side strip, which a test cannot make.
+    internal void BeginResizeForTest() => resizing = (ResizeSide.Left, 0, Width, Left);
+    internal bool IsResizingForTest => resizing is not null;
+
     // Turns the mode on or off and redraws the bar, which is how the grips, the dimmed icons and the strip come and go:
     // every one of them is built by the normal rebuild, reading `arranging`, so they cannot drift from a bar that was
     // rebuilt for some other reason mid-mode. Idempotent: asking for the state the bar is already in changes nothing.
-    internal Result SetArranging(bool on)
+    //
+    // `activate` is true for a UI entry (the menu) and false for the control pipe. Esc needs the bar to be the foreground
+    // window, but a script or another session sending `arrange on` while the user types elsewhere must not steal his
+    // keystrokes; from the pipe, the bar is left where it is and Esc works once the user clicks it (Done always works).
+    internal Result SetArranging(bool on, bool activate = false)
     {
         if (on == arranging) return Result.Success();
 
@@ -64,8 +76,12 @@ public partial class FloatingBar
             // taskbar strip; the stack of rows takes what is left (BarContent's LastChildFill).
             DockPanel.SetDock(arrangeStrip, Dock.Bottom);
             BarContent.Children.Insert(1, arrangeStrip);
-            // So Esc reaches the bar (see the file's comment).
-            Activate();
+            // So Esc reaches the bar (see the file's comment), but only when the user asked from the bar itself.
+            if (activate)
+            {
+                ArrangeActivations++;
+                Activate();
+            }
         }
         else if (arrangeStrip is not null)
         {
@@ -91,8 +107,13 @@ public partial class FloatingBar
         EndArrangingOnEscape();
     }
 
-    // The two bar-level mouse handlers return early while arranging, so that no row switches and no fold toggles
+    // The two bar-level mouse handlers stop here while arranging, so that no row switches and no fold toggles
     // (that is what makes the mode a mode). Returns true when the handler must stop there.
+    //
+    // It is called AFTER the handler's #48 press/release bookkeeping, never before: the row's release handler and the
+    // icon's orphan rescue run on handled events too (handledEventsToo), so they read the flags that bookkeeping
+    // maintains, and a swallow placed first left them the last click's values (a click before the mode could switch a
+    // row inside it). Both of those handlers also check `arranging` themselves, which does not depend on any flag.
     //
     // A press or release on the Done strip is let through UNHANDLED, so it reaches its button, but the handler still
     // stops: carrying on would arm a bar drag from a press on a button, and the bar's own press/release bookkeeping
@@ -183,7 +204,7 @@ public partial class FloatingBar
             Header = arranging ? "Done arranging" : "Arrange workspaces",
             Icon = MenuGlyph("⇅"),
         };
-        item.Click += (_, _) => Report(SetArranging(!arranging));
+        item.Click += (_, _) => Report(SetArranging(!arranging, activate: true));
         menu.Items.Add(item);
     }
 }

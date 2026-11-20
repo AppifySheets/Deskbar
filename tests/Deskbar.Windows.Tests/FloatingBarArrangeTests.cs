@@ -161,6 +161,99 @@ public class FloatingBarArrangeTests
         Assert.All(IconButtons(bar.Rows), icon => Assert.Equal(1.0, icon.Opacity));
     });
 
+    // Review, Critical 1. The row's release handler and the icon's orphan rescue run even on a handled release, and read
+    // flags the last click left behind. The swallowed press must not leave a click from before the mode alive: click a row,
+    // enter the mode, click it again, and nothing switches.
+    [Fact]
+    public void A_click_before_the_mode_does_not_make_the_next_click_switch() => StaThread.Run(() =>
+    {
+        var harness = Harness.Build();
+        using var bar = harness.ShowBar();
+        var row = RowFor(bar.Rows, "Sparrow");
+        Press(row);
+        Release(row);
+        Assert.Single(harness.Desktops.Switched); // precondition: that click switched
+
+        Assert.True(bar.Bar.SetArranging(true).IsSuccess);
+        row = RowFor(bar.Rows, "Sparrow");
+        Press(row);
+        Release(row);
+
+        Assert.Single(harness.Desktops.Switched);
+    });
+
+    // ...and an orphan release left by the last click (the post-switch case) does not turn every click in the mode into a
+    // switch, or an icon click into a toggle of its window.
+    [Fact]
+    public void An_orphan_release_before_the_mode_does_not_leak_into_it() => StaThread.Run(() =>
+    {
+        var harness = Harness.Build();
+        using var bar = harness.ShowBar();
+        OrphanRelease(RowFor(bar.Rows, "Sparrow")); // precondition for the bug: orphanRelease is now true
+        Assert.Single(harness.Desktops.Switched);   // (the orphan rescue itself switched once, as designed)
+        Assert.True(bar.Bar.SetArranging(true).IsSuccess);
+
+        var row = RowFor(bar.Rows, "Sparrow");
+        Press(row);
+        Release(row);
+        var icon = IconButtons(RowFor(bar.Rows, "Sparrow")).Single();
+        Press(icon);
+        Release(icon);
+
+        Assert.Single(harness.Desktops.Switched);
+    });
+
+    // A press in the mode followed by a release after it (Esc, or `arrange off`, with the button held) is not an orphan
+    // and switches nothing.
+    [Fact]
+    public void A_press_in_the_mode_and_a_release_after_it_switches_nothing() => StaThread.Run(() =>
+    {
+        var harness = Harness.Build();
+        using var bar = harness.ShowBar();
+        Assert.True(bar.Bar.SetArranging(true).IsSuccess);
+        var row = RowFor(bar.Rows, "Sparrow");
+        Press(row);
+
+        Assert.True(bar.Bar.SetArranging(false).IsSuccess);
+        Release(RowFor(bar.Rows, "Sparrow"));
+
+        Assert.Empty(harness.Desktops.Switched);
+    });
+
+    // Review, Important 2. A resize that is in progress when the mode starts is finished by its release, not left
+    // captured and "moving".
+    [Fact]
+    public void A_resize_in_progress_is_finished_by_its_release_while_arranging() => StaThread.Run(() =>
+    {
+        var harness = Harness.Build();
+        using var bar = harness.ShowBar();
+        bar.Bar.BeginResizeForTest();
+        Assert.True(bar.Bar.IsResizingForTest);
+
+        Assert.True(bar.Bar.SetArranging(true).IsSuccess);
+        Release(RowFor(bar.Rows, "Sparrow"));
+
+        Assert.False(bar.Bar.IsResizingForTest);
+    });
+
+    // Review, Important 3. Only a UI entry takes the foreground; the pipe's does not.
+    [Fact]
+    public void Only_the_menu_activates_the_bar() => StaThread.Run(() =>
+    {
+        var harness = Harness.Build();
+        using var bar = harness.ShowBar();
+        var sparrow = harness.Manager.State.Workspaces.Single(w => w.Name == "Sparrow").Id;
+
+        Assert.True(bar.Bar.SetArranging(true).IsSuccess);
+        Assert.Equal(0, bar.Bar.ArrangeActivations);
+        Assert.True(bar.Bar.SetArranging(false).IsSuccess);
+
+        bar.Bar.WorkspaceMenu(sparrow, "Sparrow", folded: false).Items.OfType<MenuItem>()
+            .Single(i => i.Header as string == "Arrange workspaces").RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
+
+        Assert.Equal(1, bar.Bar.ArrangeActivations);
+    });
+
     // --- helpers ------------------------------------------------------------------------------------------------
 
     static KeyEventArgs EscapeKey(FloatingBar bar) =>
@@ -176,8 +269,16 @@ public class FloatingBarArrangeTests
         return preview;
     }
 
-    static void Release(UIElement target) =>
+    // Both halves of a release, tunnelling preview first (where the bar's window-level handler runs) then the bubbling
+    // MouseUp (where the row's and the icon's handledEventsToo handlers run), as the input manager delivers them.
+    static void Release(UIElement target)
+    {
+        target.RaiseEvent(new MouseButtonEventArgs(Mouse.PrimaryDevice, 0, MouseButton.Left) { RoutedEvent = Mouse.PreviewMouseUpEvent });
         target.RaiseEvent(new MouseButtonEventArgs(Mouse.PrimaryDevice, 0, MouseButton.Left) { RoutedEvent = Mouse.MouseUpEvent });
+    }
+
+    // A release with no press before it, which the bar marks an orphan (#48).
+    static void OrphanRelease(UIElement target) => Release(target);
 
     static Grid RowFor(Panel rows, string label) =>
         rows.Children.OfType<Border>()

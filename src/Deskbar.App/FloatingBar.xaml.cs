@@ -1072,11 +1072,6 @@ public partial class FloatingBar : Window
     // deliberate one.
     void OnPreviewMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
     {
-        // Arrange mode (FloatingBar.Arrange.cs): while it is on a press never switches a row, toggles a fold or arms
-        // a window drag, so nothing below runs. That includes Ctrl+drag moving the bar and the edge resize: the mode is
-        // a short, deliberate state, and the bar stays where it is until Done.
-        if (SwallowedWhileArranging(e, "press")) return;
-
         // Stage 1 of the click trace (#48). The SOURCE type matters as much as the fact of a
         // press: it says which element the release will be delivered to, and two of the three
         // known ways to lose a click turn on that.
@@ -1121,6 +1116,13 @@ public partial class FloatingBar : Window
             e.Handled = true;
             return;
         }
+
+        // Arrange mode (FloatingBar.Arrange.cs): from here on a press never switches a row, toggles a fold or arms a
+        // bar drag, so nothing below runs. This sits AFTER the bookkeeping above, which the row and icon release
+        // handlers read, and after the resize branch, which stays available (it is not row business, and a press the
+        // mode ate there would leave the resize cursor over an edge that does nothing). Ctrl+drag moving the bar stays
+        // blocked for now.
+        if (SwallowedWhileArranging(e, "press")) return;
 
         // A press in the docked edge strip is remembered by the row it was beside (see EdgeRowAt); the
         // release decides. It still arms nothing else: docked, the bar does not move.
@@ -1262,10 +1264,6 @@ public partial class FloatingBar : Window
     // own dragStart (pitfall #2 in that file's comments).
     void OnPreviewMouseLeftButtonUp(object sender, MouseButtonEventArgs e)
     {
-        // Arrange mode, the other half of the early return in OnPreviewMouseLeftButtonDown: the press was swallowed, so
-        // there is nothing to finish, and a release that went on to the rows would otherwise read as an orphan.
-        if (SwallowedWhileArranging(e, "release")) return;
-
         // The half of the #48 trace that was missing, and the one that splits the remaining cases
         // in two. Today a lost click leaves a "press" line with no "row-up" after it, and that is
         // ambiguous: the release may have arrived at the bar and been declined somewhere before the
@@ -1321,6 +1319,9 @@ public partial class FloatingBar : Window
                 Save();
             }
         }
+        // Arrange mode, the other half of the stop in OnPreviewMouseLeftButtonDown: after the orphan bookkeeping above
+        // and after a resize in progress has been finished (a resize begun before the mode must not be left captured).
+        else if (SwallowedWhileArranging(e, "release")) { }
         // A release in the docked edge strip, beside the row its press was beside, switches to that row's
         // workspace (see EdgeRowAt). Not after a drag: that release belongs to the drag.
         else if (!dragJustFinished) EdgeRelease(e.GetPosition(this), dockedEdge);
@@ -4293,6 +4294,9 @@ public partial class FloatingBar : Window
             container.AddHandler(Mouse.MouseUpEvent, new MouseButtonEventHandler((_, e) =>
             {
                 if (e.ChangedButton != MouseButton.Left) return;
+                // Arrange mode: a row is not a switch target while arranging, whatever the click flags say (the
+                // window-level stop is not enough on its own: this handler runs on handled releases too).
+                if (arranging) return;
                 // Stage 3: the release reached THIS row's handler. Both flags are logged whatever
                 // they say, because "the release arrived and was declined" and "the release never
                 // arrived" are the two halves this bug has to be split into, and only the first
@@ -6527,7 +6531,7 @@ public partial class FloatingBar : Window
         button.AddHandler(MouseLeftButtonUpEvent, new MouseButtonEventHandler((_, e) =>
         {
             // A row clicked as a whole rescues its own orphan release (see the row's handler), so nothing here.
-            if (e.ChangedButton != MouseButton.Left || !orphanRelease || dragJustFinished || wholeRow) return;
+            if (e.ChangedButton != MouseButton.Left || !orphanRelease || dragJustFinished || wholeRow || arranging) return;
             MarkPressConsumed();
 
             RedrawWhenToggleSettles(row, activator.IsMinimized(row.Window.Handle));
