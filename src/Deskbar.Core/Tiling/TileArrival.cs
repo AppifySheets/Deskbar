@@ -19,8 +19,10 @@ public sealed record TileSplit(WindowHandle Target, TileArrange.Zone Side);
 // tiles, and a tile of a 2x2 grid would then fail a quarter it exactly has.
 //
 // SKIPPED TILES: the Tiler passes the screen's MAXIMIZED tiles in `skip`, and no rule above ever chooses one, neither
-// as the last-used tile nor as the largest. A maximized window keeps its slot but covers the whole screen, so
-// halving its slot would put the newcomer behind it, out of sight, and the maximized window would not change at all.
+// as the last-used tile nor as the largest. Since 2026-11-20 a window maximized by hand leaves the board altogether
+// (Tiler.cs), so the only maximized tile still on a board is one the Tiler is un-maximizing itself, whose restore has
+// not landed yet. It keeps its slot but covers the whole screen, so halving its slot would put the newcomer behind it,
+// out of sight, and the maximized window would not change at all.
 // Only when every tile of the screen is skipped does the rule run as if nothing were: a window still has to go
 // somewhere, and the newcomer then lands in the slot the maximized window will come back to half of.
 //

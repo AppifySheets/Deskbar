@@ -294,54 +294,92 @@ public sealed partial class TilerTests : IDisposable
         AssertTiled([W(1), W(2), W(3)]);
     }
 
+    // Petre, 2026-11-20: "let's not give space to the maximized window". A maximized tile used to keep its slot, so
+    // the tiles beneath never used that share of the screen. Now it leaves the board as a minimized tile does, the
+    // other tiles fill the screen, and when it is un-maximized it comes back to its place. It stays watched while it
+    // is off the board: an un-maximize raises no event, its Settled is the only way the Tiler hears it.
     [Fact]
-    public void A_maximized_window_keeps_its_slot_and_is_not_placed()
+    public void A_maximized_window_gives_up_its_slot_and_comes_back_to_it()
     {
         new[] { 1, 2, 3 }.ToList().ForEach(n => Exists(W(n), alpha));
         Start();
+        Assert.Equal([W(1), W(2), W(3)], tiler.Board.On(1));
         surface.Placed.Clear();
 
         // Maximized: the surface reports it through Settled, with the whole work area as its frame.
         surface.Maximized.Add(W(2));
         Settles(W(2), Area);
-        Assert.Empty(surface.Placed);
-        Assert.Equal([W(1), W(2), W(3)], tiler.Board.On(1));
 
-        // A fourth window re-tiles the screen; W(2) keeps its slot and is left maximized.
-        Opens(W(4), alpha);
-
-        // W(4) splits the largest tile, W(1), below it (predictable placement, change 2), not the end of a 2x2.
+        // W1 and W3 now share the screen; W2 was not placed and is still maximized, and still watched.
+        Assert.Equal([W(1), W(3)], tiler.Board.On(1));
         Assert.DoesNotContain(W(2), PlacedWindows);
-        Assert.Equal([W(1), W(4), W(2), W(3)], tiler.Board.On(1));
-        var grid = Grid(4);
-        Assert.Equal(grid[0], surface.Frames[W(1)]);
-        Assert.Equal(grid[1], surface.Frames[W(4)]);
-        Assert.Equal(grid[3], surface.Frames[W(3)]);
         Assert.Equal(Area, surface.Frames[W(2)]);
-        // The slot W(2) keeps is the top of the right column, where it will drop when it is restored: the split
-        // left an equal 2x2, which is what nothing stored means (final review, M8: the frames are the promise).
-        Assert.Empty(manager.State.Workspaces.Single(w => w.Id == alpha.Id).TileLayouts);
+        Assert.Contains(W(2), surface.Watched[^1]);
+        Assert.Equal(GridLayout.Arrange(Area, 2, Gap, Columns([0.5, 0.5], [1.0], [1.0])),
+            new[] { W(1), W(3) }.Select(w => surface.Frames[w]).ToList());
+
+        // Un-maximized: Windows puts it back wherever, and it returns to its old place with the old layout.
         surface.Maximized.Remove(W(2));
         Settles(W(2), new WindowRect(400, 300, 900, 700));
-        Assert.Equal(grid[2], surface.Frames[W(2)]);
+        AssertTiled([W(1), W(2), W(3)]);
     }
 
-    // Maximized before tiling began, so restoring it puts it back where it used to be, which here is over
-    // W(3)'s tile. Spec: "When it is restored, it goes back into its slot", so no swap.
+    // Petre's second report: "when one window is maximized, as edge is on this, tiled window is not full screen". One
+    // tile and one maximized window: the tile used to get half the screen, the maximized one holding the other half.
     [Fact]
-    public void A_restored_window_goes_back_into_its_slot()
+    public void A_lone_tile_beside_a_maximized_window_fills_the_screen()
+    {
+        new[] { 1, 2 }.ToList().ForEach(n => Exists(W(n), alpha));
+        Start();
+
+        surface.Maximized.Add(W(2));
+        Settles(W(2), Area);
+
+        AssertTiled([W(1)]);
+    }
+
+    // The GPH case from Petre's trace (2026-11-20): a maximized VS Code window minimized and restored by its icon in
+    // the bar. Windows restores it MAXIMIZED, and it used to come back beside its old neighbours as a bottom row that
+    // it never filled, the other tiles shrinking to make room for it. Restored maximized, it now stays off the board;
+    // un-maximized later, it comes back to the place it had before it was maximized.
+    [Fact]
+    public void A_maximized_window_restored_from_minimized_takes_no_slot()
+    {
+        new[] { 1, 2, 3 }.ToList().ForEach(n => Exists(W(n), alpha));
+        Start();
+        surface.Maximized.Add(W(2));
+        Settles(W(2), Area);
+        var twoTiles = new[] { W(1), W(3) }.Select(w => surface.Frames[w]).ToList();
+
+        Minimizes(W(2), true);
+        Minimizes(W(2), false);
+
+        Assert.Equal([W(1), W(3)], tiler.Board.On(1));
+        Assert.Equal(twoTiles, new[] { W(1), W(3) }.Select(w => surface.Frames[w]).ToList());
+
+        surface.Maximized.Remove(W(2));
+        Settles(W(2), new WindowRect(400, 300, 900, 700));
+        AssertTiled([W(1), W(2), W(3)]);
+    }
+
+    // Maximized before tiling began (and not just turned on, so not restored): it is off the board from the start.
+    // When it is un-maximized it joins as a new window does, even though Windows restores it over W3's tile: it is
+    // an arrival, never judged as a drop, so it does not swap with W3.
+    [Fact]
+    public void A_window_maximized_before_tiling_began_joins_when_restored()
     {
         new[] { 1, 2, 3 }.ToList().ForEach(n => Exists(W(n), alpha));
         surface.Maximized.Add(W(2));
         surface.Frames[W(2)] = Area;
         Start();
         Assert.DoesNotContain(W(2), PlacedWindows);
-        var order = tiler.Board.On(1);
+        Assert.Equal([W(1), W(3)], tiler.Board.On(1));
 
         surface.Maximized.Remove(W(2));
-        Settles(W(2), Grid(3)[order.ToList().IndexOf(W(3))]);
+        Settles(W(2), GridLayout.Arrange(Area, 2, Gap)[1]);
 
-        AssertTiled(order);
+        // No tile last used: it splits the largest, the later of the two equal halves (W3), below it.
+        AssertArranged([W(1), W(3), W(2)], Columns([0.5, 0.5], [1.0], [0.5, 0.5]));
     }
 
     // Petre, turning tiling on over a maximized browser: "activating tile windows should unmaximize all windows".

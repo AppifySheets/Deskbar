@@ -30,7 +30,12 @@ namespace Deskbar.Core.Tiling;
 // step 1; final review, I2): Evaluate hands these windows to Keep, whose IntoOpenings leaves them alone, and a return
 // beside its neighbours keeps the opening open (Returned moves it on with the new leaf), so a kept space stays for the
 // next new window. Only the arrival fallback takes an opening, as an arrival does.
-// Maximizing already keeps the slot (OnSettled puts a restored window straight back into it).
+//
+// A MAXIMIZED TILE IS AWAY TOO (Petre, 2026-11-20: "let's not give space to the maximized window"). It gives its slot
+// up the same way, so the other tiles fill the screen, and its spot is remembered the same way (NoteAway, called by
+// Evaluate while the board still holds it). Its un-maximize is a Settled rather than a MinimizeChanged, but it reaches
+// the same Evaluate, where ComesBack finds the entry and puts it back beside what it was next to. A maximized window
+// that is minimized and restored (Windows restores it maximized) stays away throughout and keeps its first entry.
 public sealed partial class Tiler
 {
     // `Layout` is what was stored for the screen (None: nothing, the automatic layout), put back as it was when the
@@ -41,11 +46,14 @@ public sealed partial class Tiler
 
     readonly Dictionary<WindowHandle, Away> away = [];
 
-    // Called on MinimizeChanged BEFORE the evaluate that takes the window out of the grid, so the board and the
-    // layout still hold it.
-    void NoteMinimized(WindowHandle window)
+    // Called BEFORE the evaluate that takes the window out of the grid, so the board and the layout still hold it: on
+    // MinimizeChanged for a minimized tile, and from Evaluate itself for a tile that is now maximized. A window that is
+    // neither, or is no longer on the board (a maximized window minimized: it left when it was maximized), notes
+    // nothing, and an entry it already has stands.
+    void NoteAway(WindowHandle window)
     {
-        if (!surface.IsMinimized(window) || !Acting().TryGetValue(out var workspace) || !Board.ScreenOf(window).TryGetValue(out var screen))
+        if (!(surface.IsMinimized(window) || surface.IsMaximized(window))
+            || !Acting().TryGetValue(out var workspace) || !Board.ScreenOf(window).TryGetValue(out var screen))
             return;
         var order = Board.On(screen);
         var here = surface.Screens().TryFirst(s => s.Number == screen);
