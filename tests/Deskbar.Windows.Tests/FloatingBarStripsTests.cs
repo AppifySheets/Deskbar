@@ -732,7 +732,7 @@ public class FloatingBarStripsTests
             {
                 Left = -32000, Top = -32000, Strips = () => strips, TaskbarJumps = taskbar,
                 IsMaximized = handle => maximized.Contains(handle),
-                IsTiled = handle => tiled.Contains(handle),
+                IsTiled = (handle, _) => tiled.Contains(handle),
             };
             bar.Show();
 

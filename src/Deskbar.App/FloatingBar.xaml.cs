@@ -2449,7 +2449,11 @@ public partial class FloatingBar : Window
                     titledList: Expanded(g.Workspace.Id),
                     asking: g.WantsAttention,
                     // The soonest running task timer on this workspace, drawn as a pie in the caption (Tasks.cs).
-                    timer: g.Timer);
+                    timer: g.Timer,
+                    // The tile mark after the name, on every tiled row and not only the one you are on (Tiling.cs).
+                    // TilingGate.Acts, the Tiler's own test, so a workspace left tiled after Pro lapsed shows nothing:
+                    // its flag is set but nothing arranges it.
+                    tiled: Core.Tiling.TilingGate.Acts(g.Workspace, IsPro()));
                 Phase($"row {g.Workspace.Name}");
                 return built;
             }
@@ -3719,7 +3723,7 @@ public partial class FloatingBar : Window
     // not a desktop at all.
     // `titledList` draws the current workspace's titled list at the bottom of the bar (see RebuildCore)
     // instead of an icon row.
-    UIElement GroupRow(string visualLabel, string groupLabel, bool isCurrent, Func<Result>? switchTo, string groupKey, Action<WindowHandle, int?>? onDrop, IEnumerable<WindowRow> rows, Brush? tint = null, Guid? rowKey = null, bool folded = false, bool nested = false, Brush? spine = null, bool pinned = false, Guid? desktopId = null, UIElement? captionContent = null, bool titledList = false, bool asking = false, Maybe<Core.Tasks.TaskTimer> timer = default, bool pinnedWorkspace = false)
+    UIElement GroupRow(string visualLabel, string groupLabel, bool isCurrent, Func<Result>? switchTo, string groupKey, Action<WindowHandle, int?>? onDrop, IEnumerable<WindowRow> rows, Brush? tint = null, Guid? rowKey = null, bool folded = false, bool nested = false, Brush? spine = null, bool pinned = false, Guid? desktopId = null, UIElement? captionContent = null, bool titledList = false, bool asking = false, Maybe<Core.Tasks.TaskTimer> timer = default, bool pinnedWorkspace = false, bool tiled = false)
     {
         // Background MUST be non-null for a panel to take part in hit testing at all --
         // a null Background leaves gaps between icons that swallow nothing and report no
@@ -3913,7 +3917,7 @@ public partial class FloatingBar : Window
         // either, which changes nothing -- RowLabel already returns null for a row with no
         // destination, and the pinned row has never had one.
         var (label, setHover) = captionContent is null
-            ? RowLabel(visualLabel, isCurrent, switchTo, caption: true, currentColour: spine, timeFor: rowKey, fold: foldMark, asking: asking, timer: timer, pin: pinnedWorkspace)
+            ? RowLabel(visualLabel, isCurrent, switchTo, caption: true, currentColour: spine, timeFor: rowKey, fold: foldMark, asking: asking, timer: timer, pin: pinnedWorkspace, tiled: tiled)
             : (captionContent, (Action<bool>?)null);
 
         // Collected as they are built, because the hover wiring below needs the BUTTONS and
@@ -4136,7 +4140,7 @@ public partial class FloatingBar : Window
         // by the same hover. Only for a real caption, not the pinned row's header.
         if (AcrossSeam && captionContent is null)
         {
-            var (twin, twinHover) = RowLabel(visualLabel, isCurrent, switchTo, caption: true, currentColour: spine, timeFor: rowKey, fold: foldMark, timer: timer, pin: pinnedWorkspace);
+            var (twin, twinHover) = RowLabel(visualLabel, isCurrent, switchTo, caption: true, currentColour: spine, timeFor: rowKey, fold: foldMark, timer: timer, pin: pinnedWorkspace, tiled: tiled);
             if (twin is FrameworkElement twinCaption && label is FrameworkElement firstCaption) twinCaption.Margin = firstCaption.Margin;
             var holder = AtRightHalf(twin);
             Grid.SetRow(holder, 0);
@@ -5519,9 +5523,11 @@ public partial class FloatingBar : Window
     // that are not workspaces.
     // `fold`: set when the row is drawn FOLDED (see GroupRow), and then the name is followed by how many windows
     // the row is hiding and, when one of them wants you, the attention dot. Null on every row drawn in full.
+    // `tiled`: the workspace is tiled and tiling acts on it, so the name is followed by the tile mark
+    // (FloatingBar.Tiling.cs, TiledMark). Read on every row, the one you are on or not, folded or not.
     (UIElement Element, Action<bool>? SetHover) RowLabel(string text, bool isCurrent, Func<Result>? switchTo, bool caption = false,
         Brush? currentColour = null, Guid? timeFor = null, (int Windows, bool Attention)? fold = null, bool asking = false, Maybe<Core.Tasks.TaskTimer> timer = default,
-        bool pin = false)
+        bool pin = false, bool tiled = false)
     {
         // Petre: "when switching workspaces, because the caption of the workspace gets bolded,
         // it increases the width of the floating window a little if that workspace is full,
@@ -5602,6 +5608,11 @@ public partial class FloatingBar : Window
         // (FloatingBar.Tasks.cs). Registered there for the clock's tick, which repaints it in place.
         if (caption && timer.HasValue)
             marks.Add(TaskPie(timer.Value));
+        // ...and after that, the tile mark, so it reads straight after the name, or after the pin on a pinned
+        // workspace: "Mail ⊞ ◔ · 1 h 5 min". It says the workspace as a whole is tiled, so it belongs with the name
+        // rather than with any one count or time.
+        if (caption && tiled)
+            marks.Add(TiledMark(textBlock));
         // ...and the very last, so it sits against the name: a pinned workspace's pin (FloatingBar.WorkspaceJumps.cs).
         if (caption && pin)
             marks.Add(PinnedWorkspaceMark(textBlock.FontSize, textBlock.Foreground));
@@ -6341,12 +6352,13 @@ public partial class FloatingBar : Window
         // placeholder covers whatever is left.
         // ...then the tab cards and the sound ring round it all (FloatingBar.Activity.cs).
         // The artwork itself ages to grey as the window goes unused (FloatingBar.Aging.cs).
-        // ...and a corner badge says whether the window is maximized or in a tile (FloatingBar.WindowState.cs).
+        // ...and a corner badge says whether the window is maximized or in a tile (FloatingBar.WindowState.cs). The
+        // row's workspace goes with it, so a tiled workspace you are not on badges its windows too.
         button.Content = WithActivity(WithWindowFit(WithState(
             icon is not null
                 ? Aged(icon, row)
                 : Placeholder(row.Window),
-            row), row), row);
+            row), row, rowKey), row);
         // The icon size setting (IconScaling): the ARTWORK is scaled, overlays and all, and not the button. On an
         // icon row that is the whole button anyway, and on a titled line (Titled wraps this same content) it
         // keeps the window's title at its own size, which belongs to the text size setting instead. A

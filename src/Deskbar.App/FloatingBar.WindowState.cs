@@ -33,27 +33,30 @@ public partial class FloatingBar
     // it answers for a window on another virtual desktop too.
     internal Func<WindowHandle, bool> IsMaximized { get; init; } = handle => NativeMethods.IsZoomed(handle.Value);
 
-    // Whether a window is in a tile. The Tiler lives in App and is built after the bar, so App passes a lambda that
-    // reads it when asked (its Board: the current workspace's tiles). Windows of a tiled workspace you are not on are
-    // not on that board, so they show no tile badge until you are there.
-    internal Func<WindowHandle, bool> IsTiled { get; init; } = _ => false;
+    // Whether a window, shown on the row of the given workspace (null for a row that is not one), is in a tile. The
+    // Tiler lives in App and is built after the bar, so App passes a lambda that reads it when asked (Tiler.InTile).
+    // The workspace is passed because a tiled workspace you are NOT on has no board to ask: the Tiler answers there
+    // with its own rule for what takes a tile, so its windows show the badge too. Petre: "icons in them are showing
+    // if they're tiled or they're not when it's active; let's show it for collapsed workspaces as well".
+    internal Func<WindowHandle, Guid?, bool> IsTiled { get; init; } = (_, _) => false;
 
-    internal WindowFit FitOf(WindowHandle handle) =>
+    internal WindowFit FitOf(WindowHandle handle, Guid? workspace) =>
         IsMaximized(handle) ? WindowFit.Maximized
-        : IsTiled(handle) ? WindowFit.Tiled
+        : IsTiled(handle, workspace) ? WindowFit.Tiled
         : WindowFit.None;
 
     // What each badge drawn by the last rebuild said, so the 1 s tick can tell when one is out of date. A window
     // maximized by its own title bar, or a tile formed by the Tiler, raises nothing the bar rebuilds on by itself, so
     // without this the badge would wait for an unrelated rebuild (RefreshWindowFits).
-    readonly Dictionary<WindowHandle, WindowFit> fitsShown = [];
+    // Kept with the row's workspace, which the tile half of the question needs (IsTiled).
+    readonly Dictionary<WindowHandle, (Guid? Workspace, WindowFit Fit)> fitsShown = [];
 
     void ForgetWindowFits() => fitsShown.Clear();
 
-    UIElement WithWindowFit(UIElement icon, WindowRow row)
+    UIElement WithWindowFit(UIElement icon, WindowRow row, Guid? workspace)
     {
-        var fit = FitOf(row.Window.Handle);
-        fitsShown[row.Window.Handle] = fit;
+        var fit = FitOf(row.Window.Handle, workspace);
+        fitsShown[row.Window.Handle] = (workspace, fit);
         return fit == WindowFit.None ? icon : WithFitBadge(icon, fit);
     }
 
@@ -92,6 +95,6 @@ public partial class FloatingBar
     internal void RefreshWindowFits()
     {
         if (fitsShown.Count == 0 || rebuilding) return;
-        if (fitsShown.Any(shown => FitOf(shown.Key) != shown.Value)) RequestRebuild();
+        if (fitsShown.Any(shown => FitOf(shown.Key, shown.Value.Workspace) != shown.Value.Fit)) RequestRebuild();
     }
 }

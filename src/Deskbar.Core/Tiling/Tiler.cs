@@ -165,6 +165,27 @@ public sealed partial class Tiler(WorkspaceManager manager, IVirtualDesktopServi
         context.Map(c => boards.TryGetValue(c.Workspace, out var board) ? board : TileBoard.Empty)
             .GetValueOrDefault(TileBoard.Empty);
 
+    // WHETHER A WINDOW SHOWN ON `workspaceId`'s ROW IS IN A TILE, for the bar's tile badge (FloatingBar.WindowState.cs).
+    // Petre: "icons in them are showing if they're tiled or they're not when it's active; let's show it for collapsed
+    // workspaces as well".
+    //
+    //   the workspace you are on   the board, exactly as before: a window is in a tile when the grid holds it.
+    //   another tiled workspace    the Tiler arranges nothing there (it acts only on the desktop you look at), so
+    //                              there is no board to ask; and after a restart there would be none at all. So the
+    //                              answer is the one this Tiler gives on arrival: the window takes a tile when it is
+    //                              on the taskbar, not minimized, tileable and not maximized (Eligible). The bar's
+    //                              row says which workspace it is on, which spares the two COM calls LivesOn makes,
+    //                              and this is asked of every icon on the 1 s tick.
+    //   anything else              no: untiled, the gate not acting (a free copy), or a row that is not a workspace.
+    public bool InTile(WindowHandle window, Guid? workspaceId)
+    {
+        if (Board.ScreenOf(window).HasValue) return true;
+        if (workspaceId is not { } id || Acting().Map(w => w.Id == id).GetValueOrDefault(false)) return false;
+        var pro = isPro();
+        return manager.State.Workspaces.TryFirst(w => w.Id == id).Map(w => TilingGate.Acts(w, pro)).GetValueOrDefault(false)
+            && Eligible(window);
+    }
+
     public void Start()
     {
         // Ruling 1: the Tiler listens to the manager itself, so a workspace tiled or untiled or the gap changed

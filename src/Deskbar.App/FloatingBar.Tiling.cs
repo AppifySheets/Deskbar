@@ -108,6 +108,37 @@ public partial class FloatingBar
 
     const string TilePanes = "M1.5,2 L7,2 L7,14 L1.5,14 Z M9,2 L14.5,2 L14.5,7.25 L9,7.25 Z M9,8.75 L14.5,8.75 L14.5,14 L9,14 Z";
 
+    // --- the caption's tile mark --------------------------------------------------------------------------------
+    //
+    // Petre: "i want to have workspaces showing if they're tiled or not". The header button says it for the
+    // workspace you are on only, and a folded row has no icons to carry the windows' tile badges, so each tiled
+    // row's caption carries the header button's own glyph right after the name (RowLabel adds it).
+    //
+    //   * The same panes as the header button (TilePanes), so the two read as one sign.
+    //   * Its colour follows the name's: the Fill is BOUND to the caption's Foreground, so the hover's white, the
+    //     current row's accent and the asking row's pulse all reach the mark with no wiring of their own.
+    //   * As tall as the caption's letters and inert, like the timer pie: the caption is the row's switch target,
+    //     and a mark that took the click would leave a dead spot in it.
+    internal const string TiledMarkTag = "tiled-mark";
+
+    static FrameworkElement TiledMark(TextBlock name)
+    {
+        var panes = new System.Windows.Shapes.Path { Data = Geometry.Parse(TilePanes) };
+        panes.SetBinding(System.Windows.Shapes.Shape.FillProperty,
+            new System.Windows.Data.Binding(nameof(TextBlock.Foreground)) { Source = name });
+        var size = Math.Round(name.FontSize);
+        return new Viewbox
+        {
+            Width = size,
+            Height = size,
+            Tag = TiledMarkTag,
+            Margin = new Thickness(3, 0, 1, 0),
+            VerticalAlignment = VerticalAlignment.Center,
+            IsHitTestVisible = false,
+            Child = new Canvas { Width = 16, Height = 16, Children = { panes } },
+        };
+    }
+
     Button TileButton()
     {
         var button = BareShellButton("Tile windows", TileGlyph(tiled: false));

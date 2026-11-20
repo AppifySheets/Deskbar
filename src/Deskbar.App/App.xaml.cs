@@ -1557,9 +1557,10 @@ public partial class App : Application
                     ignore: hwnd => monitor!.Ignore(hwnd),
                     switchTo: id => manager.Switch(id)),
                 Rings = windowRings,
-                // The tile badge's question (FloatingBar.WindowState.cs): is this window on the current workspace's
-                // tile board. The Tiler is built after the bar, so the lambda reads the field when asked.
-                IsTiled = handle => tiler?.Board.Screens.Values.Any(column => column.Contains(handle)) ?? false,
+                // The tile badge's question (FloatingBar.WindowState.cs): is this window, on that workspace's row, in a
+                // tile (Tiler.InTile: the board for the workspace you are on, the Tiler's own rule for any other tiled
+                // one). The Tiler is built after the bar, so the lambda reads the field when asked.
+                IsTiled = (handle, workspace) => tiler?.InTile(handle, workspace) ?? false,
                 Volume = new Windows.Audio.SystemVolume(),
                 // ...and the device list its click opens (FloatingBar.Volume.cs).
                 AudioOutputs = new Windows.Audio.AudioDevices(),
