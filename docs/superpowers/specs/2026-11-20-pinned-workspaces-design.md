@@ -105,6 +105,9 @@ where it was".
 - Strip items sit at the END of the window tabs (Petre: "put it at the end of the list of windows"), in "Look 2"
   from the mockup: a dark chip with a dot and underline in the colour of where it goes.
 
+After release (2.5.42), with a screenshot of the header: "i don't want pinned at the top". The header's copy of the
+items is gone; the strips, the taskbar buttons and the pinned rows remain.
+
 ## Left to the builder
 
 - The item's exact look (padding, the arrow glyph, the current-workspace marking) within the strip's

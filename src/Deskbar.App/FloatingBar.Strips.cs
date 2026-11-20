@@ -102,7 +102,7 @@ public partial class FloatingBar
         NoteActivity(overview);
         pinnedNow = overview.Pinned;
         FillStrips(overview);
-        FillJumpLine(overview, JumpsFor(overview)); // the header's pinned workspace items (FloatingBar.WorkspaceJumps.cs)
+        FillTaskbarJumps(overview, JumpsFor(overview)); // the pinned workspaces' taskbar buttons (FloatingBar.WorkspaceJumps.cs)
         if (IconCache.HasPendingIcons && !iconWatch.IsEnabled) iconWatch.Start();
     }
 

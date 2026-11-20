@@ -2607,9 +2607,9 @@ public partial class FloatingBar : Window
             // brings; a minute's ageing late on a tab nobody is looking at while dragging the bar's edge.
             if (fresh) FillStrips(overview);
 
-            // The header's pinned workspace items (FloatingBar.WorkspaceJumps.cs), on a fresh rebuild for the reason the
-            // strips are: a relayout changes nothing they show.
-            if (fresh) FillJumpLine(overview, JumpsFor(overview));
+            // The pinned workspaces' taskbar buttons (FloatingBar.WorkspaceJumps.cs), on a fresh rebuild for the reason
+            // the strips are: a relayout changes nothing they show.
+            if (fresh) FillTaskbarJumps(overview, JumpsFor(overview));
 
             groupRows
                 .SelectMany((row, i) => i == 0 ? new[] { row } : new[] { Separator(), row })

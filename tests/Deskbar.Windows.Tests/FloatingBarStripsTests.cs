@@ -489,18 +489,16 @@ public class FloatingBarStripsTests
         Assert.Equal([h.SparrowDesktop], h.Desktops.Switched);
     });
 
-    // The bar's header carries the same items, so they are there when the list is not on the screens.
+    // Petre, with a screenshot of the header: "i don't want pinned at the top". The pinned workspaces' items are on the
+    // strips and the taskbar only; nothing in the bar itself is one.
     [Fact]
-    public void The_header_line_carries_the_items() => StaThread.Run(() =>
+    public void The_bar_carries_no_pinned_items() => StaThread.Run(() =>
     {
         using var h = StripHarness.Build();
-        Assert.Empty(h.Bar.JumpLine.Children);
 
         Assert.True(h.Manager.SetWorkspacePinned(IdOf(h, "Sparrow"), true).IsSuccess);
-        Assert.Equal("Sparrow", LabelOf(Assert.Single(h.Bar.JumpLine.Children.OfType<Button>())));
 
-        Assert.True(h.Manager.SetWorkspacePinned(IdOf(h, "Sparrow"), false).IsSuccess);
-        Assert.Empty(h.Bar.JumpLine.Children);
+        Assert.DoesNotContain(Descendants(h.Bar), d => d is FrameworkElement { Tag: FloatingBar.WorkspaceJumpTag });
     });
 
     // The items are filled inside the bar's guard, as the tabs are, so a re-entered rebuild leaves one item a strip.
@@ -515,7 +513,6 @@ public class FloatingBarStripsTests
         h.Monitor.Pump.OnNext(new WindowEvent(WindowEventKind.Activated, h.Code));
 
         Assert.All(h.Strips, strip => Assert.Single(JumpsOf(strip)));
-        Assert.Single(h.Bar.JumpLine.Children);
     });
 
     // The row menu's one flipping item pins and unpins.
