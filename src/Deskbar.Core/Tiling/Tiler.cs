@@ -374,8 +374,19 @@ public sealed partial class Tiler(WorkspaceManager manager, IVirtualDesktopServi
             && Tileable(e.Window.Handle, workspace))
             Unmaximize(e.Window.Handle, $"{workspace.Name}: it opened maximized");
 
+        // A window brought back from minimized that is not on the board: if the evaluate below makes it arrive (it
+        // had no remembered place, Tiler.Minimize.cs, or the place is on another screen now), it keeps the screen
+        // Windows restored it to (Tiler.Arrival.cs, `unminimized`). Set only for this one evaluate.
+        if (e.Kind == WindowEventKind.MinimizeChanged
+            && !surface.IsMinimized(e.Window.Handle)
+            && !Board.ScreenOf(e.Window.Handle).HasValue)
+            unminimized = e.Window.Handle;
+
         if (e.Kind is WindowEventKind.Appeared or WindowEventKind.Hidden or WindowEventKind.Disappeared or WindowEventKind.MinimizeChanged)
-            Evaluate(everyScreen: false);
+        {
+            try { Evaluate(everyScreen: false); }
+            finally { unminimized = Maybe<WindowHandle>.None; }
+        }
     }
 
     // The manager moved a window to another desktop (WorkspaceManager.WindowMoved). Nothing else announces

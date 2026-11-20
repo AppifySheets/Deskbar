@@ -340,6 +340,28 @@ public sealed partial class TilerTests
         AssertArranged([W(4)], TileLayout.Automatic(1), Area2, screen: 2);
     }
 
+    // Petre: "i had a chrome window in the deskbar workspace minimized in the left screen; i clicked on it and it
+    // moved to the right screen". It was minimized before the Tiler started, so it had no remembered place and its
+    // restore arrived like a new window, splitting the tile last used on the other screen. A restored window is not a
+    // new one: the user knows where it was, so it stays on the screen Windows restored it to.
+    [Fact]
+    public void A_window_restored_with_no_remembered_place_stays_on_its_screen()
+    {
+        surface.ScreenList.Add(FakeTileSurface.Screen(2, Area2));
+        Exists(W(1), alpha, screen: 1);
+        Exists(W(2), alpha, screen: 2);
+        Exists(W(3), alpha, screen: 1);
+        surface.Minimized.Add(W(3));
+        Start();
+        Assert.False(tiler.Board.ScreenOf(W(3)).HasValue);
+        Uses(W(2));
+
+        Minimizes(W(3), minimized: false);
+
+        AssertArranged([W(1), W(3)], Columns([0.5, 0.5], [1.0], [1.0]));
+        AssertArranged([W(2)], TileLayout.Automatic(1), Area2, screen: 2);
+    }
+
     // --- keep the space when a window closes (change 3) -------------------------------------------------------
 
     // The window went to the tray: the shell drops it from its taskbar list (FakeMonitor.IsListed reads
