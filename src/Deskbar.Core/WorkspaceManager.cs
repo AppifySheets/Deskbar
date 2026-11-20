@@ -4,6 +4,7 @@ using System.Reactive.Linq;
 using System.Reactive.Subjects;
 using CSharpFunctionalExtensions;
 using Deskbar.Core.Abstractions;
+using Deskbar.Core.Arrange;
 using Deskbar.Core.Domain;
 using Deskbar.Core.Geometry;
 using Deskbar.Core.Overview;
@@ -1907,6 +1908,51 @@ public sealed class WorkspaceManager(
             {
                 Groups = State.Groups.Select(g => g.Id == groupId ? g with { Name = name.Trim() } : g).ToList(),
             }));
+
+    // A drop on the bar's arrange mode (docs/superpowers/specs/2026-11-20-bar-edit-mode-design.md). The rules
+    // for what a drop does, and the order it leaves, live in RowDrop (Plan decides, Applied builds the whole
+    // resulting state), so the line the bar drew and the change made here cannot disagree. This method only does
+    // what a pure function cannot: asks for a group's name, validates what the state alone can tell (a name that
+    // is taken, a row that has vanished since the bar last drew), and persists once.
+    //
+    // `askGroupName` is called only for GroupWith, with the suggested name. None means the user cancelled, which
+    // is a success that changes nothing.
+    public Result ApplyDrop(DropAction action, Func<string, Maybe<string>> askGroupName) =>
+        action switch
+        {
+            DropAction.Nothing => Result.Success(),
+            DropAction.Place p => WorkspaceExists(p.Workspace).Bind(() => RowExists(p.Beside)).Tap(() => PersistDrop(p, null)),
+            DropAction.PlaceGroup p => GroupExists(p.Group).Bind(() => RowExists(p.Beside)).Tap(() => PersistDrop(p, null)),
+            DropAction.GroupWith g => WorkspaceExists(g.Target).Bind(() => WorkspaceExists(g.Dragged))
+                .Bind(() => askGroupName(g.SuggestedName) is { HasValue: true } asked
+                    ? Result.FailureIf(string.IsNullOrWhiteSpace(asked.Value), "Group name required")
+                        .Bind(() => GroupNameTaken(asked.Value, excluding: null)
+                            ? Result.Failure($"A group named '{asked.Value.Trim()}' already exists.")
+                            : Result.Success())
+                        .Tap(() => PersistDrop(g, asked.Value))
+                    : Result.Success()),
+            _ => Result.Success(),
+        };
+
+    // One persist, and none when the drop leaves everything where it is.
+    void PersistDrop(DropAction action, string? groupName)
+    {
+        if (!RowDrop.LeavesOrderAsItIs(State, action)) Persist(RowDrop.Applied(State, action, groupName));
+    }
+
+    Result WorkspaceExists(Guid id) =>
+        State.Workspaces.Any(w => w.Id == id) ? Result.Success() : Result.Failure("Workspace no longer exists.");
+
+    Result GroupExists(Guid id) =>
+        State.Groups.Any(g => g.Id == id) ? Result.Success() : Result.Failure("That group no longer exists.");
+
+    Result RowExists(RowRef row) =>
+        row switch
+        {
+            RowRef.Workspace w => WorkspaceExists(w.Id),
+            RowRef.Group g => GroupExists(g.Id),
+            _ => Result.Failure("Workspace no longer exists."),
+        };
 
     // Case-insensitive and trim-tolerant, matching NameTaken for workspaces. Groups and workspaces
     // are allowed to share a name: a group named after one of its members is the commonest case, so

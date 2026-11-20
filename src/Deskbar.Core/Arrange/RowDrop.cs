@@ -187,7 +187,8 @@ public static class RowDrop
 
     // A drop that leaves every workspace in its place and every membership as it was is not a drop. Asked of
     // Applied, not of a second set of rules, so "nothing would change" and "what would change" cannot disagree.
-    static bool LeavesOrderAsItIs(AppState state, DropAction action) =>
+    // Internal so WorkspaceManager.ApplyDrop skips its persist on the same test, rather than a copy of it.
+    internal static bool LeavesOrderAsItIs(AppState state, DropAction action) =>
         Applied(state, action, action is DropAction.GroupWith g ? g.SuggestedName : null) is var after
         && after.Groups.Count == state.Groups.Count
         && after.Workspaces.Select(w => (w.Id, w.GroupId)).SequenceEqual(state.Workspaces.Select(w => (w.Id, w.GroupId)));
