@@ -42,7 +42,7 @@ public class UnboundDesktopMenuTests
                 .ToList()
                 .ForEach(child =>
                 {
-                    if (child is TextBlock { Text: { } text }) found.Add(text);
+                    if (child is TextBlock { Text: { } text } && !Chips.Inside(child)) found.Add(text);
                     Collect(child);
                 });
     }

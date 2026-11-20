@@ -2299,6 +2299,11 @@ public partial class FloatingBar : Window
             // overview than the rows being drawn from it.
             pinnedNow = overview.Pinned;
 
+            // The pinned workspaces' and the previous workspace's items, worked out once for this rebuild: the titled
+            // list ends with them (GroupRow) and the taskbar buttons follow them (below). Set before any row is
+            // built, for the reason pinnedNow is.
+            jumpsNow = (overview, JumpsFor(overview));
+
             // The workspace (or unnamed desktop) you are on: whose windows the titled list shows.
             var liveTarget = overview.Workspaces.FirstOrDefault(w => w.IsCurrent)?.Workspace.Id
                 ?? overview.OtherDesktops.FirstOrDefault(d => d.IsCurrent && d.DesktopId != Guid.Empty)?.DesktopId;
@@ -2609,7 +2614,7 @@ public partial class FloatingBar : Window
 
             // The pinned workspaces' taskbar buttons (FloatingBar.WorkspaceJumps.cs), on a fresh rebuild for the reason
             // the strips are: a relayout changes nothing they show.
-            if (fresh) FillTaskbarJumps(overview, JumpsFor(overview));
+            if (fresh) FillTaskbarJumps(overview, jumpsNow.Value.Jumps);
 
             groupRows
                 .SelectMany((row, i) => i == 0 ? new[] { row } : new[] { Separator(), row })
@@ -4036,6 +4041,11 @@ public partial class FloatingBar : Window
         drawnLines.Select((line, at) => (line, last: at == drawnLines.Count - 1)).ToList()
             .ForEach(x => icons.Children.Add(LineOf(x.line, showMonitorMarkers ? opensLine : [], groupLabel, groupKey, rowKey, iconButtons, washes, slots, x.last,
                 scale, spine is not null ? NestedIndent : 0, titled, wholeRow, isCurrent)));
+
+        // The titled list ends with the items the strips end with: the pinned workspaces' and the previous
+        // workspace's (FloatingBar.WorkspaceJumps.cs). Petre: "i want to have pinned workspaces in the workspace, in
+        // this layout", "and when at the bottom of the bar".
+        if (titled && jumpsNow is { } jumps) icons.Children.Add(TitledListJumps(jumps.Overview, jumps.Jumps));
 
         // A child workspace's parent's windows USED to be drawn here, dimmed, on every nested row -- the
         // issue asked for "everything from the main workspace pinned to the nested ones". Petre, seeing

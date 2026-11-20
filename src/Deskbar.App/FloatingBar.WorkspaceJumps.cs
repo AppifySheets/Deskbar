@@ -96,6 +96,26 @@ public partial class FloatingBar
         return [.. pinned.Where(item => item.Target.HasValue), .. WorkspaceJumps.BackItem(pinned, back).Match(item => new[] { item }, () => [])];
     }
 
+    // This rebuild's items and the overview they were worked out from (RebuildCore sets it before any row is built), for
+    // the titled list's line of items.
+    (Overview Overview, IReadOnlyList<WorkspaceJump> Jumps)? jumpsNow;
+
+    // The line of items at the end of the current workspace's titled list, in the row or at the bottom of the bar
+    // (GroupRow). Petre, with a screenshot of the expanded row: "i want to have pinned workspaces in the workspace, in
+    // this layout", "and when at the bottom of the bar". The strip's chips, packed from the left and wrapping, one
+    // line under the windows' lines. The line is there even with no items, at a chip's height, so the list does not
+    // change height as items come and go (the titled list's floor exists for the same reason: Petre, "without causing
+    // the size change for the workspace").
+    UIElement TitledListJumps(Overview overview, IReadOnlyList<WorkspaceJump> jumps)
+    {
+        var line = new WrapPanel { Orientation = Orientation.Horizontal, ItemHeight = TitledJumpHeight, MinHeight = TitledJumpHeight, Margin = new Thickness(0, 3, 0, 1) };
+        jumps.ToList().ForEach(jump => line.Children.Add(JumpButton(jump, overview)));
+        return line;
+    }
+
+    // A chip's height in the titled list: the strip's 24 DIP less a little, since a list line is shorter than a strip.
+    const double TitledJumpHeight = 22;
+
     // The pinned workspaces' buttons on Windows' taskbar (TaskbarJumps), kept in step with the strip items. Set by the
     // composition root; left unset, as every test but the taskbar ones leaves it, there are no buttons.
     public TaskbarJumps? TaskbarJumps { get; init; }

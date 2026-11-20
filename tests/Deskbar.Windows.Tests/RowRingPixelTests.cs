@@ -122,6 +122,6 @@ public class RowRingPixelTests(ITestOutputHelper output)
         static IEnumerable<string> Texts(DependencyObject root) =>
             LogicalTreeHelper.GetChildren(root)
                 .OfType<DependencyObject>()
-                .SelectMany(child => child is TextBlock text ? [text.Text] : Texts(child));
+                .SelectMany(child => child is TextBlock text ? (Chips.Inside(text) ? [] : [text.Text]) : Texts(child));
     }
 }

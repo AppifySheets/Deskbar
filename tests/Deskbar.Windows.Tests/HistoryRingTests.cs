@@ -46,7 +46,7 @@ public class HistoryRingTests
             .SelectMany(child => new[] { child }.Concat(Descendants(child)));
 
     static IReadOnlyList<string> TextIn(DependencyObject root) =>
-        Descendants(root).OfType<TextBlock>().Select(t => t.Text).ToList();
+        Descendants(root).OfType<TextBlock>().Where(t => !Chips.Inside(t)).Select(t => t.Text).ToList();
 
     // The harness stands on GEPHA with Sparrow as the only other workspace, so Sparrow is where the
     // back button points and therefore where the trail's first mark belongs.

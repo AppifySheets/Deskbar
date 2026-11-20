@@ -501,7 +501,23 @@ public class FloatingBarStripsTests
 
         Assert.True(h.Manager.SetWorkspacePinned(IdOf(h, "Sparrow"), true).IsSuccess);
 
-        Assert.DoesNotContain(Descendants(h.Bar), d => d is FrameworkElement { Tag: FloatingBar.WorkspaceJumpTag });
+        Assert.DoesNotContain(Descendants((DependencyObject)h.Bar.FindName("BarHeader")!), d => d is FrameworkElement { Tag: FloatingBar.WorkspaceJumpTag });
+    });
+
+    // Petre, with a screenshot of the expanded row's titled list: "i want to have pinned workspaces in the workspace,
+    // in this layout", "and when at the bottom of the bar". With the window list in the row or at the bottom of the
+    // bar, the list ends with the same items the strips end with.
+    [Theory]
+    [InlineData(WindowListPlace.Row)]
+    [InlineData(WindowListPlace.Bottom)]
+    public void The_titled_list_ends_with_the_items(WindowListPlace place) => StaThread.Run(() =>
+    {
+        using var h = StripHarness.Build();
+        Assert.True(h.Manager.SetWorkspacePinned(IdOf(h, "Sparrow"), true).IsSuccess);
+        Assert.True(h.Manager.SetWindowListPlace(place).IsSuccess);
+
+        var items = Descendants(h.Rows).Concat(Descendants(h.CurrentList)).OfType<Button>().Where(b => b.Tag is FloatingBar.WorkspaceJumpTag);
+        Assert.Equal(["Sparrow"], items.Select(LabelOf));
     });
 
     // The items are filled inside the bar's guard, as the tabs are, so a re-entered rebuild leaves one item a strip.
