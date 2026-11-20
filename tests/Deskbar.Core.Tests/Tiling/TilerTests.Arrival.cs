@@ -300,6 +300,46 @@ public sealed partial class TilerTests
         AssertArranged([W(1), W(3), W(2)], Columns([0.5, 0.5], [0.5, 0.5], [1.0]));
     }
 
+    // Petre dropped a window from another workspace onto the LEFT screen's half of the current workspace's row, and
+    // it was tiled on the right one: "let's respect which monitor i put it to". A drop aimed at a screen
+    // (AssignWindow with a monitor) is the user naming the screen, so the tile last used on ANOTHER screen does not
+    // pull the window over; it splits a tile of the screen it was aimed at.
+    [Fact]
+    public void A_window_dropped_on_a_screen_stays_on_that_screen_when_the_tile_last_used_is_on_another()
+    {
+        surface.ScreenList.Add(FakeTileSurface.Screen(2, Area2));
+        Exists(W(1), alpha, screen: 1);
+        Exists(W(2), alpha, screen: 2);
+        Exists(W(3), beta, screen: 2);
+        Start();
+        Uses(W(2));
+
+        // The manager in this harness has no screen layout, so the monitor half of the move is refused; the
+        // workspace move has happened by then, and the aim is what the Tiler reads.
+        manager.AssignWindow(W(3), alpha.Id, monitor: 1);
+
+        AssertArranged([W(1), W(3)], Columns([0.5, 0.5], [1.0], [1.0]));
+        AssertArranged([W(2)], TileLayout.Automatic(1), Area2, screen: 2);
+    }
+
+    // On the aimed screen it still prefers the tile last used THERE.
+    [Fact]
+    public void A_window_dropped_on_a_screen_splits_the_tile_last_used_on_that_screen()
+    {
+        surface.ScreenList.Add(FakeTileSurface.Screen(2, Area2));
+        new[] { 1, 2 }.ToList().ForEach(n => Exists(W(n), alpha, screen: 1));
+        Exists(W(4), alpha, screen: 2);
+        Exists(W(3), beta, screen: 2);
+        Start();
+        Uses(W(1));
+        Uses(W(4));
+
+        manager.AssignWindow(W(3), alpha.Id, monitor: 1);
+
+        AssertArranged([W(1), W(3), W(2)], Columns([0.5, 0.5], [0.5, 0.5], [1.0]));
+        AssertArranged([W(4)], TileLayout.Automatic(1), Area2, screen: 2);
+    }
+
     // --- keep the space when a window closes (change 3) -------------------------------------------------------
 
     // The window went to the tray: the shell drops it from its taskbar list (FakeMonitor.IsListed reads

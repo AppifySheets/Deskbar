@@ -131,6 +131,17 @@ public sealed class WorkspaceManager(
     // did not ask for cannot inherit it. See Follow.
     Maybe<WindowHandle> followed = Maybe<WindowHandle>.None;
 
+    // The screen a by-hand move aimed a window at (AssignWindow's `monitor`: a drop on one screen's half of a
+    // workspace row, or the pipe's `move --screen`), kept for the Tiler. Petre dropped a window onto the left
+    // screen of a tiled workspace and the Tiler put it on the right one, because a window arriving there splits the
+    // tile last used and that tile was on the right: "let's respect which monitor i put it to". So the Tiler asks
+    // here (TakeAimedScreen) when the window arrives and keeps it on the screen it was aimed at.
+    //
+    // Set BEFORE the desktop move, because that move announces WindowMoved and the Tiler can hear it at once (it
+    // does in the tests, which run it synchronously). Taken by the Tiler, overwritten or cleared by the window's
+    // next AssignWindow, and dropped when the window closes. Live-only, like pendingMonitor: a drop is about now.
+    readonly Dictionary<WindowHandle, int> aimedScreen = [];
+
     // Petre: "when switching workspaces, i want you to activate the window which was last
     // active last time this workspace was active", and "so i know what i'm going to have
     // activated when i land on that workspace" -- the bar marks the same window, so this map
@@ -931,6 +942,8 @@ public sealed class WorkspaceManager(
     {
         knownWindows.Remove(window.Handle);
         lastUsed.Remove(window.Handle);
+        // Its hwnd can be recycled, and the new window must not inherit a drop meant for this one.
+        aimedScreen.Remove(window.Handle);
         ledger = ledger.Remove(window.Handle);
         memberships.Remove(window.Handle); // roster entry stays -- ▶ Start relaunches it
         // A closed window's hwnd can be recycled by Windows for an entirely different
@@ -2436,9 +2449,12 @@ public sealed class WorkspaceManager(
             : Result.Failure("Window no longer exists.");
 
     Result Assign(WindowInfo info, Guid workspaceId, int? monitor, bool follows) =>
+        // The aim first, before anything moves (see aimedScreen): a move without one clears an older aim, so it
+        // cannot outlive the drop that set it.
+        Aim(info.Handle, monitor)
         // Explicitly moving a pinned window to ONE workspace is a statement that it
         // should no longer be on ALL of them -- unpin first, then place (spec).
-        desktops.IsPinned(info.Handle)
+        .Bind(() => desktops.IsPinned(info.Handle))
             .Bind(pinned => pinned ? desktops.Unpin(info.Handle) : Result.Success())
             .Bind(() => Place(info, workspaceId))
             // The one place a container learns its home (#132), because this is the one door every
@@ -2450,6 +2466,20 @@ public sealed class WorkspaceManager(
             // desktop we have not left yet and holds itself for the arrival in the usual way. Doing
             // it earlier would only race the switch.
             .TapIf(follows, () => Follow(info.Handle, workspaceId));
+
+    // Records (or clears, with no monitor) the screen this move aims the window at. Always succeeds; a Result only
+    // so Assign can start its chain with it.
+    Result Aim(WindowHandle window, int? monitor)
+    {
+        if (monitor is { } screen) aimedScreen[window] = screen;
+        else aimedScreen.Remove(window);
+        return Result.Success();
+    }
+
+    // For the Tiler, when the window arrives on a tiled workspace (Tiler.Arrival.cs): the screen a by-hand move aimed
+    // it at, if any, and forgotten in the same call, so one drop decides one arrival.
+    public Maybe<int> TakeAimedScreen(WindowHandle window) =>
+        aimedScreen.Remove(window, out var screen) ? screen : Maybe<int>.None;
 
     // Petre: "i think moving active windows to a different workspace doesn't always activate that
     // workspace."

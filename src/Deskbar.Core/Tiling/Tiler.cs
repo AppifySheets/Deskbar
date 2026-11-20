@@ -384,7 +384,8 @@ public sealed partial class Tiler(WorkspaceManager manager, IVirtualDesktopServi
     // WorkspaceOf is asked once, for this window only:
     //   - on the board and no longer living here: it leaves and its screen re-tiles without it;
     //   - not on the board, living here now and eligible: it arrives like a new window (Tiler.Arrival.cs), into an
-    //     opening or splitting the tile last used, which can be on another screen than the one it is on;
+    //     opening or splitting the tile last used, which can be on another screen than the one it is on, unless the
+    //     drop aimed it at a screen, which it then keeps (WorkspaceManager.TakeAimedScreen, Tiler.Arrival.cs);
     //   - anything else: nothing.
     void OnWindowMoved(WindowHandle window)
     {
