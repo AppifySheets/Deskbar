@@ -110,6 +110,27 @@ public class FloatingBarStripsTests
         Assert.Equal(Hex("#3070D0"), ((SolidColorBrush)h.StripA.NameTag.Background).Color);
     });
 
+    // Arranging is the bar's ROWS' business (FloatingBar.Arrange.cs). A strip's tabs share the bar's button code, but
+    // they live in windows of their own, where a click still activates the window: they stay at full strength and keep
+    // their window drag, while the bar's own row icons dim and refuse it.
+    [Fact]
+    public void Strip_tabs_stay_whole_while_the_bar_is_arranging() => StaThread.Run(() =>
+    {
+        using var h = StripHarness.Build();
+        h.Fill();
+
+        Assert.True(h.Bar.SetArranging(true).IsSuccess);
+
+        var tabs = h.Strips.SelectMany(TabsOf).ToList();
+        Assert.NotEmpty(tabs);
+        Assert.All(tabs, tab => Assert.Equal(1.0, tab.Opacity));
+        Assert.True(h.Bar.WindowDragAllowed(onStrip: true));
+        Assert.False(h.Bar.WindowDragAllowed(onStrip: false));
+
+        Assert.True(h.Bar.SetArranging(false).IsSuccess);
+        Assert.True(h.Bar.WindowDragAllowed(onStrip: false));
+    });
+
     // A pinned window is listed on the screen it is on, with the pin badge on its icon, as in the titled list.
     [Fact]
     public void A_pinned_window_is_on_its_screens_strip_with_the_badge() => StaThread.Run(() =>

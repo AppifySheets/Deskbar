@@ -147,6 +147,64 @@ public class FloatingBarArrangeTests
         Assert.False(press.Handled);
     });
 
+    // Review, Important 1. Only the rows go inert. The bar's own controls keep working while arranging: the header's
+    // Minimize button (which TakeBarCommands moves INTO the pinned row, so inside Rows) and the footer's buttons. Their
+    // presses and releases are left unhandled for the button, and a row's press is still swallowed.
+    [Fact]
+    public void The_bars_own_controls_keep_working_while_arranging() => StaThread.Run(() =>
+    {
+        var harness = Harness.Build();
+        using var bar = harness.ShowBar();
+        var asks = 0;
+        bar.Bar.MinimizeRequested += () => asks++;
+        Assert.True(bar.Bar.SetArranging(true).IsSuccess);
+        var minimize = (Button)bar.Bar.FindName("MinimizeButton")!;
+        Assert.True(IsInside(minimize, bar.Rows)); // precondition: the header sits inside Rows, in the pinned row
+        var footer = ((Panel)bar.Bar.FindName("ShellStrip")!).Children.OfType<Button>().ToList();
+        Assert.NotEmpty(footer);
+
+        Assert.False(Press(minimize).Handled);
+        Assert.False(Release(minimize).Handled);
+        minimize.RaiseEvent(new RoutedEventArgs(ButtonBase.ClickEvent));
+        Assert.Equal(1, asks);
+
+        Assert.All(footer, button =>
+        {
+            Assert.False(Press(button).Handled);
+            Assert.False(Release(button).Handled);
+        });
+
+        // ...and a row is still inert.
+        var row = RowFor(bar.Rows, "Sparrow");
+        Assert.True(Press(row).Handled);
+        Release(row);
+        Assert.Empty(harness.Desktops.Switched);
+        Assert.True(bar.Bar.Arranging);
+    });
+
+    // Review, Important 2. Arranging needs the bar on screen: a minimized bar does not offer the item (the strips' menu is
+    // the bar's own, FillBarMenu), and `arrange on` from the pipe fails and changes nothing.
+    [Fact]
+    public void A_minimized_bar_neither_offers_nor_starts_arranging() => StaThread.Run(() =>
+    {
+        var harness = Harness.Build();
+        using var bar = harness.ShowBar();
+        var shown = new ContextMenu();
+        bar.Bar.FillBarMenu(shown);
+        Assert.Contains(shown.Items.OfType<MenuItem>(), i => i.Header as string == "Arrange workspaces"); // precondition
+
+        bar.Bar.MinimizeToTaskbar();
+        var minimized = new ContextMenu();
+        bar.Bar.FillBarMenu(minimized);
+
+        Assert.DoesNotContain(minimized.Items.OfType<MenuItem>(), i => i.Header as string is "Arrange workspaces" or "Done arranging");
+        var result = bar.Bar.SetArranging(true);
+        Assert.True(result.IsFailure);
+        Assert.Equal("The bar is minimized.", result.Error);
+        Assert.False(bar.Bar.Arranging);
+        Assert.Null(ArrangeStrip(bar.Bar));
+    });
+
     // Icons dim to 45% while the mode is on, and come back at full strength when it ends.
     [Fact]
     public void Icons_are_dimmed_while_arranging() => StaThread.Run(() =>
@@ -340,6 +398,7 @@ public class FloatingBarArrangeTests
         Assert.Equal(BoundsOf(bar.Bar, line), painted.Highlight);
 
         bar.Bar.ArrangeRelease(At(bar.Bar, line, 0.6));
+        Pump(bar.Bar); // the release queues its drop
 
         Assert.Equal([gepha, IdOf(harness, "Sparrow"), IdOf(harness, "Archive")], harness.Manager.State.MembersOf(team).Select(w => w.Id));
     });
@@ -366,6 +425,7 @@ public class FloatingBarArrangeTests
         Press(own);
         bar.Bar.ArrangeMove(At(bar.Bar, own, 0.9));
         bar.Bar.ArrangeRelease(At(bar.Bar, own, 0.9));
+        Pump(bar.Bar);
 
         Assert.Equal(order, harness.Manager.State.Workspaces.Select(w => w.Id).ToList());
     });
@@ -547,10 +607,154 @@ public class FloatingBarArrangeTests
 
         // The release that follows the Esc belongs to the cancelled drag and drops nothing.
         bar.Bar.ArrangeRelease(At(bar.Bar, gephaRow, 0.5));
+        Pump(bar.Bar);
 
         Assert.False(asked);
         Assert.Empty(harness.Manager.State.Groups);
         Assert.Equal(order, harness.Manager.State.Workspaces.Select(w => w.Id).ToList());
+    });
+
+    // Review, Important 4. A row of its own group is nothing: a member of a folded group over ANOTHER shown member of the
+    // same group (the one you are on, Sparrow here; the pointer can open a second) does not "join at the top" of the
+    // group it is already in. Archive stands in for the second shown member: the hit test reads the row under the
+    // pointer, not whether the dragged row is drawn.
+    [Fact]
+    public void A_folded_groups_member_over_another_member_of_its_group_changes_nothing() => StaThread.Run(() =>
+    {
+        var harness = Harness.Build(grouped: true);
+        var team = harness.Manager.State.Groups.Single().Id;
+        Assert.True(harness.Manager.SetGroupFolded(team, true).IsSuccess);
+        harness.Desktops.CurrentId = harness.Desktops.Desktops.Single(d => d.Name == "Sparrow").Id;
+        using var bar = harness.ShowBar();
+        Assert.True(bar.Bar.SetArranging(true).IsSuccess);
+        bar.Bar.UpdateLayout();
+        var archive = new RowRef.Workspace(IdOf(harness, "Archive"));
+        var sparrow = At(bar.Bar, AnyRow(bar.Rows, "Sparrow"), 0.5);
+        var order = harness.Manager.State.Workspaces.Select(w => w.Id).ToList();
+
+        Assert.IsType<DropAction.Nothing>(bar.Bar.ArrangePreviewAt(archive, sparrow).Action);
+        Assert.True(bar.Bar.ArrangeDropAt(archive, sparrow).IsSuccess);
+
+        Assert.Equal(order, harness.Manager.State.Workspaces.Select(w => w.Id).ToList());
+        // ...while a row from outside the group still joins it through the same shown member.
+        Assert.IsType<DropAction.Place>(bar.Bar.ArrangePreviewAt(new RowRef.Workspace(IdOf(harness, "GEPHA")), sparrow).Action);
+    });
+
+    // Review, Important 6, and the whole path a real release takes: press on a row, drag, and let go through the bar's own
+    // tunnelling handler (OnPreviewMouseLeftButtonUp). The name prompt is modal, so it must not open inside that handler:
+    // the release only queues the drop, and the prompt opens once the input event has finished routing.
+    [Fact]
+    public void A_release_through_the_bar_queues_the_drop_and_then_asks_for_the_name() => StaThread.Run(() =>
+    {
+        var harness = Harness.Build();
+        using var bar = harness.ShowBar();
+        Assert.True(bar.Bar.SetArranging(true).IsSuccess);
+        bar.Bar.UpdateLayout();
+        var asked = new List<string>();
+        bar.Bar.AskGroupName = name => { asked.Add(name); return Maybe.From("Pair"); };
+        var sparrowRow = RowFor(bar.Rows, "Sparrow");
+
+        Press(sparrowRow);
+        bar.Bar.ArrangeMove(At(bar.Bar, RowFor(bar.Rows, "GEPHA"), 0.5));
+        Assert.True(bar.Bar.ArrangeDragging);
+        var release = Release(sparrowRow);
+
+        Assert.True(release.Handled);
+        Assert.False(bar.Bar.ArrangeDragging);
+        Assert.Empty(asked); // not yet: the release only queued it
+        Assert.Empty(harness.Manager.State.Groups);
+
+        Pump(bar.Bar);
+
+        Assert.Equal(["GEPHA"], asked);
+        var group = Assert.Single(harness.Manager.State.Groups);
+        Assert.Equal("Pair", group.Name);
+        Assert.Equal([IdOf(harness, "GEPHA"), IdOf(harness, "Sparrow")], harness.Manager.State.MembersOf(group.Id).Select(w => w.Id));
+        Assert.Empty(harness.Desktops.Switched);
+    });
+
+    // A press on a group's header picks up the WHOLE group: the gap is its box, and the drop moves every member in order.
+    [Fact]
+    public void A_press_on_a_group_header_picks_up_the_whole_group() => StaThread.Run(() =>
+    {
+        var harness = Harness.Build(grouped: true);
+        using var bar = harness.ShowBar();
+        Assert.True(bar.Bar.SetArranging(true).IsSuccess);
+        bar.Bar.UpdateLayout();
+        var team = harness.Manager.State.Groups.Single().Id;
+        var header = HeaderOf(bar.Rows, "TEAM");
+        var gepha = new RowRef.Workspace(IdOf(harness, "GEPHA"));
+
+        Assert.True(Press(header).Handled);
+        Assert.Equal(new RowRef.Group(team), bar.Bar.ArrangeDragged);
+        bar.Bar.ArrangeMove(At(bar.Bar, AnyRow(bar.Rows, "GEPHA"), 0.2));
+
+        var painted = bar.Bar.ArrangePainting!;
+        Assert.Equal(new DropShow.Line(gepha, After: false, InsideGroup: false), painted.Show);
+        Assert.True(painted.Gap.Contains(BoundsOf(bar.Bar, AnyRow(bar.Rows, "Sparrow"))), $"the gap is the whole box: {painted.Gap}");
+        Assert.True(painted.Gap.Contains(BoundsOf(bar.Bar, AnyRow(bar.Rows, "Archive"))), $"the gap is the whole box: {painted.Gap}");
+
+        Release(header);
+        Pump(bar.Bar);
+
+        Assert.Equal([IdOf(harness, "Sparrow"), IdOf(harness, "Archive"), gepha.Id], harness.Manager.State.Workspaces.Select(w => w.Id));
+        Assert.Equal(team, harness.Manager.State.Groups.Single().Id);
+    });
+
+    // Another window or the system taking the mouse mid-drag (LostMouseCapture on the bar) cancels it: nothing changes, and
+    // the rebuild that waited for the drag is served.
+    [Fact]
+    public void Losing_the_capture_mid_drag_cancels_it_and_serves_the_deferred_rebuild() => StaThread.Run(() =>
+    {
+        var harness = Harness.Build();
+        using var bar = harness.ShowBar();
+        Assert.True(bar.Bar.SetArranging(true).IsSuccess);
+        bar.Bar.UpdateLayout();
+        var order = harness.Manager.State.Workspaces.Select(w => w.Id).ToList();
+
+        Press(RowFor(bar.Rows, "Sparrow"));
+        bar.Bar.ArrangeMove(At(bar.Bar, RowFor(bar.Rows, "GEPHA"), 0.1));
+        Assert.True(bar.Bar.ArrangeDragging);
+        Assert.True(harness.Manager.RenameWorkspace(IdOf(harness, "GEPHA"), "Renamed").IsSuccess);
+        Assert.DoesNotContain("Renamed", Texts(bar.Rows)); // precondition: deferred by the drag
+
+        bar.Bar.RaiseEvent(new MouseEventArgs(Mouse.PrimaryDevice, 0) { RoutedEvent = Mouse.LostMouseCaptureEvent });
+        Pump(bar.Bar);
+
+        Assert.False(bar.Bar.ArrangeDragging);
+        Assert.Null(bar.Bar.ArrangePainting);
+        Assert.True(bar.Bar.Arranging);
+        Assert.Equal(order, harness.Manager.State.Workspaces.Select(w => w.Id).ToList());
+        Assert.Contains("Renamed", Texts(bar.Rows));
+    });
+
+    // The mode ending mid-drag (the menu, the pipe) cancels the drag first: nothing is dropped, nothing is asked.
+    [Fact]
+    public void Ending_the_mode_mid_drag_cancels_it() => StaThread.Run(() =>
+    {
+        var harness = Harness.Build();
+        using var bar = harness.ShowBar();
+        Assert.True(bar.Bar.SetArranging(true).IsSuccess);
+        bar.Bar.UpdateLayout();
+        var asked = false;
+        bar.Bar.AskGroupName = _ => { asked = true; return Maybe.From("Pair"); };
+        var order = harness.Manager.State.Workspaces.Select(w => w.Id).ToList();
+        var sparrowRow = RowFor(bar.Rows, "Sparrow");
+
+        Press(sparrowRow);
+        bar.Bar.ArrangeMove(At(bar.Bar, RowFor(bar.Rows, "GEPHA"), 0.5));
+        Assert.True(bar.Bar.ArrangeDragging);
+
+        Assert.True(bar.Bar.SetArranging(false).IsSuccess);
+        Release(sparrowRow);
+        Pump(bar.Bar);
+
+        Assert.False(bar.Bar.ArrangeDragging);
+        Assert.Null(bar.Bar.ArrangePainting);
+        Assert.False(asked);
+        Assert.Empty(harness.Manager.State.Groups);
+        Assert.Equal(order, harness.Manager.State.Workspaces.Select(w => w.Id).ToList());
+        Assert.Empty(harness.Desktops.Switched);
     });
 
     // --- helpers ------------------------------------------------------------------------------------------------
@@ -594,11 +798,22 @@ public class FloatingBarArrangeTests
 
     // Both halves of a release, tunnelling preview first (where the bar's window-level handler runs) then the bubbling
     // MouseUp (where the row's and the icon's handledEventsToo handlers run), as the input manager delivers them.
-    static void Release(UIElement target)
+    // Returns the tunnelling half, as Press does.
+    static MouseButtonEventArgs Release(UIElement target)
     {
-        target.RaiseEvent(new MouseButtonEventArgs(Mouse.PrimaryDevice, 0, MouseButton.Left) { RoutedEvent = Mouse.PreviewMouseUpEvent });
+        var preview = new MouseButtonEventArgs(Mouse.PrimaryDevice, 0, MouseButton.Left) { RoutedEvent = Mouse.PreviewMouseUpEvent };
+        target.RaiseEvent(preview);
         target.RaiseEvent(new MouseButtonEventArgs(Mouse.PrimaryDevice, 0, MouseButton.Left) { RoutedEvent = Mouse.MouseUpEvent });
+        return preview;
     }
+
+    // Runs what the dispatcher has queued at Normal priority and above: a release queues its drop (ArrangeRelease), and
+    // the drop queues the rebuild it served.
+    static void Pump(FloatingBar bar) => bar.Dispatcher.Invoke(() => { }, System.Windows.Threading.DispatcherPriority.Background);
+
+    // Whether `element` sits somewhere under `ancestor`, by the logical tree (built, not necessarily laid out).
+    static bool IsInside(DependencyObject element, DependencyObject ancestor) =>
+        LogicalTreeHelper.GetParent(element) is { } parent && (ReferenceEquals(parent, ancestor) || IsInside(parent, ancestor));
 
     // A release with no press before it, which the bar marks an orphan (#48).
     static void OrphanRelease(UIElement target) => Release(target);

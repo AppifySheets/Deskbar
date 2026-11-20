@@ -19,10 +19,13 @@ namespace Deskbar.App;
 // WHAT CHANGES WHILE IT IS ON:
 //   * a grip, the two columns of dots, before every workspace row's name and every group header's name (ArrangeGrip),
 //     so the rows look grabbable. No outlines: Petre picked look 1A of the mockup.
-//   * icons at 45% opacity, so the rows read as the thing being arranged rather than as windows to click.
+//   * the rows' icons at 45% opacity, so the rows read as the thing being arranged rather than as windows to click.
+//     A screen strip's tabs are built by the same code but stay whole (WindowDragAllowed).
 //   * a strip at the bottom of the bar with what to do and a Done button (BuildArrangeStrip).
-//   * no press switches a workspace, toggles a fold or starts a window drag (the early return in both bar-level mouse
-//     handlers, and WindowDragSource's canStart).
+//   * no press on a row switches a workspace, toggles a fold or starts a window drag (SwallowedWhileArranging, in both
+//     bar-level mouse handlers, and WindowDragSource's canStart). Everything that is not a row (the header line, the
+//     footer, Back and Minimize) works as it always does.
+//   * it is not offered, and cannot start, while the bar is minimized (SetArranging).
 //
 // HOW IT ENDS: the Done button, Esc, the menu item (it flips to "Done arranging"), or `arrange off` on the control pipe.
 // Each of them cancels a row drag that is still in flight first (an Esc during a drag ends only the drag, see below).
@@ -48,6 +51,12 @@ public partial class FloatingBar
 
     internal bool Arranging => arranging;
 
+    // Whether a window button may start a window drag right now (WindowDragSource's canStart). The bar's own row icons
+    // may not while arranging, since a press there is for the row. A screen strip's tab always may: it lives in a window
+    // of its own, the bar's press handlers never see it, and its click still activates its window, so a tab that
+    // clicked but would not drag would be half a button (a ruling on the branch review, finding 5).
+    internal bool WindowDragAllowed(bool onStrip) => onStrip || !arranging;
+
     // How many times entering the mode took the foreground; read by the tests, which cannot see the real foreground.
     internal int ArrangeActivations { get; private set; }
 
@@ -66,6 +75,11 @@ public partial class FloatingBar
     internal Result SetArranging(bool on, bool activate = false)
     {
         if (on == arranging) return Result.Success();
+
+        // Arranging is done on the bar, so it needs the bar on screen. A minimized bar has no rows to drag and no Done
+        // strip to end the mode with, and the strips' menu (the bar's own, FillBarMenu) is the one place it could be
+        // asked for from. The menu does not offer it then (AddArrangeItem), and the pipe is told why.
+        if (on && Minimized) return Result.Failure("The bar is minimized.");
 
         // A drag in flight belongs to the mode: ended with it, dropping nothing (FloatingBar.ArrangeDrag.cs). Before the
         // flag flips, so the rebuild below is not deferred by a drag that no longer has a mode to drop into.
@@ -124,26 +138,52 @@ public partial class FloatingBar
     // maintains, and a swallow placed first left them the last click's values (a click before the mode could switch a
     // row inside it). Both of those handlers also check `arranging` themselves, which does not depend on any flag.
     //
-    // A press or release on the Done strip is let through UNHANDLED, so it reaches its button, but the handler still
-    // stops: carrying on would arm a bar drag from a press on a button, and the bar's own press/release bookkeeping
-    // (#48) has nothing to say about a strip that is not a row.
+    // ONLY THE ROWS go inert (spec, "What changes on the bar while it is on"). The first version swallowed every press
+    // but the Done strip's, which left Start, search, the pinned apps, the footer (tray chevron, clock, stats, media)
+    // and the bar's own Back and Minimize dead for as long as the mode was on (review, Important 1). So where the press
+    // landed decides (ArrangeAreaOf):
+    //   * the rows (Rows, and the titled list under them): swallowed, marked handled, and the handler stops. This is the
+    //     press a row drag starts from.
+    //   * the Done strip: let through UNHANDLED so it reaches its button, but the handler still stops: carrying on would
+    //     arm a bar drag from a press on a button.
+    //   * anywhere else (the header line, the footer, the bar's own padding): not the mode's business at all, so the
+    //     handler carries on as it would with the mode off. The header and the footer are click targets already
+    //     (StartedOnClickTarget), so a press on them cannot arm a bar drag either.
+    // A release while a row press is held belongs to that press wherever it lands: under the bar's capture its source
+    // is the bar itself, which is in none of the areas above.
     bool SwallowedWhileArranging(MouseButtonEventArgs e, string what)
     {
         if (!arranging) return false;
 
-        var onStrip = PressIsOnArrangeStrip(e.OriginalSource);
+        var area = arrangeDrag is not null ? ArrangeArea.Rows : ArrangeAreaOf(e.OriginalSource);
         if (ClickTrace.On)
-            ClickTrace.Write($"arrange: {what} {(onStrip ? "passed to the strip" : "swallowed")} source={e.OriginalSource.GetType().Name}");
-        if (!onStrip) e.Handled = true;
-        return true;
+            ClickTrace.Write($"arrange: {what} {area switch
+            {
+                ArrangeArea.Rows => "swallowed",
+                ArrangeArea.Strip => "passed to the strip",
+                _ => "left to the bar",
+            }} source={e.OriginalSource.GetType().Name}");
+        if (area == ArrangeArea.Rows) e.Handled = true;
+        return area != ArrangeArea.Elsewhere;
     }
 
-    bool PressIsOnArrangeStrip(object source)
+    // Where on the bar a press landed, as far as the mode is concerned (see SwallowedWhileArranging).
+    enum ArrangeArea { Elsewhere, Rows, Strip }
+
+    // Walks up from what was hit. The header line (BarHeader) is checked on the way up BEFORE Rows, because the rebuild
+    // moves it INTO the pinned row's caption cell (TakeBarCommands), so it sits inside Rows without being a row.
+    ArrangeArea ArrangeAreaOf(object source)
     {
         for (var node = source as DependencyObject; node is not null; node = ParentOf(node))
-            if (ReferenceEquals(node, arrangeStrip)) return true;
-        return false;
+        {
+            if (ReferenceEquals(node, arrangeStrip)) return ArrangeArea.Strip;
+            if (ReferenceEquals(node, BarHeader)) return ArrangeArea.Elsewhere;
+            if (ReferenceEquals(node, Rows) || ReferenceEquals(node, CurrentList)) return ArrangeArea.Rows;
+        }
+        return ArrangeArea.Elsewhere;
     }
+
+    bool PressIsOnArrangeStrip(object source) => ArrangeAreaOf(source) == ArrangeArea.Strip;
 
     // The grip before a name, or null when the mode is off (so a caller can write `if (ArrangeGrip() is { } grip)`).
     // A TextBlock of its own, never part of the name's Text: the name stays exactly the name, which is what screen
@@ -205,9 +245,11 @@ public partial class FloatingBar
     }
 
     // The menu item, on the bar's own menu (AddBarItems) and on a group header's (GroupMenu). One item that flips,
-    // naming what it would do, like the dock items beside it.
+    // naming what it would do, like the dock items beside it. Not offered while the bar is minimized (see SetArranging):
+    // the strips open the bar's own menu then, and an item that could only fail does not belong on it.
     void AddArrangeItem(ContextMenu menu)
     {
+        if (Minimized) return;
         var item = new MenuItem
         {
             Header = arranging ? "Done arranging" : "Arrange workspaces",

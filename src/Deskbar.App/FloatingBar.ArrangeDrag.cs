@@ -26,8 +26,8 @@ namespace Deskbar.App;
 //           with the mouse captured. Nothing is drawn yet; a click that does not move is still nothing.
 //   move    past the system drag distance: started. From then on every move hit-tests the rows and repaints the
 //           preview (ArrangeMove).
-//   release applies what the preview showed (ArrangeRelease, then ArrangeDropAt), once, and serves any rebuild that
-//           waited for the drag.
+//   release plans what the preview showed and queues it (ArrangeRelease), so the drop and its name prompt run once the
+//           release has finished routing; then serves any rebuild that waited for the drag.
 //   Esc, losing the capture, the mode ending, or a move that arrives with the button already up: cancelled, nothing
 //           changes (CancelArrangeDrag).
 //
@@ -59,10 +59,18 @@ public partial class FloatingBar
     readonly Dictionary<Guid, FrameworkElement> arrangeBoxes = [];
 
     // The press or drag in progress, or null. `Element` is what the ghost copies and the gap covers; `PressedAt` is in
-    // Root's coordinates, like every point in this file.
-    sealed record ArrangeDragState(RowRef Dragged, FrameworkElement Element, Point PressedAt, bool Started);
+    // Root's coordinates, like every point in this file, and so is `At`, where the preview was last drawn for (the press
+    // point until the drag starts): what a release drops at.
+    sealed record ArrangeDragState(RowRef Dragged, FrameworkElement Element, Point PressedAt, bool Started)
+    {
+        public Point At { get; init; } = PressedAt;
+    }
 
     ArrangeDragState? arrangeDrag;
+
+    // True from a release that queued its drop until the drop has run (ArrangeRelease). Rebuild defers while it is set,
+    // as it does during the drag, so the drop's prompt opens over the rows the user let go over.
+    bool arrangeDropQueued;
 
     // What the preview draws right now, or null when nothing is. Kept as numbers rather than only painted, so a test can
     // read what would be on screen (the adorner draws exactly this).
@@ -73,6 +81,7 @@ public partial class FloatingBar
     VisualBrush? arrangeGhost;
 
     internal bool ArrangeDragging => arrangeDrag is { Started: true };
+    internal RowRef? ArrangeDragged => arrangeDrag?.Dragged;
     internal ArrangePaint? ArrangePainting => arrangePaint;
 
     // How the new-group drop asks for a name, prefilled with the target's. The dialog by default; a test swaps it for an
@@ -164,9 +173,15 @@ public partial class FloatingBar
             : DropZone.Onto;
         // The dragged row over its own place aims at itself, whatever it would aim at for another row, so its own place
         // stays the no-op RowDrop makes it (review, Important: the shown member of a folded group aims at the group, and
-        // let go over its own row it moved to the top of its group).
-        return (target.Drags == dragged ? target.Drags : target.Drop, zone);
+        // let go over its own row it moved to the top of its group). The same goes for a row of its OWN folded group:
+        // that whole-row target means "into this group", which the dragged row already is, and the spec makes a row of
+        // its own group nothing (review, Important 4: a shown member over another shown member moved to the top).
+        return (target.Drags == dragged || (target.Whole && InGroup(dragged, target.Drop)) ? dragged : target.Drop, zone);
     }
+
+    // Whether `row` is a workspace that belongs to the group `group` names.
+    bool InGroup(RowRef row, RowRef group) =>
+        row is RowRef.Workspace w && group is RowRef.Group g && manager.State.GroupOf(w.Id)?.Id == g.Id;
 
     // The hit test, then RowDrop.Plan. What the drag draws and what the release applies both come from here.
     internal (DropAction Action, DropShow Show) ArrangePreviewAt(RowRef dragged, Point inRoot) =>
@@ -176,20 +191,27 @@ public partial class FloatingBar
         RowDrop.Plan(manager.State, dragged, aim.Target, aim.Zone);
 
     // The drop itself: what the preview at this point shows, applied once. The name prompt runs only for a new group,
-    // inside ApplyDrop, and a Cancel there is a success that changes nothing.
+    // inside ApplyDrop, and a Cancel there is a success that changes nothing. Planned and applied in one go here, for a
+    // caller that is not inside an input event; the release splits the two (ArrangeRelease).
+    internal Result ArrangeDropAt(RowRef dragged, Point inRoot) => ApplyArrangeDrop(PlannedDropAt(dragged, inRoot));
+
+    // What a drop at this point would do, measured against the rows on screen now.
     //
-    // A drop whose preview would draw nothing is refused (it changes nothing and succeeds, since there is nothing to tell
-    // the user that he was not already shown): the spec's promise is that the preview shows what a release will do, and a
-    // change nobody was shown breaks it. The folded-group fallback in ShownFor means this should not happen; the guard is
-    // there for the case nobody has thought of.
-    internal Result ArrangeDropAt(RowRef dragged, Point inRoot)
+    // A drop whose preview would draw nothing is refused, as Nothing (it changes nothing and succeeds, since there is
+    // nothing to tell the user that he was not already shown): the spec's promise is that the preview shows what a
+    // release will do, and a change nobody was shown breaks it. The folded-group fallback in ShownFor means this should
+    // not happen; the guard is there for the case nobody has thought of.
+    DropAction PlannedDropAt(RowRef dragged, Point inRoot)
     {
         var (action, show) = ArrangePreviewAt(dragged, inRoot);
-        if (!ShowsItself(action, show))
-        {
-            if (ClickTrace.On) ClickTrace.Write($"arrange drop refused, nothing was shown for {DescribeDrop(action)}");
-            return Result.Success();
-        }
+        if (ShowsItself(action, show)) return action;
+        if (ClickTrace.On) ClickTrace.Write($"arrange drop refused, nothing was shown for {DescribeDrop(action)}");
+        return new DropAction.Nothing();
+    }
+
+    // Performs a planned drop. ApplyDrop checks the rows still exist, so a plan that went stale meanwhile fails cleanly.
+    Result ApplyArrangeDrop(DropAction action)
+    {
         var result = manager.ApplyDrop(action, AskGroupName);
         if (ClickTrace.On)
             ClickTrace.Write($"arrange drop {DescribeDrop(action)} ok={result.IsSuccess}{(result.IsFailure ? $" error={result.Error}" : "")}");
@@ -263,20 +285,50 @@ public partial class FloatingBar
         }
 
         var (_, show) = ArrangePreviewAt(drag.Dragged, inRoot);
+        arrangeDrag = drag with { At = inRoot };
         arrangePaint = PaintFor(drag, inRoot, show);
         arrangeAdorner?.InvalidateVisual();
     }
 
-    // The release. A press that never became a drag is only let go; a drag drops where it was released. The drag is
-    // ended BEFORE the drop is applied: the new-group drop opens a modal prompt, which must not open under a capture the
-    // bar still holds, and the drop's own rebuild must not be deferred by the drag it ends.
-    internal void ArrangeRelease(Point inRoot)
+    // The release. A press that never became a drag is only let go; a drag drops where the preview was last drawn
+    // (`inRoot` is for a caller that knows better, the tests). That is the release point anyway, since under capture the
+    // last move arrives where the button comes up, and it keeps the spec's promise exactly: the drop is the one the
+    // preview showed.
+    //
+    // The order is the drag's end, then the drop, then the deferred rebuild:
+    //   * the drag is ended (state, then the capture) BEFORE the drop: the new-group drop opens a modal prompt, which must
+    //     not open under a capture the bar still holds.
+    //   * the drop is PLANNED now, against the rows the user let go over, and APPLIED from the dispatcher queue (review,
+    //     Important 6). This runs inside the window's preview mouse-up handler, and a modal dialog opened there runs its
+    //     own message loop in the middle of the event's route: the row's and the icons' release handlers (#48) would
+    //     run only once the dialog closed. Queued, the prompt opens after the release has finished routing.
+    //   * the rebuild a drag deferred is served after the drop, not before: arrangeDropQueued keeps Rebuild deferring
+    //     until then (the window handler's own flush, which runs first, finds it still deferred).
+    internal void ArrangeRelease(Point? inRoot = null)
     {
         if (arrangeDrag is not { } drag) return;
         EndArrangeDrag();
-        if (drag.Started) Report(ArrangeDropAt(drag.Dragged, inRoot));
-        else if (ClickTrace.On) ClickTrace.Write($"arrange release without a drag {DescribeRow(drag.Dragged)}");
-        FlushDeferredRebuild();
+        if (!drag.Started)
+        {
+            if (ClickTrace.On) ClickTrace.Write($"arrange release without a drag {DescribeRow(drag.Dragged)}");
+            FlushDeferredRebuild();
+            return;
+        }
+
+        var action = PlannedDropAt(drag.Dragged, inRoot ?? drag.At);
+        arrangeDropQueued = true;
+        Dispatcher.BeginInvoke(new Action(() =>
+        {
+            try
+            {
+                Report(ApplyArrangeDrop(action));
+            }
+            finally
+            {
+                arrangeDropQueued = false;
+                FlushDeferredRebuild();
+            }
+        }));
     }
 
     // Esc, a lost capture, the mode ending: nothing is dropped, and a rebuild that waited is served.

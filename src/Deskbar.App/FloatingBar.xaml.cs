@@ -1118,12 +1118,12 @@ public partial class FloatingBar : Window
             return;
         }
 
-        // Arrange mode (FloatingBar.Arrange.cs): from here on a press never switches a row, toggles a fold or arms a
-        // bar drag, so nothing below runs. This sits AFTER the bookkeeping above, which the row and icon release
-        // handlers read, and after the resize branch, which stays available (it is not row business, and a press the
-        // mode ate there would leave the resize cursor over an edge that does nothing). Ctrl+drag moving the bar stays
-        // blocked for now. A press on a row or a group header is where a drag of that row begins (ArmArrangeDrag,
-        // FloatingBar.ArrangeDrag.cs).
+        // Arrange mode (FloatingBar.Arrange.cs): from here on a press on a ROW never switches it, toggles a fold or
+        // arms a bar drag, so nothing below runs for it. This sits AFTER the bookkeeping above, which the row and icon
+        // release handlers read, and after the resize branch, which stays available (it is not row business, and a
+        // press the mode ate there would leave the resize cursor over an edge that does nothing). A press on a row or
+        // a group header is where a drag of that row begins (ArmArrangeDrag, FloatingBar.ArrangeDrag.cs). A press
+        // anywhere else (the header line, the footer) is not stopped and carries on below as usual.
         if (SwallowedWhileArranging(e, "press"))
         {
             ArmArrangeDrag(e);
@@ -1131,8 +1131,9 @@ public partial class FloatingBar : Window
         }
 
         // A press in the docked edge strip is remembered by the row it was beside (see EdgeRowAt); the
-        // release decides. It still arms nothing else: docked, the bar does not move.
-        EdgePress(e.GetPosition(this), dockedEdge);
+        // release decides. It still arms nothing else: docked, the bar does not move. Not while arranging: the
+        // strip stands for a row, and a row is not a switch target then, so the press is remembered as beside none.
+        EdgePress(e.GetPosition(this), arranging ? null : dockedEdge);
 
         dragStart = Keyboard.Modifiers.HasFlag(ModifierKeys.Control)
                     || !(StartedOnIcon(e.OriginalSource) || StartedOnClickTarget(e.OriginalSource))
@@ -1327,11 +1328,13 @@ public partial class FloatingBar : Window
         }
         // Arrange mode, the other half of the stop in OnPreviewMouseLeftButtonDown: after the orphan bookkeeping above
         // and after a resize in progress has been finished (a resize begun before the mode must not be left captured).
-        // The release of a row drag drops it there (ArrangeRelease, FloatingBar.ArrangeDrag.cs).
-        else if (SwallowedWhileArranging(e, "release")) ArrangeRelease(e.GetPosition(Root));
+        // The release of a row drag drops it where the preview was last drawn (ArrangeRelease, FloatingBar.ArrangeDrag.cs).
+        // A release on anything that is not a row carries on below, so the header's and the footer's buttons get theirs.
+        else if (SwallowedWhileArranging(e, "release")) ArrangeRelease();
         // A release in the docked edge strip, beside the row its press was beside, switches to that row's
-        // workspace (see EdgeRowAt). Not after a drag: that release belongs to the drag.
-        else if (!dragJustFinished) EdgeRelease(e.GetPosition(this), dockedEdge);
+        // workspace (see EdgeRowAt). Not after a drag: that release belongs to the drag. Not while arranging either: no
+        // row is a switch target then.
+        else if (!dragJustFinished && !arranging) EdgeRelease(e.GetPosition(this), dockedEdge);
         FlushDeferredRebuild();
     }
 
@@ -2021,8 +2024,9 @@ public partial class FloatingBar : Window
         // ...and while a ROW IS BEING DRAGGED in arrange mode (FloatingBar.ArrangeDrag.cs), from its press to its drop or
         // cancel. The guard above cannot be trusted with it: the drag holds the mouse captured, and the pointer may be
         // anywhere, off the bar included, while the rows it is measured against must stay the rows it was measured
-        // against. The drop, or the cancel, serves the deferred pulse.
-        if (arrangeDrag is not null)
+        // against. The drop, or the cancel, serves the deferred pulse. The drop runs from the dispatcher queue after the
+        // release (ArrangeRelease), and the rows stay as they were until it has run.
+        if (arrangeDrag is not null || arrangeDropQueued)
         {
             if (ClickTrace.On) ClickTrace.Write("rebuild deferred: arrange drag in flight");
             rebuildRequested = true;
@@ -6337,7 +6341,9 @@ public partial class FloatingBar : Window
     // workspace's window, the current unnamed desktop's (which has no workspace id to pass as `rowKey`), or a pinned
     // one, on every desktop. Without it a tab's card captured a picture of a window right in front of you, which
     // Petre's rule for the card forbids (see HoverCard).
-    UIElement IconButton(string groupLabel, string groupKey, WindowRow row, Guid? rowKey = null, bool wholeRow = false, bool onScreen = false)
+    // onStrip: the button is a screen strip's tab, in a window of its own. Arrange mode leaves it whole (full strength,
+    // its window drag and its orphan rescue intact): the mode is about the bar's rows (WindowDragAllowed).
+    UIElement IconButton(string groupLabel, string groupKey, WindowRow row, Guid? rowKey = null, bool wholeRow = false, bool onScreen = false, bool onStrip = false)
     {
         var button = new Button
         {
@@ -6373,7 +6379,8 @@ public partial class FloatingBar : Window
             Tag = IconTag, // marks this as an icon: press-drag moves the WINDOW, not the bar
             // Dimmed while arranging, so the rows read as the thing being arranged and not as windows to click
             // (FloatingBar.Arrange.cs). On the button, not the artwork: the artwork's opacity carries the z-order ladder.
-            Opacity = arranging ? ArrangingIconOpacity : 1.0,
+            // A strip's tab is not a row and stays at full strength.
+            Opacity = arranging && !onStrip ? ArrangingIconOpacity : 1.0,
         };
         // Clocked across the rebuild (Cost, FloatingBar.RebuildPhases.cs), like the icon lookup and the menu below.
         Cost("markers", () => PaintMarker(button, ringed: false, focused: row.IsActive, landing: row.WillActivate, asking: Glows(row) ? AskingPulse : null, fronted: Fronted(row)));
@@ -6519,10 +6526,10 @@ public partial class FloatingBar : Window
         // cursor raises no MouseLeave during a drag) and the bar must not fade while it is being
         // dragged ONTO (the OLE loop owns the mouse and the pointer is over another row).
         WindowDragSource.Attach(button, row.Window.Handle, groupKey,
-            // No window drag while arranging: the mode's press is for rows (FloatingBar.Arrange.cs). The bar-level press
-            // handler already swallows the press, so this is the belt to that pair of braces, and it is what covers a
-            // strip's tabs, which are in windows of their own.
-            canStart: () => !arranging,
+            // No window drag from a row's icon while arranging: the mode's press is for rows (FloatingBar.Arrange.cs).
+            // The bar-level press handler already swallows that press, so this is the belt to that pair of braces. A
+            // strip's tab keeps its drag (WindowDragAllowed).
+            canStart: () => WindowDragAllowed(onStrip),
             onDragStarting: () =>
             {
                 ClearInfo();
@@ -6566,7 +6573,7 @@ public partial class FloatingBar : Window
         button.AddHandler(MouseLeftButtonUpEvent, new MouseButtonEventHandler((_, e) =>
         {
             // A row clicked as a whole rescues its own orphan release (see the row's handler), so nothing here.
-            if (e.ChangedButton != MouseButton.Left || !orphanRelease || dragJustFinished || wholeRow || arranging) return;
+            if (e.ChangedButton != MouseButton.Left || !orphanRelease || dragJustFinished || wholeRow || (arranging && !onStrip)) return;
             MarkPressConsumed();
 
             RedrawWhenToggleSettles(row, activator.IsMinimized(row.Window.Handle));

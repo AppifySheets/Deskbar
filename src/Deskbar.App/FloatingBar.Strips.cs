@@ -168,7 +168,8 @@ public partial class FloatingBar
     FrameworkElement StripTab(string groupLabel, WindowRow row, Brush? accent)
     {
         // onScreen: every tab's window is on the desktop in view, so its hover card has no picture (see IconButton).
-        var button = (Button)IconButton(groupLabel, CurrentListGroupKey, row, onScreen: true);
+        // onStrip: a tab is not a row, so the bar's arrange mode leaves it whole (see IconButton).
+        var button = (Button)IconButton(groupLabel, CurrentListGroupKey, row, onScreen: true, onStrip: true);
         var art = (UIElement)button.Content;
         button.Content = null;
         var icon = pinnedNow.Any(p => p.Window.Handle == row.Window.Handle) ? WithPinBadge(art) : art;

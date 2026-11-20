@@ -310,14 +310,13 @@ public static class RowDrop
     // where they were. That is ReorderedOnItsSide's rule (WorkspaceManager), and it is what lets an unpinned row
     // come back where it was after being pinned. Null from `edit` means "does not fit", and passes through.
     //
-    // If the edit changed how many blocks the side has, the sequence still goes into the side's slots in order:
-    //   * ONE FEWER (the dragged row joined a group or formed a new one, so its lone block is gone): the slot that
-    //     lone block held is dropped, not the side's last one. Dropping the last would walk every pinned row
-    //     sitting between the vacated slot and the end past rows nobody touched, and "unpinning puts a row back
-    //     in its stored place" would stop being true. `vacating` is the dragged workspace, whose lone block
-    //     (after it has left any group) names the slot.
-    //   * MORE (a row left a group to stand alone): the extra blocks follow the side's last slot.
-    // The order within the side is always the edited one.
+    // An edit can leave the side ONE block fewer (the dragged row joined a group or formed a new one, so its lone
+    // block is gone). The slot that lone block held is then dropped, not the side's last one: dropping the last would
+    // walk every pinned row sitting between the vacated slot and the end past rows nobody touched, and "unpinning
+    // puts a row back in its stored place" would stop being true. `vacating` is the dragged workspace, whose lone
+    // block (after it has left any group) names the slot. An edit never leaves MORE blocks: a row leaving a group
+    // has already been split into its own block by WithoutMember before the edit sees the side, so the edit only
+    // moves that block or folds it into another. The order within the side is always the edited one.
     static List<Workspace>? Rearranged(AppState state, bool pinnedSide, Guid? vacating, Func<List<List<Workspace>>, List<List<Workspace>>?> edit)
     {
         var blocks = state.Blocks().Select(b => b.ToList()).ToList();
@@ -331,15 +330,13 @@ public static class RowDrop
     // `dropped` is the stored slot to leave out (-1 for none, which keeps the trailing slots' old behaviour).
     static List<Workspace> Flattened(List<List<Workspace>> blocks, List<int> slots, List<List<Workspace>> edited, int dropped) =>
         slots.Where(i => i != dropped).ToList() is var used
-            ? blocks.SelectMany((b, i) => i == dropped ? [] : Filled(b, used.IndexOf(i), used.Count, edited)).SelectMany(b => b).ToList()
+            ? blocks.SelectMany((b, i) => i == dropped ? [] : Filled(b, used.IndexOf(i), edited)).SelectMany(b => b).ToList()
             : [];
 
     // What block `b` of the stored list becomes: itself when it is on the other side, else the edited block that
-    // takes over its slot (plus every extra block when it is the side's last slot).
-    static IEnumerable<List<Workspace>> Filled(List<Workspace> b, int slot, int slotCount, List<List<Workspace>> edited) =>
-        slot < 0
-            ? [b]
-            : edited.Skip(slot).Take(1).Concat(slot == slotCount - 1 ? edited.Skip(slot + 1) : []);
+    // takes over its slot.
+    static IEnumerable<List<Workspace>> Filled(List<Workspace> b, int slot, List<List<Workspace>> edited) =>
+        slot < 0 ? [b] : edited.Skip(slot).Take(1);
 
     // The blocks with one workspace taken out, a block left empty gone. A group left short keeps its remaining
     // members as one block: the dissolve rule has already run on the state by the time this is called.
