@@ -1346,6 +1346,11 @@ public partial class App : Application
                     if (detached) ShowDetachedStats(manager.State.DetachedStats ?? FirstDetachedStatsPlace());
                     else ReturnStats();
                 }),
+            // `arrange on|off` is the bar's arrange mode, from outside (FloatingBar.Arrange.cs). Read when the command
+            // arrives, as for the stats line: there is no bar in compatibility mode.
+            setArranging: on => floatingBar is null
+                ? Result.Failure("The bar is not running.")
+                : floatingBar.SetArranging(on),
             // `tile` is refused in the free tier, as the row menu's item is, unless tiling is free (TilingGate.Free,
             // for now). Entitlement's cached verdict, read when the command arrives, so a licence refresh in between
             // is honoured.

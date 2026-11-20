@@ -45,7 +45,7 @@ static class WindowDragSource
     // -- dropped, cancelled or dropped on nothing. The bar uses it to stop holding itself at full
     // strength; nothing else can tell it, because DoDragDrop below BLOCKS for the whole drag and
     // the caller's onDragStarting has long since returned by then.
-    internal static void Attach(Button button, WindowHandle handle, string groupKey, Action? onDragStarting = null, Action? onDragFinished = null)
+    internal static void Attach(Button button, WindowHandle handle, string groupKey, Action? onDragStarting = null, Action? onDragFinished = null, Func<bool>? canStart = null)
     {
         Point? dragStart = null;
 
@@ -70,6 +70,8 @@ static class WindowDragSource
             // this, an icon would answer that gesture too and both drags would start on the same
             // press, fighting over the same mouse.
             if (Keyboard.Modifiers.HasFlag(ModifierKeys.Control)) return;
+            // The caller may say no for now: the bar's arrange mode refuses every window drag (FloatingBar.Arrange.cs).
+            if (canStart is not null && !canStart()) return;
             var pos = e.GetPosition(null);
             if (Math.Abs(pos.X - start.X) < SystemParameters.MinimumHorizontalDragDistance
                 && Math.Abs(pos.Y - start.Y) < SystemParameters.MinimumVerticalDragDistance) return;

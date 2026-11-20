@@ -47,6 +47,9 @@ namespace Deskbar.Core.Control;
 // `setStatsDetached` detaches the stats line into its window of its own, or puts it back (`stats detach|attach`).
 // The window is the app's, so the app hands in how, as for `bar minimize`; left null, `stats` refuses.
 //
+// `setArranging` turns the bar's arrange mode on or off (`arrange on|off`, FloatingBar.Arrange.cs). The mode is the
+// bar's, so the app hands in how, as for `stats`; left null, `arrange` refuses.
+//
 // `isPro` answers whether this build is Deskbar Pro, for `tile` only (tiling is a Pro feature). Entitlement
 // is the Windows side's business, so the app hands it in; left null it means NOT Pro, so a caller that
 // passes nothing never gets tiling.
@@ -57,6 +60,7 @@ public sealed partial class RemoteControl(WorkspaceManager manager, Func<bool, R
     Func<(string Version, string? Exe, bool Packaged)>? identity = null,
     Func<string, Result>? showFind = null,
     Func<bool, Result>? setStatsDetached = null,
+    Func<bool, Result>? setArranging = null,
     Func<bool>? isPro = null,
     TaskService? tasks = null)
 {
@@ -130,6 +134,7 @@ public sealed partial class RemoteControl(WorkspaceManager manager, Func<bool, R
 
         ("bar", [var state]) => Bar(state),
         ("stats", [var state]) => Stats(state),
+        ("arrange", [var state]) => Arrange(state),
         ("window-lines", [var mode]) => WindowLines(mode),
         ("window-list", [var place]) => WindowList(place),
         ("collapsed-click", [var mode]) => CollapsedClick(mode),

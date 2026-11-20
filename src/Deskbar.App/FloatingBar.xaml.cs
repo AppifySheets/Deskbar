@@ -105,6 +105,7 @@ public partial class FloatingBar : Window
         // on a bar that has just appeared. Waiting for the first MouseLeave instead would show a
         // fully opaque bar until the pointer happened to cross it once.
         Opacity = IdleOpacity;
+        PreviewKeyDown += OnArrangePreviewKeyDown; // Esc ends arrange mode (FloatingBar.Arrange.cs)
         MouseEnter += (_, _) => UpdateFade();
         MouseLeave += (_, _) => UpdateFade();
 
@@ -1071,6 +1072,11 @@ public partial class FloatingBar : Window
     // deliberate one.
     void OnPreviewMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
     {
+        // Arrange mode (FloatingBar.Arrange.cs): while it is on a press never switches a row, toggles a fold or arms
+        // a window drag, so nothing below runs. That includes Ctrl+drag moving the bar and the edge resize: the mode is
+        // a short, deliberate state, and the bar stays where it is until Done.
+        if (SwallowedWhileArranging(e, "press")) return;
+
         // Stage 1 of the click trace (#48). The SOURCE type matters as much as the fact of a
         // press: it says which element the release will be delivered to, and two of the three
         // known ways to lose a click turn on that.
@@ -1256,6 +1262,10 @@ public partial class FloatingBar : Window
     // own dragStart (pitfall #2 in that file's comments).
     void OnPreviewMouseLeftButtonUp(object sender, MouseButtonEventArgs e)
     {
+        // Arrange mode, the other half of the early return in OnPreviewMouseLeftButtonDown: the press was swallowed, so
+        // there is nothing to finish, and a release that went on to the rows would otherwise read as an orphan.
+        if (SwallowedWhileArranging(e, "release")) return;
+
         // The half of the #48 trace that was missing, and the one that splits the remaining cases
         // in two. Today a lost click leaves a "press" line with no "row-up" after it, and that is
         // ambiguous: the release may have arrived at the bar and been declined somewhere before the
@@ -3381,8 +3391,17 @@ public partial class FloatingBar : Window
             HorizontalAlignment = HorizontalAlignment.Left,
             Margin = new Thickness(4, 2, 4, 0),
         };
-        Grid.SetColumn(label, 0);
-        header.Children.Add(label);
+        // The grip of arrange mode (FloatingBar.Arrange.cs) before the name; the name stays the label's own Text.
+        UIElement leading = label;
+        if (ArrangeGrip() is { } grip)
+        {
+            var named = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Left };
+            named.Children.Add(grip);
+            named.Children.Add(label);
+            leading = named;
+        }
+        Grid.SetColumn(leading, 0);
+        header.Children.Add(leading);
 
         // Across the seam, the name heads the right half too (see AcrossSeam): the two columns become equal halves.
         if (AcrossSeam)
@@ -3417,7 +3436,8 @@ public partial class FloatingBar : Window
     //
     // Rename matters more here than it looks: this name is the only thing naming the group, and no
     // member row stands in for it.
-    ContextMenu GroupMenu(Core.Domain.Group group, ContextMenu? into = null)
+    // internal so the arrange tests can read the menu (FloatingBarArrangeTests)
+    internal ContextMenu GroupMenu(Core.Domain.Group group, ContextMenu? into = null)
     {
         var menu = into ?? new ContextMenu(); // `into`: the empty menu a lazy element already holds (FloatingBar.LazyMenus.cs)
         HoldFadeWhileOpen(menu);
@@ -3454,6 +3474,11 @@ public partial class FloatingBar : Window
         Add("▼", "Move group down", () => Report(manager.MoveGroup(group.Id, +1)));
         Add("⤒", "Move group to top", () => Report(manager.MoveGroupTo(group.Id, 0)));
         Add("⤓", "Move group to end", () => Report(manager.MoveGroupTo(group.Id, manager.State.Workspaces.Count)));
+
+        // A group's header has no AddBarItems, so the mode's item is added here too: it is the header that gets a grip,
+        // and a user looking at one expects to start arranging from it.
+        menu.Items.Add(new Separator());
+        AddArrangeItem(menu);
 
         return menu;
     }
@@ -3495,6 +3520,8 @@ public partial class FloatingBar : Window
             TextWrapping = TextWrapping.NoWrap,
         };
 
+        // The grip of arrange mode (FloatingBar.Arrange.cs), before the group's name.
+        if (ArrangeGrip() is { } grip) line.Children.Add(grip);
         line.Children.Add(Label($"{group.Name.ToUpperInvariant()} ▸ ", GroupHeaderForeground));
 
         members.Select((m, at) => (m, at)).ToList().ForEach(x =>
@@ -5628,6 +5655,17 @@ public partial class FloatingBar : Window
             content = line;
         }
 
+        // The grip of arrange mode (FloatingBar.Arrange.cs), before the name, on a workspace's own caption only: the
+        // pinned row and an unnamed desktop's row have no rowKey and are not rows the mode can move.
+        if (caption && timeFor is not null && ArrangeGrip() is { } grip)
+        {
+            var gripped = new DockPanel { LastChildFill = true, HorizontalAlignment = HorizontalAlignment.Left };
+            DockPanel.SetDock(grip, Dock.Left);
+            gripped.Children.Add(grip);
+            gripped.Children.Add(content);
+            content = gripped;
+        }
+
         var pill = new Border
         {
             Child = content,
@@ -6294,6 +6332,9 @@ public partial class FloatingBar : Window
             // bar on the left.
             Template = MarkedButton,
             Tag = IconTag, // marks this as an icon: press-drag moves the WINDOW, not the bar
+            // Dimmed while arranging, so the rows read as the thing being arranged and not as windows to click
+            // (FloatingBar.Arrange.cs). On the button, not the artwork: the artwork's opacity carries the z-order ladder.
+            Opacity = arranging ? ArrangingIconOpacity : 1.0,
         };
         // Clocked across the rebuild (Cost, FloatingBar.RebuildPhases.cs), like the icon lookup and the menu below.
         Cost("markers", () => PaintMarker(button, ringed: false, focused: row.IsActive, landing: row.WillActivate, asking: Glows(row) ? AskingPulse : null, fronted: Fronted(row)));
@@ -6439,6 +6480,10 @@ public partial class FloatingBar : Window
         // cursor raises no MouseLeave during a drag) and the bar must not fade while it is being
         // dragged ONTO (the OLE loop owns the mouse and the pointer is over another row).
         WindowDragSource.Attach(button, row.Window.Handle, groupKey,
+            // No window drag while arranging: the mode's press is for rows (FloatingBar.Arrange.cs). The bar-level press
+            // handler already swallows the press, so this is the belt to that pair of braces, and it is what covers a
+            // strip's tabs, which are in windows of their own.
+            canStart: () => !arranging,
             onDragStarting: () =>
             {
                 ClearInfo();
@@ -7190,6 +7235,9 @@ public partial class FloatingBar : Window
     void AddBarItems(ContextMenu menu)
     {
         menu.Items.Add(new Separator());
+
+        // Arrange mode (FloatingBar.Arrange.cs), first among the bar's own items. Its pipe twin is `arrange on|off`.
+        AddArrangeItem(menu);
 
         var docked = manager.State.DockBar;
 

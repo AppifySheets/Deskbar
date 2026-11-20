@@ -186,6 +186,17 @@ public sealed partial class RemoteControl
         _ => ControlReply.Fail(ControlUsage.LineFor("stats")),
     };
 
+    // The bar's arrange mode (drag rows to arrange the workspace list), the remote twin of the menu item that flips it.
+    // The mode lives on the bar, so the app hands in how to turn it on or off, as for `stats`; null in tests and in
+    // compatibility mode. The reply says which way it ended up, so a caller can check rather than assume.
+    ControlReply Arrange(string state) => state.ToLowerInvariant() switch
+    {
+        "on" or "off" when setArranging is null => ControlReply.Fail("The bar is not running."),
+        "on" => Reply(setArranging!(true), () => new { arranging = true }),
+        "off" => Reply(setArranging!(false), () => new { arranging = false }),
+        _ => ControlReply.Fail(ControlUsage.LineFor("arrange")),
+    };
+
     // The split window lines setting (AppState.SplitWindowLines), the remote twin of the menu item that flips it.
     ControlReply WindowLines(string mode) => mode.ToLowerInvariant() switch
     {
