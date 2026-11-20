@@ -184,6 +184,12 @@ workspace's row**, where the current workspace's row expands into one window per
 bottom of the bar**, where it sits in a strip under the rows and the rows stay uniform. In the bar,
 titles are cut to fit; widen the bar to see more of them.
 
+**Pin a workspace you keep jumping into**, a Messengers workspace say, with **Pin to strip** on its
+row menu. It gets a small item at the end of every screen's strip and in the bar's header, marked
+with a dot in its colour. Click it to go there. Once you are in it, the same item reads
+**↩** and the name of the workspace you came from, and clicking it takes you back. From a script or
+a shortcut, `deskbar.cmd jump Messengers` does the same: in, or back out if you are already there.
+
 <table align="center">
   <tr>
     <td align="center"><img src="docs/images/list-expanded.png" alt="The current workspace's row expanded in place into a list of its windows, one per line with icon and title, the other rows unchanged below it." /></td>
@@ -279,7 +285,8 @@ on Manage → Settings. A fully opaque setting means it never dims.
 ### The workspace row menu
 
 Right-click a row for: **Rename…**; **Insert before…**, **Insert after…** and **Add child…**;
-the group items (next section); **Fold row**, which flips to **Unfold row**; the **Window list** submenu; the colour strip; **Move up**, **Move down**, **Move to top**
+the group items (next section); **Fold row**, which flips to **Unfold row**; **Pin to strip**, which
+flips to **Unpin from strip**; the **Window list** submenu; the colour strip; **Move up**, **Move down**, **Move to top**
 and **Move to end**, which work within the row's group; **Delete workspace…**; and the bar items,
 **Dock to screen edge**, **Dock across both screens** and **Minimize bar**.
 

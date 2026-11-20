@@ -165,6 +165,19 @@ S14. Connect over RDP and disconnect. Strips follow the screens that are there, 
      is gone.
 S15. Exit from the tray. Every strip goes and every work area is back, on every screen.
 
+## Pinned workspaces
+
+P1. Pin a workspace (Messengers) from its row menu. Every screen's strip shows a "Messengers" item after its last
+    tab, and the bar's header shows one after the tile button. The dot and underline are Messengers' colour.
+P2. Click it on the second screen's strip. You are in Messengers, and every item now reads "↩ <where you were>" in
+    that workspace's colour.
+P3. Click it again. You are back where you were, and the item reads "Messengers" again.
+P4. Go to Messengers with Win+Ctrl+Tab or Win+Ctrl+arrows instead, then use the item. "Back" is still the
+    workspace you came from.
+P5. A strip crowded with windows: the tabs narrow, the item keeps its full width, and the strip stays one line.
+P6. `deskbar.cmd jump Messengers` from elsewhere goes in; run again from inside, it goes back.
+P7. Unpin from the row menu. The items go from every strip and the header.
+
 ## Tasks in the bar
 
 Tasks in the bar (spec `docs/superpowers/specs/2026-11-19-tasks-in-the-bar-design.md`). `$ts` is
