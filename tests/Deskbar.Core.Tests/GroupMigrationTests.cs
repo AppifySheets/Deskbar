@@ -23,16 +23,121 @@ public class GroupMigrationTests
         return (AppState.Empty with { Workspaces = [parent, first, second, loner] }, parent, first, second, loner);
     }
 
+    // Child workspaces are gone: a parent and its children load as one plain named group, with the
+    // parent listed first because that is where it was drawn.
     [Fact]
-    public void A_parent_becomes_one_anchored_group()
+    public void A_parent_becomes_one_named_group_with_the_parent_first()
     {
-        var (state, parent, _, _, _) = Nested();
+        var (state, parent, first, second, _) = Nested();
 
         var migrated = state.Migrated();
 
         var group = Assert.Single(migrated.Groups);
-        Assert.Equal(parent.Id, group.AnchorWorkspaceId);
-        Assert.True(group.IsAnchored);
+        Assert.Null(group.AnchorWorkspaceId);
+        Assert.Equal("Sparrow", group.Name);
+        Assert.Equal([parent.Id, first.Id, second.Id], migrated.MembersOf(group.Id).Select(w => w.Id));
+    }
+
+    // A state.json an anchored build saved: the anchor goes, everything else about the group stays.
+    [Fact]
+    public void An_anchored_group_loses_its_anchor_and_keeps_name_members_and_colour()
+    {
+        var a = Workspace("a");
+        var b = Workspace("b");
+        var g = Guid.NewGuid();
+        var state = AppState.Empty with
+        {
+            Workspaces = [a with { GroupId = g }, b with { GroupId = g }],
+            Groups = [new Group(g, "Work") { AnchorWorkspaceId = a.Id, Color = "#123456" }],
+        };
+
+        var group = Assert.Single(state.Migrated().Groups);
+
+        Assert.Null(group.AnchorWorkspaceId);
+        Assert.Equal("Work", group.Name);
+        Assert.Equal("#123456", group.Color);
+        Assert.Equal([a.Id, b.Id], state.Migrated().MembersOf(g).Select(w => w.Id));
+    }
+
+    // The anchor used to be drawn at the head of its box wherever the list kept it. Without anchors
+    // the list order IS the drawn order, so the migration writes it down.
+    [Fact]
+    public void A_child_listed_above_its_parent_keeps_the_drawn_order()
+    {
+        var loner = Workspace("loner");
+        var parent = Workspace("parent");
+        var child = Workspace("child");
+        var g = Guid.NewGuid();
+        var state = AppState.Empty with
+        {
+            Workspaces = [loner, child with { GroupId = g }, parent with { GroupId = g }],
+            Groups = [new Group(g, "Box") { AnchorWorkspaceId = parent.Id }],
+        };
+
+        Assert.Equal([loner.Id, parent.Id, child.Id], state.Migrated().Workspaces.Select(w => w.Id));
+    }
+
+    // A group with no colour of its own took its anchor's list position. If moving the anchor to the
+    // front changes that position, the colour it was showing is written down so it does not shift.
+    [Fact]
+    public void A_group_whose_slot_moves_keeps_the_colour_it_was_showing()
+    {
+        var child = Workspace("child");
+        var other = Workspace("other");
+        var parent = Workspace("parent");
+        var g = Guid.NewGuid();
+        var state = AppState.Empty with
+        {
+            Workspaces = [child with { GroupId = g }, other, parent with { GroupId = g }],
+            Groups = [new Group(g, "Box") { AnchorWorkspaceId = parent.Id }],
+        };
+
+        Assert.Equal(WorkspacePalette.For((string?)null, 2), Assert.Single(state.Migrated().Groups).Color);
+    }
+
+    [Fact]
+    public void A_group_whose_slot_stays_still_follows_its_position()
+    {
+        var parent = Workspace("parent");
+        var child = Workspace("child");
+        var g = Guid.NewGuid();
+        var state = AppState.Empty with
+        {
+            Workspaces = [parent with { GroupId = g }, child with { GroupId = g }],
+            Groups = [new Group(g, "Box") { AnchorWorkspaceId = parent.Id }],
+        };
+
+        Assert.Null(Assert.Single(state.Migrated().Groups).Color);
+    }
+
+    // A hand-edited file can name an anchor that is not there: it is simply dropped.
+    [Fact]
+    public void An_anchor_that_no_longer_exists_is_simply_dropped()
+    {
+        var a = Workspace("a");
+        var b = Workspace("b");
+        var g = Guid.NewGuid();
+        var state = AppState.Empty with
+        {
+            Workspaces = [a with { GroupId = g }, b with { GroupId = g }],
+            Groups = [new Group(g, "Box") { AnchorWorkspaceId = Guid.NewGuid() }],
+        };
+
+        var migrated = state.Migrated();
+
+        Assert.Null(Assert.Single(migrated.Groups).AnchorWorkspaceId);
+        Assert.Equal([a.Id, b.Id], migrated.MembersOf(g).Select(w => w.Id));
+    }
+
+    [Fact]
+    public void Migrating_twice_changes_nothing()
+    {
+        var once = Nested().state.Migrated();
+
+        var twice = once.Migrated();
+
+        Assert.Equal(once.Groups, twice.Groups);
+        Assert.Equal(once.Workspaces, twice.Workspaces);
     }
 
     // The group takes the parent's name at migration time, and keeps its own copy afterwards.

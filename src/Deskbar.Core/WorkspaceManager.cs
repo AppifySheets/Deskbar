@@ -1488,7 +1488,7 @@ public sealed class WorkspaceManager(
         InsertWorkspace(name, AfterLastMemberOf(groupId, State.Workspaces), groupId);
 
     // A new ungrouped workspace at a 1-based TOP-LEVEL row of the bar, counting a whole group's box as
-    // one row (see Blocks). So no row number can land it between two members of a group. It takes the
+    // one row (see AppState.Blocks). So no row number can land it between two members of a group. It takes the
     // place of whatever was drawn at that row, which moves down one; past the last row is the end.
     //
     // Inserted before the FIRST list entry of the block at that row, rather than at a sum of block
@@ -1497,7 +1497,7 @@ public sealed class WorkspaceManager(
         InsertWorkspace(name, ListIndexOfRow(row));
 
     int ListIndexOfRow(int row) =>
-        Blocks(State) is var blocks && row >= 1 && row <= blocks.Count
+        State.Blocks() is var blocks && row >= 1 && row <= blocks.Count
             ? blocks[row - 1].Min(w => State.Workspaces.ToList().FindIndex(x => x.Id == w.Id))
             : State.Workspaces.Count;
 
@@ -1611,13 +1611,13 @@ public sealed class WorkspaceManager(
     // outside any group had the mirror problem, swapping with somebody else's group member and
     // leaving the order of the bar's top-level rows alone.
     //
-    // So peers are the rows a row is actually drawn beside, which is one of two things (see Blocks):
+    // So peers are the rows a row is actually drawn beside, which is one of two things (see AppState.Blocks):
     // the other members of its box, or the bar's other top-level rows.
     Result MoveAmongPeers(Guid id, Func<int, int> targetOf, bool clampIntoRange)
     {
         if (!State.Workspaces.Any(w => w.Id == id)) return Result.Failure("Workspace no longer exists.");
 
-        var blocks = Blocks(State).Select(b => b.ToList()).ToList();
+        var blocks = State.Blocks().Select(b => b.ToList()).ToList();
         var at = blocks.FindIndex(b => b.Exists(w => w.Id == id));
         var block = blocks[at];
 
@@ -1646,31 +1646,6 @@ public sealed class WorkspaceManager(
             : blocks.Select((b, i) => i == at ? block.Take(pinned).Concat(moved).ToList() : b).SelectMany(b => b).ToList());
     }
 
-    // The bar's top-level rows, in the order it draws them: a lone ungrouped workspace, or a whole
-    // group as one box with its members inside.
-    //
-    // Deliberately the same walk FloatingBar does, down to treating a GroupId that names no group as
-    // ungrouped, because a move that disagreed with the drawing about what sits beside what is
-    // exactly the bug #85 reported. It is the reason this lives here rather than in the bar: the
-    // order is a fact about the state, and two surfaces computing it separately is how they drifted.
-    static IReadOnlyList<IReadOnlyList<Workspace>> Blocks(AppState state)
-    {
-        var drawn = new HashSet<Guid>();
-        var blocks = new List<IReadOnlyList<Workspace>>();
-
-        state.Workspaces.ToList().ForEach(w =>
-        {
-            if (!drawn.Add(w.Id)) return;
-            if (w.GroupId is not { } id || state.Groups.All(g => g.Id != id)) { blocks.Add([w]); return; }
-
-            var members = state.MembersOf(id);
-            members.ToList().ForEach(m => drawn.Add(m.Id));
-            blocks.Add(members);
-        });
-
-        return blocks;
-    }
-
     // Moves block `at` among the blocks drawn on ITS side of the bar (DrawnBlocks): the pinned rows if it is pinned,
     // every other block if not. Each side is reordered in the stored slots it already holds, so the other side keeps
     // its stored places, which is what lets an unpinned row go back where it was. Both a row's move and a group's
@@ -1695,7 +1670,7 @@ public sealed class WorkspaceManager(
     // rebuild walks the rows in this same order.
     static IReadOnlyList<IReadOnlyList<Workspace>> DrawnBlocks(AppState state)
     {
-        var blocks = Blocks(state);
+        var blocks = state.Blocks();
         return [.. blocks.Where(Pinned), .. blocks.Where(b => !Pinned(b))];
     }
 
@@ -1748,7 +1723,7 @@ public sealed class WorkspaceManager(
     {
         if (State.Groups.All(g => g.Id != groupId)) return Result.Failure("That group no longer exists.");
 
-        var blocks = Blocks(State).Select(b => b.ToList()).ToList();
+        var blocks = State.Blocks().Select(b => b.ToList()).ToList();
         var at = blocks.FindIndex(b => b.Exists(w => w.GroupId == groupId));
         // A group with no members left is not drawn and so has nowhere to move from.
         if (at < 0) return Result.Success();
@@ -1923,8 +1898,9 @@ public sealed class WorkspaceManager(
         // A new group takes the parent's name AND its colour (#90), so nesting a workspace under a
         // parent leaves the parent's row looking exactly as it did; only the child changes.
         var group = State.GroupOf(parent)
-            ?? new Group(Guid.NewGuid(), State.Workspaces.Single(w => w.Id == parent).Name, parent)
+            ?? new Group(Guid.NewGuid(), State.Workspaces.Single(w => w.Id == parent).Name)
             {
+                AnchorWorkspaceId = parent,
                 Color = State.Workspaces.Single(w => w.Id == parent).Color,
             };
 
@@ -2081,7 +2057,7 @@ public sealed class WorkspaceManager(
                 // box draws its members in list order, a workspace joining from a row above the
                 // group would appear in the middle of it. The bottom is where a new member belongs,
                 // and it also keeps the group contiguous, which is the order every move now
-                // preserves (see Blocks).
+                // preserves (see AppState.Blocks).
                 var joiner = left.Workspaces.Single(w => w.Id == workspaceId) with { GroupId = groupId };
                 var rest = left.Workspaces.Where(w => w.Id != workspaceId).ToList();
                 rest.Insert(AfterLastMemberOf(groupId, rest), joiner);

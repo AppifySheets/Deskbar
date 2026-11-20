@@ -111,7 +111,7 @@ public class DeleteWorkspacePromptTests
     {
         var state = With(Ws(Doomed, "Sparrow", Box), Ws(Keeper, "Keeper", Box), Ws(Third, "Third", Box)) with
         {
-            Groups = [new Group(Box, "Work", Doomed)],
+            Groups = [new Group(Box, "Work") { AnchorWorkspaceId = Doomed }],
         };
 
         var text = DeleteWorkspacePrompt.For(state, Doomed, []).Value;
@@ -125,7 +125,7 @@ public class DeleteWorkspacePromptTests
     {
         var state = With(Ws(Doomed, "Sparrow", Box), Ws(Keeper, "Keeper", Box), Ws(Third, "Third", Box)) with
         {
-            Groups = [new Group(Box, "Work", Keeper)],
+            Groups = [new Group(Box, "Work") { AnchorWorkspaceId = Keeper }],
         };
 
         var text = DeleteWorkspacePrompt.For(state, Doomed, []).Value;

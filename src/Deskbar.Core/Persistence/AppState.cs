@@ -468,7 +468,7 @@ public sealed record AppState(
     //
     // ParentId is left on the records rather than cleared. Nothing reads it after this, and leaving
     // it means a downgrade to an older build still finds its nesting where it expects it.
-    public AppState Migrated()
+    AppState GroupsFromParentIds()
     {
         // Already migrated, or nothing to migrate. Checked on Groups rather than on ParentId so
         // running it twice cannot produce a second set of groups for the same parents.
@@ -487,7 +487,7 @@ public sealed record AppState(
         if (parents.Count == 0) return this;
 
         var groups = parents
-            .Select(parent => new Group(Guid.NewGuid(), Workspaces.Single(w => w.Id == parent).Name, parent))
+            .Select(parent => new Group(Guid.NewGuid(), Workspaces.Single(w => w.Id == parent).Name) { AnchorWorkspaceId = parent })
             .ToList();
 
         // parent id -> group id, for both the anchor itself and its children.
@@ -502,6 +502,91 @@ public sealed record AppState(
                     : w)
                 .ToList(),
         };
+    }
+
+    // Brings any state.json, however old, up to the current shape. Two steps, each a no-op when it has
+    // nothing to do, so running the whole thing twice changes nothing the second time (the manager
+    // persists after loading and the next load migrates again).
+    //
+    //   1. GroupsFromParentIds: the pre-groups ParentId nesting becomes groups. Today's behaviour, and
+    //      what it produces still carries the legacy anchor.
+    //   2. WithoutAnchors: child workspaces are gone, so an anchored group becomes a plain named group.
+    public AppState Migrated() => GroupsFromParentIds().WithoutAnchors();
+
+    // Turns every anchored group into a plain named group without changing what the bar drew.
+    //
+    // An anchored group used to draw its anchor at the head of its box wherever the list kept it, and
+    // took its lane colour from the anchor's list position. Without anchors the list order IS the drawn
+    // order and the colour follows the first member, so this writes down both facts:
+    //
+    //   * the anchor moves to the front of its block, and the blocks are flattened back into the list;
+    //   * a group with no colour of its own, whose first member now sits at a different list position
+    //     than its anchor did, gets the palette colour of the OLD position, so it keeps the colour it
+    //     was showing. A group whose position did not change keeps following its position.
+    //
+    // An anchor that names no workspace (a hand-edited file) is simply dropped: there is nothing to
+    // move and no colour to preserve. Returns this when no group has an anchor, which is what makes
+    // running it twice a no-op.
+    AppState WithoutAnchors()
+    {
+        if (Groups.All(g => g.AnchorWorkspaceId is null)) return this;
+
+        // Where each anchored group's colour came from, read BEFORE the list is reordered. Only for an
+        // anchor that exists; -1 would otherwise be taken for a real position.
+        var oldSlots = Groups
+            .Where(g => g.AnchorWorkspaceId is { } anchor && Workspaces.Any(w => w.Id == anchor))
+            .ToDictionary(g => g.Id, ColourSlotOf);
+
+        // The rows in stored order (Blocks), each anchor explicitly first in its block. MembersOf puts it
+        // there today; saying it here keeps this right once MembersOf stops knowing about anchors.
+        var workspaces = Blocks()
+            .SelectMany(block => block.FirstOrDefault()?.GroupId is { } id
+                    && Groups.FirstOrDefault(g => g.Id == id)?.AnchorWorkspaceId is { } anchor
+                    && block.Any(w => w.Id == anchor)
+                ? block.Where(w => w.Id == anchor).Concat(block.Where(w => w.Id != anchor))
+                : block)
+            .ToList();
+
+        var groups = Groups
+            .Select(g => g with
+            {
+                AnchorWorkspaceId = null,
+                Color = g.Color is null
+                    && oldSlots.TryGetValue(g.Id, out var oldSlot)
+                    && workspaces.FindIndex(w => w.GroupId == g.Id) != oldSlot
+                        ? WorkspacePalette.For((string?)null, oldSlot)
+                        : g.Color,
+            })
+            .ToList();
+
+        return this with { Workspaces = workspaces, Groups = groups };
+    }
+
+    // The bar's top-level rows in STORED order: a lone ungrouped workspace, or a whole group as one
+    // box with its members inside. The bar then draws the pinned rows first (WorkspaceManager's
+    // DrawnBlocks); only the drawing moves them, so the stored order is the one to keep or rewrite.
+    //
+    // Deliberately the same walk FloatingBar does, down to treating a GroupId that names no group as
+    // ungrouped, because a move that disagreed with the drawing about what sits beside what is
+    // exactly the bug #85 reported. It is the reason this lives on the state rather than in the bar
+    // or the manager: the order is a fact about the state, and two surfaces computing it separately
+    // is how they drifted.
+    public IReadOnlyList<IReadOnlyList<Workspace>> Blocks()
+    {
+        var drawn = new HashSet<Guid>();
+        var blocks = new List<IReadOnlyList<Workspace>>();
+
+        Workspaces.ToList().ForEach(w =>
+        {
+            if (!drawn.Add(w.Id)) return;
+            if (w.GroupId is not { } id || Groups.All(g => g.Id != id)) { blocks.Add([w]); return; }
+
+            var members = MembersOf(id);
+            members.ToList().ForEach(m => drawn.Add(m.Id));
+            blocks.Add(members);
+        });
+
+        return blocks;
     }
 
     public static AppState Empty { get; } = new([], [], [], new Dictionary<Guid, IReadOnlyList<InventoryEntry>>());

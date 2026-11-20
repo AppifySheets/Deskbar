@@ -1,3 +1,5 @@
+using System.Text.Json.Serialization;
+
 namespace Deskbar.Core.Domain;
 
 // A named group of workspaces, drawn together on the bar.
@@ -22,8 +24,19 @@ namespace Deskbar.Core.Domain;
 // Name is stored even for an anchored group. It starts as the anchor's name, and keeping its own
 // copy means renaming the anchor workspace does not silently rename the group, and an anchored
 // group can lose its anchor (the anchor gets deleted, or moved out) without becoming nameless.
-public sealed record Group(Guid Id, string Name, Guid? AnchorWorkspaceId = null)
+public sealed record Group(Guid Id, string Name)
 {
+    // LEGACY, and on its way out: child workspaces are being removed (see
+    // docs/superpowers/specs/2026-11-20-bar-edit-mode-design.md, "Migration"). It is no longer part of
+    // the record's shape, only an init property, because an old state.json still carries it and
+    // AppState.Migrated reads it once to turn an anchored group into a plain named group (anchor
+    // moved to the front, colour kept) before clearing it.
+    //
+    // Null in everything this build writes: WhenWritingNull keeps the key out of new files. It is
+    // still READ from old ones, which is the whole reason it has not been deleted yet.
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public Guid? AnchorWorkspaceId { get; init; }
+
     public bool IsAnchored => AnchorWorkspaceId is not null;
 
     // The lane colour for the whole group (#90). Petre: "a group has one colour: if any child

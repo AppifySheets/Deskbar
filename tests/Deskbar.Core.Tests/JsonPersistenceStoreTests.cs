@@ -32,6 +32,33 @@ public sealed class JsonPersistenceStoreTests : IDisposable
         };
     }
 
+    // A state.json written while child workspaces existed names an anchor. It must still be READ (the
+    // migration needs it), and after Migrated the group is a plain named group with the old anchor first.
+    [Fact]
+    public void An_anchored_group_in_an_old_file_loads_as_a_named_group_with_the_anchor_first()
+    {
+        var group = Guid.NewGuid();
+        var child = Guid.NewGuid();
+        var anchor = Guid.NewGuid();
+        Directory.CreateDirectory(dir);
+        File.WriteAllText(Path.Combine(dir, "state.json"),
+            $$"""
+            {"Workspaces":[
+              {"Id":"{{child}}","Name":"child","DesktopId":"{{Guid.NewGuid()}}","GroupId":"{{group}}"},
+              {"Id":"{{anchor}}","Name":"parent","DesktopId":"{{Guid.NewGuid()}}","GroupId":"{{group}}"}],
+             "WorkspaceRules":[],"RenameRules":[],"Inventory":{},
+             "Groups":[{"Id":"{{group}}","Name":"Work","AnchorWorkspaceId":"{{anchor}}"}]}
+            """);
+
+        var loaded = new JsonPersistenceStore(dir).Load().Value;
+        Assert.Equal(anchor, Assert.Single(loaded.Groups).AnchorWorkspaceId);
+
+        var migrated = loaded.Migrated();
+        Assert.Null(Assert.Single(migrated.Groups).AnchorWorkspaceId);
+        Assert.Equal(anchor, migrated.Workspaces[0].Id);
+        Assert.Equal("Work", migrated.Groups[0].Name);
+    }
+
     // The switcher shortcut is an init property with a NON-empty default, unlike every other
     // optional field here, so both halves are worth pinning: a value written by the editor
     // must come back, and a file that predates the setting must load with the default rather
