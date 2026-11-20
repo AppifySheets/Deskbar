@@ -79,4 +79,19 @@ public class WindowListPlaceTests
 
         Assert.Equal(expand, manager.State.ExpandCurrentWorkspace);
     }
+
+    // The collapsed bar click (AppState.CollapsedBarSwitchesWhole) acts on the row and on the screens, where the
+    // switched-to workspace's windows are then picked by name, and not at the bottom. Petre, with the strips on: "i
+    // want to not be able to click and activate individual windows in collapsed workspaces".
+    [Theory]
+    [InlineData(WindowListPlace.Row, true)]
+    [InlineData(WindowListPlace.Bottom, false)]
+    [InlineData(WindowListPlace.Screens, true)]
+    public void Collapsed_bar_click_applies_to_row_and_screens(WindowListPlace place, bool applies)
+    {
+        var manager = Started();
+        manager.SetWindowListPlace(place);
+
+        Assert.Equal(applies, manager.State.CollapsedBarClickApplies);
+    }
 }

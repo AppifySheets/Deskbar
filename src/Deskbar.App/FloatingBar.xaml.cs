@@ -3740,13 +3740,15 @@ public partial class FloatingBar : Window
         // active programs", "then click whatever you want after the bar is expanded". So on a row that expands
         // when clicked, an icon no longer jumps to its own window: the click falls through to the row's switch,
         // which lands on the window that was in front there last time (WindowRow.WillActivate, the halo), and
-        // the row opens into its titled list, where each window is picked by name. Only while rows expand
-        // (AppState.ExpandCurrentWorkspace): with the list at the bottom no row ever opens, so an icon is the
-        // only way to reach one window and keeps its click. Never the current row, where the icon's click is
+        // the row opens into its titled list, where each window is picked by name. The same with the list on the
+        // screens, where after the switch every strip shows that workspace's windows as tabs to pick from. Petre,
+        // with the strips on: "i want to not be able to click and activate individual windows in collapsed
+        // workspaces". Not with the list at the bottom, where an icon keeps its click as before
+        // (AppState.CollapsedBarClickApplies). Never the current row, where the icon's click is
         // the minimize toggle, nor a row with no switch (the pinned row). A SETTING, on by default
         // (AppState.CollapsedBarSwitchesWhole): "make this default, config option to disable". Off, an icon on a
         // collapsed row brings its own window up, as it did before.
-        var wholeRow = manager.State.ExpandCurrentWorkspace && manager.State.CollapsedBarSwitchesWhole
+        var wholeRow = manager.State.CollapsedBarClickApplies && manager.State.CollapsedBarSwitchesWhole
             && !titled && !isCurrent && switchTo is not null;
         var own = rows.ToList();
         var ordered = titled
@@ -7166,9 +7168,10 @@ public partial class FloatingBar : Window
 
         // The collapsed bar click setting (AppState.CollapsedBarSwitchesWhole), beside the split it is a sibling of:
         // both decide what a click on a bar does. Same one-item flip naming what it would switch TO. Its control
-        // pipe twin is `collapsed-click bar|icon` (ControlUsage). Only offered while rows expand, because with the
-        // window list at the bottom no bar ever opens and the setting does nothing.
-        if (!manager.State.ExpandCurrentWorkspace) return;
+        // pipe twin is `collapsed-click bar|icon` (ControlUsage). Offered with the list on the row or on the screens,
+        // the two places it acts on; with the window list at the bottom the setting does nothing, so it is not offered
+        // (AppState.CollapsedBarClickApplies).
+        if (!manager.State.CollapsedBarClickApplies) return;
         var whole = manager.State.CollapsedBarSwitchesWhole;
         add("▭", whole ? "Icons on collapsed bars bring their window up" : "Clicking a collapsed bar switches to its workspace",
             () => Report(manager.SetCollapsedBarSwitchesWhole(!whole)));

@@ -88,13 +88,14 @@ public class FloatingBarWindowListMenuTests
         Assert.Equal(expected, harness.Manager.State.WindowListPlace);
     });
 
-    // "Clicking a collapsed bar ..." only means something while rows expand (Row); at the bottom or on the
-    // screens no bar ever opens.
+    // "Clicking a collapsed bar ..." means something where the switched-to workspace's windows are then picked by
+    // name: on the row, which opens into its list, and on the screens, whose strips show them as tabs. At the
+    // bottom it does nothing, so it is not offered (AppState.CollapsedBarClickApplies).
     [Theory]
     [InlineData(WindowListPlace.Row, true)]
     [InlineData(WindowListPlace.Bottom, false)]
-    [InlineData(WindowListPlace.Screens, false)]
-    public void The_collapsed_click_item_is_offered_only_for_row(WindowListPlace place, bool offered) => StaThread.Run(() =>
+    [InlineData(WindowListPlace.Screens, true)]
+    public void The_collapsed_click_item_is_offered_for_row_and_screens(WindowListPlace place, bool offered) => StaThread.Run(() =>
     {
         var harness = Harness.Build();
         Assert.True(harness.Manager.SetWindowListPlace(place).IsSuccess);
