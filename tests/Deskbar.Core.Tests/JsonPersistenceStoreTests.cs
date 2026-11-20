@@ -59,6 +59,23 @@ public sealed class JsonPersistenceStoreTests : IDisposable
         Assert.Equal("Work", migrated.Groups[0].Name);
     }
 
+    // New files stop carrying the legacy key, so a downgrade-free file is the only shape on disk.
+    [Fact]
+    public void Saving_a_migrated_state_writes_no_anchor_key()
+    {
+        var group = Guid.NewGuid();
+        var anchor = new Workspace(Guid.NewGuid(), "parent", Guid.NewGuid()) { GroupId = group };
+        var state = AppState.Empty with
+        {
+            Workspaces = [anchor],
+            Groups = [new Group(group, "Work") { AnchorWorkspaceId = anchor.Id }],
+        };
+
+        Assert.True(new JsonPersistenceStore(dir).Save(state.Migrated()).IsSuccess);
+
+        Assert.DoesNotContain("AnchorWorkspaceId", File.ReadAllText(Path.Combine(dir, "state.json")));
+    }
+
     // The switcher shortcut is an init property with a NON-empty default, unlike every other
     // optional field here, so both halves are worth pinning: a value written by the editor
     // must come back, and a file that predates the setting must load with the default rather

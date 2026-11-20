@@ -129,10 +129,23 @@ public class GroupMigrationTests
         Assert.Equal([a.Id, b.Id], migrated.MembersOf(g).Select(w => w.Id));
     }
 
+    // Built so the first pass does BOTH things it can do, reorder the list and write a colour, which
+    // is what a second pass would have to undo or repeat if it were not a no-op.
     [Fact]
     public void Migrating_twice_changes_nothing()
     {
-        var once = Nested().state.Migrated();
+        var child = Workspace("child");
+        var other = Workspace("other");
+        var parent = Workspace("parent");
+        var g = Guid.NewGuid();
+        var state = AppState.Empty with
+        {
+            Workspaces = [child with { GroupId = g }, other, parent with { GroupId = g }],
+            Groups = [new Group(g, "Box") { AnchorWorkspaceId = parent.Id }],
+        };
+        var once = state.Migrated();
+        Assert.NotNull(Assert.Single(once.Groups).Color);
+        Assert.NotEqual(state.Workspaces.Select(w => w.Id), once.Workspaces.Select(w => w.Id));
 
         var twice = once.Migrated();
 
@@ -202,6 +215,44 @@ public class GroupMigrationTests
 
         Assert.Equal(once.Groups, twice.Groups);
         Assert.Equal(once.Workspaces, twice.Workspaces);
+    }
+
+    // A colour the user chose is theirs: moving the anchor must not overwrite it with the old slot's.
+    [Fact]
+    public void A_group_with_its_own_colour_keeps_it_when_its_slot_moves()
+    {
+        var child = Workspace("child");
+        var other = Workspace("other");
+        var parent = Workspace("parent");
+        var g = Guid.NewGuid();
+        var state = AppState.Empty with
+        {
+            Workspaces = [child with { GroupId = g }, other, parent with { GroupId = g }],
+            Groups = [new Group(g, "Box") { AnchorWorkspaceId = parent.Id, Color = "#abcdef" }],
+        };
+
+        Assert.Equal("#abcdef", Assert.Single(state.Migrated().Groups).Color);
+    }
+
+    // A GroupId that names no group is drawn as ungrouped. Rebuilding the list from the drawn blocks
+    // must not lose or duplicate it, whatever else reorders.
+    [Fact]
+    public void A_workspace_whose_group_is_missing_survives_the_migration()
+    {
+        var stray = Workspace("stray") with { GroupId = Guid.NewGuid() };
+        var child = Workspace("child");
+        var parent = Workspace("parent");
+        var g = Guid.NewGuid();
+        var state = AppState.Empty with
+        {
+            Workspaces = [stray, child with { GroupId = g }, parent with { GroupId = g }],
+            Groups = [new Group(g, "Box") { AnchorWorkspaceId = parent.Id }],
+        };
+
+        var migrated = state.Migrated();
+
+        Assert.Equal(3, migrated.Workspaces.Count);
+        Assert.Equal(state.Workspaces.Select(w => w.Id).Order(), migrated.Workspaces.Select(w => w.Id).Order());
     }
 
     [Fact]
