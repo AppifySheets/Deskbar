@@ -242,6 +242,14 @@ public sealed record AppState(
     // The reading the bar wants. Not stored.
     [JsonIgnore] public bool CollapsedBarSwitchesWhole => !CollapsedIconsPickWindow;
 
+    // Whether the setting above has anything to act on: wherever, once the click has switched, the new
+    // workspace's windows are there to be picked by name. On the row, the row opens into its titled list; on the
+    // screens, each strip shows that workspace's windows as tabs. Petre, with the strips on: "i want to not be
+    // able to click and activate individual windows in collapsed workspaces", then "that by default, possibility
+    // to change in the menu". Not at the bottom, which keeps the old rule: there an icon on a row is still the
+    // only way the setting was ever meant to leave a window reachable in one click. Not stored.
+    [JsonIgnore] public bool CollapsedBarClickApplies => WindowListPlace != WindowListPlace.Bottom;
+
     // Whether the FLOATING bar stays on top of a full-screen window (a video, a game) on its screen instead of
     // stepping behind it (FloatingBar.StepAsideIfCovered). Petre: "can we always hide it?", then "i may want to
     // have that as an option", "in the rightclick". Stored as the exception, so a state.json without the key
