@@ -67,7 +67,10 @@ public class FloatingBarStripsTests
         using var h = StripHarness.Build();
         h.Fill();
 
-        Assert.Same(h.StripC.NameTag, Assert.Single(h.StripC.Row.Children.Cast<UIElement>()));
+        // No tab: the name tag, then only the previous workspace's item, which every strip carries.
+        Assert.Same(h.StripC.NameTag, h.StripC.Row.Children[0]);
+        Assert.Empty(TabsOf(h.StripC));
+        Assert.Equal(["↩ Sparrow"], JumpsOf(h.StripC).Select(LabelOf));
         Assert.Equal("GEPHA", TagText(h.StripC));
         // ...on the colour the bar gives GEPHA's row: the first workspace, no colour of its own.
         Assert.Equal(Hex(WorkspacePalette.For((string?)null, 0)), ((SolidColorBrush)h.StripC.NameTag.Background).Color);
@@ -543,8 +546,37 @@ public class FloatingBarStripsTests
         Assert.True(h.Manager.SetWorkspacePinned(IdOf(h, "Sparrow"), true).IsSuccess);
         Assert.Equal("Sparrow", Assert.Single(jumps.Windows).Title);
 
+        // Unpinned, Sparrow is still where "back" goes, so its button becomes the previous workspace's.
         Assert.True(h.Manager.SetWorkspacePinned(IdOf(h, "Sparrow"), false).IsSuccess);
-        Assert.Empty(jumps.Windows);
+        Assert.Equal("↩ Sparrow", Assert.Single(jumps.Windows).Title);
+    });
+
+    // Petre: "let's also have previous workspace available in strip", "and taskbar". With nothing pinned, every strip
+    // ends with "↩ <previous>", and the taskbar has its button; a click goes there.
+    [Fact]
+    public void The_previous_workspace_is_the_last_item_on_every_strip_and_on_the_taskbar() => StaThread.Run(() =>
+    {
+        var jumps = new TaskbarJumps(pin: _ => Result.Success(), ignore: _ => { }, switchTo: _ => Result.Success());
+        using var h = StripHarness.Build(taskbar: jumps);
+        h.Fill();
+
+        Assert.All(h.Strips, strip => Assert.Equal("↩ Sparrow", LabelOf((Button)strip.Row.Children[^1])));
+        Assert.Equal("↩ Sparrow", Assert.Single(jumps.Windows).Title);
+
+        ((Button)h.StripA.Row.Children[^1]).RaiseEvent(new RoutedEventArgs(ButtonBase.ClickEvent));
+        Assert.Equal([h.SparrowDesktop], h.Desktops.Switched);
+        jumps.Close();
+    });
+
+    // "Back" from GEPHA is Sparrow, which is pinned: its own item already goes there, so no second item for one place.
+    [Fact]
+    public void No_back_item_when_the_pinned_item_goes_to_the_same_place() => StaThread.Run(() =>
+    {
+        using var h = StripHarness.Build();
+        Assert.True(h.Manager.SetWorkspacePinned(IdOf(h, "Sparrow"), true).IsSuccess);
+        h.Fill();
+
+        Assert.All(h.Strips, strip => Assert.Equal(["Sparrow"], JumpsOf(strip).Select(LabelOf)));
     });
 
     // Petre: "i may also have multiple pinned workspaces, both should go to the top". The bar draws pinned rows first.
@@ -591,8 +623,10 @@ public class FloatingBarStripsTests
 
     static string TagText(ScreenStrip strip) => ((TextBlock)strip.NameTag.Child).Text;
 
-    // The tabs on a strip, in order: every child of its row after the name tag.
-    static IReadOnlyList<Button> TabsOf(ScreenStrip strip) => strip.Row.Children.Cast<UIElement>().Skip(1).Cast<Button>().ToList();
+    // The tabs on a strip, in order: every child of its row after the name tag that is not an item (the pinned
+    // workspaces' and the previous workspace's, FloatingBar.WorkspaceJumps.cs).
+    static IReadOnlyList<Button> TabsOf(ScreenStrip strip) =>
+        strip.Row.Children.Cast<UIElement>().Skip(1).Cast<Button>().Where(b => b.Tag is not FloatingBar.WorkspaceJumpTag).ToList();
 
     static IReadOnlyList<string> NamesOf(ScreenStrip strip) =>
         TabsOf(strip).Select(System.Windows.Automation.AutomationProperties.GetName).ToList();

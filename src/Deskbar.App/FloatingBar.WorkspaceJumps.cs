@@ -77,13 +77,19 @@ public partial class FloatingBar
     // tag wears on an unnamed desktop.
     static readonly Brush JumpNowhere = Frozen(0xFF, 0x3A, 0x3F, 0x49);
 
-    // The items for this overview: the current workspace is the overview's, the same one the strips' name tag shows,
-    // and "back" is the manager's MRU answer.
-    IReadOnlyList<WorkspaceJump> JumpsFor(Overview overview) =>
-        WorkspaceJumps.Of(
+    // The items for this overview: one per pinned workspace, then the previous workspace's (WorkspaceJumps.BackItem;
+    // Petre: "let's also have previous workspace available in strip", "and taskbar"). The current workspace is the
+    // overview's, the same one the strips' name tag shows, and "back" is the manager's MRU answer, read ONCE so the
+    // pinned items and the back item cannot disagree about it.
+    IReadOnlyList<WorkspaceJump> JumpsFor(Overview overview)
+    {
+        var back = manager.ByRecentUse().Back;
+        var pinned = WorkspaceJumps.Of(
             manager.State.Workspaces,
             overview.Workspaces.FirstOrDefault(w => w.IsCurrent) is { } current ? current.Workspace.Id : Maybe<Guid>.None,
-            manager.ByRecentUse().Back);
+            back);
+        return [.. pinned, .. WorkspaceJumps.BackItem(pinned, back).Match(item => new[] { item }, () => [])];
+    }
 
     // The pinned workspaces' buttons on Windows' taskbar (TaskbarJumps), kept in step with the strip items. Set by the
     // composition root; left unset, as every test but the taskbar ones leaves it, there are no buttons.
