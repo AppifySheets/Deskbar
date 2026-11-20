@@ -184,8 +184,8 @@ public partial class App : Application
             .ContinueWith(_ => Dispatcher.InvokeAsync(() => tiler?.Refresh()), TaskScheduler.Default);
 
     // Tiling (docs/superpowers/specs/2026-11-08-tiling-design.md). Called from OnStartup on the UI thread, once,
-    // and only once the manager has STARTED: the manager's own desktop-change handling (which sends borrowed
-    // windows home) subscribes in manager.Start(). CurrentChanged is a FromEventPattern over Windows' own
+    // and only once the manager has STARTED: the manager's own desktop-change handling subscribes in
+    // manager.Start(). CurrentChanged is a FromEventPattern over Windows' own
     // CurrentChanged event, so each subscription adds its own handler to that event, and an event's multicast
     // delegate calls its handlers in the order they were added: on a desktop switch the manager settles first
     // and the Tiler then sees the result.

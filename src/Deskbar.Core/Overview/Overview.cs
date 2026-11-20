@@ -73,10 +73,9 @@ public sealed record WindowRow(
 // then the sentence that redefined the feature -- "i want parent's windows to be present in the
 // child workspace, not in the workspace row... but on the desktop."
 //
-// So they are not shown twice, they are actually THERE: WorkspaceManager borrows them onto the
-// child's desktop while you are standing in it, and they arrive in Running like any other window
-// that is genuinely on that desktop. Nothing here needs to know -- which is the point, and the
-// reason this record went back to what it was.
+// Child workspaces, and with them any borrowing of windows onto another workspace's desktop, have since
+// been removed. A window is on exactly one desktop, and it arrives in Running of the workspace that owns
+// that desktop, like any other. Nothing here needs to know, which is why this record stayed what it was.
 // WantsAttention: a session working in this workspace asked for the user and the user has not come here since, so
 // the row blinks (Petre: "it should alert the deskbar, which should alert me by having that bar on the deskbar
 // blink"). Set by WorkspaceManager, see Asking.

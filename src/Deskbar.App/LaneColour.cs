@@ -15,12 +15,16 @@ public static class LaneColour
             ? WorkspacePalette.For(group.Color, Math.Max(0, state.ColourSlotOf(group)))
             : WorkspacePalette.For(workspace, Math.Max(0, state.Workspaces.ToList().FindIndex(w => w.Id == workspace.Id)));
 
-    // The group's name for a member of a group, null for one that stands alone.
+    // The group's name for a member of a group, null for one that stands alone or that carries the very name
+    // of its group. A group made from one workspace starts out with both named alike, and "Sparrow › Sparrow"
+    // says the same word twice.
     public static string? GroupNameOf(AppState state, Workspace workspace) =>
-        state.GroupOf(workspace.Id)?.Name;
+        state.GroupOf(workspace.Id) is { } group && !string.Equals(group.Name, workspace.Name, StringComparison.OrdinalIgnoreCase)
+            ? group.Name
+            : null;
 
-    // "Sparrow › dice-rolls" for a member, the bare name otherwise: Petre names children by what they are and
-    // lets the group say where they sit.
+    // "Sparrow › dice-rolls" for a member, the bare name otherwise: a member is named by what it is and the
+    // group says where it sits.
     public static string FullName(AppState state, Workspace workspace) =>
         GroupNameOf(state, workspace) is { } group ? $"{group} › {workspace.Name}" : workspace.Name;
 }

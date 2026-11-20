@@ -318,7 +318,7 @@ public class GroupMigrationTests
     public void A_stale_parent_id_beside_existing_groups_is_cleared()
     {
         var (state, _, _, _, _) = Nested();
-        var withStale = state.Migrated() with { };
+        var withStale = state.Migrated();
         var stale = withStale with
         {
             Workspaces = withStale.Workspaces.Select(w => w.GroupId is null ? w : w with { ParentId = Guid.NewGuid() }).ToList(),

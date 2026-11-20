@@ -1524,9 +1524,8 @@ public sealed class WorkspaceManager(
     //
     // They used to move it one place in the flat list, which predates grouping. The bar draws a
     // whole group as one box, so a move that only swapped list neighbours across the box edge
-    // changed nothing at all on screen. A row
-    // outside any group had the mirror problem, swapping with somebody else's group member and
-    // leaving the order of the bar's top-level rows alone.
+    // changed nothing at all on screen. A row outside any group had the mirror problem, swapping
+    // with somebody else's group member and leaving the order of the bar's top-level rows alone.
     //
     // So peers are the rows a row is actually drawn beside, which is one of two things (see
     // AppState.Blocks): the other members of its box, or the bar's other top-level rows.
@@ -2042,8 +2041,9 @@ public sealed class WorkspaceManager(
     // bar already treats an unreadable value as "no tint" rather than as a crash (see
     // FloatingBar.Lane), which is the right answer for a file a user can edit anyway.
     //
-    // A GROUPED workspace redirects the choice to its group (#90). Petre: "any child can change the
-    // group's colour... a group has one colour". So the picker on a member's
+    // A GROUPED workspace redirects the choice to its group (#90). Petre: "the parent can change the
+    // group's colour, and so can any child... a group has one colour". Since child workspaces were
+    // removed, this means any member. So the picker on a member's
     // row is the group's picker, and there is no such thing as a per-member colour inside a box. Its
     // own Workspace.Color is deliberately left alone rather than overwritten, which is what lets it
     // go back to the colour it chose for itself if it ever leaves.

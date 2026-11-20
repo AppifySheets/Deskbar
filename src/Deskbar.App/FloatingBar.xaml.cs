@@ -2354,7 +2354,7 @@ public partial class FloatingBar : Window
             // amended: EVERY workspace gets a row -- an empty one is just its label,
             // which since round 5 is a click-to-switch button, so it's a legitimate
             // switch target rather than dead chrome.
-            // Members of a group are drawn together (#42 anchored, #84 anchorless), which means the
+            // Members of a group are drawn together (#84), which means the
             // flat list is walked once and a whole group is emitted when its first member is
             // reached. Everything after that member is skipped, so a group whose members are not
             // contiguous in the list still comes out as one box.
@@ -2374,17 +2374,17 @@ public partial class FloatingBar : Window
             // Petre: "make the children more apparent, maybe group them together with an outline
             // or a ring."
             //
-            // So a family is drawn as ONE thing: the parent and its children go inside a single
-            // outlined box, in the parent's colour. The indent and the spine say "this row is a
-            // child"; the outline says "these rows are a family", which is the question a glance
+            // So a group is drawn as ONE thing: its members go inside a single outlined box, in the
+            // group's colour. (This was written when a group had a parent workspace; child workspaces
+            // are gone and the box stayed.) The indent and the spine say "this row is a member"; the
+            // outline says "these rows belong together", which is the question a glance
             // actually asks -- and it is the only one of the three that cannot be answered by
             // looking at a single row.
             //
             // Built per family and wrapped afterwards, rather than appended one row at a time,
             // because an outline has to be drawn around a set that already exists.
             // `group` is the group this row belongs to, or null for a row that stands on its own.
-            // Everything a row inherits from its group is decided from it, so the two kinds differ
-            // in exactly one place: whether there is an anchor to inherit a colour from.
+            // Everything a row inherits from its group (colour, box, name) is decided from it.
             // `boxed` says the group around this row is drawn as a box, which is where the lane tint
             // then lives: the box paints it once behind the whole group instead of every member
             // painting the same colour separately (#91). Two coats of a translucent tint make a
@@ -2482,12 +2482,9 @@ public partial class FloatingBar : Window
                 members.ForEach(m => drawn.Add(m!.Workspace.Id));
 
                 // A group always gets its box: its header row carries the name, so even a group of
-                // one is a header plus a row rather than a row that looks unchanged. That group of
-                // one cannot normally happen, since leaving a group of two dissolves it, but a
-                // hand-edited state.json can produce one. Decided BEFORE the rows are built, because
-                // it is what decides whether a row paints its own lane or the box paints it for the
-                // whole group.
-                var boxed = members.Count > 0;
+                // one (which CreateGroup makes routinely) is a header plus a row rather than a row that
+                // looks unchanged. Every member is therefore built as boxed, which is what makes the box
+                // paint the lane for the whole group instead of each row painting its own.
 
                 // A FOLDED group (Group.Folded) is its one line, plus the full row of any member that is
                 // still in view: the workspace you are on, or one the pointer has opened. The same rule a
@@ -2502,16 +2499,14 @@ public partial class FloatingBar : Window
                     return;
                 }
 
-                var rows = members.Select(m => WorkspaceRow(m!, group, boxed)).ToList();
+                var rows = members.Select(m => WorkspaceRow(m!, group, boxed: true)).ToList();
 
                 // A group needs a header, because nothing inside it carries the name. Deliberately
                 // not a switch target: there is no desktop behind it, and a row that looks clickable
                 // and does nothing is worse than one that plainly is not.
                 rows.Insert(0, GroupHeader(group, ColourSlotOf(group)));
 
-                groupRows.Add(boxed
-                    ? FamilyBox(rows, LaneAccent(group.Color, ColourSlotOf(group)), LaneTint(group.Color, ColourSlotOf(group)), AcrossSeam)
-                    : rows[0]);
+                groupRows.Add(FamilyBox(rows, LaneAccent(group.Color, ColourSlotOf(group)), LaneTint(group.Color, ColourSlotOf(group)), AcrossSeam));
             });
 
             // ...and unbound desktops with windows (OverviewBuilder already drops empty
@@ -3299,13 +3294,11 @@ public partial class FloatingBar : Window
     // row's right-click context menu", and then "i want the bar to drive it".
     //
     // Which items appear depends on the row, so the menu never offers something that would be
-    // refused. That is the same rule the rest of this menu follows: "Add child" is hidden on a row
-    // that cannot have children rather than shown and then rejected.
+    // refused. That is the same rule the rest of this menu follows: an item that does not apply to the
+    // row is left off rather than shown and then rejected.
     //
     //   in a group        -> Move out of group, and Ungroup
     //   not in a group    -> New group…, and Move into group for each group that exists
-    //   an anchor         -> Move into group is withheld: its own members would become
-    //                        grandchildren, which is the one level rule
     void AddGroupItems(ContextMenu menu, Guid workspaceId, Action<string, string, Action> add)
     {
         var state = manager.State;
@@ -3313,9 +3306,8 @@ public partial class FloatingBar : Window
 
         if (group is not null)
         {
-            // Folding the whole group from any member, as its colour can be set from any member (#90): an
-            // anchored group has no header of its own to carry the item, and a member is where the
-            // pointer usually is when "not working on any of these" occurs to you.
+            // Folding the whole group from any member, as its colour can be set from any member (#90): a
+            // member is where the pointer usually is when "not working on any of these" occurs to you.
             add(group.Folded ? "▾" : "▸", group.Folded ? $"Unfold group '{group.Name}'" : $"Fold group '{group.Name}'",
                 () => Report(manager.SetGroupFolded(group.Id, !group.Folded)));
             add("⇤", "Move out of group", () => Report(manager.LeaveGroup(workspaceId)));
@@ -3343,16 +3335,13 @@ public partial class FloatingBar : Window
         menu.Items.Add(into);
     }
 
-    // The name of an ANCHORLESS group (#84), which has no member to carry it: "the parent is not a
+    // The name of a group (#84), which has no member to carry it: "the parent is not a
     // workspace, it's only the group's name."
     //
     // NOT a switch target and not a drop target, which is the constraint the issue itself set: there
     // is no desktop behind it. A row that looks like the others and then does nothing when clicked
     // is worse than one that plainly is not clickable, so this is a label and a lane tint with no
     // icons, no hover ring and no menu of its own.
-    //
-    // An anchored group needs none of this. Its anchor is a real workspace sitting at the top of
-    // the box, and its name is already on that row.
     //
     // #91: "the group header is too big -- a name-only line doesn't need anywhere near a full row's
     // height. It should cost the bar almost nothing." So it is a caption, not a row: no lane of its
@@ -3415,15 +3404,15 @@ public partial class FloatingBar : Window
         return header;
     }
 
-    // The GROUP's own menu, on an anchorless group's header and on a folded group's line (FoldedGroupLine),
+    // The GROUP's own menu, on a group's header and on a folded group's line (FoldedGroupLine),
     // which is the only surface a folded group has.
     //
     // #84: "where Ungroup lives when the group has no workspace row of its own -- presumably the
     // group's header gets its own small context menu." It does, and it holds only the things that are
     // about the GROUP rather than about a workspace.
     //
-    // Rename matters more here than it looks: for an anchorless group this name is the only
-    // thing naming it, and there is no anchor row to rename instead.
+    // Rename matters more here than it looks: this name is the only thing naming the group, and no
+    // member row stands in for it.
     ContextMenu GroupMenu(Core.Domain.Group group, ContextMenu? into = null)
     {
         var menu = into ?? new ContextMenu(); // `into`: the empty menu a lazy element already holds (FloatingBar.LazyMenus.cs)
@@ -3447,14 +3436,14 @@ public partial class FloatingBar : Window
         Add(group.Folded ? "▾" : "▸", group.Folded ? "Unfold group" : "Fold group",
             () => Report(manager.SetGroupFolded(group.Id, !group.Folded)));
 
-        // The group's colour belongs here too (#90): the header is a group's own row, and for an
-        // anchorless one it is the closest thing it has to a parent to set it from.
+        // The group's colour belongs here too (#90): the header is a group's own row, so it is the natural
+        // place to set it from.
         AddGroupColourPicker(menu, group.Id);
 
         menu.Items.Add(new Separator());
 
-        // MOVING THE WHOLE GROUP among the bar's rows. Petre: "move them around easily". An anchorless group
-        // had no way to move at all: a member's moves stay inside the box (#85), and this menu had none. The
+        // MOVING THE WHOLE GROUP among the bar's rows. Petre: "move them around easily". A member's moves
+        // stay inside the box (#85), so without this menu a group had no way to move at all. The
         // same four the row menu has, and "end" passes the workspace count, which is always past the last
         // row, for the manager to clamp.
         Add("▲", "Move group up", () => Report(manager.MoveGroup(group.Id, -1)));
@@ -3566,14 +3555,14 @@ public partial class FloatingBar : Window
     // smallest amount"), so they keep their proportions to one another. The size itself is now
     // GroupHeaderFontSize in FloatingBar.TextSize.cs: 9.5 plus the configurable offset.
 
-    // A parent and its children, drawn as one thing (#42). Petre: "make the children more
+    // A group's members, drawn as one thing (#42, from the days of child workspaces). Petre: "make the children more
     // apparent, maybe group them together with an outline or a ring."
     //
     // The other three signals -- indent, spine, shared lane colour -- all answer "is this row a
-    // child", one row at a time. This answers "which rows belong together", which is the question a
+    // member", one row at a time. This answers "which rows belong together", which is the question a
     // glance actually asks and the only one that cannot be answered by looking at a single row.
     //
-    // In the parent's colour, at a third of the spine's strength: it has to be findable without
+    // In the group's colour, at a third of the spine's strength: it has to be findable without
     // becoming the loudest thing on a surface whose whole job is showing icons. The current-row
     // ring is deliberately brighter and rectangular against this one's rounder, dimmer box, so the
     // two never read as the same claim.
@@ -3810,7 +3799,7 @@ public partial class FloatingBar : Window
         // bar's full width, that right column lines every label up against the same right edge,
         // so the raggedness moves to where nothing is aimed at.
         // Petre: "shall we try adding workspace captions at the top of every workspace, as it is with
-        // sparrow group, but without groups?" -- the caption treatment #91 gave an anchorless group's
+        // sparrow group, but without groups?" -- the caption treatment #91 gave a group's
         // header, applied to every row.
         //
         // The name moves ABOVE the icons, so the icons get the row's FULL width. That is the thing three
@@ -4049,8 +4038,8 @@ public partial class FloatingBar : Window
             .ForEach(x => icons.Children.Add(LineOf(x.line, showMonitorMarkers ? opensLine : [], groupLabel, groupKey, rowKey, iconButtons, washes, slots, x.last,
                 scale, spine is not null ? NestedIndent : 0, titled, wholeRow, isCurrent)));
 
-        // The parent's windows USED to be drawn here, dimmed, on every nested row -- the issue
-        // asked for "everything from the main workspace pinned to the nested ones". Petre, seeing
+        // A child workspace's parent's windows USED to be drawn here, dimmed, on every nested row -- the
+        // issue asked for "everything from the main workspace pinned to the nested ones". Petre, seeing
         // it: "ugly. i don't want to see parent's windows in the children. only children but with
         // a better representation that it's a child."
         //
@@ -4070,8 +4059,8 @@ public partial class FloatingBar : Window
         // contents -- the icons are what you aim at, and the first version proved that adding to
         // them costs more than it says:
         //
-        //   * a spine down the left, in the PARENT's colour;
-        //   * the parent's lane tint on the row itself (passed in as `tint`), so a family reads as
+        //   * a spine down the left, in the GROUP's colour;
+        //   * the group's lane tint on the row itself (passed in as `tint`), so a group reads as
         //     one colour rather than as two neighbours that happen to touch;
         //   * a small indent on the icons.
         //
@@ -6991,8 +6980,7 @@ public partial class FloatingBar : Window
         // once per row it passes.
         //
         // All four move a row among the rows it is drawn beside (#85), which for a member of a group
-        // is the inside of its box: top and end mean top and end of the group, not of the bar. On a
-        // group's ANCHOR they move the whole group, since the anchor cannot move within its own box.
+        // is the inside of its box: top and end mean top and end of the group, not of the bar.
         // The list length passed below is deliberately larger than either range; MoveWorkspaceTo
         // clamps it to the last position available.
         Add("⤒", "Move to top", () => Report(manager.MoveWorkspaceTo(workspaceId, 0)));
@@ -7318,8 +7306,7 @@ public partial class FloatingBar : Window
             // whichever surface asked.
             colour => manager.SetWorkspaceColor(workspaceId, colour));
 
-    // The same picker on an anchorless group's header (#84, #90), which is the only row of its own a
-    // group without an anchor has.
+    // The same picker on a group's header (#84, #90), which is the only row of its own a group has.
     void AddGroupColourPicker(ContextMenu menu, Guid groupId) =>
         AddColourPicker(
             menu,

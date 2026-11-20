@@ -46,7 +46,7 @@ public class GroupColourTests
         Assert.Null(manager.State.Workspaces.Single(w => w.Id == b).Color);
     }
 
-    // An anchorless group's header is the only row of its own it has, and #84 gave it its own menu.
+    // A group's header is the only row of its own it has, and #84 gave it its own menu.
     [Fact]
     public void The_header_sets_the_groups_colour_directly()
     {
