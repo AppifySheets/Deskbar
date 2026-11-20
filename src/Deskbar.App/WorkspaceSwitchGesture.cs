@@ -91,10 +91,10 @@ public sealed class WorkspaceSwitchGesture : IDisposable
 
     // The name the picker prefixes a workspace with, or null for one that stands alone (#93).
     //
-    // The GROUP's name, for both kinds of group. It used to be the parent workspace's, which meant a
-    // member of an anchorless group (#84) got no prefix at all, since there is no parent workspace to
-    // read: Petre reported exactly that, and ruled that "both group kinds present the same way in the
-    // switcher". An anchored group is named after its anchor anyway, so nothing changes there.
+    // The GROUP's name. It used to be the parent workspace's, which meant a member of an anchorless
+    // group (#84) got no prefix at all, since there is no parent workspace to read: Petre reported
+    // exactly that, and ruled that "both group kinds present the same way in the switcher". A member
+    // named like its group gets no prefix, which is the same-name rule in LaneColour.GroupNameOf.
     // Shared with quick find through LaneColour, so both lists name a workspace the same way.
     string? GroupNameOf(Workspace workspace) => LaneColour.GroupNameOf(manager.State, workspace);
 

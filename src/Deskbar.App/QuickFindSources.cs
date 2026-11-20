@@ -15,8 +15,7 @@ public static class QuickFindSources
 {
     // Every open window and tab, each placed the way the BAR places it: the bar's own overview sorts windows
     // into workspaces, unnamed desktops ("Desktop 1") and the pinned row, so quick find and the bar never
-    // disagree about where something is. A window borrowed by a nested workspace still belongs to the
-    // workspace it came from (WorkspaceOf), which is where Enter takes Petre.
+    // disagree about where something is.
     public static IReadOnlyList<FindResult> Open(WorkspaceManager manager, IBrowserTabs? tabs) =>
         manager.WindowsByWorkspace().Map(overview =>
         {
@@ -27,9 +26,9 @@ public static class QuickFindSources
                 .Concat(overview.Pinned.Select(r => (Row: r, Place: new FindPlace(null, "all desktops"))))
                 .ToList();
 
-            // A window can be listed twice in one snapshot, for instance when it moves between the two reads
-            // that build the lists above, so keep the first. No window is lent to a second workspace any more,
-            // so the place a row was listed under is its place.
+            // Every list above comes from one Overview, built in one pass, so a window moving between reads
+            // cannot list it twice. What can: two workspaces bound to one DesktopId (a hand-edited
+            // state.json), because OverviewBuilder emits OnDesktop(id) once per workspace. Keep the first.
             var rows = listed
                 .DistinctBy(x => x.Row.Window.Handle)
                 .ToList();
