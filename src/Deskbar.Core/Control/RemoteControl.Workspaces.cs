@@ -60,15 +60,10 @@ public sealed partial class RemoteControl
             w => Reply(manager.RenameWorkspace(w.Id, name), () => Describe(w.Id)),
             ControlReply.Fail);
 
-    ControlReply AddChild(string parent, string name) =>
-        WorkspaceNamed(parent).Bind(p => manager.AddChildWorkspace(p.Id, name)).Match(
-            child => Success(new { created = true, workspace = Describe(child.Id) }),
-            ControlReply.Fail);
-
     // The row menu's four moves, plus an exact position. Every one is among PEERS, as the menu's are
     // (#85): a grouped workspace moves inside its group's box, an ungrouped one among the bar's top-level
-    // rows. A whole group moves with group-reorder (RemoteControl.Groups.cs), or by moving its anchor. "end" passes the list's length, the
-    // same number the menu passes, which the manager clamps to the last peer.
+    // rows. A whole group moves with group-reorder (RemoteControl.Groups.cs), . "end" passes the list's length, the same number the menu
+    // passes, which the manager clamps to the last peer.
     ControlReply Reorder(string workspace, string where) =>
         WorkspaceNamed(workspace).Bind(w => (where.ToLowerInvariant() switch
             {

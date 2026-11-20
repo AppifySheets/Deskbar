@@ -483,40 +483,41 @@ public class LostDesktopTests
     }
 
     [Fact]
-    public void Closing_the_desktop_of_a_group_anchor_ends_up_where_deleting_it_does()
+    public void Closing_the_desktop_of_a_group_member_ends_up_where_deleting_it_does()
     {
         var a = Live("A");
         var b = Live("B");
         var c = Live("C");
         var manager = Started(("A", a), ("B", b), ("C", c));
         var (idA, idB, idC) = (Named(manager, "A").Id, Named(manager, "B").Id, Named(manager, "C").Id);
-        Assert.True(manager.NestWorkspace(idB, idA).IsSuccess);
-        Assert.True(manager.NestWorkspace(idC, idA).IsSuccess);
+        var made = manager.CreateGroup("Clients", idA).Value.Id;
+        Assert.True(manager.MoveIntoGroup(idB, made).IsSuccess);
+        Assert.True(manager.MoveIntoGroup(idC, made).IsSuccess);
 
         Close(a);
 
         Assert.DoesNotContain(manager.State.Workspaces, w => w.Id == idA);
         Assert.Equal(2, manager.State.Workspaces.Count);
         var group = Assert.Single(manager.State.Groups);
-        Assert.Null(group.AnchorWorkspaceId);
         Assert.All(manager.State.Workspaces, w => Assert.Equal(group.Id, w.GroupId));
     }
 
     [Fact]
-    public void Closing_the_desktop_of_a_nested_child_leaves_its_parent_alone_and_ends_the_group()
+    public void Closing_the_desktop_of_one_of_two_group_members_leaves_the_other_alone_and_ends_the_group()
     {
         var a = Live("A");
         var b = Live("B");
         var manager = Started(("A", a), ("B", b));
         var (idA, idB) = (Named(manager, "A").Id, Named(manager, "B").Id);
-        Assert.True(manager.NestWorkspace(idB, idA).IsSuccess);
+        var made = manager.CreateGroup("Clients", idA).Value.Id;
+        Assert.True(manager.MoveIntoGroup(idB, made).IsSuccess);
 
         Close(b);
 
         Assert.DoesNotContain(manager.State.Workspaces, w => w.Id == idB);
-        var parent = Assert.Single(manager.State.Workspaces);
-        Assert.Equal(idA, parent.Id);
-        Assert.Null(parent.GroupId);
+        var remaining = Assert.Single(manager.State.Workspaces);
+        Assert.Equal(idA, remaining.Id);
+        Assert.Null(remaining.GroupId);
         Assert.Empty(manager.State.Groups);
     }
 

@@ -254,7 +254,7 @@ public sealed partial class Tiler
     // tiled windows", and "if another window, untiled, maximized, is another one, it would not bring up anything".
     // Activating a tile (a click, Alt+Tab, the bar) puts every other tile of the workspace, on every screen, directly
     // behind it, above any floating window, so the grid is whole again. Nothing is activated or moved, so this makes
-    // no further activation and no settle. A window that is not a tile (floating, pinned, borrowed) brings up
+    // no further activation and no settle. A window that is not a tile (floating, pinned) brings up
     // nothing, nor does a maximized tile (it covers its screen anyway), and a maximized tile is left where it is.
     void RaiseTogether(WindowHandle active)
     {

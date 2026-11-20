@@ -41,7 +41,7 @@ public static class DeleteWorkspacePrompt
               $"will be closed: {string.Join(", ", closing.Distinct())}. " +
               $"Any unsaved work in them is lost.{PARA}";
 
-    // What happens to the GROUP, and only when something actually happens to it. Which of the three
+    // What happens to the GROUP, and only when something actually happens to it. Which of the two
     // sentences applies depends on how much of the group is left, so the wording follows the real
     // cases rather than promising one of them.
     static string GroupNote(AppState state, Guid workspaceId) =>
@@ -51,10 +51,6 @@ public static class DeleteWorkspacePrompt
             // A group of one is not a group, so the last one left stands alone.
             ({ } group, 1) => $"{PARA}'{group.Name}' is left with one workspace, so the group is " +
                               "dissolved and that workspace stands on its own. It keeps its windows.",
-            // Losing the anchor is what stops the borrowing, and only the anchor lends windows.
-            ({ } group, var others) when state.IsAnchor(workspaceId) =>
-                $"{PARA}'{group.Name}' keeps its other {others} workspaces and its name, but they " +
-                "will no longer show this workspace's windows.",
             ({ } group, var others) => $"{PARA}'{group.Name}' keeps its other {others} workspaces.",
         };
 

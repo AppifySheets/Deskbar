@@ -132,20 +132,22 @@ public class DeleteWorkspaceTests
         Assert.True(manager.DeleteWorkspaceIfEmpty(target).IsSuccess);
     }
 
-    // A parent whose own row is empty is deletable, and its children are promoted rather than
-    // deleted with it (the #42 rule). Nothing is lost: they keep their desktops and their windows,
-    // and refusing would leave no way to undo a nesting decision from the bar.
+    // A member of a group of two can go while its row is empty. The group would be left with one
+    // member, which is not a group, so it dissolves and the remaining workspace stands alone with
+    // its desktop and its windows. Refusing would leave no way to undo a grouping from the bar.
     [Fact]
-    public void An_empty_parent_can_go_and_its_children_are_promoted()
+    public void A_member_of_a_group_of_two_can_go_and_the_other_stands_alone()
     {
         var (manager, target, other) = Started();
-        Assert.True(manager.NestWorkspace(other, target).IsSuccess);
+        var group = manager.CreateGroup("Clients", target).Value;
+        Assert.True(manager.MoveIntoGroup(other, group.Id).IsSuccess);
         PlaceWindowOn(manager, other, 0xA);
 
         Assert.True(manager.DeleteWorkspaceIfEmpty(target).IsSuccess);
 
         Assert.DoesNotContain(manager.State.Workspaces, w => w.Id == target);
         Assert.Null(manager.State.Workspaces.Single(w => w.Id == other).GroupId);
+        Assert.Empty(manager.State.Groups);
     }
 
     [Fact]
@@ -252,25 +254,6 @@ public class DeleteWorkspaceTests
 
         Assert.Empty(activator.Closed);
         Assert.DoesNotContain(manager.State.Workspaces, w => w.Id == target);
-    }
-
-    // A borrowed window belongs to the workspace that LENDS it (#42), and the overview already says
-    // so: it stays in its parent's row while it is on the child's desktop. Deleting the child
-    // therefore must not close it -- the row being deleted never claimed it.
-    [Fact]
-    public void Deleting_a_child_does_not_close_the_windows_it_borrowed()
-    {
-        var (manager, parent, child) = Started();
-        Assert.True(manager.NestWorkspace(child, parent).IsSuccess);
-        var onParent = PlaceWindowOn(manager, parent, 0xA);
-        var childDesktop = manager.State.Workspaces.Single(w => w.Id == child).DesktopId!.Value;
-        desktops.CurrentDesktopId = childDesktop;
-        desktops.CurrentChangedSubject.OnNext(childDesktop);
-        Assert.True(desktops.IsPinned(onParent.Handle).Value); // the borrow really happened
-
-        Assert.True(manager.DeleteWorkspaceClosingWindows(child).IsSuccess);
-
-        Assert.Empty(activator.Closed);
     }
 
     [Fact]

@@ -125,17 +125,6 @@ public class RemoteControlMenuTests
         Assert.Equal("Main", Order(manager)[0]);
     }
 
-    [Fact]
-    public void Add_child_nests_a_new_workspace_under_its_parent()
-    {
-        var manager = Started();
-
-        Ok(Run(manager, "add-child", "Personal", "Bills"));
-
-        Assert.Equal(Named(manager, "Personal").GroupId, Named(manager, "Bills").GroupId);
-        Assert.Equal(Named(manager, "Personal").Id, manager.State.LendsWindowsTo(Named(manager, "Bills").Id));
-    }
-
     // A pinned workspace gets an item on every strip that takes you in, and back out (FloatingBar.WorkspaceJumps.cs).
     [Fact]
     public void Pin_and_unpin_a_workspace()
@@ -614,7 +603,7 @@ public class RemoteControlMenuTests
         var help = Run(Started(), "help").Output;
 
         Assert.All(
-            ["workspaces", "windows", "desktops", "create", "move", "rename", "add-child", "reorder", "fold",
+            ["workspaces", "windows", "desktops", "create", "move", "rename", "reorder", "fold",
              "unfold", "color", "delete", "switch", "tile", "untile", "even", "reset-grid", "keep-space", "group-create", "group-join", "group-leave", "group-rename",
              "group-color", "group-fold", "group-unfold", "group-reorder", "ungroup", "name-desktop", "rename-window", "rename-app", "rename-pattern",
              "name-by-folder", "restore-title", "pin", "unpin", "close-window", "force-close", "close-all", "restart-app", "bar",
