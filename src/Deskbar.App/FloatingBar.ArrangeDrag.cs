@@ -94,6 +94,19 @@ public partial class FloatingBar
         set => askGroupName = value;
     }
 
+    // THE REAL MOUSE, behind one seam. A drag reads it twice: it takes the capture on the press, and a move that finds the
+    // left button up calls the drag off. Both are right on a desk and wrong in a test, which drives the drag with
+    // synthetic events while the machine's own mouse sits wherever it sits with its button up. On the CI runner nine
+    // arrange tests that start a drag by a press failed and passed on a desk; the tests that skip the press passed on
+    // both. The likely reading: the runner's pointer rests over the test window, so taking the capture made WPF send a
+    // move that read the idle button and called the drag off. LastArrangeCancel below names the reason if it ever
+    // happens again. A test swaps this for a mouse whose button is down and whose capture is taken; the app keeps the
+    // real one.
+    internal ArrangeMouse ArrangeMouseInput { get; set; } = ArrangeMouse.Real;
+
+    // Why the last drag was called off, for a test to read and a failure to name, the same words ClickTrace writes.
+    internal string? LastArrangeCancel { get; private set; }
+
     // The zones (spec, "Which of those the pointer means"): a row's top quarter is Before and its bottom quarter After,
     // the middle half Onto; a group header's top quarter is Before and the rest Onto. A dragged HEADER uses halves, since
     // a whole group can only go above or below a row.
@@ -255,8 +268,8 @@ public partial class FloatingBar
         // A dragged header carries its whole box.
         var element = target.Drags is RowRef.Group g && arrangeBoxes.TryGetValue(g.Id, out var box) ? box : target.Element;
         arrangeDrag = new ArrangeDragState(target.Drags, element, e.GetPosition(Root), Started: false);
-        CaptureMouse();
-        if (ClickTrace.On) ClickTrace.Write($"arrange press {DescribeRow(target.Drags)} captured={IsMouseCaptured}");
+        var captured = ArrangeMouseInput.Capture(this);
+        if (ClickTrace.On) ClickTrace.Write($"arrange press {DescribeRow(target.Drags)} captured={captured}");
     }
 
     // The move handler's hook: true when an arrange press owns this move, which is then nobody else's. A move with the
@@ -265,7 +278,7 @@ public partial class FloatingBar
     bool ArrangeDragMoved(MouseEventArgs e)
     {
         if (arrangeDrag is null) return false;
-        if (e.LeftButton != MouseButtonState.Pressed) CancelArrangeDrag("the button came up unseen");
+        if (!ArrangeMouseInput.ButtonDown(e)) CancelArrangeDrag("the button came up unseen");
         else ArrangeMove(e.GetPosition(Root));
         return true;
     }
@@ -336,6 +349,7 @@ public partial class FloatingBar
     {
         if (arrangeDrag is not { } drag) return;
         EndArrangeDrag();
+        LastArrangeCancel = why;
         if (ClickTrace.On) ClickTrace.Write($"arrange cancel {DescribeRow(drag.Dragged)} ({why})");
         FlushDeferredRebuild();
     }

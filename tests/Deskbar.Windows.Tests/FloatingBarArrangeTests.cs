@@ -24,7 +24,7 @@ public class FloatingBarArrangeTests
     public void Arranging_puts_a_grip_on_every_row_and_header() => StaThread.Run(() =>
     {
         var harness = Harness.Build(grouped: true);
-        using var bar = harness.ShowBar();
+        using var bar = Held(harness.ShowBar());
         Assert.Empty(Grips(bar.Rows)); // precondition: none while the mode is off
 
         Assert.True(bar.Bar.SetArranging(true).IsSuccess);
@@ -44,7 +44,7 @@ public class FloatingBarArrangeTests
     public void A_click_on_a_row_does_not_switch_while_arranging() => StaThread.Run(() =>
     {
         var harness = Harness.Build();
-        using var bar = harness.ShowBar();
+        using var bar = Held(harness.ShowBar());
         var row = RowFor(bar.Rows, "Sparrow");
 
         Assert.True(bar.Bar.SetArranging(true).IsSuccess);
@@ -69,7 +69,7 @@ public class FloatingBarArrangeTests
     public void The_menu_item_flips_to_done_arranging() => StaThread.Run(() =>
     {
         var harness = Harness.Build(grouped: true);
-        using var bar = harness.ShowBar();
+        using var bar = Held(harness.ShowBar());
         var sparrow = harness.Manager.State.Workspaces.Single(w => w.Name == "Sparrow").Id;
         var group = harness.Manager.State.Groups.Single();
 
@@ -95,7 +95,7 @@ public class FloatingBarArrangeTests
     public void Esc_ends_the_mode() => StaThread.Run(() =>
     {
         var harness = Harness.Build();
-        using var bar = harness.ShowBar();
+        using var bar = Held(harness.ShowBar());
         Assert.True(bar.Bar.SetArranging(true).IsSuccess);
         Assert.True(bar.Bar.Arranging);
 
@@ -117,7 +117,7 @@ public class FloatingBarArrangeTests
     public void Done_ends_the_mode() => StaThread.Run(() =>
     {
         var harness = Harness.Build();
-        using var bar = harness.ShowBar();
+        using var bar = Held(harness.ShowBar());
         Assert.Null(ArrangeStrip(bar.Bar)); // precondition: no strip while the mode is off
 
         Assert.True(bar.Bar.SetArranging(true).IsSuccess);
@@ -138,7 +138,7 @@ public class FloatingBarArrangeTests
     public void A_press_on_the_done_strip_is_left_for_its_button() => StaThread.Run(() =>
     {
         var harness = Harness.Build();
-        using var bar = harness.ShowBar();
+        using var bar = Held(harness.ShowBar());
         Assert.True(bar.Bar.SetArranging(true).IsSuccess);
         var done = Descendants(ArrangeStrip(bar.Bar)!).OfType<Button>().Single();
 
@@ -154,7 +154,7 @@ public class FloatingBarArrangeTests
     public void The_bars_own_controls_keep_working_while_arranging() => StaThread.Run(() =>
     {
         var harness = Harness.Build();
-        using var bar = harness.ShowBar();
+        using var bar = Held(harness.ShowBar());
         var asks = 0;
         bar.Bar.MinimizeRequested += () => asks++;
         Assert.True(bar.Bar.SetArranging(true).IsSuccess);
@@ -188,7 +188,7 @@ public class FloatingBarArrangeTests
     public void A_minimized_bar_neither_offers_nor_starts_arranging() => StaThread.Run(() =>
     {
         var harness = Harness.Build();
-        using var bar = harness.ShowBar();
+        using var bar = Held(harness.ShowBar());
         var shown = new ContextMenu();
         bar.Bar.FillBarMenu(shown);
         Assert.Contains(shown.Items.OfType<MenuItem>(), i => i.Header as string == "Arrange workspaces"); // precondition
@@ -210,7 +210,7 @@ public class FloatingBarArrangeTests
     public void Icons_are_dimmed_while_arranging() => StaThread.Run(() =>
     {
         var harness = Harness.Build();
-        using var bar = harness.ShowBar();
+        using var bar = Held(harness.ShowBar());
         Assert.All(IconButtons(bar.Rows), icon => Assert.Equal(1.0, icon.Opacity));
 
         Assert.True(bar.Bar.SetArranging(true).IsSuccess);
@@ -230,7 +230,7 @@ public class FloatingBarArrangeTests
     public void A_click_before_the_mode_does_not_make_the_next_click_switch() => StaThread.Run(() =>
     {
         var harness = Harness.Build();
-        using var bar = harness.ShowBar();
+        using var bar = Held(harness.ShowBar());
         var row = RowFor(bar.Rows, "Sparrow");
         Press(row);
         Release(row);
@@ -250,7 +250,7 @@ public class FloatingBarArrangeTests
     public void An_orphan_release_before_the_mode_does_not_leak_into_it() => StaThread.Run(() =>
     {
         var harness = Harness.Build();
-        using var bar = harness.ShowBar();
+        using var bar = Held(harness.ShowBar());
         OrphanRelease(RowFor(bar.Rows, "Sparrow")); // precondition for the bug: orphanRelease is now true
         Assert.Single(harness.Desktops.Switched);   // (the orphan rescue itself switched once, as designed)
         Assert.True(bar.Bar.SetArranging(true).IsSuccess);
@@ -271,7 +271,7 @@ public class FloatingBarArrangeTests
     public void A_press_in_the_mode_and_a_release_after_it_switches_nothing() => StaThread.Run(() =>
     {
         var harness = Harness.Build();
-        using var bar = harness.ShowBar();
+        using var bar = Held(harness.ShowBar());
         Assert.True(bar.Bar.SetArranging(true).IsSuccess);
         var row = RowFor(bar.Rows, "Sparrow");
         Press(row);
@@ -288,7 +288,7 @@ public class FloatingBarArrangeTests
     public void A_resize_in_progress_is_finished_by_its_release_while_arranging() => StaThread.Run(() =>
     {
         var harness = Harness.Build();
-        using var bar = harness.ShowBar();
+        using var bar = Held(harness.ShowBar());
         bar.Bar.BeginResizeForTest();
         Assert.True(bar.Bar.IsResizingForTest);
 
@@ -303,7 +303,7 @@ public class FloatingBarArrangeTests
     public void Only_the_menu_activates_the_bar() => StaThread.Run(() =>
     {
         var harness = Harness.Build();
-        using var bar = harness.ShowBar();
+        using var bar = Held(harness.ShowBar());
         var sparrow = harness.Manager.State.Workspaces.Single(w => w.Name == "Sparrow").Id;
 
         Assert.True(bar.Bar.SetArranging(true).IsSuccess);
@@ -326,7 +326,7 @@ public class FloatingBarArrangeTests
     public void The_zone_comes_from_the_row_under_the_pointer() => StaThread.Run(() =>
     {
         var harness = Harness.Build(grouped: true);
-        using var bar = harness.ShowBar();
+        using var bar = Held(harness.ShowBar());
         Assert.True(bar.Bar.SetArranging(true).IsSuccess);
         bar.Bar.UpdateLayout();
         var gepha = new RowRef.Workspace(IdOf(harness, "GEPHA"));
@@ -359,7 +359,7 @@ public class FloatingBarArrangeTests
         var harness = Harness.Build(grouped: true);
         var team = harness.Manager.State.Groups.Single().Id;
         Assert.True(harness.Manager.SetGroupFolded(team, true).IsSuccess);
-        using var bar = harness.ShowBar();
+        using var bar = Held(harness.ShowBar());
         Assert.True(bar.Bar.SetArranging(true).IsSuccess);
         bar.Bar.UpdateLayout();
         var gepha = new RowRef.Workspace(IdOf(harness, "GEPHA"));
@@ -380,7 +380,7 @@ public class FloatingBarArrangeTests
         var team = harness.Manager.State.Groups.Single().Id;
         Assert.True(harness.Manager.SetGroupFolded(team, true).IsSuccess);
         harness.Desktops.CurrentId = harness.Desktops.Desktops.Single(d => d.Name == "Archive").Id;
-        using var bar = harness.ShowBar();
+        using var bar = Held(harness.ShowBar());
         Assert.True(bar.Bar.SetArranging(true).IsSuccess);
         bar.Bar.UpdateLayout();
         var gepha = IdOf(harness, "GEPHA");
@@ -412,7 +412,7 @@ public class FloatingBarArrangeTests
         var team = harness.Manager.State.Groups.Single().Id;
         Assert.True(harness.Manager.SetGroupFolded(team, true).IsSuccess);
         harness.Desktops.CurrentId = harness.Desktops.Desktops.Single(d => d.Name == "Archive").Id;
-        using var bar = harness.ShowBar();
+        using var bar = Held(harness.ShowBar());
         Assert.True(bar.Bar.SetArranging(true).IsSuccess);
         bar.Bar.UpdateLayout();
         var archive = new RowRef.Workspace(IdOf(harness, "Archive"));
@@ -436,7 +436,7 @@ public class FloatingBarArrangeTests
     public void A_drop_with_nothing_shown_is_refused() => StaThread.Run(() =>
     {
         var harness = Harness.Build(grouped: true);
-        using var bar = harness.ShowBar();
+        using var bar = Held(harness.ShowBar());
         Assert.True(bar.Bar.SetArranging(true).IsSuccess);
         bar.Bar.UpdateLayout();
         var gepha = new RowRef.Workspace(IdOf(harness, "GEPHA"));
@@ -460,7 +460,7 @@ public class FloatingBarArrangeTests
     public void A_preview_line_inside_a_group_is_short() => StaThread.Run(() =>
     {
         var harness = Harness.Build(grouped: true);
-        using var bar = harness.ShowBar();
+        using var bar = Held(harness.ShowBar());
         Assert.True(bar.Bar.SetArranging(true).IsSuccess);
         bar.Bar.UpdateLayout();
         var archive = IdOf(harness, "Archive");
@@ -495,7 +495,7 @@ public class FloatingBarArrangeTests
     public void A_group_with_target_is_highlighted_with_its_hint() => StaThread.Run(() =>
     {
         var harness = Harness.Build();
-        using var bar = harness.ShowBar();
+        using var bar = Held(harness.ShowBar());
         Assert.True(bar.Bar.SetArranging(true).IsSuccess);
         bar.Bar.UpdateLayout();
         var sparrow = new RowRef.Workspace(IdOf(harness, "Sparrow"));
@@ -528,7 +528,7 @@ public class FloatingBarArrangeTests
     public void Dropping_onto_an_ungrouped_row_asks_for_a_name_prefilled_with_its_name() => StaThread.Run(() =>
     {
         var harness = Harness.Build();
-        using var bar = harness.ShowBar();
+        using var bar = Held(harness.ShowBar());
         Assert.True(bar.Bar.SetArranging(true).IsSuccess);
         bar.Bar.UpdateLayout();
         var sparrow = IdOf(harness, "Sparrow");
@@ -557,7 +557,7 @@ public class FloatingBarArrangeTests
     public void A_rebuild_during_an_arrange_drag_is_deferred_until_the_drop() => StaThread.Run(() =>
     {
         var harness = Harness.Build();
-        using var bar = harness.ShowBar();
+        using var bar = Held(harness.ShowBar());
         Assert.True(bar.Bar.SetArranging(true).IsSuccess);
         bar.Bar.UpdateLayout();
         var sparrowRow = RowFor(bar.Rows, "Sparrow");
@@ -585,7 +585,7 @@ public class FloatingBarArrangeTests
     public void Escape_during_a_drag_cancels_it_and_changes_nothing() => StaThread.Run(() =>
     {
         var harness = Harness.Build();
-        using var bar = harness.ShowBar();
+        using var bar = Held(harness.ShowBar());
         Assert.True(bar.Bar.SetArranging(true).IsSuccess);
         bar.Bar.UpdateLayout();
         var asked = false;
@@ -625,7 +625,7 @@ public class FloatingBarArrangeTests
         var team = harness.Manager.State.Groups.Single().Id;
         Assert.True(harness.Manager.SetGroupFolded(team, true).IsSuccess);
         harness.Desktops.CurrentId = harness.Desktops.Desktops.Single(d => d.Name == "Sparrow").Id;
-        using var bar = harness.ShowBar();
+        using var bar = Held(harness.ShowBar());
         Assert.True(bar.Bar.SetArranging(true).IsSuccess);
         bar.Bar.UpdateLayout();
         var archive = new RowRef.Workspace(IdOf(harness, "Archive"));
@@ -647,7 +647,7 @@ public class FloatingBarArrangeTests
     public void A_release_through_the_bar_queues_the_drop_and_then_asks_for_the_name() => StaThread.Run(() =>
     {
         var harness = Harness.Build();
-        using var bar = harness.ShowBar();
+        using var bar = Held(harness.ShowBar());
         Assert.True(bar.Bar.SetArranging(true).IsSuccess);
         bar.Bar.UpdateLayout();
         var asked = new List<string>();
@@ -678,7 +678,7 @@ public class FloatingBarArrangeTests
     public void A_press_on_a_group_header_picks_up_the_whole_group() => StaThread.Run(() =>
     {
         var harness = Harness.Build(grouped: true);
-        using var bar = harness.ShowBar();
+        using var bar = Held(harness.ShowBar());
         Assert.True(bar.Bar.SetArranging(true).IsSuccess);
         bar.Bar.UpdateLayout();
         var team = harness.Manager.State.Groups.Single().Id;
@@ -701,13 +701,35 @@ public class FloatingBarArrangeTests
         Assert.Equal(team, harness.Manager.State.Groups.Single().Id);
     });
 
+    // A move that finds the left button up means the release never reached the bar, so the drag is called off and says
+    // why. This is the path the CI runner's idle mouse took on every drag before the tests got a held mouse: pinned here
+    // with a mouse whose button is up, so it cannot quietly stop working, and so LastArrangeCancel is known to name it.
+    [Fact]
+    public void A_move_with_the_button_up_calls_the_drag_off_and_names_why() => StaThread.Run(() =>
+    {
+        var harness = Harness.Build();
+        using var bar = harness.ShowBar();
+        bar.Bar.ArrangeMouseInput = new ArrangeMouse(_ => true, _ => false);
+        Assert.True(bar.Bar.SetArranging(true).IsSuccess);
+        bar.Bar.UpdateLayout();
+        var order = harness.Manager.State.Workspaces.Select(w => w.Id).ToList();
+
+        Press(RowFor(bar.Rows, "Sparrow"));
+        bar.Bar.RaiseEvent(new MouseEventArgs(Mouse.PrimaryDevice, 0) { RoutedEvent = Mouse.PreviewMouseMoveEvent });
+
+        Assert.False(bar.Bar.ArrangeDragging);
+        Assert.Equal("the button came up unseen", bar.Bar.LastArrangeCancel);
+        Assert.True(bar.Bar.Arranging);
+        Assert.Equal(order, harness.Manager.State.Workspaces.Select(w => w.Id).ToList());
+    });
+
     // Another window or the system taking the mouse mid-drag (LostMouseCapture on the bar) cancels it: nothing changes, and
     // the rebuild that waited for the drag is served.
     [Fact]
     public void Losing_the_capture_mid_drag_cancels_it_and_serves_the_deferred_rebuild() => StaThread.Run(() =>
     {
         var harness = Harness.Build();
-        using var bar = harness.ShowBar();
+        using var bar = Held(harness.ShowBar());
         Assert.True(bar.Bar.SetArranging(true).IsSuccess);
         bar.Bar.UpdateLayout();
         var order = harness.Manager.State.Workspaces.Select(w => w.Id).ToList();
@@ -733,7 +755,7 @@ public class FloatingBarArrangeTests
     public void Ending_the_mode_mid_drag_cancels_it() => StaThread.Run(() =>
     {
         var harness = Harness.Build();
-        using var bar = harness.ShowBar();
+        using var bar = Held(harness.ShowBar());
         Assert.True(bar.Bar.SetArranging(true).IsSuccess);
         bar.Bar.UpdateLayout();
         var asked = false;
@@ -785,6 +807,15 @@ public class FloatingBarArrangeTests
 
     static KeyEventArgs EscapeKey(FloatingBar bar) =>
         new(Keyboard.PrimaryDevice, PresentationSource.FromVisual(bar)!, 0, Key.Escape) { RoutedEvent = Keyboard.PreviewKeyDownEvent };
+
+    // Every bar here is driven by synthetic presses and moves, so it gets a mouse that is held down and captured
+    // (ArrangeMouse.Held) instead of the test machine's own, whose button is up and whose pointer may rest over the
+    // window: on the CI runner that real mouse called off every drag a press had just started.
+    static BarUnderTest Held(BarUnderTest bar)
+    {
+        bar.Bar.ArrangeMouseInput = ArrangeMouse.Held;
+        return bar;
+    }
 
     // The tunnelling and bubbling halves of a press as the input manager delivers them (see FloatingBarRebuildTests.Press).
     // Returns the TUNNELLING half, the one the bar's window-level handler sees first, so a test can read Handled.
