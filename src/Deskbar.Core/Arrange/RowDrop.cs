@@ -239,7 +239,7 @@ public static class RowDrop
         // Beside a member of a group means joining that group; beside a top-level row or a whole box, standing alone.
         var joins = place.Beside is RowRef.Workspace ? left.GroupOf(anchorId)?.Id : null;
 
-        return Rearranged(left, IsPinned(state, dragged.Id), side =>
+        return Rearranged(left, IsPinned(state, dragged.Id), moved.Id, side =>
             WithoutWorkspace(side, moved.Id) is var rest && rest.FindIndex(b => b.Exists(w => w.Id == anchorId)) is var at and >= 0
                 ? joins is { } group
                     ? rest.Select((b, i) => i == at
@@ -267,7 +267,7 @@ public static class RowDrop
         if (state.Blocks().Any(b => b.Any(x => x.GroupId == place.Group) && isBeside(b))) return state;
 
         // A group is never pinned, so it moves among the unpinned rows only.
-        return Rearranged(state, pinnedSide: false, side =>
+        return Rearranged(state, pinnedSide: false, vacating: null, side =>
             side.FindIndex(b => b.Exists(x => x.GroupId == place.Group)) is var mine and >= 0
             && side.Where((_, i) => i != mine).ToList() is var rest
             && rest.FindIndex(b => isBeside(b)) is var at and >= 0
@@ -294,7 +294,7 @@ public static class RowDrop
         // does not recolour the row it was made from.
         var group = new Group(Guid.NewGuid(), (groupName ?? grouping.SuggestedName).Trim()) { Color = target.Color };
 
-        return Rearranged(left, pinnedSide: false, side =>
+        return Rearranged(left, pinnedSide: false, moved.Id, side =>
             WithoutWorkspace(side, moved.Id) is var rest && rest.FindIndex(b => b.Exists(w => w.Id == target.Id)) is var at and >= 0
                 ? rest.Select((b, i) => i == at ? new List<Workspace> { target with { GroupId = group.Id }, moved with { GroupId = group.Id } } : b)
                     .ToList()
@@ -309,19 +309,29 @@ public static class RowDrop
     // where they were. That is ReorderedOnItsSide's rule (WorkspaceManager), and it is what lets an unpinned row
     // come back where it was after being pinned. Null from `edit` means "does not fit", and passes through.
     //
-    // If the edit changed how many blocks the side has (a row left a group to stand alone, or two rows became
-    // one box), the sequence still goes into the side's slots in order: extra blocks follow the side's last slot,
-    // and a shortfall drops the side's trailing slots. The order within the side is always the edited one, and
-    // the other side keeps its relative order, which is all the bar draws.
-    static List<Workspace>? Rearranged(AppState state, bool pinnedSide, Func<List<List<Workspace>>, List<List<Workspace>>?> edit)
+    // If the edit changed how many blocks the side has, the sequence still goes into the side's slots in order:
+    //   * ONE FEWER (the dragged row joined a group or formed a new one, so its lone block is gone): the slot that
+    //     lone block held is dropped, not the side's last one. Dropping the last would walk every pinned row
+    //     sitting between the vacated slot and the end past rows nobody touched, and "unpinning puts a row back
+    //     in its stored place" would stop being true. `vacating` is the dragged workspace, whose lone block
+    //     (after it has left any group) names the slot.
+    //   * MORE (a row left a group to stand alone): the extra blocks follow the side's last slot.
+    // The order within the side is always the edited one.
+    static List<Workspace>? Rearranged(AppState state, bool pinnedSide, Guid? vacating, Func<List<List<Workspace>>, List<List<Workspace>>?> edit)
     {
         var blocks = state.Blocks().Select(b => b.ToList()).ToList();
         var slots = Enumerable.Range(0, blocks.Count).Where(i => IsPinnedBlock(blocks[i]) == pinnedSide).ToList();
 
         return edit(slots.Select(i => blocks[i]).ToList()) is { } edited
-            ? blocks.SelectMany((b, i) => Filled(b, slots.IndexOf(i), slots.Count, edited)).SelectMany(b => b).ToList()
+            ? Flattened(blocks, slots, edited, edited.Count < slots.Count ? slots.FirstOrDefault(i => blocks[i] is [var only] && only.Id == vacating, -1) : -1)
             : null;
     }
+
+    // `dropped` is the stored slot to leave out (-1 for none, which keeps the trailing slots' old behaviour).
+    static List<Workspace> Flattened(List<List<Workspace>> blocks, List<int> slots, List<List<Workspace>> edited, int dropped) =>
+        slots.Where(i => i != dropped).ToList() is var used
+            ? blocks.SelectMany((b, i) => i == dropped ? [] : Filled(b, used.IndexOf(i), used.Count, edited)).SelectMany(b => b).ToList()
+            : [];
 
     // What block `b` of the stored list becomes: itself when it is on the other side, else the edited block that
     // takes over its slot (plus every extra block when it is the side's last slot).

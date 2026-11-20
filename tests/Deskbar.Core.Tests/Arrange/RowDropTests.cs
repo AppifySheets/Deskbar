@@ -346,6 +346,39 @@ public class RowDropTests
         Assert.Equal(["Docs", "Code", "Mail", "Personal"], Names(after));
     }
 
+    // A drop that MERGES blocks (one fewer on its side) must not move where a pinned row returns when it is
+    // unpinned: the slot the dragged row vacated goes, not the side's last one.
+    static (AppState State, Guid A, Guid B, Guid P, Guid C, Guid X, Guid Y, Guid G) PinnedBetween()
+    {
+        var g = Guid.NewGuid();
+        var a = new Workspace(Guid.NewGuid(), "A", Guid.NewGuid());
+        var b = new Workspace(Guid.NewGuid(), "B", Guid.NewGuid());
+        var p = new Workspace(Guid.NewGuid(), "P", Guid.NewGuid()) { Pinned = true };
+        var c = new Workspace(Guid.NewGuid(), "C", Guid.NewGuid());
+        var x = new Workspace(Guid.NewGuid(), "X", Guid.NewGuid()) { GroupId = g };
+        var y = new Workspace(Guid.NewGuid(), "Y", Guid.NewGuid()) { GroupId = g };
+        var state = AppState.Empty with { Workspaces = [a, b, p, c, x, y], Groups = [new Group(g, "G")] };
+        return (state, a.Id, b.Id, p.Id, c.Id, x.Id, y.Id, g);
+    }
+
+    [Fact]
+    public void Applied_grouping_above_a_pinned_row_keeps_its_return_place()
+    {
+        var t = PinnedBetween();
+        var after = RowDrop.Applied(t.State, new DropAction.GroupWith(t.A, t.B, "AB"), null);
+
+        Assert.Equal(["A", "B", "P", "C", "X", "Y"], Names(after));
+    }
+
+    [Fact]
+    public void Applied_joining_a_group_above_a_pinned_row_keeps_its_return_place()
+    {
+        var t = PinnedBetween();
+        var after = RowDrop.Applied(t.State, new DropAction.Place(t.B, new RowRef.Workspace(t.X), true), null);
+
+        Assert.Equal(["A", "P", "C", "X", "B", "Y"], Names(after));
+    }
+
     [Fact]
     public void Applied_nothing_returns_the_state_unchanged()
     {
