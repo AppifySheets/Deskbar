@@ -1509,7 +1509,7 @@ public sealed class WorkspaceManager(
     // The 1-based top-level row a workspace is drawn in. A grouped workspace answers its group's row.
     // Reported back by the remote control, so a caller can see where something actually landed.
     public Maybe<int> RowOf(Guid workspaceId) =>
-        Blocks(State).Select((block, at) => (block, at))
+        DrawnBlocks(State).Select((block, at) => (block, at))
             .TryFirst(x => x.block.Any(w => w.Id == workspaceId))
             .Map(x => x.at + 1);
 
@@ -1625,8 +1625,21 @@ public sealed class WorkspaceManager(
         // inside one. An ungrouped workspace is a block of one, and an anchor is held at the top of
         // its box by MembersOf, so for both of them "up" can only mean "up past the row above the
         // box". The group travels with its anchor rather than being torn open.
+        //
+        // ...among the blocks DRAWN beside it (DrawnBlocks): the pinned rows are drawn first, so a pinned row moves
+        // among the pinned and every other block among the rest. Each side is reordered in the SLOTS it already holds
+        // in the stored list, so the other side's rows keep their stored places: that is what puts an unpinned row
+        // back where it was (Petre: "back where it was").
         if (block.Count == 1 || State.IsAnchor(id))
-            return MovedTo(Reordered(blocks, at, targetOf, clampIntoRange)?.SelectMany(b => b).ToList());
+        {
+            var side = Pinned(block);
+            var slots = Enumerable.Range(0, blocks.Count).Where(i => Pinned(blocks[i]) == side).ToList();
+            var peers = slots.Select(i => blocks[i]).ToList();
+            var reordered = Reordered(peers, slots.IndexOf(at), targetOf, clampIntoRange);
+            return MovedTo(reordered is null
+                ? null
+                : blocks.Select((b, i) => slots.Contains(i) ? reordered[slots.IndexOf(i)] : b).SelectMany(b => b).ToList());
+        }
 
         // Otherwise it moves inside its own box. An anchored group's first row belongs to the anchor
         // and nothing may take it, so the members below reorder among themselves; an anchorless
@@ -1664,6 +1677,19 @@ public sealed class WorkspaceManager(
         });
 
         return blocks;
+    }
+
+    // A block is pinned when it is one pinned workspace: only an ungrouped workspace pins (SetWorkspacePinned).
+    static bool Pinned(IReadOnlyList<Workspace> block) => block is [{ Pinned: true }];
+
+    // The bar's top-level rows in the order it DRAWS them: the pinned ones first, then the rest, each side in stored
+    // order. Petre: "i may also have multiple pinned workspaces, both should go to the top". Only the drawing moves
+    // them; the stored list keeps every row where it was, so unpinning puts a row back in its old place. FloatingBar's
+    // rebuild walks the rows in this same order.
+    static IReadOnlyList<IReadOnlyList<Workspace>> DrawnBlocks(AppState state)
+    {
+        var blocks = Blocks(state);
+        return [.. blocks.Where(Pinned), .. blocks.Where(b => !Pinned(b))];
     }
 
     // Takes one item out and puts it back at the target, or returns null when there is nothing to
@@ -1740,10 +1766,16 @@ public sealed class WorkspaceManager(
         }));
 
     // PINNING a workspace (see Workspace.Pinned): the row menu's "Pin to strip" and the pipe's pin-workspace.
-    // Shaped exactly like SetWorkspaceFolded, and idempotent for the same reason: the persist and the pulse are
-    // what make the bar, the strips and the taskbar buttons redraw their items.
+    // Shaped like SetWorkspaceFolded, and idempotent for the same reason: the persist and the pulse are what make
+    // the bar, the strips and the taskbar buttons redraw their items.
+    //
+    // Only an UNGROUPED workspace pins. Petre: "they need to be ungrouped, no grouped workspace should be available
+    // for pinning". A pinned row is drawn at the top of the bar (DrawnBlocks), and a group member drawn up there
+    // would tear its box open. Unpinning always works.
     public Result SetWorkspacePinned(Guid id, bool pinned) =>
-        Workspace(id).Tap(_ => Persist(State with
+        Workspace(id)
+            .Ensure(_ => !pinned || State.GroupOf(id) is null, "A workspace in a group cannot be pinned; take it out of the group first.")
+            .Tap(_ => Persist(State with
         {
             Workspaces = State.Workspaces.Select(w => w.Id == id ? w with { Pinned = pinned } : w).ToList(),
         }));
@@ -4540,6 +4572,11 @@ public sealed class WorkspaceManager(
 
     void Persist(AppState next)
     {
+        // A grouped workspace is never pinned (SetWorkspacePinned). Enforced HERE, at the one door every change goes
+        // through, rather than in each of the ways a workspace can join a group (move into a group, a new group, a new
+        // child, a merge), so none of them can forget it: joining a group unpins.
+        if (next.Workspaces.Any(w => w.Pinned && next.GroupOf(w.Id) is not null))
+            next = next with { Workspaces = next.Workspaces.Select(w => w.Pinned && next.GroupOf(w.Id) is not null ? w with { Pinned = false } : w).ToList() };
         State = next;
         store.Save(next); // small JSON, synchronous write on every mutation is fine for v1
         stateChanged.OnNext(Unit.Default);

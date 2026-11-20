@@ -189,6 +189,9 @@ row menu. It gets a small item at the end of every screen's strip and in the bar
 with a dot in its colour. Click it to go there. Once you are in it, the same item reads
 **↩** and the name of the workspace you came from, and clicking it takes you back. From a script or
 a shortcut, `deskbar.cmd jump Messengers` does the same: in, or back out if you are already there.
+Pinned workspaces are drawn at the top of the bar with a pin beside their name; unpinning puts the
+row back where it was. A workspace inside a group cannot be pinned, and moving a pinned one into a
+group unpins it.
 
 <table align="center">
   <tr>

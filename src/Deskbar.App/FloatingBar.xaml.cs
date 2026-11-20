@@ -2438,6 +2438,8 @@ public partial class FloatingBar : Window
                     rowKey: g.Workspace.Id,
                     // The stored fold; GroupRow decides whether the row is drawn folded right now.
                     folded: g.Workspace.Folded,
+                    // A pin beside the name for a pinned workspace (FloatingBar.WorkspaceJumps.cs).
+                    pinnedWorkspace: g.Workspace.Pinned,
                     nested: nested,
                     // The rail: bright on the current workspace (and on an expanded row, which is the titled
                     // list and the louder fact), the plain accent everywhere else.
@@ -2456,7 +2458,11 @@ public partial class FloatingBar : Window
             // rest. A group is therefore drawn where it STARTS, which is what keeps a group's
             // position on the bar predictable while its members are reordered inside it.
             var drawn = new HashSet<Guid>();
-            overview.Workspaces.ToList().ForEach(entry =>
+            // ...with the pinned workspaces first, each side in list order (Petre: "i may also have multiple pinned
+            // workspaces, both should go to the top"). Only the drawing moves them; WorkspaceManager.DrawnBlocks is
+            // the same order, so a move, a row number and this walk agree. A pinned workspace is never in a group
+            // (WorkspaceManager.SetWorkspacePinned), so this cannot tear a box open. OrderBy is stable.
+            overview.Workspaces.OrderBy(entry => entry.Workspace.Pinned && entry.Workspace.GroupId is null ? 0 : 1).ToList().ForEach(entry =>
             {
                 if (!drawn.Add(entry.Workspace.Id)) return;
 
@@ -3713,7 +3719,7 @@ public partial class FloatingBar : Window
     // not a desktop at all.
     // `titledList` draws the current workspace's titled list at the bottom of the bar (see RebuildCore)
     // instead of an icon row.
-    UIElement GroupRow(string visualLabel, string groupLabel, bool isCurrent, Func<Result>? switchTo, string groupKey, Action<WindowHandle, int?>? onDrop, IEnumerable<WindowRow> rows, Brush? tint = null, Guid? rowKey = null, bool folded = false, bool nested = false, Brush? spine = null, bool pinned = false, Guid? desktopId = null, UIElement? captionContent = null, bool titledList = false, bool asking = false, Maybe<Core.Tasks.TaskTimer> timer = default)
+    UIElement GroupRow(string visualLabel, string groupLabel, bool isCurrent, Func<Result>? switchTo, string groupKey, Action<WindowHandle, int?>? onDrop, IEnumerable<WindowRow> rows, Brush? tint = null, Guid? rowKey = null, bool folded = false, bool nested = false, Brush? spine = null, bool pinned = false, Guid? desktopId = null, UIElement? captionContent = null, bool titledList = false, bool asking = false, Maybe<Core.Tasks.TaskTimer> timer = default, bool pinnedWorkspace = false)
     {
         // Background MUST be non-null for a panel to take part in hit testing at all --
         // a null Background leaves gaps between icons that swallow nothing and report no
@@ -3907,7 +3913,7 @@ public partial class FloatingBar : Window
         // either, which changes nothing -- RowLabel already returns null for a row with no
         // destination, and the pinned row has never had one.
         var (label, setHover) = captionContent is null
-            ? RowLabel(visualLabel, isCurrent, switchTo, caption: true, currentColour: spine, timeFor: rowKey, fold: foldMark, asking: asking, timer: timer)
+            ? RowLabel(visualLabel, isCurrent, switchTo, caption: true, currentColour: spine, timeFor: rowKey, fold: foldMark, asking: asking, timer: timer, pin: pinnedWorkspace)
             : (captionContent, (Action<bool>?)null);
 
         // Collected as they are built, because the hover wiring below needs the BUTTONS and
@@ -4130,7 +4136,7 @@ public partial class FloatingBar : Window
         // by the same hover. Only for a real caption, not the pinned row's header.
         if (AcrossSeam && captionContent is null)
         {
-            var (twin, twinHover) = RowLabel(visualLabel, isCurrent, switchTo, caption: true, currentColour: spine, timeFor: rowKey, fold: foldMark, timer: timer);
+            var (twin, twinHover) = RowLabel(visualLabel, isCurrent, switchTo, caption: true, currentColour: spine, timeFor: rowKey, fold: foldMark, timer: timer, pin: pinnedWorkspace);
             if (twin is FrameworkElement twinCaption && label is FrameworkElement firstCaption) twinCaption.Margin = firstCaption.Margin;
             var holder = AtRightHalf(twin);
             Grid.SetRow(holder, 0);
@@ -5514,7 +5520,8 @@ public partial class FloatingBar : Window
     // `fold`: set when the row is drawn FOLDED (see GroupRow), and then the name is followed by how many windows
     // the row is hiding and, when one of them wants you, the attention dot. Null on every row drawn in full.
     (UIElement Element, Action<bool>? SetHover) RowLabel(string text, bool isCurrent, Func<Result>? switchTo, bool caption = false,
-        Brush? currentColour = null, Guid? timeFor = null, (int Windows, bool Attention)? fold = null, bool asking = false, Maybe<Core.Tasks.TaskTimer> timer = default)
+        Brush? currentColour = null, Guid? timeFor = null, (int Windows, bool Attention)? fold = null, bool asking = false, Maybe<Core.Tasks.TaskTimer> timer = default,
+        bool pin = false)
     {
         // Petre: "when switching workspaces, because the caption of the workspace gets bolded,
         // it increases the width of the floating window a little if that workspace is full,
@@ -5595,6 +5602,9 @@ public partial class FloatingBar : Window
         // (FloatingBar.Tasks.cs). Registered there for the clock's tick, which repaints it in place.
         if (caption && timer.HasValue)
             marks.Add(TaskPie(timer.Value));
+        // ...and the very last, so it sits against the name: a pinned workspace's pin (FloatingBar.WorkspaceJumps.cs).
+        if (caption && pin)
+            marks.Add(PinnedWorkspaceMark(textBlock.FontSize, textBlock.Foreground));
 
         UIElement content = textBlock;
         if (marks.Count > 0)
@@ -6938,9 +6948,13 @@ public partial class FloatingBar : Window
         // Pin the workspace to the strips, the bar's header and the taskbar, or unpin it (Workspace.Pinned,
         // FloatingBar.WorkspaceJumps.cs). One item that flips, as Fold row does, and the STORED setting, read when the
         // menu is built, which a rebuild after any change keeps current.
+        //
+        // Not offered on a grouped workspace (Petre: "no grouped workspace should be available for pinning"), except to
+        // unpin one, which only a hand-edited state.json could leave pinned.
         var pinned = manager.State.Workspaces.TryFirst(w => w.Id == workspaceId).Map(w => w.Pinned).GetValueOrDefault(false);
-        Add("⇱", pinned ? "Unpin from strip" : "Pin to strip",
-            () => Report(manager.SetWorkspacePinned(workspaceId, !pinned)));
+        if (pinned || manager.State.GroupOf(workspaceId) is null)
+            Add("⇱", pinned ? "Unpin from strip" : "Pin to strip",
+                () => Report(manager.SetWorkspacePinned(workspaceId, !pinned)));
 
         // Tiling (FloatingBar.Tiling.cs): "Tile windows" for Pro, the Deskbar Pro wording otherwise.
         AddTilingItems(menu, workspaceId, Add);

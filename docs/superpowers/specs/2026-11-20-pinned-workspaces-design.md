@@ -91,6 +91,20 @@ strip icon on all screens", "so i can go to it from both strips".
   - If the spike shows the click cannot be made reliable, the button is dropped and the `jump`
     shortcut is the taskbar answer.
 
+Then, with the strip items live: "let's also have the pinned workspace showing that it's pinned", "maybe move it
+to the top of the list", "i may also have multiple pinned workspaces, both should go to the top", "they need to be
+ungrouped, no grouped workspace should be available for pinning", and, asked where an unpinned row goes: "back
+where it was".
+
+- Pinned rows are DRAWN first on the bar, each side in stored order, with the pin pinned windows wear beside the
+  name. The stored order is untouched, so unpinning puts a row back where it was. Row numbers (`deskbar.cmd
+  workspaces`) and Move up/down/top/end follow the drawn order: a pinned row moves among the pinned, any other
+  block among the rest, each in the stored slots its side already holds.
+- Only an ungrouped workspace pins: the row menu does not offer it on a grouped one, `pin-workspace` refuses it,
+  and joining a group unpins (enforced where every change is persisted).
+- Strip items sit at the END of the window tabs (Petre: "put it at the end of the list of windows"), in "Look 2"
+  from the mockup: a dark chip with a dot and underline in the colour of where it goes.
+
 ## Left to the builder
 
 - The item's exact look (padding, the arrow glyph, the current-workspace marking) within the strip's

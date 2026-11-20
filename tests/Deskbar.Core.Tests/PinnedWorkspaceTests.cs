@@ -112,4 +112,86 @@ public class PinnedWorkspaceTests
 
         Assert.True(manager.Jump(alone.Id).IsFailure);
     }
+
+    // --- only ungrouped workspaces pin, and pinned ones are drawn first ------------------------------------------
+    // Petre: "they need to be ungrouped, no grouped workspace should be available for pinning", "i may also have
+    // multiple pinned workspaces, both should go to the top", and, asked where an unpinned row goes: "back where it
+    // was". So pinning changes the order rows are DRAWN in, never the stored order.
+
+    // Four ungrouped workspaces, A B C D, with B and D pinned: drawn B D A C.
+    (WorkspaceManager manager, Guid a, Guid b, Guid c, Guid d) Four()
+    {
+        var all = new[] { "A", "B", "C", "D" }.Select(n => new Workspace(Guid.NewGuid(), n, Guid.NewGuid()) { Pinned = n is "B" or "D" }).ToList();
+        all.ForEach(w => desktops.Desktops.Add(new DesktopInfo(w.DesktopId!.Value, w.Name)));
+        store.Stored = AppState.Empty with { Workspaces = all };
+        var manager = new WorkspaceManager(desktops, monitor, titles, store);
+        Assert.True(manager.Start().IsSuccess);
+        return (manager, all[0].Id, all[1].Id, all[2].Id, all[3].Id);
+    }
+
+    static string Stored(WorkspaceManager manager) => string.Concat(manager.State.Workspaces.Select(w => w.Name));
+
+    [Fact]
+    public void A_grouped_workspace_cannot_be_pinned()
+    {
+        var (manager, work, messengers) = Started();
+        Assert.True(manager.CreateGroup("Team", work).IsSuccess);
+
+        Assert.True(manager.SetWorkspacePinned(work, true).IsFailure);
+        Assert.False(manager.State.Workspaces.Single(w => w.Id == work).Pinned);
+    }
+
+    [Fact]
+    public void Joining_a_group_unpins()
+    {
+        var (manager, work, messengers) = Started();
+        Assert.True(manager.SetWorkspacePinned(messengers, true).IsSuccess);
+        var team = manager.CreateGroup("Team", work).Value.Id;
+
+        Assert.True(manager.MoveIntoGroup(messengers, team).IsSuccess);
+
+        Assert.False(manager.State.Workspaces.Single(w => w.Id == messengers).Pinned);
+    }
+
+    [Fact]
+    public void Row_numbers_follow_the_drawn_order()
+    {
+        var (manager, a, b, c, d) = Four();
+
+        Assert.Equal([1, 2, 3, 4], new[] { b, d, a, c }.Select(id => manager.RowOf(id).Value));
+    }
+
+    // Move up on the second pinned row swaps it with the first pinned row, and every unpinned row keeps its place.
+    [Fact]
+    public void A_pinned_row_moves_among_the_pinned()
+    {
+        var (manager, _, _, _, d) = Four();
+
+        Assert.True(manager.MoveWorkspace(d, -1).IsSuccess);
+
+        Assert.Equal("ADCB", Stored(manager));
+    }
+
+    // Move to top on an unpinned row puts it first among the unpinned, under the pinned ones, and the pinned rows keep
+    // their stored places, so unpinning one later still puts it back where it was.
+    [Fact]
+    public void An_unpinned_row_moves_among_the_unpinned()
+    {
+        var (manager, _, _, c, _) = Four();
+
+        Assert.True(manager.MoveWorkspaceTo(c, 0).IsSuccess);
+
+        Assert.Equal("CBAD", Stored(manager));
+    }
+
+    [Fact]
+    public void Unpinning_puts_the_row_back_where_it_was()
+    {
+        var (manager, _, b, _, _) = Four();
+
+        Assert.True(manager.SetWorkspacePinned(b, false).IsSuccess);
+
+        Assert.Equal("ABCD", Stored(manager));
+        Assert.Equal(3, manager.RowOf(b).Value); // drawn D A B C: the pinned D first, then B back between A and C
+    }
 }

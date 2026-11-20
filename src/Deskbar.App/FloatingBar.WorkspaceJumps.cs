@@ -36,6 +36,38 @@ public partial class FloatingBar
     // Tag on every item, so tests and the strip can tell an item from a window tab.
     internal const string WorkspaceJumpTag = "workspace-jump";
 
+    // Tag on a pinned workspace's row mark, below.
+    internal const string PinnedWorkspaceMarkTag = "pinned-workspace-mark";
+
+    // The mark beside a pinned workspace's name on its row (Petre: "let's also have the pinned workspace showing that
+    // it's pinned"). The pin pinned WINDOWS wear on their icon (WithPinBadge), drawn bare in the caption's own ink and
+    // a little smaller than the letters, so it reads as part of the name line rather than as a badge on something.
+    // Pinned rows are also drawn first (the rebuild's walk); the mark is what tells a pinned row from a row that merely
+    // happens to be first.
+    static UIElement PinnedWorkspaceMark(double fontSize, Brush ink) =>
+        new Viewbox
+        {
+            Tag = PinnedWorkspaceMarkTag,
+            Width = fontSize,
+            Height = fontSize,
+            Margin = new Thickness(3, 0, 0, 0),
+            VerticalAlignment = VerticalAlignment.Center,
+            IsHitTestVisible = false,
+            Child = new Path
+            {
+                Data = PinBadgeShape,
+                Fill = ink,
+                Stroke = ink,
+                StrokeThickness = 0.7,
+                StrokeStartLineCap = PenLineCap.Round,
+                StrokeEndLineCap = PenLineCap.Round,
+                StrokeLineJoin = PenLineJoin.Round,
+                // The shape lives in the middle of a 10 unit square; the box keeps that square, so the pin is centred.
+                Width = 10,
+                Height = 10,
+            },
+        };
+
     // The chip's own fill: one step lighter than the strip (#141518) and the active tab (#1F232B), so it reads as a
     // control rather than as a tab, and darker than the name tag's neutral grey. From the mockup.
     static readonly Brush JumpFill = Frozen(0xFF, 0x26, 0x2A, 0x33);

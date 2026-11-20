@@ -534,6 +534,42 @@ public class FloatingBarStripsTests
         Assert.False(h.Manager.State.Workspaces.Single(w => w.Id == sparrow).Pinned);
     });
 
+    // Petre: "i may also have multiple pinned workspaces, both should go to the top". The bar draws pinned rows first.
+    [Fact]
+    public void Pinned_rows_are_drawn_first() => StaThread.Run(() =>
+    {
+        using var h = StripHarness.Build();
+        var texts = TextsIn(h.Rows);
+        Assert.True(texts.ToList().IndexOf("GEPHA") < texts.ToList().IndexOf("Sparrow"));
+
+        Assert.True(h.Manager.SetWorkspacePinned(IdOf(h, "Sparrow"), true).IsSuccess);
+
+        texts = TextsIn(h.Rows);
+        Assert.True(texts.ToList().IndexOf("Sparrow") < texts.ToList().IndexOf("GEPHA"));
+    });
+
+    // Petre: "let's also have the pinned workspace showing that it's pinned". A pin beside the row's name.
+    [Fact]
+    public void A_pinned_row_carries_the_pin_mark() => StaThread.Run(() =>
+    {
+        using var h = StripHarness.Build();
+        Assert.DoesNotContain(Descendants(h.Rows), d => d is FrameworkElement { Tag: FloatingBar.PinnedWorkspaceMarkTag });
+
+        Assert.True(h.Manager.SetWorkspacePinned(IdOf(h, "Sparrow"), true).IsSuccess);
+
+        Assert.Single(Descendants(h.Rows), d => d is FrameworkElement { Tag: FloatingBar.PinnedWorkspaceMarkTag });
+    });
+
+    // Petre: "no grouped workspace should be available for pinning".
+    [Fact]
+    public void A_grouped_row_offers_no_pin() => StaThread.Run(() =>
+    {
+        using var h = StripHarness.Build(groupColour: "#5B6CFF");
+        var headers = h.Bar.WorkspaceMenu(IdOf(h, "Sparrow"), "Sparrow", folded: false, nested: true).Items.OfType<MenuItem>().Select(i => i.Header as string);
+
+        Assert.DoesNotContain("Pin to strip", headers);
+    });
+
     // --- helpers ------------------------------------------------------------------------------------------------
 
     static Color Hex(string hex) => (Color)ColorConverter.ConvertFromString(hex);
