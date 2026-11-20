@@ -105,6 +105,21 @@ Run: `dotnet test tests/Deskbar.Core.Tests --filter "FullyQualifiedName~Workspac
 - [ ] **Step 4: Run, expect PASS**
 - [ ] **Step 5: Commit** `feat: work out what a pinned workspace's item reads and where it goes`
 
+### Task 2b: `jump <workspace>` on the pipe
+
+**Files:**
+- Modify: `src/Deskbar.Core/WorkspaceManager.cs` (next to `Switch`), `src/Deskbar.Core/Control/RemoteControl.cs`, `src/Deskbar.Core/Control/RemoteControl.Workspaces.cs`, `src/Deskbar.Core/Control/ControlUsage.cs`
+- Test: `tests/Deskbar.Core.Tests/PinnedWorkspaceTests.cs`, `tests/Deskbar.Core.Tests/RemoteControlMenuTests.cs`
+
+**Interfaces:**
+- Produces: `Result<Guid> WorkspaceManager.Jump(Guid workspaceId)`: the workspace the jump landed on. In the workspace already: `ByRecentUse().Back`, failing "Nowhere to go back to." with none; otherwise `Switch(workspaceId)`. Works for any workspace, pinned or not (a shortcut needs no pin). Control: `jump <workspace>` replies with the landed workspace's description. ControlUsage text: "Go to a workspace, or back where you came from if you are on it".
+
+- [ ] **Step 1: Failing tests:** `Jump_goes_in_from_elsewhere`, `Jump_goes_back_from_inside` (switch to A, then B, `Jump(B)` lands on A), `Jump_inside_with_nowhere_to_go_back_fails`; `Jump_over_the_pipe` in `RemoteControlMenuTests`.
+- [ ] **Step 2: Run, expect compile failure.**
+- [ ] **Step 3: Implement.**
+- [ ] **Step 4: Run Core tests, expect PASS.**
+- [ ] **Step 5: Commit** `feat: jump into a workspace or back out of it from the pipe`
+
 ### Task 3: The items on the strips and in the bar's header
 
 Before any code: a mockup (memory "Mockup before visual changes"). Show Petre the current strip next to the strip with the item in both states (outside: "Messengers" in its colour; inside: "↩ Deskbar"), plus the header line, and recommend one. Build what he picks. The values below are the starting proposal.
@@ -145,11 +160,38 @@ Run: `dotnet test tests/Deskbar.Windows.Tests --filter "FullyQualifiedName~Works
 Run: `dotnet build Deskbar.sln -c Release -warnaserror` then `dotnet test Deskbar.sln --filter "Category!=Integration"`
 - [ ] **Step 5: Commit** `feat: pinned workspaces on the strips and the bar, flipping to back inside`
 
-### Task 4: Live check, docs, PR
+### Task 4: Spike: does a taskbar button click land reliably? (throwaway)
+
+A probe, not product code: a `dotnet script` or a scratch WPF window, kept out of the repo. Measure, on this machine:
+- A small window OS-pinned to all desktops, with its own AppUserModelID (`SHGetPropertyStoreForWindow`, `PKEY_AppUserModel_ID`), gets its own taskbar button, separate from the bar's, on every desktop.
+- Clicking that button raises an activation the window sees, both when it is not the foreground window and when it is (the click that would normally minimize). Record what arrives: `WM_ACTIVATE`, `WM_SYSCOMMAND SC_MINIMIZE`, both.
+- The window can live with no visible area (off-screen or 1x1 behind the strip) without Windows hiding its button. Measure with `SetProcessDpiAwarenessContext(-4)` and `CharSet.Unicode` P/Invokes (CLAUDE.md probe traps).
+- Changing its title and icon updates the button straight away.
+
+Write the findings to `docs/superpowers/notes/2026-11-20-taskbar-jump-spike.md` and commit that note. If the click is not reliable, stop here, tell Petre, and skip Task 5.
+
+### Task 5: The taskbar button per pinned workspace
+
+**Files:**
+- Create: `src/Deskbar.App/TaskbarJumps.cs` (owns one `TaskbarJumpWindow` per pinned workspace), `src/Deskbar.App/TaskbarJumpWindow.cs`
+- Modify: `src/Deskbar.App/FloatingBar.WorkspaceJumps.cs` (hands the jumps to `TaskbarJumps` from the same rebuild), the composition root in `App.xaml.cs`
+- Test: `tests/Deskbar.Windows.Tests/TaskbarJumpsTests.cs`
+
+**Interfaces:**
+- Consumes: `WorkspaceJumps.Of` (Task 2), `manager.Switch`, `WindowMonitor.Ignore`, `IVirtualDesktopService.Pin`, the spike's findings.
+- Produces: `TaskbarJumps.Show(IReadOnlyList<WorkspaceJump> jumps, Func<Guid, Brush?> colourOf)`: one window per jump, kept by `PinnedId` so a rebuild retitles rather than recreates (a button that jumps along the taskbar is the anti-goal); windows for jumps no longer present are closed. Each window: title = `jump.Label`, icon = a filled square in `colourOf(target)`, its own AppUserModelID `Deskbar.Jump.<PinnedId>`, ignored by `WindowMonitor`, OS-pinned. Its activation (as the spike found it arrives) calls `manager.Switch(target)` when there is one, and never shows content.
+
+- [ ] **Step 1: Failing tests:** `One_window_per_pinned_workspace_titled_as_the_item`, `A_rebuild_retitles_and_keeps_the_window`, `Unpinning_closes_its_window`, `The_window_is_ignored_by_the_monitor`, `Activation_switches_to_the_target`.
+- [ ] **Step 2: Run, expect failures.**
+- [ ] **Step 3: Implement**, with a header comment carrying Petre's words and the spike note's path.
+- [ ] **Step 4: Release build with `-warnaserror` and the routine suite, expect PASS.**
+- [ ] **Step 5: Commit** `feat: a taskbar button for each pinned workspace`
+
+### Task 6: Live check, docs, PR
 
 **Files:**
 - Modify: `README.md` (one paragraph where the strips are described), `docs/superpowers/notes/manual-test-script.md` (a pinned workspace section)
 
-- [ ] **Step 1:** Stop the running Debug instance, build, start `src/Deskbar.App/bin/Debug/net10.0-windows10.0.19041.0/Deskbar.exe` in the background (memory: restart immediately, never leave it down). Pin a workspace with `deskbar.cmd pin-workspace <name>` against it, and check `deskbar.cmd workspaces` shows `"pinned": true`. Ask Petre to try the loop: into Messengers from the strip, then back.
+- [ ] **Step 1:** Stop the running Debug instance, build, start `src/Deskbar.App/bin/Debug/net10.0-windows10.0.19041.0/Deskbar.exe` in the background (memory: restart immediately, never leave it down). Pin a workspace with `deskbar.cmd pin-workspace <name>` against it, and check `deskbar.cmd workspaces` shows `"pinned": true`. Ask Petre to try the loop from each screen's strip and from the taskbar button: into Messengers, then back.
 - [ ] **Step 2:** Docs, then commit `docs: pinned workspaces in the README and the manual test script`.
 - [ ] **Step 3:** Push the branch, open the PR with a `## Release notes` section written for users and the model-name line at the end, then arm the base watch from CLAUDE.md.

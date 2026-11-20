@@ -19,7 +19,7 @@ takes you in; inside it, the same item, in the same place, takes you back to whe
 ## Non-goals
 
 - Pinning a workspace's windows to every desktop. Windows' own "show on all desktops" stays a
-  per-window thing, and nothing here OS-pins anything.
+  per-window thing. The only window this OS-pins is Deskbar's own taskbar stand-in (below).
 - A hotkey. The switcher's Win+Ctrl+Tab tap already goes back, and a third global hotkey needs its own
   case (CLAUDE.md).
 - The attention dot on the item when a window in the pinned workspace flashes. Worth doing, later, in
@@ -69,6 +69,27 @@ in Messengers:  [Messengers] [<- Deskbar]   | Teams  Outlook  Beeper
 - Order of several pinned items: the workspaces' own order.
 - Clicking runs the same switch the bar's row uses, so the MRU, the follow-active rules and the
   switch's trace stay one path.
+
+## Added after approval
+
+Petre: "can it also show up in windows taskbar?", then "yes and also do the taskbar; i want the pinned
+strip icon on all screens", "so i can go to it from both strips".
+
+- Every strip, so every screen, carries the items; that was already the design.
+- `jump <workspace>` on the control pipe: into the workspace, or back if you are already in it. The
+  same rule the item follows, so a hand-pinned shortcut to `deskbar.cmd jump Messengers` behaves like
+  the item, with a fixed icon and name.
+- A real Windows taskbar button per pinned workspace: a small Deskbar window, OS-pinned to all
+  desktops so its button shows on every desktop's taskbar, titled and iconed as the item reads now
+  (the workspace's name and colour outside, "↩ <previous>" inside). Activating it switches; it never
+  shows anything. Petre's taskbar is on the main screen only (`MMTaskbarEnabled` = 0, measured
+  2026-11-20), so the button is there and the strips cover the other screens.
+  - Traps to measure in a throwaway spike first: clicking the button of the active window minimizes
+    it rather than activating it; several windows of one exe group under one button unless each has
+    its own AppUserModelID; and the window must be left out of the bar's own lists
+    (`WindowMonitor.Ignore`) or it shows as a pinned window everywhere.
+  - If the spike shows the click cannot be made reliable, the button is dropped and the `jump`
+    shortcut is the taskbar answer.
 
 ## Left to the builder
 
