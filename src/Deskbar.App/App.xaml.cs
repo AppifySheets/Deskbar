@@ -1548,6 +1548,14 @@ public partial class App : Application
                 pinToAllDesktops: hwnd => desktops!.Pin(new WindowHandle(hwnd)));
             floatingBar = new FloatingBar(manager)
             {
+                // The pinned workspaces' buttons on Windows' taskbar (TaskbarJumps.cs): pinned to every desktop
+                // through the desktop service itself, never PinWindow, which would teach placement memory Deskbar's
+                // own windows; left out of the window list like every other window of ours; a click is the switch the
+                // bar's rows make.
+                TaskbarJumps = new TaskbarJumps(
+                    pin: hwnd => desktops!.Pin(hwnd),
+                    ignore: hwnd => monitor!.Ignore(hwnd),
+                    switchTo: id => manager.Switch(id)),
                 Rings = windowRings,
                 // The tile badge's question (FloatingBar.WindowState.cs): is this window on the current workspace's
                 // tile board. The Tiler is built after the bar, so the lambda reads the field when asked.

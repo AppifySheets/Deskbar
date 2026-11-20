@@ -88,24 +88,35 @@ public partial class FloatingBar
             overview.Workspaces.FirstOrDefault(w => w.IsCurrent) is { } current ? current.Workspace.Id : Maybe<Guid>.None,
             manager.ByRecentUse().Back);
 
-    // Refills the header's items. Called from the full rebuild and from the strips-only rebuild of a minimized bar.
+    // The pinned workspaces' buttons on Windows' taskbar (TaskbarJumps), kept in step with the header's items. Set by
+    // the composition root; left unset, as every test but the taskbar ones leaves it, there are no buttons.
+    public TaskbarJumps? TaskbarJumps { get; init; }
+
+    // Refills the header's items, and the taskbar buttons with them. Called from the full rebuild and from the
+    // strips-only rebuild of a minimized bar.
     void FillJumpLine(Overview overview, IReadOnlyList<WorkspaceJump> jumps)
     {
         JumpLine.Children.Clear();
         jumps.ToList().ForEach(jump => JumpLine.Children.Add(JumpButton(jump, overview)));
         JumpLine.Visibility = jumps.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
+        TaskbarJumps?.Show(jumps, jump => JumpColour(jump, overview));
     }
 
-    // One item, a new element on every call. The colour is that of the workspace the click goes to, from the same
-    // method that colours its row (WorkspaceAccent), so the item, the row and the strip's name tag agree.
-    FrameworkElement JumpButton(WorkspaceJump jump, Overview overview)
-    {
-        var colour = jump.Target
+    // The colour of the workspace an item's click goes to, from the same method that colours its row
+    // (WorkspaceAccent), so the item, its taskbar button, the row and the strip's name tag agree. The neutral grey
+    // when it goes nowhere.
+    Brush JumpColour(WorkspaceJump jump, Overview overview) =>
+        jump.Target
             .Bind(target => overview.Workspaces.FirstOrDefault(w => w.Workspace.Id == target) is { } group
                 && WorkspaceAccent(overview, group) is { } accent
                 ? Maybe<Brush>.From(accent)
                 : Maybe<Brush>.None)
             .GetValueOrDefault(JumpNowhere);
+
+    // One item, a new element on every call, in its destination's colour (JumpColour).
+    FrameworkElement JumpButton(WorkspaceJump jump, Overview overview)
+    {
+        var colour = JumpColour(jump, overview);
         var targetName = jump.Target
             .Bind(target => manager.State.Workspaces.TryFirst(w => w.Id == target))
             .Map(w => w.Name);
