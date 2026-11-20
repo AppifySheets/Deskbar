@@ -2043,9 +2043,10 @@ public sealed class WorkspaceManager(
     //
     // A GROUPED workspace redirects the choice to its group (#90). Petre: "the parent can change the
     // group's colour, and so can any child... a group has one colour". Since child workspaces were
-    // removed, this means any member. So the picker on a member's row is the group's picker, and there is no such thing as a per-member colour inside a box. Its
-    // own Workspace.Color is deliberately left alone rather than overwritten, which is what lets it
-    // go back to the colour it chose for itself if it ever leaves.
+    // removed, this means any member. So the picker on a member's row is the group's picker, and
+    // there is no such thing as a per-member colour inside a box. Its own Workspace.Color is
+    // deliberately left alone rather than overwritten, which is what lets it go back to the colour it
+    // chose for itself if it ever leaves.
     public Result SetWorkspaceColor(Guid id, string? color) =>
         Workspace(id).Bind(_ => State.GroupOf(id) is { } group
             ? SetGroupColor(group.Id, color)
