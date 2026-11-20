@@ -21,8 +21,9 @@ namespace Deskbar.App;
 // Where the items are:
 //   * every screen strip, at the END of the window tabs (Petre: "put it at the end of the list of windows"), so it can
 //     be reached from every screen ("so i can go to it from both strips");
-//   * the bar's header, after Start, search and the tile button (JumpLine), so the items exist when the window list is
-//     not on the screens and there are no strips.
+//   * Windows' taskbar, one button each (TaskbarJumps), on every desktop.
+// NOT in the bar's own header: they were there at first, after Start, search and the tile button, and Petre, with a
+// screenshot of it: "i don't want pinned at the top". The bar shows a pinned workspace by its row, drawn first with a pin.
 //
 // The look is "Look 2" from the mockup Petre picked: a dark chip with a dot and a 2 DIP underline in the colour of the
 // workspace the click goes to. Not a solid chip in that colour (Look 1), because the strip's name tag is already a
@@ -30,7 +31,7 @@ namespace Deskbar.App;
 // goes" look alike.
 //
 // Built inside the bar's rebuild, with the tabs, never by a rebuild of their own (the re-entrancy trap, CLAUDE.md), and
-// a fresh element for every strip and for the header, because a WPF element has one parent.
+// a fresh element for every strip, because a WPF element has one parent.
 public partial class FloatingBar
 {
     // Tag on every item, so tests and the strip can tell an item from a window tab.
@@ -76,10 +77,6 @@ public partial class FloatingBar
     // tag wears on an unnamed desktop.
     static readonly Brush JumpNowhere = Frozen(0xFF, 0x3A, 0x3F, 0x49);
 
-    // The header's copy of the items, created here and placed as the last child of ShellStart (BuildShellStrip), so it
-    // sits after Start, search and the tile button and travels with the header wherever the header goes.
-    internal StackPanel JumpLine { get; } = new() { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center };
-
     // The items for this overview: the current workspace is the overview's, the same one the strips' name tag shows,
     // and "back" is the manager's MRU answer.
     IReadOnlyList<WorkspaceJump> JumpsFor(Overview overview) =>
@@ -88,19 +85,14 @@ public partial class FloatingBar
             overview.Workspaces.FirstOrDefault(w => w.IsCurrent) is { } current ? current.Workspace.Id : Maybe<Guid>.None,
             manager.ByRecentUse().Back);
 
-    // The pinned workspaces' buttons on Windows' taskbar (TaskbarJumps), kept in step with the header's items. Set by
-    // the composition root; left unset, as every test but the taskbar ones leaves it, there are no buttons.
+    // The pinned workspaces' buttons on Windows' taskbar (TaskbarJumps), kept in step with the strip items. Set by the
+    // composition root; left unset, as every test but the taskbar ones leaves it, there are no buttons.
     public TaskbarJumps? TaskbarJumps { get; init; }
 
-    // Refills the header's items, and the taskbar buttons with them. Called from the full rebuild and from the
-    // strips-only rebuild of a minimized bar.
-    void FillJumpLine(Overview overview, IReadOnlyList<WorkspaceJump> jumps)
-    {
-        JumpLine.Children.Clear();
-        jumps.ToList().ForEach(jump => JumpLine.Children.Add(JumpButton(jump, overview)));
-        JumpLine.Visibility = jumps.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
+    // Brings the taskbar buttons in line with the items. Called from the full rebuild and from the strips-only rebuild
+    // of a minimized bar, which is why it is not folded into FillStrips: it runs with the list off the screens too.
+    void FillTaskbarJumps(Overview overview, IReadOnlyList<WorkspaceJump> jumps) =>
         TaskbarJumps?.Show(jumps, jump => JumpColour(jump, overview));
-    }
 
     // The colour of the workspace an item's click goes to, from the same method that colours its row
     // (WorkspaceAccent), so the item, its taskbar button, the row and the strip's name tag agree. The neutral grey

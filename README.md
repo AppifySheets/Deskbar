@@ -185,7 +185,7 @@ bottom of the bar**, where it sits in a strip under the rows and the rows stay u
 titles are cut to fit; widen the bar to see more of them.
 
 **Pin a workspace you keep jumping into**, a Messengers workspace say, with **Pin to strip** on its
-row menu. It gets a small item at the end of every screen's strip and in the bar's header, marked
+row menu. It gets a small item at the end of every screen's strip and a button on the Windows taskbar, marked
 with a dot in its colour. Click it to go there. Once you are in it, the same item reads
 **↩** and the name of the workspace you came from, and clicking it takes you back. From a script or
 a shortcut, `deskbar.cmd jump Messengers` does the same: in, or back out if you are already there.
