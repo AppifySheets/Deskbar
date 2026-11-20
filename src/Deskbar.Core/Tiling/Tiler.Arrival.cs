@@ -12,7 +12,9 @@ namespace Deskbar.Core.Tiling;
 //   2. An opening (TileLayout.Opening, room kept for the next window): the window goes into it. The screen of the
 //      tile last used is looked at first, then the screen the window opened on.
 //   3. Otherwise it splits the tile the user last activated, on THAT tile's screen, even when the app opened the
-//      window on another one (TileArrival.Choose picks the tile and the side).
+//      window on another one (TileArrival.Choose picks the tile and the side). Not when a by-hand move AIMED the
+//      window at a screen (a drop on one screen's half of a bar row): that screen is kept, and only the tile last
+//      used there is offered (see Arrived).
 //   4. Otherwise (no tile last used, or the second and later windows of one evaluate) it splits the largest tile
 //      of its own screen. TileArrival.Choose does that fallback too, also when the last-used tile is too small.
 //
@@ -112,20 +114,39 @@ public sealed partial class Tiler
     //
     // Layouts are stored here, before the caller hands the board to Keep, so the re-tile lays the new shape out. An
     // opening is filled HERE as well (step 2), so Keep's IntoOpenings finds no opening left and never fills twice.
+    //
+    // AN AIMED ARRIVAL STAYS ON ITS SCREEN. A window a by-hand move aimed at a screen (a drop on one screen's half of
+    // the row, WorkspaceManager.TakeAimedScreen) has that screen as its own, whatever it opened on, and is offered
+    // only the tile last used ON THAT SCREEN, so step 3 never carries it to another one. Petre: "let's respect which
+    // monitor i put it to", after a window dropped on the left screen split the last-used tile on the right. With
+    // no tile used on that screen it splits the screen's largest tile (step 4). It is offered its screen's last-used
+    // tile whatever its place among the arrivals, because the user named the screen for this window in particular.
     TileBoard Arrived(Workspace workspace, TileBoard board, IReadOnlyList<WindowHandle> arrivals)
     {
         if (arrivals.Count == 0) return board;
         var screens = surface.Screens().ToDictionary(s => s.Number);
-        var own = arrivals.ToDictionary(w => w, w => board.ScreenOf(w).GetValueOrDefault(surface.ScreenOf(w)));
+        // Taken (and so forgotten) here, once per arrival: the aim decides this arrival and no later one.
+        var aimed = arrivals.ToDictionary(w => w, manager.TakeAimedScreen);
+        var own = arrivals.ToDictionary(w => w,
+            w => aimed[w].GetValueOrDefault(board.ScreenOf(w).GetValueOrDefault(surface.ScreenOf(w))));
         var without = arrivals.Aggregate(board, (b, w) => b.Leave(w));
         var target = LastUsed(without, arrivals[0]);
+        aimed.Where(a => a.Value.HasValue).ToList()
+            .ForEach(a => trace?.Invoke($"tile: {workspace.Name}: {a.Key.Value:X} was dropped on screen {a.Value.Value}, it stays there"));
         // Each arrival is remembered with the screen as it was before it (Joining, Tiler.Rejoin.cs), so the window
         // leaving again puts that layout back.
         return arrivals
             .Select((window, i) => (Window: window, Offered: i == 0 ? target : Maybe<WindowHandle>.None))
             .Aggregate(without, (b, a) => Joining(workspace, b, a.Window,
-                () => Arrive(workspace, screens, b, a.Window, own[a.Window], a.Offered)));
+                () => Arrive(workspace, screens, b, a.Window, own[a.Window],
+                    aimed[a.Window].HasValue ? LastUsedOn(b, a.Window, own[a.Window]) : a.Offered)));
     }
+
+    // The tile last used among those on screen `number` (LastUsed's rules otherwise), for an aimed arrival.
+    Maybe<WindowHandle> LastUsedOn(TileBoard board, WindowHandle except, int number) =>
+        used.Select(u => u.Window)
+            .Where(w => w != except && board.ScreenOf(w) == number && !surface.IsMaximized(w))
+            .TryFirst();
 
     // One window's arrival: the target screen is the last-used tile's screen, or the window's own. An opening there,
     // then an opening on its own screen, then a split of a tile on the target screen.
