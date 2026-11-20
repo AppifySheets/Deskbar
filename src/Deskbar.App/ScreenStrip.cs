@@ -213,19 +213,27 @@ public sealed class ScreenStrip : Window
     //
     // The room comes from the SCREEN's width at the screen's scale, not from the window's ActualWidth: the strip is
     // filled before it is first shown, and a window not yet laid out has no width to read.
-    public void SetTabs(string name, Brush? colour, IReadOnlyList<FrameworkElement> tabs)
+    //
+    // `jumps` are the pinned workspaces' items (FloatingBar.WorkspaceJumps.cs), placed AFTER the tabs: Petre, "put it
+    // at the end of the list of windows". They keep their own width and the tabs share what is left, so tag, tabs and
+    // items together still fit the screen and the strip stays one line. Optional, so every caller that hands over
+    // tabs alone is unchanged.
+    public void SetTabs(string name, Brush? colour, IReadOnlyList<FrameworkElement> tabs, IReadOnlyList<FrameworkElement>? jumps = null)
     {
         nameText.Text = name;
         NameTag.Background = colour ?? NeutralTag;
         Row.Children.RemoveRange(1, Row.Children.Count - 1);
 
+        var items = jumps ?? [];
         NameTag.Measure(new Size(double.PositiveInfinity, HeightDip));
-        var width = StripPlan.TabWidth(WidthDip() - NameTag.DesiredSize.Width, tabs.Count);
+        items.ToList().ForEach(item => item.Measure(new Size(double.PositiveInfinity, HeightDip)));
+        var width = StripPlan.TabWidth(WidthDip() - NameTag.DesiredSize.Width - items.Sum(item => item.DesiredSize.Width), tabs.Count);
         tabs.ToList().ForEach(tab =>
         {
             tab.Width = width;
             Row.Children.Add(tab);
         });
+        items.ToList().ForEach(item => Row.Children.Add(item));
     }
 
     // The screen's width in its own DIPs. Only for sizing tabs, so while the screen cannot be read the window's own scale

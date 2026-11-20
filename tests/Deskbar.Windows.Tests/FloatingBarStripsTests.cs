@@ -439,6 +439,101 @@ public class FloatingBarStripsTests
         });
     });
 
+    // --- pinned workspaces (FloatingBar.WorkspaceJumps.cs) ---------------------------------------------------------
+
+    // The item at the end of a strip, after the window tabs (Petre: "put it at the end of the list of windows").
+    static IReadOnlyList<Button> JumpsOf(ScreenStrip strip) =>
+        strip.Row.Children.OfType<Button>().Where(b => b.Tag is FloatingBar.WorkspaceJumpTag).ToList();
+
+    static string LabelOf(Button jump) => System.Windows.Automation.AutomationProperties.GetName(jump);
+
+    static Guid IdOf(StripHarness h, string name) => h.Manager.State.Workspaces.Single(w => w.Name == name).Id;
+
+    // Every strip, so every screen, carries the item, each its own element (an element has one parent), after the tabs.
+    [Fact]
+    public void Every_strip_gets_the_pinned_item_after_its_tabs() => StaThread.Run(() =>
+    {
+        using var h = StripHarness.Build();
+        Assert.True(h.Manager.SetWorkspacePinned(IdOf(h, "Sparrow"), true).IsSuccess);
+        h.Fill();
+
+        Assert.All(h.Strips, strip =>
+        {
+            Assert.Equal("Sparrow", LabelOf(Assert.Single(JumpsOf(strip))));
+            Assert.Same(JumpsOf(strip)[0], strip.Row.Children[^1]);
+        });
+        Assert.Equal(3, h.Strips.Select(s => JumpsOf(s)[0]).Distinct().Count());
+    });
+
+    // Inside the pinned workspace the same item, in the same place, goes back where you came from.
+    [Fact]
+    public void Inside_the_pinned_workspace_the_item_reads_back() => StaThread.Run(() =>
+    {
+        using var h = StripHarness.Build();
+        Assert.True(h.Manager.SetWorkspacePinned(IdOf(h, "GEPHA"), true).IsSuccess);
+        h.Fill();
+
+        Assert.All(h.Strips, strip => Assert.Equal("↩ Sparrow", LabelOf(Assert.Single(JumpsOf(strip)))));
+    });
+
+    // A click is the manager's switch to the item's target. Raised directly, for the reason the tab click test gives.
+    [Fact]
+    public void Clicking_the_item_switches_through_the_manager() => StaThread.Run(() =>
+    {
+        using var h = StripHarness.Build();
+        Assert.True(h.Manager.SetWorkspacePinned(IdOf(h, "Sparrow"), true).IsSuccess);
+        h.Fill();
+
+        JumpsOf(h.StripA)[0].RaiseEvent(new RoutedEventArgs(ButtonBase.ClickEvent));
+
+        Assert.Equal([h.SparrowDesktop], h.Desktops.Switched);
+    });
+
+    // The bar's header carries the same items, so they are there when the list is not on the screens.
+    [Fact]
+    public void The_header_line_carries_the_items() => StaThread.Run(() =>
+    {
+        using var h = StripHarness.Build();
+        Assert.Empty(h.Bar.JumpLine.Children);
+
+        Assert.True(h.Manager.SetWorkspacePinned(IdOf(h, "Sparrow"), true).IsSuccess);
+        Assert.Equal("Sparrow", LabelOf(Assert.Single(h.Bar.JumpLine.Children.OfType<Button>())));
+
+        Assert.True(h.Manager.SetWorkspacePinned(IdOf(h, "Sparrow"), false).IsSuccess);
+        Assert.Empty(h.Bar.JumpLine.Children);
+    });
+
+    // The items are filled inside the bar's guard, as the tabs are, so a re-entered rebuild leaves one item a strip.
+    [Fact]
+    public void A_reentrant_rebuild_does_not_double_the_pinned_items() => StaThread.Run(() =>
+    {
+        using var h = StripHarness.Build();
+        Assert.True(h.Manager.SetWorkspacePinned(IdOf(h, "Sparrow"), true).IsSuccess);
+        h.Fill();
+
+        h.Desktops.PulseOnNextDesktopOf = () => h.Monitor.Pump.OnNext(new WindowEvent(WindowEventKind.Activated, h.Rdm));
+        h.Monitor.Pump.OnNext(new WindowEvent(WindowEventKind.Activated, h.Code));
+
+        Assert.All(h.Strips, strip => Assert.Single(JumpsOf(strip)));
+        Assert.Single(h.Bar.JumpLine.Children);
+    });
+
+    // The row menu's one flipping item pins and unpins.
+    [Fact]
+    public void The_row_menu_pins_and_unpins() => StaThread.Run(() =>
+    {
+        using var h = StripHarness.Build();
+        var sparrow = IdOf(h, "Sparrow");
+        MenuItem Item(string header) =>
+            h.Bar.WorkspaceMenu(sparrow, "Sparrow", folded: false, nested: false).Items.OfType<MenuItem>().Single(i => i.Header as string == header);
+
+        Item("Pin to strip").RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
+        Assert.True(h.Manager.State.Workspaces.Single(w => w.Id == sparrow).Pinned);
+
+        Item("Unpin from strip").RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
+        Assert.False(h.Manager.State.Workspaces.Single(w => w.Id == sparrow).Pinned);
+    });
+
     // --- helpers ------------------------------------------------------------------------------------------------
 
     static Color Hex(string hex) => (Color)ColorConverter.ConvertFromString(hex);

@@ -152,6 +152,8 @@ public partial class FloatingBar
         ShellStart.Children.Add(FindButton(Glyph(SearchShape, size: HeaderGlyphSize)));
         // Tiling's button (FloatingBar.Tiling.cs), collapsed until a rebuild finds a named workspace.
         ShellStart.Children.Add(TileButton());
+        // The pinned workspaces' items (FloatingBar.WorkspaceJumps.cs), after the tile button; refilled by every rebuild.
+        ShellStart.Children.Add(JumpLine);
 
         // The same pair again, where the right half of the header begins, shown only across the seam (see
         // LayOutHeader). Their own buttons, wired the same way, so a press on either pair behaves identically,

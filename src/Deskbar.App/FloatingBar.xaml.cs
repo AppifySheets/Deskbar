@@ -2605,6 +2605,10 @@ public partial class FloatingBar : Window
             // brings; a minute's ageing late on a tab nobody is looking at while dragging the bar's edge.
             if (fresh) FillStrips(overview);
 
+            // The header's pinned workspace items (FloatingBar.WorkspaceJumps.cs), on a fresh rebuild for the reason the
+            // strips are: a relayout changes nothing they show.
+            if (fresh) FillJumpLine(overview, JumpsFor(overview));
+
             groupRows
                 .SelectMany((row, i) => i == 0 ? new[] { row } : new[] { Separator(), row })
                 .ToList()
@@ -6866,7 +6870,7 @@ public partial class FloatingBar : Window
     // 'Remove workspace' is a bad way to find that out" -- and it arrived with #73 once it could
     // refuse a workspace that still held windows. It closes those windows now instead of refusing;
     // the reasoning, and what replaced the guard, is at the item itself at the bottom of this method.
-    ContextMenu WorkspaceMenu(Guid workspaceId, string name, bool folded, bool nested, ContextMenu? into = null)
+    internal ContextMenu WorkspaceMenu(Guid workspaceId, string name, bool folded, bool nested, ContextMenu? into = null)
     {
         var menu = into ?? new ContextMenu(); // `into`: the empty menu a lazy element already holds (FloatingBar.LazyMenus.cs)
         HoldFadeWhileOpen(menu);
@@ -6930,6 +6934,13 @@ public partial class FloatingBar : Window
         // it cannot go stale in a way the user could reach.
         Add(folded ? "▾" : "▸", folded ? "Unfold row" : "Fold row",
             () => Report(manager.SetWorkspaceFolded(workspaceId, !folded)));
+
+        // Pin the workspace to the strips, the bar's header and the taskbar, or unpin it (Workspace.Pinned,
+        // FloatingBar.WorkspaceJumps.cs). One item that flips, as Fold row does, and the STORED setting, read when the
+        // menu is built, which a rebuild after any change keeps current.
+        var pinned = manager.State.Workspaces.TryFirst(w => w.Id == workspaceId).Map(w => w.Pinned).GetValueOrDefault(false);
+        Add("⇱", pinned ? "Unpin from strip" : "Pin to strip",
+            () => Report(manager.SetWorkspacePinned(workspaceId, !pinned)));
 
         // Tiling (FloatingBar.Tiling.cs): "Tile windows" for Pro, the Deskbar Pro wording otherwise.
         AddTilingItems(menu, workspaceId, Add);

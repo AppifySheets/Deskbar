@@ -119,6 +119,23 @@ public class ScreenStripTests
         strip.Close();
     });
 
+    // A pinned workspace's items go at the END of the window tabs (Petre: "put it at the end of the list of windows"),
+    // and the room they take comes out of the tabs' room, so tag, tabs and items together still fit the screen.
+    [Fact]
+    public void Pinned_items_take_their_width_out_of_the_tabs_room() => StaThread.Run(() =>
+    {
+        var strip = Strip();
+        var tabs = Tabs(20);
+        var jumps = new FrameworkElement[] { new Border { Width = 100 }, new Border { Width = 100 } };
+
+        strip.SetTabs("deskbar", Brushes.SteelBlue, tabs, jumps);
+
+        Assert.Equal([strip.NameTag, .. tabs, .. jumps], strip.Row.Children.Cast<UIElement>());
+        strip.NameTag.Measure(new Size(double.PositiveInfinity, ScreenStrip.HeightDip));
+        Assert.Equal(StripPlan.TabWidth(WidthDip - strip.NameTag.DesiredSize.Width - 200, 20), tabs[0].Width, 3);
+        strip.Close();
+    });
+
     // The bar hands every strip a new set of tabs on each rebuild; the old set goes, it is not appended to.
     [Fact]
     public void SetTabs_twice_does_not_accumulate() => StaThread.Run(() =>

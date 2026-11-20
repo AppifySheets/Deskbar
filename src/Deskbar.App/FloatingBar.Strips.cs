@@ -93,6 +93,7 @@ public partial class FloatingBar
         NoteActivity(overview);
         pinnedNow = overview.Pinned;
         FillStrips(overview);
+        FillJumpLine(overview, JumpsFor(overview)); // the header's pinned workspace items (FloatingBar.WorkspaceJumps.cs)
         if (IconCache.HasPendingIcons && !iconWatch.IsEnabled) iconWatch.Start();
     }
 
@@ -131,8 +132,12 @@ public partial class FloatingBar
                 ? numbers[strip].HasValue && numbers[strip].Value == row.Monitor.Value
                 : ReferenceEquals(strip, first);
 
+        // The pinned workspaces' items, worked out once and built afresh for each strip (an element has one parent),
+        // at the end of every strip's tabs (FloatingBar.WorkspaceJumps.cs).
+        var jumps = JumpsFor(overview);
         strips.ToList().ForEach(strip =>
-            strip.SetTabs(name, accent, rows.Where(row => OnStrip(row, strip)).Select(row => StripTab(name, row, accent)).ToList()));
+            strip.SetTabs(name, accent, rows.Where(row => OnStrip(row, strip)).Select(row => StripTab(name, row, accent)).ToList(),
+                jumps.Select(jump => JumpButton(jump, overview)).ToList()));
     }
 
     // One window's tab: IconButton, exactly as the bar's own buttons are built, under the titled list's group key, then
