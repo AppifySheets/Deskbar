@@ -119,9 +119,12 @@ public sealed partial class Tiler
         var own = arrivals.ToDictionary(w => w, w => board.ScreenOf(w).GetValueOrDefault(surface.ScreenOf(w)));
         var without = arrivals.Aggregate(board, (b, w) => b.Leave(w));
         var target = LastUsed(without, arrivals[0]);
+        // Each arrival is remembered with the screen as it was before it (Joining, Tiler.Rejoin.cs), so the window
+        // leaving again puts that layout back.
         return arrivals
             .Select((window, i) => (Window: window, Offered: i == 0 ? target : Maybe<WindowHandle>.None))
-            .Aggregate(without, (b, a) => Arrive(workspace, screens, b, a.Window, own[a.Window], a.Offered));
+            .Aggregate(without, (b, a) => Joining(workspace, b, a.Window,
+                () => Arrive(workspace, screens, b, a.Window, own[a.Window], a.Offered)));
     }
 
     // One window's arrival: the target screen is the last-used tile's screen, or the window's own. An opening there,

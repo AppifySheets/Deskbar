@@ -40,11 +40,14 @@ public sealed partial class Tiler
     // window and gain another in one change (a cross-screen swap), and then its count, and so its layout, is what it
     // was: the leaf is no leaver for the fit at all. And with nothing stored, the layout the leaf was read from is the
     // automatic layout of OldCount windows, not of "one more than now" (TileArrange.FitStart).
+    //
+    // `Back` is the layout to put back instead, when the leaver was the last window to join the screen and nothing
+    // changed there since (Tiler.Rejoin.cs): the screen goes back to what it was before that window appeared.
     readonly Dictionary<(Guid Workspace, int Screen), Leaver> leavers = [];
 
-    // One screen's pending leaver: its leaf in the layout as it was, whether it closed with the switch on, and how
-    // many windows that layout held (see `leavers`).
-    sealed record Leaver(int Leaf, bool Closed, int OldCount);
+    // One screen's pending leaver: its leaf in the layout as it was, whether it closed with the switch on, how many
+    // windows that layout held, and the layout from before it joined when that is to come back (see `leavers`).
+    sealed record Leaver(int Leaf, bool Closed, int OldCount, Maybe<TileLayout> Back);
 
     // Windows that are closing right now on a workspace that keeps a closed tile's space. OnWindowEvent adds one on
     // Disappeared or Hidden of a window on the board, before the evaluate that takes it off; NoteLeavers reads it
@@ -167,6 +170,21 @@ public sealed partial class Tiler
             return kept;
         }
 
+        // THE LAST WINDOW TO JOIN LEFT, AND NOTHING ELSE CHANGED (Tiler.Rejoin.cs): the layout from before it joined comes
+        // back, rather than its leaf's share being spread over its siblings. After the kept space above, which is what
+        // that switch asks for on a close. Only for exactly one window gone, and not in a returning screen's grace
+        // period, where nothing is stored. Stored as it is, a plain one too: SetTileLayout then removes the entry, which
+        // is what "nothing stored before the join" means. Fitted to the count for laying out, which leaves it as it is
+        // (it was shown for exactly these windows) unless something unexpected happened.
+        if (pending.TryGetValue(out var back) && back.Back.TryGetValue(out var before) && back.OldCount == count + 1
+            && !InGrace(key))
+        {
+            StoreLayout(workspace, key, before)
+                .Tap(() => trace?.Invoke($"tile: {workspace.Name} screen {screen.Number}: the last window to join left, the layout from before it is back, sizes {Show(before)}"))
+                .TapError(error => trace?.Invoke($"tile: {workspace.Name} screen {screen.Number}: putting the layout from before back failed: {error}"));
+            return TileArrange.Refit(before, count, Maybe<int>.None);
+        }
+
         // Refit keeps a shape while windows leave (the leaver's leaf, else the last leaves) and while they join (the
         // last leaf split at the bottom). Stored unless plain: even splits on the automatic shape are what nothing
         // stored means already, but even splits on a custom shape are not.
@@ -219,7 +237,11 @@ public sealed partial class Tiler
                 }
                 else if (gone.Count > 0)
                     leavers[(workspace, s.Key)] = new Leaver(LeafOn(workspace, s.Key, gone[0].Slot, s.Value.Count),
-                        closing.Contains(gone[0].Window), s.Value.Count);
+                        closing.Contains(gone[0].Window), s.Value.Count,
+                        // One window gone and none come: maybe the last join undone (Tiler.Rejoin.cs).
+                        gone.Count == 1 && staying.Count == s.Value.Count - 1
+                            ? Back(workspace, s.Key, gone[0].Window, staying, s.Value.Count)
+                            : Maybe<TileLayout>.None);
             });
         else
             leavers.Keys.Where(k => k.Workspace == workspace).ToList().ForEach(k => leavers.Remove(k));

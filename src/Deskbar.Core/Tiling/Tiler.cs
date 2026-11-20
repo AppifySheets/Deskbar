@@ -29,7 +29,9 @@ namespace Deskbar.Core.Tiling;
 //     (Tiler.Arrival.cs). A restored one goes back to the place it left when it was minimized (Tiler.Minimize.cs).
 //   - A tile that leaves takes only its own leaf of the screen's split tree (TileLayout), and the tiles of its
 //     split grow into the room. On a workspace that keeps a closed tile's space (Workspace.TileKeepsSpace), a tile
-//     that CLOSES leaves its leaf as the screen's opening instead (LayoutOn).
+//     that CLOSES leaves its leaf as the screen's opening instead (LayoutOn). Otherwise, when it was the last window to
+//     join that screen and nothing changed there since, the screen gets back the layout it had before the window
+//     appeared, so a short-lived window leaves no trace in the sizes (Tiler.Rejoin.cs).
 //   - A drop on a tile's edge puts the window beside THAT tile only, at any depth of the tree (TileArrange.Drop;
 //     docs/superpowers/specs/2026-11-19-tiling-split-tree-design.md). A drop in the band along an edge of a screen
 //     makes it a full-height column or full-width row of that whole screen (TileArrange.DropAtEdge).
@@ -308,8 +310,15 @@ public sealed partial class Tiler(WorkspaceManager manager, IVirtualDesktopServi
         // `closing` belongs to this one event (Tiler.Resize.cs). NoteLeavers clears it when the evaluate below reaches
         // Keep; the finally clears it when it does not (a throw, or no board change at all), so a mark can never
         // outlive its event and turn a later minimize of the same window into a close (final review, M4).
+        //
+        // A window that disappeared forgets its last join (Tiler.Rejoin.cs) here too, AFTER the evaluate: that evaluate
+        // is the close, and it reads the join to put the screen's layout back. Its handle may be recycled afterwards.
         try { HandleWindowEvent(e); }
-        finally { closing.Clear(); }
+        finally
+        {
+            closing.Clear();
+            if (e.Kind == WindowEventKind.Disappeared) joined.Remove(e.Window.Handle);
+        }
     }
 
     void HandleWindowEvent(WindowEvent e)
@@ -876,6 +885,8 @@ public sealed partial class Tiler(WorkspaceManager manager, IVirtualDesktopServi
             putBacks.Remove(w);
             restoring.Remove(w);
             given.Remove(w);
+            // Its last join belongs to the board that was dropped (Tiler.Rejoin.cs).
+            joined.Remove(w);
             // A Place whose echo never came back before tiling went off (the hook goes with it, so it never will).
             // Left in, the mark would swallow the window's first real drag after tiling returns as "our own echo"
             // and snap it back (final review, item 5).
