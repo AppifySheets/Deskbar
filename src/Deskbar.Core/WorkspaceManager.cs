@@ -1796,7 +1796,10 @@ public sealed class WorkspaceManager(
     //
     // A group left with one member is dissolved, as above, because the one left behind never chose to
     // be a group of one.
-    static AppState WithoutMember(AppState state, Guid workspaceId)
+    //
+    // Internal rather than private since the arrange mode's RowDrop.Applied applies the same rule when a dragged
+    // row leaves its group: one rule for "a group left with one member is gone", not a copy that could drift.
+    internal static AppState WithoutMember(AppState state, Guid workspaceId)
     {
         if (state.GroupOf(workspaceId) is not { } group) return state;
 
