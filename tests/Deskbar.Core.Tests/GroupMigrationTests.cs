@@ -329,4 +329,75 @@ public class GroupMigrationTests
         Assert.All(migrated.Workspaces, w => Assert.Null(w.ParentId));
         Assert.Equal(withStale.Groups, migrated.Groups);
     }
+
+    // Promoting an anchor shifts rows, and a PLAIN group's first member can land at a different list
+    // position than before. Its colour follows that position, so the migration pins what it was showing.
+    [Fact]
+    public void A_plain_group_between_a_child_and_its_parent_keeps_its_colour()
+    {
+        var child = Workspace("child");
+        var plain1 = Workspace("plain1");
+        var plain2 = Workspace("plain2");
+        var parent = Workspace("parent");
+        var anchored = Guid.NewGuid();
+        var plain = Guid.NewGuid();
+        var state = AppState.Empty with
+        {
+            Workspaces = [child with { GroupId = anchored }, plain1 with { GroupId = plain }, plain2 with { GroupId = plain }, parent with { GroupId = anchored }],
+            Groups = [new Group(anchored, "Box") { AnchorWorkspaceId = parent.Id }, new Group(plain, "Plain")],
+        };
+        var before = state.Groups.Single(g => g.Id == plain);
+
+        var migrated = state.Migrated();
+        var after = migrated.Groups.Single(g => g.Id == plain);
+        var formerlyAnchored = migrated.Groups.Single(g => g.Id == anchored);
+
+        Assert.Equal(WorkspacePalette.For(before.Color, state.ColourSlotOf(before)), WorkspacePalette.For(after.Color, migrated.ColourSlotOf(after)));
+        // The anchored group was showing its anchor's position, 3.
+        Assert.Equal(WorkspacePalette.For((string?)null, 3), WorkspacePalette.For(formerlyAnchored.Color, migrated.ColourSlotOf(formerlyAnchored)));
+    }
+
+    // Two anchored groups whose members interleave: each keeps its drawn place and the colour its anchor gave it.
+    [Fact]
+    public void Two_anchored_groups_keep_order_and_colour()
+    {
+        var c1 = Workspace("c1");
+        var c2 = Workspace("c2");
+        var p1 = Workspace("p1");
+        var p2 = Workspace("p2");
+        var g1 = Guid.NewGuid();
+        var g2 = Guid.NewGuid();
+        var state = AppState.Empty with
+        {
+            Workspaces = [c1 with { GroupId = g1 }, c2 with { GroupId = g2 }, p1 with { GroupId = g1 }, p2 with { GroupId = g2 }],
+            Groups = [new Group(g1, "One") { AnchorWorkspaceId = p1.Id }, new Group(g2, "Two") { AnchorWorkspaceId = p2.Id }],
+        };
+
+        var migrated = state.Migrated();
+
+        // Drawn before: block One (anchor p1 first, then c1), then block Two (p2, c2).
+        Assert.Equal([p1.Id, c1.Id, p2.Id, c2.Id], migrated.Workspaces.Select(w => w.Id));
+        var one = migrated.Groups.Single(g => g.Id == g1);
+        var two = migrated.Groups.Single(g => g.Id == g2);
+        Assert.Equal(WorkspacePalette.For((string?)null, 2), WorkspacePalette.For(one.Color, migrated.ColourSlotOf(one)));
+        Assert.Equal(WorkspacePalette.For((string?)null, 3), WorkspacePalette.For(two.Color, migrated.ColourSlotOf(two)));
+    }
+
+    // A hand-edited file can carry two groups with one id. That must not stop the app loading.
+    [Fact]
+    public void Two_groups_with_one_id_do_not_stop_the_load()
+    {
+        var a = Workspace("a");
+        var b = Workspace("b");
+        var g = Guid.NewGuid();
+        var state = AppState.Empty with
+        {
+            Workspaces = [a with { GroupId = g }, b with { GroupId = g }],
+            Groups = [new Group(g, "One") { AnchorWorkspaceId = a.Id }, new Group(g, "Two") { AnchorWorkspaceId = b.Id }],
+        };
+
+        var migrated = state.Migrated();
+
+        Assert.Equal(2, migrated.Workspaces.Count);
+    }
 }

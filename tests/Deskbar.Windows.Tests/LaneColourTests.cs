@@ -37,4 +37,12 @@ public class LaneColourTests
         var state = AppState.Empty with { Workspaces = [loose] };
         Assert.Equal("Loose", LaneColour.FullName(state, loose));
     }
+
+    // CreateGroup trims the group's name, a workspace's name is stored as typed.
+    [Fact]
+    public void A_member_named_like_its_group_but_for_spaces_shows_its_bare_name()
+    {
+        var (state, member) = StateWith("Sparrow", " Sparrow ");
+        Assert.Equal(" Sparrow ", LaneColour.FullName(state, member));
+    }
 }
