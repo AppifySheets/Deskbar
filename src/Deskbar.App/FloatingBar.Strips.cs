@@ -71,7 +71,10 @@ public partial class FloatingBar
     // Also while buttons are left over, so the rebuild after the last unpin takes the last one away.
     bool RebuildWanted => IsVisible || (StripsOn && Strips().Count > 0) || JumpsWanted;
 
-    bool JumpsWanted => TaskbarJumps is { } jumps && (jumps.Windows.Count > 0 || manager.State.Workspaces.Any(w => w.Pinned));
+    //
+    // With the previous workspace's button on the taskbar too (WorkspaceJumps.BackItem), there is a button to keep
+    // current whenever there are taskbar buttons at all, pinned workspaces or not.
+    bool JumpsWanted => TaskbarJumps is not null;
 
     // A rebuild that fills the strips and nothing else: the list is on the screens and the bar is behind its taskbar
     // button. Minimized as well as not visible, because ShowBar rebuilds BEFORE it shows the bar, and that rebuild must

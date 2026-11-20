@@ -53,4 +53,34 @@ public class WorkspaceJumpsTests
     public void On_an_unnamed_desktop_every_item_goes_in() =>
         Assert.All(WorkspaceJumps.Of(All, Maybe<Guid>.None, Deskbar),
             jump => Assert.Equal(jump.PinnedId, jump.Target.Value));
+
+    // --- the previous workspace's item (WorkspaceJumps.BackItem) ------------------------------------------------------
+    // Petre: "let's also have previous workspace available in strip". One "↩ <previous>" item, unless another item
+    // already goes there.
+
+    static readonly Workspace Mail = new(Guid.NewGuid(), "Mail", Guid.NewGuid());
+
+    [Fact]
+    public void The_back_item_goes_to_the_previous_workspace()
+    {
+        var back = WorkspaceJumps.BackItem(WorkspaceJumps.Of(All, Deskbar.Id, Mail), Mail).Value;
+
+        Assert.Equal("↩ Mail", back.Label);
+        Assert.Equal(Mail.Id, back.Target.Value);
+        Assert.True(back.IsBack);
+    }
+
+    // Inside Messengers its own item already reads "↩ Deskbar": no second item for the same place.
+    [Fact]
+    public void No_back_item_when_the_pinned_item_already_goes_back() =>
+        Assert.True(WorkspaceJumps.BackItem(WorkspaceJumps.Of(All, Messengers.Id, Deskbar), Deskbar).HasNoValue);
+
+    // Back to a pinned workspace: its own item already goes there.
+    [Fact]
+    public void No_back_item_when_a_pinned_item_goes_there() =>
+        Assert.True(WorkspaceJumps.BackItem(WorkspaceJumps.Of(All, Deskbar.Id, Messengers), Messengers).HasNoValue);
+
+    [Fact]
+    public void No_back_item_with_nowhere_to_go() =>
+        Assert.True(WorkspaceJumps.BackItem(WorkspaceJumps.Of(All, Deskbar.Id, Maybe<Workspace>.None), Maybe<Workspace>.None).HasNoValue);
 }
