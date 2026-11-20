@@ -89,6 +89,12 @@ public sealed partial class RemoteControl
 
     // The row menu's "Pin to strip" / "Unpin from strip" (Workspace.Pinned). Named pin-workspace rather than pin,
     // because pin and unpin already pin a WINDOW to every desktop, which this does not do.
+    // Into the workspace, or back out of it when you are in it (WorkspaceManager.Jump); replies with where it landed.
+    ControlReply Jump(string workspace) =>
+        WorkspaceNamed(workspace).Match(
+            w => manager.Jump(w.Id).Match(landed => Success(Describe(landed)), ControlReply.Fail),
+            ControlReply.Fail);
+
     ControlReply SetRowPinned(string workspace, bool pinned) =>
         WorkspaceNamed(workspace).Match(
             w => Reply(manager.SetWorkspacePinned(w.Id, pinned), () => Describe(w.Id)),

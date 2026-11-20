@@ -1016,6 +1016,18 @@ public sealed class WorkspaceManager(
             // covers the ones we make.
             .Tap(() => mru = mru.Touch(workspaceId));
 
+    // JUMP: into a workspace, or, when you are already in it, back where you came from. The pipe's `jump`, and
+    // what a shortcut pinned by hand to Windows' taskbar runs (deskbar.cmd jump Messengers). Petre: "i need to jump
+    // in and out of the messengers" (docs/superpowers/specs/2026-11-20-pinned-workspaces-design.md).
+    //
+    // The same rule a pinned workspace's item follows (WorkspaceJumps.Of), with the same "back": ByRecentUse().Back,
+    // which the bar's ↩ button and a Win+Ctrl+Tab tap use too. Any workspace, pinned or not, since a shortcut needs
+    // no pin. Returns where it landed, so the reply can say so.
+    public Result<Guid> Jump(Guid workspaceId) =>
+        Workspace(workspaceId).Bind(w => desktops.CurrentDesktop() is { IsSuccess: true } here && here.Value == w.DesktopId
+            ? ByRecentUse().Back.ToResult("Nowhere to go back to.").Bind(back => Switch(back.Id).Map(() => back.Id))
+            : Switch(workspaceId).Map(() => workspaceId));
+
     // Alt+Tab-style switching (Petre: "maybe an alt-tab like shortcut for me to switch
     // through workspaces"): the workspaces in most-recently-used order, plus where the
     // highlight should start. One call rather than two, because the index is only meaningful

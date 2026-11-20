@@ -62,6 +62,7 @@ public static class ControlUsage
             new("unfold", "<workspace>", "Unfold row"),
             new("pin-workspace", "<workspace>", "Pin to strip: an item on every strip, the bar and the taskbar that goes in, and back out"),
             new("unpin-workspace", "<workspace>", "Unpin from strip"),
+            new("jump", "<workspace>", "Go to a workspace, or back where you came from if you are on it"),
             new("tile", "<workspace>", "Tile windows: a grid per screen, kept tidy as windows come and go"),
             new("untile", "<workspace>", "Stop tiling; windows stay where they are"),
             new("even", "<workspace>", "Even out tiles: equal splits, your shape kept"),

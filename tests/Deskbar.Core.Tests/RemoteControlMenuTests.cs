@@ -153,6 +153,18 @@ public class RemoteControlMenuTests
         Assert.False(Named(manager, "Personal").Pinned);
     }
 
+    // `jump` from elsewhere goes in, and replies with where it landed.
+    [Fact]
+    public void Jump_over_the_pipe()
+    {
+        var manager = Started();
+
+        var landed = Run(manager, "jump", "Personal");
+        Ok(landed);
+        Assert.Equal("Personal", Json(landed).GetProperty("name").GetString());
+        Assert.Equal(Named(manager, "Personal").DesktopId, desktops.Switches.Last());
+    }
+
     [Fact]
     public void Fold_and_unfold_a_row()
     {

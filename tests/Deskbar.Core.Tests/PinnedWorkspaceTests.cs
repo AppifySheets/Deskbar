@@ -64,4 +64,52 @@ public class PinnedWorkspaceTests
     [Fact]
     public void Pinning_an_unknown_workspace_fails() =>
         Assert.True(Started().manager.SetWorkspacePinned(Guid.NewGuid(), true).IsFailure);
+
+    // --- jump: in, or back out (the pipe's `jump`, and what a hand-pinned taskbar shortcut runs) ------------------
+
+    // Arrives on a workspace's desktop the way Windows reports it: the current desktop changes and says so.
+    void Arrive(WorkspaceManager manager, Guid workspace)
+    {
+        var desktop = manager.State.Workspaces.Single(w => w.Id == workspace).DesktopId!.Value;
+        desktops.CurrentDesktopId = desktop;
+        desktops.CurrentChangedSubject.OnNext(desktop);
+    }
+
+    Guid DesktopOf(WorkspaceManager manager, Guid workspace) => manager.State.Workspaces.Single(w => w.Id == workspace).DesktopId!.Value;
+
+    [Fact]
+    public void Jump_goes_in_from_elsewhere()
+    {
+        var (manager, work, messengers) = Started();
+        Arrive(manager, work);
+
+        Assert.Equal(messengers, manager.Jump(messengers).Value);
+        Assert.Equal(DesktopOf(manager, messengers), desktops.Switches.Last());
+    }
+
+    [Fact]
+    public void Jump_goes_back_from_inside()
+    {
+        var (manager, work, messengers) = Started();
+        Arrive(manager, work);
+        Arrive(manager, messengers);
+
+        Assert.Equal(work, manager.Jump(messengers).Value);
+        Assert.Equal(DesktopOf(manager, work), desktops.Switches.Last());
+    }
+
+    // The only workspace there is: "back" has no answer (ByRecentUse lists every workspace, visited or not, so this
+    // is the one way to get none), and the jump says so rather than staying silent.
+    [Fact]
+    public void Jump_inside_with_nowhere_to_go_back_fails()
+    {
+        var alone = new Workspace(Guid.NewGuid(), "Messengers", Guid.NewGuid());
+        desktops.Desktops.Add(new DesktopInfo(alone.DesktopId!.Value, alone.Name));
+        store.Stored = AppState.Empty with { Workspaces = [alone] };
+        var manager = new WorkspaceManager(desktops, monitor, titles, store);
+        Assert.True(manager.Start().IsSuccess);
+        Arrive(manager, alone.Id);
+
+        Assert.True(manager.Jump(alone.Id).IsFailure);
+    }
 }

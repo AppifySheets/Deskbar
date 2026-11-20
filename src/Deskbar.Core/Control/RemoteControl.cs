@@ -92,6 +92,7 @@ public sealed partial class RemoteControl(WorkspaceManager manager, Func<bool, R
         ("unfold", [var workspace]) => SetRowFolded(workspace, false),
         ("pin-workspace", [var workspace]) => SetRowPinned(workspace, true),
         ("unpin-workspace", [var workspace]) => SetRowPinned(workspace, false),
+        ("jump", [var workspace]) => Jump(workspace),
         ("tile", [var workspace]) => SetRowTiled(workspace, true),
         ("untile", [var workspace]) => SetRowTiled(workspace, false),
         ("even", [var workspace]) => EvenOutRow(workspace),
