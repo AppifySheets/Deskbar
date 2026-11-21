@@ -541,6 +541,32 @@ public class FloatingBarStripsTests
         Assert.Equal(["Sparrow"], items.Select(LabelOf));
     });
 
+    // Petre, with a screenshot of the previous workspace's chip in the current row: "going to messengers immediately
+    // brings me back to the current workspace". In the row, the chip sits INSIDE the current workspace's row, whose
+    // whole-row click switches to that row's workspace on the bubbling release. The chip's click went to Sparrow,
+    // then the same release reached the row and switched straight back to GEPHA. The click trace showed it as
+    // "row-up group=GEPHA consumedByChild=False" followed by "switch group=GEPHA". Only Sparrow may be switched to.
+    //
+    // A full press, click and release on the chip, as the input manager delivers them; the Click is raised by hand
+    // because ButtonBase cannot take mouse capture in a test (see A_strip_press_then_release_is_not_an_orphan).
+    [Theory]
+    [InlineData(WindowListPlace.Row)]
+    [InlineData(WindowListPlace.Bottom)]
+    public void Clicking_an_item_in_the_titled_list_goes_there_and_stays(WindowListPlace place) => StaThread.Run(() =>
+    {
+        using var h = StripHarness.Build();
+        Assert.True(h.Manager.SetWorkspacePinned(IdOf(h, "Sparrow"), true).IsSuccess);
+        Assert.True(h.Manager.SetWindowListPlace(place).IsSuccess);
+        var item = Descendants(h.Rows).Concat(Descendants(h.CurrentList)).OfType<Button>()
+            .Single(b => b.Tag is FloatingBar.WorkspaceJumpTag);
+
+        Press(item);
+        item.RaiseEvent(new RoutedEventArgs(ButtonBase.ClickEvent));
+        Release(item);
+
+        Assert.Equal([h.SparrowDesktop], h.Desktops.Switched);
+    });
+
     // The items are filled inside the bar's guard, as the tabs are, so a re-entered rebuild leaves one item a strip.
     [Fact]
     public void A_reentrant_rebuild_does_not_double_the_pinned_items() => StaThread.Run(() =>
