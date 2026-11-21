@@ -1407,6 +1407,43 @@ public sealed partial class TilerTests : IDisposable
         Assert.Contains(traced, line => line.Contains("1") && line.Contains("kept"));
     }
 
+    // A Place that moved nothing is not the window's answer (Tiler.Given has the measurement: two VS Code tiles
+    // placed while the work area moved under them read back unchanged, were taken as "kept", and sat off their
+    // slots all day). The window's next Settled at that same frame (Windows finishing its own move) places it.
+    [Fact]
+    public void A_place_that_moved_nothing_is_tried_again_when_the_window_settles()
+    {
+        new[] { 1, 2 }.ToList().ForEach(n => Exists(W(n), alpha));
+        surface.IgnorePlaceOnce.Add(W(1));
+        var before = surface.Frames[W(1)];
+        Start();
+        Assert.Equal(before, surface.Frames[W(1)]);
+        Assert.Contains(traced, line => line.Contains("did not move"));
+
+        Settles(W(1), before);
+
+        AssertTiled([W(1), W(2)]);
+    }
+
+    // The same, healed by the next re-tile instead (another window opening): it used to skip the window for good,
+    // because its slot and its frame were what it had "accepted" last time.
+    [Fact]
+    public void A_place_that_moved_nothing_is_tried_again_by_the_next_retile()
+    {
+        new[] { 1, 2 }.ToList().ForEach(n => Exists(W(n), alpha));
+        surface.IgnorePlaceOnce.Add(W(1));
+        Start();
+
+        var before = surface.Frames[W(1)];
+
+        Opens(W(3), alpha);
+
+        // Placed again, and this time it took the slot it was given.
+        Assert.Equal(2, PlacedWindows.Count(w => w == W(1)));
+        Assert.NotEqual(before, surface.Frames[W(1)]);
+        Assert.Equal(surface.Placed.Last(p => p.Window == W(1)).Frame, surface.Frames[W(1)]);
+    }
+
     // The backstop (spec: "a short per-window quiet period as a backstop"). An app that puts itself back where
     // it wants to be after every Place would otherwise be fought for ever.
     [Fact]

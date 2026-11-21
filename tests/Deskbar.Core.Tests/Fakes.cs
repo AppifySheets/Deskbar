@@ -354,11 +354,16 @@ public sealed class FakeTileSurface : ITileSurface
         return Frames.TryGetValue(window, out var frame) ? frame : Maybe<WindowRect>.None;
     }
 
+    // Place reports success for these but moves nothing, once, and then forgets them: SetWindowPos sent while
+    // Windows was moving the window itself (the work area changing under it), measured on 2026-11-21.
+    public HashSet<WindowHandle> IgnorePlaceOnce { get; } = [];
+
     public Result Place(WindowHandle window, WindowRect visibleFrame)
     {
         if (ThrowOnPlace.Remove(window)) throw new InvalidOperationException("place threw (test)");
         if (RefusePlace.Contains(window)) return Result.Failure("place refused (test)");
         Placed.Add((window, visibleFrame));
+        if (IgnorePlaceOnce.Remove(window)) return Result.Success();
         Frames[window] = MinimumSize.TryGetValue(window, out var min)
             ? visibleFrame with
             {
