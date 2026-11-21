@@ -289,9 +289,8 @@ on Manage → Settings. A fully opaque setting means it never dims.
 
 Right-click a row for: **Rename…**; **Insert before…** and **Insert after…**;
 the group items (next section); **Fold row**, which flips to **Unfold row**; **Pin to strip**, which
-flips to **Unpin from strip**; the **Window list** submenu; the colour strip; **Move up**, **Move down**, **Move to top**
-and **Move to end**, which work within the row's group; **Delete workspace…**; and the bar items,
-**Arrange workspaces** (it reads **Done arranging** while the mode is on), **Dock to screen edge**,
+flips to **Unpin from strip**; the **Window list** submenu; the colour strip; **Delete workspace…**; and the bar items,
+**Arrange workspaces**, where you drag rows to reorder or group them (it reads **Done arranging** while the mode is on), **Dock to screen edge**,
 **Dock across both screens** and **Minimize bar**.
 
 <p align="center">

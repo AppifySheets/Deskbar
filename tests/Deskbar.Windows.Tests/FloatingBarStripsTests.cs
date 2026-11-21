@@ -622,6 +622,19 @@ public class FloatingBarStripsTests
         Assert.False(h.Manager.State.Workspaces.Single(w => w.Id == sparrow).Pinned);
     });
 
+    // Petre: "retire old move up/down in favor of arranging by drag and drop". The row menu has no step-wise moves;
+    // arrange mode drags a row where it goes. (Manage's ↑ Up / ↓ Down and the pipe's `reorder` stay.)
+    [Fact]
+    public void The_row_menu_has_no_move_items() => StaThread.Run(() =>
+    {
+        using var h = StripHarness.Build();
+        var headers = h.Bar.WorkspaceMenu(IdOf(h, "Sparrow"), "Sparrow", folded: false)
+            .Items.OfType<MenuItem>().Select(i => i.Header as string).ToList();
+
+        Assert.Contains("Pin to strip", headers);
+        Assert.DoesNotContain(headers, header => header is "Move up" or "Move down" or "Move to top" or "Move to end");
+    });
+
     // Final review, Important 1: with the bar minimized and the window list NOT on the screens, the taskbar buttons are
     // the only place the items are, so the bar keeps rebuilding for them: a pin adds a button, an unpin takes it away.
     [Fact]
