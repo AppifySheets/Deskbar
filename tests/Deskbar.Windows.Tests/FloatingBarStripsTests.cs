@@ -541,6 +541,31 @@ public class FloatingBarStripsTests
         Assert.Equal(["Sparrow"], items.Select(LabelOf));
     });
 
+    // Petre, with a screenshot of the Deskbar row held open after he had moved to messengers, ending with a
+    // "↩ Deskbar" chip: "deskbar in deskbar". While the pointer is on the bar the row you left stays expanded (the
+    // hold, see RebuildCore), and every expanded row used to end with the chips, which are about where the CURRENT
+    // workspace can take you. So the chips are on the current row alone; the held row keeps the empty chip line.
+    [Fact]
+    public void A_row_held_open_after_leaving_it_has_no_items() => StaThread.Run(() =>
+    {
+        using var h = StripHarness.Build();
+        Assert.True(h.Manager.SetWorkspacePinned(IdOf(h, "GEPHA"), true).IsSuccess);
+        Assert.True(h.Manager.SetWindowListPlace(WindowListPlace.Row).IsSuccess);
+
+        // The pointer arrives on the bar, then the switch to Sparrow: GEPHA stays expanded under the hold.
+        h.Bar.RaiseEvent(new MouseEventArgs(Mouse.PrimaryDevice, 0) { RoutedEvent = UIElement.MouseEnterEvent });
+        Assert.True(h.Manager.Switch(h.Manager.State.Workspaces.Single(w => w.Name == "Sparrow").Id).IsSuccess);
+        h.Monitor.Pump.OnNext(new WindowEvent(WindowEventKind.Activated, h.Beeper));
+        h.Bar.UpdateLayout();
+
+        var rows = Descendants(h.Rows).OfType<Grid>().Where(g => g.Tag is not null).ToList();
+        var itemsIn = (string name) => rows
+            .Where(g => System.Windows.Automation.AutomationProperties.GetName(g) == name)
+            .SelectMany(Descendants).OfType<Button>().Count(b => b.Tag is FloatingBar.WorkspaceJumpTag);
+        Assert.Equal(0, itemsIn("GEPHA"));
+        Assert.Equal(1, itemsIn("Sparrow"));
+    });
+
     // Petre, with a screenshot of the previous workspace's chip in the current row: "going to messengers immediately
     // brings me back to the current workspace". In the row, the chip sits INSIDE the current workspace's row, whose
     // whole-row click switches to that row's workspace on the bubbling release. The chip's click went to Sparrow,
