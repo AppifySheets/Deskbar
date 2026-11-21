@@ -193,6 +193,13 @@ Pinned workspaces are drawn at the top of the bar with a pin beside their name; 
 row back where it was. A workspace inside a group cannot be pinned, and moving a pinned one into a
 group unpins it.
 
+**The previous workspace as an item** is off by default. Tick **Show the previous workspace on the
+strips and the taskbar** in Manage (or run `deskbar.cmd previous-workspace on`, `off` to hide it
+again) and every screen's strip, the current workspace's titled list and the Windows taskbar get an
+item reading **↩** and the name of the workspace you were on before; clicking it takes you back. It
+takes effect at once. It does not change pinned workspaces' own items, which flip to **↩** inside
+the workspace as described above.
+
 <table align="center">
   <tr>
     <td align="center"><img src="docs/images/list-expanded.png" alt="The current workspace's row expanded in place into a list of its windows, one per line with icon and title, the other rows unchanged below it." /></td>

@@ -72,6 +72,9 @@ public partial class ManageWindow : Window
         ClaudeSkill.IsChecked = manager.State.ClaudeSkill;
         // ...and SetFocusRing.
         FocusRing.IsChecked = manager.State.FocusRing;
+        // ...and SetPreviousWorkspaceItem. The box starts unticked (the setting is off by default), so opening the
+        // window writes nothing.
+        PreviousWorkspaceItem.IsChecked = manager.State.PreviousWorkspaceItem;
         // And again: SetQuietTaskbar ignores a value that matches what the box shows, so opening the window with no
         // choice made and the box ticked by default (an auto-hidden taskbar) records nothing. The note is set here
         // as well as in the handler, because an unticked box raises no Checked when the window opens.
@@ -432,6 +435,11 @@ public partial class ManageWindow : Window
     // The bar draws or clears the outlines on the next rebuild (FloatingBar.ShowFocusRings).
     void OnFocusRingToggled(object s, RoutedEventArgs e) =>
         manager.SetFocusRing(FocusRing.IsChecked == true).TapError(err => MessageBox.Show(err));
+
+    // The bar draws or clears the item, on every strip, in the titled list and on the taskbar, on the state pulse this
+    // sends (FloatingBar.JumpsFor), so it takes effect at once.
+    void OnPreviousWorkspaceItemToggled(object s, RoutedEventArgs e) =>
+        manager.SetPreviousWorkspaceItem(PreviousWorkspaceItem.IsChecked == true).TapError(err => MessageBox.Show(err));
 
     // The gap between tiles, 0 to 64 pixels at 100% scaling (the Tiler scales it by each screen's DPI). A word
     // that is not a number is refused here; a number out of range is refused by SetTileGap with its own reason.

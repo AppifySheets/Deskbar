@@ -120,6 +120,8 @@ public static class ControlUsage
                 "Manage's \"Teach Claude Code\" setting: keep ~/.claude/skills/deskbar/SKILL.md written, or remove it"),
             new("focus-ring", "on|off",
                 "Outline the focused window in its workspace's colour, and the window in front on each other screen in dim white"),
+            new("previous-workspace", "on|off",
+                "Show the previous workspace (\"↩ <name>\") at the end of every screen strip, in the titled list and on the taskbar, or hide it (off by default)"),
         ]),
         new("Diagnostics", [
             new("dump", "", "Save debug dump: write a diagnostics file (screens, the bar, every window in z-order) and print its path"),

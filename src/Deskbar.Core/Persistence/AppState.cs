@@ -274,6 +274,14 @@ public sealed record AppState(
     // The reading the app wants. Not stored.
     [JsonIgnore] public bool FocusRing => !NoFocusRing;
 
+    // Whether the previous workspace's item ("↩ <previous>", WorkspaceJumps.BackItem) is drawn at the end of every
+    // screen strip, in the current workspace's titled list and as a button on Windows' taskbar. A user did not want
+    // it and had no way to turn it off, so it is a choice, OFF by default. Stored as the plain bool, not as a
+    // negation like NoFocusRing: here the default is off, so a state.json without the key reads false, which is what
+    // is wanted. Pinned workspaces' own items are not affected: pinning is something the user opts into, and an item
+    // that flips to "↩ <previous>" inside a pinned workspace is part of it.
+    public bool PreviousWorkspaceItem { get; init; }
+
     // Petre: "i want it configurable" -- the Alt+Tab-style workspace switcher's chord.
     //
     // Stored as the TEXT the user typed, not as a parsed Chord: state.json stays readable

@@ -179,6 +179,17 @@ P5. A strip crowded with windows: the tabs narrow, the item keeps its full width
 P6. `deskbar.cmd jump Messengers` from elsewhere goes in; run again from inside, it goes back.
 P7. Unpin from the row menu. The items go from every strip and the taskbar.
 
+The previous workspace's item (off by default; Manage, "Show the previous workspace on the strips and the
+taskbar", or `deskbar.cmd previous-workspace on|off`).
+
+P8. With nothing pinned and the setting off (a fresh state.json), switch between two workspaces. No strip, no titled
+    list and no taskbar button shows a "↩ <previous>" item. The bar header's own ↩ button still goes back.
+P9. Tick the setting in Manage, with no restart. Every screen's strip ends with "↩ <where you were>", the titled list
+    (window list in the row or at the bottom) ends with it, and the taskbar has a "↩" button. Click one: you go back.
+P10. Untick it. The item leaves every strip and the list, and the taskbar button closes, also with the bar minimized
+    to its taskbar button. `deskbar.cmd previous-workspace on` and `off` do the same.
+P11. With the setting off, pin a workspace and go into it. Its pinned item still reads "↩ <where you were>".
+
 ## Tasks in the bar
 
 Tasks in the bar (spec `docs/superpowers/specs/2026-11-19-tasks-in-the-bar-design.md`). `$ts` is

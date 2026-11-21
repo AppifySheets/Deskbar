@@ -64,7 +64,7 @@ public class FloatingBarStripsTests
     [Fact]
     public void A_screen_with_no_windows_gets_an_empty_tab_list_and_the_name() => StaThread.Run(() =>
     {
-        using var h = StripHarness.Build();
+        using var h = StripHarness.Build(previousItem: true);
         h.Fill();
 
         // No tab: the name tag, then only the previous workspace's item, which every strip carries.
@@ -641,7 +641,7 @@ public class FloatingBarStripsTests
     public void A_minimized_bar_with_no_strips_keeps_the_taskbar_buttons_current() => StaThread.Run(() =>
     {
         var jumps = new TaskbarJumps(pin: _ => Result.Success(), ignore: _ => { }, switchTo: _ => Result.Success());
-        using var h = StripHarness.Build(taskbar: jumps);
+        using var h = StripHarness.Build(taskbar: jumps, previousItem: true);
         h.Bar.MinimizeToTaskbar();
 
         Assert.True(h.Manager.SetWorkspacePinned(IdOf(h, "Sparrow"), true).IsSuccess);
@@ -658,7 +658,7 @@ public class FloatingBarStripsTests
     public void The_previous_workspace_is_the_last_item_on_every_strip_and_on_the_taskbar() => StaThread.Run(() =>
     {
         var jumps = new TaskbarJumps(pin: _ => Result.Success(), ignore: _ => { }, switchTo: _ => Result.Success());
-        using var h = StripHarness.Build(taskbar: jumps);
+        using var h = StripHarness.Build(taskbar: jumps, previousItem: true);
         h.Fill();
 
         Assert.All(h.Strips, strip => Assert.Equal("↩ Sparrow", LabelOf((Button)strip.Row.Children[^1])));
@@ -669,11 +669,65 @@ public class FloatingBarStripsTests
         jumps.Close();
     });
 
+    // The default: with the setting off, no strip, titled list or taskbar button carries the previous workspace, and
+    // the bar's own ↩ button still goes back. Turning it on and off again reaches all of them at once, with no
+    // restart, the taskbar button included (it is closed, not just hidden).
+    [Fact]
+    public void The_previous_workspace_item_is_off_by_default_and_follows_the_setting() => StaThread.Run(() =>
+    {
+        var jumps = new TaskbarJumps(pin: _ => Result.Success(), ignore: _ => { }, switchTo: _ => Result.Success());
+        using var h = StripHarness.Build(taskbar: jumps);
+        var listItems = () => Descendants(h.Rows).Concat(Descendants(h.CurrentList)).OfType<Button>()
+            .Count(b => b.Tag is FloatingBar.WorkspaceJumpTag);
+        h.Fill();
+
+        Assert.All(h.Strips, strip => Assert.Empty(JumpsOf(strip)));
+        Assert.Empty(jumps.Windows);
+        Assert.Equal(0, listItems());
+
+        Assert.True(h.Manager.SetPreviousWorkspaceItem(true).IsSuccess);
+        Assert.All(h.Strips, strip => Assert.Equal(["↩ Sparrow"], JumpsOf(strip).Select(LabelOf)));
+        Assert.Equal("↩ Sparrow", Assert.Single(jumps.Windows).Title);
+
+        Assert.True(h.Manager.SetPreviousWorkspaceItem(false).IsSuccess);
+        Assert.All(h.Strips, strip => Assert.Empty(JumpsOf(strip)));
+        Assert.Empty(jumps.Windows);
+
+        // The titled list, in the bar (the strips are then off the screens and are not refilled).
+        Assert.True(h.Manager.SetWindowListPlace(WindowListPlace.Bottom).IsSuccess);
+        Assert.Equal(0, listItems());
+        Assert.True(h.Manager.SetPreviousWorkspaceItem(true).IsSuccess);
+        Assert.Equal(1, listItems());
+        Assert.Equal("↩ Sparrow", Assert.Single(jumps.Windows).Title);
+        Assert.True(h.Manager.SetPreviousWorkspaceItem(false).IsSuccess);
+        Assert.Equal(0, listItems());
+        Assert.Empty(jumps.Windows);
+        jumps.Close();
+    });
+
+    // The same with the bar minimized to its taskbar button and no strips (StripsAlone / JumpsWanted): the toggle must
+    // still reach the taskbar button.
+    [Fact]
+    public void A_minimized_bar_follows_the_previous_workspace_setting_on_the_taskbar() => StaThread.Run(() =>
+    {
+        var jumps = new TaskbarJumps(pin: _ => Result.Success(), ignore: _ => { }, switchTo: _ => Result.Success());
+        using var h = StripHarness.Build(taskbar: jumps);
+        h.Bar.MinimizeToTaskbar();
+        Assert.Empty(jumps.Windows);
+
+        Assert.True(h.Manager.SetPreviousWorkspaceItem(true).IsSuccess);
+        Assert.Equal("↩ Sparrow", Assert.Single(jumps.Windows).Title);
+
+        Assert.True(h.Manager.SetPreviousWorkspaceItem(false).IsSuccess);
+        Assert.Empty(jumps.Windows);
+        jumps.Close();
+    });
+
     // "Back" from GEPHA is Sparrow, which is pinned: its own item already goes there, so no second item for one place.
     [Fact]
     public void No_back_item_when_the_pinned_item_goes_to_the_same_place() => StaThread.Run(() =>
     {
-        using var h = StripHarness.Build();
+        using var h = StripHarness.Build(previousItem: true);
         Assert.True(h.Manager.SetWorkspacePinned(IdOf(h, "Sparrow"), true).IsSuccess);
         h.Fill();
 
@@ -821,7 +875,9 @@ public class FloatingBarStripsTests
 
         public void Fill() => Assert.True(Manager.SetWindowListPlace(WindowListPlace.Screens).IsSuccess);
 
-        public static StripHarness Build(string? groupColour = null, TaskbarJumps? taskbar = null)
+        // previousItem: the previous workspace's item (AppState.PreviousWorkspaceItem) is off in the product by default,
+        // so a test that expects it says so.
+        public static StripHarness Build(string? groupColour = null, TaskbarJumps? taskbar = null, bool previousItem = false)
         {
             var gephaDesktop = Guid.NewGuid();
             var sparrowDesktop = Guid.NewGuid();
@@ -869,6 +925,7 @@ public class FloatingBarStripsTests
                     // Off at the start, although the strips are the default, so that the tests' own
                     // SetWindowListPlace(Screens) is a real change: that change is what makes the bar fill them.
                     WindowListOffScreens = true,
+                    PreviousWorkspaceItem = previousItem,
                 },
             };
             var manager = new WorkspaceManager(desktops, monitor, new StubTitles(), store, screenLayout: screens);

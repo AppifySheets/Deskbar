@@ -10,7 +10,9 @@ using Deskbar.Core.Overview;
 
 namespace Deskbar.App;
 
-// PINNED WORKSPACES' ITEMS (docs/superpowers/specs/2026-11-20-pinned-workspaces-design.md). Petre: "i'd have a
+// PINNED WORKSPACES' ITEMS (docs/superpowers/specs/2026-11-20-pinned-workspaces-design.md), and, when the user has
+// turned it on in Manage (AppState.PreviousWorkspaceItem, off by default), the previous workspace's item after them
+// (JumpsFor). Petre: "i'd have a
 // messengers workspace pinned and i'd go to it each time i need to do something there, and have a simple way to go back
 // to the previous workspace", "i need to jump in and out of the messengers".
 //
@@ -77,10 +79,14 @@ public partial class FloatingBar
     // tag wears on an unnamed desktop.
     static readonly Brush JumpNowhere = Frozen(0xFF, 0x3A, 0x3F, 0x49);
 
-    // The items for this overview: one per pinned workspace, then the previous workspace's (WorkspaceJumps.BackItem;
-    // Petre: "let's also have previous workspace available in strip", "and taskbar"). The current workspace is the
-    // overview's, the same one the strips' name tag shows, and "back" is the manager's MRU answer, read ONCE so the
-    // pinned items and the back item cannot disagree about it.
+    // The items for this overview: one per pinned workspace, then, only when the user has turned it on
+    // (AppState.PreviousWorkspaceItem, off by default), the previous workspace's (WorkspaceJumps.BackItem; Petre:
+    // "let's also have previous workspace available in strip", "and taskbar"). This is the ONE place the back item is
+    // added, so the strips, the titled list and the taskbar buttons all follow the setting together, and a toggle
+    // reaches them on the state pulse's rebuild with no restart. A pinned workspace's own item, which flips to
+    // "↩ <previous>" while you are inside it (WorkspaceJumps.Of), is not the back item and does not depend on the
+    // setting. The current workspace is the overview's, the same one the strips' name tag shows, and "back" is the
+    // manager's MRU answer, read ONCE so the pinned items and the back item cannot disagree about it.
     IReadOnlyList<WorkspaceJump> JumpsFor(Overview overview)
     {
         var back = manager.ByRecentUse().Back;
@@ -93,7 +99,10 @@ public partial class FloatingBar
         // where you are. Petre, with the Meta strip showing an inert "Meta" chip: "remove meta from meta", "also drop
         // from the taskbar". The cost, accepted: that workspace's taskbar button goes while you are in it and comes back
         // at the end of the taskbar when you leave.
-        return [.. pinned.Where(item => item.Target.HasValue), .. WorkspaceJumps.BackItem(pinned, back).Match(item => new[] { item }, () => [])];
+        var backItem = manager.State.PreviousWorkspaceItem
+            ? WorkspaceJumps.BackItem(pinned, back).Match(item => new[] { item }, () => [])
+            : [];
+        return [.. pinned.Where(item => item.Target.HasValue), .. backItem];
     }
 
     // This rebuild's items and the overview they were worked out from (RebuildCore sets it before any row is built), for

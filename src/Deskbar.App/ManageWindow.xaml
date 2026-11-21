@@ -90,6 +90,11 @@
         <CheckBox x:Name="FocusRing" DockPanel.Dock="Bottom" Margin="8,4,8,0"
                   Content="Outline the window you are in with its workspace's colour, and the window in front on each other screen in dim white"
                   Checked="OnFocusRingToggled" Unchecked="OnFocusRingToggled"/>
+        <!-- The previous workspace's item (AppState.PreviousWorkspaceItem, FloatingBar.JumpsFor): off by default, a box
+             here. Declared after the focus ring's, so it sits just above it. -->
+        <CheckBox x:Name="PreviousWorkspaceItem" DockPanel.Dock="Bottom" Margin="8,4,8,0"
+                  Content="Show the previous workspace on the strips and the taskbar"
+                  Checked="OnPreviousWorkspaceItemToggled" Unchecked="OnPreviousWorkspaceItemToggled"/>
         <CheckBox x:Name="ClaudeSkill" DockPanel.Dock="Bottom" Margin="8,8,8,0"
                   Content="Teach Claude Code about Deskbar (a skill in ~/.claude/skills/deskbar and two hooks in ~/.claude/settings.json: sessions open windows in their own workspace and make it blink when they need you)"
                   Checked="OnClaudeSkillToggled" Unchecked="OnClaudeSkillToggled"/>

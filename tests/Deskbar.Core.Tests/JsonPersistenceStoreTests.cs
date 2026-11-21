@@ -129,6 +129,20 @@ public sealed class JsonPersistenceStoreTests : IDisposable
         Assert.Equal(WindowListPlace.Screens, new JsonPersistenceStore(dir).Load().Value.WindowListPlace);
     }
 
+    // The previous workspace's item is off by default, stored as a plain bool: a file with no key (every file written
+    // before the setting) loads as off, and choosing it on is remembered.
+    [Fact]
+    public void A_file_with_no_previous_workspace_key_loads_with_the_item_off_and_on_is_remembered()
+    {
+        Directory.CreateDirectory(dir);
+        File.WriteAllText(Path.Combine(dir, "state.json"),
+            """{"Workspaces":[],"WorkspaceRules":[],"RenameRules":[],"Inventory":{}}""");
+        Assert.False(new JsonPersistenceStore(dir).Load().Value.PreviousWorkspaceItem);
+
+        new JsonPersistenceStore(dir).Save(AppState.Empty with { PreviousWorkspaceItem = true });
+        Assert.True(new JsonPersistenceStore(dir).Load().Value.PreviousWorkspaceItem);
+    }
+
     // ...and choosing another place after that is remembered.
     [Fact]
     public void Turning_the_strips_off_is_remembered()

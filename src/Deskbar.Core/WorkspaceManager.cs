@@ -4122,6 +4122,15 @@ public sealed class WorkspaceManager(
             ? Result.Success()
             : Result.Success().Tap(() => Persist(State with { NoFocusRing = !on }));
 
+    // The previous workspace's item (AppState.PreviousWorkspaceItem): Manage's checkbox and
+    // `previous-workspace on|off`. A no-op when unchanged, like SetFocusRing, so Manage can set its box on open
+    // without writing state.json. The bar draws or clears the item, on the strips and on the taskbar, on the state
+    // pulse Persist sends.
+    public Result SetPreviousWorkspaceItem(bool on) =>
+        State.PreviousWorkspaceItem == on
+            ? Result.Success()
+            : Result.Success().Tap(() => Persist(State with { PreviousWorkspaceItem = on }));
+
     // --- overview / switcher-facing operations -----------------------------------
 
     // Ground truth for "which workspace is this window in": ASK THE OS which desktop

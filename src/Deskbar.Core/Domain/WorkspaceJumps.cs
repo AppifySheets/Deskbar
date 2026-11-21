@@ -31,7 +31,8 @@ public static class WorkspaceJumps
     // button from one rebuild to the next.
     public static readonly Guid BackId = new("6d1c0b9e-3f2a-4c55-9b8e-2a7f0e4d1b11");
 
-    // THE PREVIOUS WORKSPACE'S ITEM, after the pinned ones on every strip and on the taskbar. Petre: "let's also have
+    // THE PREVIOUS WORKSPACE'S ITEM, after the pinned ones on every strip and on the taskbar, when the user has turned
+    // it on (AppState.PreviousWorkspaceItem, off by default; FloatingBar.JumpsFor decides, this only builds it). Petre: "let's also have
     // previous workspace available in strip", "and taskbar". "↩ <previous>", going to `back` (the same back as
     // everywhere else), unless an item in `jumps` already goes there: inside a pinned workspace its own item already
     // reads "↩ <previous>", and a pinned previous workspace already has an item of its own. Two items for one place

@@ -137,4 +137,13 @@ public sealed partial class RemoteControl
             "off" or "false" or "no" => Reply(manager.SetFocusRing(false), () => new { focusRing = "off" }),
             _ => ControlReply.Fail(ControlUsage.LineFor("focus-ring")),
         };
+
+    // The previous workspace's item (AppState.PreviousWorkspaceItem), the remote twin of Manage's checkbox.
+    ControlReply PreviousWorkspace(string onOff) =>
+        onOff.ToLowerInvariant() switch
+        {
+            "on" or "true" or "yes" => Reply(manager.SetPreviousWorkspaceItem(true), () => new { previousWorkspace = "on" }),
+            "off" or "false" or "no" => Reply(manager.SetPreviousWorkspaceItem(false), () => new { previousWorkspace = "off" }),
+            _ => ControlReply.Fail(ControlUsage.LineFor("previous-workspace")),
+        };
 }
