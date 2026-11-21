@@ -7076,25 +7076,12 @@ public partial class FloatingBar : Window
         // everyone. A per-workspace choice is the answer to a per-workspace complaint.
         AddColourPicker(menu, workspaceId);
 
-        menu.Items.Add(new Separator());
-
-        // Out-of-range moves succeed as no-ops by design (see MoveWorkspace), so "Move up" on the
-        // top row does nothing rather than popping an error at someone who clicked it. That is why
-        // nothing here is disabled: a disabled item at the edge of a list is a smaller kindness
-        // than a menu whose shape never changes.
-        Add("▲", "Move up", () => Report(manager.MoveWorkspace(workspaceId, -1)));
-        Add("▼", "Move down", () => Report(manager.MoveWorkspace(workspaceId, +1)));
-        // Petre: "add move to the end and to the top". A reposition rather than a run of swaps:
-        // see MoveWorkspaceTo, which persists and pulses once for the whole gesture instead of
-        // once per row it passes.
-        //
-        // All four move a row among the rows it is drawn beside (#85), which for a member of a group
-        // is the inside of its box: top and end mean top and end of the group, not of the bar.
-        // The list length passed below is deliberately larger than either range; MoveWorkspaceTo
-        // clamps it to the last position available.
-        Add("⤒", "Move to top", () => Report(manager.MoveWorkspaceTo(workspaceId, 0)));
-        Add("⤓", "Move to end", () => Report(manager.MoveWorkspaceTo(workspaceId, manager.State.Workspaces.Count - 1)));
-
+        // NO Move up / Move down / Move to top / Move to end here any more. Petre: "retire old move up/down in favor
+        // of arranging by drag and drop". The bar's arrange mode (FloatingBar.Arrange.cs, FloatingBar.ArrangeDrag.cs)
+        // drags a row straight to where it goes, groups included, so four items stepping it one place at a time were
+        // the slow way to do the same thing. The reorder itself is not gone: Manage's ↑ Up and ↓ Down and the pipe's
+        // `reorder` (RemoteControl.Workspaces.cs) still call MoveWorkspace and MoveWorkspaceTo, since neither Manage's
+        // list nor a script can drag a bar row.
         menu.Items.Add(new Separator());
 
         // Delete (#73), which REVERSED a ruling rather than adding to the menu, so the reason is
