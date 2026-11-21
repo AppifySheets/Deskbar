@@ -102,7 +102,17 @@ public sealed partial class Tiler(WorkspaceManager manager, IVirtualDesktopServi
     // frame equals the accepted frame is our own move coming back and is not a reason to do anything. The slot
     // is kept beside it so a window that would not shrink is not placed again on every re-tile, only when its
     // slot actually changes (spec: "Accept what the window ends up as, do not retry in a loop").
-    sealed record Given(WindowRect Slot, WindowRect Accepted);
+    //
+    // Answered is false when the Place moved nothing at all: the frame read back is the frame from before it. That
+    // is not an app insisting on a size (one with a minimum size still takes the slot's position and as much of its
+    // size as it allows); it is a move that did not happen, usually because Windows was moving the window itself at
+    // that moment. Measured 2026-11-21: when the screen strips appeared, the work area moved down 36 px, and two VS
+    // Code tiles placed in the middle of that read back unchanged ("kept 1396,1087,..., wanted 1396,1105,...").
+    // Taken as their answer, they were never placed again and sat 18 px off their slots for the rest of the day,
+    // although the same SetWindowPos, sent again later, took at once. So an unanswered Place blocks nothing: the
+    // next re-tile asks again. That cannot become a loop, because a Place that moves nothing raises no
+    // LOCATIONCHANGE and so no Settled (AwaitEcho), and re-tiles come only from other events.
+    sealed record Given(WindowRect Slot, WindowRect Accepted, bool Answered = true);
 
     // The board of every tiled workspace visited this session, by workspace id. Kept across desktop switches
     // so coming back to a workspace keeps its slot order instead of re-deriving it from positions (a maximized
@@ -1128,16 +1138,23 @@ public sealed partial class Tiler(WorkspaceManager manager, IVirtualDesktopServi
             given[window] = new Given(slot, slot);
             return;
         }
-        if (!force && frame.HasValue && given.TryGetValue(window, out var last) && last.Slot == slot && last.Accepted == frame.Value)
+        // Not retried: the window answered this same slot with this same frame before. A Place that went unanswered
+        // (it moved nothing, see Given) is tried again.
+        if (!force && frame.HasValue && given.TryGetValue(window, out var last) && last.Answered
+            && last.Slot == slot && last.Accepted == frame.Value)
             return;
 
         surface.Place(window, slot)
             .Tap(() =>
             {
                 var accepted = surface.VisibleFrameOf(window).GetValueOrDefault(slot);
-                given[window] = new Given(slot, accepted);
+                // Moved nothing: not an answer (see Given). Its next Settled, or the next re-tile, places it again.
+                var unanswered = accepted != slot && frame.HasValue && frame.Value == accepted;
+                given[window] = new Given(slot, accepted, Answered: !unanswered);
                 AwaitEcho(window, frame, accepted);
-                if (accepted != slot)
+                if (unanswered)
+                    trace?.Invoke($"tile: {window.Value:X} did not move from {Show(accepted)}, wanted {Show(slot)}; asked again next time");
+                else if (accepted != slot)
                     trace?.Invoke($"tile: {window.Value:X} kept {Show(accepted)}, wanted {Show(slot)}");
             })
             // Ordinary: the window closed mid-re-tile, or it is elevated. The rest of the screen is still tiled,
