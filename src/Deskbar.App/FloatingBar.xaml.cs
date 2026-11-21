@@ -4114,7 +4114,14 @@ public partial class FloatingBar : Window
         // The titled list ends with the items the strips end with: the pinned workspaces' and the previous
         // workspace's (FloatingBar.WorkspaceJumps.cs). Petre: "i want to have pinned workspaces in the workspace, in
         // this layout", "and when at the bottom of the bar".
-        if (titled && jumpsNow is { } jumps) icons.Children.Add(TitledListJumps(jumps.Overview, jumps.Jumps));
+        //
+        // Only in the CURRENT workspace's list: its own row (isCurrent) or the list at the bottom of the bar
+        // (CurrentListGroupKey, built with isCurrent false). A row the hold keeps expanded after you left it (see
+        // `expanded` in RebuildCore) is titled too, but the items say where the current workspace can take you, so
+        // there they read as nonsense: Petre's held Deskbar row ended with "↩ Deskbar", "deskbar in deskbar". The
+        // held row still gets the line, empty, so its height does not change while the pointer is on the bar.
+        if (titled && jumpsNow is { } jumps)
+            icons.Children.Add(TitledListJumps(jumps.Overview, isCurrent || groupKey == CurrentListGroupKey ? jumps.Jumps : []));
 
         // A child workspace's parent's windows USED to be drawn here, dimmed, on every nested row -- the
         // issue asked for "everything from the main workspace pinned to the nested ones". Petre, seeing
