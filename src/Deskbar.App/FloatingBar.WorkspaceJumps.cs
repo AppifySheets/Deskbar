@@ -165,7 +165,15 @@ public partial class FloatingBar
                 () => "Nothing to go back to yet"),
         };
         AutomationProperties.SetName(button, jump.Label);
-        button.Click += (_, _) => jump.Target.Tap(target => Report(manager.Switch(target)));
+        // MarkPressConsumed first: in the titled list the item sits INSIDE the current workspace's row, and that row's
+        // whole-row click switches to the row's own workspace on the same bubbling release. Without the mark the item
+        // went to its workspace and the row brought you straight back. Petre: "going to messengers immediately brings
+        // me back to the current workspace". Harmless on a strip, where no row is underneath.
+        button.Click += (_, _) =>
+        {
+            MarkPressConsumed();
+            jump.Target.Tap(target => Report(manager.Switch(target)));
+        };
         return button;
     }
 }
