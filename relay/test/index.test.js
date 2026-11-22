@@ -118,6 +118,13 @@ test('a report opens an issue with the from-app label and answers its number', a
   assert.match(call.body.body, /shot-1\.png\?raw=true/);
 });
 
+test('a Deskbar Pro report is also labelled priority', async () => {
+  const github = fakeGitHub(201);
+  await handle(reportRequest({ pro: true }), env(), github.fetchImpl);
+  assert.deepEqual(github.calls[0].body.labels, ['from-app', 'priority']);
+  assert.match(github.calls[0].body.body, /Deskbar Pro: priority support/);
+});
+
 test('the report rate limit answers 429', async () => {
   const response = await handle(reportRequest(), env({ REPORT_LIMITER: limiter(false) }), fakeGitHub().fetchImpl);
   assert.equal(response.status, 429);

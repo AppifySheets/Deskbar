@@ -36,10 +36,12 @@ public static class TrayMenu
     // the taskbar button is ever lost (a shell restart, a pin that failed on a Windows build
     // without the desktop COM), this is the way back.
     //
-    // `dump` is "Save debug dump" (see DebugDump): Petre, about a bar misbehaving in an RDP session on another
-    // computer, "let's add debug dump which will give me a file and open window". Nothing can be traced live
-    // on a machine that is not this one, so the machine has to describe itself. Above Exit, as the least used
-    // item, and kept off the line Exit sits on so nobody reaching for Exit lands on it.
+    // `report` is "Report a problem…" (ReportWindow, issue #331): the way people outside the team tell us something
+    // broke, without signing in anywhere. It took the place of "Save debug dump" (Petre, about a bar misbehaving in
+    // an RDP session on another computer: "let's add debug dump which will give me a file and open window"), whose
+    // file now travels inside the report and whose View link still opens it; `deskbar.cmd dump` still writes it
+    // alone. Above Exit, as a rarely used item, and kept off the line Exit sits on so nobody reaching for Exit
+    // lands on it.
     //
     // `restart` is "Restart Deskbar" (see App.RestartApp): Petre, after a colleague's bar stopped switching
     // workspaces and a restart cleared it, "i need to be able to restart deskbar". Directly above Exit, as its
@@ -47,7 +49,7 @@ public static class TrayMenu
     // on, and that costs a few seconds of bar, not the app. Separate from the bar's Restart Explorer on purpose:
     // that one takes seconds, closes folders and fixes the taskbar, none of which a stale Deskbar needs.
     public static ContextMenu Build(bool compatibilityMode, Action openManage, Action exit, Action checkNow,
-        (string Label, Action Open)? update = null, (string Label, Action Toggle)? bar = null, Action? dump = null,
+        (string Label, Action Open)? update = null, (string Label, Action Toggle)? bar = null, Action? report = null,
         Action? restart = null)
     {
         var menu = new ContextMenu();
@@ -89,10 +91,10 @@ public static class TrayMenu
         check.Click += (_, _) => checkNow();
         menu.Items.Add(check);
 
-        if (dump is { } save)
+        if (report is { } open)
         {
-            var item = new MenuItem { Header = "Save debug dump" };
-            item.Click += (_, _) => save();
+            var item = new MenuItem { Header = "Report a problem…" };
+            item.Click += (_, _) => open();
             menu.Items.Add(item);
         }
 

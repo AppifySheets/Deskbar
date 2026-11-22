@@ -15,7 +15,7 @@
 // fixed set of file names. None of it is a lock (anyone can copy the User-Agent); together they
 // keep a drive-by bot out, and anything that gets through lands in a private repo under a label.
 
-import { LIMITS, attachmentPath, issueBody, issueTitle, validateAttachment, validateReport } from './report.js';
+import { LIMITS, attachmentPath, issueBody, issueLabels, issueTitle, validateAttachment, validateReport } from './report.js';
 import { createIssue, putFile } from './github.js';
 
 const json = (status, value) => new Response(JSON.stringify(value), {
@@ -71,8 +71,8 @@ const handleReport = async (request, env, fetchImpl) => {
   if (!check.ok) return error(check.status, check.error);
 
   const report = check.value;
-  const issue = await createIssue(fetchImpl, env, issueTitle(report.text), issueBody(report, env.REPO, env.BRANCH));
-  log('report', { reportId: report.reportId, attachments: report.attachments.length, github: issue.ok ? 201 : issue.status, number: issue.number });
+  const issue = await createIssue(fetchImpl, env, issueTitle(report.text), issueBody(report, env.REPO, env.BRANCH), issueLabels(report));
+  log('report', { reportId: report.reportId, pro: report.pro, attachments: report.attachments.length, github: issue.ok ? 201 : issue.status, number: issue.number });
   return issue.ok ? json(201, { number: issue.number }) : error(502, 'github refused the report');
 };
 

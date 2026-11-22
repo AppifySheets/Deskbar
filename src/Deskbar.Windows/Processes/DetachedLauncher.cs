@@ -10,8 +10,8 @@ using Deskbar.Windows.Packaging;
 namespace Deskbar.Windows.Processes;
 
 // THE ONE WAY Deskbar starts a program on someone's behalf: `deskbar.cmd start` and `restart-app`
-// (ProgramStarter), the dock's pins and their "Open file location" (TaskbarPins), the debug dump's Explorer
-// window (DebugDump.Reveal) and the stats line's Task Manager (FloatingBar.Stats).
+// (ProgramStarter), the dock's pins and their "Open file location" (TaskbarPins), the report window's Notepad
+// and Explorer windows (DebugDump.Open, ReportService) and the stats line's Task Manager (FloatingBar.Stats).
 // Design: docs/superpowers/specs/2026-10-24-deskbar-store-packaging-design.md
 //
 // WHY IT EXISTS: a process started by a packaged process inherits its package identity unless the parent

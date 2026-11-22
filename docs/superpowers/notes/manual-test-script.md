@@ -289,6 +289,28 @@ AR12. With the mode on, click Start, search, a pinned app, the tray chevron, the
 AR13. Click Done, then minimize the bar. Right-click a strip: no "Arrange workspaces" item.
       `$ts arrange on` fails with "The bar is minimized." and nothing changes.
 
+## Reporting a problem
+
+"Report a problem…" (issue #331). Reports land in the private repo AppifySheets/Deskbar-reports, so
+close every test issue there afterwards. Start each with "test" in the text.
+
+RP1. Right-click the tray: "Report a problem…" sits where "Save debug dump" was, above Restart and
+     Exit. The bar's background menu has the same item. Each opens the window; a second click brings
+     the open window forward instead of opening another.
+RP2. Send is greyed until "What happened?" has text other than spaces.
+RP3. Win+Shift+S a region, then Ctrl+V with focus in the text box: a thumbnail appears and the text
+     box gets no text. Copy plain text and Ctrl+V: it pastes as text. Copy two PNGs in Explorer and
+     Ctrl+V: two thumbnails. Drop a JPEG from Explorer: a thumbnail. Drop a .txt: a note says only
+     pictures can be added. A sixth picture is refused with a note; ✕ on a thumbnail removes it.
+RP4. "View what it contains" opens the dump in Notepad, written now, with this window in its list.
+RP5. Type a contact, send. Progress counts each screenshot, the dump, then the report. "Sent, thanks"
+     shows a reference number, and that issue in Deskbar-reports has the screenshots, the dump link
+     and the from-app label (and priority on a copy that owns Deskbar Pro).
+RP6. Disconnect the network, send: "Could not send." with a folder under %APPDATA%\Deskbar\reports
+     holding report.txt and every file; Open folder opens it. Reconnect, Try again: sent, and the
+     folder is gone.
+RP7. `$ts dump` still writes a dump file and answers its path, opening no window.
+
 ## Results (2026-08-01)
 
 Status: **pending human execution.** An agent cannot observe the desktop, Task View,

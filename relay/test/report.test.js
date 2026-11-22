@@ -1,7 +1,7 @@
 // Tests for the pure half: validation, paths, title and body. Run with `node --test` in relay/.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { LIMITS, attachmentPath, issueBody, issueTitle, validateAttachment, validateReport } from '../src/report.js';
+import { LIMITS, attachmentPath, issueBody, issueLabels, issueTitle, validateAttachment, validateReport } from '../src/report.js';
 
 const ID = '0123456789abcdef0123456789abcdef';
 const PNG = 'iVBORw0KGgoAAAANSUhEUg==';
@@ -65,11 +65,23 @@ test('malformed reports are refused with a reason', () => {
     [report({ appVersion: 'latest' }), 'bad app version'],
     [report({ windowsBuild: 'Windows 11' }), 'bad windows build'],
     [report({ store: 'yes' }), 'bad store flag'],
+    [report({ pro: 'yes' }), 'bad pro flag'],
     [report({ attachments: ['evil.sh'] }), 'bad attachment name'],
     [report({ attachments: ['dump.txt', 'dump.txt'] }), 'duplicate attachment'],
     [report({ reportId: 'nope' }), 'bad report id'],
   ];
   cases.forEach(([input, reason]) => assert.equal(validateReport(input).error, reason));
+});
+
+// Deskbar Pro comes with priority support. An app from before the flag sends no `pro` and is not Pro.
+test('pro is optional, false by default, and a Pro report is labelled priority', () => {
+  assert.equal(validateReport(report()).value.pro, false);
+  const pro = validateReport(report({ pro: true })).value;
+  assert.equal(pro.pro, true);
+  assert.deepEqual(issueLabels(pro), ['from-app', 'priority']);
+  assert.deepEqual(issueLabels(validateReport(report()).value), ['from-app']);
+  assert.match(issueBody(pro, 'o/r', 'main'), /\nDeskbar Pro: priority support\n/);
+  assert.ok(!issueBody(validateReport(report()).value, 'o/r', 'main').includes('Deskbar Pro'));
 });
 
 test('the title is the first non-empty line, cut to 80 characters', () => {

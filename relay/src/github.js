@@ -27,12 +27,15 @@ export const putFile = async (fetchImpl, env, path, base64, message) => {
   return response.status === 201 ? { ok: true } : { ok: false, status: response.status };
 };
 
-/** Opens the issue with the from-app label. Returns { ok: true, number } or { ok: false, status }. */
-export const createIssue = async (fetchImpl, env, title, body) => {
+/**
+ * Opens the issue with the given labels (issueLabels in report.js: from-app, plus priority for Deskbar Pro).
+ * Returns { ok: true, number } or { ok: false, status }. A label the repo does not have yet is created by GitHub.
+ */
+export const createIssue = async (fetchImpl, env, title, body, labels) => {
   const response = await fetchImpl(`${API}/repos/${env.REPO}/issues`, {
     method: 'POST',
     headers: headers(env.GITHUB_TOKEN),
-    body: JSON.stringify({ title, body, labels: ['from-app'] }),
+    body: JSON.stringify({ title, body, labels }),
   });
   if (response.status !== 201) return { ok: false, status: response.status };
   const { number } = await response.json();

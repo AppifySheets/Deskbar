@@ -85,17 +85,17 @@ public class TrayMenuTests
     // this one (an RDP session on another computer), where nothing can be traced live. Above Exit, below the
     // update check: the least used item, and the one nobody should hit by reaching for Exit.
     [Fact]
-    public void The_debug_dump_sits_above_exit_and_invokes_the_dump() => StaThread.Run(() =>
+    public void Report_a_problem_sits_above_exit_and_opens_the_report_window() => StaThread.Run(() =>
     {
-        var dumps = 0;
+        var reports = 0;
         var menu = TrayMenu.Build(compatibilityMode: false, () => { }, () => { }, () => { },
-            update: null, bar: null, dump: () => dumps++);
+            update: null, bar: null, report: () => reports++);
 
-        Assert.Equal(["Manage…", "Check for updates…", "Save debug dump", "Exit"], Headers(menu));
+        Assert.Equal(["Manage…", "Check for updates…", "Report a problem…", "Exit"], Headers(menu));
 
-        menu.Items.OfType<MenuItem>().Single(item => (string)item.Header == "Save debug dump")
+        menu.Items.OfType<MenuItem>().Single(item => (string)item.Header == "Report a problem…")
             .RaiseEvent(new System.Windows.RoutedEventArgs(MenuItem.ClickEvent));
-        Assert.Equal(1, dumps);
+        Assert.Equal(1, reports);
     });
 
     // Petre, after a colleague's bar stopped switching workspaces and only a restart cleared it: "i need to be
@@ -106,9 +106,9 @@ public class TrayMenuTests
     {
         var restarts = 0;
         var menu = TrayMenu.Build(compatibilityMode: false, () => { }, () => { }, () => { },
-            update: null, bar: null, dump: () => { }, restart: () => restarts++);
+            update: null, bar: null, report: () => { }, restart: () => restarts++);
 
-        Assert.Equal(["Manage…", "Check for updates…", "Save debug dump", "Restart Deskbar", "Exit"], Headers(menu));
+        Assert.Equal(["Manage…", "Check for updates…", "Report a problem…", "Restart Deskbar", "Exit"], Headers(menu));
 
         menu.Items.OfType<MenuItem>().Single(item => (string)item.Header == "Restart Deskbar")
             .RaiseEvent(new System.Windows.RoutedEventArgs(MenuItem.ClickEvent));

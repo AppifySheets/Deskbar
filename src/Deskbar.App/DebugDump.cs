@@ -9,9 +9,11 @@ using Deskbar.Windows.Processes;
 
 namespace Deskbar.App;
 
-// "Save debug dump", on the tray menu, the bar's background menu and `deskbar.cmd dump`. Petre, about the bar
-// sitting over a fullscreen window in an RDP session on another computer: "let's add debug dump which will
-// give me a file and open window".
+// The debug dump, behind `deskbar.cmd dump` and "Report a problem…" (ReportWindow, issue #331), which attaches it to
+// a report and whose View link opens it. It began as the menus' "Save debug dump"; Petre, about the bar sitting
+// over a fullscreen window in an RDP session on another computer: "let's add debug dump which will give me a file
+// and open window". The report window replaced that menu item in 2.5 and covers both halves: View writes the file
+// and opens it, and the report carries it to us without the user having to send a file anywhere.
 //
 // The trace log (ClickTrace) answers questions about a sequence and has to be switched on BEFORE the problem
 // happens. This answers questions about a MOMENT, on a machine nobody here can probe: what the screens are,
@@ -26,32 +28,36 @@ namespace Deskbar.App;
 // awareness actually in effect, because an unaware thread is handed virtualised numbers that look fine.
 //
 // Saved under %APPDATA%\Deskbar\dumps rather than %TEMP%, so it is easy to find again on a machine that is
-// not one's own; the menu items then open Explorer with the file selected (Reveal). Titles of every window
-// are in the file, which is the point of it, and also why it is written only when asked.
+// not one's own. Titles of every window are in the file, which is the point of it, and also why it is written
+// only when asked, and why the report window shows it (View) before anything is sent.
 static class DebugDump
 {
     // `strips` is the screen strips' set (ScreenStrips), null where there is none (compatibility mode, and the tests).
     public static Result<string> Save(FloatingBar? bar, WorkspaceManager manager, ScreenStrips? strips = null) =>
+        Result.Try(() => Compose(bar, manager, strips), e => $"Could not write the debug dump: {e.Message}")
+            .Bind(SaveText);
+
+    // Writes a dump that was already composed. "Report a problem…" (ReportWindow) composes the dump once, when its
+    // window opens, which is the moment of the problem; its View link writes THAT text with this and opens it, so
+    // what the user reads is exactly what Send would send.
+    public static Result<string> SaveText(string text) =>
         Result.Try(() =>
         {
             var folder = Path.Combine(AppPaths.NewStateDir, "dumps");
             Directory.CreateDirectory(folder);
             var path = Path.Combine(folder, $"deskbar-dump-{DateTime.Now:yyyyMMdd-HHmmss}.txt");
-            File.WriteAllText(path, Compose(bar, manager, strips));
+            File.WriteAllText(path, text);
             ClickTrace.Write($"debug dump written: {path}");
             return path;
         }, e => $"Could not write the debug dump: {e.Message}");
 
-    // Explorer with the file selected: the "open window" half of the request, and the quickest way to copy the
-    // file off a remote machine.
-    //
-    // Through DetachedLauncher, so under the Store copy the Explorer window is not part of Deskbar's package
-    // (store packaging design). Explorer's own `/select,"<path>"` goes as ONE verbatim string with the path
-    // always quoted, as before the package; split into two C-runtime arguments the path went unquoted when it
-    // had no space, and a comma in it broke Explorer's parse (TaskbarPins.Reveal has the same fix).
-    public static Result Reveal(string path) =>
-        DetachedLauncher.StartVerbatim("explorer.exe", $"/select,\"{path}\"", null)
-            .MapError(e => $"The dump is at {path}, but Explorer could not be opened: {e}");
+    // The written dump in Notepad, for the report window's View link: the user reads what goes out before it goes.
+    // Through DetachedLauncher, so under the Store copy Notepad is not part of Deskbar's package (store packaging
+    // design, docs/superpowers/specs/2026-10-24-deskbar-store-packaging-design.md).
+    public static Result Open(string path) =>
+        DetachedLauncher.Start("notepad.exe", [path], null)
+            .MapError(e => $"The dump is at {path}, but Notepad could not be opened: {e}")
+            .Bind(_ => Result.Success());
 
     internal static string Compose(FloatingBar? bar, WorkspaceManager manager, ScreenStrips? strips = null)
     {

@@ -66,7 +66,9 @@ const isString = value => typeof value === 'string';
  */
 export const validateReport = json => {
   if (json === null || typeof json !== 'object') return fail(400, 'not a json object');
-  const { reportId, text, contact = '', appVersion, windowsBuild, store = false, attachments = [] } = json;
+  // pro: this copy owns the Deskbar Pro add-on, which comes with priority support (issueLabels). Optional and
+  // false by default, so an app from before the flag still files reports.
+  const { reportId, text, contact = '', appVersion, windowsBuild, store = false, pro = false, attachments = [] } = json;
   if (!isString(reportId) || !REPORT_ID.test(reportId)) return fail(400, 'bad report id');
   if (!isString(text) || text.trim().length === 0) return fail(400, 'empty text');
   if (text.length > LIMITS.textChars) return fail(413, 'text too long');
@@ -74,11 +76,15 @@ export const validateReport = json => {
   if (!isString(appVersion) || !APP_VERSION.test(appVersion)) return fail(400, 'bad app version');
   if (!isString(windowsBuild) || !WINDOWS_BUILD.test(windowsBuild)) return fail(400, 'bad windows build');
   if (typeof store !== 'boolean') return fail(400, 'bad store flag');
+  if (typeof pro !== 'boolean') return fail(400, 'bad pro flag');
   if (!Array.isArray(attachments) || attachments.length > LIMITS.attachments) return fail(400, 'bad attachments');
   if (!attachments.every(name => isString(name) && ATTACHMENT_NAME.test(name))) return fail(400, 'bad attachment name');
   if (new Set(attachments).size !== attachments.length) return fail(400, 'duplicate attachment');
-  return { ok: true, value: { reportId, text, contact: contact.trim(), appVersion, windowsBuild, store, attachments } };
+  return { ok: true, value: { reportId, text, contact: contact.trim(), appVersion, windowsBuild, store, pro, attachments } };
 };
+
+/** The issue's labels: every report is from-app, and a Deskbar Pro buyer's is also priority (priority support). */
+export const issueLabels = report => (report.pro ? ['from-app', 'priority'] : ['from-app']);
 
 // Control characters (other than tab and newline) have no business in an issue and can hide text.
 const stripControl = value => value.replace(/[\u0000-\u0008\u000B-\u001F\u007F]/g, '');
@@ -115,6 +121,7 @@ export const issueBody = (report, repo, branch) => {
   const build = report.store ? 'Store build' : 'direct download';
   const lines = [
     `Deskbar ${report.appVersion} (${build}) on Windows ${report.windowsBuild}`,
+    ...(report.pro ? ['Deskbar Pro: priority support'] : []),
     `Contact: ${report.contact.length > 0 ? inlineCode(stripControl(report.contact)) : 'none given'}`,
     `Report id: \`${report.reportId}\``,
     '',

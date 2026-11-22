@@ -42,6 +42,7 @@ public partial class App : Application
     ShellHookAttentionMonitor? attentionMonitor;
     bool compatibilityMode;
     ManageWindow? manageWindow; // single instance: a left-click on the tray opens this
+    ReportWindow? reportWindow; // single instance too: "Report a problem…" brings an open one forward (ReportProblem)
     HotkeyService? hotkeys;
     WorkspaceSwitchGesture? switcher; // Alt+Tab-style workspace picker (Win+Ctrl+Tab by default)
     Chord boundSwitcher;              // the chord the picker and the hotkey are currently registered on
@@ -800,12 +801,29 @@ public partial class App : Application
     // anything else -- which matters because it arrived from the network.
     static void OpenReleasePage(ReleaseInfo release) => OpenUrl(release.PageUrl);
 
-    // "Save debug dump" from the tray or the bar's menu (see DebugDump): write the file, then open Explorer
-    // with it selected. A failure is said out loud, because whoever clicked is waiting for a window.
-    void SaveDebugDump() =>
-        DebugDump.Save(floatingBar, manager!, screenStrips)
-            .Bind(DebugDump.Reveal)
-            .TapError(error => MessageBox.Show(error, "Deskbar", MessageBoxButton.OK, MessageBoxImage.Warning));
+    // "Report a problem…" from the tray or the bar's menu (ReportWindow, issue #331). It replaced "Save debug dump":
+    // the window's View link writes and opens the dump, and Send carries it to us with the user's words.
+    //
+    // The dump is composed HERE, as the window opens, because this is the moment of the problem: by the time
+    // someone has typed what happened, pasted a screenshot and pressed Send, the windows have moved on. A dump that
+    // cannot be composed does not stop a report; the report then carries the reason instead.
+    //
+    // One window at a time, like Manage: a second click brings the open one forward rather than starting a second
+    // report and a second dump.
+    void ReportProblem()
+    {
+        if (reportWindow is { IsVisible: true } open)
+        {
+            if (open.WindowState == WindowState.Minimized) open.WindowState = WindowState.Normal;
+            open.Activate();
+            return;
+        }
+        var dump = Result.Try(() => DebugDump.Compose(floatingBar, manager!, screenStrips))
+            .Match(text => text, error => $"(the debug dump could not be written: {error})\n");
+        reportWindow = new ReportWindow(dump, ReportService.Live());
+        reportWindow.Closed += (_, _) => reportWindow = null;
+        reportWindow.Show();
+    }
 
     // Split out for #110's failure path, which has no ReleaseInfo to name a page with: a check that
     // could not be made knows nothing about any release, and the releases page is still the way
@@ -1478,7 +1496,7 @@ public partial class App : Application
             // taskbar and window icons cannot drift apart.
             IconSource = AppIcon,
             ToolTipText = compatibilityMode ? "Deskbar (compatibility mode)" : "Deskbar",
-            ContextMenu = TrayMenu.Build(compatibilityMode, OpenManage, ExitApp, CheckForUpdateNow, null, BarToggle(), SaveDebugDump, RestartApp),
+            ContextMenu = TrayMenu.Build(compatibilityMode, OpenManage, ExitApp, CheckForUpdateNow, null, BarToggle(), ReportProblem, RestartApp),
             // Petre: "left click gives us the main window, right click gives exit and
             // manage". RightClick only, so a left-click is free to open Manage (wired
             // below) instead of raising the same menu twice.
@@ -1582,7 +1600,7 @@ public partial class App : Application
                 // first time, it opens at the top right of the main screen, clear of the bar's usual corner.
                 DetachStats = () => ShowDetachedStats(manager.State.DetachedStats ?? FirstDetachedStatsPlace()),
                 // The tray's own commands, for the bar's background menu, so both menus run the same code.
-                AppActions = new FloatingBar.AppCommands(OpenManage, CheckForUpdateNow, ExitApp, () => pendingUpdate, SaveDebugDump, RestartApp),
+                AppActions = new FloatingBar.AppCommands(OpenManage, CheckForUpdateNow, ExitApp, () => pendingUpdate, ReportProblem, RestartApp),
                 // ...and the Search button's: quick find, built further down, so reached through the field.
                 OpenFind = () => quickFind?.ToggleFromBar(),
                 // ...and the captions' time today (FloatingBar.WorkspaceTime.cs): the Time tab's own reading
@@ -2323,7 +2341,7 @@ public partial class App : Application
     {
         if (trayIcon is null) return;
         trayIcon.ContextMenu = TrayMenu.Build(compatibilityMode, OpenManage, ExitApp, CheckForUpdateNow,
-            pendingUpdate, BarToggle(), SaveDebugDump, RestartApp);
+            pendingUpdate, BarToggle(), ReportProblem, RestartApp);
     }
 
     (string Label, Action Toggle)? BarToggle() =>

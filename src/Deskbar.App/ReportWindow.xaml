@@ -1,0 +1,82 @@
+<!-- "Report a problem…" (issue #331; the approved mockup is linked from the PR). Plain WPF controls, the same look as
+     PromptDialog and Manage. Laid out in the order people think: what happened, the pictures, what else goes with it,
+     how to reach them, Send. The code behind (ReportWindow.xaml.cs) explains paste, drop, sending and the fallback.
+
+     Topmost, like PromptDialog: it is opened from the bar's menu, and the bar is topmost, so an ordinary window could
+     open underneath the surface that launched it. Shown in the taskbar, unlike PromptDialog, because people switch
+     away from it to take the screenshot they are about to paste. -->
+<Window x:Class="Deskbar.App.ReportWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Deskbar: Report a problem" Width="440" SizeToContent="Height"
+        ResizeMode="NoResize" WindowStartupLocation="CenterScreen" Topmost="True"
+        AllowDrop="True"
+        Icon="pack://application:,,,/Deskbar;component/Assets/deskbar.ico">
+    <StackPanel Margin="12">
+        <!-- Everything the user fills in. Hidden while sending and after, when the state panel below takes over. -->
+        <StackPanel x:Name="Form">
+            <TextBlock Text="What happened?" Margin="0,0,0,4"/>
+            <TextBox x:Name="Description" Height="92" AcceptsReturn="True" TextWrapping="Wrap"
+                     VerticalScrollBarVisibility="Auto" MaxLength="20000"/>
+
+            <TextBlock Margin="0,10,0,4" TextWrapping="Wrap">
+                <Run Text="Screenshots"/>
+                <Run Text="(Ctrl+V to paste, or drop image files here)" Foreground="#5F5F5F"/>
+            </TextBlock>
+            <!-- Thumbnails are added in front of DropHint by the code behind; DropHint goes once there are five. -->
+            <WrapPanel x:Name="Shots">
+                <Grid x:Name="DropHint" Width="92" Height="58" Margin="0,0,6,6">
+                    <Rectangle Stroke="#8A8A8A" StrokeThickness="1" StrokeDashArray="3 2"/>
+                    <TextBlock Text="Paste or drop&#10;up to 5" Foreground="#5F5F5F" FontSize="11"
+                               TextAlignment="Center" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                </Grid>
+            </WrapPanel>
+            <TextBlock x:Name="ShotNote" Foreground="#9D5D00" TextWrapping="Wrap" Visibility="Collapsed"/>
+
+            <CheckBox x:Name="IncludeDump" IsChecked="True" Margin="0,8,0,0">
+                <TextBlock Text="Include the debug dump. It lists the titles of the windows on your screens." TextWrapping="Wrap"/>
+            </CheckBox>
+            <!-- On its own line rather than inside the box's label: a link in a CheckBox's content toggles the box too. -->
+            <TextBlock Margin="20,2,0,0">
+                <Hyperlink x:Name="ViewDumpLink" Click="OnViewDump">View what it contains</Hyperlink>
+            </TextBlock>
+
+            <TextBlock Margin="0,10,0,4">
+                <Run Text="How can we reach you?"/>
+                <Run Text="(optional)" Foreground="#5F5F5F"/>
+            </TextBlock>
+            <!-- WPF's TextBox has no placeholder; the hint is a TextBlock under it, hidden once something is typed. -->
+            <Grid>
+                <TextBox x:Name="Contact" MaxLength="200"/>
+                <TextBlock x:Name="ContactHint" Text="Email or Telegram handle" Foreground="#8A8A8A"
+                           IsHitTestVisible="False" Margin="5,2,0,0" VerticalAlignment="Center"/>
+            </Grid>
+
+            <TextBlock Text="Goes privately to the Deskbar team. Nothing is posted publicly."
+                       Foreground="#5F5F5F" FontSize="11" Margin="0,8,0,0" TextWrapping="Wrap"/>
+        </StackPanel>
+
+        <!-- Sending, sent, or could not send. Colours are set from code (ReportWindow.ShowState). -->
+        <Border x:Name="StatePanel" BorderThickness="1" Padding="10" Visibility="Collapsed">
+            <StackPanel>
+                <TextBlock x:Name="StateTitle" FontWeight="SemiBold" TextWrapping="Wrap"/>
+                <TextBlock x:Name="StateText" TextWrapping="Wrap" Margin="0,4,0,0" Visibility="Collapsed"/>
+                <!-- A read-only box rather than a TextBlock, so the folder's path can be selected and copied. -->
+                <TextBox x:Name="StatePath" IsReadOnly="True" BorderThickness="0" Background="Transparent"
+                         FontFamily="Consolas" FontSize="11" TextWrapping="Wrap" Margin="0,4,0,0" Visibility="Collapsed"/>
+                <ProgressBar x:Name="Progress" Height="6" Margin="0,6,0,0" Maximum="100" Visibility="Collapsed"/>
+            </StackPanel>
+        </Border>
+
+        <!-- Right-docked children stack from the right edge in the order declared: Close first, then Send. -->
+        <DockPanel Margin="0,12,0,0" LastChildFill="False">
+            <TextBlock x:Name="OpenFolderLink" DockPanel.Dock="Left" VerticalAlignment="Center" Visibility="Collapsed">
+                <Hyperlink Click="OnOpenFolder">Open folder</Hyperlink>
+            </TextBlock>
+            <Button x:Name="CloseButton" DockPanel.Dock="Right" Content="Cancel" Padding="12,4" Margin="8,0,0,0"
+                    IsCancel="True" Click="OnClose"/>
+            <Button x:Name="SendButton" DockPanel.Dock="Right" Content="Send" Padding="16,4" MinWidth="74"
+                    IsDefault="True" IsEnabled="False" Click="OnSend"/>
+        </DockPanel>
+    </StackPanel>
+</Window>

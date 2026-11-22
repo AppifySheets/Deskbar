@@ -28,9 +28,14 @@ screenshot shows the user's desktop and the debug dump lists every window title 
      "appVersion": "2.5.12",
      "windowsBuild": "10.0.26200",
      "store": false,
+     "pro": false,
      "attachments": ["shot-1.png", "dump.txt"]
    }
    ```
+
+   `pro` is optional and false by default. It is true when the copy owns the Deskbar Pro add-on,
+   which comes with priority support, and then the issue gets the `priority` label as well and a
+   "Deskbar Pro: priority support" line.
 
    The Worker opens the issue and answers `201 {"number": 12}`. The app shows that number as the
    report's reference. The user cannot open the issue itself, since the repository is private.

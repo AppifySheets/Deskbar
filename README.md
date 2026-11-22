@@ -692,7 +692,9 @@ Downloads are https only, from github.com or githubusercontent.com.
 the latest, a newer one exists, the download is still being built, or the check failed and here
 is the releases page. The checkbox at the bottom of Manage governs only the automatic check; a
 manual check still contacts GitHub, because clicking it is the request. Unticking takes effect at
-the next start. The check is the app's only network traffic.
+the next start. The update check is the app's only network traffic on its own. **Report a
+problem…** sends one report when you press Send, with what you typed, the screenshots you added and
+the debug dump if you left it ticked (see [Reporting a problem](#reporting-a-problem)).
 
 The Store copy does not use GitHub for any of this. It asks the Store on the same timer and
 from the same menu items, under the same checkbox in Manage, and the offer window has one
@@ -702,6 +704,24 @@ closes to update and comes back by itself.
 Why a window rather than a Windows notification: a portable exe with no Start-menu shortcut has no
 AppUserModelID, and Windows silently drops its toasts. Registering one would cost the "one file,
 nothing installed" property, so the app asks in its own window.
+
+## Reporting a problem
+
+**Report a problem…** on the tray menu and the bar's menu opens a small window: say what happened,
+paste screenshots with Ctrl+V (Win+Shift+S works well) or drop image files on it, up to five, and
+press Send. Nobody needs an account or a sign-in.
+
+- The debug dump is ticked by default. It describes your screens, the bar and every window on them,
+  titles included, so **View what it contains** opens it in Notepad before anything is sent. Untick
+  it if you would rather not send it.
+- The contact line is optional. Without it we can read the report but cannot answer you.
+- Reports go privately to the Deskbar team, not to a public issue tracker. The window shows a
+  reference number once the report has arrived.
+- If it cannot be sent (no connection, for example), the whole report is saved under
+  `%APPDATA%\Deskbar\reports` and the window names the folder. **Try again** sends the same report.
+
+The report travels over https to `report.deskbar.app`, a small relay whose code is in
+[`relay/`](relay/README.md). It holds the key that files the report; the app holds none.
 
 ## Driving it from scripts
 
