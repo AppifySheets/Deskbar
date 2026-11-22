@@ -25,9 +25,6 @@ namespace Deskbar.App;
 // and whenever it comes to the front. The 15 minutes and 8 hours are first guesses, to tune.
 public partial class FloatingBar
 {
-    static readonly TimeSpan AgingStarts = TimeSpan.FromMinutes(15);
-    static readonly TimeSpan FullyAged = TimeSpan.FromHours(8);
-
     // The grey overlays the current rows carry, so the clock can age them in place every minute without a
     // rebuild. Emptied at the start of every rebuild, which replaces them all.
     readonly List<(WindowHandle Window, UIElement Grey)> agingIcons = [];
@@ -45,9 +42,9 @@ public partial class FloatingBar
 
     void ForgetAgingIcons() => agingIcons.Clear();
 
-    // 0 for fresh, rising to 1 when fully aged.
-    internal static double AgeOf(TimeSpan unused) =>
-        unused <= AgingStarts ? 0 : Math.Pow(Math.Min(1, (unused - AgingStarts) / (FullyAged - AgingStarts)), 0.7);
+    // 0 for fresh, rising to 1 when fully aged. The curve lives in Core now (WorkspaceFade.Curve), because the
+    // workspace rows fade on the same one and the two must not drift apart.
+    internal static double AgeOf(TimeSpan unused) => WorkspaceFade.Curve(unused);
 
     double AgeOf(WindowHandle window) => manager.LastUsed(window) is { } at ? AgeOf(manager.Now - at) : 0;
 
