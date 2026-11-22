@@ -1,12 +1,12 @@
 ---
 title: Goals
-summary: Weekly and monthly goals that your tasks count toward, set from a script for now, with the planner window to follow.
+summary: Weekly and monthly goals that your tasks count toward, set from a script for now, with a planner window to come.
 order: 16
 # Clips to film: none new for this release. The tasks-window clip should be filmed again once a goal exists, since its
 # toolbar then shows the goal filter. The planner and plan-this-week clips come with the planner.
 ---
 
-A goal is something you want done this week or this month. Tasks count toward it, so you can see how much of the work behind a goal is finished. The idea comes from Stephen Covey's weekly planning in *The 7 Habits of Highly Effective People*: once a week, pick the few things that matter most, then let the daily work serve them.
+A goal is something you want done this week or this month. Tasks count toward it, and `goal list` shows how much of the work behind each goal is finished. The idea comes from Stephen Covey's weekly planning in *The 7 Habits of Highly Effective People*: once a week, pick the few things that matter most, then let the daily work serve them.
 
 ## How to use it
 
@@ -14,7 +14,7 @@ A goal has a title, a period and a status. The period is one week, Monday to Sun
 
 A weekly goal can belong to a monthly goal, as long as its week falls at least partly in that month. The week of Monday 30 November 2026 runs into December, so a goal for that week can belong to a November goal or a December one.
 
-For now you add and change goals with `deskbar.cmd goal` (see [From a script](#from-a-script)). The planner window, where you set the week's and the month's goals and review the last ones, comes in the next release.
+For now you add and change goals with `deskbar.cmd goal` (see [From a script](#from-a-script)). A planner window, where you set the week's and the month's goals and review the last ones, is coming.
 
 Once at least one goal exists, the [tasks window](tasks.md#the-tasks-window) offers two more things:
 
@@ -46,7 +46,7 @@ Finishing every task never marks a goal done, and an open task never stops you m
 
 Goals are kept in `goals.json`, beside `tasks.json` in `%APPDATA%\Deskbar`. Nothing is written there until you add a goal or dismiss the review with `goal prompt dismiss`. The link from a task to its goal is kept on the task, in `tasks.json`. A task whose goal no longer exists reads as having no goal and can be linked again.
 
-If `goals.json` cannot be read, it is kept aside as a `.bak` and your tasks keep their links. A goal in the file that is missing its id or its period is skipped, and the file it came from is copied aside as a `.bak` first, so nothing is lost.
+If `goals.json` cannot be read, it is kept aside as a `.bak` and your tasks keep their links. Until it reads again, `goal list` and `goal add` answer with that problem instead of an empty list. A goal in the file whose id or period is missing or cannot be read is skipped, and the file it came from is copied aside as a `.bak` first, so nothing is lost.
 
 ## From a script
 
@@ -62,7 +62,7 @@ $ts = "$env:APPDATA\Deskbar\deskbar.cmd"
 & $ts goal carry 7d44                              # to the current week or month
 ```
 
-Ids are a goal's full id or a unique prefix of four or more characters. A date is `yyyy-MM-dd` and picks the week or month that holds it; a bare `--week` or `--month` means the current one. "Current" is your local week, whatever the time is in UTC.
+Ids are a goal's full id or a unique prefix of four or more characters. A date is `yyyy-MM-dd`, in the years 2000 to 2999, and picks the week or month that holds it; a bare `--week` or `--month` means the current one. "Current" is your local week, whatever the time is in UTC.
 
 `goal list` gives each goal's `id`, `title`, `kind` (week or month), `period` (its first day), `status`, `order`, `parent`, `progress` (the line above, such as "3 of 5 done") with the counts behind it, and `taskIds`. `task list` gives each task's `goal` as its id and title, or null.
 
