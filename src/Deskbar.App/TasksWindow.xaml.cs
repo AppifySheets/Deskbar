@@ -144,6 +144,11 @@ public partial class TasksWindow : Window
         // Its place is remembered once a move or a resize has settled (PlaceSettles), and on every close (Dismiss). The
         // rectangle in the normal state is noted on every change, since a maximized window's own rectangle is the
         // screen's, not the one it returns to.
+        //
+        // ON A TILED WORKSPACE the window is a tile (it tiles like any app window, App.StartTiling), so the Tiler moves
+        // it, and the place remembered here becomes the tile's rectangle. That is fine and intended: a tiled window
+        // follows its tile, and the Tiler places it again whenever it shows, so the remembered place only matters when
+        // the window opens on a workspace that is not tiled, where it opens where it was last left.
         var context = new System.Windows.Threading.DispatcherSynchronizationContext(Dispatcher);
         placeWatch = Observable.Merge(
                 Observable.FromEventPattern(this, nameof(LocationChanged)).Select(_ => System.Reactive.Unit.Default),
