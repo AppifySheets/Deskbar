@@ -53,7 +53,7 @@ namespace Deskbar.App;
 // request sends a Claude task to its session instead); a note on no workspace has nowhere to go, so its click does
 // nothing. The tick box and the close button call TaskService.Close at once (the store stays the truth; only Petre
 // closes, and these are his clicks), and "Undo" calls Reopen.
-
+//
 // WHEN IT IS DRAWN. The lines are rebuilt when TaskService.Changed pulses and after every rebuild of the bar (the
 // workspace names and row colours the lines borrow are refreshed by the rebuild), and only when what they would show
 // has changed: the "shape" (ids, statuses, titles, details, the chips, the icons, the text size, folded or not)
@@ -974,8 +974,14 @@ public partial class FloatingBar
             .TapError(err => ClickTrace.Write($"task list: note not added: {err}"));
     }
 
+    // A chip, or a workspace picked from "other…"'s menu. The chips also show while the box merely holds text, after a
+    // click away (EndTyping keeps the text), so a chip can be the first thing pressed on the way back. That press must
+    // take the keyboard exactly as a click in the box does (BeginTyping): otherwise the bar is focused but fades, has
+    // nowhere to hand the keyboard back to after Enter or Esc, and does not notice losing the foreground again.
+    // BeginTyping keeps the chip a box with text was given, so the choice made here is set after it.
     void ChooseTaskTarget(Maybe<Guid> target)
     {
+        if (!taskTyping) BeginTyping();
         taskAddTarget = target;
         PaintTaskChips();
         taskAddBox?.Focus();
