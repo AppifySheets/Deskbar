@@ -1,173 +1,353 @@
 using CSharpFunctionalExtensions;
 using Deskbar.Core.Tasks;
+// System.Threading.Tasks (an implicit using) has a TaskStatus too; the alias says which one this file means.
+using TaskStatus = Deskbar.Core.Tasks.TaskStatus;
 
 namespace Deskbar.Core.Tests.Tasks;
 
-// The task rules, pure and clock-free: every method takes "now" so these tests never sleep.
-// Design: docs/superpowers/specs/2026-11-19-tasks-in-the-bar-design.md ("The model").
+// The task rules, pure and clock-free: every method takes "now", and the test moves a captured clock, so nothing
+// here waits. Design: docs/superpowers/specs/2026-11-22-tasks-board-design.md ("What Petre decided", "Calls made
+// after the builder check").
 public class TaskBoardTests
 {
-    static readonly DateTimeOffset t0 = new(2026, 11, 19, 10, 0, 0, TimeSpan.Zero);
+    DateTimeOffset clock = new(2026, 11, 22, 10, 0, 0, TimeSpan.Zero);
     static readonly Guid ws = Guid.Parse("11111111-1111-1111-1111-111111111111");
     static readonly Guid other = Guid.Parse("22222222-2222-2222-2222-222222222222");
     static readonly Guid id1 = Guid.Parse("aaaaaaaa-0000-0000-0000-000000000001");
     static readonly Guid id2 = Guid.Parse("aaaaaaaa-0000-0000-0000-000000000002");
+    static readonly Guid id3 = Guid.Parse("aaaaaaaa-0000-0000-0000-000000000003");
+    static readonly Guid id4 = Guid.Parse("aaaaaaaa-0000-0000-0000-000000000004");
+    static readonly Guid id5 = Guid.Parse("aaaaaaaa-0000-0000-0000-000000000005");
+
+    static readonly Maybe<Guid> Free = Maybe<Guid>.None;
+
+    void Later(int minutes = 1) => clock = clock.AddMinutes(minutes);
+
+    TaskSession Session(string id) => new(id, @"C:\repos\TaskSpaces", clock, Maybe<DateTimeOffset>.None);
+
+    TaskBoard Note(TaskBoard board, Guid id, Maybe<Guid> workspace, string title = "Dishwasher tablets") =>
+        board.AddNote(title, workspace, clock, id).Value.Item1;
+
+    TaskBoard Claudes(TaskBoard board, Guid id, Maybe<Guid> workspace, string session = "s1", string title = "Tasks redesign") =>
+        board.Create(title, workspace, Session(session), clock, id).Value.Item1;
+
+    static TaskItem Get(TaskBoard board, Guid id) => board.Tasks.Single(t => t.Id == id);
 
     [Fact]
-    public void A_timer_runs_then_comes_due()
+    public void A_note_starts_in_the_backlog_with_no_sessions()
     {
-        var (_, task) = TaskBoard.Empty.Park("Wait for CI", ws, TimeSpan.FromMinutes(5), t0, id1).Value;
-        Assert.Equal(TaskState.Running, task.StateAt(t0.AddMinutes(4)));
-        Assert.Equal(TaskState.Due, task.StateAt(t0.AddMinutes(5)));
-    }
+        var (board, task) = TaskBoard.Empty.AddNote("Dishwasher tablets", Free, clock, id1).Value;
 
-    [Fact]
-    public void Parking_the_same_title_reuses_the_live_task()
-    {
-        var (b1, _) = TaskBoard.Empty.Park("Wait for CI", ws, TimeSpan.FromMinutes(5), t0, id1).Value;
-        var (b2, again) = b1.Park(" wait for ci ", ws, TimeSpan.FromMinutes(10), t0.AddMinutes(1), id2).Value;
-        Assert.Single(b2.Tasks);
-        Assert.Equal(id1, again.Id);
-        Assert.Equal(t0.AddMinutes(11), again.Timer.Value.Ends);
-        Assert.Equal(TimerEnd.Replaced, again.History.Single().How);
-    }
-
-    [Fact]
-    public void Parking_the_same_title_without_a_length_adds_nothing()
-    {
-        var (b1, first) = TaskBoard.Empty.Park("Wait for CI", ws, TimeSpan.FromMinutes(5), t0, id1).Value;
-        var (b2, again) = b1.Park("wait for ci", ws, Maybe<TimeSpan>.None, t0.AddMinutes(1), id2).Value;
-        Assert.Single(b2.Tasks);
-        Assert.Equal(first, again);
-        Assert.Equal(b1, b2);
-    }
-
-    [Fact]
-    public void Free_tasks_never_match_so_each_park_is_new()
-    {
-        var b = TaskBoard.Empty.Park("a", Maybe<Guid>.None, Maybe<TimeSpan>.None, t0, id1).Value.Board
-            .Park("a", Maybe<Guid>.None, Maybe<TimeSpan>.None, t0, id2).Value.Board;
-        Assert.Equal(2, b.Tasks.Count);
-    }
-
-    [Fact]
-    public void A_new_title_on_the_same_workspace_is_a_new_task()
-    {
-        var (b1, _) = TaskBoard.Empty.Park("Wait for CI", ws, TimeSpan.FromMinutes(5), t0, id1).Value;
-        Assert.Equal(2, b1.Park("Tidy the release notes", ws, Maybe<TimeSpan>.None, t0, id2).Value.Board.LiveOn(ws).Count);
-    }
-
-    [Fact]
-    public void The_latest_live_title_is_the_parking_default()
-    {
-        var b = TaskBoard.Empty.Park("a", ws, Maybe<TimeSpan>.None, t0, id1).Value.Board
-            .Park("b", ws, Maybe<TimeSpan>.None, t0.AddMinutes(1), id2).Value.Board;
-        Assert.Equal("b", b.LatestLiveOn(ws).Value.Title);
+        Assert.Equal(TaskStatus.Backlog, task.Status);
+        Assert.False(task.IsClaudes);
+        Assert.Equal("", task.StatusLine);
+        Assert.True(task.Question.HasNoValue);
+        Assert.Empty(task.Comments);
+        Assert.Equal(clock, task.Created);
+        Assert.Equal(clock, task.UpdatedAt);
+        Assert.Equal(clock, task.Raised);
+        Assert.Equal(task, Assert.Single(board.Tasks));
     }
 
     [Fact]
     public void An_empty_title_is_refused() =>
-        Assert.True(TaskBoard.Empty.Park("   ", ws, Maybe<TimeSpan>.None, t0, id1).IsFailure);
+        Assert.Equal("A task needs a title", TaskBoard.Empty.AddNote("  ", Free, clock, id1).Error);
 
     [Fact]
-    public void Coming_back_ends_a_running_or_due_timer_and_leaves_the_task_open()
+    public void A_session_creates_a_task_in_progress()
     {
-        var (b1, _) = TaskBoard.Empty.Park("x", ws, TimeSpan.FromMinutes(1), t0, id1).Value;
-        var task = b1.CameBack(ws, t0.AddSeconds(28), t0.AddSeconds(30)).Tasks.Single();
-        Assert.Equal(TaskState.Open, task.StateAt(t0.AddMinutes(5)));
-        Assert.Equal(TimerEnd.CameBack, task.History.Single().How);
+        var (_, task) = TaskBoard.Empty.Create("Tasks redesign", ws, Session("s1"), clock, id1).Value;
+
+        Assert.Equal(TaskStatus.InProgress, task.Status);
+        Assert.True(task.IsClaudes);
+        Assert.Equal("s1", Assert.Single(task.Sessions).Id);
+        Assert.True(task.HasLiveSession);
+        Assert.Equal(ws, task.WorkspaceId.Value);
     }
 
     [Fact]
-    public void Coming_back_ends_every_timer_on_the_workspace()
+    public void Joining_a_note_makes_it_claudes()
     {
-        var b = TaskBoard.Empty.Park("a", ws, TimeSpan.FromMinutes(5), t0, id1).Value.Board
-            .Park("b", ws, TimeSpan.FromMinutes(30), t0, id2).Value.Board.CameBack(ws, t0.AddSeconds(58), t0.AddMinutes(1));
-        Assert.All(b.Tasks, t => Assert.Equal(TaskState.Open, t.StateAt(t0.AddHours(1))));
+        var board = Note(TaskBoard.Empty, id1, ws);
+        Later();
+
+        var joined = Get(board.Join(id1, Session("s1"), clock).Value, id1);
+
+        Assert.Equal(TaskStatus.InProgress, joined.Status);
+        Assert.True(joined.IsClaudes);
+        Assert.True(joined.HasLiveSession);
+        Assert.Equal(clock, joined.UpdatedAt);
     }
 
-    // A timer started after the arrival (during the dwell) is not what coming back answers; one started at the very
-    // instant of the arrival still is.
+    // A session that comes back (a resumed conversation keeps its id) is one session, live again, not two.
     [Fact]
-    public void Coming_back_leaves_a_timer_started_after_the_arrival()
+    public void Joining_again_revives_the_same_session()
     {
-        var b = TaskBoard.Empty.Park("before", ws, TimeSpan.FromMinutes(5), t0, id1).Value.Board
-            .Park("after", ws, TimeSpan.FromMinutes(5), t0.AddSeconds(1), id2).Value.Board
-            .CameBack(ws, t0, t0.AddSeconds(2));
-        Assert.Equal(TaskState.Open, b.Tasks.Single(t => t.Id == id1).StateAt(t0.AddSeconds(2)));
-        Assert.Equal(TaskState.Running, b.Tasks.Single(t => t.Id == id2).StateAt(t0.AddSeconds(2)));
-    }
+        var board = Claudes(TaskBoard.Empty, id1, ws).SessionEnded("s1", clock);
+        Later();
 
-    // Final review M2: a done task cannot take a timer or be done again; both are reachable from `deskbar.cmd task`.
-    [Fact]
-    public void A_done_task_refuses_a_timer_and_a_second_done()
-    {
-        var b = TaskBoard.Empty.Park("a", ws, Maybe<TimeSpan>.None, t0, id1).Value.Board.Done(id1, t0).Value;
-        var timer = b.SetTimer(id1, TimeSpan.FromMinutes(5), t0.AddMinutes(1));
-        var again = b.Done(id1, t0.AddMinutes(1));
-        Assert.Equal("The task is done.", timer.Error);
-        Assert.Equal("The task is done.", again.Error);
+        var task = Get(board.Join(id1, Session("s1"), clock).Value, id1);
+
+        Assert.True(Assert.Single(task.Sessions).IsLive);
     }
 
     [Fact]
-    public void A_task_moves_between_workspaces() =>
-        Assert.Equal(other, TaskBoard.Empty.Park("a", ws, Maybe<TimeSpan>.None, t0, id1).Value.Board
-            .MoveTo(id1, other, t0).Value.Tasks.Single().WorkspaceId.Value);
-
-    [Fact]
-    public void Done_ends_the_timer_and_leaves_the_live_list()
+    public void A_closed_task_cannot_be_joined()
     {
-        var b = TaskBoard.Empty.Park("a", ws, TimeSpan.FromMinutes(5), t0, id1).Value.Board.Done(id1, t0.AddMinutes(1)).Value;
-        Assert.Equal(TaskState.Done, b.Tasks.Single().StateAt(t0.AddMinutes(9)));
-        Assert.Equal(TimerEnd.Done, b.Tasks.Single().History.Single().How);
-        Assert.Empty(b.LiveOn(ws));
+        var board = Note(TaskBoard.Empty, id1, ws).Close(id1, clock).Value;
+
+        Assert.Equal("The task is closed.", board.Join(id1, Session("s1"), clock).Error);
     }
 
     [Fact]
-    public void Every_change_moves_UpdatedAt() =>
-        Assert.Equal(t0.AddMinutes(2), TaskBoard.Empty.Park("a", ws, Maybe<TimeSpan>.None, t0, id1).Value.Board
-            .Rename(id1, "b", t0.AddMinutes(2)).Value.Tasks.Single().UpdatedAt);
-
-    [Fact]
-    public void Unknown_ids_fail() => Assert.True(TaskBoard.Empty.Done(id1, t0).IsFailure);
-
-    [Fact]
-    public void Unknown_workspaces_free_their_tasks_and_keep_the_timer()
+    public void Asking_waits_on_you_and_answering_resumes()
     {
-        var b = TaskBoard.Empty.Park("a", ws, TimeSpan.FromMinutes(5), t0, id1).Value.Board.Prune(new HashSet<Guid>(), t0);
-        Assert.True(b.Tasks.Single().WorkspaceId.HasNoValue);
-        Assert.True(b.Tasks.Single().Timer.HasValue);
+        var board = Claudes(TaskBoard.Empty, id1, ws);
+        Later(5);
+
+        var asked = board.Ask(id1, "OK to restart?", clock).Value;
+        Assert.Equal(TaskStatus.WaitingOnYou, Get(asked, id1).Status);
+        Assert.Equal("OK to restart?", Get(asked, id1).Question.Value);
+        Assert.Equal(clock, Get(asked, id1).Raised);
+
+        Later();
+        var answered = Get(asked.Answered("s1", clock), id1);
+        Assert.Equal(TaskStatus.InProgress, answered.Status);
+        Assert.True(answered.Question.HasNoValue);
+        Assert.Equal(clock, answered.UpdatedAt);
     }
 
     [Fact]
-    public void Setting_and_clearing_a_timer_records_what_it_replaced()
+    public void An_empty_question_is_refused() =>
+        Assert.Equal("An ask needs a question", Claudes(TaskBoard.Empty, id1, ws).Ask(id1, " ", clock).Error);
+
+    // Spec, "After Done or Closed": a message to a session whose task is Done means Petre is continuing the work.
+    [Fact]
+    public void Answering_a_done_task_resumes_it()
     {
-        var b = TaskBoard.Empty.Park("a", ws, TimeSpan.FromMinutes(5), t0, id1).Value.Board
-            .SetTimer(id1, TimeSpan.FromMinutes(10), t0.AddMinutes(1)).Value
-            .ClearTimer(id1, t0.AddMinutes(2)).Value;
-        var task = b.Tasks.Single();
-        Assert.True(task.Timer.HasNoValue);
-        Assert.Equal(new[] { TimerEnd.Replaced, TimerEnd.Cleared }, task.History.Select(h => h.How));
+        var board = Claudes(TaskBoard.Empty, id1, ws).MarkDone(id1, clock).Value;
+
+        Assert.Equal(TaskStatus.InProgress, Get(board.Answered("s1", clock), id1).Status);
+    }
+
+    [Fact]
+    public void Answering_never_touches_a_closed_task_or_another_sessions_task()
+    {
+        var board = Claudes(TaskBoard.Empty, id1, ws, "s1").Ask(id1, "Merge?", clock).Value.Close(id1, clock).Value;
+        board = Claudes(board, id2, ws, "s2").Ask(id2, "Deploy?", clock).Value;
+        Later();
+
+        var after = board.Answered("s1", clock);
+
+        Assert.Same(board, after);
+        Assert.Equal(TaskStatus.Closed, Get(after, id1).Status);
+        Assert.Equal(TaskStatus.WaitingOnYou, Get(after, id2).Status);
+    }
+
+    [Fact]
+    public void A_session_ending_keeps_the_task_open()
+    {
+        var board = Claudes(TaskBoard.Empty, id1, ws);
+        Later();
+
+        var ended = Get(board.SessionEnded("s1", clock), id1);
+
+        Assert.Equal(TaskStatus.InProgress, ended.Status);
+        Assert.Equal(clock, ended.Sessions.Single().Ended.Value);
+        Assert.False(ended.HasLiveSession);
+        Assert.True(ended.IsClaudes);
+        Assert.True(ended.IsOpen);
+        Assert.Same(board, board.SessionEnded("s9", clock));
+    }
+
+    [Fact]
+    public void Only_close_closes_and_reopen_goes_back()
+    {
+        var claudes = Claudes(TaskBoard.Empty, id1, ws);
+        var done = claudes.MarkDone(id1, clock).Value;
+        Assert.Equal(TaskStatus.Done, Get(done, id1).Status);
+        Assert.True(Get(done, id1).IsOpen);
+
+        var closed = done.Close(id1, clock).Value;
+        Assert.Equal(TaskStatus.Closed, Get(closed, id1).Status);
+        Assert.False(Get(closed, id1).IsOpen);
+
+        Assert.Equal(TaskStatus.InProgress, Get(closed.Reopen(id1, clock).Value, id1).Status);
+
+        var ended = closed.SessionEnded("s1", clock);
+        Assert.Equal(TaskStatus.Backlog, Get(ended.Reopen(id1, clock).Value, id1).Status);
+
+        var note = Note(TaskBoard.Empty, id2, ws).Close(id2, clock).Value;
+        Assert.Equal(TaskStatus.Backlog, Get(note.Reopen(id2, clock).Value, id2).Status);
+    }
+
+    [Fact]
+    public void A_closed_task_refuses_the_sessions_changes_and_a_second_close()
+    {
+        var closed = Claudes(TaskBoard.Empty, id1, ws).Close(id1, clock).Value;
+
+        Assert.Equal("The task is closed.", closed.MarkDone(id1, clock).Error);
+        Assert.Equal("The task is closed.", closed.Ask(id1, "Why?", clock).Error);
+        Assert.Equal("The task is closed.", closed.SetStatusLine(id1, "CI", clock).Error);
+        Assert.Equal("The task is closed.", closed.Close(id1, clock).Error);
+    }
+
+    [Fact]
+    public void Reopening_an_open_task_is_refused() =>
+        Assert.Equal("The task is not closed.", Note(TaskBoard.Empty, id1, ws).Reopen(id1, clock).Error);
+
+    [Fact]
+    public void A_status_line_never_moves_a_task()
+    {
+        var board = Claudes(TaskBoard.Empty, id1, ws);
+        var raised = Get(board, id1).Raised;
+        Later(10);
+
+        var task = Get(board.SetStatusLine(id1, " waiting for CI on #398 ", clock).Value, id1);
+
+        Assert.Equal("waiting for CI on #398", task.StatusLine);
+        Assert.Equal(raised, task.Raised);
+        Assert.Equal(clock, task.UpdatedAt);
+    }
+
+    [Fact]
+    public void Setting_a_status_by_hand_takes_any_open_status_and_leaves_closing_to_close()
+    {
+        var board = Claudes(TaskBoard.Empty, id1, ws).Ask(id1, "Merge?", clock).Value;
+
+        var backlog = Get(board.SetStatus(id1, TaskStatus.Backlog, clock).Value, id1);
+        Assert.Equal(TaskStatus.Backlog, backlog.Status);
+        Assert.True(backlog.Question.HasNoValue);
+
+        Assert.Equal("Use close to close a task", board.SetStatus(id1, TaskStatus.Closed, clock).Error);
+
+        var closed = board.Close(id1, clock).Value;
+        Assert.Equal(TaskStatus.Done, Get(closed.SetStatus(id1, TaskStatus.Done, clock).Value, id1).Status);
+    }
+
+    [Fact]
+    public void The_pile_puts_waiting_first_then_done_then_newest()
+    {
+        var board = Note(TaskBoard.Empty, id1, ws, "closed").Close(id1, clock).Value;
+        Later();
+        board = Claudes(board, id2, ws, "s2", "done").MarkDone(id2, clock).Value;
+        Later();
+        board = Claudes(board, id3, ws, "s3", "older waiting").Ask(id3, "One?", clock).Value;
+        Later();
+        board = Note(board, id5, ws, "backlog");
+        Later();
+        board = Claudes(board, id4, ws, "s4", "newer waiting").Ask(id4, "Two?", clock).Value;
+
+        Assert.Equal([id4, id3, id2, id5], board.Pile().Select(t => t.Id));
+    }
+
+    [Fact]
+    public void A_newer_task_tops_the_rest_and_a_status_line_does_not()
+    {
+        var board = Note(TaskBoard.Empty, id1, ws, "older");
+        Later();
+        board = Note(board, id2, ws, "newer");
+        Later();
+        board = board.SetStatusLine(id1, "moved?", clock).Value;
+
+        Assert.Equal([id2, id1], board.Pile().Select(t => t.Id));
+    }
+
+    [Fact]
+    public void Offered_is_this_workspaces_open_tasks_and_claudes_free_ones()
+    {
+        var board = Note(TaskBoard.Empty, id1, ws, "note on ws");
+        board = Claudes(board, id2, other, "s2", "on other");
+        board = Note(board, id3, Free, "errand");
+        board = Claudes(board, id4, Free, "s4", "free claude task");
+        board = Claudes(board, id5, ws, "s5", "closed on ws").Close(id5, clock).Value;
+
+        Assert.Equal(new[] { id1, id4 }.Order(), board.Offered(ws).Select(t => t.Id).Order());
+        Assert.Equal([id4], board.Offered(Free).Select(t => t.Id));
+    }
+
+    [Fact]
+    public void TaskOf_finds_the_open_task_a_session_works_on()
+    {
+        var board = Note(Claudes(TaskBoard.Empty, id1, ws, "s1"), id2, ws);
+
+        Assert.Equal(id1, board.TaskOf("s1").Value.Id);
+        Assert.True(board.TaskOf("s9").HasNoValue);
+        Assert.True(board.Close(id1, clock).Value.TaskOf("s1").HasNoValue);
+        Assert.True(board.SessionEnded("s1", clock).TaskOf("s1").HasNoValue);
+    }
+
+    [Fact]
+    public void Comments_keep_their_order_and_author()
+    {
+        var board = Claudes(TaskBoard.Empty, id1, ws).Comment(id1, "s1", "The **detail** behind the ask", clock, id2).Value;
+        Later();
+        board = board.Comment(id1, Maybe<string>.None, "Go ahead", clock, id3).Value;
+
+        var comments = Get(board, id1).Comments;
+        Assert.Equal([id2, id3], comments.Select(c => c.Id));
+        Assert.Equal("s1", comments[0].SessionId.Value);
+        Assert.True(comments[1].SessionId.HasNoValue);
+        Assert.Equal("Go ahead", comments[1].Markdown);
+        Assert.Equal(clock, comments[1].At);
+        Assert.Equal(clock, Get(board, id1).UpdatedAt);
+        Assert.Equal("A comment needs text", board.Comment(id1, Maybe<string>.None, " ", clock, id4).Error);
+    }
+
+    [Fact]
+    public void A_task_moves_between_workspaces_and_is_renamed()
+    {
+        var board = Note(TaskBoard.Empty, id1, ws);
+        Later();
+
+        var moved = Get(board.MoveTo(id1, other, clock).Value.Rename(id1, "Soap", clock).Value, id1);
+
+        Assert.Equal(other, moved.WorkspaceId.Value);
+        Assert.Equal("Soap", moved.Title);
+        Assert.Equal(clock, moved.UpdatedAt);
+        Assert.Equal("A task needs a title", board.Rename(id1, " ", clock).Error);
+    }
+
+    [Fact]
+    public void Unknown_ids_fail()
+    {
+        Assert.Equal($"No task with id {id1}", TaskBoard.Empty.Close(id1, clock).Error);
+        Assert.True(TaskBoard.Empty.Join(id1, Session("s1"), clock).IsFailure);
+        Assert.True(TaskBoard.Empty.Comment(id1, Maybe<string>.None, "x", clock, id2).IsFailure);
     }
 
     [Fact]
     public void Delete_removes_the_task_and_fails_for_unknown_ids()
     {
-        var b = TaskBoard.Empty.Park("a", ws, Maybe<TimeSpan>.None, t0, id1).Value.Board;
-        Assert.Empty(b.Delete(id1).Value.Tasks);
-        Assert.True(b.Delete(id2).IsFailure);
+        var board = Note(TaskBoard.Empty, id1, ws);
+
+        Assert.Empty(board.Delete(id1).Value.Tasks);
+        Assert.True(board.Delete(id2).IsFailure);
+    }
+
+    [Fact]
+    public void Unknown_workspaces_free_their_tasks()
+    {
+        var board = Claudes(TaskBoard.Empty, id1, ws);
+        Later();
+
+        var task = board.Prune(new HashSet<Guid>(), clock).Tasks.Single();
+
+        Assert.True(task.WorkspaceId.HasNoValue);
+        Assert.Equal(TaskStatus.InProgress, task.Status);
+        Assert.Equal(clock, task.UpdatedAt);
     }
 
     [Fact]
     public void Find_takes_a_full_id_or_a_unique_prefix_of_four_or_more()
     {
-        var b = TaskBoard.Empty.Park("a", ws, Maybe<TimeSpan>.None, t0, id1).Value.Board
-            .Park("b", ws, Maybe<TimeSpan>.None, t0, id2).Value.Board;
-        Assert.Equal(id1, b.Find(id1.ToString()).Value.Id);
-        Assert.True(b.Find("aaaaaaaa").IsFailure);          // shared by both, so ambiguous
-        Assert.True(b.Find("aaaaaaaa-0000-0000-0000-00000000000").IsFailure); // still shared
-        Assert.True(b.Find("aaa").IsFailure);               // under four characters
-        Assert.True(b.Find("ffff").IsFailure);              // matches nothing
-        Assert.Equal(id2, b.Find("aaaaaaaa-0000-0000-0000-000000000002").Value.Id);
+        var board = Note(Note(TaskBoard.Empty, id1, ws, "a"), id2, ws, "b");
+
+        Assert.Equal(id1, board.Find(id1.ToString()).Value.Id);
+        Assert.Equal("'aaaaaaaa' matches several tasks", board.Find("aaaaaaaa").Error);
+        Assert.True(board.Find("aaaaaaaa-0000-0000-0000-00000000000").IsFailure);
+        Assert.True(board.Find("aaa").IsFailure);
+        Assert.True(board.Find("ffff").IsFailure);
+        Assert.Equal(id2, board.Find("aaaaaaaa-0000-0000-0000-000000000002").Value.Id);
     }
 }

@@ -2,46 +2,71 @@ using CSharpFunctionalExtensions;
 
 namespace Deskbar.Core.Tasks;
 
-// The task data model. Design and reasoning: docs/superpowers/specs/2026-11-19-tasks-in-the-bar-design.md,
-// section "The model". Everything here is an immutable record; TaskBoard holds the rules that change them.
-
-/// <summary>What a task looks like right now. Derived from the fields and the clock, never stored.</summary>
-public enum TaskState { Running, Due, Open, Done }
-
-/// <summary>How a timer ended, kept in a task's history for later totals.</summary>
-public enum TimerEnd { CameBack, Done, Cleared, Replaced }
-
-/// <summary>A timer that is running or has run out and not yet been answered.</summary>
-public sealed record TaskTimer(DateTimeOffset Started, TimeSpan Length)
-{
-    /// <summary>When the timer runs out. At this instant the task is already Due.</summary>
-    public DateTimeOffset Ends => Started + Length;
-}
-
-/// <summary>A timer that has ended, with when and how.</summary>
-public sealed record TimerRecord(DateTimeOffset Started, TimeSpan Length, DateTimeOffset Ended, TimerEnd How);
+// The task data model. Design and reasoning: docs/superpowers/specs/2026-11-22-tasks-board-design.md, sections
+// "What Petre decided" and "Calls made after the builder check". This replaced the timer model of
+// 2026-11-19-tasks-in-the-bar-design.md: there are no timers, no countdown and no due state any more. A task is a
+// line in one list of what is happening, Petre's notes and Claude sessions' work alike.
+//
+// Everything here is an immutable record; TaskBoard holds the rules that change them.
 
 /// <summary>
-/// One task. <see cref="WorkspaceId"/> is none for a free task. <see cref="UpdatedAt"/> moves on every change
-/// so a later sync can tell which copy is newer. <see cref="History"/> is every timer the task has finished.
+/// Where a task stands. Shown as "Backlog", "In progress", "Waiting on you", "Done" and "Closed".
+/// <list type="bullet">
+/// <item>Backlog: not started. Petre's notes start here.</item>
+/// <item>InProgress: a Claude session has joined it.</item>
+/// <item>WaitingOnYou: a session asked Petre something; his next message to that session moves it back.</item>
+/// <item>Done: Claude finished it; it stays in the list until Petre closes it.</item>
+/// <item>Closed: Petre closed it. Only Petre closes; closed tasks leave the lists but stay readable.</item>
+/// </list>
+/// Backlog is first on purpose: it is the enum's default, so a missing status in a file reads as Backlog.
+/// </summary>
+public enum TaskStatus { Backlog, InProgress, WaitingOnYou, Done, Closed }
+
+/// <summary>
+/// A Claude Code session that has worked on a task: its session id, the folder it runs in (how its VS Code window is
+/// found) and when it joined. <see cref="Ended"/> is set when the session ends; the task stays open regardless.
+/// </summary>
+public sealed record TaskSession(string Id, string Folder, DateTimeOffset Joined, Maybe<DateTimeOffset> Ended)
+{
+    public bool IsLive => Ended.HasNoValue;
+}
+
+/// <summary>
+/// One comment in a task's thread, as markdown. <see cref="SessionId"/> names the Claude session that wrote it;
+/// none means Petre wrote it.
+/// </summary>
+public sealed record TaskComment(Guid Id, Maybe<string> SessionId, DateTimeOffset At, string Markdown);
+
+/// <summary>
+/// One task. <see cref="WorkspaceId"/> is none for a free task. <see cref="StatusLine"/> is the short line a session
+/// keeps current ("waiting for CI on #398"), "" when there is none. <see cref="Question"/> is what a session asked
+/// Petre while the task is <see cref="TaskStatus.WaitingOnYou"/>. <see cref="UpdatedAt"/> moves on every change so a
+/// later sync can tell which copy is newer. <see cref="Raised"/> is what the list sorts by: set when the task is made
+/// and when a session asks, and by nothing else, so a status line changing never moves a line (spec, "The bar's
+/// order").
 /// </summary>
 public sealed record TaskItem(
     Guid Id,
     string Title,
     Maybe<Guid> WorkspaceId,
+    TaskStatus Status,
+    string StatusLine,
+    Maybe<string> Question,
     DateTimeOffset Created,
     DateTimeOffset UpdatedAt,
-    Maybe<TaskTimer> Timer,
-    Maybe<DateTimeOffset> DoneAt,
-    IReadOnlyList<TimerRecord> History)
+    DateTimeOffset Raised,
+    IReadOnlyList<TaskSession> Sessions,
+    IReadOnlyList<TaskComment> Comments)
 {
-    /// <summary>Done wins; then a timer whose end has come is Due, a timer still ahead is Running, else Open.</summary>
-    public TaskState StateAt(DateTimeOffset now) =>
-        DoneAt.HasValue ? TaskState.Done
-        : Timer.HasNoValue ? TaskState.Open
-        : Timer.Value.Ends <= now ? TaskState.Due
-        : TaskState.Running;
+    /// <summary>
+    /// A task is Claude's when at least one session has worked on it. Derived, never stored: a session joining one of
+    /// Petre's notes is exactly what makes it Claude's work (spec, "joining a note").
+    /// </summary>
+    public bool IsClaudes => Sessions.Count > 0;
 
-    /// <summary>A live task is one that is not done: it belongs on the lists and can hold a timer.</summary>
-    public bool IsLive => DoneAt.HasNoValue;
+    /// <summary>Every status but Closed: an open task belongs on the bar's list and the window's default view.</summary>
+    public bool IsOpen => Status != TaskStatus.Closed;
+
+    /// <summary>Whether a session is still running on it; a task whose sessions all ended says "no live session".</summary>
+    public bool HasLiveSession => Sessions.Any(s => s.IsLive);
 }
