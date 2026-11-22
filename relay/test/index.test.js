@@ -118,6 +118,12 @@ test('a report opens an issue with the from-app label and answers its number', a
   assert.match(call.body.body, /shot-1\.png\?raw=true/);
 });
 
+test('the people in NOTIFY are mentioned in the issue', async () => {
+  const github = fakeGitHub(201);
+  await handle(reportRequest(), env({ NOTIFY: 'lukasurmava' }), github.fetchImpl);
+  assert.match(github.calls[0].body.body, /cc @lukasurmava/);
+});
+
 test('a Deskbar Pro report is also labelled priority', async () => {
   const github = fakeGitHub(201);
   await handle(reportRequest({ pro: true }), env(), github.fetchImpl);

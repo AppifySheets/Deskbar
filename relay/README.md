@@ -49,6 +49,14 @@ The app base64-encodes files itself and sends them one at a time because the Wor
 allows 10 ms of CPU per request. The Worker never decodes an image. It passes the string through
 to GitHub, and waiting on GitHub does not count as CPU time.
 
+## Who hears about a report
+
+Anyone who watches the reports repository for issues gets GitHub's email. On top of that, every
+issue ends with a `cc` line naming the logins in `NOTIFY` (`wrangler.toml`), and a mention
+notifies them whatever they watch. A watch setting belongs to each account, so this is the way to
+make sure someone hears without asking them to change theirs. Change the list with a PR; the merge
+redeploys the relay.
+
 ## Limits and spam
 
 - Text up to 20,000 characters, contact up to 200, each attachment up to 7,000,000 base64

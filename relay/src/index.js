@@ -71,7 +71,7 @@ const handleReport = async (request, env, fetchImpl) => {
   if (!check.ok) return error(check.status, check.error);
 
   const report = check.value;
-  const issue = await createIssue(fetchImpl, env, issueTitle(report.text), issueBody(report, env.REPO, env.BRANCH), issueLabels(report));
+  const issue = await createIssue(fetchImpl, env, issueTitle(report.text), issueBody(report, env.REPO, env.BRANCH, env.NOTIFY), issueLabels(report));
   log('report', { reportId: report.reportId, pro: report.pro, attachments: report.attachments.length, github: issue.ok ? 201 : issue.status, number: issue.number });
   return issue.ok ? json(201, { number: issue.number }) : error(502, 'github refused the report');
 };
