@@ -455,6 +455,10 @@ public sealed record AppState(
     // opens there, and ignores them when no screen holds them any more.
     public TasksWindowState? TasksWindow { get; init; }
 
+    // Whether the tasks window shows its Matrix (Covey's 2 by 2) rather than its List (Task 12, Ruling 28: "a List /
+    // Matrix switch in the toolbar (remembered)"). False, the List, in every state.json written before this key.
+    public bool TasksMatrix { get; init; }
+
     // The version of the build that last saved this file, e.g. "2.1.44". JsonPersistenceStore stamps it on every
     // Save and StateVersionGate.Check refuses to load a file whose stamp is from a newer MAJOR version than the
     // running build. Within a major an older copy (the lagging Microsoft Store build) loads a newer file and

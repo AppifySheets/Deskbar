@@ -112,6 +112,7 @@ public sealed class TasksBoard : IDisposable
             AddNote: (title, workspace) => AddNote(title, workspace).IsSuccess,
             SetFlag: (id, flag, on) => SetFlag(id, flag, on),
             Place: (id, quadrant, place) => Place(id, quadrant, place),
+            ShowMatrix: on => Report(manager.SetTasksMatrix(on)),
             Filter: Filter,
             FilterWorkspace: FilterWorkspace,
             Remember: place => manager.SaveTasksWindow(place));
@@ -339,7 +340,15 @@ public sealed class TasksBoard : IDisposable
         // workspace menu: chips in their colours, in the bar's order, grouped as on the bar, none first.
         var places = WorkspaceChipMenu.Entries(manager.State, withNone: true);
         var addTarget = where.Any ? PlaceOf(manager.CurrentWorkspaceId) : PlaceOf(where.Workspace);
-        return new TasksView(filters, WorkspaceFilterLabel(), where, places, groups, EmptyText(filter), addTarget);
+        // The Matrix's four cells (Ruling 28), drawn instead of the groups while the switch says so (AppState.TasksMatrix).
+        var cells = TaskViews.Matrix(board, filter, where)
+            .Select(c => new TaskCellView(c.Quadrant, TaskViews.GroupName(TaskViews.KindOf(c.Quadrant)), c.Tasks.Select(Row).ToArray()))
+            .ToArray();
+        return new TasksView(filters, WorkspaceFilterLabel(), where, places, groups, EmptyText(filter), addTarget)
+        {
+            Matrix = manager.State.TasksMatrix,
+            Cells = cells,
+        };
     }
 
     // A task closed here shows under the status it had while its undo window lasts, so its line keeps its place.
@@ -477,6 +486,9 @@ internal sealed record TaskRowView(Guid Id, string Title, string Detail, TaskSta
     public Quadrant Quadrant => QuadrantOf.Flags(Important, Urgent);
 }
 
+/// <summary>One cell of the Matrix: its quadrant, its caption, its lines (the waiting ones first).</summary>
+internal sealed record TaskCellView(Quadrant Quadrant, string Header, IReadOnlyList<TaskRowView> Rows);
+
 /// <summary>One group under its caption: which group (Waiting on you, a quadrant, Closed), the caption, its lines.</summary>
 internal sealed record TaskGroupView(TaskGroupKind Kind, string Header, IReadOnlyList<TaskRowView> Rows);
 
@@ -486,7 +498,13 @@ internal sealed record TaskGroupView(TaskGroupKind Kind, string Header, IReadOnl
 /// </summary>
 internal sealed record TasksView(IReadOnlyList<TaskFilterChip> Filters, string WorkspaceFilterLabel, TaskWorkspaceFilter Where,
     IReadOnlyList<WorkspaceChipMenu.Entry> Places,
-    IReadOnlyList<TaskGroupView> Groups, string EmptyText, TaskPlaceChoice AddTarget);
+    IReadOnlyList<TaskGroupView> Groups, string EmptyText, TaskPlaceChoice AddTarget)
+{
+    /// <summary>Whether the window shows the Matrix (Task 12) rather than the List; its four cells.</summary>
+    public bool Matrix { get; init; }
+
+    public IReadOnlyList<TaskCellView> Cells { get; init; } = [];
+}
 
 /// <summary>
 /// Everything the window can ask for, handed over by the controller once. The window has no events of its own: a click
@@ -508,6 +526,7 @@ internal sealed record TasksWindowActions(
     Func<string, Maybe<Guid>, bool> AddNote,
     Action<Guid, TaskFlag, bool> SetFlag,
     Action<Guid, Quadrant, TaskPlace> Place,
+    Action<bool> ShowMatrix,
     Action<TaskFilter> Filter,
     Action<TaskWorkspaceFilter> FilterWorkspace,
     Action<TasksWindowState> Remember);

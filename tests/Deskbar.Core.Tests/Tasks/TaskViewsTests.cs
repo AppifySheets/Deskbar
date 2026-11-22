@@ -93,6 +93,28 @@ public class TaskViewsTests
         Assert.True(TaskViews.QuadrantOf(TaskGroupKind.Closed).HasNoValue);
     }
 
+    // The Matrix (Ruling 28): four cells, I to IV, always, each its quadrant's open tasks in their order, with the tasks
+    // waiting on Petre on top of their own quadrant's cell (pinned, as everywhere).
+    [Fact]
+    public void The_matrix_has_four_cells_with_waiting_tasks_on_top_of_their_own()
+    {
+        var a = Note("a", Free);
+        var b = Note("b", Free);
+        var w = Note("w", Free);
+        Note("closed", Free);
+        Change(x => x.SetFlag(a, TaskFlag.Important, true, clock));
+        Change(x => x.SetFlag(w, TaskFlag.Important, true, clock));
+        Change(x => x.SetStatus(w, TaskStatus.WaitingOnYou, clock));
+        Change(x => x.Close(board.Tasks.Single(t => t.Title == "closed").Id, clock));
+
+        var cells = TaskViews.Matrix(board, TaskFilter.Open, TaskWorkspaceFilter.All);
+
+        Assert.Equal([Quadrant.I, Quadrant.II, Quadrant.III, Quadrant.IV], cells.Select(c => c.Quadrant));
+        Assert.Equal([[], ["w", "a"], [], ["b"]], cells.Select(c => c.Tasks.Select(t => t.Title).ToArray()));
+        Assert.Equal([[], ["a"], [], ["b"]], TaskViews.Matrix(board, TaskFilter.Backlog, TaskWorkspaceFilter.All).Select(c => c.Tasks.Select(t => t.Title).ToArray()));
+        Assert.All(TaskViews.Matrix(board, TaskFilter.Closed, TaskWorkspaceFilter.All), c => Assert.Empty(c.Tasks));
+    }
+
     [Fact]
     public void A_group_lists_its_tasks_newest_raised_first()
     {

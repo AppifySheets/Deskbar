@@ -38,33 +38,37 @@ public partial class TasksWindow
     /// <summary>The mouse the drag reads; the arrange drag's seam, held down in tests.</summary>
     internal ArrangeMouse DragMouse { get; set; } = ArrangeMouse.Real;
 
-    /// <summary>What the drag measures against and captures: the list's own panel.</summary>
-    internal FrameworkElement DragSurface => Rows;
+    /// <summary>What the drag measures against and captures: the List's panel, or the Matrix's grid.</summary>
+    internal FrameworkElement DragSurface => matrixShown ? MatrixGrid : Rows;
+
+    // Where the drop line is drawn across: the List's width, or the width of the Matrix cell it lands in.
+    Rect dropSpan = Rect.Empty;
 
     internal bool Dragging => drag is { Started: true };
 
     bool DragInFlight => drag is not null || dropQueued;
 
-    void WireDrag()
+    // Wired on both surfaces once; only the one on show ever sees a press.
+    void WireDrag() => new FrameworkElement[] { Rows, MatrixGrid }.ToList().ForEach(surface =>
     {
-        Rows.PreviewMouseMove += (_, e) =>
+        surface.PreviewMouseMove += (_, e) =>
         {
             if (drag is null) return;
             if (!DragMouse.ButtonDown(e)) CancelDrag();
             else DragMove(e.GetPosition(DragSurface));
         };
-        Rows.PreviewMouseLeftButtonUp += (_, e) =>
+        surface.PreviewMouseLeftButtonUp += (_, e) =>
         {
             if (drag is null) return;
             if (drag.Started) e.Handled = true;
             DragRelease();
         };
-        Rows.LostMouseCapture += (_, e) =>
+        surface.LostMouseCapture += (_, e) =>
         {
-            if (ReferenceEquals(e.OriginalSource, Rows) && drag is { Started: true }) CancelDrag();
+            if (ReferenceEquals(e.OriginalSource, surface) && drag is { Started: true }) CancelDrag();
             else if (drag is { Started: false }) drag = null;
         };
-    }
+    });
 
     /// <summary>A press on a line: arms a drag, unless the line is pinned (waiting) or fixed (closed).</summary>
     internal void DragPress(Guid id, Point at)
@@ -83,12 +87,12 @@ public partial class TasksWindow
             if (Math.Abs(at.X - current.PressedAt.X) < SystemParameters.MinimumHorizontalDragDistance
                 && Math.Abs(at.Y - current.PressedAt.Y) < SystemParameters.MinimumVerticalDragDistance) return;
             drag = current = current with { Started = true };
-            DragMouse.Capture(Rows);
+            DragMouse.Capture(DragSurface);
             if (LineButton(current.Id) is { } dragged) dragged.Opacity = DragDimming;
             Cursor = Cursors.SizeNS;
-            if (AdornerLayer.GetAdornerLayer(Rows) is { } layer)
+            if (AdornerLayer.GetAdornerLayer(DragSurface) is { } layer)
             {
-                dropAdorner = new DropLine(Rows, PaintDrop) { IsHitTestVisible = false };
+                dropAdorner = new DropLine(DragSurface, PaintDrop) { IsHitTestVisible = false };
                 layer.Add(dropAdorner);
             }
         }
@@ -134,33 +138,53 @@ public partial class TasksWindow
         drag = null;
         dropShown = null;
         if (current is not null && LineButton(current.Id) is { } dragged) dragged.Opacity = 1;
-        if (dropAdorner is not null) AdornerLayer.GetAdornerLayer(Rows)?.Remove(dropAdorner);
+        if (dropAdorner is not null) AdornerLayer.GetAdornerLayer(DragSurface)?.Remove(dropAdorner);
         dropAdorner = null;
         ClearValue(CursorProperty);
-        if (Rows.IsMouseCaptured) Rows.ReleaseMouseCapture();
+        if (DragSurface.IsMouseCaptured) DragSurface.ReleaseMouseCapture();
     }
 
-    // TaskDropTarget's answer over the lines on show that can be aimed at.
+    // TaskDropTarget's answer over the lines on show that can be aimed at. In the Matrix, over the cell under the
+    // pointer (or the nearest one) alone: its lines, and the whole cell as a place to drop when it has no line that
+    // moves (empty, or only waiting lines), so every quadrant can be dropped into.
     TaskDropTarget.Drop? DropAt(Guid dragged, Point at)
     {
-        var placed = LineButtons()
-            .Where(b => b.Tag is Guid id && dragLines.TryGetValue(id, out var line) && !line.Fixed && b.IsVisible)
-            .Select(b => (Id: (Guid)b.Tag, Line: dragLines[(Guid)b.Tag], Bounds: new Rect(b.TranslatePoint(new Point(0, 0), Rows), b.RenderSize)))
-            .Select(x => new TaskDropTarget.Placed(x.Id, x.Line.Quadrant, x.Line.Waiting, x.Bounds))
-            .ToList();
         var own = dragLines.TryGetValue(dragged, out var mine) ? mine.Quadrant : Quadrant.IV;
-        return TaskDropTarget.At(placed, [], own, at);
+        if (!matrixShown)
+        {
+            dropSpan = new Rect(0, 0, Rows.ActualWidth, Rows.ActualHeight);
+            return TaskDropTarget.At(Placed(LineButtons()), [], own, at);
+        }
+        if (cells.Count == 0) return null;
+        var (quadrant, box) = cells
+            .Select(c => (Quadrant: c.Key, Bounds: new Rect(c.Value.Box.TranslatePoint(new Point(0, 0), MatrixGrid), c.Value.Box.RenderSize)))
+            .OrderBy(c => c.Bounds.Contains(at) ? 0 : Math.Abs(at.X - (c.Bounds.Left + c.Bounds.Width / 2))
+                + Math.Abs(at.Y - (c.Bounds.Top + c.Bounds.Height / 2)))
+            .First();
+        dropSpan = box;
+        var lines = Placed(cells[quadrant].Lines.Children.OfType<Button>().Where(b => b.Tag is Guid));
+        var areas = lines.All(l => l.Waiting) ? new[] { new TaskDropTarget.Area(quadrant, box) } : [];
+        return TaskDropTarget.At(lines, areas, own, at);
     }
+
+    // The lines that can be aimed at, with their boxes in the drag's coordinates.
+    IReadOnlyList<TaskDropTarget.Placed> Placed(IEnumerable<Button> buttons) =>
+        buttons
+            .Where(b => b.Tag is Guid id && dragLines.TryGetValue(id, out var line) && !line.Fixed && b.IsVisible)
+            .Select(b => new TaskDropTarget.Placed((Guid)b.Tag, dragLines[(Guid)b.Tag].Quadrant, dragLines[(Guid)b.Tag].Waiting,
+                new Rect(b.TranslatePoint(new Point(0, 0), DragSurface), b.RenderSize)))
+            .ToList();
 
     void PaintDrop(DrawingContext dc)
     {
         if (dropShown is not { } drop) return;
-        dc.DrawRoundedRectangle(DropInk, null, new Rect(0, drop.LineY - 1, Rows.ActualWidth, 2), 1, 1);
+        dc.DrawRoundedRectangle(DropInk, null, new Rect(dropSpan.Left, drop.LineY - 1, dropSpan.Width, 2), 1, 1);
     }
 
     static readonly Brush DropInk = Frozen(0xE6, 0xFF, 0xFF, 0xFF);
 
-    IEnumerable<Button> LineButtons() => Rows.Children.OfType<Button>().Where(b => b.Tag is Guid);
+    IEnumerable<Button> LineButtons() =>
+        (matrixShown ? cells.Values.SelectMany(c => c.Lines.Children.OfType<Button>()) : Rows.Children.OfType<Button>()).Where(b => b.Tag is Guid);
 
     Button? LineButton(Guid id) => LineButtons().FirstOrDefault(b => (Guid)b.Tag == id);
 

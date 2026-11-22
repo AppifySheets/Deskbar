@@ -48,6 +48,9 @@ public enum TaskGroupKind { WaitingOnYou, I, II, III, IV, Closed }
 /// <summary>One group of the window: which group, and its tasks in the order they are drawn.</summary>
 public sealed record TaskGroup(TaskGroupKind Kind, IReadOnlyList<TaskItem> Tasks);
 
+/// <summary>One cell of the window's Matrix: its quadrant, and its tasks in the order they are drawn.</summary>
+public sealed record TaskCell(Quadrant Quadrant, IReadOnlyList<TaskItem> Tasks);
+
 public static class TaskViews
 {
     static readonly IReadOnlyList<(TaskGroupKind Kind, Quadrant Quadrant)> Quadrants =
@@ -68,6 +71,20 @@ public static class TaskViews
         })
         .Where(g => g.Tasks.Count > 0)
         .ToArray();
+
+    /// <summary>
+    /// The Matrix (Ruling 28): Covey's four cells, I to IV, always all four. Each lists its quadrant's open tasks in
+    /// their order, the ones waiting on Petre first, on top of their own quadrant's cell (pinned, as everywhere,
+    /// the latest ask first), each drawn orange as everywhere. The status filter narrows every cell as it narrows the
+    /// List; the closed tasks have no quadrant order, so under "Closed" every cell is empty.
+    /// </summary>
+    public static IReadOnlyList<TaskCell> Matrix(TaskBoard board, TaskFilter filter, TaskWorkspaceFilter where) =>
+        Quadrants.Select(q => new TaskCell(q.Quadrant, filter == TaskFilter.Closed ? []
+            : board.Tasks.Where(t => t.Status == TaskStatus.WaitingOnYou && t.Quadrant == q.Quadrant).OrderByDescending(t => t.Raised)
+                .Concat(board.Group(q.Quadrant))
+                .Where(t => where.Admits(t) && StatusesOf(filter).Contains(t.Status))
+                .ToArray()))
+            .ToArray();
 
     /// <summary>The quadrant a group stands for; none for Waiting on you and Closed.</summary>
     public static Maybe<Quadrant> QuadrantOf(TaskGroupKind kind) =>
