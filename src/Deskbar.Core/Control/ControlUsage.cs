@@ -94,6 +94,7 @@ public static class ControlUsage
                 "Remember <app>'s workspace (on: the app's windows open in the workspace this window is in, and\n"
                 + "follow it when you move one; off: they open where they are opened)"),
             new("restore-title", "<hwnd>", "Restore title"),
+            new("lock-tile", "<hwnd> on|off", "Don't split this tile: a new window never takes half of it"),
             new("pin", "<hwnd>", "show the window on every workspace, as dropping it on the pin row does"),
             new("unpin", "<hwnd>", "undo pin"),
             new("close-window", "<hwnd>", "Close (asks the window to close, as its X does)"),

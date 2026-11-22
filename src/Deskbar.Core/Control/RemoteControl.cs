@@ -55,6 +55,10 @@ namespace Deskbar.Core.Control;
 // passes nothing never gets tiling.
 //
 // `tasks` is the task service for `task` (RemoteControl.Tasks.cs). Left null, every `task` command refuses.
+//
+// `setTileLocked` locks or unlocks a tile (`lock-tile <hwnd> on|off`, the twin of the icon menu's "Don't split this
+// tile"; Tiler.Lock.cs). The lock is the Tiler's, which lives in the app, so the app hands in how; left null,
+// `lock-tile` refuses.
 public sealed partial class RemoteControl(WorkspaceManager manager, Func<bool, Result>? setBarVisible = null, Func<ProgramLaunch, Result<int?>>? launch = null,
     Func<Result<string>>? dump = null, Func<Maybe<string>>? defaultBrowser = null,
     Func<(string Version, string? Exe, bool Packaged)>? identity = null,
@@ -62,7 +66,8 @@ public sealed partial class RemoteControl(WorkspaceManager manager, Func<bool, R
     Func<bool, Result>? setStatsDetached = null,
     Func<bool, Result>? setArranging = null,
     Func<bool>? isPro = null,
-    TaskService? tasks = null)
+    TaskService? tasks = null,
+    Func<WindowHandle, bool, Result>? setTileLocked = null)
 {
     static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web) { WriteIndented = true };
 
@@ -126,6 +131,7 @@ public sealed partial class RemoteControl(WorkspaceManager manager, Func<bool, R
         ("name-by-folder", [var hwnd, var onOff]) => NameByFolder(hwnd, onOff),
         ("remember-workspace", [var hwnd, var onOff]) => RememberWorkspace(hwnd, onOff),
         ("restore-title", [var hwnd]) => RestoreTitle(hwnd),
+        ("lock-tile", [var hwnd, var onOff]) => LockTile(hwnd, onOff),
         ("pin", [var hwnd]) => Pin(hwnd, pin: true),
         ("unpin", [var hwnd]) => Pin(hwnd, pin: false),
         ("close-window", [var hwnd]) => CloseWindow(hwnd),

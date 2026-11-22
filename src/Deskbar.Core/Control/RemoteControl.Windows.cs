@@ -151,6 +151,19 @@ public sealed partial class RemoteControl
             _ => ControlReply.Fail(ControlUsage.LineFor("remember-workspace")),
         };
 
+    // The icon menu's "Don't split this tile" (Tiler.Lock.cs): a locked tile is never the one a new window halves.
+    // The Tiler refuses a window that is not a tile, and that refusal is the reply.
+    ControlReply LockTile(string hwnd, string onOff) =>
+        onOff.ToLowerInvariant() switch
+        {
+            "on" or "true" or "yes" => OnWindow(hwnd, w => SetTileLocked(w.Handle, true)),
+            "off" or "false" or "no" => OnWindow(hwnd, w => SetTileLocked(w.Handle, false)),
+            _ => ControlReply.Fail(ControlUsage.LineFor("lock-tile")),
+        };
+
+    Result SetTileLocked(WindowHandle window, bool on) =>
+        setTileLocked is null ? Result.Failure("Tiling is not running.") : setTileLocked(window, on);
+
     // Names no window, so there is no window to describe: the reply echoes the rule that was made.
     ControlReply RenamePattern(string pattern, string name) =>
         Reply(manager.RenameByPattern(pattern, name), () => new { pattern, name });

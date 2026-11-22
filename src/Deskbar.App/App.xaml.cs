@@ -1463,7 +1463,10 @@ public partial class App : Application
             // for now). Entitlement's cached verdict, read when the command arrives, so a licence refresh in between
             // is honoured.
             isPro: () => Core.Tiling.TilingGate.Allowed(Entitlement.Current.IsPro),
-            tasks: tasks);
+            tasks: tasks,
+            // `lock-tile`, the icon menu's "Don't split this tile" (Tiler.Lock.cs). `tiler` is read when the command
+            // arrives: requests run on the UI thread after startup, and a copy with no Tiler refuses.
+            setTileLocked: (window, on) => tiler?.SetTileLocked(window, on) ?? Result.Failure("Tiling is not running."));
         controlServer = new ControlPipeServer(ControlCommandLine.PipeName,
             args => Dispatcher.InvokeAsync(() =>
             {
