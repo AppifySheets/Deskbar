@@ -3,6 +3,7 @@ using System.Windows.Controls;
 using System.Windows.Media;
 using Deskbar.App;
 using Deskbar.Core.Domain;
+using Deskbar.Core.Persistence;
 
 namespace Deskbar.Windows.Tests;
 
@@ -190,6 +191,26 @@ public class FloatingBarRecencyTests
         harness.Monitor.Pump.OnNext(new WindowEvent(WindowEventKind.Activated, harness.Second));
 
         Assert.Equal(0xFF, RailOf(bar, "Sparrow").A);
+    });
+
+    // A grouped member's rail fades like any other row's (Petre's bar, 2026-11-22: every grouped row's rail was still
+    // drawn at full strength, even on workspaces with no windows at all).
+    // Petre's bar keeps its window list on the screens (WindowListPlace.Screens), so the rows carry no icons.
+    [Theory]
+    [InlineData(WindowListPlace.Row)]
+    [InlineData(WindowListPlace.Screens)]
+    public void An_idle_grouped_rows_rail_is_faded(WindowListPlace place) => StaThread.Run(() =>
+    {
+        var (harness, clock) = Build(grouped: true);
+        Assert.True(harness.Manager.SetWindowListPlace(place).IsSuccess);
+        using var bar = harness.ShowBar();
+        TwoDaysLater(harness, clock);
+
+        var idle = harness.Manager.State.Workspaces.Where(w => w.GroupId is not null).Select(w => w.Name).ToList();
+        Assert.NotEmpty(idle);
+        // The family is one top-level element: the group's line and each member's rail, all idle, all faint.
+        idle.ForEach(name => Assert.All(Tree(Row(bar, name)).OfType<Border>().Where(b => b.Width == 3),
+            rail => Assert.Equal(FaintGrey, ColourOf(rail.Background))));
     });
 
     // A group's line and name follow its freshest member: with both members idle, both are faded.
