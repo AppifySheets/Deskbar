@@ -5,10 +5,10 @@ using Deskbar.Windows.Store;
 
 namespace Deskbar.App;
 
-// The app's cached answer to "is this copy Deskbar Pro?", for whatever is gated on it later (nothing is
-// yet). The decision itself is ProEntitlement's, in Core and unit-tested; this class only gathers the
-// facts, asks it, remembers the verdict and traces it.
-// Design: docs/superpowers/specs/2026-10-24-deskbar-store-packaging-design.md, "Pro is the package".
+// The app's cached answer to "is this copy Deskbar Pro?", which since 2026-11-22 means "does this Store copy
+// own the Deskbar Pro add-on" (the listing went free; ProEntitlement's header has the rules). Every feature
+// stays free; the answer is for the daily reminder to buy Pro. The decision itself is ProEntitlement's, in
+// Core and unit-tested; this class only gathers the facts, asks it, remembers the verdict and traces it.
 //
 // Refreshed at startup once the bar exists (its hwnd owns the Store context) and on every tick of the
 // update timer (App.StartUpdateChecks), so a trial that ends or a purchase made while the app runs is
