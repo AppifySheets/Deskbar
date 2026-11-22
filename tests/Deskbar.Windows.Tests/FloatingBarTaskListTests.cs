@@ -645,8 +645,7 @@ public class FloatingBarTaskListTests
         ClickBox(t);
 
         var menu = t.Bar.OpenOtherWorkspaces()!;
-        var sparrow = menu.Items.OfType<MenuItem>().Single(i => Inside(i.Header).OfType<TextBlock>().Any(x => x.Text == "Sparrow"));
-        sparrow.RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
+        Click(WorkspaceChipMenu.Chips(menu).Single(c => AutomationProperties.GetName(c) == "Sparrow"));
         menu.IsOpen = false;
 
         Assert.Equal("Add to Sparrow…", t.Bar.TaskAddPlaceholder);
@@ -985,7 +984,7 @@ public class FloatingBarTaskListTests
     static string ChipTextOf(Button line) =>
         Inside(line).OfType<Border>().Single(b => Equals(b.Tag, "task-workspace")).Child is TextBlock text ? text.Text : "";
 
-    static string MenuNameOf(MenuItem item) => Inside(item.Header).OfType<TextBlock>().First().Text;
+    static string MenuNameOf(Button chip) => AutomationProperties.GetName(chip);
 
     [Fact]
     public void A_lines_workspace_chip_moves_the_task() => StaThread.Run(() =>
@@ -995,11 +994,11 @@ public class FloatingBarTaskListTests
         var sparrow = t.Harness.Manager.State.Workspaces.Single(w => w.Name == "Sparrow").Id;
 
         var menu = t.Bar.OpenTaskMoveMenu(id)!;
-        var items = menu.Items.OfType<MenuItem>().ToList();
+        var items = WorkspaceChipMenu.Chips(menu);
         Assert.Equal(["none", "GEPHA", "Sparrow"], items.Select(MenuNameOf));
-        Assert.Equal(["GEPHA"], items.Where(i => i.IsChecked).Select(MenuNameOf));
+        Assert.Equal(["GEPHA"], items.Where(i => AutomationProperties.GetItemStatus(i) == WorkspaceChipMenu.CurrentStatus).Select(MenuNameOf));
 
-        items.Single(i => MenuNameOf(i) == "Sparrow").RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
+        Click(items.Single(i => MenuNameOf(i) == "Sparrow"));
         menu.IsOpen = false;
         t.Bar.Dispatcher.Invoke(() => { }, DispatcherPriority.Background);
         t.Bar.RequestRebuild();
@@ -1009,7 +1008,7 @@ public class FloatingBarTaskListTests
 
         // And to none.
         var again = t.Bar.OpenTaskMoveMenu(id)!;
-        again.Items.OfType<MenuItem>().Single(i => MenuNameOf(i) == "none").RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
+        Click(WorkspaceChipMenu.Chips(again).Single(i => MenuNameOf(i) == "none"));
         again.IsOpen = false;
         Assert.True(t.Tasks.Board.Tasks.Single(x => x.Id == id).WorkspaceId.HasNoValue);
     });
