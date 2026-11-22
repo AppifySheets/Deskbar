@@ -48,6 +48,43 @@ public partial class FloatingBar
     static readonly ConcurrentDictionary<int, Brush> restingCaptions = new();
     static readonly ConcurrentDictionary<int, Brush> groupHeaders = new();
 
+    // --- which workspace rows were drawn at which step ----------------------------------------------------------
+
+    // Per workspace row drawn in this rebuild: how to work its fade out again (the windows it was drawn with, and
+    // whether it was the row you are on), and the step it was drawn at. Emptied at the start of every rebuild.
+    readonly Dictionary<Guid, (Func<double> Fade, int Step)> drawnFades = [];
+
+    void ForgetDrawnFades() => drawnFades.Clear();
+
+    // Notes a workspace row about to be drawn and returns the step to draw it at. The current workspace is always 0.
+    int NoteFade(WorkspaceGroup g)
+    {
+        var windows = g.Running.Select(r => r.Window.Handle).ToList();
+        Func<double> fade = g.IsCurrent ? () => 0 : () => WorkspaceFade.Of(windows.Select(manager.LastUsed), manager.Now);
+        var step = WorkspaceFade.Step(fade());
+        drawnFades[g.Workspace.Id] = (fade, step);
+        return step;
+    }
+
+    // The step a workspace was noted at in this rebuild; 0 for one that was not.
+    int DrawnStepOf(Guid workspace) => drawnFades.TryGetValue(workspace, out var drawn) ? drawn.Step : 0;
+
+    // An icon's fade: its workspace row's, continuous rather than stepped, or, off a workspace row, the window's own age.
+    double FadeOf(Guid? workspace, WindowHandle window) =>
+        workspace is { } id && drawnFades.TryGetValue(id, out var drawn) ? drawn.Fade() : AgeOf(window);
+
+    // Whether any workspace's step has moved since it was drawn.
+    bool FadesMoved() => drawnFades.Values.Any(d => WorkspaceFade.Step(d.Fade()) != d.Step);
+
+    // From the aging timer: a rebuild when a step has moved, which redraws the rails, tints and names at the new step.
+    // Rebuild holds itself back while a button is down, a menu is open or a drag is in flight (FlushIfIdle).
+    void RefreshFades()
+    {
+        if (FadesMoved()) Rebuild();
+    }
+
+    // --- the faded brushes ----------------------------------------------------------------------------------------
+
     static double FractionOf(int step) => Math.Clamp(step, 0, WorkspaceFade.Steps) / (double)WorkspaceFade.Steps;
 
     static byte Between(byte from, byte to, double fraction) => (byte)Math.Round(from + (to - from) * fraction);

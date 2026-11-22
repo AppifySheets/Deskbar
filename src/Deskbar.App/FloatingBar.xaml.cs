@@ -2248,7 +2248,8 @@ public partial class FloatingBar : Window
         headerDropTargets.Clear();    // re-registered by every row as it is built (see GroupRow)
         ForgetArrangeTargets();       // ...and so are the rows an arrange drag picks up and aims at (FloatingBar.ArrangeDrag.cs)
         ForgetAgingIcons();           // the aging overlays belong to the rows about to be replaced
-        ForgetWindowFits();           // ...and the maximized and tile badges (FloatingBar.WindowState.cs)
+        ForgetDrawnFades();           // ...and the fade each workspace row was drawn at (FloatingBar.Recency.cs)
+        ForgetWindowFits();          // ...and the maximized and tile badges (FloatingBar.WindowState.cs)
         ForgetWorkspaceTimes();       // ...and so do the captions' time marks
         ForgetTaskPies();             // ...and the task pies, and the row colours the stopwatch's swatch reads
         // The rows these pointed at have just been thrown away, so every entry is now a Border
@@ -2466,6 +2467,12 @@ public partial class FloatingBar : Window
                 // group's name carries what a parent row would otherwise have said.
                 var nested = group is not null;
 
+                // How long since a window here was used, as a step from 0 (fresh) to 16 (idle), which fades this
+                // row's rail, tint and name below and its icons in Aged (FloatingBar.Recency.cs). 0 on the row you
+                // are on. Noted, so the aging timer can tell when the step has moved and the row needs redrawing.
+                var fadeStep = NoteFade(g);
+                var slot = colourSlot >= 0 ? colourSlot : ownSlot;
+
                 // The name, plainly. The ↳ prefix that was here first is gone: Petre asked for "a
                 // better representation that it's a child", and a glyph inside a label that already
                 // sits in a narrow gutter is the weakest place to put it. The spine, the shared
@@ -2485,7 +2492,10 @@ public partial class FloatingBar : Window
                     // That keeps a bar of fifteen rows calm, and makes the current one the only coloured
                     // block on it. Every member still wears the GROUP's colour rather than its own, since
                     // colour is what groups things here.
-                    tint: g.IsCurrent ? LaneTint(colour, colourSlot >= 0 ? colourSlot : ownSlot) : null,
+                    //
+                    // ...and, since recent workspaces keep their colour (FloatingBar.Recency.cs), a row you used lately
+                    // carries a faint trace of the tint, a third of the current row's, gone once the row has gone idle.
+                    tint: g.IsCurrent ? LaneTint(colour, slot) : FadedTint(colour, slot, fadeStep),
                     rowKey: g.Workspace.Id,
                     // The stored fold; GroupRow decides whether the row is drawn folded right now.
                     folded: g.Workspace.Folded,
@@ -2493,10 +2503,13 @@ public partial class FloatingBar : Window
                     pinnedWorkspace: g.Workspace.Pinned,
                     nested: nested,
                     // The rail: bright on the current workspace (and on an expanded row, which is the titled
-                    // list and the louder fact), the plain accent everywhere else.
+                    // list and the louder fact), the accent everywhere else, faded with the row's age: grey and faint
+                    // on a workspace left alone (Petre: "let's also fade the rails on the left, so i don't get tempted
+                    // to look at them"). At step 0 FadedAccent is LaneAccent's colour exactly.
                     spine: g.IsCurrent || Expanded(g.Workspace.Id)
-                        ? ListSpine(colour, colourSlot >= 0 ? colourSlot : ownSlot)
-                        : LaneAccent(colour, colourSlot >= 0 ? colourSlot : ownSlot),
+                        ? ListSpine(colour, slot)
+                        : FadedAccent(colour, slot, fadeStep),
+                    fadeStep: fadeStep,
                     titledList: Expanded(g.Workspace.Id),
                     asking: g.WantsAttention,
                     // The soonest running task timer on this workspace, drawn as a pie in the caption (Tasks.cs).
@@ -2536,6 +2549,12 @@ public partial class FloatingBar : Window
                     .ToList();
                 members.ForEach(m => drawn.Add(m!.Workspace.Id));
 
+                // The group's line and name fade with its FRESHEST member (FloatingBar.Recency.cs): a group you are
+                // working in anywhere is a group you are working in. Every member is noted here, drawn or not, so a
+                // folded group's line is redrawn too when one of its members' steps moves.
+                var groupStep = members.Select(m => NoteFade(m!)).DefaultIfEmpty(0).Min();
+                var groupLine = FadedAccent(group.Color, ColourSlotOf(group), groupStep);
+
                 // A FOLDED group (Group.Folded) is its one line, plus the full row of any member that is
                 // still in view: the workspace you are on, or one the pointer has opened. The same rule a
                 // folded row follows, and for the same reason: folding is "I am not working in these", and
@@ -2545,8 +2564,8 @@ public partial class FloatingBar : Window
                 {
                     var shown = members.Where(m => m!.IsCurrent || Expanded(m.Workspace.Id)).Select(m => WorkspaceRow(m!, group, boxed: true));
                     // ArrangeBox: the box an arrange drag of the group carries and draws lines at (FloatingBar.ArrangeDrag.cs).
-                    groupRows.Add(ArrangeBox(group.Id, FamilyBox([FoldedGroupLine(group, members!), .. shown],
-                        LaneAccent(group.Color, ColourSlotOf(group)), LaneTint(group.Color, ColourSlotOf(group)), AcrossSeam)));
+                    groupRows.Add(ArrangeBox(group.Id, FamilyBox([FoldedGroupLine(group, members!, groupStep), .. shown],
+                        groupLine, LaneTint(group.Color, ColourSlotOf(group)), AcrossSeam)));
                     return;
                 }
 
@@ -2559,9 +2578,9 @@ public partial class FloatingBar : Window
                 // A group needs a header, because nothing inside it carries the name. Deliberately
                 // not a switch target: there is no desktop behind it, and a row that looks clickable
                 // and does nothing is worse than one that plainly is not.
-                rows.Insert(0, GroupHeader(group, ColourSlotOf(group)));
+                rows.Insert(0, GroupHeader(group, ColourSlotOf(group), groupStep));
 
-                groupRows.Add(ArrangeBox(group.Id, FamilyBox(rows, LaneAccent(group.Color, ColourSlotOf(group)), LaneTint(group.Color, ColourSlotOf(group)), AcrossSeam)));
+                groupRows.Add(ArrangeBox(group.Id, FamilyBox(rows, groupLine, LaneTint(group.Color, ColourSlotOf(group)), AcrossSeam)));
             });
 
             // ...and unbound desktops with windows (OverviewBuilder already drops empty
@@ -3406,7 +3425,8 @@ public partial class FloatingBar : Window
     //
     // It cannot shrink to nothing, though, and that is not a compromise: this is where the group's
     // menu lives (#84, #90), so it has to stay big enough to right-click.
-    UIElement GroupHeader(Core.Domain.Group group, int colourSlot)
+    // `fadeStep`: the group's freshest member's step (FloatingBar.Recency.cs), which dims the name as its rows fade.
+    UIElement GroupHeader(Core.Domain.Group group, int colourSlot, int fadeStep = 0)
     {
         // Transparent rather than untinted: a null Background would not take part in hit testing, and
         // then the right-click that reaches the group's menu would fall through to the bar.
@@ -3422,7 +3442,7 @@ public partial class FloatingBar : Window
             Text = group.Name.ToUpperInvariant(),
             FontSize = GroupHeaderFontSize - 0.5,
             FontWeight = FontWeights.Bold,
-            Foreground = GroupHeaderForeground,
+            Foreground = GroupHeaderAt(fadeStep), // dims with the group's freshest member (FloatingBar.Recency.cs)
             // The font's line box is taller than its letters, and on a caption this small that
             // difference is most of the height. Clamped to the glyphs, which is why the caption ends
             // up costing about four pixels more than the text itself.
@@ -3546,7 +3566,8 @@ public partial class FloatingBar : Window
     //
     // No twin across the seam, unlike the header: the names are click targets, and the right half repeating
     // them would put two copies of every switch on one line.
-    UIElement FoldedGroupLine(Core.Domain.Group group, IReadOnlyList<WorkspaceGroup> members)
+    // `fadeStep`: the group's freshest member's step (FloatingBar.Recency.cs), which dims the group's name on the line.
+    UIElement FoldedGroupLine(Core.Domain.Group group, IReadOnlyList<WorkspaceGroup> members, int fadeStep = 0)
     {
         var line = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(4, 2, 4, 1) };
 
@@ -3564,7 +3585,7 @@ public partial class FloatingBar : Window
 
         // The grip of arrange mode (FloatingBar.Arrange.cs), before the group's name.
         if (ArrangeGrip() is { } grip) line.Children.Add(grip);
-        line.Children.Add(Label($"{group.Name.ToUpperInvariant()} ▸ ", GroupHeaderForeground));
+        line.Children.Add(Label($"{group.Name.ToUpperInvariant()} ▸ ", GroupHeaderAt(fadeStep)));
 
         members.Select((m, at) => (m, at)).ToList().ForEach(x =>
         {
@@ -3572,7 +3593,7 @@ public partial class FloatingBar : Window
 
             // The current member's name in the group's bright colour, as a current row's caption is, so the
             // line says which of them you are in even before the eye reaches the full row below it.
-            var resting = x.m.IsCurrent ? CurrentRowForeground : RestingRowForeground;
+            var resting = x.m.IsCurrent ? CurrentRowForeground : RestingCaption(DrawnStepOf(x.m.Workspace.Id)); // each name dims with its own workspace (FloatingBar.Recency.cs)
             var name = Label(x.m.Workspace.Name, resting);
             var button = new Button
             {
@@ -3784,7 +3805,9 @@ public partial class FloatingBar : Window
     // not a desktop at all.
     // `titledList` draws the current workspace's titled list at the bottom of the bar (see RebuildCore)
     // instead of an icon row.
-    UIElement GroupRow(string visualLabel, string groupLabel, bool isCurrent, Func<Result>? switchTo, string groupKey, Action<WindowHandle, int?>? onDrop, IEnumerable<WindowRow> rows, Brush? tint = null, Guid? rowKey = null, bool folded = false, bool nested = false, Brush? spine = null, bool pinned = false, Guid? desktopId = null, UIElement? captionContent = null, bool titledList = false, bool asking = false, Maybe<Core.Tasks.TaskTimer> timer = default, bool pinnedWorkspace = false, bool tiled = false)
+    // `fadeStep`: how faded a workspace row's name is drawn, 0 (fresh) to 16 (idle), from FloatingBar.Recency.cs. 0, today's
+    // resting colour, for every row that is not a workspace.
+    UIElement GroupRow(string visualLabel, string groupLabel, bool isCurrent, Func<Result>? switchTo, string groupKey, Action<WindowHandle, int?>? onDrop, IEnumerable<WindowRow> rows, Brush? tint = null, Guid? rowKey = null, bool folded = false, bool nested = false, Brush? spine = null, bool pinned = false, Guid? desktopId = null, UIElement? captionContent = null, bool titledList = false, bool asking = false, Maybe<Core.Tasks.TaskTimer> timer = default, bool pinnedWorkspace = false, bool tiled = false, int fadeStep = 0)
     {
         // Background MUST be non-null for a panel to take part in hit testing at all --
         // a null Background leaves gaps between icons that swallow nothing and report no
@@ -3980,7 +4003,7 @@ public partial class FloatingBar : Window
         // either, which changes nothing -- RowLabel already returns null for a row with no
         // destination, and the pinned row has never had one.
         var (label, setHover) = captionContent is null
-            ? RowLabel(visualLabel, isCurrent, switchTo, caption: true, currentColour: spine, timeFor: rowKey, fold: foldMark, asking: asking, timer: timer, pin: pinnedWorkspace, tiled: tiled)
+            ? RowLabel(visualLabel, isCurrent, switchTo, caption: true, currentColour: spine, timeFor: rowKey, fold: foldMark, asking: asking, timer: timer, pin: pinnedWorkspace, tiled: tiled, fadeStep: fadeStep)
             : (captionContent, (Action<bool>?)null);
 
         // Collected as they are built, because the hover wiring below needs the BUTTONS and
@@ -4215,7 +4238,7 @@ public partial class FloatingBar : Window
         // by the same hover. Only for a real caption, not the pinned row's header.
         if (AcrossSeam && captionContent is null)
         {
-            var (twin, twinHover) = RowLabel(visualLabel, isCurrent, switchTo, caption: true, currentColour: spine, timeFor: rowKey, fold: foldMark, timer: timer, pin: pinnedWorkspace, tiled: tiled);
+            var (twin, twinHover) = RowLabel(visualLabel, isCurrent, switchTo, caption: true, currentColour: spine, timeFor: rowKey, fold: foldMark, timer: timer, pin: pinnedWorkspace, tiled: tiled, fadeStep: fadeStep);
             if (twin is FrameworkElement twinCaption && label is FrameworkElement firstCaption) twinCaption.Margin = firstCaption.Margin;
             var holder = AtRightHalf(twin);
             Grid.SetRow(holder, 0);
@@ -5605,7 +5628,7 @@ public partial class FloatingBar : Window
     // (FloatingBar.Tiling.cs, TiledMark). Read on every row, the one you are on or not, folded or not.
     (UIElement Element, Action<bool>? SetHover) RowLabel(string text, bool isCurrent, Func<Result>? switchTo, bool caption = false,
         Brush? currentColour = null, Guid? timeFor = null, (int Windows, bool Attention)? fold = null, bool asking = false, Maybe<Core.Tasks.TaskTimer> timer = default,
-        bool pin = false, bool tiled = false)
+        bool pin = false, bool tiled = false, int fadeStep = 0)
     {
         // Petre: "when switching workspaces, because the caption of the workspace gets bolded,
         // it increases the width of the floating window a little if that workspace is full,
@@ -5622,7 +5645,9 @@ public partial class FloatingBar : Window
         // and read at a glance, and the labels were already the hardest thing on it to read.
         // A row whose session asked for the user rests in the pulsing orange instead (FloatingBar.Asking.cs); hover
         // still lifts it to white, and leaving lets the pulse show again.
-        var resting = asking ? AskingCaption : isCurrent ? currentColour ?? CurrentRowForeground : RestingRowForeground;
+        // A row that is neither: its resting white dims with the time since you used it (`fadeStep`, see
+        // FloatingBar.Recency.cs), down to a floor every name stays readable at. Step 0 is RestingRowForeground's own alpha.
+        var resting = asking ? AskingCaption : isCurrent ? currentColour ?? CurrentRowForeground : RestingCaption(fadeStep);
         var textBlock = new TextBlock
         {
             Text = text,
@@ -6451,7 +6476,7 @@ public partial class FloatingBar : Window
         // row's workspace goes with it, so a tiled workspace you are not on badges its windows too.
         button.Content = WithActivity(WithWindowFit(WithState(
             icon is not null
-                ? Aged(icon, row)
+                ? Aged(icon, row, rowKey)
                 : Placeholder(row.Window),
             row), row, rowKey), row);
         // The icon size setting (IconScaling): the ARTWORK is scaled, overlays and all, and not the button. On an

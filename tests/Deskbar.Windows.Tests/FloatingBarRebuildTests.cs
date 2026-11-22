@@ -983,7 +983,10 @@ sealed class Harness
     // grouped: Sparrow and Archive in one anchorless group, "Team", so their rows are drawn inside a family
     // box with a header above them. Implies extraWorkspace, which is where Archive comes from.
     public static Harness Build(bool withUnresolvableWindow = false, bool singleWorkspace = false,
-        bool busyWorkspace = false, bool withUnnamedDesktop = false, bool extraWorkspace = false, bool grouped = false, bool withFrameHostWindow = false)
+        bool busyWorkspace = false, bool withUnnamedDesktop = false, bool extraWorkspace = false, bool grouped = false, bool withFrameHostWindow = false,
+        // The manager's clock, for the tests that need time to pass (the recent-workspace fade, FloatingBarRecencyTests).
+        // Null is the real clock, as every other test has always had.
+        Func<DateTimeOffset>? clock = null)
     {
         extraWorkspace |= grouped;
 
@@ -1075,7 +1078,7 @@ sealed class Harness
                 WindowListOffScreens = true,
             },
         };
-        var manager = new WorkspaceManager(desktops, monitor, new StubTitles(), store);
+        var manager = new WorkspaceManager(desktops, monitor, new StubTitles(), store, clock);
         Assert.True(manager.Start().IsSuccess);
 
         return new Harness

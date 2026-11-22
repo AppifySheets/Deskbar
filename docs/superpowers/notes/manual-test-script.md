@@ -311,6 +311,25 @@ RP6. Disconnect the network, send: "Could not send." with a folder under %APPDAT
      folder is gone.
 RP7. `$ts dump` still writes a dump file and answers its path, opening no window.
 
+## Recent workspaces keep their colour
+
+Each workspace row fades with the time since any of its windows was used: full colour up to 15 minutes,
+grey and faint at 8 hours (docs/superpowers/specs/2026-11-22-recent-workspaces-design.md). Easiest to
+check after a night: everything you did not touch yesterday should be faded in the morning.
+
+RW1. A workspace untouched for hours: grey, faint rail; no tint; dimmed name; every icon grey.
+RW2. A workspace you used a few minutes ago (not the one you are on): rail in its colour, a faint wash
+     of that colour behind the row, a normal name, coloured icons.
+RW3. Click a window in a faded row: the row is in full colour once you have switched there, and stays
+     coloured after you switch away.
+RW4. The row you are on is drawn as before (bright rail, tint, ring, coloured name), however long its
+     windows have been left.
+RW5. A group whose members are all faded: its name and the line down its left are faded too. Use one
+     member and both come back.
+RW6. A faded row asking for you (a session needs you) still pulses orange.
+RW7. Leave the bar alone for an hour with a workspace near 15 minutes old: its row fades in visible
+     steps without any click being lost while you use the bar.
+
 ## Results (2026-08-01)
 
 Status: **pending human execution.** An agent cannot observe the desktop, Task View,
