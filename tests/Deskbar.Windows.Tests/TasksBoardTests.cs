@@ -1119,8 +1119,10 @@ public class TasksBoardTests
     static void RealMove(UIElement line) =>
         line.RaiseEvent(new MouseEventArgs(Mouse.PrimaryDevice, 0) { RoutedEvent = UIElement.PreviewMouseMoveEvent });
 
-    static bool RealRelease(Button line)
+    // The line released must still be drawn: a redraw under the press (#48) would have replaced it (minor 1).
+    static bool RealRelease(Board t, Button line)
     {
+        Assert.Contains(line, Inside(t.Window).OfType<Button>());
         var up = ButtonArgs(UIElement.PreviewMouseUpEvent);
         line.RaiseEvent(up);
         if (up.Handled) return false;
@@ -1132,14 +1134,23 @@ public class TasksBoardTests
     static void LoseCapture(UIElement on) =>
         on.RaiseEvent(new MouseEventArgs(Mouse.PrimaryDevice, 0) { RoutedEvent = Mouse.LostMouseCaptureEvent });
 
-    static (Board Board, Pointer Pointer, Guid A, Guid B, Guid C) RoutedWindow()
+    sealed class Captures
+    {
+        public int Count;
+    }
+
+    static (Board Board, Pointer Pointer, Guid A, Guid B, Guid C) RoutedWindow(Captures? captures = null)
     {
         var t = Build();
         var a = t.Tasks.AddNote("a", t.Gepha).Value.Id;
         var b = t.Tasks.AddNote("b", t.Gepha).Value.Id;
         var c = t.Tasks.AddNote("c", t.Gepha).Value.Id;
         var pointer = new Pointer();
-        t.Window.DragMouse = new ArrangeMouse(_ => true, _ => true, (_, _) => pointer.At);
+        t.Window.DragMouse = new ArrangeMouse(_ =>
+        {
+            if (captures is not null) captures.Count++;
+            return true;
+        }, _ => true, (_, _) => pointer.At);
         t.Controller.Open(Rect.Empty);
         t.Window.UpdateLayout();
         return (t, pointer, a, b, c);
@@ -1148,7 +1159,8 @@ public class TasksBoardTests
     [Fact]
     public void A_routed_window_press_under_the_threshold_is_still_a_click() => StaThread.Run(() =>
     {
-        var (t, pointer, _, _, c) = RoutedWindow();
+        var captures = new Captures();
+        var (t, pointer, _, _, c) = RoutedWindow(captures);
         using var board = t;
         var before = t.Tasks.Board;
         var line = LineOf(t.Window, c);
@@ -1158,7 +1170,8 @@ public class TasksBoardTests
         pointer.At = new Point(pointer.At.X + 1, pointer.At.Y + 1);
         RealMove(line);
         Assert.False(t.Window.Dragging);
-        Assert.True(RealRelease(line));
+        Assert.True(RealRelease(t, line));
+        Assert.Equal(0, captures.Count);
 
         Assert.Equal([c], t.WentTo);
         Assert.Same(before, t.Tasks.Board);
@@ -1178,7 +1191,7 @@ public class TasksBoardTests
         pointer.At = InLine(t, a, 0.8);
         RealMove(line);
         Assert.True(t.Window.Dragging);
-        Assert.False(RealRelease(line));
+        Assert.False(RealRelease(t, line));
         t.Window.Dispatcher.Invoke(() => { }, System.Windows.Threading.DispatcherPriority.Background);
 
         Assert.Empty(t.WentTo);
@@ -1212,9 +1225,91 @@ public class TasksBoardTests
         Assert.True(t.Window.Dragging);
         LoseCapture(t.Window.DragSurface);
         Assert.False(t.Window.Dragging);
-        RealRelease(line);
+        RealRelease(t, line);
         t.Window.Dispatcher.Invoke(() => { }, System.Windows.Threading.DispatcherPriority.Background);
 
         Assert.Same(before, t.Tasks.Board);
+    });
+
+    // Minor 2, in the List: the drop line on the waiting block is drawn where the task lands, the top of its quadrant.
+    [Fact]
+    public void The_window_drop_line_on_the_waiting_block_is_where_the_task_lands() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        var a = t.Tasks.AddNote("a", t.Gepha).Value.Id;
+        var b = t.Tasks.AddNote("b", t.Gepha).Value.Id;
+        var c = t.Tasks.AddNote("c", t.Gepha).Value.Id;
+        var w = t.Tasks.AddNote("w", t.Gepha).Value.Id;
+        t.Tasks.SetStatus(w, TaskStatus.WaitingOnYou);
+        t.Tasks.SetFlag(c, TaskFlag.Urgent, true);
+        t.Window.DragMouse = ArrangeMouse.Held;
+        t.Controller.Open(Rect.Empty);
+        t.Window.UpdateLayout();
+        Assert.Equal([w, c, b, a], t.Window.Keys);
+
+        var start = InLine(t, a, 0.5);
+        t.Window.DragPress(a, start);
+        t.Window.DragMove(new Point(start.X, start.Y - 8));
+        t.Window.DragMove(InLine(t, w, 0.5));
+
+        Assert.Equal(InLine(t, b, 0).Y, t.Window.DropLineY!.Value, 1);
+        t.Window.DragRelease();
+    });
+
+    // --- Review of the fix round, I-1: the Matrix gives the window back its own width and stays on screen -----------
+
+    // A place wider than the List's minimum (560 DIP) and narrower than the Matrix's (780), in device pixels at the
+    // test screen's own scale, on that screen's work area.
+    static Deskbar.Core.Persistence.TasksWindowState Narrow(Rect work, bool flushRight)
+    {
+        var scale = TasksWindow.PrimaryScale();
+        var (width, height) = ((int)(660 * scale), (int)(480 * scale));
+        return new(flushRight ? (int)work.Right - width : (int)work.Left + 40, (int)work.Top + 40, width, height, Maximized: false);
+    }
+
+    [Fact]
+    public void List_then_matrix_then_list_gives_the_window_back_its_width() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        t.Tasks.AddNote("a", t.Gepha);
+        var narrow = Narrow(TasksWindow.PrimaryWorkArea(), flushRight: false);
+        Assert.True(t.Harness.Manager.SaveTasksWindow(narrow).IsSuccess);
+        t.Controller.Open(Rect.Empty);
+        Assert.Equal(narrow.Width, (int)t.Window.DeviceRect.Width);
+
+        Click(ButtonNamed(t.Window, "Matrix"));
+        t.Window.UpdateLayout();
+        Assert.True(t.Window.DeviceRect.Width > narrow.Width, $"the Matrix grew the window to {t.Window.DeviceRect.Width}");
+        // While the Matrix has it, the place to remember is still the List's.
+        Assert.Equal(narrow, t.Window.CurrentPlace());
+
+        Click(ButtonNamed(t.Window, "List"));
+        t.Window.UpdateLayout();
+        Assert.Equal(narrow.Width, (int)t.Window.DeviceRect.Width);
+
+        t.Controller.Dismiss();
+        Assert.Equal(narrow, t.Harness.Manager.State.TasksWindow);
+    });
+
+    [Fact]
+    public void A_window_flush_with_the_right_edge_stays_on_screen_in_the_matrix() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        t.Tasks.AddNote("a", t.Gepha);
+        var work = TasksWindow.PrimaryWorkArea();
+        var narrow = Narrow(work, flushRight: true);
+        Assert.True(t.Harness.Manager.SaveTasksWindow(narrow).IsSuccess);
+        t.Controller.Open(Rect.Empty);
+
+        Click(ButtonNamed(t.Window, "Matrix"));
+        t.Window.UpdateLayout();
+
+        var rect = t.Window.DeviceRect;
+        Assert.True(rect.Width > narrow.Width, $"grown to {rect.Width}");
+        Assert.True(rect.Right <= work.Right + 0.5 && rect.Left >= work.Left - 0.5, $"window {rect} in a work area {work}");
+
+        Click(ButtonNamed(t.Window, "List"));
+        t.Window.UpdateLayout();
+        Assert.Equal(new Rect(narrow.Left, narrow.Top, narrow.Width, narrow.Height), t.Window.DeviceRect);
     });
 }

@@ -1,7 +1,11 @@
+using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Interop;
 using System.Windows.Media;
+using Deskbar.Core.Persistence;
 using Deskbar.Core.Tasks;
+using Deskbar.Windows.Monitoring;
 
 namespace Deskbar.App;
 
@@ -42,14 +46,108 @@ public partial class TasksWindow
     static readonly IReadOnlyList<GridLength> CompactColumns =
         [new(22), new(1, GridUnitType.Star), new(34), new(0), new(0), new(64), new(34), new(0), new(24)];
 
-    // THE WINDOW'S MINIMUM WIDTH FOLLOWS THE VIEW (review of 4fc4441..a1acd60, item 1). Two cells side by side, each with
-    // its own scroll bar, leave a line half the List's width: at the List's 560 DIP the title got 9.8 DIP, and 80 at
-    // 720. While the Matrix shows, the window is at least MatrixMinWidth wide (a narrower window grows to it), so the
-    // title keeps about 100 DIP with the chip and the toggles whole; back on the List, the List's own minimum returns.
+    // THE WINDOW'S WIDTH FOLLOWS THE VIEW (review of 4fc4441..a1acd60, item 1, and of the fix round, I-1). Two cells side
+    // by side, each with its own scroll bar, leave a line half the List's width: at the List's 560 DIP the title got
+    // 9.8 DIP, and 80 at 720. So while the Matrix shows, the window is at least MatrixMinWidth wide, which keeps the
+    // title about 100 DIP with the chip and the toggles whole.
+    //
+    // THE LIST'S WIDTH IS PETRE'S, AND IT COMES BACK. The first version only raised MinWidth: the window grew to the
+    // right, off a screen it sat flush against (measured 147 DIP off), stayed 780 wide back on the List, and Dismiss
+    // saved 780, so one look at the Matrix lost the List's width for good. Now growing for the Matrix notes the List's
+    // normal rectangle first (listNormal), grows the window in device pixels and moves it left as far as needed to stay
+    // inside its screen's work area, and notes what it grew to (grownNormal). Back on the List, a window nobody resized
+    // meanwhile gets the List's rectangle back (only its size, when it was moved meanwhile); one Petre resized keeps his
+    // size. While grown and not resized, the place remembered (CurrentPlace, hence Dismiss and the settle timer) is the
+    // List's, so state.json never learns the Matrix's width.
     const double ListMinWidth = 560;
     const double MatrixMinWidth = 780;
 
-    void FitMinWidthToView(bool matrix) => MinWidth = matrix ? MatrixMinWidth : ListMinWidth;
+    Rect? listNormal;
+    Rect grownNormal = Rect.Empty;
+
+    void FitWidthToView(bool matrix)
+    {
+        if (!matrix)
+        {
+            // Lowered first, or WPF would hold the window at the Matrix's minimum while the List's width comes back.
+            MinWidth = ListMinWidth;
+            if (listNormal is not null) GiveBackListWidth();
+            return;
+        }
+        var handle = new WindowInteropHelper(this).Handle;
+        // Only a window on screen in its normal state is grown: a hidden one is placed by Open first (which calls this
+        // again), and a maximized one already has the width.
+        var live = IsVisible && handle != 0 && WindowState == WindowState.Normal;
+        if (live && listNormal is null) GrowForMatrix(handle);
+        MinWidth = live ? MatrixMinWidth : ListMinWidth;
+    }
+
+    void GrowForMatrix(nint handle)
+    {
+        NoteNormal();
+        var scale = VisualTreeHelper.GetDpi(this).DpiScaleX;
+        var want = (int)Math.Ceiling(MatrixMinWidth * scale);
+        if (lastNormal.IsEmpty || lastNormal.Width >= want) return;
+        listNormal = lastNormal;
+        var work = WorkAreaOf(handle);
+        var left = work.IsEmpty ? lastNormal.Left : Math.Max(work.Left, Math.Min(lastNormal.Left, work.Right - want));
+        SetDeviceRect(new Rect(left, lastNormal.Top, want, lastNormal.Height), scale);
+        grownNormal = lastNormal;
+    }
+
+    void GiveBackListWidth()
+    {
+        NoteNormal();
+        var back = ListRect();
+        listNormal = null;
+        if (back != lastNormal) SetDeviceRect(back, VisualTreeHelper.GetDpi(this).DpiScaleX);
+    }
+
+    // The rectangle that is the List's while the Matrix has grown the window (see above): the List's own when the
+    // window is as it was grown, its size at the window's new place when it was only moved, and the window's own once
+    // it was resized.
+    Rect ListRect() =>
+        listNormal is not { } list || lastNormal.Size != grownNormal.Size ? lastNormal
+        : lastNormal.Location == grownNormal.Location ? list
+        : new Rect(lastNormal.Left, lastNormal.Top, list.Width, list.Height);
+
+    // Puts the window at a device rectangle and keeps WPF's own Width in step, so a later layout does not size it back.
+    void SetDeviceRect(Rect rect, double scale)
+    {
+        PlaceDevice(new TasksWindowState((int)rect.Left, (int)rect.Top, (int)rect.Width, (int)rect.Height, Maximized: false));
+        Width = rect.Width / scale;
+        NoteNormal();
+    }
+
+    static Rect WorkAreaOf(nint handle)
+    {
+        var info = new NativeMethods.MONITORINFO { cbSize = Marshal.SizeOf<NativeMethods.MONITORINFO>() };
+        return NativeMethods.GetMonitorInfo(NativeMethods.MonitorFromWindow(handle, NativeMethods.MONITOR_DEFAULTTONEAREST), ref info)
+            ? new Rect(info.rcWork.Left, info.rcWork.Top, info.rcWork.Right - info.rcWork.Left, info.rcWork.Bottom - info.rcWork.Top)
+            : Rect.Empty;
+    }
+
+    // For the tests: the window's rectangle as Windows has it, in device pixels, and the primary screen's work area.
+    internal Rect DeviceRect =>
+        NativeMethods.GetWindowRect(new WindowInteropHelper(this).Handle, out var rect)
+            ? new Rect(rect.Left, rect.Top, rect.Right - rect.Left, rect.Bottom - rect.Top)
+            : Rect.Empty;
+
+    internal static double PrimaryScale()
+    {
+        var monitor = NativeMethods.MonitorFromPoint(new NativeMethods.POINT { X = 0, Y = 0 }, NativeMethods.MONITOR_DEFAULTTONEAREST);
+        NativeMethods.GetDpiForMonitor(monitor, NativeMethods.MDT_EFFECTIVE_DPI, out var dpiX, out _);
+        return dpiX / 96.0;
+    }
+
+    internal static Rect PrimaryWorkArea()
+    {
+        var info = new NativeMethods.MONITORINFO { cbSize = Marshal.SizeOf<NativeMethods.MONITORINFO>() };
+        var monitor = NativeMethods.MonitorFromPoint(new NativeMethods.POINT { X = 0, Y = 0 }, NativeMethods.MONITOR_DEFAULTTONEAREST);
+        return NativeMethods.GetMonitorInfo(monitor, ref info)
+            ? new Rect(info.rcWork.Left, info.rcWork.Top, info.rcWork.Right - info.rcWork.Left, info.rcWork.Bottom - info.rcWork.Top)
+            : Rect.Empty;
+    }
 
     // For the tests: whether the Matrix is on show, where a quadrant's cell sits (row, column), which cell holds a
     // task, whether a cell is drawn the stronger way, and a cell's centre in the drag's coordinates.
