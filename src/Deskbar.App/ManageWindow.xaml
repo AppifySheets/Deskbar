@@ -336,6 +336,57 @@
                     </StackPanel>
                 </DockPanel>
             </TabItem>
+            <!-- Deskbar Pro (ManageWindow.Pro.cs fills it; what it says in each state is ProTab, in Core). Last, after
+                 Rules, as in the mockup Petre approved on 2026-11-22. Every text that changes with the state is set
+                 from code; only the fixed parts are written here. The look is the other tabs' stock look, with one
+                 exception: the buy button is solid blue with white text, the one control in Manage that costs money.
+                 It has its own small template because the stock button's hover turns its background pale blue, which
+                 would leave white text unreadable. -->
+            <TabItem x:Name="ProTabItem" Header="Deskbar Pro">
+                <ScrollViewer VerticalScrollBarVisibility="Auto">
+                    <StackPanel Margin="8">
+                        <StackPanel Orientation="Horizontal" Margin="0,0,0,12">
+                            <Ellipse x:Name="ProStatusDot" Width="9" Height="9" VerticalAlignment="Center"/>
+                            <TextBlock x:Name="ProStatus" FontSize="13" Margin="8,0,0,0" TextWrapping="Wrap" VerticalAlignment="Center"/>
+                        </StackPanel>
+                        <TextBlock x:Name="ProPitch" TextWrapping="Wrap" Margin="0,0,0,8"/>
+                        <TextBlock x:Name="ProStoreNote" TextWrapping="Wrap" Opacity="0.75" Margin="0,0,0,8"/>
+                        <StackPanel Orientation="Horizontal" Margin="0,0,0,16">
+                            <Button x:Name="ProBuy" Click="OnProBuy" Cursor="Hand">
+                                <Button.Template>
+                                    <ControlTemplate TargetType="Button">
+                                        <Border x:Name="Face" Background="#FF0067C0" BorderBrush="#FF0067C0" BorderThickness="1" Padding="16,3">
+                                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                        </Border>
+                                        <ControlTemplate.Triggers>
+                                            <Trigger Property="IsMouseOver" Value="True">
+                                                <Setter TargetName="Face" Property="Background" Value="#FF005A9E"/>
+                                            </Trigger>
+                                            <Trigger Property="IsPressed" Value="True">
+                                                <Setter TargetName="Face" Property="Background" Value="#FF004C87"/>
+                                            </Trigger>
+                                            <Trigger Property="IsKeyboardFocused" Value="True">
+                                                <Setter TargetName="Face" Property="BorderBrush" Value="#FF00263A"/>
+                                            </Trigger>
+                                        </ControlTemplate.Triggers>
+                                    </ControlTemplate>
+                                </Button.Template>
+                                <TextBlock x:Name="ProBuyText" Foreground="White" FontWeight="SemiBold"/>
+                            </Button>
+                        </StackPanel>
+                        <TextBlock Text="Priority support" FontWeight="Bold"/>
+                        <TextBlock x:Name="ProSupport" TextWrapping="Wrap" Opacity="0.75" Margin="0,2,0,8"/>
+                        <StackPanel Orientation="Horizontal">
+                            <Button x:Name="ProReport" Content="Report a problem…" Padding="12,2" Click="OnProReport"/>
+                        </StackPanel>
+                        <TextBlock x:Name="ProCheckRow" TextWrapping="Wrap" Opacity="0.75" Margin="0,16,0,0">
+                            <Run Text="Pro belongs to your Microsoft account. Bought it on another PC?"/>
+                            <Hyperlink x:Name="ProCheckAgain" Click="OnProCheckAgain">Check again</Hyperlink>
+                        </TextBlock>
+                        <TextBlock x:Name="ProCheckNote" TextWrapping="Wrap" Opacity="0.75" Margin="0,4,0,0" Visibility="Collapsed"/>
+                    </StackPanel>
+                </ScrollViewer>
+            </TabItem>
             <!-- The "Windows" tab is deliberately gone. Petre: "no need for that window tab",
                  "what's the point of it? we already have floating window manager doing just
                  that". The floating bar covers jumping to a window and dragging windows

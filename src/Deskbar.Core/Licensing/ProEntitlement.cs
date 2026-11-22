@@ -28,6 +28,14 @@ public sealed record Verdict(bool IsPro, string Reason);
 // root override by the App's Entitlement, which also caches the result.
 public static class ProEntitlement
 {
+    // The fixed reasons a verdict can carry (a trial's reason also names its end date, so it has no constant).
+    // Named so Manage's Deskbar Pro tab (ProTab) can tell the cases apart without repeating the strings; they
+    // are also what the `entitlement:` trace line prints.
+    public const string DeveloperReason = "Developer override";
+    public const string FreeReason = "Free tier";
+    public const string UnavailableReason = "Store licence unavailable";
+    public const string AddOnReason = "Deskbar Pro add-on";
+
     // The rules, evaluated in this order; the first that matches wins.
     //
     //   1. Developer override: DESKBAR_PRO=1, honoured ONLY under a root override (DESKBAR_APPDATA set).
@@ -43,17 +51,17 @@ public static class ProEntitlement
     //      trial is logged as a buyer.
     //   5. Active trial: Pro, naming the trial's last day so a log shows when it runs out. Only a copy
     //      installed while the listing was still paid with a trial can be in one; it runs out by itself.
-    //   6. Everything else, an active full app licence included (that is every free Store copy now, and
-    //      also the few bought while the listing was paid, whom the Store cannot tell apart; they get a
-    //      promo code for the add-on instead): the free tier.
+    //   6. Everything else, an active full app licence included: the free tier. That is every free Store
+    //      copy now. Nobody bought the listing while it was paid (Petre, 2026-11-22: "there are no earlier
+    //      buyers"), so no earlier buyer is left on the free tier by this rule.
     public static Verdict Decide(bool packaged, Result<LicenceFacts> licence, bool developerOverride, bool rootOverridden) =>
-        (developerOverride && rootOverridden) ? new Verdict(true, "Developer override")
+        (developerOverride && rootOverridden) ? new Verdict(true, DeveloperReason)
         // Packaged or not is the line between the Store copy and the GitHub copy (Store packaging design).
-        : !packaged ? new Verdict(false, "Free tier")
-        : licence.IsFailure ? new Verdict(true, "Store licence unavailable")
-        : licence.Value.OwnsProAddOn ? new Verdict(true, "Deskbar Pro add-on")
+        : !packaged ? new Verdict(false, FreeReason)
+        : licence.IsFailure ? new Verdict(true, UnavailableReason)
+        : licence.Value.OwnsProAddOn ? new Verdict(true, AddOnReason)
         : licence.Value is { IsActive: true, IsTrial: true } trial ? new Verdict(true, $"Store trial until {TrialEndText(trial.TrialEnds)}")
-        : new Verdict(false, "Free tier");
+        : new Verdict(false, FreeReason);
 
     // The trial's last day as the user would read it on their own calendar: the LOCAL date of the end
     // instant, yyyy-MM-dd with invariant digits so the trace reads the same on every locale. A trial the
