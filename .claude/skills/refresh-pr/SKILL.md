@@ -81,13 +81,15 @@ The rebase brought in other people's changes, so the branch is now code nobody h
 
 ```bash
 dotnet build Deskbar.sln -c Release -warnaserror
-dotnet test Deskbar.sln -c Release --no-build --filter "Category!=Integration"
+pwsh scripts/test-hidden.ps1 -Arguments 'Deskbar.sln -c Release --no-build --filter "Category!=Integration&Category!=Screen"'
 ```
 
-A running Deskbar started from this worktree's `bin` locks the output; restart it from a copy
-elsewhere first, never leave Petre without his bar. A test that captures the live screen can fail
-while he is using the machine: rerun it alone before calling it real, and say in the report that
-you did.
+The tests run on a hidden Win32 desktop, so none of their windows reach Petre's screen and his
+Deskbar cannot tile them (it did, and it rearranged his windows for the length of every run). The
+four `Category=Screen` tests need the visible desktop and are left to the pull request's CI run.
+Never run `Deskbar.Windows.Tests` on his own desktop: `StaThread.Run` refuses while a Deskbar runs
+there. A running Deskbar started from this worktree's `bin` locks the output; restart it from a
+copy elsewhere first, never leave Petre without his bar.
 
 ### 5. Push to the same branch with a lease
 

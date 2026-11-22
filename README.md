@@ -1069,6 +1069,19 @@ The `Category=Integration` tests are excluded from that command on purpose: they
 and delete **real** virtual desktops on the machine running them. Run them deliberately, not
 while you are working.
 
+If Deskbar is running on the machine, run the tests on a hidden desktop instead:
+
+```powershell
+pwsh scripts/test-hidden.ps1
+```
+
+The window tests open hundreds of real windows, and a running Deskbar treats them like any
+others: in a tiled workspace it tiles each one and rearranges your windows around it. The script
+runs `dotnet test` on a separate Win32 desktop that Deskbar cannot see and that never reaches your
+screen. The four `Category=Screen` tests read real pixels, windows or monitors, which a hidden
+desktop does not have, so the script leaves them out; CI runs them. Run on your own desktop
+beside a live Deskbar, the window tests refuse to start and say so.
+
 To try a Debug build without touching your real settings, set the environment variable
 `DESKBAR_APPDATA` to a scratch folder, given as a full path (a relative one is ignored). Deskbar
 then reads and writes under that folder instead of `%APPDATA%`. Leave "Start with Windows" alone

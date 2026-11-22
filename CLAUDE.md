@@ -38,8 +38,15 @@ object.
   not cover it, and that commit's own workflow rebuilds the exe and replaces it unsigned.
 - **Tests: about 980 green**, the great majority in `Deskbar.Core.Tests` and over a hundred
   in `Deskbar.Windows.Tests` (which constructs real WPF windows on an STA thread per
-  test). Do not trust this number to the digit; run the suite. The routine command, and the
-  default: `dotnet test Deskbar.sln --filter "Category!=Integration"`
+  test). Do not trust this number to the digit; run the suite. On Petre's machine the routine
+  command, and the default, is `pwsh scripts/test-hidden.ps1`: it runs
+  `dotnet test Deskbar.sln --filter "Category!=Integration&Category!=Screen"` on a hidden Win32
+  desktop, so the test windows never reach his screen. Never run `Deskbar.Windows.Tests` on his
+  own desktop: his Deskbar tiles every test window, rearranging his windows for the length of
+  the run and failing the tiling tests at random (measured 2026-11-22). `StaThread.Run` refuses
+  to open a window there while a Deskbar runs. `Category=Screen` (four tests that read real
+  pixels, windows or monitors) cannot run on a hidden desktop; CI runs them, with
+  `Category!=Integration` as before. `Deskbar.Core.Tests` opens no windows and runs anywhere.
 - **Integration tests mutate the real machine**. They create/switch/delete real virtual
   desktops, and one spawns `winver`. Run them deliberately, never as a routine check while
   Petre is working.
