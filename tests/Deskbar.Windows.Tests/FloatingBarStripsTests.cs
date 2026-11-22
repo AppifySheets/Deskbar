@@ -204,6 +204,24 @@ public class FloatingBarStripsTests
         Assert.Equal(rowsBefore, h.Rows.Children.Cast<UIElement>().ToList());
     });
 
+    // The recent-workspace fade (FloatingBar.Recency.cs) redraws the bar when a row's fade step moves. A minimized bar
+    // draws only the strips, and the rows it drew before it went are not on screen to redraw: the steps they were drawn
+    // at must be forgotten, or every minute's tick would find them "moved" and rebuild all night (final review,
+    // Important 1).
+    [Fact]
+    public void A_minimized_bar_forgets_the_fades_its_rows_were_drawn_at() => StaThread.Run(() =>
+    {
+        var now = new DateTimeOffset(2026, 11, 22, 9, 0, 0, TimeSpan.Zero);
+        using var h = StripHarness.Build(clock: () => now);
+        h.Fill();
+        h.Bar.MinimizeToTaskbar();
+
+        now = now.AddDays(2);
+        h.Monitor.Pump.OnNext(new WindowEvent(WindowEventKind.Activated, h.Code));
+
+        Assert.False(h.Bar.FadesMoved());
+    });
+
     // A window event landing in the middle of a rebuild's query (a COM call pumps messages) re-enters the rebuild.
     // The strips are filled inside the bar's guard, so each still holds one set of tabs.
     [Fact]
@@ -821,7 +839,8 @@ public class FloatingBarStripsTests
 
         public void Fill() => Assert.True(Manager.SetWindowListPlace(WindowListPlace.Screens).IsSuccess);
 
-        public static StripHarness Build(string? groupColour = null, TaskbarJumps? taskbar = null)
+        // clock: the manager's clock, for the recent-workspace fade (null: the real one, as every other test has).
+        public static StripHarness Build(string? groupColour = null, TaskbarJumps? taskbar = null, Func<DateTimeOffset>? clock = null)
         {
             var gephaDesktop = Guid.NewGuid();
             var sparrowDesktop = Guid.NewGuid();
@@ -871,7 +890,7 @@ public class FloatingBarStripsTests
                     WindowListOffScreens = true,
                 },
             };
-            var manager = new WorkspaceManager(desktops, monitor, new StubTitles(), store, screenLayout: screens);
+            var manager = new WorkspaceManager(desktops, monitor, new StubTitles(), store, clock, screenLayout: screens);
             Assert.True(manager.Start().IsSuccess);
 
             var strips = new[] { Strip(ScreenA), Strip(ScreenB), Strip(ScreenC) };

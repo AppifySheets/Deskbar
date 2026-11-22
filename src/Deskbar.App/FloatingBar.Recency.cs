@@ -74,13 +74,14 @@ public partial class FloatingBar
         workspace is { } id && drawnFades.TryGetValue(id, out var drawn) ? drawn.Fade() : AgeOf(window);
 
     // Whether any workspace's step has moved since it was drawn.
-    bool FadesMoved() => drawnFades.Values.Any(d => WorkspaceFade.Step(d.Fade()) != d.Step);
+    internal bool FadesMoved() => drawnFades.Values.Any(d => WorkspaceFade.Step(d.Fade()) != d.Step);
 
     // From the aging timer: a rebuild when a step has moved, which redraws the rails, tints and names at the new step.
-    // Rebuild holds itself back while a button is down, a menu is open or a drag is in flight (FlushIfIdle).
+    // Rebuild holds itself back while a button is down, a menu is open or a drag is in flight (FlushIfIdle), and
+    // RequestRebuild, the gate every timer-driven trigger goes through, skips it while nothing would be on screen.
     void RefreshFades()
     {
-        if (FadesMoved()) Rebuild();
+        if (FadesMoved()) RequestRebuild();
     }
 
     // --- the faded brushes ----------------------------------------------------------------------------------------

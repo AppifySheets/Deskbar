@@ -761,6 +761,13 @@ public sealed class WorkspaceManager(
         // A counter rather than a clock: ordering is the only thing ever asked of it, and a counter
         // cannot be disturbed by the machine's clock moving.
         activations[window] = ++activation;
+        // The window you are LEAVING was in use until this moment, so it is stamped now as well. Without it, a window
+        // focused once and then worked in for two hours kept the stamp from its focus, and the workspace you had just
+        // switched away from drew half-faded on the bar, which fades a whole workspace row by its newest stamp
+        // (docs/superpowers/specs/2026-11-22-recent-workspaces-design.md). Only a window still being tracked: a closed one
+        // has had its stamp forgotten, and must not get it back.
+        if (activeWindow.TryGetValue(out var leaving) && !leaving.Equals(window) && lastUsed.ContainsKey(leaving))
+            lastUsed[leaving] = now();
         lastUsed[window] = now();
         // Looking at a window is what answers it, so this is also where attention ends. Done
         // before the change guard below, and that ordering matters: re-activating the window you
