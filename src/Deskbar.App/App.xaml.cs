@@ -295,8 +295,10 @@ public partial class App : Application
         if (compatibilityMode || manager is null || monitor is null || desktops is null) return;
 
         // "Ours" is decided the way the bar already decides it (FloatingBar.IsOwnWindow: the window's process
-        // is this process), so Deskbar never tiles its own bar, Manage, or a dialog of its own.
-        tileSurface = new Windows.Tiling.TileSurface(w => FloatingBar.IsOwnWindow(w.Value));
+        // is this process), so Deskbar never tiles its own bar, Manage, or a dialog of its own. The one exception is the
+        // tasks window, a page Petre works in, which tiles like any app window ("maybe even tile it", 2026-11-23;
+        // TasksBoard.KeptFromTiling). It is built after this, so its handle is read when the question is asked.
+        tileSurface = new Windows.Tiling.TileSurface(w => TasksBoard.KeptFromTiling(w.Value, tasksBoard?.EnsureHandle() ?? 0));
         tiler = new Core.Tiling.Tiler(manager, desktops, monitor, tileSurface,
             // Whether this copy may tile: Pro, or anyone while tiling is free (TilingGate.Free, for now).
             () => Core.Tiling.TilingGate.Allowed(Entitlement.Current.IsPro),
@@ -2010,7 +2012,9 @@ public partial class App : Application
                 // `tasks-window show` typed in a terminal carries no foreground right. A failed move activates the
                 // window only when it is on the desktop in front already; otherwise it is traced and left where it is.
                 bringForward: hwnd => TasksBoard.Arrive(hwnd,
-                    move: () => desktops!.CurrentDesktop().Bind(front => desktops.MoveWindow(new WindowHandle(hwnd), front)),
+                    // Through the manager, which announces the move (WindowMoved), so on a tiled workspace the Tiler
+                    // gives the window its slot as it arrives; nothing about it is remembered.
+                    move: () => manager.MoveWindowToCurrentDesktop(new WindowHandle(hwnd)),
                     onCurrentDesktop: () => OnDesktopInFront(hwnd),
                     // On top of the windows in front before it is activated: activation alone left it under them
                     // ("now it's behind somewhere", see TasksBoard.Arrive).

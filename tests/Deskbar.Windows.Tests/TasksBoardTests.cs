@@ -594,6 +594,30 @@ public class TasksBoardTests
         Assert.True(g > r + 40 && g > b + 20, $"the bar's icon averages R={r} G={g} B={b}, not the checklist's green");
     });
 
+    // (b) "maybe even tile it": the tasks window takes part in tiling like any app window. Deskbar keeps its own windows
+    // out of the grid (the bar, Manage, its dialogs), and the tasks window is the one exception: the tiling surface's
+    // "ours" leaves it out, while any other window of this process stays out of the grid.
+    [Fact]
+    public void The_tasks_window_tiles_and_the_apps_other_windows_still_do_not() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        t.Controller.Open(Rect.Empty);
+        var tasksWindow = t.Controller.EnsureHandle();
+        var other = new Window { Width = 200, Height = 200, Left = -30000, Top = -30000, ShowActivated = false, ShowInTaskbar = false };
+        other.Show();
+        try
+        {
+            var surface = new Deskbar.Windows.Tiling.TileSurface(w => TasksBoard.KeptFromTiling(w.Value, tasksWindow));
+
+            Assert.True(surface.CanTile(new Deskbar.Core.Domain.WindowHandle(tasksWindow)));
+            Assert.False(surface.CanTile(new Deskbar.Core.Domain.WindowHandle(new System.Windows.Interop.WindowInteropHelper(other).Handle)));
+        }
+        finally
+        {
+            other.Close();
+        }
+    });
+
     // The average colour of a bitmap's opaque pixels.
     static (int R, int G, int B) AverageOpaque(System.Windows.Media.Imaging.BitmapSource source)
     {

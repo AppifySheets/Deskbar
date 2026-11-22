@@ -52,4 +52,31 @@ public sealed class WindowMovedTests
 
         Assert.Empty(announced);
     }
+    // (b) The tasks window brought to the desktop in front (TasksBoard.Arrive) goes through the manager's doorway, so the
+    // Tiler hears it arrive on a tiled workspace and gives it a slot, and nothing else about it is remembered: no
+    // membership, no placement, no "detached" mark, which MoveToDesktop would write.
+    [Fact]
+    public void Bringing_a_window_to_the_desktop_in_front_announces_it_and_remembers_nothing()
+    {
+        var (manager, announced) = Started();
+        desktops.WindowPlacements[Window] = beta.DesktopId!.Value;
+        var before = store.Stored;
+
+        Assert.True(manager.MoveWindowToCurrentDesktop(Window).IsSuccess);
+
+        Assert.Equal(alpha.DesktopId!.Value, desktops.WindowPlacements[Window]);
+        Assert.Equal([Window], announced);
+        Assert.Same(before, store.Stored);
+    }
+
+    [Fact]
+    public void A_refused_move_to_the_desktop_in_front_announces_nothing()
+    {
+        var (manager, announced) = Started();
+        desktops.RejectMoveFor.Add(Window);
+
+        Assert.True(manager.MoveWindowToCurrentDesktop(Window).IsFailure);
+
+        Assert.Empty(announced);
+    }
 }
