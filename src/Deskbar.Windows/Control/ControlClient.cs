@@ -28,6 +28,12 @@ public static class ControlClient
     // running, or slow"). Five seconds is far more than an answer from memory needs.
     static readonly TimeSpan HookReplyTimeout = TimeSpan.FromSeconds(5);
 
+    // And the connect wait for `claude-hook` (review of PR B, M-2). The server answers one request at a time on one pipe
+    // instance, so while the app's UI thread is stuck on a request every later client finds the pipe busy and waits to
+    // connect. For a hook that wait sits in front of the prompt, so it is half a second rather than 2 s: a stuck Deskbar
+    // costs each later prompt that much at most, and a healthy one answers a busy pipe in milliseconds.
+    static readonly TimeSpan HookConnectTimeout = TimeSpan.FromMilliseconds(500);
+
     // How long a missing pipe is given to appear before the client concludes nobody is there (PipeExistsAsync).
     // Measured against the running app with eight clients at once: between two replies the pipe was missing for up to
     // 16 ms. 100 ms leaves room for a busier app, and is what a down Deskbar costs instead of 2 s.
@@ -46,12 +52,13 @@ public static class ControlClient
 
         var (forwarded, wait) = split.Value;
         var deadline = DateTime.UtcNow + wait;
-        var replyTimeout = ControlArguments.IsClaudeHook(forwarded) ? HookReplyTimeout : ReplyTimeout;
-        var reply = await SendAsync(pipeName, forwarded, ConnectTimeout, replyTimeout).ConfigureAwait(false);
+        var hook = ControlArguments.IsClaudeHook(forwarded);
+        var (connectTimeout, replyTimeout) = hook ? (HookConnectTimeout, HookReplyTimeout) : (ConnectTimeout, ReplyTimeout);
+        var reply = await SendAsync(pipeName, forwarded, connectTimeout, replyTimeout).ConfigureAwait(false);
         while (reply.ExitCode == ControlReply.NothingMatched && DateTime.UtcNow + RetryInterval < deadline)
         {
             await Task.Delay(RetryInterval).ConfigureAwait(false);
-            reply = await SendAsync(pipeName, forwarded, ConnectTimeout, replyTimeout).ConfigureAwait(false);
+            reply = await SendAsync(pipeName, forwarded, connectTimeout, replyTimeout).ConfigureAwait(false);
         }
         return reply;
     }
@@ -115,13 +122,18 @@ public static class ControlClient
     // `ctl` with Deskbar down cost 2 s, and a Claude Code hook would put that in front of every prompt.
     // WaitNamedPipeW on the same missing name returned false with ERROR_FILE_NOT_FOUND in 0.02 to 0.05 ms.
     //
-    // "Not found" is not trusted on the first ask. The server keeps ONE pipe instance and makes a new one after each
-    // reply (ControlPipeServer), so between two replies there is a moment with no pipe at all, and a client arriving
-    // then would be told Deskbar is down while it is running (two hooks firing together, say). Measured against the
-    // running app with eight real clients at once: the server answered one every 20 ms or so, and the pipe was missing
-    // for up to 16 ms of each of those, so "missing" is the usual answer in a crowd, not a rare one. So a missing pipe is
-    // asked about again for PipeGap. Any other answer (the pipe exists, or it exists and is busy, ERROR_SEM_TIMEOUT)
-    // means someone is there, and ConnectAsync takes over with the full connect timeout as before.
+    // "Not found" is not trusted on the first ask, because a running Deskbar can briefly have no pipe at all:
+    //
+    //   * an OLDER running Deskbar. Up to this pull request the server made a new pipe instance after every reply, so
+    //     between two replies there was a moment with no pipe. Measured against such an app with eight real clients at
+    //     once: one answer every 20 ms or so, and the pipe missing for up to 16 ms of each, so in a crowd "missing" was
+    //     the usual answer. This build's client still has to work against that server (the client can be newer).
+    //   * this build's server making its instance again after a Disconnect that failed (ControlPipeServer.ServeOn),
+    //     which it does at once, but not in zero time;
+    //   * an update: the new copy starts while the old one's pipe is going, and takes the name a moment later.
+    //
+    // So a missing pipe is asked about again for PipeGap. Any other answer (the pipe exists, or it exists and is busy,
+    // ERROR_SEM_TIMEOUT) means someone is there, and ConnectAsync takes over with the connect timeout.
     //
     // ASKED AGAIN AT ONCE, NOT ON A TIMER. The first version paused with Task.Delay(5), which Windows' 15.6 ms timer turns
     // into about 21 ms: the same period as the server's cycle, so a client could land in the gap on every ask, six in a

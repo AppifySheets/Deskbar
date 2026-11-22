@@ -76,7 +76,33 @@ public class ControlPipeTests
         Assert.All(replies, reply => Assert.Equal(ControlReply.Ok, reply.ExitCode));
     }
 
-    // One server answers one request after another: the pipe is re-created after every reply.
+    // Review of PR B, M-2: a hook waits at most about half a second to connect, not 2 s, so a Deskbar whose UI thread is
+    // stuck on one request costs each later prompt that much at most. The stuck request here holds the one pipe
+    // instance; the hook gives up connecting and the client says "not running", which the hook turns into silence.
+    [Fact]
+    public async Task A_hook_waits_about_half_a_second_for_a_busy_deskbar()
+    {
+        var pipe = UniquePipe();
+        using var release = new ManualResetEventSlim();
+        using var server = new ControlPipeServer(pipe, async args =>
+        {
+            if (args is ["stuck"]) await Task.Run(() => release.Wait(TimeSpan.FromSeconds(10)));
+            return new ControlReply(ControlReply.Ok, "fine");
+        });
+        var stuck = ControlClient.SendAsync(pipe, ["stuck"], Patience);
+        await Task.Delay(200);
+
+        var clock = System.Diagnostics.Stopwatch.StartNew();
+        var hook = await ControlClient.RunAsync(pipe, ["claude-hook", "--json", "{}"]);
+        var waited = clock.Elapsed;
+        release.Set();
+        await stuck;
+
+        Assert.Equal(ControlReply.NotRunning, hook.ExitCode);
+        Assert.True(waited < TimeSpan.FromMilliseconds(1500), $"waited {waited.TotalMilliseconds:0} ms");
+        Assert.True(waited >= TimeSpan.FromMilliseconds(300), $"waited only {waited.TotalMilliseconds:0} ms");
+    }
+
     // Review of Task 7, I-1: a client that gives up before its answer (claude-hook's 5 s reply timeout, scaled down here)
     // makes the server's write fail. The server used to dispose its only pipe instance and wait a second before making
     // another, so for that second the pipe NAME was missing and the next client heard "Deskbar is not running" (measured:
@@ -103,6 +129,7 @@ public class ControlPipeTests
         Assert.Equal("fine", next.Output);
     }
 
+    // One server answers one request after another, on its one pipe instance, disconnected after every reply.
     [Fact]
     public async Task The_server_answers_more_than_one_request()
     {

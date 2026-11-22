@@ -63,7 +63,8 @@ public sealed class TaskService(ITaskStore store, Func<DateTimeOffset> now, Func
     /// </summary>
     public TaskSession NewSession(string id, string folder) => new(id, folder, now(), Maybe<DateTimeOffset>.None);
 
-    public Result SetStatusLine(Guid id, string text) => Apply(Board.SetStatusLine(id, text, now()));
+    // The same line again changes nothing, so it saves and pulses nothing (TaskBoard.SetStatusLine, review of PR B, M-3).
+    public Result SetStatusLine(Guid id, string text) => ApplyIfChanged(Board.SetStatusLine(id, text, now()));
 
     public Result Ask(Guid id, string question) => Apply(Board.Ask(id, question, now()));
 

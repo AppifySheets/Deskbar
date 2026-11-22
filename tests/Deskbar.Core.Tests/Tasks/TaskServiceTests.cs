@@ -157,6 +157,28 @@ public sealed class TaskServiceTests
         Assert.Equal(0, pulses);
     }
 
+    // Review of PR B, M-3: a session may set the same status line again (each prompt's reminder asks it to keep it
+    // current); the same text writes nothing and redraws nothing. A closed task still refuses it.
+    [Fact]
+    public void The_same_status_line_again_saves_and_pulses_nothing()
+    {
+        var s = NewService();
+        var task = s.Create("Tasks redesign", ws, Session("s1", clock)).Value;
+        Assert.True(s.SetStatusLine(task.Id, "waiting for CI").IsSuccess);
+        var saves = store.Saves;
+        var pulses = 0;
+        using var sub = s.Changed.Subscribe(_ => pulses++);
+
+        Assert.True(s.SetStatusLine(task.Id, "  waiting for CI ").IsSuccess);
+
+        Assert.Equal(saves, store.Saves);
+        Assert.Equal(0, pulses);
+        Assert.True(s.SetStatusLine(task.Id, "merged").IsSuccess);
+        Assert.Equal(saves + 1, store.Saves);
+        Assert.True(s.Close(task.Id).IsSuccess);
+        Assert.True(s.SetStatusLine(task.Id, "merged").IsFailure);
+    }
+
     [Fact]
     public void Prune_saves_only_when_a_workspace_went()
     {
