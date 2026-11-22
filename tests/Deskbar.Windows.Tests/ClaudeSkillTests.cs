@@ -121,7 +121,7 @@ public sealed class ClaudeSkillTests : IDisposable
     // on stdin. `environment` sets a variable (a value) or takes it away (null), so the hook does not inherit the
     // CLAUDE_* values of whatever Claude session runs this test. A hook that does not finish is killed, tree and all,
     // so a broken run cannot leave a process behind on the test desktop.
-    static (int ExitCode, string Stdout) RunThroughGitBash(string command, string stdin, IReadOnlyDictionary<string, string?> environment)
+    static (int ExitCode, string Stdout, string Stderr) RunThroughGitBash(string command, string stdin, IReadOnlyDictionary<string, string?> environment)
     {
         // Git for Windows' own bash, by path: a bare `bash` on PATH can be WSL's, which is not what Claude Code uses.
         var bash = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "Git", "bin", "bash.exe");
@@ -139,7 +139,7 @@ public sealed class ClaudeSkillTests : IDisposable
         });
         using var hook = System.Diagnostics.Process.Start(start)!;
         var stdout = hook.StandardOutput.ReadToEndAsync();
-        _ = hook.StandardError.ReadToEndAsync();
+        var stderr = hook.StandardError.ReadToEndAsync();
         hook.StandardInput.Write(stdin);
         hook.StandardInput.Close();
         if (!hook.WaitForExit(30_000))
@@ -147,7 +147,23 @@ public sealed class ClaudeSkillTests : IDisposable
             hook.Kill(entireProcessTree: true);
             Assert.Fail("the hook did not finish");
         }
-        return (hook.ExitCode, stdout.Result);
+        return (hook.ExitCode, stdout.Result, stderr.Result);
+    }
+
+    // What a failed run looked like, for an assertion's message: the exit code and both streams. Without the streams a
+    // CI failure said only "127" or "" (PR #423's first run), and nothing about why.
+    static string Explain(int exitCode, string stdout, string stderr) =>
+        $"exit {exitCode}; stdout: [{stdout}]; stderr: [{stderr}]";
+
+    // The hook scripts send stderr to nul, so a hook that printed nothing says nothing about why. This runs the shim
+    // directly through Git Bash with the same pipe and reports what it said, for an assertion's message.
+    string ShimDiagnosis(string exe, string pipe)
+    {
+        var shim = Path.Combine(Deskbar, "deskbar.cmd");
+        var (exitCode, stdout, stderr) = RunThroughGitBash($"\"{shim.Replace('\\', '/')}\" version", "",
+            new Dictionary<string, string?> { ["DESKBAR_CONTROL_PIPE"] = pipe });
+        return $"exe exists: {File.Exists(exe)} ({exe}); shim exists: {File.Exists(shim)} ({shim}); "
+            + $"shim text: [{(File.Exists(shim) ? File.ReadAllText(shim) : "")}]; direct run: {Explain(exitCode, stdout, stderr)}";
     }
 
     // The command Deskbar writes, run the way Claude Code runs a hook. A stand-in deskbar.cmd records the arguments it
@@ -166,14 +182,14 @@ public sealed class ClaudeSkillTests : IDisposable
             $"@echo %*> \"{called}\"\r\n@findstr \"^\" > \"{input}\"\r\n@echo context for the session\r\n");
         var project = Path.Combine(home, "My Project");
 
-        var (exitCode, stdout) = RunThroughGitBash(HookCommandFor("Stop"), StopJson, new Dictionary<string, string?>
+        var (exitCode, stdout, stderr) = RunThroughGitBash(HookCommandFor("Stop"), StopJson, new Dictionary<string, string?>
         {
             ["CLAUDE_PROJECT_DIR"] = project,
             ["CLAUDE_CODE_ENTRYPOINT"] = "claude-vscode",
             ["CLAUDE_CODE_SESSION_ATTENDED"] = "1",
         });
 
-        Assert.Equal(0, exitCode);
+        Assert.True(exitCode == 0, Explain(exitCode, stdout, stderr));
         Assert.True(File.Exists(called), "the hook never called deskbar.cmd");
         Assert.Equal($"claude-hook --entry \"claude-vscode\" --attended \"1\" --from \"{project}\"", File.ReadAllText(called).Trim());
         Assert.Equal(StopJson, File.ReadAllText(input).Trim());
@@ -194,7 +210,7 @@ public sealed class ClaudeSkillTests : IDisposable
         Assert.True(File.Exists(exe), $"no Deskbar.exe beside the tests at {exe}");
         ControlCommandLine.WriteShim(Deskbar, exe);
 
-        var (exitCode, stdout) = RunThroughGitBash(HookCommandFor(hookEvent),
+        var (exitCode, stdout, stderr) = RunThroughGitBash(HookCommandFor(hookEvent),
             StopJson.Replace("\"Stop\"", $"\"{hookEvent}\""), new Dictionary<string, string?>
             {
                 ["CLAUDE_PROJECT_DIR"] = Path.Combine(home, "My Project"),
@@ -203,7 +219,7 @@ public sealed class ClaudeSkillTests : IDisposable
                 ["DESKBAR_CONTROL_PIPE"] = $"Deskbar.Control.Test.{Guid.NewGuid():N}",
             });
 
-        Assert.Equal(0, exitCode);
+        Assert.True(exitCode == 0, Explain(exitCode, stdout, stderr));
         Assert.Equal("", stdout);
     }
 
@@ -227,7 +243,7 @@ public sealed class ClaudeSkillTests : IDisposable
         });
         var project = Path.Combine(home, "My Project");
 
-        var (exitCode, stdout) = RunThroughGitBash(HookCommandFor("SessionStart"), StopJson.Replace("Stop", "SessionStart"),
+        var (exitCode, stdout, stderr) = RunThroughGitBash(HookCommandFor("SessionStart"), StopJson.Replace("Stop", "SessionStart"),
             new Dictionary<string, string?>
             {
                 ["CLAUDE_PROJECT_DIR"] = project,
@@ -236,8 +252,9 @@ public sealed class ClaudeSkillTests : IDisposable
                 ["DESKBAR_CONTROL_PIPE"] = pipe,
             });
 
-        Assert.Equal(0, exitCode);
-        Assert.Equal("Your task is X.", stdout.Trim());
+        // The diagnosis runs the shim, which asks the same test server, so it runs only once the hook has failed.
+        if (exitCode != 0 || stdout.Trim() != "Your task is X.")
+            Assert.Fail($"hook: {Explain(exitCode, stdout, stderr)}; {ShimDiagnosis(exe, pipe)}");
         Assert.Equal(["claude-hook", "--entry", "claude-vscode", "--attended", "1", "--from", project,
             "--json", StopJson.Replace("Stop", "SessionStart")], received);
     }
@@ -260,10 +277,10 @@ public sealed class ClaudeSkillTests : IDisposable
         const string text = "checking \"x & echo INJECTED\" now | set \"a > pwned.txt\" first <in";
         var shim = Path.Combine(Deskbar, "deskbar.cmd").Replace('\\', '/');
 
-        var (exitCode, stdout) = RunThroughGitBash($"cd \"{home.Replace('\\', '/')}\" && \"{shim}\" task comment - --session s1",
+        var (exitCode, stdout, stderr) = RunThroughGitBash($"cd \"{home.Replace('\\', '/')}\" && \"{shim}\" task comment - --session s1",
             text + "\n", new Dictionary<string, string?> { ["DESKBAR_CONTROL_PIPE"] = pipe });
 
-        Assert.Equal(0, exitCode);
+        Assert.True(exitCode == 0, Explain(exitCode, stdout, stderr));
         Assert.DoesNotContain("INJECTED", stdout);
         Assert.False(File.Exists(Path.Combine(home, "pwned.txt")));
         Assert.NotNull(received);
