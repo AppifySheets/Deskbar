@@ -43,7 +43,7 @@
 
             <TextBlock Margin="0,10,0,4">
                 <Run Text="How can we reach you?"/>
-                <Run Text="(optional)" Foreground="#5F5F5F"/>
+                <Run Text="(so we can ask follow-up questions)" Foreground="#5F5F5F"/>
             </TextBlock>
             <!-- WPF's TextBox has no placeholder; the hint is a TextBlock under it, hidden once something is typed. -->
             <Grid>
@@ -51,6 +51,9 @@
                 <TextBlock x:Name="ContactHint" Text="Email or Telegram handle" Foreground="#8A8A8A"
                            IsHitTestVisible="False" Margin="5,2,0,0" VerticalAlignment="Center"/>
             </Grid>
+            <!-- The one-time ask when the line is empty or does not look like an address (ReportWindow.ConfirmContact).
+                 Same colour as ShotNote: a heads-up, not an error, since a second Send goes anyway. -->
+            <TextBlock x:Name="ContactNote" Foreground="#9D5D00" TextWrapping="Wrap" Margin="0,4,0,0" Visibility="Collapsed"/>
 
             <TextBlock Text="Goes privately to the Deskbar team. Nothing is posted publicly."
                        Foreground="#5F5F5F" FontSize="11" Margin="0,8,0,0" TextWrapping="Wrap"/>

@@ -719,7 +719,9 @@ press Send. Nobody needs an account or a sign-in.
 - The debug dump is ticked by default. It describes your screens, the bar and every window on them,
   titles included, so **View what it contains** opens it in Notepad before anything is sent. Untick
   it if you would rather not send it.
-- The contact line is optional. Without it we can read the report but cannot answer you.
+- The contact line is optional. Without it we can read the report but cannot answer you or ask a
+  follow-up question, so Send asks once when it is empty or doesn't look like an email, a Telegram
+  @handle or a phone number. Press "Send anyway" to send it as it is.
 - Reports go privately to the Deskbar team, not to a public issue tracker. The window shows a
   reference number once the report has arrived.
 - If it cannot be sent (no connection, for example), the whole report is saved under

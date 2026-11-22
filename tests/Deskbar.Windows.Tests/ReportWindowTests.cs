@@ -56,6 +56,52 @@ public class ReportWindowTests
         window.Close();
     });
 
+    // The contact line stays optional but asks once: an empty line stops the first Send with a note and "Send anyway",
+    // and a second Send with the line unchanged goes.
+    [Fact]
+    public void An_empty_contact_asks_once_and_the_second_send_goes() => StaThread.Run(() =>
+    {
+        var window = Window(new Fakes());
+
+        Assert.False(window.ConfirmContact());
+        Assert.Equal(System.Windows.Visibility.Visible, window.ContactNote.Visibility);
+        Assert.StartsWith("Without a way to reach you", window.ContactNote.Text);
+        Assert.Equal("Send anyway", window.SendButton.Content);
+
+        Assert.True(window.ConfirmContact());
+        window.Close();
+    });
+
+    // A line that does not look like an address asks too, with its own wording; typing a real one takes the ask back.
+    [Fact]
+    public void An_unrecognised_contact_asks_and_fixing_it_clears_the_ask() => StaThread.Run(() =>
+    {
+        var window = Window(new Fakes());
+        window.Contact.Text = "someone@example";
+
+        Assert.False(window.ConfirmContact());
+        Assert.StartsWith("That doesn't look like an email", window.ContactNote.Text);
+
+        window.Contact.Text = "someone@example.com";
+        Assert.Equal(System.Windows.Visibility.Collapsed, window.ContactNote.Visibility);
+        Assert.Equal("Send", window.SendButton.Content);
+        Assert.True(window.ConfirmContact());
+        window.Close();
+    });
+
+    // Changing the line after the ask means the new text gets its own look: "Send anyway" was for the old text only.
+    [Fact]
+    public void Editing_the_contact_after_the_ask_asks_again_about_the_new_text() => StaThread.Run(() =>
+    {
+        var window = Window(new Fakes());
+
+        Assert.False(window.ConfirmContact());
+        window.Contact.Text = "asdf";
+        Assert.False(window.ConfirmContact());
+        Assert.True(window.ConfirmContact());
+        window.Close();
+    });
+
     [Fact]
     public void Up_to_five_screenshots_and_the_sixth_is_refused_with_a_note() => StaThread.Run(() =>
     {
