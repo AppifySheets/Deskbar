@@ -1,10 +1,12 @@
 using System.IO;
+using System.Reflection;
 using System.Windows;
 using System.Windows.Automation;
 using System.Windows.Controls;
 using System.Windows.Documents;
 using System.Windows.Input;
 using System.Windows.Media;
+using System.Windows.Threading;
 using CSharpFunctionalExtensions;
 using Deskbar.App;
 using Deskbar.Core.Persistence;
@@ -47,7 +49,12 @@ public class FloatingBarTaskListTests
 
     // Each read of the clock is a minute later, so every task is raised at its own time and the pile's order is the
     // order the test made them in, newest first.
-    static ListBar Build(Func<Guid, Result>? goTo = null, Action? openWindow = null, TaskService? tasks = null, Func<string, Maybe<nint>>? sessionWindow = null)
+    // The window Petre was typing in before he clicked the bar, as the foreground seam reports it. Made up, like the
+    // language tests' editor: a test must never read or move the real foreground.
+    const nint Editor = 0x5150;
+
+    static ListBar Build(Func<Guid, Result>? goTo = null, Action? openWindow = null, TaskService? tasks = null, Func<string, Maybe<nint>>? sessionWindow = null,
+        List<nint>? handedBack = null, bool editorAlive = true)
     {
         var harness = Harness.Build();
         var minutes = 0;
@@ -62,6 +69,9 @@ public class FloatingBarTaskListTests
             GoToTask = goTo ?? (_ => Result.Success()),
             OpenTasksWindow = openWindow,
             SessionWindow = sessionWindow ?? (_ => Maybe<nint>.None),
+            ForegroundWindow = () => Editor,
+            HandForegroundTo = hwnd => handedBack?.Add(hwnd),
+            WindowAlive = hwnd => hwnd == Editor && editorAlive,
         };
         bar.ShowBar();
         bar.UpdateLayout();
@@ -347,6 +357,94 @@ public class FloatingBarTaskListTests
         finally
         {
             Directory.Delete(folder, recursive: true);
+        }
+    });
+
+    // FIX ROUND 1, Important 1: a paint waits under the same conditions as the bar's rebuild, a press or a drag anywhere
+    // on the bar and not only on the list, because a paint that adds a line changes the bar's height and moves the
+    // rows under a bottom-anchored bar's press. A row being dragged in arrange mode holds the paint; the cancel serves
+    // the deferred rebuild, which paints the list.
+    [Fact]
+    public void A_paint_waits_while_a_row_is_being_dragged() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        Assert.True(t.Bar.SetArranging(true).IsSuccess);
+        t.Bar.UpdateLayout();
+        var rows = (Panel)t.Bar.FindName("Rows")!;
+        var sparrow = rows.Children.OfType<Border>().Select(b => b.Child).OfType<Grid>()
+            .Single(row => Inside(row).OfType<TextBlock>().Any(text => text.Text == "Sparrow"));
+        sparrow.RaiseEvent(new MouseButtonEventArgs(Mouse.PrimaryDevice, 0, MouseButton.Left) { RoutedEvent = Mouse.PreviewMouseDownEvent });
+        sparrow.RaiseEvent(new MouseButtonEventArgs(Mouse.PrimaryDevice, 0, MouseButton.Left) { RoutedEvent = Mouse.MouseDownEvent });
+
+        t.Tasks.AddNote("Dishwasher tablets", Maybe<Guid>.None);
+        Assert.Empty(t.Lines);
+
+        t.Bar.CancelArrangeDrag("the test is over");
+        Dispatcher.CurrentDispatcher.Invoke(() => { }, DispatcherPriority.ContextIdle);
+        Assert.Single(t.Lines);
+    });
+
+    // FIX ROUND 1, Important 2 (Controller Ruling 5): the bar losing the keyboard while a note is typed closes the box,
+    // lets the bar fade again, hands nothing back, and keeps the text and its chip for the next "+ Add".
+    [Fact]
+    public void Losing_the_keyboard_puts_the_note_aside_as_a_draft() => StaThread.Run(() =>
+    {
+        var handed = new List<nint>();
+        using var t = Build(handedBack: handed);
+        var box = () => Inside(t.List).OfType<TextBox>().Single(b => Equals(b.Tag, "task-add-box"));
+
+        Click(ButtonNamed(t.List, "Add a task"));
+        box().Text = "Half a thought";
+        Click(ButtonNamed(t.List, "none"));
+        Assert.True(t.Bar.HoldsFullStrength);
+
+        // Window.OnDeactivated is what WPF calls when another window takes the foreground.
+        typeof(Window).GetMethod("OnDeactivated", BindingFlags.NonPublic | BindingFlags.Instance)!.Invoke(t.Bar, [EventArgs.Empty]);
+
+        Assert.False(t.Bar.TaskListAdding);
+        Assert.False(t.Bar.HoldsFullStrength);
+        Assert.Empty(handed);
+        Assert.Empty(t.Tasks.Board.Tasks);
+
+        Click(ButtonNamed(t.List, "Add a task"));
+        Assert.True(t.Bar.TaskListAdding);
+        Assert.Equal("Half a thought", box().Text);
+        Assert.True(t.Bar.TaskAddTarget.HasNoValue);
+
+        // The draft goes once it is used: Enter adds it, and the next box starts empty on the current workspace.
+        Press(t.Bar, box(), Key.Enter);
+        Assert.True(Assert.Single(t.Tasks.Board.Tasks).WorkspaceId.HasNoValue);
+        Click(ButtonNamed(t.List, "Add a task"));
+        Assert.Equal("", box().Text);
+        Assert.Equal(t.Gepha, t.Bar.TaskAddTarget.Value);
+    });
+
+    // FIX ROUND 1, Important 2: after Enter or Esc the keyboard goes back to the window Petre was typing in, so his next
+    // keystrokes do not land in a bar with nothing to type into; never to a window that has closed meanwhile.
+    [Fact]
+    public void Enter_and_Esc_hand_the_keyboard_back() => StaThread.Run(() =>
+    {
+        var handed = new List<nint>();
+        using (var t = Build(handedBack: handed))
+        {
+            var box = () => Inside(t.List).OfType<TextBox>().Single(b => Equals(b.Tag, "task-add-box"));
+
+            Click(ButtonNamed(t.List, "Add a task"));
+            box().Text = "Call the accountant";
+            Press(t.Bar, box(), Key.Enter);
+            Assert.Equal([Editor], handed);
+
+            Click(ButtonNamed(t.List, "Add a task"));
+            Press(t.Bar, box(), Key.Escape);
+            Assert.Equal([Editor, Editor], handed);
+        }
+
+        handed.Clear();
+        using (var t = Build(handedBack: handed, editorAlive: false))
+        {
+            Click(ButtonNamed(t.List, "Add a task"));
+            Press(t.Bar, Inside(t.List).OfType<TextBox>().Single(b => Equals(b.Tag, "task-add-box")), Key.Escape);
+            Assert.Empty(handed);
         }
     });
 
