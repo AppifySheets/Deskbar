@@ -1703,6 +1703,10 @@ public partial class App : Application
                 // ...and the task list at the bottom (FloatingBar.TaskList.cs): the same service the control pipe edits,
                 // so the two always agree.
                 Tasks = tasks,
+                // A line's tooltip names its goal, and nothing else on the bar shows goals (goals plan, Task 7). A goal
+                // renamed from the pipe repaints the lines.
+                GoalTitle = task => goals is { } g ? g.GoalOf(task).Map(goal => goal.Title) : Maybe<string>.None,
+                GoalChanges = goals?.Changed,
                 // A line's click: to its task's workspace, the switch the rows make (GoToTask below, shared with the
                 // tasks window's lines). A note on no workspace never gets here (the bar does nothing for it).
                 GoToTask = id => tasks!.Board.Tasks.TryFirst(t => t.Id == id).ToResult($"No task with id {id}").Bind(GoToTask),

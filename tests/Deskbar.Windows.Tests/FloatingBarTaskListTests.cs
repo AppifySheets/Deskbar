@@ -95,7 +95,8 @@ public class FloatingBarTaskListTests
     // never "right after a repaint" unless a test hands in a clock of its own (the click guard's tests do).
     static ListBar Build(Func<Guid, Result>? goTo = null, Action? openWindow = null, TaskService? tasks = null, Func<string, Maybe<nint>>? sessionWindow = null,
         List<nint>? handedBack = null, bool editorAlive = true, Func<DateTime>? clickClock = null, Func<nint>? front = null,
-        Func<nint, bool>? onCurrentDesktop = null, Func<DateTimeOffset>? taskNow = null)
+        Func<nint, bool>? onCurrentDesktop = null, Func<DateTimeOffset>? taskNow = null,
+        Func<TaskItem, Maybe<string>>? goalTitle = null, IObservable<System.Reactive.Unit>? goalChanges = null)
     {
         var harness = Harness.Build();
         var minutes = 0;
@@ -121,6 +122,8 @@ public class FloatingBarTaskListTests
             TaskNow = taskNow ?? (() => Start.AddHours(1)),
             // The minute's tick of the ages is driven by the tests (RefreshTaskAges), never by a real timer.
             TaskAgeTimer = (_, _) => System.Reactive.Disposables.Disposable.Empty,
+            GoalTitle = goalTitle ?? (_ => Maybe<string>.None),
+            GoalChanges = goalChanges,
         };
         bar.ShowBar();
         bar.UpdateLayout();
@@ -1866,5 +1869,84 @@ public class FloatingBarTaskListTests
 
         Assert.Equal(Deskbar.Core.Tasks.TaskStatus.InProgress, t.Tasks.Board.Tasks.Single(x => x.Id == id).Status);
         Assert.Equal(id, t.Bar.Selection.Current.Value);
+    });
+
+    // --- goals plan, Task 7: a task's tooltip names its goal, and the bar gains nothing else -------------------------
+
+    sealed class MemoryGoals : Deskbar.Core.Goals.IGoalStore
+    {
+        public Result<Deskbar.Core.Goals.GoalBoard> Load() => Deskbar.Core.Goals.GoalBoard.Empty;
+
+        public Result Save(Deskbar.Core.Goals.GoalBoard board) => Result.Success();
+    }
+
+    // The bar wired as App wires it: the goal's title for a task through GoalService.GoalOf, and its Changed to repaint.
+    // The click clock is held still, so a test can tell whether a paint restarted the click guard.
+    static (ListBar Bar, Deskbar.Core.Goals.GoalService Goals) GoalBar(Func<DateTime> clickClock, Func<Guid, Result>? goTo = null)
+    {
+        var minutes = 0;
+        var tasks = new TaskService(new MemoryStore(), () => Start.AddMinutes(minutes++));
+        var goals = new Deskbar.Core.Goals.GoalService(new MemoryGoals(), tasks, () => Start, () => new DateOnly(2026, 11, 24));
+        var t = Build(tasks: tasks, clickClock: clickClock, goTo: goTo,
+            goalTitle: task => goals.GoalOf(task).Map(g => g.Title), goalChanges: goals.Changed);
+        return (t, goals);
+    }
+
+    static string TipOf(Button line) => line.ToolTip as string ?? "";
+
+    [Fact]
+    public void A_lines_tooltip_names_its_goal() => StaThread.Run(() =>
+    {
+        var (t, goals) = GoalBar(() => ClickStart);
+        using var _ = t;
+        var goal = goals.Add("Ship the goals planner", goals.ThisWeek).Value;
+        t.Tasks.AddNote("free", t.Gepha);
+        var linked = t.Tasks.AddNote("linked", t.Gepha).Value.Id;
+        goals.LinkTask(linked, goal.Id);
+
+        var line = t.Lines.Single(l => ((TaskLine)l.Tag).Id == linked);
+        Assert.Equal("Goal: Ship the goals planner", TipOf(line).Split('\n').Last());
+        Assert.DoesNotContain("Goal:", TipOf(t.Lines.Single(l => ((TaskLine)l.Tag).Title == "free")));
+    });
+
+    // A goal renamed from the pipe repaints the line (its tooltip says the new title) without moving it: the goal is in
+    // the line's shape, not in the places key, so the click guard does not restart and the next click still goes.
+    [Fact]
+    public void Renaming_the_goal_updates_the_tooltip_without_moving_lines() => StaThread.Run(() =>
+    {
+        var now = ClickStart;
+        var went = new List<Guid>();
+        var (t, goals) = GoalBar(() => now, id =>
+        {
+            went.Add(id);
+            return Result.Success();
+        });
+        using var _ = t;
+        var goal = goals.Add("Ship it", goals.ThisWeek).Value;
+        var id = t.Tasks.AddNote("linked", t.Gepha).Value.Id;
+        goals.LinkTask(id, goal.Id);
+        now = now.AddSeconds(1);
+
+        goals.Rename(goal.Id, "Ship the goals planner");
+
+        Assert.EndsWith("Goal: Ship the goals planner", TipOf(t.Lines[0]));
+        PressAndClick(t.Lines[0], clickCount: 1);
+        Assert.Equal([id], went);
+    });
+
+    // The anti-goal "a busier bar": linking a task adds nothing to its line but the tooltip.
+    [Fact]
+    public void The_bar_shows_no_goal_chip() => StaThread.Run(() =>
+    {
+        var (t, goals) = GoalBar(() => ClickStart);
+        using var _ = t;
+        var goal = goals.Add("Ship it", goals.ThisWeek).Value;
+        var id = t.Tasks.AddNote("linked", t.Gepha).Value.Id;
+        var before = Inside(t.Lines[0]).Count();
+
+        goals.LinkTask(id, goal.Id);
+
+        Assert.Equal(before, Inside(t.Lines[0]).Count());
+        Assert.DoesNotContain(Inside(t.Lines[0]).OfType<TextBlock>(), b => b.Text.Contains("Ship it"));
     });
 }

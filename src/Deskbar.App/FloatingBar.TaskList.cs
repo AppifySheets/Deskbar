@@ -102,6 +102,27 @@ public partial class FloatingBar
     TaskService? taskService;
     IDisposable? taskChanges;
 
+    // THE TASK'S GOAL (goals plan, Task 7; docs/superpowers/specs/2026-11-22-goals-planner-design.md, "Linking a task to
+    // a goal elsewhere"): the bar gains NO chip and no control for goals (the anti-goal "a busier bar"); a line's tooltip
+    // names its goal as its last line, "Goal: <title>". App answers the title through GoalService.GoalOf (none for no
+    // link and for a link to a goal that no longer exists) and hands GoalService.Changed in, so a goal renamed from the
+    // pipe repaints the lines. The title is part of a line's shape (a repaint) but not of the places key, so a rename
+    // moves no line and does not restart the click guard (TaskClickIgnored). Left unset, no line names a goal.
+    internal Func<TaskItem, Maybe<string>> GoalTitle { get; init; } = _ => Maybe<string>.None;
+
+    internal IObservable<System.Reactive.Unit>? GoalChanges
+    {
+        init
+        {
+            goalChanges?.Dispose();
+            goalChanges = value?.Subscribe(_ => PaintTaskList());
+            // GoalTitle may have been set after Tasks in the same initializer, which painted without it.
+            PaintTaskList();
+        }
+    }
+
+    IDisposable? goalChanges;
+
     // What a click on a line does with the task's id. App sets it to the workspace switch; a refusal is traced.
     internal Func<Guid, Result> GoToTask { get; init; } = _ => Result.Success();
 
@@ -462,7 +483,7 @@ public partial class FloatingBar
     /// VS Code window from its session's folder. Pure apart from those three, so the rules are read in one place.
     /// </summary>
     internal static IReadOnlyList<TaskLine> Lines(TaskBoard board, Func<Guid, Maybe<string>> workspaceName,
-        Func<Guid, Brush?> colour, Func<string, Maybe<nint>> sessionWindow) =>
+        Func<Guid, Brush?> colour, Func<string, Maybe<nint>> sessionWindow, Func<TaskItem, Maybe<string>>? goalTitle = null) =>
         board.Pile().Select(t => new TaskLine(
             t.Id,
             t.Title,
@@ -476,6 +497,8 @@ public partial class FloatingBar
             Created = t.Created,
             Important = t.Important,
             Urgent = t.Urgent,
+            // The goal it counts toward, for the tooltip only (see GoalTitle).
+            GoalTitle = (goalTitle?.Invoke(t) ?? Maybe<string>.None).Match(title => (string?)title, () => null),
         }).ToArray();
 
     // Marks the first line of each group after the first (TaskLine.StartsGroup), over the lines as they are drawn, the
@@ -613,6 +636,7 @@ public partial class FloatingBar
         Closed += (_, _) =>
         {
             taskChanges?.Dispose();
+            goalChanges?.Dispose();
             taskAgeTick?.Dispose();
             selectionChanges?.Dispose();
             // Every closed line's timer goes with the bar; the tasks are closed already, nothing is left to do.
@@ -760,7 +784,7 @@ public partial class FloatingBar
         // the free height without changing the list.
         if (SizeToContent == SizeToContent.Manual || taskListSlots != TaskListSlots) QueueTaskListFit();
 
-        var open = Lines(taskService.Board, WorkspaceName, id => workspaceAccents.GetValueOrDefault(id), SessionWindow);
+        var open = Lines(taskService.Board, WorkspaceName, id => workspaceAccents.GetValueOrDefault(id), SessionWindow, GoalTitle);
         // A closed line whose task is open again (reopened from the pipe, say) is not pending any more: the task is back
         // in the pile under its own line.
         pendingCloses.Where(p => open.Any(l => l.Id == p.Line.Id)).ToList().ForEach(p => ForgetPendingClose(p, repaint: false));
@@ -830,7 +854,7 @@ public partial class FloatingBar
     static string ShapeOf(TaskLine line) =>
         $"{line.Id}|{line.Status}|{line.Title}|{line.Detail}|{line.Claudes}|{line.WorkspaceName}|" +
         $"{(line.Colour as SolidColorBrush)?.Color}|{line.Window.Match(w => w.ToString(), () => "")}|{line.Closing}|" +
-        $"{line.Important}|{line.Urgent}|{line.StartsGroup}";
+        $"{line.Important}|{line.Urgent}|{line.StartsGroup}|{line.GoalTitle}";
 
     // "+N more" counts the open tasks out of sight; a closed line in its undo window is not an open task, so it is
     // neither counted nor allowed to hide one from the count.
@@ -1157,6 +1181,7 @@ public partial class FloatingBar
             line.Detail,
             line.Quadrant == Quadrant.IV ? "" : $"{line.Quadrant.Numeral()}: {line.Quadrant.Words()}",
             line.WorkspaceName is { } name ? $"On {name}" : "On no workspace",
+            line.GoalTitle is { } goal ? $"Goal: {goal}" : "",
         }.Where(part => part.Length > 0));
 
     // The failed-load line: the words, the store's reason as the tooltip, and a ✕ that dismisses it.
@@ -1565,4 +1590,10 @@ internal sealed record TaskLine(Guid Id, string Title, string Detail, TaskStatus
 
     /// <summary>Whether this line is the first of its group, below another group (FloatingBar.WithGroupStarts).</summary>
     public bool StartsGroup { get; init; }
+
+    /// <summary>
+    /// The title of the goal the task counts toward, or null (goals plan, Task 7). Shown only in the tooltip, never on
+    /// the line; part of the line's shape so a rename repaints it, not of the places key, so it moves nothing.
+    /// </summary>
+    public string? GoalTitle { get; init; }
 }
