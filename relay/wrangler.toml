@@ -17,6 +17,10 @@ custom_domain = true
 [vars]
 REPO = "AppifySheets/Deskbar-reports"
 BRANCH = "main"
+# Who is mentioned ("cc @...") at the end of every report, so GitHub notifies them of it whatever they
+# watch. Comma-separated GitHub logins with access to the reports repo. Petre is not here because he
+# watches the repo for issues, and a mention on top would notify him twice.
+NOTIFY = "lukasurmava"
 
 # Per caller address, per Cloudflare location, per minute (the binding allows only 10 or 60 s).
 # A report is up to six attachments (five screenshots and the dump) and one report call, so 12

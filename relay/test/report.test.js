@@ -84,6 +84,16 @@ test('pro is optional, false by default, and a Pro report is labelled priority',
   assert.ok(!issueBody(validateReport(report()).value, 'o/r', 'main').includes('Deskbar Pro'));
 });
 
+// NOTIFY in wrangler.toml: everyone named is mentioned once at the end; anything that is not a GitHub
+// login is dropped, and with nothing valid there is no cc line at all.
+test('the cc line mentions the logins in NOTIFY and nothing else', () => {
+  assert.match(issueBody(report(), 'o/r', 'main', 'lukasurmava'), /\n\ncc @lukasurmava\n$/);
+  assert.match(issueBody(report(), 'o/r', 'main', ' a-one , b2 '), /\ncc @a-one @b2\n$/);
+  assert.match(issueBody(report(), 'o/r', 'main', 'ok, ![x](http://t), bad name'), /\ncc @ok\n$/);
+  assert.ok(!issueBody(report(), 'o/r', 'main', undefined).includes('cc @'));
+  assert.ok(!issueBody(report(), 'o/r', 'main', ' , ').includes('cc @'));
+});
+
 test('the title is the first non-empty line, cut to 80 characters', () => {
   assert.equal(issueTitle('\n\n  The bar vanished  \nmore'), 'From the app: The bar vanished');
   const long = issueTitle('x'.repeat(200));

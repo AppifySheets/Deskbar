@@ -111,11 +111,27 @@ const inlineCode = value => `\`${value.replace(/[`\r\n]/g, ' ')}\``;
 
 const blobUrl = (repo, branch, path) => `https://github.com/${repo}/blob/${branch}/${path}`;
 
+// A GitHub login: letters, digits and hyphens, at most 39 characters. Anything else in NOTIFY is
+// dropped, so a typo in wrangler.toml cannot put arbitrary markdown into every issue.
+const GITHUB_LOGIN = /^[A-Za-z0-9-]{1,39}$/;
+
+/**
+ * The "cc" line that notifies people of a new report: NOTIFY in wrangler.toml, comma-separated GitHub
+ * logins. A watch setting belongs to each account and nobody can set it for someone else, but a
+ * mention notifies whoever is named (by email, under GitHub's default settings), whatever they
+ * watch. Empty when NOTIFY is unset or holds no valid login.
+ */
+export const ccLine = notify => {
+  const logins = (notify ?? '').split(',').map(login => login.trim()).filter(login => GITHUB_LOGIN.test(login));
+  return logins.length === 0 ? [] : ['', `cc ${logins.map(login => `@${login}`).join(' ')}`];
+};
+
 /**
  * The issue body. Screenshots are embedded by their blob URL with ?raw=true, which renders for
- * anyone who can see the private repo; the dump is a link, since it can be long.
+ * anyone who can see the private repo; the dump is a link, since it can be long. `notify` is
+ * NOTIFY from wrangler.toml (ccLine).
  */
-export const issueBody = (report, repo, branch) => {
+export const issueBody = (report, repo, branch, notify) => {
   const shots = report.attachments.filter(name => name.startsWith('shot-'));
   const hasDump = report.attachments.includes('dump.txt');
   const build = report.store ? 'Store build' : 'direct download';
@@ -141,5 +157,5 @@ export const issueBody = (report, repo, branch) => {
     '',
     `[dump.txt](${blobUrl(repo, branch, attachmentPath(report.reportId, 'dump.txt'))})`,
   ];
-  return [...lines, ...shotLines, ...dumpLines, ''].join('\n');
+  return [...lines, ...shotLines, ...dumpLines, ...ccLine(notify), ''].join('\n');
 };
