@@ -963,6 +963,86 @@ public class FloatingBarTaskListTests
         });
     });
 
+    // Petre, at the live check: "make workspace changeable". A line's workspace chip opens a menu of every workspace and
+    // none, the task's own ticked; picking one moves the task, and the line's chip follows.
+    static string ChipTextOf(Button line) =>
+        Inside(line).OfType<Border>().Single(b => Equals(b.Tag, "task-workspace")).Child is TextBlock text ? text.Text : "";
+
+    static string MenuNameOf(MenuItem item) => Inside(item.Header).OfType<TextBlock>().First().Text;
+
+    [Fact]
+    public void A_lines_workspace_chip_moves_the_task() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        var id = t.Tasks.AddNote("Dishwasher tablets", t.Gepha).Value.Id;
+        var sparrow = t.Harness.Manager.State.Workspaces.Single(w => w.Name == "Sparrow").Id;
+
+        var menu = t.Bar.OpenTaskMoveMenu(id)!;
+        var items = menu.Items.OfType<MenuItem>().ToList();
+        Assert.Equal(["none", "GEPHA", "Sparrow"], items.Select(MenuNameOf));
+        Assert.Equal(["GEPHA"], items.Where(i => i.IsChecked).Select(MenuNameOf));
+
+        items.Single(i => MenuNameOf(i) == "Sparrow").RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
+        menu.IsOpen = false;
+        t.Bar.Dispatcher.Invoke(() => { }, DispatcherPriority.Background);
+        t.Bar.RequestRebuild();
+
+        Assert.Equal(sparrow, t.Tasks.Board.Tasks.Single(x => x.Id == id).WorkspaceId.Value);
+        Assert.Equal("Sparrow", ChipTextOf(t.Lines.Single()));
+
+        // And to none.
+        var again = t.Bar.OpenTaskMoveMenu(id)!;
+        again.Items.OfType<MenuItem>().Single(i => MenuNameOf(i) == "none").RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
+        again.IsOpen = false;
+        Assert.True(t.Tasks.Board.Tasks.Single(x => x.Id == id).WorkspaceId.HasNoValue);
+    });
+
+    // The chip is a button inside the line, like the tick: its click is its own and never goes to the workspace.
+    [Fact]
+    public void A_chip_click_never_goes_to_the_workspace() => StaThread.Run(() =>
+    {
+        var went = new List<Guid>();
+        using var t = Build(goTo: id =>
+        {
+            went.Add(id);
+            return Result.Success();
+        });
+        t.Tasks.AddNote("Dishwasher tablets", t.Gepha);
+
+        Click(ButtonNamed(t.Lines.Single(), "Move to workspace"));
+
+        Assert.Empty(went);
+        Assert.NotNull(t.Bar.TaskMoveMenu);
+        t.Bar.TaskMoveMenu!.IsOpen = false;
+    });
+
+    // Petre's screenshot: on "something else" the chip at the line's end was cut off ("Deskba"). The title trims first,
+    // so the chip is always whole, at the narrowest bar too.
+    [Theory]
+    [InlineData(0)]
+    [InlineData(Deskbar.Core.Domain.BarText.Maximum)]
+    public void A_long_title_trims_and_leaves_the_chip_whole(double textOffset) => StaThread.Run(() =>
+    {
+        using var t = Build();
+        var gepha = t.Gepha; // looked up by name, so taken before the rename
+        t.Harness.Manager.SetBarTextOffset(textOffset);
+        Assert.True(t.Harness.Manager.RenameWorkspace(gepha, "Deskbar").IsSuccess);
+        t.Tasks.AddNote("something else that runs on far longer than any bar is wide, and then some more", gepha);
+        t.Bar.ApplyWidth(176);
+        t.Bar.RequestRebuild();
+        t.Bar.UpdateLayout();
+
+        var line = t.Lines.Single();
+        var chip = Inside(line).OfType<Border>().Single(b => Equals(b.Tag, "task-workspace"));
+        var title = Inside(line).OfType<TextBlock>().Single(b => Equals(b.Tag, "task-text"));
+        var chipBounds = chip.TransformToAncestor(line).TransformBounds(new Rect(chip.RenderSize));
+        Assert.True(chip.RenderSize.Width >= chip.DesiredSize.Width - chip.Margin.Left - chip.Margin.Right - 0.5,
+            $"chip squeezed: {chip.RenderSize.Width} of {chip.DesiredSize.Width}");
+        Assert.True(chipBounds.Right <= line.ActualWidth + 0.5, $"chip at {chipBounds} in a line {line.ActualWidth} wide");
+        title.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
+        Assert.True(title.RenderSize.Width < title.DesiredSize.Width, "the title trims");
+    });
+
     // The words, without a window: when the store says it kept the file, the line promises the .bak; when it could
     // not move the file aside, the line says to copy it somewhere safe instead.
     [Fact]
