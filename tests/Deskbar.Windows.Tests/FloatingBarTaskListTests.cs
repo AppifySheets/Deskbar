@@ -1385,4 +1385,119 @@ public class FloatingBarTaskListTests
         Assert.Equal(3, t.Lines.Count);
         Assert.Equal(3, t.Bar.TaskListSlotCount);
     });
+
+    // --- Task 12: the two flags and Covey's quadrants on the bar (Rulings 25 and 28) ----------------------------------
+
+    static Button Toggle(Button line, string name) => ButtonNamed(line, name);
+
+    static TextBlock GlyphOf(Button toggle) => Inside(toggle).OfType<TextBlock>().Single();
+
+    // The toggle is on when it says so to automation and its glyph wears the flag's colour at full strength; off it is
+    // quiet (invisible until hover or selection, still clickable) and dim.
+    static bool IsOn(Button toggle) =>
+        AutomationProperties.GetItemStatus(toggle) == "on" && toggle.Opacity >= 1
+        && GlyphOf(toggle).Foreground is SolidColorBrush { Color: var c } && c != ((SolidColorBrush)FloatingBar.TaskFlagOffInk).Color;
+
+    static string TitleOf(Button line) => ((TaskLine)line.Tag).Title;
+
+    // Waiting on you first, then quadrant I (important and urgent), II (important), III (urgent), IV (neither), each
+    // in its own order, a newer task on top until dragged.
+    [Fact]
+    public void The_lines_are_waiting_then_covey_quadrants() => StaThread.Run(() =>
+    {
+        using var t = Build(openWindow: () => { });
+        t.Bar.SizeToContent = SizeToContent.Manual;
+        t.Bar.Height = 900;
+        var neither = t.Tasks.AddNote("neither", t.Gepha).Value.Id;
+        var urgent = t.Tasks.AddNote("urgent", t.Gepha).Value.Id;
+        var important = t.Tasks.AddNote("important", t.Gepha).Value.Id;
+        var both = t.Tasks.AddNote("both", t.Gepha).Value.Id;
+        var waiting = t.Tasks.AddNote("waiting", t.Gepha).Value.Id;
+        t.Tasks.SetFlag(urgent, TaskFlag.Urgent, true);
+        t.Tasks.SetFlag(important, TaskFlag.Important, true);
+        t.Tasks.SetFlag(both, TaskFlag.Important, true);
+        t.Tasks.SetFlag(both, TaskFlag.Urgent, true);
+        t.Tasks.SetFlag(waiting, TaskFlag.Important, true);
+        t.Tasks.SetStatus(waiting, Deskbar.Core.Tasks.TaskStatus.WaitingOnYou);
+        Settle(t);
+
+        Assert.Equal(["waiting", "both", "important", "urgent", "neither"], t.Lines.Select(TitleOf));
+        // A waiting task shows its flags though it sits in the pinned block.
+        Assert.True(IsOn(Toggle(t.Lines[0], "Important")));
+        Assert.False(IsOn(Toggle(t.Lines[0], "Urgent")));
+    });
+
+    // Each line has the two toggles, with their tooltips; on, each is drawn in its colour, off it is quiet until the
+    // line is hovered or selected. A click sets the flag and the task goes to the top of its new quadrant.
+    [Fact]
+    public void A_toggle_sets_its_flag_and_the_line_moves_to_its_quadrant() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        var first = t.Tasks.AddNote("first", t.Gepha).Value.Id;
+        t.Tasks.AddNote("second", t.Gepha);
+        Assert.Equal(["second", "first"], t.Lines.Select(TitleOf));
+        var important = Toggle(t.Lines[1], "Important");
+        Assert.Equal("Important", important.ToolTip);
+        Assert.Equal("Urgent", Toggle(t.Lines[1], "Urgent").ToolTip);
+        Assert.False(IsOn(important));
+        Assert.Equal(0, important.Opacity);
+
+        Click(important);
+
+        Assert.True(t.Tasks.Board.Tasks.Single(x => x.Id == first).Important);
+        Assert.Equal(["first", "second"], t.Lines.Select(TitleOf));
+        Assert.True(IsOn(Toggle(t.Lines[0], "Important")));
+        Assert.False(IsOn(Toggle(t.Lines[0], "Urgent")));
+
+        // Clicked again, off: back to quadrant IV, on top of it.
+        Click(Toggle(t.Lines[0], "Important"));
+        Assert.False(t.Tasks.Board.Tasks.Single(x => x.Id == first).Important);
+        Assert.Equal(["first", "second"], t.Lines.Select(TitleOf));
+    });
+
+    [Fact]
+    public void The_quiet_toggles_show_on_the_selected_line() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        var id = t.Tasks.AddNote("a note", t.Gepha).Value.Id;
+        Assert.Equal(0, Toggle(t.Lines[0], "Urgent").Opacity);
+
+        t.Bar.Selection.Select(id);
+
+        Assert.True(Toggle(t.Lines[0], "Urgent").Opacity > 0);
+        Assert.False(IsOn(Toggle(t.Lines[0], "Urgent")));
+    });
+
+    // The groups are told apart by a little space above the first line of each, and no caption: the bar stays compact.
+    [Fact]
+    public void A_little_space_separates_the_groups_and_nothing_names_them() => StaThread.Run(() =>
+    {
+        using var t = Build(openWindow: () => { });
+        t.Bar.SizeToContent = SizeToContent.Manual;
+        t.Bar.Height = 900;
+        var a = t.Tasks.AddNote("a", t.Gepha).Value.Id;
+        t.Tasks.AddNote("b", t.Gepha);
+        var c = t.Tasks.AddNote("c", t.Gepha).Value.Id;
+        t.Tasks.SetFlag(a, TaskFlag.Urgent, true);
+        t.Tasks.SetFlag(c, TaskFlag.Urgent, true);
+        Settle(t);
+
+        Assert.Equal(["c", "a", "b"], t.Lines.Select(TitleOf));
+        Assert.Equal([false, false, true], t.Lines.Select(l => ((TaskLine)l.Tag).StartsGroup));
+        Assert.True(t.Lines[2].Margin.Top > t.Lines[1].Margin.Top);
+        Assert.DoesNotContain(Inside(t.List).OfType<TextBlock>(), b => b.Text.Contains("Urgent") || b.Text.Contains("Important"));
+    });
+
+    // A closed line in its undo window has no toggles: its task is closed and takes no flag.
+    [Fact]
+    public void A_closing_line_has_no_toggles() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        t.Tasks.AddNote("a note", t.Gepha);
+
+        Click(ButtonNamed(t.Lines[0], "Tick off"));
+
+        Assert.True(Closing(t.Lines[0]));
+        Assert.False(HasButtonNamed(t.Lines[0], "Important"));
+    });
 }

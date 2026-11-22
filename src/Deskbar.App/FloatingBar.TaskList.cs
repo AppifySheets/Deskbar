@@ -36,7 +36,8 @@ namespace Deskbar.App;
 //                   starts typing as a click in the box does. Enter
 //                   adds a Backlog note through TaskService.AddNote and Esc clears the box; either way the keyboard
 //                   goes back to the window Petre was typing in. Clicking away leaves the text where it is.
-//   the lines       the first three of the pile (Waiting on you, then Done, then the rest; TaskBoard.Pile). A
+//   the lines       the first three of the pile (Waiting on you, then Covey's quadrants I to IV, each in Petre's
+//                   own order; TaskBoard.Pile, and THE FLAGS below). A
 //                   Claude line (a task with a session) has an orange edge and tint, a CLAUDE tag, the VS Code icon
 //                   of its session's window when one is found, then the task's title in a tan ink and, after a dot,
 //                   the question while it waits on Petre, else its status line, with "no live session" when every
@@ -44,6 +45,13 @@ namespace Deskbar.App;
 //                   a close button. Every line ends with its workspace's chip in that row's own colour, or "none".
 //                   A line just closed stays in its place for six seconds, struck through, with "Undo" where its
 //                   tick or close button was (Petre: "when i click on done, there should be undo"; Ruling 10).
+//   the flags       (Task 12, Rulings 25 and 28.) Two small toggles on every open line, important (an exclamation
+//                   mark) and urgent (a clock), which name the task's Covey quadrant. Off they are quiet: invisible,
+//                   still there to click, shown dimly while the line is hovered or selected. On they are drawn in
+//                   their colour. A click sets the flag through TaskService.SetFlag and the task goes to the top of the
+//                   quadrant it lands in. The groups (the Waiting on you block, then each quadrant) are told apart by a
+//                   little space above a group's first line, and nothing names them: the bar stays compact (the
+//                   window's List view has the captions).
 //   "+N more"       a small line under the last line when more open tasks are out of sight. When some of the hidden
 //                   ones wait on Petre it says so in the asking orange ("+2 waiting"), so no ask is out of sight
 //                   without a sign (spec, "The bar's order"). It opens the tasks window (OpenTasksWindow, set by the
@@ -126,6 +134,7 @@ public partial class FloatingBar
             var selected = selection.IsSelected(((TaskLine)button.Tag).Id);
             frame.BorderBrush = selected ? TaskPickedEdge : Brushes.Transparent;
             frame.Background = selected ? TaskSelectedFill : Brushes.Transparent;
+            ShowQuietFlags(button, selected || button.IsMouseOver);
         });
 
     // For the tests: whether a line on show is drawn as selected.
@@ -383,6 +392,12 @@ public partial class FloatingBar
     static readonly Brush TaskFieldFill = Frozen(0xFF, 0x15, 0x16, 0x1A);
     static readonly Brush TaskPickedEdge = Frozen(0xFF, 0x4F, 0x8C, 0xFF);
 
+    // The flags' colours (Task 12): important a soft red, urgent an amber, both clear of the asking orange that means
+    // Claude's or waiting; off, the dim ink. Internal for the tests.
+    static readonly Brush TaskImportantInk = Frozen(0xFF, 0xFF, 0x6B, 0x6B);
+    static readonly Brush TaskUrgentInk = Frozen(0xFF, 0xFF, 0xD5, 0x4F);
+    internal static readonly Brush TaskFlagOffInk = Frozen(0xFF, 0xA9, 0xAD, 0xB8);
+
     // The persistent parts, built once in BuildTaskList.
     Border? taskProblemHost;
     TextBlock? taskMoreLabel;
@@ -445,7 +460,17 @@ public partial class FloatingBar
             t.IsClaudes,
             t.WorkspaceId.Bind(workspaceName).Match(name => (string?)name, () => null),
             t.WorkspaceId.HasValue ? colour(t.WorkspaceId.Value) : null,
-            t.IsClaudes ? TaskViews.SessionToGoTo(t).Bind(s => sessionWindow(s.Folder)) : Maybe<nint>.None) { Created = t.Created }).ToArray();
+            t.IsClaudes ? TaskViews.SessionToGoTo(t).Bind(s => sessionWindow(s.Folder)) : Maybe<nint>.None)
+        {
+            Created = t.Created,
+            Important = t.Important,
+            Urgent = t.Urgent,
+        }).ToArray();
+
+    // Marks the first line of each group after the first (TaskLine.StartsGroup), over the lines as they are drawn, the
+    // closed ones in their undo window included, so the space sits where the eye sees a group begin.
+    internal static IReadOnlyList<TaskLine> WithGroupStarts(IReadOnlyList<TaskLine> lines) =>
+        lines.Select((line, i) => line with { StartsGroup = i > 0 && lines[i - 1].GroupKey != line.GroupKey }).ToArray();
 
     // What follows the title: the question while the task waits on Petre, else its status line; and for a Claude task
     // whose sessions have all ended, "no live session" after that (spec, "A task whose sessions have all ended stays
@@ -729,7 +754,7 @@ public partial class FloatingBar
         pendingCloses.Where(p => open.Any(l => l.Id == p.Line.Id)).ToList().ForEach(p => ForgetPendingClose(p, repaint: false));
         var slots = TaskSlotsNow;
         if (open.Count <= slots) taskListExpanded = false;
-        var all = WithPendingCloses(open, pendingCloses);
+        var all = WithGroupStarts(WithPendingCloses(open, pendingCloses));
         allTaskLines = all;
         var problem = taskService.LoadProblem;
         var shape = string.Join("\n", all.Select(ShapeOf).Prepend(
@@ -792,7 +817,8 @@ public partial class FloatingBar
     // Everything a line shows, as text, so two paints can be compared without drawing anything.
     static string ShapeOf(TaskLine line) =>
         $"{line.Id}|{line.Status}|{line.Title}|{line.Detail}|{line.Claudes}|{line.WorkspaceName}|" +
-        $"{(line.Colour as SolidColorBrush)?.Color}|{line.Window.Match(w => w.ToString(), () => "")}|{line.Closing}";
+        $"{(line.Colour as SolidColorBrush)?.Color}|{line.Window.Match(w => w.ToString(), () => "")}|{line.Closing}|" +
+        $"{line.Important}|{line.Urgent}|{line.StartsGroup}";
 
     // "+N more" counts the open tasks out of sight; a closed line in its undo window is not an open task, so it is
     // neither counted nor allowed to hide one from the count.
@@ -857,7 +883,8 @@ public partial class FloatingBar
             Tag = line,
             Content = frame,
             Padding = new Thickness(0),
-            Margin = new Thickness(0, 1, 0, 1),
+            // A group's first line has a little space above it (see the header: the groups are not named on the bar).
+            Margin = new Thickness(0, line.StartsGroup ? GroupGap : 1, 0, 1),
             Background = Brushes.Transparent,
             BorderThickness = new Thickness(0),
             Template = TaskLineTemplate,
@@ -867,6 +894,10 @@ public partial class FloatingBar
             ToolTip = line.Closing ? "Closed. Undo brings it back." : TipOf(line),
         };
         AutomationProperties.SetName(button, line.Title);
+        // The quiet toggles show while the pointer is on the line, and stay while it is selected.
+        ShowQuietFlags(button, selected);
+        button.MouseEnter += (_, _) => ShowQuietFlags(button, true);
+        button.MouseLeave += (_, _) => ShowQuietFlags(button, selection.IsSelected(line.Id));
         // The click guard, as on the tick and the close button (TaskClickIgnored).
         button.PreviewMouseLeftButtonDown += (_, e) => taskPressClicks = e.ClickCount;
         button.Click += (_, _) =>
@@ -914,7 +945,54 @@ public partial class FloatingBar
                     : TaskButton("Close task", new TextBlock { Text = "✕", Foreground = TaskInk, FontSize = Text(8.5), Margin = new Thickness(5, 0, 5, 0) },
                         () => CloseWithUndo(line), "Done: close this task", ignoredWhen: TaskClickIgnored)
                 : null,
+            line.Closing ? null : FlagToggle(line, TaskFlag.Urgent),
+            line.Closing ? null : FlagToggle(line, TaskFlag.Important),
         }.OfType<UIElement>();
+
+    // THE TWO TOGGLES (Task 12; see the header). Glyphs by code point in the icon font (IconFont: Segoe Fluent Icons,
+    // Segoe MDL2 Assets on Windows 10, both checked to carry them): U+E8C9 "Important", an exclamation mark, and
+    // U+E823 "Recent", a clock face, for urgent. Same size on or off, so a toggle never moves anything; off, the
+    // button is transparent (Opacity 0, still hit-testable) until the line is hovered or selected (ShowQuietFlags).
+    // Its automation status says "on" or "off", its tooltip names the flag. A closed line in its undo window has none.
+    Button FlagToggle(TaskLine line, TaskFlag flag)
+    {
+        var on = flag == TaskFlag.Important ? line.Important : line.Urgent;
+        var name = flag == TaskFlag.Important ? "Important" : "Urgent";
+        var glyph = new TextBlock
+        {
+            Text = flag == TaskFlag.Important ? "\uE8C9" : "\uE823",
+            FontFamily = IconFont,
+            FontSize = Text(8.5),
+            Foreground = on ? (flag == TaskFlag.Important ? TaskImportantInk : TaskUrgentInk) : TaskFlagOffInk,
+            VerticalAlignment = VerticalAlignment.Center,
+            Margin = new Thickness(2, 0, 2, 0),
+        };
+        var button = TaskButton(name, glyph,
+            () => taskService?.SetFlag(line.Id, flag, !on).TapError(err => ClickTrace.Write($"task list: flag not set: {err}")),
+            name, ignoredWhen: TaskClickIgnored);
+        button.Tag = on ? FlagOnTag : FlagOffTag;
+        AutomationProperties.SetItemStatus(button, on ? "on" : "off");
+        if (!on) button.Opacity = 0;
+        return button;
+    }
+
+    const string FlagOnTag = "task-flag-on";
+    const string FlagOffTag = "task-flag-off";
+
+    // The space above a group's first line, in DIP: enough to see a break, little enough to keep the bar compact.
+    const double GroupGap = 6;
+
+    // How strongly an off toggle shows while its line is hovered or selected.
+    const double QuietFlagOpacity = 0.55;
+
+    // Shows or hides a line's off toggles; the on ones are always at full strength.
+    static void ShowQuietFlags(Button line, bool show) =>
+        LogicalDescendants(line).OfType<Button>().Where(b => Equals(b.Tag, FlagOffTag)).ToList()
+            .ForEach(toggle => toggle.Opacity = show ? QuietFlagOpacity : 0);
+
+    // Every element under `node` in the logical tree, itself included.
+    static IEnumerable<DependencyObject> LogicalDescendants(DependencyObject node) =>
+        LogicalTreeHelper.GetChildren(node).OfType<DependencyObject>().SelectMany(LogicalDescendants).Prepend(node);
 
     // Undo on a line just closed: a sign, not a word (Petre: "undo sign instead of text"), Segoe Fluent Icons' Undo
     // (U+E7A7, Segoe MDL2 Assets on Windows 10), in the plain bright ink, about the tick box's size and in its place.
@@ -1060,6 +1138,7 @@ public partial class FloatingBar
         {
             $"{TaskViews.StatusName(line.Status)}: {line.Title}",
             line.Detail,
+            line.Quadrant == Quadrant.IV ? "" : $"{line.Quadrant.Numeral()}: {line.Quadrant.Words()}",
             line.WorkspaceName is { } name ? $"On {name}" : "On no workspace",
         }.Where(part => part.Length > 0));
 
@@ -1447,4 +1526,20 @@ internal sealed record TaskLine(Guid Id, string Title, string Detail, TaskStatus
     /// <summary>When the task appeared, for the age the line shows (TaskAge). Not part of the line's shape: the age is
     /// rewritten in place once a minute, never by a repaint.</summary>
     public DateTimeOffset Created { get; init; }
+
+    /// <summary>The task's two flags (Task 12), drawn as the line's toggles.</summary>
+    public bool Important { get; init; }
+
+    public bool Urgent { get; init; }
+
+    public Quadrant Quadrant => QuadrantOf.Flags(Important, Urgent);
+
+    /// <summary>
+    /// Which group the line is in: the pinned Waiting on you block, or its quadrant. Lines of one group sit together
+    /// (TaskBoard.Pile), so a change of key between neighbours is where a group starts.
+    /// </summary>
+    public string GroupKey => Status == TaskStatus.WaitingOnYou ? "waiting" : Quadrant.Numeral();
+
+    /// <summary>Whether this line is the first of its group, below another group (FloatingBar.WithGroupStarts).</summary>
+    public bool StartsGroup { get; init; }
 }
