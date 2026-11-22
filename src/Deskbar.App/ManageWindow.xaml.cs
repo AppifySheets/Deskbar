@@ -404,6 +404,7 @@ public partial class ManageWindow : Window
             TextSizeSlider.Value = BarText.Clamp(manager.State.BarTextOffset);
             // Shown in percent and stored as a factor, the way opacity is.
             IconSizeSlider.Value = IconScaling.Clamp(manager.State.IconScale) * 100;
+            FrostBlurSlider.Value = FrostBlur.Clamp(manager.State.FrostBlur);
             ListLinesSlider.Value = WindowListLines.Clamp(manager.State.WindowListMinimumLines);
             // Ticked from state like the sliders, under the same guard, so opening Manage writes nothing.
             StripItemBoxes().ForEach(box => box.IsChecked = !manager.State.HiddenStripItems.Contains((StripItem)box.Tag));
@@ -438,6 +439,7 @@ public partial class ManageWindow : Window
         };
         ListLinesValue.Text = ListLinesSlider.Value <= 1 ? "no floor" : $"{ListLinesSlider.Value:0} lines";
         IconSizeValue.Text = Math.Abs(IconSizeSlider.Value - 100) < 0.5 ? "as built" : $"{IconSizeSlider.Value:0}%";
+        FrostBlurValue.Text = FrostBlurSlider.Value <= 0.001 ? "sharp" : $"{FrostBlurSlider.Value:0} px";
     }
 
     // The icon size, applied live like the text size: each step rebuilds the bar with its icons at the new size.
@@ -446,6 +448,15 @@ public partial class ManageWindow : Window
         if (loading) return;
         ShowAppearanceValues();
         manager.SetIconScale(IconSizeSlider.Value / 100).TapError(Complain);
+    }
+
+    // The frost strength, applied live like the others: each step pulses the state, the bar's next check sees the new
+    // strength and makes the frost again (FloatingBar.Frost.cs), within half a second.
+    void OnFrostBlurChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
+    {
+        if (loading) return;
+        ShowAppearanceValues();
+        manager.SetFrostBlur(FrostBlurSlider.Value).TapError(Complain);
     }
 
     // The text size slider, applied live like the others: each step rebuilds the bar at the new size. Behind
@@ -544,6 +555,7 @@ public partial class ManageWindow : Window
         // Everything back on the strip, and every icon back to its built size.
         manager.SetHiddenStripItems([]).TapError(Complain);
         manager.SetIconScale(null).TapError(Complain);
+        manager.SetFrostBlur(null).TapError(Complain);
         LoadAppearance();
     }
 

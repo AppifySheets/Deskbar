@@ -75,4 +75,49 @@ public class FrostTests
     [Fact]
     public void A_buffer_of_the_wrong_size_is_refused() =>
         Assert.Throws<ArgumentException>(() => Frost.Apply(new byte[10], 4, 4, radius: 1, saturation: 1.0));
+
+    // Radius 0 is the setting's "no blur": only the colour lift is left.
+    [Fact]
+    public void Radius_zero_keeps_every_pixel_where_it_was()
+    {
+        var stripes = Image(6, 2, (x, _) => x % 2 == 0 ? ((byte)200, (byte)200, (byte)200) : ((byte)20, (byte)20, (byte)20));
+        var frosted = Frost.Apply(stripes, 6, 2, radius: 0, saturation: 1.0);
+        Assert.Equal((200, 200, 200, 255), At(frosted, 6, 0, 0));
+        Assert.Equal((20, 20, 20, 255), At(frosted, 6, 1, 0));
+    }
+
+    // THE SOFT EDGE (Petre: "ease into it", "make edges less pronounced"). Sharp black, frosted white, 20 wide.
+    static readonly byte[] Black = Image(20, 2, (_, _) => (0, 0, 0));
+    static readonly byte[] White = Image(20, 2, (_, _) => (255, 255, 255));
+
+    [Fact]
+    public void The_edge_facing_the_desktop_is_the_sharp_picture_and_the_far_side_the_frost()
+    {
+        var eased = Frost.Ease(Black, White, 20, 2, ramp: 0.5, fromLeft: true);
+        Assert.Equal(0, At(eased, 20, 0, 0).B);
+        Assert.Equal(255, At(eased, 20, 10, 0).B);
+        Assert.Equal(255, At(eased, 20, 19, 1).B);
+    }
+
+    [Fact]
+    public void The_frost_rises_steadily_across_the_ramp()
+    {
+        var eased = Frost.Ease(Black, White, 20, 2, ramp: 0.5, fromLeft: true);
+        var row = Enumerable.Range(0, 20).Select(x => At(eased, 20, x, 0).B).ToArray();
+        Assert.All(Enumerable.Range(1, 19), x => Assert.True(row[x] >= row[x - 1], $"column {x}: {row[x - 1]} then {row[x]}"));
+        Assert.InRange(row[5], 64, 192); // halfway up the ramp is about half
+    }
+
+    // A bar docked on the left faces the desktop with its right side.
+    [Fact]
+    public void A_bar_facing_the_desktop_on_its_right_eases_from_the_right()
+    {
+        var eased = Frost.Ease(Black, White, 20, 2, ramp: 0.5, fromLeft: false);
+        Assert.Equal(0, At(eased, 20, 19, 0).B);
+        Assert.Equal(255, At(eased, 20, 0, 0).B);
+    }
+
+    [Fact]
+    public void Two_buffers_of_different_sizes_are_refused() =>
+        Assert.Throws<ArgumentException>(() => Frost.Ease(Black, new byte[8], 20, 2, ramp: 0.3, fromLeft: true));
 }

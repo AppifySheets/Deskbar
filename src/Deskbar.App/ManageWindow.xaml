@@ -185,6 +185,18 @@
                             <TextBlock x:Name="IconSizeValue" Margin="8,0,0,0" VerticalAlignment="Center" MinWidth="70"/>
                         </StackPanel>
 
+                        <!-- The docked bar's frost strength (FrostBlur, FloatingBar.Frost.cs), with its own handler and
+                             setter like the text size. Petre, on the first frost: "it's too blurry", "make it a setting?" -->
+                        <TextBlock Text="Wallpaper blur" FontWeight="Bold" Margin="0,16,0,0"/>
+                        <TextBlock TextWrapping="Wrap" Opacity="0.75" Margin="0,2,0,6"
+                                   Text="How blurred your wallpaper is behind the workspace rows while the bar is docked, in screen pixels. At 0 it shows sharp under the bar's veil. Needs the see-through band above."/>
+                        <StackPanel Orientation="Horizontal">
+                            <Slider x:Name="FrostBlurSlider" Width="260" Minimum="0" Maximum="32"
+                                    SmallChange="1" LargeChange="4" TickFrequency="1" IsSnapToTickEnabled="True"
+                                    ValueChanged="OnFrostBlurChanged"/>
+                            <TextBlock x:Name="FrostBlurValue" Margin="8,0,0,0" VerticalAlignment="Center" MinWidth="70"/>
+                        </StackPanel>
+
                         <!-- The window list's floor (WindowListLines), with its own handler and setter like the
                              text size, so dragging it writes only this value. -->
                         <TextBlock Text="Window list height" FontWeight="Bold" Margin="0,16,0,0"/>

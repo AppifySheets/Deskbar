@@ -44,6 +44,42 @@ public static class BarSurface
     public static readonly Brush FrostVeil =
         Freeze(new SolidColorBrush(Color.FromArgb((byte)Math.Round(FrostVeilOpacity * 0xFF), Base.R, Base.G, Base.B)));
 
+    // How much of the base the veil keeps at the bar's very inner edge, where the frost is still the sharp picture
+    // (Frost.Ease). None: rendered off screen over a bright sky, even 15% left a visible step where the bar began,
+    // which is the line Petre asked to lose. The veil reaches the icons' side within a few pixels anyway.
+    public const double FrostVeilEdgeOpacity = 0;
+
+    // The veil easing in from the side that faces the desktop: FrostVeilEdgeOpacity at that edge, FrostVeil's half at
+    // `ease` of the width in, and half from there on. Petre: "make edges less pronounced"; a uniform veil drew a dark
+    // line down the screen where the bar began. One frozen brush per side, made once: the ease is a constant.
+    public static Brush FrostVeilFrom(bool fromLeft, double ease) =>
+        (fromLeft ? easedFromLeft : easedFromRight) is { } made && made.Ease == ease
+            ? made.Brush
+            : Remember(fromLeft, ease, EasedVeil(fromLeft, ease));
+
+    static (double Ease, Brush Brush)? easedFromLeft, easedFromRight;
+
+    static Brush Remember(bool fromLeft, double ease, Brush brush)
+    {
+        if (fromLeft) easedFromLeft = (ease, brush);
+        else easedFromRight = (ease, brush);
+        return brush;
+    }
+
+    // A horizontal gradient in the band's own box (relative units), so it follows the bar's width. Smoothstep-shaped
+    // like the frost's ease, sampled at a few stops, so the veil and the picture arrive together.
+    static Brush EasedVeil(bool fromLeft, double ease)
+    {
+        var stops = Enumerable.Range(0, 7)
+            .Select(i => i / 6.0)
+            .Select(t => new GradientStop(
+                Color.FromArgb(
+                    (byte)Math.Round((FrostVeilEdgeOpacity + (FrostVeilOpacity - FrostVeilEdgeOpacity) * t * t * (3 - 2 * t)) * 0xFF),
+                    Base.R, Base.G, Base.B),
+                fromLeft ? t * ease : 1 - t * ease));
+        return Freeze(new LinearGradientBrush(new GradientStopCollection(stops), new System.Windows.Point(0, 0.5), new System.Windows.Point(1, 0.5)));
+    }
+
     static T Freeze<T>(T freezable) where T : System.Windows.Freezable
     {
         freezable.Freeze();

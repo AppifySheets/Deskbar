@@ -29,7 +29,8 @@ The section for the bar has **Dock the bar to the edge of its screen**, the see-
 - how long it waits before dimming, and how long the dimming takes;
 - how long the pointer rests on an icon before its card appears, which follows Windows' own setting unless you untick its box;
 - the text size and the icon size;
-- the fewest lines the window list keeps.
+- the fewest lines the window list keeps;
+- how blurred your wallpaper is behind the rows while the bar is docked (**Wallpaper blur**, 8 screen pixels unless you move it).
 
 You choose a slider's value by watching the bar while you drag. **Reset the bar's look to defaults** puts the sliders and the bottom strip back.
 

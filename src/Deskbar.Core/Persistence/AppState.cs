@@ -80,6 +80,11 @@ public sealed record AppState(
     // and null means BarText.Default rather than zero.
     public double? BarTextOffset { get; init; }
 
+    // How blurred the docked bar's frost is, in screen pixels (Petre: "it's too blurry", "make it a setting?").
+    // Same nullable/no-migration pattern as the settings above, read through FrostBlur.Clamp, and null means
+    // FrostBlur.Default, so a later change of default reaches everyone who never moved the slider.
+    public double? FrostBlur { get; init; }
+
     // The fewest lines the current workspace's window list is drawn with (Petre: "at least 5 slots tall", "make
     // that number 5 configurable"). Same nullable/no-migration pattern, read through WindowListLines.Clamp, and
     // null means WindowListLines.Default.
