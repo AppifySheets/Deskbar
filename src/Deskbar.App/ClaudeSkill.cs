@@ -34,6 +34,13 @@ namespace Deskbar.App;
 // Deskbar is not running. And it passes the session's folder (CLAUDE_PROJECT_DIR, which Claude Code sets for hooks)
 // so the right workspace blinks.
 //
+// AND THREE MORE HOOKS, under a setting of their own (AppState.ClaudeTasks, Manage's "Claude Code sessions keep their
+// tasks in the task list", `claude-tasks on|off`; design docs/superpowers/specs/2026-11-22-tasks-board-design.md,
+// "Who gets it"). SessionStart, UserPromptSubmit and SessionEnd run the same script, which since then runs
+// `claude-hook` with the hook's JSON on stdin rather than `attention` (WriteHookScript says how), so Deskbar learns
+// the session's id and event and can answer with text the session reads. Turning "Teach Claude Code about Deskbar"
+// off takes these three out with the rest; turning the task setting off takes out only these three.
+//
 // The hook's command is the script's path alone, quoted, with forward slashes: `"C:/Users/.../claude-hook.cmd"`. It
 // was `cmd.exe /c "<path>"` at first, copied from Petre's bell hook, and it never ran once. Claude Code runs hook
 // commands through Git Bash on Windows, and Git Bash rewrites a lone `/c` argument into the path `C:/`, so cmd.exe
@@ -50,11 +57,13 @@ static class ClaudeSkill
     const string Marker = "Written by Deskbar";
     internal const string HookScriptName = "claude-hook.cmd";
 
-    public static void Sync(bool on) =>
-        Sync(on, Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), AppPaths.NewStateDir);
+    // `on` is "Teach Claude Code about Deskbar" (AppState.ClaudeSkill); `tasks` is whether sessions keep their tasks
+    // (AppState.ClaudeTasks), which adds three hook entries and only counts while `on` does (ClaudeHooks).
+    public static void Sync(bool on, bool tasks) =>
+        Sync(on, tasks, Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), AppPaths.NewStateDir);
 
     // `home` and `deskbarFolder` (where deskbar.cmd lives) are parameters so a test can point them at scratch folders.
-    internal static void Sync(bool on, string home, string deskbarFolder)
+    internal static void Sync(bool on, bool tasks, string home, string deskbarFolder)
     {
         try
         {
@@ -70,13 +79,13 @@ static class ClaudeSkill
                 // The hooks first: the skill tells a session whether they ask for the user, so it must know.
                 // An entry written by an older Deskbar (`cmd.exe /c ...`) still names the script, so Sync sees it as
                 // Deskbar's own, finds its command differs, and replaces it with this one.
-                var hooksInstalled = InstallHooks(hookScript, Path.Combine(deskbarFolder, ControlCommandLine.ShimName), settings);
+                var hooksInstalled = InstallHooks(hookScript, Path.Combine(deskbarFolder, ControlCommandLine.ShimName), settings, tasks);
                 Write(folder, file, hooksInstalled);
             }
             else
             {
                 Remove(folder, file);
-                ClaudeHooks.Sync(false, settings, HookCommand(hookScript));
+                ClaudeHooks.Sync(false, tasks, settings, HookCommand(hookScript));
             }
         }
         catch (Exception e) when (IsSettingsOrDiskProblem(e))
@@ -91,12 +100,12 @@ static class ClaudeSkill
 
     // The hook script and the entries that run it; true when the entries are in settings.json. A failure here must not
     // stop the skill from being written, so it is traced and counts as "not installed".
-    static bool InstallHooks(string hookScript, string shim, string settings)
+    static bool InstallHooks(string hookScript, string shim, string settings, bool tasks)
     {
         try
         {
             WriteHookScript(hookScript, shim);
-            return ClaudeHooks.Sync(true, settings, HookCommand(hookScript));
+            return ClaudeHooks.Sync(true, tasks, settings, HookCommand(hookScript));
         }
         catch (Exception e) when (IsSettingsOrDiskProblem(e))
         {
@@ -108,14 +117,25 @@ static class ClaudeSkill
     // The hook's command line: the script's path, quoted, with forward slashes (see the header for why not cmd.exe /c).
     internal static string HookCommand(string hookScript) => $"\"{hookScript.Replace('\\', '/')}\"";
 
-    // The script the hooks run. Its output goes nowhere: a hook's output is shown to nobody useful, and an error from
-    // a Deskbar that is not running is not the session's business.
+    // The script the hooks run: `claude-hook` with the hook's JSON on stdin (plan Task 7). Three things about it:
+    //
+    //   * STDOUT PASSES THROUGH. What Deskbar prints is what the session reads (a SessionStart or UserPromptSubmit
+    //     hook's stdout is added to its context), so there is no >nul on it. Deskbar prints nothing for the events that
+    //     only ask for the user, and nothing at all when it is not running (ControlArguments.HookReply). Stderr still
+    //     goes to nul: an error from Deskbar is not the session's business.
+    //   * STDIN PASSES THROUGH too: cmd's `call` and the shim hand theirs to Deskbar.exe, which reads it as the JSON.
+    //   * Two variables ride along as arguments, because the running Deskbar cannot see the hook's environment:
+    //     CLAUDE_CODE_ENTRYPOINT and CLAUDE_CODE_SESSION_ATTENDED, which tell a headless session from one a person is
+    //     in (ClaudeHookEvent). An unset one arrives as "" (cmd in a batch file), which ClaudeHookEvent reads as unset.
+    //
+    // The no-folder branch stays: without CLAUDE_PROJECT_DIR there is no --from, and the client adds its own folder.
     static void WriteHookScript(string path, string shim)
     {
         var quoted = shim.Replace("%", "%%");
+        var hook = $"call \"{quoted}\" claude-hook --entry \"%CLAUDE_CODE_ENTRYPOINT%\" --attended \"%CLAUDE_CODE_SESSION_ATTENDED%\"";
         var text = string.Join("\r\n",
-            "@rem Written by Deskbar for Claude Code's hooks: asks the bar for the user, for the session that runs it. Do not edit.",
-            $"@if defined CLAUDE_PROJECT_DIR (call \"{quoted}\" attention --from \"%CLAUDE_PROJECT_DIR%\" >nul 2>&1) else (call \"{quoted}\" attention >nul 2>&1)",
+            "@rem Written by Deskbar for Claude Code's hooks: tells the bar what the session that runs it is doing. Do not edit.",
+            $"@if defined CLAUDE_PROJECT_DIR ({hook} --from \"%CLAUDE_PROJECT_DIR%\" 2>nul) else ({hook} 2>nul)",
             "@exit /b 0",
             "");
         if (File.Exists(path) && File.ReadAllText(path) == text) return;

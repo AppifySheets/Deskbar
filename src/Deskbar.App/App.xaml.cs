@@ -1026,15 +1026,9 @@ public partial class App : Application
         // the environment of a normal desktop start, not one leaked into Deskbar by whatever started IT.
         LaunchEnvironment.Clean();
 
-        // `Deskbar.exe ctl <command>` is a CLIENT of the running copy, not an app start, so it is
-        // answered before everything below: before the single-instance guard (this process is a second
-        // instance by definition and would be told so), before tracing announces a session, and before
-        // any tray icon, hook or window could exist. It asks, prints, and exits with the reply's code.
-        if (ControlCommandLine.Wants(e.Args))
-        {
-            Shutdown(ControlCommandLine.Run(e.Args));
-            return;
-        }
+        // `Deskbar.exe ctl <command>` never gets here: it is a CLIENT of the running copy, not an app start, and
+        // Program.Main answers it before this Application is even made (before the single-instance guard this
+        // process would trip, and before WPF loads App.xaml and its theme, which a hook on every prompt paid for).
 
         // SINGLE INSTANCE, and it must be the very first thing that happens.
         //
@@ -1530,11 +1524,13 @@ public partial class App : Application
 
         // ...and the Claude Code skill that tells sessions about all of the above (ClaudeSkill), kept in step with the
         // setting now and whenever the state changes, so Manage's checkbox and `claude-skill on|off` take effect at once.
-        ClaudeSkill.Sync(manager.State.ClaudeSkill);
+        // The task setting rides along (`claude-tasks on|off`, Manage's box under it): it adds or removes the three
+        // task hooks, and only counts while the skill is on (ClaudeHooks).
+        ClaudeSkill.Sync(manager.State.ClaudeSkill, manager.State.ClaudeTasks);
         manager.StateChanged
-            .Select(_ => manager.State.ClaudeSkill)
+            .Select(_ => (manager.State.ClaudeSkill, manager.State.ClaudeTasks))
             .DistinctUntilChanged()
-            .Subscribe(ClaudeSkill.Sync);
+            .Subscribe(settings => ClaudeSkill.Sync(settings.ClaudeSkill, settings.ClaudeTasks));
 
         // Windows' "Show flashing on taskbar apps", held off while this copy runs when Manage's box says so, and by
         // default whenever the taskbar auto-hides (AppState.QuietTaskbarChoice, TaskbarFlashing.Wanted;

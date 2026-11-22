@@ -412,6 +412,53 @@ public class ManageSettingsTabTests
     public void The_startup_note_says_the_right_thing(StartupAvailability availability, bool packaged, bool storeCopyInstalled, string expected) =>
         Assert.Equal(expected, StartupNoteText.For(availability, packaged, storeCopyInstalled));
 
+    static CheckBox Box(ManageWindow window, string name) => (CheckBox)window.FindName(name)!;
+
+    // "Claude Code sessions keep their tasks in the task list" (AppState.ClaudeTasks) sits under "Teach Claude Code about
+    // Deskbar" and only works with it, so it is usable only while that box is ticked, and shows unticked while it is not
+    // (the effective value). Unticking the teaching keeps the stored choice: ticking it again brings the box back ticked.
+    [Fact]
+    public void The_claude_tasks_box_follows_the_teach_box() => StaThread.Run(() =>
+    {
+        var manager = Built(AppState.Empty);
+        var window = new ManageWindow(manager, compatibilityMode: false);
+        Assert.True(Box(window, "ClaudeTasks").IsChecked);
+        Assert.True(Box(window, "ClaudeTasks").IsEnabled);
+
+        Box(window, "ClaudeTasks").IsChecked = false;
+        Assert.False(manager.State.ClaudeTasks);
+        Box(window, "ClaudeTasks").IsChecked = true;
+        Assert.True(manager.State.ClaudeTasks);
+
+        Box(window, "ClaudeSkill").IsChecked = false;
+        Assert.False(Box(window, "ClaudeTasks").IsEnabled);
+        Assert.False(Box(window, "ClaudeTasks").IsChecked);
+        Assert.True(manager.State.ClaudeTasks);
+
+        Box(window, "ClaudeSkill").IsChecked = true;
+        Assert.True(Box(window, "ClaudeTasks").IsEnabled);
+        Assert.True(Box(window, "ClaudeTasks").IsChecked);
+
+        window.Close();
+    });
+
+    // Opened with the teaching off: the tasks box is greyed and unticked, and opening writes nothing.
+    [Fact]
+    public void With_teaching_off_the_claude_tasks_box_opens_greyed() => StaThread.Run(() =>
+    {
+        var manager = Built(AppState.Empty with { NoClaudeSkill = true });
+        var pulses = 0;
+        using var _ = manager.StateChanged.Subscribe(_ => pulses++);
+
+        var window = new ManageWindow(manager, compatibilityMode: false);
+
+        Assert.False(Box(window, "ClaudeTasks").IsEnabled);
+        Assert.False(Box(window, "ClaudeTasks").IsChecked);
+        Assert.Equal(0, pulses);
+        Assert.True(manager.State.ClaudeTasks);
+        window.Close();
+    });
+
     // Reports Available and off, and refuses to enable, as the startup task does once the user has turned
     // it off in Settings after the window read it.
     sealed class FailingStartupSwitch : IStartupSwitch

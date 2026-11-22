@@ -31,17 +31,28 @@ static class ControlCommandLine
     // The pipe this login session's Deskbar listens on. One definition shared by both ends.
     public static string PipeName => ControlWire.PipeName(Process.GetCurrentProcess().SessionId);
 
-    // Runs the command and returns the process exit code. Called before anything else in OnStartup:
-    // before the single-instance guard, which this process would otherwise trip (it IS a second
-    // instance, by definition), and before any window, tray icon or hook exists.
+    // The pipe the CLIENT asks: PipeName, unless DESKBAR_CONTROL_PIPE names another. For tests and probes only, which
+    // must see what a client does when Deskbar is down without stopping the Deskbar Petre is running (his copy owns
+    // PipeName in this session). Read by the client alone: the running app always listens on PipeName, so the variable
+    // can point a caller at nothing, never make a second app answer.
+    static string ClientPipeName =>
+        Environment.GetEnvironmentVariable("DESKBAR_CONTROL_PIPE") is { Length: > 0 } other ? other : PipeName;
+
+    // Runs the command and returns the process exit code. Called first thing in Program.Main, before the WPF
+    // Application exists: before the single-instance guard, which this process would otherwise trip (it IS a second
+    // instance, by definition), and before any window, tray icon, hook or resource dictionary is loaded.
     public static int Run(IReadOnlyList<string> args)
     {
         // Off the UI thread and waited for synchronously. Nothing in the client needs the dispatcher,
         // and blocking the UI thread on async work that captured it would deadlock.
-        // `open` is told which folder the caller is in (ControlArguments.WithCallerFolder); nothing else changes.
-        var forwarded = ControlArguments.WithCallerFolder(args.Skip(1).ToList(), Environment.CurrentDirectory);
-        var reply = Task.Run(() => ControlClient.RunAsync(PipeName, forwarded)).GetAwaiter().GetResult();
-        Print(reply);
+        // `open` and its kind are told which folder the caller is in (ControlArguments.WithCallerFolder), and
+        // `claude-hook` gets its stdin as --json (WithHookInput); nothing else changes.
+        var forwarded = ControlArguments.WithHookInput(
+            ControlArguments.WithCallerFolder(args.Skip(1).ToList(), Environment.CurrentDirectory),
+            ControlConsole.ReadStandardInput);
+        var reply = ControlArguments.HookReply(forwarded,
+            Task.Run(() => ControlClient.RunAsync(ClientPipeName, forwarded)).GetAwaiter().GetResult());
+        if (!ControlConsole.Silent(forwarded, reply)) Print(reply);
         return reply.ExitCode;
     }
 

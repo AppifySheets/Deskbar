@@ -56,6 +56,9 @@ public partial class ManageWindow : Window
         DockBar.IsChecked = manager.State.DockBar;
         // Same again: SetClaudeSkill ignores an unchanged value.
         ClaudeSkill.IsChecked = manager.State.ClaudeSkill;
+        // ...and the task box under it, which follows it (ShowClaudeTasks). Called here as well as from the skill box's
+        // handler, because an unticked skill box raises no Unchecked when the window opens.
+        ShowClaudeTasks();
         // ...and SetFocusRing.
         FocusRing.IsChecked = manager.State.FocusRing;
         // ...and SetSeeThrough.
@@ -304,9 +307,32 @@ public partial class ManageWindow : Window
         QuietTaskbarNote.Visibility = note.Length == 0 ? Visibility.Collapsed : Visibility.Visible;
     }
 
-    // The app writes or removes the skill from the state pulse this sends (see where App wires ClaudeSkill.Sync).
-    void OnClaudeSkillToggled(object s, RoutedEventArgs e) =>
+    // The app writes or removes the skill from the state pulse this sends (see where App wires ClaudeSkill.Sync). The
+    // task box under it follows, since it only works while this one is ticked.
+    void OnClaudeSkillToggled(object s, RoutedEventArgs e)
+    {
         manager.SetClaudeSkill(ClaudeSkill.IsChecked == true).TapError(Complain);
+        ShowClaudeTasks();
+    }
+
+    // "Claude Code sessions keep their tasks in the task list" (AppState.ClaudeTasks) shows what is IN EFFECT: usable
+    // and showing the stored choice while Deskbar teaches Claude Code, greyed and unticked while it does not, because
+    // then the task hooks are out of settings.json whatever the choice (AppState.ClaudeTasksInEffect). Greyed first, so
+    // the untick that follows is not taken as Petre's choice (OnClaudeTasksToggled ignores a greyed box) and turning the
+    // teaching back on brings the box back as it was.
+    void ShowClaudeTasks()
+    {
+        ClaudeTasks.IsEnabled = manager.State.ClaudeSkill;
+        ClaudeTasks.IsChecked = manager.State.ClaudeTasksInEffect;
+    }
+
+    // The app adds or removes the three task hooks from the state pulse this sends (ClaudeSkill.Sync, wired in App).
+    // SetClaudeTasks ignores an unchanged value, so ShowClaudeTasks ticking the box writes nothing.
+    void OnClaudeTasksToggled(object s, RoutedEventArgs e)
+    {
+        if (!ClaudeTasks.IsEnabled) return;
+        manager.SetClaudeTasks(ClaudeTasks.IsChecked == true).TapError(Complain);
+    }
 
     // The bar draws or clears the outlines on the next rebuild (FloatingBar.ShowFocusRings).
     void OnFocusRingToggled(object s, RoutedEventArgs e) =>

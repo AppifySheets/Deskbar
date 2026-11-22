@@ -45,6 +45,9 @@
          name (Deskbar.App), which is why this file does not match the output. The pack:// URIs and
          StartupRegistration.IsTheApp both key on this name, so it stays Deskbar. -->
     <AssemblyName>Deskbar</AssemblyName>
+    <!-- Program.Main, not the Main WPF generates from App.xaml: a `ctl` command (a Claude Code hook on every prompt)
+         is answered there before WPF, App.xaml or its theme load. Program.cs says why. -->
+    <StartupObject>Deskbar.App.Program</StartupObject>
     <ApplicationIcon>Assets\deskbar.ico</ApplicationIcon>
     <!-- Declares Per-Monitor V2 DPI awareness; app.manifest says why a docked bar needs it. -->
     <ApplicationManifest>app.manifest</ApplicationManifest>

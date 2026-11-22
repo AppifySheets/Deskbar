@@ -41,6 +41,41 @@ public class ControlPipeTests
         Assert.Equal(ControlReply.NotRunning, reply.ExitCode);
     }
 
+    // ...and says it at once, not after the connect timeout. Measured before this: .NET's ConnectAsync on a name nobody
+    // serves retries until the timeout runs out (2 s for every `ctl`), which a Claude Code hook would put in front of
+    // every prompt while Deskbar is down (docs/superpowers/notes/2026-11-22-claude-hook-probes.md).
+    [Fact]
+    public async Task With_no_server_the_client_says_so_at_once()
+    {
+        var clock = System.Diagnostics.Stopwatch.StartNew();
+
+        var reply = await ControlClient.SendAsync(UniquePipe(), ["windows"], TimeSpan.FromSeconds(10));
+
+        Assert.Equal(ControlReply.NotRunning, reply.ExitCode);
+        Assert.True(clock.Elapsed < TimeSpan.FromSeconds(1), $"took {clock.ElapsedMilliseconds} ms");
+    }
+
+    // The server has ONE pipe instance and makes a new one after each reply, so for a moment between two replies no
+    // pipe of that name exists. A client that asked "is there a pipe?" in that moment must not conclude Deskbar is down:
+    // two hooks firing together (Stop and Notification, or two sessions) would otherwise lose one ask.
+    //
+    // Eight clients, a few sessions' worth. Not forty: in ONE process, .NET's ConnectAsync blocks a pool thread per
+    // waiting client, forty of them starved the pool the server needs to make its next pipe, and the gap grew to
+    // hundreds of milliseconds, which real clients (each its own process) cannot do to the app. Eight still fails every
+    // time when the client trusts the first "not found" (PipeGap of zero, tried while writing this).
+    [Fact]
+    public async Task Clients_arriving_together_are_all_answered()
+    {
+        var pipe = UniquePipe();
+        using var server = new ControlPipeServer(pipe, _ => Task.FromResult(new ControlReply(ControlReply.Ok, "fine")));
+        // The first answer proves the server is up before the crowd arrives.
+        Assert.Equal("fine", (await ControlClient.SendAsync(pipe, ["windows"], Patience)).Output);
+
+        var replies = await Task.WhenAll(Enumerable.Range(0, 8).Select(_ => Task.Run(() => ControlClient.SendAsync(pipe, ["windows"], Patience))));
+
+        Assert.All(replies, reply => Assert.Equal(ControlReply.Ok, reply.ExitCode));
+    }
+
     // One server answers one request after another: the pipe is re-created after every reply.
     [Fact]
     public async Task The_server_answers_more_than_one_request()

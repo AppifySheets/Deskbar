@@ -283,6 +283,19 @@ public sealed record AppState(
     // The reading the app wants. Not stored.
     [JsonIgnore] public bool ClaudeSkill => !NoClaudeSkill;
 
+    // Whether Claude Code sessions keep their tasks in the task list: Deskbar's hooks on SessionStart, UserPromptSubmit
+    // and SessionEnd (ClaudeHooks in the app; design docs/superpowers/specs/2026-11-22-tasks-board-design.md, "Who gets
+    // it"). Petre chose a setting of its own, on by default, over reusing ClaudeSkill and over off by default. Stored as
+    // its NEGATION for the reason NoClaudeSkill is: every existing state.json lacks the key and reads false, which is on.
+    public bool NoClaudeTasks { get; init; }
+
+    // The stored choice, what Manage's box and `claude-tasks on|off` set. Not stored.
+    [JsonIgnore] public bool ClaudeTasks => !NoClaudeTasks;
+
+    // What actually happens: the task hooks write into the same files as the skill, so turning "Teach Claude Code about
+    // Deskbar" off turns them off too. The choice above is kept, so turning the teaching back on brings them back.
+    [JsonIgnore] public bool ClaudeTasksInEffect => ClaudeSkill && ClaudeTasks;
+
     // Whether the focused window, and the window in front on each other screen, get an outline on the screen itself
     // (FocusRings in Core, WindowRings in the app). Petre: "can you give each active window a ring, same in color as
     // in the bar?", then "go with proposed", where the proposal was on by default with a box in Manage. Stored as its

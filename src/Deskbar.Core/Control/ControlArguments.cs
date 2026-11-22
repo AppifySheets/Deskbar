@@ -46,6 +46,10 @@ public sealed record ProgramLaunch(string Program, IReadOnlyList<string> Argumen
 // and so which workspace, the link belongs with (see EditorFolder). The client fills `--from` in itself.
 public sealed record OpenRequest(string Url, string? From);
 
+// `claude-hook`, parsed: CLAUDE_CODE_ENTRYPOINT and CLAUDE_CODE_SESSION_ATTENDED as the hook script passed them (empty
+// or a literal %NAME% when unset; ClaudeHookEvent decides what they mean), the session's folder, and the hook's JSON.
+public sealed record ClaudeHookRequest(string? Entrypoint, string? Attended, string? From, string? Json);
+
 // The command line after `ctl`, with the parsing kept apart from the doing so both halves can be tested
 // without a pipe or a running app.
 public static class ControlArguments
@@ -125,16 +129,56 @@ public static class ControlArguments
     public static bool IsWeb(string link) =>
         Uri.TryCreate(link, UriKind.Absolute, out var uri) && (uri.Scheme == Uri.UriSchemeHttps || uri.Scheme == Uri.UriSchemeHttp);
 
-    // THE ONE PLACE THE CLIENT ADDS TO A COMMAND (see ControlWire for why it otherwise forwards verbatim). `open` and
-    // `attention` need the caller's folder, and only the asking process knows it: the running app has its own current
-    // folder, and the pipe carries the arguments alone. So either one that does not name a folder gets the client's,
-    // which is the folder of the shell that ran deskbar.cmd. Every other command goes through untouched.
-    static readonly string[] AboutTheCaller = ["open", "attention", "task"];
+    // THE FIRST OF THE TWO THINGS THE CLIENT ADDS TO A COMMAND (see ControlWire for why it otherwise forwards verbatim;
+    // the second, claude-hook's stdin, is below). `open`, `attention`, `task` and `claude-hook` need the caller's
+    // folder, and only the asking process knows it: the running app has its own current folder, and the pipe carries the
+    // arguments alone. So any of them that does not name a folder gets the client's, which is the folder of the shell
+    // that ran deskbar.cmd. Every other command goes through untouched. For `claude-hook`, claude-hook.cmd passes
+    // CLAUDE_PROJECT_DIR as --from when Claude Code set it; otherwise the folder the hook was started in is the session's.
+    static readonly string[] AboutTheCaller = ["open", "attention", "task", ClaudeHookVerb];
 
     public static IReadOnlyList<string> WithCallerFolder(IReadOnlyList<string> args, string callerFolder) =>
         args.Count > 0 && AboutTheCaller.Contains(args[0], StringComparer.OrdinalIgnoreCase) && !args.Contains("--from")
             ? [.. args, "--from", callerFolder]
             : args;
+
+    // --- claude-hook: the second and last thing the client adds -----------------------------------
+    //
+    // Claude Code hands a hook its JSON on STDIN, and the pipe carries arguments only, so the client reads its stdin and
+    // sends it on as `--json <text>`. For this verb alone: any other command started from a terminal would sit waiting
+    // on the keyboard. `readInput` is only called when it is needed, so a test can prove the other verbs never read.
+    // An explicit --json (a person trying the verb by hand) is left as it is.
+    public const string ClaudeHookVerb = "claude-hook";
+
+    public static bool IsClaudeHook(IReadOnlyList<string> args) =>
+        args.Count > 0 && args[0].Equals(ClaudeHookVerb, StringComparison.OrdinalIgnoreCase);
+
+    public static IReadOnlyList<string> WithHookInput(IReadOnlyList<string> args, Func<string> readInput) =>
+        IsClaudeHook(args) && !args.Contains("--json") ? [.. args, "--json", readInput()] : args;
+
+    // What a hook's reply becomes before it is printed. A Deskbar that is not running is not the session's business: the
+    // hook prints nothing and exits 0, so a Stop hook never tells Claude to keep going (exit 2 would) and a prompt goes
+    // on with no context and no error. Any other reply is kept: a refusal still goes to stderr, which the script sends
+    // nowhere, and still exits non-zero, which the script turns into 0.
+    public static ControlReply HookReply(IReadOnlyList<string> args, ControlReply reply) =>
+        IsClaudeHook(args) && reply.ExitCode == ControlReply.NotRunning ? new ControlReply(ControlReply.Ok, "") : reply;
+
+    // `claude-hook [--entry <value>] [--attended <value>] [--from <folder>] --json <text>`, in any order, as the server
+    // receives it. Values may be EMPTY: cmd passes an unset variable as "" inside a batch file, and that is an answer
+    // (ClaudeHookEvent reads it as "not set"), not a missing value. --json is required.
+    public static Result<ClaudeHookRequest> ParseClaudeHook(IReadOnlyList<string> args) =>
+        HookOptions(new ClaudeHookRequest(null, null, null, null), args.ToArray())
+            .Ensure(r => r.Json is not null, "claude-hook needs the hook's JSON on stdin (or as --json <text>)");
+
+    static Result<ClaudeHookRequest> HookOptions(ClaudeHookRequest so, string[] rest) => rest switch
+    {
+        [] => so,
+        ["--entry", var value, .. var tail] => HookOptions(so with { Entrypoint = value }, tail),
+        ["--attended", var value, .. var tail] => HookOptions(so with { Attended = value }, tail),
+        ["--from", var value, .. var tail] => HookOptions(so with { From = value }, tail),
+        ["--json", var value, .. var tail] => HookOptions(so with { Json = value }, tail),
+        [var unknown, ..] => Result.Failure<ClaudeHookRequest>($"'{unknown}' is not an option of claude-hook, or it is missing its value."),
+    };
 
     // `create <name> [--group <g> | --position <n> | --before <ws> | --after <ws>]`
     public static Result<CreateRequest> ParseCreate(IReadOnlyList<string> args) =>

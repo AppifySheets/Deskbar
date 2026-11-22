@@ -1,3 +1,4 @@
+using System.Text;
 using Deskbar.Core.Control;
 
 namespace Deskbar.Windows.Control;
@@ -15,6 +16,12 @@ namespace Deskbar.Windows.Control;
 // caller's folder (ControlArguments.WithCallerFolder), because in the Store build the deskbar.cmd shim
 // points at this exe, so a Claude Code session's `open` and its hook's `attention` arrive here.
 // `callerFolder` is a parameter so a test can name one; left null it is this process's current folder.
+//
+// `claude-hook` (Claude Code's hooks, plan Task 7) is the one command that reads stdin: the hook's JSON, sent on as
+// --json (ControlArguments.WithHookInput). Its reply is shaped by ControlArguments.HookReply (Deskbar not running is
+// exit 0 and silence), and an empty answer prints nothing at all, not an empty line, because what it prints is
+// context the session reads. `stdin` is a parameter so a test can hand the JSON in; left null it is this process's
+// own stdin, read as UTF-8 (ReadStandardInput).
 public static class ControlConsole
 {
     public static int Run(
@@ -23,13 +30,31 @@ public static class ControlConsole
         Func<string, IReadOnlyList<string>, Task<ControlReply>> send,
         TextWriter stdout,
         TextWriter stderr,
-        string? callerFolder = null)
+        string? callerFolder = null,
+        TextReader? stdin = null)
     {
-        var forwarded = ControlArguments.WithCallerFolder(args, callerFolder ?? Environment.CurrentDirectory);
+        var forwarded = ControlArguments.WithHookInput(
+            ControlArguments.WithCallerFolder(args, callerFolder ?? Environment.CurrentDirectory),
+            () => stdin?.ReadToEnd() ?? ReadStandardInput());
         // Waited for synchronously on a pool thread: a console Main has no sync context to deadlock,
         // but the Task.Run keeps that true if a caller ever has one.
-        var reply = Task.Run(() => send(pipeName, forwarded)).GetAwaiter().GetResult();
-        (reply.ExitCode == ControlReply.Ok ? stdout : stderr).WriteLine(reply.Output);
+        var reply = ControlArguments.HookReply(forwarded, Task.Run(() => send(pipeName, forwarded)).GetAwaiter().GetResult());
+        if (!Silent(forwarded, reply))
+            (reply.ExitCode == ControlReply.Ok ? stdout : stderr).WriteLine(reply.Output);
         return reply.ExitCode;
+    }
+
+    // A hook's empty answer (Notification, Stop, SessionEnd, or Deskbar not running): nothing at all is printed, so the
+    // session's context gains no blank line. Every other command prints its reply even when it is empty, as before.
+    public static bool Silent(IReadOnlyList<string> forwarded, ControlReply reply) =>
+        ControlArguments.IsClaudeHook(forwarded) && reply.Output.Length == 0;
+
+    // This process's stdin as UTF-8, the way Claude Code writes a hook's JSON. Not Console.In: that decodes with the
+    // console's input code page (the OEM one, 437 or 850), which would garble any non-ASCII prompt or folder name.
+    // Used by the GUI exe's `ctl` too (ControlCommandLine), whose stdin is the pipe the hook script inherited.
+    public static string ReadStandardInput()
+    {
+        using var reader = new StreamReader(Console.OpenStandardInput(), new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
+        return reader.ReadToEnd();
     }
 }

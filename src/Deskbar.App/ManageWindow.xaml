@@ -72,6 +72,15 @@
                                   Checked="OnClaudeSkillToggled" Unchecked="OnClaudeSkillToggled"/>
                         <TextBlock TextWrapping="Wrap" Margin="20,2,0,0" Opacity="0.75"
                                    Text="Writes a skill to ~/.claude/skills/deskbar and two hooks to ~/.claude/settings.json, so Claude Code sessions open windows in their own workspace and make it blink when they need you."/>
+                        <!-- Claude Code sessions in the task list (AppState.ClaudeTasks; design
+                             docs/superpowers/specs/2026-11-22-tasks-board-design.md, "Who gets it"). A setting of its own,
+                             on by default, indented under the box above because it writes into the same files and only
+                             works with it: the code behind greys it out, unticked, while that box is unticked. -->
+                        <CheckBox x:Name="ClaudeTasks" Margin="20,6,0,0" Checked="OnClaudeTasksToggled" Unchecked="OnClaudeTasksToggled">
+                            <TextBlock TextWrapping="Wrap" Text="Claude Code sessions keep their tasks in the task list"/>
+                        </CheckBox>
+                        <TextBlock TextWrapping="Wrap" Margin="40,2,0,0" Opacity="0.75"
+                                   Text="Adds three more hooks, so each session joins or starts a task, keeps its status current and asks you through it."/>
 
                         <!-- SECTION 2: THE BAR. -->
                         <TextBlock Text="The bar" FontSize="15" FontWeight="SemiBold" Margin="0,20,0,6"/>

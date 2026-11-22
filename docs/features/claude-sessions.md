@@ -28,11 +28,13 @@ A session can also add a note to its own workspace with `task add`, and it shows
 The setting is **Teach Claude Code about Deskbar**, in the Deskbar on this PC section of Manage's Settings tab. With Claude Code installed (there is a `.claude` folder in your profile) and the box ticked, Deskbar keeps two things in place:
 
 - A skill at `%USERPROFILE%\.claude\skills\deskbar\SKILL.md`, rewritten when Deskbar updates.
-- Two hooks, Notification and Stop, in `%USERPROFILE%\.claude\settings.json`, beside any hooks you already have. They run `%APPDATA%\Deskbar\claude-hook.cmd`, which runs `deskbar.cmd attention` and always exits 0.
+- Two hooks, Notification and Stop, in `%USERPROFILE%\.claude\settings.json`, beside any hooks you already have. They run `%APPDATA%\Deskbar\claude-hook.cmd`, which hands the hook's details to `deskbar.cmd claude-hook` and always exits 0. When Deskbar is not running the hook prints nothing and the session carries on.
+
+Under it, **Claude Code sessions keep their tasks in the task list** adds three more hooks running the same script: SessionStart, UserPromptSubmit and SessionEnd. It is on by default, can be used only while the box above is ticked, and `deskbar.cmd claude-tasks on|off` sets it from a script. Unticking it takes out only those three.
 
 The first time Deskbar changes `settings.json` it keeps the original as `settings.json.deskbar-backup`. It leaves a `settings.json` that has comments in it alone.
 
-Untick the box, or run `deskbar.cmd claude-skill off`, and the skill and Deskbar's own hooks are removed. Your other hooks stay as they are.
+Untick **Teach Claude Code about Deskbar**, or run `deskbar.cmd claude-skill off`, and the skill and all of Deskbar's own hooks are removed. Your other hooks stay as they are.
 
 ## From a script
 
