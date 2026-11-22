@@ -1568,6 +1568,23 @@ public class TasksBoardTests
         Assert.Equal(Quadrant.I, t.Tasks.Board.Tasks.Single(x => x.Title == "both").Quadrant);
     });
 
+    // Ruling 42 (Petre: "don't say claude; mark with claude at the beginning with the" orange edge): a Claude line has
+    // no CL badge in the window either; its mark is the orange edge at its start, and its title begins where the badge
+    // was.
+    [Fact]
+    public void A_claude_line_is_marked_by_its_edge_not_a_badge() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        var id = t.Tasks.Create("Tasks redesign", t.Gepha, Session("s1")).Value.Id;
+        t.Controller.Open(Rect.Empty);
+
+        var line = LineOf(t.Window, id);
+        Assert.DoesNotContain(Inside(line).OfType<TextBlock>(), b => b.Text is "CL" or "CLAUDE");
+        var edge = Inside(line).OfType<Border>().First(b => b.BorderThickness.Left == 3);
+        Assert.Equal(System.Windows.Media.Color.FromRgb(FloatingBar.AskingOrange.R, FloatingBar.AskingOrange.G, FloatingBar.AskingOrange.B),
+            ((System.Windows.Media.SolidColorBrush)edge.BorderBrush).Color);
+    });
+
     // Ruling 38 (Petre: "let tasks be multiline and editable"). A long title wraps to show its whole text instead of
     // ending in an ellipsis, in the List and in the Matrix: its line grows taller, the title is never trimmed.
     [Theory]

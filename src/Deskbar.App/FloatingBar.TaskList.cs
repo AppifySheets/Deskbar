@@ -39,8 +39,9 @@ namespace Deskbar.App;
 //   the lines       the first lines of the pile, three on a floating bar and as many as fit on a docked one (Waiting
 //                   on you, then Covey's quadrants I to IV, each in Petre's own order, dragged up and down; TaskBoard.Pile,
 //                   THE FLAGS below, FloatingBar.TaskDrag.cs). A
-//                   Claude line (a task with a session) has an orange edge and tint, a CLAUDE tag, the VS Code icon
-//                   of its session's window when one is found, then the task's title in a tan ink and, after a dot,
+//                   Claude line (a task with a session) has an orange edge and tint (the edge is the mark: Ruling 42,
+//                   "don't say claude", took the CLAUDE tag off), the VS Code icon of its session's window when one is
+//                   found, then the task's title in a tan ink and, after a dot,
 //                   the question while it waits on Petre, else its status line, with "no live session" when every
 //                   session has ended. Petre's notes have a plain tick box that closes them. A Done Claude task has
 //                   a close button. Every line ends with its workspace's chip in that row's own colour, or "none".
@@ -950,11 +951,12 @@ public partial class FloatingBar
         return button;
     }
 
-    // Left of the text: the CLAUDE tag and the session's window icon on Claude's lines, the tick box on a note, and on a
+    // Left of the text: the session's window icon on Claude's lines (no CLAUDE tag since Ruling 42, Petre: "don't say
+    // claude; mark with claude at the beginning with the" orange edge; the edge at the line's start is the mark), the tick box on a note, and on a
     // note just closed, "Undo" in the tick box's place.
     IEnumerable<UIElement> LeftOf(TaskLine line) =>
         line.Claudes
-            ? new UIElement?[] { ClaudeTag(), line.Window.HasValue ? WindowIconOf(line.Window.Value) : null }.OfType<UIElement>()
+            ? new UIElement?[] { line.Window.HasValue ? WindowIconOf(line.Window.Value) : null }.OfType<UIElement>()
             : line.Closing
                 ? [UndoButton(line)]
                 : [TaskButton("Tick off", new Border
@@ -1098,18 +1100,6 @@ public partial class FloatingBar
         Foreground = ink,
         VerticalAlignment = VerticalAlignment.Center,
         Margin = new Thickness(1, 0, 1, 0),
-    };
-
-    // The CLAUDE tag of the mockup: dark capitals on the asking orange.
-    Border ClaudeTag() => new()
-    {
-        Tag = "task-claude-tag",
-        Background = TaskOrange,
-        CornerRadius = new CornerRadius(3),
-        Padding = new Thickness(4, 0, 4, 0),
-        Margin = new Thickness(0, 0, 5, 0),
-        VerticalAlignment = VerticalAlignment.Center,
-        Child = new TextBlock { Text = "CLAUDE", FontSize = Text(6.5), FontWeight = FontWeights.Bold, Foreground = TaskBadgeInk },
     };
 
     // The session's VS Code window's own icon, from the same cache the rows draw from.
