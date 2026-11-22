@@ -63,7 +63,12 @@ public static class HiddenDesktop
     [DllImport("kernel32.dll")] static extern bool GetExitCodeProcess(IntPtr process, out int code);
     [DllImport("kernel32.dll")] static extern bool CloseHandle(IntPtr handle);
 
-    const uint GENERIC_ALL = 0x10000000, CREATE_NEW_CONSOLE = 0x10, INFINITE = 0xFFFFFFFF;
+    // CREATE_NO_WINDOW, never CREATE_NEW_CONSOLE: a new console is handed to the default terminal, and on
+    // Windows 11 that is Windows Terminal, which opened its window on the VISIBLE desktop for every run
+    // (measured 2026-11-22: a CASCADIA_HOSTING_WINDOW_CLASS window appeared on Petre's screen, "i'm still
+    // seeing cmd windows come up"). With no window, cmd gets a console nobody hosts, and the output still
+    // reaches the log through cmd's own redirection.
+    const uint GENERIC_ALL = 0x10000000, CREATE_NO_WINDOW = 0x08000000, INFINITE = 0xFFFFFFFF;
 
     // Starts commandLine on the desktop called `desktop` (created, or opened if it exists), waits for it, returns
     // its exit code. The desktop goes away by itself once this handle is closed and no thread uses it.
@@ -75,7 +80,7 @@ public static class HiddenDesktop
         {
             var startup = new STARTUPINFO { cb = Marshal.SizeOf<STARTUPINFO>(), lpDesktop = desktop };
             PROCESS_INFORMATION info;
-            if (!CreateProcessW(null, commandLine, IntPtr.Zero, IntPtr.Zero, false, CREATE_NEW_CONSOLE, IntPtr.Zero, directory, ref startup, out info))
+            if (!CreateProcessW(null, commandLine, IntPtr.Zero, IntPtr.Zero, false, CREATE_NO_WINDOW, IntPtr.Zero, directory, ref startup, out info))
                 throw new System.ComponentModel.Win32Exception();
             WaitForSingleObject(info.hProcess, INFINITE);
             int code;
@@ -96,7 +101,7 @@ public static class HiddenDesktop
 $root = Split-Path -Parent $PSScriptRoot
 $log = Join-Path ([IO.Path]::GetTempPath()) "deskbar-test-hidden-$PID.log"
 
-# cmd does the redirection, because the process on the hidden desktop has a console nobody can see.
+# cmd does the redirection, because the process on the hidden desktop has no console window at all.
 $cmd = Join-Path $env:SystemRoot 'System32\cmd.exe'
 $line = "`"$cmd`" /d /s /c `"dotnet test $Arguments > `"$log`" 2>&1`""
 
