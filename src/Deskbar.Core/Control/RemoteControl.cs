@@ -64,6 +64,8 @@ namespace Deskbar.Core.Control;
 // `setTasksWindow` shows or hides the tasks window (`tasks-window show|hide`, the twin of the bar's "+N more";
 // TasksBoard in the app). The window is the app's, so the app hands in how; left null, `tasks-window` refuses.
 //
+// `longPath` expands an 8.3 short path (LongPath.Of on the Windows side), so a caller's folder is matched in its long
+// form (FolderPath). Left null, folders are taken as given.
 // `goals` is the goal service for `goal` and `task goal` (RemoteControl.Goals.cs; the goals planner,
 // docs/superpowers/specs/2026-11-22-goals-planner-design.md). Left null, both refuse with "Goals are not available".
 public sealed partial class RemoteControl(WorkspaceManager manager, Func<bool, Result>? setBarVisible = null, Func<ProgramLaunch, Result<int?>>? launch = null,
@@ -76,8 +78,16 @@ public sealed partial class RemoteControl(WorkspaceManager manager, Func<bool, R
     TaskService? tasks = null,
     Func<WindowHandle, bool, Result>? setTileLocked = null,
     Func<bool, Result>? setTasksWindow = null,
+    Func<string, string>? longPath = null,
     GoalService? goals = null)
 {
+    // `longPath` turns an 8.3 short path into its long form (GetLongPathNameW, LongPath on the Windows side), for
+    // FolderPath. Left null, a path is taken as it is, which is all a test that names long paths needs.
+    string LongPath(string path) => longPath?.Invoke(path) ?? path;
+
+    // A caller's folder in the one form it is matched and stored in (FolderPath), or null for none.
+    string? Folder(string? raw) => FolderPath.Normalise(raw, LongPath) is { Length: > 0 } folder ? folder : null;
+
     static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web) { WriteIndented = true };
 
     public ControlReply Execute(IReadOnlyList<string> args) =>

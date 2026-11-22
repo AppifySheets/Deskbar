@@ -82,8 +82,15 @@ public sealed class FakeDesktops : IVirtualDesktopService
         WindowPlacements[w] = id;
         return Result.Success();
     }
-    public Result<Guid> DesktopOf(WindowHandle w) =>
-        WindowPlacements.TryGetValue(w, out var id) ? id : Result.Failure<Guid>("not placed");
+    // Runs inside every DesktopOf call, before it answers: the real call is cross-process COM, which pumps the STA
+    // thread's message queue, so a WinEvent can be handled in the middle of it. Tests use this to deliver one there.
+    public Action<WindowHandle>? OnDesktopOf { get; set; }
+
+    public Result<Guid> DesktopOf(WindowHandle w)
+    {
+        OnDesktopOf?.Invoke(w);
+        return WindowPlacements.TryGetValue(w, out var id) ? id : Result.Failure<Guid>("not placed");
+    }
     public IObservable<Guid> CurrentChanged => CurrentChangedSubject.AsObservable();
     public IObservable<Guid> Destroyed => DestroyedSubject.AsObservable();
 

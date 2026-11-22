@@ -71,6 +71,18 @@ public static class ControlUsage
             new("task", "order <id> top|end|<n>",
                 "move a task within its quadrant, as a drag does: to the top, the end or place n counting from 1.\n"
                 + "      A task waiting on you stays on top until it is answered"),
+            // A Claude Code session's own forms (RemoteControl.ClaudeHook.cs). --session is the session's id, which the
+            // hooks' briefing hands it; every form but join, new and later acts on that session's own task.
+            new("task", "join <id> --session <session>",
+                "a Claude session takes up a task (one of your notes becomes its work, in progress)"),
+            new("task", "new <title> --session <session>",
+                "a Claude session creates its task, on the workspace of the VS Code window showing its folder, or on none"),
+            new("task", "status-line <text> --session <session>", "the short line a session keeps current on its task"),
+            new("task", "ask <question> --session <session>",
+                "the session's task waits on you with the question, and its workspace blinks as attention does"),
+            new("task", "done --session <session>", "a session marks its own task done; only you close it"),
+            new("task", "comment <markdown> --session <session>", "a comment on the session's own task, signed by the session"),
+            new("task", "later <title> --session <session>", "a backlog note on the caller's workspace, a follow-up for later"),
             new("tasks-window", "show|hide|list|matrix",
                 "open the tasks window, as the bar's \"+N more\" does (every task grouped as on the bar, the closed\n"
                 + "      ones under their filter, each with its comments), or close it; list or matrix switches its view\n"

@@ -263,6 +263,29 @@ public sealed record TaskBoard(IReadOnlyList<TaskItem> Tasks)
             .TryFirst();
 
     /// <summary>
+    /// The open task a session last worked on, live or ended: how a resumed session (Claude Code keeps its id) finds
+    /// its task again after SessionEnd marked it ended (review focus 4 of plan Task 8). The latest joined wins.
+    /// </summary>
+    public Maybe<TaskItem> LastTaskOf(string sessionId) =>
+        Tasks.Where(t => t.IsOpen)
+            .SelectMany(t => t.Sessions.Where(s => s.Id == sessionId).Select(s => (Task: t, s.Joined)))
+            .OrderByDescending(x => x.Joined)
+            .Select(x => x.Task)
+            .TryFirst();
+
+    /// <summary>
+    /// The closed task a session is still live on: Petre closed the task under it (closing ends no session). Its next
+    /// prompt is told so, and that new work needs a new task, until it joins or creates one; that ends its live entries
+    /// on open tasks only, so this keeps answering, and TaskOf answers first once the session has an open task.
+    /// </summary>
+    public Maybe<TaskItem> ClosedTaskOf(string sessionId) =>
+        Tasks.Where(t => t.Status == TaskStatus.Closed)
+            .SelectMany(t => t.Sessions.Where(s => s.IsLive && s.Id == sessionId).Select(s => (Task: t, s.Joined)))
+            .OrderByDescending(x => x.Joined)
+            .Select(x => x.Task)
+            .TryFirst();
+
+    /// <summary>
     /// What a session starting on <paramref name="workspace"/> is offered to join, in the pile's order: the open
     /// tasks on that workspace, notes included, plus the open Claude tasks on no workspace. Petre's notes on no
     /// workspace (errands) are never offered (spec, "What a session is offered").

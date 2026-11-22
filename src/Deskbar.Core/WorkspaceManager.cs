@@ -703,12 +703,35 @@ public sealed class WorkspaceManager(
     // modified", or read a list that changed under it.
     public IReadOnlyCollection<Guid> AskingWorkspaces => [.. askingWorkspaces];
 
-    // Removes a workspace's ask without arriving there. True when there was one (pulses StateChanged).
+    // Removes a workspace's ask without arriving there: the user answered the session that asked (UserPromptSubmit,
+    // RemoteControl.ClaudeHook.cs). True when there was anything to clear (pulses StateChanged). Ported from the
+    // abandoned feat/task-window branch (commits 78ff230, a12a2f7, 7ba2ab6), as plan Task 8 says.
+    //
+    // The glow goes with it: the ask has been answered, and a window still glowing for it would keep asking. Only the
+    // asking windows on THIS workspace's desktop lose it, asked of the shell now as OnDesktopInFront does, because the
+    // glow set holds bare windows with no note of which workspace each asked for, and a window asking on another
+    // workspace is another ask that is still open. A window the shell cannot place (closed meanwhile, or pinned to every
+    // desktop) is left alone: it is on no one workspace, and looking at it clears it as before (MarkActive).
+    //
+    // SNAPSHOT FIRST, then ask the shell (the trap CLAUDE.md names: COM calls pump the message queue on STA threads).
+    // DesktopOf is a cross-process COM call, and the WinEvent callbacks (WindowMonitor) arrive through this thread's
+    // message queue, so askingWindows can change INSIDE that call: a foreground event runs MarkActive, which removes a
+    // window, and a new ask (RequestAttention) adds one. An add to the live set mid enumeration throws "Collection was
+    // modified" (measured in the test), and the app leaves dispatcher exceptions unhandled on purpose. Only the windows
+    // still in the set count as cleared, since MarkActive may have taken some during those calls.
     public bool ClearAttention(Guid workspaceId)
     {
         var removed = askingWorkspaces.Remove(workspaceId);
-        if (removed) stateChanged.OnNext(Unit.Default);
-        return removed;
+        var desktop = State.Workspaces.FirstOrDefault(w => w.Id == workspaceId)?.DesktopId;
+        var asking = askingWindows.ToList();
+        var glowing = asking
+            .Where(w => desktop is { } on && desktops.DesktopOf(w).Match(d => d == on, _ => false))
+            .ToList();
+        var unlit = glowing.Where(askingWindows.Contains).ToList();
+        unlit.ForEach(w => askingWindows.Remove(w));
+        var cleared = removed || unlit.Count > 0;
+        if (cleared) stateChanged.OnNext(Unit.Default);
+        return cleared;
     }
 
     // The overview as built, with the two facts above stamped on: the asking workspaces' groups and the asking

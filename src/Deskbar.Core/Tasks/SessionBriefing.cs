@@ -1,0 +1,103 @@
+using CSharpFunctionalExtensions;
+
+namespace Deskbar.Core.Tasks;
+
+// THE TEXT A CLAUDE CODE SESSION READS FROM DESKBAR'S HOOKS. Design: docs/superpowers/specs/2026-11-22-tasks-board-design.md
+// ("Claude sessions", "What a session is offered, and joining a note", "After Done or Closed"); plan Task 8.
+//
+// Claude Code adds what a SessionStart or a UserPromptSubmit hook prints to the session's context, so this is written
+// FOR CLAUDE: plain sentences, the session's own id, and every command spelt out exactly as it is to be run, because a
+// session copies commands rather than composing them. Two rules keep it cheap, since every session pays for it:
+//
+//   * Start (SessionStart) is the long one, and it is bounded: a title is cut at 80 characters and the offered list at
+//     20 tasks, with a pointer at `task list` for the rest, which keeps it far under Claude Code's 10,000 characters
+//     for a hook's context (the test builds fifty tasks with 300-character titles).
+//   * Prompt (UserPromptSubmit, on every prompt) is ONE line.
+//
+// Ids are shown by their first 8 characters, which `task join` and every other form accept as a prefix (TaskBoard.Find
+// takes four or more), to keep the list short. No em dashes, and no names: the person is "the user".
+//
+// The skill (ClaudeSkill.Text, Task 9) carries the longer explanation of the rules (never close, leave the user's notes
+// alone unless asked); this text names them in a sentence so a session that never loads the skill still keeps them.
+public static class SessionBriefing
+{
+    const int TitleLength = 80;
+    const int ListLength = 20;
+    const string Shim = "deskbar.cmd";
+
+    /// <summary>
+    /// What a session reads when it starts, resumes, clears or compacts: its own task when it has one, otherwise the
+    /// tasks it is offered and how to join one or create its own.
+    /// </summary>
+    public static string Start(ClaudeHookEvent e, Maybe<TaskItem> own, IReadOnlyList<TaskItem> offered) =>
+        string.Join("\n", Intro(e.SessionId)
+            .Concat(own.HasValue ? [$"Your task is {Describe(own.Value)}. Keep working on it."] : Choice(e.SessionId, offered))
+            .Append("")
+            .Concat(Commands(e.SessionId))) + "\n";
+
+    /// <summary>
+    /// The one line a session reads with each prompt: its task, or that the user closed it and new work needs a new
+    /// task, or that it has none yet.
+    /// </summary>
+    public static string Prompt(string sessionId, Maybe<TaskItem> own, Maybe<TaskItem> closed) =>
+        own.HasValue
+            ? $"Deskbar: your task is {Describe(own.Value)}. Keep its status line current: {Shim} task status-line \"<what you are doing now>\" --session {sessionId}\n"
+        : closed.HasValue
+            ? $"Deskbar: the user closed your task \"{Cut(closed.Value.Title)}\". Work on this prompt needs a new task: {Shim} task new \"<title>\" --session {sessionId}\n"
+        : $"Deskbar: this session has no task yet. Once you know what you are working on, run {Shim} task join <id> --session {sessionId} with an id from {Shim} task list, or {Shim} task new \"<title>\" --session {sessionId}\n";
+
+    static IEnumerable<string> Intro(string sessionId) =>
+    [
+        $"Deskbar keeps the user's task list, and this Claude Code session is {sessionId}.",
+        $"Run every command below from your working folder, through {Shim} (%APPDATA%\\Deskbar\\deskbar.cmd; in Git Bash \"$APPDATA/Deskbar/deskbar.cmd\").",
+    ];
+
+    static IEnumerable<string> Choice(string sessionId, IReadOnlyList<TaskItem> offered) =>
+        offered.Count == 0
+            ? [
+                "There are no open tasks for you to join. Once you know what this session is working on, create its task:",
+                $"  {Shim} task new \"<title>\" --session {sessionId}",
+              ]
+            : [
+                "This session has no task yet. Once you know what it is working on, join the task it continues, or create one if none fits. Open tasks:",
+                .. offered.Take(ListLength).Select(t => $"  {Describe(t)}"),
+                .. offered.Count > ListLength ? [$"  and {offered.Count - ListLength} more: {Shim} task list"] : Array.Empty<string>(),
+                $"Join one: {Shim} task join <id> --session {sessionId}",
+                $"Or create one: {Shim} task new \"<title>\" --session {sessionId}",
+              ];
+
+    static IEnumerable<string> Commands(string sessionId) =>
+    [
+        "While you work on it:",
+        $"  {Shim} task status-line \"<what you are doing now>\" --session {sessionId}   (keep it current, one short line)",
+        $"  {Shim} task ask \"<question>\" --session {sessionId}   (when you need a decision from the user; the task waits on them)",
+        $"  {Shim} task comment \"<markdown>\" --session {sessionId}   (detail worth keeping: findings, links, what is left)",
+        $"  {Shim} task done --session {sessionId}   (on a clear finish; only the user closes a task)",
+        $"  {Shim} task later \"<title>\" --session {sessionId}   (a follow-up note on your workspace)",
+        "Never close or delete a task, and leave the user's own notes alone unless they ask.",
+    ];
+
+    // A task as one line: id prefix, title, status, and the status line or question when there is one.
+    static string Describe(TaskItem t) =>
+        $"{t.Id.ToString()[..8]} \"{Cut(t.Title)}\" ({StatusText(t.Status)}{Detail(t)}{(t.WorkspaceId.HasValue ? "" : ", on no workspace")})";
+
+    static string Detail(TaskItem t) =>
+        t.Status == TaskStatus.WaitingOnYou && t.Question.HasValue ? $", asked: \"{Cut(t.Question.Value)}\""
+        : t.StatusLine.Length > 0 ? $", status line: \"{Cut(t.StatusLine)}\""
+        : "";
+
+    static string StatusText(TaskStatus status) => status switch
+    {
+        TaskStatus.Backlog => "backlog",
+        TaskStatus.InProgress => "in progress",
+        TaskStatus.WaitingOnYou => "waiting on the user",
+        TaskStatus.Done => "done, waiting for the user to close it",
+        _ => "closed",
+    };
+
+    static string Cut(string text)
+    {
+        var line = text.ReplaceLineEndings(" ").Trim();
+        return line.Length <= TitleLength ? line : line[..(TitleLength - 3)] + "...";
+    }
+}
