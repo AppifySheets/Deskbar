@@ -71,6 +71,32 @@ public static class ControlUsage
                 "open the tasks window, as the bar's \"+N more\" does (every task grouped as on the bar, the closed\n"
                 + "      ones under their filter, each with its comments), or close it; list or matrix switches its view\n"
                 + "      (Covey's 2 by 2: urgent and not urgent across, important and not important down), remembered"),
+            new("task", "goal <id> <goal-id>|none",
+                "count a task toward an open goal of any period, as the task's More menu \"Goal\" does, or toward none"),
+        ]),
+        new("Goals", [
+            new("goal", "list [--week [<date>] | --month [<date>] | --all]",
+                "this month's then this week's goals as JSON: id, title, kind (week or month), period (its first day),\n"
+                + "      status (open, done or dropped), order, parent, progress (the planner's line) with tasksDone, tasks,\n"
+                + "      weeksDone and weeks (null on a weekly goal), and taskIds; --week or --month with a yyyy-MM-dd date\n"
+                + "      lists the period holding it, bare the current one; --all every goal, the oldest period first"),
+            new("goal", "add <title> [--week [<date>] | --month [<date>]]",
+                "add a goal at the end of a period: this week without an option, the current month with a bare\n"
+                + "      --month, the week or month holding a yyyy-MM-dd date otherwise"),
+            new("goal", "done <id>", "mark a goal done (your call: finishing its tasks never does)"),
+            new("goal", "drop <id>", "drop a goal that did not happen; it stays in its period, struck through"),
+            new("goal", "reopen <id>", "open a done or dropped goal again"),
+            new("goal", "rename <id> <title>", "rename a goal"),
+            new("goal", "delete <id>",
+                "delete a goal made by mistake; its tasks and weekly goals are freed; the reply is the goal as it was"),
+            new("goal", "carry <id> [--week [<date>] | --month [<date>]]",
+                "move a goal, its tasks still attached, to another period of its kind; without an option to the\n"
+                + "      current one, as the review's \"Carry over\" does"),
+            new("goal", "parent <id> <monthly-id>|none",
+                "set the monthly goal a weekly goal serves, one of a month its week touches, or none"),
+            new("goal", "prompt [dismiss]",
+                "what the bar's \"Plan this week\" line says is due, as JSON {due: week, month or null}; dismiss is\n"
+                + "      its close sign: this week and month count as seen"),
         ]),
         new("Workspace row menu", [
             new("rename", "<workspace> <new name>", "Rename…"),

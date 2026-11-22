@@ -2,6 +2,7 @@ using System.Text.Json;
 using CSharpFunctionalExtensions;
 using Deskbar.Core.Control;
 using Deskbar.Core.Domain;
+using Deskbar.Core.Goals;
 using Deskbar.Core.Tasks;
 // System.Threading.Tasks (an implicit using) has a TaskStatus too; the alias says which one this file means.
 using TaskStatus = Deskbar.Core.Tasks.TaskStatus;
@@ -20,7 +21,13 @@ public class RemoteControlTaskTests
     DateTimeOffset clock = new(2026, 11, 22, 12, 0, 0, TimeSpan.Zero);
     readonly TaskService tasks;
 
-    public RemoteControlTaskTests() => tasks = new TaskService(new MemoryTaskStore(), () => clock);
+    readonly GoalService goals;
+
+    public RemoteControlTaskTests()
+    {
+        tasks = new TaskService(new MemoryTaskStore(), () => clock);
+        goals = new GoalService(new FakeGoalStore(), tasks, () => clock, () => DateOnly.FromDateTime(clock.UtcDateTime));
+    }
 
     sealed class MemoryTaskStore : ITaskStore
     {
@@ -38,7 +45,7 @@ public class RemoteControlTaskTests
         return manager;
     }
 
-    ControlReply Run(WorkspaceManager manager, params string[] args) => new RemoteControl(manager, tasks: tasks).Execute(args);
+    ControlReply Run(WorkspaceManager manager, params string[] args) => new RemoteControl(manager, tasks: tasks, goals: goals).Execute(args);
 
     Guid WorkspaceId(WorkspaceManager manager, string name) => manager.State.Workspaces.Single(w => w.Name == name).Id;
 
@@ -332,6 +339,66 @@ public class RemoteControlTaskTests
         Assert.Equal("Tasks are not available", reply.Output);
     }
 
+    // --- task goal (goals plan, Task 5) ------------------------------------------------------------
+    // The pipe twin of the More menu's "Goal": through GoalService.LinkTask, so the goal must be open; none unlinks.
+
+    [Fact]
+    public void Task_goal_links_and_none_unlinks()
+    {
+        var manager = Started();
+        var id = Prefix(Added(manager));
+        var goal = goals.Add("Ship the goals planner", goals.ThisWeek).Value;
+
+        var linked = Run(manager, "task", "goal", id, goal.Id.ToString()[..6]);
+
+        Assert.Equal(ControlReply.Ok, linked.ExitCode);
+        Assert.Equal(goal.Id, Only.GoalId.Value);
+        Assert.Equal(goal.Id.ToString(), Json(linked).GetProperty("goal").GetProperty("id").GetString());
+        Assert.Equal("Ship the goals planner", Json(linked).GetProperty("goal").GetProperty("title").GetString());
+
+        var unlinked = Run(manager, "task", "goal", id, "none");
+        Assert.Equal(ControlReply.Ok, unlinked.ExitCode);
+        Assert.True(Only.GoalId.HasNoValue);
+        Assert.Equal(JsonValueKind.Null, Json(unlinked).GetProperty("goal").ValueKind);
+    }
+
+    [Fact]
+    public void Task_goal_refuses_a_done_goal()
+    {
+        var manager = Started();
+        var id = Prefix(Added(manager));
+        var goal = goals.Add("Ship it", goals.ThisWeek).Value;
+        goals.MarkDone(goal.Id);
+        var before = tasks.Board;
+
+        var reply = Run(manager, "task", "goal", id, goal.Id.ToString());
+
+        AssertRefusedAndUnchanged(reply, before);
+        Assert.Equal("The goal is done", reply.Output.Trim());
+        AssertRefusedAndUnchanged(Run(manager, "task", "goal", id, "ffff"), before);
+        AssertRefusedAndUnchanged(Run(manager, "task", "goal", "ffff", goal.Id.ToString()), before);
+    }
+
+    // Every task's JSON names its goal, or null; a link to a goal that no longer exists reads as null too.
+    [Fact]
+    public void Task_list_names_the_goal()
+    {
+        var manager = Started();
+        Added(manager, "free");
+        var linked = Prefix(Added(manager, "linked"));
+        var goal = goals.Add("Ship it", goals.ThisWeek).Value;
+        Run(manager, "task", "goal", linked, goal.Id.ToString());
+        var dangling = Prefix(Added(manager, "dangling"));
+        tasks.SetGoal(tasks.Board.Find(dangling).Value.Id, Guid.NewGuid());
+
+        var list = Json(Run(manager, "task", "list")).EnumerateArray()
+            .ToDictionary(t => t.GetProperty("title").GetString()!, t => t.GetProperty("goal"));
+
+        Assert.Equal(JsonValueKind.Null, list["free"].ValueKind);
+        Assert.Equal(JsonValueKind.Null, list["dangling"].ValueKind);
+        Assert.Equal("Ship it", list["linked"].GetProperty("title").GetString());
+    }
+
     [Fact]
     public void The_client_adds_its_folder_to_task() =>
         Assert.Equal(["task", "add", "x", "--from", @"C:\work"], ControlArguments.WithCallerFolder(["task", "add", "x"], @"C:\work"));
@@ -470,6 +537,7 @@ public class RemoteControlTaskTests
         Assert.Equal(
             ["list [--closed]", "add <title> [--workspace <name>|none]", "close <id>", "reopen <id>",
              "status <id> <backlog|in-progress|waiting|done>", "rename <id> <title>", "move <id> <workspace>|none",
-             "comment <id> <markdown>", "delete <id>", "flag <id> important|urgent on|off", "order <id> top|end|<n>"],
+             "comment <id> <markdown>", "delete <id>", "flag <id> important|urgent on|off", "order <id> top|end|<n>",
+             "goal <id> <goal-id>|none"],
             ControlUsage.All.Where(c => c.Verb == "task").Select(c => c.Arguments));
 }
