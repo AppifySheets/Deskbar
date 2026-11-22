@@ -12,8 +12,11 @@ namespace Deskbar.Core.Tasks;
 //     one way to Closed (SetStatus refuses Closed and points at Close).
 //   * A closed task takes none of a session's changes (join, status line, ask, done): Petre has closed it and new
 //     work needs a new task. Renaming, moving, commenting and setting a status by hand stay open to Petre.
-//   * Raised (the sort key) moves when a task is made and when a session asks, and on nothing else, so a status line
-//     changing never reorders the list.
+//   * Raised (the sort key) moves when a task is made, when a session asks and when a task becomes Done, and on
+//     nothing else, so a status line, a comment or a session ending never reorders the list.
+//   * A session works on one task at a time. Joining or creating a task ends that session's live entry on any other
+//     open task, so TaskOf and Answered can only ever mean the task it is on now (controller ruling 4, which the
+//     hooks rely on).
 //   * Answering is Petre's next message to a session: it moves that session's task from Waiting on you, or from
 //     Done (he is continuing the work), back to In progress, and touches no other task.
 public sealed record TaskBoard(IReadOnlyList<TaskItem> Tasks)
@@ -33,16 +36,21 @@ public sealed record TaskBoard(IReadOnlyList<TaskItem> Tasks)
     public Result<(TaskBoard Board, TaskItem Task)> AddNote(string title, Maybe<Guid> workspace, DateTimeOffset now, Guid newId) =>
         CleanTitle(title).Map(clean => WithAppended(NewTask(newId, clean, workspace, TaskStatus.Backlog, [], now)));
 
-    /// <summary>A task a session makes for its own work: In progress, with that session on it.</summary>
+    /// <summary>
+    /// A task a session makes for its own work: In progress, with that session on it. The session leaves whatever
+    /// other task it was live on (see the header).
+    /// </summary>
     public Result<(TaskBoard Board, TaskItem Task)> Create(string title, Maybe<Guid> workspace, TaskSession session, DateTimeOffset now, Guid newId) =>
-        CleanTitle(title).Map(clean => WithAppended(NewTask(newId, clean, workspace, TaskStatus.InProgress, [session], now)));
+        CleanTitle(title).Map(clean =>
+            WithoutSessionElsewhere(session.Id, newId, now).WithAppended(NewTask(newId, clean, workspace, TaskStatus.InProgress, [session], now)));
 
     // --- what a session does -----------------------------------------------------------------------
 
     /// <summary>
     /// A session takes the task up: it becomes Claude's and In progress. A task already waiting on Petre keeps
     /// waiting, because the question is still unanswered. A session with that id already on the task (a resumed
-    /// conversation keeps its id) is replaced, live again, rather than listed twice.
+    /// conversation keeps its id) is replaced, live again, rather than listed twice. The session leaves whatever other
+    /// task it was live on (see the header); a refused join (a closed task) leaves it where it was.
     /// </summary>
     public Result<TaskBoard> Join(Guid id, TaskSession session, DateTimeOffset now) =>
         ChangeOpen(id, t => t with
@@ -50,7 +58,7 @@ public sealed record TaskBoard(IReadOnlyList<TaskItem> Tasks)
             Sessions = WithSession(t.Sessions, session),
             Status = t.Status == TaskStatus.WaitingOnYou ? t.Status : TaskStatus.InProgress,
             UpdatedAt = now,
-        });
+        }).Map(joined => joined.WithoutSessionElsewhere(session.Id, id, now));
 
     /// <summary>The short line a session keeps current. Does not move <see cref="TaskItem.Raised"/>.</summary>
     public Result<TaskBoard> SetStatusLine(Guid id, string text, DateTimeOffset now) =>
@@ -87,9 +95,12 @@ public sealed record TaskBoard(IReadOnlyList<TaskItem> Tasks)
                 : t).ToArray())
             : this;
 
-    /// <summary>Claude's clear finish. The task stays in the list, waiting for Petre to close it.</summary>
+    /// <summary>
+    /// Claude's clear finish. The task stays in the list, waiting for Petre to close it. Becoming Done stamps
+    /// <see cref="TaskItem.Raised"/>, which orders the Done group; a task already Done keeps its stamp.
+    /// </summary>
     public Result<TaskBoard> MarkDone(Guid id, DateTimeOffset now) =>
-        ChangeOpen(id, t => t with { Status = TaskStatus.Done, Question = Maybe<string>.None, UpdatedAt = now });
+        ChangeOpen(id, t => BecameDone(t, now) with { Question = Maybe<string>.None, UpdatedAt = now });
 
     // --- what Petre does ---------------------------------------------------------------------------
 
@@ -106,12 +117,13 @@ public sealed record TaskBoard(IReadOnlyList<TaskItem> Tasks)
     /// <summary>
     /// Any status but Closed, by hand, from any status (a closed task set to Done is reopened as Done). Closed goes
     /// through <see cref="Close"/>, the one way to close. Leaving Waiting on you drops the question; setting it by
-    /// hand does not move <see cref="TaskItem.Raised"/>, since no session asked anything.
+    /// hand does not move <see cref="TaskItem.Raised"/>, since no session asked anything. Becoming Done by hand stamps
+    /// it, as <see cref="MarkDone"/> does.
     /// </summary>
     public Result<TaskBoard> SetStatus(Guid id, TaskStatus status, DateTimeOffset now) =>
         status == TaskStatus.Closed
             ? Result.Failure<TaskBoard>(UseClose)
-            : Change(id, t => t with
+            : Change(id, t => (status == TaskStatus.Done ? BecameDone(t, now) : t) with
             {
                 Status = status,
                 Question = status == TaskStatus.WaitingOnYou ? t.Question : Maybe<string>.None,
@@ -173,12 +185,13 @@ public sealed record TaskBoard(IReadOnlyList<TaskItem> Tasks)
 
     /// <summary>
     /// The open tasks in the order the bar shows them: Waiting on you first, the latest ask on top; then Done, the
-    /// latest first, waiting for Petre to close them; then the rest by <see cref="TaskItem.Raised"/>, newest first.
-    /// Closed tasks are left out.
+    /// latest to become Done first, waiting for Petre to close them; then the rest, newest first. Every group sorts
+    /// by <see cref="TaskItem.Raised"/>, never by UpdatedAt, so a status line, a comment or a session ending cannot
+    /// move a line. Closed tasks are left out.
     /// </summary>
     public IReadOnlyList<TaskItem> Pile() =>
         Tasks.Where(t => t.Status == TaskStatus.WaitingOnYou).OrderByDescending(t => t.Raised)
-            .Concat(Tasks.Where(t => t.Status == TaskStatus.Done).OrderByDescending(t => t.UpdatedAt))
+            .Concat(Tasks.Where(t => t.Status == TaskStatus.Done).OrderByDescending(t => t.Raised))
             .Concat(Tasks.Where(t => t.Status is TaskStatus.Backlog or TaskStatus.InProgress).OrderByDescending(t => t.Raised))
             .ToArray();
 
@@ -213,6 +226,23 @@ public sealed record TaskBoard(IReadOnlyList<TaskItem> Tasks)
         sessions.Any(s => s.Id == session.Id)
             ? sessions.Select(s => s.Id == session.Id ? session : s).ToArray()
             : sessions.Append(session).ToArray();
+
+    /// <summary>Done, with Raised stamped when it was not Done before; an already Done task keeps its place.</summary>
+    static TaskItem BecameDone(TaskItem task, DateTimeOffset now) =>
+        task with { Status = TaskStatus.Done, Raised = task.Status == TaskStatus.Done ? task.Raised : now };
+
+    /// <summary>
+    /// Ends the session's live entry on every open task but <paramref name="except"/>, stamping those tasks. Closed
+    /// tasks are left alone: SessionEnded still closes the entry there when the session really ends.
+    /// </summary>
+    TaskBoard WithoutSessionElsewhere(string sessionId, Guid except, DateTimeOffset now) =>
+        new(Tasks.Select(t => t.Id != except && t.IsOpen && LiveOn(t, sessionId)
+            ? t with
+            {
+                Sessions = t.Sessions.Select(s => s.Id == sessionId && s.IsLive ? s with { Ended = now } : s).ToArray(),
+                UpdatedAt = now,
+            }
+            : t).ToArray());
 
     (TaskBoard Board, TaskItem Task) WithAppended(TaskItem task) => (new TaskBoard(Tasks.Append(task).ToArray()), task);
 

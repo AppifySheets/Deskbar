@@ -225,6 +225,74 @@ public class TaskBoardTests
         Assert.Equal(TaskStatus.Done, Get(closed.SetStatus(id1, TaskStatus.Done, clock).Value, id1).Status);
     }
 
+    // Becoming Done is a new moment the list sorts by, like an ask; staying Done is not.
+    [Fact]
+    public void Becoming_done_stamps_raised()
+    {
+        var board = Claudes(TaskBoard.Empty, id1, ws);
+        board = Note(board, id2, ws);
+        Later(5);
+        var doneAt = clock;
+
+        board = board.MarkDone(id1, clock).Value.SetStatus(id2, TaskStatus.Done, clock).Value;
+        Assert.Equal(doneAt, Get(board, id1).Raised);
+        Assert.Equal(doneAt, Get(board, id2).Raised);
+
+        Later();
+        board = board.SetStatus(id2, TaskStatus.Done, clock).Value;
+        Assert.Equal(doneAt, Get(board, id2).Raised);
+    }
+
+    // Review finding: the Done group sorted by UpdatedAt, so a status line, a comment or the session ending moved an
+    // older Done task to the top of the group.
+    [Fact]
+    public void A_done_task_keeps_its_place_through_later_changes()
+    {
+        var board = Claudes(TaskBoard.Empty, id1, ws, "s1", "older").MarkDone(id1, clock).Value;
+        Later();
+        board = Claudes(board, id2, ws, "s2", "newer").MarkDone(id2, clock).Value;
+        Later();
+
+        board = board.SetStatusLine(id1, "merged", clock).Value
+            .Comment(id1, Maybe<string>.None, "Thanks", clock, id3).Value
+            .SessionEnded("s1", clock);
+
+        Assert.Equal([id2, id1], board.Pile().Select(t => t.Id));
+    }
+
+    // Ruling 4: a session works on one task at a time, so taking up another ends it on the first.
+    [Fact]
+    public void Joining_a_second_task_ends_the_session_on_the_first()
+    {
+        var board = Claudes(TaskBoard.Empty, id1, ws, "s1").Ask(id1, "Merge?", clock).Value;
+        board = Note(board, id2, ws);
+        Later();
+
+        board = board.Join(id2, Session("s1"), clock).Value;
+
+        Assert.False(Get(board, id1).HasLiveSession);
+        Assert.Equal(clock, Get(board, id1).Sessions.Single().Ended.Value);
+        Assert.Equal(id2, board.TaskOf("s1").Value.Id);
+        Later();
+        var answered = board.Answered("s1", clock);
+        Assert.Equal(TaskStatus.WaitingOnYou, Get(answered, id1).Status);
+        Assert.Equal(Get(board, id1), Get(answered, id1));
+    }
+
+    [Fact]
+    public void Creating_a_task_ends_the_session_on_the_one_before()
+    {
+        var board = Claudes(TaskBoard.Empty, id1, ws, "s1");
+        board = Claudes(board, id2, ws, "s2");
+        Later();
+
+        board = Claudes(board, id3, ws, "s1", "follow-up");
+
+        Assert.False(Get(board, id1).HasLiveSession);
+        Assert.True(Get(board, id2).HasLiveSession);
+        Assert.Equal(id3, board.TaskOf("s1").Value.Id);
+    }
+
     [Fact]
     public void The_pile_puts_waiting_first_then_done_then_newest()
     {
