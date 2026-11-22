@@ -164,6 +164,8 @@ public sealed class TasksBoard : IDisposable
     {
         if (bringForward is { } seam) seam(EnsureHandle());
         else window.ActivateHere();
+        // A window left maximized is maximized only now, after the move (review I-2).
+        window.MaximizeIfRemembered();
     }
 
     /// <summary>

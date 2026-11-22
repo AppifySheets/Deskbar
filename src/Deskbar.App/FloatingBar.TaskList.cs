@@ -368,6 +368,7 @@ public partial class FloatingBar
     // The click guard's two facts (TaskClickIgnored): the click count of the last press on one of the list's guarded
     // buttons, and when the lines were last redrawn.
     int taskPressClicks;
+    string taskLinePlaces = "";
     DateTime taskLinesChangedAt = DateTime.MinValue;
 
     // A workspace chip's fill: its row's rail colour, faded so the name stays readable on it. One brush per colour,
@@ -692,8 +693,15 @@ public partial class FloatingBar
             taskProblemHost.Visibility = problem.HasValue ? Visibility.Visible : Visibility.Collapsed;
         }
         shownTaskLines.ToList().ForEach(line => taskLinesPanel.Children.Add(TaskLineButton(line)));
-        // The lines just moved, so the click guard distrusts a click for the next half second (TaskClickIgnored).
-        taskLinesChangedAt = TaskClickClock();
+        // When the lines on show changed places (which tasks, in which order, which are closing), the click guard
+        // distrusts a click for the next half second (TaskClickIgnored). A paint that only rewrote what lines say (a
+        // session's status line) moved nothing and does not start it, or frequent status pulses would eat clicks.
+        var placesKey = string.Join('|', shownTaskLines.Select(l => $"{l.Id}{l.Closing}"));
+        if (placesKey != taskLinePlaces)
+        {
+            taskLinePlaces = placesKey;
+            taskLinesChangedAt = TaskClickClock();
+        }
         CapTaskLines();
         PaintTaskMore(open);
     }

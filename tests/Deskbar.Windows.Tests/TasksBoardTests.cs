@@ -668,6 +668,69 @@ public class TasksBoardTests
         Assert.True(t.Window.IsSelected(oldest));
     });
 
+    // Review I-2: restoring a minimized window or showing it maximized activates it, so neither may run before the
+    // seam has moved the window to the desktop in front. The seam sees the window as it was; a remembered maximize
+    // comes after.
+    [Fact]
+    public void A_minimized_or_maximized_window_changes_no_state_before_the_move() => StaThread.Run(() =>
+    {
+        var seen = new List<WindowState>();
+        TasksWindow? window = null;
+        using var t = Build(bringForward: _ => seen.Add(window!.WindowState));
+        window = t.Window;
+        Assert.True(t.Harness.Manager.SaveTasksWindow(new Deskbar.Core.Persistence.TasksWindowState(120, 90, 900, 640, Maximized: true)).IsSuccess);
+
+        t.Controller.Open(Rect.Empty);
+        Assert.Equal([WindowState.Normal], seen);
+        Assert.Equal(WindowState.Maximized, t.Window.WindowState);
+
+        t.Window.WindowState = WindowState.Minimized;
+        t.Controller.Open(Rect.Empty);
+        Assert.Equal(WindowState.Minimized, seen[1]);
+        // The seam here is a fake; the App's activator restores an iconic window after the move.
+        Assert.Equal(WindowState.Minimized, t.Window.WindowState);
+    });
+
+    // Review I-3: at the window's minimum width, with enough lines for the scroll bar, every column stays inside the
+    // list's viewport and the title keeps a usable width.
+    [Fact]
+    public void At_the_minimum_width_the_columns_stay_inside_the_viewport() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        Enumerable.Range(1, 40).ToList().ForEach(i => t.Tasks.AddNote($"a note with a fairly long title, number {i}", t.Gepha));
+        t.Controller.Open(Rect.Empty);
+        t.Window.Width = t.Window.MinWidth;
+        t.Window.UpdateLayout();
+
+        var scroller = Inside(t.Window).OfType<ScrollViewer>().First(s => s.Content is StackPanel);
+        Assert.True(scroller.ComputedVerticalScrollBarVisibility == Visibility.Visible, "the scroll bar shows");
+        t.Window.Keys.Take(5).Select(id => LineOf(t.Window, id)).ToList().ForEach(line =>
+        {
+            var more = ButtonNamed(line, "More");
+            var bounds = more.TransformToAncestor(scroller).TransformBounds(new Rect(more.RenderSize));
+            Assert.True(bounds.Right <= scroller.ViewportWidth + 0.5, $"More ends at {bounds.Right} in a viewport {scroller.ViewportWidth} wide");
+            var title = Inside(line).OfType<TextBlock>().First(b => b.FontWeight == FontWeights.SemiBold);
+            Assert.True(title.ActualWidth >= 100, $"the title has {title.ActualWidth} DIP");
+        });
+    });
+
+    // Review minor: a redraw that only rewrites what a line says (a session's status line) moves nothing, so it does
+    // not start the click guard's half second; frequent status pulses must not eat clicks.
+    [Fact]
+    public void A_status_line_change_does_not_eat_the_next_click() => StaThread.Run(() =>
+    {
+        var now = ClickStart;
+        using var t = Build(clickClock: () => now);
+        var id = t.Tasks.Create("work", t.Gepha, Session("s1")).Value.Id;
+        t.Controller.Open(Rect.Empty);
+        now = now.AddMilliseconds(600);
+
+        t.Tasks.SetStatusLine(id, "waiting for CI");
+        Click(LineOf(t.Window, id));
+
+        Assert.Equal([id], t.WentTo);
+    });
+
     // Where a part of the window ends, against the window's own content (what the window shows).
     static Rect BoundsIn(TasksWindow window, FrameworkElement part) =>
         part.TransformToAncestor((System.Windows.Media.Visual)window.Content).TransformBounds(new Rect(part.RenderSize));
