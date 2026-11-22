@@ -258,6 +258,12 @@ public sealed class TasksBoard : IDisposable
     }
 
     /// <summary>
+    /// The tiling surface's "ours" (2026-11-23, Petre: "maybe even tile it"): Deskbar keeps its own windows out of the
+    /// grid (the bar, Manage, its dialogs), except the tasks window, a page he works in that tiles like any app window.
+    /// </summary>
+    internal static bool KeptFromTiling(nint hwnd, nint tasksWindow) => hwnd != tasksWindow && FloatingBar.IsOwnWindow(hwnd);
+
+    /// <summary>
     /// Puts the window at the top of the z-order among the windows that are not topmost, without activating it and
     /// without moving or sizing it (HWND_TOP, SWP_NOACTIVATE).
     /// </summary>
