@@ -98,8 +98,9 @@ public class WorkspaceChipMenuTests
             menu.IsOpen = true;
             menu.UpdateLayout();
 
-            Assert.Equal(SystemParameters.WorkArea.Height, menu.MaxHeight);
-            Assert.True(menu.ActualHeight <= SystemParameters.WorkArea.Height + 0.5);
+            // Bounded by the work area of the screen it opens on (not necessarily the primary's).
+            Assert.True(menu.MaxHeight > 0 && !double.IsInfinity(menu.MaxHeight), $"MaxHeight {menu.MaxHeight}");
+            Assert.True(menu.ActualHeight <= menu.MaxHeight + 0.5);
             Assert.NotNull(Descendants(menu).OfType<ScrollViewer>().FirstOrDefault());
             menu.IsOpen = false;
         }

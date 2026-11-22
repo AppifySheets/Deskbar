@@ -31,9 +31,11 @@ namespace Deskbar.App;
 //                    task window opened onto an entry form, and Petre did not like it).
 //   Present          draws a view. A view that would draw what is already drawn draws nothing, and a view that
 //                    arrives while drawing would pull something out from under Petre waits (MustWait): one of the
-//                    window's menus open (the bar's #77 lesson), a rename under way, a comment half typed with the
-//                    keyboard in it, or a press in flight on the window (the bar's #48 lost click). Each of those
-//                    ends by drawing the latest view (Flush).
+//                    window's menus open (the bar's #77 lesson), a rename under way, or a press in flight on the window
+//                    (the bar's #48 lost click). Each of those ends by drawing the latest view (Flush). A half-typed
+//                    comment does not hold a redraw; its text, keyboard and caret are carried through it instead.
+//   Clicks           a line and its buttons take the bar's click guard (ClickIgnored): no second press of a double
+//                    click, and nothing in the half second after the lines were redrawn.
 //
 // Top to bottom: the toolbar (status filters with their counts, the workspace filter, "+ Add"), the
 // add box while "+ Add" has it open, a line saying why the last action failed, then the groups. Each line: Claude's
@@ -172,6 +174,30 @@ public partial class TasksWindow : Window
     internal IReadOnlyList<string> CommentAuthors(Guid id) => authors.GetValueOrDefault(id) ?? [];
     internal bool IsClosing(Guid id) => closing.GetValueOrDefault(id);
     internal string CommentDraft(Guid id) => commentBoxes.TryGetValue(id, out var box) ? box.Text : drafts.GetValueOrDefault(id, "");
+    internal TextBox? CommentBoxOf(Guid id) => commentBoxes.GetValueOrDefault(id);
+
+    // THE CLICK GUARD, the bar's (#48, Ruling 10; FloatingBar.TaskClickIgnored), fix round 1, Important 1. A line
+    // closed here stays six seconds and then leaves, and a tick or Reopen takes its line away, so the next line slides
+    // under the pointer: the second press of a double click closed or reopened a second task, and a click aimed at a
+    // line that just moved hit its neighbour. A click on a line or one of its buttons is dropped when its press was the
+    // second of a double click or when it lands within half a second of a redraw of the lines. Undo drops only the
+    // double click: it appears where the tick was on purpose, so a deliberate click on it, however soon, is meant.
+    // ClickClock is a seam for the tests, which put a click right after a redraw or half a second later.
+    internal Func<DateTime> ClickClock { get; init; } = () => DateTime.UtcNow;
+
+    static readonly TimeSpan RepaintGrace = TimeSpan.FromMilliseconds(500);
+    int pressClicks;
+    DateTime linesChangedAt = DateTime.MinValue;
+
+    bool ClickIgnored() => DoubleClickIgnored() || ClickClock() - linesChangedAt < RepaintGrace;
+
+    // Reading it consumes the press's count, as the bar's does.
+    bool DoubleClickIgnored()
+    {
+        var doubled = pressClicks > 1;
+        pressClicks = 0;
+        return doubled;
+    }
 
     protected override void OnClosing(System.ComponentModel.CancelEventArgs e)
     {
@@ -203,27 +229,42 @@ public partial class TasksWindow : Window
         renaming = null;
         renameBox = null;
         IsOpen = true;
-        ShowActivated = !Quiet;
+        // Shown WITHOUT activation (fix round 1, Critical 1): the controller brings it to Petre afterwards, moving it to
+        // the desktop in front before anything activates it (TasksBoard.Open, Arrive).
+        ShowActivated = false;
         // Placed before Show, so it never flashes somewhere else first. A maximized window is shown at its normal place
         // and maximized after, so a restore returns it there.
-        var placed = !Quiet && remembered.HasValue && PlaceAt(remembered.Value);
-        if (!placed) Place();
         WindowState = WindowState.Normal;
+        var placed = remembered.HasValue && PlaceAt(remembered.Value);
+        if (!placed) Place();
         Show();
+        // Show applies the window's own Width/Height once more, at the DPI it was created with; the remembered device
+        // rectangle is the truth, so it is put back exactly once the window is up.
+        if (placed) PlaceDevice(remembered.Value);
         NoteNormal();
         if (placed && remembered.Value.Maximized) WindowState = WindowState.Maximized;
-        if (!Quiet) Activate();
         Scroller.ScrollToTop();
         Toolbar.Focus();
     }
 
-    /// <summary>Brings an open window to the front, restored if it was minimized, its view untouched.</summary>
+    /// <summary>
+    /// An open window, restored if it was minimized, its view untouched. No activation here (fix round 1, Critical 1):
+    /// the controller's seam moves it to the desktop in front and only then activates it.
+    /// </summary>
     public void BringForward()
     {
         if (!IsOpen) return;
         if (WindowState == WindowState.Minimized) WindowState = WindowState.Normal;
+    }
+
+    /// <summary>The window activating itself, only when the controller has no seam to bring it (and counted for the tests).</summary>
+    internal void ActivateHere()
+    {
+        SelfActivations++;
         if (!Quiet) Activate();
     }
+
+    internal int SelfActivations { get; private set; }
 
     /// <summary>Hides it (the title bar's X, or `tasks-window hide`), remembering where it was.</summary>
     public void Dismiss()
@@ -252,23 +293,23 @@ public partial class TasksWindow : Window
             lastNormal = new Rect(rect.Left, rect.Top, rect.Right - rect.Left, rect.Bottom - rect.Top);
     }
 
-    // The remembered place, when a screen still holds its middle: turned into DIPs with that screen's own DPI, the
-    // convention Place and Quick find use. False when no screen holds it (a monitor unplugged since); the caller then
-    // places it beside the bar.
+    // The remembered place, when a screen still holds its middle, put on the window in DEVICE PIXELS (fix round 1,
+    // Important 3). The first version divided by the target screen's DPI and assigned Left/Top, which WPF then turned
+    // back into pixels at the DPI of the screen the window was created on, so on mixed DPI it landed in the wrong place
+    // and size. SetWindowPos on the (still hidden) handle takes the stored pixels as they are. False when no screen
+    // holds the place any more (a monitor unplugged since); the caller then places it beside the bar.
     bool PlaceAt(TasksWindowState place)
     {
         if (place.Width <= 0 || place.Height <= 0) return false;
         var middle = new NativeMethods.POINT { X = place.Left + place.Width / 2, Y = place.Top + place.Height / 2 };
-        var monitor = NativeMethods.MonitorFromPoint(middle, MonitorDefaultToNull);
-        if (monitor == 0) return false;
-        NativeMethods.GetDpiForMonitor(monitor, NativeMethods.MDT_EFFECTIVE_DPI, out var dpiX, out var dpiY);
-        var (scaleX, scaleY) = (dpiX / 96.0, dpiY / 96.0);
-        Left = place.Left / scaleX;
-        Top = place.Top / scaleY;
-        Width = Math.Max(MinWidth, place.Width / scaleX);
-        Height = Math.Max(MinHeight, place.Height / scaleY);
+        if (NativeMethods.MonitorFromPoint(middle, MonitorDefaultToNull) == 0) return false;
+        PlaceDevice(place);
         return true;
     }
+
+    void PlaceDevice(TasksWindowState place) =>
+        NativeMethods.SetWindowPos(new WindowInteropHelper(this).EnsureHandle(), 0, place.Left, place.Top, place.Width, place.Height,
+            NativeMethods.SWP_NOZORDER | NativeMethods.SWP_NOACTIVATE);
 
     public void ShowProblem(string? text)
     {
@@ -280,7 +321,9 @@ public partial class TasksWindow : Window
     internal void Present(TasksView view)
     {
         latest = view;
-        if (MustWait)
+        // A view arriving in the middle of a draw (a pulse pumped by something the draw did) is held, and drawn by the
+        // Flush at the end of that draw (fix round 1).
+        if (MustWait || drawing)
         {
             held = true;
             return;
@@ -289,12 +332,13 @@ public partial class TasksWindow : Window
         Draw(view);
     }
 
-    // What holds a redraw back (see the header). A comment box holds it only while it has the keyboard AND some text:
-    // an empty box loses nothing, and the redraw gives the keyboard back to the new box (Draw).
+    // What holds a redraw back (see the header). Not a comment box with text in it (fix round 1, Important 2): every
+    // button here is unfocusable, so the box keeps the keyboard through any click, and a redraw waiting for it never
+    // came; the filters, the arrows and the ticks all seemed dead. The draft, the keyboard and the caret survive a
+    // redraw instead (Draw).
     bool MustWait =>
         openMenu?.IsOpen == true
         || renaming is not null
-        || commentBoxes.Values.Any(box => box.IsKeyboardFocusWithin && box.Text.Length > 0)
         || (Mouse.LeftButton == MouseButtonState.Pressed && IsMouseOver);
 
     // What waited is drawn now that nothing holds it. Not from inside a draw: clearing the rows takes the keyboard
@@ -322,19 +366,29 @@ public partial class TasksWindow : Window
         {
             drawing = false;
         }
-        // A comment box that had the keyboard (empty, or the redraw would have waited) gets it back in its new form,
-        // so a second comment can follow the first without a click. Likewise the rename box.
-        if (keyboardWasIn != Guid.Empty && commentBoxes.TryGetValue(keyboardWasIn, out var again)) again.Focus();
+        // A comment box that had the keyboard gets it back in its new form, its text (from `drafts`) and its caret where
+        // they were, so typing carries on through a redraw and a second comment can follow the first without a click.
+        // Likewise the rename box.
+        if (keyboardWasIn != Guid.Empty && commentBoxes.TryGetValue(keyboardWasIn, out var again))
+        {
+            again.Focus();
+            again.CaretIndex = Math.Min(caretWas, again.Text.Length);
+        }
         renameBox?.Focus();
+        // A view that arrived during the draw is drawn now.
+        Flush();
     }
 
-    // Which comment box had the keyboard when the last draw began.
+    // Which comment box had the keyboard when the last draw began, and where its caret was.
     Guid keyboardWasIn;
+    int caretWas;
 
     void DrawRows(TasksView view)
     {
-
         keyboardWasIn = commentBoxes.FirstOrDefault(pair => pair.Value.IsKeyboardFocusWithin).Key;
+        caretWas = keyboardWasIn != Guid.Empty ? commentBoxes[keyboardWasIn].CaretIndex : 0;
+        // The lines are redrawn now, so for half a second a click is not trusted (the click guard, ClickIgnored).
+        linesChangedAt = ClickClock();
         DrawFilters(view);
         Rows.Children.Clear();
         menuButtons.Clear();
@@ -424,8 +478,7 @@ public partial class TasksWindow : Window
         Cell(grid, 3, Chip(row.Place));
         Cell(grid, 4, CommentsButton(row));
         Cell(grid, 5, ActionOf(row));
-        var more = Small("⋯", "More", () => { }, "Status, close, rename, move, delete");
-        more.Click += (_, _) => OpenMenuFor(row.Id);
+        var more = Small("⋯", "More", () => OpenMenuFor(row.Id), "Status, close, rename, move, delete");
         menuButtons[row.Id] = more;
         Cell(grid, 6, more);
         if (row.Closing)
@@ -451,10 +504,12 @@ public partial class TasksWindow : Window
             ToolTip = row.Closing ? "Closed. Undo brings it back." : $"{TaskViews.StatusName(row.Status)}: {row.Title}",
         };
         AutomationProperties.SetName(line, row.Title);
+        // The click guard, as on the line's buttons (ClickIgnored).
+        line.PreviewMouseLeftButtonDown += (_, e) => pressClicks = e.ClickCount;
         line.Click += (_, _) =>
         {
             // A line just closed goes nowhere; Undo is the one thing on it to press. A line being renamed neither.
-            if (row.Closing || renaming == row.Id) return;
+            if (ClickIgnored() || row.Closing || renaming == row.Id) return;
             Actions?.Go(row.Id);
         };
         return line;
@@ -470,7 +525,7 @@ public partial class TasksWindow : Window
     // Claude's badge, a note's tick box, or Undo on a line just closed.
     UIElement LeftOf(TaskRowView row) =>
         row.Closing
-            ? Small("↶", "Undo", () => Actions?.Undo(row.Id), "Undo: bring the task back")
+            ? Small("↶", "Undo", () => Actions?.Undo(row.Id), "Undo: bring the task back", DoubleClickIgnored)
             : row.Claudes
                 ? new Border
                 {
@@ -787,8 +842,8 @@ public partial class TasksWindow : Window
         var move = WorkspaceChipMenu.Fill(Item("Move to"), latest?.Places ?? [], row.Place.Workspace, workspace => Actions?.MoveTo(id, workspace));
         menu.Items.Add(move);
         menu.Items.Add(new Separator());
-        // Delete cannot be undone, so it takes a second, deliberate step rather than a dialog (a dialog would take the
-        // foreground, and the window closes when it loses it).
+        // Delete cannot be undone, so it takes a second, deliberate step: a submenu item rather than a dialog, which
+        // would be one more window to answer for a menu choice already made.
         var delete = Item("Delete");
         delete.Items.Add(Item("Delete for good", () => Actions?.Delete(id)));
         menu.Items.Add(delete);
@@ -898,8 +953,11 @@ public partial class TasksWindow : Window
     // --- small parts -------------------------------------------------------------------------------------------------
 
     // A flat button with a name for automation and the tests. Unfocusable, so a click never takes the keyboard from a
-    // box Petre is typing in.
-    Button Flat(UIElement content, string name, Action press, Thickness padding)
+    // box Petre is typing in. `ignoredWhen` is the click guard it takes (ClickIgnored on a line's buttons,
+    // DoubleClickIgnored on Undo, none on the toolbar and the comment box's button, under which nothing moves); its press
+    // count is noted on the press, and the click is still marked handled when the guard drops it, so a dropped click
+    // never turns into a click on the line around it.
+    Button Flat(UIElement content, string name, Action press, Thickness padding, Func<bool>? ignoredWhen = null)
     {
         var button = new Button
         {
@@ -914,21 +972,24 @@ public partial class TasksWindow : Window
             VerticalAlignment = VerticalAlignment.Center,
         };
         AutomationProperties.SetName(button, name);
+        if (ignoredWhen is not null) button.PreviewMouseLeftButtonDown += (_, e) => pressClicks = e.ClickCount;
         button.Click += (_, e) =>
         {
             // Inside a line, a small button's click must not also go to the line.
             e.Handled = true;
+            if (ignoredWhen?.Invoke() == true) return;
             press();
         };
         return button;
     }
 
-    Button Small(string text, string name, Action press, string tip) =>
-        Small(new TextBlock { Text = text, Foreground = Ink, FontSize = 11 }, name, press, tip);
+    // A line's small button, guarded by the click guard (ClickIgnored) unless told otherwise (Undo).
+    Button Small(string text, string name, Action press, string tip, Func<bool>? ignoredWhen = null) =>
+        Small(new TextBlock { Text = text, Foreground = Ink, FontSize = 11 }, name, press, tip, ignoredWhen);
 
-    Button Small(UIElement content, string name, Action press, string tip)
+    Button Small(UIElement content, string name, Action press, string tip, Func<bool>? ignoredWhen = null)
     {
-        var button = Flat(content, name, press, new Thickness(4, 0, 4, 1));
+        var button = Flat(content, name, press, new Thickness(4, 0, 4, 1), ignoredWhen ?? ClickIgnored);
         button.Background = Brushes.Transparent;
         button.ToolTip = tip;
         button.HorizontalAlignment = HorizontalAlignment.Left;

@@ -892,6 +892,13 @@ public partial class App : Application
     Result GoToTask(Core.Tasks.TaskItem task) =>
         task.WorkspaceId.HasValue ? manager!.Switch(task.WorkspaceId.Value) : Result.Success();
 
+    // Whether a window is on the desktop in front: a window pinned to every desktop is, one on the current desktop is,
+    // and any failure to ask counts as no, so a doubt never moves Petre. Shared by the task list's keyboard hand-back
+    // and the tasks window's arrival, both of which must never switch desktops.
+    bool OnDesktopInFront(nint hwnd) =>
+        desktops!.IsPinned(new WindowHandle(hwnd)).Match(pinned => pinned, _ => false)
+        || desktops.DesktopOf(new WindowHandle(hwnd)).Bind(on => desktops.CurrentDesktop().Map(front => front == on)).Match(same => same, _ => false);
+
     // "Report a problem…" from the tray or the bar's menu (ReportWindow, issue #331). It replaced "Save debug dump":
     // the window's View link writes and opens the dump, and Send carries it to us with the user's words.
     //
@@ -1700,8 +1707,7 @@ public partial class App : Application
                 // Whether a window is on the desktop in front, for the task list's keyboard hand-back, which must never
                 // switch desktops: a window pinned to every desktop is, one on the current desktop is, and any failure
                 // to ask counts as no, so a doubt keeps the keyboard where it is rather than moving Petre.
-                OnCurrentDesktop = hwnd => desktops!.IsPinned(new WindowHandle(hwnd)).Match(pinned => pinned, _ => false)
-                    || desktops.DesktopOf(new WindowHandle(hwnd)).Bind(on => desktops.CurrentDesktop().Map(front => front == on)).Match(same => same, _ => false),
+                OnCurrentDesktop = OnDesktopInFront,
             };
             // The bar's hwnd is created HERE, before it is ever shown, for two reasons that
             // both hang off the same handle:
@@ -1957,16 +1963,16 @@ public partial class App : Application
             tasksBoard = new TasksBoard(new TasksWindow(), tasks!, manager, GoToTask,
                 // The chips wear the colour the bar's rows wear (its last rebuild's rail colours).
                 colourOf: id => floatingBar?.WorkspaceAccent(id),
-                // Brought forward on the desktop in front: a page left open on another desktop is moved here first, so
-                // "+N more" never takes Petre to the desktop where he last left it. Activated through the activator,
-                // since a `tasks-window show` typed in a terminal carries no foreground right. A failed move is traced;
-                // the window still comes forward where it is.
-                bringForward: hwnd =>
-                {
-                    desktops!.CurrentDesktop().Bind(front => desktops.MoveWindow(new WindowHandle(hwnd), front))
-                        .TapError(err => ClickTrace.Write($"tasks window: not moved to the desktop in front: {err}"));
-                    tasksActivator.Activate(new WindowHandle(hwnd));
-                });
+                // Brought to the desktop in front, in that order (TasksBoard.Arrive; fix round 1, Critical 1): a page
+                // left open on another desktop is MOVED here first and only then activated, because activating a window
+                // on another desktop makes Windows follow it there. Activated through the activator, since a
+                // `tasks-window show` typed in a terminal carries no foreground right. A failed move activates the
+                // window only when it is on the desktop in front already; otherwise it is traced and left where it is.
+                bringForward: hwnd => TasksBoard.Arrive(hwnd,
+                    move: () => desktops!.CurrentDesktop().Bind(front => desktops.MoveWindow(new WindowHandle(hwnd), front)),
+                    onCurrentDesktop: () => OnDesktopInFront(hwnd),
+                    activate: () => tasksActivator.Activate(new WindowHandle(hwnd)),
+                    trace: ClickTrace.Write));
             monitor.Ignore(tasksBoard.EnsureHandle());
 
             hotkeys = new HotkeyService(direction => switcher.Step(direction), boundSwitcher,

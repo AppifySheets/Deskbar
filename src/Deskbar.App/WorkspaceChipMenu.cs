@@ -21,7 +21,7 @@ namespace Deskbar.App;
 //
 // A LONG MENU (Petre has about twenty workspaces) must not run off the screen. WPF's ContextMenu templates put the
 // items in a ScrollViewer, and a popup is kept on its screen, so a menu taller than the screen scrolls; MaxHeight is
-// set as well, to the work area's height, so the ScrollViewer has a bound even where the popup's own constraint does
+// set as well, to the height of the work area of the screen it opens on, so the ScrollViewer has a bound even where the popup's own constraint does
 // not reach it (checked by WorkspaceChipMenuTests on the template the tests load; the Fluent template the app runs has the
 // same ScrollViewer).
 internal static class WorkspaceChipMenu
@@ -72,9 +72,24 @@ internal static class WorkspaceChipMenu
     {
         // A context menu is bounded by the work area; a submenu's popup is kept on the screen by WPF itself, and a
         // MaxHeight on its MenuItem would clip the item, not the submenu.
-        if (menu is ContextMenu context) context.MaxHeight = SystemParameters.WorkArea.Height;
+        if (menu is ContextMenu context) context.MaxHeight = WorkAreaHeightAt(context.PlacementTarget);
         entries.ToList().ForEach(entry => menu.Items.Add(entry.IsGroup ? Caption(entry) : Choice(entry, current, pick)));
         return menu;
+    }
+
+    // The height of the work area of the screen the menu opens on (fix round 1): the screen holding its placement
+    // target, in that screen's DIPs. SystemParameters.WorkArea is the primary screen's, which is the wrong bound for a
+    // bar on a shorter second screen. With no target on screen, the primary's it is.
+    static double WorkAreaHeightAt(UIElement? target)
+    {
+        if (target is null || PresentationSource.FromVisual(target) is null) return SystemParameters.WorkArea.Height;
+        var at = target.PointToScreen(new Point(0, 0));
+        var monitor = Windows.Monitoring.NativeMethods.MonitorFromPoint(new Windows.Monitoring.NativeMethods.POINT { X = (int)at.X, Y = (int)at.Y },
+            Windows.Monitoring.NativeMethods.MONITOR_DEFAULTTONEAREST);
+        var info = new Windows.Monitoring.NativeMethods.MONITORINFO { cbSize = System.Runtime.InteropServices.Marshal.SizeOf<Windows.Monitoring.NativeMethods.MONITORINFO>() };
+        if (!Windows.Monitoring.NativeMethods.GetMonitorInfo(monitor, ref info)) return SystemParameters.WorkArea.Height;
+        Windows.Monitoring.NativeMethods.GetDpiForMonitor(monitor, Windows.Monitoring.NativeMethods.MDT_EFFECTIVE_DPI, out _, out var dpiY);
+        return (info.rcWork.Bottom - info.rcWork.Top) / (dpiY / 96.0);
     }
 
     static MenuItem Choice(Entry entry, Maybe<Guid> current, Action<Maybe<Guid>> pick)
