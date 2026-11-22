@@ -215,9 +215,15 @@ The task list at the bottom of the bar (spec `docs/superpowers/specs/2026-11-22-
 48. Untick "Task list" in Manage's Settings tab (strip items): the list disappears from the bar. Tick it
     again: it is back, with the same tasks.
 49. Quit Deskbar, put a version 1 `tasks.json` (with timers) in the state folder and start it. The tasks
-    come back as notes with no timers, and `tasks.json.v1` sits beside the new file.
+    come back as notes with no timers. There is no `tasks.json.v1` yet: it appears with the first change, so
+    add or tick a note, and `tasks.json.v1` then sits beside the new file with the old file's bytes.
 50. Change the icon size on Manage's Settings tab: the list's text keeps its proportion, the bar does not
     widen for a long title (it trims with an ellipsis), and `$ts task list` agrees with what is shown.
+51. Add twelve notes and click "+9": eight lines show and the wheel over the list scrolls to the rest, while the
+    workspace rows above stay where they were. Click "Less": three lines again.
+52. Double-click the tick box of the first note: only that note closes, and the one that slides under the
+    pointer stays open. `$ts task list --closed` lists the closed note first; `$ts task reopen <id>` brings it
+    back to the list.
 
 ## Tiling on the split tree
 
