@@ -91,6 +91,46 @@ public class TaskBoardTests
         Assert.True(Assert.Single(task.Sessions).IsLive);
     }
 
+    // Ruling 34: a resumed session coming back to its OWN task keeps the task's status. Only the user's next message
+    // (Answered) moves Done or Waiting on you back to In progress; resuming a session to look at it moves nothing.
+    [Theory]
+    [InlineData(TaskStatus.Done)]
+    [InlineData(TaskStatus.WaitingOnYou)]
+    [InlineData(TaskStatus.InProgress)]
+    public void Rejoining_its_own_task_keeps_the_status(TaskStatus status)
+    {
+        var board = Claudes(TaskBoard.Empty, id1, ws);
+        board = (status switch
+        {
+            TaskStatus.Done => board.MarkDone(id1, clock),
+            TaskStatus.WaitingOnYou => board.Ask(id1, "OK to merge?", clock),
+            _ => Result.Success(board),
+        }).Value.SessionEnded("s1", clock);
+        Later();
+
+        var task = Get(board.Rejoin(id1, Session("s1"), clock).Value, id1);
+
+        Assert.Equal(status, task.Status);
+        Assert.True(Assert.Single(task.Sessions).IsLive);
+        Assert.Equal(status == TaskStatus.WaitingOnYou, task.Question.HasValue);
+    }
+
+    // A rejoin is still a session taking a task up: it leaves any other open task it was live on, and a closed task
+    // refuses it as Join does.
+    [Fact]
+    public void Rejoining_leaves_the_other_task_and_a_closed_one_refuses()
+    {
+        var board = Claudes(TaskBoard.Empty, id1, ws);
+        board = Claudes(board, id2, ws).SessionEnded("s1", clock);
+        board = board.Join(id1, Session("s1"), clock).Value;
+
+        var rejoined = board.Rejoin(id2, Session("s1"), clock).Value;
+
+        Assert.False(Get(rejoined, id1).HasLiveSession);
+        Assert.True(Get(rejoined, id2).HasLiveSession);
+        Assert.Equal("The task is closed.", rejoined.Close(id2, clock).Value.Rejoin(id2, Session("s1"), clock).Error);
+    }
+
     [Fact]
     public void A_closed_task_cannot_be_joined()
     {

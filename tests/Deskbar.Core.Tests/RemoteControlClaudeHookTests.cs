@@ -254,6 +254,26 @@ public class RemoteControlClaudeHookTests
         Assert.Contains("task join <id> --session s1", briefing);
     }
 
+    // Ruling 34: resuming a session whose task is Done keeps it Done; only the user's next message moves it back.
+    [Fact]
+    public void A_resumed_session_keeps_its_tasks_status_until_the_user_writes()
+    {
+        var manager = Started();
+        Editor(manager, 0x10, "TaskSpaces", "Deskbar");
+        Said(manager, "s1", Repo, "new", "Tasks board");
+        Said(manager, "s1", Repo, "done");
+        Hooked(manager, "SessionEnd");
+
+        Hooked(manager, "SessionStart", source: "resume");
+
+        Assert.Equal(TaskStatus.Done, Titled("Tasks board").Status);
+        Assert.True(Titled("Tasks board").HasLiveSession);
+
+        Hooked(manager, "UserPromptSubmit");
+
+        Assert.Equal(TaskStatus.InProgress, Titled("Tasks board").Status);
+    }
+
     // Review focus 4: a resumed session (same id) keeps its task instead of being asked to pick again, even after the
     // session had ended; it is live on it again. Compacting a session that never ended keeps it too.
     [Fact]
