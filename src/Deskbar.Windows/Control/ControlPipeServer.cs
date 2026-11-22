@@ -1,4 +1,5 @@
 using CSharpFunctionalExtensions;
+using System.IO;
 using System.IO.Pipes;
 using System.Text;
 using Deskbar.Core.Control;
@@ -13,7 +14,7 @@ namespace Deskbar.Windows.Control;
 // second process that edited any of those itself would race the first, so the only safe way for an
 // outside caller to create a workspace or move a window is to ASK the running instance to do it.
 //
-// One connection at a time, served on a background task, the pipe re-created after every reply. The
+// One connection at a time, served on a background task, on one pipe instance disconnected after every reply. The
 // requests are a person or an agent typing commands, so there is nothing to gain from concurrency, and
 // serialising them means the handler never sees two at once.
 //
@@ -35,32 +36,82 @@ public sealed class ControlPipeServer : IDisposable
     public ControlPipeServer(string pipeName, Func<IReadOnlyList<string>, Task<ControlReply>> handle, Action<string>? trace = null) =>
         _ = Task.Run(() => Serve(pipeName, handle, trace, stop.Token));
 
+    // ONE INSTANCE FOR THE SERVER'S LIFE, disconnected between clients rather than disposed and made again.
+    //
+    // It used to be made again for every request, and after a failed one (a client that gave up before its answer,
+    // which claude-hook's 5 s reply timeout causes, or one that hung up mid-way) the catch waited a second before
+    // making the next. For that second, and for a moment after every reply, no pipe of the name existed at all, and the
+    // client's quick "not running" answer (ControlClient.PipeExistsAsync, plan Task 7) told every caller Deskbar was
+    // down: deskbar.cmd, deskbar-cli, an agent's `move --wait`, the hooks (review of Task 7, I-1; measured: a client
+    // 450 ms after a broken request got exit 2 within 100 ms, where ConnectAsync alone connected after 216 ms). While
+    // the one instance exists, a client between two requests finds it busy (ERROR_PIPE_BUSY), which WaitNamedPipe and
+    // ConnectAsync both wait on, and never ERROR_FILE_NOT_FOUND.
+    //
+    // So: make the instance, then serve on it: wait for a client, answer it, Disconnect, wait again. Whatever one request
+    // does wrong (a failed Answer included) costs that request only, and the instance stays. It is made again only when
+    // it cannot be reused (Disconnect failed), at once; the 1 s back-off is only for failing to MAKE it.
+    //
+    // maxNumberOfServerInstances stays 1, so a second Deskbar can never answer alongside this one. During an update
+    // restart the new instance meets the old one's pipe for a moment; making it throws, the back-off waits a second,
+    // and it gets the name once the old process has gone.
     static async Task Serve(string pipeName, Func<IReadOnlyList<string>, Task<ControlReply>> handle, Action<string>? trace, CancellationToken token)
+    {
+        while (!token.IsCancellationRequested)
+        {
+            NamedPipeServerStream pipe;
+            try
+            {
+                pipe = new NamedPipeServerStream(pipeName, PipeDirection.InOut, 1,
+                    PipeTransmissionMode.Byte, PipeOptions.Asynchronous | PipeOptions.CurrentUserOnly);
+            }
+            catch (Exception e)
+            {
+                trace?.Invoke($"control pipe: not made: {e.GetType().Name}: {e.Message}");
+                try { await Task.Delay(TimeSpan.FromSeconds(1), token).ConfigureAwait(false); }
+                catch (OperationCanceledException) { return; }
+                continue;
+            }
+
+            await using (pipe)
+            {
+                if (!await ServeOn(pipe, handle, trace, token).ConfigureAwait(false)) return;
+            }
+        }
+    }
+
+    // Serves client after client on one instance. False when the server is stopping; true when the instance cannot be
+    // reused and another must be made.
+    static async Task<bool> ServeOn(NamedPipeServerStream pipe, Func<IReadOnlyList<string>, Task<ControlReply>> handle, Action<string>? trace, CancellationToken token)
     {
         while (!token.IsCancellationRequested)
         {
             try
             {
-                // maxNumberOfServerInstances: 1, so a second Deskbar can never answer alongside this
-                // one. During an update restart the new instance meets the old one's pipe for a moment;
-                // creating it throws, the catch below waits a second, and it gets the name once the old
-                // process has gone.
-                await using var pipe = new NamedPipeServerStream(pipeName, PipeDirection.InOut, 1,
-                    PipeTransmissionMode.Byte, PipeOptions.Asynchronous | PipeOptions.CurrentUserOnly);
                 await pipe.WaitForConnectionAsync(token).ConfigureAwait(false);
                 await Answer(pipe, handle, token).ConfigureAwait(false);
             }
             catch (OperationCanceledException) when (token.IsCancellationRequested)
             {
-                return;
+                return false;
             }
             catch (Exception e)
             {
                 trace?.Invoke($"control pipe: {e.GetType().Name}: {e.Message}");
-                try { await Task.Delay(TimeSpan.FromSeconds(1), token).ConfigureAwait(false); }
-                catch (OperationCanceledException) { return; }
+            }
+
+            // Back to listening for the next client. An instance that cannot be disconnected (never connected because
+            // WaitForConnectionAsync itself failed, or broken some other way) is made again.
+            try
+            {
+                pipe.Disconnect();
+            }
+            catch (Exception e) when (e is IOException or InvalidOperationException or ObjectDisposedException)
+            {
+                trace?.Invoke($"control pipe: made again after {e.GetType().Name}: {e.Message}");
+                return true;
             }
         }
+        return false;
     }
 
     static async Task Answer(NamedPipeServerStream pipe, Func<IReadOnlyList<string>, Task<ControlReply>> handle, CancellationToken token)

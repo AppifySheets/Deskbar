@@ -163,6 +163,19 @@ public static class ControlArguments
     public static ControlReply HookReply(IReadOnlyList<string> args, ControlReply reply) =>
         IsClaudeHook(args) && reply.ExitCode == ControlReply.NotRunning ? new ControlReply(ControlReply.Ok, "") : reply;
 
+    // A request as the app's trace writes it (`ctl <this> -> <exit code>`, App). Every command as it came, except a hook:
+    // its --json carries the user's prompt and Claude's last reply, and the trace is often on and goes out with problem
+    // reports (review of Task 7, I-2). So a hook is written as its event, its session and the JSON's length only, or as
+    // the length alone when the JSON does not read.
+    public static string ForTrace(IReadOnlyList<string> args) =>
+        !IsClaudeHook(args)
+            ? string.Join(' ', args)
+            : ParseClaudeHook(args.Skip(1).ToList()) is { IsSuccess: true, Value.Json: { } json }
+                ? Tasks.ClaudeHookEvent.Parse(json, null, null).Match(
+                    hook => $"{ClaudeHookVerb} {hook.Event} session {hook.SessionId} ({json.Length} characters of JSON)",
+                    _ => $"{ClaudeHookVerb} ({json.Length} characters of JSON that does not read)")
+                : $"{ClaudeHookVerb} (no JSON)";
+
     // `claude-hook [--entry <value>] [--attended <value>] [--from <folder>] --json <text>`, in any order, as the server
     // receives it. Values may be EMPTY: cmd passes an unset variable as "" inside a batch file, and that is an answer
     // (ClaudeHookEvent reads it as "not set"), not a missing value. --json is required.

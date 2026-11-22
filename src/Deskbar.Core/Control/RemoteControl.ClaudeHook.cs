@@ -77,7 +77,10 @@ public sealed partial class RemoteControl
 
     // Whatever the ask answered, the session hears nothing. A refusal from RequestAttention is the app's concern (it
     // means a COM call failed), not the session's, and the hook would print it into the conversation for nothing.
-    static ControlReply Quietly(ControlReply _) => Quiet;
+    // The exit code is kept (review of Task 7, M-4), so the app's trace line (`ctl ... -> <code>`) still says an ask
+    // failed; the output goes, and the hook still exits 0, because the script ends `@exit /b 0` and the client prints
+    // nothing for an empty hook answer (ControlConsole.Silent).
+    static ControlReply Quietly(ControlReply reply) => reply with { Output = "" };
 
     // SessionStart. TaskOf finds the task a still-live session is on (compact, clear, or a second SessionStart);
     // LastTaskOf finds the one a resumed session was on before its SessionEnd, and Rejoin makes it live there again (the

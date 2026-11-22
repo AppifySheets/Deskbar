@@ -1,3 +1,5 @@
+using System.Runtime.CompilerServices;
+
 namespace Deskbar.App;
 
 // THE EXE'S ENTRY POINT, in place of the Main WPF generates from App.xaml (the project's StartupObject names this one).
@@ -13,13 +15,19 @@ namespace Deskbar.App;
 // So the command line is looked at first, and a `ctl` never touches App or anything WPF. Everything else is exactly
 // what the generated Main did: make the App, load App.xaml, run. The exit code is Run's, which is what Shutdown(code)
 // set; returning it keeps `ctl`'s exit codes and an early Shutdown's alike.
+//
+// The app's half lives in RunApp, kept out of Main by NoInlining (review of Task 7, M-1). The JIT compiles a method
+// whole, and compiling a Main that names App made the runtime load PresentationFramework, System.Xaml and WindowsBase
+// for a `ctl` that never runs those lines (measured: they were in the client's module list). With the App lines in a
+// method of their own, nothing WPF is loaded until RunApp is first called, which a `ctl` never does.
 static class Program
 {
     [STAThread]
-    static int Main(string[] args)
-    {
-        if (ControlCommandLine.Wants(args)) return ControlCommandLine.Run(args);
+    static int Main(string[] args) => ControlCommandLine.Wants(args) ? ControlCommandLine.Run(args) : RunApp();
 
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    static int RunApp()
+    {
         var app = new App();
         app.InitializeComponent();
         return app.Run();

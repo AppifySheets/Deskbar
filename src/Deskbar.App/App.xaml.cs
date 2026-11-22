@@ -1502,7 +1502,8 @@ public partial class App : Application
             args => Dispatcher.InvokeAsync(() =>
             {
                 var reply = control.Execute(args);
-                ClickTrace.Write($"ctl {string.Join(' ', args)} -> {reply.ExitCode}");
+                // A hook's JSON (the user's prompt, Claude's last reply) never reaches the trace (ForTrace).
+                ClickTrace.Write($"ctl {ControlArguments.ForTrace(args)} -> {reply.ExitCode}");
                 return reply;
             }).Task,
             ClickTrace.On ? ClickTrace.Write : null);

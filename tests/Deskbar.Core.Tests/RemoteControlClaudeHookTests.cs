@@ -148,6 +148,24 @@ public class RemoteControlClaudeHookTests
         Assert.Equal(down, ControlArguments.HookReply(["windows"], down));
     }
 
+    // Review of Task 7, I-2: the app traces every `ctl` request, and a claude-hook's --json carries the user's prompt
+    // and Claude's last reply. Tracing is often on, and a problem report carries the trace, so a hook is traced as its
+    // event, its session and the JSON's length only. Every other command is traced as it was.
+    [Fact]
+    public void A_hook_is_traced_without_its_json()
+    {
+        var json = """{"session_id":"92943450","cwd":"C:\\x","hook_event_name":"UserPromptSubmit","prompt":"my secret plan"}""";
+
+        var traced = ControlArguments.ForTrace(["claude-hook", "--entry", "cli", "--attended", "1", "--from", @"C:\x", "--json", json]);
+
+        Assert.DoesNotContain("secret", traced);
+        Assert.Contains("UserPromptSubmit", traced);
+        Assert.Contains("92943450", traced);
+        Assert.Contains($"{json.Length}", traced);
+        Assert.DoesNotContain("secret", ControlArguments.ForTrace(["claude-hook", "--json", "{\"prompt\":\"my secret plan\""]));
+        Assert.Equal("move x --title y", ControlArguments.ForTrace(["move", "x", "--title", "y"]));
+    }
+
     // --- the setting -----------------------------------------------------------------------------
 
     // On by default (stored as its negation), and `claude-tasks` is the remote twin of Manage's box.
