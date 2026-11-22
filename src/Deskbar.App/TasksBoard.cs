@@ -345,7 +345,10 @@ public sealed class TasksBoard : IDisposable
         task.Comments.Count,
         expanded.Contains(task.Id),
         pendingCloses.ContainsKey(task.Id),
-        expanded.Contains(task.Id) ? task.Comments.Select(CommentView).ToArray() : []);
+        expanded.Contains(task.Id) ? task.Comments.Select(CommentView).ToArray() : [])
+    {
+        Created = task.Created,
+    };
 
     // The mockup's sessions column: how many, and whether any is still live. Empty for a note.
     internal static string SessionsText(TaskItem task)
@@ -423,7 +426,11 @@ internal sealed record TaskCommentView(Guid Id, string Author, bool ByClaude, st
 /// closed and waits out its undo window.
 /// </summary>
 internal sealed record TaskRowView(Guid Id, string Title, string Detail, TaskStatus Status, bool Claudes, string Sessions, int SessionCount, int LiveCount,
-    TaskPlaceChoice Place, int CommentCount, bool Expanded, bool Closing, IReadOnlyList<TaskCommentView> Comments);
+    TaskPlaceChoice Place, int CommentCount, bool Expanded, bool Closing, IReadOnlyList<TaskCommentView> Comments)
+{
+    /// <summary>When the task appeared, for its age (TaskAge), which the window rewrites in place once a minute.</summary>
+    public DateTimeOffset Created { get; init; }
+}
 
 /// <summary>One group under its header.</summary>
 internal sealed record TaskGroupView(TaskStatus Status, string Header, IReadOnlyList<TaskRowView> Rows);

@@ -115,6 +115,7 @@ public partial class TasksWindow : Window
     nint fallbackAnchor;
     Rect lastNormal = Rect.Empty;
     readonly IDisposable placeWatch;
+    readonly IDisposable ageWatch;
 
     // The workspace chosen in the add box, or none chosen yet (the view's AddTarget then).
     TaskPlaceChoice? addChosen;
@@ -146,6 +147,11 @@ public partial class TasksWindow : Window
             {
                 if (IsOpen && !Quiet) Actions?.Remember(CurrentPlace());
             });
+        // The ages' minute (RefreshAges), only while the window is open, on the window's own thread.
+        ageWatch = Observable.Interval(TimeSpan.FromMinutes(1)).ObserveOn(context).Subscribe(_ =>
+        {
+            if (IsOpen) RefreshAges();
+        });
         // A press on the window holds a redraw (MustWait); its release, after the click it made has been handled (the
         // handler sees handled events too, and runs once the button under it has raised its Click), draws what waited.
         AddHandler(MouseLeftButtonUpEvent, new MouseButtonEventHandler((_, _) => Flush()), handledEventsToo: true);
@@ -213,6 +219,7 @@ public partial class TasksWindow : Window
     {
         closingForGood = true;
         placeWatch.Dispose();
+        ageWatch.Dispose();
         Close();
     }
 
@@ -393,6 +400,7 @@ public partial class TasksWindow : Window
         Rows.Children.Clear();
         menuButtons.Clear();
         commentBoxes.Clear();
+        ages.Clear();
         authors.Clear();
         closing.Clear();
         view.Groups.ToList().ForEach(group =>
@@ -478,14 +486,15 @@ public partial class TasksWindow : Window
         Cell(grid, 0, LeftOf(row));
         Cell(grid, 1, TextOf(row));
         Cell(grid, 2, SessionsOf(row));
-        Cell(grid, 3, Chip(row.Place));
+        Cell(grid, 3, AgeOf(row));
+        Cell(grid, 4, Chip(row.Place));
         var comments = CommentsButton(row);
-        Cell(grid, 4, comments);
-        Cell(grid, 5, ActionOf(row));
+        Cell(grid, 5, comments);
+        Cell(grid, 6, ActionOf(row));
         var more = Small(new TextBlock { Text = "", FontFamily = IconFont, FontSize = 12, Foreground = Ink }, "More",
             () => OpenMenuFor(row.Id), "Status, move, rename, delete");
         menuButtons[row.Id] = more;
-        Cell(grid, 6, more);
+        Cell(grid, 7, more);
         if (row.Closing)
             grid.Children.OfType<UIElement>().Where(part => Grid.GetColumn(part) != 0).ToList().ForEach(part => part.Opacity = 0.45);
         // The comments and "…" buttons are quiet until the pointer is on their line, like the bar's quiet controls.
@@ -525,10 +534,45 @@ public partial class TasksWindow : Window
         return line;
     }
 
-    // The line's columns: tick, title (the star, trimming first), sessions, workspace chip, comments, action (close or
-    // Reopen), "…". Fixed widths, shared by every line, so each column sits at the same x on every line.
+    // The line's columns: tick, title (the star, trimming first), sessions, age, workspace chip, comments, action
+    // (close or Reopen), "…". Fixed widths, shared by every line, so each column sits at the same x on every line.
     static readonly IReadOnlyList<GridLength> LineColumns =
-        [new(22), new(1, GridUnitType.Star), new(110), new(92), new(40), new(52), new(24)];
+        [new(22), new(1, GridUnitType.Star), new(110), new(44), new(92), new(40), new(52), new(24)];
+
+    // THE AGE ON EACH LINE (ruling 26, as on the bar): TaskAge's compact form, dim, right-aligned before the chip, the
+    // full date and time in its tooltip. Rewritten in place once a minute while the window is open (RefreshAges), never
+    // by a redraw, and not while a redraw would wait (MustWait). Now is the clock, a seam for the tests.
+    internal Func<DateTimeOffset> Now { get; init; } = () => DateTimeOffset.UtcNow;
+
+    readonly Dictionary<Guid, (TextBlock Text, DateTimeOffset Created)> ages = [];
+
+    /// <summary>Rewrites every age on show for the time now; nothing else changes.</summary>
+    internal void RefreshAges()
+    {
+        if (MustWait) return;
+        var now = Now();
+        ages.Values.ToList().ForEach(age => age.Text.Text = TaskAge.Format(now - age.Created));
+    }
+
+    internal string AgeText(Guid id) => ages.TryGetValue(id, out var age) ? age.Text.Text : "";
+
+    TextBlock AgeOf(TaskRowView row)
+    {
+        var text = new TextBlock
+        {
+            Tag = "task-age",
+            Text = TaskAge.Format(Now() - row.Created),
+            FontSize = 10.5,
+            Foreground = HeaderInk,
+            HorizontalAlignment = HorizontalAlignment.Right,
+            VerticalAlignment = VerticalAlignment.Center,
+            TextTrimming = TextTrimming.CharacterEllipsis,
+            Margin = new Thickness(0, 0, 6, 0),
+            ToolTip = row.Created.ToLocalTime().ToString("dddd d MMMM yyyy, HH:mm"),
+        };
+        ages[row.Id] = (text, row.Created);
+        return text;
+    }
 
     // The icon font of Windows 11, with Windows 10's as the fallback.
     static FontFamily IconFont => FloatingBar.IconFont;
