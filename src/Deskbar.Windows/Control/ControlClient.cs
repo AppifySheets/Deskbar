@@ -1,6 +1,9 @@
 using CSharpFunctionalExtensions;
+using System.IO;
 using System.IO.Pipes;
 using System.Runtime.InteropServices;
+using System.Security.AccessControl;
+using System.Security.Principal;
 using System.Text;
 using Deskbar.Core.Control;
 
@@ -79,10 +82,10 @@ public static class ControlClient
         // it retries until the timeout runs out (measured: 2 s every time, see PipeExistsAsync).
         if (!await PipeExistsAsync(pipeName).ConfigureAwait(false)) return NotRunning;
 
-        // CurrentUserOnly on the client too: it refuses a pipe of this name owned by someone else, so a
-        // process squatting on the name cannot answer in Deskbar's place.
-        await using var pipe = new NamedPipeClientStream(".", pipeName, PipeDirection.InOut,
-            PipeOptions.Asynchronous | PipeOptions.CurrentUserOnly);
+        // The client refuses a pipe of this name that another user owns, so a process squatting on the name cannot
+        // answer in Deskbar's place (OwnedByThisUser). Checked by hand rather than with PipeOptions.CurrentUserOnly,
+        // whose check failed a real Deskbar (PR #423's CI, below).
+        await using var pipe = new NamedPipeClientStream(".", pipeName, PipeDirection.InOut, PipeOptions.Asynchronous);
         try
         {
             await pipe.ConnectAsync((int)connectTimeout.TotalMilliseconds).ConfigureAwait(false);
@@ -91,6 +94,15 @@ public static class ControlClient
         {
             return NotRunning;
         }
+        // An unexpected answer about the pipe is a refusal with a reason, never an unhandled exception: a hook's client
+        // that threw died with exit 127 under Git Bash and said nothing in the session.
+        catch (Exception e) when (e is UnauthorizedAccessException or IOException)
+        {
+            return ControlReply.Fail($"Could not connect to Deskbar's control pipe: {e.Message}");
+        }
+
+        if (!OwnedByThisUser(pipe))
+            return ControlReply.Fail("Something other than this user's Deskbar answered on its control pipe; nothing was sent.");
 
         try
         {
@@ -113,6 +125,30 @@ public static class ControlClient
         {
             return ControlReply.Fail($"The connection to Deskbar broke: {e.Message}");
         }
+    }
+
+    // WHETHER THE PIPE IS THIS USER'S, the check PipeOptions.CurrentUserOnly makes on the client, made so that it also
+    // holds when the two ends' tokens name different default owners.
+    //
+    // CurrentUserOnly compares the pipe's owner with the client token's DEFAULT OWNER, which is not always the user.
+    // An elevated process's default owner is the Administrators group, and Git Bash (MSYS, like Cygwin) sets its own
+    // processes' default owner to the user. So an elevated Deskbar's pipe (owned by Administrators) and a hook started
+    // by Git Bash (default owner: the user) do not match, and .NET threw "not owned by the current user" out of the
+    // client, which died with exit 127. Measured on PR #423's CI, where the runner is elevated: the two Git Bash tests
+    // that reach a real pipe failed that way, and the in-process ones passed.
+    //
+    // So the owner may be this user, or this process's own default owner, or the Administrators group while this process
+    // runs elevated (it is then in that group, and an elevated Deskbar of this user owns its pipe that way). Any other
+    // owner is another user's, and the request is not sent. The server's own CurrentUserOnly ACL still admits only
+    // this user.
+    static bool OwnedByThisUser(NamedPipeClientStream pipe)
+    {
+        var owner = pipe.GetAccessControl().GetOwner(typeof(SecurityIdentifier));
+        using var me = WindowsIdentity.GetCurrent();
+        var administrators = new SecurityIdentifier(WellKnownSidType.BuiltinAdministratorsSid, null);
+        return owner is not null
+            && (owner == me.User || owner == me.Owner
+                || (owner == administrators && new WindowsPrincipal(me).IsInRole(WindowsBuiltInRole.Administrator)));
     }
 
     // WHETHER ANYONE SERVES THE PIPE, answered in well under a millisecond when nobody does.
