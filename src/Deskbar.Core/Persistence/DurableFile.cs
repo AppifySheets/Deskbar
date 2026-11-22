@@ -64,15 +64,39 @@ public static class DurableFile
             .Select(file => Result.Try(() => MoveAside(file), e => $"could not keep {file} aside: {e.Message}")
                 .Match(aside => $"kept {Path.GetFileName(file)} as {Path.GetFileName(aside)}", error => error)));
 
-    // `<path>.<yyyyMMdd-HHmmss>.bak`, with a counter only if that name is taken (two failed starts in one second).
+    // A READABLE FILE THAT HELD SOMETHING THE READER DROPPED IS COPIED ASIDE ONCE (goals.json since the goals planner:
+    // a goal with no id or no period is skipped on load and the next save would not write it back). The file stays in
+    // place, since what was read from it is the board and a crash before the next save must still find it; a copy goes
+    // beside it under KeepAside's name. "Once": when a .bak of this file with the very same bytes is already there (the
+    // app restarted before anything was saved), nothing is copied again. Answers what happened, for the store's trace;
+    // a copy that fails (a lock, a full disk) is reported, not thrown, since the load itself worked.
+    public static string KeepCopy(string path) =>
+        Result.Try(() =>
+            {
+                var bytes = File.ReadAllBytes(path);
+                var same = Directory.GetFiles(Path.GetDirectoryName(Path.GetFullPath(path))!, Path.GetFileName(path) + ".*.bak")
+                    .FirstOrDefault(bak => File.ReadAllBytes(bak).AsSpan().SequenceEqual(bytes));
+                if (same is not null) return $"{Path.GetFileName(path)} is already kept as {Path.GetFileName(same)}";
+                var copy = FreeAsideName(path);
+                File.WriteAllBytes(copy, bytes);
+                return $"kept a copy of {Path.GetFileName(path)} as {Path.GetFileName(copy)}";
+            }, e => $"could not keep a copy of {path}: {e.Message}")
+            .Match(done => done, error => error);
+
     static string MoveAside(string path)
     {
-        var stamp = DateTime.Now.ToString("yyyyMMdd-HHmmss");
-        var aside = Enumerable.Range(0, int.MaxValue)
-            .Select(n => n == 0 ? $"{path}.{stamp}.bak" : $"{path}.{stamp}-{n}.bak")
-            .First(candidate => !File.Exists(candidate));
+        var aside = FreeAsideName(path);
         File.Move(path, aside);
         return aside;
+    }
+
+    // `<path>.<yyyyMMdd-HHmmss>.bak`, with a counter only if that name is taken (two failed starts in one second).
+    static string FreeAsideName(string path)
+    {
+        var stamp = DateTime.Now.ToString("yyyyMMdd-HHmmss");
+        return Enumerable.Range(0, int.MaxValue)
+            .Select(n => n == 0 ? $"{path}.{stamp}.bak" : $"{path}.{stamp}-{n}.bak")
+            .First(candidate => !File.Exists(candidate));
     }
 
     // `parse` turns the file's text into the value and throws when it cannot. `empty` is the answer when there
