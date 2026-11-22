@@ -9,7 +9,7 @@ The bottom of the bar carries a short task list, for the things you want to reme
 
 ## How to use it
 
-At the top of the list is a text box that says where a note would go, "Add to Deskbar…" (or "Add…" on a desktop you have not named). Under it are the first three open tasks, one per line, with the workspace each belongs to as a small chip in that workspace's colour (or "none"). Tasks that wait on you come first, then finished ones, then the newest. On a bar docked to a screen edge, the list uses all the height the workspace rows leave free, so it shows as many tasks as fit, never fewer than three.
+At the top of the list is a text box that says where a note would go, "Add to Deskbar…" (or "Add…" on a desktop you have not named). Under it are the first three open tasks, one per line, with the workspace each belongs to as a small chip in that workspace's colour (or "none"). Tasks that wait on you come first, then the rest in the order of [importance and urgency](#important-and-urgent), each group in the order you drag them into. On a bar docked to a screen edge, the list uses all the height the workspace rows leave free, so it shows as many tasks as fit, never fewer than three.
 
 When more than three are open, a small "+2 more" under the last line counts the ones out of sight. It turns orange and reads "+2 waiting" when the hidden ones are waiting on you, so nothing that needs you stays hidden without a sign. With nothing out of sight it reads **All tasks**. Either way, a click opens the [tasks window](#the-tasks-window), where every task is, open and closed.
 
@@ -23,11 +23,30 @@ Click anywhere else on a line to go to its workspace. A note on no workspace has
 
 A task is in one of five statuses: backlog (a plain note), in progress, waiting on you, done or closed. Closed tasks leave the list.
 
+## Important and urgent
+
+Every task can be marked important, urgent, both or neither. Each line has two small toggles for it, an exclamation mark for important and a clock for urgent, just left of the age. Off, they stay out of sight until you point at the line or select it; on, they show in colour, red for important and amber for urgent. Hover one to see its name.
+
+The two flags sort the list into the four quadrants of Stephen Covey's time management matrix, from *The 7 Habits of Highly Effective People*:
+
+- I: urgent and important
+- II: important, not urgent
+- III: urgent, not important
+- IV: neither
+
+Tasks waiting on you stay on top whatever their flags, with the latest question first. Below them come quadrants I, II, III and IV, with a little space between groups. A new task goes to the top of its quadrant (a new task has no flags, so that is quadrant IV). Setting or clearing a flag moves the task to the top of the quadrant it lands in. A task that is done keeps its place; a closed task leaves, and one you reopen comes back at the top of its quadrant. Undo after closing puts the task back where it was. A status line from a session never moves a line.
+
+Within a quadrant the order is yours. Drag a line up or down and let go: it goes just above the line you let go over if you are on its top half, just below it if you are on its bottom half. Let go among another quadrant's lines and the task takes that quadrant's flags. A press that does not move is still a click. Tasks waiting on you cannot be dragged and nothing can be dropped above them; once you answer, the task drops into its quadrant at its place. The list does not redraw while you hold the mouse button down, so nothing moves under the pointer.
+
 ## The tasks window
 
 "+2 more" (or **All tasks**) under the list opens the tasks window: a window of its own with every task. It has a title bar, you can resize it, and it stays open when you click into another app, so you can keep it beside your work. It is in Alt+Tab and on the taskbar. Close it with its X. It opens again where you left it, at the same size and on the same screen, even after a restart. If that screen is gone, it opens next to the bar. Clicking "+2 more" while the window is open brings it forward, onto the desktop you are on.
 
-The window opens on the list itself, not on a form. Open tasks are grouped by status: **Waiting on you** first, then **Done**, then **In progress**, then **Backlog**. The chips along the top filter by status and show how many tasks each one holds: Open, Waiting on you, Done, In progress, Backlog and **Closed**. Closed tasks only show under their own chip, the most recently closed first, each with **Reopen**. **Workspace: all** narrows the list to one workspace, or to tasks on none.
+The window opens on the list itself, not on a form. Open tasks are grouped as on the bar: **Waiting on you** first, then the four quadrants under Covey's own words, "I Urgent and important", "II Important, not urgent", "III Urgent, not important" and "IV Not urgent, not important". The chips along the top filter by status and show how many tasks each one holds: Open, Waiting on you, Done, In progress, Backlog and **Closed**. A status chip keeps the quadrants and shows only that status in each. Closed tasks only show under their own chip, the most recently closed first, each with **Reopen**. **Workspace: all** narrows the list to one workspace, or to tasks on none.
+
+Each line has the same two toggles as on the bar, and drags the same way: within its group to reorder, into another quadrant to take its flags.
+
+**List** and **Matrix** at the top right switch between this list and Covey's matrix itself: a 2 by 2 grid with urgent and not urgent across the top and important and not important down the side, so quadrant I sits top left and quadrant II top right. Each cell lists its quadrant's open tasks in their order, with the same lines, and scrolls on its own when it is long. Tasks waiting on you sit at the top of their own quadrant's cell, in orange. Drag a line within a cell to reorder it, or into another cell, an empty one included, to give it that cell's flags. Quadrant II, important but not urgent, is drawn a little brighter, since it is the one Covey says to put first. The window remembers which view you left it on.
 
 Each line shows the task's title, then its question or status line under it, then its sessions (a square for each, blue while it is live, with "2 sessions, 1 live" or "1 session, ended"), its workspace and its comment count. A Claude task has an orange edge and a **CL** tag. A note has a tick box that closes it, with the same six seconds of Undo as on the bar.
 
@@ -56,7 +75,12 @@ $ts = "$env:APPDATA\Deskbar\deskbar.cmd"
 & $ts task list --closed                    # the closed ones, the latest closed first
 & $ts task reopen 3f2a                      # bring a closed task back
 & $ts task close 3f2a                       # an id, or a unique prefix of four or more characters
+& $ts task flag 3f2a important on           # or urgent; off clears it
+& $ts task order 3f2a top                   # or end, or a place in its quadrant counting from 1
+& $ts tasks-window matrix                   # or list
 ```
+
+`task list` gives each task's `important` and `urgent` flags, its `quadrant` ("I" to "IV") and its `order`, its place in that quadrant counting from 1 (null while it waits on you, since it is pinned on top until you answer).
 
 The full set:
 
@@ -68,7 +92,10 @@ The full set:
 - `task move <id> <workspace>|none`
 - `task comment <id> <markdown>`
 - `task delete <id>`
+- `task flag <id> important|urgent on|off`, the toggles' twin; the task moves to the top of the quadrant it lands in
+- `task order <id> top|end|<n>`, the drag's twin, within the task's own quadrant; a task waiting on you is refused
 - `tasks-window show` and `tasks-window hide`, to open or bring forward the tasks window, or close it
+- `tasks-window list` and `tasks-window matrix`, to switch the window's view (remembered)
 
 ## With Claude sessions
 
