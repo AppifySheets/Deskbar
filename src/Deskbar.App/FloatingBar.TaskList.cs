@@ -235,7 +235,9 @@ public partial class FloatingBar
     // by painting the list.
     bool TaskListMustWait =>
         (Mouse.LeftButton == MouseButtonState.Pressed && (IsMouseOver || PointerOnStrip()))
-        || arrangeDrag is not null || arrangeDropQueued || draggingWindow || openMenu?.IsOpen == true;
+        || arrangeDrag is not null || arrangeDropQueued || draggingWindow || openMenu?.IsOpen == true
+        // A task line armed, dragged, or its drop still queued (FloatingBar.TaskDrag.cs).
+        || TaskDragInFlight;
 
     // For the tests: whether the list is on screen, what "+N more" says ("" while it is hidden), whether the box has
     // the keyboard, where a note added now would go, what the empty box says, and the lines on show.
@@ -564,6 +566,7 @@ public partial class FloatingBar
         var addRow = new StackPanel { Margin = new Thickness(0, 0, 0, 3), Children = { box, taskAddChips } };
 
         taskLinesPanel = new StackPanel();
+        WireTaskDrag(taskLinesPanel);
         // The lines scroll inside this once the expanded list is capped (CapTaskLines). The bar draws no scroll bar of
         // its own anywhere, so none here either: the wheel scrolls it. Folded to three, it has no ceiling at all.
         taskLinesScroller = new ScrollViewer
@@ -898,8 +901,13 @@ public partial class FloatingBar
         ShowQuietFlags(button, selected);
         button.MouseEnter += (_, _) => ShowQuietFlags(button, true);
         button.MouseLeave += (_, _) => ShowQuietFlags(button, selection.IsSelected(line.Id));
-        // The click guard, as on the tick and the close button (TaskClickIgnored).
-        button.PreviewMouseLeftButtonDown += (_, e) => taskPressClicks = e.ClickCount;
+        // The click guard, as on the tick and the close button (TaskClickIgnored); and the press that may become a drag
+        // of the line (FloatingBar.TaskDrag.cs), armed only, so a press released in place stays this Click.
+        button.PreviewMouseLeftButtonDown += (_, e) =>
+        {
+            taskPressClicks = e.ClickCount;
+            if (taskLinesPanel is not null) TaskDragPress(line.Id, e.GetPosition(taskLinesPanel));
+        };
         button.Click += (_, _) =>
         {
             MarkPressConsumed();

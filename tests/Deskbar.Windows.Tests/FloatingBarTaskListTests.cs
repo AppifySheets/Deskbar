@@ -1500,4 +1500,167 @@ public class FloatingBarTaskListTests
         Assert.True(Closing(t.Lines[0]));
         Assert.False(HasButtonNamed(t.Lines[0], "Important"));
     });
+
+    // --- Task 12: dragging a line up or down (Rulings 24, 25) --------------------------------------------------------
+
+    static Panel LinesPanel(ListBar t) => (Panel)t.Lines[0].Parent;
+
+    // A point inside a line, `share` of the way down it, in the lines panel's own coordinates (what the drag reads).
+    static Point In(ListBar t, Button line, double share) =>
+        line.TranslatePoint(new Point(10, line.ActualHeight * share), LinesPanel(t));
+
+    // Press on a line, move to a point (in two steps, the first past the drag distance), release, and let the queued
+    // drop run, the way a real drag ends.
+    static void Drag(ListBar t, Button from, Point to)
+    {
+        var start = In(t, from, 0.5);
+        t.Bar.TaskDragPress(((TaskLine)from.Tag).Id, start);
+        t.Bar.TaskDragMove(new Point(start.X, start.Y + (to.Y > start.Y ? 8 : -8)));
+        t.Bar.TaskDragMove(to);
+        t.Bar.TaskDragRelease();
+        PumpBar(t);
+    }
+
+    static void PumpBar(ListBar t) => t.Bar.Dispatcher.Invoke(() => { }, DispatcherPriority.Background);
+
+    static ListBar DragBar(int notes)
+    {
+        var t = Build(openWindow: () => { });
+        t.Bar.ArrangeMouseInput = ArrangeMouse.Held;
+        t.Bar.SizeToContent = SizeToContent.Manual;
+        t.Bar.Height = 900;
+        Enumerable.Range(1, notes).ToList().ForEach(i => t.Tasks.AddNote($"n{i}", t.Gepha));
+        Settle(t);
+        return t;
+    }
+
+    [Fact]
+    public void Dragging_a_line_down_puts_it_below_the_line_it_is_dropped_on() => StaThread.Run(() =>
+    {
+        using var t = DragBar(4);
+        Assert.Equal(["n4", "n3", "n2", "n1"], t.Lines.Select(TitleOf));
+
+        Drag(t, t.Lines[0], In(t, t.Lines[2], 0.8));
+
+        Assert.Equal(["n3", "n2", "n4", "n1"], t.Tasks.Board.Pile().Select(x => x.Title));
+        Settle(t);
+        Assert.Equal(["n3", "n2", "n4", "n1"], t.Lines.Select(TitleOf));
+        Assert.False(t.Bar.TaskDragging);
+    });
+
+    [Fact]
+    public void Dragging_a_line_up_puts_it_above_the_line_it_is_dropped_on() => StaThread.Run(() =>
+    {
+        using var t = DragBar(4);
+
+        Drag(t, t.Lines[3], In(t, t.Lines[1], 0.2));
+
+        Assert.Equal(["n4", "n1", "n3", "n2"], t.Tasks.Board.Pile().Select(x => x.Title));
+    });
+
+    // A press that does not travel the drag distance is a click, not a drag: nothing moves and no preview shows.
+    [Fact]
+    public void A_press_that_does_not_travel_is_no_drag() => StaThread.Run(() =>
+    {
+        using var t = DragBar(3);
+        var before = t.Tasks.Board;
+        var at = In(t, t.Lines[0], 0.5);
+
+        t.Bar.TaskDragPress(((TaskLine)t.Lines[0].Tag).Id, at);
+        t.Bar.TaskDragMove(new Point(at.X + 1, at.Y + 1));
+        Assert.False(t.Bar.TaskDragging);
+        Assert.Null(t.Bar.TaskDropShown);
+        t.Bar.TaskDragRelease();
+        PumpBar(t);
+
+        Assert.Same(before, t.Tasks.Board);
+        // Let go, the press holds nothing back: a change paints at once.
+        t.Tasks.AddNote("after the press", t.Gepha);
+        Assert.Equal("after the press", TitleOf(t.Lines[0]));
+    });
+
+    // While the drag shows where the line would go, the list does not repaint under it (#48: no repaint during a
+    // press or a drag); the change that waited is drawn once the drop is done.
+    [Fact]
+    public void The_list_does_not_repaint_during_a_drag_and_shows_the_drop_line() => StaThread.Run(() =>
+    {
+        using var t = DragBar(3);
+        var lines = t.Lines.ToList();
+        var start = In(t, lines[0], 0.5);
+        t.Bar.TaskDragPress(((TaskLine)lines[0].Tag).Id, start);
+        t.Bar.TaskDragMove(new Point(start.X, start.Y + 8));
+        t.Bar.TaskDragMove(In(t, lines[2], 0.8));
+        Assert.True(t.Bar.TaskDragging);
+        var shown = t.Bar.TaskDropShown!;
+        Assert.Equal(TaskPlace.After(((TaskLine)lines[2].Tag).Id), shown.Place);
+        Assert.Equal(Quadrant.IV, shown.Quadrant);
+
+        t.Tasks.AddNote("arrives mid-drag", t.Gepha);
+        Assert.Equal(lines, t.Lines.ToList());
+
+        t.Bar.TaskDragRelease();
+        PumpBar(t);
+        Settle(t);
+        Assert.Equal(["arrives mid-drag", "n2", "n1", "n3"], t.Lines.Select(TitleOf));
+        Assert.Null(t.Bar.TaskDropShown);
+    });
+
+    // Dropping a line among another quadrant's lines sets that quadrant's flags.
+    [Fact]
+    public void Dropping_into_another_group_sets_its_flags() => StaThread.Run(() =>
+    {
+        using var t = DragBar(3);
+        var n1 = t.Tasks.Board.Tasks.Single(x => x.Title == "n1").Id;
+        t.Tasks.SetFlag(n1, TaskFlag.Important, true);
+        Settle(t);
+        Assert.Equal(["n1", "n3", "n2"], t.Lines.Select(TitleOf));
+
+        Drag(t, t.Lines[2], In(t, t.Lines[0], 0.8));
+
+        var n2 = t.Tasks.Board.Tasks.Single(x => x.Title == "n2");
+        Assert.True(n2.Important);
+        Assert.False(n2.Urgent);
+        Assert.Equal(["n1", "n2", "n3"], t.Tasks.Board.Pile().Select(x => x.Title));
+    });
+
+    // Waiting on you lines are pinned: a press on one arms no drag, and nothing drops above them (a drop on one lands
+    // under the block, at the top of the first group below it).
+    [Fact]
+    public void Waiting_lines_cannot_be_dragged_and_nothing_drops_above_them() => StaThread.Run(() =>
+    {
+        using var t = DragBar(3);
+        var n3 = t.Tasks.Board.Tasks.Single(x => x.Title == "n3").Id;
+        t.Tasks.SetStatus(n3, Deskbar.Core.Tasks.TaskStatus.WaitingOnYou);
+        Settle(t);
+        Assert.Equal(["n3", "n2", "n1"], t.Lines.Select(TitleOf));
+
+        var start = In(t, t.Lines[0], 0.5);
+        t.Bar.TaskDragPress(n3, start);
+        t.Bar.TaskDragMove(new Point(start.X, start.Y + 30));
+        Assert.False(t.Bar.TaskDragging);
+        t.Bar.TaskDragRelease();
+
+        Drag(t, t.Lines[2], In(t, t.Lines[0], 0.2));
+
+        Assert.Equal(["n3", "n1", "n2"], t.Tasks.Board.Pile().Select(x => x.Title));
+    });
+
+    // Lost capture (another window took the mouse) calls the drag off: nothing moves.
+    [Fact]
+    public void A_cancelled_drag_moves_nothing() => StaThread.Run(() =>
+    {
+        using var t = DragBar(3);
+        var before = t.Tasks.Board;
+        var start = In(t, t.Lines[0], 0.5);
+        t.Bar.TaskDragPress(((TaskLine)t.Lines[0].Tag).Id, start);
+        t.Bar.TaskDragMove(new Point(start.X, start.Y + 8));
+        t.Bar.TaskDragMove(In(t, t.Lines[2], 0.8));
+
+        t.Bar.CancelTaskDrag("test");
+        t.Bar.TaskDragRelease();
+        PumpBar(t);
+
+        Assert.Same(before, t.Tasks.Board);
+        Assert.False(t.Bar.TaskDragging);
+    });
 }
