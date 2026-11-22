@@ -195,33 +195,29 @@ P12. Start again from a fresh state.json with the window list on the screens and
 
 ## Tasks in the bar
 
-Tasks in the bar (spec `docs/superpowers/specs/2026-11-19-tasks-in-the-bar-design.md`). `$ts` is
+The task list at the bottom of the bar (spec `docs/superpowers/specs/2026-11-22-tasks-board-design.md`). `$ts` is
 `%APPDATA%\Deskbar\deskbar.cmd`.
 
-42. `$ts task add "probe" --workspace none --in 1m` exits 0. `$ts task list` shows it running,
-    and a minute later due. `tasks.json` is in the state folder. Delete it with
-    `$ts task delete <id>`.
-43. Click the stopwatch and park the current workspace for 1 min. Switch away: the stopwatch
-    counts down with the workspace's colour beside it, and the row's blue pie empties. At the end
-    the row blinks orange and the stopwatch reads "due". Come back and stay 2 seconds: the blink
-    stops and the task is open (`$ts task list`).
-44. Arrive on a workspace and park it within 2 seconds. Stay: the new timer keeps running.
-45. Open the stopwatch menu with a due task listed. Its submenu has Done, Clear timer and the
-    four lengths; Clear timer ends the timer and the stopwatch stops reading "due". On a task
-    with no timer, Clear timer is greyed out.
-46. Type in a window on workspace A, switch to B with Win+Ctrl+Arrow and open the stopwatch
-    menu without clicking into a window there: the park header names B, not A's window.
-47. Minimize the bar, then `$ts task add "card probe" --workspace none --in 1m` and wait. A card
-    appears bottom right and the focus stays where it was. Switch desktops: the card is still
-    there. `$ts task done <id>` closes it.
-48. Repeat 47 with the bar hidden, stepped aside, and under a full-screen app. Click the card of
-    a free task: the stopwatch menu opens above the card. Walk it with the arrow keys, close it
-    with Esc, and again with a click outside; the card closes with the menu. Click the card a
-    second time while its menu is open: nothing breaks. With the bar hidden, the menu stays up
-    while open (the bar's fade is held).
-49. Park seven free tasks for 1 min with the bar minimized: five cards stack up, no more.
-50. Change the icon size on Manage's Settings tab: the stopwatch glyph grows with it, the
-    countdown text does not, and the countdown does not shift from second to second.
+42. Click "+ Add". A box opens with the current workspace's chip ticked, then "none" and "other...". Type
+    "probe", press Enter: the note appears as a line with an empty tick box and the workspace's chip, and
+    the keyboard is back in the window you were typing in. Click the tick box: the note leaves the list.
+43. `$ts task add "a"`, "b", "c", "d" and "e" (five tasks). The list shows three lines and the header
+    reads "+2". Click it: all five show and it reads "Less". Click it again: back to three.
+44. With the five tasks of step 43 open, `$ts task status <id> waiting` on all five. They sort to the top, three
+    show and the two hidden ones wait on you: the header reads "+2 waiting" in orange. Set two of them back to
+    `backlog`: the header reads "+2" in the plain ink again.
+45. Click "+ Add", type some text, then click into another app. The box closes. Click "+ Add" again: the
+    text and the chip you had are back. Enter and Esc both give the keyboard back to the window you were
+    typing in (type a few letters after each to check).
+46. Click "+ Add" and the "other..." chip. Does its menu keep the add box open? Pick a workspace: the
+    chip takes its name and is ticked, and Enter files the note there. Note the answer in the report.
+47. Click a line of a note on another workspace: you go there. Click a note on "none": nothing happens.
+48. Untick "Task list" in Manage's Settings tab (strip items): the list disappears from the bar. Tick it
+    again: it is back, with the same tasks.
+49. Quit Deskbar, put a version 1 `tasks.json` (with timers) in the state folder and start it. The tasks
+    come back as notes with no timers, and `tasks.json.v1` sits beside the new file.
+50. Change the icon size on Manage's Settings tab: the list's text keeps its proportion, the bar does not
+    widen for a long title (it trims with an ellipsis), and `$ts task list` agrees with what is shown.
 
 ## Tiling on the split tree
 
