@@ -252,6 +252,8 @@ public partial class TasksWindow
             Child = body,
         };
         cells[cell.Quadrant] = (box, lines);
+        // A press in the cell makes it the active one, whose flags a new task takes (TasksWindow.AddFlags.cs).
+        WireActiveCell(box, cell.Quadrant);
         return box;
     }
 }

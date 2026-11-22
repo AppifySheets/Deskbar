@@ -133,7 +133,7 @@ public sealed class TasksBoard : IDisposable
             MoveTo: (id, workspace) => MoveTo(id, workspace),
             Delete: id => Delete(id),
             Comment: (id, markdown) => Comment(id, markdown).IsSuccess,
-            AddNote: (title, workspace) => AddNote(title, workspace).IsSuccess,
+            AddNote: (title, workspace, quadrant) => AddNote(title, workspace, quadrant).IsSuccess,
             SetFlag: (id, flag, on) => SetFlag(id, flag, on),
             Place: (id, quadrant, place) => Place(id, quadrant, place),
             ShowMatrix: on => Report(manager.SetTasksMatrix(on)),
@@ -378,8 +378,12 @@ public sealed class TasksBoard : IDisposable
         return Report(tasks.Delete(id));
     }
 
-    /// <summary>One of Petre's notes, in the backlog, where the add box's chip says.</summary>
-    public Result AddNote(string title, Maybe<Guid> workspace) => Report(tasks.AddNote(title, workspace).Bind(_ => Result.Success()));
+    /// <summary>
+    /// One of Petre's notes, in the backlog, where the add box's chip says, with the flags its toggles say (Ruling 37):
+    /// it lands at the top of that quadrant.
+    /// </summary>
+    public Result AddNote(string title, Maybe<Guid> workspace, Quadrant quadrant = Quadrant.IV) =>
+        Report(tasks.AddNote(title, workspace, quadrant).Bind(_ => Result.Success()));
 
     /// <summary>A comment from Petre (no session), shown as "you". Its thread stays open to show it.</summary>
     public Result Comment(Guid id, string markdown)
@@ -676,7 +680,7 @@ internal sealed record TasksWindowActions(
     Action<Guid, Maybe<Guid>> MoveTo,
     Action<Guid> Delete,
     Func<Guid, string, bool> Comment,
-    Func<string, Maybe<Guid>, bool> AddNote,
+    Func<string, Maybe<Guid>, Quadrant, bool> AddNote,
     Action<Guid, TaskFlag, bool> SetFlag,
     Action<Guid, Quadrant, TaskPlace> Place,
     Action<bool> ShowMatrix,
