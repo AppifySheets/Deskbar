@@ -511,6 +511,34 @@ public sealed class ClaudeSkillTests : IDisposable
         Assert.Contains("hooks already ask", File.ReadAllText(Skill));
     }
 
+    // Plan Task 9: while sessions keep their tasks, the skill has a "Your task" section with the rules the briefing
+    // names (join or create, the status line, ask through the task, comment in markdown, done and never close, leave the
+    // user's notes alone). Off, or with the hooks not installed (no briefing gives a session its id), the section goes.
+    [Fact]
+    public void The_skill_explains_tasks_only_while_they_are_on()
+    {
+        Settled(WithABell);
+
+        ClaudeSkill.Sync(true, true, home, Deskbar);
+        var on = File.ReadAllText(Skill);
+        Assert.Contains("## Your task", on);
+        Assert.Contains("task join <id> --session", on);
+        Assert.Contains("task new", on);
+        Assert.Contains("task status-line", on);
+        Assert.Contains("task ask", on);
+        Assert.Contains("task comment", on);
+        Assert.Contains("task done", on);
+        Assert.Contains("Never close", on);
+        Assert.DoesNotContain("—", on);
+
+        ClaudeSkill.Sync(true, false, home, Deskbar);
+        Assert.DoesNotContain("## Your task", File.ReadAllText(Skill));
+
+        File.WriteAllText(Settings, Repeated);
+        ClaudeSkill.Sync(true, true, home, Deskbar);
+        Assert.DoesNotContain("## Your task", File.ReadAllText(Skill));
+    }
+
     [Fact]
     public void The_skill_says_the_hooks_ask_when_they_are_installed()
     {

@@ -91,7 +91,7 @@ user profile:
 | When each window was last used, for the icon fade | `%APPDATA%\Deskbar\last-used.json` |
 | The command-line shim scripts call (rewritten at each start) | `%APPDATA%\Deskbar\deskbar.cmd` |
 | The Claude Code skill, when Claude Code is installed and the setting is on | `%USERPROFILE%\.claude\skills\deskbar\SKILL.md` |
-| ...its two hooks (Notification and Stop), beside your own | `%USERPROFILE%\.claude\settings.json`, running `%APPDATA%\Deskbar\claude-hook.cmd` |
+| ...its hooks (Notification and Stop; SessionStart, UserPromptSubmit and SessionEnd while sessions keep tasks), beside your own | `%USERPROFILE%\.claude\settings.json`, running `%APPDATA%\Deskbar\claude-hook.cmd` and `claude-task-hook.cmd` |
 | "Start with Windows", when enabled | the `Deskbar` value under `HKCU\Software\Microsoft\Windows\CurrentVersion\Run` |
 
 If `state.json` ever fails to parse, the broken file is kept beside it as `state.json.bak` and the
@@ -443,7 +443,10 @@ none, or another one, by the chips under the box). Tick a note to close it, with
 Two small toggles on each line mark a task important or urgent, which sorts the list into Covey's four
 quadrants, and a line drags up or down to reorder it. "+N more" opens the tasks window, with every task,
 its comments, and a Matrix view of the four quadrants side by side.
-A script or a Claude Code session can add and change tasks with `deskbar.cmd task`.
+A script can add and change tasks with `deskbar.cmd task`, and every Claude Code session keeps a task of
+its own here: it joins the task its work continues or creates one, keeps a short status line on it, asks
+you through it (the task waits on you, in orange, with the question) and marks it done when it has
+finished. Only you close a task.
 
 More in [Tasks](docs/features/tasks.md).
 
@@ -535,7 +538,14 @@ looking at. The file is rewritten when Deskbar updates.
 It also adds two hooks to `%USERPROFILE%\.claude\settings.json`, beside any you have: when a session
 finishes a reply or waits for a permission while you are on another workspace, that workspace's name
 and colour rail flash orange on the bar and the session's VS Code icon glows, until you go there. The
-hooks run `%APPDATA%\Deskbar\claude-hook.cmd`, which runs `deskbar.cmd attention` and always exits 0.
+hooks run `%APPDATA%\Deskbar\claude-hook.cmd`, which hands the hook's details to `deskbar.cmd claude-hook`
+and always exits 0. When Deskbar is not running, the hook prints nothing and the session carries on.
+
+With **Claude Code sessions keep their tasks in the task list** ticked under it (on by default), three more
+hooks, on SessionStart, UserPromptSubmit and SessionEnd, run `claude-task-hook.cmd`. A starting session
+is told its task, or the open tasks on its workspace it could join and how to create its own; each of
+your messages reminds it of its task in one line, and answers a task that was waiting on you. Sessions run
+with `claude -p` or the Agent SDK are left out. `deskbar.cmd claude-tasks off` turns this off.
 The first time Deskbar changes `settings.json` it keeps the original as `settings.json.deskbar-backup`,
 and it leaves a file with comments in it alone.
 

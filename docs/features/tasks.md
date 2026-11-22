@@ -103,9 +103,19 @@ The full set:
 - `tasks-window list` and `tasks-window matrix`, to switch the window's view (remembered)
 - `task goal <id> <goal-id>|none`, the **Goal** menu's twin; `task list` gives each task's `goal` (see [Goals](goals.md))
 
+A Claude Code session's own forms, each with `--session <id>` (see [Claude Code sessions](claude-sessions.md)):
+
+- `task join <id>` and `task new <title>`, to take up a task or create one
+- `task status-line <text>`, `task ask <question>`, `task comment <markdown>` and `task done`, on the session's own task
+- `task later <title>`, a note for later on the session's workspace
+
 ## With Claude sessions
 
-A script or a Claude Code session can add a note to its own workspace with `task add`, for example to remember something while it waits for CI. See [Claude Code sessions](claude-sessions.md).
+Every Claude Code session keeps a task in this list. When it starts, it is offered the open tasks on its workspace, joins the one its work continues or creates its own, and keeps a short status line under the title. A task a session works on is Claude's: it has an orange edge, and a session that joins one of your notes makes it Claude's work.
+
+When a session needs a decision from you, its task moves to the top as **Waiting on you**, with the question on the line, and the workspace blinks. Your next message to that session answers it, and the task goes back to in progress. A session marks its task done when it has finished; the line keeps its place with a close button, because only you close a task. A message to a session whose task is done takes it back to in progress, and a session whose task you closed is told that new work needs a new task.
+
+A task whose sessions have all ended stays open and says so. Sessions nobody is sitting at (`claude -p`, Agent SDK runs) make no tasks. The setting is **Claude Code sessions keep their tasks in the task list** in Manage; see [Claude Code sessions](claude-sessions.md).
 
 ## Related
 
