@@ -193,10 +193,11 @@ and the one before that in dots, so the row that one tap of `Win+Ctrl+Tab` will 
 visible without pressing anything. Hovering a row rings it in amber, the same ring the chord uses
 for the row it would land on.
 
-Workspaces you have not used lately fade back. The bar stands on a fine grain, and a workspace you
-used in the last few minutes sits on a smooth patch of it, faintly tinted with its colour. The
-longer it goes unused, the more that patch wears away and the more its rail, name and icons dim,
-until after two hours it has sunk into the grain. Only focusing a window counts as using its
+Workspaces you have not used lately fade back. The longer a workspace goes unused, the more its
+rail, name and icons dim, until after two hours it sits well behind the rest. With the bar's grain
+on (the default), a workspace you used in the last few minutes also sits on a smooth patch over
+the grain, faintly tinted with its colour, and the patch wears away as the row fades until the row
+has sunk into the grain. Only focusing a window counts as using its
 workspace: windows that have merely opened, say after Windows restarts, leave it faded. Nothing
 moves or hides, and every row can still be clicked where it is.
 
