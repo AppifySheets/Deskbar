@@ -43,10 +43,11 @@ namespace Deskbar.App;
 //                   "don't say claude", took the CLAUDE tag off), the VS Code icon of its session's window when one is
 //                   found, then the task's title in a tan ink and, after a dot,
 //                   the question while it waits on Petre, else its status line, with "no live session" when every
-//                   session has ended. Petre's notes have a plain tick box that closes them. A Done Claude task has
-//                   a close button. Every line ends with its workspace's chip in that row's own colour, or "none".
+//                   session has ended. Every line, a note or a Claude task in any status, has a plain tick box that
+//                   closes it (Ruling 40; the Done task's close button went so all lines look alike). Every line ends
+//                   with its workspace's chip in that row's own colour, or "none".
 //                   A line just closed stays in its place for six seconds, struck through, with "Undo" where its
-//                   tick or close button was (Petre: "when i click on done, there should be undo"; Ruling 10).
+//                   tick box was (Petre: "when i click on done, there should be undo"; Ruling 10).
 //   the flags       (Task 12, Rulings 25 and 28.) Two small toggles on every open line, important (an exclamation
 //                   mark) and urgent (a clock), which name the task's Covey quadrant. Off they are quiet: invisible,
 //                   still there to click, shown dimly while the line is hovered or selected. On they are drawn in
@@ -908,13 +909,12 @@ public partial class FloatingBar
     //
     // A CLAUDE TASK HAS THE TICK BOX TOO (Ruling 40, Petre: "how do i mark claude as done?"). Only Petre closes, and a
     // tick is Petre: it closes the task at once with the note's six seconds of Undo, and Undo gives back exactly what
-    // the task had (its status, its question, its place and the selection; Ruling 31). A Done Claude task keeps the
-    // close button on the right instead (RightOf), the mark that it waits for him to look, so it has no tick box.
+    // the task had (its status, its question, its place and the selection; Ruling 31). A Done Claude task has the same
+    // box (2026-11-23: all lines look alike), so the close button it used to carry on the right is gone.
     IEnumerable<UIElement> LeftOf(TaskLine line) =>
         new UIElement?[]
         {
-            line.Claudes && line.Status == TaskStatus.Done ? null
-            : line.Closing ? UndoButton(line)
+            line.Closing ? UndoButton(line)
             : TaskButton("Tick off", new Border
             {
                 Width = 11,
@@ -928,26 +928,14 @@ public partial class FloatingBar
             line.Claudes && line.Window.HasValue ? WindowIconOf(line.Window.Value) : null,
         }.OfType<UIElement>();
 
-    // Right of the text, from the edge in: the workspace chip, then, on a Done Claude task, the close button, since a
-    // Done task waits for Petre to look and close it (spec, "A Done Claude task shows a close button on its line"). The
-    // button is the Done mark: a "Done" word beside it was tried and, on a bar of the default width, took the room the
-    // title needed. The line's tooltip names the status.
-    // A Done Claude task just closed has "Undo" in the close button's place. Just inside the chip, the task's age
-    // (AgeOf): docked before the title fills the rest, so the title trims first, then the age, never the chip.
-    //
-    // Left to right, between the title and the chip (TaskLineFace): the flags that are ON (a flag that is off is a quiet
-    // control laid over the title's end instead, QuietFlags), and the close button or its Undo. No age (Ruling 43).
+    // Right of the text, left to right, between the title and the chip (TaskLineFace): the flags that are ON (a flag that is off is a quiet
+    // control laid over the title's end instead, QuietFlags). No age (Ruling 43), and no close button: every line,
+    // a Done Claude task's included, closes from its tick box (LeftOf).
     IEnumerable<UIElement> RightOf(TaskLine line) =>
         new UIElement?[]
         {
             line.Closing || !line.Important ? null : FlagToggle(line, TaskFlag.Important),
             line.Closing || !line.Urgent ? null : FlagToggle(line, TaskFlag.Urgent),
-            line.Status == TaskStatus.Done && line.Claudes
-                ? line.Closing
-                    ? UndoButton(line)
-                    : TaskButton("Close task", new TextBlock { Text = "✕", Foreground = TaskInk, FontSize = Text(8.5), Margin = new Thickness(5, 0, 5, 0) },
-                        () => CloseWithUndo(line), "Done: close this task", ignoredWhen: TaskClickIgnored)
-                : null,
         }.OfType<UIElement>();
 
     // THE FLAGS THAT ARE OFF, as a quiet overlay (2026-11-23, the squeezed titles): laid over the right end of the title
