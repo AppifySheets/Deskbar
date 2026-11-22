@@ -14,8 +14,13 @@ public class FloatingBarProReminderTests
 {
     static FrameworkElement Line(FloatingBar bar) => (FrameworkElement)bar.FindName("ProReminderLine")!;
 
+    // Everything inside the panel, walked through the logical tree, since the sentence and the buttons sit in
+    // nested panels (the buttons on their own line under the wrapped sentence).
+    static IEnumerable<object> Inside(object node) =>
+        new[] { node }.Concat(node is DependencyObject d ? LogicalTreeHelper.GetChildren(d).Cast<object>().SelectMany(Inside) : []);
+
     static Button ButtonNamed(FloatingBar bar, string name) =>
-        ((Panel)Line(bar)).Children.OfType<Button>().Single(b => AutomationProperties.GetName(b) == name);
+        Inside(Line(bar)).OfType<Button>().Single(b => AutomationProperties.GetName(b) == name);
 
     static void Click(Button button) => button.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
 
@@ -38,8 +43,10 @@ public class FloatingBarProReminderTests
         bar.PaintProReminder();
 
         Assert.Equal(Visibility.Visible, Line(bar).Visibility);
-        var sentence = ((Panel)Line(bar)).Children.OfType<TextBlock>().Single();
+        var sentence = Inside(Line(bar)).OfType<TextBlock>().Single(t => t.ToolTip is string);
         Assert.StartsWith("Free for personal use.", sentence.ToolTip as string);
+        // Wrapped, never cut off: a narrow bar gets more lines, not an ellipsis.
+        Assert.Equal(TextWrapping.Wrap, sentence.TextWrapping);
         Assert.Contains("$18.99", sentence.ToolTip as string);
         Assert.NotNull(ButtonNamed(bar, "Get Pro"));
         Assert.NotNull(ButtonNamed(bar, "Not now"));

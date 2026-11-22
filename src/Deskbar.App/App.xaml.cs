@@ -192,30 +192,40 @@ public partial class App : Application
             }), TaskScheduler.Default);
 
     // Whether the Pro reminder line is due right now: ProReminder.Due (Core.Licensing) over the live verdict, the two
-    // dates in AppState and today's LOCAL date, since "once a day" means the user's day.
+    // dates in AppState, the active time used since the start date (the time tracker, the same numbers as Manage's
+    // Time tab) and today's LOCAL date, since "once a day" means the user's day. No tracker (compatibility mode,
+    // which has no bar anyway) counts as no use, so the line never shows there.
     //
-    // A developer can see the line at once instead of waiting two weeks: DESKBAR_PRO_REMINDER=now, honoured ONLY
-    // together with DESKBAR_APPDATA (a scratch root), the same pairing as ProEntitlement's DESKBAR_PRO, so it can
-    // never turn on in an everyday copy. It skips only the quiet weeks; Pro and "Not now" still hide the line.
+    // A developer can see the line at once instead of waiting: DESKBAR_PRO_REMINDER=now, honoured ONLY together with
+    // DESKBAR_APPDATA (a scratch root), the same pairing as ProEntitlement's DESKBAR_PRO, so it can never turn on in
+    // an everyday copy. It skips only the quiet weeks and hours; Pro and "Not now" still hide the line.
     bool ProReminderDue(WorkspaceManager manager)
     {
         var today = DateOnly.FromDateTime(DateTime.Now);
         var showNow = AppPaths.RootOverridden && Environment.GetEnvironmentVariable("DESKBAR_PRO_REMINDER") == "now";
         var since = showNow ? today.AddDays(-Core.Licensing.ProReminder.QuietDays) : manager.State.ProReminderSince;
-        return Core.Licensing.ProReminder.Due(Entitlement.Current.IsPro, since, manager.State.ProReminderDismissedOn, today);
+        var used = showNow ? Core.Licensing.ProReminder.QuietHours
+            : since is { } start && timeTracker is { } tracker ? tracker.Time.TotalSince(start) : TimeSpan.Zero;
+        return Core.Licensing.ProReminder.Due(Entitlement.Current.IsPro, since, manager.State.ProReminderDismissedOn, today, used);
     }
 
     // "Get Pro" on the reminder line. The Store copy buys the add-on through the Store's own purchase dialog
     // (StorePurchase), then reads the verdict again at once so the line goes away without waiting for the
-    // five-minute tick. The GitHub copy has no Store licence to hold an add-on, so it opens the Store page, where
-    // Deskbar Pro is bought inside the Store copy (the settings carry over: both copies share %APPDATA%\Deskbar).
+    // five-minute tick. The GitHub copy has no Store licence to hold an add-on, so Deskbar Pro is bought inside the
+    // Store copy (the settings carry over: both copies share %APPDATA%\Deskbar). It says so first and then opens
+    // the Store (OpenStoreForPro). Petre, 2026-11-22, after Get Pro took him to the bare web listing: that page
+    // does not mention Pro at all, so a GitHub user could not tell what to do there.
     // A purchase that fails says why and offers the Store page instead; a cancelled dialog says nothing.
     async void GetPro()
     {
         // Store-build behaviour, docs/superpowers/specs/2026-10-24-deskbar-store-packaging-design.md.
         if (!PackageIdentity.IsPackaged)
         {
-            OpenUrl(ProStorePage);
+            if (MessageBox.Show(
+                    "Deskbar Pro is bought in the Microsoft Store copy of Deskbar.\n\n" +
+                    "Install Deskbar from the Store: your workspaces and settings come along. Then choose Get Pro there to buy it.",
+                    "Deskbar Pro", MessageBoxButton.OKCancel, MessageBoxImage.Information) == MessageBoxResult.OK)
+                OpenStoreForPro();
             return;
         }
 
@@ -229,10 +239,27 @@ public partial class App : Application
 
         if (MessageBox.Show($"Deskbar Pro could not be bought here: {bought.Error}.\n\nOpen Deskbar in the Microsoft Store instead?",
                 "Deskbar", MessageBoxButton.YesNo, MessageBoxImage.Information) == MessageBoxResult.Yes)
-            OpenUrl(ProStorePage);
+            OpenStoreForPro();
     }
 
-    // The Store listing, where the Deskbar Pro add-on is shown and bought (Store ID 9PJX26NGFPNF).
+    // Deskbar's page in the Store APP (UpdateService.StoreLink, the ms-windows-store: link), which lands on
+    // Install without a browser detour. A machine without the Store app (LTSC, some managed installs) has no
+    // handler for that link, and the shell then throws, so the web listing is the fallback: every machine has a
+    // browser (the same reason FloatingBar.Tiling's offer uses the web page).
+    static void OpenStoreForPro()
+    {
+        try
+        {
+            System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(UpdateService.StoreLink) { UseShellExecute = true });
+        }
+        catch (Exception e)
+        {
+            ClickTrace.Write($"pro: Store app link refused ({e.Message}), opening the web listing");
+            OpenUrl(ProStorePage);
+        }
+    }
+
+    // The Store listing on the web (Store ID 9PJX26NGFPNF), OpenStoreForPro's fallback.
     const string ProStorePage = "https://apps.microsoft.com/detail/9PJX26NGFPNF";
 
     // Tiling (docs/superpowers/specs/2026-11-08-tiling-design.md). Called from OnStartup on the UI thread, once,
