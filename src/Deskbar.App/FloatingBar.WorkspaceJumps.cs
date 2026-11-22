@@ -69,7 +69,7 @@ public partial class FloatingBar
             },
         };
 
-    // The chip's own fill: one step lighter than the strip (#141518) and the active tab (#1F232B), so it reads as a
+    // The chip's own fill: one step lighter than the strip (BarSurface's #1B1C21 grain) and the active tab (#1F232B), so it reads as a
     // control rather than as a tab, and darker than the name tag's neutral grey. From the mockup.
     static readonly Brush JumpFill = Frozen(0xFF, 0x26, 0x2A, 0x33);
 

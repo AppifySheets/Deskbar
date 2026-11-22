@@ -39,10 +39,10 @@ public sealed class ScreenStrip : Window
     // breathing room and the 2 DIP underline. Turned into the screen's pixels at the screen's own scale, so 36 px at 150%.
     public const double HeightDip = 24;
 
-    // The bar's own background, so a strip reads as part of Deskbar; and the tag's grey for an unnamed desktop, which
-    // has no workspace colour. Frozen, as every static brush must be (CLAUDE.md, traps): an unfrozen one takes the
-    // affinity of the first thread that touches it and throws on the next.
-    static readonly Brush StripBackground = Frozen(Color.FromArgb(0xFF, 0x14, 0x15, 0x18));
+    // The bar's own textured surface (BarSurface.cs), so a strip reads as part of Deskbar; and the tag's grey for an
+    // unnamed desktop, which has no workspace colour. Frozen, as every static brush must be (CLAUDE.md, traps): an
+    // unfrozen one takes the affinity of the first thread that touches it and throws on the next. BarSurface's are.
+    static readonly Brush StripBackground = BarSurface.Textured;
     static readonly Brush NeutralTag = Frozen(Color.FromArgb(0xFF, 0x3A, 0x3F, 0x49));
 
     // MonitorFromPoint's "no monitor" flag: an empty answer instead of the nearest screen. See OwnMonitor.

@@ -38,7 +38,10 @@
          The window keeps AllowsTransparency and a Transparent background only so the CornerRadius corners
          outside this Border stay clear; nothing inside the Border is see-through any more. Do not add an
          opacity setting to bring it back: that reopens the same legibility problem. -->
-    <Border x:Name="Root" CornerRadius="8" Background="#FF141518" Padding="4">
+    <!-- Textured, not flat (Petre, 2026-11-22, "too black", then "texture" from a set of mockups): opaque grain on a
+         slightly lighter base, built once in BarSurface.cs and shared with the strips, the stats window and the due
+         card. Every pixel of it is opaque, so the decision above stands. -->
+    <Border x:Name="Root" CornerRadius="8" Background="{x:Static app:BarSurface.Textured}" Padding="4">
         <!-- No "Hide floating bar" menu any more. Petre: "show floating bar doesn't make
              sense anymore, it's crucial for the app's design." Once the switcher panel and the
              Windows tab were gone this bar became the only surface that lists windows and
