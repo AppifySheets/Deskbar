@@ -4,98 +4,85 @@ using CSharpFunctionalExtensions;
 
 namespace Deskbar.Core.Tasks;
 
-// Owns the live TaskBoard, saves every change through ITaskStore and is ticked once a second by the app. It is
-// where the clock enters: TaskBoard stays pure and takes "now" from here. Design:
-// docs/superpowers/specs/2026-11-19-tasks-in-the-bar-design.md ("Coming back ends the timer", "Persistence").
-// Everything runs on the UI thread (the app ticks from a dispatcher timer), so there is no locking.
+// Owns the live TaskBoard and saves every change through ITaskStore. It is where the clock and new ids enter:
+// TaskBoard stays pure and takes "now" and ids from here. Design: docs/superpowers/specs/2026-11-22-tasks-board-design.md.
+// The timer build's ticking (Tick, the dwell, CameDue) is gone with the timers: nothing about a task changes with
+// time alone any more, so there is nothing to tick.
+//
+// Everything runs on the UI thread (the bar, the window and the control pipe all dispatch there), so there is no
+// locking.
 public sealed class TaskService(ITaskStore store, Func<DateTimeOffset> now, Func<Guid>? newId = null, Action<string>? trace = null)
 {
-    /// <summary>
-    /// Arriving on a workspace counts as coming back only after staying this long, so flicking through desktops
-    /// on the way elsewhere (Win+Ctrl+Arrow, the switcher) never ends a timer by accident.
-    /// </summary>
-    public static readonly TimeSpan Dwell = TimeSpan.FromSeconds(2);
-
     readonly Func<Guid> makeId = newId ?? Guid.NewGuid;
     readonly Subject<Unit> changed = new();
-    readonly Subject<TaskItem> cameDue = new();
-
-    // Tick state. previous: the workspace seen on the last tick (unset before the first tick, which is how the
-    // first tick knows it is not an arrival: starting the app on a workspace is not coming back to it).
-    // pending: an arrival waiting out the dwell. announced: ids already told to CameDue, so a task that stays
-    // Due is announced once, not once a second.
-    bool ticked;
-    Maybe<Guid> previous = Maybe<Guid>.None;
-    Maybe<(Guid Workspace, DateTimeOffset At)> pending = Maybe<(Guid Workspace, DateTimeOffset At)>.None;
-    readonly HashSet<Guid> announced = [];
 
     public TaskBoard Board { get; private set; } = TaskBoard.Empty;
-
-    /// <summary>The service's clock, so callers (the control pipe's `task list`) and tests agree on "now".</summary>
-    public DateTimeOffset Now => now();
 
     /// <summary>Pulses after every change to the board, loaded or edited, so views refresh.</summary>
     public IObservable<Unit> Changed => changed;
 
-    /// <summary>A task whose timer ran out. Fires once per task, including tasks already due at load.</summary>
-    public IObservable<TaskItem> CameDue => cameDue;
+    /// <summary>
+    /// Why the last <see cref="Load"/> failed, in the store's words, or none. A failed load starts the board empty,
+    /// and an empty list must not read as "nothing to do" when the truth is "could not read your tasks", so the
+    /// task UI shows this until Petre dismisses it (<see cref="DismissLoadProblem"/>) or a later load works.
+    /// </summary>
+    public Maybe<string> LoadProblem { get; private set; } = Maybe<string>.None;
 
     /// <summary>Replaces the board with what the store holds. A store failure leaves the board empty.</summary>
     public Result Load()
     {
         var loaded = store.Load();
         Board = loaded.IsSuccess ? loaded.Value : TaskBoard.Empty;
+        LoadProblem = loaded.IsSuccess ? Maybe<string>.None : loaded.Error;
         changed.OnNext(Unit.Default);
         return loaded.IsSuccess ? Result.Success() : Result.Failure(loaded.Error);
     }
 
-    public Result<TaskItem> Park(string title, Maybe<Guid> workspace, Maybe<TimeSpan> length) =>
-        Board.Park(title, workspace, length, now(), makeId()).Tap(r => Commit(r.Board)).Map(r => r.Task);
+    /// <summary>
+    /// Petre has read the load problem: it stops being shown. No <see cref="Changed"/> pulse, because the board did
+    /// not change; the view that offered the dismissal redraws itself after calling this.
+    /// </summary>
+    public void DismissLoadProblem() => LoadProblem = Maybe<string>.None;
 
-    public Result SetTimer(Guid id, TimeSpan length) => Apply(Board.SetTimer(id, length, now()));
+    // One wrapper per TaskBoard change, with the clock and a new id supplied here. A refused change saves nothing.
 
-    public Result ClearTimer(Guid id) => Apply(Board.ClearTimer(id, now()));
+    public Result<TaskItem> AddNote(string title, Maybe<Guid> workspace) =>
+        Board.AddNote(title, workspace, now(), makeId()).Tap(r => Commit(r.Board)).Map(r => r.Task);
+
+    public Result<TaskItem> Create(string title, Maybe<Guid> workspace, TaskSession session) =>
+        Board.Create(title, workspace, session, now(), makeId()).Tap(r => Commit(r.Board)).Map(r => r.Task);
+
+    public Result Join(Guid id, TaskSession session) => Apply(Board.Join(id, session, now()));
+
+    public Result SetStatusLine(Guid id, string text) => Apply(Board.SetStatusLine(id, text, now()));
+
+    public Result Ask(Guid id, string question) => Apply(Board.Ask(id, question, now()));
+
+    public Result MarkDone(Guid id) => Apply(Board.MarkDone(id, now()));
+
+    public Result Close(Guid id) => Apply(Board.Close(id, now()));
+
+    public Result Reopen(Guid id) => Apply(Board.Reopen(id, now()));
+
+    public Result SetStatus(Guid id, TaskStatus status) => Apply(Board.SetStatus(id, status, now()));
 
     public Result Rename(Guid id, string title) => Apply(Board.Rename(id, title, now()));
 
     public Result MoveTo(Guid id, Maybe<Guid> workspace) => Apply(Board.MoveTo(id, workspace, now()));
 
-    public Result Done(Guid id) => Apply(Board.Done(id, now()));
-
     public Result Delete(Guid id) => Apply(Board.Delete(id));
 
+    public Result Comment(Guid id, Maybe<string> sessionId, string markdown) =>
+        Apply(Board.Comment(id, sessionId, markdown, now(), makeId()));
+
     /// <summary>
-    /// Called once a second with the workspace Petre is on (none when it is not known). Detects an arrival that
-    /// has stayed for <see cref="Dwell"/> and ends the timers there, then announces newly due tasks.
+    /// Petre sent a session a message. These two run on every prompt and every session end, nearly always with
+    /// nothing to change, so they save and pulse only when the board really changed (TaskBoard returns the same
+    /// board otherwise).
     /// </summary>
-    public void Tick(Maybe<Guid> currentWorkspace)
-    {
-        var at = now();
-        if (!ticked)
-        {
-            ticked = true;
-            previous = currentWorkspace;
-        }
-        else if (currentWorkspace != previous)
-        {
-            pending = currentWorkspace.HasValue ? (currentWorkspace.Value, at) : Maybe<(Guid, DateTimeOffset)>.None;
-            previous = currentWorkspace;
-        }
+    public void Answered(string sessionId) => CommitIfChanged(Board.Answered(sessionId, now()));
 
-        if (pending is { HasValue: true, Value: var arrival }
-            && currentWorkspace.HasValue && currentWorkspace.Value == arrival.Workspace
-            && at - arrival.At >= Dwell)
-        {
-            pending = Maybe<(Guid, DateTimeOffset)>.None;
-            // The arrival's own time, not now: a timer Petre set during the dwell is newer than the arrival and
-            // must survive it (TaskBoard.CameBack, final review I1).
-            Commit(Board.CameBack(arrival.Workspace, arrival.At, at));
-        }
-
-        var due = Board.Tasks.Where(t => t.StateAt(at) == TaskState.Due).ToArray();
-        due.Where(t => announced.Add(t.Id)).ToList().ForEach(cameDue.OnNext);
-        announced.RemoveWhere(id => due.All(t => t.Id != id));
-    }
+    public void SessionEnded(string sessionId) => CommitIfChanged(Board.SessionEnded(sessionId, now()));
 
     /// <summary>Frees the tasks of workspaces that no longer exist. Saves only when something changed.</summary>
     public void Prune(IReadOnlySet<Guid> knownWorkspaces)
@@ -104,43 +91,15 @@ public sealed class TaskService(ITaskStore store, Func<DateTimeOffset> now, Func
             Commit(Board.Prune(knownWorkspaces, now()));
     }
 
-    /// <summary>
-    /// The rows to show, in the order that needs Petre next: due first, oldest first (a timer's Ends; an ask
-    /// counts as due right now, so it follows timers that came due earlier and leads any that tie), then running
-    /// by soonest end, then open by Created newest first, then tasks done today (local time). Older done tasks
-    /// are left out.
-    /// </summary>
-    public IReadOnlyList<TaskEntry> Entries(IReadOnlyCollection<Guid> askingWorkspaces, DateOnly today)
-    {
-        var at = now();
-        var asks = askingWorkspaces.Select(w => (Entry: new TaskEntry(TaskEntryKind.Ask, Maybe<TaskItem>.None, w, TaskState.Due), When: at, Rank: 0));
-        var tasks = Board.Tasks.Select(t => (Task: t, State: t.StateAt(at)));
-        var dueTasks = tasks.Where(x => x.State == TaskState.Due).Select(x => (Entry: Row(x.Task, x.State), When: x.Task.Timer.Value.Ends, Rank: 1));
-        var due = asks.Concat(dueTasks).OrderBy(x => x.When).ThenBy(x => x.Rank).Select(x => x.Entry);
-        var running = tasks.Where(x => x.State == TaskState.Running).OrderBy(x => x.Task.Timer.Value.Ends).Select(x => Row(x.Task, x.State));
-        var open = tasks.Where(x => x.State == TaskState.Open).OrderByDescending(x => x.Task.Created).Select(x => Row(x.Task, x.State));
-        var done = tasks.Where(x => x.State == TaskState.Done && DateOnly.FromDateTime(x.Task.DoneAt.Value.ToLocalTime().DateTime) == today)
-            .OrderBy(x => x.Task.DoneAt.Value).Select(x => Row(x.Task, x.State));
-        return due.Concat(running).Concat(open).Concat(done).ToArray();
-    }
-
-    /// <summary>The workspaces with at least one task whose timer has run out.</summary>
-    public IReadOnlySet<Guid> DueWorkspaces() =>
-        Board.Tasks.Where(t => t.StateAt(now()) == TaskState.Due && t.WorkspaceId.HasValue)
-            .Select(t => t.WorkspaceId.Value).ToHashSet();
-
-    /// <summary>Per workspace, the running timer that ends soonest (what its pie shows).</summary>
-    public IReadOnlyDictionary<Guid, TaskTimer> RunningWorkspaces() =>
-        Board.Tasks.Where(t => t.StateAt(now()) == TaskState.Running && t.WorkspaceId.HasValue)
-            .GroupBy(t => t.WorkspaceId.Value)
-            .ToDictionary(g => g.Key, g => g.Select(t => t.Timer.Value).MinBy(timer => timer.Ends)!);
-
     // --- helpers ---
-
-    static TaskEntry Row(TaskItem task, TaskState state) => new(TaskEntryKind.Task, task, task.WorkspaceId, state);
 
     /// <summary>Takes a successful change, saves and pulses; passes a failure through untouched.</summary>
     Result Apply(Result<TaskBoard> change) => change.Tap(Commit);
+
+    void CommitIfChanged(TaskBoard board)
+    {
+        if (!ReferenceEquals(board, Board)) Commit(board);
+    }
 
     /// <summary>
     /// The in-memory board is the truth for this run, so it changes even when the save fails: a full disk must
