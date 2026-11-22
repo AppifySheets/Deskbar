@@ -4190,13 +4190,13 @@ public sealed class WorkspaceManager(
             ? Result.Success()
             : Result.Success().Tap(() => Persist(State with { NoFocusRing = !on }));
 
-    // The grain behind the bar's rows (AppState.Grain): Manage's checkbox and `grain on|off`. A no-op when unchanged,
-    // like SetFocusRing, so Manage can set its box on open without writing state.json. The bar shows or hides the
-    // grain on the rebuild the state pulse from Persist starts.
-    public Result SetGrain(bool on) =>
-        State.Grain == on
+    // The see-through band behind the bar's rows (AppState.SeeThrough): Manage's checkbox and `see-through on|off`. A
+    // no-op when unchanged, like SetFocusRing, so Manage can set its box on open without writing state.json. The bar
+    // repaints the band on the rebuild the state pulse from Persist starts.
+    public Result SetSeeThrough(bool on) =>
+        State.SeeThrough == on
             ? Result.Success()
-            : Result.Success().Tap(() => Persist(State with { NoGrain = !on }));
+            : Result.Success().Tap(() => Persist(State with { NoSeeThrough = !on, NoGrain = false }));
 
     // Whether the previous workspace's item is drawn now (WorkspaceJumps.BackItemWanted). Auto-hide is a fact of the
     // machine that Core cannot read, so the caller passes it: the bar and Manage read the taskbar, tests pass a value.

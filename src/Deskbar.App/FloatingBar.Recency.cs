@@ -16,12 +16,13 @@ namespace Deskbar.App;
 //
 //   rail     the workspace colour, draining to grey and thinning to about 19% opacity (alpha 0x30), so an idle
 //            rail barely shows. Not to nothing: the rails also mark where one row ends and the next begins.
-//   plate    the ground the row stands on. The bar itself stands on grain (BarSurface, PR #405), and a workspace
-//            row you used lately covers it with a smooth plate of the bar's flat base, with a faint wash of the
-//            workspace colour mixed in (a third of the current row's 0x38). The plate wears away as the row fades,
-//            fully opaque when fresh and gone when idle, so an idle row has sunk into the grain. Petre picked this
-//            ("b") from the grain mockup (https://claude.ai/artifact/HnGXmaysPdubn3wmZsgBNz), over the other way
-//            round, grain settling only on idle rows of a flat bar.
+//   plate    the ground the row stands on. Behind the rows the bar is see-through (BarSurface.SeeThrough,
+//            FloatingBar.Surface.cs), and a workspace row you used lately covers that with an opaque plate of the
+//            bar's flat base, with a faint wash of the workspace colour mixed in (a third of the current row's 0x38).
+//            The plate wears away as the row fades, fully opaque when fresh and gone when idle, so an idle row lets
+//            the desktop show through. Petre picked the plate ("b") from the grain mockup
+//            (https://claude.ai/artifact/HnGXmaysPdubn3wmZsgBNz) when the band was a grain texture; the see-through
+//            band took the grain's place ("keep the solid color for active rows", "let's take that instead, 85%").
 //   name     today's resting white (0xA8) dimming to a floor of 0x6B, never lower, so every name stays readable.
 //   icons    the grey overlay of the aging icons (FloatingBar.Aging.cs), now at the WORKSPACE's fade rather than
 //            each window's own, so every icon in a row is one shade.
@@ -125,11 +126,11 @@ public partial class FloatingBar
     // The row's plate at a step: BarSurface.Base with the workspace colour mixed in, worked out here as one opaque
     // colour (the tint over the base) rather than two layers, because a row's Grid has one Background, and the drag
     // highlight puts that one brush back when it ends (GroupRow's `idle`). Its alpha is the plate itself: 0xFF when
-    // fresh, so no grain shows, falling with the fade to nothing, which returns null, "no background", which every row
+    // fresh, so nothing shows through, falling with the fade to nothing, which returns null, "no background", which every row
     // already handles. The row you are on is always fresh and carries the full 0x38 tint it has always had.
     //
     // A row that has opted out of colour (WorkspacePalette.None), or whose hand-edited colour does not parse, still
-    // gets a plate, just a plain one: being recent is about the grain, not the colour.
+    // gets a plate, just a plain one: being recent is about being solid, not the colour.
     internal static Brush? Plate(string? color, int index, int step, bool current)
     {
         var at = current ? 0 : FractionOf(step);

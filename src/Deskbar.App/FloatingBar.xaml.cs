@@ -110,8 +110,8 @@ public partial class FloatingBar : Window
         Opacity = IdleOpacity;
         PreviewKeyDown += OnArrangePreviewKeyDown; // Esc ends arrange mode (FloatingBar.Arrange.cs)
         LostMouseCapture += OnArrangeLostCapture;  // ...and losing the mouse cancels a row drag (FloatingBar.ArrangeDrag.cs)
-        // The grain's band follows the rows after every layout pass (FloatingBar.Grain.cs).
-        LayoutUpdated += (_, _) => PlaceGrain();
+        // The surface layers follow the rows after every layout pass (FloatingBar.Surface.cs).
+        LayoutUpdated += (_, _) => PlaceSurfaces();
         MouseEnter += (_, _) => UpdateFade();
         MouseLeave += (_, _) => UpdateFade();
 
@@ -2274,8 +2274,8 @@ public partial class FloatingBar : Window
             frontsElsewhere = FrontsElsewhere.Of(overview);
             // ...and the same windows' outlines on the screen itself, with the focused one (FloatingBar.FocusRing.cs).
             ShowFocusRings(overview);
-            // ...and the grain behind the rows, on or off as Manage says (FloatingBar.Grain.cs).
-            ApplyGrainSetting();
+            // ...and the band behind the rows, see-through or flat as Manage says (FloatingBar.Surface.cs).
+            ApplySurfaceSetting();
             // The blink runs only while some row is asking (FloatingBar.Asking.cs).
             SyncAsking(overview);
 
@@ -2498,9 +2498,9 @@ public partial class FloatingBar : Window
                     // colour is what groups things here.
                     //
                     // ...and, since recent workspaces keep their colour (FloatingBar.Recency.cs), every workspace row
-                    // stands on a PLATE: a smooth patch of the bar's base over the bar's grain, with the tint mixed in
-                    // (the current row's full one, a third of it on a row used lately), wearing away as the row fades
-                    // until an idle row stands on the grain itself.
+                    // stands on a PLATE: an opaque patch of the bar's base over the see-through band, with the tint mixed
+                    // in (the current row's full one, a third of it on a row used lately), wearing away as the row fades
+                    // until an idle row stands on the band itself and the desktop shows faintly through.
                     tint: Plate(colour, slot, fadeStep, g.IsCurrent),
                     rowKey: g.Workspace.Id,
                     // The stored fold; GroupRow decides whether the row is drawn folded right now.
@@ -4757,7 +4757,7 @@ public partial class FloatingBar : Window
         // ever knows ids.
         if (rowKey is { } key) rowRings[key] = ring;
 
-        // The pinned row's box is where the grain starts (FloatingBar.Grain.cs).
+        // The pinned row's box is where the see-through band starts (FloatingBar.Surface.cs).
         if (pinned) pinnedRowBox = box;
         return box;
     }

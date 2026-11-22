@@ -43,8 +43,8 @@ public partial class FloatingBar
     static readonly Brush DialHot = Frozen(0xFF, 0x4C, 0xC2, 0xFF);
     static readonly Brush DialMuted = Frozen(0x40, 0xFF, 0xFF, 0xFF);
     static readonly Brush DialKnob = Frozen(0xFF, 0xFF, 0xFF, 0xFF);
-    // The knob's rim is the bar's own base colour, so the knob looks cut out of the bar. Flat, not the grain: a 1 DIP
-    // ring of noise would only flicker. Shared with BarSurface so a change to the base moves the rim with it.
+    // The knob's rim is the bar's own base colour, so the knob looks cut out of the bar. Shared with BarSurface so a
+    // change to the base moves the rim with it.
     static readonly Brush DialKnobRim = BarSurface.Solid;
 
     // A cross where the speaker's waves were, for muted (and for a level of zero, as Windows draws it).

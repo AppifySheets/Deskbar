@@ -80,10 +80,13 @@
                         <CheckBox x:Name="DockBar" Checked="OnDockBarToggled" Unchecked="OnDockBarToggled">
                             <TextBlock TextWrapping="Wrap" Text="Dock the bar to the edge of its screen, like the taskbar, so windows keep clear of it"/>
                         </CheckBox>
-                        <!-- The grain behind the bar's workspace rows (AppState.Grain, FloatingBar.Grain.cs). Petre: "make
-                             grain a default feature, configurable in settings". On by default. -->
-                        <CheckBox x:Name="Grain" Margin="0,6,0,0" Content="Give the bar's workspace rows a fine grain texture"
-                                  Checked="OnGrainToggled" Unchecked="OnGrainToggled"/>
+                        <!-- The see-through band behind the bar's workspace rows (AppState.SeeThrough,
+                             FloatingBar.Surface.cs). Petre: "make grain a default feature, configurable in settings",
+                             then the see-through band took the grain's place ("let's take that instead, 85%"). On by
+                             default. -->
+                        <CheckBox x:Name="SeeThrough" Margin="0,6,0,0" Checked="OnSeeThroughToggled" Unchecked="OnSeeThroughToggled">
+                            <TextBlock TextWrapping="Wrap" Text="Let the desktop show faintly through the bar behind workspaces you have not used lately"/>
+                        </CheckBox>
                         <!-- The previous workspace's item (AppState.PreviousWorkspaceItemChoice, FloatingBar.JumpsFor). Until
                              the box is ticked or unticked by hand it follows the desk (WorkspaceJumps.BackItemWanted): ticked
                              while the window list is on the screen strips and the taskbar auto-hides. The note says so,

@@ -38,11 +38,13 @@
          The window keeps AllowsTransparency and a Transparent background only so the CornerRadius corners
          outside this Border stay clear; nothing inside the Border is see-through any more. Do not add an
          opacity setting to bring it back: that reopens the same legibility problem. -->
-    <!-- The flat base, not the old #141518 (Petre, 2026-11-22, "too black"). The grain, which he picked for the same
-         reason, lies only behind the workspace rows: GrainLayer below, placed by FloatingBar.Grain.cs. The top
-         (Start, search, pinned apps) and the footer (stats, tray, clock) stay flat ("this and the top shouldn't be
-         grained"). Every pixel of both is opaque, so the decision above stands. -->
-    <Border x:Name="Root" CornerRadius="8" Background="{x:Static app:BarSurface.Solid}" Padding="4">
+    <!-- Transparent, and what the bar stands on is the three layers below (FloatingBar.Surface.cs): the top (Start,
+         search, pinned apps) and the footer (stats, tray, clock) flat and opaque, and the band behind the workspace
+         rows see-through at 85% (Petre, 2026-11-22: "too black", then, shown it over his wallpaper, "let's take that
+         instead, 85%"). The decision above still holds where it mattered: rows used lately stand on the fade's
+         opaque plate, and only idle rows let 15% of the desktop through. Transparent rather than null, so a press on
+         the bar's bare background still hits the bar. -->
+    <Border x:Name="Root" CornerRadius="8" Background="Transparent" Padding="4">
         <!-- No "Hide floating bar" menu any more. Petre: "show floating bar doesn't make
              sense anymore, it's crucial for the app's design." Once the switcher panel and the
              Windows tab were gone this bar became the only surface that lists windows and
@@ -54,11 +56,17 @@
              strip straight under the last row. -->
         <!-- Named so a seam dock across screens that are not level can inset it to the height they share
              (FloatingBar.SeamSpan); zero margin everywhere else. -->
-        <!-- A Grid only so GrainLayer can lie BEHIND the bar's content: declared first, drawn first. It never takes a
-             click (the window-level handlers do the dragging) and never sizes the bar (FloatingBar.Grain.cs keeps it
-             inside the content's own height). The -4 side margins bleed it over the Root's padding to both edges. -->
+        <!-- A Grid only so the three surface layers can lie BEHIND the bar's content: declared first, drawn first.
+             They never take a click (the window-level handlers do the dragging) and never size the bar
+             (FloatingBar.Surface.cs keeps their desired heights inside the content's). Their -4 margins bleed them over
+             the Root's padding to the bar's edges, and the top and foot layers carry the bar's rounded corners. -->
         <Grid>
-        <Border x:Name="GrainLayer" IsHitTestVisible="False" VerticalAlignment="Top" Height="0" Margin="-4,0,-4,0"/>
+        <Border x:Name="TopSurface" IsHitTestVisible="False" VerticalAlignment="Top" Height="0" Margin="-4,-4,-4,0"
+                CornerRadius="8,8,0,0" Background="{x:Static app:BarSurface.Solid}"/>
+        <Border x:Name="RowsSurface" IsHitTestVisible="False" VerticalAlignment="Top" Height="0" Margin="-4,0,-4,0"
+                Background="{x:Static app:BarSurface.SeeThrough}"/>
+        <Border x:Name="FootSurface" IsHitTestVisible="False" VerticalAlignment="Top" Height="0" Margin="-4,0,-4,-4"
+                CornerRadius="0,0,8,8" Background="{x:Static app:BarSurface.Solid}"/>
         <DockPanel x:Name="BarContent" LastChildFill="True">
             <!-- The rest of the taskbar's own buttons: the tray chevron, quick settings and the bell from the
                  left, the clock and the show desktop sliver at the right, where Windows puts them. Filled once

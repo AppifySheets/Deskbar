@@ -194,10 +194,10 @@ visible without pressing anything. Hovering a row rings it in amber, the same ri
 for the row it would land on.
 
 Workspaces you have not used lately fade back. The longer a workspace goes unused, the more its
-rail, name and icons dim, until after two hours it sits well behind the rest. With the bar's grain
-on (the default), a workspace you used in the last few minutes also sits on a smooth patch over
-the grain, faintly tinted with its colour, and the patch wears away as the row fades until the row
-has sunk into the grain. Only focusing a window counts as using its
+rail, name and icons dim, until after two hours it sits well behind the rest. Behind the workspace
+rows the bar is slightly see-through (the default), and a workspace you used in the last few
+minutes sits on a solid patch, faintly tinted with its colour; the patch wears away as the row
+fades, until the desktop shows faintly through the row. Only focusing a window counts as using its
 workspace: windows that have merely opened, say after Windows restarts, leave it faded. Nothing
 moves or hides, and every row can still be clicked where it is.
 
@@ -694,9 +694,9 @@ Left-click the tray icon. Four tabs, and Manage opens on the first:
 - **Settings** holds every setting, in three sections, and each one applies as you change it.
   - **Deskbar on this PC**: **Start Deskbar with Windows**, **Check GitHub for new versions** (the
     Store copy checks the Store) and **Teach Claude Code about Deskbar**.
-  - **The bar**: **Dock the bar to the edge of its screen**, the grain behind the workspace rows
-    (on unless you untick it, `grain on|off` from a script; the top of the bar, its footer and the
-    screen strips stay flat), what the bottom strip shows, and the sliders: how faint the bar goes
+  - **The bar**: **Dock the bar to the edge of its screen**, the see-through band behind the
+    workspace rows (on unless you untick it, `see-through on|off` from a script; it keeps 85% of the
+    bar's colour, and the top of the bar, its footer and the screen strips stay solid), what the bottom strip shows, and the sliders: how faint the bar goes
     once the pointer is elsewhere, how long it waits before dimming, how long the dimming takes,
     how long the pointer rests on an icon before its card appears, the text size, the icon size and
     the fewest lines the window list keeps. You choose a slider's value by watching the bar while
@@ -804,7 +804,7 @@ Everything the bar's menus do has a command, and each one runs the same code as 
 | Desktops | `name-desktop <id or number> <name>` |
 | Starting | `start <ws> [--create [placement]] [--cwd <folder>] -- <program> [arguments...]`, `open <link> [--from <folder>]` |
 | Windows | `move <ws> [--create [placement]] [--no-follow] (--title <text> \| --hwnd <h>)...`, `rename-window`, `rename-app`, `rename-pattern`, `name-by-folder <hwnd> on\|off`, `restore-title`, `pin`, `unpin` |
-| Bar | `bar minimize\|restore\|dock\|undock\|across\|edge`, `arrange on\|off`, `stats detach\|attach`, `grain on\|off` |
+| Bar | `bar minimize\|restore\|dock\|undock\|across\|edge`, `arrange on\|off`, `stats detach\|attach`, `see-through on\|off` |
 | Tasks | `task list`, `task add <title> [--workspace <name>\|none] [--in 1m\|5m\|10m\|30m]`, `task timer <id> (--in ... \| --clear)`, `task done`, `task rename`, `task delete` |
 
 A few more, with `$ts` standing for the batch file:

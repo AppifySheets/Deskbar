@@ -138,13 +138,13 @@ public sealed partial class RemoteControl
             _ => ControlReply.Fail(ControlUsage.LineFor("focus-ring")),
         };
 
-    // The grain behind the bar's rows (AppState.Grain), the remote twin of Manage's checkbox.
-    ControlReply Grain(string onOff) =>
+    // The see-through band behind the bar's rows (AppState.SeeThrough), the remote twin of Manage's checkbox.
+    ControlReply SeeThrough(string onOff) =>
         onOff.ToLowerInvariant() switch
         {
-            "on" or "true" or "yes" => Reply(manager.SetGrain(true), () => new { grain = "on" }),
-            "off" or "false" or "no" => Reply(manager.SetGrain(false), () => new { grain = "off" }),
-            _ => ControlReply.Fail(ControlUsage.LineFor("grain")),
+            "on" or "true" or "yes" => Reply(manager.SetSeeThrough(true), () => new { seeThrough = "on" }),
+            "off" or "false" or "no" => Reply(manager.SetSeeThrough(false), () => new { seeThrough = "off" }),
+            _ => ControlReply.Fail(ControlUsage.LineFor("see-through")),
         };
 
     // The previous workspace's item (AppState.PreviousWorkspaceItemChoice), the remote twin of Manage's checkbox. A

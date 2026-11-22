@@ -30,9 +30,10 @@ public class FloatingBarRecencyTests
     public void A_row_with_no_colour_has_no_rail_at_any_age() =>
         Assert.Null(FloatingBar.FadedAccent(WorkspacePalette.None, 0, 5));
 
-    // THE PLATE (Petre picked "b" from the grain mockup): the bar stands on grain (BarSurface), and a workspace row
-    // you used lately sits on a smooth plate of the bar's flat base, with its tint mixed in, that wears away as the
-    // row fades. A fresh row is smooth; an idle one has sunk into the grain.
+    // THE PLATE (Petre picked "b" from the grain mockup, then the see-through band replaced the grain): behind the rows
+    // the bar is see-through (BarSurface.SeeThrough), and a workspace row you used lately sits on an opaque plate of the
+    // bar's flat base, with its tint mixed in, that wears away as the row fades. A fresh row is solid; an idle one lets
+    // the desktop show through.
     static Color Over(Color under, Color tint, byte alpha) =>
         Color.FromRgb(
             (byte)Math.Round(under.R + (tint.R - under.R) * alpha / 255.0),
@@ -41,7 +42,7 @@ public class FloatingBarRecencyTests
 
     static readonly Color Purple = Color.FromRgb(0x9B, 0x6C, 0xF0);
 
-    // Fresh: fully opaque, so no grain shows, and coloured by a third of the current row's 0x38.
+    // Fresh: fully opaque, so nothing shows through, and coloured by a third of the current row's 0x38.
     [Fact]
     public void A_fresh_row_stands_on_a_smooth_plate_with_a_third_of_the_current_tint() =>
         Assert.Equal(Over(BarSurface.Base, Purple, 0x13), ColourOf(FloatingBar.Plate("#9B6CF0", 0, 0, current: false)));
@@ -51,17 +52,17 @@ public class FloatingBarRecencyTests
     public void The_current_row_stands_on_a_smooth_plate_with_its_full_tint() =>
         Assert.Equal(Over(BarSurface.Base, Purple, 0x38), ColourOf(FloatingBar.Plate("#9B6CF0", 0, 16, current: true)));
 
-    // Half way, half worn: the grain shows through at half strength.
+    // Half way, half worn: the see-through band shows at half strength.
     [Fact]
     public void Half_faded_the_plate_is_half_worn() =>
         Assert.Equal(0x80, ColourOf(FloatingBar.Plate("#9B6CF0", 0, 8, current: false)).A);
 
-    // Idle: no plate at all, the row is the bar's grain.
+    // Idle: no plate at all, the row stands on the see-through band.
     [Fact]
     public void A_fully_faded_row_has_no_plate() =>
         Assert.Null(FloatingBar.Plate("#9B6CF0", 0, 16, current: false));
 
-    // A row that opted out of colour still gets the plate, plain: being recent is about the grain, not the colour.
+    // A row that opted out of colour still gets the plate, plain: being recent is about being solid, not the colour.
     [Fact]
     public void A_row_with_no_colour_gets_a_plain_plate() =>
         Assert.Equal(BarSurface.Base, ColourOf(FloatingBar.Plate(WorkspacePalette.None, 0, 0, current: false)));
@@ -146,7 +147,7 @@ public class FloatingBarRecencyTests
         Assert.Equal(FaintGrey, RailOf(bar, "Sparrow"));
         Assert.Equal(0x6B, ColourOf(CaptionOf(bar, "Sparrow")).A);
         Assert.Empty(TintsOf(bar, "Sparrow"));
-        // No plate: nothing opaque under the row, so it stands on the bar's grain.
+        // No plate: nothing opaque under the row, so it stands on the see-through band.
         Assert.DoesNotContain(BackgroundsOf(bar, "Sparrow"), c => c.A == 0xFF);
     });
 

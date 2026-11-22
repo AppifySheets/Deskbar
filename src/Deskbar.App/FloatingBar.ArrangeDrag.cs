@@ -465,7 +465,7 @@ public partial class FloatingBar
         // The row's own slot: covered with the bar's background so the row seems to have left it, and outlined dashed.
         var gap = paint.Gap;
         gap.Inflate(-0.5, -0.5);
-        dc.DrawRoundedRectangle(Root.Background, ArrangeGapPen, gap, 3, 3);
+        dc.DrawRoundedRectangle(BarFill, ArrangeGapPen, gap, 3, 3);
 
         if (arrangeGhost is { } ghost)
         {
@@ -487,7 +487,7 @@ public partial class FloatingBar
                 GroupHeaderFontSize, CurrentRowForeground, VisualTreeHelper.GetDpi(this).PixelsPerDip);
             // Under the target, on a patch of the bar's own background, so it reads over whatever row is below.
             var at = new Point(under.Left + 4, under.Bottom + 1);
-            dc.DrawRoundedRectangle(Root.Background, ArrangeTargetPen, new Rect(at.X - 3, at.Y, text.Width + 6, text.Height + 1), 2, 2);
+            dc.DrawRoundedRectangle(BarFill, ArrangeTargetPen, new Rect(at.X - 3, at.Y, text.Width + 6, text.Height + 1), 2, 2);
             dc.DrawText(text, at);
         }
 

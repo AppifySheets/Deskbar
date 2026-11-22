@@ -58,8 +58,8 @@ public partial class ManageWindow : Window
         ClaudeSkill.IsChecked = manager.State.ClaudeSkill;
         // ...and SetFocusRing.
         FocusRing.IsChecked = manager.State.FocusRing;
-        // ...and SetGrain.
-        Grain.IsChecked = manager.State.Grain;
+        // ...and SetSeeThrough.
+        SeeThrough.IsChecked = manager.State.SeeThrough;
         // ...and SetPreviousWorkspaceItem, which, like SetQuietTaskbar, compares with what the box SHOWS, so a box
         // ticked by the default (list on the screens, taskbar on auto-hide) records no choice when Manage opens.
         PreviousWorkspaceItem.IsChecked = manager.PreviousWorkspaceItemShown(this.taskbarAutoHides);
@@ -312,9 +312,9 @@ public partial class ManageWindow : Window
     void OnFocusRingToggled(object s, RoutedEventArgs e) =>
         manager.SetFocusRing(FocusRing.IsChecked == true).TapError(Complain);
 
-    // The bar shows or hides the grain on the next rebuild (FloatingBar.ApplyGrainSetting).
-    void OnGrainToggled(object s, RoutedEventArgs e) =>
-        manager.SetGrain(Grain.IsChecked == true).TapError(Complain);
+    // The bar repaints the band behind its rows on the next rebuild (FloatingBar.ApplySurfaceSetting).
+    void OnSeeThroughToggled(object s, RoutedEventArgs e) =>
+        manager.SetSeeThrough(SeeThrough.IsChecked == true).TapError(Complain);
 
     // The bar draws or clears the item, on every strip, in the titled list and on the taskbar, on the state pulse this
     // sends (FloatingBar.JumpsFor), so it takes effect at once.

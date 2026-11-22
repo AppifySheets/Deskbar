@@ -10,7 +10,7 @@
     <!-- THE DUE CARD (see DueCard.xaml.cs). Borderless and transparent like the bar, set in XAML because WPF throws
          when these are assigned imperatively in the wrong order. The Border has the bar's own background and
          corner radius. The three lines are filled in code. The background is the bar's flat surface
-         (BarSurface.Solid): the grain belongs to the workspace rows alone. -->
+         (BarSurface.Solid): only the band behind the workspace rows is see-through. -->
     <Border CornerRadius="8" Background="{x:Static app:BarSurface.Solid}" Padding="12,10">
         <StackPanel>
             <TextBlock x:Name="TitleText" Foreground="#FFF2F2F2" FontSize="14" FontWeight="SemiBold"

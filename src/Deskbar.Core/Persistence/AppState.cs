@@ -292,13 +292,20 @@ public sealed record AppState(
     // The reading the app wants. Not stored.
     [JsonIgnore] public bool FocusRing => !NoFocusRing;
 
-    // Whether the bar's workspace rows stand on a grain texture (BarSurface and FloatingBar.Grain.cs in the app) or on
-    // the flat base. Petre: "make grain a default feature, configurable in settings". Stored as its NEGATION for the
-    // reason NoFocusRing is: every existing state.json lacks the key and reads false, which is on.
+    // Whether the band behind the bar's workspace rows lets the desktop show through (85% of the bar's colour kept,
+    // BarSurface.SeeThrough and FloatingBar.Surface.cs in the app) or is as flat as the rest of the bar. Petre picked
+    // it over a grain texture: "let's take that instead, 85%". Stored as its NEGATION for the reason NoFocusRing is:
+    // every existing state.json lacks the key and reads false, which is on.
+    public bool NoSeeThrough { get; init; }
+
+    // The grain's setting, which 2.5.120 shipped and this replaced: true when the user unticked the grain, which
+    // meant "a flat bar", so it still means a flat bar here, rather than a bar that turns see-through on update.
+    // Only read; SetSeeThrough clears it once the user chooses again.
     public bool NoGrain { get; init; }
 
     // The reading the app wants. Not stored.
-    [JsonIgnore] public bool Grain => !NoGrain;
+    [JsonIgnore] public bool SeeThrough => !NoSeeThrough && !NoGrain;
+
     // Whether the previous workspace's item ("↩ <previous>", WorkspaceJumps.BackItem) is drawn at the end of every
     // screen strip, in the current workspace's titled list and as a button on Windows' taskbar. A user did not want
     // it and had no way to turn it off, so it is a choice (Manage's box, `previous-workspace on|off`).

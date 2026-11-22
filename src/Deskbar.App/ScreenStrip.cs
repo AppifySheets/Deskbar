@@ -39,8 +39,8 @@ public sealed class ScreenStrip : Window
     // breathing room and the 2 DIP underline. Turned into the screen's pixels at the screen's own scale, so 36 px at 150%.
     public const double HeightDip = 24;
 
-    // The bar's own flat surface (BarSurface.Solid), so a strip reads as part of Deskbar; flat because the grain belongs
-    // to the workspace rows alone (FloatingBar.Grain.cs) and a strip is the taskbar's kind of thing. And the tag's grey
+    // The bar's own flat surface (BarSurface.Solid), so a strip reads as part of Deskbar; flat because the see-through band
+    // belongs to the workspace rows alone (FloatingBar.Surface.cs) and a strip is the taskbar's kind of thing. And the tag's grey
     // for an unnamed desktop, which has no workspace colour. Frozen, as every static brush must be (CLAUDE.md, traps):
     // an unfrozen one takes the affinity of the first thread that touches it and throws on the next. BarSurface's are.
     static readonly Brush StripBackground = BarSurface.Solid;
