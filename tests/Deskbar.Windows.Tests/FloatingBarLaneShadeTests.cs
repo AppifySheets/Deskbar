@@ -978,9 +978,11 @@ public class FloatingBarLaneShadeTests(ITestOutputHelper output)
                 .SelectMany(child => new[] { child }.Concat(Descendants(child)));
 
         // The row: the outermost Border wrapping a Grid on the way up, which is what GroupRow builds
-        // around every row's container.
+        // around every row's container, looking no further than the Rows panel. Since the grain went behind
+        // the rows (#408) the bar's own Root is a Border wrapping a Grid too, and without the stop every
+        // shade's "row" was the whole bar, named after the first text in it: the footer's clock.
         static FrameworkElement Row(DependencyObject node) =>
-            Ancestors(node).OfType<Border>().Last(b => b.Child is Grid);
+            Ancestors(node).TakeWhile(a => a is not Panel { Name: "Rows" }).OfType<Border>().Last(b => b.Child is Grid);
 
         static T Ancestor<T>(DependencyObject node) where T : FrameworkElement =>
             Ancestors(node).OfType<T>().First();
