@@ -59,6 +59,9 @@ public static class ControlUsage
             new("task", "move <id> <workspace>|none", "move a task to a workspace, or to none"),
             new("task", "comment <id> <markdown>", "add a comment to a task's thread, as you"),
             new("task", "delete <id>", "delete a task; the reply is the task as it was"),
+            new("tasks-window", "show|hide",
+                "open the tasks window, as the bar's \"+N more\" does (every task grouped by status, the closed ones\n"
+                + "      under their filter, each with its comments), or close it"),
         ]),
         new("Workspace row menu", [
             new("rename", "<workspace> <new name>", "Rename…"),

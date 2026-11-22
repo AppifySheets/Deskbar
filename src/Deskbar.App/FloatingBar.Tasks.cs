@@ -1,3 +1,4 @@
+using System.Windows;
 using System.Windows.Media;
 using CSharpFunctionalExtensions;
 
@@ -24,4 +25,18 @@ public partial class FloatingBar
     void NoteWorkspaceAccent(Guid workspace, Brush? accent) => workspaceAccents[workspace] = accent;
 
     Maybe<string> WorkspaceName(Guid id) => manager.State.Workspaces.TryFirst(w => w.Id == id).Map(w => w.Name);
+
+    // A workspace's rail colour as the last rebuild drew it, for the tasks window's chips, so a chip there wears the
+    // colour of the row it points at, as the list's chips here do. None before the first rebuild or for a row without
+    // a colour.
+    internal Brush? WorkspaceAccent(Guid id) => workspaceAccents.GetValueOrDefault(id);
+
+    // The bar's whole rectangle on screen in device pixels, which the tasks window keeps clear of (TasksWindow.PlaceNear;
+    // the bar re-asserts itself at the top of the topmost band every second, so a window over it would be covered).
+    // Empty while the bar is not on screen (minimized to its taskbar button): the window then opens where Quick find
+    // does.
+    internal Rect BarScreenBounds() =>
+        IsVisible && PresentationSource.FromVisual(this) is not null
+            ? new Rect(PointToScreen(new Point(0, 0)), PointToScreen(new Point(ActualWidth, ActualHeight)))
+            : Rect.Empty;
 }

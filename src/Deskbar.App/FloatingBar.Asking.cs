@@ -32,7 +32,7 @@ namespace Deskbar.App;
 // frame whether or not anything draws with it, and the bar is on screen all day.
 public partial class FloatingBar
 {
-    static readonly Color AskingOrange = Color.FromRgb(0xFF, 0xA7, 0x26);
+    internal static readonly Color AskingOrange = Color.FromRgb(0xFF, 0xA7, 0x26);
     static readonly Duration AskingHalfCycle = new(TimeSpan.FromMilliseconds(600));
 
     SolidColorBrush? askingPulse, askingCaption;

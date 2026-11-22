@@ -59,6 +59,9 @@ namespace Deskbar.Core.Control;
 // `setTileLocked` locks or unlocks a tile (`lock-tile <hwnd> on|off`, the twin of the icon menu's "Don't split this
 // tile"; Tiler.Lock.cs). The lock is the Tiler's, which lives in the app, so the app hands in how; left null,
 // `lock-tile` refuses.
+//
+// `setTasksWindow` shows or hides the tasks window (`tasks-window show|hide`, the twin of the bar's "+N more";
+// TasksBoard in the app). The window is the app's, so the app hands in how; left null, `tasks-window` refuses.
 public sealed partial class RemoteControl(WorkspaceManager manager, Func<bool, Result>? setBarVisible = null, Func<ProgramLaunch, Result<int?>>? launch = null,
     Func<Result<string>>? dump = null, Func<Maybe<string>>? defaultBrowser = null,
     Func<(string Version, string? Exe, bool Packaged)>? identity = null,
@@ -67,7 +70,8 @@ public sealed partial class RemoteControl(WorkspaceManager manager, Func<bool, R
     Func<bool, Result>? setArranging = null,
     Func<bool>? isPro = null,
     TaskService? tasks = null,
-    Func<WindowHandle, bool, Result>? setTileLocked = null)
+    Func<WindowHandle, bool, Result>? setTileLocked = null,
+    Func<bool, Result>? setTasksWindow = null)
 {
     static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web) { WriteIndented = true };
 
@@ -93,6 +97,7 @@ public sealed partial class RemoteControl(WorkspaceManager manager, Func<bool, R
         ("attention", []) => Attention(null),
         ("attention", ["--from", var folder]) => Attention(folder),
         ("task", _) => Task(rest),
+        ("tasks-window", [var state]) => TasksWindow(state),
 
         ("rename", [var workspace, var name]) => Rename(workspace, name),
         ("reorder", [var workspace, var where]) => Reorder(workspace, where),

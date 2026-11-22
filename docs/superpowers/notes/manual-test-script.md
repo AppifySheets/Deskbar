@@ -235,6 +235,42 @@ The task list at the bottom of the bar (spec `docs/superpowers/specs/2026-11-22-
 53. Make the bar as narrow as it goes (drag its edge in). Nothing in the list is cut off at the right: the box,
     "+N more", the lines' chips, and the add chips, which wrap onto a second line, a long workspace name
     trimmed with an ellipsis.
+54. Click in the box and pick "none": only "none" is filled and outlined in blue, the workspace chip loses its fill
+    and dims, and the box reads "Add…". Pick a workspace through "other…": the menu shows each workspace as its
+    chip in its colour, in the bar's order, grouped workspaces under their group's name (which cannot be clicked),
+    and the box reads "Add to <that workspace>…". With twenty or so workspaces the menu scrolls rather than running
+    off the screen.
+55. Click a line's workspace chip: a menu of "none" and every workspace in its colour opens, the task's own ticked,
+    and the click does not switch workspaces. Pick another: the line's chip changes, and `$ts task list` agrees. Add
+    a note with a title longer than the bar on a narrow bar: the title ends in an ellipsis and the chip is whole.
+
+## The tasks window
+
+The tasks window (spec `docs/superpowers/specs/2026-11-22-tasks-board-design.md`, "The window" and "Comments").
+
+56. With three or fewer open tasks the line under the list reads "All tasks"; with more, "+N more". Click it: a
+    window titled "Tasks" opens beside the bar (not over it), with a dark title bar, on the list and not on a form
+    (no box has the keyboard). It is in Alt+Tab and on the taskbar, and the bar does not list it as a window.
+57. Groups read WAITING ON YOU, DONE, IN PROGRESS, BACKLOG, in that order, each newest first. The chips count each
+    status. Click "Closed": only closed tasks show, the latest closed first, each with "Reopen"; click "Reopen" on
+    one and it goes back to the open view. "Workspace: all" lists every workspace as its coloured chip, grouped;
+    pick one, then "none", then "All workspaces".
+58. Click into another app: the window stays open. Resize it and move it to another screen, close it with its X,
+    then click "+N more": it comes back where you left it, same size. Quit and start Deskbar again: it still opens
+    there. Turn that screen off (or edit `TasksWindow` in state.json to an off-screen place): it opens beside the bar.
+59. Leave the window open, switch to another desktop and click "+N more": the window comes to this desktop rather
+    than taking you back. `$ts tasks-window hide` closes it, `$ts tasks-window show` opens or brings it forward.
+60. Click a task's comment count: its thread opens. Post a comment through the pipe with bold, italics, inline code,
+    a link to https://deskbar.app and a two-item list: it shows formatted, by "you". Type a comment and press Enter:
+    it appears under "you", the box empties and keeps the keyboard. Shift+Enter makes a new line instead. While you
+    type, add a task from the pipe: what you typed stays. Click the link: it opens in the default browser. A `file:`
+    link in a comment shows as plain text.
+61. "…" on a line: set the status to each of the four, Rename… (Enter keeps it, Esc drops it), Move to (the
+    coloured workspace menu), Close (the line stays struck through with Undo for six seconds; Undo brings back
+    the status it had) and Delete, then Delete for good. While that menu is open, change a task from the pipe:
+    nothing moves until the menu closes.
+62. Click a note's line on a workspace: you go there and the window stays open on its own desktop. "+ Add": a box
+    opens, "on <workspace> ▾" says where; Enter adds the note there, Esc closes the box.
 
 ## Tiling on the split tree
 

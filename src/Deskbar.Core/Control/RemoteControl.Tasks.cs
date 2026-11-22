@@ -75,6 +75,16 @@ public sealed partial class RemoteControl
         };
     }
 
+    // `tasks-window show|hide`: the tasks window, opened as the bar's "+N more" opens it (clear of the bar), or hidden.
+    // Only the two literal words; anything else is the usage line and asks the app nothing.
+    ControlReply TasksWindow(string state) => state.ToLowerInvariant() switch
+    {
+        "show" or "hide" when setTasksWindow is null => ControlReply.Fail("This copy of Deskbar has no tasks window."),
+        "show" => Reply(setTasksWindow!(true), () => new { shown = true }),
+        "hide" => Reply(setTasksWindow!(false), () => new { shown = false }),
+        _ => ControlReply.Fail(ControlUsage.LineFor("tasks-window")),
+    };
+
     // The client's `--from <folder>` is always last (WithCallerFolder appends it), so it is taken off the end.
     static (string[] Args, string? From) SplitFrom(string[] rest) =>
         rest is [.., "--from", var folder] ? (rest[..^2], folder) : (rest, null);

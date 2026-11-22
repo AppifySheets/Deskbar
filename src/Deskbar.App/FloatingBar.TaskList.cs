@@ -46,13 +46,15 @@ namespace Deskbar.App;
 //                   tick or close button was (Petre: "when i click on done, there should be undo"; Ruling 10).
 //   "+N more"       a small line under the last line when more open tasks are out of sight. When some of the hidden
 //                   ones wait on Petre it says so in the asking orange ("+2 waiting"), so no ask is out of sight
-//                   without a sign (spec, "The bar's order"). Until the task window exists (a later pull request sets
-//                   OpenTasksWindow) it expands the list in place and reads "Less" at the end of it. Under the lines
+//                   without a sign (spec, "The bar's order"). It opens the tasks window (OpenTasksWindow, set by the
+//                   App; TasksBoard), and with the window there it is always shown, reading "All tasks" when nothing
+//                   is hidden, since the window is where closed tasks and comment threads are. Without a window (the
+//                   bar's tests) it expands the list in place and reads "Less" at the end of it. Under the lines
 //                   rather than in a header, so it does not move under the pointer when the list opens.
 //
-// CLICKS. A line goes to its task through GoToTask, which the App points at the workspace switch (a later pull
-// request sends a Claude task to its session instead); a note on no workspace has nowhere to go, so its click does
-// nothing. The tick box and the close button call TaskService.Close at once (the store stays the truth; only Petre
+// CLICKS. A line goes to its task through GoToTask, which the App points at the workspace switch, the same path the
+// tasks window's lines take (a later change sends a Claude task to its session instead; controller ruling 13); a note
+// on no workspace has nowhere to go, so its click does nothing. The tick box and the close button call TaskService.Close at once (the store stays the truth; only Petre
 // closes, and these are his clicks), and "Undo" calls Reopen.
 //
 // WHEN IT IS DRAWN. The lines are rebuilt when TaskService.Changed pulses and after every rebuild of the bar (the
@@ -93,7 +95,10 @@ public partial class FloatingBar
     // What a click on a line does with the task's id. App sets it to the workspace switch; a refusal is traced.
     internal Func<Guid, Result> GoToTask { get; init; } = _ => Result.Success();
 
-    // What "+N" opens once the task window exists. Null until then, and the button expands the list in place.
+    // What "+N more" opens: the tasks window (TasksBoard.Toggle, set by the App). While it is set, the line under the
+    // list is always there, reading "All tasks" when nothing is out of sight, because the window is the one place the
+    // closed tasks can be seen (Petre: "can i see task list in deskbar? all of them, new and old"). Left null (the
+    // bar's own tests, or a copy with no window) the button expands the list in place, as before the window existed.
     internal Action? OpenTasksWindow { get; init; }
 
     // Whether this copy may use tasks: Deskbar Pro, or any copy while tasks are free (TasksGate.Free, so always, for
@@ -237,39 +242,23 @@ public partial class FloatingBar
             t.IsClaudes,
             t.WorkspaceId.Bind(workspaceName).Match(name => (string?)name, () => null),
             t.WorkspaceId.HasValue ? colour(t.WorkspaceId.Value) : null,
-            t.IsClaudes ? SessionOf(t).Bind(s => sessionWindow(s.Folder)) : Maybe<nint>.None)).ToArray();
+            t.IsClaudes ? TaskViews.SessionToGoTo(t).Bind(s => sessionWindow(s.Folder)) : Maybe<nint>.None)).ToArray();
 
     // What follows the title: the question while the task waits on Petre, else its status line; and for a Claude task
     // whose sessions have all ended, "no live session" after that (spec, "A task whose sessions have all ended stays
-    // open and says 'no live session'").
-    static string DetailOf(TaskItem task) =>
+    // open and says 'no live session'"). The tasks window's lines say the same (TasksBoard.Row).
+    internal static string DetailOf(TaskItem task) =>
         string.Join(TaskDetailSeparator, new[]
         {
             task.Status == TaskStatus.WaitingOnYou && task.Question.HasValue ? task.Question.Value : task.StatusLine,
             task.IsClaudes && !task.HasLiveSession ? NoLiveSession : "",
         }.Where(part => part.Length > 0));
 
-    // The session whose window the line shows: a live one before an ended one, the latest joined first. The spec's
-    // "the one waiting on Petre" cannot be told apart yet (nothing records which session asked), and while a task
-    // waits it is its live session that asked.
-    static Maybe<TaskSession> SessionOf(TaskItem task) =>
-        task.Sessions.OrderByDescending(s => s.IsLive).ThenByDescending(s => s.Joined).TryFirst();
-
-    // The words of each status, as the spec spells them.
-    static string StatusName(TaskStatus status) => status switch
-    {
-        TaskStatus.Backlog => "Backlog",
-        TaskStatus.InProgress => "In progress",
-        TaskStatus.WaitingOnYou => "Waiting on you",
-        TaskStatus.Done => "Done",
-        TaskStatus.Closed => "Closed",
-        _ => status.ToString(),
-    };
-
     // The line under the list: how many open tasks are out of sight, naming how many of them wait on Petre; "Less" at
-    // the end of the list expanded in place.
+    // the end of the list expanded in place; "All tasks" when nothing is hidden and the button opens the window.
     static string MoreText(int hidden, int waiting, bool expanded) =>
         expanded ? "Less"
+        : hidden == 0 ? "All tasks"
         : waiting == 0 ? $"+{hidden} more"
         : waiting == hidden ? $"+{hidden} waiting"
         : $"+{hidden} more, {waiting} waiting";
@@ -378,8 +367,8 @@ public partial class FloatingBar
         };
     }
 
-    // A one-shot dispatcher timer for the undo window (TaskUndoTimer's default).
-    static IDisposable DispatcherUndoTimer(TimeSpan after, Action then)
+    // A one-shot dispatcher timer for the undo window (TaskUndoTimer's default, and the tasks window's).
+    internal static IDisposable DispatcherUndoTimer(TimeSpan after, Action then)
     {
         var timer = new DispatcherTimer { Interval = after };
         timer.Tick += (_, _) =>
@@ -574,10 +563,12 @@ public partial class FloatingBar
         var onShow = shownTaskLines.Select(l => l.Id).ToHashSet();
         var hidden = open.Where(l => !onShow.Contains(l.Id)).ToArray();
         var waiting = hidden.Count(l => l.Status == TaskStatus.WaitingOnYou);
-        taskMoreButton.Visibility = hidden.Length > 0 || taskListExpanded ? Visibility.Visible : Visibility.Collapsed;
+        taskMoreButton.Visibility = hidden.Length > 0 || taskListExpanded || OpenTasksWindow is not null ? Visibility.Visible : Visibility.Collapsed;
         taskMoreLabel.Text = MoreText(hidden.Length, waiting, taskListExpanded);
         taskMoreLabel.Foreground = waiting > 0 && !taskListExpanded ? TaskOrange : TaskDimInk;
-        taskMoreButton.ToolTip = taskListExpanded ? "Show the first three" : $"{hidden.Length} more {(hidden.Length == 1 ? "task" : "tasks")}";
+        taskMoreButton.ToolTip = taskListExpanded ? "Show the first three"
+            : OpenTasksWindow is not null ? "Every task, open and closed, with its comments"
+            : $"{hidden.Length} more {(hidden.Length == 1 ? "task" : "tasks")}";
     }
 
     // One task's line: a button the width of the list, so a click anywhere on it goes to the task.
@@ -803,7 +794,7 @@ public partial class FloatingBar
     static string TipOf(TaskLine line) =>
         string.Join("\n", new[]
         {
-            $"{StatusName(line.Status)}: {line.Title}",
+            $"{TaskViews.StatusName(line.Status)}: {line.Title}",
             line.Detail,
             line.WorkspaceName is { } name ? $"On {name}" : "On no workspace",
         }.Where(part => part.Length > 0));
@@ -887,7 +878,8 @@ public partial class FloatingBar
         reopened.TapError(_ => PaintTaskList());
     }
 
-    // "+N more": the task window once it exists, else the list expanded in place, and folded back on the next click.
+    // "+N more": the tasks window when the App gave one, else the list expanded in place, and folded back on the next
+    // click.
     void OnTaskMoreClick()
     {
         if (OpenTasksWindow is { } open)

@@ -1,0 +1,98 @@
+<Window x:Class="Deskbar.App.TasksWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Tasks"
+        WindowStyle="SingleBorderWindow" ResizeMode="CanResize" Background="#FF1E1F24"
+        Width="720" Height="560" MinWidth="420" MinHeight="260"
+        ShowInTaskbar="True">
+    <!-- THE TASKS WINDOW (docs/superpowers/specs/2026-11-22-tasks-board-design.md, "The window"; mockup
+         .superpowers/brainstorm/876-1795339550/content/tasks-window.html): every task and its status, grouped, with
+         filters by status and by workspace, and a comment thread under each line. Display only: TasksBoard decides
+         what is shown and what a click does.
+
+         A regular window, a page of its own (Petre: "can i have a separate page for all tasks?"): a title bar, resizable,
+         in Alt+Tab and on the taskbar, and it stays open when he clicks into another app. Closing it hides it, and it
+         opens again where he left it (TasksWindow.Open). Not topmost: it is a page to work in, not a popup over the bar.
+         A size of its own rather than SizeToContent: the list scrolls inside it, so opening a thread or a new task
+         arriving never moves the window's edges.
+
+         The rows, the chips and the toolbar's buttons are built in code-behind, like every list in this app, so each
+         can carry its workspace's colour. The templates below are the only styling: the app runs WPF's Fluent theme,
+         whose boxed buttons and fields would look like a dialog rather than part of the bar. -->
+    <Window.Resources>
+        <!-- One flat button for the chips and the small buttons: a rounded fill that lightens under the pointer. -->
+        <ControlTemplate x:Key="FlatButton" TargetType="Button">
+            <Border x:Name="Face" Background="{TemplateBinding Background}" CornerRadius="4"
+                    BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="{TemplateBinding BorderThickness}"
+                    Padding="{TemplateBinding Padding}">
+                <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+            </Border>
+            <ControlTemplate.Triggers>
+                <Trigger Property="IsMouseOver" Value="True">
+                    <Setter TargetName="Face" Property="Opacity" Value="0.8"/>
+                </Trigger>
+            </ControlTemplate.Triggers>
+        </ControlTemplate>
+        <!-- A line: the mockup's hover, with the content stretched across so the title has the width to trim against. -->
+        <ControlTemplate x:Key="LineButton" TargetType="Button">
+            <Border x:Name="Chrome" Background="{TemplateBinding Background}">
+                <ContentPresenter HorizontalAlignment="Stretch" VerticalAlignment="Center"/>
+            </Border>
+            <ControlTemplate.Triggers>
+                <Trigger Property="IsMouseOver" Value="True">
+                    <Setter TargetName="Chrome" Property="Background" Value="#FF25272E"/>
+                </Trigger>
+            </ControlTemplate.Triggers>
+        </ControlTemplate>
+        <!-- Quick find's bare text box: the system style draws its own box, underline and clear button inside ours. -->
+        <ControlTemplate x:Key="BareTextBox" TargetType="TextBox">
+            <ScrollViewer x:Name="PART_ContentHost" Focusable="False" VerticalAlignment="Center"
+                          HorizontalScrollBarVisibility="Hidden" VerticalScrollBarVisibility="Auto"/>
+        </ControlTemplate>
+        <!-- A comment's rendered markdown, read only, with nothing drawn around it. -->
+        <ControlTemplate x:Key="BareRichTextBox" TargetType="RichTextBox">
+            <ScrollViewer x:Name="PART_ContentHost" Focusable="False"
+                          HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Disabled"/>
+        </ControlTemplate>
+    </Window.Resources>
+    <Border Background="#FF1E1F24">
+        <DockPanel>
+            <!-- The toolbar: "Tasks", the status filters with their counts, the workspace filter and "+ Add".
+                 Focusable so the window has somewhere to put the keyboard that is not a text box: it opens on
+                 the board, not on a form (TasksWindow.Open). -->
+            <Border x:Name="Toolbar" DockPanel.Dock="Top" BorderBrush="#FF33353C" BorderThickness="0,0,0,1" Padding="10,8"
+                    Focusable="True" FocusVisualStyle="{x:Null}">
+                <DockPanel>
+                    <TextBlock Text="Tasks" FontWeight="SemiBold" FontSize="13" Foreground="#FFE6E6E6"
+                               VerticalAlignment="Center" Margin="0,0,10,0"/>
+                    <StackPanel x:Name="ToolbarEnd" DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center"/>
+                    <WrapPanel x:Name="Filters" VerticalAlignment="Center"/>
+                </DockPanel>
+            </Border>
+            <!-- The add box, shown by "+ Add" and hidden again by Enter or Esc. -->
+            <Border x:Name="AddRow" DockPanel.Dock="Top" Visibility="Collapsed" Padding="10,6,10,6"
+                    BorderBrush="#FF33353C" BorderThickness="0,0,0,1">
+                <DockPanel>
+                    <StackPanel x:Name="AddEnd" DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center"/>
+                    <Border CornerRadius="4" Background="#FF15161A" BorderBrush="#FF4F8CFF" BorderThickness="1" Padding="6,3">
+                        <Grid>
+                            <TextBox x:Name="AddBox" FontSize="12" Foreground="#FFE6E6E6" Background="Transparent"
+                                     BorderThickness="0" CaretBrush="White" Padding="0" Template="{StaticResource BareTextBox}"/>
+                            <TextBlock x:Name="AddPlaceholder" Text="A note: Enter adds it, Esc closes the box" FontSize="12"
+                                       Foreground="#FF8B8F99" IsHitTestVisible="False" Margin="2,0,0,0"/>
+                        </Grid>
+                    </Border>
+                </DockPanel>
+            </Border>
+            <!-- Why the last action failed, until the next one works (TasksWindow.ShowProblem). -->
+            <TextBlock x:Name="ProblemText" DockPanel.Dock="Top" Foreground="#FFFFA726" FontSize="12" TextWrapping="Wrap"
+                       Margin="12,6,12,0" Visibility="Collapsed"/>
+            <TextBlock x:Name="EmptyText" DockPanel.Dock="Top" Foreground="#FF8B8F99" FontSize="12" Margin="12,10,12,0"
+                       Visibility="Collapsed"/>
+            <ScrollViewer x:Name="Scroller" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled"
+                          Focusable="False">
+                <StackPanel x:Name="Rows" Margin="0,0,0,8"/>
+            </ScrollViewer>
+        </DockPanel>
+    </Border>
+</Window>

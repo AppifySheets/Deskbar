@@ -1,0 +1,161 @@
+using CSharpFunctionalExtensions;
+using Deskbar.Core.Tasks;
+// System.Threading.Tasks (an implicit using) has a TaskStatus too; the alias says which one this file means.
+using TaskStatus = Deskbar.Core.Tasks.TaskStatus;
+
+namespace Deskbar.Core.Tests.Tasks;
+
+// The tasks window's grouping and filters, pure (TaskViews; docs/superpowers/specs/2026-11-22-tasks-board-design.md,
+// "The window"). The window itself is tested in Deskbar.Windows.Tests (TasksBoardTests); these pin the rules it draws.
+public class TaskViewsTests
+{
+    DateTimeOffset clock = new(2026, 11, 22, 10, 0, 0, TimeSpan.Zero);
+    static readonly Guid ws = Guid.Parse("11111111-1111-1111-1111-111111111111");
+    static readonly Guid other = Guid.Parse("22222222-2222-2222-2222-222222222222");
+    static readonly Maybe<Guid> Free = Maybe<Guid>.None;
+
+    TaskBoard board = TaskBoard.Empty;
+
+    Guid Note(string title, Maybe<Guid> workspace)
+    {
+        var id = Guid.NewGuid();
+        board = board.AddNote(title, workspace, clock, id).Value.Board;
+        clock = clock.AddMinutes(1);
+        return id;
+    }
+
+    Guid Claudes(string title, Maybe<Guid> workspace, string session = "s1")
+    {
+        var id = Guid.NewGuid();
+        board = board.Create(title, workspace, Session(session), clock, id).Value.Board;
+        clock = clock.AddMinutes(1);
+        return id;
+    }
+
+    TaskSession Session(string id) => new(id, @"C:\repos\TaskSpaces", clock, Maybe<DateTimeOffset>.None);
+
+    void Change(Func<TaskBoard, Result<TaskBoard>> change)
+    {
+        board = change(board).Value;
+        clock = clock.AddMinutes(1);
+    }
+
+    string Title(Guid id) => board.Tasks.Single(t => t.Id == id).Title;
+
+    // Each group as "Status: title, title", so two lists of groups compare by value.
+    IReadOnlyList<string> Shown(TaskFilter filter, TaskWorkspaceFilter where) =>
+        TaskViews.Grouped(board, filter, where).Select(g => $"{g.Status}: {string.Join(", ", g.Tasks.Select(t => t.Title))}").ToList();
+
+    [Fact]
+    public void The_open_view_groups_by_status_waiting_done_in_progress_backlog()
+    {
+        var note = Note("Dishwasher tablets", Free);
+        var working = Claudes("DurableFile move guard", ws, "s1");
+        var asking = Claudes("Tasks redesign", ws, "s2");
+        var done = Claudes("Store screenshots", ws, "s3");
+        var closed = Note("Old errand", Free);
+        Change(b => b.Ask(asking, "OK to restart?", clock));
+        Change(b => b.MarkDone(done, clock));
+        Change(b => b.Close(closed, clock));
+
+        Assert.Equal(
+            [
+                $"WaitingOnYou: {Title(asking)}",
+                $"Done: {Title(done)}",
+                $"InProgress: {Title(working)}",
+                $"Backlog: {Title(note)}",
+            ],
+            Shown(TaskFilter.Open, TaskWorkspaceFilter.All));
+    }
+
+    [Fact]
+    public void A_group_lists_its_tasks_newest_raised_first()
+    {
+        Note("first", Free);
+        Note("second", Free);
+        Note("third", Free);
+
+        Assert.Equal(["Backlog: third, second, first"], Shown(TaskFilter.Open, TaskWorkspaceFilter.All));
+    }
+
+    [Fact]
+    public void Closed_tasks_show_only_under_their_filter_the_latest_closed_first()
+    {
+        var a = Note("a", Free);
+        var b = Note("b", Free);
+        Note("open", Free);
+        Change(x => x.Close(b, clock));
+        Change(x => x.Close(a, clock));
+
+        Assert.Equal(["Backlog: open"], Shown(TaskFilter.Open, TaskWorkspaceFilter.All));
+        Assert.Equal(["Closed: a, b"], Shown(TaskFilter.Closed, TaskWorkspaceFilter.All));
+    }
+
+    [Fact]
+    public void A_status_filter_shows_that_status_alone()
+    {
+        Note("note", Free);
+        var asking = Claudes("asking", ws);
+        Change(b => b.Ask(asking, "?", clock));
+
+        Assert.Equal(["WaitingOnYou: asking"], Shown(TaskFilter.WaitingOnYou, TaskWorkspaceFilter.All));
+        Assert.Equal(["Backlog: note"], Shown(TaskFilter.Backlog, TaskWorkspaceFilter.All));
+        Assert.Empty(Shown(TaskFilter.Done, TaskWorkspaceFilter.All));
+    }
+
+    [Fact]
+    public void The_workspace_filter_takes_all_one_workspace_or_none()
+    {
+        Note("here", ws);
+        Note("there", other);
+        Note("nowhere", Free);
+
+        Assert.Equal(["Backlog: nowhere, there, here"], Shown(TaskFilter.Open, TaskWorkspaceFilter.All));
+        Assert.Equal(["Backlog: here"], Shown(TaskFilter.Open, TaskWorkspaceFilter.On(ws)));
+        Assert.Equal(["Backlog: nowhere"], Shown(TaskFilter.Open, TaskWorkspaceFilter.On(Free)));
+    }
+
+    [Fact]
+    public void Counts_follow_the_workspace_filter()
+    {
+        Note("here", ws);
+        var asking = Claudes("asking", other);
+        Change(b => b.Ask(asking, "?", clock));
+        var gone = Note("gone", ws);
+        Change(b => b.Close(gone, clock));
+
+        Assert.Equal(2, TaskViews.Count(board, TaskFilter.Open, TaskWorkspaceFilter.All));
+        Assert.Equal(1, TaskViews.Count(board, TaskFilter.WaitingOnYou, TaskWorkspaceFilter.All));
+        Assert.Equal(1, TaskViews.Count(board, TaskFilter.Open, TaskWorkspaceFilter.On(ws)));
+        Assert.Equal(1, TaskViews.Count(board, TaskFilter.Closed, TaskWorkspaceFilter.On(ws)));
+        Assert.Equal(0, TaskViews.Count(board, TaskFilter.WaitingOnYou, TaskWorkspaceFilter.On(ws)));
+    }
+
+    // The session a click on a Claude task would open (spec, "Going to a session": the one waiting on Petre, else the
+    // most recent). Nothing records which session asked, and while a task waits it is a live session that asked, so
+    // a live session comes first, the latest joined; with none live, the latest joined.
+    [Fact]
+    public void The_session_to_go_to_is_the_latest_live_one_else_the_latest()
+    {
+        var id = Claudes("work", ws, "old");
+        clock = clock.AddMinutes(5);
+        Change(b => b.Join(id, Session("live"), clock));
+        Assert.Equal("live", TaskViews.SessionToGoTo(board.Tasks.Single(t => t.Id == id)).Value.Id);
+
+        // The later one ends: the older one, still live, comes first.
+        board = board.SessionEnded("live", clock);
+        Assert.Equal("old", TaskViews.SessionToGoTo(board.Tasks.Single(t => t.Id == id)).Value.Id);
+
+        // Both ended: the latest joined.
+        board = board.SessionEnded("old", clock.AddMinutes(1));
+        Assert.Equal("live", TaskViews.SessionToGoTo(board.Tasks.Single(t => t.Id == id)).Value.Id);
+    }
+
+    [Fact]
+    public void A_note_has_no_session_to_go_to()
+    {
+        var id = Note("note", ws);
+
+        Assert.True(TaskViews.SessionToGoTo(board.Tasks.Single(t => t.Id == id)).HasNoValue);
+    }
+}
