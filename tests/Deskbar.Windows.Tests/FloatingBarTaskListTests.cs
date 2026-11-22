@@ -1663,4 +1663,151 @@ public class FloatingBarTaskListTests
         Assert.Same(before, t.Tasks.Board);
         Assert.False(t.Bar.TaskDragging);
     });
+
+    // Review of 4fc4441..a1acd60, item 4: a drop on the pinned Waiting on you block took the quadrant of the first line
+    // under it, so dragging a plain task to the top quietly made it important and urgent. It goes to the top of its
+    // OWN quadrant instead, its flags unchanged.
+    [Fact]
+    public void A_drop_on_the_waiting_block_keeps_the_tasks_own_quadrant() => StaThread.Run(() =>
+    {
+        using var t = DragBar(3);
+        var n3 = t.Tasks.Board.Tasks.Single(x => x.Title == "n3").Id;
+        var n2 = t.Tasks.Board.Tasks.Single(x => x.Title == "n2").Id;
+        t.Tasks.SetStatus(n3, Deskbar.Core.Tasks.TaskStatus.WaitingOnYou);
+        t.Tasks.SetFlag(n2, TaskFlag.Important, true);
+        t.Tasks.SetFlag(n2, TaskFlag.Urgent, true);
+        Settle(t);
+        Assert.Equal(["n3", "n2", "n1"], t.Lines.Select(TitleOf));
+
+        Drag(t, t.Lines[2], In(t, t.Lines[0], 0.5));
+
+        var n1 = t.Tasks.Board.Tasks.Single(x => x.Title == "n1");
+        Assert.False(n1.Important || n1.Urgent);
+        Assert.Equal(["n3", "n2", "n1"], t.Tasks.Board.Pile().Select(x => x.Title));
+    });
+
+    // --- Review of 4fc4441..a1acd60, item 2: drags driven by real routed input ---------------------------------------
+
+    sealed class Pointer
+    {
+        public Point At;
+    }
+
+    // The tunnelling and bubbling events WPF raises; each element on the route re-raises its own direct
+    // Preview/MouseLeftButtonDown/Up from them, which is where the line and the panel listen.
+    static MouseButtonEventArgs ButtonArgs(RoutedEvent routed) => new(Mouse.PrimaryDevice, 0, MouseButton.Left) { RoutedEvent = routed };
+
+    static void RealPress(UIElement line)
+    {
+        line.RaiseEvent(ButtonArgs(UIElement.PreviewMouseDownEvent));
+        line.RaiseEvent(ButtonArgs(UIElement.MouseDownEvent));
+    }
+
+    static void RealMove(UIElement line) =>
+        line.RaiseEvent(new MouseEventArgs(Mouse.PrimaryDevice, 0) { RoutedEvent = UIElement.PreviewMouseMoveEvent });
+
+    // The release, and the Click the button would raise when the release reaches it (see the note above the helpers).
+    static bool RealRelease(Button line)
+    {
+        var up = ButtonArgs(UIElement.PreviewMouseUpEvent);
+        line.RaiseEvent(up);
+        if (up.Handled) return false;
+        line.RaiseEvent(ButtonArgs(UIElement.MouseUpEvent));
+        Click(line);
+        return true;
+    }
+
+    static void LoseCapture(UIElement on) =>
+        on.RaiseEvent(new MouseEventArgs(Mouse.PrimaryDevice, 0) { RoutedEvent = Mouse.LostMouseCaptureEvent });
+
+    static (ListBar Bar, Pointer Pointer, List<Guid> Went) RoutedBar()
+    {
+        var went = new List<Guid>();
+        var t = Build(openWindow: () => { }, goTo: id =>
+        {
+            went.Add(id);
+            return Result.Success();
+        });
+        var pointer = new Pointer();
+        t.Bar.ArrangeMouseInput = new ArrangeMouse(_ => true, _ => true, (_, _) => pointer.At);
+        t.Bar.SizeToContent = SizeToContent.Manual;
+        t.Bar.Height = 900;
+        Enumerable.Range(1, 3).ToList().ForEach(i => t.Tasks.AddNote($"n{i}", t.Gepha));
+        Settle(t);
+        return (t, pointer, went);
+    }
+
+    [Fact]
+    public void A_routed_press_under_the_threshold_is_still_a_click() => StaThread.Run(() =>
+    {
+        var (t, pointer, went) = RoutedBar();
+        using var _ = t;
+        var before = t.Tasks.Board;
+        var line = t.Lines[0];
+        pointer.At = In(t, line, 0.5);
+
+        RealPress(line);
+        pointer.At = new Point(pointer.At.X + 1, pointer.At.Y + 1);
+        RealMove(line);
+        Assert.False(t.Bar.TaskDragging);
+        Assert.True(RealRelease(line));
+
+        Assert.Equal([((TaskLine)line.Tag).Id], went);
+        Assert.Same(before, t.Tasks.Board);
+    });
+
+    [Fact]
+    public void A_routed_drag_drops_and_its_release_raises_no_click() => StaThread.Run(() =>
+    {
+        var (t, pointer, went) = RoutedBar();
+        using var _ = t;
+        var line = t.Lines[0];
+        pointer.At = In(t, line, 0.5);
+
+        RealPress(line);
+        pointer.At = new Point(pointer.At.X, pointer.At.Y + 8);
+        RealMove(line);
+        pointer.At = In(t, t.Lines[2], 0.8);
+        RealMove(line);
+        Assert.True(t.Bar.TaskDragging);
+        Assert.False(RealRelease(line));
+        PumpBar(t);
+
+        Assert.Empty(went);
+        Assert.Equal(["n2", "n1", "n3"], t.Tasks.Board.Pile().Select(x => x.Title));
+    });
+
+    // A lost capture during an armed press ends it, and the paint the press held back is drawn (item 3); during a
+    // started drag it calls the drag off. Either way nothing moves.
+    [Fact]
+    public void A_routed_lost_capture_ends_a_press_or_a_drag_and_moves_nothing() => StaThread.Run(() =>
+    {
+        var (t, pointer, went) = RoutedBar();
+        using var _ = t;
+        var line = t.Lines[0];
+        pointer.At = In(t, line, 0.5);
+
+        RealPress(line);
+        t.Tasks.AddNote("held back by the press", t.Gepha);
+        Assert.NotEqual("held back by the press", TitleOf(t.Lines[0]));
+        LoseCapture(line);
+        PumpBar(t);
+        Assert.Equal("held back by the press", TitleOf(t.Lines[0]));
+
+        var before = t.Tasks.Board;
+        line = t.Lines[0];
+        pointer.At = In(t, line, 0.5);
+        RealPress(line);
+        pointer.At = new Point(pointer.At.X, pointer.At.Y + 8);
+        RealMove(line);
+        pointer.At = In(t, t.Lines[2], 0.8);
+        RealMove(line);
+        Assert.True(t.Bar.TaskDragging);
+        LoseCapture(LinesPanel(t));
+        Assert.False(t.Bar.TaskDragging);
+        RealRelease(line);
+        PumpBar(t);
+
+        Assert.Same(before, t.Tasks.Board);
+    });
 }

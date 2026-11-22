@@ -163,17 +163,14 @@ public sealed record TaskBoard(IReadOnlyList<TaskItem> Tasks)
     /// its flags (it shows them) but stays pinned until answered; a closed task is refused.
     /// </summary>
     public Result<TaskBoard> SetFlag(Guid id, TaskFlag flag, bool on, DateTimeOffset now) =>
-        Lookup(id).Bind(task => SetQuadrant(id, task.Quadrant.With(flag, on), now));
+        Lookup(id).Bind(task => ToQuadrant(task, task.Quadrant.With(flag, on), now));
 
-    /// <summary>
-    /// Both flags at once, as a drop on another cell of the window's Matrix does for a task waiting on Petre: the task
-    /// goes to the top of <paramref name="quadrant"/>. The same quadrant returns this same board.
-    /// </summary>
-    public Result<TaskBoard> SetQuadrant(Guid id, Quadrant quadrant, DateTimeOffset now) =>
-        Lookup(id).Bind(task =>
-            !task.IsOpen ? Result.Failure<TaskBoard>(TaskIsClosed)
-            : task.Quadrant == quadrant ? this
-            : Replaced(WithFlags(task, quadrant) with { Rank = TopRank(quadrant, id), UpdatedAt = now }));
+    // SetFlag's move: the task to the top of `quadrant`, both flags set to match; the same quadrant returns this same
+    // board. A drag between quadrants (the Matrix's cells included) goes through Place instead, which takes a place.
+    Result<TaskBoard> ToQuadrant(TaskItem task, Quadrant quadrant, DateTimeOffset now) =>
+        !task.IsOpen ? Result.Failure<TaskBoard>(TaskIsClosed)
+        : task.Quadrant == quadrant ? this
+        : Replaced(WithFlags(task, quadrant) with { Rank = TopRank(quadrant, task.Id), UpdatedAt = now });
 
     /// <summary>
     /// A drag, or `task order`: the task goes to <paramref name="place"/> in <paramref name="quadrant"/>, and dropping

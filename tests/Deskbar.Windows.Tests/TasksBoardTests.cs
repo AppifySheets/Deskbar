@@ -1048,4 +1048,173 @@ public class TasksBoardTests
         t.Window.DragRelease();
         t.Window.Dispatcher.Invoke(() => { }, System.Windows.Threading.DispatcherPriority.Background);
     }
+
+    // Review item 4, in the window: a drop on the waiting block keeps the task's own quadrant, at its top.
+    [Fact]
+    public void A_window_drop_on_the_waiting_block_keeps_the_tasks_own_quadrant() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        var a = t.Tasks.AddNote("a", t.Gepha).Value.Id;
+        var b = t.Tasks.AddNote("b", t.Gepha).Value.Id;
+        var c = t.Tasks.AddNote("c", t.Gepha).Value.Id;
+        var w = t.Tasks.AddNote("w", t.Gepha).Value.Id;
+        t.Tasks.SetStatus(w, TaskStatus.WaitingOnYou);
+        t.Tasks.SetFlag(c, TaskFlag.Urgent, true);
+        t.Window.DragMouse = ArrangeMouse.Held;
+        t.Controller.Open(Rect.Empty);
+        t.Window.UpdateLayout();
+        Assert.Equal([w, c, b, a], t.Window.Keys);
+
+        WindowDrag(t, a, InLine(t, w, 0.5));
+
+        Assert.False(t.Tasks.Board.Tasks.Single(x => x.Id == a).Urgent);
+        Assert.Equal([w, c, a, b], t.Tasks.Board.Pile().Select(x => x.Id));
+    });
+
+    // Review of 4fc4441..a1acd60, item 1: at the window's minimum width the Matrix left a line's title 9.8 DIP (80 at
+    // 720). With a cell long enough for its own scroll bar, every column stays inside the cell and the title keeps a
+    // usable width, as the List's I-3 test asks.
+    [Fact]
+    public void At_the_minimum_width_the_matrix_keeps_room_for_titles() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        Enumerable.Range(1, 30).ToList().ForEach(i => t.Tasks.AddNote($"a note with a fairly long title, number {i}", t.Gepha));
+        Assert.True(t.Harness.Manager.SetTasksMatrix(true).IsSuccess);
+        t.Controller.Open(Rect.Empty);
+        t.Window.Width = t.Window.MinWidth;
+        t.Window.UpdateLayout();
+
+        var line0 = LineOf(t.Window, t.Window.Keys[0]);
+        var scroller = Inside(t.Window).OfType<ScrollViewer>().First(s => s.Content is StackPanel panel && panel.Children.Contains(line0));
+        Assert.True(scroller.ComputedVerticalScrollBarVisibility == Visibility.Visible, "the cell's scroll bar shows");
+        t.Window.Keys.Take(5).Select(id => LineOf(t.Window, id)).ToList().ForEach(line =>
+        {
+            var more = ButtonNamed(line, "More");
+            var bounds = more.TransformToAncestor(scroller).TransformBounds(new Rect(more.RenderSize));
+            Assert.True(bounds.Right <= scroller.ViewportWidth + 0.5, $"More ends at {bounds.Right} in a viewport {scroller.ViewportWidth} wide");
+            var title = Inside(line).OfType<TextBlock>().First(b => b.FontWeight == FontWeights.SemiBold);
+            Assert.True(title.ActualWidth >= 100, $"the title has {title.ActualWidth} DIP at a window {t.Window.ActualWidth} wide");
+        });
+    });
+
+    // --- Review of 4fc4441..a1acd60, item 2: window drags driven by real routed input --------------------------------
+    // As on the bar (FloatingBarTaskListTests, the routed helpers): ButtonBase reads the real mouse button, so the
+    // helper raises the Click a release that reaches the button would raise.
+
+    sealed class Pointer
+    {
+        public Point At;
+    }
+
+    // The tunnelling and bubbling events WPF raises; each element on the route re-raises its own direct
+    // Preview/MouseLeftButtonDown/Up from them, which is where the line and the panel listen.
+    static MouseButtonEventArgs ButtonArgs(RoutedEvent routed) => new(Mouse.PrimaryDevice, 0, MouseButton.Left) { RoutedEvent = routed };
+
+    static void RealPress(UIElement line)
+    {
+        line.RaiseEvent(ButtonArgs(UIElement.PreviewMouseDownEvent));
+        line.RaiseEvent(ButtonArgs(UIElement.MouseDownEvent));
+    }
+
+    static void RealMove(UIElement line) =>
+        line.RaiseEvent(new MouseEventArgs(Mouse.PrimaryDevice, 0) { RoutedEvent = UIElement.PreviewMouseMoveEvent });
+
+    static bool RealRelease(Button line)
+    {
+        var up = ButtonArgs(UIElement.PreviewMouseUpEvent);
+        line.RaiseEvent(up);
+        if (up.Handled) return false;
+        line.RaiseEvent(ButtonArgs(UIElement.MouseUpEvent));
+        Click(line);
+        return true;
+    }
+
+    static void LoseCapture(UIElement on) =>
+        on.RaiseEvent(new MouseEventArgs(Mouse.PrimaryDevice, 0) { RoutedEvent = Mouse.LostMouseCaptureEvent });
+
+    static (Board Board, Pointer Pointer, Guid A, Guid B, Guid C) RoutedWindow()
+    {
+        var t = Build();
+        var a = t.Tasks.AddNote("a", t.Gepha).Value.Id;
+        var b = t.Tasks.AddNote("b", t.Gepha).Value.Id;
+        var c = t.Tasks.AddNote("c", t.Gepha).Value.Id;
+        var pointer = new Pointer();
+        t.Window.DragMouse = new ArrangeMouse(_ => true, _ => true, (_, _) => pointer.At);
+        t.Controller.Open(Rect.Empty);
+        t.Window.UpdateLayout();
+        return (t, pointer, a, b, c);
+    }
+
+    [Fact]
+    public void A_routed_window_press_under_the_threshold_is_still_a_click() => StaThread.Run(() =>
+    {
+        var (t, pointer, _, _, c) = RoutedWindow();
+        using var board = t;
+        var before = t.Tasks.Board;
+        var line = LineOf(t.Window, c);
+        pointer.At = InLine(t, c, 0.5);
+
+        RealPress(line);
+        pointer.At = new Point(pointer.At.X + 1, pointer.At.Y + 1);
+        RealMove(line);
+        Assert.False(t.Window.Dragging);
+        Assert.True(RealRelease(line));
+
+        Assert.Equal([c], t.WentTo);
+        Assert.Same(before, t.Tasks.Board);
+    });
+
+    [Fact]
+    public void A_routed_window_drag_drops_and_its_release_raises_no_click() => StaThread.Run(() =>
+    {
+        var (t, pointer, a, b, c) = RoutedWindow();
+        using var board = t;
+        var line = LineOf(t.Window, c);
+        pointer.At = InLine(t, c, 0.5);
+
+        RealPress(line);
+        pointer.At = new Point(pointer.At.X, pointer.At.Y + 8);
+        RealMove(line);
+        pointer.At = InLine(t, a, 0.8);
+        RealMove(line);
+        Assert.True(t.Window.Dragging);
+        Assert.False(RealRelease(line));
+        t.Window.Dispatcher.Invoke(() => { }, System.Windows.Threading.DispatcherPriority.Background);
+
+        Assert.Empty(t.WentTo);
+        Assert.Equal([b, a, c], t.Tasks.Board.Pile().Select(x => x.Id));
+    });
+
+    [Fact]
+    public void A_routed_window_lost_capture_ends_a_press_or_a_drag_and_moves_nothing() => StaThread.Run(() =>
+    {
+        var (t, pointer, a, b, c) = RoutedWindow();
+        using var board = t;
+        var line = LineOf(t.Window, c);
+        pointer.At = InLine(t, c, 0.5);
+
+        RealPress(line);
+        var late = t.Tasks.AddNote("held back by the press", t.Gepha).Value.Id;
+        Assert.DoesNotContain(late, t.Window.Keys);
+        LoseCapture(line);
+        t.Window.Dispatcher.Invoke(() => { }, System.Windows.Threading.DispatcherPriority.Background);
+        Assert.Contains(late, t.Window.Keys);
+
+        var before = t.Tasks.Board;
+        t.Window.UpdateLayout();
+        line = LineOf(t.Window, c);
+        pointer.At = InLine(t, c, 0.5);
+        RealPress(line);
+        pointer.At = new Point(pointer.At.X, pointer.At.Y + 8);
+        RealMove(line);
+        pointer.At = InLine(t, a, 0.8);
+        RealMove(line);
+        Assert.True(t.Window.Dragging);
+        LoseCapture(t.Window.DragSurface);
+        Assert.False(t.Window.Dragging);
+        RealRelease(line);
+        t.Window.Dispatcher.Invoke(() => { }, System.Windows.Threading.DispatcherPriority.Background);
+
+        Assert.Same(before, t.Tasks.Board);
+    });
 }

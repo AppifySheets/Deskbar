@@ -906,7 +906,7 @@ public partial class FloatingBar
         button.PreviewMouseLeftButtonDown += (_, e) =>
         {
             taskPressClicks = e.ClickCount;
-            if (taskLinesPanel is not null) TaskDragPress(line.Id, e.GetPosition(taskLinesPanel));
+            if (taskLinesPanel is not null) TaskDragPress(line.Id, ArrangeMouseInput.Position(e, taskLinesPanel));
         };
         button.Click += (_, _) =>
         {

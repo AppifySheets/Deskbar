@@ -55,7 +55,7 @@ public partial class TasksWindow
         {
             if (drag is null) return;
             if (!DragMouse.ButtonDown(e)) CancelDrag();
-            else DragMove(e.GetPosition(DragSurface));
+            else DragMove(DragMouse.Position(e, DragSurface));
         };
         surface.PreviewMouseLeftButtonUp += (_, e) =>
         {
@@ -66,7 +66,13 @@ public partial class TasksWindow
         surface.LostMouseCapture += (_, e) =>
         {
             if (ReferenceEquals(e.OriginalSource, surface) && drag is { Started: true }) CancelDrag();
-            else if (drag is { Started: false }) drag = null;
+            // A press still armed when the capture goes (another window took the mouse) ends, and the redraw it held back
+            // is drawn, from the queue rather than inside the capture change (review of 4fc4441..a1acd60, item 3).
+            else if (drag is { Started: false })
+            {
+                drag = null;
+                Dispatcher.BeginInvoke(new Action(Flush));
+            }
         };
     });
 
@@ -164,7 +170,8 @@ public partial class TasksWindow
         dropSpan = box;
         var lines = Placed(cells[quadrant].Lines.Children.OfType<Button>().Where(b => b.Tag is Guid));
         var areas = lines.All(l => l.Waiting) ? new[] { new TaskDropTarget.Area(quadrant, box) } : [];
-        return TaskDropTarget.At(lines, areas, own, at);
+        // A drop on the cell's waiting lines goes to the top of the cell's own quadrant.
+        return TaskDropTarget.At(lines, areas, quadrant, at);
     }
 
     // The lines that can be aimed at, with their boxes in the drag's coordinates.
