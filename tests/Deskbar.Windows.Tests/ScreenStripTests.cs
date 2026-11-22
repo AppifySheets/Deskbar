@@ -546,7 +546,8 @@ public class ScreenStripTests
         Assert.False(strip.ShowInTaskbar);
         Assert.True(strip.Topmost);
         Assert.NotEqual(0, NativeMethods.GetWindowLongPtr(hwnd, NativeMethods.GWL_EXSTYLE) & (nint)NativeMethods.WS_EX_TOOLWINDOW);
-        Assert.Equal(Color.FromArgb(0xFF, 0x14, 0x15, 0x18), Assert.IsType<SolidColorBrush>(strip.Background).Color);
+        // The bar's own surface, the very brush, so a strip can never drift from the bar's background (BarSurface).
+        Assert.Same(Deskbar.App.BarSurface.Textured, strip.Background);
         strip.Close();
     });
 }
