@@ -664,7 +664,7 @@ public partial class FloatingBar
     IEnumerable<UIElement> RightOf(TaskLine line) =>
         new UIElement?[]
         {
-            WorkspaceChip(line),
+            WorkspaceChipButton(line),
             line.Status == TaskStatus.Done && line.Claudes
                 ? line.Closing
                     ? UndoButton(line)
@@ -735,13 +735,51 @@ public partial class FloatingBar
     }
 
     // The workspace's chip in its row's colour (the colour the rebuild noted for that row), or a grey "none".
+    // THE CHIP MOVES THE TASK (Petre, at the live check: "make workspace changeable"). A button like the tick, with the
+    // tick's click guard, and its click marked handled (TaskButton), so it never also goes to the workspace; it opens the
+    // workspace menu (OpenTaskMoveMenu). A line in its undo window has a plain chip: its task is closed.
+    //
+    // The chip is docked before the title fills what is left (TaskLineButton), and its name is trimmed under a ceiling,
+    // so the title trims first and the chip stays whole (Petre's screenshot had "Deskba" cut off at the line's end;
+    // A_long_title_trims_and_leaves_the_chip_whole pins it at the narrowest bar and the largest text size).
+    UIElement WorkspaceChipButton(TaskLine line)
+    {
+        var chip = WorkspaceChip(line);
+        if (line.Closing) return chip;
+        Button? button = null;
+        button = TaskButton("Move to workspace", chip, () => OpenTaskMoveMenu(line.Id, button), "Move to another workspace",
+            ignoredWhen: TaskClickIgnored);
+        button.Margin = new Thickness(4, 0, 0, 0);
+        return button;
+    }
+
+    // The task's workspace menu: every workspace as its chip, in the bar's order and grouped as on the bar, with none
+    // first and the task's own ticked (WorkspaceChipMenu); a pick moves the task through TaskService.MoveTo, the same
+    // move the tasks window and `task move` make. Held open the way the bar's menus are (HoldFadeWhileOpen): the bar
+    // neither fades nor rebuilds under it (#77), and the paint the move causes waits for it to close
+    // (TaskListMustWait). Internal, and answering the menu, for the tests.
+    internal ContextMenu? OpenTaskMoveMenu(Guid id, UIElement? anchor = null)
+    {
+        if (taskService?.Board.Tasks.FirstOrDefault(t => t.Id == id) is not { } task) return null;
+        var menu = WorkspaceChipMenu.Fill(new ContextMenu { PlacementTarget = anchor, Placement = PlacementMode.Bottom },
+            WorkspaceChipMenu.Entries(manager.State, withNone: true), task.WorkspaceId,
+            workspace => taskService?.MoveTo(id, workspace).TapError(err => ClickTrace.Write($"task list: not moved: {err}")));
+        HoldFadeWhileOpen(menu);
+        TaskMoveMenu = menu;
+        menu.IsOpen = true;
+        return menu;
+    }
+
+    // The last workspace menu a chip opened, for the tests.
+    internal ContextMenu? TaskMoveMenu { get; private set; }
+
     Border WorkspaceChip(TaskLine line) => new()
     {
         Tag = "task-workspace",
         Background = line.WorkspaceName is null ? TaskNoneFill : ChipFill(line.Colour),
         CornerRadius = new CornerRadius(8),
         Padding = new Thickness(7, 0, 7, 1),
-        Margin = new Thickness(4, 0, 0, 0),
+        Margin = line.Closing ? new Thickness(4, 0, 0, 0) : new Thickness(0),
         VerticalAlignment = VerticalAlignment.Center,
         Child = new TextBlock
         {
