@@ -401,6 +401,7 @@ public partial class TasksWindow : Window
         menuButtons.Clear();
         commentBoxes.Clear();
         ages.Clear();
+        selectionFrames.Clear();
         authors.Clear();
         closing.Clear();
         view.Groups.ToList().ForEach(group =>
@@ -501,6 +502,9 @@ public partial class TasksWindow : Window
         var quiet = new UIElement[] { comments, more };
         Quieten(quiet, loud: false);
 
+        // The selection's frame (ruling 21, as on the bar): 2 DIP on the left, clear unless this is the task Petre
+        // picked, then the text box's blue over a fill lighter than hover. Always there, so a pick moves nothing; a
+        // change of selection repaints it in place (PaintSelection), not the lines.
         var edge = new Border
         {
             BorderThickness = new Thickness(3, 0, 0, 0),
@@ -509,10 +513,13 @@ public partial class TasksWindow : Window
             Padding = new Thickness(7, 5, 8, 5),
             Child = grid,
         };
+        var frame = new Border { BorderThickness = new Thickness(2, 0, 0, 0), Child = edge };
+        selectionFrames[row.Id] = (frame, quiet);
+        PaintFrame(row.Id);
         var line = new Button
         {
             Tag = row.Id,
-            Content = edge,
+            Content = frame,
             Template = (ControlTemplate)FindResource("LineButton"),
             Background = Brushes.Transparent,
             HorizontalContentAlignment = HorizontalAlignment.Stretch,
@@ -522,7 +529,7 @@ public partial class TasksWindow : Window
         };
         AutomationProperties.SetName(line, row.Title);
         line.MouseEnter += (_, _) => Quieten(quiet, loud: true);
-        line.MouseLeave += (_, _) => Quieten(quiet, loud: false);
+        line.MouseLeave += (_, _) => Quieten(quiet, loud: selectedId == row.Id);
         // The click guard, as on the line's buttons (ClickIgnored).
         line.PreviewMouseLeftButtonDown += (_, e) => pressClicks = e.ClickCount;
         line.Click += (_, _) =>
@@ -576,6 +583,46 @@ public partial class TasksWindow : Window
 
     // The icon font of Windows 11, with Windows 10's as the fallback.
     static FontFamily IconFont => FloatingBar.IconFont;
+
+    // THE SELECTED TASK (ruling 21): which line is drawn as picked, the frame of each line on show, and their quiet
+    // buttons, which a selected line shows at full strength as hover does.
+    Guid? selectedId;
+    readonly Dictionary<Guid, (Border Frame, IReadOnlyList<UIElement> Quiet)> selectionFrames = [];
+    static readonly Brush SelectedFill = Frozen(0x38, 0xFF, 0xFF, 0xFF);
+
+    /// <summary>Draws the selection as it now stands, in place.</summary>
+    internal void PaintSelection(Maybe<Guid> selected)
+    {
+        selectedId = selected.HasValue ? selected.Value : null;
+        selectionFrames.Keys.ToList().ForEach(PaintFrame);
+    }
+
+    void PaintFrame(Guid id)
+    {
+        if (!selectionFrames.TryGetValue(id, out var parts)) return;
+        var selected = selectedId == id;
+        parts.Frame.BorderBrush = selected ? PickedEdge : Brushes.Transparent;
+        parts.Frame.Background = selected ? SelectedFill : Brushes.Transparent;
+        Quieten(parts.Quiet, loud: selected);
+    }
+
+    /// <summary>Brings the selected task's line into view, as the window opens.</summary>
+    internal void ScrollToSelected()
+    {
+        if (selectedId is not { } id || !selectionFrames.TryGetValue(id, out var parts)) return;
+        UpdateLayout();
+        // The line's place in the list, a third of the way down the view; the scroll itself runs in the next layout
+        // pass, which is run here so the window opens already there.
+        var top = parts.Frame.TransformToAncestor(Rows).Transform(new Point(0, 0)).Y;
+        Scroller.ScrollToVerticalOffset(Math.Max(0, top - Scroller.ViewportHeight / 3));
+        UpdateLayout();
+    }
+
+    // For the tests.
+    internal bool IsSelected(Guid id) =>
+        selectionFrames.TryGetValue(id, out var parts) && parts.Frame.BorderBrush is SolidColorBrush { Color.A: > 0 };
+
+    internal double ScrollOffset => Scroller.VerticalOffset;
 
     static void Quieten(IEnumerable<UIElement> parts, bool loud) => parts.ToList().ForEach(part => part.Opacity = loud ? 1 : 0.5);
 

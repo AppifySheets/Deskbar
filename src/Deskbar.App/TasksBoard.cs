@@ -60,6 +60,7 @@ public sealed class TasksBoard : IDisposable
     readonly Action<nint>? bringForward;
     readonly Func<TimeSpan, Action, IDisposable> undoTimer;
     readonly Func<DateTimeOffset> now;
+    readonly TaskSelection selection;
     readonly IDisposable subscriptions;
 
     // The lines closed in this window and still in their undo window: the status each had, and its timer.
@@ -81,7 +82,7 @@ public sealed class TasksBoard : IDisposable
     //   now           the clock a comment's time is told against ("11:42" today, a date before)
     public TasksBoard(TasksWindow window, TaskService tasks, WorkspaceManager manager, Func<TaskItem, Result> goTo,
         Func<Guid, Brush?>? colourOf = null, Action<nint>? bringForward = null, Func<TimeSpan, Action, IDisposable>? undoTimer = null,
-        Func<DateTimeOffset>? now = null)
+        Func<DateTimeOffset>? now = null, TaskSelection? selection = null)
     {
         this.window = window;
         this.tasks = tasks;
@@ -91,6 +92,8 @@ public sealed class TasksBoard : IDisposable
         this.bringForward = bringForward;
         this.undoTimer = undoTimer ?? FloatingBar.DispatcherUndoTimer;
         this.now = now ?? (() => DateTimeOffset.Now);
+        // The task Petre picked (ruling 21), the bar's own object in the App, so a pick in either view shows in both.
+        this.selection = selection ?? new TaskSelection();
 
         window.Actions = new TasksWindowActions(
             Go: id => Go(id),
@@ -110,7 +113,8 @@ public sealed class TasksBoard : IDisposable
 
         subscriptions = new CompositeDisposable(
             tasks.Changed.Subscribe(_ => Refresh()),
-            manager.StateChanged.Subscribe(_ => Refresh()));
+            manager.StateChanged.Subscribe(_ => Refresh()),
+            this.selection.Changed.Subscribe(_ => window.PaintSelection(this.selection.Current)));
     }
 
     /// <summary>
@@ -146,8 +150,11 @@ public sealed class TasksBoard : IDisposable
         where = TaskWorkspaceFilter.All;
         expanded.Clear();
         window.ShowProblem(null);
+        window.PaintSelection(selection.Current);
         window.Present(View());
         window.Open(near, manager.State.TasksWindow is { } place ? Maybe.From(place) : Maybe<TasksWindowState>.None);
+        // The selected task's line comes into view (ruling 21: the window scrolls to it when it opens).
+        window.ScrollToSelected();
         Arrived();
     }
 
@@ -212,6 +219,8 @@ public sealed class TasksBoard : IDisposable
     {
         var task = tasks.Board.Tasks.TryFirst(t => t.Id == id);
         if (task.HasNoValue) return Report(Result.Failure($"No task with id {id}"));
+        // The click picks the task, in both views (ruling 21), whether or not it has anywhere to go.
+        selection.Select(id);
         if (!task.Value.IsClaudes && task.Value.WorkspaceId.HasNoValue)
         {
             ToggleThread(id);
@@ -291,6 +300,8 @@ public sealed class TasksBoard : IDisposable
     TasksView View()
     {
         ForgetReopened();
+        // A task closed or deleted is not selected any more (ruling 21).
+        selection.KeepOnly(tasks.Board);
         var board = WithPendingCloses(tasks.Board);
         var groups = TaskViews.Grouped(board, filter, where)
             .Select(g => new TaskGroupView(g.Status, TaskViews.StatusName(g.Status), g.Tasks.Select(Row).ToArray()))

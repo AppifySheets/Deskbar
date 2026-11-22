@@ -76,7 +76,7 @@ public class TasksBoardTests
     // the click clock is a second later, so a click is never "right after a repaint" unless a test hands in a clock of
     // its own (the click guard's test does).
     static Board Build(Func<TaskItem, Result>? goTo = null, Action<nint>? bringForward = null, Func<DateTime>? clickClock = null,
-        Func<DateTimeOffset>? now = null)
+        Func<DateTimeOffset>? now = null, TaskSelection? selection = null)
     {
         var harness = Harness.Build();
         var minutes = 0;
@@ -89,7 +89,7 @@ public class TasksBoardTests
         {
             went.Add(t.Id);
             return Result.Success();
-        }), bringForward: bringForward, undoTimer: timers.Start, now: () => Start.AddHours(1));
+        }), bringForward: bringForward, undoTimer: timers.Start, now: () => Start.AddHours(1), selection: selection);
         return new Board { Harness = harness, Window = window, Controller = controller, Tasks = tasks, Timers = timers, WentTo = went };
     }
 
@@ -625,6 +625,47 @@ public class TasksBoardTests
         Assert.Equal("3d3h", t.Window.AgeText(id));
         Assert.Equal(rebuilds, t.Window.Rebuilds);
         Assert.Same(line, LineOf(t.Window, id));
+    });
+
+    // Ruling 21: one selection for both views. A click on a window line picks it, and so does a pick made on the bar
+    // (the same TaskSelection object); the window draws it in place and lets go when the task is closed.
+    [Fact]
+    public void A_pick_in_either_view_shows_in_the_window() => StaThread.Run(() =>
+    {
+        var selection = new TaskSelection();
+        using var t = Build(selection: selection);
+        var first = t.Tasks.AddNote("first", t.Gepha).Value.Id;
+        var second = t.Tasks.AddNote("second", t.Gepha).Value.Id;
+        t.Controller.Open(Rect.Empty);
+        var rebuilds = t.Window.Rebuilds;
+
+        Click(LineOf(t.Window, first));
+        Assert.True(selection.IsSelected(first));
+        Assert.True(t.Window.IsSelected(first));
+
+        // Picked on the bar: the window follows, in place.
+        selection.Select(second);
+        Assert.True(t.Window.IsSelected(second));
+        Assert.False(t.Window.IsSelected(first));
+        Assert.Equal(rebuilds, t.Window.Rebuilds);
+
+        t.Tasks.Close(second);
+        Assert.True(selection.Current.HasNoValue);
+    });
+
+    [Fact]
+    public void The_window_opens_scrolled_to_the_selected_task() => StaThread.Run(() =>
+    {
+        var selection = new TaskSelection();
+        using var t = Build(selection: selection);
+        var oldest = t.Tasks.AddNote("the oldest", t.Gepha).Value.Id;
+        Enumerable.Range(1, 40).ToList().ForEach(i => t.Tasks.AddNote($"note {i}", t.Gepha));
+        selection.Select(oldest);
+
+        t.Controller.Open(Rect.Empty);
+
+        Assert.True(t.Window.ScrollOffset > 0, $"offset {t.Window.ScrollOffset}");
+        Assert.True(t.Window.IsSelected(oldest));
     });
 
     // Where a part of the window ends, against the window's own content (what the window shows).

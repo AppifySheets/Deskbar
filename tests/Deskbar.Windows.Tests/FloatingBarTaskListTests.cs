@@ -1171,4 +1171,25 @@ public class FloatingBarTaskListTests
         Assert.Equal("2h4m", Age().Text);
         Assert.Same(line, t.Lines.Single());
     });
+
+    // Petre: "highlight selected task" (ruling 21). A click on a line picks its task: drawn with the blue edge, kept
+    // through a repaint, let go when the task is closed.
+    [Fact]
+    public void Clicking_a_line_selects_it_until_it_is_closed() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        var first = t.Tasks.AddNote("first", t.Gepha).Value.Id;
+        var second = t.Tasks.AddNote("second", t.Gepha).Value.Id;
+
+        Click(t.Lines.Single(l => ((TaskLine)l.Tag).Id == first));
+        Assert.True(t.Bar.Selection.IsSelected(first));
+        Assert.True(t.Bar.TaskLineSelected(first));
+        Assert.False(t.Bar.TaskLineSelected(second));
+
+        t.Tasks.AddNote("third", t.Gepha);
+        Assert.True(t.Bar.TaskLineSelected(first));
+
+        t.Tasks.Close(first);
+        Assert.True(t.Bar.Selection.Current.HasNoValue);
+    });
 }
