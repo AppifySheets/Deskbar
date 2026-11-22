@@ -106,6 +106,28 @@ public class TasksBoardGoalTests
         Assert.Contains(ItemsOf(t.Window.OpenMenuFor(id)), i => TextOf(i) == "Goal");
     });
 
+    // The goal filter's button was built like the workspace chips that "did not work" (2026-11-23): its menu opened
+    // from a Click handler added after the button's own, which marks the click handled, so it was never called. A
+    // routed click on the real button opens the menu, and a pick filters.
+    [Fact]
+    public void A_click_on_the_goal_filter_opens_its_menu_and_a_pick_filters() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        var goal = t.Goals.Add("Ship it", t.Goals.ThisWeek).Value;
+        var linked = t.Tasks.AddNote("linked", t.Gepha).Value.Id;
+        t.Tasks.AddNote("free", t.Gepha);
+        t.Goals.LinkTask(linked, goal.Id);
+        t.Controller.Open(Rect.Empty);
+
+        GoalFilterButton(t.Window)!.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+
+        var menu = Assert.IsAssignableFrom<ContextMenu>(t.Window.OpenedMenu);
+        Assert.True(menu.IsOpen);
+        Named(menu, "Ship it").RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
+        Close(menu, t.Window);
+        Assert.Equal([linked], t.Window.Keys);
+    });
+
     [Fact]
     public void Without_a_goal_service_there_is_no_goal_item_either() => StaThread.Run(() =>
     {

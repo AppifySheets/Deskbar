@@ -1485,6 +1485,71 @@ public class TasksBoardTests
         Assert.Contains("on Sparrow", Inside(ButtonNamed(t.Window, "Add to workspace")).OfType<TextBlock>().Single().Text);
     });
 
+    // (d) 2026-11-23, Petre, of the add row's "on Deskbar site ▾": "dropdown doesn't work". The chip is a flat button
+    // whose own Click handler marks the click handled, and the menu was opened from a second Click handler added after
+    // it, which WPF then never calls (a handler added with += is skipped once an earlier one on the same element has
+    // handled the event). A routed click on the real chip opens the menu, and a pick lands on the next note.
+    [Fact]
+    public void The_add_rows_workspace_chip_opens_its_menu_and_a_pick_lands() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        t.Controller.Open(Rect.Empty);
+        Click(ButtonNamed(t.Window, "Add"));
+
+        Click(ButtonNamed(t.Window, "Add to workspace"));
+
+        var menu = Assert.IsAssignableFrom<ContextMenu>(t.Window.OpenedMenu);
+        Assert.True(menu.IsOpen);
+        Click(WorkspaceChipMenu.Chips(menu).Single(c => AutomationProperties.GetName(c) == "Sparrow"));
+        Assert.False(menu.IsOpen);
+        Assert.Contains("on Sparrow", Inside(ButtonNamed(t.Window, "Add to workspace")).OfType<TextBlock>().Single().Text);
+
+        Assert.True(t.Window.TypeNote("encrypt data", Key.Enter));
+        Assert.Equal(t.Sparrow, t.Tasks.Board.Tasks.Single(x => x.Title == "encrypt data").WorkspaceId.Value);
+    });
+
+    // The toolbar's "Workspace: all ▾" was built the same way and had the same fault: a routed click opens its menu, and
+    // a pick filters the board.
+    [Fact]
+    public void The_workspace_filter_chip_opens_its_menu_and_a_pick_filters() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        t.Tasks.AddNote("here", t.Gepha);
+        t.Tasks.AddNote("there", t.Sparrow);
+        t.Controller.Open(Rect.Empty);
+
+        Click(ButtonNamed(t.Window, "Workspace filter"));
+
+        var menu = Assert.IsAssignableFrom<ContextMenu>(t.Window.OpenedMenu);
+        Assert.True(menu.IsOpen);
+        Click(WorkspaceChipMenu.Chips(menu).Single(c => AutomationProperties.GetName(c) == "Sparrow"));
+        Assert.Equal("Workspace: Sparrow", t.Window.WorkspaceFilterLabel);
+    });
+
+    // The screencast shoot on v2.5.189: the toolbar's dropdowns did not open by mouse, keyboard or UI Automation. UIA's
+    // Invoke on a dropdown goes through the button's own Click as a mouse click does, so it opens the menu too: what a
+    // screen reader or a keyboard-driven tool does reaches the same press.
+    [Theory]
+    [InlineData("Workspace filter")]
+    [InlineData("Add to workspace")]
+    public void UI_Automation_Invoke_opens_a_toolbar_dropdown(string name) => StaThread.Run(() =>
+    {
+        using var t = Build();
+        t.Tasks.AddNote("here", t.Gepha);
+        t.Controller.Open(Rect.Empty);
+        if (name == "Add to workspace") Click(ButtonNamed(t.Window, "Add"));
+        var button = ButtonNamed(t.Window, name);
+
+        var invoke = (System.Windows.Automation.Provider.IInvokeProvider)System.Windows.Automation.Peers.UIElementAutomationPeer
+            .CreatePeerForElement(button).GetPattern(System.Windows.Automation.Peers.PatternInterface.Invoke);
+        invoke.Invoke();
+        // The peer raises the click through the dispatcher.
+        t.Window.Dispatcher.Invoke(() => { }, System.Windows.Threading.DispatcherPriority.Background);
+
+        Assert.True(Assert.IsAssignableFrom<ContextMenu>(t.Window.OpenedMenu).IsOpen);
+        t.Window.OpenedMenu!.IsOpen = false;
+    });
+
     // Whole-PR review, minor 4: a state pulse the window does not show (here the Claude skill setting) builds no view;
     // a change of the workspaces does.
     [Fact]
