@@ -28,7 +28,10 @@ namespace Deskbar.App;
 // height (the -4 margins pay for the bleed), because the bar is SizeToContent: a layer that asked for 4 DIP more
 // would grow the bar, which would grow the layer, every pass.
 //
-// The setting (AppState.SeeThrough, on by default): off, the rows band is as flat as the rest.
+// A fourth layer, FrostSurface, lies under all three while the bar is docked: the wallpaper behind it, blurred
+// (FloatingBar.Frost.cs). The band then lays a lighter veil over it (BarSurface.FrostVeil) instead of the 85%.
+//
+// The setting (AppState.SeeThrough, on by default): off, the rows band is as flat as the rest, frost or not.
 public partial class FloatingBar
 {
     // The pinned row's box, set by GroupRow each rebuild: the see-through band starts under it.
@@ -37,9 +40,24 @@ public partial class FloatingBar
     // How far the layers bleed past the content, the Root's own Padding.
     const double SurfaceBleed = 4;
 
-    // Called on every rebuild: the band follows the setting.
-    void ApplySurfaceSetting() =>
-        RowsSurface.Background = manager.State.SeeThrough ? BarSurface.SeeThrough : BarSurface.Solid;
+    // Called on every rebuild: the band follows the setting, and the frost is checked for change (FloatingBar.Frost.cs;
+    // the check is coalesced to twice a second, and costs next to nothing when nothing changed).
+    void ApplySurfaceSetting()
+    {
+        PaintBand();
+        ScheduleFrost();
+    }
+
+    // The band's own paint. Flat with the setting off. With it on: over a frost (a docked bar, FloatingBar.Frost.cs)
+    // the band is a light veil so the frost's colour comes through; with no frost it is 85% of the bar's colour, as
+    // before. Called by the rebuild and by every frost that arrives or goes, and never schedules a check itself, or a
+    // band without frost would ask again every half second for ever.
+    void PaintBand()
+    {
+        var frosted = manager.State.SeeThrough && frostSource is not null;
+        RowsSurface.Background = !manager.State.SeeThrough ? BarSurface.Solid : frosted ? BarSurface.FrostVeil : BarSurface.SeeThrough;
+        FrostSurface.Visibility = frosted ? Visibility.Visible : Visibility.Collapsed;
+    }
 
     // Called after every layout pass (LayoutUpdated). Cheap: a few TranslatePoints, and the layers are only touched
     // when their bands actually moved, so placing them cannot start another pass that places them again.

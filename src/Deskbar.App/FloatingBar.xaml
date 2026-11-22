@@ -61,6 +61,10 @@
              (FloatingBar.Surface.cs keeps their desired heights inside the content's). Their -4 margins bleed them over
              the Root's padding to the bar's edges, and the top and foot layers carry the bar's rounded corners. -->
         <Grid>
+        <!-- The frost: the wallpaper behind a docked bar, blurred, under everything (FloatingBar.Frost.cs). It covers
+             the whole bar, the top and the footer hide it, and the rows band shows it through a light veil. Stretched
+             rather than placed, and with no content, so it never asks the bar for any size. -->
+        <Border x:Name="FrostSurface" IsHitTestVisible="False" Margin="-4" Visibility="Collapsed"/>
         <Border x:Name="TopSurface" IsHitTestVisible="False" VerticalAlignment="Top" Height="0" Margin="-4,-4,-4,0"
                 CornerRadius="8,8,0,0" Background="{x:Static app:BarSurface.Solid}"/>
         <Border x:Name="RowsSurface" IsHitTestVisible="False" VerticalAlignment="Top" Height="0" Margin="-4,0,-4,0"

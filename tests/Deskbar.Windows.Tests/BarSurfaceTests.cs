@@ -18,6 +18,16 @@ public class BarSurfaceTests
         Assert.True(BarSurface.SeeThrough.IsFrozen);
     }
 
+    // Over the frost (a docked bar's blurred wallpaper) the band keeps half the bar's colour, the mockup Petre picked.
+    [Fact]
+    public void The_veil_over_the_frost_is_the_bar_colour_at_half()
+    {
+        var veil = Assert.IsType<SolidColorBrush>(BarSurface.FrostVeil).Color;
+        Assert.Equal(0x80, veil.A);
+        Assert.Equal((BarSurface.Base.R, BarSurface.Base.G, BarSurface.Base.B), (veil.R, veil.G, veil.B));
+        Assert.True(BarSurface.FrostVeil.IsFrozen);
+    }
+
     [Fact]
     public void The_flat_surface_is_fully_opaque()
     {

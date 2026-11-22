@@ -112,6 +112,8 @@ public partial class FloatingBar : Window
         LostMouseCapture += OnArrangeLostCapture;  // ...and losing the mouse cancels a row drag (FloatingBar.ArrangeDrag.cs)
         // The surface layers follow the rows after every layout pass (FloatingBar.Surface.cs).
         LayoutUpdated += (_, _) => PlaceSurfaces();
+        // ...and a docked bar's frost follows the wallpaper and the bar's place (FloatingBar.Frost.cs).
+        WatchFrost();
         MouseEnter += (_, _) => UpdateFade();
         MouseLeave += (_, _) => UpdateFade();
 
