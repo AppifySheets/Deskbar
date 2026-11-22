@@ -41,10 +41,13 @@ public static class BarSurface
 
     const int TileSize = 128;
 
-    // How far a pixel may stray from the base, in 8-bit levels, before clamping. Summing two uniform draws gives a
-    // triangular distribution: most pixels sit within a level or two of the base and only a few reach the edge,
-    // which reads as grain rather than as static. 8 matches the strongest specks of the mockup Petre picked.
-    const int Spread = 8;
+    // How far a pixel may stray from the base, in 8-bit levels. Summing two uniform draws gives a triangular
+    // distribution: most pixels sit near the base and only a few reach the edge, which reads as grain rather than
+    // as static. Measured, not guessed (BarSurfaceTests): 8 gave a standard deviation of 3.3 levels at 96 dpi and
+    // only 2.1 at 150%, where bilinear scaling smooths it, and Petre could not see it ("i can't see texture").
+    // 24 lands at about 6.5 at 150% and 200%. The base is 27 levels and the spread stays under it, so nothing clamps
+    // and the average stays on the base.
+    const int Spread = 24;
 
     // Fixed seed: the same tile on every start, so the bar looks identical across restarts and screenshots.
     const int Seed = 2026_11_22;
