@@ -240,6 +240,73 @@ public class WorkspaceChipMenuTests
         });
     });
 
+    // Ruling (g), 2026-11-23: under a light Windows theme the system menu drew a near-white surface (#F3F3F3) with an
+    // icon gutter down it, and the pastel chips with near-white names on it could barely be read. The menu draws its
+    // own dark surface, the tasks window's, whatever the theme, and has no gutter: its template is a border round a
+    // scroll viewer round the blocks, nothing else.
+    [Fact]
+    public void The_menu_draws_its_own_dark_surface_under_the_light_theme() => StaThread.Run(() =>
+    {
+        var entries = WorkspaceChipMenu.Entries(Harness.Build(grouped: true).Manager.State, withNone: true);
+        WithAnchor(anchor =>
+        {
+#pragma warning disable WPF0001 // ThemeMode is marked experimental; used only to put the anchor under the light theme
+            anchor.ThemeMode = ThemeMode.Light;
+#pragma warning restore WPF0001
+            var menu = WorkspaceChipMenu.Build(entries, Maybe<Guid>.None, _ => { }, anchor);
+            menu.IsOpen = true;
+            menu.UpdateLayout();
+
+            var surface = Descendants(menu).OfType<Border>().First();
+            Assert.Equal(((SolidColorBrush)WorkspaceChipMenu.Surface).Color, ((SolidColorBrush)surface.Background).Color);
+            Assert.Equal(((SolidColorBrush)WorkspaceChipMenu.Surface).Color, ((SolidColorBrush)menu.Background).Color);
+            // No gutter: nothing between the surface and the blocks but the scroll viewer and its own parts.
+            var scroller = Descendants(surface).OfType<ScrollViewer>().First();
+            Assert.Same(scroller, VisualTreeHelper.GetChild(surface, 0));
+            Assert.Equal(ScrollBarVisibility.Disabled, scroller.HorizontalScrollBarVisibility);
+            menu.IsOpen = false;
+            return 0;
+        });
+    });
+
+    // Every palette colour's chip, as drawn (its fill at the chip's alpha over the menu's surface), keeps its name
+    // readable: WCAG's 4.5:1 for normal text. The "none" chip too.
+    [Fact]
+    public void Every_palette_chip_is_readable_on_the_menu() => StaThread.Run(() =>
+    {
+        var entries = WorkspacePalette.Swatches
+            .Select(s => new WorkspaceChipMenu.Entry(false, Guid.NewGuid(), s.Name, new SolidColorBrush((Color)ColorConverter.ConvertFromString(s.Hex))))
+            .Prepend(new WorkspaceChipMenu.Entry(false, Maybe<Guid>.None, "none", null))
+            .ToList();
+        var menu = WorkspaceChipMenu.Build(entries, Maybe<Guid>.None, _ => { }, null);
+        var surface = ((SolidColorBrush)WorkspaceChipMenu.Surface).Color;
+
+        Assert.All(WorkspaceChipMenu.Chips(menu), chip =>
+        {
+            var fill = Over(((SolidColorBrush)chip.Background).Color, surface);
+            var ink = ((SolidColorBrush)((TextBlock)chip.Content).Foreground).Color;
+            var ratio = Contrast(ink, fill);
+            Assert.True(ratio >= 4.5, $"{NameOf(chip)}: {ratio:0.00}:1");
+        });
+    });
+
+    // A colour with alpha laid over an opaque one, as the screen shows it.
+    static Color Over(Color top, Color under)
+    {
+        var a = top.A / 255.0;
+        byte Mix(byte t, byte u) => (byte)Math.Round(a * t + (1 - a) * u);
+        return Color.FromRgb(Mix(top.R, under.R), Mix(top.G, under.G), Mix(top.B, under.B));
+    }
+
+    // WCAG 2's contrast ratio.
+    static double Contrast(Color one, Color two)
+    {
+        static double Channel(byte c) => c / 255.0 is var v && v <= 0.04045 ? v / 12.92 : Math.Pow((v + 0.055) / 1.055, 2.4);
+        static double Luminance(Color c) => 0.2126 * Channel(c.R) + 0.7152 * Channel(c.G) + 0.0722 * Channel(c.B);
+        var (a, b) = (Luminance(one), Luminance(two));
+        return (Math.Max(a, b) + 0.05) / (Math.Min(a, b) + 0.05);
+    }
+
     static IEnumerable<DependencyObject> Descendants(DependencyObject node) =>
         Enumerable.Range(0, VisualTreeHelper.GetChildrenCount(node)).Select(i => VisualTreeHelper.GetChild(node, i))
             .SelectMany(child => new[] { child }.Concat(Descendants(child)));
