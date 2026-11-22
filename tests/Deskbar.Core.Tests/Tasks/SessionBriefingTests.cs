@@ -33,7 +33,7 @@ public sealed class SessionBriefingTests
         Assert.Contains("Dishwasher tablets", text);
         Assert.Contains(offered[0].Id.ToString()[..8], text);
         Assert.Contains($"task join <id> --session {Sid}", text);
-        Assert.Contains($"task new \"<title>\" --session {Sid}", text);
+        Assert.Contains($"task new - --session {Sid}", text);
         Assert.DoesNotContain(Dashes, d => text.Contains(d));
     }
 
@@ -46,24 +46,42 @@ public sealed class SessionBriefingTests
 
         Assert.Contains("Tasks board", text);
         Assert.Contains("waiting for CI", text);
-        Assert.Contains($"task status-line \"<what you are doing now>\" --session {Sid}", text);
-        Assert.Contains($"task ask \"<question>\" --session {Sid}", text);
+        Assert.Contains($"task status-line - --session {Sid}", text);
+        Assert.Contains($"task ask - --session {Sid}", text);
         Assert.Contains($"task done --session {Sid}", text);
         Assert.DoesNotContain("task join <id>", text);
     }
 
-    // Fifty offered tasks with long titles: titles cut at 80 characters, the list cut at 20 with a pointer at the rest,
-    // and the whole well under Claude Code's 10,000 characters for a hook's context.
+    // Review of PR B, I-1: free text goes on stdin through `-` and a heredoc, never on the command line, and the
+    // briefing says so in as many words.
+    [Fact]
+    public void The_briefing_teaches_free_text_on_stdin()
+    {
+        var text = SessionBriefing.Start(Start(), Maybe<TaskItem>.None, []);
+
+        Assert.Contains($"task comment - --session {Sid} <<'EOF'", text);
+        Assert.Contains("Never put free text with quotes or & | < > on the command line", text);
+    }
+
+    // Fifty offered tasks with long titles, long status lines and long questions (review of PR B, M-7): each is cut at
+    // 80 characters, the list cut at 20 with a pointer at the rest, and the whole well under Claude Code's 10,000
+    // characters for a hook's context.
     [Fact]
     public void The_briefing_stays_under_10000_characters()
     {
-        var offered = Enumerable.Range(1, 50).Select(i => Task($"Task {i} " + new string('x', 300))).ToArray();
+        var offered = Enumerable.Range(1, 50).Select(i => i % 2 == 0
+            ? Task($"Task {i} " + new string('x', 300)) with { StatusLine = new string('s', 300) }
+            : Task($"Task {i} " + new string('x', 300), TaskStatus.WaitingOnYou) with { Question = new string('q', 300) }).ToArray();
 
         var text = SessionBriefing.Start(Start(), Maybe<TaskItem>.None, offered);
 
         Assert.True(text.Length < 10_000, $"{text.Length} characters");
         Assert.Contains("and 30 more: deskbar.cmd task list", text);
         Assert.DoesNotContain(new string('x', 81), text);
+        Assert.DoesNotContain(new string('s', 81), text);
+        Assert.DoesNotContain(new string('q', 81), text);
+        Assert.Contains(new string('s', 70), text);
+        Assert.Contains(new string('q', 70), text);
         Assert.Contains("Task 20 ", text);
         Assert.DoesNotContain("Task 21 ", text);
     }
@@ -90,7 +108,7 @@ public sealed class SessionBriefingTests
 
         Assert.Contains("closed", text);
         Assert.Contains("Tasks board", text);
-        Assert.Contains($"task new \"<title>\" --session {Sid}", text);
+        Assert.Contains($"task new - --session {Sid}", text);
     }
 
     [Fact]

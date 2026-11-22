@@ -43,9 +43,10 @@ public static class ControlUsage
                 + "      folder if not given) blinks on the bar and that window's icon glows, until the user goes there.\n"
                 + "      Nothing happens when the user is already on that workspace"),
             new("claude-hook", "[--entry <value>] [--attended <value>] [--from <folder>]",
-                "what Claude Code's hooks run (claude-hook.cmd), with the hook's JSON on stdin: Notification and Stop ask\n"
-                + "      for the user as attention does. Prints only what the session should read, and exits 0 even when\n"
-                + "      Deskbar is not running; JSON that is not a hook's exits 1"),
+                "what Claude Code's hooks run (claude-hook.cmd for Notification and Stop, claude-task-hook.cmd for\n"
+                + "      SessionStart, UserPromptSubmit and SessionEnd), with the hook's JSON on stdin: Notification and\n"
+                + "      Stop ask for the user as attention does. Prints only what the session should read, and exits 0\n"
+                + "      even when Deskbar is not running; JSON that is not a hook's exits 1"),
         ]),
         new("Tasks", [
             new("task", "list [--closed]",
@@ -63,7 +64,7 @@ public static class ControlUsage
                 "set a task's status by hand (waiting is waiting on you); close closes"),
             new("task", "rename <id> <title>", "rename a task"),
             new("task", "move <id> <workspace>|none", "move a task to a workspace, or to none"),
-            new("task", "comment <id> <markdown>", "add a comment to a task's thread, as you"),
+            new("task", "comment <id> <markdown>|-", "add a comment to a task's thread, as you; - reads the markdown from stdin"),
             new("task", "delete <id>", "delete a task; the reply is the task as it was"),
             new("task", "flag <id> important|urgent on|off",
                 "set or clear a flag, as the toggles on a line do; the task moves to the top of the quadrant it lands\n"
@@ -72,17 +73,21 @@ public static class ControlUsage
                 "move a task within its quadrant, as a drag does: to the top, the end or place n counting from 1.\n"
                 + "      A task waiting on you stays on top until it is answered"),
             // A Claude Code session's own forms (RemoteControl.ClaudeHook.cs). --session is the session's id, which the
-            // hooks' briefing hands it; every form but join, new and later acts on that session's own task.
+            // hooks' briefing hands it; every form but join, new and later acts on that session's own task. `-` in a
+            // text's place reads the text from stdin (ControlArguments.WithTextInput): free text on cmd's command line
+            // is not safe, since deskbar.cmd hands it to cmd, which runs what follows a quote it misreads.
             new("task", "join <id> --session <session>",
                 "a Claude session takes up a task (one of your notes becomes its work, in progress)"),
-            new("task", "new <title> --session <session>",
+            new("task", "new <title>|- --session <session>",
                 "a Claude session creates its task, on the workspace of the VS Code window showing its folder, or on none"),
-            new("task", "status-line <text> --session <session>", "the short line a session keeps current on its task"),
-            new("task", "ask <question> --session <session>",
+            new("task", "status-line <text>|- --session <session>", "the short line a session keeps current on its task"),
+            new("task", "ask <question>|- --session <session>",
                 "the session's task waits on you with the question, and its workspace blinks as attention does"),
             new("task", "done --session <session>", "a session marks its own task done; only you close it"),
-            new("task", "comment <markdown> --session <session>", "a comment on the session's own task, signed by the session"),
-            new("task", "later <title> --session <session>", "a backlog note on the caller's workspace, a follow-up for later"),
+            new("task", "comment <markdown>|- --session <session>", "a comment on the session's own task, signed by the session"),
+            new("task", "later <title>|- --session <session>",
+                "a backlog note on the caller's workspace, a follow-up for later. In every form that takes text, -\n"
+                + "      reads the text from stdin (a heredoc in Git Bash): free text never goes on the command line"),
             new("tasks-window", "show|hide|list|matrix",
                 "open the tasks window, as the bar's \"+N more\" does (every task grouped as on the bar, the closed\n"
                 + "      ones under their filter, each with its comments), or close it; list or matrix switches its view\n"

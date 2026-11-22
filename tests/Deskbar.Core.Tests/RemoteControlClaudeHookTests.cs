@@ -148,6 +148,65 @@ public class RemoteControlClaudeHookTests
         Assert.Equal(down, ControlArguments.HookReply(["windows"], down));
     }
 
+    // Review of PR B, I-1: free text never rides cmd's command line. Each text-taking form takes `-` for its text and the
+    // client puts its stdin there, the heredoc's last line break dropped; a `-` that is an option's value is not text.
+    [Theory]
+    [InlineData("status-line")]
+    [InlineData("ask")]
+    [InlineData("comment")]
+    [InlineData("new")]
+    [InlineData("later")]
+    public void A_text_form_takes_its_text_from_stdin(string verb)
+    {
+        const string text = "set \"a > pwned.txt\" & echo INJECTED | more <x";
+
+        Assert.Equal(["task", verb, text, "--session", "s1", "--from", @"C:\x"],
+            ControlArguments.WithInput(["task", verb, "-", "--session", "s1", "--from", @"C:\x"], () => text + "\n"));
+        Assert.Equal(["task", verb, "--session", "s1", text],
+            ControlArguments.WithInput(["task", verb, "--session", "s1", "-"], () => text + "\r\n"));
+    }
+
+    [Fact]
+    public void Only_a_text_forms_dash_reads_stdin()
+    {
+        string Never() => throw new InvalidOperationException("stdin read");
+
+        Assert.Equal(["task", "done", "--session", "-"], ControlArguments.WithInput(["task", "done", "--session", "-"], Never));
+        Assert.Equal(["task", "ask", "--session", "-"], ControlArguments.WithInput(["task", "ask", "--session", "-"], Never));
+        Assert.Equal(["task", "ask", "plain"], ControlArguments.WithInput(["task", "ask", "plain"], Never));
+        Assert.Equal(["move", "-"], ControlArguments.WithInput(["move", "-"], Never));
+    }
+
+    // The text arrives at the task exactly as written: quotes, &, |, < and > included.
+    [Fact]
+    public void Text_with_quotes_and_cmd_operators_arrives_intact()
+    {
+        var manager = Started();
+        Editor(manager, 0x10, "TaskSpaces", "Deskbar");
+        const string text = "checking \"x & echo INJECTED\" now | then > pwned.txt <in";
+        Said(manager, "s1", Repo, "new", "Tasks board");
+
+        var args = ControlArguments.WithInput(["task", "status-line", "-", "--session", "s1", "--from", Repo], () => text + "\n");
+        var reply = Ran(manager, [.. args]);
+
+        Assert.Equal(ControlReply.Ok, reply.ExitCode);
+        Assert.Equal(text, Titled("Tasks board").StatusLine);
+    }
+
+    // Review of PR B, M-4: a session's words are traced as their length; a comment's task id stays.
+    [Fact]
+    public void A_tasks_text_is_traced_as_its_length()
+    {
+        Assert.Equal("task ask (13 characters) --session s1 --from C:\\x",
+            ControlArguments.ForTrace(["task", "ask", "OK to merge? ", "--session", "s1", "--from", @"C:\x"]));
+        Assert.Equal("task comment 3f2a (6 characters) --from C:\\x",
+            ControlArguments.ForTrace(["task", "comment", "3f2a", "secret", "--from", @"C:\x"]));
+        Assert.DoesNotContain("secret", ControlArguments.ForTrace(["task", "status-line", "secret", "--session", "s1"]));
+        Assert.DoesNotContain("secret", ControlArguments.ForTrace(["task", "new", "secret", "--session", "s1"]));
+        Assert.DoesNotContain("secret", ControlArguments.ForTrace(["task", "later", "secret", "--session", "s1"]));
+        Assert.Equal("task close 3f2a", ControlArguments.ForTrace(["task", "close", "3f2a"]));
+    }
+
     // Review of Task 7, I-2: the app traces every `ctl` request, and a claude-hook's --json carries the user's prompt
     // and Claude's last reply. Tracing is often on, and a problem report carries the trace, so a hook is traced as its
     // event, its session and the JSON's length only. Every other command is traced as it was.
@@ -347,7 +406,7 @@ public class RemoteControlClaudeHookTests
         var line = Hooked(manager, "UserPromptSubmit");
 
         Assert.Contains("closed", line);
-        Assert.Contains("task new \"<title>\" --session s1", line);
+        Assert.Contains("task new - --session s1", line);
         Assert.Equal(TaskStatus.Closed, Titled("Tasks board").Status);
     }
 

@@ -41,10 +41,10 @@ public static class SessionBriefing
     /// </summary>
     public static string Prompt(string sessionId, Maybe<TaskItem> own, Maybe<TaskItem> closed) =>
         own.HasValue
-            ? $"Deskbar: your task is {Describe(own.Value)}. Keep its status line current: {Shim} task status-line \"<what you are doing now>\" --session {sessionId}\n"
+            ? $"Deskbar: your task is {Describe(own.Value)}. Keep its status line current: {Shim} task status-line - --session {sessionId}, the line on stdin (a heredoc).\n"
         : closed.HasValue
-            ? $"Deskbar: the user closed your task \"{Cut(closed.Value.Title)}\". Work on this prompt needs a new task: {Shim} task new \"<title>\" --session {sessionId}\n"
-        : $"Deskbar: this session has no task yet. Once you know what you are working on, run {Shim} task join <id> --session {sessionId} with an id from {Shim} task list, or {Shim} task new \"<title>\" --session {sessionId}\n";
+            ? $"Deskbar: the user closed your task \"{Cut(closed.Value.Title)}\". Work on this prompt needs a new task: {Shim} task new - --session {sessionId}, the title on stdin (a heredoc).\n"
+        : $"Deskbar: this session has no task yet. Once you know what you are working on, run {Shim} task join <id> --session {sessionId} with an id from {Shim} task list, or {Shim} task new - --session {sessionId} with the title on stdin (a heredoc).\n";
 
     static IEnumerable<string> Intro(string sessionId) =>
     [
@@ -56,24 +56,32 @@ public static class SessionBriefing
         offered.Count == 0
             ? [
                 "There are no open tasks for you to join. Once you know what this session is working on, create its task:",
-                $"  {Shim} task new \"<title>\" --session {sessionId}",
+                $"  {Shim} task new - --session {sessionId}   (the title on stdin, as below)",
               ]
             : [
                 "This session has no task yet. Once you know what it is working on, join the task it continues, or create one if none fits. Open tasks:",
                 .. offered.Take(ListLength).Select(t => $"  {Describe(t)}"),
                 .. offered.Count > ListLength ? [$"  and {offered.Count - ListLength} more: {Shim} task list"] : Array.Empty<string>(),
                 $"Join one: {Shim} task join <id> --session {sessionId}",
-                $"Or create one: {Shim} task new \"<title>\" --session {sessionId}",
+                $"Or create one: {Shim} task new - --session {sessionId}   (the title on stdin, as below)",
               ];
 
+    // FREE TEXT GOES ON STDIN (review of PR B, I-1): deskbar.cmd hands its command line to cmd, which runs whatever
+    // follows a quote it misreads, so a title, status line, question or comment with quotes or & | < > in it is not safe
+    // there. Each text form takes `-` and reads its text from stdin (ControlArguments.WithTextInput).
     static IEnumerable<string> Commands(string sessionId) =>
     [
+        "Free text (a title, a status line, a question, a comment) always goes on stdin: put - in its place and give the text as a heredoc, for example",
+        $"  {Shim} task comment - --session {sessionId} <<'EOF'",
+        "  **Found it**: the guard ran twice",
+        "  EOF",
+        "Never put free text with quotes or & | < > on the command line.",
         "While you work on it:",
-        $"  {Shim} task status-line \"<what you are doing now>\" --session {sessionId}   (keep it current, one short line)",
-        $"  {Shim} task ask \"<question>\" --session {sessionId}   (when you need a decision from the user; the task waits on them)",
-        $"  {Shim} task comment \"<markdown>\" --session {sessionId}   (detail worth keeping: findings, links, what is left)",
+        $"  {Shim} task status-line - --session {sessionId}   (keep it current, one short line)",
+        $"  {Shim} task ask - --session {sessionId}   (when you need a decision from the user; the task waits on them)",
+        $"  {Shim} task comment - --session {sessionId}   (detail worth keeping, in markdown: findings, links, what is left)",
         $"  {Shim} task done --session {sessionId}   (on a clear finish; only the user closes a task)",
-        $"  {Shim} task later \"<title>\" --session {sessionId}   (a follow-up note on your workspace)",
+        $"  {Shim} task later - --session {sessionId}   (the title of a follow-up note on your workspace)",
         "Never close or delete a task, and leave the user's own notes alone unless they ask.",
     ];
 

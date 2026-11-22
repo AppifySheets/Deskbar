@@ -46,8 +46,9 @@ static class ControlCommandLine
         // Off the UI thread and waited for synchronously. Nothing in the client needs the dispatcher,
         // and blocking the UI thread on async work that captured it would deadlock.
         // `open` and its kind are told which folder the caller is in (ControlArguments.WithCallerFolder), and
-        // `claude-hook` gets its stdin as --json (WithHookInput); nothing else changes.
-        var forwarded = ControlArguments.WithHookInput(
+        // `claude-hook` gets its stdin as --json, and a task text form its stdin in place of `-` (WithInput); nothing
+        // else changes.
+        var forwarded = ControlArguments.WithInput(
             ControlArguments.WithCallerFolder(args.Skip(1).ToList(), Environment.CurrentDirectory),
             ControlConsole.ReadStandardInput);
         var reply = ControlArguments.HookReply(forwarded,

@@ -7,8 +7,8 @@ namespace Deskbar.Core.Tasks;
 // ("Claude sessions", "Non-interactive sessions"); plan Task 7; the measurements behind every rule here are in
 // docs/superpowers/notes/2026-11-22-claude-hook-probes.md.
 //
-// Claude Code runs Deskbar's hook script (claude-hook.cmd, ClaudeSkill in the app) on five events and hands it a JSON
-// object on stdin. The script passes it on to the running Deskbar as `claude-hook --json <text>`, together with two
+// Claude Code runs Deskbar's hook scripts (claude-hook.cmd and claude-task-hook.cmd, ClaudeSkill in the app) on five
+// events and hands each run a JSON object on stdin. The script passes it on to the running Deskbar as `claude-hook --json <text>`, together with two
 // variables from the hook's environment, and this record is what comes out:
 //
 //   Event      hook_event_name: SessionStart, UserPromptSubmit, Notification, Stop or SessionEnd.
