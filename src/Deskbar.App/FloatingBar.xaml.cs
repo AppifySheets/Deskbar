@@ -288,7 +288,7 @@ public partial class FloatingBar : Window
     //     counts as having left the bar -- which would fade the row the menu belongs to.
     // ...and while a note is being typed into the task list's box (FloatingBar.TaskList.cs): a bar fading away under
     // the text being typed would be in the way of exactly what it was asked to do.
-    bool HoldsFullStrength => candidate is not null || draggingWindow || openMenu?.IsOpen == true || TaskListAdding;
+    internal bool HoldsFullStrength => candidate is not null || draggingWindow || openMenu?.IsOpen == true || TaskListAdding;
 
     bool draggingWindow;
     ContextMenu? openMenu;

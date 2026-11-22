@@ -28,8 +28,10 @@ namespace Deskbar.App;
 //                   place, and a second click folds it back to three.
 //   the add box     shown by "+ Add": a text box, then the chips choosing where the note goes: the current
 //                   workspace (ticked to begin with), "none" and "other…", which lists the other workspaces. Enter
-//                   adds a Backlog note through TaskService.AddNote, Esc drops what was typed. Built once and kept,
-//                   so the "other…" menu always has its chip to hang from.
+//                   adds a Backlog note through TaskService.AddNote, Esc drops what was typed, and either way the
+//                   keyboard goes back to the window Petre was typing in. A click into another window closes the box
+//                   but keeps what was typed as a draft for the next "+ Add" (Controller Ruling 5). Built once and
+//                   kept, so the "other…" menu always has its chip to hang from.
 //   a failed load   "Tasks could not be read. ..." as the first line, the store's own reason in its tooltip and a ✕
 //                   that dismisses it (TaskService.DismissLoadProblem). An empty list must not pass for "nothing to
 //                   do" when the truth is "your tasks could not be read".
@@ -49,9 +51,10 @@ namespace Deskbar.App;
 // has changed: the "shape" (ids, statuses, titles, details, the chips, the icons, the text size, folded or not)
 // is compared with the last one drawn, so a pulse that changes nothing on screen touches nothing. Never during the
 // bar's own rebuild (CLAUDE.md, "Re-entrancy in the bar's rebuild": COM calls pump messages, so a pulse can arrive
-// in the middle of one); the rebuild paints the list once it has finished. And never under a pressed button over
-// the list, which would destroy the button before its Click (the bar's #48 rule): that waits for the release, the
-// same way a rebuild does.
+// in the middle of one); the rebuild paints the list once it has finished. And never while Rebuild itself would
+// wait: a button down anywhere on the bar or a screen strip, a drag, an open menu (TaskListMustWait). A paint that
+// changes the line count changes the bar's height, which on a bottom-anchored bar moves the rows under a press in
+// flight (the bar's #48 lost click); the wait ends the way a rebuild's does, and that rebuild paints the list.
 //
 // WIDTH. The bar sizes itself to its content, so a long task title would widen the whole bar. The list therefore
 // claims no width of its own (TakesNoWidth) and takes whatever the rows give it, trimming every line to fit.
@@ -92,6 +95,22 @@ public partial class FloatingBar
     // RemoteControl.CallerOf uses (EditorFolder.Best over the editor windows' titles). A seam so the tests need no
     // real windows. No window, no icon.
     internal Func<string, Maybe<nint>> SessionWindow { get; init; } = _ => Maybe<nint>.None;
+
+    // Whether a window still exists, before the keyboard is handed back to it (GiveTaskKeyboardBack). A seam for the
+    // tests, whose windows are made-up handles; HandForegroundTo and ForegroundWindow, its two neighbours, are the
+    // language switcher's seams (FloatingBar.Language.cs).
+    internal Func<nint, bool> WindowAlive { get; init; } = Windows.Monitoring.NativeMethods.IsWindow;
+
+    // Whether a paint must wait: the conditions Rebuild waits under, all of them (FloatingBar.xaml.cs, Rebuild). A
+    // button down anywhere on the bar or on a screen strip, not only on the list: a paint that adds or drops a line
+    // changes the bar's height, a bar anchored at the bottom then moves its Top, and the rows shift under a press in
+    // flight, so the release lands on another element (#48's lost click). And while a row or a window is being
+    // dragged, or an arrange drop is queued, or one of the bar's menus is open. Each of those ends by serving
+    // rebuildRequested (the release, the drop, the cancel, the drag's end, the menu's close), and that rebuild ends
+    // by painting the list.
+    bool TaskListMustWait =>
+        (Mouse.LeftButton == MouseButtonState.Pressed && (IsMouseOver || PointerOnStrip()))
+        || arrangeDrag is not null || arrangeDropQueued || draggingWindow || openMenu?.IsOpen == true;
 
     // For the tests: whether the list is on screen, what "+N" says ("" while it is hidden), whether the add box is
     // open, where a note added now would go, and the lines on show.
@@ -143,6 +162,11 @@ public partial class FloatingBar
     IReadOnlyList<TaskLine> shownTaskLines = [];
     Maybe<Guid> taskAddHere = Maybe<Guid>.None;
     Maybe<Guid> taskAddTarget = Maybe<Guid>.None;
+
+    // A note put aside when the bar lost the keyboard mid-typing (PutTaskDraftAside): its text stays in the box and its
+    // chip in taskAddTarget, for the next "+ Add". And the window to hand the keyboard back to after Enter or Esc.
+    bool taskDraftKept;
+    nint taskReturnTo;
 
     // A workspace chip's fill: its row's rail colour, faded so the name stays readable on it. One brush per colour,
     // per bar, frozen.
@@ -344,19 +368,19 @@ public partial class FloatingBar
         // The rebuild paints the list itself once it has finished (Rebuild, Relayout).
         if (rebuilding || taskLinesPanel is null) return;
 
+        // Not under a press or a drag anywhere on the bar (see TaskListMustWait). The rebuild that serves the wait ends
+        // by painting the list, so nothing is lost, only put off until the press or the drag is over.
+        if (TaskListMustWait)
+        {
+            rebuildRequested = true;
+            return;
+        }
+
         var shown = taskService is not null && TasksAllowed() && !manager.State.HiddenStripItems.Contains(StripItem.Tasks);
         TaskListLine.Visibility = shown ? Visibility.Visible : Visibility.Collapsed;
         if (!shown || taskService is null)
         {
-            if (TaskListAdding) StopAddingTask();
-            return;
-        }
-
-        // A press on one of the lines' buttons must reach its Click: the repaint waits for the release, which serves
-        // it through the bar's deferred rebuild (FlushDeferredRebuild), and that rebuild ends by painting the list.
-        if (Mouse.LeftButton == MouseButtonState.Pressed && TaskListLine.IsMouseOver)
-        {
-            rebuildRequested = true;
+            if (TaskListAdding) PutTaskDraftAside();
             return;
         }
 
@@ -607,27 +631,69 @@ public partial class FloatingBar
         PaintTaskList();
     }
 
-    // "+ Add": the box opens with the current workspace's chip ticked. The bar takes the keyboard the way quick find's
-    // box does (QuickFindWindow.Open: Activate, then focus the box), since a key goes to the foreground window and the
-    // bar may not be it when the click arrives through a strip or after a menu.
+    // "+ Add": the box opens with the current workspace's chip ticked, or with the draft a click elsewhere put aside,
+    // its text and its chip as they were (see PutTaskDraftAside). The bar takes the keyboard the way quick find's box
+    // does (QuickFindWindow.Open: Activate, then focus the box), since a key goes to the foreground window and the bar
+    // may not be it when the click arrives through a strip or after a menu.
+    //
+    // First it notes where Petre was typing, to hand the keyboard back there after Enter or Esc (GiveTaskKeyboardBack).
+    // The language switcher's rule finds that window (FollowForeground): the window in front when it is one you type
+    // in, else the last such window the foreground hook saw, since the click on the bar has usually made the bar the
+    // window in front already.
     void StartAddingTask()
     {
         if (taskService is null || taskAddPanel is null || taskAddBox is null) return;
+        FollowForeground();
+        taskReturnTo = languageTarget;
         taskAddHere = manager.CurrentWorkspaceId;
-        taskAddTarget = taskAddHere;
+        if (!taskDraftKept) taskAddTarget = taskAddHere;
+        taskDraftKept = false;
         PaintTaskChips();
         taskAddPanel.Visibility = Visibility.Visible;
         UpdateFade();
         Activate();
         taskAddBox.Focus();
+        taskAddBox.CaretIndex = taskAddBox.Text.Length;
     }
 
+    // Enter or Esc: the box closes, empty, and the keyboard goes back to where Petre was typing.
     void StopAddingTask()
     {
         if (taskAddPanel is null || taskAddBox is null) return;
         taskAddBox.Text = "";
+        taskDraftKept = false;
         taskAddPanel.Visibility = Visibility.Collapsed;
         UpdateFade();
+        GiveTaskKeyboardBack();
+    }
+
+    // THE BAR LOST THE KEYBOARD WHILE A NOTE WAS BEING TYPED (Controller Ruling 5): Petre clicked into another window.
+    // The box closes, so the bar is free to fade again (HoldsFullStrength) and no box sits open that Esc can no longer
+    // reach, but what he typed is KEPT as a draft with its chip, and the next "+ Add" brings it back. Nothing is handed
+    // back: the keyboard is already where he took it.
+    void PutTaskDraftAside()
+    {
+        if (taskAddPanel is null || !TaskListAdding) return;
+        taskDraftKept = true;
+        taskReturnTo = 0;
+        taskAddPanel.Visibility = Visibility.Collapsed;
+        UpdateFade();
+    }
+
+    protected override void OnDeactivated(EventArgs e)
+    {
+        base.OnDeactivated(e);
+        PutTaskDraftAside();
+    }
+
+    // The window noted when the box opened gets the foreground back, the way the language switcher hands it back
+    // (HandForegroundTo), so Petre's next keystrokes land where he was typing rather than in a bar with nothing to
+    // type into. Only a window that still exists and is not one of Deskbar's own (the bar included).
+    void GiveTaskKeyboardBack()
+    {
+        var back = taskReturnTo;
+        taskReturnTo = 0;
+        if (back != 0 && !IsOwnWindow(back) && WindowAlive(back)) HandForegroundTo(back);
     }
 
     void OnTaskAddKey(object sender, KeyEventArgs e)
