@@ -562,12 +562,14 @@ public partial class TasksWindow : Window
         Cell(grid, 1, TextOf(row));
         var flags = FlagsOf(row);
         Cell(grid, 2, flags);
-        Cell(grid, 3, SessionsOf(row));
-        Cell(grid, 4, AgeOf(row));
+        // A Matrix line (compact) has no column for the sessions, the age or the close button, so they are not made at
+        // all (whole-PR review, minor 5): no element in a zero-width column, and no age for the minute's tick to rewrite.
+        Cell(grid, 3, compactLines ? null : SessionsOf(row));
+        Cell(grid, 4, compactLines ? null : AgeOf(row));
         Cell(grid, 5, Chip(row.Place));
         var comments = CommentsButton(row);
         Cell(grid, 6, comments);
-        Cell(grid, 7, ActionOf(row));
+        Cell(grid, 7, compactLines ? null : ActionOf(row));
         var more = Small(new TextBlock { Text = "", FontFamily = IconFont, FontSize = 12, Foreground = Ink }, "More",
             () => OpenMenuFor(row.Id), "Status, move, rename, delete");
         menuButtons[row.Id] = more;
@@ -728,9 +730,14 @@ public partial class TasksWindow : Window
         if (selectedId.HasNoValue || !selectionFrames.TryGetValue(selectedId.Value, out var parts)) return;
         UpdateLayout();
         // The line's place in the list, a third of the way down the view; the scroll itself runs in the next layout
-        // pass, which is run here so the window opens already there.
-        var top = parts.Frame.TransformToAncestor(Rows).Transform(new Point(0, 0)).Y;
-        Scroller.ScrollToVerticalOffset(Math.Max(0, top - Scroller.ViewportHeight / 3));
+        // pass, which is run here so the window opens already there. In the Matrix it is the line's own cell that
+        // scrolls (whole-PR review, minor 5: measuring against the List's rows threw there).
+        var (scroller, panel) = matrixShown && cells.Values.FirstOrDefault(c => parts.Frame.IsDescendantOf(c.Lines)) is { Lines: not null } cell
+            ? ((ScrollViewer)cell.Lines.Parent, (Visual)cell.Lines)
+            : (Scroller, Rows);
+        if (!parts.Frame.IsDescendantOf(panel)) return;
+        var top = parts.Frame.TransformToAncestor(panel).Transform(new Point(0, 0)).Y;
+        scroller.ScrollToVerticalOffset(Math.Max(0, top - scroller.ViewportHeight / 3));
         UpdateLayout();
     }
 

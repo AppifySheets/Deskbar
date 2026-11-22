@@ -98,6 +98,8 @@ public sealed partial class RemoteControl(WorkspaceManager manager, Func<bool, R
         ("attention", ["--from", var folder]) => Attention(folder),
         ("task", _) => Task(rest),
         ("tasks-window", [var state]) => TasksWindow(state),
+        // A bare `tasks-window` (or one with too many words) gets its own usage line, not the whole usage.
+        ("tasks-window", _) => ControlReply.Fail(ControlUsage.LineFor("tasks-window")),
 
         ("rename", [var workspace, var name]) => Rename(workspace, name),
         ("reorder", [var workspace, var where]) => Reorder(workspace, where),

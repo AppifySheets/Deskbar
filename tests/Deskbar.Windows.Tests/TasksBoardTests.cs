@@ -1398,4 +1398,36 @@ public class TasksBoardTests
         Assert.Equal("OK to merge?", task.Question.Value);
         Assert.Equal(id, selection.Current.Value);
     });
+
+    // Whole-PR review, minor 5: a Matrix line makes no sessions, age or close button it has no column for, and the
+    // selected task is scrolled into view inside its cell when the window opens on the Matrix.
+    [Fact]
+    public void A_matrix_line_has_no_hidden_columns() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        var id = t.Tasks.Create("work", t.Gepha, Session("s1")).Value.Id;
+        t.Tasks.MarkDone(id);
+        Assert.True(t.Harness.Manager.SetTasksMatrix(true).IsSuccess);
+        t.Controller.Open(Rect.Empty);
+
+        var line = LineOf(t.Window, id);
+        Assert.Equal("", t.Window.AgeText(id));
+        Assert.DoesNotContain(Inside(line).OfType<Button>(), b => AutomationProperties.GetName(b) == "Close");
+        Assert.DoesNotContain(Inside(line).OfType<TextBlock>(), b => b.Text.Contains("session"));
+    });
+
+    [Fact]
+    public void The_matrix_scrolls_the_selected_task_into_view_in_its_cell() => StaThread.Run(() =>
+    {
+        var selection = new TaskSelection();
+        using var t = Build(selection: selection);
+        var oldest = t.Tasks.AddNote("the oldest", t.Gepha).Value.Id;
+        Enumerable.Range(1, 40).ToList().ForEach(i => t.Tasks.AddNote($"note {i}", t.Gepha));
+        Assert.True(t.Harness.Manager.SetTasksMatrix(true).IsSuccess);
+        selection.Select(oldest);
+
+        t.Controller.Open(Rect.Empty);
+
+        Assert.True(t.Window.CellScroller(Quadrant.IV).VerticalOffset > 0, $"offset {t.Window.CellScroller(Quadrant.IV).VerticalOffset}");
+    });
 }

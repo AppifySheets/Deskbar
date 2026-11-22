@@ -594,6 +594,16 @@ public class RemoteControlMenuTests
         Assert.Contains(ControlUsage.All, c => c.Verb == "tasks-window" && c.Arguments == "show|hide|list|matrix");
     }
 
+    // Whole-PR review, minor 5: a bare `tasks-window` prints its own usage line, not the whole usage.
+    [Fact]
+    public void A_bare_tasks_window_prints_its_own_usage_line()
+    {
+        var reply = new RemoteControl(Started(), setTasksWindow: _ => Result.Success()).Execute(["tasks-window"]);
+
+        Assert.Equal(ControlReply.Failed, reply.ExitCode);
+        Assert.Equal("usage: deskbar.cmd tasks-window show|hide|list|matrix", reply.Output.Trim());
+    }
+
     [Fact]
     public void Tasks_window_refuses_without_a_window()
     {
