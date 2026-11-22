@@ -243,6 +243,9 @@ The task list at the bottom of the bar (spec `docs/superpowers/specs/2026-11-22-
 55. Click a line's workspace chip: a menu of "none" and every workspace in its colour opens, the task's own ticked,
     and the click does not switch workspaces. Pick another: the line's chip changes, and `$ts task list` agrees. Add
     a note with a title longer than the bar on a narrow bar: the title ends in an ellipsis and the chip is whole.
+55a. Dock the bar to a screen edge with twenty or so open tasks: the list fills the empty height between the last
+    workspace row and the footer, at least three lines, "+N more" counting the rest. Add workspaces or shorten the
+    screen: the list gives up lines, never below three. Float the bar again: three lines.
 
 ## The tasks window
 

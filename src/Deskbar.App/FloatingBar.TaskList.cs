@@ -237,8 +237,71 @@ public partial class FloatingBar
     internal string TaskAddPlaceholder => taskAddPlaceholder?.Text ?? "";
     internal IReadOnlyList<TaskLine> TaskListLines => shownTaskLines;
 
-    // Three lines, the number the spec gives ("the three most recent tasks").
+    // Three lines, the number the spec gives ("the three most recent tasks"): always on a floating bar, and the least
+    // on a docked one.
     const int TaskListSlots = 3;
+
+    // THE DOCKED BAR'S LIST FILLS THE FREE HEIGHT (Petre: "tasks list can grow all the way up to the available vertical
+    // space when docked", then, of his docked bar with the whole screen empty above three lines and "+3 more": "use
+    // entire height when available for tasks"; ruling 23). When the bar's height is not its content's (docked to an
+    // edge, or across the seam: SizeToContent is Manual), the list shows as many lines as fit in the height the rows
+    // leave free, at least three; the rest stay behind "+N more". A floating bar keeps three.
+    //
+    // The rows keep priority, and nothing measures the list against itself (a layout loop). A pass after layout
+    // (FitTaskListToFreeHeight, deferred to the dispatcher's Loaded priority) reads how much of the rows' area its
+    // children do not use: the area is the DockPanel's last child, which gets everything the footer leaves, and the
+    // sum of its children's desired heights is what the rows need (more than the area when they overflow). Each line
+    // more the list shows takes one line's height from that free space, so the next pass finds the same count and stops.
+    // A pass that would change nothing changes nothing; one that waits for a press, a drag or a menu (TaskListMustWait)
+    // is left to the paint that follows.
+    int taskListSlots = TaskListSlots;
+    bool taskFitQueued;
+
+    internal int TaskListSlotCount => taskListSlots;
+
+    // Queues the pass after the layout now under way.
+    void QueueTaskListFit()
+    {
+        if (taskFitQueued) return;
+        taskFitQueued = true;
+        Dispatcher.BeginInvoke(DispatcherPriority.Loaded, () =>
+        {
+            taskFitQueued = false;
+            FitTaskListToFreeHeight();
+        });
+    }
+
+    /// <summary>The pass itself (see above), internal so the tests can run it after their own layout.</summary>
+    internal void FitTaskListToFreeHeight()
+    {
+        var slots = SizeToContent == SizeToContent.Manual ? Math.Max(TaskListSlots, shownTaskLines.Count + ExtraLinesThatFit()) : TaskListSlots;
+        if (slots == taskListSlots || TaskListMustWait) return;
+        taskListSlots = slots;
+        PaintTaskList();
+    }
+
+    // How many lines more (or, negative, fewer) fit: the free height over one line's height. The free height is the
+    // height the window gives the content, less what the footer (this list included, as it is now) and the rows need.
+    // Read from the window, not from the rows' area: once the content is taller than the window, WPF arranges the area
+    // at its own desired height and clips it (measured: four rows added and the area still read "free 0"), so its
+    // ActualHeight never shows the overflow. Everything here is in content units (the bar scales its content).
+    int ExtraLinesThatFit()
+    {
+        if (BarContent.Children.OfType<FrameworkElement>().LastOrDefault() is not Panel rowsArea || taskLinesPanel is null) return 0;
+        var line = taskLinesPanel.Children.OfType<FrameworkElement>().FirstOrDefault();
+        if (line is null || line.ActualHeight <= 0 || PresentationSource.FromVisual(BarContent) is null) return 0;
+        var toBar = BarContent.TransformToAncestor(this);
+        var top = toBar.Transform(new Point(0, 0)).Y;
+        var unit = toBar.Transform(new Point(0, 1)).Y - top;
+        if (unit <= 0) return 0;
+        // The content's height: the window's below BarContent's top, less the root's padding at the foot.
+        var available = (ActualHeight - top) / unit - RootPadding - BarContent.Margin.Bottom;
+        var others = BarContent.Children.OfType<UIElement>().Where(child => child != rowsArea).Sum(child => child.DesiredSize.Height);
+        var rowsNeed = rowsArea.Children.OfType<UIElement>().Sum(child => child.DesiredSize.Height) + rowsArea.Margin.Top + rowsArea.Margin.Bottom;
+        var free = available - others - rowsNeed;
+        var lineHeight = line.ActualHeight + line.Margin.Top + line.Margin.Bottom;
+        return (int)Math.Floor(free / lineHeight);
+    }
 
     // Expanded in place, at most this many lines show and the rest scroll (PR A review, Important 3): dozens of
     // migrated notes must not push the workspace rows off a docked bar.
@@ -448,7 +511,12 @@ public partial class FloatingBar
         // The width the list is laid out at follows the bar's window (VisibleWidthOf), and a footer laid out wider than
         // the window keeps the host's own slot unchanged when the window narrows, so nothing would arrange it again:
         // every change of the bar's size asks it to (measured: the lines stayed at the width of the bar before).
-        SizeChanged += (_, _) => host.InvalidateArrange();
+        SizeChanged += (_, _) =>
+        {
+            host.InvalidateArrange();
+            // A docked bar's height changed: the free height for the list did too (ruling 23).
+            if (SizeToContent == SizeToContent.Manual || taskListSlots != TaskListSlots) QueueTaskListFit();
+        };
         // The bar's own selection until the App hands it the shared one (Selection's init replaces this subscription).
         selectionChanges ??= selection.Changed.Subscribe(_ => PaintTaskSelection());
         ApplyTaskListTextSize();
@@ -596,20 +664,24 @@ public partial class FloatingBar
         FollowCurrentWorkspace();
         // A task closed or deleted is not selected any more (ruling 21).
         selection.KeepOnly(taskService.Board);
+        // On a bar whose height is not its content's, the pass after layout sees whether the free height takes more
+        // lines or fewer (ruling 23). Queued on every paint, the rebuild's included, since rows added or removed change
+        // the free height without changing the list.
+        if (SizeToContent == SizeToContent.Manual || taskListSlots != TaskListSlots) QueueTaskListFit();
 
         var open = Lines(taskService.Board, WorkspaceName, id => workspaceAccents.GetValueOrDefault(id), SessionWindow);
         // A closed line whose task is open again (reopened from the pipe, say) is not pending any more: the task is back
         // in the pile under its own line.
         pendingCloses.Where(p => open.Any(l => l.Id == p.Line.Id)).ToList().ForEach(p => ForgetPendingClose(p, repaint: false));
-        if (open.Count <= TaskListSlots) taskListExpanded = false;
+        if (open.Count <= taskListSlots) taskListExpanded = false;
         var all = WithPendingCloses(open, pendingCloses);
         var problem = taskService.LoadProblem;
         var shape = string.Join("\n", all.Select(ShapeOf).Prepend(
-            $"{taskListExpanded}|{OpenTasksWindow is null}|{TextOffset}|{problem.GetValueOrDefault("")}"));
+            $"{taskListExpanded}|{OpenTasksWindow is null}|{TextOffset}|{problem.GetValueOrDefault("")}|{taskListSlots}"));
         if (shape == lastTaskListShape) return;
         lastTaskListShape = shape;
 
-        shownTaskLines = taskListExpanded ? all : all.Take(TaskListSlots).ToArray();
+        shownTaskLines = taskListExpanded ? all : all.Take(taskListSlots).ToArray();
         taskLinesPanel.Children.Clear();
         taskAges.Clear();
         // The minute's tick of the ages starts with the first lines drawn and lives as long as the bar.
