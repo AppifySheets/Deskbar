@@ -300,6 +300,43 @@ The tasks window (spec `docs/superpowers/specs/2026-11-22-tasks-board-design.md`
     Add twenty tasks to one cell: that cell scrolls, the others do not move. Close and reopen the window: still the
     Matrix. `$ts tasks-window list` switches it back.
 
+## Claude sessions and their tasks
+
+The hooks and the briefing (spec `docs/superpowers/specs/2026-11-22-tasks-board-design.md`, "Claude sessions"; plan
+Tasks 7 to 9). Needs Claude Code installed and both Claude boxes in Manage ticked. `$ts` is
+`%APPDATA%\Deskbar\deskbar.cmd`.
+
+65. In Manage's Settings tab, "Claude Code sessions keep their tasks in the task list" sits under "Teach Claude Code
+    about Deskbar". Untick the teach box: the tasks box greys out and unticks. Tick it again: the tasks box is back,
+    ticked. `%USERPROFILE%\.claude\settings.json` has Deskbar's entries on Notification and Stop running
+    `claude-hook.cmd`, and on SessionStart, UserPromptSubmit and SessionEnd running `claude-task-hook.cmd`, beside
+    your own hooks. Untick only the tasks box: the three task entries and `claude-task-hook.cmd` go, the other two stay.
+66. With a note on a workspace whose VS Code window you open, start a new Claude Code session there. Its first reply
+    knows its session id and lists the note among the tasks it could join (ask it what Deskbar told it). A note of
+    yours on no workspace is not in that list.
+67. Ask the session to start some work. It joins the note or creates a task: the line turns orange with a CL tag and
+    a live session square in the tasks window, and the status line under the title changes as it works.
+68. Ask the session to ask you something through its task. Switch to another workspace first: the task jumps to the
+    top as Waiting on you with the question, in orange, and the session's workspace blinks. Answer in the session:
+    the task goes back to in progress and the question goes.
+69. Ask the session to finish and mark its task done: the line shows a close button. Send the session another
+    message: the task is in progress again. Mark it done again and close it yourself, then send a message: the
+    session says its task was closed and makes a new one only for new work.
+70. Close the session's VS Code tab: the task stays open with "no live session". Resume the session (the history
+    list): it names its task straight away and is not offered the list again, and a task that was done stays done
+    until you send a message.
+71. Run `/clear` in a session that has a task, then send a message. Note whether it keeps its task (same session id)
+    or is offered the list again (a new id); either is accepted, but record which.
+72. Send one `/loop` prompt in a session whose task waits on you: note whether the loop's prompt answers the task
+    (a known limitation: it cannot be told apart from your own message).
+73. Run `claude -p "say ok"` in a workspace's folder from a terminal: no task appears and nothing changes on the
+    list. Its finish still blinks the workspace, as before.
+74. Quit Deskbar and send a session a message: the reply comes at once, with nothing about Deskbar in it and no error.
+    Start Deskbar again and send another: the reminder line is back.
+75. Swap back to an older Deskbar build and start a session: the bar does not blink on session start or on each
+    message (the task hooks reach a script the older build leaves alone), and Notification and Stop still blink.
+    Start the current build again: `$ts help` lists `claude-tasks` and the session forms of `task`.
+
 ## Goals
 
 Weekly and monthly goals, pull request 1: the pipe, the task's link, the tasks window's menu and filter, the bar's

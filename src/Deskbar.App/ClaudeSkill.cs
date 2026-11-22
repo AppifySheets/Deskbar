@@ -86,7 +86,7 @@ static class ClaudeSkill
                 // An entry written by an older Deskbar (`cmd.exe /c ...`) still names the script, so Sync sees it as
                 // Deskbar's own, finds its command differs, and replaces it with this one.
                 var hooksInstalled = InstallHooks(scripts, Path.Combine(deskbarFolder, ControlCommandLine.ShimName), settings, tasks);
-                Write(folder, file, hooksInstalled);
+                Write(folder, file, hooksInstalled, tasks);
             }
             else
             {
@@ -168,9 +168,9 @@ static class ClaudeSkill
         File.WriteAllText(path, text);
     }
 
-    static void Write(string folder, string file, bool hooksInstalled)
+    static void Write(string folder, string file, bool hooksInstalled, bool tasks)
     {
-        var text = Text(UpdateService.DisplayVersion, hooksInstalled);
+        var text = Text(UpdateService.DisplayVersion, hooksInstalled, tasks);
         if (File.Exists(file) && File.ReadAllText(file) == text) return;
         Directory.CreateDirectory(folder);
         File.WriteAllText(file, text, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
@@ -201,10 +201,48 @@ static class ClaudeSkill
         they come to it. Do not call it for routine progress.
         """;
 
+    // "Your task" (plan Task 9): the rules a session keeps for its task in the user's task list, the longer form of what
+    // the SessionStart briefing names (SessionBriefing). Only while sessions keep tasks AND the hooks are installed: the
+    // hooks are what hand a session its id (`--session`), and without them it could not run one of these commands.
+    const string YourTask = """
+        ## Your task
+
+        Deskbar keeps the user's task list at the bottom of its bar, and every session works on one task in it. When
+        your session starts, Deskbar's hook tells you your session id, your task if you have one, and the open tasks
+        you could join. Pass `--session <your session id>` to every command below, and run them from your working
+        folder.
+
+        - Join or create. Once you know what the session is working on, join the task it continues with
+          `deskbar.cmd task join <id> --session <id>`, or create one with
+          `deskbar.cmd task new "<short title>" --session <id>`. Joining one of the user's notes makes it your work.
+          A resumed session keeps its task; you do not need to join it again.
+        - Keep the status line current: `deskbar.cmd task status-line "<what you are doing now>" --session <id>`, one
+          short line ("waiting for CI on #398"), changed when what you are doing changes.
+        - Ask through the task. When you need a decision from the user, run
+          `deskbar.cmd task ask "<question>" --session <id>`: the task waits on the user with your question, and your
+          workspace blinks. Their next message to you answers it. A reply finishing is not an ask; do not ask for
+          routine progress.
+        - Comment with detail: `deskbar.cmd task comment "<markdown>" --session <id>` for what is worth keeping
+          (findings, links, what is left to do). The status line stays short; the detail goes here.
+        - Mark it done on a clear finish: `deskbar.cmd task done --session <id>`. Never close or delete a task: only
+          the user closes one. A follow-up for later is `deskbar.cmd task later "<title>" --session <id>`, a note on
+          your workspace.
+        - Leave the user's own notes alone unless they ask you to change one.
+        """;
+
+    // A section followed by the blank line that separates it from the next, in the line ending the raw literals have
+    // (they take the source file's, which depends on the checkout), so the skill never mixes the two.
+    static string WithBlankLine(string section)
+    {
+        var newLine = section.Contains('\r') ? "\r\n" : "\n";
+        return section + newLine + newLine;
+    }
+
     // The skill. Written for a Claude session, not for a person: what Deskbar is in two sentences, then the three
     // commands a session needs, each with the one mistake that has cost time here (a move without --no-follow took
-    // the user's screen along; a bare URL landed in a browser window on another workspace).
-    internal static string Text(string version, bool hooksInstalled = true) =>
+    // the user's screen along; a bare URL landed in a browser window on another workspace). The "Your task" section
+    // is there while sessions keep tasks and the hooks are installed (see YourTask).
+    internal static string Text(string version, bool hooksInstalled = true, bool tasks = false) =>
         $$"""
         ---
         name: deskbar
@@ -248,7 +286,7 @@ static class ClaudeSkill
         without it takes the user's screen to that workspace. Do not use the workspace marked `current` in
         `deskbar.cmd workspaces` as yours: that is the one the user is looking at.
 
-        ## Asking for the user
+        {{(tasks && hooksInstalled ? WithBlankLine(YourTask) : "")}}## Asking for the user
 
         {{(hooksInstalled ? HooksAsk : HooksMissing)}}
 

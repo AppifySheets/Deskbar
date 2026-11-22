@@ -21,7 +21,21 @@ Links and windows a session opens land in that session's workspace, not on the o
 
 Seven VS Code windows all named `VSC` tell you nothing. **Name *app* windows by folder** on a VS Code icon's menu names each window after the folder, project or session it holds instead, and follows the window when it opens something else.
 
-A session can also add a note to its own workspace with `task add`, and it shows in the bar's task list.
+## Each session keeps a task
+
+Every Claude Code session works on a task in the bar's [task list](tasks.md), so the list shows what each one is doing without you switching to it.
+
+- When a session starts, Deskbar tells it the open tasks on its workspace (and Claude tasks on no workspace). Once it knows what it is working on, it joins the task its work continues or creates one. A session in a folder no VS Code window shows makes its task on no workspace. Your own notes on no workspace are never offered to a session.
+- A session that joins one of your notes makes it Claude's work: the line turns orange, and the session can mark it done.
+- The session keeps a short status line under the task's title, such as "waiting for CI on #398".
+- When it needs a decision from you, it asks through its task. The task moves to the top as "Waiting on you" with the question, and the workspace blinks. Your next message to that session answers it, and the task goes back to in progress.
+- It adds comments with the detail worth keeping, in markdown, and marks the task done when it has clearly finished. Only you close a task. A message to a session whose task is done takes it back to in progress. If you close a session's task, its next prompt tells it so, and new work needs a new task.
+- A resumed session keeps its task as it was; a session that ends leaves its task open, with "no live session".
+- Sessions run without anyone at them, such as `claude -p`, Agent SDK runs and scheduled agents, are told nothing and make no tasks.
+
+A finished reply or a permission prompt still only blinks the workspace; it does not change the task.
+
+A session can also add a note for later to its own workspace, and a script can add one with `task add`.
 
 ## Settings
 
@@ -30,7 +44,9 @@ The setting is **Teach Claude Code about Deskbar**, in the Deskbar on this PC se
 - A skill at `%USERPROFILE%\.claude\skills\deskbar\SKILL.md`, rewritten when Deskbar updates.
 - Two hooks, Notification and Stop, in `%USERPROFILE%\.claude\settings.json`, beside any hooks you already have. They run `%APPDATA%\Deskbar\claude-hook.cmd`, which hands the hook's details to `deskbar.cmd claude-hook` and always exits 0. When Deskbar is not running the hook prints nothing and the session carries on.
 
-Under it, **Claude Code sessions keep their tasks in the task list** adds three more hooks running the same script: SessionStart, UserPromptSubmit and SessionEnd. It is on by default, can be used only while the box above is ticked, and `deskbar.cmd claude-tasks on|off` sets it from a script. Unticking it takes out only those three.
+Under it, **Claude Code sessions keep their tasks in the task list** adds three more hooks, SessionStart, UserPromptSubmit and SessionEnd, running `%APPDATA%\Deskbar\claude-task-hook.cmd`. It is on by default, can be used only while the box above is ticked, and `deskbar.cmd claude-tasks on|off` sets it from a script. Unticking it takes out only those three and their script. While it is on, the skill also has a "Your task" section with the rules above.
+
+The task hooks have a script of their own so that going back to an older Deskbar is harmless: an older version does not know that script, leaves it alone, and refuses what it asks for, so nothing blinks and the session reads nothing.
 
 The first time Deskbar changes `settings.json` it keeps the original as `settings.json.deskbar-backup`. It leaves a `settings.json` that has comments in it alone.
 
@@ -57,6 +73,17 @@ $ts = "$env:APPDATA\Deskbar\deskbar.cmd"
 
 ```powershell
 & $ts task add "Wait for CI"
+```
+
+A session's own task forms carry `--session` with the session's id, which the start-of-session message gives it. Every form but `join`, `new` and `later` acts only on that session's own task:
+
+```powershell
+& $ts task new "Tasks board" --session <id>            # or: task join <task id> --session <id>
+& $ts task status-line "waiting for CI" --session <id>
+& $ts task ask "OK to merge?" --session <id>           # waits on you, and the workspace blinks
+& $ts task comment "**Found it**: the guard" --session <id>
+& $ts task done --session <id>
+& $ts task later "Rename the guard" --session <id>      # a note on the session's workspace
 ```
 
 On a machine with the Microsoft Store copy, `deskbar` is on the PATH, so `deskbar windows` and `deskbar help` work from PowerShell, cmd and Git Bash.
