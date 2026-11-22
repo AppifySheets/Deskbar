@@ -105,6 +105,34 @@ public sealed class GoalServiceTests
         Assert.Contains(traced, line => line.Contains("save failed"));
     }
 
+    // Review I2, ruling G1: a copy that never uses goals never writes goals.json. Loading an empty store and asking what
+    // is due and what to review saves nothing.
+    [Fact]
+    public void Load_of_nothing_writes_nothing()
+    {
+        var s = NewService();
+
+        Assert.True(s.Load().IsSuccess);
+        Assert.Equal(ReviewDue.Week, s.PromptDue());
+        Assert.Empty(s.ToReview());
+
+        Assert.Equal(0, store.Saves);
+    }
+
+    // Review M2: Seen reads today ONCE, so this week and this month come from the same day even when midnight falls
+    // between two reads. Here each read of the clock is a day later: Monday 30 November, then Tuesday 1 December.
+    [Fact]
+    public void Seen_reads_today_once()
+    {
+        var days = new Queue<DateOnly>([new DateOnly(2026, 11, 30), new DateOnly(2026, 12, 1)]);
+        var s = new GoalService(store, tasks, () => clock, () => days.Count > 1 ? days.Dequeue() : days.Peek());
+
+        s.Seen();
+
+        Assert.Equal(new DateOnly(2026, 11, 30), store.Stored.WeekSeen.Value);
+        Assert.Equal(new DateOnly(2026, 11, 1), store.Stored.MonthSeen.Value);
+    }
+
     [Fact]
     public void Load_reads_the_store_and_pulses()
     {

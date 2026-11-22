@@ -35,7 +35,11 @@ namespace Deskbar.Core.Goals;
 //   * A period is a local date written as yyyy-MM-dd (no time, no zone: GoalPeriod's header says why). A date that is
 //     not the first day of its period (a hand edit) is snapped to the period holding it.
 //   * Every time is converted to UTC before writing AND after reading, as in tasks.json, so a later sync can compare
-//     UpdatedAt directly.
+//     UpdatedAt directly. A missing time reads as the goal's other time, or the Unix epoch when both are missing.
+//   * A goal with no id or no period (null or missing; a hand edit) is SKIPPED and traced, and the rest of the file
+//     reads (review M1). Failing the whole file over one goal would move every other goal aside to a .bak, and reading
+//     the missing period as 0001-01-01 made Previous() throw. The skipped goal is not written back by the next save:
+//     without an id or a period it was never a goal this build could show.
 //   * A newer version is read as this one, tolerating what it does not know, rather than failing the whole file.
 public sealed class JsonGoalStore(string baseDirectory, Action<string>? trace = null) : IGoalStore
 {
@@ -47,16 +51,18 @@ public sealed class JsonGoalStore(string baseDirectory, Action<string>? trace = 
         Converters = { new TolerantNameConverter<GoalKind>(), new TolerantNameConverter<GoalStatus>() },
     };
 
+    // Id, Period and the times are nullable so a hand-edited null or a missing field reads instead of failing the file
+    // (see the header); FromDto skips a goal without an id or a period and fills in a missing time.
     sealed record GoalDto(
-        Guid Id,
+        Guid? Id,
         string? Title,
         GoalKind Kind,
-        DateOnly Period,
+        DateOnly? Period,
         GoalStatus Status,
         int Order,
         Guid? ParentId,
-        DateTimeOffset Created,
-        DateTimeOffset UpdatedAt);
+        DateTimeOffset? Created,
+        DateTimeOffset? UpdatedAt);
 
     sealed record FileDto(int Version, DateOnly? WeekSeen, DateOnly? MonthSeen, IReadOnlyList<GoalDto>? Goals);
 
@@ -74,7 +80,7 @@ public sealed class JsonGoalStore(string baseDirectory, Action<string>? trace = 
             DurableFile.Write(GoalsPath, JsonSerializer.Serialize(ToDto(board), Options));
         }, e => $"Could not write {GoalsPath}: {e.Message}");
 
-    static GoalBoard Parse(string text) =>
+    GoalBoard Parse(string text) =>
         FromDto(JsonSerializer.Deserialize<FileDto>(text, Options) ?? throw new JsonException("goals.json deserialized to null"));
 
     static FileDto ToDto(GoalBoard board) =>
@@ -85,15 +91,24 @@ public sealed class JsonGoalStore(string baseDirectory, Action<string>? trace = 
                 g.ParentId.HasValue ? g.ParentId.Value : null,
                 g.Created.ToUniversalTime(), g.UpdatedAt.ToUniversalTime())).ToArray());
 
-    static GoalBoard FromDto(FileDto file) =>
-        new GoalBoard((file.Goals ?? []).Select(d => new Goal(d.Id, d.Title ?? "",
-            GoalPeriod.Of(d.Kind, d.Period), d.Status, d.Order,
+    GoalBoard FromDto(FileDto file) =>
+        new GoalBoard((file.Goals ?? []).Where(Usable).Select(d => new Goal(d.Id!.Value, d.Title ?? "",
+            GoalPeriod.Of(d.Kind, d.Period!.Value), d.Status, d.Order,
             d.ParentId is { } parent ? parent : Maybe<Guid>.None,
-            d.Created.ToUniversalTime(), d.UpdatedAt.ToUniversalTime())).ToArray())
+            (d.Created ?? d.UpdatedAt ?? DateTimeOffset.UnixEpoch).ToUniversalTime(),
+            (d.UpdatedAt ?? d.Created ?? DateTimeOffset.UnixEpoch).ToUniversalTime())).ToArray())
         {
             WeekSeen = file.WeekSeen is { } week ? week : Maybe<DateOnly>.None,
             MonthSeen = file.MonthSeen is { } month ? month : Maybe<DateOnly>.None,
         };
+
+    // A goal this build can show needs an id and a period; one without is traced and skipped (see the header).
+    bool Usable(GoalDto goal)
+    {
+        var usable = goal.Id is not null && goal.Period is not null;
+        if (!usable) trace?.Invoke($"goals: skipped a goal with no {(goal.Id is null ? "id" : "period")}: '{goal.Title}'");
+        return usable;
+    }
 
     // Reads an enum from its name in any case and writes it as its lower-case name. Anything else, a name a newer build
     // added, a number, null or an object included, reads as the enum's first value (see the header).

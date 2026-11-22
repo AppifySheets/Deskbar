@@ -76,10 +76,12 @@ public sealed partial class RemoteControl
             ? Result.Success<IReadOnlyList<Goal>>(service.Board.Goals
                 .OrderBy(g => g.Period.Start).ThenBy(g => g.Kind == GoalKind.Month ? 0 : 1)
                 .ThenBy(g => g.Order).ThenBy(g => g.Created).ThenBy(g => g.Id).ToArray())
-            : ParsePeriod(service, options).Map(period => period.HasValue
-                ? service.Board.In(period.Value)
-                : service.Board.In(service.ThisMonth).Concat(service.Board.In(service.ThisWeek)).ToArray()))
+            : ParsePeriod(service, options).Map(period => period.HasValue ? service.Board.In(period.Value) : CurrentGoals(service.Board, service.Today)))
         .Match(list => Success(list.Select(g => DescribeGoal(service, g.Id)).ToArray()), ControlReply.Fail);
+
+    // This month's goals then this week's, both from ONE read of today (review M2), so they cannot straddle midnight.
+    static IReadOnlyList<Goal> CurrentGoals(GoalBoard board, DateOnly day) =>
+        board.In(GoalPeriod.MonthOf(day)).Concat(board.In(GoalPeriod.WeekOf(day))).ToArray();
 
     static ControlReply GoalPrompt(GoalService service) =>
         Success(new { due = service.PromptDue() switch { ReviewDue.Week => "week", ReviewDue.Month => "month", _ => (string?)null } });

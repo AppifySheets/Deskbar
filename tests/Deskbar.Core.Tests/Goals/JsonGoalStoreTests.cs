@@ -98,6 +98,52 @@ public sealed class JsonGoalStoreTests : IDisposable
         Assert.Empty(loaded.Value.Goals);
         Assert.True(loaded.Value.WeekSeen.HasNoValue);
         Assert.True(loaded.Value.MonthSeen.HasNoValue);
+        // Ruling G1: loading writes nothing, so a copy that never uses goals never has a goals.json.
+        Assert.False(File.Exists(GoalsPath));
+    }
+
+    // Review M1: one goal with no period (null or missing) or no id is skipped and traced, and the rest of the file
+    // reads; failing the whole file over one goal would lose every other goal to the .bak.
+    [Fact]
+    public void A_goal_without_a_period_or_an_id_is_skipped_and_the_rest_read()
+    {
+        const string Good = """
+            { "id": "dddddddd-0000-0000-0000-000000000009", "title": "Good", "kind": "week", "period": "2026-11-23",
+              "created": "2026-11-22T09:00:00+00:00", "updatedAt": "2026-11-22T09:00:00+00:00" }
+            """;
+        WriteGoals($$"""
+            { "version": 1, "goals": [
+              { "id": "dddddddd-0000-0000-0000-000000000001", "title": "Null period", "kind": "week", "period": null },
+              { "id": "dddddddd-0000-0000-0000-000000000002", "title": "No period", "kind": "month" },
+              { "title": "No id", "kind": "week", "period": "2026-11-23" },
+              {{Good}} ] }
+            """);
+        var traced = new List<string>();
+
+        var loaded = new JsonGoalStore(dir, traced.Add).Load();
+
+        Assert.True(loaded.IsSuccess, loaded.IsFailure ? loaded.Error : "");
+        Assert.Equal(["Good"], loaded.Value.Goals.Select(g => g.Title));
+        Assert.Equal(3, traced.Count(line => line.Contains("skipped")));
+        Assert.Contains(traced, line => line.Contains("Null period"));
+        Assert.Contains(traced, line => line.Contains("No id"));
+    }
+
+    // A goal with no times (a hand edit) reads with its created time standing in for both, or the epoch.
+    [Fact]
+    public void Missing_times_read_as_the_other_time_or_the_epoch()
+    {
+        WriteGoals("""
+            { "version": 1, "goals": [
+              { "id": "dddddddd-0000-0000-0000-000000000001", "title": "a", "period": "2026-11-23", "created": "2026-11-22T09:00:00+00:00" },
+              { "id": "dddddddd-0000-0000-0000-000000000002", "title": "b", "period": "2026-11-23" } ] }
+            """);
+
+        var goals = new JsonGoalStore(dir).Load().Value.Goals;
+
+        Assert.Equal(new DateTimeOffset(2026, 11, 22, 9, 0, 0, TimeSpan.Zero), goals[0].UpdatedAt);
+        Assert.Equal(DateTimeOffset.UnixEpoch, goals[1].Created);
+        Assert.Equal(DateTimeOffset.UnixEpoch, goals[1].UpdatedAt);
     }
 
     [Fact]

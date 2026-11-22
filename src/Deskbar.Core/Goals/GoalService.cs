@@ -144,9 +144,12 @@ public sealed class GoalService(
 
     /// <summary>
     /// Petre opened the planner or dismissed the bar's line: this week and this month are recorded as seen. Saves only
-    /// when that changed the board.
+    /// when that changed the board. Today is read ONCE (review M2), so the week and the month recorded are those of one
+    /// day even when midnight falls between two reads of the clock.
     /// </summary>
-    public void Seen() => CommitIfChanged(Board.Seen(ThisWeek, ThisMonth));
+    public void Seen() => CommitIfChanged(SeenOn(today()));
+
+    GoalBoard SeenOn(DateOnly day) => Board.Seen(GoalPeriod.WeekOf(day), GoalPeriod.MonthOf(day));
 
     // --- helpers ------------------------------------------------------------------------------------------
 
