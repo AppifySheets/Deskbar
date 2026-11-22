@@ -126,18 +126,21 @@ public sealed record TaskBoard(IReadOnlyList<TaskItem> Tasks)
             : Change(id, t => OnTopIfClosed(t) with { Status = t.HasLiveSession ? TaskStatus.InProgress : TaskStatus.Backlog, UpdatedAt = now });
 
     /// <summary>
-    /// Undo on a line just closed (the bar's and the window's six seconds): the task comes back Done when it was Done,
-    /// else as <see cref="Reopen"/> would bring it, In progress with a live session or Backlog, but at the place it had,
-    /// not on top, because its line never left the screen. A task that is not closed is refused.
+    /// Undo on a line just closed (the bar's and the window's six seconds). UNDO MEANS EXACTLY UNDO (Ruling 31): the
+    /// task comes back with the status it had before the close, <paramref name="was"/>, whatever it was (a note set to
+    /// In progress by hand stays In progress), and a task that waited on Petre gets its <paramref name="question"/> back
+    /// and goes back into the pinned block. Neither Raised nor the rank moves, so the line is exactly where it was: it
+    /// never left the screen. A task that is not closed is refused, and so is Closed as the status to come back to.
     /// </summary>
-    public Result<TaskBoard> UndoClose(Guid id, TaskStatus was, DateTimeOffset now) =>
-        Tasks.FirstOrDefault(t => t.Id == id) is { IsOpen: true }
-            ? Result.Failure<TaskBoard>(TaskIsNotClosed)
-            : Change(id, t => (was == TaskStatus.Done ? BecameDone(t, now) : t) with
-            {
-                Status = was == TaskStatus.Done ? TaskStatus.Done : t.HasLiveSession ? TaskStatus.InProgress : TaskStatus.Backlog,
-                UpdatedAt = now,
-            });
+    public Result<TaskBoard> UndoClose(Guid id, TaskStatus was, Maybe<string> question, DateTimeOffset now) =>
+        Tasks.FirstOrDefault(t => t.Id == id) is { IsOpen: true } ? Result.Failure<TaskBoard>(TaskIsNotClosed)
+        : was == TaskStatus.Closed ? Result.Failure<TaskBoard>("A closed task cannot come back closed")
+        : Change(id, t => t with
+        {
+            Status = was,
+            Question = was == TaskStatus.WaitingOnYou ? question : Maybe<string>.None,
+            UpdatedAt = now,
+        });
 
     /// <summary>
     /// Any status but Closed, by hand, from any status (a closed task set to Done is reopened as Done, at the top of

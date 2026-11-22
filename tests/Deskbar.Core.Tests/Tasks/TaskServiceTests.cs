@@ -45,7 +45,7 @@ public sealed class TaskServiceTests
             () => s.SetFlag(note.Id, TaskFlag.Important, true),
             () => s.Place(claudes.Id, Quadrant.I, TaskPlace.Before(note.Id)),
             () => s.Close(note.Id),
-            () => s.UndoClose(note.Id, TaskStatus.Backlog),
+            () => s.UndoClose(note.Id, TaskStatus.Backlog, Maybe<string>.None),
             () => { s.SessionEnded("s2"); return Result.Success(); },
             () => { s.Prune(new HashSet<Guid>()); return Result.Success(); },
             () => s.Delete(note.Id),

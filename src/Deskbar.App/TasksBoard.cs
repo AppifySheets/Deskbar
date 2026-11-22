@@ -36,7 +36,8 @@ namespace Deskbar.App;
 //                 to go, so its click opens its thread instead.
 //   Close         at once through TaskService.Close (only Petre closes, and this is his click), with the bar's undo
 //                 window: the line stays in its place for six seconds, struck through, with Undo (Ruling 10).
-//   Undo          the task comes back with the status it had (SetStatus, which also takes a closed task back).
+//   Undo          exactly undo (Ruling 31): the status it had, its question if it waited on Petre, its place and the
+//                 selection (TaskBoard.UndoClose).
 //   Reopen        a closed task under the Closed filter: TaskService.Reopen.
 //   SetStatus     Backlog, In progress, Waiting on you or Done by hand. Closed is refused there (Close is the way).
 //   Rename, MoveTo, Delete, AddNote, Comment (as Petre, no session; shown as "you").
@@ -72,7 +73,13 @@ public sealed class TasksBoard : IDisposable
     TaskFilter filter = TaskFilter.Open;
     TaskWorkspaceFilter where = TaskWorkspaceFilter.All;
 
-    sealed record PendingClose(TaskStatus Was, IDisposable Timer);
+    // What Undo gives back (Ruling 31): the status, the question of a task that waited on Petre, and the selection.
+    sealed record PendingClose(TaskStatus Was, IDisposable Timer)
+    {
+        public Maybe<string> Question { get; init; } = Maybe<string>.None;
+
+        public bool Selected { get; init; }
+    }
 
     //   goTo          where a line's click goes (see the header)
     //   colourOf      a workspace's lane colour, the one its row on the bar wears; none for a workspace without one
@@ -263,21 +270,25 @@ public sealed class TasksBoard : IDisposable
     {
         if (tasks.Board.Tasks.FirstOrDefault(t => t.Id == id) is not { IsOpen: true } task) return Report(tasks.Close(id));
         // Pending before Close pulses Changed, so the redraw that pulse causes already draws the line struck through.
-        pendingCloses[id] = new PendingClose(task.Status, undoTimer(UndoWindow, () => Forget(id)));
+        pendingCloses[id] = new PendingClose(task.Status, undoTimer(UndoWindow, () => Forget(id)))
+        {
+            Question = task.Question,
+            Selected = selection.IsSelected(id),
+        };
         return Report(tasks.Close(id).TapError(_ => Forget(id)));
     }
 
     /// <summary>
-    /// Undo on a line just closed, by the bar's rule (FloatingBar.UndoClose), so the two Undos agree (fix round 1): a
-    /// task that was Done comes back Done; any other comes back In progress while a session is live on it, else
-    /// Backlog. Both through TaskBoard.UndoClose, which keeps the task's place in its quadrant (Task 12): the line
-    /// stayed on screen, struck through, so it must not jump to the top as a reopened task does.
+    /// Undo on a line just closed, by the bar's rule (FloatingBar.UndoClose), so the two Undos agree: exactly undo
+    /// (Ruling 31). The task comes back with the status it had before the close and, when it waited on Petre, its
+    /// question, in its place (TaskBoard.UndoClose), and selected again if it was the task selected.
     /// </summary>
     public Result Undo(Guid id)
     {
         if (!pendingCloses.Remove(id, out var pending)) return Report(Result.Failure("Nothing to undo"));
         pending.Timer.Dispose();
-        var back = tasks.UndoClose(id, pending.Was);
+        var back = tasks.UndoClose(id, pending.Was, pending.Question);
+        if (back.IsSuccess && pending.Selected) selection.Select(id);
         // SetStatus pulses Changed, which redraws; a refusal (the task is gone) still needs the line taken away.
         if (back.IsFailure) Refresh();
         return Report(back);

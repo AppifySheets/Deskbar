@@ -287,7 +287,7 @@ The tasks window (spec `docs/superpowers/specs/2026-11-22-tasks-board-design.md`
     link in a comment shows as plain text.
 61. "…" on a line: set the status to each of the four, Rename… (Enter keeps it, Esc drops it), Move to (the
     coloured workspace menu), Close (the line stays struck through with Undo for six seconds; Undo brings back
-    the status it had) and Delete, then Delete for good. While that menu is open, change a task from the pipe:
+    the status it had, a waiting task its question too, and the selection) and Delete, then Delete for good. While that menu is open, change a task from the pipe:
     nothing moves until the menu closes.
 62. Click a note's line on a workspace: you go there and the window stays open on its own desktop. "+ Add": a box
     opens, "on <workspace> ▾" says where; Enter adds the note there, Esc closes the box.
