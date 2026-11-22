@@ -1979,6 +1979,8 @@ public partial class App : Application
                 colourOf: id => floatingBar?.WorkspaceAccent(id),
                 // The task Petre picked (ruling 21): the bar's selection, so a pick in either view shows in both.
                 selection: floatingBar?.Selection,
+                // The goals (goals plan, Task 6): a line's More menu "Goal" and the goal filter, while goals exist.
+                goals: goals,
                 // Brought to the desktop in front, in that order (TasksBoard.Arrive; fix round 1, Critical 1): a page
                 // left open on another desktop is MOVED here first and only then activated, because activating a window
                 // on another desktop makes Windows follow it there. Activated through the activator, since a

@@ -5,6 +5,7 @@ using System.Windows.Interop;
 using System.Windows.Media;
 using CSharpFunctionalExtensions;
 using Deskbar.Core;
+using Deskbar.Core.Goals;
 using Deskbar.Core.Persistence;
 using Deskbar.Core.Tasks;
 
@@ -47,6 +48,17 @@ namespace Deskbar.App;
 // draw with what it drew and redraws nothing when they match, and it waits while one of its menus is open, a rename
 // is under way or a press is in flight (TasksWindow.MustWait): the bar's #77 lesson about redrawing under an open
 // menu, applied to this window's own refresh.
+//
+// GOALS (goals plan, Task 6; docs/superpowers/specs/2026-11-22-goals-planner-design.md, "Linking a task to a goal
+// elsewhere"). With a GoalService, a line's More menu gains "Goal" (None, then this month's and this week's OPEN goals,
+// the task's own goal checked), which links through GoalService.LinkTask (SetGoal), the one place a task is linked; a
+// refusal (a goal done meanwhile) shows on the problem line. The toolbar gains a goal filter beside the workspace one:
+// all goals, no goal (a dangling link counts as no goal), or one goal (a monthly goal also shows its weekly goals'
+// tasks), applied to the board BEFORE the groups, the Matrix and the chips' counts are made (TaskGoalFilter.Narrow),
+// so every view and every count agrees with it. Ruling G1: both appear only while at least one goal exists, so a copy
+// with no goals looks exactly as before. A filter whose goal no longer exists falls back to every goal (review M7),
+// rather than showing an empty list under a filter nobody can see. The window redraws on GoalService.Changed too, since
+// the filter's label and choices show goal titles.
 public sealed class TasksBoard : IDisposable
 {
     // How long a line just closed stays, struck through with Undo: the bar's own window, so the two agree.
@@ -65,6 +77,7 @@ public sealed class TasksBoard : IDisposable
     readonly Func<TimeSpan, Action, IDisposable> undoTimer;
     readonly Func<DateTimeOffset> now;
     readonly TaskSelection selection;
+    readonly GoalService? goals;
     readonly IDisposable subscriptions;
 
     // The lines closed in this window and still in their undo window: the status each had, and its timer.
@@ -72,6 +85,7 @@ public sealed class TasksBoard : IDisposable
     readonly HashSet<Guid> expanded = [];
     TaskFilter filter = TaskFilter.Open;
     TaskWorkspaceFilter where = TaskWorkspaceFilter.All;
+    TaskGoalFilter goalFilter = TaskGoalFilter.All;
 
     // What Undo gives back (Ruling 31): the status, the question of a task that waited on Petre, and the selection.
     sealed record PendingClose(TaskStatus Was, IDisposable Timer)
@@ -91,10 +105,12 @@ public sealed class TasksBoard : IDisposable
     //   undoTimer     runs `then` once after the undo window unless disposed first; a dispatcher timer by default, a
     //                 seam so the tests move time by hand
     //   now           the clock a comment's time is told against ("11:42" today, a date before)
+    //   goals         the goal service, for the "Goal" menu and the goal filter (see the header); none, no goals UI
     public TasksBoard(TasksWindow window, TaskService tasks, WorkspaceManager manager, Func<TaskItem, Result> goTo,
         Func<Guid, Brush?>? colourOf = null, Func<nint, bool>? bringForward = null, Func<TimeSpan, Action, IDisposable>? undoTimer = null,
-        Func<DateTimeOffset>? now = null, TaskSelection? selection = null)
+        Func<DateTimeOffset>? now = null, TaskSelection? selection = null, GoalService? goals = null)
     {
+        this.goals = goals;
         this.window = window;
         this.tasks = tasks;
         this.manager = manager;
@@ -123,10 +139,15 @@ public sealed class TasksBoard : IDisposable
             ShowMatrix: on => Report(manager.SetTasksMatrix(on)),
             Filter: Filter,
             FilterWorkspace: FilterWorkspace,
-            Remember: place => manager.SaveTasksWindow(place));
+            Remember: place => manager.SaveTasksWindow(place),
+            SetGoal: (id, goal) => SetGoal(id, goal),
+            FilterGoal: FilterGoal);
 
         subscriptions = new CompositeDisposable(
             tasks.Changed.Subscribe(_ => Refresh()),
+            // A goal added, renamed, done or deleted (from the pipe, later the planner) changes the goal filter's label
+            // and choices and, with G1, whether goals show at all.
+            goals?.Changed.Subscribe(_ => Refresh()) ?? Disposable.Empty,
             // Only a change the window shows (whole-PR review, minor 4): the workspaces (names, colours, groups, order),
             // which workspace is in front (where a new note goes) and the List / Matrix switch. Every other state pulse,
             // a window moving or a stats tick, used to rebuild the whole view for nothing; tasks have their own pulse.
@@ -170,6 +191,7 @@ public sealed class TasksBoard : IDisposable
         }
         filter = TaskFilter.Open;
         where = TaskWorkspaceFilter.All;
+        goalFilter = TaskGoalFilter.All;
         expanded.Clear();
         window.ShowProblem(null);
         window.PaintSelection(selection.Current);
@@ -242,6 +264,13 @@ public sealed class TasksBoard : IDisposable
         Refresh();
     }
 
+    /// <summary>The toolbar's goal filter: every goal, no goal, or one goal (see the header).</summary>
+    public void FilterGoal(TaskGoalFilter shown)
+    {
+        goalFilter = shown;
+        Refresh();
+    }
+
     public void ToggleThread(Guid id)
     {
         if (!expanded.Remove(id)) expanded.Add(id);
@@ -308,6 +337,13 @@ public sealed class TasksBoard : IDisposable
     /// <summary>A drop: the task goes to that place in that quadrant, taking its flags (TaskBoard.Place).</summary>
     public Result Place(Guid id, Quadrant quadrant, TaskPlace place) => Report(tasks.Place(id, quadrant, place));
 
+    /// <summary>
+    /// The "Goal" menu: links the task to an open goal, or (none) unlinks it, through GoalService.LinkTask. Flags, rank
+    /// and status stay as they are, so the line does not move.
+    /// </summary>
+    public Result SetGoal(Guid id, Maybe<Guid> goal) =>
+        Report(goals is { } service ? service.LinkTask(id, goal) : Result.Failure("Goals are not available"));
+
     public Result Delete(Guid id)
     {
         expanded.Remove(id);
@@ -349,7 +385,13 @@ public sealed class TasksBoard : IDisposable
         ForgetReopened();
         // A task closed or deleted is not selected any more (ruling 21).
         selection.KeepOnly(tasks.Board);
-        var board = WithPendingCloses(tasks.Board);
+        // The goal filter narrows the board before anything is grouped or counted (see the header), so the List, the
+        // Matrix and the chips' counts all follow it. Ruling G1: no goals, no goal UI and no narrowing.
+        var goalBoard = goals?.Board ?? GoalBoard.Empty;
+        var showsGoals = goals is not null && goalBoard.Goals.Count > 0;
+        if (!showsGoals || goalFilter.Goal.Map(id => goalBoard.Get(id).HasNoValue).GetValueOrDefault(false))
+            goalFilter = TaskGoalFilter.All;
+        var board = goalFilter.Narrow(WithPendingCloses(tasks.Board), goalBoard);
         var groups = TaskViews.Grouped(board, filter, where)
             .Select(g => new TaskGroupView(g.Kind, TaskViews.GroupName(g.Kind), g.Tasks.Select(Row).ToArray()))
             .ToArray();
@@ -365,12 +407,39 @@ public sealed class TasksBoard : IDisposable
         var cells = TaskViews.Matrix(board, filter, where)
             .Select(c => new TaskCellView(c.Quadrant, TaskViews.GroupName(TaskViews.KindOf(c.Quadrant)), c.Tasks.Select(Row).ToArray()))
             .ToArray();
+        var (menuGoals, filterGoals) = showsGoals ? GoalChoices(goalBoard) : NoGoalChoices;
         return new TasksView(filters, WorkspaceFilterLabel(), where, places, groups, EmptyText(filter), addTarget)
         {
             Matrix = manager.State.TasksMatrix,
             Cells = cells,
+            ShowsGoals = showsGoals,
+            Goals = menuGoals,
+            GoalFilterChoices = filterGoals,
+            GoalFilter = goalFilter,
+            GoalFilterLabel = showsGoals ? GoalFilterLabel(goalBoard) : "",
         };
     }
+
+    // The goals the window offers, both from ONE read of today (review M2): the "Goal" menu's (this month's then this
+    // week's OPEN goals, the ones a task can be linked to) and the goal filter's (those two periods' goals of every
+    // status, since a done goal's tasks are still worth finding, plus the goal in force when it is of another period, so
+    // the filter in force is always on its own menu).
+    (IReadOnlyList<GoalChoice> Menu, IReadOnlyList<GoalChoice> Filter) GoalChoices(GoalBoard board)
+    {
+        var today = goals!.Today;
+        var current = board.In(GoalPeriod.MonthOf(today)).Concat(board.In(GoalPeriod.WeekOf(today))).ToArray();
+        var inForce = goalFilter.Goal.Bind(board.Get).Where(g => current.All(c => c.Id != g.Id));
+        return (current.Where(g => g.IsOpen).Select(ChoiceOf).ToArray(),
+            current.Concat(inForce.HasValue ? [inForce.Value] : Array.Empty<Goal>()).Select(ChoiceOf).ToArray());
+    }
+
+    static readonly (IReadOnlyList<GoalChoice> Menu, IReadOnlyList<GoalChoice> Filter) NoGoalChoices = ([], []);
+
+    static GoalChoice ChoiceOf(Goal goal) => new(goal.Id, goal.Title, goal.Kind == GoalKind.Month ? "month" : "week");
+
+    string GoalFilterLabel(GoalBoard board) =>
+        goalFilter.Any ? "Goal: all"
+        : goalFilter.Goal.Bind(board.Get).Map(g => $"Goal: {g.Title}").GetValueOrDefault("Goal: none");
 
     // A task closed here shows under the status it had while its undo window lasts, so its line keeps its place.
     // Closing moves neither Raised nor anything else the groups sort by, so the line is drawn exactly where it was.
@@ -416,6 +485,7 @@ public sealed class TasksBoard : IDisposable
         Created = task.Created,
         Important = task.Important,
         Urgent = task.Urgent,
+        GoalId = task.GoalId,
     };
 
     // The mockup's sessions column: how many, and whether any is still live. Empty for a note.
@@ -505,7 +575,19 @@ internal sealed record TaskRowView(Guid Id, string Title, string Detail, TaskSta
     public bool Urgent { get; init; }
 
     public Quadrant Quadrant => QuadrantOf.Flags(Important, Urgent);
+
+    /// <summary>
+    /// The goal the task is linked to (goals plan, Task 6), for the "Goal" menu's check mark. Not drawn on the line, so
+    /// not in the window's redraw signature.
+    /// </summary>
+    public Maybe<Guid> GoalId { get; init; }
 }
+
+/// <summary>
+/// A goal as the "Goal" menu and the goal filter list it: its id (none for "None"), its title and its period's kind in
+/// words ("week" or "month"), shown dim beside the title. Goals have no colour, so the items are plain text.
+/// </summary>
+internal sealed record GoalChoice(Maybe<Guid> Goal, string Title, string Period);
 
 /// <summary>One cell of the Matrix: its quadrant, its caption, its lines (the waiting ones first).</summary>
 internal sealed record TaskCellView(Quadrant Quadrant, string Header, IReadOnlyList<TaskRowView> Rows);
@@ -525,6 +607,21 @@ internal sealed record TasksView(IReadOnlyList<TaskFilterChip> Filters, string W
     public bool Matrix { get; init; }
 
     public IReadOnlyList<TaskCellView> Cells { get; init; } = [];
+
+    /// <summary>Ruling G1: whether the "Goal" menu and the goal filter show at all (a goal service and at least one goal).</summary>
+    public bool ShowsGoals { get; init; }
+
+    /// <summary>The "Goal" menu's goals: this month's then this week's open goals ("None" is the window's own first item).</summary>
+    public IReadOnlyList<GoalChoice> Goals { get; init; } = [];
+
+    /// <summary>The goal filter's goals, after its "All goals" and "No goal" (see TasksBoard.GoalChoices).</summary>
+    public IReadOnlyList<GoalChoice> GoalFilterChoices { get; init; } = [];
+
+    /// <summary>The goal filter in force, for its menu's check mark.</summary>
+    public TaskGoalFilter GoalFilter { get; init; } = TaskGoalFilter.All;
+
+    /// <summary>"Goal: all", "Goal: none" or "Goal: &lt;title&gt;"; "" while ShowsGoals is false.</summary>
+    public string GoalFilterLabel { get; init; } = "";
 }
 
 /// <summary>
@@ -550,4 +647,6 @@ internal sealed record TasksWindowActions(
     Action<bool> ShowMatrix,
     Action<TaskFilter> Filter,
     Action<TaskWorkspaceFilter> FilterWorkspace,
-    Action<TasksWindowState> Remember);
+    Action<TasksWindowState> Remember,
+    Action<Guid, Maybe<Guid>> SetGoal,
+    Action<TaskGoalFilter> FilterGoal);

@@ -54,6 +54,12 @@ public sealed class GoalService(
     /// </summary>
     public Maybe<string> LoadProblem { get; private set; } = Maybe<string>.None;
 
+    /// <summary>
+    /// Today's local date, read once. A caller that needs this week AND this month derives both from one read
+    /// (GoalPeriod.WeekOf, MonthOf), so the two cannot straddle midnight between two reads of the clock.
+    /// </summary>
+    public DateOnly Today => today();
+
     /// <summary>The local week holding today, Monday to Sunday.</summary>
     public GoalPeriod ThisWeek => GoalPeriod.WeekOf(today());
 
