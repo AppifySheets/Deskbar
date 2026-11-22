@@ -4,7 +4,8 @@ summary: A short task list at the bottom of the bar, for the things you want to 
 order: 7
 clip: tasks-bar
 # Clips to film: tasks-bar (the bar's list with its toggles and a drag), tasks-window (the List view), tasks-matrix
-# (the Matrix, with a drag between cells). task-due showed the stopwatch build and is retired.
+# (the Matrix, with a drag between cells). task-due showed the stopwatch build and is retired. Film tasks-window again
+# with a goal in place, since its toolbar then shows the goal filter.
 ---
 
 The bottom of the bar carries a short task list, for the things you want to remember while you work.
@@ -18,6 +19,8 @@ When more than three are open, a small "+2 more" under the last line counts the 
 Click in the box to write a note. Under it, always, are chips for where the note goes: the workspace you are on (ticked, and following you while the box is empty), **none**, and **other...**, which lists your other workspaces. Only the chosen chip is filled and outlined in blue; the others are dimmed. The box names where the note will go ("Add to Deskbar..." or, with none chosen, "Add..."). The workspaces in **other...** look the way they do on the bar: each one is its chip in its own colour, in the bar's order, with grouped workspaces under their group's name. On a narrow bar they wrap onto a second line. Clicking a chip starts a note just as clicking in the box does. Press Enter to add the note and Esc to clear the box. Either way the keyboard goes back to the window you were typing in, as long as that window is on the desktop you are looking at, because Deskbar never switches desktops to hand it back. If you click into another app while typing, what you typed stays in the box, with its chip, until you come back to it.
 
 A note has a tick box at the left of its line. Ticking it closes the note at once, but its line stays where it is for six seconds, struck through, with **Undo** where the tick box was. Undo brings the note back, and otherwise the line then leaves. A double click, or a click in the half second after the list changes, is ignored rather than landing on the next note. Past the six seconds, `task list --closed` finds a closed note and `task reopen <id>` brings it back.
+
+Point at a line for its tooltip: its status and title, its question or status line, its quadrant, its workspace and, when it belongs to one, its [goal](goals.md).
 
 The workspace chip at the end of a line is a button. Click it to move the task: a menu lists **none** and every workspace in its colour, with the task's own ticked. The title shortens to make room, so the chip is never cut off.
 
@@ -44,7 +47,7 @@ Within a quadrant the order is yours. Drag a line up or down and let go: it goes
 
 "+2 more" (or **All tasks**) under the list opens the tasks window: a window of its own with every task. It has a title bar, you can resize it, and it stays open when you click into another app, so you can keep it beside your work. It is in Alt+Tab and on the taskbar. Close it with its X. It opens again where you left it, at the same size and on the same screen, even after a restart. If that screen is gone, it opens next to the bar. Clicking "+2 more" while the window is open brings it forward, onto the desktop you are on.
 
-The window opens on the list itself, not on a form. Open tasks are grouped as on the bar: **Waiting on you** first, then the four quadrants under Covey's own words, "I Urgent and important", "II Important, not urgent", "III Urgent, not important" and "IV Not urgent, not important". The chips along the top filter by status and show how many tasks each one holds: Open, Waiting on you, Done, In progress, Backlog and **Closed**. A status chip keeps the quadrants and shows only that status in each. Closed tasks only show under their own chip, the most recently closed first, each with **Reopen**. **Workspace: all** narrows the list to one workspace, or to tasks on none.
+The window opens on the list itself, not on a form. Open tasks are grouped as on the bar: **Waiting on you** first, then the four quadrants under Covey's own words, "I Urgent and important", "II Important, not urgent", "III Urgent, not important" and "IV Not urgent, not important". The chips along the top filter by status and show how many tasks each one holds: Open, Waiting on you, Done, In progress, Backlog and **Closed**. A status chip keeps the quadrants and shows only that status in each. Closed tasks only show under their own chip, the most recently closed first, each with **Reopen**. **Workspace: all** narrows the list to one workspace, or to tasks on none. Once you have a [goal](goals.md), **Goal: all** next to it narrows the list and the Matrix to one goal's tasks, or to tasks with no goal.
 
 Each line has the same two toggles as on the bar, and drags the same way: within its group to reorder, into another quadrant to take its flags.
 
@@ -54,7 +57,7 @@ Each line shows the task's title, then its question or status line under it, the
 
 - Click a line to go to its workspace. The window stays open behind you. The line stays highlighted, as on the bar, and when the window opens it scrolls to that task.
 - Click the comment glyph (with the count beside it when there are comments) to open the task's comments. Each comment shows who wrote it, **Claude** or **you**, and when, and its text is formatted: bold, italics, code, code blocks, links and lists. Only web links can be clicked, and they open in your default browser. Type in the box under the comments and press Enter to add one as **you**. Shift+Enter starts a new line.
-- **...** at the end of a line sets the status by hand (Backlog, In progress, Waiting on you or Done), closes or reopens the task, renames it in place, moves it to another workspace or deletes it. Delete needs a second click, on **Delete for good**, because it cannot be undone.
+- **...** at the end of a line sets the status by hand (Backlog, In progress, Waiting on you or Done), closes or reopens the task, renames it in place, moves it to another workspace or deletes it. Delete needs a second click, on **Delete for good**, because it cannot be undone. Once you have a goal, it also has **Goal**: **None**, then this month's and this week's open goals, with the task's own ticked. Linking a task to a goal changes nothing else about it.
 - **+ Add** opens a box for a note. Enter adds it on the workspace its chip shows, which you can change. Esc closes the box.
 
 ## Tasks from older versions
@@ -98,6 +101,7 @@ The full set:
 - `task order <id> top|end|<n>`, the drag's twin, within the task's own quadrant; a task waiting on you is refused
 - `tasks-window show` and `tasks-window hide`, to open or bring forward the tasks window, or close it
 - `tasks-window list` and `tasks-window matrix`, to switch the window's view (remembered)
+- `task goal <id> <goal-id>|none`, the **Goal** menu's twin; `task list` gives each task's `goal` (see [Goals](goals.md))
 
 ## With Claude sessions
 
@@ -105,5 +109,6 @@ A script or a Claude Code session can add a note to its own workspace with `task
 
 ## Related
 
+- [Goals](goals.md) covers the weekly and monthly goals tasks count toward.
 - [Driving it from scripts](scripts.md) lists every other command.
 - [Docking and taskbar pieces](docking.md) covers the rest of the bottom strip.

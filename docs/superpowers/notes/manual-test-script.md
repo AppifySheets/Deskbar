@@ -300,6 +300,28 @@ The tasks window (spec `docs/superpowers/specs/2026-11-22-tasks-board-design.md`
     Add twenty tasks to one cell: that cell scrolls, the others do not move. Close and reopen the window: still the
     Matrix. `$ts tasks-window list` switches it back.
 
+## Goals
+
+Weekly and monthly goals, pull request 1: the pipe, the task's link, the tasks window's menu and filter, the bar's
+tooltip (spec `docs/superpowers/specs/2026-11-22-goals-planner-design.md`). The planner window and the bar's "Plan
+this week" line come with pull request 2. `$ts` is `%APPDATA%\Deskbar\deskbar.cmd`.
+
+G1. With no goals (a fresh profile, no `goals.json`): a line's "…" menu has no "Goal" item, the toolbar has no goal
+    filter, and `goals.json` is still missing after a restart.
+G2. `$ts goal add "Ship goals"` and `$ts goal add "Store listing" --month`: the toolbar now shows "Goal: all ▾"
+    without reopening the window, and "…" on a line has "Goal" with None, "Store listing" (month) and "Ship goals"
+    (week). Pick "Ship goals": the line stays where it was, its flags unchanged; open the menu again and it is ticked.
+G3. Hover that task's line on the bar: the tooltip's last line reads "Goal: Ship goals". The line itself shows
+    nothing new. `$ts goal rename <id> "Ship the goals planner"`: hover again and the tooltip says the new title; the
+    line did not move, and a click on it right after the rename still goes to its workspace.
+G4. "Goal: all ▾": All goals, No goal, then the goals. Pick "Ship goals": only its task shows, and the status chips
+    count only it. Switch to the Matrix: the same. `$ts goal parent <week-id> <month-id>`, then pick "Store listing":
+    the weekly goal's task shows too. Pick "No goal": every task without a goal. `$ts goal delete <week-id>`: the
+    filter goes back to "Goal: all".
+G5. `$ts goal done <id>`: "Goal" on a line no longer offers it, and `$ts task goal <task-id> <id>` is refused with
+    "The goal is done". `$ts goal list` prints this month's goals then this week's with their progress, and
+    `$ts task list` names each task's goal.
+
 ## Tiling on the split tree
 
 Tiling's layout is a split tree since the split tree change (spec
