@@ -1,4 +1,5 @@
 using System.IO;
+using System.Reactive.Subjects;
 using System.Reflection;
 using System.Windows;
 using System.Windows.Automation;
@@ -34,6 +35,11 @@ public class FloatingBarTaskListTests
         public required Harness Harness { get; init; }
         public required FloatingBar Bar { get; init; }
         public required TaskService Tasks { get; init; }
+        public required FakeTimers Timers { get; init; }
+
+        public TextBox Box => Inside(List).OfType<TextBox>().Single(b => Equals(b.Tag, "task-add-box"));
+
+        public FrameworkElement Chips => Inside(List).OfType<WrapPanel>().Single(w => Equals(w.Tag, "task-add-chips"));
 
         public Guid Gepha => Harness.Manager.State.Workspaces.Single(w => w.Name == "GEPHA").Id;
 
@@ -46,6 +52,37 @@ public class FloatingBarTaskListTests
     }
 
     static readonly DateTimeOffset Start = new(2026, 11, 22, 9, 0, 0, TimeSpan.Zero);
+
+    // The undo window's timers, started by the bar and fired by the test (TaskUndoTimer), so no test waits six seconds.
+    sealed class FakeTimers
+    {
+        sealed class Handle : IDisposable
+        {
+            public bool Stopped { get; private set; }
+
+            public void Dispose() => Stopped = true;
+        }
+
+        readonly List<(TimeSpan After, Action Then, Handle Handle)> started = [];
+
+        public int Running => started.Count(t => !t.Handle.Stopped);
+
+        public IReadOnlyList<TimeSpan> Afters => started.Select(t => t.After).ToList();
+
+        public IDisposable Start(TimeSpan after, Action then)
+        {
+            var handle = new Handle();
+            started.Add((after, then, handle));
+            return handle;
+        }
+
+        // Every timer still running runs out now.
+        public void FireAll() => started.Where(t => !t.Handle.Stopped).ToList().ForEach(t =>
+        {
+            t.Handle.Dispose();
+            t.Then();
+        });
+    }
 
     // The window Petre was typing in before he clicked the bar, as the foreground seam reports it. Made up, like the
     // language tests' editor: a test must never read or move the real foreground.
@@ -63,6 +100,7 @@ public class FloatingBarTaskListTests
         var harness = Harness.Build();
         var minutes = 0;
         var seconds = 0;
+        var timers = new FakeTimers();
         var service = tasks ?? new TaskService(new MemoryStore(), () => Start.AddMinutes(minutes++));
         var bar = new FloatingBar(harness.Manager)
         {
@@ -79,10 +117,11 @@ public class FloatingBarTaskListTests
             WindowAlive = hwnd => hwnd == Editor && editorAlive,
             OnCurrentDesktop = onCurrentDesktop ?? (_ => true),
             TaskClickClock = clickClock ?? (() => ClickStart.AddSeconds(seconds++)),
+            TaskUndoTimer = timers.Start,
         };
         bar.ShowBar();
         bar.UpdateLayout();
-        return new ListBar { Harness = harness, Bar = bar, Tasks = service };
+        return new ListBar { Harness = harness, Bar = bar, Tasks = service, Timers = timers };
     }
 
     static IEnumerable<object> Inside(object node) =>
@@ -95,6 +134,13 @@ public class FloatingBarTaskListTests
         Inside(scope).OfType<Button>().Any(b => AutomationProperties.GetName(b) == name);
 
     static void Click(Button button) => button.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+
+    // A click in the text box, the way the bar sees one: the press arrives first and takes the keyboard.
+    static void ClickBox(ListBar t) =>
+        t.Box.RaiseEvent(new MouseButtonEventArgs(Mouse.PrimaryDevice, 0, MouseButton.Left) { RoutedEvent = UIElement.PreviewMouseLeftButtonDownEvent });
+
+    // Whether a line is a closed one still in its undo window.
+    static bool Closing(Button line) => ((TaskLine)line.Tag).Closing;
 
     // A press of the left button with the click count Windows would give it (2 for the second press of a double
     // click), then the Click it ends in. ClickCount has no public setter, so it is set the way WPF's own input code
@@ -131,7 +177,7 @@ public class FloatingBarTaskListTests
 
         Assert.True(t.Bar.TaskListShown);
         Assert.Equal(["Note 5", "Note 4", "Note 3"], t.Lines.Select(l => ((TaskLine)l.Tag).Title));
-        Assert.Equal("+2", t.Bar.TaskListMoreText);
+        Assert.Equal("+2 more", t.Bar.TaskListMoreText);
     });
 
     // Waiting on you sorts first, so hidden waiting tasks only exist when more than three wait; the button says so,
@@ -212,7 +258,10 @@ public class FloatingBarTaskListTests
         Assert.False(HasButtonNamed(line, "Close task"));
         Click(ButtonNamed(line, "Tick off"));
 
+        // Closed in the store at once; the line stays for the undo window and then leaves.
         Assert.Equal(TaskStatus.Closed, t.Tasks.Board.Tasks.Single(x => x.Id == note.Id).Status);
+        Assert.True(Closing(Assert.Single(t.Lines)));
+        t.Timers.FireAll();
         Assert.Empty(t.Lines);
     });
 
@@ -232,6 +281,8 @@ public class FloatingBarTaskListTests
         Click(ButtonNamed(doneLine, "Close task"));
 
         Assert.Equal(TaskStatus.Closed, t.Tasks.Board.Tasks.Single(x => x.Id == done.Id).Status);
+        Assert.True(Closing(t.Lines.Single(l => ((TaskLine)l.Tag).Id == done.Id)));
+        t.Timers.FireAll();
         Assert.DoesNotContain(t.Lines, l => ((TaskLine)l.Tag).Id == done.Id);
     });
 
@@ -255,10 +306,10 @@ public class FloatingBarTaskListTests
         var box = () => Inside(t.List).OfType<TextBox>().Single(b => Equals(b.Tag, "task-add-box"));
         Assert.False(t.Bar.TaskListAdding);
 
-        // Straight in: the current workspace's chip is the one ticked.
-        Click(ButtonNamed(t.List, "Add a task"));
-        Assert.True(t.Bar.TaskListAdding);
+        // The box is there before anything is pressed. A click in it: the current workspace's chip is the one ticked.
         Assert.Equal(Visibility.Visible, box().Visibility);
+        ClickBox(t);
+        Assert.True(t.Bar.TaskListAdding);
         Assert.Equal(t.Gepha, t.Bar.TaskAddTarget.Value);
         box().Text = "Call the accountant";
         Press(t.Bar, box(), Key.Enter);
@@ -269,7 +320,7 @@ public class FloatingBarTaskListTests
         Assert.False(t.Bar.TaskListAdding);
 
         // "none" makes it a free note.
-        Click(ButtonNamed(t.List, "Add a task"));
+        ClickBox(t);
         box().Text = "Dishwasher tablets";
         Click(ButtonNamed(t.List, "none"));
         Press(t.Bar, box(), Key.Enter);
@@ -279,8 +330,8 @@ public class FloatingBarTaskListTests
         Assert.Equal(TaskStatus.Backlog, free.Status);
         Assert.False(free.IsClaudes);
 
-        // Esc drops what was typed and adds nothing.
-        Click(ButtonNamed(t.List, "Add a task"));
+        // Esc clears what was typed and adds nothing.
+        ClickBox(t);
         box().Text = "Never mind";
         Press(t.Bar, box(), Key.Escape);
 
@@ -320,7 +371,7 @@ public class FloatingBarTaskListTests
 
             Click(ButtonNamed(t.List, "More tasks"));
             Assert.Equal(3, t.Lines.Count);
-            Assert.Equal("+2", t.Bar.TaskListMoreText);
+            Assert.Equal("+2 more", t.Bar.TaskListMoreText);
         }
 
         // Once the App has a window to open, the button opens it and the list stays at three.
@@ -402,17 +453,17 @@ public class FloatingBarTaskListTests
         Assert.Single(t.Lines);
     });
 
-    // FIX ROUND 1, Important 2 (Controller Ruling 5): the bar losing the keyboard while a note is typed closes the box,
-    // lets the bar fade again, hands nothing back, and keeps the text and its chip for the next "+ Add".
+    // Ruling 9, replacing Ruling 5's draft: the box is the draft. The bar losing the foreground while a note is typed
+    // lets the box go (the bar may fade again, nothing is handed back) and leaves the text and its chip where they are,
+    // for a later click in the box.
     [Fact]
-    public void Losing_the_keyboard_puts_the_note_aside_as_a_draft() => StaThread.Run(() =>
+    public void Clicking_away_leaves_the_text_in_the_box() => StaThread.Run(() =>
     {
         var handed = new List<nint>();
         using var t = Build(handedBack: handed);
-        var box = () => Inside(t.List).OfType<TextBox>().Single(b => Equals(b.Tag, "task-add-box"));
 
-        Click(ButtonNamed(t.List, "Add a task"));
-        box().Text = "Half a thought";
+        ClickBox(t);
+        t.Box.Text = "Half a thought";
         Click(ButtonNamed(t.List, "none"));
         Assert.True(t.Bar.HoldsFullStrength);
 
@@ -423,18 +474,58 @@ public class FloatingBarTaskListTests
         Assert.False(t.Bar.HoldsFullStrength);
         Assert.Empty(handed);
         Assert.Empty(t.Tasks.Board.Tasks);
-
-        Click(ButtonNamed(t.List, "Add a task"));
-        Assert.True(t.Bar.TaskListAdding);
-        Assert.Equal("Half a thought", box().Text);
+        Assert.Equal("Half a thought", t.Box.Text);
         Assert.True(t.Bar.TaskAddTarget.HasNoValue);
 
-        // The draft goes once it is used: Enter adds it, and the next box starts empty on the current workspace.
-        Press(t.Bar, box(), Key.Enter);
+        ClickBox(t);
+        Assert.True(t.Bar.TaskListAdding);
+        Assert.Equal("Half a thought", t.Box.Text);
+        Assert.True(t.Bar.TaskAddTarget.HasNoValue);
+
+        // Enter adds it, and the box is empty again with the current workspace's chip.
+        Press(t.Bar, t.Box, Key.Enter);
         Assert.True(Assert.Single(t.Tasks.Board.Tasks).WorkspaceId.HasNoValue);
-        Click(ButtonNamed(t.List, "Add a task"));
-        Assert.Equal("", box().Text);
+        Assert.Equal("", t.Box.Text);
         Assert.Equal(t.Gepha, t.Bar.TaskAddTarget.Value);
+    });
+
+    // The chips show while the box has the keyboard or holds text, and only then; the bar stays at full strength while
+    // the box has the keyboard, not merely while it holds text.
+    [Fact]
+    public void The_chips_show_while_the_box_has_the_keyboard_or_holds_text() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        Assert.Equal(Visibility.Collapsed, t.Chips.Visibility);
+
+        ClickBox(t);
+        Assert.Equal(Visibility.Visible, t.Chips.Visibility);
+        Press(t.Bar, t.Box, Key.Escape);
+        Assert.Equal(Visibility.Collapsed, t.Chips.Visibility);
+
+        ClickBox(t);
+        t.Box.Text = "Later";
+        typeof(Window).GetMethod("OnDeactivated", BindingFlags.NonPublic | BindingFlags.Instance)!.Invoke(t.Bar, [EventArgs.Empty]);
+        Assert.Equal(Visibility.Visible, t.Chips.Visibility);
+        Assert.False(t.Bar.HoldsFullStrength);
+
+        t.Box.Text = "";
+        Assert.Equal(Visibility.Collapsed, t.Chips.Visibility);
+    });
+
+    // The empty box says where a note would go, and follows a desktop switch; on an unnamed desktop it says "Add…".
+    [Fact]
+    public void The_placeholder_names_the_workspace_in_front() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        Assert.Equal("Add to GEPHA…", t.Bar.TaskAddPlaceholder);
+
+        var sparrow = t.Harness.Manager.State.Workspaces.Single(w => w.Name == "Sparrow").DesktopId!.Value;
+        t.Harness.Desktops.CurrentId = sparrow;
+        ((Subject<Guid>)t.Harness.Desktops.CurrentChanged).OnNext(sparrow);
+        t.Bar.RequestRebuild();
+
+        Assert.Equal("Add to Sparrow…", t.Bar.TaskAddPlaceholder);
+        Assert.Equal("Add…", FloatingBar.PlaceholderFor(Maybe<string>.None));
     });
 
     // FIX ROUND 1, Important 2: after Enter or Esc the keyboard goes back to the window Petre was typing in, so his next
@@ -447,12 +538,12 @@ public class FloatingBarTaskListTests
         {
             var box = () => Inside(t.List).OfType<TextBox>().Single(b => Equals(b.Tag, "task-add-box"));
 
-            Click(ButtonNamed(t.List, "Add a task"));
+            ClickBox(t);
             box().Text = "Call the accountant";
             Press(t.Bar, box(), Key.Enter);
             Assert.Equal([Editor], handed);
 
-            Click(ButtonNamed(t.List, "Add a task"));
+            ClickBox(t);
             Press(t.Bar, box(), Key.Escape);
             Assert.Equal([Editor, Editor], handed);
         }
@@ -460,7 +551,7 @@ public class FloatingBarTaskListTests
         handed.Clear();
         using (var t = Build(handedBack: handed, editorAlive: false))
         {
-            Click(ButtonNamed(t.List, "Add a task"));
+            ClickBox(t);
             Press(t.Bar, Inside(t.List).OfType<TextBox>().Single(b => Equals(b.Tag, "task-add-box")), Key.Escape);
             Assert.Empty(handed);
         }
@@ -514,10 +605,13 @@ public class FloatingBarTaskListTests
         PressAndClick(ButtonNamed(t.Lines[0], "Tick off"), clickCount: 1);
         Assert.Equal(4, t.Tasks.Board.Pile().Count);
 
-        // ...and the second press of the double click, landing on Note 4's tick a moment later, does not close it.
+        // ...whose line stays where it was with "Undo" in the tick's place, so the second press of the double click lands
+        // on Undo rather than on Note 4's tick, and is dropped there too: the note stays closed and Note 4 stays open.
         now = now.AddMilliseconds(600);
-        PressAndClick(ButtonNamed(t.Lines[0], "Tick off"), clickCount: 2);
-        PressAndClick(t.Lines[0], clickCount: 2);
+        Assert.True(Closing(t.Lines[0]));
+        PressAndClick(ButtonNamed(t.Lines[0], "Undo"), clickCount: 2);
+        PressAndClick(ButtonNamed(t.Lines[1], "Tick off"), clickCount: 2);
+        PressAndClick(t.Lines[1], clickCount: 2);
         PressAndClick(ButtonNamed(t.List, "More tasks"), clickCount: 2);
         Assert.Equal(4, t.Tasks.Board.Pile().Count);
         Assert.Empty(went);
@@ -540,9 +634,10 @@ public class FloatingBarTaskListTests
         t.Tasks.MarkDone(done.Id);
 
         Click(ButtonNamed(t.Lines.Single(l => ((TaskLine)l.Tag).Id == done.Id), "Close task"));
-        Click(ButtonNamed(Assert.Single(t.Lines), "Tick off"));
+        Click(ButtonNamed(t.Lines.Single(l => !Closing(l)), "Tick off"));
 
-        Assert.Empty(t.Lines);
+        Assert.All(t.Lines, line => Assert.True(Closing(line)));
+        Assert.Empty(t.Tasks.Board.Pile());
         Assert.Empty(went);
     });
 
@@ -577,7 +672,7 @@ public class FloatingBarTaskListTests
     {
         using var t = Build();
         t.Tasks.AddNote("Review the migration", t.Gepha);
-        Click(ButtonNamed(t.List, "Add a task"));
+        ClickBox(t);
 
         var labels = Inside(t.List).OfType<Border>().Where(b => Equals(b.Tag, "task-workspace") || Equals(b.Tag, "task-chip"))
             .Select(b => (TextBlock)b.Child).ToList();
@@ -603,7 +698,7 @@ public class FloatingBarTaskListTests
         {
             t.Bar.NoteForeground(Editor);
             inFront = new System.Windows.Interop.WindowInteropHelper(t.Bar).Handle;
-            Click(ButtonNamed(t.List, "Add a task"));
+            ClickBox(t);
             Press(t.Bar, Inside(t.List).OfType<TextBox>().Single(b => Equals(b.Tag, "task-add-box")), Key.Escape);
             Assert.Empty(handed);
         }
@@ -612,7 +707,7 @@ public class FloatingBarTaskListTests
         var here = true;
         using (var t = Build(handedBack: handed, onCurrentDesktop: _ => here))
         {
-            Click(ButtonNamed(t.List, "Add a task"));
+            ClickBox(t);
             here = false;
             Press(t.Bar, Inside(t.List).OfType<TextBox>().Single(b => Equals(b.Tag, "task-add-box")), Key.Escape);
             Assert.Empty(handed);
@@ -624,10 +719,140 @@ public class FloatingBarTaskListTests
         {
             t.Bar.NoteForeground(Editor);
             inFront = new System.Windows.Interop.WindowInteropHelper(t.Bar).Handle;
-            Click(ButtonNamed(t.List, "Add a task"));
+            ClickBox(t);
             Press(t.Bar, Inside(t.List).OfType<TextBox>().Single(b => Equals(b.Tag, "task-add-box")), Key.Escape);
             Assert.Equal([Editor], handed);
         }
+    });
+
+    // LIVE CHECK (Ruling 10, "when i click on done, there should be undo"): a tick closes the note in the store at once,
+    // and its line stays where it was for the undo window, struck through, with Undo where the tick was.
+    [Fact]
+    public void A_tick_leaves_a_struck_through_line_with_undo() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        var first = t.Tasks.AddNote("First", Maybe<Guid>.None).Value;
+        var second = t.Tasks.AddNote("Second", Maybe<Guid>.None).Value;
+
+        Click(ButtonNamed(t.Lines[0], "Tick off"));
+
+        Assert.Equal(TaskStatus.Closed, t.Tasks.Board.Tasks.Single(x => x.Id == second.Id).Status);
+        Assert.Equal([second.Id, first.Id], t.Lines.Select(l => ((TaskLine)l.Tag).Id));
+        var closing = t.Lines[0];
+        Assert.True(Closing(closing));
+        Assert.True(HasButtonNamed(closing, "Undo"));
+        Assert.False(HasButtonNamed(closing, "Tick off"));
+        var text = Inside(closing).OfType<TextBlock>().Single(b => Equals(b.Tag, "task-text"));
+        Assert.Equal(TextDecorations.Strikethrough, text.TextDecorations);
+        Assert.Equal([FloatingBar.UndoWindow], t.Timers.Afters);
+        Assert.Equal(TimeSpan.FromSeconds(6), FloatingBar.UndoWindow);
+    });
+
+    [Fact]
+    public void Undo_reopens_the_note_and_restores_its_line() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        var note = t.Tasks.AddNote("Dishwasher tablets", t.Gepha).Value;
+        Click(ButtonNamed(t.Lines[0], "Tick off"));
+
+        Click(ButtonNamed(t.Lines[0], "Undo"));
+
+        Assert.Equal(TaskStatus.Backlog, t.Tasks.Board.Tasks.Single(x => x.Id == note.Id).Status);
+        var line = Assert.Single(t.Lines);
+        Assert.False(Closing(line));
+        Assert.True(HasButtonNamed(line, "Tick off"));
+        Assert.Equal(0, t.Timers.Running);
+    });
+
+    [Fact]
+    public void After_six_seconds_the_closed_line_leaves() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        t.Tasks.AddNote("First", Maybe<Guid>.None);
+        t.Tasks.AddNote("Second", Maybe<Guid>.None);
+        Click(ButtonNamed(t.Lines[0], "Tick off"));
+        Assert.Equal(2, t.Lines.Count);
+
+        t.Timers.FireAll();
+
+        Assert.Equal(["First"], t.Lines.Select(l => ((TaskLine)l.Tag).Title));
+        Assert.False(Closing(t.Lines[0]));
+    });
+
+    // Two ticks in a row: both lines stay in their places, each with its own Undo and its own timer, so nothing moves up
+    // under the pointer; and "+N more" counts only the open tasks out of sight.
+    [Fact]
+    public void Two_ticks_in_a_row_keep_both_lines_in_place() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        Enumerable.Range(1, 4).ToList().ForEach(i => t.Tasks.AddNote($"Note {i}", Maybe<Guid>.None));
+        var before = t.Lines.Select(l => ((TaskLine)l.Tag).Id).ToList();
+
+        Click(ButtonNamed(t.Lines[0], "Tick off"));
+        Click(ButtonNamed(t.Lines[1], "Tick off"));
+
+        Assert.Equal(before, t.Lines.Select(l => ((TaskLine)l.Tag).Id));
+        Assert.True(Closing(t.Lines[0]) && Closing(t.Lines[1]) && !Closing(t.Lines[2]));
+        Assert.Equal(2, t.Timers.Running);
+        Assert.Equal("+1 more", t.Bar.TaskListMoreText);
+
+        t.Timers.FireAll();
+        Assert.Equal(["Note 2", "Note 1"], t.Lines.Select(l => ((TaskLine)l.Tag).Title));
+    });
+
+    // A Done task's close button behaves the same: its line lingers with Undo in the close button's place, and Undo
+    // brings it back Done.
+    [Fact]
+    public void A_done_tasks_close_button_has_the_same_undo() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        var done = t.Tasks.Create("Merged", t.Gepha, Session("s1")).Value;
+        t.Tasks.MarkDone(done.Id);
+
+        Click(ButtonNamed(t.Lines[0], "Close task"));
+        Assert.Equal(TaskStatus.Closed, t.Tasks.Board.Tasks.Single(x => x.Id == done.Id).Status);
+        Assert.True(Closing(t.Lines[0]));
+        Assert.False(HasButtonNamed(t.Lines[0], "Close task"));
+
+        Click(ButtonNamed(t.Lines[0], "Undo"));
+        Assert.Equal(TaskStatus.Done, t.Tasks.Board.Tasks.Single(x => x.Id == done.Id).Status);
+        Assert.False(Closing(Assert.Single(t.Lines)));
+        Assert.True(HasButtonNamed(t.Lines[0], "Close task"));
+    });
+
+    // LIVE CHECK, Petre's 320 px screenshot: nothing in the list clips at the narrowest width the bar allows. The box,
+    // the chips (wrapping, a long workspace name among them), "+N more, K waiting" and the lines' chips all lie inside
+    // the list, each at least as wide as it asked to be.
+    [Fact]
+    public void Nothing_in_the_list_clips_at_the_narrowest_bar() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        var gepha = t.Gepha; // looked up by name, so taken before the rename
+        Assert.True(t.Harness.Manager.RenameWorkspace(gepha, "Customer onboarding portal").IsSuccess);
+        // Four waiting and two more: three waiting lines show, and the hidden ones are one waiting and two more.
+        Enumerable.Range(1, 2).ToList().ForEach(i => t.Tasks.AddNote($"Note {i}", gepha));
+        Enumerable.Range(1, 4).ToList().ForEach(i => t.Tasks.Ask(t.Tasks.Create($"Ask {i}", gepha, Session($"s{i}")).Value.Id, "OK?"));
+        t.Bar.ApplyWidth(176); // MinimumWidth at the default scale: (18 + 150 + 8) DIP
+        t.Bar.RequestRebuild();
+        ClickBox(t);
+        t.Bar.UpdateLayout();
+
+        Assert.Equal("+3 more, 1 waiting", t.Bar.TaskListMoreText);
+        Assert.Contains("Customer onboarding portal", Inside(t.Chips).OfType<TextBlock>().Select(b => b.Text));
+        var width = t.List.ActualWidth;
+        var checkedParts = Inside(t.List).OfType<FrameworkElement>()
+            .Where(e => e.IsVisible && (e is Button || e is TextBox || Equals(e.Tag, "task-workspace")))
+            .Where(e => e is not Button { Tag: TaskLine })
+            .ToList();
+        Assert.True(checkedParts.Count >= 8, $"{checkedParts.Count} parts checked");
+        Assert.All(checkedParts, part =>
+        {
+            var bounds = part.TransformToAncestor(t.List).TransformBounds(new Rect(part.RenderSize));
+            var name = AutomationProperties.GetName(part) is { Length: > 0 } n ? n : part.GetType().Name;
+            Assert.True(bounds.Left >= -0.5 && bounds.Right <= width + 0.5, $"{name} at {bounds} in a list {width} wide");
+            Assert.True(part.RenderSize.Width >= part.DesiredSize.Width - part.Margin.Left - part.Margin.Right - 0.5,
+                $"{name} squeezed: {part.RenderSize.Width} of {part.DesiredSize.Width}");
+        });
     });
 
     // The words, without a window: when the store says it kept the file, the line promises the .bak; when it could

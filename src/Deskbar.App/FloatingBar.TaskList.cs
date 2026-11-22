@@ -6,6 +6,8 @@ using System.Windows.Documents;
 using System.Windows.Input;
 using System.Windows.Markup;
 using System.Windows.Media;
+using System.Windows.Threading;
+using System.Reactive.Disposables;
 using CSharpFunctionalExtensions;
 using Deskbar.Core.Domain;
 using Deskbar.Core.Persistence;
@@ -19,33 +21,39 @@ namespace Deskbar.App;
 // lines marked) and tasklist-bottom.html (the add box). The model and its rules live in Deskbar.Core.Tasks; this file
 // only draws TaskBoard.Pile() and hands Petre's clicks back to TaskService.
 //
-// WHAT IT SHOWS, top to bottom, inside the TaskListLine border at the top of the footer:
+// WHAT IT SHOWS, top to bottom, inside the TaskListLine border at the top of the footer. There is no header: no
+// "Tasks" label and no "+ Add" button (Petre, at the live check: "let there be a textbox without +add", then "don't
+// say Tasks"; Controller Rulings 9 and 11).
 //
-//   the header      "Tasks", the "+N" button when more than three tasks are open, and "+ Add" at the right.
-//                   "+N" counts the hidden tasks; when some of them wait on Petre it says so, in the asking orange
-//                   ("+2 waiting"), so no ask is out of sight without a sign (spec, "The bar's order"). Until the
-//                   task window exists (a later pull request sets OpenTasksWindow) the button expands the list in
-//                   place, and a second click folds it back to three.
-//   the add box     shown by "+ Add": a text box, then the chips choosing where the note goes: the current
-//                   workspace (ticked to begin with), "none" and "other…", which lists the other workspaces. Enter
-//                   adds a Backlog note through TaskService.AddNote, Esc drops what was typed, and either way the
-//                   keyboard goes back to the window Petre was typing in. A click into another window closes the box
-//                   but keeps what was typed as a draft for the next "+ Add" (Controller Ruling 5). Built once and
-//                   kept, so the "other…" menu always has its chip to hang from.
-//   a failed load   "Tasks could not be read. ..." as the first line, the store's own reason in its tooltip and a ✕
-//                   that dismisses it (TaskService.DismissLoadProblem). An empty list must not pass for "nothing to
-//                   do" when the truth is "your tasks could not be read".
+//   a failed load   "Tasks could not be read. ..." first, the store's own reason in its tooltip and a ✕ that
+//                   dismisses it (TaskService.DismissLoadProblem). An empty list must not pass for "nothing to do"
+//                   when the truth is "your tasks could not be read".
+//   the text box    always there, with a placeholder naming where a note would go ("Add to Deskbar…", or
+//                   "Add…" on an unnamed desktop) that follows a desktop switch. A click in it takes the
+//                   keyboard (BeginTyping). Under it, while it has the keyboard or holds text, the chips choosing
+//                   where the note goes: the current workspace (ticked to begin with), "none" and "other…", which
+//                   lists the other workspaces; they wrap onto a second line on a narrow bar rather than clip. Enter
+//                   adds a Backlog note through TaskService.AddNote and Esc clears the box; either way the keyboard
+//                   goes back to the window Petre was typing in. Clicking away leaves the text where it is.
 //   the lines       the first three of the pile (Waiting on you, then Done, then the rest; TaskBoard.Pile). A
 //                   Claude line (a task with a session) has an orange edge and tint, a CLAUDE tag, the VS Code icon
 //                   of its session's window when one is found, then the task's title in a tan ink and, after a dot,
 //                   the question while it waits on Petre, else its status line, with "no live session" when every
 //                   session has ended. Petre's notes have a plain tick box that closes them. A Done Claude task has
 //                   a close button. Every line ends with its workspace's chip in that row's own colour, or "none".
+//                   A line just closed stays in its place for six seconds, struck through, with "Undo" where its
+//                   tick or close button was (Petre: "when i click on done, there should be undo"; Ruling 10).
+//   "+N more"       a small line under the last line when more open tasks are out of sight. When some of the hidden
+//                   ones wait on Petre it says so in the asking orange ("+2 waiting"), so no ask is out of sight
+//                   without a sign (spec, "The bar's order"). Until the task window exists (a later pull request sets
+//                   OpenTasksWindow) it expands the list in place and reads "Less" at the end of it. Under the lines
+//                   rather than in a header, so it does not move under the pointer when the list opens.
 //
 // CLICKS. A line goes to its task through GoToTask, which the App points at the workspace switch (a later pull
 // request sends a Claude task to its session instead); a note on no workspace has nowhere to go, so its click does
-// nothing. The tick box and the close button call TaskService.Close: only Petre closes, and these are his clicks.
-//
+// nothing. The tick box and the close button call TaskService.Close at once (the store stays the truth; only Petre
+// closes, and these are his clicks), and "Undo" calls Reopen.
+
 // WHEN IT IS DRAWN. The lines are rebuilt when TaskService.Changed pulses and after every rebuild of the bar (the
 // workspace names and row colours the lines borrow are refreshed by the rebuild), and only when what they would show
 // has changed: the "shape" (ids, statuses, titles, details, the chips, the icons, the text size, folded or not)
@@ -110,6 +118,11 @@ public partial class FloatingBar
     // or half a second later, without waiting.
     internal Func<DateTime> TaskClickClock { get; init; } = () => DateTime.UtcNow;
 
+    // How a closed line's six seconds are timed: run `then` once after `after`, unless the returned handle is disposed
+    // first (Undo, or the bar closing). A dispatcher timer in the app, so `then` runs on the UI thread; a seam so the
+    // tests move time by hand instead of waiting.
+    internal Func<TimeSpan, Action, IDisposable> TaskUndoTimer { get; init; } = DispatcherUndoTimer;
+
     // Whether a paint must wait: the conditions Rebuild waits under, all of them (FloatingBar.xaml.cs, Rebuild). A
     // button down anywhere on the bar or on a screen strip, not only on the list: a paint that adds or drops a line
     // changes the bar's height, a bar anchored at the bottom then moves its Top, and the rows shift under a press in
@@ -121,12 +134,13 @@ public partial class FloatingBar
         (Mouse.LeftButton == MouseButtonState.Pressed && (IsMouseOver || PointerOnStrip()))
         || arrangeDrag is not null || arrangeDropQueued || draggingWindow || openMenu?.IsOpen == true;
 
-    // For the tests: whether the list is on screen, what "+N" says ("" while it is hidden), whether the add box is
-    // open, where a note added now would go, and the lines on show.
+    // For the tests: whether the list is on screen, what "+N more" says ("" while it is hidden), whether the box has
+    // the keyboard, where a note added now would go, what the empty box says, and the lines on show.
     internal bool TaskListShown => TaskListLine.Visibility == Visibility.Visible;
     internal string TaskListMoreText => taskMoreButton is { Visibility: Visibility.Visible } ? taskMoreLabel?.Text ?? "" : "";
-    internal bool TaskListAdding => taskAddPanel is { Visibility: Visibility.Visible };
+    internal bool TaskListAdding => taskTyping;
     internal Maybe<Guid> TaskAddTarget => taskAddTarget;
+    internal string TaskAddPlaceholder => taskAddPlaceholder?.Text ?? "";
     internal IReadOnlyList<TaskLine> TaskListLines => shownTaskLines;
 
     // Three lines, the number the spec gives ("the three most recent tasks").
@@ -138,6 +152,9 @@ public partial class FloatingBar
 
     // A click this soon after a repaint that changed the lines is not trusted (TaskClickIgnored).
     static readonly TimeSpan RepaintGrace = TimeSpan.FromMilliseconds(500);
+
+    // How long a closed line stays, struck through with its "Undo" (Ruling 10).
+    internal static readonly TimeSpan UndoWindow = TimeSpan.FromSeconds(6);
     const string NoLiveSession = "no live session";
     const string TaskDetailSeparator = " · ";
     const string OtherChipText = "other…";
@@ -159,14 +176,13 @@ public partial class FloatingBar
     static readonly Brush TaskPickedEdge = Frozen(0xFF, 0x4F, 0x8C, 0xFF);
 
     // The persistent parts, built once in BuildTaskList.
-    TextBlock? taskHeaderLabel;
+    Border? taskProblemHost;
     TextBlock? taskMoreLabel;
     Button? taskMoreButton;
-    TextBlock? taskAddLabel;
-    StackPanel? taskAddPanel;
     TextBox? taskAddBox;
+    TextBlock? taskAddPlaceholder;
+    WrapPanel? taskAddChips;
     TextBlock? taskAddOn;
-    TextBlock? taskAddHint;
     TaskChipParts? taskChipHere;
     TaskChipParts? taskChipNone;
     TaskChipParts? taskChipOther;
@@ -180,10 +196,17 @@ public partial class FloatingBar
     Maybe<Guid> taskAddHere = Maybe<Guid>.None;
     Maybe<Guid> taskAddTarget = Maybe<Guid>.None;
 
-    // A note put aside when the bar lost the keyboard mid-typing (PutTaskDraftAside): its text stays in the box and its
-    // chip in taskAddTarget, for the next "+ Add". And the window to hand the keyboard back to after Enter or Esc.
-    bool taskDraftKept;
+    // Whether the box has the keyboard: from a click in it (BeginTyping) until Enter, Esc or the bar losing the
+    // foreground (EndTyping). The bar stays at full strength while it is set, not merely while the box holds text. And
+    // the window to hand the keyboard back to after Enter or Esc.
+    bool taskTyping;
     nint taskReturnTo;
+
+    // The lines just closed, each staying in its place for the undo window: the line as it was drawn (marked Closing),
+    // its index among the lines on show when it was closed, its status before (what Undo restores), and its timer.
+    readonly List<PendingClose> pendingCloses = [];
+
+    sealed record PendingClose(TaskLine Line, int Index, TaskStatus Was, IDisposable Timer);
 
     // The click guard's two facts (TaskClickIgnored): the click count of the last press on one of the list's guarded
     // buttons, and when the lines were last redrawn.
@@ -242,12 +265,17 @@ public partial class FloatingBar
         _ => status.ToString(),
     };
 
-    // "+N" over the hidden lines, naming how many of them wait on Petre; "Less" once expanded in place.
+    // The line under the list: how many open tasks are out of sight, naming how many of them wait on Petre; "Less" at
+    // the end of the list expanded in place.
     static string MoreText(int hidden, int waiting, bool expanded) =>
         expanded ? "Less"
-        : waiting == 0 ? $"+{hidden}"
+        : waiting == 0 ? $"+{hidden} more"
         : waiting == hidden ? $"+{hidden} waiting"
-        : $"+{hidden}, {waiting} waiting";
+        : $"+{hidden} more, {waiting} waiting";
+
+    // What the empty box says: where a note typed now would go.
+    internal static string PlaceholderFor(Maybe<string> workspace) =>
+        workspace.HasValue ? $"Add to {workspace.Value}…" : "Add…";
 
     // THE FAILED-LOAD LINE, which must be true about the file (kept from the abandoned task window, commit 78ff230,
     // TaskPanel.LoadProblemLine). JsonTaskStore.Load moves an unreadable tasks.json (and its previous copy) aside as
@@ -266,16 +294,12 @@ public partial class FloatingBar
     // the lines are made by PaintTaskList.
     void BuildTaskList()
     {
-        taskHeaderLabel = new TextBlock { Text = "Tasks", Foreground = TaskDimInk, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(2, 0, 6, 0) };
-        taskMoreLabel = new TextBlock { Foreground = TaskInk };
-        taskMoreButton = TaskButton("More tasks", Pill(taskMoreLabel), OnTaskMoreClick, guarded: true);
-        taskMoreButton.Visibility = Visibility.Collapsed;
-        taskAddLabel = new TextBlock { Text = "+ Add", Foreground = TaskInk };
-        var add = TaskButton("Add a task", Pill(taskAddLabel), StartAddingTask, "Add a note");
-        DockPanel.SetDock(add, Dock.Right);
-        var header = new DockPanel { LastChildFill = false, Margin = new Thickness(0, 0, 0, 2), Children = { add, taskHeaderLabel, taskMoreButton } };
+        // The failed-load line's place, first in the list (LoadProblemRow fills it).
+        taskProblemHost = new Border { Visibility = Visibility.Collapsed };
 
-        // The add box. Its Enter and Esc are read in Preview, ahead of anything the box itself does with them.
+        // The box. Its Enter and Esc are read in Preview, ahead of anything the box itself does with them. WPF has no
+        // placeholder of its own, so the placeholder is a text laid over the box, shown while the box is empty and
+        // never in the way of a click.
         taskAddBox = new TextBox
         {
             Tag = "task-add-box",
@@ -285,32 +309,41 @@ public partial class FloatingBar
             BorderBrush = TaskPickedEdge,
             BorderThickness = new Thickness(1),
             Padding = new Thickness(4, 2, 4, 2),
-            ToolTip = "Enter to add, Esc to drop",
+            ToolTip = "Enter adds the task, Esc clears the box",
         };
         AutomationProperties.SetName(taskAddBox, "New task");
         taskAddBox.PreviewKeyDown += OnTaskAddKey;
+        taskAddBox.PreviewMouseLeftButtonDown += (_, _) =>
+        {
+            if (!taskTyping) BeginTyping();
+        };
+        taskAddBox.TextChanged += (_, _) => PaintAddRow();
+        taskAddPlaceholder = new TextBlock
+        {
+            Tag = "task-add-placeholder",
+            Foreground = TaskDimInk,
+            IsHitTestVisible = false,
+            VerticalAlignment = VerticalAlignment.Center,
+            TextTrimming = TextTrimming.CharacterEllipsis,
+            // The box's border, padding and the caret's own two DIP, so the placeholder sits where typing starts.
+            Margin = new Thickness(7, 0, 6, 0),
+        };
+        var box = new Grid { Children = { taskAddBox, taskAddPlaceholder } };
 
+        // The chips, wrapping onto a second line on a narrow bar instead of clipping (Petre's 320 px screenshot had
+        // them cut off). Shown only while the box has the keyboard or holds text (PaintAddRow).
         taskChipHere = TaskChip("", () => ChooseTaskTarget(taskAddHere));
         taskChipNone = TaskChip("none", () => ChooseTaskTarget(Maybe<Guid>.None));
         taskChipOther = TaskChip(OtherChipText, OpenOtherWorkspaces);
-        taskAddOn = new TextBlock { Text = "on", Foreground = TaskDimInk, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(2, 0, 4, 0) };
-        taskAddHint = new TextBlock
+        taskAddOn = new TextBlock { Text = "on", Foreground = TaskDimInk, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(2, 1, 4, 1) };
+        taskAddChips = new WrapPanel
         {
-            Text = "Enter to add, Esc to drop",
-            Foreground = TaskDimInk,
-            VerticalAlignment = VerticalAlignment.Center,
-            TextAlignment = TextAlignment.Right,
-            TextTrimming = TextTrimming.CharacterEllipsis,
-            Margin = new Thickness(6, 0, 2, 0),
+            Tag = "task-add-chips",
+            Visibility = Visibility.Collapsed,
+            Margin = new Thickness(0, 3, 0, 0),
+            Children = { taskAddOn, taskChipHere.Button, taskChipNone.Button, taskChipOther.Button },
         };
-        var chips = new DockPanel { LastChildFill = true, Margin = new Thickness(0, 3, 0, 0) };
-        new UIElement[] { taskAddOn, taskChipHere.Button, taskChipNone.Button, taskChipOther.Button }.ToList().ForEach(part =>
-        {
-            DockPanel.SetDock(part, Dock.Left);
-            chips.Children.Add(part);
-        });
-        chips.Children.Add(taskAddHint);
-        taskAddPanel = new StackPanel { Visibility = Visibility.Collapsed, Margin = new Thickness(0, 2, 0, 3), Children = { taskAddBox, chips } };
+        var addRow = new StackPanel { Margin = new Thickness(0, 0, 0, 3), Children = { box, taskAddChips } };
 
         taskLinesPanel = new StackPanel();
         // The lines scroll inside this once the expanded list is capped (CapTaskLines). The bar draws no scroll bar of
@@ -323,9 +356,38 @@ public partial class FloatingBar
             HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
             Focusable = false,
         };
-        TaskListLine.Child = new TakesNoWidth { Child = new StackPanel { Children = { header, taskAddPanel, taskLinesScroller } } };
+
+        // "+N more" / "Less": a small line under the last line, at the left, trimmed rather than clipped.
+        taskMoreLabel = new TextBlock { Foreground = TaskDimInk, TextTrimming = TextTrimming.CharacterEllipsis };
+        taskMoreButton = TaskButton("More tasks", taskMoreLabel, OnTaskMoreClick, ignoredWhen: TaskClickIgnored);
+        taskMoreButton.HorizontalAlignment = HorizontalAlignment.Left;
+        taskMoreButton.Padding = new Thickness(6, 1, 6, 1);
+        taskMoreButton.Margin = new Thickness(0, 1, 0, 0);
+        taskMoreButton.Visibility = Visibility.Collapsed;
+
+        TaskListLine.Child = new TakesNoWidth { Child = new StackPanel { Children = { taskProblemHost, addRow, taskLinesScroller, taskMoreButton } } };
         ApplyTaskListTextSize();
-        Closed += (_, _) => taskChanges?.Dispose();
+        PaintAddRow();
+        Closed += (_, _) =>
+        {
+            taskChanges?.Dispose();
+            // Every closed line's timer goes with the bar; the tasks are closed already, nothing is left to do.
+            pendingCloses.ForEach(pending => pending.Timer.Dispose());
+            pendingCloses.Clear();
+        };
+    }
+
+    // A one-shot dispatcher timer for the undo window (TaskUndoTimer's default).
+    static IDisposable DispatcherUndoTimer(TimeSpan after, Action then)
+    {
+        var timer = new DispatcherTimer { Interval = after };
+        timer.Tick += (_, _) =>
+        {
+            timer.Stop();
+            then();
+        };
+        timer.Start();
+        return Disposable.Create(timer.Stop);
     }
 
     // A small button in the bar's style (the strip's template, so it hovers like the bar's other small controls).
@@ -334,9 +396,10 @@ public partial class FloatingBar
     // sit inside it: Click bubbles, and the line must not also act on them. Handled even when the guard drops the
     // click, so a dropped tick never turns into a click on its line.
     //
-    // `guarded`: the click is dropped when TaskClickIgnored says so. The tick, the close button and "+N" are; "+ Add",
-    // the chips and the failed-load line's dismiss are not, since nothing slides under them.
-    Button TaskButton(string name, UIElement content, Action press, string? tip = null, bool guarded = false)
+    // `ignoredWhen`: the rule that drops a click. The tick, the close button and "+N more" take TaskClickIgnored; Undo
+    // takes only the double click (DoubleClickIgnored), since it appears under the pointer on purpose; the chips and
+    // the failed-load line's dismiss take none, since nothing slides under them.
+    Button TaskButton(string name, UIElement content, Action press, string? tip = null, Func<bool>? ignoredWhen = null)
     {
         var button = new Button
         {
@@ -351,12 +414,12 @@ public partial class FloatingBar
         };
         AutomationProperties.SetName(button, name);
         if (tip is not null) button.ToolTip = tip;
-        if (guarded) button.PreviewMouseLeftButtonDown += (_, e) => taskPressClicks = e.ClickCount;
+        if (ignoredWhen is not null) button.PreviewMouseLeftButtonDown += (_, e) => taskPressClicks = e.ClickCount;
         button.Click += (_, e) =>
         {
             e.Handled = true;
             MarkPressConsumed();
-            if (guarded && TaskClickIgnored()) return;
+            if (ignoredWhen?.Invoke() == true) return;
             press();
         };
         return button;
@@ -367,16 +430,17 @@ public partial class FloatingBar
     // upward from the footer, so "+N" moves under the pointer the same way. A click is dropped when its press was the
     // second of a double click (ClickCount above 1) or when it lands within half a second of a repaint that redrew the
     // lines: either way it was aimed at something that has just moved. Reading the guard consumes the press's count.
-    bool TaskClickIgnored()
+    bool TaskClickIgnored() => DoubleClickIgnored() || TaskClickClock() - taskLinesChangedAt < RepaintGrace;
+
+    // Undo's rule: only the second press of a double click is dropped. Undo appears where the tick or the close button
+    // was, so that a quick second click lands on it and not on the next note; a deliberate click on it, however soon,
+    // is meant. A double click on the tick, though, must not close and undo in one gesture.
+    bool DoubleClickIgnored()
     {
         var doubled = taskPressClicks > 1;
         taskPressClicks = 0;
-        return doubled || TaskClickClock() - taskLinesChangedAt < RepaintGrace;
+        return doubled;
     }
-
-    // The header's grey pill around a label ("+2", "+ Add").
-    static Border Pill(TextBlock label) =>
-        new() { Background = TaskButtonFill, CornerRadius = new CornerRadius(4), Padding = new Thickness(8, 1, 8, 1), Child = label };
 
     // A chip of the add box. Its edge is always 1 DIP, coloured only when the chip is the one ticked, so ticking
     // another chip never moves anything (CLAUDE.md: present and recoloured, not conditional thickness).
@@ -395,7 +459,7 @@ public partial class FloatingBar
             Child = label,
         };
         var button = TaskButton(text, face, press);
-        button.Margin = new Thickness(0, 0, 4, 0);
+        button.Margin = new Thickness(0, 1, 4, 1);
         return new TaskChipParts(button, face, label);
     }
 
@@ -406,11 +470,9 @@ public partial class FloatingBar
     // The text built once and kept takes the bar's text size here (ApplyTextSize); the lines take it as they are made.
     void ApplyTaskListTextSize()
     {
-        Sized(taskHeaderLabel, 8.5);
-        Sized(taskMoreLabel, 8.5);
-        Sized(taskAddLabel, 8.5);
+        Sized(taskMoreLabel, 8);
         Sized(taskAddOn, 7.5);
-        Sized(taskAddHint, 7.5);
+        Sized(taskAddPlaceholder, 9.5);
         new[] { taskChipHere, taskChipNone, taskChipOther }.ToList().ForEach(chip =>
         {
             Sized(chip?.Label, 7.5);
@@ -440,32 +502,51 @@ public partial class FloatingBar
         TaskListLine.Visibility = shown ? Visibility.Visible : Visibility.Collapsed;
         if (!shown || taskService is null)
         {
-            if (TaskListAdding) PutTaskDraftAside();
+            if (taskTyping) EndTyping(clear: false);
             return;
         }
 
-        var lines = Lines(taskService.Board, WorkspaceName, id => workspaceAccents.GetValueOrDefault(id), SessionWindow);
-        if (lines.Count <= TaskListSlots) taskListExpanded = false;
+        FollowCurrentWorkspace();
+
+        var open = Lines(taskService.Board, WorkspaceName, id => workspaceAccents.GetValueOrDefault(id), SessionWindow);
+        // A closed line whose task is open again (reopened from the pipe, say) is not pending any more: the task is back
+        // in the pile under its own line.
+        pendingCloses.Where(p => open.Any(l => l.Id == p.Line.Id)).ToList().ForEach(p => ForgetPendingClose(p, repaint: false));
+        if (open.Count <= TaskListSlots) taskListExpanded = false;
+        var all = WithPendingCloses(open, pendingCloses);
         var problem = taskService.LoadProblem;
-        var shape = string.Join("\n", lines.Select(ShapeOf).Prepend(
+        var shape = string.Join("\n", all.Select(ShapeOf).Prepend(
             $"{taskListExpanded}|{OpenTasksWindow is null}|{TextOffset}|{problem.GetValueOrDefault("")}"));
         if (shape == lastTaskListShape) return;
         lastTaskListShape = shape;
 
-        shownTaskLines = taskListExpanded ? lines : lines.Take(TaskListSlots).ToArray();
+        shownTaskLines = taskListExpanded ? all : all.Take(TaskListSlots).ToArray();
         taskLinesPanel.Children.Clear();
-        if (problem.HasValue) taskLinesPanel.Children.Add(LoadProblemRow(problem.Value));
+        if (taskProblemHost is not null)
+        {
+            taskProblemHost.Child = problem.HasValue ? LoadProblemRow(problem.Value) : null;
+            taskProblemHost.Visibility = problem.HasValue ? Visibility.Visible : Visibility.Collapsed;
+        }
         shownTaskLines.ToList().ForEach(line => taskLinesPanel.Children.Add(TaskLineButton(line)));
         // The lines just moved, so the click guard distrusts a click for the next half second (TaskClickIgnored).
         taskLinesChangedAt = TaskClickClock();
-        CapTaskLines(problem.HasValue);
-        PaintTaskMore(lines);
+        CapTaskLines();
+        PaintTaskMore(open);
     }
 
-    // The expanded list's ceiling: the height of its first eight lines (and the failed-load line above them, when
-    // there is one), so the ninth and later scroll inside the viewer. Measured from the lines just built, at their own
+    // The open lines with every closed line still in its undo window put back where it was, in the order they were
+    // closed at, so no line moves up under the pointer while one lingers (Ruling 10). Each index is the line's place
+    // among the lines on show when it was closed, the earlier lines (pending ones included) already in front of it.
+    static IReadOnlyList<TaskLine> WithPendingCloses(IReadOnlyList<TaskLine> open, IReadOnlyList<PendingClose> pending) =>
+        pending.OrderBy(p => p.Index).Aggregate(open.ToList(), (lines, p) =>
+        {
+            lines.Insert(Math.Min(p.Index, lines.Count), p.Line);
+            return lines;
+        });
+
+    // The expanded list's ceiling: the height of its first eight lines, so the ninth and later scroll inside the viewer. Measured from the lines just built, at their own
     // height, since a line's height follows the text size. Folded, there is no ceiling and the viewer is at its top.
-    void CapTaskLines(bool problemShown)
+    void CapTaskLines()
     {
         if (taskLinesScroller is null || taskLinesPanel is null) return;
         if (!taskListExpanded || shownTaskLines.Count <= ExpandedSlots)
@@ -474,7 +555,7 @@ public partial class FloatingBar
             taskLinesScroller.ScrollToTop();
             return;
         }
-        var counted = taskLinesPanel.Children.OfType<UIElement>().Take(ExpandedSlots + (problemShown ? 1 : 0)).ToList();
+        var counted = taskLinesPanel.Children.OfType<UIElement>().Take(ExpandedSlots).ToList();
         counted.ForEach(row => row.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity)));
         taskLinesScroller.MaxHeight = counted.Sum(row => row.DesiredSize.Height);
     }
@@ -482,16 +563,19 @@ public partial class FloatingBar
     // Everything a line shows, as text, so two paints can be compared without drawing anything.
     static string ShapeOf(TaskLine line) =>
         $"{line.Id}|{line.Status}|{line.Title}|{line.Detail}|{line.Claudes}|{line.WorkspaceName}|" +
-        $"{(line.Colour as SolidColorBrush)?.Color}|{line.Window.Match(w => w.ToString(), () => "")}";
+        $"{(line.Colour as SolidColorBrush)?.Color}|{line.Window.Match(w => w.ToString(), () => "")}|{line.Closing}";
 
-    void PaintTaskMore(IReadOnlyList<TaskLine> lines)
+    // "+N more" counts the open tasks out of sight; a closed line in its undo window is not an open task, so it is
+    // neither counted nor allowed to hide one from the count.
+    void PaintTaskMore(IReadOnlyList<TaskLine> open)
     {
         if (taskMoreButton is null || taskMoreLabel is null) return;
-        var hidden = lines.Skip(TaskListSlots).ToArray();
+        var onShow = shownTaskLines.Select(l => l.Id).ToHashSet();
+        var hidden = open.Where(l => !onShow.Contains(l.Id)).ToArray();
         var waiting = hidden.Count(l => l.Status == TaskStatus.WaitingOnYou);
-        taskMoreButton.Visibility = hidden.Length > 0 ? Visibility.Visible : Visibility.Collapsed;
+        taskMoreButton.Visibility = hidden.Length > 0 || taskListExpanded ? Visibility.Visible : Visibility.Collapsed;
         taskMoreLabel.Text = MoreText(hidden.Length, waiting, taskListExpanded);
-        taskMoreLabel.Foreground = waiting > 0 && !taskListExpanded ? TaskOrange : TaskInk;
+        taskMoreLabel.Foreground = waiting > 0 && !taskListExpanded ? TaskOrange : TaskDimInk;
         taskMoreButton.ToolTip = taskListExpanded ? "Show the first three" : $"{hidden.Length} more {(hidden.Length == 1 ? "task" : "tasks")}";
     }
 
@@ -510,6 +594,9 @@ public partial class FloatingBar
             face.Children.Add(part);
         });
         face.Children.Add(TextOf(line));
+        // A closed line in its undo window is dimmed, all but its Undo, which is the one thing on it to press.
+        if (line.Closing)
+            face.Children.OfType<UIElement>().Where(part => part is not Button).ToList().ForEach(part => part.Opacity = 0.45);
 
         // Every line has the same 3 DIP edge, orange on Claude's and clear on Petre's notes, so the two kinds line up
         // and nothing changes width when a note becomes Claude's.
@@ -535,7 +622,7 @@ public partial class FloatingBar
             HorizontalContentAlignment = HorizontalAlignment.Stretch,
             Focusable = false,
             Cursor = Cursors.Hand,
-            ToolTip = TipOf(line),
+            ToolTip = line.Closing ? "Closed. Undo brings it back." : TipOf(line),
         };
         AutomationProperties.SetName(button, line.Title);
         // The click guard, as on the tick and the close button (TaskClickIgnored).
@@ -543,17 +630,21 @@ public partial class FloatingBar
         button.Click += (_, _) =>
         {
             MarkPressConsumed();
-            if (TaskClickIgnored()) return;
+            // A closed line goes nowhere: its task is closed, and Undo is the one thing on it to press.
+            if (TaskClickIgnored() || line.Closing) return;
             OnTaskLineClick(line);
         };
         return button;
     }
 
-    // Left of the text: the CLAUDE tag and the session's window icon on Claude's lines, the tick box on a note.
+    // Left of the text: the CLAUDE tag and the session's window icon on Claude's lines, the tick box on a note, and on a
+    // note just closed, "Undo" in the tick box's place.
     IEnumerable<UIElement> LeftOf(TaskLine line) =>
         line.Claudes
             ? new UIElement?[] { ClaudeTag(), line.Window.HasValue ? WindowIconOf(line.Window.Value) : null }.OfType<UIElement>()
-            : [TaskButton("Tick off", new Border
+            : line.Closing
+                ? [UndoButton(line)]
+                : [TaskButton("Tick off", new Border
             {
                 Width = 11,
                 Height = 11,
@@ -562,21 +653,34 @@ public partial class FloatingBar
                 CornerRadius = new CornerRadius(3),
                 Background = Brushes.Transparent,
                 Margin = new Thickness(1, 0, 1, 0),
-            }, () => taskService?.Close(line.Id), "Tick off: closes the note", guarded: true)];
+            }, () => CloseWithUndo(line), "Tick off: closes the note", ignoredWhen: TaskClickIgnored)];
 
     // Right of the text, from the edge in: the workspace chip, then, on a Done Claude task, the close button, since a
     // Done task waits for Petre to look and close it (spec, "A Done Claude task shows a close button on its line"). The
     // button is the Done mark: a "Done" word beside it was tried and, on a bar of the default width, took the room the
     // title needed. The line's tooltip names the status.
+    // A Done Claude task just closed has "Undo" in the close button's place.
     IEnumerable<UIElement> RightOf(TaskLine line) =>
         new UIElement?[]
         {
             WorkspaceChip(line),
             line.Status == TaskStatus.Done && line.Claudes
-                ? TaskButton("Close task", new TextBlock { Text = "✕", Foreground = TaskInk, FontSize = Text(8.5), Margin = new Thickness(5, 0, 5, 0) },
-                    () => taskService?.Close(line.Id), "Done: close this task", guarded: true)
+                ? line.Closing
+                    ? UndoButton(line)
+                    : TaskButton("Close task", new TextBlock { Text = "✕", Foreground = TaskInk, FontSize = Text(8.5), Margin = new Thickness(5, 0, 5, 0) },
+                        () => CloseWithUndo(line), "Done: close this task", ignoredWhen: TaskClickIgnored)
                 : null,
         }.OfType<UIElement>();
+
+    // "Undo" on a line just closed: the asking orange's opposite, the plain bright ink, in a small pill.
+    Button UndoButton(TaskLine line) =>
+        TaskButton("Undo", new Border
+        {
+            Background = TaskButtonFill,
+            CornerRadius = new CornerRadius(4),
+            Padding = new Thickness(6, 0, 6, 1),
+            Child = new TextBlock { Text = "Undo", Foreground = TaskInk, FontSize = Text(7.5) },
+        }, () => UndoClose(line.Id), "Bring the task back", ignoredWhen: DoubleClickIgnored);
 
     // The CLAUDE tag of the mockup: dark capitals on the asking orange.
     Border ClaudeTag() => new()
@@ -619,6 +723,8 @@ public partial class FloatingBar
             VerticalAlignment = VerticalAlignment.Center,
             Margin = new Thickness(4, 0, 4, 0),
         };
+        // A closed line in its undo window is struck through.
+        if (line.Closing) text.TextDecorations = TextDecorations.Strikethrough;
         var detailInk = line.Status == TaskStatus.WaitingOnYou ? TaskOrange : line.Claudes ? TaskInk : TaskDimInk;
         text.Inlines.Add(new Run(line.Title) { Foreground = line.Claudes ? TaskTitleInk : TaskInk });
         if (line.Detail.Length == 0) return text;
@@ -705,7 +811,44 @@ public partial class FloatingBar
         Report(GoToTask(line.Id));
     }
 
-    // "+N": the task window once it exists, else the list expanded in place, and folded back on the next click.
+    // THE UNDO WINDOW (Petre: "when i click on done, there should be undo"; Ruling 10). The task is closed at once
+    // through Close, so the store is the truth whatever happens next; its line stays in its place for six seconds,
+    // struck through, with "Undo" where the tick or the close button was, and then leaves and the list settles.
+    // The line is pending before Close pulses Changed, so the repaint that pulse causes already draws it struck
+    // through rather than dropping it for a moment. A refused Close (the task was closed meanwhile) leaves nothing
+    // pending. Several lines can be pending at once, each with its own timer.
+    void CloseWithUndo(TaskLine line)
+    {
+        if (taskService is null) return;
+        var index = shownTaskLines.ToList().FindIndex(l => l.Id == line.Id);
+        var pending = new PendingClose(line with { Closing = true }, Math.Max(index, 0), line.Status, Disposable.Empty);
+        pending = pending with { Timer = TaskUndoTimer(UndoWindow, () => ForgetPendingClose(pendingCloses.FirstOrDefault(p => p.Line.Id == line.Id), repaint: true)) };
+        pendingCloses.Add(pending);
+        taskService.Close(line.Id).TapError(_ => ForgetPendingClose(pending, repaint: true));
+    }
+
+    // The undo window is over (or Undo was pressed, or the task came back another way): the line leaves.
+    void ForgetPendingClose(PendingClose? pending, bool repaint)
+    {
+        if (pending is null || !pendingCloses.Remove(pending)) return;
+        pending.Timer.Dispose();
+        if (repaint) PaintTaskList();
+    }
+
+    // Undo: the task comes back as it was. A note, and any task that was not Done, through Reopen (Backlog, or In
+    // progress while a session is live on it). A Done task through SetStatus Done, the board's way back to Done for a
+    // closed task, since Reopen would make it In progress or Backlog; becoming Done stamps its place in the Done group
+    // as now (TaskBoard.BecameDone), which puts it at the top of that group.
+    void UndoClose(Guid id)
+    {
+        if (taskService is null || pendingCloses.FirstOrDefault(p => p.Line.Id == id) is not { } pending) return;
+        ForgetPendingClose(pending, repaint: false);
+        var reopened = pending.Was == TaskStatus.Done ? taskService.SetStatus(id, TaskStatus.Done) : taskService.Reopen(id);
+        // Reopen pulses Changed, which repaints; a refusal (the task is gone) still needs the line taken away.
+        reopened.TapError(_ => PaintTaskList());
+    }
+
+    // "+N more": the task window once it exists, else the list expanded in place, and folded back on the next click.
     void OnTaskMoreClick()
     {
         if (OpenTasksWindow is { } open)
@@ -717,63 +860,82 @@ public partial class FloatingBar
         PaintTaskList();
     }
 
-    // "+ Add": the box opens with the current workspace's chip ticked, or with the draft a click elsewhere put aside,
-    // its text and its chip as they were (see PutTaskDraftAside). The bar takes the keyboard the way quick find's box
-    // does (QuickFindWindow.Open: Activate, then focus the box), since a key goes to the foreground window and the bar
-    // may not be it when the click arrives through a strip or after a menu.
+    // A CLICK IN THE BOX takes the keyboard for the bar the way quick find's box does (QuickFindWindow.Open: Activate,
+    // then focus the box), since a key goes to the foreground window and the bar may not be it when the click lands.
+    // The chips show, the current workspace ticked unless the box still holds text from before, which keeps the chip
+    // it was given.
     //
     // First it notes where Petre was typing, to hand the keyboard back there after Enter or Esc (GiveTaskKeyboardBack):
     // the window in front at the click, when it is one you type in; failing that (the click has usually made the bar
     // the window in front already), the last such window the foreground hook saw (languageTarget), but only while it
     // is on the desktop in front. A window on another desktop is never chosen: giving it the foreground would switch
     // desktops under Petre (PR A review, Minor 8).
-    void StartAddingTask()
+    void BeginTyping()
     {
-        if (taskService is null || taskAddPanel is null || taskAddBox is null) return;
+        if (taskService is null || taskAddBox is null) return;
         var front = ForegroundWindow();
         FollowForeground();
         taskReturnTo = IsTypingWindow(front, isFlyout: ShellKeys.Recognise(front) is not null || (front != 0 && front == trayOverflow))
             ? front
             : languageTarget != 0 && OnCurrentDesktop(languageTarget) ? languageTarget : 0;
         taskAddHere = manager.CurrentWorkspaceId;
-        if (!taskDraftKept) taskAddTarget = taskAddHere;
-        taskDraftKept = false;
+        if (taskAddBox.Text.Length == 0) taskAddTarget = taskAddHere;
+        taskTyping = true;
         PaintTaskChips();
-        taskAddPanel.Visibility = Visibility.Visible;
+        PaintAddRow();
         UpdateFade();
         Activate();
         taskAddBox.Focus();
-        taskAddBox.CaretIndex = taskAddBox.Text.Length;
     }
 
-    // Enter or Esc: the box closes, empty, and the keyboard goes back to where Petre was typing.
-    void StopAddingTask()
+    // The box lets go of the keyboard. After Enter or Esc (`clear`) it empties, the chip goes back to the current
+    // workspace and the keyboard goes back to where Petre was typing. After a click elsewhere (the bar lost the
+    // foreground) the text stays as it is, with its chip, for whenever he comes back to it (Ruling 9: the box itself
+    // is the draft); nothing is handed back, since the keyboard is already where he took it.
+    void EndTyping(bool clear)
     {
-        if (taskAddPanel is null || taskAddBox is null) return;
-        taskAddBox.Text = "";
-        taskDraftKept = false;
-        taskAddPanel.Visibility = Visibility.Collapsed;
-        UpdateFade();
-        GiveTaskKeyboardBack();
-    }
-
-    // THE BAR LOST THE KEYBOARD WHILE A NOTE WAS BEING TYPED (Controller Ruling 5): Petre clicked into another window.
-    // The box closes, so the bar is free to fade again (HoldsFullStrength) and no box sits open that Esc can no longer
-    // reach, but what he typed is KEPT as a draft with its chip, and the next "+ Add" brings it back. Nothing is handed
-    // back: the keyboard is already where he took it.
-    void PutTaskDraftAside()
-    {
-        if (taskAddPanel is null || !TaskListAdding) return;
-        taskDraftKept = true;
-        taskReturnTo = 0;
-        taskAddPanel.Visibility = Visibility.Collapsed;
+        if (taskAddBox is null) return;
+        taskTyping = false;
+        if (clear)
+        {
+            taskAddBox.Text = "";
+            taskAddTarget = taskAddHere;
+            PaintTaskChips();
+            GiveTaskKeyboardBack();
+        }
+        else taskReturnTo = 0;
+        PaintAddRow();
         UpdateFade();
     }
 
     protected override void OnDeactivated(EventArgs e)
     {
         base.OnDeactivated(e);
-        PutTaskDraftAside();
+        if (taskTyping) EndTyping(clear: false);
+    }
+
+    // The placeholder and the chips as the box stands: the placeholder while it is empty, the chips while it has the
+    // keyboard or holds text.
+    void PaintAddRow()
+    {
+        if (taskAddBox is null || taskAddPlaceholder is null || taskAddChips is null) return;
+        var empty = taskAddBox.Text.Length == 0;
+        taskAddPlaceholder.Visibility = empty ? Visibility.Visible : Visibility.Collapsed;
+        taskAddChips.Visibility = taskTyping || !empty ? Visibility.Visible : Visibility.Collapsed;
+    }
+
+    // On every paint: the placeholder names the workspace in front, so it follows a desktop switch; and while nobody is
+    // typing, the "here" chip is that workspace too. An empty box's chip follows it; a box holding text keeps the
+    // workspace it was given, which then shows as the "other…" chip if it is no longer the one in front.
+    void FollowCurrentWorkspace()
+    {
+        if (taskAddPlaceholder is null || taskAddBox is null) return;
+        var current = manager.CurrentWorkspaceId;
+        taskAddPlaceholder.Text = PlaceholderFor(current.Bind(WorkspaceName));
+        if (taskTyping) return;
+        taskAddHere = current;
+        if (taskAddBox.Text.Length == 0) taskAddTarget = current;
+        PaintTaskChips();
     }
 
     // The window noted when the box opened gets the foreground back, the way the language switcher hands it back
@@ -798,16 +960,17 @@ public partial class FloatingBar
         else if (e.Key == Key.Escape)
         {
             e.Handled = true;
-            StopAddingTask();
+            EndTyping(clear: true);
         }
     }
 
-    // Enter: a Backlog note where the chips say. A title of nothing is refused by the board and the box stays open.
+    // Enter: a Backlog note where the chips say. A title of nothing is refused by the board and the box keeps the
+    // keyboard.
     void CommitTaskNote()
     {
         if (taskService is null || taskAddBox is null) return;
         taskService.AddNote(taskAddBox.Text, taskAddTarget)
-            .Tap(_ => StopAddingTask())
+            .Tap(_ => EndTyping(clear: true))
             .TapError(err => ClickTrace.Write($"task list: note not added: {err}"));
     }
 
@@ -928,6 +1091,8 @@ public partial class FloatingBar
 /// One task's line as the bar draws it: the task's id, title and detail (the question while it waits on Petre, else
 /// its status line, plus "no live session" when its sessions have all ended), its status, whether it is Claude's (it
 /// has a session), its workspace's name and row colour (none on no workspace), and the VS Code window of its session
-/// when one is found. Made by <see cref="FloatingBar.Lines"/>.
+/// when one is found. Made by <see cref="FloatingBar.Lines"/>. <see cref="Closing"/> marks a line whose task was just
+/// closed and which stays, struck through with its Undo, for the undo window (FloatingBar.CloseWithUndo).
 /// </summary>
-internal sealed record TaskLine(Guid Id, string Title, string Detail, TaskStatus Status, bool Claudes, string? WorkspaceName, Brush? Colour, Maybe<nint> Window);
+internal sealed record TaskLine(Guid Id, string Title, string Detail, TaskStatus Status, bool Claudes, string? WorkspaceName, Brush? Colour,
+    Maybe<nint> Window, bool Closing = false);
