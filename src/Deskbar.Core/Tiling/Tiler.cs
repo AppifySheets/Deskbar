@@ -364,6 +364,8 @@ public sealed partial class Tiler(WorkspaceManager manager, IVirtualDesktopServi
             ForgetUsed(e.Window.Handle);
             // Its lock too (Tiler.Lock.cs): a recycled handle must not come back locked.
             ForgetLock(e.Window.Handle);
+            // And its learned minimum (Tiler.Minimums.cs), for the same reason.
+            ForgetMinimum(e.Window.Handle);
         }
         if (e.Kind == WindowEventKind.Activated)
         {
@@ -916,6 +918,8 @@ public sealed partial class Tiler(WorkspaceManager manager, IVirtualDesktopServi
             // Left in, the mark would swallow the window's first real drag after tiling returns as "our own echo"
             // and snap it back (final review, item 5).
             awaitingEcho.Remove(w);
+            // A window off every board is learned again if it comes back (Tiler.Minimums.cs).
+            ForgetMinimum(w);
         });
     }
 
@@ -1015,7 +1019,7 @@ public sealed partial class Tiler(WorkspaceManager manager, IVirtualDesktopServi
             .ForEach(n => RetileScreen(workspace, screens[n], board.On(n)));
     }
 
-    void RetileScreen(Workspace workspace, TileScreen screen, IReadOnlyList<WindowHandle> windows)
+    void RetileScreen(Workspace workspace, TileScreen screen, IReadOnlyList<WindowHandle> windows, int passes = 0)
     {
         if (windows.Count == 0)
         {
@@ -1050,9 +1054,17 @@ public sealed partial class Tiler(WorkspaceManager manager, IVirtualDesktopServi
 
         var line = $"tile: {workspace.Name} screen {screen.Number}: " +
                    string.Join(" ", windows.Select(w => $"{w.Value:X}@{Show(slots[w])}{(maximizedNow.Contains(w) ? "(max)" : "")}"));
-        if (lastLines.TryGetValue((workspace.Id, screen.Number), out var last) && last == line) return;
-        lastLines[(workspace.Id, screen.Number)] = line;
-        trace?.Invoke(line);
+        if (!lastLines.TryGetValue((workspace.Id, screen.Number), out var last) || last != line)
+        {
+            lastLines[(workspace.Id, screen.Number)] = line;
+            trace?.Invoke(line);
+        }
+
+        // #398 (Tiler.Minimums.cs): a window that kept a frame bigger than its slot has a minimum now, and the screen is
+        // laid out again to make room for it. Bounded by the window count, one pass per window at most, though it settles
+        // sooner: minimums only grow, and one that cannot fit leaves the layout as it was, so the next pass learns nothing.
+        if (passes < windows.Count && LearnMinimums(screen, slots, maximizedNow))
+            RetileScreen(workspace, screen, windows, passes + 1);
     }
 
     // The slot of each window on a screen, by window; empty when the grid does not fit (see RetileScreen). The grid
@@ -1061,10 +1073,12 @@ public sealed partial class Tiler(WorkspaceManager manager, IVirtualDesktopServi
     IReadOnlyDictionary<WindowHandle, WindowRect> SlotsOf(Workspace workspace, TileScreen screen, IReadOnlyList<WindowHandle> windows) =>
         SlotsOf(screen, windows, LayoutOn(workspace, screen, windows.Count));
 
-    // The same, with a layout the caller already fitted (OnSettled, which also hands it to MovedASplit).
+    // The same, with a layout the caller already fitted (OnSettled, which also hands it to MovedASplit). Every slot a
+    // window is given or judged against comes from here, with the windows' learned minimums (Tiler.Minimums.cs), so a
+    // re-tile and a drop agree on where a window that will not shrink belongs.
     IReadOnlyDictionary<WindowHandle, WindowRect> SlotsOf(TileScreen screen, IReadOnlyList<WindowHandle> windows, TileLayout layout)
     {
-        var tiles = GridLayout.Arrange(screen.WorkArea, windows.Count, GapOn(screen), layout);
+        var tiles = GridLayout.Arrange(screen.WorkArea, windows.Count, GapOn(screen), layout, MinimumsOn(screen, windows));
         return tiles.Any(t => t.Width <= 0 || t.Height <= 0)
             ? new Dictionary<WindowHandle, WindowRect>()
             : windows.Zip(tiles).ToDictionary(p => p.First, p => p.Second);
