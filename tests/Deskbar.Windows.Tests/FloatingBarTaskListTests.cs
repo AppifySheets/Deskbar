@@ -489,6 +489,30 @@ public class FloatingBarTaskListTests
         Assert.Equal(t.Gepha, t.Bar.TaskAddTarget.Value);
     });
 
+    // Text left in the box keeps the chips on show, so after clicking away a chip can be the first thing pressed. That
+    // press takes the keyboard as a click in the box does: the bar holds full strength, and Esc hands the keyboard back
+    // to the window Petre was typing in.
+    [Fact]
+    public void Picking_a_chip_with_text_in_the_box_takes_the_keyboard() => StaThread.Run(() =>
+    {
+        var handed = new List<nint>();
+        using var t = Build(handedBack: handed);
+        ClickBox(t);
+        t.Box.Text = "Half a thought";
+        typeof(Window).GetMethod("OnDeactivated", BindingFlags.NonPublic | BindingFlags.Instance)!.Invoke(t.Bar, [EventArgs.Empty]);
+        Assert.False(t.Bar.TaskListAdding);
+        Assert.Equal(Visibility.Visible, t.Chips.Visibility);
+
+        Click(ButtonNamed(t.List, "none"));
+
+        Assert.True(t.Bar.TaskListAdding);
+        Assert.True(t.Bar.HoldsFullStrength);
+        Assert.True(t.Bar.TaskAddTarget.HasNoValue);
+        Assert.Equal("Half a thought", t.Box.Text);
+        Press(t.Bar, t.Box, Key.Escape);
+        Assert.Equal([Editor], handed);
+    });
+
     // The chips show while the box has the keyboard or holds text, and only then; the bar stays at full strength while
     // the box has the keyboard, not merely while it holds text.
     [Fact]
