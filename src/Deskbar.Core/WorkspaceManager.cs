@@ -4177,6 +4177,14 @@ public sealed class WorkspaceManager(
             ? Result.Success()
             : Result.Success().Tap(() => Persist(State with { NoFocusRing = !on }));
 
+    // The grain behind the bar's rows (AppState.Grain): Manage's checkbox and `grain on|off`. A no-op when unchanged,
+    // like SetFocusRing, so Manage can set its box on open without writing state.json. The bar shows or hides the
+    // grain on the rebuild the state pulse from Persist starts.
+    public Result SetGrain(bool on) =>
+        State.Grain == on
+            ? Result.Success()
+            : Result.Success().Tap(() => Persist(State with { NoGrain = !on }));
+
     // --- overview / switcher-facing operations -----------------------------------
 
     // Ground truth for "which workspace is this window in": ASK THE OS which desktop

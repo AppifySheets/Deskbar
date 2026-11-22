@@ -87,6 +87,12 @@
         <!-- The focus ring (AppState.FocusRing, FocusRings in Core, WindowRings). Petre: "can you give each active
              window a ring, same in color as in the bar?", then "go with proposed": on by default, a box here.
              Declared before the Claude box, so it sits just below it. -->
+        <!-- The grain behind the bar's workspace rows (AppState.Grain, FloatingBar.Grain.cs). Petre: "make grain a
+             default feature, configurable in settings". On by default. Declared before the focus ring's box, so it
+             sits just below it. -->
+        <CheckBox x:Name="Grain" DockPanel.Dock="Bottom" Margin="8,4,8,0"
+                  Content="Give the floating bar's workspace rows a fine grain texture instead of a flat background"
+                  Checked="OnGrainToggled" Unchecked="OnGrainToggled"/>
         <CheckBox x:Name="FocusRing" DockPanel.Dock="Bottom" Margin="8,4,8,0"
                   Content="Outline the window you are in with its workspace's colour, and the window in front on each other screen in dim white"
                   Checked="OnFocusRingToggled" Unchecked="OnFocusRingToggled"/>

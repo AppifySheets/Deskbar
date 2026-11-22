@@ -3,8 +3,10 @@ using System.Windows.Media.Imaging;
 
 namespace Deskbar.App;
 
-// THE BAR'S SURFACE: the one background every piece of the bar's family stands on (the floating bar's Root, the
-// detached stats window, the due card and the screen strips), so they cannot drift apart.
+// THE BAR'S SURFACE: the backgrounds every piece of the bar's family stands on, so they cannot drift apart. Solid, the
+// flat base, is the floating bar's Root, its top and footer, the detached stats window, the due card and the screen
+// strips. Textured, the grain, lies only behind the bar's workspace rows (FloatingBar.Grain.cs), and only while the
+// setting is on (AppState.Grain).
 //
 // Why a texture. The bar was a flat, fully opaque #141518, and docked at full screen height most of it is empty:
 // Petre, 2026-11-22, "too black". He was shown lighter flat colours, raised row cards, zones, acrylic, mica and grain

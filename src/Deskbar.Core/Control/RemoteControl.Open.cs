@@ -137,4 +137,13 @@ public sealed partial class RemoteControl
             "off" or "false" or "no" => Reply(manager.SetFocusRing(false), () => new { focusRing = "off" }),
             _ => ControlReply.Fail(ControlUsage.LineFor("focus-ring")),
         };
+
+    // The grain behind the bar's rows (AppState.Grain), the remote twin of Manage's checkbox.
+    ControlReply Grain(string onOff) =>
+        onOff.ToLowerInvariant() switch
+        {
+            "on" or "true" or "yes" => Reply(manager.SetGrain(true), () => new { grain = "on" }),
+            "off" or "false" or "no" => Reply(manager.SetGrain(false), () => new { grain = "off" }),
+            _ => ControlReply.Fail(ControlUsage.LineFor("grain")),
+        };
 }

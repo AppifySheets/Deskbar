@@ -110,6 +110,8 @@ public partial class FloatingBar : Window
         Opacity = IdleOpacity;
         PreviewKeyDown += OnArrangePreviewKeyDown; // Esc ends arrange mode (FloatingBar.Arrange.cs)
         LostMouseCapture += OnArrangeLostCapture;  // ...and losing the mouse cancels a row drag (FloatingBar.ArrangeDrag.cs)
+        // The grain's band follows the rows after every layout pass (FloatingBar.Grain.cs).
+        LayoutUpdated += (_, _) => PlaceGrain();
         MouseEnter += (_, _) => UpdateFade();
         MouseLeave += (_, _) => UpdateFade();
 
@@ -2272,6 +2274,8 @@ public partial class FloatingBar : Window
             frontsElsewhere = FrontsElsewhere.Of(overview);
             // ...and the same windows' outlines on the screen itself, with the focused one (FloatingBar.FocusRing.cs).
             ShowFocusRings(overview);
+            // ...and the grain behind the rows, on or off as Manage says (FloatingBar.Grain.cs).
+            ApplyGrainSetting();
             // The blink runs only while some row is asking (FloatingBar.Asking.cs).
             SyncAsking(overview);
 
@@ -4752,6 +4756,9 @@ public partial class FloatingBar : Window
         // unique (an unbound desktop can share a name with a workspace) and the gesture only
         // ever knows ids.
         if (rowKey is { } key) rowRings[key] = ring;
+
+        // The pinned row's box is where the grain starts (FloatingBar.Grain.cs).
+        if (pinned) pinnedRowBox = box;
         return box;
     }
 
