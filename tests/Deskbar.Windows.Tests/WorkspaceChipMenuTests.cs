@@ -3,6 +3,7 @@ using System.Windows.Automation;
 using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Media;
+using System.Windows.Threading;
 using CSharpFunctionalExtensions;
 using Deskbar.App;
 using Deskbar.Core.Domain;
@@ -138,8 +139,12 @@ public class WorkspaceChipMenuTests
             Assert.Equal(KeyboardNavigationMode.Cycle, KeyboardNavigation.GetTabNavigation(menu));
             Assert.Equal(KeyboardNavigationMode.Cycle, KeyboardNavigation.GetDirectionalNavigation(menu));
             Assert.All(WorkspaceChipMenu.Chips(menu), chip => Assert.True(chip.Focusable && chip.IsTabStop));
+            // The menu's Opened event puts the keyboard on the current chip, and it may come on a later dispatcher turn
+            // than IsOpen: on the CI runner no chip was focused right after IsOpen, while here one was. So the queue is
+            // run down before looking.
             menu.IsOpen = true;
             menu.UpdateLayout();
+            Dispatcher.CurrentDispatcher.Invoke(() => { }, DispatcherPriority.ContextIdle);
             Assert.Equal("Sparrow", NameOf(WorkspaceChipMenu.Chips(menu).Single(c => c.IsKeyboardFocused || c.IsFocused)));
             menu.IsOpen = false;
             return 0;
