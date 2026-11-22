@@ -252,7 +252,7 @@ The task list at the bottom of the bar (spec `docs/superpowers/specs/2026-11-22-
     the same task is highlighted there and scrolled into view. Click another line in the window: the bar's
     highlight follows. Close the highlighted task: no line is highlighted any more.
 
-55c. Point at a note's line: two dim toggles appear left of its age, an exclamation mark and a clock. Click the
+55c. Point at a note's line: two dim toggles appear over the end of its title, an exclamation mark and a clock. Click the
     exclamation mark: it turns red and stays, and the line moves above the plain ones. Click the clock on another
     line: amber, and that line moves above the plain ones but below the important one. Set both on a third: it goes
     to the very top of the open lines. A task set to waiting stays above all of them, showing its flags. A little
