@@ -52,8 +52,17 @@ internal static class WorkspaceChipMenu
     // the blue the text box and a chosen chip use, for the current choice and the keyboard's place.
     static readonly Brush Ink = Frozen(0xFF, 0xE6, 0xE6, 0xE6);
     static readonly Brush NoneFill = Frozen(0xFF, 0x33, 0x33, 0x33);
-    static readonly Brush NoneInk = Frozen(0xFF, 0x99, 0x99, 0x99);
+    // A little lighter than the task list's #999, so the "none" chip's name clears 4.5:1 on its grey (it was 4.4).
+    static readonly Brush NoneInk = Frozen(0xFF, 0xA3, 0xA3, 0xA3);
     static readonly Brush CurrentEdge = Frozen(0xFF, 0x4F, 0x8C, 0xFF);
+
+    // THE MENU'S OWN SURFACE (ruling g, 2026-11-23). The chips were designed on the bar's dark surface: lane colours at
+    // 0x66 alpha with near-white names. Left to the system's ContextMenu template under ThemeMode="System", a light
+    // Windows theme drew them on #F3F3F3 with an icon gutter down the menu, and Petre could barely read the names. So
+    // the menu brings its own template (SurfaceTemplate): the tasks window's dark page and edge, no gutter, whatever the
+    // theme. On it every palette chip's name is at least 4.65:1 (WorkspaceChipMenuTests checks every swatch).
+    internal static readonly Brush Surface = Frozen(0xFF, 0x1E, 0x1F, 0x24);
+    static readonly Brush SurfaceEdge = Frozen(0xFF, 0x33, 0x35, 0x3C);
 
     /// <summary>
     /// One entry of the menu: a group's caption (<see cref="IsGroup"/>, never clickable), or a choice of a workspace or
@@ -107,6 +116,11 @@ internal static class WorkspaceChipMenu
             Width = Math.Max(120, Math.Min(PreferredWidth, width)),
             MaxHeight = WorkAreaHeightAt(target),
             Padding = new Thickness(6, 4, 6, 4),
+            // Its own dark surface and template, never the theme's (see Surface).
+            Template = SurfaceTemplate,
+            Background = Surface,
+            BorderBrush = SurfaceEdge,
+            Foreground = Ink,
         };
         // Tab, Shift+Tab and the arrows walk the chips in a cycle (see the header).
         KeyboardNavigation.SetTabNavigation(menu, KeyboardNavigationMode.Cycle);
@@ -158,8 +172,8 @@ internal static class WorkspaceChipMenu
 
     // One block: an optional caption over a wrap of chips. The caption is 6 DIP below the block above it and sits
     // directly over its chips; the first block has none.
-    // What the context menu's template draws around its items, at most, on either theme: a 1 DIP border and a little
-    // inner margin.
+    // What the menu's template draws around its items: a 1 DIP border either side, and room to spare, so the blocks
+    // still fit when the scroll viewer's vertical bar shows on a long menu (its horizontal one is disabled).
     const double TemplateEdge = 8;
 
     static StackPanel Block(Entry? caption, IReadOnlyList<Button> chips, double width)
@@ -250,6 +264,22 @@ internal static class WorkspaceChipMenu
               <Setter TargetName="Face" Property="BorderBrush" Value="White" />
             </Trigger>
           </ControlTemplate.Triggers>
+        </ControlTemplate>
+        """));
+
+    // The menu's whole look (see Surface): a rounded dark border, its padding inside, and the scroll viewer that keeps
+    // a long menu inside the work area (MaxHeight) with its horizontal scrolling off, so the blocks wrap at the width
+    // they are given (review I-1) instead of growing sideways. No icon gutter, no separator column, nothing from the
+    // theme: the system template is what drew the light surface and the stripe.
+    static readonly ControlTemplate SurfaceTemplate = Sealed((ControlTemplate)XamlReader.Parse(
+        """
+        <ControlTemplate TargetType="ContextMenu" xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation">
+          <Border Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="1"
+                  CornerRadius="6" Padding="{TemplateBinding Padding}">
+            <ScrollViewer HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto" CanContentScroll="False">
+              <ItemsPresenter />
+            </ScrollViewer>
+          </Border>
         </ControlTemplate>
         """));
 
