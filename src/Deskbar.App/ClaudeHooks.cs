@@ -8,19 +8,30 @@ namespace Deskbar.App;
 // Deskbar's entries in Claude Code's ~/.claude/settings.json (see ClaudeSkill for why they exist): two that ask for the
 // user (Notification, Stop) while "Teach Claude Code about Deskbar" is on, and three more (SessionStart,
 // UserPromptSubmit, SessionEnd) while Claude Code sessions also keep their tasks (AppState.ClaudeTasksInEffect; design
-// docs/superpowers/specs/2026-11-22-tasks-board-design.md, "Who gets it"). All five run the same command, the hook
-// script, which hands the event's JSON to `claude-hook`; the event's name is in the JSON, so one script serves them all.
+// docs/superpowers/specs/2026-11-22-tasks-board-design.md, "Who gets it"). Each runs a script that hands the event's
+// JSON to `claude-hook`; the event's name is in the JSON.
+//
+// TWO SCRIPTS, NOT ONE (Ruling 35, review of Task 7, I-3). The ask events run claude-hook.cmd, the name every Deskbar
+// since the hooks were added knows; the task events run claude-task-hook.cmd, a name no older build knows. That matters
+// when Petre swaps back to an older Deskbar: an older build recognises its entries by "claude-hook.cmd" in the command
+// and rewrites claude-hook.cmd to run `attention`, so task entries pointing at claude-hook.cmd would blink the bar on
+// every session start, prompt and end. Pointing at claude-task-hook.cmd, it neither counts them as its own nor rewrites
+// the script, and the script keeps running `claude-hook`, which an older Deskbar refuses as an unknown command: the
+// refusal goes to stderr, the script sends that to nul and exits 0, and nothing blinks and the session reads nothing.
 //
 // That file is the user's, and Claude Code's, and holds everything from permissions to the model, so this is careful
 // in the ways the file deserves:
 //
-//   * Only Deskbar's own entries are added or removed, recognised by the hook script's name in their command. Every
+//   * Only Deskbar's own entries are added or removed, recognised by either script's name in their command. Every
 //     other hook, Petre's bell on Notification and Stop included, stays exactly where it is.
 //   * Written only when something changes, so a Deskbar that starts every morning does not rewrite the file every
 //     morning.
 //   * Before the FIRST change, the file as it was is copied to settings.json.deskbar-backup, once.
 //   * A file that does not parse as strict JSON (comments, a half-written save, a repeated key) is left alone and
 //     traced: rewriting it through a parser would drop what the parser skipped. Sync then returns false.
+//   * The same for a "hooks" value that is not an object, and an event's value that is not an array (review of Task 7,
+//     M-3): Claude Code would not read them as hooks either, but they are the user's, so they are left as they are and
+//     traced, never replaced. The other events are still kept in step, and Sync returns false.
 //   * A foreign entry of an odd shape (a string, null, a command that is not a string) is kept and skipped: it is not
 //     Deskbar's, and it does not stop Deskbar's own from being added.
 //   * Written to a temporary file and moved over the original, so a crash mid-write cannot leave half a file.
@@ -42,10 +53,11 @@ static class ClaudeHooks
     };
 
     // True when the file now matches what was asked: hooks added or removed, nothing to do, or no file with the setting
-    // off. False only when the file was left alone because it cannot be parsed (see above), so the caller can tell.
+    // off. False when anything was left alone because it cannot be read as hooks (see above), so the caller can tell.
     // `on` is "Teach Claude Code about Deskbar"; `tasks` adds the task events, and only counts while `on` does, so the
-    // teaching turned off takes every entry of Deskbar's.
-    internal static bool Sync(bool on, bool tasks, string settingsPath, string command)
+    // teaching turned off takes every entry of Deskbar's. `askCommand` runs claude-hook.cmd, `taskCommand`
+    // claude-task-hook.cmd (the header says why two).
+    internal static bool Sync(bool on, bool tasks, string settingsPath, string askCommand, string taskCommand)
     {
         JsonObject root;
         string? original = null;
@@ -68,7 +80,14 @@ static class ClaudeHooks
         else if (on) root = [];
         else return true;
 
-        if (!Apply(root, Wanted(on, tasks), command)) return true;
+        if (root["hooks"] is { } odd && odd is not JsonObject)
+        {
+            ClickTrace.Write($"claude hooks: {settingsPath} left alone, its \"hooks\" is not an object");
+            return false;
+        }
+
+        var (changed, complete) = Apply(root, Wanted(on, tasks, askCommand, taskCommand));
+        if (!changed) return complete;
 
         if (original is not null)
         {
@@ -79,29 +98,38 @@ static class ClaudeHooks
         File.WriteAllText(temporary, root.ToJsonString(Indented));
         File.Move(temporary, settingsPath, overwrite: true);
         ClickTrace.Write($"claude hooks {(on ? $"set ({(tasks ? "with" : "without")} the task events) in" : "removed from")} {settingsPath}");
-        return true;
+        return complete;
     }
 
-    // Each event of Deskbar's, and whether its entry should be there.
-    static IReadOnlyList<(string Name, bool On)> Wanted(bool on, bool tasks) =>
-        [.. AskEvents.Select(name => (name, on)), .. TaskEvents.Select(name => (name, on && tasks))];
+    // Each event of Deskbar's, whether its entry should be there, and the command it runs.
+    static IReadOnlyList<(string Name, bool On, string Command)> Wanted(bool on, bool tasks, string askCommand, string taskCommand) =>
+        [.. AskEvents.Select(name => (name, on, askCommand)), .. TaskEvents.Select(name => (name, on && tasks, taskCommand))];
 
-    // The change itself, on the parsed file: true when anything changed. Public to the tests through Sync.
-    static bool Apply(JsonObject root, IReadOnlyList<(string Name, bool On)> wanted, string command)
+    // The change itself, on the parsed file: whether anything changed, and whether every event could be kept in step
+    // (false when an event's value is not an array and was left alone).
+    static (bool Changed, bool Complete) Apply(JsonObject root, IReadOnlyList<(string Name, bool On, string Command)> wanted)
     {
         var changed = false;
+        var complete = true;
         var hooks = root["hooks"] as JsonObject;
 
-        foreach (var (name, on) in wanted)
+        foreach (var (name, on, command) in wanted)
         {
+            if (hooks?[name] is { } value && value is not JsonArray)
+            {
+                ClickTrace.Write($"claude hooks: \"{name}\" left alone, it is not an array");
+                complete = false;
+                continue;
+            }
+
             var entries = hooks?[name] as JsonArray;
             var ours = entries?.Where(e => IsOurs(e)).ToList() ?? [];
             var current = ours.Count == 1 && CommandOf(ours[0]) == command;
 
             if (on && current) continue;
 
-            // Anything of ours that is not exactly the current entry goes: a stale path from an older Deskbar, or a
-            // duplicate.
+            // Anything of ours that is not exactly the current entry goes: a stale path from an older Deskbar, a task
+            // event still on claude-hook.cmd from before Ruling 35, or a duplicate.
             ours.ForEach(e => entries!.Remove(e));
             changed |= ours.Count > 0;
 
@@ -122,11 +150,14 @@ static class ClaudeHooks
 
         // The same for the whole "hooks" object, once nothing of anyone's is left in it.
         if (changed && hooks is { Count: 0 }) root.Remove("hooks");
-        return changed;
+        return (changed, complete);
     }
 
+    // Deskbar's entries: a command naming either of its scripts, in Deskbar's folder.
     static bool IsOurs(JsonNode? entry) =>
-        CommandOf(entry) is { } command && command.Contains(ClaudeSkill.HookScriptName, StringComparison.OrdinalIgnoreCase)
+        CommandOf(entry) is { } command
+        && (command.Contains(ClaudeSkill.HookScriptName, StringComparison.OrdinalIgnoreCase)
+            || command.Contains(ClaudeSkill.TaskHookScriptName, StringComparison.OrdinalIgnoreCase))
         && command.Contains("Deskbar", StringComparison.OrdinalIgnoreCase);
 
     // The command of an entry that holds exactly one command hook, which is the shape Deskbar writes; anything else is
