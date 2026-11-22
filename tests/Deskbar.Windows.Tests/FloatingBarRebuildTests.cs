@@ -401,14 +401,15 @@ public class FloatingBarRebuildTests
         Assert.NotNull(FloatingBar.GetMarkerBar(both));
     });
 
-    // Petre: "i need to be able to move workspaces up or down in the manage window".
+    // Manage opens, and it no longer manages workspaces. Petre (2026-11-22): "managing workspaces from within settings
+    // is not needed anymore"; the bar adds, renames, deletes and reorders them.
     //
     // Constructing the window is most of the value here: XAML is parsed at construction, so a
     // typo in a Click handler name or an x:Name only fails THEN -- which would otherwise mean
     // crashing the moment Petre opens Manage, with nothing having caught it. Asserting the
-    // reorder buttons exist also stops them being quietly dropped in a later XAML edit.
+    // workspace buttons are absent stops them being quietly brought back in a later XAML edit.
     [Fact]
-    public void The_manage_window_offers_workspace_reordering() => StaThread.Run(() =>
+    public void The_manage_window_opens_without_workspace_management() => StaThread.Run(() =>
     {
         var harness = Harness.Build();
 
@@ -417,8 +418,9 @@ public class FloatingBarRebuildTests
         // Button.Content here is a raw string rather than a TextBlock, so these are collected
         // separately from the text labels.
         var buttons = ButtonLabels(manage);
-        Assert.Contains("↑ Up", buttons);
-        Assert.Contains("↓ Down", buttons);
+        Assert.DoesNotContain("↑ Up", buttons);
+        Assert.DoesNotContain("Rename", buttons);
+        Assert.Null(manage.FindName("WorkspaceList"));
 
         // There must be NO "Show floating bar" checkbox. Petre: "show floating bar doesn't make
         // sense anymore, it's crucial for the app's design" -- the bar is the only surface that

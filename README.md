@@ -77,8 +77,8 @@ both. If you use it for work, Deskbar Pro is US$18.99 once, with priority suppor
    **Not** your Downloads folder: see the note below.
 3. Double-click it. Deskbar opens no window at startup; it goes straight to the notification
    area (the tray) and puts the floating bar on screen.
-4. **Left-click the tray icon** to open Manage and create your first workspace. Or right-click
-   any empty part of the bar and choose **New workspace…**.
+4. Right-click any empty part of the bar and choose **New workspace…** to create your first
+   workspace. Left-clicking the tray icon opens Manage, where the settings are.
 5. In Manage, tick **Start Deskbar with Windows** if you want it always running.
 
 There is no installer and no admin rights are needed. Deskbar writes nothing outside your own
@@ -679,37 +679,39 @@ The axis it arranges on its own is which desktop a window belongs to, and that i
 
 ## Manage
 
-Left-click the tray icon. Six tabs:
+Left-click the tray icon. Five tabs, and Manage opens on the first:
 
-- **Workspaces** adds, renames, removes and reorders them (that order is the bar's row order). Beside the list, **Apps that belong to this workspace** shows the
-  roster, each entry as the exe plus the last title when they differ, with **Remove from this
-  workspace** to forget a placement. Removing an entry never touches a running window; move the
-  app back by hand and a new entry is written. Remove on a workspace here does not close its
-  windows; the bar's **Delete workspace…** does.
+- **Settings** holds every setting, in three sections, and each one applies as you change it.
+  - **Deskbar on this PC**: **Start Deskbar with Windows**, **Check GitHub for new versions** (the
+    Store copy checks the Store) and **Teach Claude Code about Deskbar**.
+  - **The bar**: **Dock the bar to the edge of its screen**, the grain behind the workspace rows
+    (on unless you untick it, `grain on|off` from a script; the top of the bar, its footer and the
+    screen strips stay flat), what the bottom strip shows, and the sliders: how faint the bar goes
+    once the pointer is elsewhere, how long it waits before dimming, how long the dimming takes,
+    how long the pointer rests on an icon before its card appears, the text size, the icon size and
+    the fewest lines the window list keeps. You choose a slider's value by watching the bar while
+    you drag. The hover delay follows Windows' own setting unless you untick its box. **Reset the
+    bar's look to defaults** puts the sliders and the bottom strip back.
+  - **Windows on the desktop**: the outline around the window you are in, **Stop apps flashing on
+    Windows' taskbar while Deskbar runs**, and the gap between tiled windows, which takes effect when
+    you press Apply.
+
+  The version you are running is at the bottom right.
 - **Shortcuts** rebinds the switcher's chord and quick find's.
 - **Time** reports how long you have spent in each workspace today, this week (since Monday) and
   over the last thirty days, by group and by workspace, sortable. Only input counts, keyboard or
   mouse; two minutes without either is idle, so a workspace left on screen overnight accrues
   nothing, and a machine that slept is not credited for the gap. It is counted in fifteen-second
   slices.
-- **Settings** holds the bar's five dials: how faint it goes once the pointer is elsewhere, how
-  long it waits before starting to dim, how long the dimming takes, how long the pointer has
-  to rest on an icon before the card appears, and the size of the bar's text, in half points, all
-  of it moving together. Each applies as you drag the slider, so you choose by
-  looking, and there is nothing to save. The hover delay follows Windows' own setting unless you
-  untick the box and pick your own.
 - **Rules** holds the auto-assignment and renaming patterns.
 - **Deskbar Pro** says whether this copy has [Deskbar Pro](#deskbar-pro). Without it, the tab has
   **Get Pro** with the price in your currency (in the GitHub copy, **Open Deskbar in the Store**)
   and **Check again**, which asks the Store at once, for Pro bought on another PC. With or without
   it, **Report a problem…** is there too, because priority support is what Pro adds.
 
-Below the tabs sit the machine-level settings, among them **Dock the bar to the edge of its screen**,
-**Start Deskbar with Windows** and **Check GitHub for new versions**, with the version you are
-running at the bottom right. One of them is the bar's look: **Give the floating bar's workspace rows
-a fine grain texture instead of a flat background**, on unless you untick it (`grain on|off` from a
-script). The grain lies only behind the workspace rows; the top of the bar (Start, search, the
-pinned apps), its footer (stats, tray, clock) and the strips along the top of each screen stay flat.
+Workspaces are not managed here. The bar adds, renames, deletes and reorders them, and a window
+icon's menu has **Remember *app*'s workspace**, which decides whether that app goes back to its
+workspace when it opens.
 
 <p align="center">
   <img src="docs/images/manage-settings.png" alt="Manage on the Settings tab: an explanation that every change applies at once, the Dimming slider at 75 percent with its description, the start of the Before it starts dimming section, Reset to defaults, and below the tabs the three checkboxes for docking, starting with Windows and checking GitHub, with the version at bottom right." />
@@ -735,7 +737,7 @@ Downloads are https only, from github.com or githubusercontent.com.
 
 **Check for updates…** on the tray and bar menus asks immediately and always answers: you are on
 the latest, a newer one exists, the download is still being built, or the check failed and here
-is the releases page. The checkbox at the bottom of Manage governs only the automatic check; a
+is the releases page. The **Check GitHub for new versions** box in Manage governs only the automatic check; a
 manual check still contacts GitHub, because clicking it is the request. Unticking takes effect at
 the next start. The update check is the app's only network traffic on its own. **Report a
 problem…** sends one report when you press Send, with what you typed, the screenshots you added and

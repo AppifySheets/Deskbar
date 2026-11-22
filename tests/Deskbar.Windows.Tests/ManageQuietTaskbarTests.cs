@@ -43,7 +43,7 @@ public class ManageQuietTaskbarTests
         var window = Opened(manager, autoHide);
 
         Assert.Equal(autoHide, Box(window).IsChecked);
-        Assert.Equal("Stop apps flashing on Windows' taskbar while Deskbar runs (the bar's amber dot shows them instead)", Box(window).Content);
+        Assert.Equal("Stop apps flashing on Windows' taskbar while Deskbar runs", Box(window).Content);
         Assert.Null(manager.State.QuietTaskbarChoice);
         Assert.Equal(0, pulses);
 

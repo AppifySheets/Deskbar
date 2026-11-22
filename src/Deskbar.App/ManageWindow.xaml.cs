@@ -15,23 +15,13 @@ using Deskbar.Windows.Packaging;
 
 namespace Deskbar.App;
 
-// Code-behind, not MVVM: three windows, no view-state worth abstracting. Every handler
+// Code-behind, not MVVM: a settings window, no view-state worth abstracting. Every handler
 // is a thin adapter onto WorkspaceManager, which owns all behavior (and all the tests).
 public partial class ManageWindow : Window
 {
     // DataGrid needs mutable rows; the domain records are immutable. These DTOs are the bridge.
     public sealed class WorkspaceRuleRow { public string Workspace { get; set; } = ""; public RuleMatchKind Kind { get; set; } public string Pattern { get; set; } = ""; }
     public sealed class RenameRuleRow { public RuleMatchKind Kind { get; set; } public string Pattern { get; set; } = ""; public string ShortName { get; set; } = ""; }
-
-    // One roster entry, as a row. Display is precomputed rather than templated because the part
-    // worth reading is a JOIN of two fields -- the exe you would recognise it by, and the title it
-    // last had -- and a DisplayMemberPath cannot compose those. The Entry itself rides along
-    // because RemoveRosterEntry matches on identity, not on the text shown.
-    public sealed class RosterRow
-    {
-        public required InventoryEntry Entry { get; init; }
-        public required string Display { get; init; }
-    }
 
     readonly WorkspaceManager manager;
     readonly ObservableCollection<WorkspaceRuleRow> workspaceRules = [];
@@ -95,27 +85,15 @@ public partial class ManageWindow : Window
         LoadAppearance();
         WorkspaceRulesGrid.ItemsSource = workspaceRules;
         RenameRulesGrid.ItemsSource = renameRules;
-        // Task 10: the Windows tab is now the shared WindowGroupsView (same control the
-        // switcher panel uses). No runChildDialog/afterAction override needed -- this
-        // window doesn't hide-on-deactivate like the panel does, so the default
-        // pass-through dialog runner and a no-op afterAction are exactly right; live
-        // refresh on manager.StateChanged is the view's own responsibility now.
         Reload();
         // The Deskbar Pro tab, painted now and again when the Store's price arrives (ManageWindow.Pro.cs).
         LoadPro();
     }
 
-    // Reviewer (fix round 1, Important): reassigning ItemsSource wholesale drops the
-    // current selection, so every button click ("Rename", "Remove", ...) silently
-    // deselects the very row the user just acted on -- annoying for the common case of
-    // doing several operations on the same workspace in a row. Capture the selected
-    // *identity* (Id -- never the object reference, since Reload() always rebuilds fresh
-    // instances) before rebinding, and re-select the matching item after.
+    // Fills the rules grids, the Time tab and the shortcut boxes from state. Run when the window opens and
+    // after anything here that changes state (Save rules, Apply or Reset on a shortcut).
     void Reload()
     {
-        var selectedWorkspaceId = (WorkspaceList.SelectedItem as Workspace)?.Id;
-
-        WorkspaceList.ItemsSource = manager.State.Workspaces;
         workspaceRules.Clear();
         manager.State.WorkspaceRules.ToList().ForEach(r => workspaceRules.Add(new WorkspaceRuleRow
         {
@@ -126,12 +104,6 @@ public partial class ManageWindow : Window
         renameRules.Clear();
         manager.State.RenameRules.ToList().ForEach(r => renameRules.Add(new RenameRuleRow { Kind = r.Kind, Pattern = r.Pattern, ShortName = r.ShortName }));
 
-        if (selectedWorkspaceId is { } wsId)
-            WorkspaceList.SelectedItem = manager.State.Workspaces.FirstOrDefault(w => w.Id == wsId);
-
-        // After the selection is restored, so it fills for the workspace that ends up selected
-        // rather than for the one that happened to be selected before the rebind.
-        ReloadRoster();
         ReloadTime();
 
         // Reads through WorkspaceManager, not AppState, so the box shows what is actually
@@ -270,90 +242,6 @@ public partial class ManageWindow : Window
         : time < TimeSpan.FromHours(1) ? $"{time.TotalMinutes:0}m"
         : $"{(int)time.TotalHours}h {time.Minutes:00}m";
 
-    // --- roster (#55) ---------------------------------------------------------------------
-    //
-    // Petre's open thread: "No UI removes a roster entry (that lived on the deleted Windows tab),
-    // so a wrong one needs hand-editing %APPDATA%\Deskbar\state.json."
-    //
-    // The roster is the workspace half of placement memory -- identity (exe path + args) ->
-    // workspace, written on every placement and read to put an app back where it was last had --
-    // so a wrong entry keeps sending an app somewhere unwanted for as long as it stands.
-    // WorkspaceManager.RemoveRosterEntry has existed and been tested all along; nothing called it.
-    readonly ObservableCollection<RosterRow> roster = [];
-
-    void ReloadRoster()
-    {
-        // ItemsSource is assigned once, here, rather than on every reload: the collection is
-        // observable, so clearing and refilling it updates the ListBox without dropping its
-        // scroll position -- the same reason the rules grids are bound this way.
-        RosterList.ItemsSource ??= roster;
-        roster.Clear();
-
-        // EVERY entry, not just the ones whose app is closed. The deleted Windows tab dimmed the
-        // not-running ones, which answered a different question -- "what is open right now", which
-        // the floating bar already answers far better. What this list is for is "what will be sent
-        // here in future", and a running app's entry governs that just as much as a closed one's.
-        if (WorkspaceList.SelectedItem is Workspace workspace)
-            manager.State.Inventory.GetValueOrDefault(workspace.Id, [])
-                .ToList()
-                .ForEach(entry => roster.Add(new RosterRow { Entry = entry, Display = Describe(entry) }));
-
-        OnRosterSelected(this, null!);
-    }
-
-    // The exe you would recognise it by, plus the title it last had when the two differ. Both are
-    // needed: five Chrome profiles share an exe and are told apart only by the title, while a
-    // title like "Inbox" says nothing about which app would open.
-    static string Describe(InventoryEntry entry)
-    {
-        var exe = Path.GetFileNameWithoutExtension(entry.ProcessPath);
-        return string.IsNullOrWhiteSpace(entry.Title) || entry.Title.Equals(exe, StringComparison.OrdinalIgnoreCase)
-            ? exe
-            : $"{exe} — {entry.Title}";
-    }
-
-    void OnWorkspaceSelected(object s, SelectionChangedEventArgs e) => ReloadRoster();
-
-    // The button is disabled with nothing selected rather than reporting "nothing selected" after
-    // the fact: there is no useful action to attempt, so there is nothing to explain.
-    void OnRosterSelected(object s, SelectionChangedEventArgs e) =>
-        RemoveRosterButton.IsEnabled = RosterList.SelectedItem is RosterRow;
-
-    void OnRemoveRosterEntry(object s, RoutedEventArgs e)
-    {
-        if (WorkspaceList.SelectedItem is not Workspace workspace || RosterList.SelectedItem is not RosterRow row) return;
-        Report(manager.RemoveRosterEntry(workspace.Id, row.Entry).Map(() => true)).Tap(Reload);
-    }
-
-    void OnAddWorkspace(object s, RoutedEventArgs e) => Report(manager.AddWorkspace(NewWorkspaceName.Text).Map(_ => true)).Tap(Reload);
-    void OnRenameWorkspace(object s, RoutedEventArgs e) => WithSelectedWorkspace(w => manager.RenameWorkspace(w.Id, NewWorkspaceName.Text));
-
-    // The same question the bar's "Delete workspace…" asks, answered by the same Core method,
-    // so one rule holds on every surface. It does NOT go through WithSelectedWorkspace, because that
-    // reloads on any success and a No is a success: Reload throws away unsaved rule edits and a
-    // typed shortcut, and declining a delete must not cost anyone those. Reload only after
-    // a real delete.
-    void OnRemoveWorkspace(object s, RoutedEventArgs e)
-    {
-        if (WorkspaceList.SelectedItem is not Workspace workspace)
-        {
-            MessageBox.Show("Select a workspace first.");
-            return;
-        }
-
-        Report(manager.DeleteWorkspaceAfterConfirming(workspace.Id, text =>
-                MessageBox.Show(this, text, "Deskbar", MessageBoxButton.YesNo,
-                    MessageBoxImage.Warning, MessageBoxResult.No) == MessageBoxResult.Yes))
-            .Tap(deleted => { if (deleted) Reload(); });
-    }
-
-    // Petre: "i need to be able to move workspaces up or down in the manage window".
-    // WithSelectedWorkspace already reloads and re-selects by Id, so the selection follows
-    // the workspace as it moves and ↑ can simply be clicked repeatedly. MoveWorkspace
-    // returns success for an out-of-range move, so hitting ↑ on the top row does nothing
-    // rather than popping an error box.
-    void OnMoveWorkspaceUp(object s, RoutedEventArgs e) => WithSelectedWorkspace(w => manager.MoveWorkspace(w.Id, -1));
-    void OnMoveWorkspaceDown(object s, RoutedEventArgs e) => WithSelectedWorkspace(w => manager.MoveWorkspace(w.Id, +1));
     // True while ShowStartup is setting the box from the switch, so the Checked/Unchecked that raises is not
     // taken for the user flipping it. Before this guard, opening Manage with autostart on called Enable,
     // which re-pointed the Run value at whichever build opened the window, a development copy included.
@@ -405,18 +293,18 @@ public partial class ManageWindow : Window
     // down a live timer from here to buy that would mean this window reaching into the app's
     // composition root for no outcome anybody would notice.
     void OnCheckForUpdatesToggled(object s, RoutedEventArgs e) =>
-        manager.SetCheckForUpdates(CheckForUpdates.IsChecked == true).TapError(err => MessageBox.Show(err));
+        manager.SetCheckForUpdates(CheckForUpdates.IsChecked == true).TapError(Complain);
 
     // The bar follows the setting from the state pulse this sends (FloatingBar.FollowDockSetting).
     void OnDockBarToggled(object s, RoutedEventArgs e) =>
-        manager.SetDockBar(DockBar.IsChecked == true).TapError(err => MessageBox.Show(err));
+        manager.SetDockBar(DockBar.IsChecked == true).TapError(Complain);
 
     // The app flips Windows' setting from the state pulse this sends (see where App wires
     // TaskbarFlashingSwitch.Sync); this window never writes the registry itself, which is also what keeps the
     // tests that build it away from the real setting.
     void OnQuietTaskbarToggled(object s, RoutedEventArgs e)
     {
-        manager.SetQuietTaskbar(QuietTaskbar.IsChecked == true, taskbarAutoHides()).TapError(err => MessageBox.Show(err));
+        manager.SetQuietTaskbar(QuietTaskbar.IsChecked == true, taskbarAutoHides()).TapError(Complain);
         ShowQuietTaskbarNote();
     }
 
@@ -435,15 +323,15 @@ public partial class ManageWindow : Window
 
     // The app writes or removes the skill from the state pulse this sends (see where App wires ClaudeSkill.Sync).
     void OnClaudeSkillToggled(object s, RoutedEventArgs e) =>
-        manager.SetClaudeSkill(ClaudeSkill.IsChecked == true).TapError(err => MessageBox.Show(err));
+        manager.SetClaudeSkill(ClaudeSkill.IsChecked == true).TapError(Complain);
 
     // The bar draws or clears the outlines on the next rebuild (FloatingBar.ShowFocusRings).
     void OnFocusRingToggled(object s, RoutedEventArgs e) =>
-        manager.SetFocusRing(FocusRing.IsChecked == true).TapError(err => MessageBox.Show(err));
+        manager.SetFocusRing(FocusRing.IsChecked == true).TapError(Complain);
 
     // The bar shows or hides the grain on the next rebuild (FloatingBar.ApplyGrainSetting).
     void OnGrainToggled(object s, RoutedEventArgs e) =>
-        manager.SetGrain(Grain.IsChecked == true).TapError(err => MessageBox.Show(err));
+        manager.SetGrain(Grain.IsChecked == true).TapError(Complain);
 
     // The gap between tiles, 0 to 64 pixels at 100% scaling (the Tiler scales it by each screen's DPI). A word
     // that is not a number is refused here; a number out of range is refused by SetTileGap with its own reason.
@@ -454,7 +342,7 @@ public partial class ManageWindow : Window
                 : Result.Failure("The tile gap must be a whole number of pixels between 0 and 64."))
             .TapError(err =>
             {
-                MessageBox.Show(err);
+                Complain(err);
                 TileGapBox.Text = manager.State.TileGap.ToString();
             });
 
@@ -543,7 +431,7 @@ public partial class ManageWindow : Window
     {
         if (loading) return;
         ShowAppearanceValues();
-        manager.SetIconScale(IconSizeSlider.Value / 100).TapError(err => MessageBox.Show(this, err, "Deskbar"));
+        manager.SetIconScale(IconSizeSlider.Value / 100).TapError(Complain);
     }
 
     // The text size slider, applied live like the others: each step rebuilds the bar at the new size. Behind
@@ -552,7 +440,7 @@ public partial class ManageWindow : Window
     {
         if (loading) return;
         ShowAppearanceValues();
-        manager.SetBarTextOffset(TextSizeSlider.Value).TapError(err => MessageBox.Show(this, err, "Deskbar"));
+        manager.SetBarTextOffset(TextSizeSlider.Value).TapError(Complain);
     }
 
     // THE BOTTOM STRIP'S BOXES, one per StripItem, built on first use rather than written out in XAML: the enum
@@ -590,7 +478,7 @@ public partial class ManageWindow : Window
     {
         if (loading) return;
         manager.SetHiddenStripItems(StripItemBoxes().Where(box => box.IsChecked != true).Select(box => (StripItem)box.Tag))
-            .TapError(err => MessageBox.Show(this, err, "Deskbar"));
+            .TapError(Complain);
     }
 
     // The window list's floor, the same way: applied live, each step rebuilds the bar with that many lines.
@@ -598,7 +486,7 @@ public partial class ManageWindow : Window
     {
         if (loading) return;
         ShowAppearanceValues();
-        manager.SetWindowListMinimumLines((int)ListLinesSlider.Value).TapError(err => MessageBox.Show(this, err, "Deskbar"));
+        manager.SetWindowListMinimumLines((int)ListLinesSlider.Value).TapError(Complain);
     }
 
     // Every control on the tab lands here, and it writes on every change rather than on a Save button
@@ -629,19 +517,19 @@ public partial class ManageWindow : Window
                 // Null is what "inherit Windows' hover time" means, and it is the reason the checkbox
                 // exists rather than a magic value on the slider.
                 hoverDwellMs: InheritHoverDwell.IsChecked == true ? null : HoverDwellSlider.Value)
-            .TapError(err => MessageBox.Show(this, err, "Deskbar"));
+            .TapError(Complain);
     }
 
     // Clears the stored values rather than writing today's defaults as numbers, which is what keeps a
     // later change of default reaching anyone who pressed this.
     void OnResetAppearance(object sender, RoutedEventArgs e)
     {
-        manager.SetBarAppearance(null, null, null, null).TapError(err => MessageBox.Show(this, err, "Deskbar"));
-        manager.SetBarTextOffset(null).TapError(err => MessageBox.Show(this, err, "Deskbar"));
-        manager.SetWindowListMinimumLines(null).TapError(err => MessageBox.Show(this, err, "Deskbar"));
+        manager.SetBarAppearance(null, null, null, null).TapError(Complain);
+        manager.SetBarTextOffset(null).TapError(Complain);
+        manager.SetWindowListMinimumLines(null).TapError(Complain);
         // Everything back on the strip, and every icon back to its built size.
-        manager.SetHiddenStripItems([]).TapError(err => MessageBox.Show(this, err, "Deskbar"));
-        manager.SetIconScale(null).TapError(err => MessageBox.Show(this, err, "Deskbar"));
+        manager.SetHiddenStripItems([]).TapError(Complain);
+        manager.SetIconScale(null).TapError(Complain);
         LoadAppearance();
     }
 
@@ -652,7 +540,7 @@ public partial class ManageWindow : Window
             .Select(r => r.Pattern)
             .Concat(renameRules.Where(r => r.Kind == RuleMatchKind.TitleRegex && !IsValidRegex(r.Pattern)).Select(r => r.Pattern))
             .ToList();
-        if (invalid.Count > 0) { MessageBox.Show($"Invalid regex pattern(s):\n{string.Join("\n", invalid)}"); return; }
+        if (invalid.Count > 0) { Complain($"Invalid regex pattern(s):\n{string.Join("\n", invalid)}"); return; }
 
         // Reviewer (fix round 1, Critical, defense in depth): WorkspaceManager now rejects
         // duplicate names going forward, but state.json written before that guard existed
@@ -665,7 +553,7 @@ public partial class ManageWindow : Window
             .GroupBy(w => w.Name, StringComparer.OrdinalIgnoreCase)
             .ToDictionary(g => g.Key, g => g.First().Id, StringComparer.OrdinalIgnoreCase);
         var unknown = workspaceRules.Where(r => !byName.ContainsKey(r.Workspace)).Select(r => r.Workspace).ToList();
-        if (unknown.Count > 0) { MessageBox.Show($"Unknown workspace(s):\n{string.Join("\n", unknown)}"); return; }
+        if (unknown.Count > 0) { Complain($"Unknown workspace(s):\n{string.Join("\n", unknown)}"); return; }
 
         Report(manager.SetRules(
             workspaceRules.Select(r => new WorkspaceRule(byName[r.Workspace], r.Kind, r.Pattern)).ToList(),
@@ -678,11 +566,10 @@ public partial class ManageWindow : Window
         catch (ArgumentException) { return false; }
     }
 
-    Result<bool> WithSelectedWorkspace(Func<Workspace, Result> action) =>
-        (WorkspaceList.SelectedItem is Workspace w ? action(w) : Result.Failure("Select a workspace first."))
-            .Map(() => true)
-            .Tap(Reload)
-            .TapError(err => MessageBox.Show(err));
+    Result<bool> Report(Result<bool> result) => result.TapError(Complain);
 
-    static Result<bool> Report(Result<bool> result) => result.TapError(err => MessageBox.Show(err));
+    // Every refusal on this window is shown through here: owned by Manage, so the box cannot open behind it (an
+    // ownerless MessageBox belongs to no window and can land under the one the user is looking at), and titled
+    // "Deskbar" like the app's other boxes rather than with an empty caption.
+    void Complain(string error) => MessageBox.Show(this, error, "Deskbar");
 }

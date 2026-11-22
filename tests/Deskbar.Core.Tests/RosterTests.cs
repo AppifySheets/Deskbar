@@ -48,15 +48,14 @@ public class RosterTests
     }
 
     [Fact]
-    public void Manual_add_and_remove_roster_entry()
+    // Adding only: removing an entry by hand went with Manage's Workspaces tab (see WorkspaceManager, where
+    // RemoveRosterEntry was).
+    public void Manual_add_roster_entry()
     {
         var (manager, work, _) = Started();
         var added = manager.AddRosterEntry(work.Id, @"C:\Tools\gitextensions.exe", "browse C:\\repos\\X");
         Assert.True(added.IsSuccess);
         Assert.Single(store.Stored.Inventory[work.Id]);
-
-        Assert.True(manager.RemoveRosterEntry(work.Id, added.Value).IsSuccess);
-        Assert.Empty(store.Stored.Inventory[work.Id]);
     }
 
     [Fact]
