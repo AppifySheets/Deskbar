@@ -67,6 +67,10 @@ public partial class FloatingBar : Window
         // ...and the Deskbar Pro reminder above that (FloatingBar.ProReminder.cs), hidden until the App says it is due.
         BuildProReminder();
 
+        // ...and the task list at the top of the footer (FloatingBar.TaskList.cs), hidden until the App hands over the
+        // task service.
+        BuildTaskList();
+
         // A right-click on bare background, which docking made most of the bar (see BuildBarMenu).
         BuildBarMenu();
 
@@ -280,7 +284,9 @@ public partial class FloatingBar : Window
     //     over another row, and the bar is the drop target being aimed at.
     //   * A context menu is open. The menu is its own window, so the pointer standing in it
     //     counts as having left the bar -- which would fade the row the menu belongs to.
-    bool HoldsFullStrength => candidate is not null || draggingWindow || openMenu?.IsOpen == true;
+    // ...and while a note is being typed into the task list's box (FloatingBar.TaskList.cs): a bar fading away under
+    // the text being typed would be in the way of exactly what it was asked to do.
+    bool HoldsFullStrength => candidate is not null || draggingWindow || openMenu?.IsOpen == true || TaskListAdding;
 
     bool draggingWindow;
     ContextMenu? openMenu;
@@ -2110,6 +2116,11 @@ public partial class FloatingBar : Window
             StopPhases();
         }
 
+        // The task list borrows the rows' workspace names and colours, which this rebuild has just refreshed, and
+        // skips any pulse that arrived while it ran, so it is painted here, once the rebuild is over and never inside
+        // it (FloatingBar.TaskList.cs). A no-op when nothing it shows has changed.
+        PaintTaskList();
+
         // The suppressed pulse still carried real news (a window opened, closed or moved),
         // so serve it -- but via BeginInvoke rather than a synchronous loop. Queuing hands
         // the message pump a turn between passes, so a title-rewriting browser cannot spin
@@ -2190,6 +2201,8 @@ public partial class FloatingBar : Window
         {
             rebuilding = false;
         }
+        // ...and the task list after it, as Rebuild does.
+        PaintTaskList();
     }
 
     void RebuildCore(bool fresh = true)

@@ -1,0 +1,361 @@
+using System.IO;
+using System.Windows;
+using System.Windows.Automation;
+using System.Windows.Controls;
+using System.Windows.Documents;
+using System.Windows.Input;
+using System.Windows.Media;
+using CSharpFunctionalExtensions;
+using Deskbar.App;
+using Deskbar.Core.Persistence;
+using Deskbar.Core.Tasks;
+
+namespace Deskbar.Windows.Tests;
+
+// The task list at the bottom of the bar (FloatingBar.TaskList.cs; docs/superpowers/specs/2026-11-22-tasks-board-design.md,
+// "The bar"). Built over the shared two-workspace harness (GEPHA current, Sparrow beside it; see Harness in
+// FloatingBarRebuildTests) with a real TaskService on an in-memory store, so every change goes through the same
+// service the App hands the bar. No Claude task can be made from the app yet, so Claude's tasks come from
+// TaskService.Create with a session, the way a session's `task create` will make them.
+public class FloatingBarTaskListTests
+{
+    // Keeps nothing: the board in memory is the service's own, and these tests read it there.
+    sealed class MemoryStore : ITaskStore
+    {
+        public Result<TaskBoard> Load() => TaskBoard.Empty;
+
+        public Result Save(TaskBoard board) => Result.Success();
+    }
+
+    sealed class ListBar : IDisposable
+    {
+        public required Harness Harness { get; init; }
+        public required FloatingBar Bar { get; init; }
+        public required TaskService Tasks { get; init; }
+
+        public Guid Gepha => Harness.Manager.State.Workspaces.Single(w => w.Name == "GEPHA").Id;
+
+        public FrameworkElement List => (FrameworkElement)Bar.FindName("TaskListLine")!;
+
+        // The task lines on show, in order: the buttons that carry a TaskLine.
+        public IReadOnlyList<Button> Lines => Inside(List).OfType<Button>().Where(b => b.Tag is TaskLine).ToList();
+
+        public void Dispose() => Bar.Close();
+    }
+
+    static readonly DateTimeOffset Start = new(2026, 11, 22, 9, 0, 0, TimeSpan.Zero);
+
+    // Each read of the clock is a minute later, so every task is raised at its own time and the pile's order is the
+    // order the test made them in, newest first.
+    static ListBar Build(Func<Guid, Result>? goTo = null, Action? openWindow = null, TaskService? tasks = null, Func<string, Maybe<nint>>? sessionWindow = null)
+    {
+        var harness = Harness.Build();
+        var minutes = 0;
+        var service = tasks ?? new TaskService(new MemoryStore(), () => Start.AddMinutes(minutes++));
+        var bar = new FloatingBar(harness.Manager)
+        {
+            Left = -32000,
+            Top = -32000,
+            SendShellKeys = _ => { },
+            PressSpace = () => { },
+            Tasks = service,
+            GoToTask = goTo ?? (_ => Result.Success()),
+            OpenTasksWindow = openWindow,
+            SessionWindow = sessionWindow ?? (_ => Maybe<nint>.None),
+        };
+        bar.ShowBar();
+        bar.UpdateLayout();
+        return new ListBar { Harness = harness, Bar = bar, Tasks = service };
+    }
+
+    static IEnumerable<object> Inside(object node) =>
+        new[] { node }.Concat(node is DependencyObject d ? LogicalTreeHelper.GetChildren(d).Cast<object>().SelectMany(Inside) : []);
+
+    static Button ButtonNamed(object scope, string name) =>
+        Inside(scope).OfType<Button>().Single(b => AutomationProperties.GetName(b) == name);
+
+    static bool HasButtonNamed(object scope, string name) =>
+        Inside(scope).OfType<Button>().Any(b => AutomationProperties.GetName(b) == name);
+
+    static void Click(Button button) => button.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+
+    static void Press(FloatingBar bar, UIElement target, Key key) =>
+        target.RaiseEvent(new KeyEventArgs(Keyboard.PrimaryDevice, PresentationSource.FromVisual(bar), 0, key) { RoutedEvent = Keyboard.PreviewKeyDownEvent });
+
+    // What a line says, its runs joined: the title, then its status line or question.
+    static string TextOf(Button line) =>
+        string.Concat(Inside(line).OfType<TextBlock>().Where(t => Equals(t.Tag, "task-text"))
+            .SelectMany(t => t.Inlines.OfType<Run>()).Select(r => r.Text));
+
+    static Border EdgeOf(Button line) => Inside(line).OfType<Border>().Single(b => Equals(b.Tag, "task-line"));
+
+    static bool HasClaudeTag(Button line) => Inside(line).OfType<FrameworkElement>().Any(e => Equals(e.Tag, "task-claude-tag"));
+
+    static TaskSession Session(string id) => new(id, @"C:\repos\Deskbar", Start, Maybe<DateTimeOffset>.None);
+
+    static readonly Color Orange = Color.FromRgb(0xFF, 0xA7, 0x26);
+
+    [Fact]
+    public void Three_lines_show_and_the_rest_wait_behind_more() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        Enumerable.Range(1, 5).ToList().ForEach(i => t.Tasks.AddNote($"Note {i}", Maybe<Guid>.None));
+
+        Assert.True(t.Bar.TaskListShown);
+        Assert.Equal(["Note 5", "Note 4", "Note 3"], t.Lines.Select(l => ((TaskLine)l.Tag).Title));
+        Assert.Equal("+2", t.Bar.TaskListMoreText);
+    });
+
+    // Waiting on you sorts first, so hidden waiting tasks only exist when more than three wait; the button says so,
+    // in the asking orange, so none is out of sight without a sign.
+    [Fact]
+    public void Hidden_waiting_tasks_are_counted_in_orange() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        Enumerable.Range(1, 5).ToList().ForEach(i =>
+        {
+            var made = t.Tasks.Create($"Task {i}", t.Gepha, Session($"s{i}")).Value;
+            t.Tasks.Ask(made.Id, $"Question {i}?");
+        });
+
+        Assert.Equal(3, t.Lines.Count);
+        Assert.Equal("+2 waiting", t.Bar.TaskListMoreText);
+        var label = Inside(ButtonNamed(t.List, "More tasks")).OfType<TextBlock>().Single();
+        Assert.Equal(Orange, ((SolidColorBrush)label.Foreground).Color);
+    });
+
+    [Fact]
+    public void A_claude_line_is_marked() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        var task = t.Tasks.Create("Tasks redesign", t.Gepha, Session("s1")).Value;
+        t.Tasks.SetStatusLine(task.Id, "waiting for CI on #398");
+        t.Tasks.AddNote("Dishwasher tablets", Maybe<Guid>.None);
+
+        var claude = t.Lines.Single(l => ((TaskLine)l.Tag).Id == task.Id);
+        Assert.True(HasClaudeTag(claude));
+        var edge = EdgeOf(claude);
+        Assert.Equal(Orange, ((SolidColorBrush)edge.BorderBrush).Color);
+        Assert.Equal(3, edge.BorderThickness.Left);
+        Assert.Contains("Tasks redesign", TextOf(claude));
+        Assert.Contains("waiting for CI on #398", TextOf(claude));
+
+        // A note is plain: no tag, and the same edge width drawn in no colour, so the two kinds line up.
+        var note = t.Lines.Single(l => ((TaskLine)l.Tag).Title == "Dishwasher tablets");
+        Assert.False(HasClaudeTag(note));
+        Assert.Equal(3, EdgeOf(note).BorderThickness.Left);
+        Assert.Equal(0, ((SolidColorBrush)EdgeOf(note).BorderBrush).Color.A);
+
+        // Waiting on you: the question takes the status line's place.
+        t.Tasks.Ask(task.Id, "OK to restart Deskbar for the live check?");
+        claude = t.Lines.Single(l => ((TaskLine)l.Tag).Id == task.Id);
+        Assert.Contains("OK to restart Deskbar for the live check?", TextOf(claude));
+        Assert.DoesNotContain("waiting for CI", TextOf(claude));
+    });
+
+    // The VS Code icon of the session's window comes from the App's lookup by folder; no window, no icon.
+    [Fact]
+    public void A_claude_line_carries_its_session_window() => StaThread.Run(() =>
+    {
+        var asked = new List<string>();
+        using var t = Build(sessionWindow: folder =>
+        {
+            asked.Add(folder);
+            return Maybe.From((nint)101);
+        });
+        t.Tasks.Create("Tasks redesign", t.Gepha, Session("s1"));
+        t.Tasks.AddNote("Dishwasher tablets", Maybe<Guid>.None);
+
+        var claude = t.Lines.Single(l => ((TaskLine)l.Tag).Claudes);
+        Assert.Equal((nint)101, ((TaskLine)claude.Tag).Window.Value);
+        Assert.Contains(Inside(claude).OfType<FrameworkElement>(), e => Equals(e.Tag, "task-window-icon"));
+        Assert.Contains(@"C:\repos\Deskbar", asked);
+        var note = t.Lines.Single(l => !((TaskLine)l.Tag).Claudes);
+        Assert.DoesNotContain(Inside(note).OfType<FrameworkElement>(), e => Equals(e.Tag, "task-window-icon"));
+    });
+
+    [Fact]
+    public void A_note_has_a_tick_box_that_closes_it() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        var note = t.Tasks.AddNote("Dishwasher tablets", Maybe<Guid>.None).Value;
+
+        var line = Assert.Single(t.Lines);
+        Assert.False(HasButtonNamed(line, "Close task"));
+        Click(ButtonNamed(line, "Tick off"));
+
+        Assert.Equal(TaskStatus.Closed, t.Tasks.Board.Tasks.Single(x => x.Id == note.Id).Status);
+        Assert.Empty(t.Lines);
+    });
+
+    [Fact]
+    public void A_done_claude_task_has_a_close_button() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        var working = t.Tasks.Create("Still going", t.Gepha, Session("s1")).Value;
+        var done = t.Tasks.Create("Merged", t.Gepha, Session("s2")).Value;
+        t.Tasks.MarkDone(done.Id);
+
+        var workingLine = t.Lines.Single(l => ((TaskLine)l.Tag).Id == working.Id);
+        Assert.False(HasButtonNamed(workingLine, "Close task"));
+        Assert.False(HasButtonNamed(workingLine, "Tick off"));
+
+        var doneLine = t.Lines.Single(l => ((TaskLine)l.Tag).Id == done.Id);
+        Click(ButtonNamed(doneLine, "Close task"));
+
+        Assert.Equal(TaskStatus.Closed, t.Tasks.Board.Tasks.Single(x => x.Id == done.Id).Status);
+        Assert.DoesNotContain(t.Lines, l => ((TaskLine)l.Tag).Id == done.Id);
+    });
+
+    [Fact]
+    public void A_claude_task_with_no_live_session_says_so() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        var task = t.Tasks.Create("Portal last seen", t.Gepha, Session("s1")).Value;
+        t.Tasks.SetStatusLine(task.Id, "migration ready");
+        t.Tasks.SessionEnded("s1");
+
+        var line = Assert.Single(t.Lines);
+        Assert.Equal("migration ready · no live session", ((TaskLine)line.Tag).Detail);
+        Assert.Contains("migration ready · no live session", TextOf(line));
+    });
+
+    [Fact]
+    public void Add_puts_a_note_on_the_current_workspace() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        var box = () => Inside(t.List).OfType<TextBox>().Single(b => Equals(b.Tag, "task-add-box"));
+        Assert.False(t.Bar.TaskListAdding);
+
+        // Straight in: the current workspace's chip is the one ticked.
+        Click(ButtonNamed(t.List, "Add a task"));
+        Assert.True(t.Bar.TaskListAdding);
+        Assert.Equal(Visibility.Visible, box().Visibility);
+        Assert.Equal(t.Gepha, t.Bar.TaskAddTarget.Value);
+        box().Text = "Call the accountant";
+        Press(t.Bar, box(), Key.Enter);
+
+        var first = Assert.Single(t.Tasks.Board.Tasks);
+        Assert.Equal("Call the accountant", first.Title);
+        Assert.Equal(t.Gepha, first.WorkspaceId.Value);
+        Assert.False(t.Bar.TaskListAdding);
+
+        // "none" makes it a free note.
+        Click(ButtonNamed(t.List, "Add a task"));
+        box().Text = "Dishwasher tablets";
+        Click(ButtonNamed(t.List, "none"));
+        Press(t.Bar, box(), Key.Enter);
+
+        var free = t.Tasks.Board.Tasks.Single(x => x.Title == "Dishwasher tablets");
+        Assert.True(free.WorkspaceId.HasNoValue);
+        Assert.Equal(TaskStatus.Backlog, free.Status);
+        Assert.False(free.IsClaudes);
+
+        // Esc drops what was typed and adds nothing.
+        Click(ButtonNamed(t.List, "Add a task"));
+        box().Text = "Never mind";
+        Press(t.Bar, box(), Key.Escape);
+
+        Assert.Equal(2, t.Tasks.Board.Tasks.Count);
+        Assert.False(t.Bar.TaskListAdding);
+        Assert.Equal("", box().Text);
+    });
+
+    [Fact]
+    public void Clicking_a_line_goes_to_its_workspace() => StaThread.Run(() =>
+    {
+        var went = new List<Guid>();
+        using var t = Build(goTo: id =>
+        {
+            went.Add(id);
+            return Result.Success();
+        });
+        var errand = t.Tasks.AddNote("Dishwasher tablets", Maybe<Guid>.None).Value;
+        var onGepha = t.Tasks.AddNote("Review the migration", t.Gepha).Value;
+
+        Click(t.Lines.Single(l => ((TaskLine)l.Tag).Id == onGepha.Id));
+        Click(t.Lines.Single(l => ((TaskLine)l.Tag).Id == errand.Id));
+
+        // The note on no workspace has nowhere to go, so its click does nothing.
+        Assert.Equal([onGepha.Id], went);
+    });
+
+    [Fact]
+    public void More_shows_everything_until_the_window_exists() => StaThread.Run(() =>
+    {
+        using (var t = Build())
+        {
+            Enumerable.Range(1, 5).ToList().ForEach(i => t.Tasks.AddNote($"Note {i}", Maybe<Guid>.None));
+
+            Click(ButtonNamed(t.List, "More tasks"));
+            Assert.Equal(5, t.Lines.Count);
+
+            Click(ButtonNamed(t.List, "More tasks"));
+            Assert.Equal(3, t.Lines.Count);
+            Assert.Equal("+2", t.Bar.TaskListMoreText);
+        }
+
+        // Once the App has a window to open, the button opens it and the list stays at three.
+        var opened = 0;
+        using (var t = Build(openWindow: () => opened++))
+        {
+            Enumerable.Range(1, 5).ToList().ForEach(i => t.Tasks.AddNote($"Note {i}", Maybe<Guid>.None));
+
+            Click(ButtonNamed(t.List, "More tasks"));
+            Assert.Equal(1, opened);
+            Assert.Equal(3, t.Lines.Count);
+        }
+    });
+
+    [Fact]
+    public void The_list_hides_with_its_strip_item() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        Assert.True(t.Bar.TaskListShown);
+
+        t.Harness.Manager.SetHiddenStripItems([StripItem.Tasks]);
+        Assert.False(t.Bar.TaskListShown);
+
+        t.Harness.Manager.SetHiddenStripItems([]);
+        Assert.True(t.Bar.TaskListShown);
+    });
+
+    // A tasks.json that could not be read must not pass for an empty list. The real store is used, so the line's
+    // promise (a .bak kept beside tasks.json) is checked against what the store really did.
+    [Fact]
+    public void A_failed_load_shows_one_line_with_a_dismiss() => StaThread.Run(() =>
+    {
+        var folder = Path.Combine(Path.GetTempPath(), "deskbar-tasklist-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(folder);
+        try
+        {
+            File.WriteAllText(Path.Combine(folder, "tasks.json"), "{ not json");
+            var service = new TaskService(new JsonTaskStore(folder), () => Start);
+            service.Load();
+            var reason = service.LoadProblem.Value;
+
+            using var t = Build(tasks: service);
+            var problem = Inside(t.List).OfType<TextBlock>().First(b => Equals(b.Tag, "task-load-problem"));
+            Assert.StartsWith("Tasks could not be read.", problem.Text);
+            Assert.Contains(".bak", problem.Text);
+            Assert.Equal(reason, problem.ToolTip);
+
+            Click(ButtonNamed(t.List, "Dismiss"));
+            Assert.True(service.LoadProblem.HasNoValue);
+            Assert.DoesNotContain(Inside(t.List).OfType<TextBlock>(), b => Equals(b.Tag, "task-load-problem"));
+        }
+        finally
+        {
+            Directory.Delete(folder, recursive: true);
+        }
+    });
+
+    // The words, without a window: when the store says it kept the file, the line promises the .bak; when it could
+    // not move the file aside, the line says to copy it somewhere safe instead.
+    [Fact]
+    public void The_failed_load_line_promises_a_bak_only_when_one_was_kept()
+    {
+        Assert.Contains(".bak", FloatingBar.LoadProblemLine("Could not read tasks.json: bad; kept tasks.json as tasks.json.20261122-090000.bak"));
+        Assert.Contains("copy it somewhere safe", FloatingBar.LoadProblemLine("Could not read tasks.json: bad; could not keep C:\\x\\tasks.json aside: locked"));
+    }
+}

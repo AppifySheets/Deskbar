@@ -15,6 +15,12 @@
     <InternalsVisibleTo Include="Deskbar.Windows.Tests" />
   </ItemGroup>
 
+  <!-- Deskbar's task status (Deskbar.Core.Tasks), not System.Threading.Tasks.TaskStatus, which ImplicitUsings also
+       brings in. One alias for the project rather than one per file. -->
+  <ItemGroup>
+    <Using Include="Deskbar.Core.Tasks.TaskStatus" Alias="TaskStatus" />
+  </ItemGroup>
+
   <!-- Finding 7 (reviewer, promoted Minor): System.Drawing.Common removed — the
        WindowsDesktop/UseWPF framework already provides System.Drawing.Common on Windows,
        so the explicit PackageReference only produced an NU1510 "unnecessary reference"

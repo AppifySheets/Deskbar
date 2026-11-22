@@ -458,7 +458,7 @@ public partial class ManageWindow : Window
         StripItem.Language => "Language",
         StripItem.Clock => "Clock",
         StripItem.ShowDesktop => "Show desktop",
-        StripItem.Tasks => "Tasks",
+        StripItem.Tasks => "Task list",
         _ => item.ToString(),
     };
 
