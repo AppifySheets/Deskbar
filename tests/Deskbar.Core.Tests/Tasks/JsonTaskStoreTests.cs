@@ -49,6 +49,9 @@ public sealed class JsonTaskStoreTests : IDisposable
         Assert.Equal(expected.Created, actual.Created);
         Assert.Equal(expected.UpdatedAt, actual.UpdatedAt);
         Assert.Equal(expected.Raised, actual.Raised);
+        Assert.Equal(expected.Important, actual.Important);
+        Assert.Equal(expected.Urgent, actual.Urgent);
+        Assert.Equal(expected.Rank, actual.Rank);
         Assert.Equal(expected.Sessions, actual.Sessions);
         Assert.Equal(expected.Comments, actual.Comments);
     }
@@ -266,6 +269,52 @@ public sealed class JsonTaskStoreTests : IDisposable
         Assert.Equal(task.Created, task.Raised);
         Assert.Empty(task.Sessions);
         Assert.Empty(task.Comments);
+    }
+
+    // Task 12: the two flags and the manual order are saved, still version 2 (they are optional fields, so an older
+    // version 2 build reads the file and ignores them).
+    [Fact]
+    public void The_flags_and_the_order_round_trip()
+    {
+        var store = new JsonTaskStore(dir);
+        var board = Sample();
+        board = new TaskBoard(board.Tasks.Select((t, i) => t with { Important = i == 0, Urgent = i == 1, Rank = 2.5 - i }).ToArray());
+
+        Assert.True(store.Save(board).IsSuccess);
+        var loaded = store.Load().Value;
+
+        Assert.Equal(board.Tasks.Select(t => (t.Important, t.Urgent, t.Rank)), loaded.Tasks.Select(t => (t.Important, t.Urgent, t.Rank)));
+        var text = File.ReadAllText(TasksPath);
+        Assert.Contains("\"version\": 2", text);
+        Assert.Contains("\"important\": true", text);
+        Assert.Contains("\"urgent\": true", text);
+        Assert.Contains("\"rank\": 2.5", text);
+    }
+
+    // A version 2 file written before the order existed has no rank: the tasks come back in the order the bar showed
+    // them then (Waiting on you, then Done, then the rest, each latest raised first), so the first start of this build
+    // moves no line. No flags means quadrant IV for every task.
+    [Fact]
+    public void A_file_without_ranks_keeps_the_order_it_had()
+    {
+        Directory.CreateDirectory(dir);
+        static string Task(int n, string status, int minute) => $$"""
+            { "id": "aaaaaaaa-0000-0000-0000-00000000000{{n}}", "title": "t{{n}}", "status": "{{status}}",
+              "created": "2026-11-22T09:00:00+00:00", "updatedAt": "2026-11-22T09:00:00+00:00",
+              "raised": "2026-11-22T09:{{minute:D2}}:00+00:00" }
+            """;
+        File.WriteAllText(TasksPath, $$"""
+            { "version": 2, "tasks": [ {{Task(1, "Backlog", 1)}}, {{Task(2, "Done", 2)}}, {{Task(3, "InProgress", 3)}},
+              {{Task(4, "Done", 4)}}, {{Task(5, "Backlog", 5)}} ] }
+            """);
+
+        var board = new JsonTaskStore(dir).Load().Value;
+
+        Assert.Equal(["t4", "t2", "t5", "t3", "t1"], board.Pile().Select(t => t.Title));
+        Assert.All(board.Tasks, t => Assert.Equal(Quadrant.IV, t.Quadrant));
+        // Once loaded, the order is the stored one: a drop is relative to these ranks, and a save writes them.
+        Assert.True(new JsonTaskStore(dir).Save(board).IsSuccess);
+        Assert.Equal(["t4", "t2", "t5", "t3", "t1"], new JsonTaskStore(dir).Load().Value.Pile().Select(t => t.Title));
     }
 
     // One version 2 task in local (+04:00) time, with a session and a comment, as a person might edit it.

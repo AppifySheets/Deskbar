@@ -196,8 +196,9 @@ public class RemoteControlTaskTests
 
         var entries = Json(Run(manager, "task", "list")).EnumerateArray().ToList();
 
-        Assert.Equal(["Claude's one", "Waiting one", "Done one", "Backlog one"], entries.Select(e => e.GetProperty("title").GetString()));
-        Assert.Equal(["waiting", "waiting", "done", "backlog"], entries.Select(e => e.GetProperty("status").GetString()));
+        // Task 12: Done no longer sorts ahead; it keeps its place in its quadrant, where the newer note is on top.
+        Assert.Equal(["Claude's one", "Waiting one", "Backlog one", "Done one"], entries.Select(e => e.GetProperty("title").GetString()));
+        Assert.Equal(["waiting", "waiting", "backlog", "done"], entries.Select(e => e.GetProperty("status").GetString()));
         var first = entries[0];
         Assert.Equal(claudes.Id.ToString(), first.GetProperty("id").GetString());
         Assert.Equal("Deskbar", first.GetProperty("workspace").GetString());
@@ -360,11 +361,115 @@ public class RemoteControlTaskTests
         Assert.Equal(["Still open"], Json(Run(manager, "task", "list")).EnumerateArray().Select(e => e.GetProperty("title").GetString()));
     }
 
+    // Task 12: the toggles' twin. `on` and `off` set a flag; the task moves to the top of the quadrant it lands in.
+    [Fact]
+    public void Flag_sets_and_clears_important_and_urgent()
+    {
+        var manager = Started();
+        var id = Prefix(Added(manager));
+
+        var important = Run(manager, "task", "flag", id, "important", "on");
+        Assert.Equal(ControlReply.Ok, important.ExitCode);
+        Assert.True(Json(important).GetProperty("important").GetBoolean());
+        Assert.Equal("II", Json(important).GetProperty("quadrant").GetString());
+
+        Ok(Run(manager, "task", "flag", id, "URGENT", "on"));
+        Assert.True(Only.Important && Only.Urgent);
+
+        Ok(Run(manager, "task", "flag", id, "important", "off"));
+        Assert.Equal(Quadrant.III, Only.Quadrant);
+    }
+
+    [Fact]
+    public void Flag_refuses_what_it_does_not_know()
+    {
+        var manager = Started();
+        var id = Prefix(Added(manager));
+        var before = tasks.Board;
+
+        AssertRefusedAndUnchanged(Run(manager, "task", "flag", id, "huge", "on"), before);
+        AssertRefusedAndUnchanged(Run(manager, "task", "flag", id, "urgent", "maybe"), before);
+        AssertRefusedAndUnchanged(Run(manager, "task", "flag", "ffffff", "urgent", "on"), before);
+        Assert.Equal(ControlReply.Failed, Run(manager, "task", "flag", id, "urgent").ExitCode);
+    }
+
+    // The drag's twin: top, end, or a 1-based position within the task's own quadrant.
+    [Fact]
+    public void Order_moves_a_task_within_its_quadrant()
+    {
+        var manager = Started();
+        var a = Prefix(Added(manager, "a"));
+        clock = clock.AddMinutes(1);
+        Added(manager, "b");
+        clock = clock.AddMinutes(1);
+        var c = Prefix(Added(manager, "c"));
+        string[] Titles() => Json(Run(manager, "task", "list")).EnumerateArray().Select(e => e.GetProperty("title").GetString()!).ToArray();
+        Assert.Equal(["c", "b", "a"], Titles());
+
+        Ok(Run(manager, "task", "order", a, "top"));
+        Assert.Equal(["a", "c", "b"], Titles());
+
+        Ok(Run(manager, "task", "order", a, "end"));
+        Assert.Equal(["c", "b", "a"], Titles());
+
+        var second = Run(manager, "task", "order", c, "2");
+        Assert.Equal(ControlReply.Ok, second.ExitCode);
+        Assert.Equal(2, Json(second).GetProperty("order").GetInt32());
+        Assert.Equal(["b", "c", "a"], Titles());
+    }
+
+    [Fact]
+    public void Order_refuses_a_bad_place_and_a_waiting_task()
+    {
+        var manager = Started();
+        var id = Prefix(Added(manager));
+        var before = tasks.Board;
+
+        AssertRefusedAndUnchanged(Run(manager, "task", "order", id, "sideways"), before);
+        AssertRefusedAndUnchanged(Run(manager, "task", "order", id, "0"), before);
+        AssertRefusedAndUnchanged(Run(manager, "task", "order", "ffffff", "top"), before);
+
+        Run(manager, "task", "status", id, "waiting");
+        before = tasks.Board;
+        var waiting = Run(manager, "task", "order", id, "top");
+        AssertRefusedAndUnchanged(waiting, before);
+        Assert.Contains("waiting on you", waiting.Output);
+    }
+
+    // `list` says each task's flags, its quadrant and its place in that quadrant (none while it waits on Petre: it is
+    // pinned on top until answered, and only then takes its place).
+    [Fact]
+    public void List_carries_the_flags_the_quadrant_and_the_order()
+    {
+        var manager = Started();
+        var a = Prefix(Added(manager, "a"));
+        clock = clock.AddMinutes(1);
+        Added(manager, "b");
+        clock = clock.AddMinutes(1);
+        var w = Prefix(Added(manager, "w"));
+        Run(manager, "task", "flag", a, "urgent", "on");
+        Run(manager, "task", "flag", a, "important", "on");
+        Run(manager, "task", "status", w, "waiting");
+
+        var entries = Json(Run(manager, "task", "list")).EnumerateArray().ToList();
+
+        Assert.Equal(["w", "a", "b"], entries.Select(e => e.GetProperty("title").GetString()));
+        Assert.Equal(["IV", "I", "IV"], entries.Select(e => e.GetProperty("quadrant").GetString()));
+        Assert.True(entries[1].GetProperty("important").GetBoolean());
+        Assert.True(entries[1].GetProperty("urgent").GetBoolean());
+        Assert.False(entries[2].GetProperty("important").GetBoolean());
+        Assert.Equal(JsonValueKind.Null, entries[0].GetProperty("order").ValueKind);
+        Assert.Equal(1, entries[1].GetProperty("order").GetInt32());
+        Assert.Equal(1, entries[2].GetProperty("order").GetInt32());
+    }
+
+    static void Ok(ControlReply reply) => Assert.True(reply.ExitCode == ControlReply.Ok, reply.Output);
+
     [Fact]
     public void Task_is_in_the_help() =>
         Assert.Equal(
             ["list [--closed]", "add <title> [--workspace <name>|none]", "close <id>", "reopen <id>",
              "status <id> <backlog|in-progress|waiting|done>", "rename <id> <title>", "move <id> <workspace>|none",
-             "comment <id> <markdown>", "delete <id>"],
+             "comment <id> <markdown>", "delete <id>", "flag <id> important|urgent on|off", "order <id> top|end|<n>"],
             ControlUsage.All.Where(c => c.Verb == "task").Select(c => c.Arguments));
 }

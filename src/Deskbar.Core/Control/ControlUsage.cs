@@ -45,8 +45,10 @@ public static class ControlUsage
         ]),
         new("Tasks", [
             new("task", "list [--closed]",
-                "the open tasks in the bar's order (waiting on you, then done, then newest), as JSON: id, title,\n"
-                + "      workspace, status, statusLine, question, claudes, sessions, comments (a count), updatedAt;\n"
+                "the open tasks in the bar's order (waiting on you, then quadrants I to IV, each in its own order),\n"
+                + "      as JSON: id, title, workspace, status, statusLine, question, claudes, sessions, comments (a\n"
+                + "      count), updatedAt, important, urgent, quadrant (I to IV) and order (its place in the quadrant,\n"
+                + "      from 1; null while it waits on you);\n"
                 + "      --closed lists the closed ones instead, the latest closed first, to find one to reopen"),
             new("task", "add <title> [--workspace <name>|none]",
                 "add a note to the backlog; without --workspace it goes on the workspace of the VS Code window\n"
@@ -59,6 +61,12 @@ public static class ControlUsage
             new("task", "move <id> <workspace>|none", "move a task to a workspace, or to none"),
             new("task", "comment <id> <markdown>", "add a comment to a task's thread, as you"),
             new("task", "delete <id>", "delete a task; the reply is the task as it was"),
+            new("task", "flag <id> important|urgent on|off",
+                "set or clear a flag, as the toggles on a line do; the task moves to the top of the quadrant it lands\n"
+                + "      in (I urgent and important, II important, III urgent, IV neither)"),
+            new("task", "order <id> top|end|<n>",
+                "move a task within its quadrant, as a drag does: to the top, the end or place n counting from 1.\n"
+                + "      A task waiting on you stays on top until it is answered"),
             new("tasks-window", "show|hide",
                 "open the tasks window, as the bar's \"+N more\" does (every task grouped by status, the closed ones\n"
                 + "      under their filter, each with its comments), or close it"),

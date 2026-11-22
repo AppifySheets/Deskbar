@@ -19,6 +19,12 @@ namespace Deskbar.Core.Tasks;
 // and needs no copy. It is made once; an existing tasks.json.v1 is never overwritten. A version above 2 (a newer
 // build) is read as version 2, tolerating what it does not know, rather than failing the whole file.
 //
+// THE FLAGS AND THE ORDER (Task 12, Rulings 24, 25 and 28). `important`, `urgent` and `rank` are optional fields of
+// version 2, not a version 3: an older version 2 build reads the file and ignores them (it would drop them on its next
+// save, which costs the order, never a task). A missing flag is off. A missing rank is derived ONCE, on load, from the
+// order the bar showed before ranks existed (Waiting on you, then Done, then the rest, each latest raised first;
+// FallbackRank), so the first start of this build moves no line, and the first save writes the ranks down.
+//
 // The model uses Maybe, which serialises badly, so the file is written from private DTO records: a Maybe becomes a
 // nullable field (null means none). Every time is converted to UTC before writing AND after reading, so the file
 // means the same on a machine in another time zone, a hand-edited time in local time is still the same instant,
@@ -65,7 +71,10 @@ public sealed class JsonTaskStore(string baseDirectory, Action<string>? trace = 
         DateTimeOffset UpdatedAt,
         DateTimeOffset? Raised,
         IReadOnlyList<SessionDto>? Sessions,
-        IReadOnlyList<CommentDto>? Comments);
+        IReadOnlyList<CommentDto>? Comments,
+        bool? Important = null,
+        bool? Urgent = null,
+        double? Rank = null);
 
     sealed record FileDto(int Version, IReadOnlyList<TaskDto>? Tasks);
 
@@ -166,7 +175,8 @@ public sealed class JsonTaskStore(string baseDirectory, Action<string>? trace = 
             t.Sessions.Select(s => new SessionDto(s.Id, s.Folder, s.Joined.ToUniversalTime(),
                 s.Ended.HasValue ? s.Ended.Value.ToUniversalTime() : null)).ToArray(),
             t.Comments.Select(c => new CommentDto(c.Id, c.SessionId.HasValue ? c.SessionId.Value : null,
-                c.At.ToUniversalTime(), c.Markdown)).ToArray());
+                c.At.ToUniversalTime(), c.Markdown)).ToArray(),
+            t.Important, t.Urgent, t.Rank);
 
     static TaskItem FromDto(TaskDto d) =>
         new(d.Id, d.Title ?? "",
@@ -175,7 +185,27 @@ public sealed class JsonTaskStore(string baseDirectory, Action<string>? trace = 
             d.Created.ToUniversalTime(), d.UpdatedAt.ToUniversalTime(), (d.Raised ?? d.Created).ToUniversalTime(),
             (d.Sessions ?? []).Select(s => new TaskSession(s.Id ?? "", s.Folder ?? "", s.Joined.ToUniversalTime(),
                 s.Ended is { } ended ? ended.ToUniversalTime() : Maybe<DateTimeOffset>.None)).ToArray(),
-            (d.Comments ?? []).Select(c => new TaskComment(c.Id, Maybe.From(c.SessionId), c.At.ToUniversalTime(), c.Markdown ?? "")).ToArray());
+            (d.Comments ?? []).Select(c => new TaskComment(c.Id, Maybe.From(c.SessionId), c.At.ToUniversalTime(), c.Markdown ?? "")).ToArray())
+        {
+            Important = d.Important ?? false,
+            Urgent = d.Urgent ?? false,
+            Rank = d.Rank ?? FallbackRank(d.Status, d.Raised ?? d.Created),
+        };
+
+    // The rank a task saved before ranks existed gets, so the tasks keep the order the bar showed them in then:
+    // Waiting on you first, then Done, then the rest, each group the latest raised first. Smaller is higher, so the
+    // later raised is the more negative, and each earlier group sits a band of 10^13 further up (milliseconds since
+    // 1970 are under 2 * 10^12 until the year 2033, and doubles hold these whole numbers exactly). Waiting on you is
+    // pinned above the quadrants anyway; its band only decides where such a task lands once it is answered.
+    // Every task here has no flags, so all of them are in quadrant IV and this one band order is the whole order.
+    static double FallbackRank(TaskStatus status, DateTimeOffset raised) =>
+        -raised.ToUnixTimeMilliseconds()
+        - status switch
+        {
+            TaskStatus.WaitingOnYou => 2e13,
+            TaskStatus.Done => 1e13,
+            _ => 0,
+        };
 
     // The migration (see the header): live becomes a Backlog note, done becomes Closed, nothing else survives.
     static TaskItem FromVersion1(Version1TaskDto d) =>
