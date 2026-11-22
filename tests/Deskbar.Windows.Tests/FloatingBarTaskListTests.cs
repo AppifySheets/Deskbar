@@ -1192,4 +1192,78 @@ public class FloatingBarTaskListTests
         t.Tasks.Close(first);
         Assert.True(t.Bar.Selection.Current.HasNoValue);
     });
+
+    // Ruling 23 (Petre: "use entire height when available for tasks"). A bar sized by hand (docked, or across the
+    // seam) shows as many lines as fit in the height its rows leave free, at least three. The pass runs after layout;
+    // the test runs it the way the dispatcher would, until it settles.
+    static void Settle(ListBar t)
+    {
+        Enumerable.Range(0, 6).ToList().ForEach(_ =>
+        {
+            t.Bar.UpdateLayout();
+            t.Bar.FitTaskListToFreeHeight();
+            t.Bar.UpdateLayout();
+        });
+    }
+
+    static Panel RowsArea(ListBar t) => ((DockPanel)t.Bar.FindName("BarContent")!).Children.OfType<Panel>().Last();
+
+    static double FreeHeight(ListBar t) =>
+        RowsArea(t).ActualHeight - RowsArea(t).Children.OfType<UIElement>().Sum(c => c.DesiredSize.Height);
+
+    static void Dock(ListBar t, double height)
+    {
+        t.Bar.SizeToContent = SizeToContent.Manual;
+        t.Bar.Height = height;
+    }
+
+    [Fact]
+    public void A_docked_bar_fills_its_free_height_with_lines() => StaThread.Run(() =>
+    {
+        using var t = Build(openWindow: () => { });
+        Enumerable.Range(1, 30).ToList().ForEach(i => t.Tasks.AddNote($"Note {i}", t.Gepha));
+        Dock(t, 900);
+        Settle(t);
+
+        var lineHeight = t.Lines[0].ActualHeight + t.Lines[0].Margin.Top + t.Lines[0].Margin.Bottom;
+        Assert.True(t.Lines.Count > 3, $"{t.Lines.Count} lines");
+        // The list took the free height, less than one more line of it is left, and the layout has settled.
+        Assert.InRange(FreeHeight(t), -0.5, lineHeight);
+        Assert.True(t.Bar.IsMeasureValid && t.Bar.IsArrangeValid);
+        Assert.Equal(t.Lines.Count, t.Bar.TaskListSlotCount);
+        Assert.Equal($"+{30 - t.Lines.Count} more", t.Bar.TaskListMoreText);
+    });
+
+    [Fact]
+    public void Less_free_height_means_fewer_lines_but_never_under_three() => StaThread.Run(() =>
+    {
+        using var t = Build(openWindow: () => { });
+        Enumerable.Range(1, 30).ToList().ForEach(i => t.Tasks.AddNote($"Note {i}", t.Gepha));
+        Dock(t, 900);
+        Settle(t);
+        var tall = t.Lines.Count;
+
+        // Rows added take height from the list: the rows keep priority.
+        Enumerable.Range(1, 4).ToList().ForEach(i => Assert.True(t.Harness.Manager.AddWorkspace($"Extra {i}").IsSuccess));
+        t.Bar.RequestRebuild();
+        Settle(t);
+        var withRows = t.Lines.Count;
+        Assert.True(withRows < tall, $"{withRows} lines with more rows, {tall} before; rows {((Panel)t.Bar.FindName("Rows")!).Children.Count} workspaces {t.Harness.Manager.State.Workspaces.Count} free {FreeHeight(t)} area {RowsArea(t).ActualHeight}");
+
+        // A bar too short for more than the rows keeps three.
+        Dock(t, 200);
+        Settle(t);
+        Assert.Equal(3, t.Lines.Count);
+    });
+
+    [Fact]
+    public void A_floating_bar_keeps_three_lines() => StaThread.Run(() =>
+    {
+        using var t = Build(openWindow: () => { });
+        Enumerable.Range(1, 30).ToList().ForEach(i => t.Tasks.AddNote($"Note {i}", t.Gepha));
+        Settle(t);
+
+        Assert.Equal(3, t.Lines.Count);
+        Assert.Equal(3, t.Bar.TaskListSlotCount);
+    });
 }
