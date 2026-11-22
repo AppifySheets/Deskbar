@@ -431,7 +431,14 @@ public partial class FloatingBar
     // its index among the lines on show when it was closed, its status before (what Undo restores), and its timer.
     readonly List<PendingClose> pendingCloses = [];
 
-    sealed record PendingClose(TaskLine Line, int Index, TaskStatus Was, IDisposable Timer);
+    // Undo brings back exactly what the close took (Ruling 31): the status (Was), the question of a task that waited on
+    // Petre, and the selection when the line was the one selected.
+    sealed record PendingClose(TaskLine Line, int Index, TaskStatus Was, IDisposable Timer)
+    {
+        public Maybe<string> Question { get; init; } = Maybe<string>.None;
+
+        public bool Selected { get; init; }
+    }
 
     // The click guard's two facts (TaskClickIgnored): the click count of the last press on one of the list's guarded
     // buttons, and when the lines were last redrawn.
@@ -1204,7 +1211,11 @@ public partial class FloatingBar
     {
         if (taskService is null) return;
         var index = shownTaskLines.ToList().FindIndex(l => l.Id == line.Id);
-        var pending = new PendingClose(line with { Closing = true }, Math.Max(index, 0), line.Status, Disposable.Empty);
+        var pending = new PendingClose(line with { Closing = true }, Math.Max(index, 0), line.Status, Disposable.Empty)
+        {
+            Question = taskService.Board.Tasks.TryFirst(t => t.Id == line.Id).Bind(t => t.Question),
+            Selected = selection.IsSelected(line.Id),
+        };
         pending = pending with { Timer = TaskUndoTimer(UndoWindow, () => ForgetPendingClose(pendingCloses.FirstOrDefault(p => p.Line.Id == line.Id), repaint: true)) };
         pendingCloses.Add(pending);
         taskService.Close(line.Id).TapError(_ => ForgetPendingClose(pending, repaint: true));
@@ -1230,14 +1241,16 @@ public partial class FloatingBar
         PaintTaskList(evenUnderPress: true);
     }
 
-    // Undo: the task comes back as it was, through TaskBoard.UndoClose: Done when it was Done, else Backlog, or In
-    // progress while a session is live on it. It keeps its place in its quadrant (Task 12): a reopening would put it on
-    // top, but the line never left the screen during its six seconds, so it must not jump.
+    // Undo: the task comes back exactly as it was (Ruling 31), through TaskBoard.UndoClose: the status it had before the
+    // close, its question if it waited on Petre, its place (a reopening would put it on top, but the line never left the
+    // screen during its six seconds), and the selection if it was the line selected.
     void UndoClose(Guid id)
     {
         if (taskService is null || pendingCloses.FirstOrDefault(p => p.Line.Id == id) is not { } pending) return;
         ForgetPendingClose(pending, repaint: false);
-        var reopened = taskService.UndoClose(id, pending.Was);
+        var reopened = taskService.UndoClose(id, pending.Was, pending.Question);
+        // The line Petre had picked is picked again: the close took the selection away (ruling 21), the undo gives it back.
+        if (reopened.IsSuccess && pending.Selected) selection.Select(id);
         // Reopen pulses Changed, which repaints; a refusal (the task is gone) still needs the line taken away.
         reopened.TapError(_ => PaintTaskList());
     }

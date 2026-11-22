@@ -1849,4 +1849,22 @@ public class FloatingBarTaskListTests
         Assert.Equal(landing, t.Bar.TaskDropShown!.LineY, 1);
         t.Bar.CancelTaskDrag("test");
     });
+
+    // Ruling 31 on the bar: Undo brings a note back with the status it had (here In progress, set by hand), and the
+    // line Petre had selected is selected again.
+    [Fact]
+    public void Undo_on_the_bar_brings_back_the_status_and_the_selection() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        var id = t.Tasks.AddNote("set by hand", t.Gepha).Value.Id;
+        t.Tasks.SetStatus(id, Deskbar.Core.Tasks.TaskStatus.InProgress);
+        t.Bar.Selection.Select(id);
+
+        Click(ButtonNamed(t.Lines[0], "Tick off"));
+        Assert.True(t.Bar.Selection.Current.HasNoValue);
+        Click(ButtonNamed(t.Lines[0], "Undo"));
+
+        Assert.Equal(Deskbar.Core.Tasks.TaskStatus.InProgress, t.Tasks.Board.Tasks.Single(x => x.Id == id).Status);
+        Assert.Equal(id, t.Bar.Selection.Current.Value);
+    });
 }

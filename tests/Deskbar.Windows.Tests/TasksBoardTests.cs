@@ -252,12 +252,11 @@ public class TasksBoardTests
         Assert.Equal([note], t.Window.Keys);
         Assert.True(t.Window.IsClosing(note));
 
-        // Undo brings it back by the bar's rule, so the two Undos agree: Reopen (Backlog for a note with no live
-        // session), Done only for a task that was Done.
+        // Undo means exactly undo (Ruling 31), by the bar's rule, so the two Undos agree: the status it had before the
+        // close comes back, here In progress, set by hand on a note with no session.
         Click(ButtonNamed(LineOf(t.Window, note), "Undo"));
-        Assert.Equal(TaskStatus.Backlog, t.Tasks.Board.Tasks.Single(x => x.Id == note).Status);
+        Assert.Equal(TaskStatus.InProgress, t.Tasks.Board.Tasks.Single(x => x.Id == note).Status);
         Assert.False(t.Window.IsClosing(note));
-        Assert.True(t.Controller.SetStatus(note, TaskStatus.InProgress).IsSuccess);
 
         // Closed for good once the six seconds are over: it leaves the open view...
         Assert.True(t.Controller.Close(note).IsSuccess);
@@ -1378,5 +1377,25 @@ public class TasksBoardTests
 
         Assert.True(t.Harness.Manager.RenameWorkspace(t.Gepha, "GEPHA two").IsSuccess);
         Assert.True(t.Window.Presents > presents);
+    });
+
+    // Ruling 31 in the window: Undo brings a task waiting on you back waiting, with its question, and selected again.
+    [Fact]
+    public void Undo_in_the_window_brings_back_waiting_with_its_question_and_the_selection() => StaThread.Run(() =>
+    {
+        var selection = new TaskSelection();
+        using var t = Build(selection: selection);
+        var id = t.Tasks.Create("work", t.Gepha, Session("s1")).Value.Id;
+        t.Tasks.Ask(id, "OK to merge?");
+        t.Controller.Open(Rect.Empty);
+        selection.Select(id);
+
+        Assert.True(t.Controller.Close(id).IsSuccess);
+        Assert.True(t.Controller.Undo(id).IsSuccess);
+
+        var task = t.Tasks.Board.Tasks.Single(x => x.Id == id);
+        Assert.Equal(TaskStatus.WaitingOnYou, task.Status);
+        Assert.Equal("OK to merge?", task.Question.Value);
+        Assert.Equal(id, selection.Current.Value);
     });
 }

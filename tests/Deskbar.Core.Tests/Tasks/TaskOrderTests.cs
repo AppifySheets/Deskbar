@@ -336,23 +336,66 @@ public class TaskOrderTests
         board = board.Close(id2, clock).Value.Close(id1, clock).Value;
         Later();
 
-        board = board.UndoClose(id2, TaskStatus.Done, clock).Value.UndoClose(id1, TaskStatus.Backlog, clock).Value;
+        board = board.UndoClose(id2, TaskStatus.Done, Maybe<string>.None, clock).Value.UndoClose(id1, TaskStatus.Backlog, Maybe<string>.None, clock).Value;
 
         Assert.Equal([id3, id2, id1], Group(board, Quadrant.IV));
         Assert.Equal(TaskStatus.Done, Get(board, id2).Status);
         Assert.Equal(TaskStatus.Backlog, Get(board, id1).Status);
-        Assert.True(board.UndoClose(id3, TaskStatus.Backlog, clock).IsFailure);
+        Assert.True(board.UndoClose(id3, TaskStatus.Backlog, Maybe<string>.None, clock).IsFailure);
+    }
+
+    // Ruling 31: Undo means exactly undo. The status the task had before the close comes back as it was, whatever it
+    // was, its question with it, and Raised is not touched (the pinned block's order stays as it was).
+    [Fact]
+    public void Undo_brings_back_a_task_waiting_on_you_with_its_question_and_its_place_in_the_block()
+    {
+        var board = TaskBoard.Empty.Create("Tasks redesign", Free, Session("s1"), clock, id1).Value.Board;
+        Later();
+        board = board.Ask(id1, "Merge?", clock).Value;
+        var raised = Get(board, id1).Raised;
+        Later();
+        board = board.Close(id1, clock).Value;
+        Later();
+
+        board = board.UndoClose(id1, TaskStatus.WaitingOnYou, Maybe.From("Merge?"), clock).Value;
+
+        Assert.Equal(TaskStatus.WaitingOnYou, Get(board, id1).Status);
+        Assert.Equal("Merge?", Get(board, id1).Question.Value);
+        Assert.Equal(raised, Get(board, id1).Raised);
+        Assert.Equal([id1], board.Pile().Select(t => t.Id));
     }
 
     [Fact]
-    public void Undoing_a_close_of_a_claude_task_with_a_live_session_is_in_progress()
+    public void Undo_brings_back_in_progress_and_a_status_set_by_hand_on_a_note()
     {
-        var board = TaskBoard.Empty.Create("Tasks redesign", Free, Session("s1"), clock, id1).Value.Board
-            .Ask(id1, "Merge?", clock).Value.Close(id1, clock).Value;
+        var board = TaskBoard.Empty.Create("work", Free, Session("s1"), clock, id1).Value.Board;
+        board = board.AddNote("a note set to in progress by hand", Free, clock, id2).Value.Board;
+        board = board.SetStatus(id2, TaskStatus.InProgress, clock).Value;
+        board = board.SessionEnded("s1", clock);
+        board = board.Close(id1, clock).Value.Close(id2, clock).Value;
+        Later();
 
-        board = board.UndoClose(id1, TaskStatus.WaitingOnYou, clock).Value;
+        board = board.UndoClose(id1, TaskStatus.InProgress, Maybe<string>.None, clock).Value
+            .UndoClose(id2, TaskStatus.InProgress, Maybe<string>.None, clock).Value;
 
+        // Both were in progress, and that is what comes back, though neither has a live session now.
         Assert.Equal(TaskStatus.InProgress, Get(board, id1).Status);
+        Assert.Equal(TaskStatus.InProgress, Get(board, id2).Status);
+    }
+
+    [Fact]
+    public void Undo_brings_back_done_without_a_new_raised()
+    {
+        var board = Notes(id1).SetStatus(id1, TaskStatus.Done, clock).Value;
+        var raised = Get(board, id1).Raised;
+        Later();
+        board = board.Close(id1, clock).Value;
+        Later();
+
+        board = board.UndoClose(id1, TaskStatus.Done, Maybe<string>.None, clock).Value;
+
+        Assert.Equal(TaskStatus.Done, Get(board, id1).Status);
+        Assert.Equal(raised, Get(board, id1).Raised);
     }
 
     [Fact]
