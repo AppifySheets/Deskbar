@@ -134,7 +134,8 @@ public partial class TasksWindow : Window
         // Its own checklist icon (TasksIcon): the bar lists this window like any app window and draws it by this icon,
         // so Petre can find it on a workspace row and drag it where he wants it.
         Icon = TasksIcon.Image;
-        PreviewKeyDown += (_, e) => e.Handled = e.Key == Key.Escape && Escape();
+        // Esc undoes the innermost thing; F2 edits the selected line's title in place (Ruling 38).
+        PreviewKeyDown += (_, e) => e.Handled = (e.Key == Key.Escape && Escape()) || (e.Key == Key.F2 && EditSelected());
         SourceInitialized += (_, _) =>
         {
             var on = 1;
@@ -656,6 +657,16 @@ public partial class TasksWindow : Window
         // (TasksWindow.Drag.cs), armed only, so a press released in place stays this Click.
         line.PreviewMouseLeftButtonDown += (_, e) =>
         {
+            // A double-click on the title opens the editor (Ruling 38). Handled, so the line neither clicks nor arms a
+            // drag; its first click was already dropped from a second Go by the click guard (a double click's second
+            // press counts 2).
+            if (e.ClickCount == 2 && !row.Closing && row.Status != TaskStatus.Closed && renaming != row.Id
+                && e.OriginalSource is TextBlock { Tag: TitleTag })
+            {
+                e.Handled = true;
+                BeginRename(row.Id);
+                return;
+            }
             pressClicks = e.ClickCount;
             DragPress(row.Id, DragMouse.Position(e, DragSurface));
         };
@@ -844,13 +855,18 @@ public partial class TasksWindow : Window
             panel.Children.Add(renameBox);
         }
         else
+            // THE WHOLE TITLE (Ruling 38; Petre, of the Matrix's "…": "let tasks be multiline and editable"). It wraps in
+            // its column instead of ending in an ellipsis, and keeps any line break it holds, so a long title makes its
+            // line taller and every other column keeps its place. Double-click it, or press F2 on the selected line, to
+            // edit it in place (RenameBox).
             panel.Children.Add(new TextBlock
             {
+                Tag = TitleTag,
                 Text = row.Title,
                 FontWeight = FontWeights.SemiBold,
                 FontSize = 12,
                 Foreground = row.Claudes ? ClaudeInk : Ink,
-                TextTrimming = TextTrimming.CharacterEllipsis,
+                TextWrapping = TextWrapping.Wrap,
                 TextDecorations = row.Closing ? TextDecorations.Strikethrough : null,
             });
         if (row.Detail.Length > 0)
@@ -1091,6 +1107,14 @@ public partial class TasksWindow : Window
 
     // --- rename --------------------------------------------------------------------------------------------------------
 
+    // The title's TextBlock, so a double-click on it can be told from one elsewhere on the line.
+    const string TitleTag = "task-title";
+
+    // THE IN-PLACE EDITOR (Ruling 38), the rename this window always had, grown to the whole title: it wraps like the
+    // title and takes line breaks. Enter saves through Rename (TaskService.Rename, `task rename`'s twin), Shift+Enter
+    // adds a line break, Esc (Escape) or a click away cancels. While it is open a redraw waits (MustWait: `renaming`),
+    // so a change arriving from a session never takes the text from under the keyboard; it is drawn when the editor
+    // closes.
     TextBox RenameBox(TaskRowView row)
     {
         var box = new TextBox
@@ -1104,14 +1128,21 @@ public partial class TasksWindow : Window
             BorderThickness = new Thickness(1),
             FontSize = 12,
             Padding = new Thickness(3, 1, 3, 1),
+            TextWrapping = TextWrapping.Wrap,
+            AcceptsReturn = true,
         };
         AutomationProperties.SetName(box, "Rename task");
-        box.Loaded += (_, _) => box.SelectAll();
+        box.Loaded += (_, _) =>
+        {
+            box.SelectAll();
+            box.Focus();
+        };
         box.PreviewKeyDown += (_, e) =>
         {
-            if (e.Key is not (Key.Enter or Key.Return)) return;
+            // Shift+Enter is left to the box, which takes it as a line break (AcceptsReturn).
+            if (!EditorSaves(e.Key, Keyboard.Modifiers)) return;
             e.Handled = true;
-            if (Actions?.Rename(row.Id, box.Text) != false) EndRename();
+            SaveRename(row.Id, box.Text);
         };
         // A click elsewhere abandons the rename; only Enter keeps it.
         box.LostKeyboardFocus += (_, _) =>
@@ -1125,6 +1156,39 @@ public partial class TasksWindow : Window
     {
         renaming = id;
         if (latest is not null) Draw(latest);
+    }
+
+    // Enter in the editor: saved through Rename, and the editor closes once the rename is taken (a refused title, an
+    // empty one, keeps it open with the problem line saying why).
+    void SaveRename(Guid id, string title)
+    {
+        if (Actions?.Rename(id, title) != false) EndRename();
+    }
+
+    // F2: the selected line's title, when the line is on show, open and nothing is being edited already.
+    bool EditSelected()
+    {
+        if (renaming is not null || selectedId.HasNoValue) return false;
+        var id = selectedId.Value;
+        if (!Keys.Contains(id) || closing.GetValueOrDefault(id) || AddBoxShown && AddBox.IsKeyboardFocusWithin) return false;
+        BeginRename(id);
+        return true;
+    }
+
+    /// <summary>For the tests: the open editor, if any.</summary>
+    internal TextBox? Editor => renameBox;
+
+    /// <summary>
+    /// Whether a key in the editor saves: Enter without Shift. Shift+Enter is left to the box, which takes it as a line
+    /// break (AcceptsReturn).
+    /// </summary>
+    internal static bool EditorSaves(Key key, ModifierKeys modifiers) =>
+        key is Key.Enter or Key.Return && !modifiers.HasFlag(ModifierKeys.Shift);
+
+    /// <summary>For the tests: Enter in the open editor, the save its key press makes.</summary>
+    internal void SaveEditor()
+    {
+        if (renameBox is not null && renaming is { } id) SaveRename(id, renameBox.Text);
     }
 
     void EndRename()
