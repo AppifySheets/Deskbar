@@ -729,7 +729,7 @@ public class FloatingBarTaskListTests
         PressAndClick(ButtonNamed(t.Lines[0], "Tick off"), clickCount: 1);
         Assert.Equal(4, t.Tasks.Board.Pile().Count);
 
-        // ...whose line stays where it was with "Undo" in the tick's place, so the second press of the double click lands
+        // ...whose line stays where it was with the Undo sign in the tick's place, so the second press of the double click lands
         // on Undo rather than on Note 4's tick, and is dropped there too: the note stays closed and Note 4 stays open.
         now = now.AddMilliseconds(600);
         Assert.True(Closing(t.Lines[0]));
@@ -1132,5 +1132,20 @@ public class FloatingBarTaskListTests
             var bounds = part.TransformToAncestor(t.Bar).TransformBounds(new Rect(part.RenderSize));
             Assert.True(bounds.Right <= edge + 0.5, $"{AutomationProperties.GetName(part)} ends at {bounds.Right}, the bar shows up to {edge}");
         });
+    });
+
+    // Petre: "undo sign instead of text". The Undo on a line just closed is the Undo glyph, not the word, found by its
+    // automation name and tooltip.
+    [Fact]
+    public void Undo_is_a_sign_not_a_word() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        t.Tasks.AddNote("note", t.Gepha);
+        Click(ButtonNamed(t.Lines[0], "Tick off"));
+
+        var undo = ButtonNamed(t.Lines[0], "Undo");
+        Assert.Equal("Undo", undo.ToolTip);
+        Assert.Equal("", Inside(undo).OfType<TextBlock>().Single(b => Equals(b.Tag, "undo-sign")).Text);
+        Assert.DoesNotContain(Inside(undo).OfType<TextBlock>(), b => b.Text == "Undo");
     });
 }
