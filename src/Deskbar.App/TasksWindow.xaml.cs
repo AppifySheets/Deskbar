@@ -41,9 +41,11 @@ namespace Deskbar.App;
 // add box while "+ Add" has it open, a line saying why the last action failed, then the groups (Waiting on you, then
 // Covey's quadrants I to IV, captioned; Task 12). Each line: Claude's
 // CL badge or a note's tick box (Undo in its place for the six seconds after a close), the title over the question or
-// status line, the important and urgent toggles (quiet until hover or selection, as on the bar), the sessions (a square each, blue while live), the workspace chip, the comment count whose arrow opens
+// status line, the important and urgent toggles (quiet until hover or selection, as on the bar), the sessions (a
+// square each, blue while live), the age, the workspace chip, the comment glyph with the count beside it, which opens
 // the thread, a close button on a done Claude task or Reopen on a closed one, and "⋯" for the rest (status, close or
-// reopen, rename, move, delete). A click anywhere else on the line goes to the task.
+// reopen, rename, move, delete). A click anywhere else on the line goes to the task, and a press dragged up or down
+// reorders it (TasksWindow.Drag.cs). The Matrix draws the same lines, compact (TasksWindow.Matrix.cs).
 public partial class TasksWindow : Window
 {
     // The mockup's palette. Frozen, as every static WPF brush must be (CLAUDE.md, Traps).
@@ -857,10 +859,9 @@ public partial class TasksWindow : Window
         },
     };
 
-    // The comment count and its arrow: ▸ closed, ▾ open. A line with no comments shows the arrow alone, so the first
-    // comment has a way in.
-    // A comment glyph with the count beside it when there are comments (Petre asked what the "▸" meant). Tooltip
-    // "Comments", the same whether the thread is open or not.
+    // A comment glyph, with the count beside it when there are comments (Petre asked what the old "▸" arrow meant). A
+    // line with no comments shows the glyph alone, so the first comment has a way in. Tooltip "Comments", the same
+    // whether the thread is open or not.
     Button CommentsButton(TaskRowView row)
     {
         var content = new StackPanel { Orientation = Orientation.Horizontal };
