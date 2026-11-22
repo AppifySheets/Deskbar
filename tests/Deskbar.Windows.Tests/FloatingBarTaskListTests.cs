@@ -213,7 +213,9 @@ public class FloatingBarTaskListTests
         t.Tasks.AddNote("Dishwasher tablets", Maybe<Guid>.None);
 
         var claude = t.Lines.Single(l => ((TaskLine)l.Tag).Id == task.Id);
-        Assert.True(HasClaudeTag(claude));
+        // Ruling 42 (Petre: "don't say claude"): no CLAUDE tag, the orange edge at the line's start is the mark.
+        Assert.False(HasClaudeTag(claude));
+        Assert.DoesNotContain(Inside(claude).OfType<TextBlock>(), b => b.Text == "CLAUDE");
         var edge = EdgeOf(claude);
         Assert.Equal(Orange, ((SolidColorBrush)edge.BorderBrush).Color);
         Assert.Equal(3, edge.BorderThickness.Left);

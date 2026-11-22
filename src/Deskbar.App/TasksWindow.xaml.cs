@@ -41,8 +41,8 @@ namespace Deskbar.App;
 // Top to bottom: the toolbar (status filters with their counts, the workspace filter, the goal filter while goals
 // exist, "+ Add"), the
 // add box while "+ Add" has it open, a line saying why the last action failed, then the groups (Waiting on you, then
-// Covey's quadrants I to IV, captioned; Task 12). Each line: Claude's
-// CL badge or a note's tick box (Undo in its place for the six seconds after a close), the title over the question or
+// Covey's quadrants I to IV, captioned; Task 12). Each line: Claude's orange edge (no CL badge since Ruling 42: the
+// edge is the mark) or a note's tick box (Undo in its place for the six seconds after a close), the title over the question or
 // status line, the important and urgent toggles (quiet until hover or selection, as on the bar), the sessions (a
 // square each, blue while live), the age, the workspace chip, the comment glyph with the count beside it, which opens
 // the thread, a close button on a done Claude task or Reopen on a closed one, and "⋯" for the rest (status, close or
@@ -818,22 +818,14 @@ public partial class TasksWindow : Window
         grid.Children.Add(part);
     }
 
-    // Claude's badge, a note's tick box, or Undo on a line just closed.
+    // A note's tick box, or Undo on a line just closed. A Claude line has no badge here (Ruling 42, Petre: "don't say
+    // claude"): the orange edge at the line's start is its mark.
     UIElement LeftOf(TaskRowView row) =>
         row.Closing
             // A sign, not a word (Petre: "undo sign instead of text"), the bar's own (FloatingBar.UndoSign).
             ? Small(FloatingBar.UndoSign(12, Ink), "Undo", () => Actions?.Undo(row.Id), "Undo", DoubleClickIgnored)
             : row.Claudes
-                ? new Border
-                {
-                    Background = Orange,
-                    CornerRadius = new CornerRadius(3),
-                    Padding = new Thickness(3, 0, 3, 0),
-                    HorizontalAlignment = HorizontalAlignment.Left,
-                    VerticalAlignment = VerticalAlignment.Center,
-                    Child = new TextBlock { Text = "CL", FontSize = 9, FontWeight = FontWeights.Bold, Foreground = BadgeInk },
-                    ToolTip = "Claude's task",
-                }
+                ? new TextBlock()
                 : row.Status == TaskStatus.Closed
                     ? new TextBlock()
                     : Small(new Border
