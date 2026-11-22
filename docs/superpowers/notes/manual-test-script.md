@@ -252,6 +252,31 @@ T4. A restart keeps a hand-made layout. Make A | C over B again and drag one spl
 T5. Upgrade from a build before the split tree, on a profile that build tiled with a dragged split. After the
     update the grid looks exactly as it did, to the pixel, and Even out offers itself as before.
 
+## Locked tiles and other screens on arrival
+
+Spec `docs/superpowers/specs/2026-11-22-tile-lock-and-other-screens-design.md`. Two screens, a tiled workspace, the
+trace on. `$ts` is `%APPDATA%\Deskbar\deskbar.cmd`.
+
+L1. Lock from the bar. One tile A on screen 1, one tile B on screen 2. Right-click A's icon on the bar: "Don't split
+    this tile" sits just above Close, unticked. Tick it; the trace has `tile: <workspace>: <hwnd> locked`. Right-click
+    an icon of a window on another workspace, or a floating dialog's: the item is not there.
+L2. A locked tile is not halved. Click A, then open a new window from it (Ctrl+N in a browser). It does not take half
+    of A: the trace says every tile on screen 1 is locked and it goes to screen 2, where it splits B. Untick A and
+    repeat: the new window halves A again.
+L3. Lock from the pipe. `$ts windows`, take A's hwnd, `$ts lock-tile 0x... on`: the reply is A's window; the bar's
+    item is ticked. `$ts lock-tile 0x... maybe` prints the usage line. On a window that is not a tile the reply is
+    "That window is not in a tile."
+L4. Empty screen first. Close or move everything of the workspace off screen 2, keep two tiles on screen 1, click one,
+    open a new window. It fills all of screen 2; screen 1 does not change. The trace has `took empty screen 2`.
+L5. A maximized window counts. Maximize a window of the workspace on screen 2 (it leaves the grid). Open a new window
+    from a tile on screen 1: it halves that tile, and screen 2's maximized window is left alone.
+L6. An opening elsewhere. Turn on "Keep the space when a window closes", close one of two tiles on screen 2, click a
+    tile on screen 1 and open a new window: it fills screen 2's opening (`took the opening ... on another screen`).
+L7. A drop stays put. With screen 2 empty, drag a window from another workspace onto screen 1's half of this
+    workspace's row: it splits a tile on screen 1 and screen 2 stays empty.
+L8. The lock goes with the window. Lock A, close it, open a new window that takes its place: its icon menu shows the
+    item unticked.
+
 ## Arranging the bar
 
 Arrange mode (spec `docs/superpowers/specs/2026-11-20-bar-edit-mode-design.md`). Start with

@@ -333,6 +333,12 @@ To tidy up, the row's menu and the tile button's right-click menu offer **Even o
 split is off centre: every split goes back to equal and your shape stays. After that the item reads
 **Reset to grid**, which forgets the shape and goes back to the automatic grid.
 
+A new window goes into a space kept open on any screen, or onto a screen with nothing of the
+workspace on it, before it takes half of a tile. A window you drop on a screen stays on that screen.
+To keep a tile from ever being halved by a new window, right-click its icon on the bar and tick
+**Don't split this tile** (or `deskbar.cmd lock-tile <hwnd> on`). The lock lasts until the window
+closes or Deskbar restarts.
+
 **Colour.** Nine swatches sit in one strip inside the menu, with the current choice ringed. Below
 them, **Custom…** opens Windows' own colour dialog starting on the row's current colour;
 **Transparent** opts the row out of tinting; **By position** hands the colour back to the palette.
