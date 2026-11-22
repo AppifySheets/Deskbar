@@ -606,6 +606,65 @@ public class TasksBoardTests
         Assert.Equal(TaskStatus.Done, t.Tasks.Board.Tasks.Single(x => x.Id == id).Status);
     });
 
+    // Where a part of the window ends, against the window's own content (what the window shows).
+    static Rect BoundsIn(TasksWindow window, FrameworkElement part) =>
+        part.TransformToAncestor((System.Windows.Media.Visual)window.Content).TransformBounds(new Rect(part.RenderSize));
+
+    static double ContentWidth(TasksWindow window) => ((FrameworkElement)window.Content).ActualWidth;
+
+    // Petre's screenshot: every line sized its own columns, so the chip, the comments and "…" sat at a different x on
+    // each line, and a long title pushed the chip off the window. One column layout for every line, the title trimming
+    // first: each column at the same x on every line, nothing past the right edge, at the window's minimum width too.
+    [Fact]
+    public void The_lines_columns_line_up_and_a_long_title_never_pushes_them_out() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        t.Tasks.AddNote("a", t.Gepha);
+        var closed = t.Tasks.Create("done one", t.Gepha, Session("s1")).Value.Id;
+        t.Tasks.MarkDone(closed);
+        t.Tasks.AddNote("iam.ge: transcripts, learnings and every other thing - personalized-health - Visual Studio Code", Maybe<Guid>.None);
+        t.Controller.Open(Rect.Empty);
+        t.Window.Width = t.Window.MinWidth;
+        t.Window.UpdateLayout();
+
+        var lines = t.Window.Keys.Select(id => LineOf(t.Window, id)).ToList();
+        var chips = lines.Select(l => BoundsIn(t.Window, Inside(l).OfType<Border>().Single(b => b.Child is TextBlock && b.CornerRadius.TopLeft == 8))).ToList();
+        var comments = lines.Select(l => BoundsIn(t.Window, ButtonNamed(l, "Comments"))).ToList();
+        var mores = lines.Select(l => BoundsIn(t.Window, ButtonNamed(l, "More"))).ToList();
+        Assert.True(chips.Max(b => b.Left) - chips.Min(b => b.Left) < 0.5, string.Join(", ", chips.Select(b => b.Left)));
+        Assert.True(comments.Max(b => b.Left) - comments.Min(b => b.Left) < 0.5, string.Join(", ", comments.Select(b => b.Left)));
+        Assert.True(mores.Max(b => b.Left) - mores.Min(b => b.Left) < 0.5, string.Join(", ", mores.Select(b => b.Left)));
+        Assert.All(chips.Concat(comments).Concat(mores), b => Assert.True(b.Right <= ContentWidth(t.Window) + 0.5, $"{b} in {ContentWidth(t.Window)}"));
+        // The icons explain themselves.
+        Assert.Equal("Comments", ButtonNamed(lines[0], "Comments").ToolTip);
+        Assert.Equal("Status, move, rename, delete", ButtonNamed(lines[0], "More").ToolTip);
+    });
+
+    // Petre's screenshot: the placeholder "Comment as you, in markdow…" was cut off and the box squeezed. A short
+    // placeholder, the hint in the tooltip, the box across the thread, and nothing clipped at the minimum width.
+    [Fact]
+    public void The_comment_box_is_short_spoken_and_never_clips() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        var id = t.Tasks.AddNote("note", t.Gepha).Value.Id;
+        t.Controller.Open(Rect.Empty);
+        t.Controller.ToggleThread(id);
+        t.Window.Width = t.Window.MinWidth;
+        t.Window.UpdateLayout();
+
+        var box = t.Window.CommentBoxOf(id)!;
+        Assert.Equal(TasksWindow.CommentHint, box.ToolTip);
+        var placeholder = Inside(t.Window).OfType<TextBlock>().Single(b => Equals(b.Tag, "comment-placeholder"));
+        Assert.Equal("Add a comment…", placeholder.Text);
+        var post = ButtonNamed(t.Window, "Post comment");
+        Assert.All(new FrameworkElement[] { box, placeholder, post }, part =>
+        {
+            var bounds = BoundsIn(t.Window, part);
+            Assert.True(bounds.Right <= ContentWidth(t.Window) + 0.5, $"{part.GetType().Name} ends at {bounds.Right} in {ContentWidth(t.Window)}");
+            Assert.True(part.RenderSize.Width >= part.DesiredSize.Width - part.Margin.Left - part.Margin.Right - 0.5, $"{part.GetType().Name} squeezed");
+        });
+    });
+
     // PlaceNear: clear of the bar, inside the work area (the model is commit 183d85e's PlaceUnder).
     [Fact]
     public void The_window_opens_below_a_bar_at_the_top() =>
