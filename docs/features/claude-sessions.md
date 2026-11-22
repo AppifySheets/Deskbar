@@ -75,15 +75,24 @@ $ts = "$env:APPDATA\Deskbar\deskbar.cmd"
 & $ts task add "Wait for CI"
 ```
 
-A session's own task forms carry `--session` with the session's id, which the start-of-session message gives it. Every form but `join`, `new` and `later` acts only on that session's own task:
+A session's own task forms carry `--session` with the session's id, which the start-of-session message gives it. Every form but `join`, `new` and `later` acts only on that session's own task.
+
+Free text (a title, a status line, a question, a comment) goes on stdin, with `-` in its place: `deskbar.cmd` hands its command line to cmd, which can run part of a text with quotes or `& | < >` in it as a command. In Git Bash, where Claude Code runs its commands, that is a heredoc:
+
+```bash
+"$APPDATA/Deskbar/deskbar.cmd" task comment - --session <id> <<'EOF'
+**Found it**: the guard ran twice
+EOF
+```
+
+From PowerShell, pipe the text in:
 
 ```powershell
-& $ts task new "Tasks board" --session <id>            # or: task join <task id> --session <id>
-& $ts task status-line "waiting for CI" --session <id>
-& $ts task ask "OK to merge?" --session <id>           # waits on you, and the workspace blinks
-& $ts task comment "**Found it**: the guard" --session <id>
+'Tasks board' | & $ts task new - --session <id>          # or: & $ts task join <task id> --session <id>
+'waiting for CI' | & $ts task status-line - --session <id>
+'OK to merge?' | & $ts task ask - --session <id>          # waits on you, and the workspace blinks
 & $ts task done --session <id>
-& $ts task later "Rename the guard" --session <id>      # a note on the session's workspace
+'Rename the guard' | & $ts task later - --session <id>    # a note on the session's workspace
 ```
 
 On a machine with the Microsoft Store copy, `deskbar` is on the PATH, so `deskbar windows` and `deskbar help` work from PowerShell, cmd and Git Bash.

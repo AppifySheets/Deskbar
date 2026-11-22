@@ -242,6 +242,55 @@ public sealed class ClaudeSkillTests : IDisposable
             "--json", StopJson.Replace("Stop", "SessionStart")], received);
     }
 
+    // Review of PR B, I-1, the whole way: a session in Git Bash sends free text with quotes and cmd's operators through
+    // the real shim and the real Deskbar.exe as `-` and a heredoc. It reaches the app as written, and cmd runs none of it
+    // (on the command line it ran `echo INJECTED` and tried a redirect into pwned.txt).
+    [Fact]
+    public void Free_text_on_stdin_reaches_deskbar_intact_through_the_shim()
+    {
+        var exe = Path.Combine(AppContext.BaseDirectory, "Deskbar.exe");
+        ControlCommandLine.WriteShim(Deskbar, exe);
+        var pipe = $"Deskbar.Control.Test.{Guid.NewGuid():N}";
+        IReadOnlyList<string>? received = null;
+        using var server = new ControlPipeServer(pipe, args =>
+        {
+            received = args;
+            return Task.FromResult(new global::Deskbar.Core.Control.ControlReply(0, "{}"));
+        });
+        const string text = "checking \"x & echo INJECTED\" now | set \"a > pwned.txt\" first <in";
+        var shim = Path.Combine(Deskbar, "deskbar.cmd").Replace('\\', '/');
+
+        var (exitCode, stdout) = RunThroughGitBash($"cd \"{home.Replace('\\', '/')}\" && \"{shim}\" task comment - --session s1",
+            text + "\n", new Dictionary<string, string?> { ["DESKBAR_CONTROL_PIPE"] = pipe });
+
+        Assert.Equal(0, exitCode);
+        Assert.DoesNotContain("INJECTED", stdout);
+        Assert.False(File.Exists(Path.Combine(home, "pwned.txt")));
+        Assert.NotNull(received);
+        Assert.Equal(["task", "comment", text, "--session", "s1"], received!.Take(5));
+    }
+
+    // Review of PR B, I-3: cmd reads a batch file in the OEM code page and the scripts were written UTF-8, so a profile
+    // path with a letter outside ASCII garbled the shim's absolute path and every hook died silently. The scripts call
+    // the shim beside them by `%~dp0`, so neither holds a path at all.
+    [Fact]
+    public void The_hook_scripts_hold_no_absolute_path()
+    {
+        Directory.CreateDirectory(Path.Combine(home, ".claude"));
+
+        ClaudeSkill.Sync(true, true, home, Deskbar);
+
+        Assert.All(new[] { "claude-hook.cmd", "claude-task-hook.cmd" }, name =>
+        {
+            var script = File.ReadAllText(Path.Combine(Deskbar, name));
+            Assert.Contains("\"%~dp0deskbar.cmd\"", script);
+            Assert.DoesNotContain(":\\", script);
+            Assert.DoesNotContain(":/", script);
+            Assert.DoesNotContain(home, script, StringComparison.OrdinalIgnoreCase);
+            Assert.True(script.All(c => c < 128), $"{name} is not ASCII");
+        });
+    }
+
     static string[] Ours(string json, string hookEvent) =>
         Commands(json, hookEvent).Where(c => c.Contains("claude-hook.cmd") || c.Contains("claude-task-hook.cmd")).ToArray();
 
@@ -530,9 +579,15 @@ public sealed class ClaudeSkillTests : IDisposable
         Assert.Contains("task done", on);
         Assert.Contains("Never close", on);
         Assert.DoesNotContain("—", on);
+        // Review of PR B, I-1: free text on stdin, never on the command line. M-6: the description says to load the
+        // skill for the task too.
+        Assert.Contains("<<'EOF'", on);
+        Assert.Contains("Never put free text with quotes or & | < > on the command line", on);
+        Assert.Contains("task", on.Split("\n---")[0].Split("description:")[1]);
 
         ClaudeSkill.Sync(true, false, home, Deskbar);
         Assert.DoesNotContain("## Your task", File.ReadAllText(Skill));
+        Assert.DoesNotContain("task", File.ReadAllText(Skill).Split("\n---")[0].Split("description:")[1]);
 
         File.WriteAllText(Settings, Repeated);
         ClaudeSkill.Sync(true, true, home, Deskbar);

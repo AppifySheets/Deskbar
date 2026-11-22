@@ -17,11 +17,12 @@ namespace Deskbar.Windows.Control;
 // points at this exe, so a Claude Code session's `open` and its hook's `attention` arrive here.
 // `callerFolder` is a parameter so a test can name one; left null it is this process's current folder.
 //
-// `claude-hook` (Claude Code's hooks, plan Task 7) is the one command that reads stdin: the hook's JSON, sent on as
-// --json (ControlArguments.WithHookInput). Its reply is shaped by ControlArguments.HookReply (Deskbar not running is
-// exit 0 and silence), and an empty answer prints nothing at all, not an empty line, because what it prints is
-// context the session reads. `stdin` is a parameter so a test can hand the JSON in; left null it is this process's
-// own stdin, read as UTF-8 (ReadStandardInput).
+// Two commands read stdin (ControlArguments.WithInput): `claude-hook` (Claude Code's hooks, plan Task 7), whose stdin is
+// the hook's JSON, sent on as --json, and a `task` form that takes free text, given `-` in the text's place (review of
+// PR B, I-1: free text never goes through cmd's command line). A hook's reply is shaped by ControlArguments.HookReply
+// (Deskbar not running is exit 0 and silence), and an empty answer prints nothing at all, not an empty line, because
+// what it prints is context the session reads. `stdin` is a parameter so a test can hand the text in; left null it is
+// this process's own stdin, read as UTF-8 (ReadStandardInput).
 public static class ControlConsole
 {
     public static int Run(
@@ -33,7 +34,7 @@ public static class ControlConsole
         string? callerFolder = null,
         TextReader? stdin = null)
     {
-        var forwarded = ControlArguments.WithHookInput(
+        var forwarded = ControlArguments.WithInput(
             ControlArguments.WithCallerFolder(args, callerFolder ?? Environment.CurrentDirectory),
             () => stdin?.ReadToEnd() ?? ReadStandardInput());
         // Waited for synchronously on a pool thread: a console Main has no sync context to deadlock,

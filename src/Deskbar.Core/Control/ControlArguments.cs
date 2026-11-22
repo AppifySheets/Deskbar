@@ -133,7 +133,7 @@ public static class ControlArguments
     // the second, claude-hook's stdin, is below). `open`, `attention`, `task` and `claude-hook` need the caller's
     // folder, and only the asking process knows it: the running app has its own current folder, and the pipe carries the
     // arguments alone. So any of them that does not name a folder gets the client's, which is the folder of the shell
-    // that ran deskbar.cmd. Every other command goes through untouched. For `claude-hook`, claude-hook.cmd passes
+    // that ran deskbar.cmd. Every other command goes through untouched. For `claude-hook`, the hook scripts pass
     // CLAUDE_PROJECT_DIR as --from when Claude Code set it; otherwise the folder the hook was started in is the session's.
     static readonly string[] AboutTheCaller = ["open", "attention", "task", ClaudeHookVerb];
 
@@ -142,19 +142,48 @@ public static class ControlArguments
             ? [.. args, "--from", callerFolder]
             : args;
 
-    // --- claude-hook: the second and last thing the client adds -----------------------------------
+    // --- stdin: the second thing the client adds ---------------------------------------------------
     //
     // Claude Code hands a hook its JSON on STDIN, and the pipe carries arguments only, so the client reads its stdin and
-    // sends it on as `--json <text>`. For this verb alone: any other command started from a terminal would sit waiting
-    // on the keyboard. `readInput` is only called when it is needed, so a test can prove the other verbs never read.
-    // An explicit --json (a person trying the verb by hand) is left as it is.
+    // sends it on as `--json <text>` (WithHookInput). And a `task` form that takes free text takes `-` for it, which
+    // means "the text is on stdin" (WithTextInput). Only those two ever read stdin: any other command started from a
+    // terminal would sit waiting on the keyboard. `readInput` is only called when it is needed, so a test can prove the
+    // other verbs never read. WithInput applies both; a command is never both, so stdin is read once at most.
+    public static IReadOnlyList<string> WithInput(IReadOnlyList<string> args, Func<string> readInput) =>
+        WithTextInput(WithHookInput(args, readInput), readInput);
+
     public const string ClaudeHookVerb = "claude-hook";
 
     public static bool IsClaudeHook(IReadOnlyList<string> args) =>
         args.Count > 0 && args[0].Equals(ClaudeHookVerb, StringComparison.OrdinalIgnoreCase);
 
+    // An explicit --json (a person trying the verb by hand) is left as it is.
     public static IReadOnlyList<string> WithHookInput(IReadOnlyList<string> args, Func<string> readInput) =>
         IsClaudeHook(args) && !args.Contains("--json") ? [.. args, "--json", readInput()] : args;
+
+    // FREE TEXT NEVER GOES THROUGH cmd's COMMAND LINE (review of PR B, I-1). deskbar.cmd hands its arguments on with
+    // `%*`, and cmd parses that line again: Git Bash and PowerShell escape a quote inside an argument as \", which cmd
+    // does not know, so the quote ends the quoted run and whatever follows is cmd's to run. Measured:
+    // `task status-line 'checking "x & echo INJECTED" now'` ran `echo INJECTED`, and `task comment 'set "a > pwned.txt"'`
+    // tried a redirect. A session's status line, question, comment and titles are exactly that kind of text.
+    //
+    // So the text-taking `task` forms accept `-` in the text's place, and the client puts its stdin there: a heredoc in
+    // Git Bash (`task comment - --session <id> <<'EOF'`), a pipe in PowerShell. Stdin is bytes to cmd, never parsed.
+    // A `-` that is an option's value (after --session, say) is not text. The heredoc's last line break is dropped.
+    static readonly string[] TextVerbs = ["status-line", "ask", "comment", "new", "later"];
+
+    static bool IsTextForm(IReadOnlyList<string> args) =>
+        args.Count > 2 && args[0].Equals("task", StringComparison.OrdinalIgnoreCase)
+        && TextVerbs.Contains(args[1], StringComparer.OrdinalIgnoreCase);
+
+    public static IReadOnlyList<string> WithTextInput(IReadOnlyList<string> args, Func<string> readInput) =>
+        IsTextForm(args) && Enumerable.Range(2, args.Count - 2).Where(i => args[i] == "-" && !IsOption(args[i - 1])).ToList() is [var at, ..]
+            ? [.. args.Take(at), readInput().TrimEnd(LineBreaks), .. args.Skip(at + 1)]
+            : args;
+
+    static readonly char[] LineBreaks = ['\r', '\n'];
+
+    static bool IsOption(string word) => word.StartsWith("--", StringComparison.Ordinal);
 
     // What a hook's reply becomes before it is printed. A Deskbar that is not running is not the session's business: the
     // hook prints nothing and exits 0, so a Stop hook never tells Claude to keep going (exit 2 would) and a prompt goes
@@ -167,14 +196,27 @@ public static class ControlArguments
     // its --json carries the user's prompt and Claude's last reply, and the trace is often on and goes out with problem
     // reports (review of Task 7, I-2). So a hook is written as its event, its session and the JSON's length only, or as
     // the length alone when the JSON does not read.
+    //
+    // A task's free text (a question, a comment, a status line, a title) goes the same way (review of PR B, M-4): it is
+    // the session's words, so it is written as its length. A comment's task id stays, since it is no one's words.
     public static string ForTrace(IReadOnlyList<string> args) =>
-        !IsClaudeHook(args)
+        IsTextForm(args) ? string.Join(' ', TextForTrace(args))
+        : !IsClaudeHook(args)
             ? string.Join(' ', args)
             : ParseClaudeHook(args.Skip(1).ToList()) is { IsSuccess: true, Value.Json: { } json }
                 ? Tasks.ClaudeHookEvent.Parse(json, null, null).Match(
                     hook => $"{ClaudeHookVerb} {hook.Event} session {hook.SessionId} ({json.Length} characters of JSON)",
                     _ => $"{ClaudeHookVerb} ({json.Length} characters of JSON that does not read)")
                 : $"{ClaudeHookVerb} (no JSON)";
+
+    // The words of a task text form, its text as a length. The positional words are the text, except the id that the
+    // user's `task comment <id> <markdown>` names first.
+    static IEnumerable<string> TextForTrace(IReadOnlyList<string> args)
+    {
+        var positional = Enumerable.Range(2, args.Count - 2).Where(i => !IsOption(args[i]) && !IsOption(args[i - 1])).ToList();
+        var text = args[1].Equals("comment", StringComparison.OrdinalIgnoreCase) && positional.Count > 1 ? positional.Skip(1) : positional;
+        return args.Select((word, i) => text.Contains(i) ? $"({word.Length} characters)" : word);
+    }
 
     // `claude-hook [--entry <value>] [--attended <value>] [--from <folder>] --json <text>`, in any order, as the server
     // receives it. Values may be EMPTY: cmd passes an unset variable as "" inside a batch file, and that is an answer

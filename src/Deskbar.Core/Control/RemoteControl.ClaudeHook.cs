@@ -12,8 +12,9 @@ namespace Deskbar.Core.Control;
 //
 //   claude-hook [--entry <value>] [--attended <value>] [--from <folder>] --json <text>
 //
-// claude-hook.cmd (written by ClaudeSkill in the app) runs this on every hook event it is registered for, with the
-// hook's JSON on the client's stdin; the client sends it on as --json (ControlArguments.WithHookInput). --entry and
+// The hook scripts (written by ClaudeSkill in the app: claude-hook.cmd for Notification and Stop, claude-task-hook.cmd
+// for SessionStart, UserPromptSubmit and SessionEnd) run this on every event they are registered for, with the
+// hook's JSON on the client's stdin; the client sends it on as --json (ControlArguments.WithInput). --entry and
 // --attended are CLAUDE_CODE_ENTRYPOINT and CLAUDE_CODE_SESSION_ATTENDED as the script passed them; ClaudeHookEvent
 // turns them into Headless. --from is the session's folder: CLAUDE_PROJECT_DIR, or the client's own folder when Claude
 // Code did not set it (ControlArguments.WithCallerFolder). It is normalised (FolderPath: the long form of an 8.3 path,

@@ -85,7 +85,7 @@ static class ClaudeSkill
                 // The hooks first: the skill tells a session whether they ask for the user, so it must know.
                 // An entry written by an older Deskbar (`cmd.exe /c ...`) still names the script, so Sync sees it as
                 // Deskbar's own, finds its command differs, and replaces it with this one.
-                var hooksInstalled = InstallHooks(scripts, Path.Combine(deskbarFolder, ControlCommandLine.ShimName), settings, tasks);
+                var hooksInstalled = InstallHooks(scripts, settings, tasks);
                 Write(folder, file, hooksInstalled, tasks);
             }
             else
@@ -110,12 +110,12 @@ static class ClaudeSkill
     // stop the skill from being written, so it is traced and counts as "not installed".
     // The task script is there exactly while its entries are: written before they are added, taken away once they
     // are removed (and not while a file Sync left alone may still hold them), so no entry points at a missing file.
-    static bool InstallHooks(HookScripts scripts, string shim, string settings, bool tasks)
+    static bool InstallHooks(HookScripts scripts, string settings, bool tasks)
     {
         try
         {
-            WriteHookScript(scripts.Ask, shim);
-            if (tasks) WriteHookScript(scripts.Task, shim);
+            WriteHookScript(scripts.Ask);
+            if (tasks) WriteHookScript(scripts.Task);
             var installed = ClaudeHooks.Sync(true, tasks, settings, HookCommand(scripts.Ask), HookCommand(scripts.Task));
             if (!tasks && installed) RemoveTaskScript(scripts.Task);
             return installed;
@@ -154,10 +154,15 @@ static class ClaudeSkill
     //     in (ClaudeHookEvent). An unset one arrives as "" (cmd in a batch file), which ClaudeHookEvent reads as unset.
     //
     // The no-folder branch stays: without CLAUDE_PROJECT_DIR there is no --from, and the client adds its own folder.
-    static void WriteHookScript(string path, string shim)
+    //
+    // THE SHIM IS CALLED BY `%~dp0`, the folder the script itself is in, where deskbar.cmd always sits beside it (review
+    // of PR B, I-3). The script used to name the shim's absolute path, written UTF-8, but cmd reads a batch file in the
+    // console's OEM code page: a profile path with a letter outside ASCII came out garbled, the call found no shim, and
+    // with stderr sent to nul every hook died without a word. With `%~dp0` the script holds no path and is pure ASCII,
+    // and cmd fills in the folder itself, in whatever letters it has.
+    static void WriteHookScript(string path)
     {
-        var quoted = shim.Replace("%", "%%");
-        var hook = $"call \"{quoted}\" claude-hook --entry \"%CLAUDE_CODE_ENTRYPOINT%\" --attended \"%CLAUDE_CODE_SESSION_ATTENDED%\"";
+        var hook = $"call \"%~dp0{ControlCommandLine.ShimName}\" claude-hook --entry \"%CLAUDE_CODE_ENTRYPOINT%\" --attended \"%CLAUDE_CODE_SESSION_ATTENDED%\"";
         var text = string.Join("\r\n",
             "@rem Written by Deskbar for Claude Code's hooks: tells the bar what the session that runs it is doing. Do not edit.",
             $"@if defined CLAUDE_PROJECT_DIR ({hook} --from \"%CLAUDE_PROJECT_DIR%\" 2>nul) else ({hook} 2>nul)",
@@ -212,23 +217,38 @@ static class ClaudeSkill
         you could join. Pass `--session <your session id>` to every command below, and run them from your working
         folder.
 
+        Free text (a title, a status line, a question, a comment) always goes on stdin: put `-` in its place and give
+        the text as a heredoc in Git Bash,
+
+            "$APPDATA/Deskbar/deskbar.cmd" task comment - --session <id> <<'EOF'
+            **Found it**: the guard ran twice
+            EOF
+
+        or pipe it in from PowerShell (`'waiting for CI' | & "$env:APPDATA\Deskbar\deskbar.cmd" task status-line - --session <id>`).
+        Never put free text with quotes or & | < > on the command line: deskbar.cmd hands it to cmd, which can run part
+        of it as a command.
+
         - Join or create. Once you know what the session is working on, join the task it continues with
-          `deskbar.cmd task join <id> --session <id>`, or create one with
-          `deskbar.cmd task new "<short title>" --session <id>`. Joining one of the user's notes makes it your work.
-          A resumed session keeps its task; you do not need to join it again.
-        - Keep the status line current: `deskbar.cmd task status-line "<what you are doing now>" --session <id>`, one
-          short line ("waiting for CI on #398"), changed when what you are doing changes.
-        - Ask through the task. When you need a decision from the user, run
-          `deskbar.cmd task ask "<question>" --session <id>`: the task waits on the user with your question, and your
-          workspace blinks. Their next message to you answers it. A reply finishing is not an ask; do not ask for
-          routine progress.
-        - Comment with detail: `deskbar.cmd task comment "<markdown>" --session <id>` for what is worth keeping
-          (findings, links, what is left to do). The status line stays short; the detail goes here.
+          `deskbar.cmd task join <id> --session <id>`, or create one with `deskbar.cmd task new - --session <id>` and a
+          short title on stdin. Joining one of the user's notes makes it your work. A resumed session keeps its task;
+          you do not need to join it again.
+        - Keep the status line current: `deskbar.cmd task status-line - --session <id>`, one short line on stdin
+          ("waiting for CI on #398"), changed when what you are doing changes.
+        - Ask through the task. When you need a decision from the user, run `deskbar.cmd task ask - --session <id>`
+          with the question on stdin: the task waits on the user with your question, and your workspace blinks. Their
+          next message to you answers it. A reply finishing is not an ask; do not ask for routine progress.
+        - Comment with detail: `deskbar.cmd task comment - --session <id>` with markdown on stdin, for what is worth
+          keeping (findings, links, what is left to do). The status line stays short; the detail goes here.
         - Mark it done on a clear finish: `deskbar.cmd task done --session <id>`. Never close or delete a task: only
-          the user closes one. A follow-up for later is `deskbar.cmd task later "<title>" --session <id>`, a note on
-          your workspace.
+          the user closes one. A follow-up for later is `deskbar.cmd task later - --session <id>`, its title on stdin,
+          a note on your workspace.
         - Leave the user's own notes alone unless they ask you to change one.
         """;
+
+    // The description's extra sentence while the task section is there (review of PR B, M-6): a session decides from
+    // the description whether to load the skill, so it has to name the task too, or a session about to set its status
+    // line would never read how.
+    const string TaskDescription = " Also use it to keep your task in the user's Deskbar task list: joining or creating it, its status line, asking the user through it, comments, and marking it done.";
 
     // A section followed by the blank line that separates it from the next, in the line ending the raw literals have
     // (they take the source file's, which depends on the checkout), so the skill never mixes the two.
@@ -246,7 +266,7 @@ static class ClaudeSkill
         $$"""
         ---
         name: deskbar
-        description: Use whenever you open a link, start a program, or open any window for the user on Windows (a browser, File Explorer, an app), and when asked to move windows between virtual desktops or Deskbar workspaces. Deskbar runs on this machine and can put the window in the workspace you work in, instead of on whatever desktop the user is looking at.
+        description: Use whenever you open a link, start a program, or open any window for the user on Windows (a browser, File Explorer, an app), and when asked to move windows between virtual desktops or Deskbar workspaces. Deskbar runs on this machine and can put the window in the workspace you work in, instead of on whatever desktop the user is looking at.{{(tasks && hooksInstalled ? TaskDescription : "")}}
         ---
 
         # Deskbar

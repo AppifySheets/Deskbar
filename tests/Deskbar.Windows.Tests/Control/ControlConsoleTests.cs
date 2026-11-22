@@ -59,8 +59,24 @@ public class ControlConsoleTests
         Assert.Equal(["move", "--title", "a b"], seenArgs);
     }
 
+    // Review of PR B, I-1: deskbar-cli (the Store build's `deskbar`) puts its stdin in place of a text form's `-` too.
+    [Fact]
+    public void A_task_text_form_takes_its_text_from_stdin()
+    {
+        IReadOnlyList<string>? seenArgs = null;
+        const string text = "set \"a > pwned.txt\" & echo INJECTED";
+
+        ControlConsole.Run(["task", "ask", "-", "--session", "s1"], "pipe", (_, args) =>
+        {
+            seenArgs = args;
+            return Task.FromResult(new ControlReply(ControlReply.Ok, "{}"));
+        }, new StringWriter(), new StringWriter(), callerFolder: @"C:\work\repo", stdin: new StringReader(text + "\n"));
+
+        Assert.Equal(["task", "ask", text, "--session", "s1", "--from", @"C:\work\repo"], seenArgs);
+    }
+
     // `claude-hook` is run by Claude Code's hooks with the hook's JSON on stdin. The client sends it on as `--json`, after
-    // the caller's folder, and reads stdin for this verb only.
+    // the caller's folder.
     [Fact]
     public void Claude_hook_sends_its_stdin_as_json()
     {

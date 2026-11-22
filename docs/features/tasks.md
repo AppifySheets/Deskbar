@@ -109,6 +109,8 @@ A Claude Code session's own forms, each with `--session <id>` (see [Claude Code 
 - `task status-line <text>`, `task ask <question>`, `task comment <markdown>` and `task done`, on the session's own task
 - `task later <title>`, a note for later on the session's workspace
 
+Every form that takes text, `task comment <id> <markdown>` included, takes `-` in the text's place and reads the text from stdin. Use it for any text with quotes or `& | < >` in it: `deskbar.cmd` hands its command line to cmd, which could run part of such a text as a command.
+
 ## With Claude sessions
 
 Every Claude Code session keeps a task in this list. When it starts, it is offered the open tasks on its workspace, joins the one its work continues or creates its own, and keeps a short status line under the title. A task a session works on is Claude's: it has an orange edge, and a session that joins one of your notes makes it Claude's work.
