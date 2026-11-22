@@ -61,9 +61,10 @@ arrival sees the board as the earlier ones left it.
 ## The lock
 
 - Toggled from the window icon's right-click menu in the bar: a checkable "Don't split this tile", shown only while
-  that window is in a tile (`Tiler.InTile`). It sits with the other per-window items, after "Rename this window…".
-- Remote twin on the control pipe, `tile-lock <on|off> --hwnd 0x...`, listed in `ControlUsage`, because every menu
-  command has one.
+  that window is a tile of the workspace being looked at (on the Tiler's board). It is the last item before the
+  separator that starts the closing group.
+- Remote twin on the control pipe, `lock-tile <hwnd> on|off` (the shape of `remember-workspace <hwnd> on|off`),
+  listed in `ControlUsage`, because every menu command has one.
 - My call: the Tiler holds the locked set, keyed by window handle, in memory only. It is forgotten when the window
   closes and when Deskbar restarts. Handles get reused after a reboot, so writing them to `state.json` could lock
   an unrelated window later; keying on process and start time would fix that, but costs more than the feature is
