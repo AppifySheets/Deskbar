@@ -1680,6 +1680,11 @@ public partial class App : Application
                         .Select(w => (w.Handle, Titles: manager.OriginalTitle(w.Handle).Map(t => (IEnumerable<string>)[w.Title, t]).GetValueOrDefault([w.Title]))))
                     .TryFirst()
                     .Map(handle => handle.Value),
+                // Whether a window is on the desktop in front, for the task list's keyboard hand-back, which must never
+                // switch desktops: a window pinned to every desktop is, one on the current desktop is, and any failure
+                // to ask counts as no, so a doubt keeps the keyboard where it is rather than moving Petre.
+                OnCurrentDesktop = hwnd => desktops!.IsPinned(new WindowHandle(hwnd)).Match(pinned => pinned, _ => false)
+                    || desktops.DesktopOf(new WindowHandle(hwnd)).Bind(on => desktops.CurrentDesktop().Map(front => front == on)).Match(same => same, _ => false),
             };
             // The bar's hwnd is created HERE, before it is ever shown, for two reasons that
             // both hang off the same handle:

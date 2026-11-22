@@ -101,6 +101,15 @@ public partial class FloatingBar
     // language switcher's seams (FloatingBar.Language.cs).
     internal Func<nint, bool> WindowAlive { get; init; } = Windows.Monitoring.NativeMethods.IsWindow;
 
+    // Whether a window is on the virtual desktop in front (a window pinned to every desktop is). The App answers from
+    // the desktop service; left unset the answer is no, so a bar without one never hands the keyboard to a window that
+    // might sit on another desktop, which would switch desktops under Petre (GiveTaskKeyboardBack).
+    internal Func<nint, bool> OnCurrentDesktop { get; init; } = _ => false;
+
+    // The clock the click guard reads (TaskClickIgnored). A seam so the tests can put a click right after a repaint,
+    // or half a second later, without waiting.
+    internal Func<DateTime> TaskClickClock { get; init; } = () => DateTime.UtcNow;
+
     // Whether a paint must wait: the conditions Rebuild waits under, all of them (FloatingBar.xaml.cs, Rebuild). A
     // button down anywhere on the bar or on a screen strip, not only on the list: a paint that adds or drops a line
     // changes the bar's height, a bar anchored at the bottom then moves its Top, and the rows shift under a press in
@@ -122,6 +131,13 @@ public partial class FloatingBar
 
     // Three lines, the number the spec gives ("the three most recent tasks").
     const int TaskListSlots = 3;
+
+    // Expanded in place, at most this many lines show and the rest scroll (PR A review, Important 3): dozens of
+    // migrated notes must not push the workspace rows off a docked bar.
+    const int ExpandedSlots = 8;
+
+    // A click this soon after a repaint that changed the lines is not trusted (TaskClickIgnored).
+    static readonly TimeSpan RepaintGrace = TimeSpan.FromMilliseconds(500);
     const string NoLiveSession = "no live session";
     const string TaskDetailSeparator = " · ";
     const string OtherChipText = "other…";
@@ -155,6 +171,7 @@ public partial class FloatingBar
     TaskChipParts? taskChipNone;
     TaskChipParts? taskChipOther;
     StackPanel? taskLinesPanel;
+    ScrollViewer? taskLinesScroller;
 
     // The list's state: folded to three or expanded, what was drawn last, the lines on show, and the add box's choice.
     bool taskListExpanded;
@@ -167,6 +184,11 @@ public partial class FloatingBar
     // chip in taskAddTarget, for the next "+ Add". And the window to hand the keyboard back to after Enter or Esc.
     bool taskDraftKept;
     nint taskReturnTo;
+
+    // The click guard's two facts (TaskClickIgnored): the click count of the last press on one of the list's guarded
+    // buttons, and when the lines were last redrawn.
+    int taskPressClicks;
+    DateTime taskLinesChangedAt = DateTime.MinValue;
 
     // A workspace chip's fill: its row's rail colour, faded so the name stays readable on it. One brush per colour,
     // per bar, frozen.
@@ -246,7 +268,7 @@ public partial class FloatingBar
     {
         taskHeaderLabel = new TextBlock { Text = "Tasks", Foreground = TaskDimInk, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(2, 0, 6, 0) };
         taskMoreLabel = new TextBlock { Foreground = TaskInk };
-        taskMoreButton = TaskButton("More tasks", Pill(taskMoreLabel), OnTaskMoreClick);
+        taskMoreButton = TaskButton("More tasks", Pill(taskMoreLabel), OnTaskMoreClick, guarded: true);
         taskMoreButton.Visibility = Visibility.Collapsed;
         taskAddLabel = new TextBlock { Text = "+ Add", Foreground = TaskInk };
         var add = TaskButton("Add a task", Pill(taskAddLabel), StartAddingTask, "Add a note");
@@ -291,7 +313,17 @@ public partial class FloatingBar
         taskAddPanel = new StackPanel { Visibility = Visibility.Collapsed, Margin = new Thickness(0, 2, 0, 3), Children = { taskAddBox, chips } };
 
         taskLinesPanel = new StackPanel();
-        TaskListLine.Child = new TakesNoWidth { Child = new StackPanel { Children = { header, taskAddPanel, taskLinesPanel } } };
+        // The lines scroll inside this once the expanded list is capped (CapTaskLines). The bar draws no scroll bar of
+        // its own anywhere, so none here either: the wheel scrolls it. Folded to three, it has no ceiling at all.
+        taskLinesScroller = new ScrollViewer
+        {
+            Tag = "task-lines",
+            Content = taskLinesPanel,
+            VerticalScrollBarVisibility = ScrollBarVisibility.Hidden,
+            HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
+            Focusable = false,
+        };
+        TaskListLine.Child = new TakesNoWidth { Child = new StackPanel { Children = { header, taskAddPanel, taskLinesScroller } } };
         ApplyTaskListTextSize();
         Closed += (_, _) => taskChanges?.Dispose();
     }
@@ -299,8 +331,12 @@ public partial class FloatingBar
     // A small button in the bar's style (the strip's template, so it hovers like the bar's other small controls).
     // Marks the press consumed, as every button on the bar does, so the bar's own release does not read it as a click
     // of its own; and marks the Click handled, because a line is itself a button and the tick box and the close button
-    // sit inside it: Click bubbles, and the line must not also act on them.
-    Button TaskButton(string name, UIElement content, Action press, string? tip = null)
+    // sit inside it: Click bubbles, and the line must not also act on them. Handled even when the guard drops the
+    // click, so a dropped tick never turns into a click on its line.
+    //
+    // `guarded`: the click is dropped when TaskClickIgnored says so. The tick, the close button and "+N" are; "+ Add",
+    // the chips and the failed-load line's dismiss are not, since nothing slides under them.
+    Button TaskButton(string name, UIElement content, Action press, string? tip = null, bool guarded = false)
     {
         var button = new Button
         {
@@ -315,13 +351,27 @@ public partial class FloatingBar
         };
         AutomationProperties.SetName(button, name);
         if (tip is not null) button.ToolTip = tip;
+        if (guarded) button.PreviewMouseLeftButtonDown += (_, e) => taskPressClicks = e.ClickCount;
         button.Click += (_, e) =>
         {
             e.Handled = true;
             MarkPressConsumed();
+            if (guarded && TaskClickIgnored()) return;
             press();
         };
         return button;
+    }
+
+    // THE CLICK GUARD (PR A review, Important 2 and Minor 5). Ticking a note takes its line away and the next note's
+    // tick slides under the pointer, so the second click of a double click closed that one too; and the list grows
+    // upward from the footer, so "+N" moves under the pointer the same way. A click is dropped when its press was the
+    // second of a double click (ClickCount above 1) or when it lands within half a second of a repaint that redrew the
+    // lines: either way it was aimed at something that has just moved. Reading the guard consumes the press's count.
+    bool TaskClickIgnored()
+    {
+        var doubled = taskPressClicks > 1;
+        taskPressClicks = 0;
+        return doubled || TaskClickClock() - taskLinesChangedAt < RepaintGrace;
     }
 
     // The header's grey pill around a label ("+2", "+ Add").
@@ -332,9 +382,11 @@ public partial class FloatingBar
     // another chip never moves anything (CLAUDE.md: present and recoloured, not conditional thickness).
     TaskChipParts TaskChip(string text, Action press)
     {
-        var label = new TextBlock { Text = text, Foreground = TaskInk, VerticalAlignment = VerticalAlignment.Center };
+        // Trimmed under a ceiling (ApplyTaskListTextSize), so a long workspace name cannot push "other…" out of the row.
+        var label = new TextBlock { Text = text, Foreground = TaskInk, VerticalAlignment = VerticalAlignment.Center, TextTrimming = TextTrimming.CharacterEllipsis };
         var face = new Border
         {
+            Tag = "task-chip",
             Background = TaskButtonFill,
             BorderBrush = Brushes.Transparent,
             BorderThickness = new Thickness(1),
@@ -347,6 +399,10 @@ public partial class FloatingBar
         return new TaskChipParts(button, face, label);
     }
 
+    // The widest a workspace chip's name may be, in a line or in the add box: about eight characters of chip text,
+    // following the text size. Past it the name is trimmed, so it never squeezes a title away.
+    double ChipTextCeiling => Text(7.5) * 7;
+
     // The text built once and kept takes the bar's text size here (ApplyTextSize); the lines take it as they are made.
     void ApplyTaskListTextSize()
     {
@@ -355,7 +411,11 @@ public partial class FloatingBar
         Sized(taskAddLabel, 8.5);
         Sized(taskAddOn, 7.5);
         Sized(taskAddHint, 7.5);
-        new[] { taskChipHere, taskChipNone, taskChipOther }.ToList().ForEach(chip => Sized(chip?.Label, 7.5));
+        new[] { taskChipHere, taskChipNone, taskChipOther }.ToList().ForEach(chip =>
+        {
+            Sized(chip?.Label, 7.5);
+            if (chip is not null) chip.Label.MaxWidth = ChipTextCeiling;
+        });
         if (taskAddBox is not null) taskAddBox.FontSize = Text(9.5);
     }
 
@@ -396,7 +456,27 @@ public partial class FloatingBar
         taskLinesPanel.Children.Clear();
         if (problem.HasValue) taskLinesPanel.Children.Add(LoadProblemRow(problem.Value));
         shownTaskLines.ToList().ForEach(line => taskLinesPanel.Children.Add(TaskLineButton(line)));
+        // The lines just moved, so the click guard distrusts a click for the next half second (TaskClickIgnored).
+        taskLinesChangedAt = TaskClickClock();
+        CapTaskLines(problem.HasValue);
         PaintTaskMore(lines);
+    }
+
+    // The expanded list's ceiling: the height of its first eight lines (and the failed-load line above them, when
+    // there is one), so the ninth and later scroll inside the viewer. Measured from the lines just built, at their own
+    // height, since a line's height follows the text size. Folded, there is no ceiling and the viewer is at its top.
+    void CapTaskLines(bool problemShown)
+    {
+        if (taskLinesScroller is null || taskLinesPanel is null) return;
+        if (!taskListExpanded || shownTaskLines.Count <= ExpandedSlots)
+        {
+            taskLinesScroller.MaxHeight = double.PositiveInfinity;
+            taskLinesScroller.ScrollToTop();
+            return;
+        }
+        var counted = taskLinesPanel.Children.OfType<UIElement>().Take(ExpandedSlots + (problemShown ? 1 : 0)).ToList();
+        counted.ForEach(row => row.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity)));
+        taskLinesScroller.MaxHeight = counted.Sum(row => row.DesiredSize.Height);
     }
 
     // Everything a line shows, as text, so two paints can be compared without drawing anything.
@@ -458,9 +538,12 @@ public partial class FloatingBar
             ToolTip = TipOf(line),
         };
         AutomationProperties.SetName(button, line.Title);
+        // The click guard, as on the tick and the close button (TaskClickIgnored).
+        button.PreviewMouseLeftButtonDown += (_, e) => taskPressClicks = e.ClickCount;
         button.Click += (_, _) =>
         {
             MarkPressConsumed();
+            if (TaskClickIgnored()) return;
             OnTaskLineClick(line);
         };
         return button;
@@ -479,7 +562,7 @@ public partial class FloatingBar
                 CornerRadius = new CornerRadius(3),
                 Background = Brushes.Transparent,
                 Margin = new Thickness(1, 0, 1, 0),
-            }, () => taskService?.Close(line.Id), "Tick off: closes the note")];
+            }, () => taskService?.Close(line.Id), "Tick off: closes the note", guarded: true)];
 
     // Right of the text, from the edge in: the workspace chip, then, on a Done Claude task, the close button, since a
     // Done task waits for Petre to look and close it (spec, "A Done Claude task shows a close button on its line"). The
@@ -491,7 +574,7 @@ public partial class FloatingBar
             WorkspaceChip(line),
             line.Status == TaskStatus.Done && line.Claudes
                 ? TaskButton("Close task", new TextBlock { Text = "✕", Foreground = TaskInk, FontSize = Text(8.5), Margin = new Thickness(5, 0, 5, 0) },
-                    () => taskService?.Close(line.Id), "Done: close this task")
+                    () => taskService?.Close(line.Id), "Done: close this task", guarded: true)
                 : null,
         }.OfType<UIElement>();
 
@@ -558,6 +641,8 @@ public partial class FloatingBar
             Text = line.WorkspaceName ?? "none",
             FontSize = Text(7.5),
             Foreground = line.WorkspaceName is null ? TaskNoneInk : TaskInk,
+            MaxWidth = ChipTextCeiling,
+            TextTrimming = TextTrimming.CharacterEllipsis,
         },
     };
 
@@ -616,7 +701,8 @@ public partial class FloatingBar
     {
         var goes = taskService?.Board.Tasks.TryFirst(t => t.Id == line.Id).Where(t => t.IsClaudes || t.WorkspaceId.HasValue).HasValue ?? false;
         if (!goes) return;
-        GoToTask(line.Id).TapError(err => ClickTrace.Write($"task list: going to {line.Id} failed: {err}"));
+        // Shown the way a row's failed switch is (Report), not only traced: a click that goes nowhere must say why.
+        Report(GoToTask(line.Id));
     }
 
     // "+N": the task window once it exists, else the list expanded in place, and folded back on the next click.
@@ -636,15 +722,19 @@ public partial class FloatingBar
     // does (QuickFindWindow.Open: Activate, then focus the box), since a key goes to the foreground window and the bar
     // may not be it when the click arrives through a strip or after a menu.
     //
-    // First it notes where Petre was typing, to hand the keyboard back there after Enter or Esc (GiveTaskKeyboardBack).
-    // The language switcher's rule finds that window (FollowForeground): the window in front when it is one you type
-    // in, else the last such window the foreground hook saw, since the click on the bar has usually made the bar the
-    // window in front already.
+    // First it notes where Petre was typing, to hand the keyboard back there after Enter or Esc (GiveTaskKeyboardBack):
+    // the window in front at the click, when it is one you type in; failing that (the click has usually made the bar
+    // the window in front already), the last such window the foreground hook saw (languageTarget), but only while it
+    // is on the desktop in front. A window on another desktop is never chosen: giving it the foreground would switch
+    // desktops under Petre (PR A review, Minor 8).
     void StartAddingTask()
     {
         if (taskService is null || taskAddPanel is null || taskAddBox is null) return;
+        var front = ForegroundWindow();
         FollowForeground();
-        taskReturnTo = languageTarget;
+        taskReturnTo = IsTypingWindow(front, isFlyout: ShellKeys.Recognise(front) is not null || (front != 0 && front == trayOverflow))
+            ? front
+            : languageTarget != 0 && OnCurrentDesktop(languageTarget) ? languageTarget : 0;
         taskAddHere = manager.CurrentWorkspaceId;
         if (!taskDraftKept) taskAddTarget = taskAddHere;
         taskDraftKept = false;
@@ -688,12 +778,14 @@ public partial class FloatingBar
 
     // The window noted when the box opened gets the foreground back, the way the language switcher hands it back
     // (HandForegroundTo), so Petre's next keystrokes land where he was typing rather than in a bar with nothing to
-    // type into. Only a window that still exists and is not one of Deskbar's own (the bar included).
+    // type into. Only a window that still exists, is not one of Deskbar's own (the bar included) and is still on the
+    // desktop in front: Petre may have switched desktops while the box was open, and handing the keyboard to a window
+    // left behind would switch him back.
     void GiveTaskKeyboardBack()
     {
         var back = taskReturnTo;
         taskReturnTo = 0;
-        if (back != 0 && !IsOwnWindow(back) && WindowAlive(back)) HandForegroundTo(back);
+        if (back != 0 && !IsOwnWindow(back) && WindowAlive(back) && OnCurrentDesktop(back)) HandForegroundTo(back);
     }
 
     void OnTaskAddKey(object sender, KeyEventArgs e)
@@ -796,20 +888,36 @@ public partial class FloatingBar
     // Holds the task list without letting it widen the bar. The bar sizes itself to its content (SizeToContent), so
     // a task title measured at its full length would make the whole bar that wide; this reports no width of its own,
     // only its height, and lays its content out at whatever width the rest of the bar gave it, where every line trims
-    // to fit. Measured again at that width on arrange, so the trimming is worked out for the width it really has.
+    // to fit.
+    //
+    // IT MUST MEASURE AT ONE WIDTH (PR A review, Critical 1). The first version measured the content at the width it
+    // was offered and again at the arranged width on every arrange. On a bar whose width SizeToContent still owns (a
+    // floating bar never resized, a new install's) the offered width is infinite, so the content's size flipped
+    // between "untrimmed" and "trimmed" on every pass: each arrange's measure changed the child's DesiredSize, that
+    // invalidated this element's measure, the next measure flipped it back, and layout never settled (a probe did 154
+    // arranges in one UpdateLayout and gave up). So the arranged width is remembered and every later measure uses it;
+    // only a first measure, with nothing arranged yet, takes the offered width. An arrange at a NEW width (the bar
+    // resized) measures once at it and remembers it, and the measure that follows asks for the same width, a no-op.
+    // The height is always measured unbounded: the list is as tall as its lines (the expanded list caps itself).
     sealed class TakesNoWidth : Decorator
     {
+        double arrangedWidth = double.NaN;
+
         protected override Size MeasureOverride(Size constraint)
         {
             if (Child is null) return new Size(0, 0);
-            Child.Measure(constraint);
+            Child.Measure(new Size(double.IsNaN(arrangedWidth) ? constraint.Width : arrangedWidth, double.PositiveInfinity));
             return new Size(0, Child.DesiredSize.Height);
         }
 
         protected override Size ArrangeOverride(Size arrangeSize)
         {
             if (Child is null) return arrangeSize;
-            Child.Measure(new Size(arrangeSize.Width, double.PositiveInfinity));
+            if (double.IsNaN(arrangedWidth) || Math.Abs(arrangeSize.Width - arrangedWidth) > 0.01)
+            {
+                arrangedWidth = arrangeSize.Width;
+                Child.Measure(new Size(arrangedWidth, double.PositiveInfinity));
+            }
             Child.Arrange(new Rect(arrangeSize));
             return arrangeSize;
         }
