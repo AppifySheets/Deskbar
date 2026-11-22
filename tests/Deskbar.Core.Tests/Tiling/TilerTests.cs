@@ -1391,11 +1391,39 @@ public sealed partial class TilerTests : IDisposable
         AssertTiled([W(1), W(2), W(3)]);
     }
 
+    // #398: "Tiles overlap when a window cannot go as narrow as its column". The window that kept a frame wider than its
+    // half gets a column that wide, its neighbour takes what is left, and nothing overlaps. Then it is left alone: its
+    // own LOCATIONCHANGE and a refresh place nothing again (the spec's "do not retry in a loop" still holds).
     [Fact]
-    public void A_window_that_will_not_shrink_is_placed_once()
+    public void A_window_that_will_not_shrink_gets_a_column_its_size_and_is_then_left_alone()
     {
         new[] { 1, 2 }.ToList().ForEach(n => Exists(W(n), alpha));
         surface.MinimumSize[W(1)] = (1500, 1000);
+        Start();
+
+        // Placed in its half, kept 1500 wide, and placed once more in a column made that wide.
+        Assert.Equal(2, PlacedWindows.Count(w => w == W(1)));
+        // At least its minimum; up to a gap more, since a cell reserves a whole gap for insets (GridLayout.Need) and a
+        // column on the screen's edge only loses half of one.
+        Assert.InRange(surface.Frames[W(1)].Width, 1500, 1500 + Gap);
+        Assert.True(surface.Frames[W(1)].Right + Gap <= surface.Frames[W(2)].Left,
+            $"the tiles overlap: {surface.Frames[W(1)]} and {surface.Frames[W(2)]}");
+        Assert.Equal(1920 - Gap, surface.Frames[W(2)].Right);
+        Assert.Contains(traced, line => line.Contains("will not go below 1500"));
+
+        Settles(W(1), surface.Frames[W(1)]);
+        tiler.Refresh();
+
+        Assert.Equal(2, PlacedWindows.Count(w => w == W(1)));
+    }
+
+    // When the minimum cannot fit beside its neighbour at all, the layout keeps its shares, as before: the window keeps
+    // the size it insists on, is placed once, and the Tiler does not fight it.
+    [Fact]
+    public void A_window_too_wide_to_make_room_for_is_placed_once()
+    {
+        new[] { 1, 2 }.ToList().ForEach(n => Exists(W(n), alpha));
+        surface.MinimumSize[W(1)] = (1900, 1000);
         Start();
         Assert.Single(PlacedWindows, W(1));
 
