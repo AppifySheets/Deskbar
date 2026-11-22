@@ -128,6 +128,21 @@ Describe 'Set-StoreSubmissionForUpdate' {
         $s.applicationPackages[0].fileStatus | Should Be 'PendingDelete'
     }
 
+    It 'drops the trial when the price is Free' {
+        $s = '{"TargetPublishMode":"Manual","ApplicationPackages":[],"Pricing":{"PriceId":"Free","TrialPeriod":"FifteenDays"}}' | ConvertFrom-Json
+        (Set-StoreSubmissionForUpdate $s '2.2.26').Pricing.TrialPeriod | Should Be 'NoFreeTrial'
+    }
+
+    It 'keeps the trial of a paid listing' {
+        $s = '{"TargetPublishMode":"Manual","ApplicationPackages":[],"Pricing":{"PriceId":"Tier1120","TrialPeriod":"FifteenDays"}}' | ConvertFrom-Json
+        (Set-StoreSubmissionForUpdate $s '2.2.26').Pricing.TrialPeriod | Should Be 'FifteenDays'
+    }
+
+    It 'matches the pricing names without regard to case too' {
+        $s = '{"targetPublishMode":"Manual","applicationPackages":[],"pricing":{"priceId":"Free","trialPeriod":"FifteenDays"}}' | ConvertFrom-Json
+        (Set-StoreSubmissionForUpdate $s '2.2.26').pricing.trialPeriod | Should Be 'NoFreeTrial'
+    }
+
     It 'throws when the draft has no publish mode to set' {
         { Set-StoreSubmissionForUpdate ([pscustomobject]@{ ApplicationPackages = @() }) '2.2.26' } | Should Throw 'TargetPublishMode'
     }

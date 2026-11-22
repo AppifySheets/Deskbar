@@ -108,7 +108,10 @@ jobs:
           DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run }}
           NO_COMMIT: ${{ github.event_name == 'workflow_dispatch' && inputs.no_commit }}
           # The base price tier, a repository VARIABLE because it is not secret and should be
-          # readable in the logs: Tier1120 is US$18.99. Without it msstore stops on the price, since
-          # Partner Center reports a market-group price as 'Base' (see scripts/store-submit.ps1).
+          # readable in the logs: Tier1120 is US$18.99, Free is a free listing. Without it msstore
+          # stops on the price, since Partner Center reports a market-group price as 'Base' (see
+          # scripts/store-submit.ps1). This variable IS the listing's price: every submission sets
+          # it, so a price changed only in Partner Center is undone by the next run. Set to Free,
+          # the script also drops the trial (Set-StoreSubmissionForUpdate in StoreSubmission.psm1).
           STORE_PRICE_ID: ${{ vars.STORE_PRICE_ID }}
         run: ./scripts/store-submit.ps1

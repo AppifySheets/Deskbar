@@ -20,7 +20,8 @@
 #   GH_TOKEN         for gh: listing artifacts and runs, downloading the package
 #   GITHUB_REPOSITORY  owner/repo, set by Actions
 #   DRY_RUN          'true' to stop after the decision, uploading nothing
-#   STORE_PRICE_ID   the base price tier msstore publish sets, e.g. Tier1120 (US$18.99). Required:
+#   STORE_PRICE_ID   the base price tier msstore publish sets, e.g. Tier1120 (US$18.99) or Free (a
+#                    free listing; the trial is then dropped too, see Set-StoreSubmissionForUpdate). Required:
 #                    Deskbar is priced through a Partner Center market group, so the submission API
 #                    reports its price as 'Base', and msstore refuses to pass that back (measured on
 #                    the first real run, 2026-11-03) rather than risk resetting the app to free.

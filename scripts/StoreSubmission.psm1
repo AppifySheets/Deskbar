@@ -96,6 +96,11 @@ function Set-StoreSubmissionForUpdate {
     #     update would wait for a click.
     #   - Every package whose version is not the new one is marked PendingDelete, so the Store
     #     serves one package rather than keeping the old one beside it.
+    #   - When the price is Free, the trial becomes NoFreeTrial. The draft is copied from the last
+    #     published submission, so it still carries the 15-day trial of the paid listing, and a
+    #     trial on a free app means nothing at best. The price itself is set before this runs, by
+    #     msstore publish --priceId from STORE_PRICE_ID, so setting that variable to Free is the
+    #     whole switch to a free listing (decided 2026-11-22: a free listing, Pro sold as an add-on).
     # Only properties the submission already has are set. PowerShell matches property names
     # without regard to case, so this works whether the CLI prints camelCase or PascalCase.
     # Returns the same object.
@@ -109,6 +114,12 @@ function Set-StoreSubmissionForUpdate {
     @($Submission.ApplicationPackages) |
         Where-Object { $_ -and $_.Version -and (ConvertTo-StoreVersion $_.Version) -ne $new } |
         ForEach-Object { $_.FileStatus = 'PendingDelete' }
+    # The trial rule above. Only a draft that has both a Free price and a trial property is touched,
+    # so a paid listing keeps its trial exactly as Partner Center has it.
+    $pricing = $Submission.PSObject.Properties['Pricing']
+    if ($pricing -and $pricing.Value -and $pricing.Value.PriceId -eq 'Free' -and $null -ne $pricing.Value.PSObject.Properties['TrialPeriod']) {
+        $pricing.Value.TrialPeriod = 'NoFreeTrial'
+    }
     $Submission
 }
 

@@ -1106,6 +1106,9 @@ emails about it.
 It needs four repository secrets for a Microsoft Entra app that Partner Center trusts with the
 Manager role: `STORE_TENANT_ID`, `STORE_CLIENT_ID`, `STORE_CLIENT_SECRET` and
 `STORE_SELLER_ID`. Until they are set, every run says so and passes without submitting. It also
-needs the repository variable `STORE_PRICE_ID`, the base price tier (`Tier1120` is US$18.99):
-Partner Center reports a market-group price as `Base`, which the Store CLI will not send back, so
-the tier is stated outright. Change it together with the price in Partner Center.
+needs the repository variable `STORE_PRICE_ID`, the base price tier (`Tier1120` is US$18.99,
+`Free` is a free listing): Partner Center reports a market-group price as `Base`, which the Store
+CLI will not send back, so the tier is stated outright. The variable is the listing's price, because
+every submission sets it: a price changed only in Partner Center is undone by the next run. With
+`Free`, the submission also drops the trial, which the draft would otherwise copy from the last
+paid submission.
