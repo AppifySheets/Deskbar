@@ -986,24 +986,17 @@ public partial class FloatingBar
         taskAddBox?.Focus();
     }
 
-    // "other…": every workspace but the current one, as a menu under the chip. Held open the way the bar's other menus
-    // are (HoldFadeWhileOpen), so the bar neither fades nor rebuilds out from under it. Internal, and answering the
-    // menu, for the tests, which pick from it.
+    // "other…": every workspace but the current one, as a menu under the chip, each drawn as its chip in its colour and
+    // grouped as on the bar (WorkspaceChipMenu), the chosen one ticked. Held open the way the bar's other menus are
+    // (HoldFadeWhileOpen), so the bar neither fades nor rebuilds out from under it. Internal, and answering the menu,
+    // for the tests, which pick from it.
     internal ContextMenu? OpenOtherWorkspaces()
     {
         if (taskChipOther is null) return null;
-        var menu = new ContextMenu { PlacementTarget = taskChipOther.Button, Placement = PlacementMode.Bottom };
-        manager.State.Workspaces
-            .Where(w => !taskAddHere.HasValue || w.Id != taskAddHere.Value)
-            .ToList()
-            .ForEach(w =>
-            {
-                // A TextBlock, not a string, so an underscore in a name is not read as an access key.
-                var item = new MenuItem { Header = new TextBlock { Text = w.Name } };
-                item.Click += (_, _) => ChooseTaskTarget(w.Id);
-                menu.Items.Add(item);
-            });
-        if (menu.Items.Count == 0) return null;
+        var entries = WorkspaceChipMenu.Entries(manager.State, withNone: false, w => !taskAddHere.HasValue || w.Id != taskAddHere.Value);
+        if (entries.Count == 0) return null;
+        var menu = WorkspaceChipMenu.Fill(new ContextMenu { PlacementTarget = taskChipOther.Button, Placement = PlacementMode.Bottom },
+            entries, taskAddTarget, ChooseTaskTarget);
         HoldFadeWhileOpen(menu);
         menu.IsOpen = true;
         return menu;
