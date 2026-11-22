@@ -148,6 +148,7 @@ public sealed partial class RemoteControl(WorkspaceManager manager, Func<bool, R
         ("full-screen", [var mode]) => FullScreen(mode),
         ("claude-skill", [var onOff]) => ClaudeSkill(onOff),
         ("focus-ring", [var onOff]) => FocusRing(onOff),
+        ("grain", [var onOff]) => Grain(onOff),
 
         // The file is the answer, not a window: whoever asked through the pipe reads it back from the path.
         ("dump", []) => dump is null

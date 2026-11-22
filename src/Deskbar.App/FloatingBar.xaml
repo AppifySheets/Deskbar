@@ -38,10 +38,11 @@
          The window keeps AllowsTransparency and a Transparent background only so the CornerRadius corners
          outside this Border stay clear; nothing inside the Border is see-through any more. Do not add an
          opacity setting to bring it back: that reopens the same legibility problem. -->
-    <!-- Textured, not flat (Petre, 2026-11-22, "too black", then "texture" from a set of mockups): opaque grain on a
-         slightly lighter base, built once in BarSurface.cs and shared with the strips, the stats window and the due
-         card. Every pixel of it is opaque, so the decision above stands. -->
-    <Border x:Name="Root" CornerRadius="8" Background="{x:Static app:BarSurface.Textured}" Padding="4">
+    <!-- The flat base, not the old #141518 (Petre, 2026-11-22, "too black"). The grain, which he picked for the same
+         reason, lies only behind the workspace rows: GrainLayer below, placed by FloatingBar.Grain.cs. The top
+         (Start, search, pinned apps) and the footer (stats, tray, clock) stay flat ("this and the top shouldn't be
+         grained"). Every pixel of both is opaque, so the decision above stands. -->
+    <Border x:Name="Root" CornerRadius="8" Background="{x:Static app:BarSurface.Solid}" Padding="4">
         <!-- No "Hide floating bar" menu any more. Petre: "show floating bar doesn't make
              sense anymore, it's crucial for the app's design." Once the switcher panel and the
              Windows tab were gone this bar became the only surface that lists windows and
@@ -53,6 +54,11 @@
              strip straight under the last row. -->
         <!-- Named so a seam dock across screens that are not level can inset it to the height they share
              (FloatingBar.SeamSpan); zero margin everywhere else. -->
+        <!-- A Grid only so GrainLayer can lie BEHIND the bar's content: declared first, drawn first. It never takes a
+             click (the window-level handlers do the dragging) and never sizes the bar (FloatingBar.Grain.cs keeps it
+             inside the content's own height). The -4 side margins bleed it over the Root's padding to both edges. -->
+        <Grid>
+        <Border x:Name="GrainLayer" IsHitTestVisible="False" VerticalAlignment="Top" Height="0" Margin="-4,0,-4,0"/>
         <DockPanel x:Name="BarContent" LastChildFill="True">
             <!-- The rest of the taskbar's own buttons: the tray chevron, quick settings and the bell from the
                  left, the clock and the show desktop sliver at the right, where Windows puts them. Filled once
@@ -159,5 +165,6 @@
 
         </StackPanel>
         </DockPanel>
+        </Grid>
     </Border>
 </Window>

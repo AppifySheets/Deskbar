@@ -292,6 +292,14 @@ public sealed record AppState(
     // The reading the app wants. Not stored.
     [JsonIgnore] public bool FocusRing => !NoFocusRing;
 
+    // Whether the bar's workspace rows stand on a grain texture (BarSurface and FloatingBar.Grain.cs in the app) or on
+    // the flat base. Petre: "make grain a default feature, configurable in settings". Stored as its NEGATION for the
+    // reason NoFocusRing is: every existing state.json lacks the key and reads false, which is on.
+    public bool NoGrain { get; init; }
+
+    // The reading the app wants. Not stored.
+    [JsonIgnore] public bool Grain => !NoGrain;
+
     // Petre: "i want it configurable" -- the Alt+Tab-style workspace switcher's chord.
     //
     // Stored as the TEXT the user typed, not as a parsed Chord: state.json stays readable

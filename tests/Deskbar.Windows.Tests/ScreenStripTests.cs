@@ -546,8 +546,9 @@ public class ScreenStripTests
         Assert.False(strip.ShowInTaskbar);
         Assert.True(strip.Topmost);
         Assert.NotEqual(0, NativeMethods.GetWindowLongPtr(hwnd, NativeMethods.GWL_EXSTYLE) & (nint)NativeMethods.WS_EX_TOOLWINDOW);
-        // The bar's own surface, the very brush, so a strip can never drift from the bar's background (BarSurface).
-        Assert.Same(Deskbar.App.BarSurface.Textured, strip.Background);
+        // The bar's own flat surface, the very brush, so a strip can never drift from the bar's background
+        // (BarSurface). Flat, not grained: the grain is the workspace rows' alone (FloatingBar.Grain.cs).
+        Assert.Same(Deskbar.App.BarSurface.Solid, strip.Background);
         strip.Close();
     });
 }
