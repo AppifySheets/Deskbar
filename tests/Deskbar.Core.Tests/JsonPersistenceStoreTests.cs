@@ -350,6 +350,27 @@ public sealed class JsonPersistenceStoreTests : IDisposable
         Assert.Equal(new DetachedStatsState(false, 1500.5, 12), store.Load().Value.DetachedStats);
     }
 
+    // The tasks window's place (AppState.TasksWindow), remembered across restarts: through the manager into the file
+    // and back, and the same place again writes nothing.
+    [Fact]
+    public void SaveTasksWindow_round_trips_through_the_store()
+    {
+        var store = new JsonPersistenceStore(dir);
+        var manager = new WorkspaceManager(new FakeDesktops(), new FakeMonitor(), new FakeTitles(), store);
+        Assert.True(manager.Start().IsSuccess);
+        Assert.Null(manager.State.TasksWindow);
+        var pulses = 0;
+        using var pulse = manager.StateChanged.Subscribe(_ => pulses++);
+
+        var place = new TasksWindowState(2600, 140, 1080, 840, Maximized: false);
+        Assert.True(manager.SaveTasksWindow(place).IsSuccess);
+        Assert.Equal(place, store.Load().Value.TasksWindow);
+        Assert.Equal(1, pulses);
+
+        Assert.True(manager.SaveTasksWindow(place).IsSuccess);
+        Assert.Equal(1, pulses);
+    }
+
     [Fact]
     public void An_old_state_file_without_the_key_loads_null()
     {

@@ -47,6 +47,7 @@ public partial class App : Application
     WorkspaceSwitchGesture? switcher; // Alt+Tab-style workspace picker (Win+Ctrl+Tab by default)
     Chord boundSwitcher;              // the chord the picker and the hotkey are currently registered on
     QuickFind? quickFind;             // the search box for every window, tab and app (Win+Alt+Space by default)
+    TasksBoard? tasksBoard;           // the tasks window, a page with every task (the bar's "+N more", `tasks-window show`)
     Chord boundQuickFind;             // the chord quick find's hotkey is currently registered on
     FloatingBar? floatingBar; // Task 11: created lazily on first show
     // The window list along the top of every screen (ScreenStrips, spec 2026-11-19-screen-strips-design.md): built with
@@ -885,6 +886,12 @@ public partial class App : Application
     // anything else -- which matters because it arrived from the network.
     static void OpenReleasePage(ReleaseInfo release) => OpenUrl(release.PageUrl);
 
+    // Where a click on a task goes, from the bar's list and the tasks window alike: its workspace, the switch the rows
+    // make. A Claude task on no workspace succeeds without moving. Controller ruling 13 (Task 10): a later change sends a
+    // Claude task to its session (the `vscode://` link, TaskViews.SessionToGoTo names which) by changing this one method.
+    Result GoToTask(Core.Tasks.TaskItem task) =>
+        task.WorkspaceId.HasValue ? manager!.Switch(task.WorkspaceId.Value) : Result.Success();
+
     // "Report a problem…" from the tray or the bar's menu (ReportWindow, issue #331). It replaced "Save debug dump":
     // the window's View link writes and opens the dump, and Send carries it to us with the user's words.
     //
@@ -1464,7 +1471,16 @@ public partial class App : Application
             tasks: tasks,
             // `lock-tile`, the icon menu's "Don't split this tile" (Tiler.Lock.cs). `tiler` is read when the command
             // arrives: requests run on the UI thread after startup, and a copy with no Tiler refuses.
-            setTileLocked: (window, on) => tiler?.SetTileLocked(window, on) ?? Result.Failure("Tiling is not running."));
+            setTileLocked: (window, on) => tiler?.SetTileLocked(window, on) ?? Result.Failure("Tiling is not running."),
+            // `tasks-window show|hide`, the twin of the bar's "+N more" and the window's own X. Read when the command
+            // arrives: the window is built later, with quick find, and is missing in compatibility mode.
+            setTasksWindow: shown => tasksBoard is { } board
+                ? Result.Success().Tap(() =>
+                {
+                    if (shown) board.Open(floatingBar?.BarScreenBounds() ?? Rect.Empty);
+                    else board.Dismiss();
+                })
+                : Result.Failure("The tasks window is not available in this mode."));
         controlServer = new ControlPipeServer(ControlCommandLine.PipeName,
             args => Dispatcher.InvokeAsync(() =>
             {
@@ -1666,11 +1682,12 @@ public partial class App : Application
                 // ...and the task list at the bottom (FloatingBar.TaskList.cs): the same service the control pipe edits,
                 // so the two always agree.
                 Tasks = tasks,
-                // A line's click: to its task's workspace, the switch the rows make. A note on no workspace never gets
-                // here (the bar does nothing for it); a Claude task on none succeeds without moving, until a later pull
-                // request sends Claude's tasks to their session.
-                GoToTask = id => tasks!.Board.Tasks.TryFirst(t => t.Id == id).ToResult($"No task with id {id}")
-                    .Bind(task => task.WorkspaceId.HasValue ? manager.Switch(task.WorkspaceId.Value) : Result.Success()),
+                // A line's click: to its task's workspace, the switch the rows make (GoToTask below, shared with the
+                // tasks window's lines). A note on no workspace never gets here (the bar does nothing for it).
+                GoToTask = id => tasks!.Board.Tasks.TryFirst(t => t.Id == id).ToResult($"No task with id {id}").Bind(GoToTask),
+                // "+N more" and "All tasks": the tasks window, built with quick find below, so read through the field.
+                // It opens clear of the bar, or brings an open one forward.
+                OpenTasksWindow = () => tasksBoard?.Open(floatingBar?.BarScreenBounds() ?? Rect.Empty),
                 // A Claude line's icon: the VS Code window whose title names the session's folder, by the rule the
                 // control pipe's `open` and `attention` use to find a caller's window (RemoteControl.CallerOf,
                 // EditorFolder.Best), each window offering its current title and the one it had before a rename. Two
@@ -1930,6 +1947,27 @@ public partial class App : Application
                 bringForward: hwnd => findActivator.Activate(new WindowHandle(hwnd)));
             monitor.Ignore(quickFind.EnsureHandle());
             boundQuickFind = Chord.Parse(manager.QuickFindShortcut).Value;
+
+            // THE TASKS WINDOW (TasksBoard, TasksWindow; docs/superpowers/specs/2026-11-22-tasks-board-design.md, "The
+            // window"): a page with every task, open and closed, and its comments, opened from the bar's "+N more" and
+            // from `tasks-window show`. The same TaskService as the bar's list and the control pipe, so all three agree.
+            // Its handle is ignored by the monitor before it ever shows, like quick find's: it is the app's own window
+            // and the bar must not list it, though it is a regular window in Alt+Tab and on the taskbar.
+            var tasksActivator = new WindowActivator();
+            tasksBoard = new TasksBoard(new TasksWindow(), tasks!, manager, GoToTask,
+                // The chips wear the colour the bar's rows wear (its last rebuild's rail colours).
+                colourOf: id => floatingBar?.WorkspaceAccent(id),
+                // Brought forward on the desktop in front: a page left open on another desktop is moved here first, so
+                // "+N more" never takes Petre to the desktop where he last left it. Activated through the activator,
+                // since a `tasks-window show` typed in a terminal carries no foreground right. A failed move is traced;
+                // the window still comes forward where it is.
+                bringForward: hwnd =>
+                {
+                    desktops!.CurrentDesktop().Bind(front => desktops.MoveWindow(new WindowHandle(hwnd), front))
+                        .TapError(err => ClickTrace.Write($"tasks window: not moved to the desktop in front: {err}"));
+                    tasksActivator.Activate(new WindowHandle(hwnd));
+                });
+            monitor.Ignore(tasksBoard.EnsureHandle());
 
             hotkeys = new HotkeyService(direction => switcher.Step(direction), boundSwitcher,
                 () => quickFind.Show(), boundQuickFind);
@@ -2476,6 +2514,8 @@ public partial class App : Application
         monitor?.Dispose();
         hotkeys?.Dispose(); // unregisters RegisterHotKey chords before the process exits
         quickFind?.Dispose();
+        // An open tasks window remembers where it is, so it comes back there after the restart.
+        tasksBoard?.Shutdown();
         detachedStats?.CloseForGood();
         switcher?.Dispose(); // stops the release poll and closes the picker window
         trayIcon?.Dispose();

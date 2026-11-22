@@ -64,12 +64,15 @@ internal static class WorkspaceChipMenu
     }
 
     /// <summary>
-    /// Fills <paramref name="menu"/> with the entries, each choice a chip whose click calls <paramref name="pick"/>,
-    /// the one equal to <paramref name="current"/> ticked (none ticks nothing when the menu has no "none").
+    /// Fills <paramref name="menu"/> (a context menu, or a menu item whose submenu it is) with the entries, each choice
+    /// a chip whose click calls <paramref name="pick"/>, the one equal to <paramref name="current"/> ticked (none ticks
+    /// nothing when the menu has no "none").
     /// </summary>
-    internal static ContextMenu Fill(ContextMenu menu, IReadOnlyList<Entry> entries, Maybe<Guid> current, Action<Maybe<Guid>> pick)
+    internal static T Fill<T>(T menu, IReadOnlyList<Entry> entries, Maybe<Guid> current, Action<Maybe<Guid>> pick) where T : ItemsControl
     {
-        menu.MaxHeight = SystemParameters.WorkArea.Height;
+        // A context menu is bounded by the work area; a submenu's popup is kept on the screen by WPF itself, and a
+        // MaxHeight on its MenuItem would clip the item, not the submenu.
+        if (menu is ContextMenu context) context.MaxHeight = SystemParameters.WorkArea.Height;
         entries.ToList().ForEach(entry => menu.Items.Add(entry.IsGroup ? Caption(entry) : Choice(entry, current, pick)));
         return menu;
     }

@@ -386,6 +386,23 @@ public class FloatingBarTaskListTests
         }
     });
 
+    // With the window there, the line under the list is always there, since the window is where the closed tasks and
+    // the comments are (Petre: "can i see task list in deskbar? all of them, new and old"): "All tasks" when nothing is
+    // out of sight, even with no open task at all.
+    [Fact]
+    public void With_the_window_the_list_always_offers_all_tasks() => StaThread.Run(() =>
+    {
+        var opened = 0;
+        using var t = Build(openWindow: () => opened++);
+        Assert.Equal("All tasks", t.Bar.TaskListMoreText);
+
+        t.Tasks.AddNote("One", Maybe<Guid>.None);
+        Assert.Equal("All tasks", t.Bar.TaskListMoreText);
+
+        Click(ButtonNamed(t.List, "More tasks"));
+        Assert.Equal(1, opened);
+    });
+
     [Fact]
     public void The_list_hides_with_its_strip_item() => StaThread.Run(() =>
     {

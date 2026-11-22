@@ -448,6 +448,13 @@ public sealed record AppState(
     // every fresh install: the line stays on the bar. Shown false keeps the position for the next time it is detached.
     public DetachedStatsState? DetachedStats { get; init; }
 
+    // Where the tasks window (the app's TasksWindow, "a separate page for all tasks") was last left: its rectangle on
+    // screen in device pixels and whether it was maximized. Null until it is first closed or moved, which is every
+    // state.json written before this key: the window then opens beside the bar. Device pixels rather than DIPs, because
+    // the screen it sat on may have its own scale; the window turns them into DIPs with that screen's DPI when it
+    // opens there, and ignores them when no screen holds them any more.
+    public TasksWindowState? TasksWindow { get; init; }
+
     // The version of the build that last saved this file, e.g. "2.1.44". JsonPersistenceStore stamps it on every
     // Save and StateVersionGate.Check refuses to load a file whose stamp is from a newer MAJOR version than the
     // running build. Within a major an older copy (the lagging Microsoft Store build) loads a newer file and
@@ -721,3 +728,7 @@ public sealed record FloatingBarState(double Left, double Top, bool Visible)
 // Where the detached stats window sits and whether it is up (AppState.DetachedStats). Left/Top are the window's own
 // Window.Left/Top in DIPs, clamped into whichever monitor holds that point every time it is shown.
 public sealed record DetachedStatsState(bool Shown, double Left, double Top);
+
+// Where the tasks window sits (AppState.TasksWindow): its rectangle in device pixels, and whether it was maximized (the
+// rectangle is then the one it returns to).
+public sealed record TasksWindowState(int Left, int Top, int Width, int Height, bool Maximized);

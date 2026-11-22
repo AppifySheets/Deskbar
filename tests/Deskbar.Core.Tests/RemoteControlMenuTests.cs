@@ -555,6 +555,34 @@ public class RemoteControlMenuTests
         Assert.Equal([true, false], asked);
     }
 
+    // The tasks window's twin (docs/superpowers/specs/2026-11-22-tasks-board-design.md, "The window"; every window action
+    // has a pipe twin): show and hide go to the app's callback, anything else is a usage error that asks it nothing.
+    [Fact]
+    public void Tasks_window_show_and_hide_over_the_pipe()
+    {
+        var asked = new List<bool>();
+        var control = new RemoteControl(Started(), setTasksWindow: shown => { asked.Add(shown); return Result.Success(); });
+
+        var show = control.Execute(["tasks-window", "show"]);
+        var hide = control.Execute(["tasks-window", "hide"]);
+        Ok(show);
+        Ok(hide);
+
+        Assert.Equal([true, false], asked);
+        Assert.True(Json(show).GetProperty("shown").GetBoolean());
+        Assert.False(Json(hide).GetProperty("shown").GetBoolean());
+        Assert.Equal(ControlReply.Failed, control.Execute(["tasks-window", "sideways"]).ExitCode);
+        Assert.Equal([true, false], asked);
+    }
+
+    [Fact]
+    public void Tasks_window_refuses_without_a_window()
+    {
+        var control = new RemoteControl(Started());
+
+        Assert.Equal(ControlReply.Failed, control.Execute(["tasks-window", "show"]).ExitCode);
+    }
+
     [Fact]
     public void Arrange_refuses_when_the_bar_cannot_be_reached()
     {
@@ -637,7 +665,7 @@ public class RemoteControlMenuTests
              "unfold", "color", "delete", "switch", "tile", "untile", "even", "reset-grid", "keep-space", "group-create", "group-join", "group-leave", "group-rename",
              "group-color", "group-fold", "group-unfold", "group-reorder", "ungroup", "name-desktop", "rename-window", "rename-app", "rename-pattern",
              "name-by-folder", "restore-title", "pin", "unpin", "close-window", "force-close", "close-all", "restart-app", "bar",
-             "stats", "arrange", "window-lines", "window-list", "collapsed-click", "full-screen", "task", "dump"],
+             "stats", "arrange", "window-lines", "window-list", "collapsed-click", "full-screen", "task", "tasks-window", "dump"],
             verb => Assert.Contains($"\n  {verb}", help));
     }
 
