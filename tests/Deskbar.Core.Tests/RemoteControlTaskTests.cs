@@ -3,20 +3,21 @@ using CSharpFunctionalExtensions;
 using Deskbar.Core.Control;
 using Deskbar.Core.Domain;
 using Deskbar.Core.Tasks;
+// System.Threading.Tasks (an implicit using) has a TaskStatus too; the alias says which one this file means.
+using TaskStatus = Deskbar.Core.Tasks.TaskStatus;
 
 namespace Deskbar.Core.Tests;
 
-// `deskbar.cmd task ...`. Design: docs/superpowers/specs/2026-11-19-tasks-in-the-bar-design.md ("Remote control").
-// Add parks on the caller's workspace (found from --from like `attention`), or on a named one, or on none.
-// Every failure is one line and leaves the board as it was.
+// `deskbar.cmd task ...`, the forms a script or Petre uses. Design: docs/superpowers/specs/2026-11-22-tasks-board-design.md
+// ("Left to the builder": the pipe commands). Add makes a note on the caller's workspace (found from --from like
+// `attention`), or on a named one, or on none. Every failure is one line and leaves the board as it was.
 public class RemoteControlTaskTests
 {
     readonly FakeDesktops desktops = new();
     readonly FakeMonitor monitor = new();
     readonly FakeTitles titles = new();
     readonly FakeStore store = new();
-    // Noon keeps "today" unambiguous in any local time zone.
-    DateTimeOffset clock = new(2026, 11, 19, 12, 0, 0, TimeSpan.Zero);
+    DateTimeOffset clock = new(2026, 11, 22, 12, 0, 0, TimeSpan.Zero);
     readonly TaskService tasks;
 
     public RemoteControlTaskTests() => tasks = new TaskService(new MemoryTaskStore(), () => clock);
@@ -52,9 +53,11 @@ public class RemoteControlTaskTests
 
     static string Prefix(JsonElement task) => task.GetProperty("id").GetString()![..6];
 
-    // A task added on Deskbar, answered as its JSON.
-    JsonElement Added(WorkspaceManager manager, string title = "Wait for CI") =>
+    // A note added on Deskbar, answered as its JSON.
+    JsonElement Added(WorkspaceManager manager, string title = "Dishwasher tablets") =>
         Json(Run(manager, "task", "add", title, "--workspace", "Deskbar"));
+
+    TaskItem Only => Assert.Single(tasks.Board.Tasks);
 
     void AssertRefusedAndUnchanged(ControlReply reply, TaskBoard before)
     {
@@ -64,30 +67,31 @@ public class RemoteControlTaskTests
     }
 
     [Fact]
-    public void Add_parks_the_callers_workspace()
+    public void Add_makes_a_note_on_the_callers_workspace()
     {
         var manager = Started();
         Editor(manager, 0x10, "TaskSpaces", "Deskbar");
 
-        var reply = Run(manager, "task", "add", "Wait for CI", "--in", "10m", "--from", @"C:\repos\TaskSpaces\.claude\worktrees\x");
+        var reply = Run(manager, "task", "add", "Dishwasher tablets", "--from", @"C:\repos\TaskSpaces\.claude\worktrees\x");
 
         Assert.Equal(ControlReply.Ok, reply.ExitCode);
-        var task = Assert.Single(tasks.Board.Tasks);
-        Assert.Equal(WorkspaceId(manager, "Deskbar"), task.WorkspaceId.Value);
-        Assert.Equal(TaskState.Running, task.StateAt(clock));
+        Assert.Equal(WorkspaceId(manager, "Deskbar"), Only.WorkspaceId.Value);
+        Assert.Equal(TaskStatus.Backlog, Only.Status);
+        Assert.False(Only.IsClaudes);
         Assert.Equal("Deskbar", Json(reply).GetProperty("workspace").GetString());
-        Assert.Equal("running", Json(reply).GetProperty("state").GetString());
+        Assert.Equal("backlog", Json(reply).GetProperty("status").GetString());
+        Assert.False(Json(reply).GetProperty("claudes").GetBoolean());
     }
 
     [Fact]
-    public void Add_with_workspace_none_is_free()
+    public void Add_with_none_makes_a_free_note()
     {
         var manager = Started();
 
         var reply = Run(manager, "task", "add", "Buy milk", "--workspace", "none");
 
         Assert.Equal(ControlReply.Ok, reply.ExitCode);
-        Assert.True(Assert.Single(tasks.Board.Tasks).WorkspaceId.HasNoValue);
+        Assert.True(Only.WorkspaceId.HasNoValue);
         Assert.Equal(JsonValueKind.Null, Json(reply).GetProperty("workspace").ValueKind);
     }
 
@@ -98,19 +102,7 @@ public class RemoteControlTaskTests
 
         Run(manager, "task", "add", "Review", "--workspace", "IAM.GE");
 
-        Assert.Equal(WorkspaceId(manager, "iam.ge"), Assert.Single(tasks.Board.Tasks).WorkspaceId.Value);
-    }
-
-    [Fact]
-    public void Adding_the_same_title_again_reuses_the_task()
-    {
-        var manager = Started();
-        var first = Added(manager);
-
-        var second = Added(manager);
-
-        Assert.Single(tasks.Board.Tasks);
-        Assert.Equal(first.GetProperty("id").GetString(), second.GetProperty("id").GetString());
+        Assert.Equal(WorkspaceId(manager, "iam.ge"), Only.WorkspaceId.Value);
     }
 
     [Fact]
@@ -119,7 +111,7 @@ public class RemoteControlTaskTests
         var manager = Started();
         var before = tasks.Board;
 
-        var reply = Run(manager, "task", "add", "Wait for CI", "--from", @"C:\nowhere");
+        var reply = Run(manager, "task", "add", "Dishwasher tablets", "--from", @"C:\nowhere");
 
         AssertRefusedAndUnchanged(reply, before);
         Assert.Contains("--workspace", reply.Output);
@@ -134,68 +126,120 @@ public class RemoteControlTaskTests
     }
 
     [Fact]
-    public void List_includes_asks()
-    {
-        var manager = Started();
-        manager.RequestAttention(WorkspaceId(manager, "iam.ge"), Maybe<WindowHandle>.None);
-        Added(manager);
-
-        var entries = Json(Run(manager, "task", "list")).EnumerateArray().ToList();
-
-        Assert.Equal(2, entries.Count);
-        var ask = Assert.Single(entries, e => e.GetProperty("kind").GetString() == "ask");
-        Assert.Equal("iam.ge", ask.GetProperty("workspace").GetString());
-        Assert.Equal("due", ask.GetProperty("state").GetString());
-        Assert.Equal(JsonValueKind.Null, ask.GetProperty("id").ValueKind);
-        Assert.Equal(JsonValueKind.Null, ask.GetProperty("title").ValueKind);
-        var task = Assert.Single(entries, e => e.GetProperty("kind").GetString() == "task");
-        Assert.Equal("open", task.GetProperty("state").GetString());
-        Assert.Equal("Wait for CI", task.GetProperty("title").GetString());
-    }
-
-    [Fact]
-    public void List_shows_a_timers_end_and_a_done_time()
-    {
-        var manager = Started();
-        Run(manager, "task", "add", "Running", "--workspace", "Deskbar", "--in", "5m");
-        var finished = Added(manager, "Finished");
-        Run(manager, "task", "done", Prefix(finished));
-
-        var entries = Json(Run(manager, "task", "list")).EnumerateArray().ToList();
-
-        var running = Assert.Single(entries, e => e.GetProperty("title").GetString() == "Running");
-        Assert.Equal(clock.AddMinutes(5), running.GetProperty("endsAt").GetDateTimeOffset());
-        Assert.Equal(JsonValueKind.Null, running.GetProperty("doneAt").ValueKind);
-        var done = Assert.Single(entries, e => e.GetProperty("title").GetString() == "Finished");
-        Assert.Equal("done", done.GetProperty("state").GetString());
-        Assert.Equal(clock, done.GetProperty("doneAt").GetDateTimeOffset());
-    }
-
-    [Fact]
-    public void Timer_done_rename_delete_by_prefix()
+    public void Close_and_reopen()
     {
         var manager = Started();
         var id = Prefix(Added(manager));
 
-        var timer = Run(manager, "task", "timer", id, "--in", "5m");
-        Assert.Equal(ControlReply.Ok, timer.ExitCode);
-        Assert.Equal(TaskState.Running, tasks.Board.Tasks.Single().StateAt(clock));
+        var closed = Run(manager, "task", "close", id);
+        Assert.Equal(ControlReply.Ok, closed.ExitCode);
+        Assert.Equal("closed", Json(closed).GetProperty("status").GetString());
+        Assert.Equal(TaskStatus.Closed, Only.Status);
 
-        var cleared = Run(manager, "task", "timer", id, "--clear");
-        Assert.Equal(ControlReply.Ok, cleared.ExitCode);
-        Assert.Equal(TaskState.Open, tasks.Board.Tasks.Single().StateAt(clock));
+        var before = tasks.Board;
+        var again = Run(manager, "task", "close", id);
+        AssertRefusedAndUnchanged(again, before);
+        Assert.Equal("The task is closed.", again.Output.Trim());
 
-        var renamed = Run(manager, "task", "rename", id, "Wait for the deploy");
-        Assert.Equal("Wait for the deploy", Json(renamed).GetProperty("title").GetString());
-        Assert.Equal("Wait for the deploy", tasks.Board.Tasks.Single().Title);
+        var reopened = Run(manager, "task", "reopen", id);
+        Assert.Equal(ControlReply.Ok, reopened.ExitCode);
+        Assert.Equal("backlog", Json(reopened).GetProperty("status").GetString());
+        Assert.Equal(TaskStatus.Backlog, Only.Status);
+    }
 
-        var done = Run(manager, "task", "done", id);
-        Assert.Equal("done", Json(done).GetProperty("state").GetString());
-        Assert.Equal(TaskState.Done, tasks.Board.Tasks.Single().StateAt(clock));
+    [Fact]
+    public void Status_takes_the_four_names_and_refuses_closed()
+    {
+        var manager = Started();
+        var id = Prefix(Added(manager));
+
+        new[] { ("in-progress", TaskStatus.InProgress), ("waiting", TaskStatus.WaitingOnYou), ("done", TaskStatus.Done), ("backlog", TaskStatus.Backlog) }
+            .ToList().ForEach(pair =>
+            {
+                var reply = Run(manager, "task", "status", id, pair.Item1);
+                Assert.Equal(ControlReply.Ok, reply.ExitCode);
+                Assert.Equal(pair.Item1, Json(reply).GetProperty("status").GetString());
+                Assert.Equal(pair.Item2, Only.Status);
+            });
+
+        var before = tasks.Board;
+        var closed = Run(manager, "task", "status", id, "closed");
+        AssertRefusedAndUnchanged(closed, before);
+        Assert.Equal("Use close to close a task", closed.Output.Trim());
+
+        var unknown = Run(manager, "task", "status", id, "snoozed");
+        AssertRefusedAndUnchanged(unknown, before);
+        Assert.Contains("backlog, in-progress, waiting or done", unknown.Output);
+    }
+
+    [Fact]
+    public void List_is_the_pile_in_order_as_json()
+    {
+        var manager = Started();
+        var closed = Prefix(Added(manager, "Closed one"));
+        Run(manager, "task", "close", closed);
+        clock = clock.AddMinutes(1);
+        var done = Prefix(Added(manager, "Done one"));
+        Run(manager, "task", "status", done, "done");
+        clock = clock.AddMinutes(1);
+        Added(manager, "Backlog one");
+        clock = clock.AddMinutes(1);
+        var waiting = Prefix(Added(manager, "Waiting one"));
+        Run(manager, "task", "status", waiting, "waiting");
+        clock = clock.AddMinutes(1);
+        tasks.Create("Claude's one", WorkspaceId(manager, "Deskbar"), new TaskSession("s1", @"C:\repos\TaskSpaces", clock, Maybe<DateTimeOffset>.None));
+        var claudes = tasks.Board.Tasks.Single(t => t.Title == "Claude's one");
+        tasks.SetStatusLine(claudes.Id, "waiting for CI");
+        tasks.Ask(claudes.Id, "OK to merge?");
+        tasks.Comment(claudes.Id, "s1", "The detail");
+        Run(manager, "task", "comment", claudes.Id.ToString()[..6], "Go ahead");
+
+        var entries = Json(Run(manager, "task", "list")).EnumerateArray().ToList();
+
+        Assert.Equal(["Claude's one", "Waiting one", "Done one", "Backlog one"], entries.Select(e => e.GetProperty("title").GetString()));
+        Assert.Equal(["waiting", "waiting", "done", "backlog"], entries.Select(e => e.GetProperty("status").GetString()));
+        var first = entries[0];
+        Assert.Equal(claudes.Id.ToString(), first.GetProperty("id").GetString());
+        Assert.Equal("Deskbar", first.GetProperty("workspace").GetString());
+        Assert.Equal("waiting for CI", first.GetProperty("statusLine").GetString());
+        Assert.Equal("OK to merge?", first.GetProperty("question").GetString());
+        Assert.True(first.GetProperty("claudes").GetBoolean());
+        var session = Assert.Single(first.GetProperty("sessions").EnumerateArray());
+        Assert.Equal("s1", session.GetProperty("id").GetString());
+        Assert.True(session.GetProperty("live").GetBoolean());
+        Assert.Equal(2, first.GetProperty("comments").GetInt32());
+        Assert.Equal(clock, first.GetProperty("updatedAt").GetDateTimeOffset());
+        Assert.Equal(JsonValueKind.Null, entries[1].GetProperty("question").ValueKind);
+        Assert.False(entries[1].GetProperty("claudes").GetBoolean());
+        Assert.Empty(entries[1].GetProperty("sessions").EnumerateArray());
+    }
+
+    [Fact]
+    public void Rename_move_comment_delete_by_prefix()
+    {
+        var manager = Started();
+        var id = Prefix(Added(manager));
+
+        var renamed = Run(manager, "task", "rename", id, "Soap");
+        Assert.Equal("Soap", Json(renamed).GetProperty("title").GetString());
+        Assert.Equal("Soap", Only.Title);
+
+        var moved = Run(manager, "task", "move", id, "iam.ge");
+        Assert.Equal("iam.ge", Json(moved).GetProperty("workspace").GetString());
+        Assert.Equal(WorkspaceId(manager, "iam.ge"), Only.WorkspaceId.Value);
+
+        Assert.Equal(ControlReply.Ok, Run(manager, "task", "move", id, "none").ExitCode);
+        Assert.True(Only.WorkspaceId.HasNoValue);
+
+        var commented = Run(manager, "task", "comment", id, "Get the **big** box");
+        Assert.Equal(1, Json(commented).GetProperty("comments").GetInt32());
+        var comment = Only.Comments.Single();
+        Assert.Equal("Get the **big** box", comment.Markdown);
+        Assert.True(comment.SessionId.HasNoValue);
 
         var deleted = Run(manager, "task", "delete", id);
         Assert.Equal(ControlReply.Ok, deleted.ExitCode);
-        Assert.Equal("Wait for the deploy", Json(deleted).GetProperty("title").GetString());
+        Assert.Equal("Soap", Json(deleted).GetProperty("title").GetString());
         Assert.Empty(tasks.Board.Tasks);
     }
 
@@ -206,28 +250,13 @@ public class RemoteControlTaskTests
         Added(manager);
         var before = tasks.Board;
 
-        AssertRefusedAndUnchanged(Run(manager, "task", "done", "ffffff"), before);
-        AssertRefusedAndUnchanged(Run(manager, "task", "delete", "ffffff"), before);
-        AssertRefusedAndUnchanged(Run(manager, "task", "timer", "ffffff", "--clear"), before);
+        AssertRefusedAndUnchanged(Run(manager, "task", "close", "ffffff"), before);
+        AssertRefusedAndUnchanged(Run(manager, "task", "reopen", "ffffff"), before);
+        AssertRefusedAndUnchanged(Run(manager, "task", "status", "ffffff", "done"), before);
         AssertRefusedAndUnchanged(Run(manager, "task", "rename", "ffffff", "x"), before);
-    }
-
-    // Final review M2: a done task takes no timer and cannot be done twice; each is exit 1 with the board's reason.
-    [Fact]
-    public void A_done_task_refuses_a_timer_and_a_second_done()
-    {
-        var manager = Started();
-        var id = Prefix(Added(manager));
-        Assert.Equal(ControlReply.Ok, Run(manager, "task", "done", id).ExitCode);
-        var before = tasks.Board;
-
-        var timer = Run(manager, "task", "timer", id, "--in", "5m");
-        var again = Run(manager, "task", "done", id);
-
-        AssertRefusedAndUnchanged(timer, before);
-        AssertRefusedAndUnchanged(again, before);
-        Assert.Equal("The task is done.", timer.Output.Trim());
-        Assert.Equal("The task is done.", again.Output.Trim());
+        AssertRefusedAndUnchanged(Run(manager, "task", "move", "ffffff", "none"), before);
+        AssertRefusedAndUnchanged(Run(manager, "task", "comment", "ffffff", "x"), before);
+        AssertRefusedAndUnchanged(Run(manager, "task", "delete", "ffffff"), before);
     }
 
     [Fact]
@@ -241,7 +270,7 @@ public class RemoteControlTaskTests
         control.Execute(["task", "add", "Two", "--workspace", "none"]);
         var before = service.Board;
 
-        var reply = control.Execute(["task", "done", "abcd"]);
+        var reply = control.Execute(["task", "close", "abcd"]);
 
         Assert.Equal(ControlReply.Failed, reply.ExitCode);
         Assert.Contains("several", reply.Output);
@@ -249,7 +278,7 @@ public class RemoteControlTaskTests
     }
 
     [Fact]
-    public void Empty_title_fails()
+    public void Empty_text_fails()
     {
         var manager = Started();
         var id = Prefix(Added(manager));
@@ -257,17 +286,27 @@ public class RemoteControlTaskTests
 
         AssertRefusedAndUnchanged(Run(manager, "task", "add", "  ", "--workspace", "none"), before);
         AssertRefusedAndUnchanged(Run(manager, "task", "rename", id, "  "), before);
+        AssertRefusedAndUnchanged(Run(manager, "task", "comment", id, "  "), before);
     }
 
+    // The timer build's forms are gone: `timer` is not a form any more, and `--in` is not an option of `add`.
     [Fact]
-    public void Length_outside_presets_fails()
+    public void Timer_and_in_are_gone()
     {
         var manager = Started();
         var id = Prefix(Added(manager));
         var before = tasks.Board;
 
-        AssertRefusedAndUnchanged(Run(manager, "task", "add", "x", "--workspace", "none", "--in", "7m"), before);
-        AssertRefusedAndUnchanged(Run(manager, "task", "timer", id, "--in", "7m"), before);
+        var timer = Run(manager, "task", "timer", id, "--in", "5m");
+        Assert.Equal(ControlReply.Failed, timer.ExitCode);
+        Assert.Contains("usage: deskbar.cmd task list", timer.Output);
+        Assert.Same(before, tasks.Board);
+
+        var add = Run(manager, "task", "add", "x", "--workspace", "none", "--in", "5m");
+        AssertRefusedAndUnchanged(add, before);
+        Assert.Equal("Unexpected --in", add.Output.Trim());
+
+        Assert.DoesNotContain(ControlUsage.All, c => c.Verb == "task" && (c.Arguments.Contains("--in") || c.Arguments.StartsWith("timer")));
     }
 
     [Fact]
@@ -275,10 +314,11 @@ public class RemoteControlTaskTests
     {
         var manager = Started();
 
-        var reply = Run(manager, "task", "done");
+        var reply = Run(manager, "task", "close");
 
         Assert.Equal(ControlReply.Failed, reply.ExitCode);
         Assert.Contains("usage: deskbar.cmd task list", reply.Output);
+        Assert.Contains("usage: deskbar.cmd task status <id> <backlog|in-progress|waiting|done>", reply.Output);
         Assert.Contains("usage: deskbar.cmd task delete <id>", reply.Output);
     }
 
@@ -297,5 +337,9 @@ public class RemoteControlTaskTests
 
     [Fact]
     public void Task_is_in_the_help() =>
-        Assert.Contains(ControlUsage.All, c => c.Verb == "task");
+        Assert.Equal(
+            ["list", "add <title> [--workspace <name>|none]", "close <id>", "reopen <id>",
+             "status <id> <backlog|in-progress|waiting|done>", "rename <id> <title>", "move <id> <workspace>|none",
+             "comment <id> <markdown>", "delete <id>"],
+            ControlUsage.All.Where(c => c.Verb == "task").Select(c => c.Arguments));
 }

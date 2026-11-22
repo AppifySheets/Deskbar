@@ -44,14 +44,19 @@ public static class ControlUsage
                 + "      Nothing happens when the user is already on that workspace"),
         ]),
         new("Tasks", [
-            new("task", "list", "every task and every workspace asking for you, as JSON: kind, id, title, workspace, state, endsAt, doneAt"),
-            new("task", "add <title> [--workspace <name>|none] [--in 1m|5m|10m|30m]",
-                "park a task, optionally with a timer; without --workspace it goes on the workspace of the VS Code\n"
-                + "      window whose folder holds --from (the caller's own folder if not given). A live task with the\n"
-                +"      same title on that workspace is reused rather than added again"),
-            new("task", "timer <id> (--in 1m|5m|10m|30m | --clear)", "start a timer on a task, replacing any running one, or clear it"),
-            new("task", "done <id>", "mark a task done"),
+            new("task", "list",
+                "the open tasks in the bar's order (waiting on you, then done, then newest), as JSON: id, title,\n"
+                + "      workspace, status, statusLine, question, claudes, sessions, comments (a count), updatedAt"),
+            new("task", "add <title> [--workspace <name>|none]",
+                "add a note to the backlog; without --workspace it goes on the workspace of the VS Code window\n"
+                + "      whose folder holds --from (the caller's own folder if not given)"),
+            new("task", "close <id>", "close a task: it leaves the bar and the window's open tasks"),
+            new("task", "reopen <id>", "reopen a closed task: in progress while a session is live on it, else backlog"),
+            new("task", "status <id> <backlog|in-progress|waiting|done>",
+                "set a task's status by hand (waiting is waiting on you); close closes"),
             new("task", "rename <id> <title>", "rename a task"),
+            new("task", "move <id> <workspace>|none", "move a task to a workspace, or to none"),
+            new("task", "comment <id> <markdown>", "add a comment to a task's thread, as you"),
             new("task", "delete <id>", "delete a task; the reply is the task as it was"),
         ]),
         new("Workspace row menu", [
