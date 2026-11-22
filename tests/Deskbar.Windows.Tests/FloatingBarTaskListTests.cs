@@ -270,6 +270,36 @@ public class FloatingBarTaskListTests
         Assert.Empty(t.Lines);
     });
 
+    // Ruling 40 (Petre: "how do i mark claude as done?"): a Claude line has the note's tick box. Ticking it closes the
+    // task at once, with the six seconds of Undo; Undo gives back its status and its question exactly (Ruling 31); and
+    // the line keeps its Claude look throughout: the orange edge and the session's icon.
+    [Fact]
+    public void Ticking_a_claude_line_closes_it_and_undo_brings_it_back_as_it_was() => StaThread.Run(() =>
+    {
+        using var t = Build(sessionWindow: _ => Maybe.From((nint)0x4242));
+        var task = t.Tasks.Create("Testing the release", t.Gepha, Session("s1")).Value;
+        t.Tasks.Ask(task.Id, "Ship it?");
+        var line = t.Lines.Single();
+        Assert.Equal(Orange, ((SolidColorBrush)EdgeOf(line).BorderBrush).Color);
+
+        Click(ButtonNamed(line, "Tick off"));
+
+        Assert.Equal(TaskStatus.Closed, t.Tasks.Board.Tasks.Single().Status);
+        var closing = t.Lines.Single();
+        Assert.True(Closing(closing));
+        Assert.Equal(Orange, ((SolidColorBrush)EdgeOf(closing).BorderBrush).Color);
+        Click(ButtonNamed(closing, "Undo"));
+
+        var back = t.Tasks.Board.Tasks.Single();
+        Assert.Equal(TaskStatus.WaitingOnYou, back.Status);
+        Assert.Equal("Ship it?", back.Question.Value);
+        var again = t.Lines.Single();
+        Assert.False(Closing(again));
+        Assert.Equal(Orange, ((SolidColorBrush)EdgeOf(again).BorderBrush).Color);
+        Assert.Contains(Inside(again).OfType<FrameworkElement>(), e => Equals(e.Tag, "task-window-icon"));
+        Assert.True(HasButtonNamed(again, "Tick off"));
+    });
+
     [Fact]
     public void A_done_claude_task_has_a_close_button() => StaThread.Run(() =>
     {
@@ -280,7 +310,8 @@ public class FloatingBarTaskListTests
 
         var workingLine = t.Lines.Single(l => ((TaskLine)l.Tag).Id == working.Id);
         Assert.False(HasButtonNamed(workingLine, "Close task"));
-        Assert.False(HasButtonNamed(workingLine, "Tick off"));
+        // Ruling 40: a Claude task that is not done has the tick box a note has; the done one has the close button.
+        Assert.True(HasButtonNamed(workingLine, "Tick off"));
 
         var doneLine = t.Lines.Single(l => ((TaskLine)l.Tag).Id == done.Id);
         Click(ButtonNamed(doneLine, "Close task"));
