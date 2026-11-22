@@ -61,8 +61,9 @@
                 <StackPanel>
                     <!-- The Deskbar Pro reminder: one line, at most once a day, never in the first two weeks, never
                          for Pro (Petre: "a gentle nudge per day", then "line at the bottom, okay"). Filled in
-                         FloatingBar.ProReminder.cs; collapsed unless the App says it is due. -->
-                    <DockPanel x:Name="ProReminderLine" Margin="0,0,0,3" Visibility="Collapsed"/>
+                         FloatingBar.ProReminder.cs, a tinted panel with the sentence wrapped and the two buttons
+                         under it; collapsed unless the App says it is due. -->
+                    <Border x:Name="ProReminderLine" Margin="0,0,0,4" Visibility="Collapsed"/>
                     <!-- CPU, memory, disk and GPU, a sparkline each, and a click for Task Manager (Petre: "let's
                          show system stats ... above the music player", then "b"). Filled in FloatingBar.Stats.cs;
                          collapsed until the first sample, and for good with no stats source. -->

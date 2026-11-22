@@ -30,9 +30,18 @@ public partial class FloatingBar
     internal Action? GetPro { get; init; }
     internal Action? DismissProReminder { get; init; }
 
-    static readonly Brush ProReminderInk = Frozen(0x8C, 0xFF, 0xFF, 0xFF);
-    static readonly Brush ProReminderEmphasis = Frozen(0xE6, 0xFF, 0xFF, 0xFF);
-    static readonly Brush ProReminderLink = Frozen(0xFF, 0x4C, 0xC2, 0xFF);
+    // A blue panel rather than grey text on the bar's own background. Petre, after the first build: "make it more
+    // pronounced, perhaps by giving it a different color". Blue because it is the colour Windows uses for an offer
+    // or a link and nothing else on the bar is blue; a tint of it, not a solid block, so it reads as a note on the
+    // bar and not as an error. The sentence is near-white on it, and "Get Pro" is a solid blue button, the one
+    // thing on the line meant to be pressed.
+    static readonly Brush ProReminderPanel = Frozen(0x33, 0x4C, 0xC2, 0xFF);
+    static readonly Brush ProReminderPanelEdge = Frozen(0x80, 0x4C, 0xC2, 0xFF);
+    static readonly Brush ProReminderInk = Frozen(0xD9, 0xFF, 0xFF, 0xFF);
+    static readonly Brush ProReminderEmphasis = Frozen(0xFF, 0xFF, 0xFF, 0xFF);
+    static readonly Brush ProReminderQuiet = Frozen(0xB3, 0xFF, 0xFF, 0xFF);
+    static readonly Brush ProGetFill = Frozen(0xFF, 0x4C, 0xC2, 0xFF);
+    static readonly Brush ProGetInk = Frozen(0xFF, 0x00, 0x26, 0x3A);
 
     TextBlock? proReminderText;
     TextBlock? proGetText;
@@ -43,46 +52,56 @@ public partial class FloatingBar
     const string ProReminderLead = "Free for personal use.";
     const string ProReminderRest = " Using it for work? Deskbar Pro is $18.99 once, with priority support.";
 
+    // Two parts stacked inside the panel: the sentence, WRAPPED to the bar's width (Petre: "doesn't fit; multiline
+    // if so", after a narrow bar cut it to "Free for person..."), then the two buttons on their own line at the
+    // right. On a wide bar that is two short lines; on a narrow one the sentence takes as many lines as it needs and
+    // nothing is ever cut off.
     void BuildProReminder()
     {
         proReminderText = new TextBlock
         {
             FontSize = Text(10.5),
             Foreground = ProReminderInk,
-            TextTrimming = TextTrimming.CharacterEllipsis,
-            VerticalAlignment = VerticalAlignment.Center,
-            Margin = new Thickness(4, 0, 6, 0),
+            TextWrapping = TextWrapping.Wrap,
+            Margin = new Thickness(0, 0, 0, 4),
         };
         proReminderText.Inlines.Add(new System.Windows.Documents.Run(ProReminderLead) { Foreground = ProReminderEmphasis, FontWeight = FontWeights.SemiBold });
         proReminderText.Inlines.Add(new System.Windows.Documents.Run(ProReminderRest));
         proReminderText.ToolTip = ProReminderLead + ProReminderRest;
 
-        (proGetText, var getPro) = ProReminderButton("Get Pro", ProReminderLink, () => GetPro?.Invoke());
-        (proNotNowText, var notNow) = ProReminderButton("Not now", ProReminderInk, () =>
+        (proGetText, var getPro) = ProReminderButton("Get Pro", ProGetInk, ProGetFill, () => GetPro?.Invoke());
+        (proNotNowText, var notNow) = ProReminderButton("Not now", ProReminderQuiet, null, () =>
         {
             DismissProReminder?.Invoke();
             PaintProReminder();
         });
+        getPro.Margin = new Thickness(0, 0, 4, 0);
 
-        // From the right edge in: "Not now", then "Get Pro"; the sentence takes what is left and trims with an
-        // ellipsis on a narrow bar (the full sentence is its tooltip).
-        new[] { notNow, getPro }.ToList().ForEach(b =>
+        ProReminderLine.Background = ProReminderPanel;
+        ProReminderLine.BorderBrush = ProReminderPanelEdge;
+        ProReminderLine.BorderThickness = new Thickness(1);
+        ProReminderLine.CornerRadius = new CornerRadius(5);
+        ProReminderLine.Padding = new Thickness(8, 6, 6, 6);
+        ProReminderLine.Child = new StackPanel
         {
-            DockPanel.SetDock(b, Dock.Right);
-            ProReminderLine.Children.Add(b);
-        });
-        ProReminderLine.Children.Add(proReminderText);
+            Children =
+            {
+                proReminderText,
+                new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right, Children = { getPro, notNow } },
+            },
+        };
     }
 
-    // A text button in the bar's flat style (the shell strip's template, so it hovers like the bar's other small
-    // controls). Returns the label too, so ApplyTextSize can resize it.
-    (TextBlock Label, Button Button) ProReminderButton(string label, Brush ink, Action press)
+    // A text button. With a fill it is a solid pill (Get Pro); without one it is flat text in the bar's style (the
+    // shell strip's template, so it hovers like the bar's other small controls). Returns the label too, so
+    // ApplyTextSize can resize it.
+    (TextBlock Label, Button Button) ProReminderButton(string label, Brush ink, Brush? fill, Action press)
     {
-        var text = new TextBlock { Text = label, FontSize = Text(10.5), Foreground = ink, VerticalAlignment = VerticalAlignment.Center };
+        var text = new TextBlock { Text = label, FontSize = Text(10.5), Foreground = ink, VerticalAlignment = VerticalAlignment.Center, FontWeight = fill is null ? FontWeights.Normal : FontWeights.SemiBold };
         var button = new Button
         {
-            Content = text,
-            Padding = new Thickness(6, 2, 6, 2),
+            Content = fill is null ? text : new Border { Background = fill, CornerRadius = new CornerRadius(4), Padding = new Thickness(10, 3, 10, 3), Child = text },
+            Padding = fill is null ? new Thickness(6, 3, 6, 3) : new Thickness(0),
             Background = Brushes.Transparent,
             BorderThickness = new Thickness(0),
             Template = ShellButtonTemplate,

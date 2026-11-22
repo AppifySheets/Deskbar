@@ -48,6 +48,11 @@ public sealed record WorkspaceTime(IReadOnlyDictionary<Guid, IReadOnlyDictionary
             ? days.Where(d => d.Key >= from && d.Key <= to).Aggregate(TimeSpan.Zero, (total, d) => total + d.Value)
             : TimeSpan.Zero;
 
+    // Every workspace's active time from the given day on (inclusive), added up: how much somebody has actually
+    // worked with Deskbar since then. The Deskbar Pro reminder waits for enough of it (ProReminder.QuietHours).
+    public TimeSpan TotalSince(DateOnly from) =>
+        ByWorkspace.Values.SelectMany(days => days).Where(d => d.Key >= from).Aggregate(TimeSpan.Zero, (total, d) => total + d.Value);
+
     // Days older than the cutoff, dropped. The file grows forever otherwise -- one entry per
     // workspace per day is small, but "small forever" is still forever, and nobody asks what they
     // were doing in a workspace two years ago.
