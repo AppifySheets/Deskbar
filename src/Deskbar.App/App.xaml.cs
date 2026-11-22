@@ -2007,6 +2007,9 @@ public partial class App : Application
                 bringForward: hwnd => TasksBoard.Arrive(hwnd,
                     move: () => desktops!.CurrentDesktop().Bind(front => desktops.MoveWindow(new WindowHandle(hwnd), front)),
                     onCurrentDesktop: () => OnDesktopInFront(hwnd),
+                    // On top of the windows in front before it is activated: activation alone left it under them
+                    // ("now it's behind somewhere", see TasksBoard.Arrive).
+                    raise: () => TasksBoard.RaiseToTop(hwnd),
                     activate: () => tasksActivator.Activate(new WindowHandle(hwnd)),
                     trace: ClickTrace.Write));
             monitor.Ignore(tasksBoard.EnsureHandle());
