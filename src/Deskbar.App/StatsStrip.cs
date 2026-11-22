@@ -9,8 +9,8 @@ using Deskbar.Windows.Performance;
 
 namespace Deskbar.App;
 
-// THE FOUR STATS CELLS AS ONE CONTROL: CPU, MEM, DISK and GPU side by side, each a value now and a sparkline of the
-// last minute under it with the stat's name inside the graph. It used to live inside FloatingBar.Stats.cs; it is a
+// THE FOUR STATS CELLS AS ONE CONTROL: CPU, MEM, DISK and GPU side by side, each its name and value now on one line
+// and a sparkline of the last minute under them. It used to live inside FloatingBar.Stats.cs; it is a
 // control of its own so the bar's stats line and the detached stats window (DetachedStatsWindow) draw the same
 // thing from the same code. The history of the readings lives in the strip, so each owner of a strip keeps its own
 // and the bar, which keeps recording while its line is hidden, shows the full minute when the line comes back.
@@ -39,8 +39,8 @@ internal sealed class StatsStrip : UniformGrid
     {
         public string Label { get; } = label;
         public Color Hue { get; } = hue;
-        // The stat's name, drawn INSIDE its graph at the top left, over the sparkline; not hit-testable, so a
-        // click on it is a click on the line.
+        // The stat's name: on the top line beside the value, or inside the graph at its top left on a strip too
+        // narrow for both on one line (FitNames). Not hit-testable, so a click on it is a click on the line.
         public TextBlock Name { get; } = new()
         {
             Text = label,
@@ -48,81 +48,83 @@ internal sealed class StatsStrip : UniformGrid
             Foreground = StatLabelInk,
             HorizontalAlignment = HorizontalAlignment.Left,
             VerticalAlignment = VerticalAlignment.Top,
-            Margin = new Thickness(2, 0, 0, 0),
             IsHitTestVisible = false,
         };
         // An en dash until the first sample, so a freshly shown window has no blank cells for the first second.
         public TextBlock Value { get; } = new() { Foreground = StatValueInk, Text = "–" };
+        // THE VALUE SHRINKS, IT IS NEVER CLIPPED. Petre once read "MEM8%" on a narrower bar while Task Manager
+        // said 98%: name and value shared the top line, and the value, right-aligned in what was left, was pushed
+        // past its slot and lost its first digit to the clip. So the value sits in a shrink-only Viewbox: when
+        // it does not fit, it gets smaller rather than cut. A smaller "100%" is still true, where "00%" would be
+        // another wrong number. DownOnly, so it never grows past its size.
+        public Viewbox Box { get; } = new()
+        {
+            Stretch = Stretch.Uniform,
+            StretchDirection = StretchDirection.DownOnly,
+            HorizontalAlignment = HorizontalAlignment.Right,
+        };
+        // The top line: the name takes what it needs (Auto) and the value the rest (*), so the pair can never
+        // push the value out of its cell. With the name inside the graph, the value has the whole line.
+        public Grid Top { get; } = new()
+        {
+            ColumnDefinitions =
+            {
+                new ColumnDefinition { Width = GridLength.Auto },
+                new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) },
+            },
+        };
+        public Grid Graph { get; } = new();
         public Canvas Spark { get; } = new() { Height = SparkHeight, ClipToBounds = true };
         public Polygon Fill { get; } = new() { Fill = FrozenBrush(Color.FromArgb(0x38, hue.R, hue.G, hue.B)) };
         public Polyline Line { get; } = new() { Stroke = FrozenBrush(hue), StrokeThickness = 1.4, StrokeLineJoin = PenLineJoin.Round };
         public ImmutableList<double> History { get; set; } = [];
     }
 
-    readonly StatCell cpuCell, memoryCell, diskCell, gpuCell;
+    // Each cell's margin either side, and the gap between a name and its value on the top line.
+    const double CellMargin = 3;
+    const double NameGap = 4;
+    // How far the widest value ("100%") may shrink before the names leave the top line (FitNames).
+    const double LeastValueScale = 0.75;
 
-    // TWO LAYOUTS, because the bar and the detached window have different room and different readers. The bar's
-    // cells are narrow (55 to 68 DIP), so there the value has the top line alone and the name sits inside the
-    // graph (the owner's decision, below). The window's cells are 70 DIP wide, enough for both on one line, and
-    // its reader cannot tell a name from the coloured fill under it: "when resources are in use I can't really see
-    // CPU or MEM or any characters". With `namesBesideValues` the name is top left and the value top right, and
-    // nothing is drawn over the graph.
-    internal StatsStrip(bool namesBesideValues = false)
+    readonly StatCell cpuCell, memoryCell, diskCell, gpuCell;
+    readonly IReadOnlyList<StatCell> cells;
+    // Where the names are now: beside the values (true) or inside the graphs.
+    bool namesBeside = true;
+
+    // NAMES BESIDE VALUES, for the bar and the detached window alike: the name top left, the value top right, and
+    // the graph below holding the sparkline alone. The window had it first, because over a coloured fill nobody
+    // could read the name: "when resources are in use I can't really see CPU or MEM or any characters". The bar
+    // followed when Petre, looking at its line: "text and values same line".
+    //
+    // Except on a strip too narrow for both: there the names go back inside the graphs and the value has the top
+    // line to itself, which is the layout the bar had before for exactly that reason (FitNames has the numbers).
+    internal StatsStrip()
     {
         cpuCell = new StatCell("CPU", CpuHue);
         memoryCell = new StatCell("MEM", MemoryHue);
         diskCell = new StatCell("DISK", DiskHue);
         gpuCell = new StatCell("GPU", GpuHue);
+        cells = [cpuCell, memoryCell, diskCell, gpuCell];
 
         Rows = 1;
         Columns = 4;
-        new[] { cpuCell, memoryCell, diskCell, gpuCell }.ToList().ForEach(cell =>
+        cells.ToList().ForEach(cell =>
         {
             cell.Spark.Children.Add(cell.Fill);
             cell.Spark.Children.Add(cell.Line);
             // The sparkline is laid out against the canvas's real width, so a resize (the bar's width, the seam)
             // redraws it rather than stretching the stroke.
             cell.Spark.SizeChanged += (_, e) => { if (e.WidthChanged) PaintSpark(cell); };
-            // THE PERCENTAGE ALONE ON THE TOP LINE, THE NAME INSIDE THE GRAPH. Petre, on a narrower bar reading
-            // "MEM8%" while Task Manager said 98%: name and value shared the top line, and when they did not
-            // both fit, the value, right-aligned in what was left, was shifted past its slot and lost its first
-            // digit to the clip. Hiding names that did not fit was tried next and left one cell unlabelled by
-            // 0.1 DIP; his answer: "show titles inside the graph", "percentage only at the top". So the value
-            // has the whole width of the cell to itself, and the name sits over the sparkline's top left.
-            //
-            // And in a cell too narrow even for the value alone ("100%" in a 26 DIP cell, measured in
-            // FloatingBarStatsTests), the value SHRINKS rather than being clipped: a smaller "100%" is still
-            // true, where "00%" would be another wrong number. DownOnly, so it never grows past its size.
-            var value = new Viewbox
-            {
-                Child = cell.Value,
-                Stretch = Stretch.Uniform,
-                StretchDirection = StretchDirection.DownOnly,
-                HorizontalAlignment = HorizontalAlignment.Right,
-            };
-            if (namesBesideValues)
-            {
-                // The name takes what it needs (Auto) and the value the rest (*), shrinking only if even that is
-                // too little, so the pair can never push the value out of its cell. The graph holds the
-                // sparkline alone.
-                cell.Name.Margin = new Thickness(0, 0, 4, 0);
-                Grid.SetColumn(cell.Name, 0);
-                Grid.SetColumn(value, 1);
-                var top = new Grid
-                {
-                    ColumnDefinitions =
-                    {
-                        new ColumnDefinition { Width = GridLength.Auto },
-                        new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) },
-                    },
-                    Children = { cell.Name, value },
-                };
-                Children.Add(new StackPanel { Margin = new Thickness(3, 0, 3, 0), Children = { top, new Grid { Children = { cell.Spark } } } });
-                return;
-            }
-            var graph = new Grid { Children = { cell.Spark, cell.Name } };
-            Children.Add(new StackPanel { Margin = new Thickness(3, 0, 3, 0), Children = { value, graph } });
+            cell.Box.Child = cell.Value;
+            Grid.SetColumn(cell.Box, 1);
+            cell.Top.Children.Add(cell.Box);
+            cell.Graph.Children.Add(cell.Spark);
+            Place(cell, namesBeside);
+            Children.Add(new StackPanel { Margin = new Thickness(CellMargin, 0, CellMargin, 0), Children = { cell.Top, cell.Graph } });
         });
+        // The room per cell changes with the strip's width (the bar's width, the text-size setting widening the
+        // bar), so the names are fitted again whenever it does.
+        SizeChanged += (_, e) => { if (e.WidthChanged) FitNames(); };
     }
 
     // Whether the GPU has been read at least once; a machine without GPU counters never has.
@@ -130,12 +132,56 @@ internal sealed class StatsStrip : UniformGrid
 
     // The text size of every name and value, set by the owner from the bar's text-size setting
     // (FloatingBar.TextSize.cs). The cells are built once, so a change of setting reaches them through here.
-    internal void ApplyTextSize(double size) =>
-        new[] { cpuCell, memoryCell, diskCell, gpuCell }.ToList().ForEach(cell =>
+    // A bigger text needs more room on the top line, so the names are fitted again.
+    internal void ApplyTextSize(double size)
+    {
+        cells.ToList().ForEach(cell =>
         {
             cell.Name.FontSize = size;
             cell.Value.FontSize = size;
         });
+        FitNames();
+    }
+
+    // Whether the names are on the top line beside the values (false: inside the graphs). For the tests and the trace.
+    internal bool NamesBeside => namesBeside;
+
+    // BESIDE OR INSIDE, decided for the whole strip at once so the four cells always look alike. The names stay
+    // beside the values while the widest value, "100%", keeps at least LeastValueScale of its size next to the
+    // widest name ("MEM", 26 DIP at the default text size); below that they go inside the graphs. Measured in
+    // FloatingBarStatsTests at the default text size: at 273 DIP everything fits whole; at 233 DIP "MEM 100%"
+    // would keep 81% of the value's size, still easy to read; at 180 DIP "98%" beside "MEM" shrank to 40% and at
+    // 130 DIP the values shrank to nothing, which is the "MEM8%" problem again in another form. So the bar
+    // switches at about 225 DIP. "100%" rather than the value now, so the layout does not flip as the numbers
+    // change.
+    //
+    // Moving a name changes neither the strip's width nor its height (the top line is one text high either way),
+    // so this cannot set off another SizeChanged and loop.
+    void FitNames()
+    {
+        if (ActualWidth <= 0) return;
+        var room = ActualWidth / Columns - 2 * CellMargin;
+        var scale = cells.Min(cell => (room - TextWidth(cell.Name, cell.Label) - NameGap) / TextWidth(cell.Value, "100%"));
+        var beside = scale >= LeastValueScale;
+        if (beside == namesBeside) return;
+        namesBeside = beside;
+        cells.ToList().ForEach(cell => Place(cell, beside));
+    }
+
+    // Puts a cell's name on the top line (column 0, the value's left) or inside the graph at its top left, over
+    // the sparkline (added after it, so drawn on top).
+    static void Place(StatCell cell, bool beside)
+    {
+        (cell.Name.Parent as Panel)?.Children.Remove(cell.Name);
+        cell.Name.Margin = beside ? new Thickness(0, 0, NameGap, 0) : new Thickness(2, 0, 0, 0);
+        (beside ? cell.Top : cell.Graph).Children.Add(cell.Name);
+    }
+
+    // The width a text needs in a text block's font, as the block itself would lay it out.
+    static double TextWidth(TextBlock like, string text) =>
+        new FormattedText(text, System.Globalization.CultureInfo.CurrentUICulture, FlowDirection.LeftToRight,
+            new Typeface(like.FontFamily, like.FontStyle, like.FontWeight, like.FontStretch), like.FontSize, Brushes.Black,
+            VisualTreeHelper.GetDpi(like).PixelsPerDip).WidthIncludingTrailingWhitespace;
 
     // One reading in: every cell's history grows by a sample and is redrawn, then the strip fits its columns.
     internal void Paint(SystemSample sample, bool holdFourColumns)
@@ -172,10 +218,10 @@ internal sealed class StatsStrip : UniformGrid
     {
         get
         {
-            var cells = string.Join(",", Children.OfType<FrameworkElement>().Select(c => $"{c.ActualWidth:0}"));
-            var values = string.Join(" ", new[] { cpuCell, memoryCell, diskCell, gpuCell }.Select(c =>
-                $"{c.Label}='{c.Value.Text}' value={c.Value.ActualWidth:0.0} box={((FrameworkElement)c.Value.Parent).ActualWidth:0.0}"));
-            return $"{cells} values=[{values}]";
+            var widths = string.Join(",", Children.OfType<FrameworkElement>().Select(c => $"{c.ActualWidth:0}"));
+            var values = string.Join(" ", cells.Select(c =>
+                $"{c.Label}='{c.Value.Text}' value={c.Value.ActualWidth:0.0} box={c.Box.ActualWidth:0.0}"));
+            return $"{widths} names={(namesBeside ? "beside" : "inside")} values=[{values}]";
         }
     }
 
@@ -235,6 +281,8 @@ internal sealed class StatsStrip : UniformGrid
     {
         Children[3].Visibility = HasGpu ? Visibility.Visible : holdFourColumns ? Visibility.Hidden : Visibility.Collapsed;
         Columns = HasGpu || holdFourColumns ? 4 : 3;
+        // Three columns or four changes the room per cell without changing the strip's width.
+        FitNames();
     }
 
     static Brush FrozenBrush(Color color)

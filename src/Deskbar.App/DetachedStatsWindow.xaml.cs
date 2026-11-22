@@ -47,9 +47,8 @@ public partial class DetachedStatsWindow : Window
     readonly WorkspaceManager manager;
     readonly Action openTaskManager;
     readonly TextBlock tip = new();
-    // Four cells of 70 DIP.
-    // The window has the room for the name beside the value (StatsStrip has why the bar does not).
-    readonly StatsStrip Strip = new(namesBesideValues: true) { Width = 280 };
+    // Four cells of 70 DIP, each with its name beside its value (StatsStrip).
+    readonly StatsStrip Strip = new() { Width = 280 };
     readonly IDisposable subscription;
 
     // Set only when the app is going away. Until then a close request (Alt+F4, a taskbar close) is turned into a

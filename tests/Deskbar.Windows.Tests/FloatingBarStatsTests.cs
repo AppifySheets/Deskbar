@@ -67,12 +67,16 @@ public class FloatingBarStatsTests(ITestOutputHelper output)
         bar.UpdateLayout();
     }
 
-    // Each cell: the value alone on top, in a shrink-only Viewbox, then the graph with the label inside it.
-    static IEnumerable<(TextBlock Label, Viewbox Box, TextBlock Value)> Heads(FloatingBar bar) =>
+    // Each cell: a top line with the value, in a shrink-only Viewbox, at the right, then the graph. The label is
+    // on the top line at the left (Beside) or inside the graph over the sparkline, whichever StatsStrip.FitNames
+    // chose for the strip's width.
+    static IEnumerable<(TextBlock Label, Viewbox Box, TextBlock Value, bool Beside)> Heads(FloatingBar bar) =>
         Grid(bar).Children.OfType<StackPanel>()
             .Where(cell => cell.Visibility == Visibility.Visible)
-            .Select(cell => (Box: (Viewbox)cell.Children[0], Graph: (System.Windows.Controls.Grid)cell.Children[1]))
-            .Select(c => (Label: c.Graph.Children.OfType<TextBlock>().Single(), c.Box, Value: (TextBlock)c.Box.Child));
+            .Select(cell => (Top: (System.Windows.Controls.Grid)cell.Children[0], Graph: (System.Windows.Controls.Grid)cell.Children[1]))
+            .Select(c => (Label: c.Top.Children.OfType<TextBlock>().Concat(c.Graph.Children.OfType<TextBlock>()).Single(),
+                Box: c.Top.Children.OfType<Viewbox>().Single(), c.Top))
+            .Select(c => (c.Label, c.Box, Value: (TextBlock)c.Box.Child, Beside: c.Label.Parent == c.Top));
 
     static IEnumerable<string> Values(FloatingBar bar) => Heads(bar).Select(h => h.Value.Text);
 
@@ -101,15 +105,18 @@ public class FloatingBarStatsTests(ITestOutputHelper output)
     });
 
     // Petre, on a narrower bar: "MEM8%" while Task Manager said 98%, the value's first digit lost to the
-    // clip. The value now has the top line to itself ("show titles inside the graph", "percentage only at
-    // the top"), so at any width it stays whole (at 130 DIP even "100%" alone does not fit its cell, so it
-    // shrinks instead), and every label shows, inside its graph.
+    // clip. Labels sit beside the values where both fit ("text and values same line") and inside the graphs
+    // where they do not, so at every width every label shows, no value is cut, and no value shrinks below
+    // 75% of its size. Sharing the line at 180 DIP shrank "98%" to 40%, and at 130 DIP to nothing, which is
+    // why those widths put the labels inside the graphs. (Inside a 26 DIP cell at 130 DIP, "MEM" loses its
+    // last 2 DIP to the clip, as it did before the labels ever left the graphs; only a label beside its
+    // value is held to being whole.)
     [Theory]
-    [InlineData(273)]
-    [InlineData(233)]
-    [InlineData(180)]
-    [InlineData(130)]
-    public void At_any_width_every_value_is_whole_and_every_label_shows(double width) => StaThread.Run(() =>
+    [InlineData(273, true)]
+    [InlineData(233, true)]
+    [InlineData(180, false)]
+    [InlineData(130, false)]
+    public void At_any_width_every_value_is_whole_and_every_label_shows(double width, bool beside) => StaThread.Run(() =>
     {
         var stats = new FakeStats();
         var bar = Bar(stats);
@@ -119,12 +126,37 @@ public class FloatingBarStatsTests(ITestOutputHelper output)
         bar.UpdateLayout();
         Heads(bar).ToList().ForEach(h =>
         {
-            output.WriteLine($"{width}: {h.Label.Text} {h.Label.Visibility} value '{h.Value.Text}' box {h.Box.ActualWidth:0.0} of {h.Value.ActualWidth:0.0} clip {LayoutInformation.GetLayoutClip(h.Box)?.Bounds.ToString() ?? "none"}");
+            output.WriteLine($"{width}: {h.Label.Text} {(h.Beside ? "beside" : "inside")} value '{h.Value.Text}' box {h.Box.ActualWidth:0.0} of {h.Value.ActualWidth:0.0} clip {LayoutInformation.GetLayoutClip(h.Box)?.Bounds.ToString() ?? "none"}");
+            Assert.Equal(beside, h.Beside);
+            Assert.True(h.Box.ActualWidth >= 0.75 * h.Value.ActualWidth, $"{h.Label.Text}'s value shrank to {h.Box.ActualWidth / h.Value.ActualWidth:P0}");
             Assert.Equal(Visibility.Visible, h.Label.Visibility);
+            if (h.Beside) Assert.Null(LayoutInformation.GetLayoutClip(h.Label));
             Assert.Null(LayoutInformation.GetLayoutClip(h.Box));
             Assert.Null(LayoutInformation.GetLayoutClip(h.Value));
         });
         Assert.Equal(["62%", "98%", "100%", "100%"], Values(bar));
+        bar.Close();
+    });
+
+    // A live bar is resized (its width setting, the text size, a move onto the seam), so the labels move inside
+    // the graphs when it narrows and back beside the values when it widens again.
+    [Fact]
+    public void Narrowing_and_widening_the_bar_moves_the_labels_and_back() => StaThread.Run(() =>
+    {
+        var stats = new FakeStats();
+        var bar = Bar(stats);
+        Push(bar, stats, Sample());
+
+        bool[] BesideAt(double width)
+        {
+            Line(bar).Width = width;
+            bar.UpdateLayout();
+            return Heads(bar).Select(h => h.Beside).ToArray();
+        }
+
+        Assert.All(BesideAt(273), Assert.True);
+        Assert.All(BesideAt(150), Assert.False);
+        Assert.All(BesideAt(273), Assert.True);
         bar.Close();
     });
 
