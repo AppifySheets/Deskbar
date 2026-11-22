@@ -1,4 +1,3 @@
-using System.Globalization;
 using CSharpFunctionalExtensions;
 using Deskbar.Core.Goals;
 
@@ -17,7 +16,7 @@ namespace Deskbar.Core.Control;
 //
 // Within the `task` commands' conventions: an id is the goal's Guid or a unique prefix of at least four characters
 // (GoalBoard.Find); a period is `--week` or `--month`, bare for the current one or with any yyyy-MM-dd date inside it
-// (snapped to its Monday or its 1st). With no period option, `add` uses this week, `carry` the current period of the
+// (snapped to its Monday or its 1st), in the years 2000 to 2999 (GoalPeriod.ParseDay). With no period option, `add` uses this week, `carry` the current period of the
 // goal's own kind (the review's "Carry over"), and `list` shows this month's goals then this week's; `--all` lists
 // every goal, the oldest period first. "Current" is Petre's local week and month (GoalService.ThisWeek).
 //
@@ -30,7 +29,9 @@ namespace Deskbar.Core.Control;
 // workspace), so the client appends no --from. `task goal <id> <goal-id>|none` lives with the task verbs
 // (RemoteControl.Tasks.cs) and links through GoalService.LinkTask.
 //
-// Every failure is one line and changes nothing: parsing and lookups finish before the first service call.
+// Every failure is one line and changes nothing: parsing and lookups finish before the first service call. While
+// goals.json could not be read (GoalService.LoadProblem), `list` and `add` answer with that problem rather than with an
+// empty board.
 public sealed partial class RemoteControl
 {
     const string GoalsUnavailable = "Goals are not available";
@@ -40,7 +41,15 @@ public sealed partial class RemoteControl
             ? ControlReply.Fail(GoalsUnavailable)
             : rest switch
             {
+                // goals.json could not be read (review M3): the board is empty for this run, so `list` would answer "no
+                // goals" when the truth is "could not read them", and `add` would start a fresh file over the place the
+                // unreadable one was kept aside from. Both answer with the store's problem instead, which names the .bak.
+                ["list" or "add", ..] when service.LoadProblem.HasValue => ControlReply.Fail(service.LoadProblem.Value),
                 ["list", .. var options] => GoalList(service, options),
+                // An option where the title belongs (`goal add --month`) would otherwise become a goal called
+                // "--month" (review M5).
+                ["add", var title, ..] when title.TrimStart().StartsWith("--", StringComparison.Ordinal) =>
+                    ControlReply.Fail($"'{title}' is not a title; put the title first, in quotes if it has spaces"),
                 ["add", var title, .. var options] => ParsePeriod(service, options)
                     .Bind(period => service.Add(title, period.GetValueOrDefault(service.ThisWeek)))
                     .Match(goal => Success(DescribeGoal(service, goal.Id)), ControlReply.Fail),
@@ -102,16 +111,11 @@ public sealed partial class RemoteControl
         [] => Maybe<GoalPeriod>.None,
         ["--week"] => Maybe.From(service.ThisWeek),
         ["--month"] => Maybe.From(service.ThisMonth),
-        ["--week", var date] => ParseDate(date).Map(d => Maybe.From(GoalPeriod.WeekOf(d))),
-        ["--month", var date] => ParseDate(date).Map(d => Maybe.From(GoalPeriod.MonthOf(d))),
+        ["--week", var date] => GoalPeriod.ParseDay(date).Map(d => Maybe.From(GoalPeriod.WeekOf(d))),
+        ["--month", var date] => GoalPeriod.ParseDay(date).Map(d => Maybe.From(GoalPeriod.MonthOf(d))),
         [var option, ..] when option.StartsWith("--", StringComparison.Ordinal) => Result.Failure<Maybe<GoalPeriod>>($"Unexpected {option}; use --week or --month"),
         [var extra, ..] => Result.Failure<Maybe<GoalPeriod>>($"Unexpected '{extra}': a title with spaces needs quotes"),
     };
-
-    static Result<DateOnly> ParseDate(string text) =>
-        DateOnly.TryParseExact(text.Trim(), "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out var date)
-            ? date
-            : Result.Failure<DateOnly>($"'{text}' is not a date; use yyyy-MM-dd");
 
     static Result<Maybe<Guid>> ParseParent(GoalService service, string parent) =>
         parent.Trim().Equals("none", StringComparison.OrdinalIgnoreCase)

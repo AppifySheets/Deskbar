@@ -148,7 +148,8 @@ public sealed record GoalBoard(IReadOnlyList<Goal> Goals)
     static Result<string> CleanTitle(string title) =>
         string.IsNullOrWhiteSpace(title) ? Result.Failure<string>("A goal needs a title") : title.Trim();
 
-    static string NoGoal(string id) => $"No goal with id {id}";
+    /// <summary>The one wording of an unknown goal, here and in GoalService, so the pipe always says the same.</summary>
+    public static string NoGoal(string id) => $"No goal with id {id}";
 
     Result<Goal> Lookup(Guid id) => Get(id).ToResult(NoGoal(id.ToString()));
 

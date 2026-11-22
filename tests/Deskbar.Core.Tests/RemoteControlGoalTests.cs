@@ -104,6 +104,71 @@ public sealed class RemoteControlGoalTests
         Assert.Equal("A goal needs a title", Run("goal", "add", " ").Output.Trim());
     }
 
+    // Review I1: the help describes what each goal command does in this build, not UI that comes with the planner (the
+    // review strip's "Carry over", the bar's "Plan this week" line, struck-through goals).
+    [Fact]
+    public void The_goal_help_names_no_ui_this_build_lacks()
+    {
+        var lines = ControlUsage.All.Where(c => c.Verb == "goal" || c.Arguments.StartsWith("goal ", StringComparison.Ordinal))
+            .Select(c => c.Description).ToArray();
+
+        Assert.NotEmpty(lines);
+        Assert.All(lines, line => Assert.DoesNotMatch("struck through|Carry over|Plan this week|close sign|planner", line));
+    }
+
+    // Review M4: a date far from now made GoalPeriod.End overflow (December 9999 has no month after it). Years outside
+    // 2000 to 2999 are refused before anything is touched.
+    [Fact]
+    public void A_date_outside_the_years_2000_to_2999_is_refused()
+    {
+        var before = goals.Board;
+
+        var reply = Run("goal", "add", "Ship it", "--month", "9999-12-31");
+
+        AssertRefusedAndUnchanged(reply, before);
+        Assert.Equal("'9999-12-31' is outside the years 2000 to 2999", reply.Output.Trim());
+        AssertRefusedAndUnchanged(Run("goal", "list", "--week", "1999-12-31"), before);
+        Assert.Equal(ControlReply.Ok, Run("goal", "list", "--month", "2999-12-31").ExitCode);
+    }
+
+    // Review M5: `goal add --month` with no title made a goal called "--month". An option where the title belongs is
+    // refused.
+    [Fact]
+    public void An_option_where_the_title_belongs_is_refused()
+    {
+        var before = goals.Board;
+
+        var reply = Run("goal", "add", "--month");
+
+        AssertRefusedAndUnchanged(reply, before);
+        Assert.Equal("'--month' is not a title; put the title first, in quotes if it has spaces", reply.Output.Trim());
+        AssertRefusedAndUnchanged(Run("goal", "add", "--week", "2026-11-30"), before);
+    }
+
+    // Review M3: goals.json could not be read, so the board is empty for this run. `list` must not answer "no goals"
+    // and `add` must not start a new board over the one kept aside: both answer with the problem.
+    [Fact]
+    public void List_and_add_answer_with_a_load_problem()
+    {
+        goalStore.LoadFails = "Could not read goals.json; kept goals.json as goals.json.20261124-120000.bak";
+        goals.Load();
+        var before = goals.Board;
+
+        var list = Run("goal", "list");
+        var add = Run("goal", "add", "Ship it");
+
+        Assert.Equal(ControlReply.Failed, list.ExitCode);
+        Assert.Contains("goals.json.20261124-120000.bak", list.Output);
+        AssertRefusedAndUnchanged(add, before);
+        Assert.Contains("goals.json.20261124-120000.bak", add.Output);
+        Assert.Equal(0, goalStore.Saves);
+
+        // Once goals.json reads again, both work.
+        goalStore.LoadFails = Maybe<string>.None;
+        goals.Load();
+        Assert.Equal(ControlReply.Ok, Run("goal", "add", "Ship it").ExitCode);
+    }
+
     [Fact]
     public void List_is_this_week_and_month_as_json()
     {

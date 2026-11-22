@@ -1,4 +1,5 @@
 using System.Globalization;
+using CSharpFunctionalExtensions;
 
 namespace Deskbar.Core.Goals;
 
@@ -27,6 +28,18 @@ public sealed record GoalPeriod
 
     /// <summary>The last day, inclusive: the Sunday of a week, the last day of a month.</summary>
     public DateOnly End => Kind == GoalKind.Week ? Start.AddDays(6) : Start.AddMonths(1).AddDays(-1);
+
+    /// <summary>
+    /// A day as the pipe and goals.json write it, yyyy-MM-dd, in the years 2000 to 2999. The range is a guard, not a
+    /// preference (review M4): December 9999 has no month after it, so End, Next and Touches would overflow on a period
+    /// that far out, and nobody plans a goal there. One rule for both readers, so the pipe never accepts a date the file
+    /// would then skip.
+    /// </summary>
+    public static Result<DateOnly> ParseDay(string? text) =>
+        !DateOnly.TryParseExact((text ?? "").Trim(), "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out var day)
+            ? Result.Failure<DateOnly>($"'{text}' is not a date; use yyyy-MM-dd")
+        : day.Year is < 2000 or > 2999 ? Result.Failure<DateOnly>($"'{text}' is outside the years 2000 to 2999")
+        : day;
 
     /// <summary>The week holding <paramref name="day"/>, Monday to Sunday.</summary>
     public static GoalPeriod WeekOf(DateOnly day) =>
