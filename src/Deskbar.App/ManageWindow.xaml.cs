@@ -48,10 +48,14 @@ public partial class ManageWindow : Window
     // what they assert does not depend on the taskbar of the machine running them.
     readonly Func<bool> taskbarAutoHides;
 
-    public ManageWindow(WorkspaceManager manager, bool compatibilityMode, TimeTracker? timeTracker = null, Func<bool>? taskbarAutoHides = null)
+    // `pro` is what the Deskbar Pro tab's buttons do (ManageWindow.Pro.cs). App always passes it; it is optional only
+    // so the tests that build this window without App keep their shape.
+    public ManageWindow(WorkspaceManager manager, bool compatibilityMode, TimeTracker? timeTracker = null, Func<bool>? taskbarAutoHides = null,
+        ProActions? pro = null)
     {
         this.manager = manager;
         this.timeTracker = timeTracker;
+        this.pro = pro;
         this.taskbarAutoHides = taskbarAutoHides ?? (() => TaskbarFlashingSwitch.TaskbarAutoHides);
         InitializeComponent();
         if (compatibilityMode) CompatBanner.Visibility = Visibility.Visible;
@@ -95,6 +99,8 @@ public partial class ManageWindow : Window
         // pass-through dialog runner and a no-op afterAction are exactly right; live
         // refresh on manager.StateChanged is the view's own responsibility now.
         Reload();
+        // The Deskbar Pro tab, painted now and again when the Store's price arrives (ManageWindow.Pro.cs).
+        LoadPro();
     }
 
     // Reviewer (fix round 1, Important): reassigning ItemsSource wholesale drops the

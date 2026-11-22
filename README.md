@@ -665,7 +665,7 @@ The axis it arranges on its own is which desktop a window belongs to, and that i
 
 ## Manage
 
-Left-click the tray icon. Five tabs:
+Left-click the tray icon. Six tabs:
 
 - **Workspaces** adds, renames, removes and reorders them (that order is the bar's row order). Beside the list, **Apps that belong to this workspace** shows the
   roster, each entry as the exe plus the last title when they differ, with **Remove from this
@@ -685,6 +685,10 @@ Left-click the tray icon. Five tabs:
   looking, and there is nothing to save. The hover delay follows Windows' own setting unless you
   untick the box and pick your own.
 - **Rules** holds the auto-assignment and renaming patterns.
+- **Deskbar Pro** says whether this copy has [Deskbar Pro](#deskbar-pro). Without it, the tab has
+  **Get Pro** with the price in your currency (in the GitHub copy, **Open Deskbar in the Store**)
+  and **Check again**, which asks the Store at once, for Pro bought on another PC. With or without
+  it, **Report a problem…** is there too, because priority support is what Pro adds.
 
 Below the tabs sit the three machine-level settings: **Dock the bar to the edge of its screen**,
 **Start Deskbar with Windows**, and **Check GitHub for new versions**, with the version you are

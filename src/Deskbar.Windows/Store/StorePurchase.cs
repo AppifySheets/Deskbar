@@ -20,7 +20,8 @@ namespace Deskbar.Windows.Store;
 // the caller can show.
 public static class StorePurchase
 {
-    const string ProAddOnStoreId = "9N5D13B3PR87";
+    // The add-on's Store ID, shared with StorePrice so the two can never ask about different products.
+    internal const string ProAddOnStoreId = "9N5D13B3PR87";
 
     public static async Task<Result<bool>> BuyProAsync(IntPtr ownerHwnd)
     {

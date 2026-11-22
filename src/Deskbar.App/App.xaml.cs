@@ -182,14 +182,21 @@ public partial class App : Application
     // finds it null and does nothing.
     //
     // The Pro reminder line is repainted on the same landing: a purchase takes it away, and since this runs on the
-    // five-minute tick, a new day brings it back without a restart (FloatingBar.ProReminder.cs).
-    void RefreshEntitlement() =>
-        _ = Entitlement.RefreshAsync(barHandle)
+    // five-minute tick, a new day brings it back without a restart (FloatingBar.ProReminder.cs). So is Manage's
+    // Deskbar Pro tab when Manage is open (ManageWindow.Pro.cs), so it turns into the thank-you as soon as Pro is bought.
+    void RefreshEntitlement() => _ = RefreshEntitlementAsync();
+
+    // The same, as a task that completes once the repaint has run on the UI thread: Manage's "Check again" awaits it
+    // so its "Checked at" note is written after the new answer is on screen, not before.
+    Task RefreshEntitlementAsync() =>
+        Entitlement.RefreshAsync(barHandle)
             .ContinueWith(_ => Dispatcher.InvokeAsync(() =>
             {
                 tiler?.Refresh();
                 floatingBar?.PaintProReminder();
-            }), TaskScheduler.Default);
+                manageWindow?.PaintPro();
+            }).Task, TaskScheduler.Default)
+            .Unwrap();
 
     // Whether the Pro reminder line is due right now: ProReminder.Due (Core.Licensing) over the live verdict, the two
     // dates in AppState, the active time used since the start date (the time tracker, the same numbers as Manage's
@@ -2216,7 +2223,12 @@ public partial class App : Application
             return;
         }
 
-        manageWindow = new ManageWindow(manager!, compatibilityMode, timeTracker);
+        // The Deskbar Pro tab's buttons (ManageWindow.Pro.cs): the bar's own Get Pro (which buys in the Store copy), the
+        // Store page directly for the GitHub copy (the tab has already explained, so no dialog first), Report a
+        // problem…, an immediate licence read, and the add-on's price in the user's currency (asked only when packaged).
+        manageWindow = new ManageWindow(manager!, compatibilityMode, timeTracker, pro: new ManageWindow.ProActions(
+            GetPro, OpenStoreForPro, ReportProblem, RefreshEntitlementAsync,
+            () => Deskbar.Windows.Store.StorePrice.ProPriceAsync(barHandle)));
         manageWindow.Closed += (_, _) => manageWindow = null;
         manageWindow.Show();
     }
