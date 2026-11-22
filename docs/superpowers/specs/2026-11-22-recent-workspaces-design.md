@@ -23,7 +23,12 @@ eased by ^0.7 so most of the change is in the first hours) and the result, 0 to 
 
 - Icons: the grey overlay's opacity, as today, but from the workspace's age instead of each
   window's own. Every icon in a row is the same shade.
-- Rail: the workspace colour blended toward grey.
+- Rail: the workspace colour blended toward grey, and the stripe itself fading from opaque to about
+  19% (alpha `0x30`). Petre: "let's also fade the rails on the left, so i don't get tempted to look at
+  them". A grey stripe at full strength still draws the eye down every idle row; a faint one does not.
+  The rails also mark where one row ends and the next begins (see `Separator`), which is why they do
+  not fade to nothing: the 2 DIP gap between rows and the faint stripe still do that job.
+  The group's line down its left side fades the same way, by its freshest member.
 - Tint: a faint wash of the workspace colour, about a third of the current row's `0x38` at age 0,
   fading to none.
 - Name: full brightness fading to about 42%, never lower, so every name stays readable.

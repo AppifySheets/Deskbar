@@ -14,7 +14,7 @@
 
 - Work in the worktree `E:\repos\TaskSpaces\.claude\worktrees\recent-workspaces`, branch `feat/recent-workspaces-colour`.
 - Curve: 0 up to 15 minutes, 1 at 8 hours, eased by `^0.7` (today's `FloatingBar.AgeOf`, unchanged values).
-- Steps: 16. Rail at step 16 is `#4A4E58`. Recent tint alpha at step 0 is `0x13` (a third of `LaneTint`'s `0x38`), 0 at step 16. Resting caption alpha goes from `0xA8` (step 0, today's `RestingRowForeground`) to `0x6B` (step 16).
+- Steps: 16. Rail at step 0 is the palette colour, opaque; at step 16 it is `#4A4E58` at alpha `0x30`, both colour and alpha linear in the step. Recent tint alpha at step 0 is `0x13` (a third of `LaneTint`'s `0x38`), 0 at step 16. Resting caption alpha goes from `0xA8` (step 0, today's `RestingRowForeground`) to `0x6B` (step 16).
 - The current row is drawn exactly as today. An expanded (titled-list) row keeps `ListSpine`. `AskingCaption` wins over the fade.
 - Pinned windows, the pinned row, unbound desktops and Unplaced keep today's per-window aging and colours.
 - No rows move, fold or hide. Never a rebuild every minute.
@@ -97,7 +97,7 @@ Expected: PASS both (the `AgeOf` theory still holds).
 **Interfaces:**
 - Consumes: `WorkspaceFade.Steps`; the existing `Lane`, `Tint`, `WorkspacePalette`, `Frozen`, `GroupHeaderForeground`.
 - Produces (all `internal static` so tests reach them):
-  - `Brush? FadedAccent(string? color, int index, int step)`: the palette colour blended toward `#4A4E58` by `step / 16`, opaque, frozen, cached per hex and step; null where `Lane` is null (a row opted out of colour)
+  - `Brush? FadedAccent(string? color, int index, int step)`: the palette colour blended toward `#4A4E58` by `step / 16`, with alpha from `0xFF` down to `0x30` by the same fraction, frozen, cached per hex and step; null where `Lane` is null (a row opted out of colour)
   - `Brush? FadedTint(string? color, int index, int step)`: `Lane(color, index, alpha)` with `alpha = round(0x13 * (1 - step / 16.0))`; null when alpha is 0
   - `Brush RestingCaption(int step)`: white, alpha linear from `0xA8` to `0x6B`, frozen, cached per step
   - `Brush GroupHeaderAt(int step)`: `GroupHeaderForeground`'s colour with its alpha scaled by the same ratio as `RestingCaption` (`alpha(step) / 0xA8`)
@@ -111,8 +111,8 @@ public class FloatingBarRecencyTests
 
     [Fact] public void A_fresh_rail_is_the_workspace_colour() =>
         Assert.Equal(Color.FromRgb(0x9B, 0x6C, 0xF0), ColourOf(FloatingBar.FadedAccent("#9B6CF0", 0, 0)));
-    [Fact] public void A_fully_faded_rail_is_grey() =>
-        Assert.Equal(Color.FromRgb(0x4A, 0x4E, 0x58), ColourOf(FloatingBar.FadedAccent("#9B6CF0", 0, 16)));
+    [Fact] public void A_fully_faded_rail_is_a_faint_grey() =>
+        Assert.Equal(Color.FromArgb(0x30, 0x4A, 0x4E, 0x58), ColourOf(FloatingBar.FadedAccent("#9B6CF0", 0, 16)));
     [Fact] public void A_fresh_row_has_a_third_of_the_current_tint() =>
         Assert.Equal(0x13, ColourOf(FloatingBar.FadedTint("#9B6CF0", 0, 0)).A);
     [Fact] public void A_fully_faded_row_has_no_tint() =>
@@ -170,7 +170,7 @@ File header comment: the design (one age per workspace, gradual, B with tint), t
 Use a mutable clock: `var now = T0; Harness.Build(clock: () => now)`. Every window is stamped `T0` on arrival, so `now = T0.AddDays(2)` followed by a rebuild (triggered the way the file's tests already do) makes every workspace two days old. GEPHA is current.
 
 ```csharp
-[Fact] public void An_idle_workspace_row_is_drawn_faded()          // Sparrow's rail Border (Width == SpineWidth) is #4A4E58,
+[Fact] public void An_idle_workspace_row_is_drawn_faded()          // Sparrow's rail Border (Width == SpineWidth) is #304A4E58 (ARGB),
                                                                     // its caption TextBlock's alpha is 0x6B, its row has no tint
 [Fact] public void The_current_row_is_not_faded_however_old()       // GEPHA's window is two days old too: rail is ListSpine's
                                                                     // colour, caption CurrentRowForeground, tint LaneTint
