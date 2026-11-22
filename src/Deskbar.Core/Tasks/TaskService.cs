@@ -54,6 +54,9 @@ public sealed class TaskService(ITaskStore store, Func<DateTimeOffset> now, Func
 
     public Result Join(Guid id, TaskSession session) => Apply(Board.Join(id, session, now()));
 
+    /// <summary>A session back on its own task, the task's status kept (TaskBoard.Rejoin, Ruling 34).</summary>
+    public Result Rejoin(Guid id, TaskSession session) => Apply(Board.Rejoin(id, session, now()));
+
     /// <summary>
     /// A live session joining now, for the control pipe, which has no clock of its own: the Claude hooks and the
     /// session-facing `task` forms (RemoteControl.ClaudeHook.cs) make every session they hand to Join and Create here.

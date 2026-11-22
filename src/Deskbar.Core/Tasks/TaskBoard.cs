@@ -68,6 +68,17 @@ public sealed record TaskBoard(IReadOnlyList<TaskItem> Tasks)
             UpdatedAt = now,
         }).Map(joined => joined.WithoutSessionElsewhere(session.Id, id, now));
 
+    /// <summary>
+    /// A session coming back to its OWN task (a resumed conversation keeps its id; RemoteControl's SessionStart finds
+    /// the task by TaskBoard.LastTaskOf): live on it again, as <see cref="Join"/> makes it, but the task KEEPS ITS
+    /// STATUS (Ruling 34). Resuming a session to look at it is not continuing the work; only the user's next message
+    /// (<see cref="Answered"/>) moves Done or Waiting on you back to In progress. A closed task refuses, and the session
+    /// leaves any other open task it was live on, both as Join does.
+    /// </summary>
+    public Result<TaskBoard> Rejoin(Guid id, TaskSession session, DateTimeOffset now) =>
+        ChangeOpen(id, t => t with { Sessions = WithSession(t.Sessions, session), UpdatedAt = now })
+            .Map(joined => joined.WithoutSessionElsewhere(session.Id, id, now));
+
     /// <summary>The short line a session keeps current. Does not move <see cref="TaskItem.Raised"/>.</summary>
     public Result<TaskBoard> SetStatusLine(Guid id, string text, DateTimeOffset now) =>
         ChangeOpen(id, t => t with { StatusLine = (text ?? "").Trim(), UpdatedAt = now });

@@ -80,13 +80,14 @@ public sealed partial class RemoteControl
     static ControlReply Quietly(ControlReply _) => Quiet;
 
     // SessionStart. TaskOf finds the task a still-live session is on (compact, clear, or a second SessionStart);
-    // LastTaskOf finds the one a resumed session was on before its SessionEnd, and Join makes it live there again (the
-    // same id replaces its old entry, TaskBoard.Join, which also brings a Done task back to In progress: resuming is
-    // taking the work up again). Only a session with no open task at all is offered a choice.
+    // LastTaskOf finds the one a resumed session was on before its SessionEnd, and Rejoin makes it live there again (the
+    // same id replaces its old entry) WITHOUT touching the task's status (Ruling 34): resuming a session to look at it
+    // is not continuing the work, so a Done or waiting task stays as it is until the user's next message (Prompted).
+    // Only a session with no open task at all is offered a choice.
     string SessionStarted(TaskService service, ClaudeHookEvent hook, string? folder)
     {
         if (service.Board.TaskOf(hook.SessionId).HasNoValue)
-            service.Board.LastTaskOf(hook.SessionId).Tap(t => service.Join(t.Id, service.NewSession(hook.SessionId, folder ?? "")));
+            service.Board.LastTaskOf(hook.SessionId).Tap(t => service.Rejoin(t.Id, service.NewSession(hook.SessionId, folder ?? "")));
         var own = service.Board.TaskOf(hook.SessionId);
         var offered = own.HasValue ? [] : service.Board.Offered(CallerOf(folder).Workspace is { } w ? w.Id : Maybe<Guid>.None);
         return SessionBriefing.Start(hook, own, offered);
