@@ -2037,7 +2037,9 @@ public partial class FloatingBar : Window
         // anywhere, off the bar included, while the rows it is measured against must stay the rows it was measured
         // against. The drop, or the cancel, serves the deferred pulse. The drop runs from the dispatcher queue after the
         // release (ArrangeRelease), and the rows stay as they were until it has run.
-        if (arrangeDrag is not null || arrangeDropQueued)
+        // A task line's drag (FloatingBar.TaskDrag.cs) holds the rebuild back the same way: the line it measures against
+        // must stay the line it was measured against, and its drop serves the deferred pulse.
+        if (arrangeDrag is not null || arrangeDropQueued || TaskDragInFlight)
         {
             if (ClickTrace.On) ClickTrace.Write("rebuild deferred: arrange drag in flight");
             rebuildRequested = true;
