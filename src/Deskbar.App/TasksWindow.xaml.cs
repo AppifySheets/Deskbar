@@ -469,20 +469,28 @@ public partial class TasksWindow : Window
     // mark their Click handled, so the line does not also act on them.
     Button Line(TaskRowView row, TasksView view)
     {
+        // ONE COLUMN LAYOUT FOR EVERY LINE (Petre's screenshot: each line sized a column to its own content, so the chip,
+        // the comments and "…" sat at a different x on every line, and a long title pushed the chip off the window).
+        // Every column but the title's is a fixed width, the same on every line of every group, so each sits at the
+        // same x, flush to the right edge; the title takes the star column and trims first.
         var grid = new Grid();
-        new[] { new GridLength(22), new GridLength(1, GridUnitType.Star), new GridLength(150), new GridLength(96), new GridLength(44), GridLength.Auto, new GridLength(24) }
-            .ToList().ForEach(width => grid.ColumnDefinitions.Add(new ColumnDefinition { Width = width }));
+        LineColumns.ToList().ForEach(width => grid.ColumnDefinitions.Add(new ColumnDefinition { Width = width }));
         Cell(grid, 0, LeftOf(row));
         Cell(grid, 1, TextOf(row));
         Cell(grid, 2, SessionsOf(row));
         Cell(grid, 3, Chip(row.Place));
-        Cell(grid, 4, CommentsButton(row));
+        var comments = CommentsButton(row);
+        Cell(grid, 4, comments);
         Cell(grid, 5, ActionOf(row));
-        var more = Small("⋯", "More", () => OpenMenuFor(row.Id), "Status, close, rename, move, delete");
+        var more = Small(new TextBlock { Text = "", FontFamily = IconFont, FontSize = 12, Foreground = Ink }, "More",
+            () => OpenMenuFor(row.Id), "Status, move, rename, delete");
         menuButtons[row.Id] = more;
         Cell(grid, 6, more);
         if (row.Closing)
             grid.Children.OfType<UIElement>().Where(part => Grid.GetColumn(part) != 0).ToList().ForEach(part => part.Opacity = 0.45);
+        // The comments and "…" buttons are quiet until the pointer is on their line, like the bar's quiet controls.
+        var quiet = new UIElement[] { comments, more };
+        Quieten(quiet, loud: false);
 
         var edge = new Border
         {
@@ -504,6 +512,8 @@ public partial class TasksWindow : Window
             ToolTip = row.Closing ? "Closed. Undo brings it back." : $"{TaskViews.StatusName(row.Status)}: {row.Title}",
         };
         AutomationProperties.SetName(line, row.Title);
+        line.MouseEnter += (_, _) => Quieten(quiet, loud: true);
+        line.MouseLeave += (_, _) => Quieten(quiet, loud: false);
         // The click guard, as on the line's buttons (ClickIgnored).
         line.PreviewMouseLeftButtonDown += (_, e) => pressClicks = e.ClickCount;
         line.Click += (_, _) =>
@@ -514,6 +524,16 @@ public partial class TasksWindow : Window
         };
         return line;
     }
+
+    // The line's columns: tick, title (the star, trimming first), sessions, workspace chip, comments, action (close or
+    // Reopen), "…". Fixed widths, shared by every line, so each column sits at the same x on every line.
+    static readonly IReadOnlyList<GridLength> LineColumns =
+        [new(22), new(1, GridUnitType.Star), new(110), new(92), new(40), new(52), new(24)];
+
+    // The icon font of Windows 11, with Windows 10's as the fallback.
+    static readonly FontFamily IconFont = new("Segoe Fluent Icons, Segoe MDL2 Assets");
+
+    static void Quieten(IEnumerable<UIElement> parts, bool loud) => parts.ToList().ForEach(part => part.Opacity = loud ? 1 : 0.5);
 
     static void Cell(Grid grid, int column, UIElement? part)
     {
@@ -616,9 +636,16 @@ public partial class TasksWindow : Window
 
     // The comment count and its arrow: ▸ closed, ▾ open. A line with no comments shows the arrow alone, so the first
     // comment has a way in.
-    Button CommentsButton(TaskRowView row) =>
-        Small($"{(row.CommentCount > 0 ? $"{row.CommentCount} " : "")}{(row.Expanded ? "▾" : "▸")}", "Comments",
-            () => Actions?.ToggleThread(row.Id), row.Expanded ? "Hide the comments" : "Show the comments");
+    // A comment glyph with the count beside it when there are comments (Petre asked what the "▸" meant). Tooltip
+    // "Comments", the same whether the thread is open or not.
+    Button CommentsButton(TaskRowView row)
+    {
+        var content = new StackPanel { Orientation = Orientation.Horizontal };
+        content.Children.Add(new TextBlock { Text = "", FontFamily = IconFont, FontSize = 12, Foreground = Ink, VerticalAlignment = VerticalAlignment.Center });
+        if (row.CommentCount > 0)
+            content.Children.Add(new TextBlock { Text = $"{row.CommentCount}", FontSize = 11, Foreground = Ink, Margin = new Thickness(3, 0, 0, 0), VerticalAlignment = VerticalAlignment.Center });
+        return Small(content, "Comments", () => Actions?.ToggleThread(row.Id), "Comments");
+    }
 
     // A done Claude task's close button (it waits for Petre to look and close it), or Reopen on a closed task.
     UIElement? ActionOf(TaskRowView row) =>
@@ -674,8 +701,17 @@ public partial class TasksWindow : Window
         return new StackPanel { Margin = new Thickness(0, 0, 0, 8), Children = { header, body } };
     }
 
-    // Petre's next comment: Enter posts it, Shift+Enter starts a new line (markdown lists need them). What is typed is
+    // Petre's next comment: Enter adds it, Shift+Enter starts a new line (markdown lists need them). What is typed is
     // kept in `drafts`, so a redraw while he types (from a session's change) loses nothing.
+    //
+    // Petre's screenshot: the placeholder "Comment as you, in markdow…" was cut off and the box was squeezed beside its
+    // button inside the indented frame. So the box spans the frame's full width with a short placeholder; the hint
+    // (markdown works, which keys do what) is its tooltip and a dim line under it while it has the keyboard; the
+    // "Comment" button sits at the end of that line. Nothing here has a width of its own to clip at the window's
+    // minimum width: the hint trims, the box wraps.
+    internal const string CommentPlaceholder = "Add a comment…";
+    internal const string CommentHint = "Markdown works. Enter adds, Shift+Enter starts a new line.";
+
     UIElement CommentBox(Guid id)
     {
         var box = new TextBox
@@ -690,16 +726,31 @@ public partial class TasksWindow : Window
             TextWrapping = TextWrapping.Wrap,
             AcceptsReturn = false,
             MaxHeight = 120,
+            ToolTip = CommentHint,
         };
         AutomationProperties.SetName(box, "New comment");
         var placeholder = new TextBlock
         {
-            Text = "Comment as you, in markdown. Enter posts, Shift+Enter starts a new line",
+            Tag = "comment-placeholder",
+            Text = CommentPlaceholder,
             FontSize = 12,
             Foreground = HeaderInk,
             IsHitTestVisible = false,
             Margin = new Thickness(2, 0, 0, 0),
+            TextTrimming = TextTrimming.CharacterEllipsis,
             Visibility = box.Text.Length == 0 ? Visibility.Visible : Visibility.Collapsed,
+        };
+        var hint = new TextBlock
+        {
+            Tag = "comment-hint",
+            Text = CommentHint,
+            FontSize = 10.5,
+            Foreground = HeaderInk,
+            TextTrimming = TextTrimming.CharacterEllipsis,
+            VerticalAlignment = VerticalAlignment.Center,
+            // Hidden rather than collapsed, so the line under the box keeps its height and nothing moves as the keyboard
+            // comes and goes.
+            Visibility = Visibility.Hidden,
         };
         box.TextChanged += (_, _) =>
         {
@@ -707,19 +758,22 @@ public partial class TasksWindow : Window
             placeholder.Visibility = box.Text.Length == 0 ? Visibility.Visible : Visibility.Collapsed;
         };
         box.PreviewKeyDown += (_, e) => e.Handled = PressInComment(id, e.Key, Keyboard.Modifiers) != KeyOutcome.Ignored;
-        // The keyboard leaving a box with text in it frees a redraw that waited for it.
-        box.LostKeyboardFocus += (_, _) => Flush();
+        box.GotKeyboardFocus += (_, _) => hint.Visibility = Visibility.Visible;
+        // The keyboard leaving the box hides the hint, and frees a redraw that waited for it.
+        box.LostKeyboardFocus += (_, _) =>
+        {
+            hint.Visibility = Visibility.Hidden;
+            Flush();
+        };
         commentBoxes[id] = box;
 
-        var post = Flat(new TextBlock { Text = "Comment", Foreground = Ink, FontSize = 11 }, "Post comment", () => Post(id), new Thickness(10, 2, 10, 2));
+        var post = Flat(new TextBlock { Text = "Comment", Foreground = Ink, FontSize = 11 }, "Post comment", () => Post(id), new Thickness(10, 1, 10, 1));
         post.Margin = new Thickness(6, 0, 0, 0);
-        post.VerticalAlignment = VerticalAlignment.Bottom;
         DockPanel.SetDock(post, Dock.Right);
-        return new DockPanel
+        return new StackPanel
         {
             Children =
             {
-                post,
                 new Border
                 {
                     CornerRadius = new CornerRadius(4),
@@ -729,6 +783,7 @@ public partial class TasksWindow : Window
                     Padding = new Thickness(6, 3, 6, 3),
                     Child = new Grid { Children = { box, placeholder } },
                 },
+                new DockPanel { Margin = new Thickness(0, 3, 0, 0), Children = { post, hint } },
             },
         };
     }
