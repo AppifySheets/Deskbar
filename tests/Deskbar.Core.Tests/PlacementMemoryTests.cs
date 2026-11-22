@@ -16,16 +16,52 @@ public class PlacementMemoryTests
     static WindowInfo BeeperWindow(nint handle = 1) =>
         new(new WindowHandle(handle), 42, "Beeper", BeeperPath, "Beeper | HRIS", $"\"{BeeperPath}\" ");
 
+    // Beeper is opted in to workspace memory unless a test says otherwise: memory is opt-in per app
+    // (PlacementMemory.For), and most of these tests are about what memory does once an app has it.
     static AppState StateWith(
         IReadOnlyList<InventoryEntry>? pinned = null,
         IReadOnlyList<InventoryEntry>? detached = null,
-        Dictionary<Guid, IReadOnlyList<InventoryEntry>>? inventory = null) =>
+        Dictionary<Guid, IReadOnlyList<InventoryEntry>>? inventory = null,
+        IReadOnlyList<string>? remembered = null) =>
         AppState.Empty with
         {
             PinnedApps = pinned ?? [],
             DetachedApps = detached ?? [],
             Inventory = inventory ?? new Dictionary<Guid, IReadOnlyList<InventoryEntry>>(),
+            RememberedApps = remembered ?? ["Beeper"],
         };
+
+    // --- memory is opt-in (2026-11-22) ------------------------------------------------
+
+    // Petre: "mstsc opened in another workspace". An app nobody opted in opens where it was opened,
+    // whatever the roster learned from a drag.
+    [Fact]
+    public void An_app_not_opted_in_is_not_sent_to_its_rostered_workspace() =>
+        Assert.False(PlacementMemory.For(BeeperWindow(), StateWith(inventory: new() { [Sparrow] = [Beeper] }, remembered: [])).HasValue);
+
+    // Another app's opt-in does not lend Beeper a memory.
+    [Fact]
+    public void Opting_in_another_app_does_not_remember_this_one() =>
+        Assert.False(PlacementMemory.For(BeeperWindow(), StateWith(inventory: new() { [Sparrow] = [Beeper] }, remembered: ["obs64"])).HasValue);
+
+    // Process names are matched the way Windows spells them, so case must not matter.
+    [Fact]
+    public void The_opt_in_ignores_case()
+    {
+        var placement = PlacementMemory.For(BeeperWindow(), StateWith(inventory: new() { [Sparrow] = [Beeper] }, remembered: ["beeper"]));
+
+        Assert.Equal(Sparrow, placement.Value.WorkspaceId);
+    }
+
+    // A pin cannot send a window away from where he is (it puts it on every workspace), so it stays
+    // automatic: Beeper's re-pin after closing to tray needs no opt-in.
+    [Fact]
+    public void A_pin_is_remembered_without_an_opt_in() =>
+        Assert.Equal(PlacementKind.Pinned, PlacementMemory.For(BeeperWindow(), StateWith(pinned: [Beeper], remembered: [])).Value.Kind);
+
+    [Fact]
+    public void A_detach_is_remembered_without_an_opt_in() =>
+        Assert.Equal(PlacementKind.Detached, PlacementMemory.For(BeeperWindow(), StateWith(detached: [Beeper], remembered: [])).Value.Kind);
 
     [Fact]
     public void A_workspace_roster_entry_is_remembered_as_that_workspace()

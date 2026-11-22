@@ -165,6 +165,24 @@ public sealed record AppState(
     // container to be named after.
     public IReadOnlyList<string> NameByFolder { get; init; } = [];
 
+    // The apps that keep a WORKSPACE memory, by process name ("Beeper", "obs64"), opted in one by one
+    // from a window's icon menu ("Remember <app>'s workspace") or `deskbar.cmd remember-workspace`.
+    //
+    // Petre, 2026-11-22, after mstsc opened on another workspace: "placement memory has to always consider
+    // the context that the window is in. i can't think of anything other than code windows moving to their
+    // corresponding workspaces", and then "let's keep memory, but only for specific apps". So memory is
+    // opt-in. An app not listed here opens where it is opened, and a drag moves that one window without
+    // deciding where the app goes next time. See PlacementMemory.For for the whole reasoning.
+    //
+    // Process names rather than identities (path plus arguments): a Store app such as Teams lives in a
+    // versioned folder, so an identity dies with every update, and eleven dead Teams entries in his file
+    // were the proof. The roster still decides WHICH workspace; this list only decides whether it is used.
+    //
+    // Empty by default, which is the point: memory is something an app is given, not something every app
+    // picks up from a drag. A state.json written before this key loads with it empty, so memory is off for
+    // every app until one is opted in.
+    public IReadOnlyList<string> RememberedApps { get; init; } = [];
+
     // The order Petre arranged the bar's icons in, as a sequence of app identities (exe path plus
     // arguments). Petre: "go with the first-seen order, with the possibility of dragging those icons."
     //

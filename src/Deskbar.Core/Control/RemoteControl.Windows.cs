@@ -140,6 +140,17 @@ public sealed partial class RemoteControl
             _ => ControlReply.Fail(ControlUsage.LineFor("name-by-folder")),
         };
 
+    // The icon menu's "Remember <app>'s workspace" (WorkspaceManager.RememberWorkspace): workspace memory is
+    // opt-in per app, and this turns it on or off for the app owning the window. On also records the
+    // window's current workspace as the one to remember.
+    ControlReply RememberWorkspace(string hwnd, string onOff) =>
+        onOff.ToLowerInvariant() switch
+        {
+            "on" or "true" or "yes" => OnWindow(hwnd, w => manager.RememberWorkspace(w.Handle, true)),
+            "off" or "false" or "no" => OnWindow(hwnd, w => manager.RememberWorkspace(w.Handle, false)),
+            _ => ControlReply.Fail(ControlUsage.LineFor("remember-workspace")),
+        };
+
     // Names no window, so there is no window to describe: the reply echoes the rule that was made.
     ControlReply RenamePattern(string pattern, string name) =>
         Reply(manager.RenameByPattern(pattern, name), () => new { pattern, name });

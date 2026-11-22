@@ -40,15 +40,44 @@ public static class PlacementMemory
     // order only matters for a hand-edited state.json. Pinned is checked first because it
     // is the least destructive to re-apply (a pin makes a window appear everywhere; it
     // does not move it).
-    public static Maybe<Placement> For(string identity, AppState state) =>
+    //
+    // THE WORKSPACE HALF IS OPT-IN (AppState.RememberedApps), and the pin and detach halves are not.
+    //
+    // Petre, 2026-11-22: "mstsc opened in another workspace" / "should in the same". The trace showed
+    // the Remote Desktop dialog appear on the workspace he was on and land on Meta 35 ms later, because
+    // an argument-less mstsc had been dragged to Meta once. It was the fourth report of exactly this
+    // shape: the Run box, Snipping Tool and Notepad came first, and each was fixed by adding one more
+    // name to RosterIdentity.StayWhereOpened. A drag says where ONE window goes now; it says nothing
+    // about where the app belongs the next time it is opened, and for most apps nothing does. His
+    // ruling: "placement memory has to always consider the context that the window is in. i can't
+    // think of anything other than code windows moving to their corresponding workspaces", and "let's
+    // keep memory, but only for specific apps".
+    //
+    // So a workspace is remembered only for an app he has opted in by name. The context tiers above
+    // memory in WorkspaceManager are untouched: the container tier (a VS Code window goes where its
+    // folder lives) and launched-by (a window opened from an app goes to that app's workspace). So are
+    // workspace rules, which he writes himself.
+    //
+    // Pins and detaches stay automatic because neither can send a window AWAY from where he is: a pin
+    // puts it on every workspace including this one, and detaching only marks it. Beeper's re-pin after
+    // closing to tray (the defect this class was written for) keeps working without an opt-in.
+    //
+    // `processName` without the extension, the way WindowInfo.ProcessName has it.
+    public static Maybe<Placement> For(string identity, string processName, AppState state) =>
         Claims(state.PinnedApps, identity) ? Maybe<Placement>.From(Placement.Pinned)
         : Claims(state.DetachedApps, identity) ? Maybe<Placement>.From(Placement.Detached)
-        : WorkspaceClaiming(identity, state).Map(Placement.In);
+        : RemembersWorkspace(processName, state) ? WorkspaceClaiming(identity, state).Map(Placement.In)
+        : Maybe<Placement>.None;
 
     // A window with no readable process path (elevated) has no identity, so nothing can be
     // remembered about it.
     public static Maybe<Placement> For(WindowInfo window, AppState state) =>
-        RosterIdentity.Of(window).Bind(identity => For(identity, state));
+        RosterIdentity.Of(window).Bind(identity => For(identity, window.ProcessName, state));
+
+    // Whether this app was opted in to workspace memory. Case-insensitive, like every other
+    // process-name list in AppState.
+    public static bool RemembersWorkspace(string processName, AppState state) =>
+        state.RememberedApps.Any(name => name.Equals(processName, StringComparison.OrdinalIgnoreCase));
 
     // The roster IS the workspace half of placement memory: Place() -> RosterAdd() ->
     // AddEntry() already records identity -> workspace on every placement, and AddEntry

@@ -33,6 +33,7 @@ public class LaunchDestinationTests
         var manager = Manager(WithWorkspaces with
         {
             Inventory = new Dictionary<Guid, IReadOnlyList<InventoryEntry>> { [Dev] = [new InventoryEntry(Rider, $"\"{Rider}\" C:\\src\\X.sln", "X")] },
+            RememberedApps = ["rider64"], // workspace memory is opt-in per app (PlacementMemory.For)
         });
 
         Assert.Equal(Dev, manager.LaunchDestination(Rider, $"\"{Rider}\" C:\\src\\X.sln"));

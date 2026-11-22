@@ -40,7 +40,8 @@ public class SharedIdentityPlacementTests
         desktops.Desktops.Add(new Abstractions.DesktopInfo(personal.DesktopId!.Value, "Personal"));
         desktops.Desktops.Add(new Abstractions.DesktopInfo(messaging.DesktopId!.Value, "Messaging"));
         desktops.CurrentDesktopId = messaging.DesktopId!.Value; // Petre is IN Messaging
-        store.Stored = AppState.Empty with { Workspaces = [personal, messaging] };
+        // Beeper has workspace memory, as it does on his machine: memory is opt-in per app (PlacementMemory.For).
+        store.Stored = AppState.Empty with { Workspaces = [personal, messaging], RememberedApps = ["Beeper"] };
         monitor.InitialWindows.AddRange(alreadyOpen);
 
         var manager = new WorkspaceManager(desktops, monitor, new FakeTitles(), store, ownProcessId: 4242);

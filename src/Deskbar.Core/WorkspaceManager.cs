@@ -476,6 +476,10 @@ public sealed class WorkspaceManager(
         //                        by hand. This is also what re-pins an app whose window
         //                        was destroyed and recreated (Electron closing to tray),
         //                        which the OS pin cannot survive since it is HWND-keyed.
+        //                        Since 2026-11-22 the WORKSPACE half applies only to apps he
+        //                        opted in (AppState.RememberedApps); pins and detaches stay
+        //                        automatic. Every other app opens where it was opened. See
+        //                        PlacementMemory.For.
         //   3. rule            -- first sight only: the one case memory cannot cover, since
         //                        a never-seen window has no placement to remember.
         //
@@ -3010,6 +3014,46 @@ public sealed class WorkspaceManager(
     public bool NamesByFolder(string processName) =>
         State.NameByFolder.Any(p => p.Equals(processName, StringComparison.OrdinalIgnoreCase));
 
+    // Workspace memory for one app, turned on or off from a window's icon menu ("Remember <app>'s
+    // workspace") or `deskbar.cmd remember-workspace`. Memory is opt-in since 2026-11-22; the reasoning
+    // is at PlacementMemory.For.
+    //
+    // Turning it ON also records where THIS window is now. The roster may hold an older answer for the
+    // app (his file had Teams under Rustdesk, learned from one meeting window), and the window the menu
+    // was opened on is the one he is looking at, so its workspace is the answer he means. A window on an
+    // unnamed desktop or pinned has no workspace, and then whatever the roster held stays.
+    //
+    // Turning it OFF keeps the roster entry. It is inert without the opt-in, and turning memory back on
+    // overwrites it with the window's place anyway.
+    //
+    // Refused where memory could never apply, so the command cannot leave an entry that silently does
+    // nothing: our own windows, an elevated window with no readable path, the shell, and the apps whose
+    // windows always stay where they were opened (RosterIdentity.StaysWhereOpened, which includes the
+    // Store apps' shared frame). The menu does not offer it for those either.
+    public Result RememberWorkspace(WindowHandle window, bool on) =>
+        knownWindows.TryGetValue(window, out var info)
+            ? CanRememberWorkspace(info)
+                .Tap(() => Persist(State with
+                {
+                    RememberedApps = on
+                        ? [.. Without(State.RememberedApps, info.ProcessName), info.ProcessName]
+                        : Without(State.RememberedApps, info.ProcessName),
+                }))
+                .Tap(() => { if (on) WorkspaceOf(window).Tap(workspace => RosterAdd(info, workspace.Id)); })
+            : Result.Failure("Window no longer exists.");
+
+    // For the menu's check mark.
+    public bool RemembersWorkspace(string processName) =>
+        PlacementMemory.RemembersWorkspace(processName, State);
+
+    // Whether an app could be given workspace memory at all, for RememberWorkspace and for the menu.
+    public Result CanRememberWorkspace(WindowInfo window) =>
+        IsOurs(window.Handle) ? Result.Failure("Deskbar's own windows have no workspace memory.")
+        : window.ProcessPath is null ? Result.Failure("This window's program cannot be read (it runs elevated), so nothing can be remembered about it.")
+        : RosterIdentity.IsShell(window.ProcessPath) || RosterIdentity.StaysWhereOpened(window.ProcessPath, window.CommandLine)
+            ? Result.Failure($"{window.ProcessName} windows always open where they are opened, so it has no workspace to remember.")
+        : Result.Success();
+
     // Exact-title renames belonging to an app that is now named by its folder. One record per app is the
     // most that can be true, and these are the ones that cannot be.
     void ForgetRenamesSupersededByFolders()
@@ -3476,7 +3520,7 @@ public sealed class WorkspaceManager(
     public Placement? LaunchPlacement(string processPath, string? commandLine) =>
         RosterIdentity.IsShell(processPath) || RosterIdentity.StaysWhereOpened(processPath, commandLine)
             ? null
-            : PlacementMemory.For(RosterIdentity.Of(processPath, commandLine), State)
+            : PlacementMemory.For(RosterIdentity.Of(processPath, commandLine), Path.GetFileNameWithoutExtension(processPath), State)
                 .Or(() => Path.IsPathRooted(processPath)
                     ? RulesEngine.MatchWorkspace(
                         new WindowInfo(new WindowHandle(0), 0, Path.GetFileNameWithoutExtension(processPath), processPath, "", commandLine),

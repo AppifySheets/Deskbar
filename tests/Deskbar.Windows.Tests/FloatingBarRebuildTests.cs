@@ -264,7 +264,7 @@ public class FloatingBarRebuildTests
 
         Assert.NotNull(menu);
         Assert.Equal(
-            ["Rename this window…", "Rename by title pattern…", "Rename all rdm windows…", "Restore title",
+            ["Rename this window…", "Rename by title pattern…", "Rename all rdm windows…", "Remember rdm's workspace", "Restore title",
              "Close", "Force close (rdm)", "Close all rdm processes", "Restart all rdm windows"],
             menu.Items.OfType<MenuItem>().Select(item => (string)item.Header));
         // Never renamed, so Restore title is visible-but-unavailable rather than absent

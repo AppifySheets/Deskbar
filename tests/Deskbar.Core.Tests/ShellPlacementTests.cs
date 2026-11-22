@@ -99,6 +99,7 @@ public class ShellPlacementTests(ITestOutputHelper output)
                 [llc.Id] = [new InventoryEntry(ExplorerPath, ExplorerCmd, "Run"),
                             new InventoryEntry(BeeperPath, @"""C:\Programs\BeeperTexts\Beeper.exe"" ", "Beeper")],
             },
+            RememberedApps = ["Beeper"], // workspace memory is opt-in per app (PlacementMemory.For)
         });
 
         monitor.Subject.OnNext(new WindowEvent(WindowEventKind.Appeared, BeeperWindow(0x20)));

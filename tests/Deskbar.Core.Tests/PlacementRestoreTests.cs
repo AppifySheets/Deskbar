@@ -117,6 +117,7 @@ public class PlacementRestoreTests
         {
             Workspaces = [sparrow],
             Inventory = new Dictionary<Guid, IReadOnlyList<InventoryEntry>> { [sparrow.Id] = [BeeperEntry] },
+            RememberedApps = ["Beeper"], // workspace memory is opt-in per app (PlacementMemory.For)
         });
 
         monitor.Subject.OnNext(new WindowEvent(WindowEventKind.Appeared, BeeperWindow(0x20)));
@@ -136,6 +137,7 @@ public class PlacementRestoreTests
             Workspaces = [gepha, sparrow],
             WorkspaceRules = [new WorkspaceRule(gepha.Id, RuleMatchKind.ProcessName, "Beeper")],
             Inventory = new Dictionary<Guid, IReadOnlyList<InventoryEntry>> { [sparrow.Id] = [BeeperEntry] },
+            RememberedApps = ["Beeper"], // workspace memory is opt-in per app (PlacementMemory.For)
         });
 
         monitor.Subject.OnNext(new WindowEvent(WindowEventKind.Appeared, BeeperWindow(0x30)));
@@ -179,6 +181,7 @@ public class PlacementRestoreTests
         {
             Workspaces = [sparrow],
             Inventory = new Dictionary<Guid, IReadOnlyList<InventoryEntry>> { [sparrow.Id] = [BeeperEntry] },
+            RememberedApps = ["Beeper"], // workspace memory is opt-in per app (PlacementMemory.For)
         });
 
         Assert.Equal(manager.State.Workspaces.Single().DesktopId, desktops.WindowPlacements[window.Handle]);
@@ -222,6 +225,7 @@ public class PlacementRestoreTests
         {
             Workspaces = [gepha, sparrow],
             Inventory = new Dictionary<Guid, IReadOnlyList<InventoryEntry>> { [sparrow.Id] = [BeeperEntry] },
+            RememberedApps = ["Beeper"], // workspace memory is opt-in per app (PlacementMemory.For)
         });
 
         Assert.Equal(gephaDesktop, desktops.WindowPlacements[window.Handle]); // untouched
