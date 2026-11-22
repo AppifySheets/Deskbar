@@ -38,9 +38,10 @@ namespace Deskbar.App;
 //                    click, and nothing in the half second after the lines were redrawn.
 //
 // Top to bottom: the toolbar (status filters with their counts, the workspace filter, "+ Add"), the
-// add box while "+ Add" has it open, a line saying why the last action failed, then the groups. Each line: Claude's
+// add box while "+ Add" has it open, a line saying why the last action failed, then the groups (Waiting on you, then
+// Covey's quadrants I to IV, captioned; Task 12). Each line: Claude's
 // CL badge or a note's tick box (Undo in its place for the six seconds after a close), the title over the question or
-// status line, the sessions (a square each, blue while live), the workspace chip, the comment count whose arrow opens
+// status line, the important and urgent toggles (quiet until hover or selection, as on the bar), the sessions (a square each, blue while live), the workspace chip, the comment count whose arrow opens
 // the thread, a close button on a done Claude task or Reopen on a closed one, and "⋯" for the rest (status, close or
 // reopen, rename, move, delete). A click anywhere else on the line goes to the task.
 public partial class TasksWindow : Window
@@ -157,6 +158,7 @@ public partial class TasksWindow : Window
         AddHandler(MouseLeftButtonUpEvent, new MouseButtonEventHandler((_, _) => Flush()), handledEventsToo: true);
         AddBox.TextChanged += (_, _) => AddPlaceholder.Visibility = AddBox.Text.Length == 0 ? Visibility.Visible : Visibility.Collapsed;
         AddBox.PreviewKeyDown += (_, e) => e.Handled = PressInAdd(e.Key) != KeyOutcome.Ignored;
+        WireDrag();
         BuildToolbarEnd();
     }
 
@@ -362,6 +364,8 @@ public partial class TasksWindow : Window
     bool MustWait =>
         openMenu?.IsOpen == true
         || renaming is not null
+        // A line armed, dragged, or its drop still queued (TasksWindow.Drag.cs): no redraw under it (#48).
+        || DragInFlight
         || (Mouse.LeftButton == MouseButtonState.Pressed && IsMouseOver);
 
     // What waited is drawn now that nothing holds it. Not from inside a draw: clearing the rows takes the keyboard
@@ -423,6 +427,7 @@ public partial class TasksWindow : Window
         DrawFilters(view);
         Rows.Children.Clear();
         menuButtons.Clear();
+        dragLines.Clear();
         commentBoxes.Clear();
         ages.Clear();
         selectionFrames.Clear();
@@ -457,7 +462,7 @@ public partial class TasksWindow : Window
             $"{renaming}",
             string.Join('\u0002', view.Groups.Select(g => $"{g.Header}:" + string.Join('\u0003', g.Rows.Select(r =>
                 $"{r.Id}|{r.Title}|{r.Detail}|{r.Status}|{r.Claudes}|{r.Sessions}|{r.SessionCount}|{r.LiveCount}|{PlaceSignature(r.Place)}|{r.CommentCount}|" +
-                $"{r.Expanded}|{r.Closing}|" + string.Join('\u0004', r.Comments.Select(c => $"{c.Id}{c.Author}{c.When}{c.Markdown}")))))));
+                $"{r.Expanded}|{r.Closing}|{r.Important}|{r.Urgent}|" + string.Join('\u0004', r.Comments.Select(c => $"{c.Id}{c.Author}{c.When}{c.Markdown}")))))));
 
     static string PlaceSignature(TaskPlaceChoice place) => $"{place.Workspace}{place.Name}{(place.Colour as SolidColorBrush)?.Color}";
 
@@ -494,7 +499,7 @@ public partial class TasksWindow : Window
         Tag = "task-group",
         Text = group.Header.ToUpperInvariant(),
         FontSize = 10,
-        Foreground = group.Status == TaskStatus.WaitingOnYou ? Orange : HeaderInk,
+        Foreground = group.Kind == TaskGroupKind.WaitingOnYou ? Orange : HeaderInk,
         Margin = new Thickness(12, 10, 12, 3),
     };
 
@@ -510,22 +515,25 @@ public partial class TasksWindow : Window
         LineColumns.ToList().ForEach(width => grid.ColumnDefinitions.Add(new ColumnDefinition { Width = width }));
         Cell(grid, 0, LeftOf(row));
         Cell(grid, 1, TextOf(row));
-        Cell(grid, 2, SessionsOf(row));
-        Cell(grid, 3, AgeOf(row));
-        Cell(grid, 4, Chip(row.Place));
+        var flags = FlagsOf(row);
+        Cell(grid, 2, flags);
+        Cell(grid, 3, SessionsOf(row));
+        Cell(grid, 4, AgeOf(row));
+        Cell(grid, 5, Chip(row.Place));
         var comments = CommentsButton(row);
-        Cell(grid, 5, comments);
-        Cell(grid, 6, ActionOf(row));
+        Cell(grid, 6, comments);
+        Cell(grid, 7, ActionOf(row));
         var more = Small(new TextBlock { Text = "", FontFamily = IconFont, FontSize = 12, Foreground = Ink }, "More",
             () => OpenMenuFor(row.Id), "Status, move, rename, delete");
         menuButtons[row.Id] = more;
-        Cell(grid, 7, more);
+        Cell(grid, 8, more);
         if (row.Closing)
             grid.Children.OfType<UIElement>().Where(part => Grid.GetColumn(part) != 0).ToList().ForEach(part => part.Opacity = 0.45);
         // The comments and "…" buttons are quiet until the pointer is on their line, like the bar's quiet controls.
         // A line in its undo window keeps its own dimming (above): its quiet buttons are not brightened by a hover or a
         // selection (review minor).
-        var quiet = row.Closing ? Array.Empty<UIElement>() : new UIElement[] { comments, more };
+        var quiet = row.Closing ? Array.Empty<UIElement>()
+            : new UIElement[] { comments, more }.Concat(flags?.Children.OfType<UIElement>() ?? []).ToArray();
         Quieten(quiet, loud: false);
 
         // The selection's frame (ruling 21, as on the bar): 2 DIP on the left, clear unless this is the task Petre
@@ -556,8 +564,14 @@ public partial class TasksWindow : Window
         AutomationProperties.SetName(line, row.Title);
         line.MouseEnter += (_, _) => Quieten(quiet, loud: true);
         line.MouseLeave += (_, _) => Quieten(quiet, loud: Picked(row.Id));
-        // The click guard, as on the line's buttons (ClickIgnored).
-        line.PreviewMouseLeftButtonDown += (_, e) => pressClicks = e.ClickCount;
+        // The click guard, as on the line's buttons (ClickIgnored); and the press that may become a drag of the line
+        // (TasksWindow.Drag.cs), armed only, so a press released in place stays this Click.
+        line.PreviewMouseLeftButtonDown += (_, e) =>
+        {
+            pressClicks = e.ClickCount;
+            DragPress(row.Id, e.GetPosition(DragSurface));
+        };
+        dragLines[row.Id] = (row.Quadrant, row.Status == TaskStatus.WaitingOnYou && !row.Closing, row.Closing || row.Status == TaskStatus.Closed);
         line.Click += (_, _) =>
         {
             // A line just closed goes nowhere; Undo is the one thing on it to press. A line being renamed neither.
@@ -567,12 +581,38 @@ public partial class TasksWindow : Window
         return line;
     }
 
-    // The line's columns: tick, title (the star, trimming first), sessions, age, workspace chip, comments, action
-    // (close or Reopen), "…". Fixed widths, shared by every line, so each column sits at the same x on every line.
-    // The sessions column is narrow (its words trim; it is empty on a note) and the window's minimum width is 560 DIP,
-    // so the title keeps a usable width there even with the list's scroll bar showing (review I-3).
+    // The line's columns: tick, title (the star, trimming first), the two flag toggles, sessions, age, workspace chip,
+    // comments, action (close or Reopen), "…". Fixed widths, shared by every line, so each column sits at the same x on
+    // every line. The sessions column is narrow (its words trim; it is empty on a note) and the window's minimum width
+    // is 560 DIP, so the title keeps a usable width there even with the list's scroll bar showing (review I-3).
     static readonly IReadOnlyList<GridLength> LineColumns =
-        [new(22), new(1, GridUnitType.Star), new(70), new(44), new(92), new(40), new(52), new(24)];
+        [new(22), new(1, GridUnitType.Star), new(38), new(64), new(44), new(88), new(40), new(52), new(24)];
+
+    // THE TWO TOGGLES (Task 12), the bar's (FloatingBar.FlagToggle): important, Segoe Fluent Icons' "Important" U+E8C9,
+    // and urgent, its "Recent" clock U+E823 (Segoe MDL2 Assets carries both on Windows 10). On, the glyph wears its
+    // colour; off it is dim and quiet: invisible until the line is hovered or selected (Quieten), still clickable.
+    // Automation status "on" or "off", tooltip the flag's name. None on a closed task or a line in its undo window.
+    StackPanel? FlagsOf(TaskRowView row)
+    {
+        if (row.Closing || row.Status == TaskStatus.Closed) return null;
+        var panel = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center };
+        new[] { (TaskFlag.Important, "Important", "\uE8C9", row.Important, ImportantInk), (TaskFlag.Urgent, "Urgent", "\uE823", row.Urgent, UrgentInk) }
+            .ToList().ForEach(flag =>
+            {
+                var toggle = Small(new TextBlock { Text = flag.Item3, FontFamily = IconFont, FontSize = 12, Foreground = flag.Item4 ? flag.Item5 : DimInk },
+                    flag.Item2, () => Actions?.SetFlag(row.Id, flag.Item1, !flag.Item4), flag.Item2);
+                toggle.Padding = new Thickness(2, 0, 2, 1);
+                toggle.Tag = flag.Item4 ? FlagOnTag : FlagOffTag;
+                AutomationProperties.SetItemStatus(toggle, flag.Item4 ? "on" : "off");
+                panel.Children.Add(toggle);
+            });
+        return panel;
+    }
+
+    const string FlagOnTag = "task-flag-on";
+    const string FlagOffTag = "task-flag-off";
+    static readonly Brush ImportantInk = Frozen(0xFF, 0xFF, 0x6B, 0x6B);
+    static readonly Brush UrgentInk = Frozen(0xFF, 0xFF, 0xD5, 0x4F);
 
     // THE AGE ON EACH LINE (ruling 26, as on the bar): TaskAge's compact form, dim, right-aligned before the chip, the
     // full date and time in its tooltip. Rewritten in place once a minute while the window is open (RefreshAges), never
@@ -655,7 +695,15 @@ public partial class TasksWindow : Window
 
     internal double ScrollOffset => Scroller.VerticalOffset;
 
-    static void Quieten(IEnumerable<UIElement> parts, bool loud) => parts.ToList().ForEach(part => part.Opacity = loud ? 1 : 0.5);
+    // Quiet parts at half strength until hover or selection; an off flag toggle quieter still, invisible until then
+    // (as on the bar), an on one always at full strength.
+    static void Quieten(IEnumerable<UIElement> parts, bool loud) => parts.ToList().ForEach(part => part.Opacity =
+        (part as FrameworkElement)?.Tag switch
+        {
+            FlagOnTag => 1,
+            FlagOffTag => loud ? 0.55 : 0,
+            _ => loud ? 1 : 0.5,
+        });
 
     static void Cell(Grid grid, int column, UIElement? part)
     {
