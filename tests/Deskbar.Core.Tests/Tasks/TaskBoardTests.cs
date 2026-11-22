@@ -420,4 +420,83 @@ public class TaskBoardTests
         Assert.True(board.Find("ffff").IsFailure);
         Assert.Equal(id2, board.Find("aaaaaaaa-0000-0000-0000-000000000002").Value.Id);
     }
+
+    // --- the goal a task counts toward (goals plan, Task 2) -------------------------------------------
+    // The link lives on the task. Attaching never changes its flags, rank or status (goals spec, "Tasks contribute"),
+    // and TaskBoard checks nothing about goals: GoalService.LinkTask is where a goal must exist and be open.
+
+    static readonly Guid goal = Guid.Parse("cccccccc-0000-0000-0000-000000000001");
+    static readonly Guid otherGoal = Guid.Parse("cccccccc-0000-0000-0000-000000000002");
+
+    [Fact]
+    public void Setting_a_goal_changes_nothing_else()
+    {
+        var board = Note(TaskBoard.Empty, id1, ws).SetFlag(id1, TaskFlag.Important, true, clock).Value;
+        var before = Get(board, id1);
+        Later();
+
+        var after = Get(board.SetGoal(id1, goal, clock).Value, id1);
+
+        Assert.Equal(goal, after.GoalId.Value);
+        Assert.Equal(Quadrant.II, after.Quadrant);
+        Assert.Equal(before.Important, after.Important);
+        Assert.Equal(before.Urgent, after.Urgent);
+        Assert.Equal(before.Rank, after.Rank);
+        Assert.Equal(before.Status, after.Status);
+        Assert.Equal(before.Raised, after.Raised);
+        Assert.Equal(clock, after.UpdatedAt);
+        Assert.True(before.GoalId.HasNoValue);
+    }
+
+    [Fact]
+    public void Setting_the_same_goal_is_the_same_board()
+    {
+        var board = Note(TaskBoard.Empty, id1, ws).SetGoal(id1, goal, clock).Value;
+
+        Assert.Same(board, board.SetGoal(id1, goal, clock).Value);
+        Assert.True(Get(board.SetGoal(id1, Maybe<Guid>.None, clock).Value, id1).GoalId.HasNoValue);
+        Assert.Equal($"No task with id {id2}", board.SetGoal(id2, goal, clock).Error);
+    }
+
+    // A closed task stays readable history, so it takes a goal too (and keeps the one it had).
+    [Fact]
+    public void A_closed_task_takes_a_goal()
+    {
+        var board = Note(TaskBoard.Empty, id1, ws).Close(id1, clock).Value;
+
+        Assert.Equal(goal, Get(board.SetGoal(id1, goal, clock).Value, id1).GoalId.Value);
+    }
+
+    [Fact]
+    public void Detaching_a_goal_frees_every_task_that_named_it()
+    {
+        var board = Note(Note(Note(TaskBoard.Empty, id1, ws), id2, ws), id3, ws)
+            .SetGoal(id1, goal, clock).Value
+            .SetGoal(id2, goal, clock).Value
+            .SetGoal(id3, otherGoal, clock).Value;
+        var untouched = Get(board, id3);
+        Later();
+
+        var detached = board.DetachGoal(goal, clock);
+
+        Assert.All(new[] { id1, id2 }.Select(id => Get(detached, id)), t =>
+        {
+            Assert.True(t.GoalId.HasNoValue);
+            Assert.Equal(clock, t.UpdatedAt);
+        });
+        Assert.Equal(untouched, Get(detached, id3));
+        Assert.Same(detached, detached.DetachGoal(goal, clock));
+    }
+
+    [Fact]
+    public void Undo_and_reopen_keep_the_goal()
+    {
+        var board = Note(TaskBoard.Empty, id1, ws).SetGoal(id1, goal, clock).Value;
+
+        var closed = board.Close(id1, clock).Value;
+        Assert.Equal(goal, Get(closed, id1).GoalId.Value);
+        Assert.Equal(goal, Get(closed.UndoClose(id1, TaskStatus.Backlog, Maybe<string>.None, clock).Value, id1).GoalId.Value);
+        Assert.Equal(goal, Get(closed.Reopen(id1, clock).Value, id1).GoalId.Value);
+        Assert.Equal(goal, Get(board.SetFlag(id1, TaskFlag.Urgent, true, clock).Value, id1).GoalId.Value);
+    }
 }

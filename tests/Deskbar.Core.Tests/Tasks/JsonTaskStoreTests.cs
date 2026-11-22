@@ -52,6 +52,7 @@ public sealed class JsonTaskStoreTests : IDisposable
         Assert.Equal(expected.Important, actual.Important);
         Assert.Equal(expected.Urgent, actual.Urgent);
         Assert.Equal(expected.Rank, actual.Rank);
+        Assert.Equal(expected.GoalId, actual.GoalId);
         Assert.Equal(expected.Sessions, actual.Sessions);
         Assert.Equal(expected.Comments, actual.Comments);
     }
@@ -289,6 +290,38 @@ public sealed class JsonTaskStoreTests : IDisposable
         Assert.Contains("\"important\": true", text);
         Assert.Contains("\"urgent\": true", text);
         Assert.Contains("\"rank\": 2.5", text);
+    }
+
+    // Goals plan, Task 2: the goal a task counts toward is an optional `goalId` on the task, still version 2.
+    [Fact]
+    public void The_goal_round_trips()
+    {
+        var store = new JsonTaskStore(dir);
+        var goal = Guid.Parse("cccccccc-0000-0000-0000-000000000001");
+        var board = Sample();
+        board = new TaskBoard(board.Tasks.Select((t, i) => i == 0 ? t : t with { GoalId = goal }).ToArray());
+
+        Assert.True(store.Save(board).IsSuccess);
+        var loaded = store.Load().Value;
+
+        Assert.Equal(board.Tasks.Select(t => t.GoalId), loaded.Tasks.Select(t => t.GoalId));
+        var text = File.ReadAllText(TasksPath);
+        Assert.Contains("\"version\": 2", text);
+        Assert.Contains("\"goalId\": \"cccccccc-0000-0000-0000-000000000001\"", text);
+        Assert.Contains("\"goalId\": null", text);
+    }
+
+    // A file written before goals has no goalId at all: every task reads as belonging to no goal.
+    [Fact]
+    public void A_file_without_goal_ids_reads_as_no_goal()
+    {
+        Directory.CreateDirectory(dir);
+        File.WriteAllText(TasksPath, Version2(status: "\"Backlog\""));
+
+        var loaded = new JsonTaskStore(dir).Load();
+
+        Assert.True(loaded.IsSuccess, loaded.IsFailure ? loaded.Error : "");
+        Assert.True(loaded.Value.Tasks.Single().GoalId.HasNoValue);
     }
 
     // A version 2 file written before the order existed has no rank: the tasks come back in the order the bar showed

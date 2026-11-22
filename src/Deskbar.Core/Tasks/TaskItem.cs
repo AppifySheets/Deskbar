@@ -75,6 +75,16 @@ public sealed record TaskItem(
     /// </summary>
     public double Rank { get; init; }
 
+    /// <summary>
+    /// The goal this task counts toward, weekly or monthly, or none (goals spec,
+    /// docs/superpowers/specs/2026-11-22-goals-planner-design.md, "Tasks contribute"). An init property like the flags,
+    /// so no constructor call has to say it. The link lives HERE, on the task, while the goals live in goals.json; a
+    /// link naming a goal that no longer exists reads as no goal everywhere, and nothing prunes it (pruning on load
+    /// would wipe every link the day goals.json fails to load). Only GoalService.LinkTask checks that the goal is open;
+    /// TaskBoard.SetGoal checks nothing about goals, so the tasks code never depends on the goals code.
+    /// </summary>
+    public Maybe<Guid> GoalId { get; init; }
+
     /// <summary>Covey's quadrant the two flags name (TaskOrder.cs).</summary>
     public Quadrant Quadrant => QuadrantOf.Flags(Important, Urgent);
 
