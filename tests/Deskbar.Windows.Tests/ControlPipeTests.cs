@@ -77,6 +77,32 @@ public class ControlPipeTests
     }
 
     // One server answers one request after another: the pipe is re-created after every reply.
+    // Review of Task 7, I-1: a client that gives up before its answer (claude-hook's 5 s reply timeout, scaled down here)
+    // makes the server's write fail. The server used to dispose its only pipe instance and wait a second before making
+    // another, so for that second the pipe NAME was missing and the next client heard "Deskbar is not running" (measured:
+    // a client 450 ms after the broken one, exit 2 after 100 ms). The server now keeps its one instance and disconnects
+    // it, so the next client is answered.
+    [Fact]
+    public async Task A_client_after_one_that_gave_up_is_still_answered()
+    {
+        var pipe = UniquePipe();
+        using var server = new ControlPipeServer(pipe, async args =>
+        {
+            if (args is ["slow"]) await Task.Delay(300);
+            return new ControlReply(ControlReply.Ok, "fine");
+        });
+
+        var abandoned = await ControlClient.SendAsync(pipe, ["slow"], Patience, replyTimeout: TimeSpan.FromMilliseconds(50));
+        Assert.Equal(ControlReply.Failed, abandoned.ExitCode);
+        // The server's handler finishes at 300 ms and its write to the client that left fails.
+        await Task.Delay(450);
+
+        var next = await ControlClient.SendAsync(pipe, ["windows"], Patience);
+
+        Assert.Equal(ControlReply.Ok, next.ExitCode);
+        Assert.Equal("fine", next.Output);
+    }
+
     [Fact]
     public async Task The_server_answers_more_than_one_request()
     {

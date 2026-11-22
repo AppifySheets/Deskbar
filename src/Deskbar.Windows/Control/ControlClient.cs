@@ -56,6 +56,10 @@ public static class ControlClient
         return reply;
     }
 
+    // "5 seconds", or "50 ms" for the short waits tests use, rather than "0 seconds".
+    static string Wording(TimeSpan wait) =>
+        wait.TotalSeconds >= 1 ? $"{wait.TotalSeconds:0} seconds" : $"{wait.TotalMilliseconds:0} ms";
+
     static readonly ControlReply NotRunning = new(ControlReply.NotRunning,
         "Deskbar is not running (nothing answered on its control pipe). Start it and try again.");
 
@@ -96,7 +100,7 @@ public static class ControlClient
         }
         catch (OperationCanceledException)
         {
-            return ControlReply.Fail($"Deskbar accepted the request but did not answer within {(replyTimeout ?? ReplyTimeout).TotalSeconds:0} seconds.");
+            return ControlReply.Fail($"Deskbar accepted the request but did not answer within {Wording(replyTimeout ?? ReplyTimeout)}.");
         }
         catch (IOException e)
         {
