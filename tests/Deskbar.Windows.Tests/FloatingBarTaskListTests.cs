@@ -1067,4 +1067,70 @@ public class FloatingBarTaskListTests
         Assert.Contains(".bak", FloatingBar.LoadProblemLine("Could not read tasks.json: bad; kept tasks.json as tasks.json.20261122-090000.bak"));
         Assert.Contains("copy it somewhere safe", FloatingBar.LoadProblemLine("Could not read tasks.json: bad; could not keep C:\\x\\tasks.json aside: locked"));
     }
+
+    // Where the bar's content ends: its width less the root's padding (FloatingBar.xaml, Root Padding="4").
+    static double VisibleEdge(ListBar t) => t.Bar.ActualWidth - 4;
+
+    // What Petre's bar has and the harness's does not, measured from his trace (2026-11-22 18:32): "stats geometry:
+    // footer=226 ... pins=222" on a bar whose geometry lines read width=140 to 197. His footer is laid out wider than
+    // the bar (its line of pinned apps asks for 222 DIP), and the task list, which asks for no width of its own, took
+    // the footer's width: the chip row never wrapped at the edge the bar shows, and a line's chip, docked at the line's
+    // right end, sat past it. The harness's footer has no such line, so it is made that wide here, as his was.
+    static void WidenTheFooter(ListBar t) => ((FrameworkElement)t.Bar.FindName("ShellFooter")!).MinWidth = 300;
+
+    // Petre, of his narrow bar: "chip on the right side", then "edge". Every line's workspace chip ends flush at the
+    // line's right edge (only the line's own inner padding inside it), all at the same x, whatever the title's length;
+    // the title fills the space between the tick and the chip.
+    [Fact]
+    public void Every_lines_chip_sits_at_the_right_edge() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        t.Tasks.AddNote("a", t.Gepha);
+        t.Tasks.AddNote("a somewhat longer title", t.Gepha);
+        t.Tasks.AddNote("mid", Maybe<Guid>.None);
+        WidenTheFooter(t);
+        t.Bar.ApplyWidth(200);
+        t.Bar.RequestRebuild();
+        t.Bar.UpdateLayout();
+
+        var rights = t.Lines.Select(line =>
+        {
+            var chip = Inside(line).OfType<Border>().Single(b => Equals(b.Tag, "task-workspace"));
+            var bounds = chip.TransformToAncestor(t.Bar).TransformBounds(new Rect(chip.RenderSize));
+            var lineBounds = line.TransformToAncestor(t.Bar).TransformBounds(new Rect(line.RenderSize));
+            Assert.True(lineBounds.Right - bounds.Right <= 10, $"chip ends at {bounds.Right}, its line at {lineBounds.Right}");
+            Assert.True(lineBounds.Right <= VisibleEdge(t) + 0.5, $"the line ends at {lineBounds.Right}, the bar shows up to {VisibleEdge(t)}");
+            return bounds.Right;
+        }).ToList();
+        Assert.True(rights.Max() - rights.Min() < 0.5, $"chips end at {string.Join(", ", rights)}");
+    });
+
+    // Petre's screenshot: the chips under the box read "on [Deskbar] [none] [oth", "other…" cut at the bar's right edge.
+    // They must wrap at the width the bar really shows, checked against the bar's own window, not against the list
+    // (which can be laid out wider than the window and so never sees the clip).
+    [Fact]
+    public void The_chip_row_wraps_inside_the_bars_own_width() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        var gepha = t.Gepha; // looked up by name, so taken before the rename
+        Assert.True(t.Harness.Manager.RenameWorkspace(gepha, "Deskbar").IsSuccess);
+        t.Tasks.AddNote("a note", gepha);
+        WidenTheFooter(t);
+        t.Bar.ApplyWidth(140); // the narrowest Petre's trace shows (geometry: width=140 scale=0.90)
+        t.Bar.RequestRebuild();
+        t.Bar.UpdateLayout();
+
+        // The visible edge: the bar's width less its root's 4 DIP padding. The chips that wrap inside the list must end
+        // there, and so must the lines' chips.
+        var edge = VisibleEdge(t);
+        var parts = Inside(t.Chips).OfType<Button>().Where(b => b.IsVisible).Cast<FrameworkElement>()
+            .Concat(Inside(t.List).OfType<Border>().Where(b => Equals(b.Tag, "task-workspace")))
+            .ToList();
+        Assert.True(parts.Count >= 3);
+        Assert.All(parts, part =>
+        {
+            var bounds = part.TransformToAncestor(t.Bar).TransformBounds(new Rect(part.RenderSize));
+            Assert.True(bounds.Right <= edge + 0.5, $"{AutomationProperties.GetName(part)} ends at {bounds.Right}, the bar shows up to {edge}");
+        });
+    });
 }
