@@ -451,9 +451,10 @@ More in [Tasks](docs/features/tasks.md).
 
 Weekly and monthly goals, after Covey's weekly planning: pick the few things that matter this week or
 this month, and let the tasks serve them. A task can belong to a goal, from its "..." menu in the tasks
-window, and a goal shows how many of its tasks are done; a monthly goal also counts the weekly goals
-that belong to it. The tasks window can filter by goal, and a task's tooltip on the bar names its goal.
-For now goals are added and changed with `deskbar.cmd goal`; a planner window comes in the next release.
+window. The tasks window can filter by goal, and a task's tooltip on the bar names its goal. For now
+goals are added and changed with `deskbar.cmd goal`, and `goal list` shows how many of each goal's
+tasks are done (a monthly goal also counts the weekly goals that belong to it). A planner window is
+coming.
 
 More in [Goals](docs/features/goals.md).
 
