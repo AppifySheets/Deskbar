@@ -268,8 +268,18 @@ public partial class TasksWindow : Window
         NoteNormal();
         FitWidthToView(matrixShown);
         Scroller.ScrollToTop();
-        Toolbar.Focus();
+        // NO Toolbar.Focus() HERE (2026-11-23, "tasks should become a top window, now it's behind somewhere"). A WPF
+        // Focus() on an element of a window that is not active activates that window (measured on the hidden desktop),
+        // so this used to make the window the foreground one before the controller had moved it to the desktop in
+        // front, and the seam's SetForegroundWindow on what already was the foreground window then raised nothing. The
+        // controller hands the keyboard over once the window has arrived (FocusBoard, from TasksBoard.Arrived).
     }
+
+    /// <summary>
+    /// The keyboard to the toolbar, never to a text box (the window opens on the board). Only once the controller has
+    /// brought the window to the desktop in front and activated it: focusing an inactive window activates it.
+    /// </summary>
+    internal void FocusBoard() => Toolbar.Focus();
 
     // Whether the window, opened at its remembered normal place, is to be maximized once it has arrived.
     bool maximizeOnArrival;

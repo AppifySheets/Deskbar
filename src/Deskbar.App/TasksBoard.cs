@@ -207,10 +207,14 @@ public sealed class TasksBoard : IDisposable
     // only now, after the move (review I-2), and only when it was really activated: setting Maximized on a window
     // still on another desktop activates it, and Windows would follow it there (review minor 1 of 187cf4a). It stays
     // due, so the next arrival that works maximizes it.
+    // The keyboard goes to the toolbar only now, after the activation (see TasksWindow.FocusBoard): a window left on
+    // another desktop is not focused, since focusing it would activate it there.
     void Arrived()
     {
         var activated = bringForward is { } seam ? seam(EnsureHandle()) : ActivatedHere();
-        if (activated) window.MaximizeIfRemembered();
+        if (!activated) return;
+        window.MaximizeIfRemembered();
+        window.FocusBoard();
     }
 
     bool ActivatedHere()
@@ -225,23 +229,41 @@ public sealed class TasksBoard : IDisposable
     /// if it is already on the desktop in front (<paramref name="onCurrentDesktop"/>); a window left on another desktop
     /// is traced and left there, since activating it would take Petre to it. Answers whether it activated the window.
     /// </summary>
-    internal static bool Arrive(nint hwnd, Func<Result> move, Func<bool> onCurrentDesktop, Action activate, Action<string> trace)
+    //
+    // RAISED BEFORE IT IS ACTIVATED (2026-11-23, Petre: "tasks should become a top window, now it's behind somewhere").
+    // His trace had four clicks on "+N more", no failed move, no other window taking the foreground, and in between him
+    // dragging and minimizing his tiles to find the window under them. Activation alone does not promise the top of the
+    // z-order: SetForegroundWindow on a window that already is the foreground window changes nothing (measured on the
+    // hidden desktop: an active window with another raised over it stayed under it after WindowActivator.Activate), and
+    // the window could already be the foreground one (TasksWindow.FocusBoard says how). So `raise` puts it on top of
+    // the non-topmost windows first, a z-order change Windows allows a process for its own window without any foreground
+    // right, and only then is it activated. It is never made topmost: it is an ordinary window that tiles.
+    internal static bool Arrive(nint hwnd, Func<Result> move, Func<bool> onCurrentDesktop, Action raise, Action activate, Action<string> trace)
     {
         var moved = move();
-        if (moved.IsSuccess)
+        if (moved.IsFailure)
         {
-            activate();
-            return true;
+            trace($"tasks window 0x{hwnd:X}: not moved to the desktop in front: {moved.Error}");
+            if (!onCurrentDesktop())
+            {
+                trace($"tasks window 0x{hwnd:X}: left on its own desktop rather than taking you there");
+                return false;
+            }
         }
-        trace($"tasks window 0x{hwnd:X}: not moved to the desktop in front: {moved.Error}");
-        if (onCurrentDesktop())
-        {
-            activate();
-            return true;
-        }
-        trace($"tasks window 0x{hwnd:X}: left on its own desktop rather than taking you there");
-        return false;
+        raise();
+        activate();
+        // One line per arrival, so a live check reads whether the window really ended up in front.
+        trace($"tasks window 0x{hwnd:X}: raised and activated, foreground now 0x{Windows.Monitoring.NativeMethods.GetForegroundWindow():X}");
+        return true;
     }
+
+    /// <summary>
+    /// Puts the window at the top of the z-order among the windows that are not topmost, without activating it and
+    /// without moving or sizing it (HWND_TOP, SWP_NOACTIVATE).
+    /// </summary>
+    internal static void RaiseToTop(nint hwnd) =>
+        Windows.Monitoring.NativeMethods.SetWindowPos(hwnd, 0, 0, 0, 0, 0,
+            Windows.Monitoring.NativeMethods.SWP_NOMOVE | Windows.Monitoring.NativeMethods.SWP_NOSIZE | Windows.Monitoring.NativeMethods.SWP_NOACTIVATE);
 
     /// <summary>`tasks-window hide`, as the title bar's X does: hidden, its place remembered.</summary>
     public void Dismiss() => window.Dismiss();

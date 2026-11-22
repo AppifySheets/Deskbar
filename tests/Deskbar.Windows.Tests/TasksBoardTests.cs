@@ -496,26 +496,97 @@ public class TasksBoardTests
         Assert.Equal(0, t.Window.SelfActivations);
     });
 
-    // The App's seam, in its order: move to the desktop in front, then activate. A failed move activates only a window
-    // already on the desktop in front; one elsewhere is traced and left where it is.
+    // The App's seam, in its order: move to the desktop in front, raise to the top of the z-order, then activate
+    // ("tasks should become a top window, now it's behind somewhere"). A failed move raises and activates only a window
+    // already on the desktop in front; one elsewhere is traced and left where it is. Every arrival is traced, so a live
+    // check can read what happened.
     [Fact]
-    public void Arriving_moves_first_then_activates() => StaThread.Run(() =>
+    public void Arriving_moves_first_then_raises_then_activates() => StaThread.Run(() =>
     {
         var steps = new List<string>();
         Assert.True(TasksBoard.Arrive(0x42, () => { steps.Add("move"); return Result.Success(); }, () => { steps.Add("ask"); return false; },
-            () => steps.Add("activate"), trace => steps.Add("trace")));
-        Assert.Equal(["move", "activate"], steps);
+            () => steps.Add("raise"), () => steps.Add("activate"), trace => steps.Add("trace")));
+        Assert.Equal(["move", "raise", "activate", "trace"], steps);
 
         steps.Clear();
         Assert.True(TasksBoard.Arrive(0x42, () => { steps.Add("move"); return Result.Failure("refused"); }, () => { steps.Add("ask"); return true; },
-            () => steps.Add("activate"), trace => steps.Add("trace")));
-        Assert.Equal(["move", "trace", "ask", "activate"], steps);
+            () => steps.Add("raise"), () => steps.Add("activate"), trace => steps.Add("trace")));
+        Assert.Equal(["move", "trace", "ask", "raise", "activate", "trace"], steps);
 
         steps.Clear();
         Assert.False(TasksBoard.Arrive(0x42, () => { steps.Add("move"); return Result.Failure("refused"); }, () => { steps.Add("ask"); return false; },
-            () => steps.Add("activate"), trace => steps.Add("trace")));
+            () => steps.Add("raise"), () => steps.Add("activate"), trace => steps.Add("trace")));
         Assert.Equal(["move", "trace", "ask", "trace"], steps);
     });
+
+    // THE ROOT OF "IT'S BEHIND SOMEWHERE" (2026-11-23 live check). Opening the window gave the toolbar the keyboard
+    // before the seam ran, and a WPF Focus() on an element of an inactive window activates that window (measured on the
+    // hidden desktop: active=T right after Focus). So the window was already the foreground window, possibly still on
+    // the desktop it had been left on, before it was moved, and the seam's SetForegroundWindow on a window that already
+    // is the foreground one changes nothing: it is never raised. Now nothing activates the window before the seam, and
+    // the keyboard goes to the toolbar only after the seam says the window has arrived.
+    [Fact]
+    public void Opening_does_not_activate_the_window_before_the_seam_and_focuses_it_after() => StaThread.Run(() =>
+    {
+        var activeAtSeam = new List<bool>();
+        TasksWindow? window = null;
+        using var t = Build(bringForward: _ => activeAtSeam.Add(window!.IsActive));
+        window = t.Window;
+
+        t.Controller.Open(Rect.Empty);
+
+        Assert.Equal([false], activeAtSeam);
+        Assert.Same(t.Window.Toolbar, FocusManager.GetFocusedElement(t.Window));
+    });
+
+    // An arrival the seam could not complete (the window left on another desktop) leaves the keyboard alone: focusing
+    // the window would activate it, and Windows would follow it to that desktop.
+    [Fact]
+    public void A_window_left_on_another_desktop_is_not_focused() => StaThread.Run(() =>
+    {
+        using var t = Build(activates: () => false);
+
+        t.Controller.Open(Rect.Empty);
+
+        Assert.False(t.Window.IsActive);
+    });
+
+    // The raise itself, on real windows: a window that is active but has another window over it (the state the live
+    // check left the tasks window in) comes to the top of the z-order, without anything else being activated.
+    [Fact]
+    public void Raising_puts_the_window_above_one_that_covered_it() => StaThread.Run(() =>
+    {
+        var below = new Window { Title = "below", Width = 200, Height = 200, Left = -30000, Top = -30000, ShowActivated = false };
+        var cover = new Window { Title = "cover", Width = 200, Height = 200, Left = -30000, Top = -30000, ShowActivated = false };
+        below.Show();
+        cover.Show();
+        var belowHandle = new System.Windows.Interop.WindowInteropHelper(below).Handle;
+        var coverHandle = new System.Windows.Interop.WindowInteropHelper(cover).Handle;
+        try
+        {
+            Assert.True(Above(coverHandle, belowHandle));
+
+            TasksBoard.RaiseToTop(belowHandle);
+
+            Assert.True(Above(belowHandle, coverHandle));
+        }
+        finally
+        {
+            below.Close();
+            cover.Close();
+        }
+    });
+
+    // Whether `upper` is above `lower` in the z-order: walking up from `lower` reaches it.
+    static bool Above(nint upper, nint lower)
+    {
+        for (var h = GetWindow(lower, 3); h != 0; h = GetWindow(h, 3))
+            if (h == upper) return true;
+        return false;
+    }
+
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    static extern nint GetWindow(nint hwnd, uint command);
 
     // FIX ROUND 1, Important 1: the bar's click guard (#48, Ruling 10). A press that is the second of a double click, or
     // a click within half a second of a repaint that changed the lines, is dropped on a line and its buttons; Undo
