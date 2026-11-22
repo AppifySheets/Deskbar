@@ -1,6 +1,8 @@
 using CSharpFunctionalExtensions;
 using System.IO;
 using System.IO.Pipes;
+using System.Security.AccessControl;
+using System.Security.Principal;
 using System.Text;
 using Deskbar.Core.Control;
 
@@ -18,9 +20,15 @@ namespace Deskbar.Windows.Control;
 // requests are a person or an agent typing commands, so there is nothing to gain from concurrency, and
 // serialising them means the handler never sees two at once.
 //
-// CurrentUserOnly sets an ACL that admits only this user, so another account on the same machine
-// cannot drive this one's desktops. The session id in the name (ControlWire.PipeName) is what keeps two
-// signed-in users from colliding on the name itself.
+// WHO MAY CONNECT (Security, below). The pipe grants full control to this process's DEFAULT OWNER, and owns the pipe
+// as it, which is exactly what .NET's PipeOptions.CurrentUserOnly does, so another account on the same machine cannot
+// drive this one's desktops. The default owner is the user while Deskbar runs normally, but BUILTIN\Administrators
+// while it runs elevated (security review of fb50f0b, I2), and then the user's own NON-elevated processes are refused
+// too. That refusal is a UAC barrier worth keeping, because `start` and `restart-app` launch programs: a non-elevated
+// process must not get an elevated Deskbar to start things for it. ANY FUTURE CHANGE TO THIS ACL MUST KEEP THAT
+// BARRIER, so it must not grant the user's SID when the default owner is Administrators. The pipe also denies the
+// NETWORK logon outright, so no remote client reaches it. The session id in the name (ControlWire.PipeName) is what
+// keeps two signed-in users from colliding on the name itself.
 //
 // Never throws out of the loop. A malformed request, a handler that throws and a client that hangs up
 // mid-way each cost that one request and nothing more, because a remote control that dies quietly
@@ -55,6 +63,22 @@ public sealed class ControlPipeServer : IDisposable
     // maxNumberOfServerInstances stays 1, so a second Deskbar can never answer alongside this one. During an update
     // restart the new instance meets the old one's pipe for a moment; making it throws, the back-off waits a second,
     // and it gets the name once the old process has gone.
+    // The pipe's security: what .NET's PipeOptions.CurrentUserOnly sets (full control to this process's default owner,
+    // which also owns the pipe), plus a deny of everything to NETWORK, S-1-5-2 (security review of fb50f0b, M4), so a
+    // client on another machine is refused whoever it logs on as. Built here rather than through CurrentUserOnly because
+    // that option takes no extra rules. The header says why the default owner, and not the user, is the one allowed.
+    internal static PipeSecurity Security()
+    {
+        using var me = WindowsIdentity.GetCurrent();
+        var owner = me.Owner!;
+        var security = new PipeSecurity();
+        security.AddAccessRule(new PipeAccessRule(owner, PipeAccessRights.FullControl, AccessControlType.Allow));
+        security.AddAccessRule(new PipeAccessRule(new SecurityIdentifier(WellKnownSidType.NetworkSid, null),
+            PipeAccessRights.FullControl, AccessControlType.Deny));
+        security.SetOwner(owner);
+        return security;
+    }
+
     static async Task Serve(string pipeName, Func<IReadOnlyList<string>, Task<ControlReply>> handle, Action<string>? trace, CancellationToken token)
     {
         while (!token.IsCancellationRequested)
@@ -62,8 +86,8 @@ public sealed class ControlPipeServer : IDisposable
             NamedPipeServerStream pipe;
             try
             {
-                pipe = new NamedPipeServerStream(pipeName, PipeDirection.InOut, 1,
-                    PipeTransmissionMode.Byte, PipeOptions.Asynchronous | PipeOptions.CurrentUserOnly);
+                pipe = NamedPipeServerStreamAcl.Create(pipeName, PipeDirection.InOut, 1,
+                    PipeTransmissionMode.Byte, PipeOptions.Asynchronous, 0, 0, Security());
             }
             catch (Exception e)
             {

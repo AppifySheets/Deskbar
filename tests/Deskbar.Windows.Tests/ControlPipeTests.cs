@@ -1,5 +1,8 @@
 using System.IO;
 using System.IO.Pipes;
+using System.Runtime.InteropServices;
+using System.Security.AccessControl;
+using System.Security.Principal;
 using System.Text;
 using Deskbar.Core.Control;
 using Deskbar.Windows.Control;
@@ -222,4 +225,104 @@ public class ControlPipeTests
         var next = await ControlClient.SendAsync(pipe, ["windows"], Patience);
         Assert.Equal("fine", next.Output);
     }
+    // Security review of fb50f0b, I1: a Low-integrity process of this user can make a pipe of Deskbar's name. Its pipe
+    // is owned by this user but carries a Low mandatory label (a Low process's objects get S:(ML;;NW;;;LW)), and the
+    // client used to trust it: it sent the request and printed the squatter's reply with exit 0. Here the squatter is a
+    // pipe in this process given that same label; the client must refuse it and send nothing.
+    [Fact]
+    public async Task A_pipe_labelled_low_integrity_is_refused_and_told_nothing()
+    {
+        var pipe = UniquePipe();
+        await using var squatter = NamedPipeServerStreamAcl.Create(pipe, PipeDirection.InOut, 1, PipeTransmissionMode.Byte,
+            PipeOptions.Asynchronous, 0, 0, null, HandleInheritability.None,
+            PipeAccessRights.ChangePermissions | PipeAccessRights.TakeOwnership);
+        LowLabel.Apply(squatter.SafePipeHandle);
+        string? received = null;
+        var serving = Task.Run(async () =>
+        {
+            await squatter.WaitForConnectionAsync();
+            using var reader = new StreamReader(squatter, new UTF8Encoding(false), false, 1024, leaveOpen: true);
+            var read = reader.ReadLineAsync();
+            if (await Task.WhenAny(read, Task.Delay(2000)) == read) received = read.Result;
+        });
+
+        var reply = await ControlClient.SendAsync(pipe, ["windows"], Patience);
+        await serving;
+
+        Assert.Equal(ControlReply.Failed, reply.ExitCode);
+        Assert.Contains("low integrity", reply.Output);
+        Assert.Null(received);
+    }
+
+    // Security review M4: the server's pipe denies the NETWORK logon (S-1-5-2) outright, so no remote client reaches it,
+    // and otherwise grants exactly what .NET's CurrentUserOnly grants: full control to this process's default owner,
+    // which owns the pipe. Read back through a real connection, so this is the ACL Windows applied.
+    [Fact]
+    public async Task The_servers_pipe_denies_the_network_and_keeps_current_user_only()
+    {
+        var pipe = UniquePipe();
+        using var server = new ControlPipeServer(pipe, _ => Task.FromResult(new ControlReply(ControlReply.Ok, "fine")));
+        Assert.Equal("fine", (await ControlClient.SendAsync(pipe, ["windows"], Patience)).Output);
+        await using var client = new NamedPipeClientStream(".", pipe, PipeDirection.InOut, PipeOptions.Asynchronous);
+        await client.ConnectAsync(5000);
+
+        var security = client.GetAccessControl();
+        var rules = security.GetAccessRules(true, false, typeof(SecurityIdentifier)).Cast<PipeAccessRule>().ToList();
+        using var me = WindowsIdentity.GetCurrent();
+
+        Assert.Equal(me.Owner, security.GetOwner(typeof(SecurityIdentifier)));
+        Assert.Contains(rules, r => r.AccessControlType == AccessControlType.Deny
+            && r.IdentityReference.Value == "S-1-5-2" && r.PipeAccessRights.HasFlag(PipeAccessRights.FullControl));
+        var allowed = Assert.Single(rules, r => r.AccessControlType == AccessControlType.Allow);
+        Assert.Equal(me.Owner, allowed.IdentityReference);
+        Assert.True(allowed.PipeAccessRights.HasFlag(PipeAccessRights.FullControl));
+
+        // And the same allow as .NET's own CurrentUserOnly gives, read from such a pipe the same way.
+        var reference = UniquePipe();
+        await using var currentUserOnly = new NamedPipeServerStream(reference, PipeDirection.InOut, 1, PipeTransmissionMode.Byte,
+            PipeOptions.Asynchronous | PipeOptions.CurrentUserOnly);
+        var waiting = currentUserOnly.WaitForConnectionAsync();
+        await using var probe = new NamedPipeClientStream(".", reference, PipeDirection.InOut, PipeOptions.Asynchronous);
+        await probe.ConnectAsync(5000);
+        await waiting;
+        var theirs = probe.GetAccessControl();
+        var theirAllow = Assert.Single(theirs.GetAccessRules(true, false, typeof(SecurityIdentifier)).Cast<PipeAccessRule>());
+        Assert.Equal((theirAllow.IdentityReference, theirAllow.PipeAccessRights), (allowed.IdentityReference, allowed.PipeAccessRights));
+        Assert.Equal(theirs.GetOwner(typeof(SecurityIdentifier)), security.GetOwner(typeof(SecurityIdentifier)));
+    }
+
+    // Gives a pipe this process made the Low mandatory label a Low-integrity process's pipe would have.
+    static class LowLabel
+    {
+        public static void Apply(SafeHandle pipe)
+        {
+            Assert.True(ConvertStringSecurityDescriptorToSecurityDescriptorW("S:(ML;;NW;;;LW)", 1, out var descriptor, out _),
+                $"SDDL: {Marshal.GetLastWin32Error()}");
+            try
+            {
+                Assert.True(GetSecurityDescriptorSacl(descriptor, out _, out var sacl, out _), $"SACL: {Marshal.GetLastWin32Error()}");
+                Assert.Equal(0u, SetSecurityInfo(pipe, KernelObject, LabelInformation, IntPtr.Zero, IntPtr.Zero, IntPtr.Zero, sacl));
+            }
+            finally
+            {
+                LocalFree(descriptor);
+            }
+        }
+
+        const int KernelObject = 6;
+        const uint LabelInformation = 0x10;
+
+        [DllImport("advapi32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+        static extern bool ConvertStringSecurityDescriptorToSecurityDescriptorW(string sddl, uint revision, out IntPtr descriptor, out uint size);
+
+        [DllImport("advapi32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+        static extern bool GetSecurityDescriptorSacl(IntPtr descriptor, out bool present, out IntPtr sacl, out bool defaulted);
+
+        [DllImport("advapi32.dll", CharSet = CharSet.Unicode)]
+        static extern uint SetSecurityInfo(SafeHandle handle, int objectType, uint information, IntPtr owner, IntPtr group, IntPtr dacl, IntPtr sacl);
+
+        [DllImport("kernel32.dll", CharSet = CharSet.Unicode)]
+        static extern IntPtr LocalFree(IntPtr memory);
+    }
+
 }
