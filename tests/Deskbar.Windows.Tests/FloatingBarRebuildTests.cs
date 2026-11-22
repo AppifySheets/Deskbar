@@ -263,10 +263,12 @@ public class FloatingBarRebuildTests
         var menu = FloatingBar.MenuOf(IconButtons(bar.Rows).First());
 
         Assert.NotNull(menu);
+        // VISIBLE items: "Don't split this tile" is on every icon menu but collapsed unless the window is a tile
+        // (FloatingBar.Tiling.cs, FloatingBarTileLockMenuTests), and the harness has no Tiler.
         Assert.Equal(
             ["Rename this window…", "Rename by title pattern…", "Rename all rdm windows…", "Remember rdm's workspace", "Restore title",
              "Close", "Force close (rdm)", "Close all rdm processes", "Restart all rdm windows"],
-            menu.Items.OfType<MenuItem>().Select(item => (string)item.Header));
+            menu.Items.OfType<MenuItem>().Where(item => item.Visibility == Visibility.Visible).Select(item => (string)item.Header));
         // Never renamed, so Restore title is visible-but-unavailable rather than absent
         // (mirrors WindowGroupsView.RunningMenu; a menu whose shape shifts per icon is
         // harder to learn than one with a greyed entry).
@@ -289,7 +291,8 @@ public class FloatingBarRebuildTests
         Assert.Equal(
             ["Rename this window…", "Rename by title pattern…", "Restore title",
              "Close", "Force close"],
-            menu.Items.OfType<MenuItem>().Select(item => (string)item.Header));
+            // Visible items only, for the reason the test above gives.
+            menu.Items.OfType<MenuItem>().Where(item => item.Visibility == Visibility.Visible).Select(item => (string)item.Header));
     });
 
     // Petre: "active window should be highlighted in the floating window". Asserts the fact

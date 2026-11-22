@@ -1677,6 +1677,9 @@ public partial class App : Application
                 // tile (Tiler.InTile: the board for the workspace you are on, the Tiler's own rule for any other tiled
                 // one). The Tiler is built after the bar, so the lambda reads the field when asked.
                 IsTiled = (handle, workspace) => tiler?.InTile(handle, workspace) ?? false,
+                // The icon menu's "Don't split this tile" (FloatingBar.Tiling.cs, Tiler.Lock.cs), read the same way.
+                TileLockOf = handle => tiler?.TileLockOf(handle) ?? Maybe<bool>.None,
+                SetTileLocked = (handle, on) => tiler?.SetTileLocked(handle, on) ?? Result.Failure("Tiling is not running."),
                 Volume = new Windows.Audio.SystemVolume(),
                 // ...and the device list its click opens (FloatingBar.Volume.cs).
                 AudioOutputs = new Windows.Audio.AudioDevices(),

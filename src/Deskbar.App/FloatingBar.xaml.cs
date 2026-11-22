@@ -7696,6 +7696,10 @@ public partial class FloatingBar : Window
         restore.Click += (_, _) => Report(manager.RestoreTitle(row.Window.Handle));
         menu.Items.Add(restore);
 
+        // "Don't split this tile" (FloatingBar.Tiling.cs): the last item before the closing group, shown only while
+        // the window is a tile of the workspace being looked at.
+        menu.Items.Add(TileLockItem(row.Window.Handle, menu));
+
         // CLOSING, at the bottom and behind a separator, away from the renames above. Petre: "right clicking an
         // app should have close and force close", then "also, close all", "so i can kill all vscode or edge
         // processes". Gentlest first:

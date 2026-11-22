@@ -78,6 +78,37 @@ public partial class FloatingBar
             add("⊟", "Stop tiling", () => Report(manager.SetWorkspaceTiled(workspaceId, false)));
     }
 
+    // --- "Don't split this tile", on the window icon menu ----------------------------------------------------------
+    //
+    // Petre: "i want to pin the window so that it's not moving" (spec 2026-11-22-tile-lock-and-other-screens). A locked
+    // tile is never the one a new window halves (Tiler.Lock.cs). The Tiler lives in App and is built after the bar, so
+    // App hands in two lambdas that read it when asked, as it does for IsTiled; the defaults say "no tile, no tiler".
+    // `deskbar.cmd lock-tile <hwnd> on|off` is the pipe's twin.
+
+    // None when the window is not a tile of the workspace being looked at; otherwise whether it is locked.
+    internal Func<WindowHandle, Maybe<bool>> TileLockOf { get; init; } = _ => Maybe<bool>.None;
+
+    internal Func<WindowHandle, bool, Result> SetTileLocked { get; init; } = (_, _) => Result.Failure("Tiling is not running.");
+
+    // The item, for IconMenu. The icon menu is built once and kept (FloatingBar.LazyMenus.cs) while the window can
+    // become a tile or stop being one, so the item is always there and its visibility and tick are read again each
+    // time the menu opens: collapsed unless the window is a tile. The click reads the lock at CLICK time and flips it,
+    // and uses Click rather than Checked/Unchecked for the reason KeepSpaceItem gives.
+    MenuItem TileLockItem(WindowHandle window, ContextMenu menu)
+    {
+        var item = new MenuItem { Header = "Don't split this tile", IsCheckable = true, Icon = MenuGlyph("⊞") };
+        void Show()
+        {
+            var state = TileLockOf(window);
+            item.Visibility = state.HasValue ? Visibility.Visible : Visibility.Collapsed;
+            item.IsChecked = state.GetValueOrDefault(false);
+        }
+        Show();
+        menu.Opened += (_, _) => Show();
+        item.Click += (_, _) => Report(SetTileLocked(window, !TileLockOf(window).GetValueOrDefault(false)));
+        return item;
+    }
+
     // --- the header's tiling button ---------------------------------------------------------------------------
     //
     // Petre, testing tiling live: "maybe add a button at the top of the bar", then from a mockup, "Header, beside
