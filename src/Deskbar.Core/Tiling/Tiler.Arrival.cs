@@ -19,6 +19,14 @@ namespace Deskbar.Core.Tiling;
 //   4. Otherwise (no tile last used, or the second and later windows of one evaluate) it splits the largest tile
 //      of its own screen. TileArrival.Choose does that fallback too, also when the last-used tile is too small.
 //
+// Since 2026-11-22 (docs/superpowers/specs/2026-11-22-tile-lock-and-other-screens-design.md) two rules come between
+// step 2 and step 3 for a window that is free to move (not aimed, not restored): an opening on ANY other screen, in
+// screen number order, and then an EMPTY screen (its own first, then the others in number order; empty means nothing of
+// this workspace there, a set-aside maximized window included). Petre: "when opening windows, check if there's space on
+// another screen too". And in steps 3 and 4 a LOCKED tile is never split (Tiler.Lock.cs): when every tile of the target
+// screen is locked the window splits the largest unlocked tile of another screen, and only when nothing anywhere is
+// unlocked is the lock ignored for that one window.
+//
 // "Last used" is the order windows were activated in, kept for every window and filtered when a target is picked:
 // a new window usually activates itself BEFORE it joins the board, and once it has joined it is the last-used tile
 // like any other. Activations Windows hands out by itself do not count: when a tile closes or is minimized,
@@ -169,13 +177,43 @@ public sealed partial class Tiler
     // then an opening on its own screen, then a split of a tile on the target screen (SplitSomewhere, which looks at
     // another screen only when every tile on the target is locked). `aimed` is a window dropped on a screen or restored
     // from minimized (KeptScreenOf): it never leaves `own`.
+    //
+    // OTHER SCREENS FIRST (spec 2026-11-22-tile-lock-and-other-screens, steps 3 and 4). Petre: "when opening windows,
+    // check if there's space on another screen too", and of the two meanings of space he picked an opening or an empty
+    // screen, not balancing by tile size (which would send windows to a screen he is not looking at). So, for a window
+    // that is free to move, after the two openings above: an opening on any other screen in number order, then an
+    // empty screen (its own first, then the others in number order), and only then a split. An aimed window skips both.
+    //
+    // Each later arrival of one evaluate sees the board the earlier ones left (Arrived folds over them), so two windows
+    // never both take one empty screen.
     TileBoard Arrive(Workspace workspace, IReadOnlyDictionary<int, TileScreen> screens, TileBoard board,
         WindowHandle window, int own, Maybe<WindowHandle> lastUsed, bool aimed)
     {
         var target = lastUsed.Bind(board.ScreenOf).GetValueOrDefault(own);
-        return IntoOpeningOn(workspace, screens, board, window, target, lastUsed.HasValue ? "the screen of the tile last used" : "its own screen")
-            .Or(() => target != own ? IntoOpeningOn(workspace, screens, board, window, own, "its own screen") : Maybe<TileBoard>.None)
+        var others = screens.Keys.Where(n => n != target && n != own).Order().ToList();
+        // Lazy: Select runs each try only until one answers, so a later one never stores a layout it did not take.
+        IEnumerable<Func<Maybe<TileBoard>>> tries =
+        [
+            () => IntoOpeningOn(workspace, screens, board, window, target, lastUsed.HasValue ? "the screen of the tile last used" : "its own screen"),
+            () => target != own ? IntoOpeningOn(workspace, screens, board, window, own, "its own screen") : Maybe<TileBoard>.None,
+            .. aimed ? [] : others.Select(n => (Func<Maybe<TileBoard>>)(() => IntoOpeningOn(workspace, screens, board, window, n, "another screen"))),
+            .. aimed ? [] : new[] { own }.Concat(screens.Keys.Where(n => n != own).Order())
+                .Select(n => (Func<Maybe<TileBoard>>)(() => IntoEmptyScreen(workspace, screens, board, window, n))),
+        ];
+        return tries.Select(t => t()).FirstOrDefault(m => m.HasValue, Maybe<TileBoard>.None)
             .GetValueOrDefault(() => SplitSomewhere(workspace, screens, board, window, target, lastUsed, aimed));
+    }
+
+    // Step 4: screen `number` holds nothing of this workspace, so the window takes all of it. Empty means no tile on the
+    // board there AND no maximized window of this workspace set aside there (`aside`): such a window is off the board but
+    // fills the screen, and a tile laid there would sit under it or over it.
+    Maybe<TileBoard> IntoEmptyScreen(Workspace workspace, IReadOnlyDictionary<int, TileScreen> screens, TileBoard board,
+        WindowHandle window, int number)
+    {
+        if (!screens.ContainsKey(number) || board.On(number).Count > 0 || aside.Any(w => surface.ScreenOf(w) == number))
+            return Maybe<TileBoard>.None;
+        trace?.Invoke($"tile: {workspace.Name}: {window.Value:X} arrived, took empty screen {number}");
+        return board.Join(number, window);
     }
 
     // EVERY TILE ON THE TARGET SCREEN LOCKED (Tiler.Lock.cs; spec 2026-11-22, behaviour step 6). Splitting there would
