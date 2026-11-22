@@ -199,20 +199,21 @@ The task list at the bottom of the bar (spec `docs/superpowers/specs/2026-11-22-
 `%APPDATA%\Deskbar\deskbar.cmd`.
 
 42. The list has no header: the text box is its first line, reading "Add to <the workspace you are on>…".
-    Switch desktops: it names the new one ("Add…" on an unnamed desktop). Click in it: the chips appear, the
-    current workspace's ticked, then "none" and "other...". Type "probe", press Enter: the note appears as a
-    line with an empty tick box and the workspace's chip, the chips go away, and the keyboard is back in the
-    window you were typing in. Click the tick box: the line stays for six seconds, struck through, with
+    Under it, always, the chips: the current workspace's ticked, then "none" and "other...". Switch desktops:
+    the box names the new one ("Add…" on an unnamed desktop) and the ticked chip follows, and nothing in the
+    list jumps. Click in the box, type "probe", press Enter: the note appears as a line with an empty tick box
+    and the workspace's chip, the chips stay where they are, and the keyboard is back in the window you were
+    typing in. Click the tick box: the line stays for six seconds, struck through, with
     "Undo" in the tick box's place, then leaves.
 43. `$ts task add "a"`, "b", "c", "d" and "e" (five tasks). The list shows three lines and a small "+2 more"
     under them. Click it: all five show and "Less" is at the end. Click "Less": back to three.
 44. With the five tasks of step 43 open, `$ts task status <id> waiting` on all five. They sort to the top, three
     show and the two hidden ones wait on you: the line under them reads "+2 waiting" in orange. Set two of them
     back to `backlog`: it reads "+2 more" in the plain ink again.
-45. Click in the box, type some text, then click into another app. The chips stay (the box holds text) and the
-    text is still there when you come back; click in the box and carry on. Enter and Esc both give the
-    keyboard back to the window you were typing in (type a few letters after each to check). Empty the box
-    and click away: the chips go.
+45. Click in the box, type some text, pick "none", then click into another app and switch desktops. The text
+    and the "none" choice are still there when you come back; click in the box and carry on. Enter and Esc both
+    give the keyboard back to the window you were typing in (type a few letters after each to check). With the
+    box empty and idle, click a chip: it starts a note, as a click in the box does.
 46. Click in the box, then the "other..." chip, and pick a workspace: the chip takes its name and is ticked,
     the text stays, and Enter files the note there.
 47. Click a line of a note on another workspace: you go there. Click a note on "none": nothing happens.

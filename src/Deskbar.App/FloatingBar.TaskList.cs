@@ -30,9 +30,10 @@ namespace Deskbar.App;
 //                   when the truth is "your tasks could not be read".
 //   the text box    always there, with a placeholder naming where a note would go ("Add to Deskbar…", or
 //                   "Add…" on an unnamed desktop) that follows a desktop switch. A click in it takes the
-//                   keyboard (BeginTyping). Under it, while it has the keyboard or holds text, the chips choosing
-//                   where the note goes: the current workspace (ticked to begin with), "none" and "other…", which
-//                   lists the other workspaces; they wrap onto a second line on a narrow bar rather than clip. Enter
+//                   keyboard (BeginTyping). Under it, always, the chips choosing where the note goes: the current
+//                   workspace (ticked to begin with), "none" and "other…", which lists the other workspaces; they
+//                   wrap onto a second line on a narrow bar rather than clip. A chip pressed while the box is idle
+//                   starts typing as a click in the box does. Enter
 //                   adds a Backlog note through TaskService.AddNote and Esc clears the box; either way the keyboard
 //                   goes back to the window Petre was typing in. Clicking away leaves the text where it is.
 //   the lines       the first three of the pile (Waiting on you, then Done, then the rest; TaskBoard.Pile). A
@@ -331,7 +332,8 @@ public partial class FloatingBar
         var box = new Grid { Children = { taskAddBox, taskAddPlaceholder } };
 
         // The chips, wrapping onto a second line on a narrow bar instead of clipping (Petre's 320 px screenshot had
-        // them cut off). Shown only while the box has the keyboard or holds text (PaintAddRow).
+        // them cut off). Always shown (Ruling 12, Petre: "present always"): a row that came and went with the keyboard
+        // made the whole list jump up and down under it.
         taskChipHere = TaskChip("", () => ChooseTaskTarget(taskAddHere));
         taskChipNone = TaskChip("none", () => ChooseTaskTarget(Maybe<Guid>.None));
         taskChipOther = TaskChip(OtherChipText, OpenOtherWorkspaces);
@@ -339,7 +341,6 @@ public partial class FloatingBar
         taskAddChips = new WrapPanel
         {
             Tag = "task-add-chips",
-            Visibility = Visibility.Collapsed,
             Margin = new Thickness(0, 3, 0, 0),
             Children = { taskAddOn, taskChipHere.Button, taskChipNone.Button, taskChipOther.Button },
         };
@@ -914,14 +915,11 @@ public partial class FloatingBar
         if (taskTyping) EndTyping(clear: false);
     }
 
-    // The placeholder and the chips as the box stands: the placeholder while it is empty, the chips while it has the
-    // keyboard or holds text.
+    // The placeholder as the box stands: shown while the box is empty. (The chips under it are always shown.)
     void PaintAddRow()
     {
-        if (taskAddBox is null || taskAddPlaceholder is null || taskAddChips is null) return;
-        var empty = taskAddBox.Text.Length == 0;
-        taskAddPlaceholder.Visibility = empty ? Visibility.Visible : Visibility.Collapsed;
-        taskAddChips.Visibility = taskTyping || !empty ? Visibility.Visible : Visibility.Collapsed;
+        if (taskAddBox is null || taskAddPlaceholder is null) return;
+        taskAddPlaceholder.Visibility = taskAddBox.Text.Length == 0 ? Visibility.Visible : Visibility.Collapsed;
     }
 
     // On every paint: the placeholder names the workspace in front, so it follows a desktop switch; and while nobody is
@@ -974,8 +972,8 @@ public partial class FloatingBar
             .TapError(err => ClickTrace.Write($"task list: note not added: {err}"));
     }
 
-    // A chip, or a workspace picked from "other…"'s menu. The chips also show while the box merely holds text, after a
-    // click away (EndTyping keeps the text), so a chip can be the first thing pressed on the way back. That press must
+    // A chip, or a workspace picked from "other…"'s menu. The chips are always shown, so a chip can be the first thing
+    // pressed, on an idle box or on the way back to text left in it (EndTyping keeps the text). That press must
     // take the keyboard exactly as a click in the box does (BeginTyping): otherwise the bar is focused but fades, has
     // nowhere to hand the keyboard back to after Enter or Esc, and does not notice losing the foreground again.
     // BeginTyping keeps the chip a box with text was given, so the choice made here is set after it.

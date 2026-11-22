@@ -513,18 +513,19 @@ public class FloatingBarTaskListTests
         Assert.Equal([Editor], handed);
     });
 
-    // The chips show while the box has the keyboard or holds text, and only then; the bar stays at full strength while
-    // the box has the keyboard, not merely while it holds text.
+    // Ruling 12 (Petre: "present always"): the chips are under the box all the time, idle or typing, empty or not, so
+    // the list never jumps. The bar stays at full strength while the box has the keyboard, not merely while it holds
+    // text.
     [Fact]
-    public void The_chips_show_while_the_box_has_the_keyboard_or_holds_text() => StaThread.Run(() =>
+    public void The_chips_are_always_under_the_box() => StaThread.Run(() =>
     {
         using var t = Build();
-        Assert.Equal(Visibility.Collapsed, t.Chips.Visibility);
+        Assert.Equal(Visibility.Visible, t.Chips.Visibility);
 
         ClickBox(t);
         Assert.Equal(Visibility.Visible, t.Chips.Visibility);
         Press(t.Bar, t.Box, Key.Escape);
-        Assert.Equal(Visibility.Collapsed, t.Chips.Visibility);
+        Assert.Equal(Visibility.Visible, t.Chips.Visibility);
 
         ClickBox(t);
         t.Box.Text = "Later";
@@ -533,23 +534,53 @@ public class FloatingBarTaskListTests
         Assert.False(t.Bar.HoldsFullStrength);
 
         t.Box.Text = "";
-        Assert.Equal(Visibility.Collapsed, t.Chips.Visibility);
+        Assert.Equal(Visibility.Visible, t.Chips.Visibility);
+    });
+
+    // A chip pressed on an idle, empty box starts typing, as a click in the box does, with that chip chosen.
+    [Fact]
+    public void A_chip_on_an_idle_box_starts_typing() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        Assert.False(t.Bar.TaskListAdding);
+
+        Click(ButtonNamed(t.List, "none"));
+
+        Assert.True(t.Bar.TaskListAdding);
+        Assert.True(t.Bar.HoldsFullStrength);
+        Assert.True(t.Bar.TaskAddTarget.HasNoValue);
     });
 
     // The empty box says where a note would go, and follows a desktop switch; on an unnamed desktop it says "Add…".
+    // While the box is idle and empty the chosen chip follows the workspace in front too; a chip picked for text that
+    // is still in the box stays.
     [Fact]
-    public void The_placeholder_names_the_workspace_in_front() => StaThread.Run(() =>
+    public void The_placeholder_and_the_chip_follow_the_workspace_in_front() => StaThread.Run(() =>
     {
         using var t = Build();
         Assert.Equal("Add to GEPHA…", t.Bar.TaskAddPlaceholder);
+        Assert.Equal(t.Gepha, t.Bar.TaskAddTarget.Value);
+        var sparrowWorkspace = t.Harness.Manager.State.Workspaces.Single(w => w.Name == "Sparrow");
+        var gephaDesktop = t.Harness.Manager.State.Workspaces.Single(w => w.Name == "GEPHA").DesktopId!.Value;
+        void SwitchTo(Guid desktop)
+        {
+            t.Harness.Desktops.CurrentId = desktop;
+            ((Subject<Guid>)t.Harness.Desktops.CurrentChanged).OnNext(desktop);
+            t.Bar.RequestRebuild();
+        }
 
-        var sparrow = t.Harness.Manager.State.Workspaces.Single(w => w.Name == "Sparrow").DesktopId!.Value;
-        t.Harness.Desktops.CurrentId = sparrow;
-        ((Subject<Guid>)t.Harness.Desktops.CurrentChanged).OnNext(sparrow);
-        t.Bar.RequestRebuild();
-
+        SwitchTo(sparrowWorkspace.DesktopId!.Value);
         Assert.Equal("Add to Sparrow…", t.Bar.TaskAddPlaceholder);
+        Assert.Equal(sparrowWorkspace.Id, t.Bar.TaskAddTarget.Value);
         Assert.Equal("Add…", FloatingBar.PlaceholderFor(Maybe<string>.None));
+
+        // Text held with "none" picked: a switch leaves the choice alone.
+        ClickBox(t);
+        t.Box.Text = "Dishwasher tablets";
+        Click(ButtonNamed(t.List, "none"));
+        typeof(Window).GetMethod("OnDeactivated", BindingFlags.NonPublic | BindingFlags.Instance)!.Invoke(t.Bar, [EventArgs.Empty]);
+        SwitchTo(gephaDesktop);
+        Assert.True(t.Bar.TaskAddTarget.HasNoValue);
     });
 
     // FIX ROUND 1, Important 2: after Enter or Esc the keyboard goes back to the window Petre was typing in, so his next
