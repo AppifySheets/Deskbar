@@ -131,13 +131,19 @@ internal static class WorkspaceChipMenu
             menu.Items.Add(Block(x.entry, entries.Skip(x.at + 1).TakeWhile(e => e.InGroup).Select(e => Choice(e, current, pick, menu)).ToArray(), inner)));
 
         // The keyboard starts on the current choice, or on the first chip.
-        menu.Opened += (_, _) =>
-        {
-            var chips = Chips(menu);
-            (chips.FirstOrDefault(c => AutomationProperties.GetItemStatus(c) == CurrentStatus) ?? chips.FirstOrDefault())?.Focus();
-        };
+        menu.Opened += (_, _) => StartChip(menu).Tap(chip => chip.Focus());
         return menu;
     }
+
+    /// <summary>
+    /// The chip the keyboard starts on when the menu opens: the current choice, or the first chip. Apart from the Opened
+    /// handler so a test can check the choice without depending on the machine handing an opening popup the keyboard,
+    /// which the CI runner never does (no chip had the focus there, before or after the dispatcher ran down).
+    /// </summary>
+    internal static Maybe<Button> StartChip(ContextMenu menu) =>
+        Chips(menu) is var chips && chips.Count > 0
+            ? chips.FirstOrDefault(c => AutomationProperties.GetItemStatus(c) == CurrentStatus) ?? chips[0]
+            : Maybe<Button>.None;
 
     /// <summary>Every chip of a menu, in order, for the menu's own focus and for the tests.</summary>
     internal static IReadOnlyList<Button> Chips(ContextMenu menu) =>
