@@ -1,0 +1,70 @@
+---
+title: Claude Code sessions
+summary: Run many Claude Code sessions side by side, a workspace each, and see on the bar which one has finished or is waiting for you.
+order: 1
+clip: claude-many
+---
+
+Give each Claude Code session a workspace of its own, and the bar shows every one of them at once: which session has finished, which one is waiting for a permission, and one chord or one click to get there.
+
+## How to use it
+
+Supervising coding agents is not one task in one editor. Each agent you run wants its own editor window, its own terminal and its own browser tabs, often its own running copy of the thing under test. A workspace is a real Windows virtual desktop, so one per session keeps each cluster of windows together and off the taskbar of the others. Related sessions can share a group, for example two agents working on one project.
+
+When a session finishes a reply, or waits for a permission, while you are on another workspace, that workspace's name and colour rail flash orange on the bar and the session's VS Code icon glows. Both stop once you go there.
+
+To go there, click the workspace's row on the bar, or hold `Win+Ctrl` and tap `Tab`. The chord walks your workspaces in most-recently-used order, so when you are alternating between two sessions, one tap takes you back to the other. You land in the window you were last using in that workspace, so you arrive typing.
+
+Quick find (`Win+Alt+Space`) searches every VS Code editor tab on every workspace, and an open Claude Code session is one of them, because each session is a tab named after the session. Type a few letters of its name and press Enter.
+
+Links and windows a session opens land in that session's workspace, not on the one you are looking at. Deskbar's skill tells every Claude Code session on the machine to open links with `open`, start programs with `start` and move the windows it opens with `move --no-follow`. Apart from the skill, a window opened by another app joins that app's workspace, so a link you click in the session's editor opens its browser window beside the editor.
+
+Seven VS Code windows all named `VSC` tell you nothing. **Name *app* windows by folder** on a VS Code icon's menu names each window after the folder, project or session it holds instead, and follows the window when it opens something else.
+
+A session can also park a reminder on its own workspace with `task add`. When the timer runs out, the row blinks the way it does when a session asks for you.
+
+## Settings
+
+The setting is **Teach Claude Code about Deskbar**, in the Deskbar on this PC section of Manage's Settings tab. With Claude Code installed (there is a `.claude` folder in your profile) and the box ticked, Deskbar keeps two things in place:
+
+- A skill at `%USERPROFILE%\.claude\skills\deskbar\SKILL.md`, rewritten when Deskbar updates.
+- Two hooks, Notification and Stop, in `%USERPROFILE%\.claude\settings.json`, beside any hooks you already have. They run `%APPDATA%\Deskbar\claude-hook.cmd`, which runs `deskbar.cmd attention` and always exits 0.
+
+The first time Deskbar changes `settings.json` it keeps the original as `settings.json.deskbar-backup`. It leaves a `settings.json` that has comments in it alone.
+
+Untick the box, or run `deskbar.cmd claude-skill off`, and the skill and Deskbar's own hooks are removed. Your other hooks stay as they are.
+
+## From a script
+
+A session that has just set up a git worktree can give it a workspace and move the editor there:
+
+```powershell
+& "$env:APPDATA\Deskbar\deskbar.cmd" move wt-login --create --group EC --title wt-login --wait 20
+```
+
+Or start the editor straight into the workspace, without taking you along:
+
+```powershell
+$ts = "$env:APPDATA\Deskbar\deskbar.cmd"
+& $ts start wt-login --create --group EC --cwd C:\src\login -- code .
+```
+
+`open <link>` is for a session or a terminal inside VS Code. It finds the VS Code window whose folder holds the caller's folder. When that window is in a workspace you are not looking at, the link gets a new window of your default browser there, and you stay where you are. Otherwise the link opens as usual.
+
+`task add` with no `--workspace` parks the caller's own workspace:
+
+```powershell
+& $ts task add "Wait for CI" --in 10m
+```
+
+On a machine with the Microsoft Store copy, `deskbar` is on the PATH, so `deskbar windows` and `deskbar help` work from PowerShell, cmd and Git Bash.
+
+## Related
+
+- [Driving it from scripts](scripts.md) has every command.
+- [Switching workspaces](switching.md) and [Quick find](quick-find.md) are the two ways to get to a session.
+- [The bar](the-bar.md) explains the rows, rings and icons.
+- [Tasks](tasks.md) covers the timers a session can park.
+- [Where windows go](where-windows-go.md) covers the launched-by rule and folder memory.
+- [Naming windows](naming-windows.md) covers naming editor windows by folder.
+- The README's [case for agents and workspaces](../../README.md#agentic-ai-multiplies-the-contexts-it-does-not-replace-them).

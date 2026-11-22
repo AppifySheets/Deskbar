@@ -193,14 +193,6 @@ and the one before that in dots, so the row that one tap of `Win+Ctrl+Tab` will 
 visible without pressing anything. Hovering a row rings it in amber, the same ring the chord uses
 for the row it would land on.
 
-Workspaces you have not used lately fade back. The longer a workspace goes unused, the more its
-rail, name and icons dim, until after two hours it sits well behind the rest. Behind the workspace
-rows the bar is slightly see-through (the default), and a workspace you used in the last few
-minutes sits on a solid patch, faintly tinted with its colour; the patch wears away as the row
-fades, until the desktop shows faintly through the row. Only focusing a window counts as using its
-workspace: windows that have merely opened, say after Windows restarts, leave it faded. Nothing
-moves or hides, and every row can still be clicked where it is.
-
 **The current workspace's windows, with their titles, sit in a thin strip along the top of every
 screen**: each screen's strip holds that screen's windows of the workspace you are in, and
 maximized windows stop below it. The active window's title is white, the rest are dimmer, and
@@ -209,23 +201,6 @@ background menu, picks where the list goes: **At the top of each screen** (the d
 workspace's row**, where the current workspace's row expands into one window per line, or **At the
 bottom of the bar**, where it sits in a strip under the rows and the rows stay uniform. In the bar,
 titles are cut to fit; widen the bar to see more of them.
-
-**Pin a workspace you keep jumping into**, a Messengers workspace say, with **Pin to strip** on its
-row menu. It gets a small item at the end of every screen's strip and a button on the Windows taskbar, marked
-with a dot in its colour. Click it to go there. Once you are in it, the same item reads
-**↩** and the name of the workspace you came from, and clicking it takes you back. From a script or
-a shortcut, `deskbar.cmd jump Messengers` does the same: in, or back out if you are already there.
-Pinned workspaces are drawn at the top of the bar with a pin beside their name; unpinning puts the
-row back where it was. A workspace inside a group cannot be pinned, and moving a pinned one into a
-group unpins it.
-
-**The previous workspace as an item**: every screen's strip, the current workspace's titled list and
-the Windows taskbar can carry an item reading **↩** and the name of the workspace you were on before;
-clicking it takes you back. Until you choose, it is on while the window list is on the screens and
-Windows' taskbar auto-hides, and off otherwise. Tick or untick **Show the previous workspace on the
-strips and the taskbar** in Manage (or run `deskbar.cmd previous-workspace on` or `off`) and your
-choice holds from then on. It takes effect at once. It does not change pinned workspaces' own items, which flip to **↩** inside
-the workspace as described above.
 
 <table align="center">
   <tr>
@@ -238,40 +213,12 @@ the workspace as described above.
   </tr>
 </table>
 
-**What each icon tells you.**
-
-- The focused window is outlined and filled. A fainter amber outline on another row marks the
-  window you would land on if you switched there.
-- Icons fade as they recede: full strength in front, dimmer when covered, dimmest when minimised.
-- An amber dot means the app flashed its taskbar button at you. Apps that only badge their icon
-  (WhatsApp, for one) do not trigger it. Looking at the window clears it.
-- A pulsing green ring means the window is playing sound. The ring holds still when Windows'
-  animations are off.
-- A small number at the top right is a tab count: on browser windows with two or more tabs, and
-  on VS Code windows for their editor tabs.
-- Several windows with the **same icon** each get a short coloured bar along the bottom, so you
-  can tell three Chrome windows apart. The key is the icon's pixels, not the process: an installed
-  web app sitting next to its browser has its own icon and gets no bar.
-- An icon you have not touched for fifteen minutes starts to lose its colour and is fully grey
-  after eight hours. The window you are in never ages. The hover card says "last used 2 h ago".
-- A window with no readable icon (an elevated process, say) gets a lettered placeholder.
-
-**Rest on an icon and a card appears** with the window's title, the app and workspace it belongs
-to, and, for windows on workspaces you are not looking at, a picture of the window at a quarter
-size. That is the point: you can see what is waiting elsewhere without going there. A window on the
-workspace you are on is already in front of you, so its card is text alone. The
-card waits for the pointer to settle first, using the same delay Windows' own taskbar thumbnails
-use, so crossing the bar on the way somewhere else shows nothing. A minimised window has no picture
-to show, so its card is text alone.
-
 <p align="center">
   <img src="docs/images/hover-card.png" alt="The pointer resting on a Notepad icon in the HRIS row, which is ringed in amber. Beside the bar a card reads Untitled - Notepad, then Notepad, HRIS, last used 5 h ago, above a quarter-size picture of the empty Notepad window, which lives on another desktop." />
 </p>
 
-**Icons keep their order.** Within a row, icons sit in the order their windows were first seen, so
-nothing jumps out from under the pointer. Drag an icon along its row to put it where you want; a
-thin marker shows where it will land, and the order is saved by app, so it comes back after a
-restart.
+More in [The bar](docs/features/the-bar.md), and on the window list, pinned workspaces and the previous
+workspace's item in [Strips and pinned workspaces](docs/features/strips.md).
 
 ### Screens
 
@@ -345,15 +292,7 @@ tiles can sit side by side over a third that spans the screen. Drop it close to 
 edge and it gets that whole side. Dropping on the middle of a tile swaps the two. Drag a separation
 between two tiles to resize them. The layout you make is kept, across restarts too.
 
-To tidy up, the row's menu and the tile button's right-click menu offer **Even out tiles** while a
-split is off centre: every split goes back to equal and your shape stays. After that the item reads
-**Reset to grid**, which forgets the shape and goes back to the automatic grid.
-
-A new window goes into a space kept open on any screen, or onto a screen with nothing of the
-workspace on it, before it takes half of a tile. A window you drop on a screen stays on that screen.
-To keep a tile from ever being halved by a new window, right-click its icon on the bar and tick
-**Don't split this tile** (or `deskbar.cmd lock-tile <hwnd> on`). The lock lasts until the window
-closes or Deskbar restarts.
+More in [Tiling](docs/features/tiling.md).
 
 **Colour.** Nine swatches sit in one strip inside the menu, with the current choice ringed. Below
 them, **Custom…** opens Windows' own colour dialog starting on the row's current colour;
@@ -396,24 +335,7 @@ bring the bar to the front, so `Esc` works only once the bar has focus. End the 
 **Done** on the strip at the bottom of the bar ("Drag rows to arrange · Esc"), or with **Done
 arranging** on the menu.
 
-While it is on, a grip sits before every row and group header name. Clicks on rows do not switch
-workspaces, and the rows' icons are dimmed and do not drag windows. Everything that is not a row works
-as usual: Start, search, the pinned apps, the footer, the back and minimize buttons, the right-click
-menus and the window tabs on the screens. You can still resize the bar from its edge and move it by
-anything that is not a row; `Ctrl`+drag on a row does not move it.
-
-The row under the pointer decides where a dragged row goes. Its top quarter drops before it and its
-bottom quarter after it: inside the group if that row is in one, shown as a short line inside the
-group's bracket, and as a full-width line between top-level rows. The middle drops onto it. Onto a
-row in a group, the dragged row joins that group below it. Onto a row in no group, a prompt asks for
-a group name, prefilled with that row's name, and makes a group of the two at that row's place;
-Cancel changes nothing. On a group header, the top quarter drops above the whole group and the rest
-joins the group at the top. A folded group is joined through its line. Below the last row means the
-end of the bar. A row that leaves a group of two dissolves it.
-
-Dragging a group header moves the whole group among the top-level rows. Pinned workspaces stay at the
-top and move only among themselves; they cannot be grouped. `Esc` during a drag cancels the drag, and
-a second `Esc` ends the mode.
+More in [Arranging the bar](docs/features/arranging.md).
 
 ### Pinned, unnamed and unplaced rows
 
@@ -451,19 +373,6 @@ windows keep clear of it. The bar cannot be moved while docked (moving the strip
 reservation behind), but its width can still be dragged. A full-screen app takes the bar out of the
 topmost band while it runs. Minimising the bar gives the strip back.
 
-The floating bar does the same for a full-screen window (a video, a game) on its own screen: the bar
-steps just below the window and comes back when the window leaves full screen, closes or is
-minimised. Only the bar's own screen counts: a video on the other screen leaves the bar on top, and a
-bar dragged onto the video's screen goes below it too. To keep the floating bar on top of full-screen
-windows instead, pick **Stay on top of full-screen windows** in the bar's right-click menu
-(`deskbar.cmd full-screen top`); **Step aside for full-screen windows** turns it back.
-
-**Dock across both screens** straddles the seam between two side-by-side screens: the first
-screen's lane sits on the left screen, the second's on the right, each half reserving half the
-bar's width, and each half repeating the row's caption and group line so either side reads on its
-own. Screens that are not level are handled: the bar spans both strips and its content is inset to
-the height the two screens share. Screens with different scaling are not.
-
 <table align="center">
   <tr>
     <td align="center" valign="top"><img src="docs/images/bar-docked-edge.png" alt="The bar docked to the left edge of a screen: full height with square corners, the workspace rows at the top and the taskbar pieces at the foot of the screen, shown at about half size." /></td>
@@ -478,44 +387,11 @@ the height the two screens share. Screens with different scaling are not.
 Compare the floating bar at the top of this page: the same rows, but only as tall as its content,
 with rounded corners, wherever you dropped it.
 
+More in [Docking and taskbar pieces](docs/features/docking.md).
+
 ### Taskbar pieces
 
 Docked or not, the bar carries enough of the taskbar that you can leave Windows' own on auto-hide.
-
-An auto-hidden taskbar comes up, and stays up, whenever an app flashes its button, until you click
-that app. So while your taskbar is on auto-hide, Deskbar turns off Windows' "Show flashing on
-taskbar apps" for as long as it runs, and puts it back to what it was when you exit, so the taskbar
-flashes as before whenever Deskbar is not running. The amber dot on the bar still shows which app
-wants you. The box **Stop apps flashing on Windows' taskbar while Deskbar runs** in Manage shows
-this. It starts ticked on an auto-hidden taskbar and unticked on one that is always shown, and once
-you tick or untick it yourself, your choice holds whatever auto-hide does.
-
-- **Pins.** A line showing the taskbar's pinned apps in the taskbar's order. Click one to jump to
-  its window in this workspace, or to start it here if it has none. A short bar under a pin means
-  it has a window here, a dot means one only elsewhere. Middle-click or `Shift`+click opens a new
-  window. Browser pins always open a new window; installed web apps jump to theirs. Right-click
-  offers **New window**, **Open file location** and **Unpin from taskbar**. Pinning itself stays
-  on the taskbar, because Windows gives other programs no way to pin.
-- **System stats.** The top line of the footer shows CPU, memory, disk and GPU use, each with a graph
-  of the last minute. Click it to open Task Manager. Right-click it and choose **Detach stats into a
-  window** to move it into a small always-on-top window; drag it anywhere with the middle mouse
-  button, and click it for Task Manager. The bar's own line hides while it is detached, and the
-  window comes back where you left it after a restart. Right-click the window and choose **Put stats
-  back on the bar** to undo it (`deskbar.cmd stats detach`, `deskbar.cmd stats attach`). The window
-  sits above ordinary windows, borderless-windowed games and full-screen videos included; another
-  always-on-top window raised after it, the taskbar for one, can sit in front of it, and no window
-  can show over a game in exclusive full-screen mode.
-- **Now playing.** While something is playing, a line above the pins shows the player's icon, the
-  title, the artist and the app, with previous, play/pause and next. Clicking the title brings the
-  player forward.
-- **The strip along the bottom.** A tray chevron that opens the hidden icons in one click, quick
-  settings (drawn as wifi, plus a battery on a laptop), a volume dial, the notification bell, the
-  clock (time over date, in your regional format, with the long date as a tooltip) and a show
-  desktop sliver at the very edge. The buttons send Windows' own shortcuts, so each opens the real
-  flyout.
-- **The volume dial** is a 270° arc. Hover and it grows a knob and shows the percentage; the mouse
-  wheel moves it 2% a notch and unmutes. Click it to list your playback devices with the default
-  ticked, and **Mute** at the end; choosing a device makes it Windows' default.
 
 <table align="center">
   <tr>
@@ -528,7 +404,7 @@ you tick or untick it yourself, your choice holds whatever auto-hide does.
   </tr>
 </table>
 
-Tray icons are not copied onto the bar, because apps hand them only to Explorer.
+More in [Docking and taskbar pieces](docs/features/docking.md).
 
 ## Switching workspaces
 
@@ -545,17 +421,7 @@ not animate three desktop switches.
   <img src="docs/images/switcher.png" alt="The chord held: a list beside the bar headed hold Win+Ctrl, tap Tab, with every workspace in most-recently-used order and its colour swatch, grouped ones shown as group then name, and the second entry highlighted. On the bar the matching row is ringed in amber and the window that would take focus there is outlined." />
 </p>
 
-**You arrive in the window you left.** Landing on a workspace puts focus back on whichever window
-had it last time you were there. Somewhere you have not been yet this session gets the front-most
-window on your main monitor.
-
-`Win+Ctrl+Tab` was chosen by testing every `*+Tab` chord against Windows: it is the only one with
-both its forward and reverse halves free, and it neighbours `Win+Ctrl+←/→`, which Windows already
-uses for desktops. Change it on Manage → **Shortcuts**; the new chord is checked as you type and
-takes effect at once. Whatever you pick becomes **exclusive** while Deskbar runs, so avoid
-chords other apps need (`Ctrl+Tab` would stop reaching browsers, editors and Explorer). Key release
-is detected by polling while the list is up, not by a keyboard hook, so Deskbar never sits in the
-path of your keystrokes.
+More in [Switching workspaces](docs/features/switching.md).
 
 ## Quick find
 
@@ -567,15 +433,7 @@ used most recently first. Enter takes you there, Esc closes the box. A browser w
 its tabs, so you find the page, not the window that happens to show it. A tab is found by its own
 title or its workspace, so `code` does not list every tab of every VS Code window.
 
-A program that is already running is offered once more as a **new window** row, which opens another
-window of it on the desktop you are on, as a middle click on its taskbar button does. Type the
-program's name (`code`, `edge`) while it has several windows open and that row is first, so Enter
-opens the new window. With one window open, Enter still goes to that window and the new window row
-sits below.
-
-`deskbar find inv 10` opens it with the text already typed. Change the chord on Manage →
-**Shortcuts**; it can never be the switcher's. These two chords are the only ones Deskbar
-registers; everything else is on the bar, one click away. Windows' own search is still `Win+S`.
+More in [Quick find](docs/features/quick-find.md).
 
 ## Tasks
 
@@ -585,61 +443,18 @@ workspace's latest open task, or the title of the window you were typing in when
 this workspace, or else the workspace's name. Parking the same title again reuses the task instead of
 adding a row.
 
-While a timer runs, the stopwatch shows the soonest one counting down ("4:32") next to a swatch in
-its workspace's colour, and that workspace's row gets a small blue pie that empties as the time runs
-out. When a timer runs out, the stopwatch reads "due" in orange and the row blinks the way it does
-when a Claude session asks for you. Below the four lengths the menu lists your open tasks, each with
-its own submenu: **Done**, **Clear timer**, or a new length.
-
-Coming back ends the timer. Switch to the workspace and stay there for 2 seconds, and every timer that
-was running there when you arrived ends and the task stays open. Flicking past a desktop on the way
-somewhere else does not count, nothing restarts a timer by itself, and a timer you set during those
-2 seconds is left running.
-
-If a timer runs out while the bar is out of sight (minimized, hidden, stepped aside, or under a
-full-screen app), a small card appears in the bottom right corner of the main screen and follows you
-across desktops. It never takes the focus. Click it to go to the task's workspace; a task with no
-workspace opens the stopwatch menu from the card instead. The card closes once the task is no longer
-due, and at most five are shown at a time; the rest stay due in the bar.
-
-Tasks are kept in `tasks.json` beside `state.json`, and a script or a Claude Code session can drive
-them through `deskbar.cmd task` (see [Driving it from scripts](#driving-it-from-scripts)):
-
-```powershell
-$ts = "$env:APPDATA\Deskbar\deskbar.cmd"
-& $ts task add "Wait for CI" --in 10m       # parks the caller's own workspace
-& $ts task add "Call the bank" --workspace none
-& $ts task list                             # JSON: open tasks, today's done ones, and asks
-& $ts task done 3f2a                        # an id, or a unique prefix of four or more characters
-```
-
-Untick **Tasks** under **Bottom strip** in Manage's settings to hide the stopwatch.
+More in [Tasks](docs/features/tasks.md).
 
 ## Naming windows
 
 Give a window a short name so the taskbar shows `RDP` instead of
-`Remote Desktop Manager [server-01 - fhd]`. Right-click an icon for:
-
-- **Rename this window…**, keyed to the exact title the window had at the time. It lapses the
-  moment the app rewrites its own title, so prefer the next one for browsers, chat apps and
-  editors.
-- **Rename all *app* windows…**, keyed to the process. Never lapses.
-- **Rename by title pattern…**, matching with `*`: `beeper *` names every Beeper window `beeper`.
-- **Name *app* windows by folder**, for apps whose titles say what they hold. One name for every
-  window of an editor is the wrong shape: seven VS Code windows all reading `VSC` tell you nothing.
-  This names each after the folder, project or session it currently holds, and follows the window
-  when you open something else. Offered for VS Code and its forks, Visual Studio, the JetBrains
-  IDEs and Remote Desktop Manager. Browsers are left out, because a tab title is the page rather
-  than a container.
-- **Restore title**, to take a name back. On a window named by a title pattern it removes the
-  pattern too, so every window it named gets its title back.
+`Remote Desktop Manager [server-01 - fhd]`. Right-click an icon on the bar for the renaming items.
 
 <p align="center">
   <img src="docs/images/menu-icon.png" alt="The icon menu over a browser icon: Rename this window, Rename by title pattern, Rename all msedge windows, and a greyed-out Restore title." />
 </p>
 
-Names persist across restarts. A titleless window that still wants a taskbar button is shown under
-its process name rather than "(untitled)".
+More in [Naming windows](docs/features/naming-windows.md).
 
 ## Where windows go
 
@@ -647,81 +462,13 @@ Deskbar never launches anything, and it moves or resizes a window on screen only
 by dropping it on another screen's lane, or by turning on [tiling](#the-workspace-row-menu) for a workspace.
 The axis it arranges on its own is which desktop a window belongs to, and that it remembers.
 
-- **An app opens where you open it**, unless you have told Deskbar it lives somewhere. Right-click
-  one of its windows on the bar and tick **Remember *app*'s workspace**: from then on its windows
-  open in the workspace that window is in, and they follow it when you move one. Good for apps that
-  have a home, such as a messenger or a recording tool. Everything else stays where it opened, so
-  the Remote Desktop dialog or a tool you open once in a while never jumps to a workspace you
-  dragged it to weeks ago. Identity is the executable plus its arguments, so `rider64 A.sln` and
-  `rider64 B.sln` are different things, and an installed web app is a different thing from the
-  browser it runs in.
-- **Dragging teaches a remembered app.** Move a window of an app you ticked and that is where the
-  app goes next time. A window that merely *opened* somewhere teaches nothing until you move it
-  once, because where a new window opens is just the desktop you happened to be on. Pinning a
-  window to every desktop is remembered for every app, without the tick, since a pin never takes
-  a window away from where you are.
-- **Some apps stay where they were opened** and are never learned from: browsers, Windows Terminal
-  and console windows, Open and Save dialogs, the Windows Security sign-in and Task Manager. A
-  browser window says nothing about the work, so one dragged Edge window used to teach that all
-  of Edge lived there. Explorer is never remembered either, so `Win+R` opens on the current
-  desktop. Installed web apps, the launched-by rule and hand-written rules still apply to them.
-- **Folders get their own memory.** Several windows of one editor are a single app as far as the
-  roster is concerned, so a reboot used to pile every editor window into one workspace. Where a
-  window's *folder* lives is remembered separately: open that folder again, anywhere, and the
-  window goes to its own workspace. It learns from where your windows sit once a position has held
-  still, including moves made with Task View or `Win+Ctrl+←/→`, and from anything you drag.
-  Deleting a workspace forgets the folders that lived in it.
-- **A window opened by another app joins that app's workspace.** Click a link in your editor and
-  the browser window it opens lands beside the editor rather than wherever you are standing. It
-  follows the process chain to whoever really started it, and where that app has windows in
-  several workspaces, the one you were last in wins. Explorer and the shell never count as the
-  launcher, so things started from the taskbar are unaffected. This is an inference about one
-  window: it moves the window and teaches the roster nothing.
-- **When several windows of one app are already open, a new one is left where you opened it.**
-  Four browser windows on one profile are one identity, so "put it back" has no single answer.
-- **Rules** are no longer written by hand. Title-pattern renames come from the bar's **Rename by
-  title pattern…** and go again with **Restore title**. Placement rules written by an earlier
-  version still apply, but nothing creates new ones.
-- **Remote Desktop Manager** session windows go to their own workspace, and tabbed apps get one
-  placement check per window, so a dashboard does not jump between workspaces.
-- An **automated browser** (one a tool started with its own `--user-data-dir`) is placed by the
-  launched-by rule, so it lands beside the tool that started it.
+More in [Where windows go](docs/features/where-windows-go.md).
 
 ## Manage
 
-Left-click the tray icon. Four tabs, and Manage opens on the first:
-
-- **Settings** holds every setting, in three sections, and each one applies as you change it.
-  - **Deskbar on this PC**: **Start Deskbar with Windows**, **Check GitHub for new versions** (the
-    Store copy checks the Store) and **Teach Claude Code about Deskbar**.
-  - **The bar**: **Dock the bar to the edge of its screen**, the see-through band behind the
-    workspace rows (on unless you untick it, `see-through on|off` from a script; it keeps 85% of the
-    bar's colour, and the top of the bar, its footer and the screen strips stay solid), what the bottom strip shows, and the sliders: how faint the bar goes
-    once the pointer is elsewhere, how long it waits before dimming, how long the dimming takes,
-    how long the pointer rests on an icon before its card appears, the text size, the icon size and
-    the fewest lines the window list keeps. You choose a slider's value by watching the bar while
-    you drag. The hover delay follows Windows' own setting unless you untick its box. **Reset the
-    bar's look to defaults** puts the sliders and the bottom strip back.
-  - **Windows on the desktop**: the outline around the window you are in, **Stop apps flashing on
-    Windows' taskbar while Deskbar runs**, and the gap between tiled windows, which takes effect when
-    you press Apply.
-
-  The version you are running is at the bottom right.
-- **Shortcuts** rebinds the switcher's chord and quick find's.
-- **Time** reports how long you have spent in each workspace today, this week (since Monday) and
-  over the last thirty days, by group and by workspace, sortable. Only input counts, keyboard or
-  mouse; two minutes without either is idle, so a workspace left on screen overnight accrues
-  nothing, and a machine that slept is not credited for the gap. It is counted in fifteen-second
-  slices.
-- **Deskbar Pro** says whether this copy has [Deskbar Pro](#deskbar-pro). Without it, the tab has
-  **Get Pro** with the price in your currency (in the GitHub copy, **Open Deskbar in the Store**)
-  and **Check again**, which asks the Store at once, for Pro bought on another PC. With or without
-  it, **Report a problem…** is there too, because priority support is what Pro adds.
-
-Workspaces and rules are not managed here. The bar adds, renames, deletes and reorders
-workspaces. A window icon's menu has **Remember *app*'s workspace**, which decides whether that
-app goes back to its workspace when it opens, and the title-pattern renames, made with **Rename by
-title pattern…** and removed with **Restore title**.
+Left-click the tray icon. Four tabs, and Manage opens on the first: **Settings**, which holds
+every setting and applies each one as you change it, **Shortcuts**, **Time** and **Deskbar Pro**.
+Workspaces and rules are not managed here; the bar and its menus do that.
 
 <p align="center">
   <img src="docs/images/manage-settings.png" alt="Manage on the Settings tab: an explanation that every change applies at once, the Dimming slider at 75 percent with its description, the start of the Before it starts dimming section, Reset to defaults, and below the tabs the three checkboxes for docking, starting with Windows and checking GitHub, with the version at bottom right." />
@@ -730,6 +477,8 @@ title pattern…** and removed with **Restore title**.
   <img src="docs/images/manage-shortcuts.png" alt="Manage on the Shortcuts tab: a paragraph on global shortcuts being exclusive, the Switch workspaces section with the chord box reading Win+Ctrl+Tab, Apply and Reset to default, and the hint hold Win+Ctrl, tap Tab to walk forwards, add Shift to walk backwards." />
 </p>
 
+More in [Manage](docs/features/manage.md).
+
 ## Updates
 
 Every five minutes Deskbar asks GitHub whether a newer release exists (a release whose exe is
@@ -737,30 +486,7 @@ still being built is ignored until it is ready). When one appears you are asked 
 window of the app's own: "Update Deskbar to 1.28.0?". Say no and an **Update to …** item stays
 on the tray and bar menus until you are on that version. Only the newest offer is ever shown.
 
-Accepting downloads the new exe **next to the one you are running**, never over it, through a
-`.part` file renamed only when complete, with a progress window showing the real percentage; then
-the new copy starts and the old one exits, and "Start with Windows" is re-pointed at the new file.
-The previous exe stays on disk, so if you dislike the new version you can go back one step. When the
-new version starts it removes the `Deskbar-<version>-win-x64.exe` files beside it that are older than
-that previous one.
-Downloads are https only, from github.com or githubusercontent.com.
-
-**Check for updates…** on the tray and bar menus asks immediately and always answers: you are on
-the latest, a newer one exists, the download is still being built, or the check failed and here
-is the releases page. The **Check GitHub for new versions** box in Manage governs only the automatic check; a
-manual check still contacts GitHub, because clicking it is the request. Unticking takes effect at
-the next start. The update check is the app's only network traffic on its own. **Report a
-problem…** sends one report when you press Send, with what you typed, the screenshots you added and
-the debug dump if you left it ticked (see [Reporting a problem](#reporting-a-problem)).
-
-The Store copy does not use GitHub for any of this. It asks the Store on the same timer and
-from the same menu items, under the same checkbox in Manage, and the offer window has one
-action button, **Update from the Store**, which has the Store install the update. Deskbar
-closes to update and comes back by itself.
-
-Why a window rather than a Windows notification: a portable exe with no Start-menu shortcut has no
-AppUserModelID, and Windows silently drops its toasts. Registering one would cost the "one file,
-nothing installed" property, so the app asks in its own window.
+More in [Updates](docs/features/updates.md).
 
 ## Reporting a problem
 
@@ -768,20 +494,7 @@ nothing installed" property, so the app asks in its own window.
 paste screenshots with Ctrl+V (Win+Shift+S works well) or drop image files on it, up to five, and
 press Send. Nobody needs an account or a sign-in.
 
-- The debug dump is ticked by default. It describes your screens, the bar and every window on them,
-  titles included, so **View what it contains** opens it in Notepad before anything is sent. Untick
-  it if you would rather not send it.
-- The contact line is optional. Without it we can read the report but cannot answer you or ask a
-  follow-up question, so Send asks once when it is empty or doesn't look like an email, a Telegram
-  @handle or a phone number. Press "Send anyway" to send it as it is.
-- Reports go privately to the Deskbar team, not to a public issue tracker. The window shows a
-  reference number once the report has arrived. A report from a copy with
-  [Deskbar Pro](#deskbar-pro) is marked priority.
-- If it cannot be sent (no connection, for example), the whole report is saved under
-  `%APPDATA%\Deskbar\reports` and the window names the folder. **Try again** sends the same report.
-
-The report travels over https to `report.deskbar.app`, a small relay whose code is in
-[`relay/`](relay/README.md). It holds the key that files the report; the app holds none.
+More in [Reporting a problem](docs/features/reporting-a-problem.md).
 
 ## Driving it from scripts
 
@@ -794,36 +507,9 @@ it a workspace of its own and move the editor there:
 ```
 
 Everything the bar's menus do has a command, and each one runs the same code as its menu item.
-`help` prints the list from the running copy, so it always matches the version you have:
+`help` prints the list from the running copy, so it always matches the version you have.
 
-| Group | Commands |
-|---|---|
-| Listing (JSON) | `workspaces`, `windows`, `desktops` |
-| Workspaces | `create <name> [placement]`, `rename`, `reorder <ws> up\|down\|top\|end\|<n>`, `fold`, `unfold`, `color <ws> <colour>`, `delete <ws> [--close-windows]`, `switch` |
-| Groups | `group-create`, `group-join`, `group-leave`, `group-rename`, `group-color`, `group-fold`, `group-unfold`, `group-reorder <group> up\|down\|top\|end\|<n>`, `ungroup` |
-| Desktops | `name-desktop <id or number> <name>` |
-| Starting | `start <ws> [--create [placement]] [--cwd <folder>] -- <program> [arguments...]`, `open <link> [--from <folder>]` |
-| Windows | `move <ws> [--create [placement]] [--no-follow] (--title <text> \| --hwnd <h>)...`, `rename-window`, `rename-app`, `rename-pattern`, `name-by-folder <hwnd> on\|off`, `restore-title`, `pin`, `unpin` |
-| Bar | `bar minimize\|restore\|dock\|undock\|across\|edge`, `arrange on\|off`, `stats detach\|attach`, `see-through on\|off` |
-| Tasks | `task list`, `task add <title> [--workspace <name>\|none] [--in 1m\|5m\|10m\|30m]`, `task timer <id> (--in ... \| --clear)`, `task done`, `task rename`, `task delete` |
-
-A few more, with `$ts` standing for the batch file:
-
-```powershell
-$ts = "$env:APPDATA\Deskbar\deskbar.cmd"
-& $ts workspaces                          # JSON: name, group, row, colour, minimized, current
-& $ts create Review --after Services      # beside Services, inside its group
-& $ts reorder Review end                  # to the bottom of its group
-& $ts group-leave Review                  # out of the group
-& $ts color Review teal                   # a palette name, #RRGGBB, none or default
-& $ts move Review --hwnd 0x51107A --no-follow
-& $ts bar across                          # dock across both screens
-& $ts delete Review                       # refused while it still has windows
-```
-
-`open <link>` is for a session or a terminal inside VS Code. It finds the VS Code window whose folder
-holds the caller's folder; when that window is in a workspace you are not looking at, the link gets a
-new window of your default browser there, and you stay where you are. Otherwise it opens as usual.
+More in [Driving it from scripts](docs/features/scripts.md), with the full list of commands.
 
 ### Claude Code
 
@@ -840,44 +526,7 @@ hooks run `%APPDATA%\Deskbar\claude-hook.cmd`, which runs `deskbar.cmd attention
 The first time Deskbar changes `settings.json` it keeps the original as `settings.json.deskbar-backup`,
 and it leaves a file with comments in it alone.
 
-Untick "Teach Claude Code about Deskbar" in Manage, or run `deskbar.cmd claude-skill off`, and the
-skill and Deskbar's own hooks are removed; your other hooks stay as they are.
-
-A new workspace goes at the end of the bar unless you say where: `--group <group>` puts it at the
-bottom of that group, `--position <n>` at row n counting a whole group as one row, and `--before`
-or `--after <workspace>` work like the menu's Insert items. `create` is not an error when the
-workspace already exists.
-
-`move <workspace>` picks windows with `--title <text>`, which also searches the title a window had
-before Deskbar shortened it, or with `--hwnd <handle>` taken from `windows`. A move is all or
-nothing: when any selector finds no window, nothing moves and the exit code is 3. `--wait <s>`
-keeps retrying that case, which covers an editor that is still opening. Moving the window you are
-in takes you along, as a drag on the bar does; add `--no-follow` to stay put, which you want for a
-window a script has just opened, because that window has focus.
-
-`start <workspace> -- <program> [arguments...]` starts a program and puts its window in that workspace as it
-opens, without taking you along. Windows opens every new window on the desktop in front, so this is not a
-move you have to make afterwards, but it is still a move: Deskbar claims the window the moment it appears,
-which on a measured run was half a second after the command, with the window on your current workspace for
-part of that. It claims every window of the started process and the processes it starts for 30 seconds, plus
-the first new window with the same exe name, which covers a browser or editor that hands the request to a
-copy already running. Everything after `--` is the program's own command line. `--cwd <folder>` sets the
-folder it starts in, since the running app cannot see yours. Deskbar never starts anything on its own.
-
-```powershell
-& $ts start wt-login --create --group EC --cwd C:\src\login -- code .
-& $ts start Research -- chrome --new-window https://example.com
-```
-
-`delete` closes nothing unless you add `--close-windows`. The menu asks before closing; a command
-cannot ask, so you have to say it. Manage, Check for updates and Exit deliberately have no
-command.
-
-The batch file exists because PowerShell does not wait for a windowed program it calls directly,
-so it would get no output and no exit code. From Git Bash or cmd you can also call the exe itself
-with `ctl <command>`. The client passes arguments through verbatim, so it does not have to match
-the app's version. Exit codes: 0 done, 1 refused, 2 Deskbar is not running, 3 no window
-matched.
+More in [Claude Code sessions](docs/features/claude-sessions.md).
 
 ## Why this matters
 
