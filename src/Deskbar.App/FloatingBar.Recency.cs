@@ -16,8 +16,12 @@ namespace Deskbar.App;
 //
 //   rail     the workspace colour, draining to grey and thinning to about 19% opacity (alpha 0x30), so an idle
 //            rail barely shows. Not to nothing: the rails also mark where one row ends and the next begins.
-//   tint     a faint wash of the workspace colour, a third of the current row's 0x38 when fresh, gone when idle.
-//            Before this only the row you are on was tinted ("try b"); a fresh row now carries a trace of it.
+//   plate    the ground the row stands on. The bar itself stands on grain (BarSurface, PR #405), and a workspace
+//            row you used lately covers it with a smooth plate of the bar's flat base, with a faint wash of the
+//            workspace colour mixed in (a third of the current row's 0x38). The plate wears away as the row fades,
+//            fully opaque when fresh and gone when idle, so an idle row has sunk into the grain. Petre picked this
+//            ("b") from the grain mockup (https://claude.ai/artifact/HnGXmaysPdubn3wmZsgBNz), over the other way
+//            round, grain settling only on idle rows of a flat bar.
 //   name     today's resting white (0xA8) dimming to a floor of 0x6B, never lower, so every name stays readable.
 //   icons    the grey overlay of the aging icons (FloatingBar.Aging.cs), now at the WORKSPACE's fade rather than
 //            each window's own, so every icon in a row is one shade.
@@ -26,7 +30,7 @@ namespace Deskbar.App;
 // a row asking for you keeps its pulsing caption. Rows that are not workspaces (the pinned row, unbound desktops,
 // Unplaced) are left as they were, icons aging per window.
 //
-// The rail, tint and name are drawn from the fade rounded to one of WorkspaceFade.Steps (16) steps, which keeps the
+// The rail, plate and name are drawn from the fade rounded to one of WorkspaceFade.Steps (16) steps, which keeps the
 // brush caches below at 16 entries per colour, and lets the aging timer ask for a rebuild only when a workspace's
 // step has moved (RefreshFades), every seven minutes or so while a row fades. The icons fade continuously in place.
 public partial class FloatingBar
@@ -35,7 +39,8 @@ public partial class FloatingBar
     static readonly Color IdleRail = Color.FromRgb(0x4A, 0x4E, 0x58);
     const byte IdleRailAlpha = 0x30;
 
-    // A third of LaneTint's 0x38, the current row's tint.
+    // LaneTint's 0x38, the current row's tint, and a third of it for a row you used lately.
+    const byte CurrentTintAlpha = 0x38;
     const byte RecentTintAlpha = 0x13;
 
     // The resting caption's alpha when fresh (RestingRowForeground's) and its floor when fully faded.
@@ -46,6 +51,8 @@ public partial class FloatingBar
     // and these are static; the brushes themselves are frozen, so any thread may use them.
     static readonly ConcurrentDictionary<(string Hex, int Step), Brush> fadedAccents = new();
     static readonly ConcurrentDictionary<int, Brush> restingCaptions = new();
+    // Keyed by hex ("" for no colour) and step, the current row as step -1.
+    static readonly ConcurrentDictionary<(string Hex, int Step), Brush> plates = new();
     static readonly ConcurrentDictionary<int, Brush> groupHeaders = new();
 
     // --- which workspace rows were drawn at which step ----------------------------------------------------------
@@ -115,10 +122,38 @@ public partial class FloatingBar
         }
     }
 
-    // The row's wash at a step: RecentTintAlpha when fresh, nothing once it has faded away. Null means "no tint", which
-    // every row already handles.
-    internal static Brush? FadedTint(string? color, int index, int step) =>
-        Between(RecentTintAlpha, 0, FractionOf(step)) is var alpha && alpha > 0 ? Lane(color, index, alpha) : null;
+    // The row's plate at a step: BarSurface.Base with the workspace colour mixed in, worked out here as one opaque
+    // colour (the tint over the base) rather than two layers, because a row's Grid has one Background, and the drag
+    // highlight puts that one brush back when it ends (GroupRow's `idle`). Its alpha is the plate itself: 0xFF when
+    // fresh, so no grain shows, falling with the fade to nothing, which returns null, "no background", which every row
+    // already handles. The row you are on is always fresh and carries the full 0x38 tint it has always had.
+    //
+    // A row that has opted out of colour (WorkspacePalette.None), or whose hand-edited colour does not parse, still
+    // gets a plate, just a plain one: being recent is about the grain, not the colour.
+    internal static Brush? Plate(string? color, int index, int step, bool current)
+    {
+        var at = current ? 0 : FractionOf(step);
+        var opacity = Between(0xFF, 0x00, at);
+        if (opacity == 0) return null;
+        var hex = WorkspacePalette.IsNone(color) ? "" : WorkspacePalette.For(color, index < 0 ? 0 : index);
+        return plates.GetOrAdd((hex, current ? -1 : step), _ =>
+        {
+            var under = BarSurface.Base;
+            var tint = TryColour(hex) ?? under;
+            var alpha = current ? CurrentTintAlpha : Between(RecentTintAlpha, 0, at);
+            return Frozen(opacity, Mix(under.R, tint.R, alpha), Mix(under.G, tint.G, alpha), Mix(under.B, tint.B, alpha));
+        });
+    }
+
+    // One channel of `over` laid on `under` at `alpha`, as WPF would composite the old translucent tint.
+    static byte Mix(byte under, byte over, byte alpha) => (byte)Math.Round(under + (over - under) * alpha / 255.0);
+
+    static Color? TryColour(string hex)
+    {
+        if (hex.Length == 0) return null;
+        try { return (Color)ColorConverter.ConvertFromString(hex); }
+        catch (FormatException) { return null; }
+    }
 
     // A resting workspace name at a step.
     internal static Brush RestingCaption(int step) =>

@@ -2493,9 +2493,11 @@ public partial class FloatingBar : Window
                     // block on it. Every member still wears the GROUP's colour rather than its own, since
                     // colour is what groups things here.
                     //
-                    // ...and, since recent workspaces keep their colour (FloatingBar.Recency.cs), a row you used lately
-                    // carries a faint trace of the tint, a third of the current row's, gone once the row has gone idle.
-                    tint: g.IsCurrent ? LaneTint(colour, slot) : FadedTint(colour, slot, fadeStep),
+                    // ...and, since recent workspaces keep their colour (FloatingBar.Recency.cs), every workspace row
+                    // stands on a PLATE: a smooth patch of the bar's base over the bar's grain, with the tint mixed in
+                    // (the current row's full one, a third of it on a row used lately), wearing away as the row fades
+                    // until an idle row stands on the grain itself.
+                    tint: Plate(colour, slot, fadeStep, g.IsCurrent),
                     rowKey: g.Workspace.Id,
                     // The stored fold; GroupRow decides whether the row is drawn folded right now.
                     folded: g.Workspace.Folded,

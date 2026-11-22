@@ -30,14 +30,41 @@ public class FloatingBarRecencyTests
     public void A_row_with_no_colour_has_no_rail_at_any_age() =>
         Assert.Null(FloatingBar.FadedAccent(WorkspacePalette.None, 0, 5));
 
-    // A third of the current row's 0x38: a recent row is coloured, and still nowhere near the row you are on.
-    [Fact]
-    public void A_fresh_row_has_a_third_of_the_current_tint() =>
-        Assert.Equal(0x13, ColourOf(FloatingBar.FadedTint("#9B6CF0", 0, 0)).A);
+    // THE PLATE (Petre picked "b" from the grain mockup): the bar stands on grain (BarSurface), and a workspace row
+    // you used lately sits on a smooth plate of the bar's flat base, with its tint mixed in, that wears away as the
+    // row fades. A fresh row is smooth; an idle one has sunk into the grain.
+    static Color Over(Color under, Color tint, byte alpha) =>
+        Color.FromRgb(
+            (byte)Math.Round(under.R + (tint.R - under.R) * alpha / 255.0),
+            (byte)Math.Round(under.G + (tint.G - under.G) * alpha / 255.0),
+            (byte)Math.Round(under.B + (tint.B - under.B) * alpha / 255.0));
 
+    static readonly Color Purple = Color.FromRgb(0x9B, 0x6C, 0xF0);
+
+    // Fresh: fully opaque, so no grain shows, and coloured by a third of the current row's 0x38.
     [Fact]
-    public void A_fully_faded_row_has_no_tint() =>
-        Assert.Null(FloatingBar.FadedTint("#9B6CF0", 0, 16));
+    public void A_fresh_row_stands_on_a_smooth_plate_with_a_third_of_the_current_tint() =>
+        Assert.Equal(Over(BarSurface.Base, Purple, 0x13), ColourOf(FloatingBar.Plate("#9B6CF0", 0, 0, current: false)));
+
+    // The row you are on: smooth too, with the full 0x38 tint it has always had.
+    [Fact]
+    public void The_current_row_stands_on_a_smooth_plate_with_its_full_tint() =>
+        Assert.Equal(Over(BarSurface.Base, Purple, 0x38), ColourOf(FloatingBar.Plate("#9B6CF0", 0, 16, current: true)));
+
+    // Half way, half worn: the grain shows through at half strength.
+    [Fact]
+    public void Half_faded_the_plate_is_half_worn() =>
+        Assert.Equal(0x80, ColourOf(FloatingBar.Plate("#9B6CF0", 0, 8, current: false)).A);
+
+    // Idle: no plate at all, the row is the bar's grain.
+    [Fact]
+    public void A_fully_faded_row_has_no_plate() =>
+        Assert.Null(FloatingBar.Plate("#9B6CF0", 0, 16, current: false));
+
+    // A row that opted out of colour still gets the plate, plain: being recent is about the grain, not the colour.
+    [Fact]
+    public void A_row_with_no_colour_gets_a_plain_plate() =>
+        Assert.Equal(BarSurface.Base, ColourOf(FloatingBar.Plate(WorkspacePalette.None, 0, 0, current: false)));
 
     // From today's resting white down to a floor that every name stays readable at.
     [Fact]
@@ -104,6 +131,11 @@ public class FloatingBarRecencyTests
             .Concat(Tree(Row(bar, name)).OfType<Border>().Where(b => b.Width != 3).Select(b => b.Background))
             .OfType<SolidColorBrush>().Select(b => b.Color).Where(c => c.A is > 0 and <= 0x38)];
 
+    // Every solid background in the row, opaque ones included (the plate).
+    static IReadOnlyList<Color> BackgroundsOf(BarUnderTest bar, string name) =>
+        [.. Tree(Row(bar, name)).OfType<Panel>().Select(p => p.Background)
+            .OfType<SolidColorBrush>().Select(b => b.Color)];
+
     [Fact]
     public void An_idle_workspace_row_is_drawn_faded() => StaThread.Run(() =>
     {
@@ -114,6 +146,8 @@ public class FloatingBarRecencyTests
         Assert.Equal(FaintGrey, RailOf(bar, "Sparrow"));
         Assert.Equal(0x6B, ColourOf(CaptionOf(bar, "Sparrow")).A);
         Assert.Empty(TintsOf(bar, "Sparrow"));
+        // No plate: nothing opaque under the row, so it stands on the bar's grain.
+        Assert.DoesNotContain(BackgroundsOf(bar, "Sparrow"), c => c.A == 0xFF);
     });
 
     // Being on it is using it: the current row's windows are two days old too, and it is drawn as it always was.
@@ -137,9 +171,11 @@ public class FloatingBarRecencyTests
         var (harness, _) = Build();
         using var bar = harness.ShowBar();
 
-        Assert.Equal(0xFF, RailOf(bar, "Sparrow").A);
-        Assert.NotEqual(FaintGrey with { A = 0xFF }, RailOf(bar, "Sparrow"));
-        Assert.Contains(TintsOf(bar, "Sparrow"), c => c.A == 0x13);
+        var rail = RailOf(bar, "Sparrow");
+        Assert.Equal(0xFF, rail.A);
+        Assert.NotEqual(FaintGrey with { A = 0xFF }, rail);
+        // The row stands on its smooth plate: the bar's base with a third of the current row's tint, fully opaque.
+        Assert.Contains(BackgroundsOf(bar, "Sparrow"), c => c == Over(BarSurface.Base, rail, 0x13));
         Assert.Equal(0xA8, ColourOf(CaptionOf(bar, "Sparrow")).A);
     });
 
