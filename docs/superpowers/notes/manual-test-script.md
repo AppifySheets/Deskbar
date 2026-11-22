@@ -198,19 +198,23 @@ P12. Start again from a fresh state.json with the window list on the screens and
 The task list at the bottom of the bar (spec `docs/superpowers/specs/2026-11-22-tasks-board-design.md`). `$ts` is
 `%APPDATA%\Deskbar\deskbar.cmd`.
 
-42. Click "+ Add". A box opens with the current workspace's chip ticked, then "none" and "other...". Type
-    "probe", press Enter: the note appears as a line with an empty tick box and the workspace's chip, and
-    the keyboard is back in the window you were typing in. Click the tick box: the note leaves the list.
-43. `$ts task add "a"`, "b", "c", "d" and "e" (five tasks). The list shows three lines and the header
-    reads "+2". Click it: all five show and it reads "Less". Click it again: back to three.
+42. The list has no header: the text box is its first line, reading "Add to <the workspace you are on>…".
+    Switch desktops: it names the new one ("Add…" on an unnamed desktop). Click in it: the chips appear, the
+    current workspace's ticked, then "none" and "other...". Type "probe", press Enter: the note appears as a
+    line with an empty tick box and the workspace's chip, the chips go away, and the keyboard is back in the
+    window you were typing in. Click the tick box: the line stays for six seconds, struck through, with
+    "Undo" in the tick box's place, then leaves.
+43. `$ts task add "a"`, "b", "c", "d" and "e" (five tasks). The list shows three lines and a small "+2 more"
+    under them. Click it: all five show and "Less" is at the end. Click "Less": back to three.
 44. With the five tasks of step 43 open, `$ts task status <id> waiting` on all five. They sort to the top, three
-    show and the two hidden ones wait on you: the header reads "+2 waiting" in orange. Set two of them back to
-    `backlog`: the header reads "+2" in the plain ink again.
-45. Click "+ Add", type some text, then click into another app. The box closes. Click "+ Add" again: the
-    text and the chip you had are back. Enter and Esc both give the keyboard back to the window you were
-    typing in (type a few letters after each to check).
-46. Click "+ Add" and the "other..." chip. Does its menu keep the add box open? Pick a workspace: the
-    chip takes its name and is ticked, and Enter files the note there. Note the answer in the report.
+    show and the two hidden ones wait on you: the line under them reads "+2 waiting" in orange. Set two of them
+    back to `backlog`: it reads "+2 more" in the plain ink again.
+45. Click in the box, type some text, then click into another app. The chips stay (the box holds text) and the
+    text is still there when you come back; click in the box and carry on. Enter and Esc both give the
+    keyboard back to the window you were typing in (type a few letters after each to check). Empty the box
+    and click away: the chips go.
+46. Click in the box, then the "other..." chip, and pick a workspace: the chip takes its name and is ticked,
+    the text stays, and Enter files the note there.
 47. Click a line of a note on another workspace: you go there. Click a note on "none": nothing happens.
 48. Untick "Task list" in Manage's Settings tab (strip items): the list disappears from the bar. Tick it
     again: it is back, with the same tasks.
@@ -221,9 +225,15 @@ The task list at the bottom of the bar (spec `docs/superpowers/specs/2026-11-22-
     widen for a long title (it trims with an ellipsis), and `$ts task list` agrees with what is shown.
 51. Add twelve notes and click "+9": eight lines show and the wheel over the list scrolls to the rest, while the
     workspace rows above stay where they were. Click "Less": three lines again.
-52. Double-click the tick box of the first note: only that note closes, and the one that slides under the
-    pointer stays open. `$ts task list --closed` lists the closed note first; `$ts task reopen <id>` brings it
-    back to the list.
+52. Double-click the tick box of the first note: only that note closes; its line stays struck through with
+    "Undo" where the tick box was, and the second click does not undo it or close the next note. Click "Undo"
+    within six seconds: the note is back as it was. Tick two notes in a row: both lines stay in place, each with
+    its own Undo, and leave after their six seconds. A done Claude task's close button does the same, and Undo
+    brings it back done. After the six seconds, `$ts task list --closed` lists the closed note first and
+    `$ts task reopen <id>` brings it back.
+53. Make the bar as narrow as it goes (drag its edge in). Nothing in the list is cut off at the right: the box,
+    "+N more", the lines' chips, and the add chips, which wrap onto a second line, a long workspace name
+    trimmed with an ellipsis.
 
 ## Tiling on the split tree
 
