@@ -23,11 +23,19 @@ namespace Deskbar.App;
 //
 // "Used" is the manager's to say (WorkspaceManager.LastUsed): a window is stamped when it first becomes known
 // and whenever it comes to the front. The 15 minutes and 8 hours are first guesses, to tune.
+//
+// BY WORKSPACE, NOT BY WINDOW, on a workspace's row. Petre: "let's fade windows not based on individual age, but
+// the age of the workspace". So every icon in a workspace row takes that row's fade (FloatingBar.Recency.cs: the time
+// since ANY of its windows was used), and the row's icons are one shade, fading together with its rail and name.
+// What that gives up: inside one busy row, the bar no longer shows which windows were left alone; the hover card's
+// "last used 2 h ago" still does, per window. Rows that are not workspaces (the pinned row, unbound desktops) keep
+// aging each window on its own, as before.
 public partial class FloatingBar
 {
-    // The grey overlays the current rows carry, so the clock can age them in place every minute without a
-    // rebuild. Emptied at the start of every rebuild, which replaces them all.
-    readonly List<(WindowHandle Window, UIElement Grey)> agingIcons = [];
+    // The grey overlays the current rows carry, with the workspace row each sits on (null on a row that is not a
+    // workspace), so the clock can age them in place every minute without a rebuild. Emptied at the start of every
+    // rebuild, which replaces them all.
+    readonly List<(Guid? Workspace, WindowHandle Window, UIElement Grey)> agingIcons = [];
     readonly DispatcherTimer agingTimer = new() { Interval = TimeSpan.FromMinutes(1) };
 
     // One grey copy per icon image, kept as long as the image itself is.
@@ -35,7 +43,13 @@ public partial class FloatingBar
 
     void StartAging()
     {
-        agingTimer.Tick += (_, _) => agingIcons.ForEach(a => a.Grey.Opacity = AgeOf(a.Window));
+        agingTimer.Tick += (_, _) =>
+        {
+            agingIcons.ForEach(a => a.Grey.Opacity = FadeOf(a.Workspace, a.Window));
+            // The rails, tints and names are drawn at a STEP of the fade, so they change only when a step moves: a
+            // rebuild then, a few times an hour, and never otherwise (FloatingBar.Recency.cs, RefreshFades).
+            RefreshFades();
+        };
         agingTimer.Start();
         Closed += (_, _) => agingTimer.Stop();
     }
@@ -48,9 +62,9 @@ public partial class FloatingBar
 
     double AgeOf(WindowHandle window) => manager.LastUsed(window) is { } at ? AgeOf(manager.Now - at) : 0;
 
-    // An icon's artwork, with its grey copy over it at the window's age. The window you are IN is never aged:
-    // being in it is using it, whatever the last stamp says.
-    UIElement Aged(ImageSource icon, WindowRow row)
+    // An icon's artwork, with its grey copy over it at its workspace row's fade (or, off a workspace row, the window's
+    // own age). The window you are IN is never aged: being in it is using it, whatever the last stamp says.
+    UIElement Aged(ImageSource icon, WindowRow row, Guid? workspace)
     {
         var colour = new Image { Source = icon, Width = 20, Height = 20 };
         if (GreyOf(icon) is not { } grey) return colour;
@@ -60,9 +74,9 @@ public partial class FloatingBar
             Width = 20,
             Height = 20,
             IsHitTestVisible = false,
-            Opacity = row.IsActive ? 0 : AgeOf(row.Window.Handle),
+            Opacity = row.IsActive ? 0 : FadeOf(workspace, row.Window.Handle),
         };
-        agingIcons.Add((row.Window.Handle, overlay));
+        agingIcons.Add((workspace, row.Window.Handle, overlay));
         return new Grid { Children = { colour, overlay } };
     }
 
