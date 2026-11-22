@@ -41,9 +41,9 @@ public sealed record TaskComment(Guid Id, Maybe<string> SessionId, DateTimeOffse
 /// One task. <see cref="WorkspaceId"/> is none for a free task. <see cref="StatusLine"/> is the short line a session
 /// keeps current ("waiting for CI on #398"), "" when there is none. <see cref="Question"/> is what a session asked
 /// Petre while the task is <see cref="TaskStatus.WaitingOnYou"/>. <see cref="UpdatedAt"/> moves on every change so a
-/// later sync can tell which copy is newer. <see cref="Raised"/> is what the list sorts by: set when the task is made
-/// and when a session asks, and by nothing else, so a status line changing never moves a line (spec, "The bar's
-/// order").
+/// later sync can tell which copy is newer. <see cref="Raised"/> is what the list sorts by: set when the task is made,
+/// when a session asks and when the task becomes Done, and by nothing else, so a status line, a comment or a session
+/// ending never moves a line (spec, "The bar's order").
 /// </summary>
 public sealed record TaskItem(
     Guid Id,
