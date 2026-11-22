@@ -95,7 +95,7 @@ public class FloatingBarTaskListTests
     // never "right after a repaint" unless a test hands in a clock of its own (the click guard's tests do).
     static ListBar Build(Func<Guid, Result>? goTo = null, Action? openWindow = null, TaskService? tasks = null, Func<string, Maybe<nint>>? sessionWindow = null,
         List<nint>? handedBack = null, bool editorAlive = true, Func<DateTime>? clickClock = null, Func<nint>? front = null,
-        Func<nint, bool>? onCurrentDesktop = null)
+        Func<nint, bool>? onCurrentDesktop = null, Func<DateTimeOffset>? taskNow = null)
     {
         var harness = Harness.Build();
         var minutes = 0;
@@ -118,6 +118,9 @@ public class FloatingBarTaskListTests
             OnCurrentDesktop = onCurrentDesktop ?? (_ => true),
             TaskClickClock = clickClock ?? (() => ClickStart.AddSeconds(seconds++)),
             TaskUndoTimer = timers.Start,
+            TaskNow = taskNow ?? (() => Start.AddHours(1)),
+            // The minute's tick of the ages is driven by the tests (RefreshTaskAges), never by a real timer.
+            TaskAgeTimer = (_, _) => System.Reactive.Disposables.Disposable.Empty,
         };
         bar.ShowBar();
         bar.UpdateLayout();
@@ -1147,5 +1150,25 @@ public class FloatingBarTaskListTests
         Assert.Equal("Undo", undo.ToolTip);
         Assert.Equal("", Inside(undo).OfType<TextBlock>().Single(b => Equals(b.Tag, "undo-sign")).Text);
         Assert.DoesNotContain(Inside(undo).OfType<TextBlock>(), b => b.Text == "Undo");
+    });
+
+    // Petre: "tasks should say how long ago they appeared - 2h3m". Each line says its age just before its chip, the
+    // full time in the tooltip; a minute passing rewrites that text and nothing else (the line is the same element).
+    [Fact]
+    public void A_line_says_its_age_and_a_minute_rewrites_only_that() => StaThread.Run(() =>
+    {
+        var now = Start.AddHours(2).AddMinutes(3);
+        using var t = Build(taskNow: () => now);
+        t.Tasks.AddNote("note", t.Gepha);
+        var line = t.Lines.Single();
+        TextBlock Age() => Inside(t.Lines.Single()).OfType<TextBlock>().Single(b => Equals(b.Tag, "task-age"));
+        Assert.Equal("2h3m", Age().Text);
+        Assert.NotNull(Age().ToolTip);
+
+        now = now.AddMinutes(1);
+        t.Bar.RefreshTaskAges();
+
+        Assert.Equal("2h4m", Age().Text);
+        Assert.Same(line, t.Lines.Single());
     });
 }

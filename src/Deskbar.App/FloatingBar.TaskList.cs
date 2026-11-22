@@ -125,6 +125,55 @@ public partial class FloatingBar
     // or half a second later, without waiting.
     internal Func<DateTime> TaskClickClock { get; init; } = () => DateTime.UtcNow;
 
+    // THE AGE ON EACH LINE (Petre: "tasks should say how long ago they appeared - 2h3m"; ruling 26). A dim text just
+    // before the workspace chip, TaskAge's compact form, the full date and time in its tooltip. Once a minute only
+    // those texts are rewritten (RefreshTaskAges), never the lines: a repaint would change the list's shape and could
+    // slide a line under the pointer (#48). Not while a paint would wait either (TaskListMustWait: a press, a drag, a
+    // menu). TaskNow is the clock they are told against; TaskAgeTimer starts the minute's tick. Both seams for the tests.
+    internal Func<DateTimeOffset> TaskNow { get; init; } = () => DateTimeOffset.UtcNow;
+    internal Func<TimeSpan, Action, IDisposable> TaskAgeTimer { get; init; } = RepeatingTimer;
+
+    static readonly TimeSpan AgeTick = TimeSpan.FromMinutes(1);
+
+    // The age texts on show, by task, with when each task appeared.
+    readonly Dictionary<Guid, (TextBlock Text, DateTimeOffset Created)> taskAges = [];
+    IDisposable? taskAgeTick;
+
+    /// <summary>Rewrites every age on show for the time now; nothing else on the lines changes.</summary>
+    internal void RefreshTaskAges()
+    {
+        if (TaskListMustWait) return;
+        var now = TaskNow();
+        taskAges.Values.ToList().ForEach(age => age.Text.Text = TaskAge.Format(now - age.Created));
+    }
+
+    // A dispatcher timer that runs `then` every `every` until disposed.
+    static IDisposable RepeatingTimer(TimeSpan every, Action then)
+    {
+        var timer = new DispatcherTimer { Interval = every };
+        timer.Tick += (_, _) => then();
+        timer.Start();
+        return Disposable.Create(timer.Stop);
+    }
+
+    // The age text of a line: dim, trimmed after the title has given up its room, never pushing the chip.
+    TextBlock AgeOf(TaskLine line)
+    {
+        var text = new TextBlock
+        {
+            Tag = "task-age",
+            Text = TaskAge.Format(TaskNow() - line.Created),
+            FontSize = Text(7.5),
+            Foreground = TaskDimInk,
+            VerticalAlignment = VerticalAlignment.Center,
+            TextTrimming = TextTrimming.CharacterEllipsis,
+            Margin = new Thickness(4, 0, 0, 0),
+            ToolTip = line.Created.ToLocalTime().ToString("dddd d MMMM yyyy, HH:mm"),
+        };
+        taskAges[line.Id] = (text, line.Created);
+        return text;
+    }
+
     // How a closed line's six seconds are timed: run `then` once after `after`, unless the returned handle is disposed
     // first (Undo, or the bar closing). A dispatcher timer in the app, so `then` runs on the UI thread; a seam so the
     // tests move time by hand instead of waiting.
@@ -243,7 +292,7 @@ public partial class FloatingBar
             t.IsClaudes,
             t.WorkspaceId.Bind(workspaceName).Match(name => (string?)name, () => null),
             t.WorkspaceId.HasValue ? colour(t.WorkspaceId.Value) : null,
-            t.IsClaudes ? TaskViews.SessionToGoTo(t).Bind(s => sessionWindow(s.Folder)) : Maybe<nint>.None)).ToArray();
+            t.IsClaudes ? TaskViews.SessionToGoTo(t).Bind(s => sessionWindow(s.Folder)) : Maybe<nint>.None) { Created = t.Created }).ToArray();
 
     // What follows the title: the question while the task waits on Petre, else its status line; and for a Claude task
     // whose sessions have all ended, "no live session" after that (spec, "A task whose sessions have all ended stays
@@ -367,6 +416,7 @@ public partial class FloatingBar
         Closed += (_, _) =>
         {
             taskChanges?.Dispose();
+            taskAgeTick?.Dispose();
             // Every closed line's timer goes with the bar; the tasks are closed already, nothing is left to do.
             pendingCloses.ForEach(pending => pending.Timer.Dispose());
             pendingCloses.Clear();
@@ -518,6 +568,9 @@ public partial class FloatingBar
 
         shownTaskLines = taskListExpanded ? all : all.Take(TaskListSlots).ToArray();
         taskLinesPanel.Children.Clear();
+        taskAges.Clear();
+        // The minute's tick of the ages starts with the first lines drawn and lives as long as the bar.
+        taskAgeTick ??= TaskAgeTimer(AgeTick, RefreshTaskAges);
         if (taskProblemHost is not null)
         {
             taskProblemHost.Child = problem.HasValue ? LoadProblemRow(problem.Value) : null;
@@ -657,11 +710,13 @@ public partial class FloatingBar
     // Done task waits for Petre to look and close it (spec, "A Done Claude task shows a close button on its line"). The
     // button is the Done mark: a "Done" word beside it was tried and, on a bar of the default width, took the room the
     // title needed. The line's tooltip names the status.
-    // A Done Claude task just closed has "Undo" in the close button's place.
+    // A Done Claude task just closed has "Undo" in the close button's place. Just inside the chip, the task's age
+    // (AgeOf): docked before the title fills the rest, so the title trims first, then the age, never the chip.
     IEnumerable<UIElement> RightOf(TaskLine line) =>
         new UIElement?[]
         {
             WorkspaceChipButton(line),
+            AgeOf(line),
             line.Status == TaskStatus.Done && line.Claudes
                 ? line.Closing
                     ? UndoButton(line)
@@ -1183,4 +1238,9 @@ public partial class FloatingBar
 /// closed and which stays, struck through with its Undo, for the undo window (FloatingBar.CloseWithUndo).
 /// </summary>
 internal sealed record TaskLine(Guid Id, string Title, string Detail, TaskStatus Status, bool Claudes, string? WorkspaceName, Brush? Colour,
-    Maybe<nint> Window, bool Closing = false);
+    Maybe<nint> Window, bool Closing = false)
+{
+    /// <summary>When the task appeared, for the age the line shows (TaskAge). Not part of the line's shape: the age is
+    /// rewritten in place once a minute, never by a repaint.</summary>
+    public DateTimeOffset Created { get; init; }
+}

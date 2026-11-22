@@ -75,7 +75,8 @@ public class TasksBoardTests
     // Each read of the task clock is a minute later, so tasks are raised in the order the test makes them. Each read of
     // the click clock is a second later, so a click is never "right after a repaint" unless a test hands in a clock of
     // its own (the click guard's test does).
-    static Board Build(Func<TaskItem, Result>? goTo = null, Action<nint>? bringForward = null, Func<DateTime>? clickClock = null)
+    static Board Build(Func<TaskItem, Result>? goTo = null, Action<nint>? bringForward = null, Func<DateTime>? clickClock = null,
+        Func<DateTimeOffset>? now = null)
     {
         var harness = Harness.Build();
         var minutes = 0;
@@ -83,7 +84,7 @@ public class TasksBoardTests
         var timers = new FakeTimers();
         var went = new List<Guid>();
         var tasks = new TaskService(new MemoryStore(), () => Start.AddMinutes(minutes++));
-        var window = new TasksWindow { Quiet = true, ClickClock = clickClock ?? (() => ClickStart.AddSeconds(seconds++)) };
+        var window = new TasksWindow { Quiet = true, ClickClock = clickClock ?? (() => ClickStart.AddSeconds(seconds++)), Now = now ?? (() => Start.AddHours(1)) };
         var controller = new TasksBoard(window, tasks, harness.Manager, goTo ?? (t =>
         {
             went.Add(t.Id);
@@ -604,6 +605,26 @@ public class TasksBoardTests
         Click(ButtonNamed(LineOf(t.Window, id), "Undo"));
 
         Assert.Equal(TaskStatus.Done, t.Tasks.Board.Tasks.Single(x => x.Id == id).Status);
+    });
+
+    // Ruling 26: each line says how long ago its task appeared, and a minute passing rewrites only that text.
+    [Fact]
+    public void A_line_says_its_age_and_a_minute_rewrites_only_that() => StaThread.Run(() =>
+    {
+        var now = Start.AddDays(3).AddHours(2);
+        using var t = Build(now: () => now);
+        var id = t.Tasks.AddNote("note", t.Gepha).Value.Id;
+        t.Controller.Open(Rect.Empty);
+        var line = LineOf(t.Window, id);
+        var rebuilds = t.Window.Rebuilds;
+        Assert.Equal("3d2h", t.Window.AgeText(id));
+
+        now = now.AddHours(1);
+        t.Window.RefreshAges();
+
+        Assert.Equal("3d3h", t.Window.AgeText(id));
+        Assert.Equal(rebuilds, t.Window.Rebuilds);
+        Assert.Same(line, LineOf(t.Window, id));
     });
 
     // Where a part of the window ends, against the window's own content (what the window shows).
