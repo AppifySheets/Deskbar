@@ -26,7 +26,8 @@ Everything the bar's menus do has a command, and each one runs the same code as 
 | Starting | `start <ws> [--create [placement]] [--cwd <folder>] -- <program> [arguments...]`, `open <link> [--from <folder>]` |
 | Windows | `move <ws> [--create [placement]] [--no-follow] (--title <text> \| --hwnd <h>)...`, `rename-window`, `rename-app`, `rename-pattern`, `name-by-folder <hwnd> on\|off`, `restore-title`, `pin`, `unpin` |
 | Bar | `bar minimize\|restore\|dock\|undock\|across\|edge`, `arrange on\|off`, `stats detach\|attach`, `see-through on\|off` |
-| Tasks | `task list [--closed]`, `task add <title> [--workspace <name>\|none]`, `task close`, `task reopen`, `task status`, `task rename`, `task move`, `task comment`, `task delete`, `task flag <id> important\|urgent on\|off`, `task order <id> top\|end\|<n>`, `tasks-window show\|hide\|list\|matrix` |
+| Tasks | `task list [--closed]`, `task add <title> [--workspace <name>\|none]`, `task close`, `task reopen`, `task status`, `task rename`, `task move`, `task comment`, `task delete`, `task flag <id> important\|urgent on\|off`, `task order <id> top\|end\|<n>`, `task goal <id> <goal-id>\|none`, `tasks-window show\|hide\|list\|matrix` |
+| Goals | `goal list [--week [<date>] \| --month [<date>] \| --all]`, `goal add <title> [--week [<date>] \| --month [<date>]]`, `goal done`, `goal drop`, `goal reopen`, `goal rename`, `goal delete`, `goal carry <id> [--week [<date>] \| --month [<date>]]`, `goal parent <id> <monthly-id>\|none`, `goal prompt [dismiss]` |
 
 A few more, with `$ts` standing for the batch file:
 
@@ -74,5 +75,6 @@ Deskbar's Claude Code skill teaches every session on the machine to open links w
 ## Related
 
 - [Tasks](tasks.md) has the `task` commands with examples.
+- [Goals](goals.md) has the `goal` commands with examples.
 - [Where windows go](where-windows-go.md) covers what happens to windows nobody moved.
 - [Arranging the bar](arranging.md) covers `arrange on` and `arrange off`.

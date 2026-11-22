@@ -447,6 +447,16 @@ A script or a Claude Code session can add and change tasks with `deskbar.cmd tas
 
 More in [Tasks](docs/features/tasks.md).
 
+## Goals
+
+Weekly and monthly goals, after Covey's weekly planning: pick the few things that matter this week or
+this month, and let the tasks serve them. A task can belong to a goal, from its "..." menu in the tasks
+window, and a goal shows how many of its tasks are done; a monthly goal also counts the weekly goals
+that belong to it. The tasks window can filter by goal, and a task's tooltip on the bar names its goal.
+For now goals are added and changed with `deskbar.cmd goal`; a planner window comes in the next release.
+
+More in [Goals](docs/features/goals.md).
+
 ## Naming windows
 
 Give a window a short name so the taskbar shows `RDP` instead of
