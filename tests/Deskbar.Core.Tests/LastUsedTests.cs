@@ -98,4 +98,22 @@ public class LastUsedTests
         monitor.Subject.OnNext(new WindowEvent(WindowEventKind.Disappeared, Window(0x10)));
         Assert.Null(manager.LastUsed(Window(0x10).Handle));
     }
+
+    // The window you are LEAVING was in use right up to now. Without this, two hours in one editor with no other
+    // window focused, then a switch away, left that editor stamped two hours ago, and the workspace you had just left
+    // drew half-faded on the bar (review of the recent-workspaces fade, docs/superpowers/specs/2026-11-22-recent-workspaces-design.md).
+    [Fact]
+    public void The_window_you_leave_is_stamped_as_you_leave_it()
+    {
+        var manager = Started();
+        monitor.Subject.OnNext(new WindowEvent(WindowEventKind.Appeared, Window(0x10)));
+        monitor.Subject.OnNext(new WindowEvent(WindowEventKind.Appeared, Window(0x20)));
+        monitor.Subject.OnNext(new WindowEvent(WindowEventKind.Activated, Window(0x10)));
+
+        clock = clock.AddHours(2);
+        monitor.Subject.OnNext(new WindowEvent(WindowEventKind.Activated, Window(0x20)));
+
+        Assert.Equal(clock, manager.LastUsed(Window(0x10).Handle));
+        Assert.Equal(clock, manager.LastUsed(Window(0x20).Handle));
+    }
 }

@@ -100,6 +100,9 @@ public partial class FloatingBar
     {
         ForgetAgingIcons();
         ForgetWindowFits(); // the maximized and tile badges belong to the tabs about to be replaced (FloatingBar.WindowState.cs)
+        // ...and the fades the bar's rows were drawn at (FloatingBar.Recency.cs): those rows are not on screen, so there is
+        // nothing to redraw when a step moves, and keeping them would have the aging timer rebuild every minute all night.
+        ForgetDrawnFades();
         frontsElsewhere = FrontsElsewhere.Of(overview);
         ShowFocusRings(overview);
         NoteActivity(overview);
