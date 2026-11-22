@@ -1097,6 +1097,76 @@ public class FloatingBarTaskListTests
         t.Bar.TaskMoveMenu!.IsOpen = false;
     });
 
+    // (m) A RELEASED-BUILD BUG (2026-11-23, the site's screenshot at 1920x1080 and 125%, the bar docked at 198 px): the
+    // titles read "Ca…", "M…", "S.", with a wide empty gap between the title and the age. The gap was the line's two
+    // OFF flag toggles: transparent until hover (Opacity 0) but still laid out, docked between the title and the age, so
+    // they took the room the title should have had. At the default docked width (158 DIP: 176 at the default 0.9 scale)
+    // and at a floating width, real titles of 20 to 60 characters now show at least eight characters, and nothing
+    // empty sits between the title and what follows it.
+    [Theory]
+    [InlineData(158.4)]
+    [InlineData(240)]
+    public void A_title_takes_the_free_width_of_its_line(double width) => StaThread.Run(() =>
+    {
+        using var t = Build();
+        var gepha = t.Gepha;
+        Assert.True(t.Harness.Manager.RenameWorkspace(gepha, "Website").IsSuccess);
+        string[] titles =
+        [
+            "Call the accountant about Q4",
+            "Make the hero video for the home page",
+            "Send the invoices for November to every client, with the late fee",
+            "Check the screenshots",
+        ];
+        titles.ToList().ForEach(title => t.Tasks.AddNote(title, gepha));
+        t.Bar.ApplyWidth(width);
+        t.Bar.RequestRebuild();
+        t.Bar.UpdateLayout();
+
+        t.Lines.ToList().ForEach(line =>
+        {
+            var title = Inside(line).OfType<TextBlock>().Single(b => Equals(b.Tag, "task-text"));
+            var name = AutomationProperties.GetName(line);
+            var eight = new FormattedText(name[..8], System.Globalization.CultureInfo.CurrentCulture, FlowDirection.LeftToRight,
+                new Typeface(title.FontFamily, title.FontStyle, title.FontWeight, title.FontStretch), title.FontSize, Brushes.White, 1).Width;
+            Assert.True(title.ActualWidth >= eight, $"at {width}: '{name}' has {title.ActualWidth:0.#} DIP, eight characters need {eight:0.#}");
+            // What follows the title on the line: the next element laid out to its right that takes room and shows.
+            var right = title.TransformToAncestor(line).TransformBounds(new Rect(title.RenderSize)).Right;
+            title.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
+            if (title.DesiredSize.Width <= title.ActualWidth + 0.5) return; // a title that fits needs no more room
+            var next = Inside(line).OfType<FrameworkElement>()
+                .Where(e => e != title && e.IsVisible && e.Opacity > 0 && e.ActualWidth > 0 && !e.IsAncestorOf(title) && !title.IsAncestorOf(e))
+                .Select(e => e.TransformToAncestor(line).TransformBounds(new Rect(e.RenderSize)))
+                .Where(b => b.Left >= right - 0.5)
+                .Select(b => b.Left).DefaultIfEmpty(line.ActualWidth).Min();
+            Assert.True(next - right <= 8, $"at {width}: '{name}' ends at {right:0.#}, the next thing starts at {next:0.#}");
+        });
+    });
+
+    // When the chip would leave the title less than its share of the line (TaskLineFace.TitleShare), the chip gives way to
+    // a dot in the workspace's colour, its name in the tooltip; on a wide bar the chip stays.
+    [Fact]
+    public void A_narrow_line_shows_a_dot_for_its_workspace_and_a_wide_one_the_chip() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        var gepha = t.Gepha;
+        Assert.True(t.Harness.Manager.RenameWorkspace(gepha, "Deskbar site").IsSuccess);
+        t.Tasks.AddNote("Make the hero video for the home page", gepha);
+
+        t.Bar.ApplyWidth(158.4);
+        t.Bar.RequestRebuild();
+        t.Bar.UpdateLayout();
+        var dot = Inside(t.Lines.Single()).OfType<FrameworkElement>().Single(e => Equals(e.Tag, "task-workspace-dot"));
+        Assert.True(dot.IsVisible, "the dot shows on a narrow line");
+        Assert.Equal("On Deskbar site", dot.ToolTip);
+        Assert.False(Inside(t.Lines.Single()).OfType<Border>().Single(b => Equals(b.Tag, "task-workspace")).IsVisible);
+
+        t.Bar.ApplyWidth(400);
+        t.Bar.RequestRebuild();
+        t.Bar.UpdateLayout();
+        Assert.True(Inside(t.Lines.Single()).OfType<Border>().Single(b => Equals(b.Tag, "task-workspace")).IsVisible, "the chip shows on a wide line");
+    });
+
     // Petre's screenshot: on "something else" the chip at the line's end was cut off ("Deskba"). The title trims first,
     // so the chip is always whole, at the narrowest bar too.
     [Theory]
@@ -1160,7 +1230,8 @@ public class FloatingBarTaskListTests
 
         var rights = t.Lines.Select(line =>
         {
-            var chip = Inside(line).OfType<Border>().Single(b => Equals(b.Tag, "task-workspace"));
+            // The chip, or the dot that stands for it on a line too narrow for it (TaskLineFace): whichever is shown.
+            var chip = Inside(line).OfType<FrameworkElement>().Single(b => (Equals(b.Tag, "task-workspace") || Equals(b.Tag, "task-workspace-dot")) && b.IsVisible);
             var bounds = chip.TransformToAncestor(t.Bar).TransformBounds(new Rect(chip.RenderSize));
             var lineBounds = line.TransformToAncestor(t.Bar).TransformBounds(new Rect(line.RenderSize));
             Assert.True(lineBounds.Right - bounds.Right <= 10, $"chip ends at {bounds.Right}, its line at {lineBounds.Right}");

@@ -881,18 +881,11 @@ public partial class FloatingBar
     // One task's line: a button the width of the list, so a click anywhere on it goes to the task.
     Button TaskLineButton(TaskLine line)
     {
-        var face = new DockPanel { LastChildFill = true };
-        LeftOf(line).ToList().ForEach(part =>
-        {
-            DockPanel.SetDock(part, Dock.Left);
-            face.Children.Add(part);
-        });
-        RightOf(line).ToList().ForEach(part =>
-        {
-            DockPanel.SetDock(part, Dock.Right);
-            face.Children.Add(part);
-        });
-        face.Children.Add(TextOf(line));
+        // Laid out by TaskLineFace (see its header): the title takes every DIP the shown parts leave, the flags that are
+        // off lie over the title's end instead of beside it, and the chip turns into a dot when the title would keep
+        // less than its share of the line.
+        var face = new TaskLineFace(LeftOf(line).ToList(), TextOf(line), RightOf(line).ToList(), WorkspaceChipButton(line),
+            WorkspaceDot(line), QuietFlags(line));
         // A closed line in its undo window is dimmed, all but its Undo, which is the one thing on it to press.
         if (line.Closing)
             face.Children.OfType<UIElement>().Where(part => part is not Button).ToList().ForEach(part => part.Opacity = 0.45);
@@ -981,20 +974,62 @@ public partial class FloatingBar
     // title needed. The line's tooltip names the status.
     // A Done Claude task just closed has "Undo" in the close button's place. Just inside the chip, the task's age
     // (AgeOf): docked before the title fills the rest, so the title trims first, then the age, never the chip.
+    //
+    // Left to right, between the title and the chip (TaskLineFace): the flags that are ON (a flag that is off is a quiet
+    // control laid over the title's end instead, QuietFlags), the close button or its Undo, and the age.
     IEnumerable<UIElement> RightOf(TaskLine line) =>
         new UIElement?[]
         {
-            WorkspaceChipButton(line),
-            AgeOf(line),
+            line.Closing || !line.Important ? null : FlagToggle(line, TaskFlag.Important),
+            line.Closing || !line.Urgent ? null : FlagToggle(line, TaskFlag.Urgent),
             line.Status == TaskStatus.Done && line.Claudes
                 ? line.Closing
                     ? UndoButton(line)
                     : TaskButton("Close task", new TextBlock { Text = "✕", Foreground = TaskInk, FontSize = Text(8.5), Margin = new Thickness(5, 0, 5, 0) },
                         () => CloseWithUndo(line), "Done: close this task", ignoredWhen: TaskClickIgnored)
                 : null,
-            line.Closing ? null : FlagToggle(line, TaskFlag.Urgent),
-            line.Closing ? null : FlagToggle(line, TaskFlag.Important),
+            AgeOf(line),
         }.OfType<UIElement>();
+
+    // THE FLAGS THAT ARE OFF, as a quiet overlay (2026-11-23, the squeezed titles): laid over the right end of the title
+    // (TaskLineFace) on a fill of the bar's dark, shown while the line is hovered or selected (ShowQuietFlags), clear
+    // and see-through otherwise. They used to be laid out beside the title, invisible but taking its room. None on a
+    // line in its undo window, nor when both flags are on.
+    Border? QuietFlags(TaskLine line)
+    {
+        if (line.Closing || (line.Important && line.Urgent)) return null;
+        var toggles = new StackPanel { Orientation = Orientation.Horizontal };
+        new[] { (Flag: TaskFlag.Important, On: line.Important), (Flag: TaskFlag.Urgent, On: line.Urgent) }
+            .Where(f => !f.On).ToList().ForEach(f => toggles.Children.Add(FlagToggle(line, f.Flag)));
+        return new Border { Tag = QuietFlagsTag, CornerRadius = new CornerRadius(3), Padding = new Thickness(2, 0, 0, 0), Child = toggles };
+    }
+
+    const string QuietFlagsTag = "task-quiet-flags";
+
+    // Behind the quiet flags while they show, so they read over the title's tail.
+    static readonly Brush QuietFlagsFill = Frozen(0xF2, 0x26, 0x28, 0x2E);
+
+    // The workspace as a dot in its colour, for a line too narrow for the chip (TaskLineFace): its name in the tooltip,
+    // and the chip's click (the move menu) on a line that is not closing.
+    UIElement WorkspaceDot(TaskLine line)
+    {
+        var name = line.WorkspaceName ?? "none";
+        var dot = new System.Windows.Shapes.Ellipse
+        {
+            Tag = "task-workspace-dot",
+            Width = 8,
+            Height = 8,
+            Fill = line.WorkspaceName is null ? TaskNoneFill : line.Colour ?? TaskButtonFill,
+            Margin = new Thickness(5, 0, 0, 0),
+            VerticalAlignment = VerticalAlignment.Center,
+            ToolTip = $"On {name}",
+        };
+        if (line.Closing) return dot;
+        Button? button = null;
+        button = TaskButton("Workspace dot", dot, () => OpenTaskMoveMenu(line.Id, button), $"On {name}: move to another workspace",
+            ignoredWhen: TaskClickIgnored);
+        return button;
+    }
 
     // THE TWO TOGGLES (Task 12; see the header). Glyphs by code point in the icon font (IconFont: Segoe Fluent Icons,
     // Segoe MDL2 Assets on Windows 10, both checked to carry them): U+E8C9 "Important", an exclamation mark, and
@@ -1033,9 +1068,14 @@ public partial class FloatingBar
     const double QuietFlagOpacity = 0.55;
 
     // Shows or hides a line's off toggles; the on ones are always at full strength.
-    static void ShowQuietFlags(Button line, bool show) =>
+    static void ShowQuietFlags(Button line, bool show)
+    {
         LogicalDescendants(line).OfType<Button>().Where(b => Equals(b.Tag, FlagOffTag)).ToList()
             .ForEach(toggle => toggle.Opacity = show ? QuietFlagOpacity : 0);
+        // Their fill only while they show: otherwise the title's tail under them reads through.
+        LogicalDescendants(line).OfType<Border>().Where(b => Equals(b.Tag, QuietFlagsTag)).ToList()
+            .ForEach(overlay => overlay.Background = show ? QuietFlagsFill : Brushes.Transparent);
+    }
 
     // Every element under `node` in the logical tree, itself included.
     static IEnumerable<DependencyObject> LogicalDescendants(DependencyObject node) =>
