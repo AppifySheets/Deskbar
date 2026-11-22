@@ -81,15 +81,20 @@ minimize button, in the title bar.
 - What it is: a small Deskbar window laid over the tile's title bar, never anything inside the app. Adding a real
   button to another app's title bar means injecting code into its process, which fails on elevated windows, trips
   antivirus and would not pass Store certification.
-- Look: a pushpin glyph in a rounded square about the size of a caption button's icon. Locked: filled, always shown.
-  Unlocked: a faint outline, shown only while the mouse is over that tile's title bar; elsewhere an unlocked tile
-  shows nothing. Clicking the pin toggles the lock, the same as the bar's menu item, and does not activate the pin's
-  own window.
+- Look: a padlock glyph in a rounded square about the size of a caption button's icon (24 DIP). Locked: a closed
+  padlock on a filled square, always shown. Unlocked: an open padlock in a faint outline, shown only while the mouse
+  is over that tile's title bar; elsewhere an unlocked tile shows nothing. Clicking the mark toggles the lock, the
+  same as the bar's menu item, and does not activate the mark's own window. Petre first picked a pushpin; the probe
+  found VS Code's own "always on top" pushpin sits exactly where the mark goes, so he switched to the padlock (B in
+  the glyph mockup, 2026-11-22). "Pin" below means this mark.
 - Where: just left of the window's caption buttons. The caption buttons' bounds come from
   `DwmGetWindowAttribute(DWMWA_CAPTION_BUTTON_BOUNDS)` where Windows answers; a window with a title bar it draws itself
   (VS Code, Chromium) may answer differently, so a probe on VS Code, Edge or Chrome, Explorer and Windows Terminal
   comes first and settles the placement and any fallback. Known cost, accepted by Petre: on VS Code and Chromium the
-  pin covers whatever the app put beside minimize (layout buttons, tab search).
+  pin covers whatever the app put beside minimize (layout buttons, tab search). The probe
+  (`docs/superpowers/notes/2026-11-22-tile-pin-probes.md`) settled it: Edge, Chrome, Explorer and Terminal report
+  their buttons; VS Code reports a zero-width rectangle, so a window whose bounds have height but no width falls back
+  to three 46 DIP buttons at the right edge of its visible frame (`DWMWA_EXTENDED_FRAME_BOUNDS`).
 - Which windows: only tiles of the tiled workspace on the desktop being looked at (the Tiler's board). Not floating
   windows, not maximized or minimized ones, and no pin on any other desktop. The pins go away when the desktop
   changes or tiling stops, and are made again on arrival.
