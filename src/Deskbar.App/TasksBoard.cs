@@ -1,4 +1,5 @@
 using System.Reactive.Disposables;
+using System.Reactive.Linq;
 using System.Windows;
 using System.Windows.Interop;
 using System.Windows.Media;
@@ -119,9 +120,18 @@ public sealed class TasksBoard : IDisposable
 
         subscriptions = new CompositeDisposable(
             tasks.Changed.Subscribe(_ => Refresh()),
-            manager.StateChanged.Subscribe(_ => Refresh()),
+            // Only a change the window shows (whole-PR review, minor 4): the workspaces (names, colours, groups, order),
+            // which workspace is in front (where a new note goes) and the List / Matrix switch. Every other state pulse,
+            // a window moving or a stats tick, used to rebuild the whole view for nothing; tasks have their own pulse.
+            manager.StateChanged.Select(_ => ShownStateKey()).StartWith(ShownStateKey()).DistinctUntilChanged().Skip(1).Subscribe(_ => Refresh()),
             this.selection.Changed.Subscribe(_ => window.PaintSelection(this.selection.Current)));
     }
+
+    // What of the workspace state the window shows, as text: compared, never parsed.
+    string ShownStateKey() =>
+        string.Join('|', manager.State.Workspaces.Select(w => $"{w}"))
+        + "|" + string.Join('|', manager.State.Groups.Select(g => $"{g}"))
+        + $"|{manager.CurrentWorkspaceId}|{manager.State.TasksMatrix}";
 
     /// <summary>
     /// The window's handle, so the App can hand it to WindowMonitor.Ignore before it ever shows: the monitor lists the
