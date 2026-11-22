@@ -1,11 +1,14 @@
 using CSharpFunctionalExtensions;
 using Deskbar.Core.Tasks;
 using Xunit;
+// System.Threading.Tasks (an implicit using) has a TaskStatus too; the alias says which one this file means.
+using TaskStatus = Deskbar.Core.Tasks.TaskStatus;
 
 namespace Deskbar.Core.Tests.Tasks;
 
-// tasks.json round trips through JsonTaskStore. Design: docs/superpowers/specs/2026-11-19-tasks-in-the-bar-design.md
-// ("Persistence"). Each test works in its own fresh temp directory and removes it afterwards.
+// tasks.json round trips through JsonTaskStore, and a version 1 file (the timer build's) comes back as notes.
+// Design: docs/superpowers/specs/2026-11-22-tasks-board-design.md ("Calls made in the conversation that the builder
+// should keep"). Each test works in its own fresh temp directory and removes it afterwards.
 public sealed class JsonTaskStoreTests : IDisposable
 {
     readonly string dir = Path.Combine(Path.GetTempPath(), "deskbar-tasks-" + Guid.NewGuid().ToString("N"));
@@ -15,20 +18,24 @@ public sealed class JsonTaskStoreTests : IDisposable
         if (Directory.Exists(dir)) Directory.Delete(dir, recursive: true);
     }
 
-    static readonly DateTimeOffset T0 = new(2026, 11, 19, 9, 0, 0, TimeSpan.FromHours(4));
+    static readonly DateTimeOffset T0 = new(2026, 11, 22, 9, 0, 0, TimeSpan.FromHours(4));
+
+    string TasksPath => Path.Combine(dir, "tasks.json");
 
     static TaskBoard Sample()
     {
         var workspace = Guid.NewGuid();
-        var free = new TaskItem(Guid.NewGuid(), "Call the bank", Maybe<Guid>.None, T0, T0,
-            Maybe<TaskTimer>.None, Maybe<DateTimeOffset>.None, Array.Empty<TimerRecord>());
-        var running = new TaskItem(Guid.NewGuid(), "Review the PR", workspace, T0, T0.AddMinutes(1),
-            new TaskTimer(T0.AddMinutes(1), TimeSpan.FromMinutes(25)), Maybe<DateTimeOffset>.None, Array.Empty<TimerRecord>());
-        var done = new TaskItem(Guid.NewGuid(), "Write the spec", workspace, T0, T0.AddHours(2),
-            Maybe<TaskTimer>.None, T0.AddHours(2),
-            [new TimerRecord(T0, TimeSpan.FromMinutes(10), T0.AddMinutes(10), TimerEnd.Replaced),
-             new TimerRecord(T0.AddMinutes(10), TimeSpan.FromMinutes(30), T0.AddHours(2), TimerEnd.Done)]);
-        return new TaskBoard([free, running, done]);
+        var note = new TaskItem(Guid.NewGuid(), "Call the bank", Maybe<Guid>.None, TaskStatus.Backlog, "",
+            Maybe<string>.None, T0, T0, T0, [], []);
+        var waiting = new TaskItem(Guid.NewGuid(), "Tasks redesign", workspace, TaskStatus.WaitingOnYou, "waiting for CI",
+            "OK to merge?", T0, T0.AddMinutes(5), T0.AddMinutes(4),
+            [new TaskSession("s1", @"C:\repos\TaskSpaces", T0, T0.AddMinutes(3)),
+             new TaskSession("s2", @"C:\repos\TaskSpaces", T0.AddMinutes(3), Maybe<DateTimeOffset>.None)],
+            [new TaskComment(Guid.NewGuid(), "s2", T0.AddMinutes(4), "The **detail**"),
+             new TaskComment(Guid.NewGuid(), Maybe<string>.None, T0.AddMinutes(5), "Go ahead")]);
+        var closed = new TaskItem(Guid.NewGuid(), "Write the spec", workspace, TaskStatus.Closed, "",
+            Maybe<string>.None, T0, T0.AddHours(2), T0, [], []);
+        return new TaskBoard([note, waiting, closed]);
     }
 
     static void AssertSame(TaskItem expected, TaskItem actual)
@@ -36,15 +43,18 @@ public sealed class JsonTaskStoreTests : IDisposable
         Assert.Equal(expected.Id, actual.Id);
         Assert.Equal(expected.Title, actual.Title);
         Assert.Equal(expected.WorkspaceId, actual.WorkspaceId);
+        Assert.Equal(expected.Status, actual.Status);
+        Assert.Equal(expected.StatusLine, actual.StatusLine);
+        Assert.Equal(expected.Question, actual.Question);
         Assert.Equal(expected.Created, actual.Created);
         Assert.Equal(expected.UpdatedAt, actual.UpdatedAt);
-        Assert.Equal(expected.Timer, actual.Timer);
-        Assert.Equal(expected.DoneAt, actual.DoneAt);
-        Assert.Equal(expected.History, actual.History);
+        Assert.Equal(expected.Raised, actual.Raised);
+        Assert.Equal(expected.Sessions, actual.Sessions);
+        Assert.Equal(expected.Comments, actual.Comments);
     }
 
     [Fact]
-    public void Round_trips_a_board()
+    public void A_version_2_file_round_trips()
     {
         var store = new JsonTaskStore(dir);
         var board = Sample();
@@ -52,14 +62,212 @@ public sealed class JsonTaskStoreTests : IDisposable
         Assert.True(store.Save(board).IsSuccess);
         var loaded = store.Load();
 
-        Assert.True(loaded.IsSuccess);
+        Assert.True(loaded.IsSuccess, loaded.IsFailure ? loaded.Error : "");
         Assert.Equal(board.Tasks.Count, loaded.Value.Tasks.Count);
         board.Tasks.Zip(loaded.Value.Tasks).ToList().ForEach(p => AssertSame(p.First, p.Second));
+
+        var text = File.ReadAllText(TasksPath);
+        Assert.Contains("\"version\": 2", text);
+        Assert.Contains("\"status\": \"WaitingOnYou\"", text);
+        Assert.Contains("\"status\": \"Closed\"", text);
+        // Sample() uses +04:00 everywhere; none of that may reach the file.
+        Assert.DoesNotContain("+04:00", text);
+        Assert.Contains("+00:00", text);
     }
+
+    // A literal file as the timer build wrote it: one running task, one open, one done.
+    const string Version1 = """
+        {
+          "tasks": [
+            {
+              "id": "aaaaaaaa-0000-0000-0000-000000000001",
+              "title": "Wait for CI",
+              "workspaceId": "11111111-1111-1111-1111-111111111111",
+              "created": "2026-11-19T09:00:00+04:00",
+              "updatedAt": "2026-11-19T09:05:00+04:00",
+              "timer": { "started": "2026-11-19T09:05:00+04:00", "lengthSeconds": 300 },
+              "doneAt": null,
+              "history": [
+                { "started": "2026-11-19T09:00:00+04:00", "lengthSeconds": 60, "ended": "2026-11-19T09:01:00+04:00", "how": "Replaced" }
+              ]
+            },
+            {
+              "id": "aaaaaaaa-0000-0000-0000-000000000002",
+              "title": "Buy milk",
+              "workspaceId": null,
+              "created": "2026-11-19T10:00:00+04:00",
+              "updatedAt": "2026-11-19T10:00:00+04:00",
+              "timer": null,
+              "doneAt": null,
+              "history": []
+            },
+            {
+              "id": "aaaaaaaa-0000-0000-0000-000000000003",
+              "title": "Write the spec",
+              "workspaceId": "11111111-1111-1111-1111-111111111111",
+              "created": "2026-11-19T08:00:00+04:00",
+              "updatedAt": "2026-11-19T11:00:00+04:00",
+              "timer": null,
+              "doneAt": "2026-11-19T11:00:00+04:00",
+              "history": []
+            }
+          ]
+        }
+        """;
+
+    [Fact]
+    public void A_version_1_file_migrates()
+    {
+        Directory.CreateDirectory(dir);
+        File.WriteAllText(TasksPath, Version1);
+
+        var loaded = new JsonTaskStore(dir).Load();
+
+        Assert.True(loaded.IsSuccess, loaded.IsFailure ? loaded.Error : "");
+        var tasks = loaded.Value.Tasks;
+        Assert.Equal([TaskStatus.Backlog, TaskStatus.Backlog, TaskStatus.Closed], tasks.Select(t => t.Status));
+        Assert.Equal(Guid.Parse("11111111-1111-1111-1111-111111111111"), tasks[0].WorkspaceId.Value);
+        Assert.True(tasks[1].WorkspaceId.HasNoValue);
+        Assert.Equal(["Wait for CI", "Buy milk", "Write the spec"], tasks.Select(t => t.Title));
+        Assert.All(tasks, t => Assert.Empty(t.Sessions));
+        Assert.All(tasks, t => Assert.Empty(t.Comments));
+        Assert.All(tasks, t => Assert.Equal("", t.StatusLine));
+        Assert.All(tasks, t => Assert.Equal(t.Created, t.Raised));
+        Assert.All(tasks, t => Assert.Equal(TimeSpan.Zero, t.Created.Offset));
+        Assert.Equal(new DateTimeOffset(2026, 11, 19, 5, 0, 0, TimeSpan.Zero), tasks[0].Created);
+        Assert.Equal(new DateTimeOffset(2026, 11, 19, 5, 5, 0, TimeSpan.Zero), tasks[0].UpdatedAt);
+    }
+
+    [Fact]
+    public void The_version_1_file_is_kept_beside_the_new_one()
+    {
+        Directory.CreateDirectory(dir);
+        File.WriteAllText(TasksPath, Version1);
+        var original = File.ReadAllBytes(TasksPath);
+        var store = new JsonTaskStore(dir);
+        var board = store.Load().Value;
+
+        Assert.False(File.Exists(TasksPath + ".v1"));
+        Assert.True(store.Save(board).IsSuccess);
+        Assert.Equal(original, File.ReadAllBytes(TasksPath + ".v1"));
+        Assert.Contains("\"version\": 2", File.ReadAllText(TasksPath));
+
+        // Made once: a later save, even after another version 1 load, leaves the first copy alone.
+        File.WriteAllText(TasksPath, Version1.Replace("Buy milk", "Buy bread"));
+        Assert.True(store.Save(store.Load().Value).IsSuccess);
+        Assert.Equal(original, File.ReadAllBytes(TasksPath + ".v1"));
+    }
+
+    [Fact]
+    public void A_version_2_load_makes_no_version_1_copy()
+    {
+        var store = new JsonTaskStore(dir);
+        store.Save(Sample());
+
+        store.Save(store.Load().Value);
+
+        Assert.False(File.Exists(TasksPath + ".v1"));
+    }
+
+    // A status this build does not know (written by a newer one) reads as Backlog instead of failing the whole file.
+    [Fact]
+    public void An_unknown_status_reads_as_backlog()
+    {
+        Directory.CreateDirectory(dir);
+        File.WriteAllText(TasksPath, Version2(status: "\"Snoozed\""));
+
+        var loaded = new JsonTaskStore(dir).Load();
+
+        Assert.True(loaded.IsSuccess, loaded.IsFailure ? loaded.Error : "");
+        Assert.Equal(TaskStatus.Backlog, loaded.Value.Tasks.Single().Status);
+    }
+
+    [Fact]
+    public void A_status_reads_in_any_case()
+    {
+        Directory.CreateDirectory(dir);
+        File.WriteAllText(TasksPath, Version2(status: "\"inprogress\""));
+
+        Assert.Equal(TaskStatus.InProgress, new JsonTaskStore(dir).Load().Value.Tasks.Single().Status);
+    }
+
+    // Times are UTC on the way in too, so a hand-edited file in local time means the same instants.
+    [Fact]
+    public void Times_are_read_as_UTC()
+    {
+        Directory.CreateDirectory(dir);
+        File.WriteAllText(TasksPath, Version2(status: "\"Done\""));
+
+        var task = new JsonTaskStore(dir).Load().Value.Tasks.Single();
+
+        Assert.Equal(TimeSpan.Zero, task.Created.Offset);
+        Assert.Equal(TimeSpan.Zero, task.UpdatedAt.Offset);
+        Assert.Equal(TimeSpan.Zero, task.Raised.Offset);
+        Assert.Equal(TimeSpan.Zero, task.Sessions.Single().Joined.Offset);
+        Assert.Equal(TimeSpan.Zero, task.Comments.Single().At.Offset);
+        Assert.Equal(new DateTimeOffset(2026, 11, 22, 5, 0, 0, TimeSpan.Zero), task.Created);
+    }
+
+    // A hand-edited file with nulls where text belongs loads as empty text, never a crash; a missing raised time is
+    // the created one.
+    [Fact]
+    public void Nulls_load_as_empty_text()
+    {
+        Directory.CreateDirectory(dir);
+        File.WriteAllText(TasksPath, """
+            { "version": 2, "tasks": [ { "id": "aaaaaaaa-0000-0000-0000-000000000001", "title": null, "statusLine": null,
+              "created": "2026-11-22T09:00:00+00:00", "updatedAt": "2026-11-22T09:00:00+00:00" } ] }
+            """);
+
+        var loaded = new JsonTaskStore(dir).Load();
+
+        Assert.True(loaded.IsSuccess, loaded.IsFailure ? loaded.Error : "");
+        var task = loaded.Value.Tasks.Single();
+        Assert.Equal("", task.Title);
+        Assert.Equal("", task.StatusLine);
+        Assert.Equal(TaskStatus.Backlog, task.Status);
+        Assert.Equal(task.Created, task.Raised);
+        Assert.Empty(task.Sessions);
+        Assert.Empty(task.Comments);
+    }
+
+    // One version 2 task in local (+04:00) time, with a session and a comment, as a person might edit it.
+    static string Version2(string status) => $$"""
+        {
+          "version": 2,
+          "tasks": [
+            {
+              "id": "aaaaaaaa-0000-0000-0000-000000000001",
+              "title": "Tasks redesign",
+              "workspaceId": null,
+              "status": {{status}},
+              "statusLine": "",
+              "question": null,
+              "created": "2026-11-22T09:00:00+04:00",
+              "updatedAt": "2026-11-22T09:00:00+04:00",
+              "raised": "2026-11-22T09:00:00+04:00",
+              "sessions": [ { "id": "s1", "folder": "C:/repos/TaskSpaces", "joined": "2026-11-22T09:00:00+04:00", "ended": null } ],
+              "comments": [ { "id": "bbbbbbbb-0000-0000-0000-000000000001", "sessionId": "s1", "at": "2026-11-22T09:00:00+04:00", "markdown": "Hi" } ]
+            }
+          ]
+        }
+        """;
 
     [Fact]
     public void A_missing_file_is_an_empty_board()
     {
+        var loaded = new JsonTaskStore(dir).Load();
+
+        Assert.True(loaded.IsSuccess);
+        Assert.Empty(loaded.Value.Tasks);
+    }
+
+    [Fact]
+    public void An_empty_tasks_list_is_an_empty_board()
+    {
+        Directory.CreateDirectory(dir);
+        File.WriteAllText(TasksPath, """{ "version": 2, "tasks": [] }""");
+
         var loaded = new JsonTaskStore(dir).Load();
 
         Assert.True(loaded.IsSuccess);
@@ -73,7 +281,7 @@ public sealed class JsonTaskStoreTests : IDisposable
         var a = Sample();
         store.Save(a);
         store.Save(new TaskBoard(a.Tasks.Take(1).ToArray()));
-        File.WriteAllText(Path.Combine(dir, "tasks.json"), "{not json");
+        File.WriteAllText(TasksPath, "{not json");
 
         var loaded = store.Load();
 
@@ -81,16 +289,13 @@ public sealed class JsonTaskStoreTests : IDisposable
         Assert.Equal(a.Tasks.Count, loaded.Value.Tasks.Count);
     }
 
-    string TasksPath => Path.Combine(dir, "tasks.json");
-
     // The quarantined copies of tasks.json (and of its previous copy) a failed Load moved aside: <prefix>.<stamp>.bak,
     // the stamp starting with the year, which tells tasks.json's own copies from tasks.json.previous's.
     string[] Quarantined(string prefix) =>
         Directory.GetFiles(dir, prefix + ".*.bak").Where(f => Path.GetFileName(f).StartsWith(prefix + ".2", StringComparison.Ordinal)).ToArray();
 
-    // Final review I2: with both copies unreadable, Load fails and the board starts empty, so the next two saves
-    // would write over both files. The unreadable files are moved aside on the failed Load, so what was in them
-    // survives every later save.
+    // With both copies unreadable, Load fails and the board starts empty, so the next two saves would write over both
+    // files. The unreadable files are moved aside on the failed Load, so what was in them survives every later save.
     [Fact]
     public void Both_copies_unreadable_are_kept_aside_before_the_next_save()
     {
@@ -139,96 +344,5 @@ public sealed class JsonTaskStoreTests : IDisposable
 
         Assert.True(saved.IsFailure);
         Assert.Contains("tasks.json", saved.Error);
-    }
-
-    // Final review M1: a timer's end is written by name, so the file is readable and a reordered enum cannot
-    // renumber it.
-    [Fact]
-    public void How_a_timer_ended_is_written_by_name()
-    {
-        new JsonTaskStore(dir).Save(Sample());
-
-        var text = File.ReadAllText(TasksPath);
-
-        Assert.Contains("\"how\": \"Replaced\"", text);
-        Assert.Contains("\"how\": \"Done\"", text);
-    }
-
-    // A name this build does not know (written by a newer one) reads as Cleared instead of failing the whole file,
-    // and the numbers files were written with before names still read.
-    [Fact]
-    public void An_unknown_end_reads_as_cleared_and_numbers_still_read()
-    {
-        Directory.CreateDirectory(dir);
-        File.WriteAllText(TasksPath, HandWritten(title: "\"Old\"", how1: "\"Abandoned\"", how2: "3"));
-
-        var loaded = new JsonTaskStore(dir).Load();
-
-        Assert.True(loaded.IsSuccess, loaded.IsFailure ? loaded.Error : "");
-        var history = loaded.Value.Tasks.Single().History;
-        Assert.Equal([TimerEnd.Cleared, TimerEnd.Replaced], history.Select(h => h.How));
-    }
-
-    // Times are UTC on the way in too, so a hand-edited file in local time means the same instants.
-    [Fact]
-    public void Times_are_read_as_UTC()
-    {
-        Directory.CreateDirectory(dir);
-        File.WriteAllText(TasksPath, HandWritten(title: "\"Old\"", how1: "\"Done\"", how2: "\"Done\""));
-
-        var task = new JsonTaskStore(dir).Load().Value.Tasks.Single();
-
-        Assert.Equal(TimeSpan.Zero, task.Created.Offset);
-        Assert.Equal(TimeSpan.Zero, task.UpdatedAt.Offset);
-        Assert.Equal(TimeSpan.Zero, task.Timer.Value.Started.Offset);
-        Assert.All(task.History, h => Assert.Equal(TimeSpan.Zero, h.Started.Offset));
-        Assert.All(task.History, h => Assert.Equal(TimeSpan.Zero, h.Ended.Offset));
-        Assert.Equal(new DateTimeOffset(2026, 11, 19, 5, 0, 0, TimeSpan.Zero), task.Created);
-    }
-
-    // Final review M8: a hand-edited file with a null title loads as an empty title, never a crash.
-    [Fact]
-    public void A_null_title_loads_as_empty()
-    {
-        Directory.CreateDirectory(dir);
-        File.WriteAllText(TasksPath, HandWritten(title: "null", how1: "\"Done\"", how2: "\"Done\""));
-
-        var loaded = new JsonTaskStore(dir).Load();
-
-        Assert.True(loaded.IsSuccess, loaded.IsFailure ? loaded.Error : "");
-        Assert.Equal("", loaded.Value.Tasks.Single().Title);
-    }
-
-    // One task in local (+04:00) time with a running timer and two history records, as a person might edit it.
-    static string HandWritten(string title, string how1, string how2) => $$"""
-        {
-          "tasks": [
-            {
-              "id": "aaaaaaaa-0000-0000-0000-000000000001",
-              "title": {{title}},
-              "workspaceId": null,
-              "created": "2026-11-19T09:00:00+04:00",
-              "updatedAt": "2026-11-19T09:00:00+04:00",
-              "timer": { "started": "2026-11-19T09:00:00+04:00", "lengthSeconds": 300 },
-              "doneAt": null,
-              "history": [
-                { "started": "2026-11-19T08:00:00+04:00", "lengthSeconds": 60, "ended": "2026-11-19T08:01:00+04:00", "how": {{how1}} },
-                { "started": "2026-11-19T08:10:00+04:00", "lengthSeconds": 60, "ended": "2026-11-19T08:11:00+04:00", "how": {{how2}} }
-              ]
-            }
-          ]
-        }
-        """;
-
-    [Fact]
-    public void Times_are_written_in_UTC()
-    {
-        new JsonTaskStore(dir).Save(Sample());
-
-        var text = File.ReadAllText(Path.Combine(dir, "tasks.json"));
-
-        // Sample() uses +04:00 everywhere; none of that may reach the file.
-        Assert.DoesNotContain("+04:00", text);
-        Assert.Contains("+00:00", text);
     }
 }
