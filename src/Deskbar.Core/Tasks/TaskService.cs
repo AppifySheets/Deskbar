@@ -80,8 +80,6 @@ public sealed class TaskService(ITaskStore store, Func<DateTimeOffset> now, Func
 
     public Result SetFlag(Guid id, TaskFlag flag, bool on) => ApplyIfChanged(Board.SetFlag(id, flag, on, now()));
 
-    public Result SetQuadrant(Guid id, Quadrant quadrant) => ApplyIfChanged(Board.SetQuadrant(id, quadrant, now()));
-
     public Result Place(Guid id, Quadrant quadrant, TaskPlace place) => ApplyIfChanged(Board.Place(id, quadrant, place, now()));
 
     public Result Comment(Guid id, Maybe<string> sessionId, string markdown) =>

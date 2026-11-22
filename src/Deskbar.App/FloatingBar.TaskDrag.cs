@@ -61,7 +61,7 @@ public partial class FloatingBar
         {
             if (taskDrag is null) return;
             if (!ArrangeMouseInput.ButtonDown(e)) CancelTaskDrag("the button came up unseen");
-            else TaskDragMove(e.GetPosition(panel));
+            else TaskDragMove(ArrangeMouseInput.Position(e, panel));
         };
         panel.PreviewMouseLeftButtonUp += (_, e) =>
         {
@@ -78,9 +78,19 @@ public partial class FloatingBar
         panel.LostMouseCapture += (_, e) =>
         {
             if (ReferenceEquals(e.OriginalSource, panel) && taskDrag is { Started: true }) CancelTaskDrag("capture lost");
-            // The line's own capture going (its release, or another window taking the mouse) ends a press that never
-            // became a drag, so an armed press can never hold the list's paints back.
-            else if (taskDrag is { Started: false }) taskDrag = null;
+            // The line's own capture going while a press is still armed (another window took the mouse; an ordinary
+            // release has cleared the press before this) ends that press, and serves what it held back: a paint, and
+            // any rebuild that waited (review of 4fc4441..a1acd60, item 3). Queued, never inline: this is inside the
+            // capture change, the #48 kind of moment.
+            else if (taskDrag is { Started: false })
+            {
+                taskDrag = null;
+                Dispatcher.BeginInvoke(new Action(() =>
+                {
+                    PaintTaskList();
+                    FlushDeferredRebuild();
+                }));
+            }
         };
     }
 

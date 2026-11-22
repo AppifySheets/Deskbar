@@ -436,6 +436,7 @@ public partial class TasksWindow : Window
         closing.Clear();
         // The List or the Matrix (TasksWindow.Matrix.cs), whichever the switch says; the other is emptied and hidden.
         matrixShown = view.Matrix;
+        FitMinWidthToView(view.Matrix);
         Scroller.Visibility = view.Matrix ? Visibility.Collapsed : Visibility.Visible;
         MatrixGrid.Visibility = view.Matrix ? Visibility.Visible : Visibility.Collapsed;
         MatrixGrid.Children.Clear();
@@ -597,7 +598,7 @@ public partial class TasksWindow : Window
         line.PreviewMouseLeftButtonDown += (_, e) =>
         {
             pressClicks = e.ClickCount;
-            DragPress(row.Id, e.GetPosition(DragSurface));
+            DragPress(row.Id, DragMouse.Position(e, DragSurface));
         };
         dragLines[row.Id] = (row.Quadrant, row.Status == TaskStatus.WaitingOnYou && !row.Closing, row.Closing || row.Status == TaskStatus.Closed);
         line.Click += (_, _) =>

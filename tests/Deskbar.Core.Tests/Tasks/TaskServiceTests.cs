@@ -42,8 +42,8 @@ public sealed class TaskServiceTests
             () => s.MoveTo(note.Id, other),
             () => s.Comment(note.Id, Maybe<string>.None, "Get the big box"),
             () => s.SetFlag(note.Id, TaskFlag.Urgent, true),
-            () => s.SetQuadrant(note.Id, Quadrant.II),
-            () => s.Place(claudes.Id, Quadrant.II, TaskPlace.Before(note.Id)),
+            () => s.SetFlag(note.Id, TaskFlag.Important, true),
+            () => s.Place(claudes.Id, Quadrant.I, TaskPlace.Before(note.Id)),
             () => s.Close(note.Id),
             () => s.UndoClose(note.Id, TaskStatus.Backlog),
             () => { s.SessionEnded("s2"); return Result.Success(); },
@@ -76,7 +76,6 @@ public sealed class TaskServiceTests
         using var sub = s.Changed.Subscribe(_ => pulses++);
 
         Assert.True(s.SetFlag(note.Id, TaskFlag.Important, false).IsSuccess);
-        Assert.True(s.SetQuadrant(note.Id, Quadrant.IV).IsSuccess);
         Assert.True(s.Place(note.Id, Quadrant.IV, TaskPlace.Top).IsSuccess);
 
         Assert.Equal(saves, store.Saves);

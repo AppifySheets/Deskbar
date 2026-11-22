@@ -38,8 +38,18 @@ public partial class TasksWindow
     const string StrongTag = "matrix-strong";
 
     // The compact columns of a Matrix line: tick, title, flags, (no sessions, no age), chip, comments, (no action), "…".
+    // 178 DIP of fixed columns, so a line in a cell keeps a title of 100 DIP or more at MatrixMinWidth.
     static readonly IReadOnlyList<GridLength> CompactColumns =
-        [new(22), new(1, GridUnitType.Star), new(38), new(0), new(0), new(80), new(34), new(0), new(24)];
+        [new(22), new(1, GridUnitType.Star), new(34), new(0), new(0), new(64), new(34), new(0), new(24)];
+
+    // THE WINDOW'S MINIMUM WIDTH FOLLOWS THE VIEW (review of 4fc4441..a1acd60, item 1). Two cells side by side, each with
+    // its own scroll bar, leave a line half the List's width: at the List's 560 DIP the title got 9.8 DIP, and 80 at
+    // 720. While the Matrix shows, the window is at least MatrixMinWidth wide (a narrower window grows to it), so the
+    // title keeps about 100 DIP with the chip and the toggles whole; back on the List, the List's own minimum returns.
+    const double ListMinWidth = 560;
+    const double MatrixMinWidth = 780;
+
+    void FitMinWidthToView(bool matrix) => MinWidth = matrix ? MatrixMinWidth : ListMinWidth;
 
     // For the tests: whether the Matrix is on show, where a quadrant's cell sits (row, column), which cell holds a
     // task, whether a cell is drawn the stronger way, and a cell's centre in the drag's coordinates.
