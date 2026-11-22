@@ -9,7 +9,7 @@ namespace Deskbar.Core.Control;
 // session acting for him. Design: docs/superpowers/specs/2026-11-22-tasks-board-design.md ("Left to the builder":
 // the pipe commands, and `task list` stays JSON).
 //
-//   task list
+//   task list [--closed]
 //   task add <title> [--workspace <name>|none]
 //   task close <id>
 //   task reopen <id>
@@ -57,6 +57,10 @@ public sealed partial class RemoteControl
         return args switch
         {
             ["list"] => Success(service.Board.Pile().Select(Describe).ToArray()),
+            // The closed tasks, which every other view leaves out, so one closed by mistake can be found and reopened.
+            // The latest closed first: closing stamps UpdatedAt, and nothing but Petre's own edits moves it after that.
+            ["list", "--closed"] => Success(service.Board.Tasks.Where(t => t.Status == TaskStatus.Closed)
+                .OrderByDescending(t => t.UpdatedAt).Select(Describe).ToArray()),
             ["add", .. var more] => TaskAdd(service, more, from),
             ["close", var id] => TaskChange(service, id, t => service.Close(t.Id)),
             ["reopen", var id] => TaskChange(service, id, t => service.Reopen(t.Id)),

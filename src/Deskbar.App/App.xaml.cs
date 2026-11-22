@@ -1318,7 +1318,7 @@ public partial class App : Application
 
         // The tasks board (docs/superpowers/specs/2026-11-22-tasks-board-design.md), in tasks.json beside state.json.
         // A failed load is traced and leaves the board empty, never fatal.
-        tasks = new Core.Tasks.TaskService(new Core.Tasks.JsonTaskStore(stateDir), () => DateTimeOffset.UtcNow,
+        tasks = new Core.Tasks.TaskService(new Core.Tasks.JsonTaskStore(stateDir, ClickTrace.On ? ClickTrace.Write : null), () => DateTimeOffset.UtcNow,
             trace: ClickTrace.On ? ClickTrace.Write : null);
         tasks.Load().TapError(err => ClickTrace.Write($"tasks.json not loaded: {err}"));
 
