@@ -335,10 +335,35 @@ public class RemoteControlTaskTests
     public void The_client_adds_its_folder_to_task() =>
         Assert.Equal(["task", "add", "x", "--from", @"C:\work"], ControlArguments.WithCallerFolder(["task", "add", "x"], @"C:\work"));
 
+    // A closed task leaves `task list`, so a note ticked by mistake would otherwise be out of reach from a script:
+    // `task list --closed` prints the closed ones, the latest closed first, in the same shape, and `reopen` brings one
+    // back. Closing stamps UpdatedAt, which is what orders them.
+    [Fact]
+    public void Task_list_closed_prints_the_closed_tasks_latest_closed_first()
+    {
+        var manager = Started();
+        var first = Prefix(Added(manager, "Closed first"));
+        clock = clock.AddMinutes(1);
+        var second = Prefix(Added(manager, "Closed second"));
+        clock = clock.AddMinutes(1);
+        Added(manager, "Still open");
+        clock = clock.AddMinutes(1);
+        Run(manager, "task", "close", first);
+        clock = clock.AddMinutes(1);
+        Run(manager, "task", "close", second);
+
+        var closed = Json(Run(manager, "task", "list", "--closed")).EnumerateArray().ToList();
+
+        Assert.Equal(["Closed second", "Closed first"], closed.Select(e => e.GetProperty("title").GetString()));
+        Assert.All(closed, e => Assert.Equal("closed", e.GetProperty("status").GetString()));
+        Assert.Equal("Deskbar", closed[0].GetProperty("workspace").GetString());
+        Assert.Equal(["Still open"], Json(Run(manager, "task", "list")).EnumerateArray().Select(e => e.GetProperty("title").GetString()));
+    }
+
     [Fact]
     public void Task_is_in_the_help() =>
         Assert.Equal(
-            ["list", "add <title> [--workspace <name>|none]", "close <id>", "reopen <id>",
+            ["list [--closed]", "add <title> [--workspace <name>|none]", "close <id>", "reopen <id>",
              "status <id> <backlog|in-progress|waiting|done>", "rename <id> <title>", "move <id> <workspace>|none",
              "comment <id> <markdown>", "delete <id>"],
             ControlUsage.All.Where(c => c.Verb == "task").Select(c => c.Arguments));

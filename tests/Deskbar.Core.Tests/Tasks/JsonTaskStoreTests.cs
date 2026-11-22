@@ -158,6 +158,43 @@ public sealed class JsonTaskStoreTests : IDisposable
         Assert.Equal(original, File.ReadAllBytes(TasksPath + ".v1"));
     }
 
+    // The copy is a courtesy, never a reason to lose the save: when tasks.json.v1 cannot be written (here a folder of
+    // that name stands in the way) the save still goes through, the failure is traced, and the copy is tried again
+    // at the next save.
+    [Fact]
+    public void A_version_1_copy_that_fails_does_not_fail_the_save()
+    {
+        Directory.CreateDirectory(dir);
+        File.WriteAllText(TasksPath, Version1);
+        Directory.CreateDirectory(TasksPath + ".v1");
+        var traced = new List<string>();
+        var store = new JsonTaskStore(dir, traced.Add);
+
+        var saved = store.Save(store.Load().Value);
+
+        Assert.True(saved.IsSuccess, saved.IsFailure ? saved.Error : "");
+        Assert.Contains("\"version\": 2", File.ReadAllText(TasksPath));
+        Assert.Contains(traced, line => line.Contains("tasks.json.v1"));
+    }
+
+    // A version 1 tasks.json that cannot be read falls back to tasks.json.previous (DurableFile.Read); when that copy is
+    // version 1 too, it migrates, and the .v1 copy keeps the previous copy's bytes, the file the board came from.
+    [Fact]
+    public void A_version_1_file_read_through_previous_keeps_the_previous_bytes()
+    {
+        Directory.CreateDirectory(dir);
+        File.WriteAllText(TasksPath, "{not json");
+        File.WriteAllText(TasksPath + ".previous", Version1);
+        var previous = File.ReadAllBytes(TasksPath + ".previous");
+        var store = new JsonTaskStore(dir);
+
+        var board = store.Load().Value;
+        Assert.Equal(3, board.Tasks.Count);
+        Assert.True(store.Save(board).IsSuccess);
+
+        Assert.Equal(previous, File.ReadAllBytes(TasksPath + ".v1"));
+    }
+
     [Fact]
     public void A_version_2_load_makes_no_version_1_copy()
     {

@@ -44,9 +44,10 @@ public static class ControlUsage
                 + "      Nothing happens when the user is already on that workspace"),
         ]),
         new("Tasks", [
-            new("task", "list",
+            new("task", "list [--closed]",
                 "the open tasks in the bar's order (waiting on you, then done, then newest), as JSON: id, title,\n"
-                + "      workspace, status, statusLine, question, claudes, sessions, comments (a count), updatedAt"),
+                + "      workspace, status, statusLine, question, claudes, sessions, comments (a count), updatedAt;\n"
+                + "      --closed lists the closed ones instead, the latest closed first, to find one to reopen"),
             new("task", "add <title> [--workspace <name>|none]",
                 "add a note to the backlog; without --workspace it goes on the workspace of the VS Code window\n"
                 + "      whose folder holds --from (the caller's own folder if not given)"),

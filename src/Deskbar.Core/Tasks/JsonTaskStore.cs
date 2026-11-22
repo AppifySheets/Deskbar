@@ -34,7 +34,9 @@ namespace Deskbar.Core.Tasks;
 // aside as `<name>.<yyyyMMdd-HHmmss>.bak` before anything can be saved. That happens HERE, inside Load, rather than as
 // a Quarantine() the service calls, because ITaskStore is the seam a cloud store replaces (see ITaskStore) and must
 // stay its two members: only a store made of files has files to move aside.
-public sealed class JsonTaskStore(string baseDirectory) : ITaskStore
+//
+// `trace` hears what goes wrong without failing anything: today only a .v1 copy that could not be written (KeepVersion1).
+public sealed class JsonTaskStore(string baseDirectory, Action<string>? trace = null) : ITaskStore
 {
     const int CurrentVersion = 2;
 
@@ -120,11 +122,20 @@ public sealed class JsonTaskStore(string baseDirectory) : ITaskStore
 
     // Writes tasks.json.v1 once, before the first version 2 save replaces the version 1 file. Never over an existing
     // copy: that one is the first migration's, and a later version 1 file (restored by hand) must not replace it.
+    //
+    // BEST EFFORT. The copy is a courtesy to the timer build's file, and the save it runs inside is Petre's change to
+    // his tasks: a copy that cannot be written (a lock, a full disk, a folder in the way) is traced and must never
+    // fail that save. The bytes stay in memory, so the next save tries the copy again.
     void KeepVersion1()
     {
         if (version1Original.HasNoValue) return;
-        if (!File.Exists(Version1Path)) File.WriteAllBytes(Version1Path, version1Original.Value);
-        version1Original = Maybe<byte[]>.None;
+        var original = version1Original.Value;
+        Result.Try(() =>
+            {
+                if (!File.Exists(Version1Path)) File.WriteAllBytes(Version1Path, original);
+            }, e => $"could not keep the version 1 file as {Version1Path}: {e.Message}")
+            .Tap(() => version1Original = Maybe<byte[]>.None)
+            .TapError(error => trace?.Invoke($"tasks: {error}"));
     }
 
     // Moves tasks.json and tasks.json.previous, whichever exist, out of the way of the next two saves, and says
