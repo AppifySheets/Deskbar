@@ -124,8 +124,10 @@ public class TasksBoardTests
     static Button LineOf(TasksWindow window, Guid id) =>
         Inside(window).OfType<Button>().Single(b => b.Tag is Guid tag && tag == id);
 
+    // Task 12 (Ruling 28): the List view is grouped as the bar, Waiting on you, then Covey's quadrants under captions in
+    // his words; a Done task keeps its place in its quadrant.
     [Fact]
-    public void The_board_groups_open_tasks_by_status() => StaThread.Run(() =>
+    public void The_board_groups_open_tasks_as_the_bar() => StaThread.Run(() =>
     {
         using var t = Build();
         var note = t.Tasks.AddNote("Dishwasher tablets", Maybe<Guid>.None).Value.Id;
@@ -139,7 +141,7 @@ public class TasksBoardTests
 
         t.Controller.Open(Rect.Empty);
 
-        Assert.Equal(["Waiting on you", "Done", "In progress", "Backlog"], t.Window.Headers);
+        Assert.Equal(["Waiting on you", "IV  Not urgent, not important"], t.Window.Headers);
         Assert.Equal([asking, done, working, note], t.Window.Keys);
 
         // Closed only under its own filter.
@@ -240,7 +242,7 @@ public class TasksBoardTests
 
         // Set by hand.
         Assert.True(t.Controller.SetStatus(note, TaskStatus.InProgress).IsSuccess);
-        Assert.Equal(["In progress"], t.Window.Headers);
+        Assert.Equal(["IV  Not urgent, not important"], t.Window.Headers);
         // Closed is not a status to set: Close is the way.
         Assert.True(t.Controller.SetStatus(note, TaskStatus.Closed).IsFailure);
 
@@ -830,4 +832,122 @@ public class TasksBoardTests
     [Fact]
     public void The_window_stays_inside_the_work_area_on_the_right() =>
         Assert.Equal(new Point(1920 - 720, 304), TasksWindow.PlaceNear(new Rect(1700, 0, 200, 300), new Rect(0, 0, 1920, 1040), new Size(720, 560)));
+
+    // --- Task 12: flags, quadrants and drag in the List view ---------------------------------------------------------
+
+    static bool ToggleOn(Button toggle) => AutomationProperties.GetItemStatus(toggle) == "on";
+
+    [Fact]
+    public void The_quadrants_are_captioned_in_coveys_words_in_his_order() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        var a = t.Tasks.AddNote("a", t.Gepha).Value.Id;
+        var b = t.Tasks.AddNote("b", t.Gepha).Value.Id;
+        var c = t.Tasks.AddNote("c", t.Gepha).Value.Id;
+        t.Tasks.AddNote("d", t.Gepha);
+        t.Tasks.SetFlag(a, TaskFlag.Urgent, true);
+        t.Tasks.SetFlag(b, TaskFlag.Important, true);
+        t.Tasks.SetFlag(c, TaskFlag.Important, true);
+        t.Tasks.SetFlag(c, TaskFlag.Urgent, true);
+
+        t.Controller.Open(Rect.Empty);
+
+        Assert.Equal(["I  Urgent and important", "II  Important, not urgent", "III  Urgent, not important", "IV  Not urgent, not important"],
+            t.Window.Headers);
+    });
+
+    // The two toggles on each line, as on the bar: a click sets the flag and the line moves to its quadrant.
+    [Fact]
+    public void A_toggle_on_a_window_line_sets_its_flag() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        var a = t.Tasks.AddNote("a", t.Gepha).Value.Id;
+        var b = t.Tasks.AddNote("b", t.Gepha).Value.Id;
+        t.Controller.Open(Rect.Empty);
+        Assert.Equal([b, a], t.Window.Keys);
+        var important = ButtonNamed(LineOf(t.Window, a), "Important");
+        Assert.Equal("Important", important.ToolTip);
+        Assert.Equal("Urgent", ButtonNamed(LineOf(t.Window, a), "Urgent").ToolTip);
+        Assert.False(ToggleOn(important));
+
+        Click(important);
+
+        Assert.True(t.Tasks.Board.Tasks.Single(x => x.Id == a).Important);
+        Assert.Equal([a, b], t.Window.Keys);
+        Assert.True(ToggleOn(ButtonNamed(LineOf(t.Window, a), "Important")));
+        Assert.Equal(["II  Important, not urgent", "IV  Not urgent, not important"], t.Window.Headers);
+    });
+
+    // A point inside a window line, `share` of the way down it, in the drag's own coordinates (the window's rows).
+    static Point InLine(Board t, Guid id, double share)
+    {
+        var line = LineOf(t.Window, id);
+        return line.TranslatePoint(new Point(10, line.ActualHeight * share), t.Window.DragSurface);
+    }
+
+    static void WindowDrag(Board t, Guid from, Point to)
+    {
+        var start = InLine(t, from, 0.5);
+        t.Window.DragPress(from, start);
+        t.Window.DragMove(new Point(start.X, start.Y + (to.Y > start.Y ? 8 : -8)));
+        t.Window.DragMove(to);
+        t.Window.DragRelease();
+        t.Window.Dispatcher.Invoke(() => { }, System.Windows.Threading.DispatcherPriority.Background);
+    }
+
+    // Drag a line within its group, or into another group (whose flags it then takes), as on the bar.
+    [Fact]
+    public void Dragging_a_window_line_reorders_and_across_a_group_sets_flags() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        var a = t.Tasks.AddNote("a", t.Gepha).Value.Id;
+        var b = t.Tasks.AddNote("b", t.Gepha).Value.Id;
+        var c = t.Tasks.AddNote("c", t.Gepha).Value.Id;
+        t.Window.DragMouse = ArrangeMouse.Held;
+        t.Controller.Open(Rect.Empty);
+        t.Window.UpdateLayout();
+        Assert.Equal([c, b, a], t.Window.Keys);
+
+        WindowDrag(t, c, InLine(t, a, 0.8));
+        t.Window.UpdateLayout();
+        Assert.Equal([b, a, c], t.Window.Keys);
+
+        t.Tasks.SetFlag(b, TaskFlag.Urgent, true);
+        t.Window.UpdateLayout();
+        Assert.Equal([b, a, c], t.Window.Keys);
+        WindowDrag(t, c, InLine(t, b, 0.2));
+        t.Window.UpdateLayout();
+        Assert.True(t.Tasks.Board.Tasks.Single(x => x.Id == c).Urgent);
+        Assert.Equal([c, b, a], t.Window.Keys);
+    });
+
+    // A press that does not travel is a click, and waiting lines cannot be dragged; nothing drops above them.
+    [Fact]
+    public void A_window_press_in_place_is_a_click_and_waiting_lines_stay_pinned() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        var a = t.Tasks.AddNote("a", t.Gepha).Value.Id;
+        var b = t.Tasks.AddNote("b", t.Gepha).Value.Id;
+        var w = t.Tasks.AddNote("w", t.Gepha).Value.Id;
+        t.Tasks.SetStatus(w, TaskStatus.WaitingOnYou);
+        t.Window.DragMouse = ArrangeMouse.Held;
+        t.Controller.Open(Rect.Empty);
+        t.Window.UpdateLayout();
+        var before = t.Tasks.Board;
+
+        var at = InLine(t, b, 0.5);
+        t.Window.DragPress(b, at);
+        t.Window.DragMove(new Point(at.X + 1, at.Y + 1));
+        Assert.False(t.Window.Dragging);
+        t.Window.DragRelease();
+        var waitingAt = InLine(t, w, 0.5);
+        t.Window.DragPress(w, waitingAt);
+        t.Window.DragMove(new Point(waitingAt.X, waitingAt.Y + 30));
+        Assert.False(t.Window.Dragging);
+        t.Window.DragRelease();
+        Assert.Same(before, t.Tasks.Board);
+
+        WindowDrag(t, a, InLine(t, w, 0.2));
+        Assert.Equal([w, a, b], t.Tasks.Board.Pile().Select(x => x.Id));
+    });
 }

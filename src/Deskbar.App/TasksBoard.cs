@@ -14,9 +14,11 @@ namespace Deskbar.App;
 // The window (TasksWindow) only draws; this decides what it shows and what each click does, the split Quick find has
 // (QuickFind and QuickFindWindow).
 //
-// WHAT IT SHOWS. Every task, grouped by status: the open ones by default (Waiting on you, Done, In progress, Backlog;
-// TaskViews.Grouped), one status alone under its filter chip, and the closed ones only under "Closed", the latest
-// closed first. A workspace filter narrows any of them to one workspace or to none. Each line carries its title, the
+// WHAT IT SHOWS. Every task, grouped as the bar groups them (Task 12, Ruling 28): the open ones by default, Waiting on
+// you first, then Covey's quadrants I to IV under captions in his words, each in Petre's own order (TaskViews.Grouped);
+// a status filter keeps the quadrants and shows that status alone in each; the closed ones only under "Closed", the
+// latest closed first. Each line has the important and urgent toggles (SetFlag) and drags to reorder (Place), as on
+// the bar. A workspace filter narrows any of them to one workspace or to none. Each line carries its title, the
 // question or status line, its sessions (live or ended), its workspace and its comment count; a line's arrow opens its
 // thread. The window opens onto this board whenever it was hidden (filters reset, threads closed, no text box
 // focused): the first version opened onto an entry form and Petre did not like it (spec, "Anti-goals"). It is a page
@@ -108,6 +110,8 @@ public sealed class TasksBoard : IDisposable
             Delete: id => Delete(id),
             Comment: (id, markdown) => Comment(id, markdown).IsSuccess,
             AddNote: (title, workspace) => AddNote(title, workspace).IsSuccess,
+            SetFlag: (id, flag, on) => SetFlag(id, flag, on),
+            Place: (id, quadrant, place) => Place(id, quadrant, place),
             Filter: Filter,
             FilterWorkspace: FilterWorkspace,
             Remember: place => manager.SaveTasksWindow(place));
@@ -276,6 +280,12 @@ public sealed class TasksBoard : IDisposable
 
     public Result MoveTo(Guid id, Maybe<Guid> workspace) => Report(tasks.MoveTo(id, workspace));
 
+    /// <summary>A toggle on a line: the flag on or off; the task goes to the top of the quadrant it lands in.</summary>
+    public Result SetFlag(Guid id, TaskFlag flag, bool on) => Report(tasks.SetFlag(id, flag, on));
+
+    /// <summary>A drop: the task goes to that place in that quadrant, taking its flags (TaskBoard.Place).</summary>
+    public Result Place(Guid id, Quadrant quadrant, TaskPlace place) => Report(tasks.Place(id, quadrant, place));
+
     public Result Delete(Guid id)
     {
         expanded.Remove(id);
@@ -319,7 +329,7 @@ public sealed class TasksBoard : IDisposable
         selection.KeepOnly(tasks.Board);
         var board = WithPendingCloses(tasks.Board);
         var groups = TaskViews.Grouped(board, filter, where)
-            .Select(g => new TaskGroupView(g.Status, TaskViews.StatusName(g.Status), g.Tasks.Select(Row).ToArray()))
+            .Select(g => new TaskGroupView(g.Kind, TaskViews.GroupName(g.Kind), g.Tasks.Select(Row).ToArray()))
             .ToArray();
         var filters = FilterOrder.Select(f => (Filter: f, Count: TaskViews.Count(board, f, where)))
             .Select(x => new TaskFilterChip(x.Filter, $"{FilterName(x.Filter)} {x.Count}", x.Filter == filter,
@@ -374,6 +384,8 @@ public sealed class TasksBoard : IDisposable
         expanded.Contains(task.Id) ? task.Comments.Select(CommentView).ToArray() : [])
     {
         Created = task.Created,
+        Important = task.Important,
+        Urgent = task.Urgent,
     };
 
     // The mockup's sessions column: how many, and whether any is still live. Empty for a note.
@@ -456,10 +468,17 @@ internal sealed record TaskRowView(Guid Id, string Title, string Detail, TaskSta
 {
     /// <summary>When the task appeared, for its age (TaskAge), which the window rewrites in place once a minute.</summary>
     public DateTimeOffset Created { get; init; }
+
+    /// <summary>The task's two flags (Task 12), drawn as the line's toggles.</summary>
+    public bool Important { get; init; }
+
+    public bool Urgent { get; init; }
+
+    public Quadrant Quadrant => QuadrantOf.Flags(Important, Urgent);
 }
 
-/// <summary>One group under its header.</summary>
-internal sealed record TaskGroupView(TaskStatus Status, string Header, IReadOnlyList<TaskRowView> Rows);
+/// <summary>One group under its caption: which group (Waiting on you, a quadrant, Closed), the caption, its lines.</summary>
+internal sealed record TaskGroupView(TaskGroupKind Kind, string Header, IReadOnlyList<TaskRowView> Rows);
 
 /// <summary>
 /// Everything the window draws: the filter chips, the workspace filter (its label and its value), the workspaces for
@@ -487,6 +506,8 @@ internal sealed record TasksWindowActions(
     Action<Guid> Delete,
     Func<Guid, string, bool> Comment,
     Func<string, Maybe<Guid>, bool> AddNote,
+    Action<Guid, TaskFlag, bool> SetFlag,
+    Action<Guid, Quadrant, TaskPlace> Place,
     Action<TaskFilter> Filter,
     Action<TaskWorkspaceFilter> FilterWorkspace,
     Action<TasksWindowState> Remember);

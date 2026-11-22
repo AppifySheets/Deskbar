@@ -42,12 +42,13 @@ public class TaskViewsTests
 
     string Title(Guid id) => board.Tasks.Single(t => t.Id == id).Title;
 
-    // Each group as "Status: title, title", so two lists of groups compare by value.
+    // Each group as "Kind: title, title", so two lists of groups compare by value. Task 12: the open view is Waiting on
+    // you, then Covey's quadrants I to IV (TaskGroupKind), as the bar.
     IReadOnlyList<string> Shown(TaskFilter filter, TaskWorkspaceFilter where) =>
-        TaskViews.Grouped(board, filter, where).Select(g => $"{g.Status}: {string.Join(", ", g.Tasks.Select(t => t.Title))}").ToList();
+        TaskViews.Grouped(board, filter, where).Select(g => $"{g.Kind}: {string.Join(", ", g.Tasks.Select(t => t.Title))}").ToList();
 
     [Fact]
-    public void The_open_view_groups_by_status_waiting_done_in_progress_backlog()
+    public void The_open_view_is_waiting_then_the_quadrants_done_keeping_its_place()
     {
         var note = Note("Dishwasher tablets", Free);
         var working = Claudes("DurableFile move guard", ws, "s1");
@@ -61,11 +62,35 @@ public class TaskViewsTests
         Assert.Equal(
             [
                 $"WaitingOnYou: {Title(asking)}",
-                $"Done: {Title(done)}",
-                $"InProgress: {Title(working)}",
-                $"Backlog: {Title(note)}",
+                $"IV: {Title(done)}, {Title(working)}, {Title(note)}",
             ],
             Shown(TaskFilter.Open, TaskWorkspaceFilter.All));
+    }
+
+    // Task 12 (Ruling 28): each quadrant is a group of its own, in Covey's order, captioned in his words; a status filter
+    // keeps the quadrants, showing only that status in each.
+    [Fact]
+    public void The_quadrants_are_groups_of_their_own_and_a_status_filter_keeps_them()
+    {
+        var a = Note("a", Free);
+        var b = Note("b", Free);
+        var c = Note("c", Free);
+        var d = Claudes("d", ws);
+        Change(x => x.SetFlag(a, TaskFlag.Important, true, clock));
+        Change(x => x.SetFlag(b, TaskFlag.Urgent, true, clock));
+        Change(x => x.SetFlag(c, TaskFlag.Important, true, clock));
+        Change(x => x.SetFlag(c, TaskFlag.Urgent, true, clock));
+
+        Assert.Equal(["I: c", "II: a", "III: b", "IV: d"], Shown(TaskFilter.Open, TaskWorkspaceFilter.All));
+        Assert.Equal(["I: c", "II: a", "III: b"], Shown(TaskFilter.Backlog, TaskWorkspaceFilter.All));
+        Assert.Equal(["IV: d"], Shown(TaskFilter.InProgress, TaskWorkspaceFilter.All));
+        Assert.Equal("I  Urgent and important", TaskViews.GroupName(TaskGroupKind.I));
+        Assert.Equal("II  Important, not urgent", TaskViews.GroupName(TaskGroupKind.II));
+        Assert.Equal("III  Urgent, not important", TaskViews.GroupName(TaskGroupKind.III));
+        Assert.Equal("IV  Not urgent, not important", TaskViews.GroupName(TaskGroupKind.IV));
+        Assert.Equal("Waiting on you", TaskViews.GroupName(TaskGroupKind.WaitingOnYou));
+        Assert.Equal(Quadrant.II, TaskViews.QuadrantOf(TaskGroupKind.II).Value);
+        Assert.True(TaskViews.QuadrantOf(TaskGroupKind.Closed).HasNoValue);
     }
 
     [Fact]
@@ -75,7 +100,7 @@ public class TaskViewsTests
         Note("second", Free);
         Note("third", Free);
 
-        Assert.Equal(["Backlog: third, second, first"], Shown(TaskFilter.Open, TaskWorkspaceFilter.All));
+        Assert.Equal(["IV: third, second, first"], Shown(TaskFilter.Open, TaskWorkspaceFilter.All));
     }
 
     [Fact]
@@ -87,7 +112,7 @@ public class TaskViewsTests
         Change(x => x.Close(b, clock));
         Change(x => x.Close(a, clock));
 
-        Assert.Equal(["Backlog: open"], Shown(TaskFilter.Open, TaskWorkspaceFilter.All));
+        Assert.Equal(["IV: open"], Shown(TaskFilter.Open, TaskWorkspaceFilter.All));
         Assert.Equal(["Closed: a, b"], Shown(TaskFilter.Closed, TaskWorkspaceFilter.All));
     }
 
@@ -99,7 +124,7 @@ public class TaskViewsTests
         Change(b => b.Ask(asking, "?", clock));
 
         Assert.Equal(["WaitingOnYou: asking"], Shown(TaskFilter.WaitingOnYou, TaskWorkspaceFilter.All));
-        Assert.Equal(["Backlog: note"], Shown(TaskFilter.Backlog, TaskWorkspaceFilter.All));
+        Assert.Equal(["IV: note"], Shown(TaskFilter.Backlog, TaskWorkspaceFilter.All));
         Assert.Empty(Shown(TaskFilter.Done, TaskWorkspaceFilter.All));
     }
 
@@ -110,9 +135,9 @@ public class TaskViewsTests
         Note("there", other);
         Note("nowhere", Free);
 
-        Assert.Equal(["Backlog: nowhere, there, here"], Shown(TaskFilter.Open, TaskWorkspaceFilter.All));
-        Assert.Equal(["Backlog: here"], Shown(TaskFilter.Open, TaskWorkspaceFilter.On(ws)));
-        Assert.Equal(["Backlog: nowhere"], Shown(TaskFilter.Open, TaskWorkspaceFilter.On(Free)));
+        Assert.Equal(["IV: nowhere, there, here"], Shown(TaskFilter.Open, TaskWorkspaceFilter.All));
+        Assert.Equal(["IV: here"], Shown(TaskFilter.Open, TaskWorkspaceFilter.On(ws)));
+        Assert.Equal(["IV: nowhere"], Shown(TaskFilter.Open, TaskWorkspaceFilter.On(Free)));
     }
 
     [Fact]

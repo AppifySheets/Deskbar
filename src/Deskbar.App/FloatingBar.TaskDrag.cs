@@ -11,11 +11,9 @@ namespace Deskbar.App;
 // move the ones that aren't important below". The order lives in Deskbar.Core (TaskBoard.Place); this file only reads
 // where the pointer is and hands TaskService.Place a quadrant and a place beside a line.
 //
-// WHAT A DROP MEANS. The pointer is over a line (the nearest one, between lines): over its top half the dragged task
-// goes just BEFORE it, over its bottom half just AFTER it, in that line's quadrant. So a line dropped among another
-// quadrant's lines takes that quadrant's flags (TaskBoard.Place sets them). Waiting on you is pinned: its lines cannot
-// be dragged, and nothing drops above them; a drop on one lands under the block, before the first line below it (or,
-// with nothing below, at the end of the dragged task's own quadrant). A closed line in its undo window is not a
+// WHAT A DROP MEANS is TaskDropTarget's rule, shared with the tasks window: before or after the line under the pointer,
+// in that line's quadrant, so a line dropped among another quadrant's lines takes that quadrant's flags. Waiting on
+// you is pinned: its lines cannot be dragged, and nothing drops above them. A closed line in its undo window is not a
 // target either; the nearest open line answers. Below the last line is after the last line. A quadrant with no line on
 // show cannot be dropped into on the bar: the toggles set flags, and the window's Matrix has a cell for each quadrant.
 //
@@ -174,32 +172,21 @@ public partial class FloatingBar
         if (taskLinesPanel?.IsMouseCaptured == true) taskLinesPanel.ReleaseMouseCapture();
     }
 
-    // Where a release at this point drops `dragged` (see the header), or none when no line can answer.
+    // Where a release at this point drops `dragged`: TaskDropTarget's rule (see the header), the one the window uses
+    // too, over the lines on show. A closed line in its undo window is no target.
     TaskDropPreview? TaskDropAt(Guid dragged, Point inList)
     {
         if (taskLinesPanel is null || taskService is null) return null;
         var placed = taskLinesPanel.Children.OfType<Button>()
             .Where(b => b.Tag is TaskLine { Closing: false } && b.IsVisible)
-            .Select(b => (Line: (TaskLine)b.Tag, Bounds: new Rect(b.TranslatePoint(new Point(0, 0), taskLinesPanel), b.RenderSize)))
+            .Select(b => (TaskLine)b.Tag is var line
+                ? new TaskDropTarget.Placed(line.Id, line.Quadrant, line.Status == TaskStatus.WaitingOnYou,
+                    new Rect(b.TranslatePoint(new Point(0, 0), taskLinesPanel), b.RenderSize))
+                : null)
+            .OfType<TaskDropTarget.Placed>()
             .ToList();
-        var open = placed.Where(p => p.Line.Status != TaskStatus.WaitingOnYou).ToList();
-        if (open.Count == 0) return null;
         var own = taskService.Board.Tasks.FirstOrDefault(t => t.Id == dragged)?.Quadrant ?? Quadrant.IV;
-
-        // The nearest line to the pointer, by its vertical distance, any line on show counting (a waiting one too).
-        var nearest = placed.OrderBy(p => inList.Y < p.Bounds.Top ? p.Bounds.Top - inList.Y : inList.Y > p.Bounds.Bottom ? inList.Y - p.Bounds.Bottom : 0).First();
-        if (nearest.Line.Status == TaskStatus.WaitingOnYou)
-        {
-            // Under the pinned block: before the first open line below it, or at the end of the task's own quadrant.
-            var below = open.FirstOrDefault(p => p.Bounds.Top >= placed.Where(w => w.Line.Status == TaskStatus.WaitingOnYou).Max(w => w.Bounds.Bottom) - 0.5);
-            return below.Line is { } first
-                ? new TaskDropPreview(first.Quadrant, TaskPlace.Before(first.Id), below.Bounds.Top)
-                : new TaskDropPreview(own, TaskPlace.End, open.Max(p => p.Bounds.Bottom));
-        }
-        var upper = inList.Y < nearest.Bounds.Top + nearest.Bounds.Height / 2;
-        return upper
-            ? new TaskDropPreview(nearest.Line.Quadrant, TaskPlace.Before(nearest.Line.Id), nearest.Bounds.Top)
-            : new TaskDropPreview(nearest.Line.Quadrant, TaskPlace.After(nearest.Line.Id), nearest.Bounds.Bottom);
+        return TaskDropTarget.At(placed, [], own, inList) is { } drop ? new TaskDropPreview(drop.Quadrant, drop.Place, drop.LineY) : null;
     }
 
     // The drop line across the list, centred on the gap it means.

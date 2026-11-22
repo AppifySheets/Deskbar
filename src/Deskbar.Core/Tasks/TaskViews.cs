@@ -3,14 +3,14 @@ using CSharpFunctionalExtensions;
 namespace Deskbar.Core.Tasks;
 
 // THE TASKS WINDOW'S GROUPING AND FILTERS, pure. Design: docs/superpowers/specs/2026-11-22-tasks-board-design.md,
-// "The window": the window opens onto the board, every open task grouped by status (Waiting on you, Done, In
-// progress, Backlog), with filters by status (Closed among them) and by workspace.
+// "The window", with Task 12's order (progress.md Rulings 25 and 28): the window's List view is grouped as the bar is,
+// Waiting on you first (the latest ask on top), then Covey's quadrants I to IV, each in Petre's manual order
+// (TaskBoard.Group), each captioned in Covey's words. Filters by status (Closed among them) and by workspace.
 //
-// Why a second ordering next to TaskBoard.Pile: Pile is the bar's order, which leaves Closed out and puts In progress
-// and Backlog in one group. The window shows them as two groups and needs Closed under its own filter, so it groups
-// over TaskBoard.Tasks itself. Inside each open group the order is still TaskItem.Raised, newest first, the rule that
-// keeps a status line or a comment from moving a line (spec, "The bar's order"). Closed tasks are the latest closed
-// first: closing stamps UpdatedAt, the same order `task list --closed` prints.
+// A status filter keeps the quadrants: "In progress" shows the quadrants with only their tasks in progress, in the
+// same order, so a line sits in the same group whatever the filter. "Waiting on you" is the pinned block alone.
+// Closed tasks have no order of their own (closing takes a task out of it): they are one group, the latest closed
+// first, since closing stamps UpdatedAt, the same order `task list --closed` prints.
 //
 // The window's controller (Deskbar.App.TasksBoard) draws what this returns. It puts a task closed in the window back
 // under its earlier status for the six seconds of its Undo before calling here, so a line just closed stays in place
@@ -39,25 +39,58 @@ public sealed record TaskWorkspaceFilter(bool Any, Maybe<Guid> Workspace)
             : task.WorkspaceId.HasNoValue);
 }
 
-/// <summary>One group of the window: its status and its tasks in the order they are drawn.</summary>
-public sealed record TaskGroup(TaskStatus Status, IReadOnlyList<TaskItem> Tasks);
+/// <summary>
+/// Which group of the window a task is drawn in: the pinned Waiting on you block, one of Covey's quadrants (named as
+/// the book numbers them), or the closed tasks.
+/// </summary>
+public enum TaskGroupKind { WaitingOnYou, I, II, III, IV, Closed }
+
+/// <summary>One group of the window: which group, and its tasks in the order they are drawn.</summary>
+public sealed record TaskGroup(TaskGroupKind Kind, IReadOnlyList<TaskItem> Tasks);
 
 public static class TaskViews
 {
-    // The open view's groups, top to bottom: the one that asks something of Petre, then the finished work waiting for
-    // him to close it, then work in progress, then the backlog (spec, "The window").
-    static readonly IReadOnlyList<TaskStatus> OpenOrder =
-        [TaskStatus.WaitingOnYou, TaskStatus.Done, TaskStatus.InProgress, TaskStatus.Backlog];
+    static readonly IReadOnlyList<(TaskGroupKind Kind, Quadrant Quadrant)> Quadrants =
+        [(TaskGroupKind.I, Quadrant.I), (TaskGroupKind.II, Quadrant.II), (TaskGroupKind.III, Quadrant.III), (TaskGroupKind.IV, Quadrant.IV)];
 
     /// <summary>
-    /// The groups the window draws for a filter, empty groups left out. Open tasks newest raised first in each group;
-    /// closed tasks the latest closed first.
+    /// The groups the window draws for a filter, empty groups left out (see the header): Waiting on you by its latest
+    /// ask, each quadrant in its manual order, the closed tasks the latest closed first.
     /// </summary>
     public static IReadOnlyList<TaskGroup> Grouped(TaskBoard board, TaskFilter filter, TaskWorkspaceFilter where) =>
-        StatusesOf(filter)
-            .Select(status => new TaskGroup(status, Ordered(status, board.Tasks.Where(t => t.Status == status && where.Admits(t)))))
-            .Where(g => g.Tasks.Count > 0)
-            .ToArray();
+        (filter switch
+        {
+            TaskFilter.Closed => [new TaskGroup(TaskGroupKind.Closed,
+                board.Tasks.Where(t => t.Status == TaskStatus.Closed && where.Admits(t)).OrderByDescending(t => t.UpdatedAt).ToArray())],
+            TaskFilter.WaitingOnYou => [Waiting(board, where)],
+            TaskFilter.Open => QuadrantGroups(board, where, _ => true).Prepend(Waiting(board, where)),
+            _ => QuadrantGroups(board, where, t => StatusesOf(filter).Contains(t.Status)),
+        })
+        .Where(g => g.Tasks.Count > 0)
+        .ToArray();
+
+    /// <summary>The quadrant a group stands for; none for Waiting on you and Closed.</summary>
+    public static Maybe<Quadrant> QuadrantOf(TaskGroupKind kind) =>
+        Quadrants.TryFirst(q => q.Kind == kind).Map(q => q.Quadrant);
+
+    /// <summary>The group a quadrant's tasks are drawn in.</summary>
+    public static TaskGroupKind KindOf(Quadrant quadrant) => Quadrants.First(q => q.Quadrant == quadrant).Kind;
+
+    /// <summary>
+    /// A group's caption: "Waiting on you", "Closed", or the quadrant's numeral and Covey's words, two spaces apart
+    /// ("I  Urgent and important"; Ruling 28).
+    /// </summary>
+    public static string GroupName(TaskGroupKind kind) =>
+        QuadrantOf(kind).Match(
+            q => $"{q.Numeral()}  {q.Words()}",
+            () => kind == TaskGroupKind.WaitingOnYou ? StatusName(TaskStatus.WaitingOnYou) : StatusName(TaskStatus.Closed));
+
+    static TaskGroup Waiting(TaskBoard board, TaskWorkspaceFilter where) =>
+        new(TaskGroupKind.WaitingOnYou, board.Tasks.Where(t => t.Status == TaskStatus.WaitingOnYou && where.Admits(t))
+            .OrderByDescending(t => t.Raised).ToArray());
+
+    static IEnumerable<TaskGroup> QuadrantGroups(TaskBoard board, TaskWorkspaceFilter where, Func<TaskItem, bool> shows) =>
+        Quadrants.Select(q => new TaskGroup(q.Kind, board.Group(q.Quadrant).Where(t => where.Admits(t) && shows(t)).ToArray()));
 
     /// <summary>How many tasks a filter shows, for its chip.</summary>
     public static int Count(TaskBoard board, TaskFilter filter, TaskWorkspaceFilter where) =>
@@ -85,7 +118,7 @@ public static class TaskViews
 
     static IReadOnlyList<TaskStatus> StatusesOf(TaskFilter filter) => filter switch
     {
-        TaskFilter.Open => OpenOrder,
+        TaskFilter.Open => [TaskStatus.WaitingOnYou, TaskStatus.Done, TaskStatus.InProgress, TaskStatus.Backlog],
         TaskFilter.WaitingOnYou => [TaskStatus.WaitingOnYou],
         TaskFilter.Done => [TaskStatus.Done],
         TaskFilter.InProgress => [TaskStatus.InProgress],
@@ -93,6 +126,4 @@ public static class TaskViews
         _ => [TaskStatus.Closed],
     };
 
-    static IReadOnlyList<TaskItem> Ordered(TaskStatus status, IEnumerable<TaskItem> tasks) =>
-        (status == TaskStatus.Closed ? tasks.OrderByDescending(t => t.UpdatedAt) : tasks.OrderByDescending(t => t.Raised)).ToArray();
 }
