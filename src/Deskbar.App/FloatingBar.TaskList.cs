@@ -356,7 +356,12 @@ public partial class FloatingBar
         taskMoreButton.Margin = new Thickness(0, 1, 0, 0);
         taskMoreButton.Visibility = Visibility.Collapsed;
 
-        TaskListLine.Child = new TakesNoWidth { Child = new StackPanel { Children = { taskProblemHost, addRow, taskLinesScroller, taskMoreButton } } };
+        var host = new TakesNoWidth(VisibleWidthOf) { Child = new StackPanel { Children = { taskProblemHost, addRow, taskLinesScroller, taskMoreButton } } };
+        TaskListLine.Child = host;
+        // The width the list is laid out at follows the bar's window (VisibleWidthOf), and a footer laid out wider than
+        // the window keeps the host's own slot unchanged when the window narrows, so nothing would arrange it again:
+        // every change of the bar's size asks it to (measured: the lines stayed at the width of the bar before).
+        SizeChanged += (_, _) => host.InvalidateArrange();
         ApplyTaskListTextSize();
         PaintAddRow();
         Closed += (_, _) =>
@@ -1114,7 +1119,15 @@ public partial class FloatingBar
     // only a first measure, with nothing arranged yet, takes the offered width. An arrange at a NEW width (the bar
     // resized) measures once at it and remembers it, and the measure that follows asks for the same width, a no-op.
     // The height is always measured unbounded: the list is as tall as its lines (the expanded list caps itself).
-    sealed class TakesNoWidth : Decorator
+    //
+    // AND AT THE WIDTH THE BAR SHOWS, NOT THE WIDTH IT IS GIVEN (Petre: the chip row read "on [Deskbar] [none] [oth",
+    // and the lines' chips were not at the edge). Measured from his trace: "stats geometry: footer=226 ... pins=222" on
+    // a bar 140 to 197 DIP wide. His footer is laid out wider than the bar, because its line of pinned apps asks for
+    // 222 DIP, and WPF arranges an element no narrower than it asked for and clips the rest. This element, asking for
+    // no width, was arranged at that footer width, so the chip row never wrapped at the edge the bar shows and a line's
+    // chip, docked at the line's right end, sat past it. So the width the content is laid out at is capped by
+    // `visibleWidth`: what is left of the bar's window from this element's left edge, in this element's own units.
+    sealed class TakesNoWidth(Func<UIElement, double> visibleWidth) : Decorator
     {
         double arrangedWidth = double.NaN;
 
@@ -1128,14 +1141,28 @@ public partial class FloatingBar
         protected override Size ArrangeOverride(Size arrangeSize)
         {
             if (Child is null) return arrangeSize;
-            if (double.IsNaN(arrangedWidth) || Math.Abs(arrangeSize.Width - arrangedWidth) > 0.01)
+            var width = Math.Min(arrangeSize.Width, visibleWidth(this));
+            if (double.IsNaN(arrangedWidth) || Math.Abs(width - arrangedWidth) > 0.01)
             {
-                arrangedWidth = arrangeSize.Width;
+                arrangedWidth = width;
                 Child.Measure(new Size(arrangedWidth, double.PositiveInfinity));
             }
-            Child.Arrange(new Rect(arrangeSize));
+            Child.Arrange(new Rect(0, 0, width, arrangeSize.Height));
             return arrangeSize;
         }
+    }
+
+    // How much of the bar's window there is to the right of `part`'s left edge, in `part`'s own units (the bar scales
+    // its content, so a bar DIP is not a list DIP): the window's width less the root's padding (RootPadding, in content
+    // units, so scaled like the part), less where the part starts. Unbounded while the part is not on screen yet, which
+    // leaves the first layout to the width it is given, as before.
+    double VisibleWidthOf(UIElement part)
+    {
+        if (PresentationSource.FromVisual(part) is null || !part.IsDescendantOf(this) || ActualWidth <= 0) return double.PositiveInfinity;
+        var toBar = part.TransformToAncestor(this);
+        var left = toBar.Transform(new Point(0, 0)).X;
+        var unit = toBar.Transform(new Point(1, 0)).X - left;
+        return unit <= 0 ? double.PositiveInfinity : Math.Max(0, (ActualWidth - left) / unit - RootPadding);
     }
 }
 
