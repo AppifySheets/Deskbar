@@ -54,6 +54,9 @@ public partial class ReportWindow : Window
     string? archived;
     CancellationTokenSource? sending;
     bool closed;
+    // The contact line, trimmed, that the user was last asked about (ConfirmContact). Pressing Send again with the
+    // line unchanged means "send anyway"; null while no ask is showing.
+    string? askedAbout;
 
     // The state panel's three looks. Frozen, because a WPF brush that is not frozen belongs to the thread that made it.
     static readonly (Brush Border, Brush Fill, Brush Title) Neutral = Look("#ABADB3", "#F0F0F0", "#000000");
@@ -68,7 +71,12 @@ public partial class ReportWindow : Window
 
         // Send waits for something in "What happened?": a report with only a screenshot has no title and no story.
         Description.TextChanged += (_, _) => SendButton.IsEnabled = Description.Text.Trim().Length > 0;
-        Contact.TextChanged += (_, _) => ContactHint.Visibility = Contact.Text.Length == 0 ? Visibility.Visible : Visibility.Collapsed;
+        Contact.TextChanged += (_, _) =>
+        {
+            ContactHint.Visibility = Contact.Text.Length == 0 ? Visibility.Visible : Visibility.Collapsed;
+            // Editing the line after the ask takes the ask back: what is there now gets its own look at the next Send.
+            if (Contact.Text.Trim() != askedAbout) ClearContactNote();
+        };
         PreviewKeyDown += OnPreviewKeyDown;
         PreviewDragOver += OnDragOver;
         PreviewDrop += OnDrop;
@@ -215,11 +223,47 @@ public partial class ReportWindow : Window
                 : Array.Empty<ReportAttachment>())
             .ToList());
 
-    // Send, and Try again after a failure: the same handler, since a retry is the same report sent again.
+    // Send, and Try again after a failure: the same handler, since a retry is the same report sent again. The contact
+    // check runs only before the first send; a retry is the report the user already chose to send.
     async void OnSend(object sender, RoutedEventArgs e)
     {
+        if (sent is null && !ConfirmContact()) return;
         sent ??= Compose();
         await SendAsync(sent);
+    }
+
+    // THE CONTACT ASK. The line is optional, but without it nobody can ask a follow-up question, so a Send with it
+    // empty, or holding something that is not an email, Telegram handle or phone number (most often a typo), stops
+    // once: a note under the line says why, the cursor goes to the line, and the button becomes "Send anyway". A
+    // second Send with the line unchanged goes. Editing the line clears the ask (see the constructor).
+    //
+    // Why not a required field: a required field gets "a@a.com" from people who do not want to be reached, which
+    // looks reachable and is not, and loses the report of anyone who closes the window instead. Petre agreed on
+    // 2026-11-22. ReportContact (in Core) has the looks-like-an-address rules.
+    /// <summary>True when the report may go now; false when the ask was just shown instead.</summary>
+    internal bool ConfirmContact()
+    {
+        var contact = Contact.Text.Trim();
+        var kind = ReportContact.Check(contact);
+        if (kind == ContactKind.Reachable || contact == askedAbout) return true;
+
+        askedAbout = contact;
+        ContactNote.Text = kind == ContactKind.Missing
+            ? "Without a way to reach you, we can't ask follow-up questions or tell you when it's fixed."
+              + " Add one above, or press Send anyway."
+            : "That doesn't look like an email, a Telegram @handle or a phone number, so we may not be able to reach you."
+              + " Check it, or press Send anyway.";
+        ContactNote.Visibility = Visibility.Visible;
+        SendButton.Content = "Send anyway";
+        Contact.Focus();
+        return false;
+    }
+
+    void ClearContactNote()
+    {
+        askedAbout = null;
+        ContactNote.Visibility = Visibility.Collapsed;
+        SendButton.Content = "Send";
     }
 
     internal async Task SendAsync(ProblemReport report)

@@ -310,6 +310,10 @@ RP6. Disconnect the network, send: "Could not send." with a folder under %APPDAT
      holding report.txt and every file; Open folder opens it. Reconnect, Try again: sent, and the
      folder is gone.
 RP7. `$ts dump` still writes a dump file and answers its path, opening no window.
+RP8. Leave the contact empty and press Send: nothing goes, a note under the contact line says we
+     can't ask follow-up questions, the cursor is in the line and the button reads "Send anyway".
+     Press it: the report goes. Open a new window, type `someone@example` and Send: a note says it
+     doesn't look like an email; add `.com` and the note goes and the button reads Send again.
 
 ## Recent workspaces keep their colour
 
