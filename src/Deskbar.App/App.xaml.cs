@@ -1663,6 +1663,23 @@ public partial class App : Application
                 TimeToday = id => timeTracker?.Time.On(id, DateOnly.FromDateTime(DateTime.Now)) ?? TimeSpan.Zero,
                 // ...and the screen strips it fills on every rebuild (FloatingBar.Strips.cs).
                 Strips = () => stripSet.Current,
+                // ...and the task list at the bottom (FloatingBar.TaskList.cs): the same service the control pipe edits,
+                // so the two always agree.
+                Tasks = tasks,
+                // A line's click: to its task's workspace, the switch the rows make. A note on no workspace never gets
+                // here (the bar does nothing for it); a Claude task on none succeeds without moving, until a later pull
+                // request sends Claude's tasks to their session.
+                GoToTask = id => tasks!.Board.Tasks.TryFirst(t => t.Id == id).ToResult($"No task with id {id}")
+                    .Bind(task => task.WorkspaceId.HasValue ? manager.Switch(task.WorkspaceId.Value) : Result.Success()),
+                // A Claude line's icon: the VS Code window whose title names the session's folder, by the rule the
+                // control pipe's `open` and `attention` use to find a caller's window (RemoteControl.CallerOf,
+                // EditorFolder.Best), each window offering its current title and the one it had before a rename. Two
+                // windows on the same folder are both VS Code, so the first serves for the icon.
+                SessionWindow = folder => EditorFolder.Best(folder, manager.KnownWindows
+                        .Where(EditorFolder.IsEditor)
+                        .Select(w => (w.Handle, Titles: manager.OriginalTitle(w.Handle).Map(t => (IEnumerable<string>)[w.Title, t]).GetValueOrDefault([w.Title]))))
+                    .TryFirst()
+                    .Map(handle => handle.Value),
             };
             // The bar's hwnd is created HERE, before it is ever shown, for two reasons that
             // both hang off the same handle:

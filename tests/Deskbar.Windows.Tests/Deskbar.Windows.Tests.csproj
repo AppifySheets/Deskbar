@@ -18,6 +18,9 @@
 
   <ItemGroup>
     <Using Include="Xunit" />
+    <!-- Deskbar's task status, not System.Threading.Tasks.TaskStatus, which ImplicitUsings also brings in. One alias
+         for the project rather than one per file. -->
+    <Using Include="Deskbar.Core.Tasks.TaskStatus" Alias="TaskStatus" />
   </ItemGroup>
 
   <ItemGroup>

@@ -80,6 +80,13 @@
             <Border x:Name="ShellFooter" DockPanel.Dock="Bottom" BorderBrush="#14FFFFFF" BorderThickness="0,1,0,0"
                     Margin="0,3,0,0" Padding="0,3,0,0">
                 <StackPanel>
+                    <!-- The task list (docs/superpowers/specs/2026-11-22-tasks-board-design.md, "The bar"): a header
+                         with "Tasks", the "+N" button and "+ Add", then the first three tasks of the pile, Claude's
+                         marked in orange and Petre's notes with a tick box. First in the footer, so it reads straight
+                         under the rows, under the footer's hairline, as in the chosen mockup. Filled in
+                         FloatingBar.TaskList.cs; collapsed until the App hands the bar its task service, and while
+                         the "Task list" strip item is switched off in Manage. -->
+                    <Border x:Name="TaskListLine" Margin="0,0,0,4" Visibility="Collapsed"/>
                     <!-- The Deskbar Pro reminder: one line, at most once a day, never in the first two weeks, never
                          for Pro (Petre: "a gentle nudge per day", then "line at the bottom, okay"). Filled in
                          FloatingBar.ProReminder.cs, a tinted panel with the sentence wrapped and the two buttons
