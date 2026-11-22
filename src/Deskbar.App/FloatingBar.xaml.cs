@@ -746,9 +746,11 @@ public partial class FloatingBar : Window
         Root.CornerRadius = new CornerRadius(8);
         BarContent.Margin = new Thickness(0);
 
-        // Back to following its content in height; the width stays the one chosen.
+        // Back to following its content in height; the width stays the one chosen. Put back from chosenWidth, because
+        // the live Width is the strip's, which a scale change may have moved off the chosen one.
         SizeToContent = SizeToContent.Height;
         Height = double.NaN;
+        if (chosenWidth is { } chosen) Width = chosen;
         UpdateLayout();
     }
 
@@ -793,7 +795,8 @@ public partial class FloatingBar : Window
             var scaleX = dpiX / 96.0;
             var scaleY = dpiY / 96.0;
 
-            var widthDips = double.IsNaN(Width) ? ActualWidth : Width;
+            // The chosen width, never the window's live one (see chosenWidth for the drift that caused).
+            var widthDips = DockedWidth();
             var granted = appBar.Dock(edge == "left" ? AppBar.Edge.Left : AppBar.Edge.Right,
                 new AppBar.Rect(info.rcMonitor.Left, info.rcMonitor.Top, info.rcMonitor.Right, info.rcMonitor.Bottom),
                 (int)Math.Round(widthDips * scaleX));
@@ -849,7 +852,7 @@ public partial class FloatingBar : Window
             onPositionChanged: OnShellMovedStrips,
             onFullScreen: OnFullScreenApp);
 
-        var widthDips = double.IsNaN(Width) ? ActualWidth : Width;
+        var widthDips = DockedWidth();
         var right = appBar!.Dock(AppBar.Edge.Left, seam.Right, (int)Math.Round(widthDips / 2 * seam.RightScale));
         var left = seamBar.Dock(AppBar.Edge.Right, seam.Left, (int)Math.Round(widthDips / 2 * seam.LeftScale));
 
@@ -958,7 +961,7 @@ public partial class FloatingBar : Window
     {
         Right = anchorRight,
         Bottom = anchorBottom,
-        Width = double.IsNaN(Width) ? null : Width,
+        Width = chosenWidth ?? (double.IsNaN(Width) ? null : Width),
     };
 
     // Petre: "the bar shouldn't be hidden, it should be impossible to hide that floating bar,
@@ -1760,8 +1763,29 @@ public partial class FloatingBar : Window
     internal void ApplyWidth(double width)
     {
         if (!Docked) SizeToContent = SizeToContent.Height;
+        chosenWidth = width;
         Width = width;
     }
+
+    // THE WIDTH SOMEBODY CHOSE, in DIPs (#396), kept apart from the window's live Width. ApplyWidth is the only writer:
+    // a width drag, the stored width at startup, and the fit to a narrower screen. DockTo, Save and undocking read it.
+    //
+    // Why not the live Width: a docked bar's Width is the strip the shell granted, divided by the screen's scale, and
+    // WPF rewrites Width whenever Windows resizes the window, a DPI change included. Across an RDP round trip at another
+    // scaling the two disagreed, and every re-dock read the window's own size back as the width chosen. Measured on
+    // Petre's machine, 2026-11-23, coming back to the 150% console from an RDP session at 225%: the bar docked at 316 px
+    // (211 DIP), and half a second later at 474 px, because Width had become 316 DIP (the trace's "geometry:
+    // width=316"); he dragged it back by hand. The round trip before left it at 429 px. Each wrong width was saved,
+    // so the drift outlived the session. Read from here, the strip is always this width times the screen's scale, so it
+    // follows the scaling and never drifts.
+    //
+    // Null until a width is chosen or the bar first docks (DockedWidth then keeps the content's width, which is what a
+    // first dock with no width chosen has always used).
+    double? chosenWidth;
+
+    // The width to dock at, in DIPs: the chosen one, or, for a bar that never had one, what it measures now, kept from
+    // then on so the re-docks that follow do not read it back from the window either.
+    internal double DockedWidth() => chosenWidth ??= double.IsNaN(Width) ? ActualWidth : Width;
 
     void OnPreviewMouseMove(object sender, MouseEventArgs e)
     {
@@ -8160,10 +8184,12 @@ public partial class FloatingBar : Window
         // An explicit width chosen on a wider desk can exceed the whole screen now, which leaves the
         // bar's right edge unreachable however well the position is clamped. Reduced to fit, and never
         // grown: a width is a choice, and the narrower screen is the only reason to overrule it.
-        if (!double.IsNaN(Width) && MonitorBounds(Left, Top) is { } screen)
+        // The chosen width rather than the live one, which on a docked bar is the strip's (see chosenWidth).
+        var chosen = chosenWidth ?? Width;
+        if (!double.IsNaN(chosen) && MonitorBounds(Left, Top) is { } screen)
         {
-            var fits = Math.Max(MinimumWidth, Math.Min(Width, screen.Right - screen.Left));
-            if (Math.Abs(fits - Width) > 0.5)
+            var fits = Math.Max(MinimumWidth, Math.Min(chosen, screen.Right - screen.Left));
+            if (Math.Abs(fits - chosen) > 0.5)
             {
                 ApplyWidth(fits);
                 UpdateLayout();
@@ -8241,7 +8267,8 @@ public partial class FloatingBar : Window
             ? (floatingBeforeDock ?? FloatingState()) with
             {
                 Visible = !Minimized,
-                Width = double.IsNaN(Width) ? null : Width,
+                // The chosen width, so a drifted strip is never what gets remembered (see chosenWidth).
+                Width = chosenWidth ?? (double.IsNaN(Width) ? null : Width),
                 DockedEdge = dockedEdge,
             }
             : FloatingState(), layout);
