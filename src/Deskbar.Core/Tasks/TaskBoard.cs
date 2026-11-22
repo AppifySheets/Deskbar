@@ -79,9 +79,15 @@ public sealed record TaskBoard(IReadOnlyList<TaskItem> Tasks)
         ChangeOpen(id, t => t with { Sessions = WithSession(t.Sessions, session), UpdatedAt = now })
             .Map(joined => joined.WithoutSessionElsewhere(session.Id, id, now));
 
-    /// <summary>The short line a session keeps current. Does not move <see cref="TaskItem.Raised"/>.</summary>
+    /// <summary>
+    /// The short line a session keeps current. Does not move <see cref="TaskItem.Raised"/>. The same line again returns
+    /// this same board (review of PR B, M-3): every prompt's reminder asks a session to keep its line current, so it often
+    /// sets what is already there, and that must not save the file or redraw the bar. A closed task still refuses.
+    /// </summary>
     public Result<TaskBoard> SetStatusLine(Guid id, string text, DateTimeOffset now) =>
-        ChangeOpen(id, t => t with { StatusLine = (text ?? "").Trim(), UpdatedAt = now });
+        (text ?? "").Trim() is var line && Tasks.FirstOrDefault(t => t.Id == id) is { IsOpen: true } task && task.StatusLine == line
+            ? this
+            : ChangeOpen(id, t => t with { StatusLine = line, UpdatedAt = now });
 
     /// <summary>A session needs a decision: the task waits on Petre, shows the question and moves to the top.</summary>
     public Result<TaskBoard> Ask(Guid id, string question, DateTimeOffset now) =>

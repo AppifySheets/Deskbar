@@ -49,7 +49,8 @@ public sealed class ControlPipeServer : IDisposable
     //
     // So: make the instance, then serve on it: wait for a client, answer it, Disconnect, wait again. Whatever one request
     // does wrong (a failed Answer included) costs that request only, and the instance stays. It is made again only when
-    // it cannot be reused (Disconnect failed), at once; the 1 s back-off is only for failing to MAKE it.
+    // it cannot be reused: at once when Disconnect failed, after a tenth of a second when waiting for a client failed
+    // (ListenBackOff); the 1 s back-off is only for failing to MAKE it.
     //
     // maxNumberOfServerInstances stays 1, so a second Deskbar can never answer alongside this one. During an update
     // restart the new instance meets the old one's pipe for a moment; making it throws, the back-off waits a second,
@@ -79,6 +80,11 @@ public sealed class ControlPipeServer : IDisposable
         }
     }
 
+    // A pause before making the instance again after waiting for a client failed (review of PR B, M-8). Such a failure
+    // is the pipe's own, not a client's, and an instance made again at once could fail the same way at once, turning the
+    // loop into a busy spin with a trace line per turn. A tenth of a second caps that at ten tries a second.
+    static readonly TimeSpan ListenBackOff = TimeSpan.FromMilliseconds(100);
+
     // Serves client after client on one instance. False when the server is stopping; true when the instance cannot be
     // reused and another must be made.
     static async Task<bool> ServeOn(NamedPipeServerStream pipe, Func<IReadOnlyList<string>, Task<ControlReply>> handle, Action<string>? trace, CancellationToken token)
@@ -88,6 +94,21 @@ public sealed class ControlPipeServer : IDisposable
             try
             {
                 await pipe.WaitForConnectionAsync(token).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) when (token.IsCancellationRequested)
+            {
+                return false;
+            }
+            catch (Exception e)
+            {
+                trace?.Invoke($"control pipe: waiting for a client failed: {e.GetType().Name}: {e.Message}");
+                try { await Task.Delay(ListenBackOff, token).ConfigureAwait(false); }
+                catch (OperationCanceledException) { return false; }
+                return true;
+            }
+
+            try
+            {
                 await Answer(pipe, handle, token).ConfigureAwait(false);
             }
             catch (OperationCanceledException) when (token.IsCancellationRequested)
@@ -99,8 +120,8 @@ public sealed class ControlPipeServer : IDisposable
                 trace?.Invoke($"control pipe: {e.GetType().Name}: {e.Message}");
             }
 
-            // Back to listening for the next client. An instance that cannot be disconnected (never connected because
-            // WaitForConnectionAsync itself failed, or broken some other way) is made again.
+            // Back to listening for the next client. An instance that cannot be disconnected (broken some other way) is
+            // made again.
             try
             {
                 pipe.Disconnect();
