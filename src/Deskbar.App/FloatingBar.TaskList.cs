@@ -95,6 +95,44 @@ public partial class FloatingBar
     // What a click on a line does with the task's id. App sets it to the workspace switch; a refusal is traced.
     internal Func<Guid, Result> GoToTask { get; init; } = _ => Result.Success();
 
+    // THE SELECTED TASK (Petre: "highlight selected task"; ruling 21): the one his last click on a line picked, here or
+    // in the tasks window, which the App hands the same object (TaskSelection). Its line has a lighter fill than hover
+    // and a 2 DIP edge on its left in the blue the text box uses, so it reads as chosen, not hovered. Every line carries
+    // that edge, clear unless selected, so selecting changes neither a line's height nor the bar's width; and a change
+    // of selection repaints the highlight in place (PaintTaskSelection), not the lines, so nothing moves and the click
+    // guard's half second does not start again.
+    internal TaskSelection Selection
+    {
+        get => selection;
+        init
+        {
+            selectionChanges?.Dispose();
+            selection = value;
+            selectionChanges = value.Changed.Subscribe(_ => PaintTaskSelection());
+        }
+    }
+
+    TaskSelection selection = new();
+    IDisposable? selectionChanges;
+
+    // The selected line's fill (lighter than the hover's #1FFFFFFF) and its edge (TaskPickedEdge, the text box's blue).
+    static readonly Brush TaskSelectedFill = Frozen(0x38, 0xFF, 0xFF, 0xFF);
+
+    // The highlight as the selection stands, on the lines on show, in place.
+    void PaintTaskSelection() =>
+        (taskLinesPanel?.Children.OfType<Button>() ?? []).Where(b => b.Tag is TaskLine).ToList().ForEach(button =>
+        {
+            if (button.Content is not Border frame) return;
+            var selected = selection.IsSelected(((TaskLine)button.Tag).Id);
+            frame.BorderBrush = selected ? TaskPickedEdge : Brushes.Transparent;
+            frame.Background = selected ? TaskSelectedFill : Brushes.Transparent;
+        });
+
+    // For the tests: whether a line on show is drawn as selected.
+    internal bool TaskLineSelected(Guid id) =>
+        (taskLinesPanel?.Children.OfType<Button>() ?? []).Any(b => b.Tag is TaskLine line && line.Id == id
+            && b.Content is Border { BorderBrush: SolidColorBrush { Color.A: > 0 } });
+
     // What "+N more" opens: the tasks window (TasksBoard.Open, set by the App: it opens the window, or brings an open
     // one to the desktop in front). While it is set, the line under the
     // list is always there, reading "All tasks" when nothing is out of sight, because the window is the one place the
@@ -411,12 +449,15 @@ public partial class FloatingBar
         // the window keeps the host's own slot unchanged when the window narrows, so nothing would arrange it again:
         // every change of the bar's size asks it to (measured: the lines stayed at the width of the bar before).
         SizeChanged += (_, _) => host.InvalidateArrange();
+        // The bar's own selection until the App hands it the shared one (Selection's init replaces this subscription).
+        selectionChanges ??= selection.Changed.Subscribe(_ => PaintTaskSelection());
         ApplyTaskListTextSize();
         PaintAddRow();
         Closed += (_, _) =>
         {
             taskChanges?.Dispose();
             taskAgeTick?.Dispose();
+            selectionChanges?.Dispose();
             // Every closed line's timer goes with the bar; the tasks are closed already, nothing is left to do.
             pendingCloses.ForEach(pending => pending.Timer.Dispose());
             pendingCloses.Clear();
@@ -553,6 +594,8 @@ public partial class FloatingBar
         }
 
         FollowCurrentWorkspace();
+        // A task closed or deleted is not selected any more (ruling 21).
+        selection.KeepOnly(taskService.Board);
 
         var open = Lines(taskService.Board, WorkspaceName, id => workspaceAccents.GetValueOrDefault(id), SessionWindow);
         // A closed line whose task is open again (reopened from the pipe, say) is not pending any more: the task is back
@@ -661,10 +704,21 @@ public partial class FloatingBar
             Padding = new Thickness(5, 3, 5, 3),
             Child = face,
         };
+        // The selection's frame (see Selection): always 2 DIP on the left, clear unless this line is selected.
+        var selected = selection.IsSelected(line.Id);
+        var frame = new Border
+        {
+            Tag = "task-selection",
+            BorderThickness = new Thickness(2, 0, 0, 0),
+            BorderBrush = selected ? TaskPickedEdge : Brushes.Transparent,
+            Background = selected ? TaskSelectedFill : Brushes.Transparent,
+            CornerRadius = new CornerRadius(4),
+            Child = edge,
+        };
         var button = new Button
         {
             Tag = line,
-            Content = edge,
+            Content = frame,
             Padding = new Thickness(0),
             Margin = new Thickness(0, 1, 0, 1),
             Background = Brushes.Transparent,
@@ -908,6 +962,8 @@ public partial class FloatingBar
     // since a later pull request takes it to its session, which the App decides.
     void OnTaskLineClick(TaskLine line)
     {
+        // The click picks the task, in both views, whether or not it has anywhere to go.
+        selection.Select(line.Id);
         var goes = taskService?.Board.Tasks.TryFirst(t => t.Id == line.Id).Where(t => t.IsClaudes || t.WorkspaceId.HasValue).HasValue ?? false;
         if (!goes) return;
         // Shown the way a row's failed switch is (Report), not only traced: a click that goes nowhere must say why.
