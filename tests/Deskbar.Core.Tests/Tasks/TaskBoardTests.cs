@@ -293,8 +293,10 @@ public class TaskBoardTests
         Assert.Equal(id3, board.TaskOf("s1").Value.Id);
     }
 
+    // Task 12 (Ruling 25): Done no longer sorts ahead of the rest; it keeps its place in its quadrant, where a newer
+    // task sits above an older one until Petre drags them. TaskOrderTests carries the quadrants and the drag.
     [Fact]
-    public void The_pile_puts_waiting_first_then_done_then_newest()
+    public void The_pile_puts_waiting_first_then_the_rest_newest_first_done_included()
     {
         var board = Note(TaskBoard.Empty, id1, ws, "closed").Close(id1, clock).Value;
         Later();
@@ -306,7 +308,7 @@ public class TaskBoardTests
         Later();
         board = Claudes(board, id4, ws, "s4", "newer waiting").Ask(id4, "Two?", clock).Value;
 
-        Assert.Equal([id4, id3, id2, id5], board.Pile().Select(t => t.Id));
+        Assert.Equal([id4, id3, id5, id2], board.Pile().Select(t => t.Id));
     }
 
     [Fact]

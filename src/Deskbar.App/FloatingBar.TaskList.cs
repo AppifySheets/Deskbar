@@ -1143,15 +1143,14 @@ public partial class FloatingBar
         PaintTaskList(evenUnderPress: true);
     }
 
-    // Undo: the task comes back as it was. A note, and any task that was not Done, through Reopen (Backlog, or In
-    // progress while a session is live on it). A Done task through SetStatus Done, the board's way back to Done for a
-    // closed task, since Reopen would make it In progress or Backlog; becoming Done stamps its place in the Done group
-    // as now (TaskBoard.BecameDone), which puts it at the top of that group.
+    // Undo: the task comes back as it was, through TaskBoard.UndoClose: Done when it was Done, else Backlog, or In
+    // progress while a session is live on it. It keeps its place in its quadrant (Task 12): a reopening would put it on
+    // top, but the line never left the screen during its six seconds, so it must not jump.
     void UndoClose(Guid id)
     {
         if (taskService is null || pendingCloses.FirstOrDefault(p => p.Line.Id == id) is not { } pending) return;
         ForgetPendingClose(pending, repaint: false);
-        var reopened = pending.Was == TaskStatus.Done ? taskService.SetStatus(id, TaskStatus.Done) : taskService.Reopen(id);
+        var reopened = taskService.UndoClose(id, pending.Was);
         // Reopen pulses Changed, which repaints; a refusal (the task is gone) still needs the line taken away.
         reopened.TapError(_ => PaintTaskList());
     }

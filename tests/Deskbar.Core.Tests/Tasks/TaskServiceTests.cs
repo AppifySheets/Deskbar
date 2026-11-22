@@ -41,6 +41,11 @@ public sealed class TaskServiceTests
             () => s.Rename(note.Id, "Soap"),
             () => s.MoveTo(note.Id, other),
             () => s.Comment(note.Id, Maybe<string>.None, "Get the big box"),
+            () => s.SetFlag(note.Id, TaskFlag.Urgent, true),
+            () => s.SetQuadrant(note.Id, Quadrant.II),
+            () => s.Place(claudes.Id, Quadrant.II, TaskPlace.Before(note.Id)),
+            () => s.Close(note.Id),
+            () => s.UndoClose(note.Id, TaskStatus.Backlog),
             () => { s.SessionEnded("s2"); return Result.Success(); },
             () => { s.Prune(new HashSet<Guid>()); return Result.Success(); },
             () => s.Delete(note.Id),
@@ -57,6 +62,25 @@ public sealed class TaskServiceTests
             Assert.Equal(before + 1, pulses);
         });
         Assert.Equal(s.Board, store.Stored);
+    }
+
+    // A toggle set to what it already is, or a drop where the task already was, is no change: no save, no pulse,
+    // so the bar does not redraw under a click that went nowhere.
+    [Fact]
+    public void A_flag_or_a_place_that_changes_nothing_saves_nothing()
+    {
+        var s = NewService();
+        var note = s.AddNote("Dishwasher tablets", ws).Value;
+        var saves = store.Saves;
+        var pulses = 0;
+        using var sub = s.Changed.Subscribe(_ => pulses++);
+
+        Assert.True(s.SetFlag(note.Id, TaskFlag.Important, false).IsSuccess);
+        Assert.True(s.SetQuadrant(note.Id, Quadrant.IV).IsSuccess);
+        Assert.True(s.Place(note.Id, Quadrant.IV, TaskPlace.Top).IsSuccess);
+
+        Assert.Equal(saves, store.Saves);
+        Assert.Equal(0, pulses);
     }
 
     [Fact]

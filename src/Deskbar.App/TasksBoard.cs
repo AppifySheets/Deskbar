@@ -254,14 +254,15 @@ public sealed class TasksBoard : IDisposable
 
     /// <summary>
     /// Undo on a line just closed, by the bar's rule (FloatingBar.UndoClose), so the two Undos agree (fix round 1): a
-    /// task that was Done comes back Done (SetStatus, the board's way back to Done for a closed task); any other comes
-    /// back through Reopen, In progress while a session is live on it, else Backlog.
+    /// task that was Done comes back Done; any other comes back In progress while a session is live on it, else
+    /// Backlog. Both through TaskBoard.UndoClose, which keeps the task's place in its quadrant (Task 12): the line
+    /// stayed on screen, struck through, so it must not jump to the top as a reopened task does.
     /// </summary>
     public Result Undo(Guid id)
     {
         if (!pendingCloses.Remove(id, out var pending)) return Report(Result.Failure("Nothing to undo"));
         pending.Timer.Dispose();
-        var back = pending.Was == TaskStatus.Done ? tasks.SetStatus(id, TaskStatus.Done) : tasks.Reopen(id);
+        var back = tasks.UndoClose(id, pending.Was);
         // SetStatus pulses Changed, which redraws; a refusal (the task is gone) still needs the line taken away.
         if (back.IsFailure) Refresh();
         return Report(back);

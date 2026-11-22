@@ -18,6 +18,15 @@ namespace Deskbar.Core.Control;
 //   task move <id> <workspace>|none
 //   task comment <id> <markdown>
 //   task delete <id>
+//   task flag <id> important|urgent on|off
+//   task order <id> top|end|<n>
+//
+// `flag` and `order` (Task 12, Rulings 25 and 28) are the twins of the toggles on a line and of dragging it. The flags
+// name Covey's quadrant (TaskOrder.cs); a flag that changes the quadrant puts the task on top of its new one, as the
+// toggle does. `order` moves a task within its own quadrant, n counting from 1 and clamped to the quadrant's length
+// (a drag across quadrants is a flag change plus an order, so a script does it in two steps). A task waiting on you
+// is refused by `order`: it is pinned above the quadrants until answered (TaskBoard.Place says so). `list` prints each
+// task's flags, its quadrant ("I" to "IV") and its 1-based `order` in it, null while it waits on you.
 //
 // The timer build's `task timer` and `task add --in` are gone with the timers. The forms a Claude session uses for
 // its own task (join, create, status line, ask, done) come with the hooks, in a later change.
@@ -71,6 +80,10 @@ public sealed partial class RemoteControl
                 .Match(w => TaskChange(service, id, t => service.MoveTo(t.Id, w)), ControlReply.Fail),
             ["comment", var id, var markdown] => TaskChange(service, id, t => service.Comment(t.Id, Maybe<string>.None, markdown)),
             ["delete", var id] => TaskDelete(service, id),
+            ["flag", var id, var flag, var state] => ParseFlag(flag, state)
+                .Match(f => TaskChange(service, id, t => service.SetFlag(t.Id, f.Flag, f.On)), ControlReply.Fail),
+            ["order", var id, var place] => ParsePlace(place)
+                .Match(p => TaskChange(service, id, t => service.Place(t.Id, t.Quadrant, p)), ControlReply.Fail),
             _ => ControlReply.Fail($"Wrong arguments for task.\n{TaskUsage()}"),
         };
     }
@@ -106,10 +119,33 @@ public sealed partial class RemoteControl
                 .First(),
         };
 
+    // `important|urgent` and `on|off`, in any case; both are checked before the task is looked up.
+    static Result<(TaskFlag Flag, bool On)> ParseFlag(string flag, string state) =>
+        (flag.Trim().ToLowerInvariant(), state.Trim().ToLowerInvariant()) switch
+        {
+            ("important", ("on" or "off") and var on) => (TaskFlag.Important, on == "on"),
+            ("urgent", ("on" or "off") and var on) => (TaskFlag.Urgent, on == "on"),
+            ("important" or "urgent", _) => Result.Failure<(TaskFlag, bool)>($"'{state}' is not on or off"),
+            _ => Result.Failure<(TaskFlag, bool)>($"'{flag}' is not a flag; use important or urgent"),
+        };
+
+    // `top`, `end` or a position counted from 1. Zero and below are refused rather than read as the top, since they
+    // are more likely a script counting from 0 than a wish for the top.
+    static Result<TaskPlace> ParsePlace(string place) =>
+        place.Trim().ToLowerInvariant() switch
+        {
+            "top" => TaskPlace.Top,
+            "end" => TaskPlace.End,
+            var n when int.TryParse(n, out var position) && position >= 1 => TaskPlace.At(position),
+            _ => Result.Failure<TaskPlace>($"'{place}' is not a place; use top, end or a position from 1"),
+        };
+
     // --- the JSON shape of a task ------------------------------------------------------------------
 
     // One task as `list` prints it and every other verb answers with it. `claudes` is whether a session has worked on
     // it, `sessions` who did (live or ended), `comments` the thread's length (the thread itself is the window's).
+    // `important`, `urgent`, `quadrant` and `order` are Task 12's (see the header). Describe reads the order off the
+    // live board, so every verb's reply says where the task is now.
     object Describe(TaskItem task) => new
     {
         id = task.Id,
@@ -122,6 +158,10 @@ public sealed partial class RemoteControl
         sessions = task.Sessions.Select(s => new { id = s.Id, folder = s.Folder, live = s.IsLive }).ToArray(),
         comments = task.Comments.Count,
         updatedAt = task.UpdatedAt,
+        important = task.Important,
+        urgent = task.Urgent,
+        quadrant = task.Quadrant.Numeral(),
+        order = tasks is { } service && task.IsOpen ? service.Board.PositionOf(task.Id).Map(n => (int?)n).GetValueOrDefault() : null,
     };
 
     string? WorkspaceNameOf(Maybe<Guid> id) =>

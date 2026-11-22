@@ -72,6 +72,18 @@ public sealed class TaskService(ITaskStore store, Func<DateTimeOffset> now, Func
 
     public Result Delete(Guid id) => Apply(Board.Delete(id));
 
+    /// <summary>Undo on a line just closed: back as it was, in its place (TaskBoard.UndoClose).</summary>
+    public Result UndoClose(Guid id, TaskStatus was) => Apply(Board.UndoClose(id, was, now()));
+
+    // The flags and the manual order (Task 12). A change that changes nothing (a flag set to what it is, a drop where
+    // the task already was) saves and pulses nothing, so a click that went nowhere costs no redraw.
+
+    public Result SetFlag(Guid id, TaskFlag flag, bool on) => ApplyIfChanged(Board.SetFlag(id, flag, on, now()));
+
+    public Result SetQuadrant(Guid id, Quadrant quadrant) => ApplyIfChanged(Board.SetQuadrant(id, quadrant, now()));
+
+    public Result Place(Guid id, Quadrant quadrant, TaskPlace place) => ApplyIfChanged(Board.Place(id, quadrant, place, now()));
+
     public Result Comment(Guid id, Maybe<string> sessionId, string markdown) =>
         Apply(Board.Comment(id, sessionId, markdown, now(), makeId()));
 
@@ -95,6 +107,8 @@ public sealed class TaskService(ITaskStore store, Func<DateTimeOffset> now, Func
 
     /// <summary>Takes a successful change, saves and pulses; passes a failure through untouched.</summary>
     Result Apply(Result<TaskBoard> change) => change.Tap(Commit);
+
+    Result ApplyIfChanged(Result<TaskBoard> change) => change.Tap(CommitIfChanged);
 
     void CommitIfChanged(TaskBoard board)
     {

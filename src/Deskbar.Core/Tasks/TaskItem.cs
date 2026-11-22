@@ -41,9 +41,10 @@ public sealed record TaskComment(Guid Id, Maybe<string> SessionId, DateTimeOffse
 /// One task. <see cref="WorkspaceId"/> is none for a free task. <see cref="StatusLine"/> is the short line a session
 /// keeps current ("waiting for CI on #398"), "" when there is none. <see cref="Question"/> is what a session asked
 /// Petre while the task is <see cref="TaskStatus.WaitingOnYou"/>. <see cref="UpdatedAt"/> moves on every change so a
-/// later sync can tell which copy is newer. <see cref="Raised"/> is what the list sorts by: set when the task is made,
-/// when a session asks and when the task becomes Done, and by nothing else, so a status line, a comment or a session
-/// ending never moves a line (spec, "The bar's order").
+/// later sync can tell which copy is newer. <see cref="Raised"/> orders the Waiting on you block (the latest ask on
+/// top): set when the task is made, when a session asks and when the task becomes Done, and by nothing else.
+/// Everything below that block is ordered by the quadrant its two flags name and its <see cref="Rank"/> in it
+/// (TaskOrder.cs), so a status line, a comment or a session ending never moves a line (spec, "The bar's order").
 /// </summary>
 public sealed record TaskItem(
     Guid Id,
@@ -58,6 +59,25 @@ public sealed record TaskItem(
     IReadOnlyList<TaskSession> Sessions,
     IReadOnlyList<TaskComment> Comments)
 {
+    // The two flags and the manual order (Task 12, Rulings 25 and 28). Init properties rather than more positional
+    // parameters: every task made before they existed is "neither flag", and its rank is what TaskBoard gives it
+    // (a new task) or what JsonTaskStore reads or derives (a loaded one), so no constructor call has to say them.
+
+    /// <summary>Petre's "important" flag, the exclamation toggle on a line.</summary>
+    public bool Important { get; init; }
+
+    /// <summary>Petre's "urgent" flag, the clock toggle on a line.</summary>
+    public bool Urgent { get; init; }
+
+    /// <summary>
+    /// The task's place in its quadrant's manual order: smaller is higher. Only the order of ranks within one quadrant
+    /// means anything; the numbers themselves are arbitrary (TaskBoard.Place takes the middle of two neighbours).
+    /// </summary>
+    public double Rank { get; init; }
+
+    /// <summary>Covey's quadrant the two flags name (TaskOrder.cs).</summary>
+    public Quadrant Quadrant => QuadrantOf.Flags(Important, Urgent);
+
     /// <summary>
     /// A task is Claude's when at least one session has worked on it. Derived, never stored: a session joining one of
     /// Petre's notes is exactly what makes it Claude's work (spec, "joining a note").
