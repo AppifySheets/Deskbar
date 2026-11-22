@@ -12,7 +12,12 @@ public static class RulesEngine
         rules.TryFirst(r => Matches(window, r.Kind, r.Pattern)).Map(r => r.WorkspaceId);
 
     public static Maybe<string> MatchRename(WindowInfo window, IReadOnlyList<RenameRule> rules) =>
-        rules.TryFirst(r => Matches(window, r.Kind, r.Pattern)).Map(r => r.ShortName);
+        RenameRuleFor(window, rules).Map(r => r.ShortName);
+
+    // The rule itself rather than its name: "Restore title" on the bar removes the rule that renamed the window,
+    // and needs to know which one that was (WorkspaceManager.RestoreTitle).
+    public static Maybe<RenameRule> RenameRuleFor(WindowInfo window, IReadOnlyList<RenameRule> rules) =>
+        rules.TryFirst(r => Matches(window, r.Kind, r.Pattern));
 
     static bool Matches(WindowInfo window, RuleMatchKind kind, string pattern) => kind switch
     {
@@ -24,8 +29,9 @@ public static class RulesEngine
         _ => false,
     };
 
-    // A user's malformed regex must degrade to "no match", never crash the pipeline.
-    // The rule editor UI validates regexes at entry; this is defense in depth.
+    // A malformed regex must degrade to "no match", never crash the pipeline. The bar writes its patterns
+    // through RenamePattern.ToRegex, which escapes everything but the wildcard, but a state.json edited by
+    // hand (or written by an older build's rule editor) can still hold anything.
     static bool SafeIsMatch(string input, string pattern)
     {
         try { return Regex.IsMatch(input, pattern, RegexOptions.IgnoreCase, TimeSpan.FromMilliseconds(100)); }

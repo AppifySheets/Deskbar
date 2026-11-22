@@ -276,21 +276,10 @@
                     </DataGrid>
                 </DockPanel>
             </TabItem>
-            <TabItem Header="Rules">
-                <DockPanel Margin="8">
-                    <TextBlock DockPanel.Dock="Top" TextWrapping="Wrap" Margin="0,0,0,8"
-                               Text="Rules run top-to-bottom; first match wins. Kinds: ProcessName (exact, e.g. chrome), TitleRegex (.NET regex on the title), BrowserProfile (Chrome/Edge --profile-directory name)."/>
-                    <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" Margin="0,8,0,0">
-                        <Button Content="Save rules" Padding="12,2" Click="OnSaveRules"/>
-                    </StackPanel>
-                    <StackPanel>
-                        <TextBlock Text="Workspace rules" FontWeight="Bold"/>
-                        <DataGrid x:Name="WorkspaceRulesGrid" AutoGenerateColumns="True" Height="140" CanUserAddRows="True"/>
-                        <TextBlock Text="Rename rules" FontWeight="Bold" Margin="0,8,0,0"/>
-                        <DataGrid x:Name="RenameRulesGrid" AutoGenerateColumns="True" Height="140" CanUserAddRows="True"/>
-                    </StackPanel>
-                </DockPanel>
-            </TabItem>
+            <!-- There is no Rules tab. Petre (2026-11-22): "those rules should be created by the bar itself, not humans".
+                 Rename rules are made by the bar's "Rename by title pattern…" and unmade by its "Restore title"
+                 (WorkspaceManager.RestoreTitle); where an app opens is "Remember <app>'s workspace" on its icon menu. -->
+
             <!-- Deskbar Pro (ManageWindow.Pro.cs fills it; what it says in each state is ProTab, in Core). Last, after
                  Rules, as in the mockup Petre approved on 2026-11-22. Every text that changes with the state is set
                  from code; only the fixed parts are written here. The look is the other tabs' stock look, with one

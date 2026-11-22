@@ -623,7 +623,8 @@ Give a window a short name so the taskbar shows `RDP` instead of
   when you open something else. Offered for VS Code and its forks, Visual Studio, the JetBrains
   IDEs and Remote Desktop Manager. Browsers are left out, because a tab title is the page rather
   than a container.
-- **Restore title**, to take a name back.
+- **Restore title**, to take a name back. On a window named by a title pattern it removes the
+  pattern too, so every window it named gets its title back.
 
 <p align="center">
   <img src="docs/images/menu-icon.png" alt="The icon menu over a browser icon: Rename this window, Rename by title pattern, Rename all msedge windows, and a greyed-out Restore title." />
@@ -670,8 +671,9 @@ The axis it arranges on its own is which desktop a window belongs to, and that i
   window: it moves the window and teaches the roster nothing.
 - **When several windows of one app are already open, a new one is left where you opened it.**
   Four browser windows on one profile are one identity, so "put it back" has no single answer.
-- **Rules**, on Manage → Rules, assign windows you have never placed, by process name, title regex
-  or browser profile, and hold the title-pattern renames.
+- **Rules** are no longer written by hand. Title-pattern renames come from the bar's **Rename by
+  title pattern…** and go again with **Restore title**. Placement rules written by an earlier
+  version still apply, but nothing creates new ones.
 - **Remote Desktop Manager** session windows go to their own workspace, and tabbed apps get one
   placement check per window, so a dashboard does not jump between workspaces.
 - An **automated browser** (one a tool started with its own `--user-data-dir`) is placed by the
@@ -679,7 +681,7 @@ The axis it arranges on its own is which desktop a window belongs to, and that i
 
 ## Manage
 
-Left-click the tray icon. Five tabs, and Manage opens on the first:
+Left-click the tray icon. Four tabs, and Manage opens on the first:
 
 - **Settings** holds every setting, in three sections, and each one applies as you change it.
   - **Deskbar on this PC**: **Start Deskbar with Windows**, **Check GitHub for new versions** (the
@@ -703,15 +705,15 @@ Left-click the tray icon. Five tabs, and Manage opens on the first:
   mouse; two minutes without either is idle, so a workspace left on screen overnight accrues
   nothing, and a machine that slept is not credited for the gap. It is counted in fifteen-second
   slices.
-- **Rules** holds the auto-assignment and renaming patterns.
 - **Deskbar Pro** says whether this copy has [Deskbar Pro](#deskbar-pro). Without it, the tab has
   **Get Pro** with the price in your currency (in the GitHub copy, **Open Deskbar in the Store**)
   and **Check again**, which asks the Store at once, for Pro bought on another PC. With or without
   it, **Report a problem…** is there too, because priority support is what Pro adds.
 
-Workspaces are not managed here. The bar adds, renames, deletes and reorders them, and a window
-icon's menu has **Remember *app*'s workspace**, which decides whether that app goes back to its
-workspace when it opens.
+Workspaces and rules are not managed here. The bar adds, renames, deletes and reorders
+workspaces. A window icon's menu has **Remember *app*'s workspace**, which decides whether that
+app goes back to its workspace when it opens, and the title-pattern renames, made with **Rename by
+title pattern…** and removed with **Restore title**.
 
 <p align="center">
   <img src="docs/images/manage-settings.png" alt="Manage on the Settings tab: an explanation that every change applies at once, the Dimming slider at 75 percent with its description, the start of the Before it starts dimming section, Reset to defaults, and below the tabs the three checkboxes for docking, starting with Windows and checking GitHub, with the version at bottom right." />

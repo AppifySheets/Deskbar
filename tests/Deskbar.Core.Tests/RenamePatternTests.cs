@@ -133,6 +133,24 @@ public class WildcardRenameTests
         Assert.Equal("beeper", titles.Titles[new WindowHandle(0x2)]);
     }
 
+    // The bar unmakes what it made: with Manage's Rules tab gone, "Restore title" is the only way to take a pattern
+    // back, so it removes the rule that renamed the window as well as restoring the title. A rule that renamed
+    // something else stays.
+    [Fact]
+    public void Restore_title_removes_the_pattern_that_renamed_the_window()
+    {
+        var manager = Started();
+        monitor.Subject.OnNext(new WindowEvent(WindowEventKind.Appeared, Beeper(0x1, "beeper | work chat")));
+        Assert.True(manager.AddRenameRule("slack *").IsSuccess);
+        Assert.True(manager.RenameWindow(new WindowHandle(0x1), "beeper *").IsSuccess);
+        Assert.Equal(2, store.Stored.RenameRules.Count);
+
+        Assert.True(manager.RestoreTitle(new WindowHandle(0x1)).IsSuccess);
+
+        Assert.Equal("beeper | work chat", titles.Titles[new WindowHandle(0x1)]);
+        Assert.Equal("slack", Assert.Single(store.Stored.RenameRules).ShortName);
+    }
+
     // Without a wildcard, nothing about the old behaviour changes.
     [Fact]
     public void A_plain_rename_still_uses_the_exact_title_mechanism()

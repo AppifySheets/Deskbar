@@ -3905,8 +3905,15 @@ public sealed class WorkspaceManager(
             .Bind(original => titles.Set(window, original)
                 .Tap(() => ledger = ledger.Remove(window)));
 
-    // User explicitly un-renames a window: restore the title AND remove the durable entry,
-    // else the sweep would re-apply it seconds later.
+    // User explicitly un-renames a window: restore the title AND remove what renamed it, else the sweep
+    // or the next title change would re-apply it seconds later. That is either the durable per-window entry
+    // (a plain "Rename this window…") or the pattern rule ("Rename by title pattern…").
+    //
+    // The pattern rule goes too because the bar is the only place rename rules are made and unmade: Manage's
+    // Rules tab is gone (Petre, 2026-11-22: "those rules should be created by the bar itself, not humans").
+    // Without this, a pattern added from the bar could never be taken back. Removing the rule un-renames every
+    // window it named, not just this one, which is what "stop renaming these" means; those windows get their
+    // titles back on the next sweep or title change, as with any rule that stops matching.
     public Result RestoreTitle(WindowHandle window)
     {
         // Capture the original title before RestoreTitleOnly removes the ledger entry.
@@ -3916,15 +3923,21 @@ public sealed class WorkspaceManager(
             {
                 // Only remove the persisted entry if we know the process name -- better a stale
                 // persisted rename than deleting another app's entry if the window is hidden.
-                var processName = knownWindows.TryGetValue(window, out var info) ? info.ProcessName : null;
-                if (processName is not null)
-                {
-                    var remaining = State.PersistedRenames
-                        .Where(r => !(r.OriginalTitle == originalTitle && r.ProcessName.Equals(processName, StringComparison.OrdinalIgnoreCase)))
-                        .ToList();
-                    if (remaining.Count != State.PersistedRenames.Count)
-                        Persist(State with { PersistedRenames = remaining });
-                }
+                if (!knownWindows.TryGetValue(window, out var info)) return;
+                var processName = info.ProcessName;
+                var remaining = State.PersistedRenames
+                    .Where(r => !(r.OriginalTitle == originalTitle && r.ProcessName.Equals(processName, StringComparison.OrdinalIgnoreCase)))
+                    .ToList();
+                // The rule is matched against the title the window had BEFORE the rename, which is the
+                // title the rule matched when it applied. The window's current title is ours.
+                var rule = RulesEngine.RenameRuleFor(info with { Title = originalTitle }, State.RenameRules);
+                if (remaining.Count != State.PersistedRenames.Count || rule.HasValue)
+                    Persist(State with
+                    {
+                        PersistedRenames = remaining,
+                        RenameRules = rule.Map(r => (IReadOnlyList<RenameRule>)State.RenameRules.Where(x => x != r).ToList())
+                            .GetValueOrDefault(State.RenameRules),
+                    });
             }));
     }
 

@@ -1,6 +1,5 @@
 ﻿using System.Collections.ObjectModel;
 using System.IO;
-using System.Text.RegularExpressions;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
@@ -9,7 +8,6 @@ using Deskbar.Core;
 using Deskbar.Core.Domain;
 using Deskbar.Core.Persistence;
 using Deskbar.Core.Time;
-using Deskbar.Core.Rules;
 using Deskbar.App.Startup;
 using Deskbar.Windows.Packaging;
 
@@ -19,13 +17,7 @@ namespace Deskbar.App;
 // is a thin adapter onto WorkspaceManager, which owns all behavior (and all the tests).
 public partial class ManageWindow : Window
 {
-    // DataGrid needs mutable rows; the domain records are immutable. These DTOs are the bridge.
-    public sealed class WorkspaceRuleRow { public string Workspace { get; set; } = ""; public RuleMatchKind Kind { get; set; } public string Pattern { get; set; } = ""; }
-    public sealed class RenameRuleRow { public RuleMatchKind Kind { get; set; } public string Pattern { get; set; } = ""; public string ShortName { get; set; } = ""; }
-
     readonly WorkspaceManager manager;
-    readonly ObservableCollection<WorkspaceRuleRow> workspaceRules = [];
-    readonly ObservableCollection<RenameRuleRow> renameRules = [];
 
     // #53: read-only here. Manage shows what has been tracked; the tracker itself is owned by App,
     // which is where the timer that feeds it lives. Optional so the two tests that construct this
@@ -83,27 +75,15 @@ public partial class ManageWindow : Window
         // #151. Before Reload(), so the tab is populated whether or not the window is ever switched to
         // it, and so the guard flag it sets is honoured from the first raise.
         LoadAppearance();
-        WorkspaceRulesGrid.ItemsSource = workspaceRules;
-        RenameRulesGrid.ItemsSource = renameRules;
         Reload();
         // The Deskbar Pro tab, painted now and again when the Store's price arrives (ManageWindow.Pro.cs).
         LoadPro();
     }
 
-    // Fills the rules grids, the Time tab and the shortcut boxes from state. Run when the window opens and
-    // after anything here that changes state (Save rules, Apply or Reset on a shortcut).
+    // Fills the Time tab and the shortcut boxes from state. Run when the window opens and after Apply or
+    // Reset on a shortcut.
     void Reload()
     {
-        workspaceRules.Clear();
-        manager.State.WorkspaceRules.ToList().ForEach(r => workspaceRules.Add(new WorkspaceRuleRow
-        {
-            Workspace = manager.State.Workspaces.FirstOrDefault(w => w.Id == r.WorkspaceId)?.Name ?? "?",
-            Kind = r.Kind,
-            Pattern = r.Pattern,
-        }));
-        renameRules.Clear();
-        manager.State.RenameRules.ToList().ForEach(r => renameRules.Add(new RenameRuleRow { Kind = r.Kind, Pattern = r.Pattern, ShortName = r.ShortName }));
-
         ReloadTime();
 
         // Reads through WorkspaceManager, not AppState, so the box shows what is actually
@@ -533,38 +513,6 @@ public partial class ManageWindow : Window
         LoadAppearance();
     }
 
-
-    void OnSaveRules(object s, RoutedEventArgs e)
-    {
-        var invalid = workspaceRules.Where(r => r.Kind == RuleMatchKind.TitleRegex && !IsValidRegex(r.Pattern))
-            .Select(r => r.Pattern)
-            .Concat(renameRules.Where(r => r.Kind == RuleMatchKind.TitleRegex && !IsValidRegex(r.Pattern)).Select(r => r.Pattern))
-            .ToList();
-        if (invalid.Count > 0) { Complain($"Invalid regex pattern(s):\n{string.Join("\n", invalid)}"); return; }
-
-        // Reviewer (fix round 1, Critical, defense in depth): WorkspaceManager now rejects
-        // duplicate names going forward, but state.json written before that guard existed
-        // may still contain duplicates on disk. A plain `ToDictionary(w => w.Name, ...)`
-        // throws ArgumentException on any duplicate key and -- with no unhandled-exception
-        // handler at the time this bug was found -- took the whole process down mid-save.
-        // GroupBy never throws on duplicates; first-match-wins here is an accepted, silent
-        // tie-break (the root-cause fix means new duplicates can no longer be created).
-        var byName = manager.State.Workspaces
-            .GroupBy(w => w.Name, StringComparer.OrdinalIgnoreCase)
-            .ToDictionary(g => g.Key, g => g.First().Id, StringComparer.OrdinalIgnoreCase);
-        var unknown = workspaceRules.Where(r => !byName.ContainsKey(r.Workspace)).Select(r => r.Workspace).ToList();
-        if (unknown.Count > 0) { Complain($"Unknown workspace(s):\n{string.Join("\n", unknown)}"); return; }
-
-        Report(manager.SetRules(
-            workspaceRules.Select(r => new WorkspaceRule(byName[r.Workspace], r.Kind, r.Pattern)).ToList(),
-            renameRules.Select(r => new RenameRule(r.Kind, r.Pattern, r.ShortName)).ToList()).Map(() => true)).Tap(Reload);
-    }
-
-    static bool IsValidRegex(string pattern)
-    {
-        try { _ = Regex.IsMatch("", pattern, RegexOptions.IgnoreCase, TimeSpan.FromMilliseconds(100)); return true; }
-        catch (ArgumentException) { return false; }
-    }
 
     Result<bool> Report(Result<bool> result) => result.TapError(Complain);
 
