@@ -44,7 +44,8 @@ namespace Deskbar.Core.Tasks;
 // AN UNREADABLE FILE IS KEPT, NEVER SAVED OVER. When tasks.json and its previous copy are both unreadable, Load fails
 // and the service starts from an empty board; the next save would then replace tasks.json and the one after it would
 // rotate that over tasks.json.previous, so two clicks would destroy both. So a failed Load moves the unreadable files
-// aside as `<name>.<yyyyMMdd-HHmmss>.bak` before anything can be saved. That happens HERE, inside Load, rather than as
+// aside as `<name>.<yyyyMMdd-HHmmss>.bak` before anything can be saved (DurableFile.KeepAside, shared with goals.json
+// since the goals planner). That happens HERE, inside Load, rather than as
 // a Quarantine() the service calls, because ITaskStore is the seam a cloud store replaces (see ITaskStore) and must
 // stay its two members: only a store made of files has files to move aside.
 //
@@ -111,7 +112,7 @@ public sealed class JsonTaskStore(string baseDirectory, Action<string>? trace = 
     // aside (see the header) and the failure says where they went, which App traces.
     public Result<TaskBoard> Load() =>
         DurableFile.Read(TasksPath, Parse, new Parsed(TaskBoard.Empty, false))
-            .MapError(error => $"{error}; {KeepAside()}")
+            .MapError(error => $"{error}; {DurableFile.KeepAside(TasksPath)}")
             .Tap(parsed => version1Original = parsed.WasVersion1 ? Version1Source() : Maybe<byte[]>.None)
             .Map(parsed => parsed.Board);
 
@@ -153,25 +154,6 @@ public sealed class JsonTaskStore(string baseDirectory, Action<string>? trace = 
             }, e => $"could not keep the version 1 file as {Version1Path}: {e.Message}")
             .Tap(() => version1Original = Maybe<byte[]>.None)
             .TapError(error => trace?.Invoke($"tasks: {error}"));
-    }
-
-    // Moves tasks.json and tasks.json.previous, whichever exist, out of the way of the next two saves, and says
-    // what happened to each. A move that fails (the file is locked) is reported, not thrown: Load must still answer.
-    string KeepAside() =>
-        string.Join("; ", new[] { TasksPath, DurableFile.PreviousOf(TasksPath) }
-            .Where(File.Exists)
-            .Select(path => Result.Try(() => MoveAside(path), e => $"could not keep {path} aside: {e.Message}")
-                .Match(aside => $"kept {Path.GetFileName(path)} as {Path.GetFileName(aside)}", error => error)));
-
-    // `<path>.<yyyyMMdd-HHmmss>.bak`, with a counter only if that name is taken (two failed starts in one second).
-    static string MoveAside(string path)
-    {
-        var stamp = DateTime.Now.ToString("yyyyMMdd-HHmmss");
-        var aside = Enumerable.Range(0, int.MaxValue)
-            .Select(n => n == 0 ? $"{path}.{stamp}.bak" : $"{path}.{stamp}-{n}.bak")
-            .First(candidate => !File.Exists(candidate));
-        File.Move(path, aside);
-        return aside;
     }
 
     static TaskDto ToDto(TaskItem t) =>

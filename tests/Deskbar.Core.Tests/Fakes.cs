@@ -4,6 +4,7 @@ using System.Reactive.Subjects;
 using CSharpFunctionalExtensions;
 using Deskbar.Core.Abstractions;
 using Deskbar.Core.Domain;
+using Deskbar.Core.Goals;
 using Deskbar.Core.Persistence;
 
 namespace Deskbar.Core.Tests;
@@ -435,5 +436,25 @@ public sealed class FakeTileSurface : ITileSurface
     // Every preview asked for, in order; an empty one is a hide.
     public List<IReadOnlyList<TilePreview>> Previews { get; } = [];
     public void Preview(IReadOnlyList<TilePreview> tiles) => Previews.Add(tiles.ToList());
+}
+
+// goals.json in memory (goals plan, Task 3). LoadFails makes Load fail with that text, the way an unreadable
+// goals.json does; SaveFails makes every Save fail (a full disk) while still counting it.
+public sealed class FakeGoalStore : IGoalStore
+{
+    public GoalBoard Stored { get; set; } = GoalBoard.Empty;
+    public int Saves { get; private set; }
+    public Maybe<string> LoadFails { get; set; } = Maybe<string>.None;
+    public bool SaveFails { get; set; }
+
+    public Result<GoalBoard> Load() => LoadFails.HasValue ? Result.Failure<GoalBoard>(LoadFails.Value) : Stored;
+
+    public Result Save(GoalBoard board)
+    {
+        Saves++;
+        if (SaveFails) return Result.Failure("save failed");
+        Stored = board;
+        return Result.Success();
+    }
 }
 

@@ -51,6 +51,30 @@ public static class DurableFile
         }
     }
 
+    // AN UNREADABLE FILE IS KEPT, NEVER SAVED OVER. When a file and its previous copy are both unreadable, Read fails
+    // and its caller starts from nothing; the next save would then replace the file and the one after it would rotate
+    // that over the previous copy, so two clicks would destroy both. A store that hits that failure calls KeepAside
+    // first: it moves the file and its previous copy, whichever exist, out of the way of the next two saves as
+    // `<name>.<yyyyMMdd-HHmmss>.bak`, and says what happened to each, for the store's error text. A move that fails (the
+    // file is locked) is reported, not thrown: the caller's Load must still answer. Written for tasks.json
+    // (JsonTaskStore) and shared with goals.json (JsonGoalStore) since the goals planner.
+    public static string KeepAside(string path) =>
+        string.Join("; ", new[] { path, PreviousOf(path) }
+            .Where(File.Exists)
+            .Select(file => Result.Try(() => MoveAside(file), e => $"could not keep {file} aside: {e.Message}")
+                .Match(aside => $"kept {Path.GetFileName(file)} as {Path.GetFileName(aside)}", error => error)));
+
+    // `<path>.<yyyyMMdd-HHmmss>.bak`, with a counter only if that name is taken (two failed starts in one second).
+    static string MoveAside(string path)
+    {
+        var stamp = DateTime.Now.ToString("yyyyMMdd-HHmmss");
+        var aside = Enumerable.Range(0, int.MaxValue)
+            .Select(n => n == 0 ? $"{path}.{stamp}.bak" : $"{path}.{stamp}-{n}.bak")
+            .First(candidate => !File.Exists(candidate));
+        File.Move(path, aside);
+        return aside;
+    }
+
     // `parse` turns the file's text into the value and throws when it cannot. `empty` is the answer when there
     // is nothing to read at all, the normal first run.
     public static Result<T> Read<T>(string path, Func<string, T> parse, T empty, Action<string>? trace = null)
