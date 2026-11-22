@@ -270,12 +270,10 @@ public sealed class WorkspaceManager(
                 // it: switching by Task View or Win+Ctrl+arrows is just as much a visit as
                 // one we performed, and an Alt+Tab-style list that ignored those would send
                 // the first tap somewhere Petre did not expect.
-                currentDesktop = desktops.CurrentChanged.Subscribe(desktopId =>
-                {
-                    OnDesktopChanged(desktopId);
-                    RememberVisit(desktopId);
-                    stateChanged.OnNext(Unit.Default);
-                });
+                //
+                // Through OnDesktopEvent, which lets nothing escape: see there for why one exception used
+                // to leave the manager deaf to every later switch (#399).
+                currentDesktop = desktops.CurrentChanged.Subscribe(OnDesktopEvent);
                 // A desktop closed in Task View takes its workspace with it. The event alone is only a
                 // hint (see OnDesktopDestroyed), and the re-bind in WithLiveDesktop stays as the backup for
                 // when nobody heard the close. Disposed like the subscription above, which means never: it
@@ -294,9 +292,11 @@ public sealed class WorkspaceManager(
                 // Filtered to windows we actually track, so our own chrome and the shell's
                 // helper windows can never light up a row -- and a flash for something with no
                 // row would pulse every open surface for nothing.
+                // Through OnFlashEvent for the same reason as the desktop change above: OnFlashed pulses
+                // StateChanged inline, and one throw from a subscriber would end every later dot.
                 attentionSubscription = attention?.Flashed
                     .Where(w => knownWindows.ContainsKey(w))
-                    .Subscribe(OnFlashed);
+                    .Subscribe(OnFlashEvent);
 
                 ReapplyRenames();
                 RestorePlacements();
@@ -849,6 +849,46 @@ public sealed class WorkspaceManager(
     // A window you are already looking at is ignored outright. Some apps flash regardless of
     // focus, and a dot on the icon you are currently in would be telling you to go somewhere you
     // already are.
+    // A DESKTOP CHANGE, and NOTHING may escape it, for the reason OnWindowEvent gives: Rx disposes a
+    // Subscribe(action) subscription the first time its handler throws (measured again for #399 with a
+    // dotnet-script probe against System.Reactive 7.0.0: a FromEventPattern subscriber that threw on its first
+    // event ran once for three events and left no handler attached to the event). This handler reaches a lot:
+    // window activation and moves (OnDesktopChanged), a state.json write, and every StateChanged subscriber
+    // inline, the bar's synchronous Dispatcher.Invoke rebuild among them. One throw from any of those left the
+    // manager deaf to every later switch until a restart, and a deaf manager:
+    //
+    //   - never clears a workspace's ask on arrival, so its row keeps blinking however you got there (#399:
+    //     "deskbar.cmd switch does not clear a Claude session's ask");
+    //   - keeps the desktop it last heard as currentDesktopId, so RequestAttention refuses to mark a workspace
+    //     you have since left, as "the current workspace" (#399's "stopped the next take's flash");
+    //   - stops feeding the switcher's MRU with switches made outside the app.
+    //
+    // So a failure costs that one arrival and never the ones after it. It is traced with the stack, because
+    // which subscriber threw is not known, and this line is how the next occurrence names it.
+    void OnDesktopEvent(Guid desktopId)
+    {
+        try
+        {
+            OnDesktopChanged(desktopId);
+            RememberVisit(desktopId);
+            stateChanged.OnNext(Unit.Default);
+        }
+        catch (Exception ex)
+        {
+            trace?.Invoke($"desktop change to {NameOfDesktop(desktopId)} threw {ex.GetType().Name}: {ex.Message}\n{ex.StackTrace}");
+        }
+    }
+
+    // A taskbar flash, guarded like the desktop change above: a failure costs that one dot, never the later ones.
+    void OnFlashEvent(WindowHandle window)
+    {
+        try { OnFlashed(window); }
+        catch (Exception ex)
+        {
+            trace?.Invoke($"flash for {window.Value:X} threw {ex.GetType().Name}: {ex.Message}\n{ex.StackTrace}");
+        }
+    }
+
     void OnFlashed(WindowHandle window)
     {
         if (activeWindow.Equals(Maybe<WindowHandle>.From(window))) return;
