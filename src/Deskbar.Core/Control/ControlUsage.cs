@@ -90,6 +90,9 @@ public static class ControlUsage
             new("rename-app", "<hwnd> <short name>", "Rename all <app> windows… (refused for a Store app's shared frame)"),
             new("rename-pattern", "<title pattern> <short name>", "Rename by title pattern… (* is a wildcard)"),
             new("name-by-folder", "<hwnd> on|off", "Name <app> windows by folder"),
+            new("remember-workspace", "<hwnd> on|off",
+                "Remember <app>'s workspace (on: the app's windows open in the workspace this window is in, and\n"
+                + "follow it when you move one; off: they open where they are opened)"),
             new("restore-title", "<hwnd>", "Restore title"),
             new("pin", "<hwnd>", "show the window on every workspace, as dropping it on the pin row does"),
             new("unpin", "<hwnd>", "undo pin"),

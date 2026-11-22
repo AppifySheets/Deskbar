@@ -4,7 +4,7 @@ Deskbar is a Windows tray utility, called TaskSpaces until 2.0. It **names Windo
 desktops** and adds what they lack:
 an always-on-top floating bar showing every desktop's windows at once, `Win+Ctrl+Tab` to
 switch between them Alt+Tab style, per-desktop colours, short taskbar names for windows,
-and memory of where you last put each window. State persists across reboots. The solution,
+and, for the apps you choose, memory of where you last put each window. State persists across reboots. The solution,
 projects, folders and C# namespaces are `Deskbar.*` too, renamed in their own mechanical PR after
 2.0 (the rename design in `docs/superpowers/specs/2026-10-19-deskbar-rename-design.md` had left
 them as `TaskSpaces.*` until a quiet day). `TaskSpaces` still appears on purpose in two places:
@@ -195,6 +195,16 @@ page says "Sorry, we couldn't find that page": switch accounts, do not debug the
 - **Membership identity = exe path + args.** Chromium browsers key on
   `--profile-directory` plus `--app-id` (so a PWA is not the browser); Firefox is
   deliberately excluded because its args are too generic. Do not "fix" that.
+- **Workspace memory is opt-in per app** (2026-11-22). Petre, after mstsc opened on another
+  workspace (the fourth report of that shape, after the Run box, Snipping Tool and Notepad): "placement
+  memory has to always consider the context that the window is in. i can't think of anything other
+  than code windows moving to their corresponding workspaces", then "let's keep memory, but only for
+  specific apps". So `AppState.RememberedApps` (process names) decides whether the roster's workspace
+  is applied, set from the icon menu's "Remember <app>'s workspace" or `remember-workspace`. Not opted
+  in, an app opens where it was opened and a drag teaches nothing about its next window. The context
+  tiers stay automatic: the folder tier, launched-by, plus rules and `start`. Pins and detaches stay
+  automatic too, because neither sends a window away from where he is. Do not go back to adding
+  names to `StayWhereOpened` one report at a time; that cycle is what this ended.
 - **Placement memory stands down when another live window shares the identity.** Four
   browser windows on one profile are one identity, so "put it back" has no single answer; a
   new one stays where it was opened. Memory restores an app *coming back*; it does not herd

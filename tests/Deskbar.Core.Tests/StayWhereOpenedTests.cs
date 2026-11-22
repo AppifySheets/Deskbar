@@ -66,6 +66,8 @@ public class StayWhereOpenedTests(ITestOutputHelper output)
                     new InventoryEntry(BeeperPath, BeeperCmd, "Beeper"),
                 ],
             },
+            // Opted in, so what is measured is StayWhereOpened and not the opt-in (PlacementMemory.For).
+            RememberedApps = ["msedge", "Beeper"],
         });
         return (manager, manager.State.Workspaces.Single());
     }
@@ -131,6 +133,7 @@ public class StayWhereOpenedTests(ITestOutputHelper output)
                     new InventoryEntry(BeeperPath, BeeperCmd, "Beeper"),
                 ],
             },
+            RememberedApps = ["Beeper"], // workspace memory is opt-in per app (PlacementMemory.For)
         });
 
         monitor.Subject.OnNext(new WindowEvent(WindowEventKind.Appeared,

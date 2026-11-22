@@ -605,14 +605,19 @@ its process name rather than "(untitled)".
 Deskbar never launches anything and never changes a window's size or position on screen. The
 one axis it arranges is which desktop a window belongs to, and that it remembers.
 
-- **A workspace remembers which apps belong to it** even when they are closed. That memory is what
-  puts a window back where you last had it rather than wherever it opens. Identity is the
-  executable plus its arguments, so `rider64 A.sln` and `rider64 B.sln` are different things, and
-  an installed web app is a different thing from the browser it runs in.
-- **Dragging teaches.** Move a window to a workspace by hand and that is where the app goes next
-  time. A window that merely *opened* somewhere teaches nothing until you move it once, because
-  where a new window opens is just the desktop you happened to be on, and a wrong rule is worse
-  than none. Windows already open when Deskbar starts are learned from where they sit.
+- **An app opens where you open it**, unless you have told Deskbar it lives somewhere. Right-click
+  one of its windows on the bar and tick **Remember *app*'s workspace**: from then on its windows
+  open in the workspace that window is in, and they follow it when you move one. Good for apps that
+  have a home, such as a messenger or a recording tool. Everything else stays where it opened, so
+  the Remote Desktop dialog or a tool you open once in a while never jumps to a workspace you
+  dragged it to weeks ago. Identity is the executable plus its arguments, so `rider64 A.sln` and
+  `rider64 B.sln` are different things, and an installed web app is a different thing from the
+  browser it runs in.
+- **Dragging teaches a remembered app.** Move a window of an app you ticked and that is where the
+  app goes next time. A window that merely *opened* somewhere teaches nothing until you move it
+  once, because where a new window opens is just the desktop you happened to be on. Pinning a
+  window to every desktop is remembered for every app, without the tick, since a pin never takes
+  a window away from where you are.
 - **Some apps stay where they were opened** and are never learned from: browsers, Windows Terminal
   and console windows, Open and Save dialogs, the Windows Security sign-in and Task Manager. A
   browser window says nothing about the work, so one dragged Edge window used to teach that all
@@ -901,8 +906,8 @@ sustains residue is a reasonable inference, not a measured finding.
 | Fragmentation is getting finer | A switch is `Win+Ctrl+Tab`, or one click on the bar |
 
 And the features that exist because manual organisation decays the moment it needs upkeep:
-**placement memory** (where you last put a window is where it goes next time, keyed to what the
-app *is* rather than to a window handle), **rosters** (a workspace remembers which apps belong to
+**placement memory** (for the apps you choose, where you last put a window is where it goes next
+time, keyed to what the app *is* rather than to a window handle), **rosters** (a workspace remembers which apps belong to
 it even when they are closed, which is what makes that memory outlive any single window), and
 **renaming** (`RDP` is parsed faster than `Remote Desktop Manager [server-01 - fhd]`, and
 retrieval cues work better when they are legible).

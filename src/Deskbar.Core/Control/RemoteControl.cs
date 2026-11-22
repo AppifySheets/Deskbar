@@ -124,6 +124,7 @@ public sealed partial class RemoteControl(WorkspaceManager manager, Func<bool, R
         ("rename-app", [var hwnd, var name]) => RenameApp(hwnd, name),
         ("rename-pattern", [var pattern, var name]) => RenamePattern(pattern, name),
         ("name-by-folder", [var hwnd, var onOff]) => NameByFolder(hwnd, onOff),
+        ("remember-workspace", [var hwnd, var onOff]) => RememberWorkspace(hwnd, onOff),
         ("restore-title", [var hwnd]) => RestoreTitle(hwnd),
         ("pin", [var hwnd]) => Pin(hwnd, pin: true),
         ("unpin", [var hwnd]) => Pin(hwnd, pin: false),

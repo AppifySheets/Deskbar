@@ -467,6 +467,8 @@ public class ContainerPlacementTests
 
         // Taught separately: the APP lives in framework. A bare window, so no folder is learned.
         Appears(monitor, Code(0x908, Bare));
+        // Workspace memory is opt-in per app (PlacementMemory.For), and the bare window below needs it.
+        Assert.True(manager.RememberWorkspace(new WindowHandle(0x908), true).IsSuccess);
         Assert.True(manager.AssignWindow(new WindowHandle(0x908), framework.Id).IsSuccess);
         Closed(monitor, Code(0x908, Bare));
 
@@ -509,6 +511,8 @@ public class ContainerPlacementTests
     {
         var manager = Started();
         Appears(monitor, Code(0x910, Bare));
+        // Workspace memory is opt-in per app (PlacementMemory.For); this test is about what it does once given.
+        Assert.True(manager.RememberWorkspace(new WindowHandle(0x910), true).IsSuccess);
         Assert.True(manager.AssignWindow(new WindowHandle(0x910), framework.Id).IsSuccess);
         Closed(monitor, Code(0x910, Bare));
 
@@ -688,6 +692,8 @@ public class ContainerPlacementTests
         // does have somewhere to move it. Without this the window would open in its home already, and
         // the test would pass by measuring nothing.
         Appears(monitor, Code(0x916, Bare));
+        // Workspace memory is opt-in per app (PlacementMemory.For), and the bare window below needs it.
+        Assert.True(manager.RememberWorkspace(new WindowHandle(0x916), true).IsSuccess);
         Assert.True(manager.AssignWindow(new WindowHandle(0x916), framework.Id).IsSuccess);
         Closed(monitor, Code(0x916, Bare));
 

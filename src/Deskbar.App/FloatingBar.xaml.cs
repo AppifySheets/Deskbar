@@ -7645,6 +7645,28 @@ public partial class FloatingBar : Window
             menu.Items.Add(byFolder);
         }
 
+        // Workspace memory is opt-in per app since 2026-11-22. Petre: "placement memory has to always
+        // consider the context that the window is in", then "let's keep memory, but only for specific apps".
+        // Ticked, the app's windows open in the workspace this window is in and follow it when he moves one;
+        // unticked (the default), they open wherever they are opened. Reasoning: PlacementMemory.For.
+        //
+        // Offered only where memory can apply (WorkspaceManager.CanRememberWorkspace): not for browsers,
+        // terminals, the shell, a Store app's shared frame or an elevated window, where a check mark would
+        // be a control that does nothing.
+        if (manager.CanRememberWorkspace(row.Window).IsSuccess)
+        {
+            var remember = new MenuItem
+            {
+                Header = $"Remember {row.Window.ProcessName}'s workspace",
+                IsCheckable = true,
+                IsChecked = manager.RemembersWorkspace(row.Window.ProcessName),
+                Icon = MenuGlyph("⌖"),
+            };
+            // Click, not Checked/Unchecked, for the reason given on the folder item above.
+            remember.Click += (_, _) => Report(manager.RememberWorkspace(row.Window.Handle, remember.IsChecked));
+            menu.Items.Add(remember);
+        }
+
         var restore = new MenuItem { Header = "Restore title", IsEnabled = row.OriginalTitle.HasValue, Icon = MenuGlyph("↺") };
         restore.Click += (_, _) => Report(manager.RestoreTitle(row.Window.Handle));
         menu.Items.Add(restore);
