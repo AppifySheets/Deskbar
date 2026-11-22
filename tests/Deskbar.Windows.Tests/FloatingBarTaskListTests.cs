@@ -432,11 +432,14 @@ public class FloatingBarTaskListTests
     // FIX ROUND 1, Important 1: a paint waits under the same conditions as the bar's rebuild, a press or a drag anywhere
     // on the bar and not only on the list, because a paint that adds a line changes the bar's height and moves the
     // rows under a bottom-anchored bar's press. A row being dragged in arrange mode holds the paint; the cancel serves
-    // the deferred rebuild, which paints the list.
+    // the deferred rebuild, which paints the list. The press is synthetic, so the bar gets a mouse that is held down and
+    // captured (ArrangeMouse.Held, as FloatingBarArrangeTests.Held explains): with the runner's real mouse, whose button
+    // is up, the press was called off before the paint could wait on it, and the test passed locally but failed on CI.
     [Fact]
     public void A_paint_waits_while_a_row_is_being_dragged() => StaThread.Run(() =>
     {
         using var t = Build();
+        t.Bar.ArrangeMouseInput = ArrangeMouse.Held;
         Assert.True(t.Bar.SetArranging(true).IsSuccess);
         t.Bar.UpdateLayout();
         var rows = (Panel)t.Bar.FindName("Rows")!;
