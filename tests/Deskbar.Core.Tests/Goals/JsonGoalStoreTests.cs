@@ -129,6 +129,35 @@ public sealed class JsonGoalStoreTests : IDisposable
         Assert.Contains(traced, line => line.Contains("No id"));
     }
 
+    // Review M2: a malformed id or date (a hand edit) failed the whole file. Such a goal is skipped like one with none,
+    // through the same path, so the file is copied aside once. A malformed parent or seen date reads as none: those are
+    // links and marks, not goals, and dropping them loses nothing a later review cannot set again.
+    [Fact]
+    public void A_malformed_id_or_date_skips_that_goal_and_the_rest_read()
+    {
+        WriteGoals("""
+            { "version": 1, "weekSeen": "23-11-2026", "monthSeen": "2026-11-01", "goals": [
+              { "id": "not-a-guid", "title": "Bad id", "period": "2026-11-23" },
+              { "id": "dddddddd-0000-0000-0000-000000000002", "title": "Bad date", "period": "2026-11-3" },
+              { "id": "dddddddd-0000-0000-0000-000000000003", "title": "Far year", "kind": "month", "period": "9999-12-01" },
+              { "id": "dddddddd-0000-0000-0000-000000000009", "title": "Good", "period": "2026-11-23", "parentId": "nope" } ] }
+            """);
+        var traced = new List<string>();
+
+        var loaded = new JsonGoalStore(dir, traced.Add).Load();
+
+        Assert.True(loaded.IsSuccess, loaded.IsFailure ? loaded.Error : "");
+        var good = Assert.Single(loaded.Value.Goals);
+        Assert.Equal("Good", good.Title);
+        Assert.True(good.ParentId.HasNoValue);
+        Assert.True(loaded.Value.WeekSeen.HasNoValue);
+        Assert.Equal(new DateOnly(2026, 11, 1), loaded.Value.MonthSeen.Value);
+        Assert.Equal(3, traced.Count(line => line.Contains("skipped")));
+        Assert.Contains(traced, line => line.Contains("Bad id") && line.Contains("not-a-guid"));
+        Assert.Contains(traced, line => line.Contains("Bad date") && line.Contains("2026-11-3"));
+        Assert.Single(Quarantined("goals.json"));
+    }
+
     // A skipped goal is not written back by the next save, so the file it came from is COPIED aside once, as a .bak, and
     // traced: nothing in it is lost. Copied, not moved: goals.json was readable and its other goals are the board, and
     // a crash before the next save must still find them. A second load of the same file makes no second copy.

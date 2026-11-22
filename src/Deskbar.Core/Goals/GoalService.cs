@@ -98,7 +98,7 @@ public sealed class GoalService(
 
     /// <summary>The review's "Carry over": to the current period of the goal's own kind, a week to this week, a month to this month.</summary>
     public Result CarryToNow(Guid id) =>
-        Board.Get(id).ToResult($"No goal with id {id}").Bind(goal => Carry(id, GoalPeriod.Of(goal.Kind, today())));
+        Board.Get(id).ToResult(GoalBoard.NoGoal(id.ToString())).Bind(goal => Carry(id, GoalPeriod.Of(goal.Kind, today())));
 
     public Result SetParent(Guid id, Maybe<Guid> parent) => Apply(Board.SetParent(id, parent, now()));
 
@@ -115,7 +115,7 @@ public sealed class GoalService(
     public Result LinkTask(Guid taskId, Maybe<Guid> goalId) =>
         (goalId.HasNoValue
             ? Result.Success()
-            : Board.Get(goalId.Value).ToResult($"No goal with id {goalId.Value}").Bind(goal => goal.Status switch
+            : Board.Get(goalId.Value).ToResult(GoalBoard.NoGoal(goalId.Value.ToString())).Bind(goal => goal.Status switch
             {
                 GoalStatus.Done => Result.Failure("The goal is done"),
                 GoalStatus.Dropped => Result.Failure("The goal is dropped"),

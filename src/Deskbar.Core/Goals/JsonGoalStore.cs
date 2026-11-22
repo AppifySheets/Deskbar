@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using CSharpFunctionalExtensions;
@@ -36,8 +37,9 @@ namespace Deskbar.Core.Goals;
 //     not the first day of its period (a hand edit) is snapped to the period holding it.
 //   * Every time is converted to UTC before writing AND after reading, as in tasks.json, so a later sync can compare
 //     UpdatedAt directly. A missing time reads as the goal's other time, or the Unix epoch when both are missing.
-//   * A goal with no id or no period (null or missing; a hand edit) is SKIPPED and traced, and the rest of the file
-//     reads (review M1). Failing the whole file over one goal would move every other goal aside to a .bak, and reading
+//   * A goal with no id or no period (null or missing; a hand edit), or one whose id is not a Guid or whose period is
+//     not a yyyy-MM-dd date in the years 2000 to 2999, is SKIPPED and traced, and the rest of the file reads (review M1,
+//     M2). Failing the whole file over one goal would move every other goal aside to a .bak, and reading
 //     the missing period as 0001-01-01 made Previous() throw. The skipped goal is not written back by the next save, so
 //     it must not be lost with it: a load that skipped any goal COPIES the file it read aside once, as
 //     `<name>.<yyyyMMdd-HHmmss>.bak` beside it (DurableFile.KeepCopy), and traces where. Copied, not moved: the file
@@ -53,46 +55,41 @@ public sealed class JsonGoalStore(string baseDirectory, Action<string>? trace = 
         Converters = { new TolerantNameConverter<GoalKind>(), new TolerantNameConverter<GoalStatus>() },
     };
 
-    // Id, Period and the times are nullable so a hand-edited null or a missing field reads instead of failing the file
-    // (see the header); FromDto skips a goal without an id or a period and fills in a missing time.
+    // The id, the period, the parent and the seen dates are TEXT here, parsed by hand (review M2): as a Guid or a DateOnly
+    // field, one malformed value ("not-a-guid", "2026-11-3") made the serializer fail the whole file. FromDto skips a goal
+    // whose id or period does not parse, and reads a parent or a seen date that does not parse as none. The times are
+    // nullable so a missing one reads instead of failing the file.
     sealed record GoalDto(
-        Guid? Id,
+        string? Id,
         string? Title,
         GoalKind Kind,
-        DateOnly? Period,
+        string? Period,
         GoalStatus Status,
         int Order,
-        Guid? ParentId,
+        string? ParentId,
         DateTimeOffset? Created,
         DateTimeOffset? UpdatedAt);
 
-    sealed record FileDto(int Version, DateOnly? WeekSeen, DateOnly? MonthSeen, IReadOnlyList<GoalDto>? Goals);
+    sealed record FileDto(int Version, string? WeekSeen, string? MonthSeen, IReadOnlyList<GoalDto>? Goals);
+
+    // What one parse made: the board, and whether it skipped a goal, carried from Parse (which DurableFile.Read calls) to
+    // Load (which then keeps the file aside), as JsonTaskStore's Parsed carries a version 1 file.
+    sealed record Parsed(GoalBoard Board, bool Skipped);
 
     string GoalsPath => Path.Combine(baseDirectory, "goals.json");
 
-    // Whether the last parse skipped a goal (see the header). The store's one piece of state, carried from Parse, which
-    // DurableFile.Read calls, to Load, which keeps the file a skipped goal came from.
-    bool skipped;
-
     // A missing file is the normal first run (an empty board, nothing seen). See the header for the unreadable case and
     // for a file with a goal this build cannot read.
-    public Result<GoalBoard> Load()
-    {
-        // A missing file parses nothing, so the flag must not carry over from an earlier load.
-        skipped = false;
-        return DurableFile.Read(GoalsPath, Parse, GoalBoard.Empty, line => trace?.Invoke($"goals: {line}"))
+    public Result<GoalBoard> Load() =>
+        DurableFile.Read(GoalsPath, Parse, new Parsed(GoalBoard.Empty, false), line => trace?.Invoke($"goals: {line}"))
             .MapError(error => $"{error}; {DurableFile.KeepAside(GoalsPath)}")
-            .Tap(_ => KeepSkippedSource());
-    }
+            .Tap(parsed => { if (parsed.Skipped) KeepSkippedSource(); })
+            .Map(parsed => parsed.Board);
 
     // The file the board was read from: goals.json when it is still in place, else its previous copy (DurableFile.Read
     // moves an unreadable goals.json aside before it reads the previous one).
-    void KeepSkippedSource()
-    {
-        if (!skipped) return;
-        var source = File.Exists(GoalsPath) ? GoalsPath : DurableFile.PreviousOf(GoalsPath);
-        trace?.Invoke($"goals: a goal could not be read, so {DurableFile.KeepCopy(source)}");
-    }
+    void KeepSkippedSource() =>
+        trace?.Invoke($"goals: a goal could not be read, so {DurableFile.KeepCopy(File.Exists(GoalsPath) ? GoalsPath : DurableFile.PreviousOf(GoalsPath))}");
 
     public Result Save(GoalBoard board) =>
         Result.Try(() =>
@@ -101,40 +98,53 @@ public sealed class JsonGoalStore(string baseDirectory, Action<string>? trace = 
             DurableFile.Write(GoalsPath, JsonSerializer.Serialize(ToDto(board), Options));
         }, e => $"Could not write {GoalsPath}: {e.Message}");
 
-    GoalBoard Parse(string text)
-    {
-        skipped = false;
-        return FromDto(JsonSerializer.Deserialize<FileDto>(text, Options) ?? throw new JsonException("goals.json deserialized to null"));
-    }
+    Parsed Parse(string text) =>
+        FromDto(JsonSerializer.Deserialize<FileDto>(text, Options) ?? throw new JsonException("goals.json deserialized to null"));
 
+    // The id as the serializer wrote it when it was a Guid ("D", lower case), and the period as yyyy-MM-dd, so the
+    // file's bytes are the same as before these became text.
     static FileDto ToDto(GoalBoard board) =>
         new(CurrentVersion,
-            board.WeekSeen.HasValue ? board.WeekSeen.Value : null,
-            board.MonthSeen.HasValue ? board.MonthSeen.Value : null,
-            board.Goals.Select(g => new GoalDto(g.Id, g.Title, g.Kind, g.Period.Start, g.Status, g.Order,
-                g.ParentId.HasValue ? g.ParentId.Value : null,
+            board.WeekSeen.Map(Day).GetValueOrDefault(),
+            board.MonthSeen.Map(Day).GetValueOrDefault(),
+            board.Goals.Select(g => new GoalDto(g.Id.ToString("D"), g.Title, g.Kind, g.Period.Key, g.Status, g.Order,
+                g.ParentId.Map(p => p.ToString("D")).GetValueOrDefault(),
                 g.Created.ToUniversalTime(), g.UpdatedAt.ToUniversalTime())).ToArray());
 
-    GoalBoard FromDto(FileDto file) =>
-        new GoalBoard((file.Goals ?? []).Where(Usable).Select(d => new Goal(d.Id!.Value, d.Title ?? "",
-            GoalPeriod.Of(d.Kind, d.Period!.Value), d.Status, d.Order,
-            d.ParentId is { } parent ? parent : Maybe<Guid>.None,
-            (d.Created ?? d.UpdatedAt ?? DateTimeOffset.UnixEpoch).ToUniversalTime(),
-            (d.UpdatedAt ?? d.Created ?? DateTimeOffset.UnixEpoch).ToUniversalTime())).ToArray())
-        {
-            WeekSeen = file.WeekSeen is { } week ? week : Maybe<DateOnly>.None,
-            MonthSeen = file.MonthSeen is { } month ? month : Maybe<DateOnly>.None,
-        };
+    static string Day(DateOnly day) => day.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
 
-    // A goal this build can show needs an id and a period; one without is traced and skipped (see the header).
-    bool Usable(GoalDto goal)
+    // Every goal read, or why it could not be: the unreadable ones are traced, one line each with the goal's title, and
+    // skipped, and the parse says it skipped (see the header).
+    Parsed FromDto(FileDto file)
     {
-        var usable = goal.Id is not null && goal.Period is not null;
-        if (usable) return true;
-        skipped = true;
-        trace?.Invoke($"goals: skipped a goal with no {(goal.Id is null ? "id" : "period")}: '{goal.Title}'");
-        return false;
+        var read = (file.Goals ?? []).Select(d => (Dto: d, Goal: ToGoal(d))).ToArray();
+        read.Where(r => r.Goal.IsFailure).ToList()
+            .ForEach(r => trace?.Invoke($"goals: skipped a goal with {r.Goal.Error}: '{r.Dto.Title}'"));
+        return new Parsed(
+            new GoalBoard(read.Where(r => r.Goal.IsSuccess).Select(r => r.Goal.Value).ToArray())
+            {
+                WeekSeen = SeenDay(file.WeekSeen),
+                MonthSeen = SeenDay(file.MonthSeen),
+            },
+            read.Any(r => r.Goal.IsFailure));
     }
+
+    // A goal this build can show needs an id that is a Guid and a period that is a date in range (GoalPeriod.ParseDay);
+    // the error names what is wrong, for the trace. A parent that is not a Guid reads as none (a link, not a goal).
+    static Result<Goal> ToGoal(GoalDto d) =>
+        string.IsNullOrWhiteSpace(d.Id) ? Result.Failure<Goal>("no id")
+        : !Guid.TryParse(d.Id, out var id) ? Result.Failure<Goal>($"an id that is not one, '{d.Id}'")
+        : string.IsNullOrWhiteSpace(d.Period) ? Result.Failure<Goal>("no period")
+        : GoalPeriod.ParseDay(d.Period).MapError(error => $"a period that is not usable: {error}").Map(day => new Goal(id, d.Title ?? "",
+            GoalPeriod.Of(d.Kind, day), d.Status, d.Order,
+            Guid.TryParse(d.ParentId, out var parent) ? parent : Maybe<Guid>.None,
+            (d.Created ?? d.UpdatedAt ?? DateTimeOffset.UnixEpoch).ToUniversalTime(),
+            (d.UpdatedAt ?? d.Created ?? DateTimeOffset.UnixEpoch).ToUniversalTime()));
+
+    // A seen date that does not parse reads as none: the review then counts as not done, which costs one prompt.
+    static Maybe<DateOnly> SeenDay(string? text) =>
+        string.IsNullOrWhiteSpace(text) ? Maybe<DateOnly>.None
+        : GoalPeriod.ParseDay(text).Match(day => Maybe.From(day), _ => Maybe<DateOnly>.None);
 
     // Reads an enum from its name in any case and writes it as its lower-case name. Anything else, a name a newer build
     // added, a number, null or an object included, reads as the enum's first value (see the header).
