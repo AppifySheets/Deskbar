@@ -26,7 +26,7 @@ Everything the bar's menus do has a command, and each one runs the same code as 
 | Starting | `start <ws> [--create [placement]] [--cwd <folder>] -- <program> [arguments...]`, `open <link> [--from <folder>]` |
 | Windows | `move <ws> [--create [placement]] [--no-follow] (--title <text> \| --hwnd <h>)...`, `rename-window`, `rename-app`, `rename-pattern`, `name-by-folder <hwnd> on\|off`, `restore-title`, `pin`, `unpin` |
 | Bar | `bar minimize\|restore\|dock\|undock\|across\|edge`, `arrange on\|off`, `stats detach\|attach`, `see-through on\|off` |
-| Tasks | `task list`, `task add <title> [--workspace <name>\|none] [--in 1m\|5m\|10m\|30m]`, `task timer <id> (--in ... \| --clear)`, `task done`, `task rename`, `task delete` |
+| Tasks | `task list [--closed]`, `task add <title> [--workspace <name>\|none]`, `task close`, `task reopen`, `task status`, `task rename`, `task move`, `task comment`, `task delete` |
 
 A few more, with `$ts` standing for the batch file:
 

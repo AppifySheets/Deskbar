@@ -21,7 +21,7 @@ Links and windows a session opens land in that session's workspace, not on the o
 
 Seven VS Code windows all named `VSC` tell you nothing. **Name *app* windows by folder** on a VS Code icon's menu names each window after the folder, project or session it holds instead, and follows the window when it opens something else.
 
-A session can also park a reminder on its own workspace with `task add`. When the timer runs out, the row blinks the way it does when a session asks for you.
+A session can also add a note to its own workspace with `task add`, and it shows in the bar's task list.
 
 ## Settings
 
@@ -51,10 +51,10 @@ $ts = "$env:APPDATA\Deskbar\deskbar.cmd"
 
 `open <link>` is for a session or a terminal inside VS Code. It finds the VS Code window whose folder holds the caller's folder. When that window is in a workspace you are not looking at, the link gets a new window of your default browser there, and you stay where you are. Otherwise the link opens as usual.
 
-`task add` with no `--workspace` parks the caller's own workspace:
+`task add` with no `--workspace` puts the note on the caller's own workspace:
 
 ```powershell
-& $ts task add "Wait for CI" --in 10m
+& $ts task add "Wait for CI"
 ```
 
 On a machine with the Microsoft Store copy, `deskbar` is on the PATH, so `deskbar windows` and `deskbar help` work from PowerShell, cmd and Git Bash.
@@ -64,7 +64,7 @@ On a machine with the Microsoft Store copy, `deskbar` is on the PATH, so `deskba
 - [Driving it from scripts](scripts.md) has every command.
 - [Switching workspaces](switching.md) and [Quick find](quick-find.md) are the two ways to get to a session.
 - [The bar](the-bar.md) explains the rows, rings and icons.
-- [Tasks](tasks.md) covers the timers a session can park.
+- [Tasks](tasks.md) covers the task list a session can add to.
 - [Where windows go](where-windows-go.md) covers the launched-by rule and folder memory.
 - [Naming windows](naming-windows.md) covers naming editor windows by folder.
 - The README's [case for agents and workspaces](../../README.md#agentic-ai-multiplies-the-contexts-it-does-not-replace-them).

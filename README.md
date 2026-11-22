@@ -437,11 +437,10 @@ More in [Quick find](docs/features/quick-find.md).
 
 ## Tasks
 
-The stopwatch in the bar's bottom strip, beside the language code, parks a workspace for later. Click
-it and pick 1, 5, 10 or 30 minutes to park the workspace you are on. The task takes the title of the
-workspace's latest open task, or the title of the window you were typing in when that window is on
-this workspace, or else the workspace's name. Parking the same title again reuses the task instead of
-adding a row.
+The bottom of the bar carries a short task list, for the things you want to remember while you work.
+Type a note into the box at its top and press Enter, and it lands on the workspace you are on (or on
+none, or another one, by the chips under the box). Tick a note to close it, with six seconds to undo.
+A script or a Claude Code session can add and change tasks with `deskbar.cmd task`.
 
 More in [Tasks](docs/features/tasks.md).
 

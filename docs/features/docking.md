@@ -51,5 +51,5 @@ $ts = "$env:APPDATA\Deskbar\deskbar.cmd"
 
 - [The bar](the-bar.md) covers the rows and the bar's own settings.
 - [Strips and pinned workspaces](strips.md) covers the strip along the top of each screen.
-- [Tasks](tasks.md) covers the stopwatch in the bottom strip.
+- [Tasks](tasks.md) covers the task list in the bottom strip.
 - The README on [minimising the bar](../../README.md#minimising-the-bar).
