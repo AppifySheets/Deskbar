@@ -418,7 +418,8 @@ public partial class TasksWindow : Window
         // may now be under the pointer that was not, so for half a second a click is not trusted (the click guard,
         // ClickIgnored). A redraw that only rewrites what lines say (a session's status line) moves nothing and does
         // not start the half second, or frequent status pulses would eat clicks (review minor).
-        var placesKey = string.Join('|', view.Groups.SelectMany(g => g.Rows).Select(r => $"{r.Id}{r.Expanded}{r.Closing}"));
+        var shownRows = view.Matrix ? view.Cells.SelectMany(c => c.Rows).ToArray() : view.Groups.SelectMany(g => g.Rows).ToArray();
+        var placesKey = string.Join('|', shownRows.Select(r => $"{r.Id}{r.Expanded}{r.Closing}").Prepend($"{view.Matrix}"));
         if (placesKey != linesPlaces)
         {
             linesPlaces = placesKey;
@@ -433,20 +434,28 @@ public partial class TasksWindow : Window
         selectionFrames.Clear();
         authors.Clear();
         closing.Clear();
-        view.Groups.ToList().ForEach(group =>
-        {
-            Rows.Children.Add(Header(group));
-            group.Rows.ToList().ForEach(row =>
+        // The List or the Matrix (TasksWindow.Matrix.cs), whichever the switch says; the other is emptied and hidden.
+        matrixShown = view.Matrix;
+        Scroller.Visibility = view.Matrix ? Visibility.Collapsed : Visibility.Visible;
+        MatrixGrid.Visibility = view.Matrix ? Visibility.Visible : Visibility.Collapsed;
+        MatrixGrid.Children.Clear();
+        if (view.Matrix) DrawMatrix(view);
+        else
+            view.Groups.ToList().ForEach(group =>
             {
-                closing[row.Id] = row.Closing;
-                Rows.Children.Add(Line(row, view));
-                if (row.Expanded) Rows.Children.Add(Thread(row));
+                Rows.Children.Add(Header(group));
+                group.Rows.ToList().ForEach(row =>
+                {
+                    closing[row.Id] = row.Closing;
+                    Rows.Children.Add(Line(row, view));
+                    if (row.Expanded) Rows.Children.Add(Thread(row));
+                });
             });
-        });
-        Headers = view.Groups.Select(g => g.Header).ToArray();
-        Keys = view.Groups.SelectMany(g => g.Rows).Select(r => r.Id).ToArray();
+        Headers = view.Matrix ? view.Cells.Select(c => c.Header).ToArray() : view.Groups.Select(g => g.Header).ToArray();
+        Keys = shownRows.Select(r => r.Id).ToArray();
         EmptyText.Text = view.EmptyText;
-        EmptyText.Visibility = Keys.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
+        // The Matrix always draws its four cells, empty or not, so it needs no empty line.
+        EmptyText.Visibility = Keys.Count == 0 && !view.Matrix ? Visibility.Visible : Visibility.Collapsed;
         PaintAddPlace();
     }
 
@@ -460,6 +469,10 @@ public partial class TasksWindow : Window
             PlaceSignature(view.AddTarget),
             view.EmptyText,
             $"{renaming}",
+            $"{view.Matrix}",
+            string.Join('\u0002', view.Cells.Select(c => $"{c.Header}:" + string.Join('\u0003', c.Rows.Select(r =>
+                $"{r.Id}|{r.Title}|{r.Detail}|{r.Status}|{r.Claudes}|{PlaceSignature(r.Place)}|{r.CommentCount}|{r.Expanded}|{r.Closing}|{r.Important}|{r.Urgent}|" +
+                string.Join('\u0004', r.Comments.Select(c => $"{c.Id}{c.Author}{c.When}{c.Markdown}")))))),
             string.Join('\u0002', view.Groups.Select(g => $"{g.Header}:" + string.Join('\u0003', g.Rows.Select(r =>
                 $"{r.Id}|{r.Title}|{r.Detail}|{r.Status}|{r.Claudes}|{r.Sessions}|{r.SessionCount}|{r.LiveCount}|{PlaceSignature(r.Place)}|{r.CommentCount}|" +
                 $"{r.Expanded}|{r.Closing}|{r.Important}|{r.Urgent}|" + string.Join('\u0004', r.Comments.Select(c => $"{c.Id}{c.Author}{c.When}{c.Markdown}")))))));
@@ -483,12 +496,27 @@ public partial class TasksWindow : Window
         workspace.Click += (_, _) => OpenMenu(WorkspaceFilterMenu(view, workspace));
         Filters.Children.Add(workspace);
         FilterLabels = view.Filters.Select(f => f.Label).ToArray();
+        // The view switch shows which view is on, outlined like a filter chip.
+        if (listSwitch is not null) listSwitch.BorderBrush = view.Matrix ? Brushes.Transparent : PickedEdge;
+        if (matrixSwitch is not null) matrixSwitch.BorderBrush = view.Matrix ? PickedEdge : Brushes.Transparent;
         WorkspaceFilterLabel = view.WorkspaceFilterLabel;
     }
 
-    // "+ Add", made once. The title bar's X closes the window, so the toolbar has no close button of its own.
+    // The List / Matrix switch (Task 12, Ruling 28): two chips, the one on show outlined (DrawFilters).
+    Button? listSwitch;
+    Button? matrixSwitch;
+
+    // The view switch and "+ Add", made once. The title bar's X closes the window, so the toolbar has no close button
+    // of its own.
     void BuildToolbarEnd()
     {
+        listSwitch = Flat(new TextBlock { Text = "List", Foreground = Ink, FontSize = 11 }, "List", () => Actions?.ShowMatrix(false), new Thickness(8, 2, 8, 2));
+        listSwitch.ToolTip = "The tasks grouped, one group under another";
+        matrixSwitch = Flat(new TextBlock { Text = "Matrix", Foreground = Ink, FontSize = 11 }, "Matrix", () => Actions?.ShowMatrix(true), new Thickness(8, 2, 8, 2));
+        matrixSwitch.ToolTip = "Covey's matrix: urgent and not urgent across, important and not important down";
+        matrixSwitch.Margin = new Thickness(4, 0, 10, 0);
+        ToolbarEnd.Children.Add(listSwitch);
+        ToolbarEnd.Children.Add(matrixSwitch);
         var add = Flat(new TextBlock { Text = "+ Add", Foreground = Ink, FontSize = 11 }, "Add", ShowAdd, new Thickness(10, 2, 10, 2));
         add.ToolTip = "Write a note";
         ToolbarEnd.Children.Add(add);
@@ -512,7 +540,7 @@ public partial class TasksWindow : Window
         // Every column but the title's is a fixed width, the same on every line of every group, so each sits at the
         // same x, flush to the right edge; the title takes the star column and trims first.
         var grid = new Grid();
-        LineColumns.ToList().ForEach(width => grid.ColumnDefinitions.Add(new ColumnDefinition { Width = width }));
+        (compactLines ? CompactColumns : LineColumns).ToList().ForEach(width => grid.ColumnDefinitions.Add(new ColumnDefinition { Width = width }));
         Cell(grid, 0, LeftOf(row));
         Cell(grid, 1, TextOf(row));
         var flags = FlagsOf(row);

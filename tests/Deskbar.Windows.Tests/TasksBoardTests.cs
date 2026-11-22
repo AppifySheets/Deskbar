@@ -950,4 +950,102 @@ public class TasksBoardTests
         WindowDrag(t, a, InLine(t, w, 0.2));
         Assert.Equal([w, a, b], t.Tasks.Board.Pile().Select(x => x.Id));
     });
+
+    // --- Task 12: the Matrix view (Ruling 28) ------------------------------------------------------------------------
+
+    // The toolbar's switch shows Covey's 2 by 2 and is remembered (AppState.TasksMatrix): urgent and not urgent across,
+    // important and not important down, so I is top left and II top right. Each cell lists its quadrant's tasks, a task
+    // waiting on Petre on top of its own quadrant's cell.
+    [Fact]
+    public void The_matrix_shows_four_cells_in_coveys_places() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        var a = t.Tasks.AddNote("a", t.Gepha).Value.Id;
+        var b = t.Tasks.AddNote("b", t.Gepha).Value.Id;
+        var c = t.Tasks.AddNote("c", t.Gepha).Value.Id;
+        var w = t.Tasks.AddNote("w", t.Gepha).Value.Id;
+        t.Tasks.SetFlag(a, TaskFlag.Important, true);
+        t.Tasks.SetFlag(a, TaskFlag.Urgent, true);
+        t.Tasks.SetFlag(b, TaskFlag.Important, true);
+        t.Tasks.SetFlag(w, TaskFlag.Important, true);
+        t.Tasks.SetStatus(w, TaskStatus.WaitingOnYou);
+        t.Controller.Open(Rect.Empty);
+        Assert.False(t.Window.MatrixShown);
+
+        Click(ButtonNamed(t.Window, "Matrix"));
+
+        Assert.True(t.Harness.Manager.State.TasksMatrix);
+        Assert.True(t.Window.MatrixShown);
+        Assert.Equal(["I  Urgent and important", "II  Important, not urgent", "III  Urgent, not important", "IV  Not urgent, not important"],
+            t.Window.Headers);
+        Assert.Equal([a, w, b, c], t.Window.Keys);
+        Assert.Equal((0, 0), t.Window.CellPlace(Quadrant.I));
+        Assert.Equal((0, 1), t.Window.CellPlace(Quadrant.II));
+        Assert.Equal((1, 0), t.Window.CellPlace(Quadrant.III));
+        Assert.Equal((1, 1), t.Window.CellPlace(Quadrant.IV));
+        Assert.Equal(Quadrant.II, t.Window.CellOf(w));
+        // Quadrant II is drawn a little stronger: Covey's quadrant to put first.
+        Assert.True(t.Window.CellStronger(Quadrant.II));
+        Assert.False(t.Window.CellStronger(Quadrant.I));
+
+        Click(ButtonNamed(t.Window, "List"));
+        Assert.False(t.Harness.Manager.State.TasksMatrix);
+        Assert.False(t.Window.MatrixShown);
+    });
+
+    [Fact]
+    public void The_matrix_is_remembered_when_the_window_opens_again() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        t.Tasks.AddNote("a", t.Gepha);
+        Assert.True(t.Harness.Manager.SetTasksMatrix(true).IsSuccess);
+
+        t.Controller.Open(Rect.Empty);
+
+        Assert.True(t.Window.MatrixShown);
+    });
+
+    // A point inside a line, in the Matrix's drag coordinates.
+    static Point InMatrixLine(Board t, Guid id, double share)
+    {
+        var line = LineOf(t.Window, id);
+        return line.TranslatePoint(new Point(10, line.ActualHeight * share), t.Window.DragSurface);
+    }
+
+    // Dragging between cells sets the flags of the cell it lands in; into an empty cell, it lands at its top.
+    [Fact]
+    public void Dragging_between_matrix_cells_sets_the_flags() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        var a = t.Tasks.AddNote("a", t.Gepha).Value.Id;
+        var b = t.Tasks.AddNote("b", t.Gepha).Value.Id;
+        t.Tasks.SetFlag(a, TaskFlag.Important, true);
+        Assert.True(t.Harness.Manager.SetTasksMatrix(true).IsSuccess);
+        t.Window.DragMouse = ArrangeMouse.Held;
+        t.Controller.Open(Rect.Empty);
+        t.Window.UpdateLayout();
+        Assert.Equal(Quadrant.II, t.Window.CellOf(a));
+
+        WindowDragTo(t, b, InMatrixLine(t, a, 0.2));
+        t.Window.UpdateLayout();
+        Assert.True(t.Tasks.Board.Tasks.Single(x => x.Id == b).Important);
+        Assert.Equal([b, a], t.Window.Keys);
+
+        // Into the empty cell III (urgent, not important).
+        WindowDragTo(t, a, t.Window.CellCentre(Quadrant.III));
+        t.Window.UpdateLayout();
+        var moved = t.Tasks.Board.Tasks.Single(x => x.Id == a);
+        Assert.True(moved.Urgent && !moved.Important);
+        Assert.Equal(Quadrant.III, t.Window.CellOf(a));
+    });
+
+    static void WindowDragTo(Board t, Guid from, Point to)
+    {
+        var start = InMatrixLine(t, from, 0.5);
+        t.Window.DragPress(from, start);
+        t.Window.DragMove(new Point(start.X + 8, start.Y + 8));
+        t.Window.DragMove(to);
+        t.Window.DragRelease();
+        t.Window.Dispatcher.Invoke(() => { }, System.Windows.Threading.DispatcherPriority.Background);
+    }
 }

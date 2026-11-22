@@ -575,6 +575,25 @@ public class RemoteControlMenuTests
         Assert.Equal([true, false], asked);
     }
 
+    // Task 12 (Ruling 28): the window's List / Matrix switch has its twin too. It is a setting (AppState.TasksMatrix),
+    // remembered, so it works whether or not the window is open, and a copy with no window still keeps it.
+    [Fact]
+    public void Tasks_window_list_and_matrix_set_the_remembered_view()
+    {
+        var manager = Started();
+        var control = new RemoteControl(manager, setTasksWindow: _ => Result.Success());
+        Assert.False(manager.State.TasksMatrix);
+
+        var matrix = control.Execute(["tasks-window", "matrix"]);
+        Ok(matrix);
+        Assert.True(manager.State.TasksMatrix);
+        Assert.True(Json(matrix).GetProperty("matrix").GetBoolean());
+
+        Ok(control.Execute(["tasks-window", "list"]));
+        Assert.False(manager.State.TasksMatrix);
+        Assert.Contains(ControlUsage.All, c => c.Verb == "tasks-window" && c.Arguments == "show|hide|list|matrix");
+    }
+
     [Fact]
     public void Tasks_window_refuses_without_a_window()
     {

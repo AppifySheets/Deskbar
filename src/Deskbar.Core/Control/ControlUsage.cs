@@ -67,9 +67,10 @@ public static class ControlUsage
             new("task", "order <id> top|end|<n>",
                 "move a task within its quadrant, as a drag does: to the top, the end or place n counting from 1.\n"
                 + "      A task waiting on you stays on top until it is answered"),
-            new("tasks-window", "show|hide",
-                "open the tasks window, as the bar's \"+N more\" does (every task grouped by status, the closed ones\n"
-                + "      under their filter, each with its comments), or close it"),
+            new("tasks-window", "show|hide|list|matrix",
+                "open the tasks window, as the bar's \"+N more\" does (every task grouped as on the bar, the closed\n"
+                + "      ones under their filter, each with its comments), or close it; list or matrix switches its view\n"
+                + "      (Covey's 2 by 2: urgent and not urgent across, important and not important down), remembered"),
         ]),
         new("Workspace row menu", [
             new("rename", "<workspace> <new name>", "Rename…"),
