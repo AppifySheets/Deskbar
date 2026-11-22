@@ -36,10 +36,11 @@ namespace Deskbar.App;
 //
 // AND THREE MORE HOOKS, under a setting of their own (AppState.ClaudeTasks, Manage's "Claude Code sessions keep their
 // tasks in the task list", `claude-tasks on|off`; design docs/superpowers/specs/2026-11-22-tasks-board-design.md,
-// "Who gets it"). SessionStart, UserPromptSubmit and SessionEnd run the same script, which since then runs
-// `claude-hook` with the hook's JSON on stdin rather than `attention` (WriteHookScript says how), so Deskbar learns
-// the session's id and event and can answer with text the session reads. Turning "Teach Claude Code about Deskbar"
-// off takes these three out with the rest; turning the task setting off takes out only these three.
+// "Who gets it"). SessionStart, UserPromptSubmit and SessionEnd run claude-task-hook.cmd, the same text as
+// claude-hook.cmd under a name older builds do not know (Ruling 35; ClaudeHooks says why). Both run `claude-hook` with
+// the hook's JSON on stdin rather than `attention` (WriteHookScript says how), so Deskbar learns the session's id and
+// event and can answer with text the session reads. Turning "Teach Claude Code about Deskbar" off takes these three out
+// with the rest; turning the task setting off takes out only these three, and claude-task-hook.cmd with them.
 //
 // The hook's command is the script's path alone, quoted, with forward slashes: `"C:/Users/.../claude-hook.cmd"`. It
 // was `cmd.exe /c "<path>"` at first, copied from Petre's bell hook, and it never ran once. Claude Code runs hook
@@ -57,6 +58,11 @@ static class ClaudeSkill
     const string Marker = "Written by Deskbar";
     internal const string HookScriptName = "claude-hook.cmd";
 
+    // The task events' script (Ruling 35): the same text as claude-hook.cmd under a name no Deskbar before it knows, so an
+    // older build swapped back in neither counts its entries as its own nor rewrites it (ClaudeHooks' header says what
+    // an older Deskbar then does with it: nothing visible).
+    internal const string TaskHookScriptName = "claude-task-hook.cmd";
+
     // `on` is "Teach Claude Code about Deskbar" (AppState.ClaudeSkill); `tasks` is whether sessions keep their tasks
     // (AppState.ClaudeTasks), which adds three hook entries and only counts while `on` does (ClaudeHooks).
     public static void Sync(bool on, bool tasks) =>
@@ -72,20 +78,22 @@ static class ClaudeSkill
 
             var folder = Path.Combine(claude, "skills", "deskbar");
             var file = Path.Combine(folder, "SKILL.md");
-            var hookScript = Path.Combine(deskbarFolder, HookScriptName);
+            var scripts = new HookScripts(Path.Combine(deskbarFolder, HookScriptName), Path.Combine(deskbarFolder, TaskHookScriptName));
             var settings = Path.Combine(claude, "settings.json");
             if (on)
             {
                 // The hooks first: the skill tells a session whether they ask for the user, so it must know.
                 // An entry written by an older Deskbar (`cmd.exe /c ...`) still names the script, so Sync sees it as
                 // Deskbar's own, finds its command differs, and replaces it with this one.
-                var hooksInstalled = InstallHooks(hookScript, Path.Combine(deskbarFolder, ControlCommandLine.ShimName), settings, tasks);
+                var hooksInstalled = InstallHooks(scripts, Path.Combine(deskbarFolder, ControlCommandLine.ShimName), settings, tasks);
                 Write(folder, file, hooksInstalled);
             }
             else
             {
                 Remove(folder, file);
-                ClaudeHooks.Sync(false, tasks, settings, HookCommand(hookScript));
+                // The script goes only once no entry points at it (a settings file left alone keeps its entries).
+                if (ClaudeHooks.Sync(false, tasks, settings, HookCommand(scripts.Ask), HookCommand(scripts.Task)))
+                    RemoveTaskScript(scripts.Task);
             }
         }
         catch (Exception e) when (IsSettingsOrDiskProblem(e))
@@ -100,18 +108,35 @@ static class ClaudeSkill
 
     // The hook script and the entries that run it; true when the entries are in settings.json. A failure here must not
     // stop the skill from being written, so it is traced and counts as "not installed".
-    static bool InstallHooks(string hookScript, string shim, string settings, bool tasks)
+    // The task script is there exactly while its entries are: written before they are added, taken away once they
+    // are removed (and not while a file Sync left alone may still hold them), so no entry points at a missing file.
+    static bool InstallHooks(HookScripts scripts, string shim, string settings, bool tasks)
     {
         try
         {
-            WriteHookScript(hookScript, shim);
-            return ClaudeHooks.Sync(true, tasks, settings, HookCommand(hookScript));
+            WriteHookScript(scripts.Ask, shim);
+            if (tasks) WriteHookScript(scripts.Task, shim);
+            var installed = ClaudeHooks.Sync(true, tasks, settings, HookCommand(scripts.Ask), HookCommand(scripts.Task));
+            if (!tasks && installed) RemoveTaskScript(scripts.Task);
+            return installed;
         }
         catch (Exception e) when (IsSettingsOrDiskProblem(e))
         {
             ClickTrace.Write($"claude hooks not installed: {e.Message}");
             return false;
         }
+    }
+
+    // Where the two scripts live: claude-hook.cmd for the ask events, claude-task-hook.cmd for the task events.
+    sealed record HookScripts(string Ask, string Task);
+
+    // Takes the task script away with its entries, but only a file Deskbar wrote (it says so on its first line), the
+    // rule the skill's own removal keeps: a file of that name someone else put there is theirs.
+    static void RemoveTaskScript(string path)
+    {
+        if (!File.Exists(path) || !File.ReadAllText(path).Contains(Marker)) return;
+        File.Delete(path);
+        ClickTrace.Write($"claude task hook script removed: {path}");
     }
 
     // The hook's command line: the script's path, quoted, with forward slashes (see the header for why not cmd.exe /c).

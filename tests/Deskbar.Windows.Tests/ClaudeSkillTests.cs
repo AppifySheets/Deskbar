@@ -115,7 +115,7 @@ public sealed class ClaudeSkillTests : IDisposable
     const string StopJson = """{"session_id":"92943450","cwd":"C:\\repos\\x","hook_event_name":"Stop"}""";
 
     // The hook command Deskbar wrote for one event.
-    string HookCommandFor(string hookEvent) => Commands(File.ReadAllText(Settings), hookEvent).Single(c => c.Contains("claude-hook.cmd"));
+    string HookCommandFor(string hookEvent) => Commands(File.ReadAllText(Settings), hookEvent).Single(c => c.Contains("claude-hook.cmd") || c.Contains("claude-task-hook.cmd"));
 
     // Runs a hook command the way Claude Code runs one on Windows: Git for Windows' bash, `-c <command>`, the hook's JSON
     // on stdin. `environment` sets a variable (a value) or takes it away (null), so the hook does not inherit the
@@ -243,7 +243,7 @@ public sealed class ClaudeSkillTests : IDisposable
     }
 
     static string[] Ours(string json, string hookEvent) =>
-        Commands(json, hookEvent).Where(c => c.Contains("claude-hook.cmd")).ToArray();
+        Commands(json, hookEvent).Where(c => c.Contains("claude-hook.cmd") || c.Contains("claude-task-hook.cmd")).ToArray();
 
     static readonly string[] AskEvents = ["Notification", "Stop"];
     static readonly string[] TaskEvents = ["SessionStart", "UserPromptSubmit", "SessionEnd"];
@@ -295,6 +295,89 @@ public sealed class ClaudeSkillTests : IDisposable
         Assert.All(AskEvents.Concat(TaskEvents), e => Assert.Empty(Ours(json, e)));
         Assert.Equal(["python title.py"], Commands(json, "SessionStart"));
         Assert.Equal([@"cmd.exe /c C:\bell.bat"], Commands(json, "Stop"));
+        Assert.False(File.Exists(Path.Combine(Deskbar, "claude-task-hook.cmd")));
+    }
+
+    // How a Deskbar from before this change tells its entries: "claude-hook.cmd" and "Deskbar" in the command (its
+    // ClaudeHooks.IsOurs). It rewrites those entries and claude-hook.cmd itself to run `attention`.
+    static bool OlderBuildCallsItsOwn(string command) =>
+        command.Contains("claude-hook.cmd", StringComparison.OrdinalIgnoreCase) && command.Contains("Deskbar", StringComparison.OrdinalIgnoreCase);
+
+    // Ruling 35 (review of Task 7, I-3): swapped back to an older Deskbar, the task events must not end up running
+    // `attention` and blinking the bar on every session start, prompt and end. So they point at claude-task-hook.cmd,
+    // which an older build neither counts as its own nor rewrites; only Notification and Stop are its.
+    [Fact]
+    public void An_older_deskbar_sees_only_the_ask_entries_as_its_own()
+    {
+        Settled(WithABellAndAStartHook);
+
+        ClaudeSkill.Sync(true, true, home, Deskbar);
+
+        var json = File.ReadAllText(Settings);
+        Assert.All(AskEvents, e => Assert.True(OlderBuildCallsItsOwn(Assert.Single(Ours(json, e)))));
+        Assert.All(TaskEvents, e => Assert.False(OlderBuildCallsItsOwn(Assert.Single(Ours(json, e)))));
+        Assert.All(TaskEvents, e => Assert.Contains("claude-task-hook.cmd", Assert.Single(Ours(json, e))));
+        Assert.Contains("claude-hook --entry", File.ReadAllText(Path.Combine(Deskbar, "claude-task-hook.cmd")));
+    }
+
+    // A task entry this build's Task 7 wrote (on claude-hook.cmd) moves to claude-task-hook.cmd on the next start.
+    [Fact]
+    public void A_task_entry_on_the_ask_script_moves_to_the_task_script()
+    {
+        Directory.CreateDirectory(Path.Combine(home, ".claude"));
+        var askCommand = ClaudeSkill.HookCommand(Path.Combine(Deskbar, "claude-hook.cmd"));
+        File.WriteAllText(Settings, $$"""
+            { "hooks": { "SessionStart": [ { "hooks": [ { "type": "command", "command": {{System.Text.Json.JsonSerializer.Serialize(askCommand)}} } ] } ] } }
+            """);
+
+        ClaudeSkill.Sync(true, true, home, Deskbar);
+
+        Assert.Equal([ClaudeSkill.HookCommand(Path.Combine(Deskbar, "claude-task-hook.cmd"))], Commands(File.ReadAllText(Settings), "SessionStart"));
+    }
+
+    // The task script comes and goes with the task setting, and a file of that name Deskbar did not write stays.
+    [Fact]
+    public void The_task_script_comes_and_goes_with_its_setting()
+    {
+        Directory.CreateDirectory(Path.Combine(home, ".claude"));
+        var script = Path.Combine(Deskbar, "claude-task-hook.cmd");
+
+        ClaudeSkill.Sync(true, true, home, Deskbar);
+        Assert.True(File.Exists(script));
+
+        ClaudeSkill.Sync(true, false, home, Deskbar);
+        Assert.False(File.Exists(script));
+        Assert.True(File.Exists(Path.Combine(Deskbar, "claude-hook.cmd")));
+
+        File.WriteAllText(script, "@echo mine");
+        ClaudeSkill.Sync(true, false, home, Deskbar);
+        Assert.Equal("@echo mine", File.ReadAllText(script));
+    }
+
+    // Review of Task 7, M-3: a "hooks" that is not an object, or an event that is not an array, is the user's and is
+    // left as it is (Claude Code would not run it either), not replaced; the other events are still kept in step, and
+    // Sync says the file is not as asked.
+    [Fact]
+    public void A_hooks_value_that_is_not_an_object_is_left_alone()
+    {
+        const string odd = """{"hooks":"mine"}""";
+        Settled(odd);
+
+        Assert.False(ClaudeHooks.Sync(true, true, Settings, "\"C:/x/Deskbar/claude-hook.cmd\"", "\"C:/x/Deskbar/claude-task-hook.cmd\""));
+
+        Assert.Equal(odd, File.ReadAllText(Settings));
+    }
+
+    [Fact]
+    public void An_event_that_is_not_an_array_is_left_alone_and_the_rest_kept_in_step()
+    {
+        Settled("""{"hooks":{"Stop":{"mine":true}}}""");
+
+        Assert.False(ClaudeHooks.Sync(true, false, Settings, "\"C:/x/Deskbar/claude-hook.cmd\"", "\"C:/x/Deskbar/claude-task-hook.cmd\""));
+
+        var hooks = System.Text.Json.Nodes.JsonNode.Parse(File.ReadAllText(Settings))!["hooks"]!;
+        Assert.Equal("""{"mine":true}""", hooks["Stop"]!.ToJsonString());
+        Assert.Single(hooks["Notification"]!.AsArray());
     }
 
     // A file a parser would lose something from (comments) is not touched.
@@ -332,7 +415,7 @@ public sealed class ClaudeSkillTests : IDisposable
     {
         Settled(odd);
 
-        var result = ClaudeHooks.Sync(on, false, Settings, "\"C:/x/claude-hook.cmd\"");
+        var result = ClaudeHooks.Sync(on, false, Settings, "\"C:/x/claude-hook.cmd\"", "\"C:/x/claude-task-hook.cmd\"");
 
         Assert.False(result);
         Assert.Equal(odd, File.ReadAllText(Settings));
@@ -365,7 +448,7 @@ public sealed class ClaudeSkillTests : IDisposable
     {
         Settled(odd);
 
-        var result = ClaudeHooks.Sync(true, false, Settings, "\"C:/x/claude-hook.cmd\"");
+        var result = ClaudeHooks.Sync(true, false, Settings, "\"C:/x/claude-hook.cmd\"", "\"C:/x/claude-task-hook.cmd\"");
 
         Assert.True(result);
         var json = File.ReadAllText(Settings);
@@ -386,7 +469,7 @@ public sealed class ClaudeSkillTests : IDisposable
     {
         Settled(odd);
 
-        var result = ClaudeHooks.Sync(false, false, Settings, "\"C:/x/claude-hook.cmd\"");
+        var result = ClaudeHooks.Sync(false, false, Settings, "\"C:/x/claude-hook.cmd\"", "\"C:/x/claude-task-hook.cmd\"");
 
         Assert.True(result);
         Assert.Equal(odd, File.ReadAllText(Settings));
@@ -399,7 +482,7 @@ public sealed class ClaudeSkillTests : IDisposable
     {
         Settled("""{"hooks":{"Stop":["x",{"hooks":[{"type":"command","command":"\"C:/x/Deskbar/claude-hook.cmd\""}]}]}}""");
 
-        var result = ClaudeHooks.Sync(false, false, Settings, "\"C:/x/Deskbar/claude-hook.cmd\"");
+        var result = ClaudeHooks.Sync(false, false, Settings, "\"C:/x/Deskbar/claude-hook.cmd\"", "\"C:/x/Deskbar/claude-task-hook.cmd\"");
 
         Assert.True(result);
         var stop = System.Text.Json.Nodes.JsonNode.Parse(File.ReadAllText(Settings))!["hooks"]!["Stop"]!.AsArray();
