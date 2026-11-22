@@ -902,15 +902,20 @@ public partial class FloatingBar
         return button;
     }
 
-    // Left of the text: the session's window icon on Claude's lines (no CLAUDE tag since Ruling 42, Petre: "don't say
-    // claude; mark with claude at the beginning with the" orange edge; the edge at the line's start is the mark), the tick box on a note, and on a
-    // note just closed, "Undo" in the tick box's place.
+    // Left of the text: the tick box, or "Undo" in its place on a line just closed, then on Claude's lines the session's
+    // window icon. No CLAUDE tag since Ruling 42 (Petre: "don't say claude"): the orange edge at the line's start is the
+    // mark.
+    //
+    // A CLAUDE TASK HAS THE TICK BOX TOO (Ruling 40, Petre: "how do i mark claude as done?"). Only Petre closes, and a
+    // tick is Petre: it closes the task at once with the note's six seconds of Undo, and Undo gives back exactly what
+    // the task had (its status, its question, its place and the selection; Ruling 31). A Done Claude task keeps the
+    // close button on the right instead (RightOf), the mark that it waits for him to look, so it has no tick box.
     IEnumerable<UIElement> LeftOf(TaskLine line) =>
-        line.Claudes
-            ? new UIElement?[] { line.Window.HasValue ? WindowIconOf(line.Window.Value) : null }.OfType<UIElement>()
-            : line.Closing
-                ? [UndoButton(line)]
-                : [TaskButton("Tick off", new Border
+        new UIElement?[]
+        {
+            line.Claudes && line.Status == TaskStatus.Done ? null
+            : line.Closing ? UndoButton(line)
+            : TaskButton("Tick off", new Border
             {
                 Width = 11,
                 Height = 11,
@@ -919,7 +924,9 @@ public partial class FloatingBar
                 CornerRadius = new CornerRadius(3),
                 Background = Brushes.Transparent,
                 Margin = new Thickness(1, 0, 1, 0),
-            }, () => CloseWithUndo(line), "Tick off: closes the note", ignoredWhen: TaskClickIgnored)];
+            }, () => CloseWithUndo(line), line.Claudes ? "Tick off: closes Claude's task" : "Tick off: closes the note", ignoredWhen: TaskClickIgnored),
+            line.Claudes && line.Window.HasValue ? WindowIconOf(line.Window.Value) : null,
+        }.OfType<UIElement>();
 
     // Right of the text, from the edge in: the workspace chip, then, on a Done Claude task, the close button, since a
     // Done task waits for Petre to look and close it (spec, "A Done Claude task shows a close button on its line"). The

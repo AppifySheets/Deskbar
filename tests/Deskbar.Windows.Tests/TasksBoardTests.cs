@@ -1568,6 +1568,22 @@ public class TasksBoardTests
         Assert.Equal(Quadrant.I, t.Tasks.Board.Tasks.Single(x => x.Title == "both").Quadrant);
     });
 
+    // Ruling 40, the window's half: "…"'s Close settles a Claude task that is still in progress, as the bar's tick does.
+    [Fact]
+    public void The_menus_close_settles_an_in_progress_claude_task() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        var id = t.Tasks.Create("Still going", t.Gepha, Session("s1")).Value.Id;
+        t.Controller.Open(Rect.Empty);
+
+        var menu = t.Window.OpenMenuFor(id);
+        var close = menu.Items.OfType<MenuItem>().Single(i => i.Header is TextBlock { Text: "Close" });
+        close.RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
+        menu.IsOpen = false;
+
+        Assert.Equal(TaskStatus.Closed, t.Tasks.Board.Tasks.Single().Status);
+    });
+
     // Ruling 42 (Petre: "don't say claude; mark with claude at the beginning with the" orange edge): a Claude line has
     // no CL badge in the window either; its mark is the orange edge at its start, and its title begins where the badge
     // was.
