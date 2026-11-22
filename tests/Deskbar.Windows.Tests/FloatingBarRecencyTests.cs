@@ -56,8 +56,9 @@ public class FloatingBarRecencyTests
 
     // --- the bar ----------------------------------------------------------------------------------------------
     //
-    // Harness: GEPHA (current, the rdm window) and Sparrow (the beeper window). Every window is stamped at T0 when the
-    // manager first sees it, so moving the clock two days on and redrawing makes BOTH workspaces two days old.
+    // Harness: GEPHA (current, the rdm window) and Sparrow (the beeper window). Opening a window does not stamp it, so
+    // Build gives both windows a T0 stamp: both are used at T0, and moving the clock two days on and redrawing makes
+    // BOTH workspaces two days old.
 
     static readonly DateTimeOffset T0 = new(2026, 11, 22, 9, 0, 0, TimeSpan.Zero);
     static readonly Color FaintGrey = Color.FromArgb(0x30, 0x4A, 0x4E, 0x58);
@@ -67,7 +68,11 @@ public class FloatingBarRecencyTests
     static (Harness Harness, Clock Clock) Build(bool grouped = false)
     {
         var clock = new Clock();
-        return (Harness.Build(grouped: grouped, clock: () => clock.Now), clock);
+        var harness = Harness.Build(grouped: grouped, clock: () => clock.Now);
+        // Stamped as a restart restores them: focusing Sparrow's window here would also make Sparrow current.
+        new[] { harness.First, harness.Second }.ToList()
+            .ForEach(w => harness.Manager.RestoreLastUsed(w.Handle, w.ProcessId, T0));
+        return (harness, clock);
     }
 
     // Two days on, then a window event to redraw (activating GEPHA's own window, which is current anyway).
@@ -160,6 +165,17 @@ public class FloatingBarRecencyTests
         Assert.True(harness.Manager.RequestAttention(sparrow.Id, CSharpFunctionalExtensions.Maybe<WindowHandle>.None).Value);
 
         Assert.Same(bar.Bar.AskingCaption, CaptionOf(bar, "Sparrow"));
+    });
+
+    // A workspace whose windows have only opened, never been focused, is idle from the start: after a Windows restart
+    // every window comes back at once, and none of that is use (Petre: "all bars still have full color").
+    [Fact]
+    public void A_workspace_never_focused_is_drawn_faded() => StaThread.Run(() =>
+    {
+        var harness = Harness.Build(clock: () => T0);
+        using var bar = harness.ShowBar();
+
+        Assert.Equal(FaintGrey, RailOf(bar, "Sparrow"));
     });
 
     // Using a window in it again brings the colour straight back.

@@ -87,9 +87,12 @@ public sealed class WorkspaceManager(
 
     // When each window was last USED, for the bar's aging icons. Petre: "let's age icons in workspaces", then
     // "a" from three mockups: an icon fades to grey the longer its window goes unused. A clock this time, not
-    // the counter above, because the question is "how long ago". Set when a window first becomes known (a new
-    // window is fresh, and so is one already open when the app starts, there being nothing to go on) and on
-    // every activation; forgotten when the window closes. Carried across restarts of the app (not of Windows)
+    // the counter above, because the question is "how long ago". Set on every activation, and NOT when a window
+    // first becomes known: opening is not using. It once was, and after a Windows restart every window came back
+    // within a minute, each stamped as the app first saw it, so every workspace on the bar looked just used for
+    // hours (Petre: "all bars still have full color", 2026-11-22). A window with no stamp has not been focused
+    // since it opened, and the bar draws it, and a workspace holding only such windows, as idle. Forgotten when
+    // the window closes. Carried across restarts of the app (not of Windows)
     // by the App's LastUsedFile, through the two members below, because a window outlives the app that watches it.
     readonly Dictionary<WindowHandle, DateTimeOffset> lastUsed = [];
 
@@ -102,12 +105,13 @@ public sealed class WorkspaceManager(
             .Select(p => (p.Key, knownWindows[p.Key].ProcessId, p.Value))
             .ToList();
 
-    // A stamp from before a restart, taken only for the same window (handle AND process) and only when it is
-    // older than the one the restart gave it: anything used since is already right.
+    // A stamp from before a restart, taken only for the same window (handle AND process). A window not focused
+    // since the restart has no stamp, and takes the saved one; a window focused since already has the right one,
+    // which is never replaced by an older stamp.
     public void RestoreLastUsed(WindowHandle window, int processId, DateTimeOffset at)
     {
         if (knownWindows.TryGetValue(window, out var known) && known.ProcessId == processId
-            && lastUsed.TryGetValue(window, out var current) && at < current)
+            && (!lastUsed.TryGetValue(window, out var current) || at < current))
             lastUsed[window] = at;
     }
 
@@ -4050,8 +4054,8 @@ public sealed class WorkspaceManager(
             return;
         }
 
+        // No last-used stamp here: appearing is not using (see lastUsed). The first activation stamps it.
         knownWindows.Insert(ArrivalIndex(window), window.Handle, window);
-        lastUsed.TryAdd(window.Handle, now());
     }
 
     // Before the first known window whose app is saved LATER in the order than this one's, so the saved

@@ -6,8 +6,9 @@ using Deskbar.Core.Domain;
 namespace Deskbar.App;
 
 // The aging icons' memory across restarts of the app (FloatingBar.Aging.cs). A window outlives the app watching
-// it, and the app restarts often (every new build swapped in), so without this every restart would make every
-// icon fresh again and hide 15 minutes of aging each time.
+// it, and the app restarts often (every new build swapped in), so without this every restart would forget every
+// window's last use and draw the whole bar idle until each window was focused again. Only windows that HAVE been
+// focused are saved: a window that has only opened has no stamp (WorkspaceManager.LastUsed).
 //
 // %APPDATA%\Deskbar\last-used.json, written once a minute (a kill skips any exit handler, which is how
 // builds are swapped), read once at startup. Separate from state.json on purpose: this is volatile, rewritten

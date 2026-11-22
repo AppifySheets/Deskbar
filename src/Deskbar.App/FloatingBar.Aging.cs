@@ -12,17 +12,18 @@ namespace Deskbar.App;
 // AGING ICONS. Petre: "let's age icons in workspaces", then "a" from three mockups: an icon fades to grey the
 // longer its window goes unused, so the windows in use stand out from the ones left alone.
 //
-//   up to 15 minutes   full colour
-//   then               fading, most of it in the first hours (eased by ^0.7, as in the mockup)
-//   8 hours and on     fully grey, and 15% darker
+//   up to 5 minutes    full colour
+//   then               fading, most of it early (eased by ^0.7, as in the mockup)
+//   2 hours and on     fully grey, and 15% darker
 //
 // COLOUR, not opacity, and that is the whole design: opacity on this bar already means "behind another
 // window" and "minimised" (WithState's ladder), and the two must not fight. Drawn as a grey copy of the icon
 // laid over the coloured one, with the age as the copy's opacity, which blends the two exactly; WPF has no
 // built-in grayscale for an element, and a pixel shader would mean shipping compiled HLSL for one effect.
 //
-// "Used" is the manager's to say (WorkspaceManager.LastUsed): a window is stamped when it first becomes known
-// and whenever it comes to the front. The 15 minutes and 8 hours are first guesses, to tune.
+// "Used" is the manager's to say (WorkspaceManager.LastUsed): a window is stamped whenever it comes to the front,
+// and a window never focused since it opened has no stamp and is drawn fully aged. The ends were 15 minutes and
+// 8 hours until Petre: "it should decay much faster" (WorkspaceFade, which owns the curve).
 //
 // BY WORKSPACE, NOT BY WINDOW, on a workspace's row. Petre: "let's fade windows not based on individual age, but
 // the age of the workspace". So every icon in a workspace row takes that row's fade (FloatingBar.Recency.cs: the time
@@ -47,7 +48,7 @@ public partial class FloatingBar
         {
             agingIcons.ForEach(a => a.Grey.Opacity = FadeOf(a.Workspace, a.Window));
             // The rails, tints and names are drawn at a STEP of the fade, so they change only when a step moves: a
-            // rebuild then, a few times an hour, and never otherwise (FloatingBar.Recency.cs, RefreshFades).
+            // rebuild then, every few minutes while a row is fading, and never otherwise (FloatingBar.Recency.cs, RefreshFades).
             RefreshFades();
         };
         agingTimer.Start();
@@ -60,7 +61,9 @@ public partial class FloatingBar
     // workspace rows fade on the same one and the two must not drift apart.
     internal static double AgeOf(TimeSpan unused) => WorkspaceFade.Curve(unused);
 
-    double AgeOf(WindowHandle window) => manager.LastUsed(window) is { } at ? AgeOf(manager.Now - at) : 0;
+    // No stamp means never focused since it opened, which is not use: fully aged, as WorkspaceFade treats a workspace
+    // with no stamped windows.
+    double AgeOf(WindowHandle window) => manager.LastUsed(window) is { } at ? AgeOf(manager.Now - at) : 1;
 
     // An icon's artwork, with its grey copy over it at its workspace row's fade (or, off a workspace row, the window's
     // own age). The window you are IN is never aged: being in it is using it, whatever the last stamp says.

@@ -8,22 +8,24 @@ namespace Deskbar.Core.Overview;
 // ONE AGE PER WORKSPACE: the time since you last used ANY of its windows, so the window you used most recently
 // sets it. That is the answer to "have I been working here?": one window used five minutes ago means yes, however
 // many others in it have sat untouched since yesterday. The stamps are the ones WorkspaceManager.LastUsed already
-// keeps for the aging icons (stamped when a window becomes known and whenever it comes to the front, and saved
+// keeps for the aging icons (stamped whenever a window comes to the front, never merely for opening, and saved
 // across restarts in last-used.json), so there is no second clock to keep in step.
 //
 // A workspace with no windows, or none with a stamp, is fully faded: there is nothing in it to have used.
 //
 // The CURVE is the one the aging icons have used since they shipped (FloatingBar.Aging.cs, which now asks this
-// class): full colour up to 15 minutes, then a fade eased by ^0.7 so most of it happens in the first hours, and
-// fully faded at 8 hours. The two ends are first guesses, to tune.
+// class): full colour up to 5 minutes, then a fade eased by ^0.7 so most of it happens early, and fully faded at
+// 2 hours. The first guess was 15 minutes to 8 hours; on the bar that left every row looking fresh all afternoon,
+// and Petre: "it should decay much faster" (2026-11-22). Half an hour away is now a third of the way down.
 //
 // STEPS: the bar draws a row's rail, tint and name from the fade rounded to one of 16 steps. Sixteen is finer than
 // the eye can tell apart on a 3 DIP rail, it keeps the cache of faded brushes small (16 per colour), and it lets
-// the bar redraw only when a workspace's step has actually moved, a few times an hour, instead of every minute.
+// the bar redraw only when a workspace's step has actually moved (16 times over the 2 hours a row takes to fade, so
+// every seven minutes or so per fading workspace), instead of every minute.
 public static class WorkspaceFade
 {
-    public static readonly TimeSpan Starts = TimeSpan.FromMinutes(15);
-    public static readonly TimeSpan Full = TimeSpan.FromHours(8);
+    public static readonly TimeSpan Starts = TimeSpan.FromMinutes(5);
+    public static readonly TimeSpan Full = TimeSpan.FromHours(2);
     public const int Steps = 16;
 
     // 0 for fresh, rising to 1 when fully faded. A negative span (a clock moved back, a restored stamp later than

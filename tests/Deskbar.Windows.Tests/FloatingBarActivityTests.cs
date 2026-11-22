@@ -79,12 +79,12 @@ public class FloatingBarActivityTests
     public void Silence_marks_nothing() =>
         Assert.Empty(FloatingBar.Sounding(All, new HashSet<int>(), Tabs()));
 
-    // The aging curve (Petre: "a", fade to grey): full colour for 15 minutes, fully aged at 8 hours, and most of
-    // the change in the first hours.
+    // The aging curve (Petre: "a", fade to grey, then "it should decay much faster"): full colour for 5 minutes,
+    // fully aged at 2 hours, and most of the change early.
     [Theory]
     [InlineData(0, 0.0)]
-    [InlineData(15, 0.0)]
-    [InlineData(480, 1.0)]
+    [InlineData(5, 0.0)]
+    [InlineData(120, 1.0)]
     [InlineData(1440, 1.0)]
     public void Icons_age_from_fresh_to_fully_grey(int minutesUnused, double age) =>
         Assert.Equal(age, FloatingBar.AgeOf(TimeSpan.FromMinutes(minutesUnused)), 6);
@@ -92,11 +92,11 @@ public class FloatingBarActivityTests
     [Fact]
     public void Aging_is_front_loaded()
     {
-        var oneHour = FloatingBar.AgeOf(TimeSpan.FromHours(1));
-        var fourHours = FloatingBar.AgeOf(TimeSpan.FromHours(4));
-        Assert.InRange(oneHour, 0.1, 0.3);
-        Assert.True(fourHours > oneHour * 2, $"1 h {oneHour:F2}, 4 h {fourHours:F2}");
-        Assert.True(fourHours < 1);
+        var halfHour = FloatingBar.AgeOf(TimeSpan.FromMinutes(30));
+        var ninety = FloatingBar.AgeOf(TimeSpan.FromMinutes(90));
+        Assert.InRange(halfHour, 0.25, 0.45);
+        Assert.True(ninety > halfHour * 2, $"30 min {halfHour:F2}, 90 min {ninety:F2}");
+        Assert.True(ninety < 1);
     }
 
     // VS Code's editor tabs against the activity bar's view switchers, by the classes measured on Petre's windows.

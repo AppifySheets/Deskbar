@@ -11,7 +11,7 @@ namespace Deskbar.App;
 // "more time goes by, less pronounced a bar and all its icons become", and "let's also fade the rails on the left,
 // so i don't get tempted to look at them". Design: docs/superpowers/specs/2026-11-22-recent-workspaces-design.md.
 //
-// Every workspace row has ONE fade, from 0 (used in the last 15 minutes) to 1 (untouched for 8 hours), worked out by
+// Every workspace row has ONE fade, from 0 (used in the last 5 minutes) to 1 (untouched for 2 hours), worked out by
 // WorkspaceFade from the newest last-used stamp among its windows. That one number drives the whole row:
 //
 //   rail     the workspace colour, draining to grey and thinning to about 19% opacity (alpha 0x30), so an idle
@@ -28,7 +28,7 @@ namespace Deskbar.App;
 //
 // The rail, tint and name are drawn from the fade rounded to one of WorkspaceFade.Steps (16) steps, which keeps the
 // brush caches below at 16 entries per colour, and lets the aging timer ask for a rebuild only when a workspace's
-// step has moved (RefreshFades), a few times an hour. The icons fade continuously in place, as they always have.
+// step has moved (RefreshFades), every seven minutes or so while a row fades. The icons fade continuously in place.
 public partial class FloatingBar
 {
     // Where a rail ends up: a cool grey a touch lighter than the bar, at 0x30, so it is a trace and not a stripe.

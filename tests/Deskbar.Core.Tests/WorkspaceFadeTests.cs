@@ -16,8 +16,8 @@ public class WorkspaceFadeTests
         Assert.Equal(0, WorkspaceFade.Of([Now.AddDays(-3), Now.AddMinutes(-5), null], Now));
 
     [Fact]
-    public void A_workspace_untouched_for_eight_hours_is_fully_faded() =>
-        Assert.Equal(1, WorkspaceFade.Of([Now.AddHours(-8)], Now));
+    public void A_workspace_untouched_for_two_hours_is_fully_faded() =>
+        Assert.Equal(1, WorkspaceFade.Of([Now.AddHours(-2)], Now));
 
     // Nothing to have used, so nothing recent: an empty workspace sits back with the idle ones.
     [Fact]
@@ -34,10 +34,16 @@ public class WorkspaceFadeTests
     public void A_stamp_after_now_is_fresh_not_negative() =>
         Assert.Equal(0, WorkspaceFade.Of([Now.AddMinutes(10)], Now));
 
-    // Gradual: two hours in, partway, and most of the change already made (the ^0.7 easing).
+    // Petre, on the first curve (15 minutes to 8 hours): "it should decay much faster". Half an hour in, already a
+    // third of the way; still gradual (the ^0.7 easing), with no line where a row turns idle.
     [Fact]
-    public void Two_hours_is_partway() =>
-        Assert.InRange(WorkspaceFade.Of([Now.AddHours(-2)], Now), 0.2, 0.5);
+    public void Half_an_hour_is_a_third_of_the_way() =>
+        Assert.InRange(WorkspaceFade.Of([Now.AddMinutes(-30)], Now), 0.25, 0.45);
+
+    // Five minutes away is still fresh: a quick look at another workspace does not dim the one you came from.
+    [Fact]
+    public void Five_minutes_is_still_fresh() =>
+        Assert.Equal(0, WorkspaceFade.Of([Now.AddMinutes(-5)], Now));
 
     [Theory]
     [InlineData(0.0, 0)]

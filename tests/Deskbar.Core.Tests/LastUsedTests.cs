@@ -4,8 +4,9 @@ using Deskbar.Core.Domain;
 namespace Deskbar.Core.Tests;
 
 // When each window was last used, for the bar's aging icons (Petre: "let's age icons in workspaces", then "a":
-// an icon fades to grey the longer its window goes unused). Stamped when a window becomes known and whenever
-// it comes to the front; forgotten when it closes.
+// an icon fades to grey the longer its window goes unused). Stamped whenever a window comes to the front, and
+// never merely for opening: after a Windows restart Petre's bar showed every workspace fresh, because each window
+// was stamped as the app first saw it ("all bars still have full color", 2026-11-22). Forgotten when it closes.
 public class LastUsedTests
 {
     readonly FakeDesktops desktops = new();
@@ -22,12 +23,14 @@ public class LastUsedTests
         return manager;
     }
 
+    // Opening is not using. A window the app has only seen appear (a session restored after a Windows restart, a
+    // window opened behind another) has no stamp, so its workspace sits back with the idle ones until it is focused.
     [Fact]
-    public void A_new_window_starts_fresh()
+    public void A_window_that_has_only_opened_has_no_stamp()
     {
         var manager = Started();
         monitor.Subject.OnNext(new WindowEvent(WindowEventKind.Appeared, Window(0x10)));
-        Assert.Equal(clock, manager.LastUsed(Window(0x10).Handle));
+        Assert.Null(manager.LastUsed(Window(0x10).Handle));
     }
 
     // Left alone, a window's stamp stays where it was while time goes on; that gap is its age.
@@ -36,10 +39,11 @@ public class LastUsedTests
     {
         var manager = Started();
         monitor.Subject.OnNext(new WindowEvent(WindowEventKind.Appeared, Window(0x10)));
-        var opened = clock;
+        monitor.Subject.OnNext(new WindowEvent(WindowEventKind.Activated, Window(0x10)));
+        var used = clock;
 
         clock = clock.AddHours(3);
-        Assert.Equal(opened, manager.LastUsed(Window(0x10).Handle));
+        Assert.Equal(used, manager.LastUsed(Window(0x10).Handle));
         Assert.Equal(TimeSpan.FromHours(3), manager.Now - manager.LastUsed(Window(0x10).Handle)!.Value);
     }
 
@@ -55,7 +59,8 @@ public class LastUsedTests
         Assert.Equal(clock, manager.LastUsed(Window(0x10).Handle));
     }
 
-    // Across a restart of the app: the same window (handle and process) takes back its older stamp.
+    // Across a restart of the app: the same window (handle and process) takes back its stamp. The restart gave it
+    // none, appearing not being use, so the saved one fills the gap.
     [Fact]
     public void A_restart_gives_the_same_window_its_old_stamp_back()
     {
@@ -67,7 +72,7 @@ public class LastUsedTests
         Assert.Equal(beforeRestart, manager.LastUsed(Window(0x10).Handle));
     }
 
-    // A recycled handle now belongs to another process, so it is a different window and stays fresh.
+    // A recycled handle now belongs to another process, so it is a different window and inherits nothing.
     [Fact]
     public void A_recycled_handle_does_not_inherit_an_old_stamp()
     {
@@ -75,7 +80,7 @@ public class LastUsedTests
         monitor.Subject.OnNext(new WindowEvent(WindowEventKind.Appeared, Window(0x10)));
 
         manager.RestoreLastUsed(Window(0x10).Handle, processId: 999, clock.AddHours(-5));
-        Assert.Equal(clock, manager.LastUsed(Window(0x10).Handle));
+        Assert.Null(manager.LastUsed(Window(0x10).Handle));
     }
 
     // Used since the restart: the newer stamp is already right.
@@ -84,6 +89,7 @@ public class LastUsedTests
     {
         var manager = Started();
         monitor.Subject.OnNext(new WindowEvent(WindowEventKind.Appeared, Window(0x10)));
+        monitor.Subject.OnNext(new WindowEvent(WindowEventKind.Activated, Window(0x10)));
 
         manager.RestoreLastUsed(Window(0x10).Handle, Window(0x10).ProcessId, clock.AddMinutes(5));
         Assert.Equal(clock, manager.LastUsed(Window(0x10).Handle));
