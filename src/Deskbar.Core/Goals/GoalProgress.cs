@@ -11,6 +11,10 @@ namespace Deskbar.Core.Goals;
 //   * Weeks, for a monthly goal only: its weekly goals (those naming it as parent) that are not Dropped, done when
 //     Done. A dropped weekly goal counts in NEITHER number, so dropping one never makes the month look further behind.
 //     A weekly goal's own tasks count toward it, not again toward the month: the month sees them through the week.
+//     Only the weekly goals whose week TOUCHES the monthly goal's current period count (ruling G6, review I1). A monthly
+//     goal carried from November to December keeps its November weeks naming it (G4: they are not moved, that history
+//     stays), but they served November; counting them made December read "0 of 1 weeks' goals done" before December
+//     had a single week. The split week of 30 November touches December, so a goal there still counts after the carry.
 //   * Nothing here closes a goal. Marking a goal done is Petre's call, whatever the counts say.
 //
 // The kind is part of the record (the plan's sketch had only the four counts) because the two kinds word the same
@@ -24,7 +28,7 @@ public sealed record GoalProgress(GoalKind Kind, int TasksDone, int Tasks, int W
     {
         var own = tasks.Tasks.Where(t => t.GoalId == goal.Id).ToArray();
         var weeks = goal.Kind == GoalKind.Month
-            ? goals.ChildrenOf(goal.Id).Where(g => g.Status != GoalStatus.Dropped).ToArray()
+            ? goals.ChildrenOf(goal.Id).Where(g => g.Status != GoalStatus.Dropped && g.Period.Touches(goal.Period)).ToArray()
             : [];
         return new(goal.Kind, own.Count(t => t.Status is TaskStatus.Done or TaskStatus.Closed), own.Length,
             weeks.Count(g => g.Status == GoalStatus.Done), weeks.Length);

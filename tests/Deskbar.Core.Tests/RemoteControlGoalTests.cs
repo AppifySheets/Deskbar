@@ -165,7 +165,7 @@ public sealed class RemoteControlGoalTests
         var before = goals.Board;
         var again = Run("goal", "drop", id);
         AssertRefusedAndUnchanged(again, before);
-        Assert.Equal("The goal is already dropped.", again.Output.Trim());
+        Assert.Equal("The goal is already dropped", again.Output.Trim());
 
         var deleted = Ok(Run("goal", "delete", id));
         Assert.Equal("Ship the planner", deleted.GetProperty("title").GetString());

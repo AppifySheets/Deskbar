@@ -14,15 +14,19 @@ namespace Deskbar.Core.Goals;
 //   * Carrying moves a goal to another period of its OWN kind and keeps its id (its tasks stay attached). It goes to
 //     the end of its new period. A carried weekly goal keeps its parent only while the new week still touches the
 //     parent's month; a carried monthly goal leaves its weekly goals where they were, still naming it, because their
-//     weeks served it and that history stays (G4).
+//     weeks served it and that history stays (G4). So a weekly goal can name a parent whose month its week no longer
+//     touches. That link is history, not a claim on the new month: GoalProgress counts only the weekly goals whose week
+//     touches the monthly goal's CURRENT period (ruling G6, review I1), and picking that same parent again is no change
+//     rather than a refusal (SetParent compares before it checks).
 //   * Delete is for mistakes; Drop is the normal end of a goal that did not happen. Deleting a monthly goal frees its
 //     weekly children (their ParentId becomes none). The tasks that named the goal are freed by GoalService through
 //     TaskService.DetachGoal: the task's link lives on the task, in tasks.json, not here.
 //   * Goals have an order within their period but no way to change it yet: a new or carried goal goes to the end.
 //   * The review state rides along: WeekSeen and MonthSeen (the Monday and the 1st Petre last reviewed or dismissed)
 //     are kept by every change and written to goals.json with the goals (GoalReview reads them).
-//   * A change that changes nothing (setting the parent it already has, carrying to the period it is in, marking seen
-//     what was seen) returns this same board, so GoalService can tell by reference and skip the save.
+//   * A change that changes nothing (the title or the parent it already has, carrying to the period it is in, marking
+//     seen what was seen) returns this same board, so GoalService can tell by reference and skip the save.
+//   * Refusals take no full stop, like the task commands' ("The goal is open").
 public sealed record GoalBoard(IReadOnlyList<Goal> Goals)
 {
     public static readonly GoalBoard Empty = new(Array.Empty<Goal>());
@@ -47,16 +51,17 @@ public sealed record GoalBoard(IReadOnlyList<Goal> Goals)
         });
 
     public Result<GoalBoard> Rename(Guid id, string title, DateTimeOffset now) =>
-        CleanTitle(title).Bind(clean => Change(id, g => g with { Title = clean, UpdatedAt = now }));
+        CleanTitle(title).Bind(clean => Lookup(id).Map(goal =>
+            goal.Title == clean ? this : Replaced(goal with { Title = clean, UpdatedAt = now })));
 
     /// <summary>Petre's call, from Open or Dropped; never automatic (spec, "Tasks contribute").</summary>
-    public Result<GoalBoard> MarkDone(Guid id, DateTimeOffset now) => ToStatus(id, GoalStatus.Done, "The goal is already done.", now);
+    public Result<GoalBoard> MarkDone(Guid id, DateTimeOffset now) => ToStatus(id, GoalStatus.Done, "The goal is already done", now);
 
     /// <summary>The normal end of a goal that did not happen, from Open or Done.</summary>
-    public Result<GoalBoard> Drop(Guid id, DateTimeOffset now) => ToStatus(id, GoalStatus.Dropped, "The goal is already dropped.", now);
+    public Result<GoalBoard> Drop(Guid id, DateTimeOffset now) => ToStatus(id, GoalStatus.Dropped, "The goal is already dropped", now);
 
     /// <summary>A done or dropped goal back to Open, in place. An open goal is refused.</summary>
-    public Result<GoalBoard> Reopen(Guid id, DateTimeOffset now) => ToStatus(id, GoalStatus.Open, "The goal is open.", now);
+    public Result<GoalBoard> Reopen(Guid id, DateTimeOffset now) => ToStatus(id, GoalStatus.Open, "The goal is open", now);
 
     /// <summary>
     /// Moves the goal to <paramref name="to"/>, a period of its own kind, at the end of it, keeping its id and status.
@@ -79,11 +84,12 @@ public sealed record GoalBoard(IReadOnlyList<Goal> Goals)
     /// <summary>
     /// Sets or clears a weekly goal's monthly parent. Refused: a parent on a monthly goal, a parent that is not a
     /// monthly goal, and a monthly goal of a month the week does not touch. The parent it already has returns this same
-    /// board; so does clearing the parent of a goal that has none.
+    /// board BEFORE any check (G6: after the parent was carried to another month the check would refuse it); so does
+    /// clearing the parent of a goal that has none.
     /// </summary>
     public Result<GoalBoard> SetParent(Guid id, Maybe<Guid> parent, DateTimeOffset now) =>
         Lookup(id).Bind(goal =>
-            parent.HasNoValue ? Result.Success(goal)
+            goal.ParentId == parent || parent.HasNoValue ? Result.Success(goal)
             : goal.Kind != GoalKind.Week ? Result.Failure<Goal>("Only a weekly goal has a monthly parent")
             : Lookup(parent.Value).Bind(p =>
                 p.Kind != GoalKind.Month ? Result.Failure<Goal>($"'{p.Title}' is not a monthly goal")
@@ -156,6 +162,4 @@ public sealed record GoalBoard(IReadOnlyList<Goal> Goals)
             : Replaced(goal with { Status = status, UpdatedAt = now }));
 
     GoalBoard Replaced(Goal updated) => this with { Goals = Goals.Select(g => g.Id == updated.Id ? updated : g).ToArray() };
-
-    Result<GoalBoard> Change(Guid id, Func<Goal, Goal> change) => Lookup(id).Map(goal => Replaced(change(goal)));
 }

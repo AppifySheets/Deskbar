@@ -73,9 +73,9 @@ public sealed class GoalBoardTests
         Assert.Equal(clock, Get(dropped, id1).UpdatedAt);
         Assert.Equal(GoalStatus.Done, Get(dropped.MarkDone(id1, clock).Value, id1).Status);
 
-        Assert.Equal("The goal is open.", board.Reopen(id1, clock).Error);
-        Assert.Equal("The goal is already done.", done.MarkDone(id1, clock).Error);
-        Assert.Equal("The goal is already dropped.", dropped.Drop(id1, clock).Error);
+        Assert.Equal("The goal is open", board.Reopen(id1, clock).Error);
+        Assert.Equal("The goal is already done", done.MarkDone(id1, clock).Error);
+        Assert.Equal("The goal is already dropped", dropped.Drop(id1, clock).Error);
     }
 
     [Fact]
@@ -182,6 +182,41 @@ public sealed class GoalBoardTests
         Assert.Equal(December, Get(carried, id2).Period);
         Assert.Equal(id2, Get(carried, id1).ParentId.Value);
         Assert.Equal(Week23, Get(carried, id1).Period);
+    }
+
+    // Review I1 (ruling G6): after the carry above, the November week still names the goal now in December. Picking
+    // that same parent again is no change, so it is the same board, not a refusal for a month the week does not touch.
+    [Fact]
+    public void Picking_the_current_parent_again_is_no_change()
+    {
+        var board = Add(GoalBoard.Empty, id1, Week23);
+        board = Add(board, id2, November, "November goal");
+        board = board.SetParent(id1, id2, clock).Value.Carry(id2, December, clock).Value;
+
+        var again = board.SetParent(id1, id2, clock);
+
+        Assert.True(again.IsSuccess, again.IsFailure ? again.Error : "");
+        Assert.Same(board, again.Value);
+    }
+
+    // Review M4: a parent that no longer exists (deleted elsewhere, a file restored by hand) is let go on a carry, even
+    // to a week that would touch its month.
+    [Fact]
+    public void Carrying_lets_go_of_a_vanished_parent()
+    {
+        var orphan = new Goal(id1, "Orphan", Week23, GoalStatus.Open, 0, id2, clock, clock);
+        var board = new GoalBoard([orphan]);
+
+        Assert.True(Get(board.Carry(id1, Week30, clock).Value, id1).ParentId.HasNoValue);
+    }
+
+    // Review M3: renaming a goal to the title it has is no change.
+    [Fact]
+    public void Renaming_to_the_same_title_is_the_same_board()
+    {
+        var board = Add(GoalBoard.Empty, id1, Week23, "Ship it");
+
+        Assert.Same(board, board.Rename(id1, " Ship it ", clock).Value);
     }
 
     [Fact]

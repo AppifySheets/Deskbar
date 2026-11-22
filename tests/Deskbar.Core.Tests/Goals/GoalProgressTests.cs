@@ -115,4 +115,25 @@ public sealed class GoalProgressTests
         Assert.Equal(new GoalProgress(GoalKind.Month, 0, 0, 0, 0), Of(month));
         Assert.Equal("nothing attached yet", Of(month).Text);
     }
+
+    // Review I1, ruling G6: a monthly goal carried from November to December keeps its November weeks naming it (G4:
+    // the children are not moved), but they served November, so December's count leaves them out. The split week of 30
+    // November touches December, so a weekly goal there still counts after the carry.
+    [Fact]
+    public void A_carried_monthly_goal_counts_only_the_weeks_of_its_new_month()
+    {
+        var month = AddGoal("Store", November);
+        AddGoal("w23", Week, month.Id);
+        var split = AddGoal("w30", Week30, month.Id);
+        goals = goals.MarkDone(split.Id, T0).Value;
+        Assert.Equal("1 of 2 weeks' goals done", Of(month).Text);
+
+        goals = goals.Carry(month.Id, GoalPeriod.MonthOf(new DateOnly(2026, 12, 1)), T0).Value;
+
+        Assert.Equal(new GoalProgress(GoalKind.Month, 0, 0, 1, 1), Of(month));
+        Assert.Equal("1 of 1 weeks' goals done", Of(month).Text);
+
+        goals = goals.Carry(month.Id, GoalPeriod.MonthOf(new DateOnly(2027, 1, 1)), T0).Value;
+        Assert.Equal("nothing attached yet", Of(month).Text);
+    }
 }

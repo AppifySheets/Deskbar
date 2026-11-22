@@ -53,6 +53,19 @@ public sealed class GoalPeriodTests
         Assert.Equal([november], november.Months());
     }
 
+    // Review M4: a week across the new year. 1 January 2027 is a Friday, in the week of Monday 28 December 2026.
+    [Fact]
+    public void A_week_across_the_new_year_touches_december_and_january()
+    {
+        var week = GoalPeriod.WeekOf(D(2027, 1, 1));
+
+        Assert.Equal(D(2026, 12, 28), week.Start);
+        Assert.Equal(D(2027, 1, 3), week.End);
+        Assert.Equal([GoalPeriod.MonthOf(D(2026, 12, 1)), GoalPeriod.MonthOf(D(2027, 1, 1))], week.Months());
+        Assert.Equal("Week of 28 Dec 2026", week.Label);
+        Assert.Equal(D(2027, 1, 4), week.Next().Start);
+    }
+
     [Fact]
     public void Contains_is_inclusive_at_both_ends()
     {
