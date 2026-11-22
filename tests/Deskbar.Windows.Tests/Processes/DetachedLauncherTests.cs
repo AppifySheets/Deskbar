@@ -31,7 +31,7 @@ public sealed class DetachedLauncherTests : IDisposable
         var pid = DetachedLauncher.Start("wscript.exe", Arguments, null, packaged: false);
         Assert.True(pid.IsSuccess, pid.IsFailure ? pid.Error : "");
         Assert.NotNull(pid.Value);
-        Assert.True(SpinWait.SpinUntil(() => File.Exists(marker), 5000), "the started program never wrote its marker");
+        AssertMarkerAppears(marker, pid.Value);
     }
 
     [Fact]
@@ -40,7 +40,7 @@ public sealed class DetachedLauncherTests : IDisposable
         var result = DetachedLauncher.Start("wscript.exe", Arguments, null, packaged: true);
         Assert.True(result.IsSuccess, result.IsFailure ? result.Error : "");
         Assert.Null(result.Value);
-        Assert.True(SpinWait.SpinUntil(() => File.Exists(marker), 5000), "the started program never wrote its marker");
+        AssertMarkerAppears(marker, null);
     }
 
     // The verbatim form (Explorer's `/select,"<path>"`) on both paths, run for real: the marker's path has a
@@ -56,7 +56,7 @@ public sealed class DetachedLauncherTests : IDisposable
         {
             var result = DetachedLauncher.StartVerbatim("wscript.exe", $"//B //E:JScript \"{script}\" \"{awkward}\"", null, packaged);
             Assert.True(result.IsSuccess, result.IsFailure ? result.Error : "");
-            Assert.True(SpinWait.SpinUntil(() => File.Exists(awkward), 5000), "the started program never wrote its marker");
+            AssertMarkerAppears(awkward, null);
         }
         finally
         {
@@ -97,6 +97,41 @@ public sealed class DetachedLauncherTests : IDisposable
         var result = DetachedLauncher.RunOutsidePackage(Cmd, ["/d", "/c", "exit", "3"], TimeSpan.FromSeconds(10));
         Assert.True(result.IsFailure);
         Assert.Equal("cmd.exe exited with code 3", result.Error);
+    }
+
+    // The bound is generous on purpose: SpinUntil returns the moment the file appears, so a run that works costs
+    // the same whatever the bound is. On the GitHub runner the first wscript of a run takes 350 to 950 ms and the
+    // rest about 60 ms, but one Release run (actions/runs/44544956567, attempt 1) missed the old 5 s bound on two
+    // tests in a row and passed on the retry: the runner stalled for seconds, most likely Defender scanning the
+    // freshly written script, which no test can control. 30 s still catches a launcher that never starts anything.
+    static readonly TimeSpan MarkerBound = TimeSpan.FromSeconds(30);
+
+    // Waits for the started program's marker. If it never comes, the message says how long was waited and, when
+    // the launcher returned a pid, whether that process is still running or how it ended, so the next failure names
+    // its cause (stuck, crashed, or never wrote) instead of only saying the file is missing.
+    static void AssertMarkerAppears(string path, int? pid)
+    {
+        var clock = System.Diagnostics.Stopwatch.StartNew();
+        if (SpinWait.SpinUntil(() => File.Exists(path), MarkerBound)) return;
+        Assert.Fail($"the started program never wrote its marker within {clock.Elapsed.TotalSeconds:F1}s; {ProcessState(pid)}");
+    }
+
+    static string ProcessState(int? pid)
+    {
+        if (pid is not { } id) return "no pid to ask about (packaged path)";
+        try
+        {
+            using var process = System.Diagnostics.Process.GetProcessById(id);
+            return process.HasExited ? $"pid {id} exited with code {process.ExitCode}" : $"pid {id} is still running";
+        }
+        catch (ArgumentException)
+        {
+            return $"pid {id} is gone and its exit code is not readable";
+        }
+        catch (InvalidOperationException e)
+        {
+            return $"pid {id}: {e.Message}";
+        }
     }
 
     static string Cmd => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.System), "cmd.exe");
