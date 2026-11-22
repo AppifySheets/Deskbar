@@ -72,8 +72,10 @@ public partial class FloatingBar
     bool RebuildWanted => IsVisible || (StripsOn && Strips().Count > 0) || JumpsWanted;
 
     //
-    // With the previous workspace's button on the taskbar too (WorkspaceJumps.BackItem), there is a button to keep
-    // current whenever there are taskbar buttons at all, pinned workspaces or not.
+    // With the previous workspace's button on the taskbar too (WorkspaceJumps.BackItem, when it is wanted:
+    // WorkspaceJumps.BackItemWanted), there can be a button to keep current whenever there are taskbar buttons at
+    // all, pinned workspaces or not. This stays true with the setting off, on purpose: turning it off is a rebuild that
+    // must still run on a minimized bar, or the button would stay until the bar next opened.
     bool JumpsWanted => TaskbarJumps is not null;
 
     // A rebuild that fills the strips and nothing else: the list is on the screens and the bar is behind its taskbar

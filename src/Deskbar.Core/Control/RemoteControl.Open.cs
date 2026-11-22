@@ -146,4 +146,14 @@ public sealed partial class RemoteControl
             "off" or "false" or "no" => Reply(manager.SetGrain(false), () => new { grain = "off" }),
             _ => ControlReply.Fail(ControlUsage.LineFor("grain")),
         };
+
+    // The previous workspace's item (AppState.PreviousWorkspaceItemChoice), the remote twin of Manage's checkbox. A
+    // script's on or off is a choice, kept whatever the taskbar or the list's place does after.
+    ControlReply PreviousWorkspace(string onOff) =>
+        onOff.ToLowerInvariant() switch
+        {
+            "on" or "true" or "yes" => Reply(manager.SetPreviousWorkspaceItem(true), () => new { previousWorkspace = "on" }),
+            "off" or "false" or "no" => Reply(manager.SetPreviousWorkspaceItem(false), () => new { previousWorkspace = "off" }),
+            _ => ControlReply.Fail(ControlUsage.LineFor("previous-workspace")),
+        };
 }

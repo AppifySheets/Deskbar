@@ -299,6 +299,18 @@ public sealed record AppState(
 
     // The reading the app wants. Not stored.
     [JsonIgnore] public bool Grain => !NoGrain;
+    // Whether the previous workspace's item ("↩ <previous>", WorkspaceJumps.BackItem) is drawn at the end of every
+    // screen strip, in the current workspace's titled list and as a button on Windows' taskbar. A user did not want
+    // it and had no way to turn it off, so it is a choice (Manage's box, `previous-workspace on|off`).
+    //
+    // NULL MEANS NOBODY HAS CHOSEN, and then the default depends on the desk (WorkspaceJumps.BackItemWanted): on
+    // when the window list is on the screen strips AND Windows' taskbar auto-hides, off otherwise. Petre: "make it
+    // on by default if top strip is used", "and taskbar is autohide". With both, the strips are where you look
+    // and the taskbar is mostly out of sight, so the item is the quickest way back; without them it is clutter.
+    // The same shape as QuietTaskbarChoice: a fact of the machine decides until a choice is made, and a choice
+    // holds whatever the desk does after. Pinned workspaces' own items are not affected: pinning is something the
+    // user opts into, and an item that flips to "↩ <previous>" inside a pinned workspace is part of it.
+    public bool? PreviousWorkspaceItemChoice { get; init; }
 
     // Petre: "i want it configurable" -- the Alt+Tab-style workspace switcher's chord.
     //

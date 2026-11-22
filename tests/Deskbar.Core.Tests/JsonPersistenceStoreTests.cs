@@ -129,6 +129,23 @@ public sealed class JsonPersistenceStoreTests : IDisposable
         Assert.Equal(WindowListPlace.Screens, new JsonPersistenceStore(dir).Load().Value.WindowListPlace);
     }
 
+    // The previous workspace's item is a choice that starts unmade: a file with no key (every file written before the
+    // setting) loads as no choice, so the desk decides (WorkspaceJumps.BackItemWanted), and a choice either way is
+    // remembered.
+    [Fact]
+    public void A_file_with_no_previous_workspace_key_loads_with_no_choice_and_a_choice_is_remembered()
+    {
+        Directory.CreateDirectory(dir);
+        File.WriteAllText(Path.Combine(dir, "state.json"),
+            """{"Workspaces":[],"WorkspaceRules":[],"RenameRules":[],"Inventory":{}}""");
+        Assert.Null(new JsonPersistenceStore(dir).Load().Value.PreviousWorkspaceItemChoice);
+
+        new JsonPersistenceStore(dir).Save(AppState.Empty with { PreviousWorkspaceItemChoice = false });
+        Assert.False(new JsonPersistenceStore(dir).Load().Value.PreviousWorkspaceItemChoice);
+        new JsonPersistenceStore(dir).Save(AppState.Empty with { PreviousWorkspaceItemChoice = true });
+        Assert.True(new JsonPersistenceStore(dir).Load().Value.PreviousWorkspaceItemChoice);
+    }
+
     // ...and choosing another place after that is remembered.
     [Fact]
     public void Turning_the_strips_off_is_remembered()

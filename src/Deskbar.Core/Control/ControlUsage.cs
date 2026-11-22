@@ -126,6 +126,9 @@ public static class ControlUsage
                 "Outline the focused window in its workspace's colour, and the window in front on each other screen in dim white"),
             new("grain", "on|off",
                 "A fine grain texture behind the floating bar's workspace rows, or a flat background"),
+            new("previous-workspace", "on|off",
+                "Show the previous workspace (\"↩ <name>\") at the end of every screen strip, in the titled list and on the taskbar, or hide it\n"
+                + "(until chosen: on while the window list is on the screens and the taskbar auto-hides)"),
         ]),
         new("Diagnostics", [
             new("dump", "", "Save debug dump: write a diagnostics file (screens, the bar, every window in z-order) and print its path"),

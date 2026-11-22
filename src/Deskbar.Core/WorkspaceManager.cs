@@ -4198,6 +4198,29 @@ public sealed class WorkspaceManager(
             ? Result.Success()
             : Result.Success().Tap(() => Persist(State with { NoGrain = !on }));
 
+    // Whether the previous workspace's item is drawn now (WorkspaceJumps.BackItemWanted). Auto-hide is a fact of the
+    // machine that Core cannot read, so the caller passes it: the bar and Manage read the taskbar, tests pass a value.
+    public bool PreviousWorkspaceItemShown(Func<bool> taskbarAutoHides) =>
+        WorkspaceJumps.BackItemWanted(State.PreviousWorkspaceItemChoice, State.WindowListPlace == WindowListPlace.Screens, taskbarAutoHides);
+
+    // Manage's box (AppState.PreviousWorkspaceItemChoice). A no-op when it would change nothing, measured against what
+    // the box SHOWS, not against the stored choice, for the reason SetQuietTaskbar gives: Manage sets its box when it
+    // opens, which raises Checked, and with no choice stored and the default on, comparing with the stored null would
+    // record a choice nobody made and pin today's default for good. The bar draws or clears the item, on the strips,
+    // in the titled list and on the taskbar, on the state pulse Persist sends.
+    public Result SetPreviousWorkspaceItem(bool on, bool taskbarAutoHides) =>
+        PreviousWorkspaceItemShown(() => taskbarAutoHides) == on
+            ? Result.Success()
+            : Result.Success().Tap(() => Persist(State with { PreviousWorkspaceItemChoice = on }));
+
+    // `previous-workspace on|off`: an explicit choice from a script, recorded unless that same choice is already
+    // stored. No box is showing anything here, so there is no default to guard, and the command's whole point is to
+    // say "on" or "off" for good.
+    public Result SetPreviousWorkspaceItem(bool on) =>
+        State.PreviousWorkspaceItemChoice == on
+            ? Result.Success()
+            : Result.Success().Tap(() => Persist(State with { PreviousWorkspaceItemChoice = on }));
+
     // --- overview / switcher-facing operations -----------------------------------
 
     // Ground truth for "which workspace is this window in": ASK THE OS which desktop

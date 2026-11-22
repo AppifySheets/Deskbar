@@ -82,8 +82,17 @@
                         </CheckBox>
                         <!-- The grain behind the bar's workspace rows (AppState.Grain, FloatingBar.Grain.cs). Petre: "make
                              grain a default feature, configurable in settings". On by default. -->
-                        <CheckBox x:Name="Grain" Margin="0,6,0,16" Content="Give the bar's workspace rows a fine grain texture"
+                        <CheckBox x:Name="Grain" Margin="0,6,0,0" Content="Give the bar's workspace rows a fine grain texture"
                                   Checked="OnGrainToggled" Unchecked="OnGrainToggled"/>
+                        <!-- The previous workspace's item (AppState.PreviousWorkspaceItemChoice, FloatingBar.JumpsFor). Until
+                             the box is ticked or unticked by hand it follows the desk (WorkspaceJumps.BackItemWanted): ticked
+                             while the window list is on the screen strips and the taskbar auto-hides. The note says so,
+                             because a box that changes by itself when the taskbar setting changes needs explaining. -->
+                        <CheckBox x:Name="PreviousWorkspaceItem" Margin="0,6,0,0"
+                                  Content="Show the previous workspace on the strips and the taskbar"
+                                  Checked="OnPreviousWorkspaceItemToggled" Unchecked="OnPreviousWorkspaceItemToggled"/>
+                        <TextBlock TextWrapping="Wrap" Margin="20,2,0,16" Opacity="0.75"
+                                   Text="Until you tick or untick it, it is on while the window list is on the screens and Windows' taskbar auto-hides."/>
 
                         <!-- What the bar's bottom strip shows (AppState.HiddenStripItems, StripItem). Petre: "i
                              don't want wifi there", "and i don't think i want notifications either", "make it a

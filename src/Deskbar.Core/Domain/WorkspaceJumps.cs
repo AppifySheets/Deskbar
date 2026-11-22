@@ -31,7 +31,17 @@ public static class WorkspaceJumps
     // button from one rebuild to the next.
     public static readonly Guid BackId = new("6d1c0b9e-3f2a-4c55-9b8e-2a7f0e4d1b11");
 
-    // THE PREVIOUS WORKSPACE'S ITEM, after the pinned ones on every strip and on the taskbar. Petre: "let's also have
+    // WHETHER THE PREVIOUS WORKSPACE'S ITEM IS SHOWN: the choice made in Manage or with `previous-workspace on|off`,
+    // or, with none made, on exactly when the window list is on the screen strips and Windows' taskbar auto-hides
+    // (AppState.PreviousWorkspaceItemChoice says why). One rule, used by the bar (FloatingBar.JumpsFor), by Manage's box
+    // and by WorkspaceManager.SetPreviousWorkspaceItem, so what the box shows and what the bar draws cannot disagree.
+    // Auto-hide is asked for only when it decides anything (no choice, list on the strips): reading it is two
+    // synchronous messages to Explorer, and the bar asks on every rebuild.
+    public static bool BackItemWanted(bool? choice, bool listOnScreens, Func<bool> taskbarAutoHides) =>
+        choice ?? (listOnScreens && taskbarAutoHides());
+
+    // THE PREVIOUS WORKSPACE'S ITEM, after the pinned ones on every strip and on the taskbar, when BackItemWanted says
+    // so (FloatingBar.JumpsFor decides, this only builds it). Petre: "let's also have
     // previous workspace available in strip", "and taskbar". "↩ <previous>", going to `back` (the same back as
     // everywhere else), unless an item in `jumps` already goes there: inside a pinned workspace its own item already
     // reads "↩ <previous>", and a pinned previous workspace already has an item of its own. Two items for one place
