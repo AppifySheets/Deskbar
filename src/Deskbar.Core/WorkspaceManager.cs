@@ -2348,8 +2348,8 @@ public sealed class WorkspaceManager(
             }));
 
     // The whole "Delete workspace" decision, shared by every surface that offers it. The
-    // bar's menu and Manage's Remove button both call this, so they cannot disagree about whether a
-    // workspace full of windows is deleted silently, which is what Manage did before: the desktop
+    // bar's menu calls this (and so did Manage's Remove button, until the Workspaces tab went), so no
+    // surface can delete a workspace full of windows silently, which is what Manage once did: the desktop
     // went, Windows merged its windows onto a neighbour, and its rules, roster and homes were wiped
     // without a word. The surface supplies only the dialog; what it says, and what happens after
     // Yes, is decided here.
@@ -4465,17 +4465,9 @@ public sealed class WorkspaceManager(
                 Path.GetFileNameWithoutExtension(exePath)))
             .Tap(entry => AddEntry(workspaceId, entry));
 
-    public Result RemoveRosterEntry(Guid workspaceId, InventoryEntry entry)
-    {
-        var identity = RosterIdentity.Of(entry);
-        var current = State.Inventory.GetValueOrDefault(workspaceId, []);
-        var remaining = current.Where(e => RosterIdentity.Of(e) != identity).ToList();
-        if (remaining.Count == current.Count) return Result.Failure("That app is no longer in this workspace's list.");
-        var inventory = State.Inventory.ToDictionary(kv => kv.Key, kv => kv.Value);
-        inventory[workspaceId] = remaining;
-        Persist(State with { Inventory = inventory });
-        return Result.Success();
-    }
+    // There is no RemoveRosterEntry. Its only caller was the roster list on Manage's Workspaces tab, which went
+    // with the tab (2026-11-22): workspace memory is opt-in per app now, and unticking "Remember <app>'s workspace"
+    // on a window icon's menu (RememberWorkspace) is how a placement stops.
 
     void Persist(AppState next)
     {
