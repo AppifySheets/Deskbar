@@ -588,11 +588,17 @@ public class TasksBoardTests
     // FIX ROUND 1, Important 3: the remembered place is device pixels, and the window is put there in device pixels
     // (SetWindowPos on the hidden handle before Show), not through Left/Top, which WPF reads at the DPI of the screen it
     // was created on. On the screen that holds it, the window's own rectangle is exactly the one remembered.
+    //
+    // The place is sized in DIPs at the test screen's own scale, so it clears the window's minimum (560 by 260 DIP) on
+    // any screen. It was a fixed 900 by 640 px, which is 600 DIP wide at 150% but only 400 at 225%: on Petre's machine,
+    // once its 3840 by 2160 screen went to 216 DPI, WPF rightly held the window at its 560 DIP minimum (1260 px) and
+    // the test failed for a reason that was the test's, not the window's (measured; task-12-report.md, fix round 4).
     [Fact]
     public void A_remembered_place_comes_back_in_device_pixels() => StaThread.Run(() =>
     {
         using var t = Build();
-        var place = new Deskbar.Core.Persistence.TasksWindowState(120, 90, 900, 640, Maximized: false);
+        var scale = TasksWindow.PrimaryScale();
+        var place = new Deskbar.Core.Persistence.TasksWindowState(120, 90, (int)(700 * scale), (int)(480 * scale), Maximized: false);
         Assert.True(t.Harness.Manager.SaveTasksWindow(place).IsSuccess);
 
         t.Controller.Open(Rect.Empty);
