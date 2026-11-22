@@ -6,4 +6,4 @@ In addition to the licence in LICENSE, the licensor grants you permission to mak
 
 To send a change, open a pull request against `main`. Keep it to one topic per pull request, and make sure the tests pass with `dotnet test Deskbar.sln --filter "Category!=Integration"`. Do not change a version number or put one in the title: the version is computed from the git history. Build from a full clone (not a source zip or `--depth 1`), because the version needs the history.
 
-Commercial use needs the paid licence, which the app's Pro tab and the site explain once they exist.
+Commercial use, such as using Deskbar for work, needs Deskbar Pro, a US$18.99 add-on in the Microsoft Store copy. The [Deskbar Pro](README.md#deskbar-pro) section of the README explains it.

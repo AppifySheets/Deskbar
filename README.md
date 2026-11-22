@@ -65,8 +65,9 @@ the .NET runtime.
 
 <a href="https://apps.microsoft.com/detail/9PJX26NGFPNF"><img src="https://get.microsoft.com/images/en-us%20dark.svg" width="200" alt="Get it from Microsoft Store" /></a>
 
-The Store copy is Deskbar Pro, US$18.99 once with a 15-day trial; see
-[From the Microsoft Store](#from-the-microsoft-store). The exe below is the free version.
+Deskbar is free for personal use, from the Store or as the exe below, and every feature works in
+both. If you use it for work, Deskbar Pro is US$18.99 once, with priority support; see
+[Deskbar Pro](#deskbar-pro).
 
 1. Download the `Deskbar-…-win-x64.exe` attached to the
    [latest release](https://github.com/AppifySheets/Deskbar/releases/latest). The file
@@ -114,10 +115,9 @@ you want your settings gone too, delete `%APPDATA%\Deskbar`.
 
 ### From the Microsoft Store
 
-Deskbar is [on the Microsoft Store](https://apps.microsoft.com/detail/9PJX26NGFPNF). The Store
-copy is Deskbar Pro: US$18.99 once (the Store sets the price in other currencies), with a 15-day
-trial from the Store. The exe on GitHub is the free version. Nothing is held back from
-it yet, so the free version keeps everything until a later release says otherwise.
+Deskbar is [on the Microsoft Store](https://apps.microsoft.com/detail/9PJX26NGFPNF), free. The
+Store copy and the exe on GitHub are the same program with the same features; the difference is
+how they install and update, and that Deskbar Pro is bought in the Store copy.
 
 The Store copy installs and updates through the Store, and it starts with Windows through a
 startup task that **Start Deskbar with Windows** in Manage turns on and off. It writes no Run
@@ -142,6 +142,24 @@ saves, it keeps the top-level settings it does not know about; a setting a newer
 inside a workspace, a rule or the bar's own settings is still dropped. A copy that finds a file saved by a
 newer major version does not load it. It shows a dialog that tells you to start the newer copy,
 or to remove it and delete the `WrittenBy` line from `state.json` to go on with the older one.
+
+### Deskbar Pro
+
+Deskbar is free for personal use, and nothing in it is locked. If you use it for work, please buy
+Deskbar Pro: US$18.99 once, not a subscription (the Store sets the price in other currencies). It
+is an add-on in the Microsoft Store copy and comes with priority support: a report sent with
+**Report a problem…** from a copy with Pro is marked priority, and those are answered first. Pro
+belongs to your Microsoft account, so it follows you to any PC where you run the Store copy signed
+in with that account.
+
+A copy without Pro asks, gently. After two weeks and about 20 hours of active use, a line at the
+bottom of the bar says that Deskbar is free for personal use and what Pro costs.
+**Get Pro** buys it through the Store, and **Not now** hides the line until the next day. Once
+Pro is bought, the line does not come back.
+
+In the GitHub copy, **Get Pro** explains that Pro is bought in the Store copy and opens Deskbar's
+Store page. Install the Store copy and your workspaces and settings come along, because both copies
+use `%APPDATA%\Deskbar`.
 
 ### "Windows protected your PC"
 
@@ -303,7 +321,7 @@ flashing for you, so folding never hides a message. Clicking the name still swit
 window dropped on it still moves there. The workspace you are on always shows its icons, folded or
 not; leave it and it folds again.
 
-**Tile windows** (Deskbar Pro) lays the workspace's windows out on each screen while you are on it,
+**Tile windows** lays the workspace's windows out on each screen while you are on it,
 starting from a grid. Turn it on with the tile button at the top of the bar, beside Search, or from
 the row's menu; the gap between tiles is set on Manage. Drop a tile on the edge of another to put it
 above, below or beside that one, which takes half of its room and leaves the rest alone, so two
@@ -602,8 +620,9 @@ its process name rather than "(untitled)".
 
 ## Where windows go
 
-Deskbar never launches anything and never changes a window's size or position on screen. The
-one axis it arranges is which desktop a window belongs to, and that it remembers.
+Deskbar never launches anything, and it moves or resizes a window on screen only when you ask:
+by dropping it on another screen's lane, or by turning on [tiling](#the-workspace-row-menu) for a workspace.
+The axis it arranges on its own is which desktop a window belongs to, and that it remembers.
 
 - **An app opens where you open it**, unless you have told Deskbar it lives somewhere. Right-click
   one of its windows on the bar and tick **Remember *app*'s workspace**: from then on its windows
@@ -723,7 +742,8 @@ press Send. Nobody needs an account or a sign-in.
   follow-up question, so Send asks once when it is empty or doesn't look like an email, a Telegram
   @handle or a phone number. Press "Send anyway" to send it as it is.
 - Reports go privately to the Deskbar team, not to a public issue tracker. The window shows a
-  reference number once the report has arrived.
+  reference number once the report has arrived. A report from a copy with
+  [Deskbar Pro](#deskbar-pro) is marked priority.
 - If it cannot be sent (no connection, for example), the whole report is saved under
   `%APPDATA%\Deskbar\reports` and the window names the folder. **Try again** sends the same report.
 
@@ -868,9 +888,11 @@ open window is a deliberate cue about where you were. Anything that scatters the
 destroys the cue, and anything that preserves it preserves the context for free. Deskbar does
 not help you rebuild context; it stops the context being demolished.
 
-Which is why it never changes a window's size or where it sits on screen. It does not tile, snap
-or lay anything out, and it opens nothing for you. It arranges your windows along one axis only,
-which desktop each belongs to, and that much it remembers and puts back.
+Which is why, left to itself, it never changes a window's size or where it sits on screen, and it
+opens nothing for you. It arranges your windows along one axis only, which desktop each belongs to,
+and that much it remembers and puts back. Tiling is there for a workspace where you want it, but
+you turn it on, and the layout you make is kept, so it becomes part of the arrangement rather than
+something that scatters it.
 
 ### Which is what virtual desktops were invented for, in 1986
 
@@ -1008,7 +1030,8 @@ readable with tracing left on all day. Off by default, and off means nothing tou
 
 The source is available under the [PolyForm Strict License 1.0.0](LICENSE): you may read
 it, build it and run it for noncommercial purposes, and you may not distribute it or
-publish changed versions. Contributions are welcome under the extra permission in
+publish changed versions. Using Deskbar for work is commercial use, and [Deskbar Pro](#deskbar-pro) is the
+licence for it. Contributions are welcome under the extra permission in
 [CONTRIBUTING.md](CONTRIBUTING.md). This is source-available software, not open source.
 
 ## Tech
