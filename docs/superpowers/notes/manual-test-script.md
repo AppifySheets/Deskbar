@@ -252,6 +252,18 @@ The task list at the bottom of the bar (spec `docs/superpowers/specs/2026-11-22-
     the same task is highlighted there and scrolled into view. Click another line in the window: the bar's
     highlight follows. Close the highlighted task: no line is highlighted any more.
 
+55c. Point at a note's line: two dim toggles appear left of its age, an exclamation mark and a clock. Click the
+    exclamation mark: it turns red and stays, and the line moves above the plain ones. Click the clock on another
+    line: amber, and that line moves above the plain ones but below the important one. Set both on a third: it goes
+    to the very top of the open lines. A task set to waiting stays above all of them, showing its flags. A little
+    space separates each group, and nothing names the groups on the bar.
+55d. Drag a plain line down past another and let go on that line's lower half: it lands under it. A press and
+    release without moving still goes to the task. Drag a plain line onto an important one: it becomes important
+    (its exclamation mark turns red). Try to drag a waiting line: nothing moves. Drop a line on a waiting line: it
+    lands under the waiting block. While dragging, add a task from the pipe: the list does not change until you
+    let go. `$ts task list` shows `important`, `urgent`, `quadrant` and `order` matching what you see, and
+    `$ts task order <id> 2` and `$ts task flag <id> urgent on` move lines as a drag and a click do.
+
 ## The tasks window
 
 The tasks window (spec `docs/superpowers/specs/2026-11-22-tasks-board-design.md`, "The window" and "Comments").
@@ -259,7 +271,7 @@ The tasks window (spec `docs/superpowers/specs/2026-11-22-tasks-board-design.md`
 56. With three or fewer open tasks the line under the list reads "All tasks"; with more, "+N more". Click it: a
     window titled "Tasks" opens beside the bar (not over it), with a dark title bar, on the list and not on a form
     (no box has the keyboard). It is in Alt+Tab and on the taskbar, and the bar does not list it as a window.
-57. Groups read WAITING ON YOU, DONE, IN PROGRESS, BACKLOG, in that order, each newest first. The chips count each
+57. Groups read WAITING ON YOU, then the quadrants that have tasks (I to IV), a new task on top. The chips count each
     status. Click "Closed": only closed tasks show, the latest closed first, each with "Reopen"; click "Reopen" on
     one and it goes back to the open view. "Workspace: all" lists every workspace as its coloured chip, grouped;
     pick one, then "none", then "All workspaces".
@@ -279,6 +291,14 @@ The tasks window (spec `docs/superpowers/specs/2026-11-22-tasks-board-design.md`
     nothing moves until the menu closes.
 62. Click a note's line on a workspace: you go there and the window stays open on its own desktop. "+ Add": a box
     opens, "on <workspace> ▾" says where; Enter adds the note there, Esc closes the box.
+63. With flagged tasks, the window's List shows Waiting on you, then the quadrants captioned "I Urgent and
+    important" to "IV Not urgent, not important". The toggles and the drag work as on the bar, and the bar
+    follows every change. Pick the "In progress" chip: the quadrants stay, with only tasks in progress.
+64. Click "Matrix": a 2 by 2 grid, URGENT and NOT URGENT across the top, IMPORTANT and NOT IMPORTANT down the side,
+    I top left, II top right (drawn a little brighter), III bottom left, IV bottom right. A waiting task sits at the
+    top of its own cell in orange. Drag a line into another cell, an empty one included: it takes that cell's flags.
+    Add twenty tasks to one cell: that cell scrolls, the others do not move. Close and reopen the window: still the
+    Matrix. `$ts tasks-window list` switches it back.
 
 ## Tiling on the split tree
 
