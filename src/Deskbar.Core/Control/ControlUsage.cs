@@ -55,9 +55,10 @@ public static class ControlUsage
                 + "      count), updatedAt, important, urgent, quadrant (I to IV) and order (its place in the quadrant,\n"
                 + "      from 1; null while it waits on you);\n"
                 + "      --closed lists the closed ones instead, the latest closed first, to find one to reopen"),
-            new("task", "add <title>|- [--workspace <name>|none]",
+            new("task", "add <title>|- [--workspace <name>|none] [--important] [--urgent]",
                 "add a note to the backlog; without --workspace it goes on the workspace of the VS Code window\n"
-                + "      whose folder holds --from (the caller's own folder if not given); - reads the title from stdin"),
+                + "      whose folder holds --from (the caller's own folder if not given); - reads the title from stdin;\n"
+                + "      --important and --urgent set its flags, and it goes to the top of the quadrant they give"),
             new("task", "close <id>", "close a task: it leaves the bar and the window's open tasks"),
             new("task", "reopen <id>", "reopen a closed task: in progress while a session is live on it, else backlog"),
             new("task", "status <id> <backlog|in-progress|waiting|done>",

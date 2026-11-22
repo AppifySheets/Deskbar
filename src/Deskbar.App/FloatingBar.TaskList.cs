@@ -589,12 +589,18 @@ public partial class FloatingBar
         taskChipNone = TaskChip("none", () => ChooseTaskTarget(Maybe<Guid>.None));
         taskChipOther = TaskChip(OtherChipText, () => OpenOtherWorkspaces());
         taskAddOn = new TextBlock { Text = "on", Foreground = TaskDimInk, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(2, 1, 4, 1) };
+        // The important and urgent toggles of a task line, for the note about to be added (Ruling 37), at the end of the
+        // chip row: in the wrap, so on a narrow bar they wrap with the chips instead of widening the bar (the whole list
+        // sits in TakesNoWidth), and the docked fit pass measures the row as it is.
+        taskAddImportant = AddFlagToggle(TaskFlag.Important);
+        taskAddUrgent = AddFlagToggle(TaskFlag.Urgent);
         taskAddChips = new WrapPanel
         {
             Tag = "task-add-chips",
             Margin = new Thickness(0, 3, 0, 0),
-            Children = { taskAddOn, taskChipHere.Button, taskChipNone.Button, taskChipOther.Button },
+            Children = { taskAddOn, taskChipHere.Button, taskChipNone.Button, taskChipOther.Button, taskAddImportant.Button, taskAddUrgent.Button },
         };
+        PaintAddFlags();
         var addRow = new StackPanel { Margin = new Thickness(0, 0, 0, 3), Children = { box, taskAddChips } };
 
         taskLinesPanel = new StackPanel();
@@ -1335,6 +1341,9 @@ public partial class FloatingBar
         {
             taskAddBox.Text = "";
             taskAddTarget = taskAddHere;
+            // The toggles are off again after an add (and after Esc): each note says its own flags (Ruling 37).
+            taskAddFlags = (false, false);
+            PaintAddFlags();
             PaintTaskChips();
             GiveTaskKeyboardBack();
         }
@@ -1402,7 +1411,7 @@ public partial class FloatingBar
     void CommitTaskNote()
     {
         if (taskService is null || taskAddBox is null) return;
-        taskService.AddNote(taskAddBox.Text, taskAddTarget)
+        taskService.AddNote(taskAddBox.Text, taskAddTarget, QuadrantOf.Flags(taskAddFlags.Important, taskAddFlags.Urgent))
             .Tap(_ => EndTyping(clear: true))
             .TapError(err => ClickTrace.Write($"task list: note not added: {err}"));
     }
@@ -1419,6 +1428,48 @@ public partial class FloatingBar
         PaintTaskChips();
         taskAddBox?.Focus();
     }
+
+    // FLAGS WHEN ADDING (Ruling 37; Petre: "i should be able to say urgent or important or both when adding"). The note
+    // about to be added has the two flags a task line has, as toggles at the end of the chip row: neither, either or
+    // both, picked before Enter, and the note lands at the top of the quadrant they give. Like a chip, a toggle pressed
+    // on an idle box takes the keyboard first (BeginTyping). Off again after Enter or Esc (EndTyping).
+    (bool Important, bool Urgent) taskAddFlags;
+    TaskAddToggle? taskAddImportant;
+    TaskAddToggle? taskAddUrgent;
+
+    sealed record TaskAddToggle(Button Button, TextBlock Glyph, TaskFlag Flag);
+
+    TaskAddToggle AddFlagToggle(TaskFlag flag)
+    {
+        var name = flag == TaskFlag.Important ? "Add as important" : "Add as urgent";
+        var glyph = new TextBlock
+        {
+            Text = flag == TaskFlag.Important ? "\uE8C9" : "\uE823",
+            FontFamily = IconFont,
+            FontSize = Text(8.5),
+            VerticalAlignment = VerticalAlignment.Center,
+            Margin = new Thickness(3, 1, 3, 1),
+        };
+        var button = TaskButton(name, glyph, () => ToggleAddFlag(flag), name);
+        return new TaskAddToggle(button, glyph, flag);
+    }
+
+    void ToggleAddFlag(TaskFlag flag)
+    {
+        if (!taskTyping) BeginTyping();
+        taskAddFlags = flag == TaskFlag.Important ? taskAddFlags with { Important = !taskAddFlags.Important } : taskAddFlags with { Urgent = !taskAddFlags.Urgent };
+        PaintAddFlags();
+        taskAddBox?.Focus();
+    }
+
+    // On: the glyph in its flag's colour; off: the dim ink of an off toggle. Automation status "on" or "off".
+    void PaintAddFlags() =>
+        new[] { taskAddImportant, taskAddUrgent }.OfType<TaskAddToggle>().ToList().ForEach(toggle =>
+        {
+            var on = toggle.Flag == TaskFlag.Important ? taskAddFlags.Important : taskAddFlags.Urgent;
+            toggle.Glyph.Foreground = on ? (toggle.Flag == TaskFlag.Important ? TaskImportantInk : TaskUrgentInk) : TaskDimInk;
+            AutomationProperties.SetItemStatus(toggle.Button, on ? "on" : "off");
+        });
 
     // "other…": every workspace but the current one, as a menu under the chip, each drawn as its chip in its colour and
     // grouped as on the bar (WorkspaceChipMenu), the chosen one ticked. Held open the way the bar's other menus are

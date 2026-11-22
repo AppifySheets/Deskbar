@@ -50,6 +50,28 @@ public class TaskOrderTests
         Assert.Equal([id2, id1], Group(board, Quadrant.IV));
     }
 
+    // Ruling 37: flags when adding. A note made with its flags lands at the top of the quadrant they give, among the
+    // tasks already there, with both flags set as asked.
+    [Theory]
+    [InlineData(false, false, Quadrant.IV)]
+    [InlineData(true, false, Quadrant.II)]
+    [InlineData(false, true, Quadrant.III)]
+    [InlineData(true, true, Quadrant.I)]
+    public void A_note_added_with_flags_tops_the_quadrant_they_give(bool important, bool urgent, Quadrant quadrant)
+    {
+        var board = Notes(id1, id2);
+        board = board.SetFlag(id1, TaskFlag.Important, important, clock).Value.SetFlag(id1, TaskFlag.Urgent, urgent, clock).Value;
+        board = board.SetFlag(id2, TaskFlag.Important, important, clock).Value.SetFlag(id2, TaskFlag.Urgent, urgent, clock).Value;
+        Later();
+
+        board = board.AddNote("flagged", Free, clock, id3, QuadrantOf.Flags(important, urgent)).Value.Board;
+
+        Assert.Equal(important, Get(board, id3).Important);
+        Assert.Equal(urgent, Get(board, id3).Urgent);
+        Assert.Equal(id3, Group(board, quadrant)[0]);
+        Assert.Equal(3, Group(board, quadrant).Count);
+    }
+
     [Fact]
     public void The_flags_make_covey_quadrants()
     {

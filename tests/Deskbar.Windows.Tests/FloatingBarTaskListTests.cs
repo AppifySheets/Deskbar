@@ -677,7 +677,8 @@ public class FloatingBarTaskListTests
         && FaceOf(chip).Background is SolidColorBrush { Color.A: > 0 };
 
     static IReadOnlyList<string> ChosenChips(ListBar t) =>
-        Inside(t.Chips).OfType<Button>().Where(b => b.Visibility == Visibility.Visible && LooksChosen(b))
+        // The chips only: the row also holds the add toggles (Ruling 37), which are not chips.
+        Inside(t.Chips).OfType<Button>().Where(b => b.Visibility == Visibility.Visible && b.Content is Border && LooksChosen(b))
             .Select(b => AutomationProperties.GetName(b)).ToList();
 
     // Petre's live check: he picked "none", its edge went blue, but the GEPHA chip stayed filled in its colour and the
@@ -1948,5 +1949,43 @@ public class FloatingBarTaskListTests
 
         Assert.Equal(before, Inside(t.Lines[0]).Count());
         Assert.DoesNotContain(Inside(t.Lines[0]).OfType<TextBlock>(), b => b.Text.Contains("Ship it"));
+    });
+
+    // Ruling 37: flags when adding. The add box's chip row carries a task line's two toggles; the note takes the flags
+    // they say and lands at the top of that quadrant, and the toggles are off again after the add.
+    [Theory]
+    [InlineData(false, false)]
+    [InlineData(true, false)]
+    [InlineData(false, true)]
+    [InlineData(true, true)]
+    public void A_note_added_on_the_bar_takes_the_toggles_flags(bool important, bool urgent) => StaThread.Run(() =>
+    {
+        using var t = Build();
+        t.Tasks.AddNote("already there", t.Gepha, QuadrantOf.Flags(important, urgent));
+
+        ClickBox(t);
+        t.Box.Text = "Pay rent";
+        if (important) Click(ButtonNamed(t.List, "Add as important"));
+        if (urgent) Click(ButtonNamed(t.List, "Add as urgent"));
+        Assert.Equal(important ? "on" : "off", AutomationProperties.GetItemStatus(ButtonNamed(t.List, "Add as important")));
+        Press(t.Bar, t.Box, Key.Enter);
+
+        var added = t.Tasks.Board.Tasks.Single(x => x.Title == "Pay rent");
+        Assert.Equal((important, urgent), (added.Important, added.Urgent));
+        Assert.Equal(added.Id, t.Tasks.Board.Group(QuadrantOf.Flags(important, urgent))[0].Id);
+        Assert.Equal("off", AutomationProperties.GetItemStatus(ButtonNamed(t.List, "Add as important")));
+        Assert.Equal("off", AutomationProperties.GetItemStatus(ButtonNamed(t.List, "Add as urgent")));
+    });
+
+    // The toggles sit in the chip row's wrap, inside the list that takes no width: on a narrow bar they wrap, and the bar
+    // is no wider for them.
+    [Fact]
+    public void The_add_toggles_wrap_with_the_chips_and_take_no_width() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        var chips = Inside(t.List).OfType<WrapPanel>().Single(w => Equals(w.Tag, "task-add-chips"));
+
+        Assert.Contains(ButtonNamed(t.List, "Add as important"), chips.Children.OfType<Button>());
+        Assert.Contains(ButtonNamed(t.List, "Add as urgent"), chips.Children.OfType<Button>());
     });
 }

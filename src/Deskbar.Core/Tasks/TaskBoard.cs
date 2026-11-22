@@ -39,9 +39,15 @@ public sealed record TaskBoard(IReadOnlyList<TaskItem> Tasks)
 
     // --- making tasks ------------------------------------------------------------------------------
 
-    /// <summary>One of Petre's notes: Backlog, no sessions. Every add is a new task, even with a title seen before.</summary>
-    public Result<(TaskBoard Board, TaskItem Task)> AddNote(string title, Maybe<Guid> workspace, DateTimeOffset now, Guid newId) =>
-        CleanTitle(title).Map(clean => WithAppended(NewTask(newId, clean, workspace, TaskStatus.Backlog, [], now) with { Rank = TopRank(Quadrant.IV, newId) }));
+    /// <summary>
+    /// One of Petre's notes: Backlog, no sessions. Every add is a new task, even with a title seen before. It takes the
+    /// flags of <paramref name="quadrant"/> (Ruling 37: the add box's important and urgent toggles, or `task add
+    /// --important --urgent`) and lands at the top of that quadrant; no flags, quadrant IV, is the default.
+    /// </summary>
+    public Result<(TaskBoard Board, TaskItem Task)> AddNote(string title, Maybe<Guid> workspace, DateTimeOffset now, Guid newId,
+        Quadrant quadrant = Quadrant.IV) =>
+        CleanTitle(title).Map(clean => WithAppended(
+            WithFlags(NewTask(newId, clean, workspace, TaskStatus.Backlog, [], now), quadrant) with { Rank = TopRank(quadrant, newId) }));
 
     /// <summary>
     /// A task a session makes for its own work: In progress, with that session on it. The session leaves whatever

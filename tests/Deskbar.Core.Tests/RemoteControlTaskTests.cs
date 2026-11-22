@@ -102,6 +102,34 @@ public class RemoteControlTaskTests
         Assert.Equal(JsonValueKind.Null, Json(reply).GetProperty("workspace").ValueKind);
     }
 
+    // Ruling 37's pipe twin: `task add <title> [--important] [--urgent]`, in any order after the title; the note tops
+    // the quadrant its flags give.
+    [Theory]
+    [InlineData(new string[0], false, false)]
+    [InlineData(new[] { "--important" }, true, false)]
+    [InlineData(new[] { "--urgent" }, false, true)]
+    [InlineData(new[] { "--urgent", "--important" }, true, true)]
+    public void Add_takes_the_flags(string[] flags, bool important, bool urgent)
+    {
+        var manager = Started();
+
+        var reply = Run(manager, ["task", "add", "Pay rent", .. flags, "--workspace", "none"]);
+
+        Assert.Equal(ControlReply.Ok, reply.ExitCode);
+        Assert.Equal(important, Only.Important);
+        Assert.Equal(urgent, Only.Urgent);
+        Assert.Equal(Only.Id, tasks.Board.Group(QuadrantOf.Flags(important, urgent))[0].Id);
+    }
+
+    [Fact]
+    public void A_flag_given_twice_is_refused()
+    {
+        var manager = Started();
+        var before = tasks.Board;
+
+        AssertRefusedAndUnchanged(Run(manager, "task", "add", "Pay rent", "--urgent", "--urgent", "--workspace", "none"), before);
+    }
+
     [Fact]
     public void Add_by_workspace_name_ignores_case()
     {
@@ -535,7 +563,7 @@ public class RemoteControlTaskTests
     [Fact]
     public void Task_is_in_the_help() =>
         Assert.Equal(
-            ["list [--closed]", "add <title>|- [--workspace <name>|none]", "close <id>", "reopen <id>",
+            ["list [--closed]", "add <title>|- [--workspace <name>|none] [--important] [--urgent]", "close <id>", "reopen <id>",
              "status <id> <backlog|in-progress|waiting|done>", "rename <id> <title>", "move <id> <workspace>|none",
              "comment <id> <markdown>|-", "delete <id>", "flag <id> important|urgent on|off", "order <id> top|end|<n>",
              // A Claude session's own forms (plan Task 8, RemoteControl.ClaudeHook.cs); `-` reads the text from stdin.

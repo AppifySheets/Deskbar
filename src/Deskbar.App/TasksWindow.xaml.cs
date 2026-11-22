@@ -493,6 +493,7 @@ public partial class TasksWindow : Window
         EmptyText.Text = view.EmptyText;
         // The Matrix always draws its four cells, empty or not, so it needs no empty line.
         EmptyText.Visibility = Keys.Count == 0 && !view.Matrix ? Visibility.Visible : Visibility.Collapsed;
+        PaintActiveCell();
         PaintAddPlace();
     }
 
@@ -753,6 +754,8 @@ public partial class TasksWindow : Window
     {
         selectedId = selected;
         selectionFrames.Keys.ToList().ForEach(PaintFrame);
+        // In the Matrix the selected task's cell becomes the active one (TasksWindow.AddFlags.cs).
+        if (selected.HasValue) FollowSelectionToCell(selected.Value);
     }
 
     void PaintFrame(Guid id)
@@ -1299,6 +1302,7 @@ public partial class TasksWindow : Window
     {
         AddBox.Text = "";
         addChosen = null;
+        ResetAddFlags();
         AddRow.Visibility = Visibility.Collapsed;
     }
 
@@ -1307,6 +1311,8 @@ public partial class TasksWindow : Window
     void PaintAddPlace()
     {
         AddEnd.Children.Clear();
+        // The important and urgent toggles first (Ruling 37, TasksWindow.AddFlags.cs), then the workspace chip.
+        AddFlagToggles().ToList().ForEach(toggle => AddEnd.Children.Add(toggle));
         var target = addChosen ?? latest?.AddTarget;
         if (target is null) return;
         // DROPDOWN THAT DID NOT OPEN (2026-11-23, Petre: "dropdown doesn't work"). The menu used to open from a second
@@ -1335,7 +1341,7 @@ public partial class TasksWindow : Window
     {
         if (key is not (Key.Enter or Key.Return)) return KeyOutcome.Ignored;
         var target = addChosen ?? latest?.AddTarget;
-        if (Actions is null || target is null || !Actions.AddNote(AddBox.Text, target.Workspace)) return KeyOutcome.NewLine;
+        if (Actions is null || target is null || !Actions.AddNote(AddBox.Text, target.Workspace, AddQuadrant)) return KeyOutcome.NewLine;
         HideAdd();
         return KeyOutcome.Posted;
     }

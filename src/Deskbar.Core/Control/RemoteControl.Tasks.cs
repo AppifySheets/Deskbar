@@ -10,7 +10,7 @@ namespace Deskbar.Core.Control;
 // the pipe commands, and `task list` stays JSON).
 //
 //   task list [--closed]
-//   task add <title> [--workspace <name>|none]
+//   task add <title>|- [--workspace <name>|none] [--important] [--urgent]
 //   task close <id>
 //   task reopen <id>
 //   task status <id> <backlog|in-progress|waiting|done>
@@ -189,14 +189,22 @@ public sealed partial class RemoteControl
 
     // --- add -----------------------------------------------------------------------------------
 
-    sealed record TaskAddOptions(string? Title, string? Workspace, string? Bad);
+    sealed record TaskAddOptions(string? Title, string? Workspace, string? Bad)
+    {
+        public bool Important { get; init; }
 
-    // One positional title, then --workspace at most once. Any other option is refused by name (the timer build's
+        public bool Urgent { get; init; }
+    }
+
+    // One positional title, then --workspace, --important and --urgent at most once each, in any order (Ruling 37: the
+    // flags a note is made with, the add box's two toggles). Any other option is refused by name (the timer build's
     // --in included), so a script written for that build fails loudly instead of losing its timer quietly.
     static TaskAddOptions ParseAddFrom(string[] args, TaskAddOptions o) => args switch
     {
         [] => o,
         ["--workspace", var w, .. var more] when o.Workspace is null => ParseAddFrom(more, o with { Workspace = w }),
+        ["--important", .. var more] when !o.Important => ParseAddFrom(more, o with { Important = true }),
+        ["--urgent", .. var more] when !o.Urgent => ParseAddFrom(more, o with { Urgent = true }),
         [var option, ..] when option.StartsWith("--", StringComparison.Ordinal) => o with { Bad = $"Unexpected {option}" },
         [var title, .. var more] when o.Title is null => ParseAddFrom(more, o with { Title = title }),
         [var extra, ..] => o with { Bad = $"Unexpected '{extra}': a title with spaces needs quotes" },
@@ -213,7 +221,7 @@ public sealed partial class RemoteControl
         if (failure is not null) return ControlReply.Fail(failure);
 
         return ResolveWorkspace(o.Workspace, from)
-            .Bind(workspace => service.AddNote(o.Title!, workspace))
+            .Bind(workspace => service.AddNote(o.Title!, workspace, QuadrantOf.Flags(o.Important, o.Urgent)))
             .Match(task => Success(Describe(task)), ControlReply.Fail);
     }
 

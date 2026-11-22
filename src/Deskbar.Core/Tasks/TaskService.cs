@@ -46,8 +46,9 @@ public sealed class TaskService(ITaskStore store, Func<DateTimeOffset> now, Func
 
     // One wrapper per TaskBoard change, with the clock and a new id supplied here. A refused change saves nothing.
 
-    public Result<TaskItem> AddNote(string title, Maybe<Guid> workspace) =>
-        Board.AddNote(title, workspace, now(), makeId()).Tap(r => Commit(r.Board)).Map(r => r.Task);
+    // `quadrant`: the flags the note is made with (Ruling 37), none by default.
+    public Result<TaskItem> AddNote(string title, Maybe<Guid> workspace, Quadrant quadrant = Quadrant.IV) =>
+        Board.AddNote(title, workspace, now(), makeId(), quadrant).Tap(r => Commit(r.Board)).Map(r => r.Task);
 
     public Result<TaskItem> Create(string title, Maybe<Guid> workspace, TaskSession session) =>
         Board.Create(title, workspace, session, now(), makeId()).Tap(r => Commit(r.Board)).Map(r => r.Task);

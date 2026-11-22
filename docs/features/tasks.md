@@ -16,7 +16,7 @@ At the top of the list is a text box that says where a note would go, "Add to De
 
 When more than three are open, a small "+2 more" under the last line counts the ones out of sight. It turns orange and reads "+2 waiting" when the hidden ones are waiting on you, so nothing that needs you stays hidden without a sign. With nothing out of sight it reads **All tasks**. Either way, a click opens the [tasks window](#the-tasks-window), where every task is, open and closed.
 
-Click in the box to write a note. Under it, always, are chips for where the note goes: the workspace you are on (ticked, and following you while the box is empty), **none**, and **other...**, which lists your other workspaces. Only the chosen chip is filled and outlined in blue; the others are dimmed. The box names where the note will go ("Add to Deskbar..." or, with none chosen, "Add..."). The workspaces in **other...** look the way they do on the bar: each one is its chip in its own colour, in the bar's order, with grouped workspaces under their group's name. On a narrow bar they wrap onto a second line. Clicking a chip starts a note just as clicking in the box does. Press Enter to add the note and Esc to clear the box. Either way the keyboard goes back to the window you were typing in, as long as that window is on the desktop you are looking at, because Deskbar never switches desktops to hand it back. If you click into another app while typing, what you typed stays in the box, with its chip, until you come back to it.
+Click in the box to write a note. Under it, always, are chips for where the note goes: the workspace you are on (ticked, and following you while the box is empty), **none**, and **other...**, which lists your other workspaces. Only the chosen chip is filled and outlined in blue; the others are dimmed. The box names where the note will go ("Add to Deskbar..." or, with none chosen, "Add..."). The workspaces in **other...** look the way they do on the bar: each one is its chip in its own colour, in the bar's order, with grouped workspaces under their group's name. On a narrow bar they wrap onto a second line. Clicking a chip starts a note just as clicking in the box does. At the end of the chip row are the two toggles a task line has, important and urgent: turn on neither, either or both before you press Enter, and the note goes to the top of the quadrant they give. They are off again after each note. Press Enter to add the note and Esc to clear the box. Either way the keyboard goes back to the window you were typing in, as long as that window is on the desktop you are looking at, because Deskbar never switches desktops to hand it back. If you click into another app while typing, what you typed stays in the box, with its chip, until you come back to it.
 
 A note has a tick box at the left of its line. Ticking it closes the note at once, but its line stays where it is for six seconds, struck through, with **Undo** where the tick box was. Undo brings the note back, and otherwise the line then leaves. A double click, or a click in the half second after the list changes, is ignored rather than landing on the next note. Past the six seconds, `task list --closed` finds a closed note and `task reopen <id>` brings it back.
 
@@ -58,7 +58,7 @@ Each line shows the task's title, then its question or status line under it, the
 - Click a line to go to its workspace. The window stays open behind you. The line stays highlighted, as on the bar, and when the window opens it scrolls to that task.
 - Click the comment glyph (with the count beside it when there are comments) to open the task's comments. Each comment shows who wrote it, **Claude** or **you**, and when, and its text is formatted: bold, italics, code, code blocks, links and lists. Only web links can be clicked, and they open in your default browser. Type in the box under the comments and press Enter to add one as **you**. Shift+Enter starts a new line.
 - **...** at the end of a line sets the status by hand (Backlog, In progress, Waiting on you or Done), closes or reopens the task, renames it in place, moves it to another workspace or deletes it. Delete needs a second click, on **Delete for good**, because it cannot be undone. Once you have a goal, it also has **Goal**: **None**, then this month's and this week's open goals, with the task's own ticked. Linking a task to a goal changes nothing else about it.
-- **+ Add** opens a box for a note. Enter adds it on the workspace its chip shows, which you can change. Esc closes the box.
+- **+ Add** opens a box for a note. Beside it are the important and urgent toggles, then the chip saying which workspace it goes on, which you can change. Enter adds the note at the top of the quadrant the toggles give; Esc closes the box. In the List the toggles start off and are off again after each note. In the Matrix they follow the active cell, which has a blue edge: the cell you last clicked in, or the one holding the task you selected, and quadrant II until then. Click in a cell and the toggles take its flags; flip a toggle and the active cell moves to match. A note added there lands at the top of the active cell.
 
 ## Tasks from older versions
 
@@ -77,6 +77,7 @@ $ts = "$env:APPDATA\Deskbar\deskbar.cmd"
 & $ts task add "Wait for CI"                # a note on the caller's own workspace
 & $ts task add "Call the bank" --workspace none
 'Buy "the good" soap & tablets' | & $ts task add -   # a title with quotes or &: - reads it from stdin
+& $ts task add "Renew the passport" --important --urgent   # quadrant I, at its top
 & $ts task list                             # JSON: the open tasks in the bar's order
 & $ts task list --closed                    # the closed ones, the latest closed first
 & $ts task reopen 3f2a                      # bring a closed task back
@@ -91,7 +92,7 @@ $ts = "$env:APPDATA\Deskbar\deskbar.cmd"
 The full set:
 
 - `task list [--closed]`
-- `task add <title>|- [--workspace <name>|none]`, with `-` reading the title from stdin
+- `task add <title>|- [--workspace <name>|none] [--important] [--urgent]`, with `-` reading the title from stdin; the flags put the note at the top of the quadrant they give
 - `task close <id>` and `task reopen <id>`
 - `task status <id> <backlog|in-progress|waiting|done>`
 - `task rename <id> <title>`

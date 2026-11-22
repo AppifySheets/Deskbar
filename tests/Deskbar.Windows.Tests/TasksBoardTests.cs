@@ -1508,6 +1508,66 @@ public class TasksBoardTests
         Assert.Equal(t.Sparrow, t.Tasks.Board.Tasks.Single(x => x.Title == "encrypt data").WorkspaceId.Value);
     });
 
+    // Ruling 37 in the window's List: the add row has a line's two toggles; the note takes their flags and tops that
+    // quadrant, and they are off again after the add.
+    [Theory]
+    [InlineData(false, false)]
+    [InlineData(true, false)]
+    [InlineData(false, true)]
+    [InlineData(true, true)]
+    public void A_note_added_in_the_list_takes_the_toggles_flags(bool important, bool urgent) => StaThread.Run(() =>
+    {
+        using var t = Build();
+        t.Tasks.AddNote("already there", t.Gepha, QuadrantOf.Flags(important, urgent));
+        t.Controller.Open(Rect.Empty);
+        Click(ButtonNamed(t.Window, "Add"));
+
+        if (important) Click(ButtonNamed(t.Window, "Add as important"));
+        if (urgent) Click(ButtonNamed(t.Window, "Add as urgent"));
+        Assert.True(t.Window.TypeNote("Pay rent", Key.Enter));
+
+        var added = t.Tasks.Board.Tasks.Single(x => x.Title == "Pay rent");
+        Assert.Equal((important, urgent), (added.Important, added.Urgent));
+        Assert.Equal(added.Id, t.Tasks.Board.Group(QuadrantOf.Flags(important, urgent))[0].Id);
+        Click(ButtonNamed(t.Window, "Add"));
+        Assert.Equal("off", AutomationProperties.GetItemStatus(ButtonNamed(t.Window, "Add as important")));
+        Assert.Equal("off", AutomationProperties.GetItemStatus(ButtonNamed(t.Window, "Add as urgent")));
+    });
+
+    // Petre: "actually use the box which is active when adding through the matrix". In the Matrix the toggles are the
+    // active cell: quadrant II at first, outlined; a press in a cell makes it active and turns the toggles to its flags;
+    // a toggle moves the active cell; a new task lands at the top of the active cell.
+    [Fact]
+    public void In_the_matrix_a_note_goes_to_the_active_cell() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        t.Tasks.AddNote("urgent one", t.Gepha, Quadrant.III);
+        Assert.True(t.Harness.Manager.SetTasksMatrix(true).IsSuccess);
+        t.Controller.Open(Rect.Empty);
+        Click(ButtonNamed(t.Window, "Add"));
+
+        Assert.Equal(Quadrant.II, t.Window.ActiveCell);
+        Assert.Equal(Quadrant.II, t.Window.HighlightedCell);
+        Assert.Equal("on", AutomationProperties.GetItemStatus(ButtonNamed(t.Window, "Add as important")));
+        Assert.Equal("off", AutomationProperties.GetItemStatus(ButtonNamed(t.Window, "Add as urgent")));
+
+        // A press in cell III makes it the active one.
+        t.Window.PressInCell(Quadrant.III);
+        Assert.Equal(Quadrant.III, t.Window.HighlightedCell);
+        Assert.Equal("off", AutomationProperties.GetItemStatus(ButtonNamed(t.Window, "Add as important")));
+        Assert.Equal("on", AutomationProperties.GetItemStatus(ButtonNamed(t.Window, "Add as urgent")));
+        Assert.True(t.Window.TypeNote("next urgent", Key.Enter));
+        var added = t.Tasks.Board.Tasks.Single(x => x.Title == "next urgent");
+        Assert.Equal(added.Id, t.Tasks.Board.Group(Quadrant.III)[0].Id);
+
+        // Turning important on moves the active cell to I, and the next note lands there.
+        Click(ButtonNamed(t.Window, "Add"));
+        Click(ButtonNamed(t.Window, "Add as important"));
+        Assert.Equal(Quadrant.I, t.Window.HighlightedCell);
+        Assert.True(t.Window.TypeNote("both", Key.Enter));
+        Assert.Equal(Quadrant.I, t.Tasks.Board.Tasks.Single(x => x.Title == "both").Quadrant);
+    });
+
     // The toolbar's "Workspace: all ▾" was built the same way and had the same fault: a routed click opens its menu, and
     // a pick filters the board.
     [Fact]
