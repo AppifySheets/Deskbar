@@ -2,8 +2,6 @@ using CSharpFunctionalExtensions;
 using System.IO;
 using System.IO.Pipes;
 using System.Runtime.InteropServices;
-using System.Security.AccessControl;
-using System.Security.Principal;
 using System.Text;
 using Deskbar.Core.Control;
 
@@ -82,9 +80,10 @@ public static class ControlClient
         // it retries until the timeout runs out (measured: 2 s every time, see PipeExistsAsync).
         if (!await PipeExistsAsync(pipeName).ConfigureAwait(false)) return NotRunning;
 
-        // The client refuses a pipe of this name that another user owns, so a process squatting on the name cannot
-        // answer in Deskbar's place (OwnedByThisUser). Checked by hand rather than with PipeOptions.CurrentUserOnly,
-        // whose check failed a real Deskbar (PR #423's CI, below).
+        // The client refuses a pipe of this name that is not this user's Deskbar, before it writes a byte, so a process
+        // squatting on the name can neither hear the request nor answer in Deskbar's place (PipeTrust: the owner and the
+        // mandatory label). Checked by hand rather than with PipeOptions.CurrentUserOnly, whose owner check failed a real
+        // Deskbar (PR #423's CI) and knows nothing of labels (a Low-integrity squatter passed it).
         await using var pipe = new NamedPipeClientStream(".", pipeName, PipeDirection.InOut, PipeOptions.Asynchronous);
         try
         {
@@ -95,14 +94,30 @@ public static class ControlClient
             return NotRunning;
         }
         // An unexpected answer about the pipe is a refusal with a reason, never an unhandled exception: a hook's client
-        // that threw died with exit 127 under Git Bash and said nothing in the session.
-        catch (Exception e) when (e is UnauthorizedAccessException or IOException)
+        // that threw died with exit 127 under Git Bash and said nothing in the session. Access denied is what a
+        // non-elevated caller meets at an elevated Deskbar, whose pipe admits only elevated callers (ControlPipeServer),
+        // so the message names that.
+        catch (UnauthorizedAccessException e)
+        {
+            return ControlReply.Fail($"Could not connect to Deskbar's control pipe: {e.Message} Deskbar may be running as administrator; run this from an elevated prompt, or start Deskbar normally.");
+        }
+        catch (IOException e)
         {
             return ControlReply.Fail($"Could not connect to Deskbar's control pipe: {e.Message}");
         }
 
-        if (!OwnedByThisUser(pipe))
-            return ControlReply.Fail("Something other than this user's Deskbar answered on its control pipe; nothing was sent.");
+        // Reading the pipe's owner and label can fail too (security review M1). Whatever it throws is a refusal with its
+        // reason, not a crash: this client is what every hook runs, and one that dies says nothing to anyone.
+        Result trusted;
+        try
+        {
+            trusted = PipeTrust.Check(pipe);
+        }
+        catch (Exception e)
+        {
+            trusted = Result.Failure($"The control pipe's owner could not be read: {e.Message}");
+        }
+        if (trusted.IsFailure) return ControlReply.Fail(trusted.Error);
 
         try
         {
@@ -125,30 +140,6 @@ public static class ControlClient
         {
             return ControlReply.Fail($"The connection to Deskbar broke: {e.Message}");
         }
-    }
-
-    // WHETHER THE PIPE IS THIS USER'S, the check PipeOptions.CurrentUserOnly makes on the client, made so that it also
-    // holds when the two ends' tokens name different default owners.
-    //
-    // CurrentUserOnly compares the pipe's owner with the client token's DEFAULT OWNER, which is not always the user.
-    // An elevated process's default owner is the Administrators group, and Git Bash (MSYS, like Cygwin) sets its own
-    // processes' default owner to the user. So an elevated Deskbar's pipe (owned by Administrators) and a hook started
-    // by Git Bash (default owner: the user) do not match, and .NET threw "not owned by the current user" out of the
-    // client, which died with exit 127. Measured on PR #423's CI, where the runner is elevated: the two Git Bash tests
-    // that reach a real pipe failed that way, and the in-process ones passed.
-    //
-    // So the owner may be this user, or this process's own default owner, or the Administrators group while this process
-    // runs elevated (it is then in that group, and an elevated Deskbar of this user owns its pipe that way). Any other
-    // owner is another user's, and the request is not sent. The server's own CurrentUserOnly ACL still admits only
-    // this user.
-    static bool OwnedByThisUser(NamedPipeClientStream pipe)
-    {
-        var owner = pipe.GetAccessControl().GetOwner(typeof(SecurityIdentifier));
-        using var me = WindowsIdentity.GetCurrent();
-        var administrators = new SecurityIdentifier(WellKnownSidType.BuiltinAdministratorsSid, null);
-        return owner is not null
-            && (owner == me.User || owner == me.Owner
-                || (owner == administrators && new WindowsPrincipal(me).IsInRole(WindowsBuiltInRole.Administrator)));
     }
 
     // WHETHER ANYONE SERVES THE PIPE, answered in well under a millisecond when nobody does.
