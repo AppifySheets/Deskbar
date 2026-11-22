@@ -532,17 +532,21 @@ public partial class TasksWindow : Window
             button.Margin = new Thickness(0, 0, 6, 0);
             Filters.Children.Add(button);
         });
-        var workspace = Flat(new TextBlock { Text = $"{view.WorkspaceFilterLabel} ▾", Foreground = Ink, FontSize = 11 }, "Workspace filter",
-            () => { }, new Thickness(8, 2, 8, 2));
-        workspace.Click += (_, _) => OpenMenu(WorkspaceFilterMenu(view, workspace));
+        // The menu opens from Flat's own press, never from a Click handler added afterwards: Flat's handler marks the
+        // click handled, and WPF does not call a later += handler on a handled event, so such a menu never opened
+        // (2026-11-23, "dropdown doesn't work"; TasksBoardTests.The_add_rows_workspace_chip_opens_its_menu_and_a_pick_lands).
+        Button? workspace = null;
+        workspace = Flat(new TextBlock { Text = $"{view.WorkspaceFilterLabel} ▾", Foreground = Ink, FontSize = 11 }, "Workspace filter",
+            () => OpenMenu(WorkspaceFilterMenu(view, workspace!)), new Thickness(8, 2, 8, 2));
         Filters.Children.Add(workspace);
         // The goal filter, beside the workspace one, only while goals exist (ruling G1).
         goalFilterButton = null;
         if (view.ShowsGoals)
         {
+            // Its menu opens from Flat's own press, as the workspace filter's does (see above): a Click handler added
+            // after Flat's was never called, because Flat's own handler marks the click handled.
             var goal = Flat(new TextBlock { Text = $"{view.GoalFilterLabel} ▾", Foreground = Ink, FontSize = 11 }, "Goal filter",
-                () => { }, new Thickness(8, 2, 8, 2));
-            goal.Click += (_, _) => OpenGoalFilterMenu();
+                () => OpenGoalFilterMenu(), new Thickness(8, 2, 8, 2));
             goal.Margin = new Thickness(6, 0, 0, 0);
             goalFilterButton = goal;
             Filters.Children.Add(goal);
@@ -1258,6 +1262,9 @@ public partial class TasksWindow : Window
         return menu;
     }
 
+    // For the tests: the menu open now, if any.
+    internal ContextMenu? OpenedMenu => openMenu;
+
     // Every menu of the window opens here, so a redraw waits for it (MustWait) and runs when it closes.
     void OpenMenu(ContextMenu menu)
     {
@@ -1302,9 +1309,12 @@ public partial class TasksWindow : Window
         AddEnd.Children.Clear();
         var target = addChosen ?? latest?.AddTarget;
         if (target is null) return;
-        var chip = Flat(new TextBlock { Text = $"on {target.Name} ▾", Foreground = Ink, FontSize = 11 }, "Add to workspace", () => { }, new Thickness(8, 2, 8, 2));
-        chip.Margin = new Thickness(8, 0, 0, 0);
-        chip.Click += (_, _) =>
+        // DROPDOWN THAT DID NOT OPEN (2026-11-23, Petre: "dropdown doesn't work"). The menu used to open from a second
+        // Click handler added after Flat's, and Flat's own handler marks the click handled, so WPF never called the
+        // second one: a handler added with += is skipped for an event already handled, even on the same element. The
+        // menu now opens from Flat's press itself.
+        Button? chip = null;
+        chip = Flat(new TextBlock { Text = $"on {target.Name} ▾", Foreground = Ink, FontSize = 11 }, "Add to workspace", () =>
         {
             var places = latest?.Places ?? [];
             OpenMenu(WorkspaceChipMenu.Build(places, target.Workspace,
@@ -1316,7 +1326,8 @@ public partial class TasksWindow : Window
                     PaintAddPlace();
                     AddBox.Focus();
                 }, chip));
-        };
+        }, new Thickness(8, 2, 8, 2));
+        chip.Margin = new Thickness(8, 0, 0, 0);
         AddEnd.Children.Add(chip);
     }
 
