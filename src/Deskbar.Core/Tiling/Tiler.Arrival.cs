@@ -223,16 +223,28 @@ public sealed partial class Tiler
     // unlocked tile; the tile last used is on the locked screen, so none is offered. With no such screen, or for an
     // aimed window, the split happens on the target as before, and TileArrival.Choose, finding every tile skipped,
     // ignores the skip: a window always has to go somewhere.
+    //
+    // The same redirect for two more targets the final review found (it measured both):
+    //   - every tile there is locked OR maximized (a tile the Tiler is un-maximizing itself keeps its slot but is never
+    //     split), with at least one locked: Choose would find every tile skipped and halve a locked one anyway.
+    //   - no tile there, but a maximized window of this workspace is set aside there (`aside`): the screen is not empty
+    //     (IntoEmptyScreen says so), and joining it would put the window under or over the maximized one. This target
+    //     comes up whenever no tile last used is offered: the second and later arrivals of one evaluate, or any arrival
+    //     before a tile has been activated since Deskbar started.
+    // With no other screen to go to (no unlocked tile anywhere else), the window goes to the target as before.
     TileBoard SplitSomewhere(Workspace workspace, IReadOnlyDictionary<int, TileScreen> screens, TileBoard board,
         WindowHandle window, int target, Maybe<WindowHandle> lastUsed, bool aimed)
     {
         var here = board.On(target);
-        if (aimed || here.Count == 0 || !here.All(locked.Contains))
+        var blocked = here.Count == 0
+            ? aside.Any(w => surface.ScreenOf(w) == target) ? "shows only a maximized window" : null
+            : here.Any(locked.Contains) && here.All(w => locked.Contains(w) || surface.IsMaximized(w)) ? "has every tile locked" : null;
+        if (aimed || blocked is null)
             return Split(workspace, screens, board, window, target, lastUsed);
         return UnlockedElsewhere(workspace, screens, board, target).Match(
             other =>
             {
-                trace?.Invoke($"tile: {workspace.Name}: {window.Value:X} arrived, every tile on screen {target} is locked, it goes to screen {other}");
+                trace?.Invoke($"tile: {workspace.Name}: {window.Value:X} arrived, screen {target} {blocked}, it goes to screen {other}");
                 return Split(workspace, screens, board, window, other, Maybe<WindowHandle>.None);
             },
             () => Split(workspace, screens, board, window, target, lastUsed));

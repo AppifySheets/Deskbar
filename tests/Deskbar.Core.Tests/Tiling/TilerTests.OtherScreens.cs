@@ -95,6 +95,46 @@ public sealed partial class TilerTests
         Assert.Equal([W(2), W(4)], tiler.Board.On(2));
     }
 
+    // Final review, I1 (a). No tile used yet (right after a restart), so the window's target is the screen it opened on,
+    // screen 2, which shows only a maximized window of the workspace. It must not join that screen alone under the
+    // maximized window: it splits a tile on screen 1.
+    [Fact]
+    public void A_window_opening_on_a_screen_with_only_a_maximized_window_splits_a_tile_elsewhere()
+    {
+        surface.ScreenList.Add(FakeTileSurface.Screen(2, Area2));
+        Exists(W(1), alpha, screen: 1);
+        Exists(W(2), alpha, screen: 2);
+        surface.Maximized.Add(W(2));
+        Start();
+
+        Opens(W(3), alpha, screen: 2);
+
+        AssertArranged([W(1), W(3)], Columns([0.5, 0.5], [1.0], [1.0]));
+        Assert.Empty(tiler.Board.On(2));
+    }
+
+    // Final review, I1 (b). The second arrival of one evaluate is offered no tile last used, so its target is its own
+    // screen, the maximized one. It goes to screen 1 like the first.
+    [Fact]
+    public void The_second_arrival_does_not_join_a_screen_with_only_a_maximized_window()
+    {
+        surface.ScreenList.Add(FakeTileSurface.Screen(2, Area2));
+        Exists(W(1), alpha, screen: 1);
+        Exists(W(2), alpha, screen: 2);
+        surface.Maximized.Add(W(2));
+        Start();
+        Uses(W(1));
+
+        SwitchTo(beta);
+        Opens(W(3), alpha, screen: 2);
+        Opens(W(4), alpha, screen: 2);
+        SwitchTo(alpha);
+
+        Assert.Empty(tiler.Board.On(2));
+        Assert.Equal(3, tiler.Board.On(1).Count);
+        Assert.Contains(W(4), tiler.Board.On(1));
+    }
+
     // "let's respect which monitor i put it to": a window dropped on screen 1 stays there with screen 2 empty.
     [Fact]
     public void A_window_dropped_on_a_screen_does_not_go_to_an_empty_one()

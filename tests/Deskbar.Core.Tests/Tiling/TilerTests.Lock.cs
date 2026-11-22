@@ -44,6 +44,31 @@ public sealed partial class TilerTests
         AssertArranged([W(2), W(3)], Columns([0.5, 0.5], [1.0], [1.0]), Area2, screen: 2);
     }
 
+    // Final review, M2. Screen 1 holds a locked W1 and W2, a maximized window the Tiler is un-maximizing itself (tiling
+    // was just turned on and the restore has not landed), which keeps its slot but can never be split. Every tile there
+    // is locked or restoring, so the new window goes to screen 2's unlocked W3 rather than halving the locked W1.
+    [Fact]
+    public void A_screen_of_locked_and_restoring_tiles_sends_the_window_to_an_unlocked_tile_elsewhere()
+    {
+        surface.ScreenList.Add(FakeTileSurface.Screen(2, Area2));
+        surface.RestoreLandsLater = true;
+        Exists(W(1), alpha, screen: 1);
+        Exists(W(2), alpha, screen: 1);
+        Exists(W(3), alpha, screen: 2);
+        surface.Maximized.Add(W(2));
+        Start(alphaTiled: false);
+        Assert.True(manager.SetWorkspaceTiled(alpha.Id, true).IsSuccess);
+        Assert.Contains(W(2), surface.Restored);
+        Assert.Equal(2, tiler.Board.On(1).Count);
+        Uses(W(1));
+        Assert.True(tiler.SetTileLocked(W(1), true).IsSuccess);
+
+        Opens(W(4), alpha, screen: 1);
+
+        Assert.Equal([W(3), W(4)], tiler.Board.On(2));
+        Assert.DoesNotContain(W(4), tiler.Board.On(1));
+    }
+
     // Nothing anywhere is unlocked: a window still has to go somewhere, so the lock is ignored for this one window.
     [Fact]
     public void When_every_tile_everywhere_is_locked_the_lock_is_ignored_for_that_window()

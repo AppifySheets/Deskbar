@@ -397,10 +397,14 @@ public sealed class FakeTileSurface : ITileSurface
     // Its frame is left alone, so a test settles it where it wants, as the real restore leaves it at its old place.
     public List<WindowHandle> Restored { get; } = [];
 
+    // True: the restore has not landed yet, so the window stays maximized after Restore (Windows restores
+    // asynchronously). For a test that needs the Tiler's own un-maximize still in flight (its `restoring` set).
+    public bool RestoreLandsLater { get; set; }
+
     public void Restore(WindowHandle window)
     {
         Restored.Add(window);
-        Maximized.Remove(window);
+        if (!RestoreLandsLater) Maximized.Remove(window);
     }
 
     public IObservable<WindowHandle> Settled => SettledSubject.AsObservable();
