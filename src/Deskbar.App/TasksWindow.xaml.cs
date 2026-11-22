@@ -9,6 +9,7 @@ using System.Windows.Interop;
 using System.Windows.Media;
 using System.Reactive.Linq;
 using CSharpFunctionalExtensions;
+using Deskbar.Core.Goals;
 using Deskbar.Core.Persistence;
 using Deskbar.Core.Tasks;
 using Deskbar.Windows.Monitoring;
@@ -37,7 +38,8 @@ namespace Deskbar.App;
 //   Clicks           a line and its buttons take the bar's click guard (ClickIgnored): no second press of a double
 //                    click, and nothing in the half second after the lines were redrawn.
 //
-// Top to bottom: the toolbar (status filters with their counts, the workspace filter, "+ Add"), the
+// Top to bottom: the toolbar (status filters with their counts, the workspace filter, the goal filter while goals
+// exist, "+ Add"), the
 // add box while "+ Add" has it open, a line saying why the last action failed, then the groups (Waiting on you, then
 // Covey's quadrants I to IV, captioned; Task 12). Each line: Claude's
 // CL badge or a note's tick box (Undo in its place for the six seconds after a close), the title over the question or
@@ -179,6 +181,8 @@ public partial class TasksWindow : Window
     internal IReadOnlyList<Guid> Keys { get; private set; } = [];
     internal IReadOnlyList<string> FilterLabels { get; private set; } = [];
     internal string WorkspaceFilterLabel { get; private set; } = "";
+    // The goal filter's words, "" while it is not shown (ruling G1: no goals, no goal filter).
+    internal string GoalFilterLabel { get; private set; } = "";
     internal bool AddBoxShown => AddRow.Visibility == Visibility.Visible;
     internal string? Problem => ProblemText.Visibility == Visibility.Visible ? ProblemText.Text : null;
     internal bool ThreadShown(Guid id) => authors.ContainsKey(id);
@@ -485,6 +489,11 @@ public partial class TasksWindow : Window
             string.Join('|', view.Filters.Select(f => $"{f.Label}{f.On}{f.Asks}")),
             view.WorkspaceFilterLabel,
             $"{view.Where}",
+            // The goal filter (goals plan, Task 6): its label, the filter in force and every goal either goal menu lists,
+            // so a goal renamed, added or done from the pipe redraws the toolbar. A row's own GoalId is not drawn, so it
+            // is not here.
+            $"{view.ShowsGoals}{view.GoalFilterLabel}{view.GoalFilter}",
+            string.Join('|', view.Goals.Concat(view.GoalFilterChoices).Select(g => $"{g.Goal}{g.Title}{g.Period}")),
             string.Join('|', view.Places.Select(p => $"{p.IsGroup}{p.Workspace}{p.Name}{(p.Colour as SolidColorBrush)?.Color}")),
             view.EmptyText,
             $"{renaming}",
@@ -514,6 +523,18 @@ public partial class TasksWindow : Window
             () => { }, new Thickness(8, 2, 8, 2));
         workspace.Click += (_, _) => OpenMenu(WorkspaceFilterMenu(view, workspace));
         Filters.Children.Add(workspace);
+        // The goal filter, beside the workspace one, only while goals exist (ruling G1).
+        goalFilterButton = null;
+        if (view.ShowsGoals)
+        {
+            var goal = Flat(new TextBlock { Text = $"{view.GoalFilterLabel} ▾", Foreground = Ink, FontSize = 11 }, "Goal filter",
+                () => { }, new Thickness(8, 2, 8, 2));
+            goal.Click += (_, _) => OpenGoalFilterMenu();
+            goal.Margin = new Thickness(6, 0, 0, 0);
+            goalFilterButton = goal;
+            Filters.Children.Add(goal);
+        }
+        GoalFilterLabel = view.GoalFilterLabel;
         FilterLabels = view.Filters.Select(f => f.Label).ToArray();
         // The view switch shows which view is on, outlined like a filter chip.
         if (listSwitch is not null) listSwitch.BorderBrush = view.Matrix ? Brushes.Transparent : PickedEdge;
@@ -1122,6 +1143,13 @@ public partial class TasksWindow : Window
         // a submenu.
         menu.Items.Add(Item("Move to…", () => Dispatcher.BeginInvoke(() => OpenMoveMenu(id, row.Place.Workspace),
             System.Windows.Threading.DispatcherPriority.Input)));
+        // The goal the task counts toward (goals plan, Task 6): a plain submenu, only while goals exist (ruling G1).
+        if (latest?.ShowsGoals == true)
+        {
+            var goal = Item("Goal");
+            GoalItems(id, row.GoalId).ForEach(item => goal.Items.Add(item));
+            menu.Items.Add(goal);
+        }
         menu.Items.Add(new Separator());
         // Delete cannot be undone, so it takes a second, deliberate step: a submenu item rather than a dialog, which
         // would be one more window to answer for a menu choice already made.
@@ -1147,6 +1175,68 @@ public partial class TasksWindow : Window
         WorkspaceChipMenu.Build(view.Places, view.Where.Any ? Maybe.From(Guid.Empty) : view.Where.Workspace,
             workspace => Actions?.FilterWorkspace(TaskWorkspaceFilter.On(workspace)), anchor,
             extra: [new WorkspaceChipMenu.Extra("All workspaces", view.Where.Any, () => Actions?.FilterWorkspace(TaskWorkspaceFilter.All))]);
+
+    // --- goals (goals plan, Task 6) -------------------------------------------------------------------------------------
+
+    // The goal filter's button, while it is shown: the anchor its menu opens under.
+    Button? goalFilterButton;
+
+    // The "Goal" choices for one task: "None", then this month's and this week's open goals (the view's Goals), the
+    // task's own goal checked, each with "week" or "month" dim beside it. Plain TextBlock headers and no colours: goals
+    // have none. With no open goal this week or month, a disabled line says so, so the submenu is never just "None".
+    List<MenuItem> GoalItems(Guid id, Maybe<Guid> current)
+    {
+        var none = Item("None", () => Actions?.SetGoal(id, Maybe<Guid>.None));
+        none.IsChecked = current.HasNoValue;
+        var goals = (latest?.Goals ?? []).Select(choice =>
+        {
+            var item = Item(choice.Title, () => Actions?.SetGoal(id, choice.Goal));
+            item.InputGestureText = choice.Period;
+            item.IsChecked = current.HasValue && choice.Goal == current.Value;
+            return item;
+        }).ToList();
+        return goals.Count > 0
+            ? goals.Prepend(none).ToList()
+            : [none, new MenuItem { Header = new TextBlock { Text = "No goals this week or month" }, IsEnabled = false }];
+    }
+
+    /// <summary>
+    /// A line's goal choices as a menu of their own under its "⋯", the same items as the More menu's "Goal" submenu.
+    /// Internal, and answering the menu, for the tests, which check it and that a redraw waits for it.
+    /// </summary>
+    internal ContextMenu OpenGoalMenu(Guid id)
+    {
+        var row = latest?.Groups.SelectMany(g => g.Rows).FirstOrDefault(r => r.Id == id);
+        var menu = new ContextMenu { PlacementTarget = menuButtons.GetValueOrDefault(id), Placement = PlacementMode.Bottom };
+        GoalItems(id, row?.GoalId ?? Maybe<Guid>.None).ForEach(item => menu.Items.Add(item));
+        OpenMenu(menu);
+        return menu;
+    }
+
+    /// <summary>
+    /// "Goal: all ▾": "All goals", "No goal", then this month's and this week's goals (every status) and the goal in
+    /// force, the filter in force checked. Internal, and answering the menu, for the tests.
+    /// </summary>
+    internal ContextMenu OpenGoalFilterMenu()
+    {
+        var shown = latest?.GoalFilter ?? TaskGoalFilter.All;
+        var menu = new ContextMenu { PlacementTarget = goalFilterButton, Placement = PlacementMode.Bottom };
+        var all = Item("All goals", () => Actions?.FilterGoal(TaskGoalFilter.All));
+        all.IsChecked = shown.Any;
+        var noGoal = Item("No goal", () => Actions?.FilterGoal(TaskGoalFilter.NoGoal));
+        noGoal.IsChecked = shown == TaskGoalFilter.NoGoal;
+        menu.Items.Add(all);
+        menu.Items.Add(noGoal);
+        (latest?.GoalFilterChoices ?? []).ToList().ForEach(choice =>
+        {
+            var item = Item(choice.Title, () => Actions?.FilterGoal(new TaskGoalFilter(false, choice.Goal)));
+            item.InputGestureText = choice.Period;
+            item.IsChecked = !shown.Any && shown.Goal == choice.Goal;
+            menu.Items.Add(item);
+        });
+        OpenMenu(menu);
+        return menu;
+    }
 
     // Every menu of the window opens here, so a redraw waits for it (MustWait) and runs when it closes.
     void OpenMenu(ContextMenu menu)
