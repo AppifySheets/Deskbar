@@ -57,7 +57,9 @@ shows which windows have been left alone; the hover card's "last used 2 h ago" s
 - The curve's ends (15 minutes, 8 hours), the third-strength tint and the 42% name floor are first
   values, to tune live, as the aging thresholds were. Past 8 hours every row looks the same; if a
   row from last week should look fainter than yesterday's, the tail gets stretched.
-- The per-minute aging timer refreshes in place, as it does for icons today: it keeps each row's
-  rail, tint and name with its workspace from the rebuild that drew them, and rewrites only those.
-  Never a rebuild a minute, which costs clicks (see `ClickTrace`).
+- Icons keep fading in place on the per-minute aging timer, as today. The rail, tint and name are
+  drawn from the fade rounded to one of 16 steps, and the same timer asks for a rebuild only when some
+  workspace's step has moved since it was drawn: a few times an hour, not every minute. Rebuild already
+  holds itself back while a button is down, a menu is open or a drag is in flight (`FlushIfIdle`),
+  which is what made a rebuild a minute costly before (see `ClickTrace`).
 - No setting to turn it off for now.
