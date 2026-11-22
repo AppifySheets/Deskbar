@@ -1,5 +1,9 @@
+using CSharpFunctionalExtensions;
 using Deskbar.Core.Control;
 using Deskbar.Core.Domain;
+using Deskbar.Core.Tasks;
+// System.Threading.Tasks (an implicit using) has a TaskStatus too; the alias says which one this file means.
+using TaskStatus = Deskbar.Core.Tasks.TaskStatus;
 
 namespace Deskbar.Core.Tests;
 
@@ -78,12 +82,13 @@ public class RemoteControlClaudeHookTests
         Assert.Equal("", reply.Output);
     }
 
-    // The task events are wired here and answered in Task 8; for now they say nothing and blink nothing.
+    // A copy of Deskbar with no task service (RemoteControl's `tasks` left null) answers the task events with nothing
+    // and blinks nothing.
     [Theory]
     [InlineData("SessionStart")]
     [InlineData("UserPromptSubmit")]
     [InlineData("SessionEnd")]
-    public void The_task_events_answer_nothing_yet(string hookEvent)
+    public void Without_tasks_the_task_events_answer_nothing(string hookEvent)
     {
         var manager = Started();
         Editor(manager, 0x10, "TaskSpaces", "Deskbar");
@@ -180,5 +185,278 @@ public class RemoteControlClaudeHookTests
     {
         Assert.Contains(ControlUsage.All, c => c.Verb == "claude-tasks");
         Assert.Contains(ControlUsage.All, c => c.Verb == "claude-hook");
+    }
+
+    // --- sessions join or create a task (plan Task 8) --------------------------------------------
+    //
+    // The hooks with a real TaskService behind them, and the session-facing `task` forms the briefing tells a session
+    // to run. The clock is fixed, the store keeps nothing, and the long-path lookup is a stand-in that knows
+    // one 8.3 name.
+
+    readonly TaskService tasks = new(new MemoryTaskStore(), () => new DateTimeOffset(2026, 11, 22, 12, 0, 0, TimeSpan.Zero));
+
+    sealed class MemoryTaskStore : ITaskStore
+    {
+        public Result<TaskBoard> Load() => TaskBoard.Empty;
+
+        public Result Save(TaskBoard board) => Result.Success();
+    }
+
+    const string Repo = @"C:\repos\TaskSpaces";
+
+    // GetLongPathNameW's answer for the one short form used here.
+    static string LongPath(string path) =>
+        path.Equals(@"C:\repos\TASKSP~1", StringComparison.OrdinalIgnoreCase) ? Repo : path;
+
+    ControlReply Ran(WorkspaceManager manager, params string[] args) =>
+        new RemoteControl(manager, tasks: tasks, longPath: LongPath).Execute(args);
+
+    static string HookOf(string hookEvent, string session, string? source) =>
+        $$"""{"session_id":"{{session}}","cwd":"C:\\repos\\TaskSpaces","hook_event_name":"{{hookEvent}}"{{(source is null ? "" : $",\"source\":\"{source}\"")}}}""";
+
+    // One hook, as the script runs it for an attended VS Code session (attended "0" for a headless one).
+    string Hooked(WorkspaceManager manager, string hookEvent, string session = "s1", string? source = null,
+        string from = Repo, string attended = "1")
+    {
+        var reply = Ran(manager, "claude-hook", "--entry", "claude-vscode", "--attended", attended, "--from", from,
+            "--json", HookOf(hookEvent, session, source));
+        Assert.Equal(ControlReply.Ok, reply.ExitCode);
+        return reply.Output;
+    }
+
+    // A session-facing `task` form, as a session runs it from its folder (the client appends --from).
+    ControlReply Said(WorkspaceManager manager, string session, string from, params string[] form) =>
+        Ran(manager, ["task", .. form, "--session", session, "--from", from]);
+
+    Guid IdOf(WorkspaceManager manager, string name) => manager.State.Workspaces.Single(w => w.Name == name).Id;
+
+    TaskItem Titled(string title) => tasks.Board.Tasks.Single(t => t.Title == title);
+
+    // The spec's "What a session is offered": the open tasks on the session's own workspace, notes included, plus the
+    // open Claude tasks on no workspace. Petre's notes on no workspace (errands) and other workspaces' tasks are not.
+    [Fact]
+    public void A_new_session_is_offered_its_workspaces_tasks()
+    {
+        var manager = Started();
+        Editor(manager, 0x10, "TaskSpaces", "Deskbar");
+        tasks.AddNote("Fix the strip", IdOf(manager, "Deskbar"));
+        tasks.AddNote("Dishwasher tablets", Maybe<Guid>.None);
+        tasks.AddNote("Portal accounts", IdOf(manager, "iam.ge"));
+        tasks.Create("Free Claude work", Maybe<Guid>.None, tasks.NewSession("old", @"C:\elsewhere"));
+
+        var briefing = Hooked(manager, "SessionStart", source: "startup");
+
+        Assert.Contains("s1", briefing);
+        Assert.Contains("Fix the strip", briefing);
+        Assert.Contains("Free Claude work", briefing);
+        Assert.DoesNotContain("Dishwasher tablets", briefing);
+        Assert.DoesNotContain("Portal accounts", briefing);
+        Assert.Contains("task join <id> --session s1", briefing);
+    }
+
+    // Review focus 4: a resumed session (same id) keeps its task instead of being asked to pick again, even after the
+    // session had ended; it is live on it again. Compacting a session that never ended keeps it too.
+    [Fact]
+    public void A_resumed_session_keeps_its_task()
+    {
+        var manager = Started();
+        Editor(manager, 0x10, "TaskSpaces", "Deskbar");
+        tasks.AddNote("Fix the strip", IdOf(manager, "Deskbar"));
+        Hooked(manager, "SessionStart", source: "startup");
+        Assert.Equal(ControlReply.Ok, Said(manager, "s1", Repo, "new", "Tasks board").ExitCode);
+        Hooked(manager, "SessionEnd");
+        Assert.False(Titled("Tasks board").HasLiveSession);
+
+        var resumed = Hooked(manager, "SessionStart", source: "resume");
+
+        Assert.Contains("Tasks board", resumed);
+        Assert.DoesNotContain("Fix the strip", resumed);
+        Assert.DoesNotContain("task join <id>", resumed);
+        Assert.True(Titled("Tasks board").HasLiveSession);
+        Assert.Contains("Tasks board", Hooked(manager, "SessionStart", source: "compact"));
+    }
+
+    // Petre's next message answers the session's ask: the task goes back to In progress, the question goes, the
+    // workspace's blink stops, and the session reads one line naming its task.
+    [Fact]
+    public void A_prompt_answers_a_waiting_task_and_reminds_the_session()
+    {
+        var manager = Started();
+        Editor(manager, 0x10, "TaskSpaces", "Deskbar");
+        StandOn(manager, "iam.ge");
+        Said(manager, "s1", Repo, "new", "Tasks board");
+        Said(manager, "s1", Repo, "ask", "OK to merge?");
+        Assert.True(Blinks(manager, "Deskbar"));
+
+        var line = Hooked(manager, "UserPromptSubmit");
+
+        Assert.Equal(TaskStatus.InProgress, Titled("Tasks board").Status);
+        Assert.True(Titled("Tasks board").Question.HasNoValue);
+        Assert.False(Blinks(manager, "Deskbar"));
+        Assert.Contains("Tasks board", line);
+        Assert.Single(line.Trim().Split('\n'));
+    }
+
+    // Petre closed the task: the session is told on its next prompt, and that new work needs a new task.
+    [Fact]
+    public void A_closed_task_tells_the_session_to_start_a_new_one()
+    {
+        var manager = Started();
+        Editor(manager, 0x10, "TaskSpaces", "Deskbar");
+        Said(manager, "s1", Repo, "new", "Tasks board");
+        Assert.True(tasks.Close(Titled("Tasks board").Id).IsSuccess);
+
+        var line = Hooked(manager, "UserPromptSubmit");
+
+        Assert.Contains("closed", line);
+        Assert.Contains("task new \"<title>\" --session s1", line);
+        Assert.Equal(TaskStatus.Closed, Titled("Tasks board").Status);
+    }
+
+    // Review focus 5: a session in a folder no VS Code window shows makes a task on no workspace, still Claude's.
+    [Fact]
+    public void A_session_outside_any_vs_code_window_makes_a_free_task()
+    {
+        var manager = Started();
+        Editor(manager, 0x10, "TaskSpaces", "Deskbar");
+
+        var reply = Said(manager, "s1", @"C:\scratch\probe", "new", "Probe the hooks");
+
+        Assert.Equal(ControlReply.Ok, reply.ExitCode);
+        Assert.True(Titled("Probe the hooks").WorkspaceId.HasNoValue);
+        Assert.True(Titled("Probe the hooks").IsClaudes);
+        Assert.Equal(TaskStatus.InProgress, Titled("Probe the hooks").Status);
+    }
+
+    // An 8.3 short path with forward slashes (the SDK run in the probes) still finds the VS Code window, and the
+    // session's folder is kept in its long form.
+    [Fact]
+    public void A_short_path_with_forward_slashes_finds_the_sessions_workspace()
+    {
+        var manager = Started();
+        Editor(manager, 0x10, "TaskSpaces", "Deskbar");
+
+        Said(manager, "s1", "C:/repos/TASKSP~1/", "new", "Tasks board");
+
+        Assert.Equal(IdOf(manager, "Deskbar"), Titled("Tasks board").WorkspaceId.Value);
+        Assert.Equal(Repo, Titled("Tasks board").Sessions.Single().Folder);
+    }
+
+    // `task ask` puts the task on Waiting on you with its question and asks for Petre, as `attention` does.
+    [Fact]
+    public void Ask_waits_on_you_and_blinks_the_workspace()
+    {
+        var manager = Started();
+        Editor(manager, 0x10, "TaskSpaces", "Deskbar");
+        StandOn(manager, "iam.ge");
+        Said(manager, "s1", Repo, "new", "Tasks board");
+
+        var reply = Said(manager, "s1", Repo, "ask", "OK to merge?");
+
+        Assert.Equal(ControlReply.Ok, reply.ExitCode);
+        Assert.Equal(TaskStatus.WaitingOnYou, Titled("Tasks board").Status);
+        Assert.Equal("OK to merge?", Titled("Tasks board").Question.Value);
+        Assert.True(Blinks(manager, "Deskbar"));
+    }
+
+    // A session settles only its own task: `done` marks the task it is live on, not another session's or a note.
+    [Fact]
+    public void Done_marks_only_the_sessions_own_task()
+    {
+        var manager = Started();
+        Editor(manager, 0x10, "TaskSpaces", "Deskbar");
+        tasks.AddNote("Fix the strip", IdOf(manager, "Deskbar"));
+        Said(manager, "s1", Repo, "new", "Tasks board");
+        Said(manager, "s2", Repo, "new", "Store listing");
+
+        Assert.Equal(ControlReply.Ok, Said(manager, "s1", Repo, "done").ExitCode);
+
+        Assert.Equal(TaskStatus.Done, Titled("Tasks board").Status);
+        Assert.Equal(TaskStatus.InProgress, Titled("Store listing").Status);
+        Assert.Equal(TaskStatus.Backlog, Titled("Fix the strip").Status);
+    }
+
+    // The rest of a session's forms: join an offered task, keep its status line, comment on it in markdown (signed by
+    // the session), and leave a follow-up note for later on its workspace.
+    [Fact]
+    public void A_session_joins_keeps_its_status_line_comments_and_leaves_a_note()
+    {
+        var manager = Started();
+        Editor(manager, 0x10, "TaskSpaces", "Deskbar");
+        var note = tasks.AddNote("Fix the strip", IdOf(manager, "Deskbar")).Value;
+
+        Assert.Equal(ControlReply.Ok, Said(manager, "s1", Repo, "join", note.Id.ToString()[..8]).ExitCode);
+        Assert.Equal(ControlReply.Ok, Said(manager, "s1", Repo, "status-line", "waiting for CI").ExitCode);
+        Assert.Equal(ControlReply.Ok, Said(manager, "s1", Repo, "comment", "**Found it**: the guard").ExitCode);
+        Assert.Equal(ControlReply.Ok, Said(manager, "s1", Repo, "later", "Rename the guard").ExitCode);
+
+        var joined = Titled("Fix the strip");
+        Assert.True(joined.IsClaudes);
+        Assert.Equal(TaskStatus.InProgress, joined.Status);
+        Assert.Equal("waiting for CI", joined.StatusLine);
+        Assert.Equal("s1", joined.Comments.Single().SessionId.Value);
+        Assert.Equal(IdOf(manager, "Deskbar"), Titled("Rename the guard").WorkspaceId.Value);
+        Assert.Equal(TaskStatus.Backlog, Titled("Rename the guard").Status);
+    }
+
+    // A form that acts on the session's own task needs one: refused, and nothing changes.
+    [Fact]
+    public void A_session_with_no_task_is_refused_and_nothing_changes()
+    {
+        var manager = Started();
+        var before = tasks.Board;
+
+        Assert.Equal(ControlReply.Failed, Said(manager, "s1", Repo, "done").ExitCode);
+        Assert.Equal(ControlReply.Failed, Said(manager, "s1", Repo, "ask", "OK?").ExitCode);
+        Assert.Equal(ControlReply.Failed, Ran(manager, "task", "done", "--from", Repo).ExitCode);
+        Assert.Same(before, tasks.Board);
+    }
+
+    // Headless sessions (`claude -p`, SDK runs, scheduled agents) read nothing and change nothing.
+    [Fact]
+    public void A_headless_session_changes_nothing()
+    {
+        var manager = Started();
+        Editor(manager, 0x10, "TaskSpaces", "Deskbar");
+        tasks.AddNote("Fix the strip", IdOf(manager, "Deskbar"));
+        Said(manager, "s1", Repo, "new", "Tasks board");
+        Said(manager, "s1", Repo, "ask", "OK to merge?");
+        var before = tasks.Board;
+
+        Assert.Equal("", Hooked(manager, "SessionStart", session: "s1", source: "startup", attended: "0"));
+        Assert.Equal("", Hooked(manager, "UserPromptSubmit", session: "s1", attended: "0"));
+        Assert.Equal("", Hooked(manager, "SessionEnd", session: "s1", attended: "0"));
+
+        Assert.Same(before, tasks.Board);
+    }
+
+    // With "Claude Code sessions keep their tasks" off (or Teach off), a stale task hook says and changes nothing.
+    [Fact]
+    public void With_the_setting_off_the_task_events_say_nothing()
+    {
+        var manager = Started();
+        Editor(manager, 0x10, "TaskSpaces", "Deskbar");
+        Said(manager, "s1", Repo, "new", "Tasks board");
+        Assert.True(manager.SetClaudeTasks(false).IsSuccess);
+        var before = tasks.Board;
+
+        Assert.Equal("", Hooked(manager, "SessionStart", source: "startup"));
+        Assert.Equal("", Hooked(manager, "UserPromptSubmit"));
+        Assert.Equal("", Hooked(manager, "SessionEnd"));
+        Assert.Same(before, tasks.Board);
+    }
+
+    // SessionEnd marks the session ended; the task stays open with "no live session".
+    [Fact]
+    public void A_session_ending_leaves_its_task_open()
+    {
+        var manager = Started();
+        Editor(manager, 0x10, "TaskSpaces", "Deskbar");
+        Said(manager, "s1", Repo, "new", "Tasks board");
+
+        Assert.Equal("", Hooked(manager, "SessionEnd"));
+
+        Assert.False(Titled("Tasks board").HasLiveSession);
+        Assert.Equal(TaskStatus.InProgress, Titled("Tasks board").Status);
     }
 }

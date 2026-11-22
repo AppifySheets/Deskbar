@@ -50,10 +50,15 @@ public sealed partial class RemoteControl
     // and `attention`. `Missing` says why there is no workspace when there is none: no folder given, no window on
     // it, or several windows in different workspaces. A window that is in no workspace counts as no answer, the same
     // as two answers. `Handle` and `Window` are set only when exactly one window matched.
+    //
+    // The folder is normalised first (FolderPath, plan Task 8): an 8.3 short segment such as TASKSP~1 names no VS Code
+    // window, and a Claude session can report its folder that way. Forward slashes and a trailing separator would
+    // only have cost the reply's wording, but they go too, so every caller is matched on the same form.
     sealed record Caller(Workspace? Workspace, Maybe<WindowHandle> Handle, object? Window, string? Missing);
 
-    Caller CallerOf(string? from)
+    Caller CallerOf(string? raw)
     {
+        var from = Folder(raw);
         var editors = manager.KnownWindows
             .Where(EditorFolder.IsEditor)
             .Select(w => (w.Handle, Titles: manager.OriginalTitle(w.Handle).Map(t => (IEnumerable<string>)[w.Title, t]).GetValueOrDefault([w.Title])))

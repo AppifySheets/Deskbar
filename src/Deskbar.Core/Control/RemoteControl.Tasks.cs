@@ -30,7 +30,8 @@ namespace Deskbar.Core.Control;
 // task's flags, its quadrant ("I" to "IV") and its 1-based `order` in it, null while it waits on you.
 //
 // The timer build's `task timer` and `task add --in` are gone with the timers. The forms a Claude session uses for
-// its own task (join, create, status line, ask, done) come with the hooks, in a later change.
+// its own task (join, new, status-line, ask, done, comment, later), each with `--session <id>`, are in
+// RemoteControl.ClaudeHook.cs with the hooks that tell a session about them.
 //
 // Every verb calls the same TaskService method the UI calls, so a task changed from a script obeys the rules a
 // click does and the bar redraws from the service's Changed. An id is the task's Guid or any unique prefix of at
@@ -63,9 +64,19 @@ public sealed partial class RemoteControl
     ControlReply Task(string[] rest)
     {
         if (tasks is not { } service) return ControlReply.Fail("Tasks are not available");
-        var (args, from) = SplitFrom(rest);
+        var (words, from) = SplitFrom(rest);
+        // A session's own forms carry --session (RemoteControl.ClaudeHook.cs); everything below is the user's or a
+        // script's. `task comment` is both: with --session it comments on the session's own task, without it on an id.
+        var (args, session) = SplitSession(words);
+        if (session is not null)
+            return string.IsNullOrWhiteSpace(session)
+                ? ControlReply.Fail("--session needs the session's id")
+                : SessionTask(service, args, session.Trim(), from);
         return args switch
         {
+            // A session's form typed without its --session: it cannot know whose task is meant.
+            ["done"] or ["join", _] or ["new", _] or ["status-line", _] or ["ask", _] or ["later", _] =>
+                ControlReply.Fail($"task {args[0]} is a session's form and needs --session <id>"),
             ["list"] => Success(service.Board.Pile().Select(Describe).ToArray()),
             // The closed tasks, which every other view leaves out, so one closed by mistake can be found and reopened.
             // The latest closed first: closing stamps UpdatedAt, and nothing but Petre's own edits moves it after that.

@@ -1494,6 +1494,8 @@ public partial class App : Application
                     else board.Dismiss();
                 })
                 : Result.Failure("The tasks window is not available in this mode."),
+            // A caller's folder in its long form (FolderPath): a Claude session can report an 8.3 short path.
+            longPath: LongPath.Of,
             // `goal ...` and `task goal`, the planner's pipe twins (RemoteControl.Goals.cs).
             goals: goals);
         controlServer = new ControlPipeServer(ControlCommandLine.PipeName,
