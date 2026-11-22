@@ -300,8 +300,9 @@ public class FloatingBarTaskListTests
         Assert.True(HasButtonNamed(again, "Tick off"));
     });
 
+    // Every Claude line, a Done one included, has the tick box and no close button: all lines look alike.
     [Fact]
-    public void A_done_claude_task_has_a_close_button() => StaThread.Run(() =>
+    public void A_done_claude_task_closes_from_its_tick_box() => StaThread.Run(() =>
     {
         using var t = Build();
         var working = t.Tasks.Create("Still going", t.Gepha, Session("s1")).Value;
@@ -310,11 +311,11 @@ public class FloatingBarTaskListTests
 
         var workingLine = t.Lines.Single(l => ((TaskLine)l.Tag).Id == working.Id);
         Assert.False(HasButtonNamed(workingLine, "Close task"));
-        // Ruling 40: a Claude task that is not done has the tick box a note has; the done one has the close button.
         Assert.True(HasButtonNamed(workingLine, "Tick off"));
 
         var doneLine = t.Lines.Single(l => ((TaskLine)l.Tag).Id == done.Id);
-        Click(ButtonNamed(doneLine, "Close task"));
+        Assert.False(HasButtonNamed(doneLine, "Close task"));
+        Click(ButtonNamed(doneLine, "Tick off"));
 
         Assert.Equal(TaskStatus.Closed, t.Tasks.Board.Tasks.Single(x => x.Id == done.Id).Status);
         Assert.True(Closing(t.Lines.Single(l => ((TaskLine)l.Tag).Id == done.Id)));
@@ -852,7 +853,7 @@ public class FloatingBarTaskListTests
         var done = t.Tasks.Create("Merged", t.Gepha, Session("s1")).Value;
         t.Tasks.MarkDone(done.Id);
 
-        Click(ButtonNamed(t.Lines.Single(l => ((TaskLine)l.Tag).Id == done.Id), "Close task"));
+        Click(ButtonNamed(t.Lines.Single(l => ((TaskLine)l.Tag).Id == done.Id), "Tick off"));
         Click(ButtonNamed(t.Lines.Single(l => !Closing(l)), "Tick off"));
 
         Assert.All(t.Lines, line => Assert.True(Closing(line)));
@@ -1019,24 +1020,24 @@ public class FloatingBarTaskListTests
         Assert.Equal(["Note 2", "Note 1"], t.Lines.Select(l => ((TaskLine)l.Tag).Title));
     });
 
-    // A Done task's close button behaves the same: its line lingers with Undo in the close button's place, and Undo
-    // brings it back Done.
+    // A Done task's tick behaves the same: its line lingers with Undo in the tick box's place, and Undo brings it back
+    // Done.
     [Fact]
-    public void A_done_tasks_close_button_has_the_same_undo() => StaThread.Run(() =>
+    public void A_done_tasks_tick_has_the_same_undo() => StaThread.Run(() =>
     {
         using var t = Build();
         var done = t.Tasks.Create("Merged", t.Gepha, Session("s1")).Value;
         t.Tasks.MarkDone(done.Id);
 
-        Click(ButtonNamed(t.Lines[0], "Close task"));
+        Click(ButtonNamed(t.Lines[0], "Tick off"));
         Assert.Equal(TaskStatus.Closed, t.Tasks.Board.Tasks.Single(x => x.Id == done.Id).Status);
         Assert.True(Closing(t.Lines[0]));
-        Assert.False(HasButtonNamed(t.Lines[0], "Close task"));
+        Assert.False(HasButtonNamed(t.Lines[0], "Tick off"));
 
         Click(ButtonNamed(t.Lines[0], "Undo"));
         Assert.Equal(TaskStatus.Done, t.Tasks.Board.Tasks.Single(x => x.Id == done.Id).Status);
         Assert.False(Closing(Assert.Single(t.Lines)));
-        Assert.True(HasButtonNamed(t.Lines[0], "Close task"));
+        Assert.True(HasButtonNamed(t.Lines[0], "Tick off"));
     });
 
     // LIVE CHECK, Petre's 320 px screenshot: nothing in the list clips at the narrowest width the bar allows. The box,
