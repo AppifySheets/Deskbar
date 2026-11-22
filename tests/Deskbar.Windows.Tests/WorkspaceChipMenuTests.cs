@@ -174,6 +174,29 @@ public class WorkspaceChipMenuTests
         Assert.Equal([Maybe<Guid>.From(workspaces.Single(w => w.Name == "Garden").Id)], picked);
     });
 
+    // Review I-1: a block wider than the menu must wrap inside it. A menu's scroll viewer can measure its content at an
+    // infinite width (the cause the bar's list had, ruling 20), and then Width only clips. On Petre's 140 to 197 DIP bar
+    // the first block ("none" and the ungrouped workspaces) ran past the right edge.
+    [Fact]
+    public void A_block_wider_than_the_menu_wraps_inside_it() => StaThread.Run(() =>
+    {
+        var entries = new[] { "none" }.Concat(Enumerable.Range(1, 9).Select(i => $"Workspace {i}"))
+            .Select((name, i) => new WorkspaceChipMenu.Entry(false, i == 0 ? Maybe<Guid>.None : Guid.NewGuid(), name, null))
+            .ToList();
+        WithAnchor(anchor =>
+        {
+            var menu = WorkspaceChipMenu.Build(entries, Maybe<Guid>.None, _ => { }, anchor, width: 150);
+            menu.IsOpen = true;
+            menu.UpdateLayout();
+
+            var chips = WorkspaceChipMenu.Chips(menu).Select(c => c.TransformToAncestor(menu).TransformBounds(new Rect(c.RenderSize))).ToList();
+            Assert.All(chips, chip => Assert.True(chip.Right <= menu.ActualWidth + 0.5, $"a chip ends at {chip.Right} in a menu {menu.ActualWidth} wide"));
+            Assert.True(chips.Select(c => Math.Round(c.Top)).Distinct().Count() > 1, "the chips stayed on one row");
+            menu.IsOpen = false;
+            return 0;
+        });
+    });
+
     // A long menu is bounded by the work area of its screen, and its template scrolls what does not fit.
     [Fact]
     public void A_long_menu_is_bounded_and_scrolls() => StaThread.Run(() =>

@@ -3,7 +3,7 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="Tasks"
         WindowStyle="SingleBorderWindow" ResizeMode="CanResize" Background="#FF1E1F24"
-        Width="720" Height="560" MinWidth="420" MinHeight="260"
+        Width="720" Height="560" MinWidth="560" MinHeight="260"
         ShowInTaskbar="True">
     <!-- THE TASKS WINDOW (docs/superpowers/specs/2026-11-22-tasks-board-design.md, "The window"; mockup
          .superpowers/brainstorm/876-1795339550/content/tasks-window.html): every task and its status, grouped, with

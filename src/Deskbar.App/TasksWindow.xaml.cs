@@ -192,6 +192,7 @@ public partial class TasksWindow : Window
     internal Func<DateTime> ClickClock { get; init; } = () => DateTime.UtcNow;
 
     static readonly TimeSpan RepaintGrace = TimeSpan.FromMilliseconds(500);
+    string linesPlaces = "";
     int pressClicks;
     DateTime linesChangedAt = DateTime.MinValue;
 
@@ -239,35 +240,54 @@ public partial class TasksWindow : Window
         // Shown WITHOUT activation (fix round 1, Critical 1): the controller brings it to Petre afterwards, moving it to
         // the desktop in front before anything activates it (TasksBoard.Open, Arrive).
         ShowActivated = false;
-        // Placed before Show, so it never flashes somewhere else first. A maximized window is shown at its normal place
-        // and maximized after, so a restore returns it there.
+        // Placed before Show, so it does not open somewhere else first. A maximized window is shown at its normal place
+        // and maximized only once it has arrived (MaximizeIfRemembered, after the move to the desktop in front): showing
+        // maximized activates the window whatever ShowActivated says (review I-2).
         WindowState = WindowState.Normal;
         var placed = remembered.HasValue && PlaceAt(remembered.Value);
         if (!placed) Place();
+        maximizeOnArrival = placed && remembered.Value.Maximized;
         Show();
-        // Show applies the window's own Width/Height once more, at the DPI it was created with; the remembered device
-        // rectangle is the truth, so it is put back exactly once the window is up.
+        // Show applies the window's Width and Height at the DPI the window was created with. PlaceAt set them to the
+        // remembered pixels at that DPI, so on the same screen this changes nothing; on a screen of another DPI the
+        // window can show one frame at the scaled size before this puts the remembered device rectangle back.
         if (placed) PlaceDevice(remembered.Value);
         NoteNormal();
-        if (placed && remembered.Value.Maximized) WindowState = WindowState.Maximized;
         Scroller.ScrollToTop();
         Toolbar.Focus();
     }
 
+    // Whether the window, opened at its remembered normal place, is to be maximized once it has arrived.
+    bool maximizeOnArrival;
+
     /// <summary>
-    /// An open window, restored if it was minimized, its view untouched. No activation here (fix round 1, Critical 1):
-    /// the controller's seam moves it to the desktop in front and only then activates it.
+    /// Maximizes the window when it was left maximized, once the controller has brought it to the desktop in front
+    /// (review I-2: SW_SHOWMAXIMIZED activates, so it must not run before the move).
+    /// </summary>
+    internal void MaximizeIfRemembered()
+    {
+        if (!maximizeOnArrival) return;
+        maximizeOnArrival = false;
+        WindowState = WindowState.Maximized;
+    }
+
+    /// <summary>
+    /// An open window, its view untouched. No state change and no activation here (fix round 1, Critical 1; review
+    /// I-2): restoring a minimized window activates it, which would take Petre to the window's desktop. The
+    /// controller's seam moves it to the desktop in front, and the activator it ends with restores an iconic window.
     /// </summary>
     public void BringForward()
     {
-        if (!IsOpen) return;
-        if (WindowState == WindowState.Minimized) WindowState = WindowState.Normal;
     }
 
-    /// <summary>The window activating itself, only when the controller has no seam to bring it (and counted for the tests).</summary>
+    /// <summary>
+    /// The window activating itself, only when the controller has no seam to bring it (and counted for the tests):
+    /// restored first if it was minimized, since nothing else will.
+    /// </summary>
     internal void ActivateHere()
     {
         SelfActivations++;
+        if (WindowState == WindowState.Minimized) WindowState = WindowState.Normal;
         if (!Quiet) Activate();
     }
 
@@ -311,6 +331,11 @@ public partial class TasksWindow : Window
         var middle = new NativeMethods.POINT { X = place.Left + place.Width / 2, Y = place.Top + place.Height / 2 };
         if (NativeMethods.MonitorFromPoint(middle, MonitorDefaultToNull) == 0) return false;
         PlaceDevice(place);
+        // The same size as WPF's own Width and Height, at the DPI the hidden window has now, so Show does not apply the
+        // XAML size for a frame (review minor: the post-Show placement could flash one frame).
+        var dpi = VisualTreeHelper.GetDpi(this);
+        Width = place.Width / dpi.DpiScaleX;
+        Height = place.Height / dpi.DpiScaleY;
         return true;
     }
 
@@ -394,8 +419,16 @@ public partial class TasksWindow : Window
     {
         keyboardWasIn = commentBoxes.FirstOrDefault(pair => pair.Value.IsKeyboardFocusWithin).Key;
         caretWas = keyboardWasIn != Guid.Empty ? commentBoxes[keyboardWasIn].CaretIndex : 0;
-        // The lines are redrawn now, so for half a second a click is not trusted (the click guard, ClickIgnored).
-        linesChangedAt = ClickClock();
+        // When the lines on show change (which tasks, their order, which threads are open, which are closing), a line
+        // may now be under the pointer that was not, so for half a second a click is not trusted (the click guard,
+        // ClickIgnored). A redraw that only rewrites what lines say (a session's status line) moves nothing and does
+        // not start the half second, or frequent status pulses would eat clicks (review minor).
+        var placesKey = string.Join('|', view.Groups.SelectMany(g => g.Rows).Select(r => $"{r.Id}{r.Expanded}{r.Closing}"));
+        if (placesKey != linesPlaces)
+        {
+            linesPlaces = placesKey;
+            linesChangedAt = ClickClock();
+        }
         DrawFilters(view);
         Rows.Children.Clear();
         menuButtons.Clear();
@@ -499,7 +532,9 @@ public partial class TasksWindow : Window
         if (row.Closing)
             grid.Children.OfType<UIElement>().Where(part => Grid.GetColumn(part) != 0).ToList().ForEach(part => part.Opacity = 0.45);
         // The comments and "…" buttons are quiet until the pointer is on their line, like the bar's quiet controls.
-        var quiet = new UIElement[] { comments, more };
+        // A line in its undo window keeps its own dimming (above): its quiet buttons are not brightened by a hover or a
+        // selection (review minor).
+        var quiet = row.Closing ? Array.Empty<UIElement>() : new UIElement[] { comments, more };
         Quieten(quiet, loud: false);
 
         // The selection's frame (ruling 21, as on the bar): 2 DIP on the left, clear unless this is the task Petre
@@ -543,8 +578,10 @@ public partial class TasksWindow : Window
 
     // The line's columns: tick, title (the star, trimming first), sessions, age, workspace chip, comments, action
     // (close or Reopen), "…". Fixed widths, shared by every line, so each column sits at the same x on every line.
+    // The sessions column is narrow (its words trim; it is empty on a note) and the window's minimum width is 560 DIP,
+    // so the title keeps a usable width there even with the list's scroll bar showing (review I-3).
     static readonly IReadOnlyList<GridLength> LineColumns =
-        [new(22), new(1, GridUnitType.Star), new(110), new(44), new(92), new(40), new(52), new(24)];
+        [new(22), new(1, GridUnitType.Star), new(70), new(44), new(92), new(40), new(52), new(24)];
 
     // THE AGE ON EACH LINE (ruling 26, as on the bar): TaskAge's compact form, dim, right-aligned before the chip, the
     // full date and time in its tooltip. Rewritten in place once a minute while the window is open (RefreshAges), never

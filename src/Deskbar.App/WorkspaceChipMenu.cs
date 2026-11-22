@@ -21,8 +21,9 @@ namespace Deskbar.App;
 // COMPACT (Petre, of the first version with about 22 workspaces and 6 groups running the whole screen height: "compact
 // it"). Not one menu row per chip: the chips flow side by side and wrap, a WrapPanel per block, so a group's workspaces
 // sit on one or two lines. The first block is "none" (when offered) and every workspace in no group; then one block per
-// group, its small caption 6 DIP below the block above and directly over its chips. A chip is its text plus about 2 DIP
-// each side, 3 DIP from its neighbours. The menu is about 260 DIP wide, or the bar's width when that is less.
+// group, its small caption 6 DIP below the block above and directly over its chips. A chip is its text with 7 DIP of
+// padding left and right and 1 to 2 DIP above and below inside a 1 DIP edge, 3 DIP from its neighbours. The menu is
+// about 260 DIP wide, or the bar's width when that is less, and each block wraps at that width.
 //
 // IT STAYS A CONTEXT MENU, so every rule the bar keeps for its menus still holds (HoldFadeWhileOpen holds the fade and
 // defers rebuilds, #77; a click away and Esc close it), with its item container overridden (ChipMenu): the blocks are
@@ -118,11 +119,16 @@ internal static class WorkspaceChipMenu
             }))
             .Concat(entries.Where(e => !e.IsGroup && !e.InGroup).Select(e => Choice(e, current, pick, menu)))
             .ToArray();
-        if (first.Length > 0) menu.Items.Add(Block(null, first));
+        // The blocks wrap at the menu's inner width, given to them outright (review I-1): the menu's scroll viewer
+        // measures its content at an infinite width, so a WrapPanel left to find its width never wraps and the menu's
+        // Width only clips (measured: chips ran to 535 DIP in a menu 150 wide). The inner width is the menu's less its
+        // padding and the template's edge.
+        var inner = Math.Max(40, menu.Width - menu.Padding.Left - menu.Padding.Right - TemplateEdge);
+        if (first.Length > 0) menu.Items.Add(Block(null, first, inner));
 
         // Each caption with the members that follow it.
         entries.Select((entry, at) => (entry, at)).Where(x => x.entry.IsGroup).ToList().ForEach(x =>
-            menu.Items.Add(Block(x.entry, entries.Skip(x.at + 1).TakeWhile(e => e.InGroup).Select(e => Choice(e, current, pick, menu)).ToArray())));
+            menu.Items.Add(Block(x.entry, entries.Skip(x.at + 1).TakeWhile(e => e.InGroup).Select(e => Choice(e, current, pick, menu)).ToArray(), inner)));
 
         // The keyboard starts on the current choice, or on the first chip.
         menu.Opened += (_, _) =>
@@ -146,7 +152,11 @@ internal static class WorkspaceChipMenu
 
     // One block: an optional caption over a wrap of chips. The caption is 6 DIP below the block above it and sits
     // directly over its chips; the first block has none.
-    static StackPanel Block(Entry? caption, IReadOnlyList<Button> chips)
+    // What the context menu's template draws around its items, at most, on either theme: a 1 DIP border and a little
+    // inner margin.
+    const double TemplateEdge = 8;
+
+    static StackPanel Block(Entry? caption, IReadOnlyList<Button> chips, double width)
     {
         var block = new StackPanel();
         if (caption is not null)
@@ -161,7 +171,7 @@ internal static class WorkspaceChipMenu
                 IsHitTestVisible = false,
                 Focusable = false,
             });
-        var wrap = new WrapPanel();
+        var wrap = new WrapPanel { Width = width };
         chips.ToList().ForEach(chip => wrap.Children.Add(chip));
         block.Children.Add(wrap);
         return block;
