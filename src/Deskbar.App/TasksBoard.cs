@@ -420,6 +420,11 @@ public sealed class TasksBoard : IDisposable
         };
     }
 
+    // STALE AT MIDNIGHT (review M7, known): "this week" and "this month" are read when a view is made, and nothing makes
+    // a view when the day changes, so a window left open over midnight into a new week offers last week's goals until
+    // the next redraw (any task or goal change, a filter click, reopening the window). Pull request 2 redraws on a day
+    // change, with the planner's review.
+    //
     // The goals the window offers, both from ONE read of today (review M2): the "Goal" menu's (this month's then this
     // week's OPEN goals, the ones a task can be linked to) and the goal filter's (those two periods' goals of every
     // status, since a done goal's tasks are still worth finding, plus the goal in force when it is of another period, so
@@ -485,7 +490,8 @@ public sealed class TasksBoard : IDisposable
         Created = task.Created,
         Important = task.Important,
         Urgent = task.Urgent,
-        GoalId = task.GoalId,
+        // Null for no goal and for a link to a goal that no longer exists, which reads as no goal everywhere.
+        Goal = goals?.GoalOf(task).Map(ChoiceOf).GetValueOrDefault(),
     };
 
     // The mockup's sessions column: how many, and whether any is still live. Empty for a note.
@@ -577,10 +583,11 @@ internal sealed record TaskRowView(Guid Id, string Title, string Detail, TaskSta
     public Quadrant Quadrant => QuadrantOf.Flags(Important, Urgent);
 
     /// <summary>
-    /// The goal the task is linked to (goals plan, Task 6), for the "Goal" menu's check mark. Not drawn on the line, so
-    /// not in the window's redraw signature.
+    /// The goal the task is linked to (goals plan, Task 6), for the "Goal" menu: its check mark, and the goal itself when
+    /// the menu would not otherwise list it (review M6). Null for no goal. Not drawn on the line, so not in the window's
+    /// redraw signature.
     /// </summary>
-    public Maybe<Guid> GoalId { get; init; }
+    public GoalChoice? Goal { get; init; }
 }
 
 /// <summary>

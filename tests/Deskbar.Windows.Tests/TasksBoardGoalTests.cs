@@ -188,7 +188,7 @@ public class TasksBoardGoalTests
 
     // G1: goals exist, but none open this week or month (only last week's): "None" and a disabled line saying so.
     [Fact]
-    public void With_no_goals_the_menu_says_how_to_add_one() => StaThread.Run(() =>
+    public void With_no_open_goal_this_week_or_month_the_menu_says_so() => StaThread.Run(() =>
     {
         using var t = Build();
         t.Goals.Add("Last week", t.Goals.ThisWeek.Previous());
@@ -280,9 +280,31 @@ public class TasksBoardGoalTests
         Assert.Equal("Goal: Ship the goals planner", t.Window.GoalFilterLabel);
     });
 
-    // The #77 lesson: a goal change arriving while the goal menu is open waits for the menu to close.
+    // The #77 lesson: a change arriving while the goal menu is open waits for the menu to close.
     [Fact]
     public void The_goal_menu_holds_a_redraw_until_it_closes() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        t.Goals.Add("Ship it", t.Goals.ThisWeek);
+        var id = t.Tasks.AddNote("note", t.Gepha).Value.Id;
+        t.Controller.Open(Rect.Empty);
+        var rebuilds = t.Window.Rebuilds;
+
+        var menu = t.Window.OpenGoalMenu(id);
+        Assert.True(menu.IsOpen);
+        var second = t.Tasks.AddNote("second", t.Gepha).Value.Id;
+        Assert.Equal(rebuilds, t.Window.Rebuilds);
+        Assert.Equal([id], t.Window.Keys);
+
+        Close(menu, t.Window);
+        Assert.Equal(rebuilds + 1, t.Window.Rebuilds);
+        Assert.Equal([second, id], t.Window.Keys);
+    });
+
+    // Review M1: both goal menus are built from the latest view when they open, so a goal edit that changes nothing
+    // the window draws (the filter shows "Goal: all") redraws no row. A redraw for it reset the Matrix's scrolls.
+    [Fact]
+    public void A_goal_edit_redraws_no_row() => StaThread.Run(() =>
     {
         using var t = Build();
         var goal = t.Goals.Add("Ship it", t.Goals.ThisWeek).Value;
@@ -290,13 +312,32 @@ public class TasksBoardGoalTests
         t.Controller.Open(Rect.Empty);
         var rebuilds = t.Window.Rebuilds;
 
-        var menu = t.Window.OpenGoalMenu(id);
-        Assert.True(menu.IsOpen);
-        t.Goals.Rename(goal.Id, "Renamed");
-        Assert.Equal(rebuilds, t.Window.Rebuilds);
+        t.Goals.Rename(goal.Id, "Ship the goals planner");
+        t.Goals.Add("Store listing", t.Goals.ThisMonth);
+        t.Goals.MarkDone(goal.Id);
 
-        Close(menu, t.Window);
-        Assert.Equal(rebuilds + 1, t.Window.Rebuilds);
+        Assert.Equal(rebuilds, t.Window.Rebuilds);
+        // The menus still show the goals as they are now.
+        Assert.Equal(["None", "Store listing"], ItemsOf(t.Window.OpenGoalMenu(id)).Select(TextOf));
+    });
+
+    // Review M6: a task linked to a goal of another period (or one done since) still shows its goal, ticked, at the end
+    // of the menu, so the menu never hides what the task counts toward.
+    [Fact]
+    public void A_tasks_own_goal_from_another_period_is_listed_and_ticked() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        t.Goals.Add("Ship it", t.Goals.ThisWeek);
+        var old = t.Goals.Add("Last week's", t.Goals.ThisWeek.Previous()).Value;
+        var id = t.Tasks.AddNote("note", t.Gepha).Value.Id;
+        t.Goals.LinkTask(id, old.Id);
+        t.Controller.Open(Rect.Empty);
+
+        var menu = t.Window.OpenGoalMenu(id);
+
+        Assert.Equal(["None", "Ship it", "Last week's"], ItemsOf(menu).Select(TextOf));
+        Assert.True(Named(menu, "Last week's").IsChecked);
+        Assert.False(Named(menu, "None").IsChecked);
     });
 
     // Opening the window again starts at every goal, as it starts at every workspace.
