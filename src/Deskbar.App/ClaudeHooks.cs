@@ -5,7 +5,11 @@ using System.Text.Json.Nodes;
 
 namespace Deskbar.App;
 
-// Deskbar's two entries in Claude Code's ~/.claude/settings.json (see ClaudeSkill for why they exist).
+// Deskbar's entries in Claude Code's ~/.claude/settings.json (see ClaudeSkill for why they exist): two that ask for the
+// user (Notification, Stop) while "Teach Claude Code about Deskbar" is on, and three more (SessionStart,
+// UserPromptSubmit, SessionEnd) while Claude Code sessions also keep their tasks (AppState.ClaudeTasksInEffect; design
+// docs/superpowers/specs/2026-11-22-tasks-board-design.md, "Who gets it"). All five run the same command, the hook
+// script, which hands the event's JSON to `claude-hook`; the event's name is in the JSON, so one script serves them all.
 //
 // That file is the user's, and Claude Code's, and holds everything from permissions to the model, so this is careful
 // in the ways the file deserves:
@@ -22,8 +26,13 @@ namespace Deskbar.App;
 //   * Written to a temporary file and moved over the original, so a crash mid-write cannot leave half a file.
 static class ClaudeHooks
 {
-    // Notification: a permission prompt, or a session left waiting for input. Stop: a reply finished.
-    static readonly string[] Events = ["Notification", "Stop"];
+    // Notification: a permission prompt, or a session left waiting for input. Stop: a reply finished. Both ask for the
+    // user, so they stay while the skill is on whatever the task setting says.
+    static readonly string[] AskEvents = ["Notification", "Stop"];
+
+    // A session starting (or resuming, clearing, compacting), each prompt Petre sends, and a session ending: how a session
+    // joins or creates its task and keeps it (Task 8). No matcher, so SessionStart fires for every source.
+    static readonly string[] TaskEvents = ["SessionStart", "UserPromptSubmit", "SessionEnd"];
 
     static readonly JsonSerializerOptions Indented = new()
     {
@@ -34,7 +43,9 @@ static class ClaudeHooks
 
     // True when the file now matches what was asked: hooks added or removed, nothing to do, or no file with the setting
     // off. False only when the file was left alone because it cannot be parsed (see above), so the caller can tell.
-    internal static bool Sync(bool on, string settingsPath, string command)
+    // `on` is "Teach Claude Code about Deskbar"; `tasks` adds the task events, and only counts while `on` does, so the
+    // teaching turned off takes every entry of Deskbar's.
+    internal static bool Sync(bool on, bool tasks, string settingsPath, string command)
     {
         JsonObject root;
         string? original = null;
@@ -57,7 +68,7 @@ static class ClaudeHooks
         else if (on) root = [];
         else return true;
 
-        if (!Apply(root, on, command)) return true;
+        if (!Apply(root, Wanted(on, tasks), command)) return true;
 
         if (original is not null)
         {
@@ -67,17 +78,21 @@ static class ClaudeHooks
         var temporary = settingsPath + ".deskbar-new";
         File.WriteAllText(temporary, root.ToJsonString(Indented));
         File.Move(temporary, settingsPath, overwrite: true);
-        ClickTrace.Write($"claude hooks {(on ? "added to" : "removed from")} {settingsPath}");
+        ClickTrace.Write($"claude hooks {(on ? $"set ({(tasks ? "with" : "without")} the task events) in" : "removed from")} {settingsPath}");
         return true;
     }
 
+    // Each event of Deskbar's, and whether its entry should be there.
+    static IReadOnlyList<(string Name, bool On)> Wanted(bool on, bool tasks) =>
+        [.. AskEvents.Select(name => (name, on)), .. TaskEvents.Select(name => (name, on && tasks))];
+
     // The change itself, on the parsed file: true when anything changed. Public to the tests through Sync.
-    static bool Apply(JsonObject root, bool on, string command)
+    static bool Apply(JsonObject root, IReadOnlyList<(string Name, bool On)> wanted, string command)
     {
         var changed = false;
         var hooks = root["hooks"] as JsonObject;
 
-        foreach (var name in Events)
+        foreach (var (name, on) in wanted)
         {
             var entries = hooks?[name] as JsonArray;
             var ours = entries?.Where(e => IsOurs(e)).ToList() ?? [];
@@ -100,11 +115,13 @@ static class ClaudeHooks
                 });
                 changed = true;
             }
-            else if (entries is { Count: 0 })
+            // An event left empty by taking ours out goes too; one the user left empty is theirs and stays.
+            else if (ours.Count > 0 && entries is { Count: 0 })
                 hooks!.Remove(name);
         }
 
-        if (!on && hooks is { Count: 0 }) root.Remove("hooks");
+        // The same for the whole "hooks" object, once nothing of anyone's is left in it.
+        if (changed && hooks is { Count: 0 }) root.Remove("hooks");
         return changed;
     }
 

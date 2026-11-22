@@ -101,6 +101,8 @@ public sealed partial class RemoteControl(WorkspaceManager manager, Func<bool, R
         ("open", _) => ControlArguments.ParseOpen(rest).Match(Open, ControlReply.Fail),
         ("attention", []) => Attention(null),
         ("attention", ["--from", var folder]) => Attention(folder),
+        // Claude Code's hooks (RemoteControl.ClaudeHook.cs): the hook's JSON and the session's folder.
+        (ControlArguments.ClaudeHookVerb, _) => ClaudeHook(rest),
         ("task", _) => Task(rest),
         ("tasks-window", [var state]) => TasksWindow(state),
         ("goal", _) => Goal(rest),
@@ -160,6 +162,7 @@ public sealed partial class RemoteControl(WorkspaceManager manager, Func<bool, R
         ("collapsed-click", [var mode]) => CollapsedClick(mode),
         ("full-screen", [var mode]) => FullScreen(mode),
         ("claude-skill", [var onOff]) => ClaudeSkill(onOff),
+        ("claude-tasks", [var onOff]) => ClaudeTasks(onOff),
         ("focus-ring", [var onOff]) => FocusRing(onOff),
         ("see-through", [var onOff]) => SeeThrough(onOff),
         ("previous-workspace", [var onOff]) => PreviousWorkspace(onOff),

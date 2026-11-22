@@ -42,6 +42,10 @@ public static class ControlUsage
                 "ask for the user: the workspace of the VS Code window whose folder holds --from (the caller's own\n"
                 + "      folder if not given) blinks on the bar and that window's icon glows, until the user goes there.\n"
                 + "      Nothing happens when the user is already on that workspace"),
+            new("claude-hook", "[--entry <value>] [--attended <value>] [--from <folder>]",
+                "what Claude Code's hooks run (claude-hook.cmd), with the hook's JSON on stdin: Notification and Stop ask\n"
+                + "      for the user as attention does. Prints only what the session should read, and exits 0 even when\n"
+                + "      Deskbar is not running; JSON that is not a hook's exits 1"),
         ]),
         new("Tasks", [
             new("task", "list [--closed]",
@@ -166,6 +170,10 @@ public static class ControlUsage
                 "Step aside for full-screen windows (the floating bar goes behind a video or game on its screen), or Stay on top of full-screen windows"),
             new("claude-skill", "on|off",
                 "Manage's \"Teach Claude Code\" setting: keep ~/.claude/skills/deskbar/SKILL.md written, or remove it"),
+            new("claude-tasks", "on|off",
+                "Manage's \"Claude Code sessions keep their tasks in the task list\" setting: keep Deskbar's SessionStart,\n"
+                + "      UserPromptSubmit and SessionEnd hooks in ~/.claude/settings.json, or remove them (off while\n"
+                + "      claude-skill is off)"),
             new("focus-ring", "on|off",
                 "Outline the focused window in its workspace's colour, and the window in front on each other screen in dim white"),
             new("see-through", "on|off",

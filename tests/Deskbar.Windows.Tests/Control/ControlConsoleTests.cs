@@ -59,6 +59,54 @@ public class ControlConsoleTests
         Assert.Equal(["move", "--title", "a b"], seenArgs);
     }
 
+    // `claude-hook` is run by Claude Code's hooks with the hook's JSON on stdin. The client sends it on as `--json`, after
+    // the caller's folder, and reads stdin for this verb only.
+    [Fact]
+    public void Claude_hook_sends_its_stdin_as_json()
+    {
+        IReadOnlyList<string>? seenArgs = null;
+
+        var code = ControlConsole.Run(["claude-hook", "--entry", "claude-vscode"], "pipe", (_, args) =>
+        {
+            seenArgs = args;
+            return Task.FromResult(new ControlReply(ControlReply.Ok, ""));
+        }, new StringWriter(), new StringWriter(), callerFolder: @"C:\work\repo", stdin: new StringReader("""{"hook_event_name":"Stop"}"""));
+
+        Assert.Equal(0, code);
+        Assert.Equal(["claude-hook", "--entry", "claude-vscode", "--from", @"C:\work\repo", "--json", """{"hook_event_name":"Stop"}"""], seenArgs);
+    }
+
+    // Deskbar down: the session reads nothing and the hook exits 0 (a Stop hook exiting 2 tells Claude to keep going).
+    [Fact]
+    public void Claude_hook_with_deskbar_down_prints_nothing_and_exits_0()
+    {
+        var (stdout, stderr) = (new StringWriter(), new StringWriter());
+
+        var code = ControlConsole.Run(["claude-hook"], "pipe",
+            (_, _) => Task.FromResult(new ControlReply(ControlReply.NotRunning, "Deskbar is not running")),
+            stdout, stderr, stdin: new StringReader("{}"));
+
+        Assert.Equal(0, code);
+        Assert.Equal("", stdout.ToString());
+        Assert.Equal("", stderr.ToString());
+    }
+
+    // An empty answer (Notification, Stop, SessionEnd) prints nothing at all, not an empty line, so the session's
+    // context gains nothing; a briefing is printed as it came.
+    [Fact]
+    public void Claude_hook_prints_its_answer_and_nothing_for_an_empty_one()
+    {
+        var (quiet, spoken) = (new StringWriter(), new StringWriter());
+
+        ControlConsole.Run(["claude-hook"], "pipe", (_, _) => Task.FromResult(new ControlReply(ControlReply.Ok, "")),
+            quiet, new StringWriter(), stdin: new StringReader("{}"));
+        ControlConsole.Run(["claude-hook"], "pipe", (_, _) => Task.FromResult(new ControlReply(ControlReply.Ok, "Your task is X.")),
+            spoken, new StringWriter(), stdin: new StringReader("{}"));
+
+        Assert.Equal("", quiet.ToString());
+        Assert.Equal("Your task is X." + Environment.NewLine, spoken.ToString());
+    }
+
     // The Store build's shim points at this exe, so `open` and `attention` must carry the caller's folder
     // here exactly as ControlCommandLine adds it for `Deskbar.exe ctl`.
     [Theory]

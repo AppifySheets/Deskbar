@@ -42,7 +42,7 @@ public sealed class ClaudeSkillTests : IDisposable
         Directory.CreateDirectory(Path.Combine(home, ".claude"));
         File.WriteAllText(Settings, WithABell);
 
-        ClaudeSkill.Sync(true, home, Deskbar);
+        ClaudeSkill.Sync(true, true, home, Deskbar);
 
         var json = File.ReadAllText(Settings);
         Assert.Equal(2, Commands(json, "Stop").Length);
@@ -61,11 +61,11 @@ public sealed class ClaudeSkillTests : IDisposable
     {
         Directory.CreateDirectory(Path.Combine(home, ".claude"));
         File.WriteAllText(Settings, WithABell);
-        ClaudeSkill.Sync(true, home, Deskbar);
+        ClaudeSkill.Sync(true, true, home, Deskbar);
         var first = File.ReadAllText(Settings);
         File.SetLastWriteTimeUtc(Settings, new DateTime(2020, 1, 1, 0, 0, 0, DateTimeKind.Utc));
 
-        ClaudeSkill.Sync(true, home, Deskbar);
+        ClaudeSkill.Sync(true, true, home, Deskbar);
 
         Assert.Equal(first, File.ReadAllText(Settings));
         Assert.Equal(new DateTime(2020, 1, 1, 0, 0, 0, DateTimeKind.Utc), File.GetLastWriteTimeUtc(Settings));
@@ -77,9 +77,9 @@ public sealed class ClaudeSkillTests : IDisposable
     {
         Directory.CreateDirectory(Path.Combine(home, ".claude"));
         File.WriteAllText(Settings, WithABell);
-        ClaudeSkill.Sync(true, home, Deskbar);
+        ClaudeSkill.Sync(true, true, home, Deskbar);
 
-        ClaudeSkill.Sync(false, home, Deskbar);
+        ClaudeSkill.Sync(false, true, home, Deskbar);
 
         var json = File.ReadAllText(Settings);
         Assert.Equal([@"cmd.exe /c C:\bell.bat"], Commands(json, "Stop"));
@@ -104,42 +104,197 @@ public sealed class ClaudeSkillTests : IDisposable
             }
             """);
 
-        ClaudeSkill.Sync(true, home, Deskbar);
+        ClaudeSkill.Sync(true, true, home, Deskbar);
 
         var json = File.ReadAllText(Settings);
         Assert.Equal([@"cmd.exe /c C:\bell.bat", ClaudeSkill.HookCommand(Path.Combine(Deskbar, "claude-hook.cmd"))],
             Commands(json, "Stop"));
     }
 
-    // The command Deskbar writes, run the way Claude Code runs a hook on Windows: through Git Bash, with the hook's
-    // JSON on stdin and CLAUDE_PROJECT_DIR set. A stand-in deskbar.cmd records what it was called with. The old
+    // A Stop hook's JSON, cut down to the fields claude-hook reads.
+    const string StopJson = """{"session_id":"92943450","cwd":"C:\\repos\\x","hook_event_name":"Stop"}""";
+
+    // The hook command Deskbar wrote for one event.
+    string HookCommandFor(string hookEvent) => Commands(File.ReadAllText(Settings), hookEvent).Single(c => c.Contains("claude-hook.cmd"));
+
+    // Runs a hook command the way Claude Code runs one on Windows: Git for Windows' bash, `-c <command>`, the hook's JSON
+    // on stdin. `environment` sets a variable (a value) or takes it away (null), so the hook does not inherit the
+    // CLAUDE_* values of whatever Claude session runs this test. A hook that does not finish is killed, tree and all,
+    // so a broken run cannot leave a process behind on the test desktop.
+    static (int ExitCode, string Stdout) RunThroughGitBash(string command, string stdin, IReadOnlyDictionary<string, string?> environment)
+    {
+        // Git for Windows' own bash, by path: a bare `bash` on PATH can be WSL's, which is not what Claude Code uses.
+        var bash = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "Git", "bin", "bash.exe");
+        Assert.True(File.Exists(bash), $"Git Bash not found at {bash}");
+        var start = new System.Diagnostics.ProcessStartInfo(bash)
+        {
+            RedirectStandardInput = true, RedirectStandardOutput = true, RedirectStandardError = true, CreateNoWindow = true,
+        };
+        start.ArgumentList.Add("-c");
+        start.ArgumentList.Add(command);
+        environment.ToList().ForEach(variable =>
+        {
+            if (variable.Value is null) start.Environment.Remove(variable.Key);
+            else start.Environment[variable.Key] = variable.Value;
+        });
+        using var hook = System.Diagnostics.Process.Start(start)!;
+        var stdout = hook.StandardOutput.ReadToEndAsync();
+        _ = hook.StandardError.ReadToEndAsync();
+        hook.StandardInput.Write(stdin);
+        hook.StandardInput.Close();
+        if (!hook.WaitForExit(30_000))
+        {
+            hook.Kill(entireProcessTree: true);
+            Assert.Fail("the hook did not finish");
+        }
+        return (hook.ExitCode, stdout.Result);
+    }
+
+    // The command Deskbar writes, run the way Claude Code runs a hook. A stand-in deskbar.cmd records the arguments it
+    // was called with and the stdin it was handed, and answers a line the way the real one answers a session. The old
     // `cmd.exe /c` command fails this: Git Bash turns /c into C:/, cmd.exe sits at a prompt eating stdin, and the
-    // stand-in is never called.
+    // stand-in is never called. What this pins: the session's folder, entrypoint and attended flag reach Deskbar as
+    // arguments, the hook's JSON reaches it as stdin through cmd's `call`, and what Deskbar prints reaches the session.
     [Fact]
     public void The_hook_reaches_deskbar_when_git_bash_runs_it()
     {
         Directory.CreateDirectory(Path.Combine(home, ".claude"));
-        ClaudeSkill.Sync(true, home, Deskbar);
+        ClaudeSkill.Sync(true, true, home, Deskbar);
         var called = Path.Combine(home, "called.txt");
-        File.WriteAllText(Path.Combine(Deskbar, "deskbar.cmd"), $"@echo %*> \"{called}\"\r\n");
+        var input = Path.Combine(home, "input.txt");
+        File.WriteAllText(Path.Combine(Deskbar, "deskbar.cmd"),
+            $"@echo %*> \"{called}\"\r\n@findstr \"^\" > \"{input}\"\r\n@echo context for the session\r\n");
         var project = Path.Combine(home, "My Project");
-        var command = Commands(File.ReadAllText(Settings), "Stop").Single(c => c.Contains("claude-hook.cmd"));
 
-        // Git for Windows' own bash, by path: a bare `bash` on PATH can be WSL's, which is not what Claude Code uses.
-        var bash = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "Git", "bin", "bash.exe");
-        Assert.True(File.Exists(bash), $"Git Bash not found at {bash}");
-        var start = new System.Diagnostics.ProcessStartInfo(bash) { RedirectStandardInput = true, CreateNoWindow = true };
-        start.ArgumentList.Add("-c");
-        start.ArgumentList.Add(command);
-        start.Environment["CLAUDE_PROJECT_DIR"] = project;
-        using var hook = System.Diagnostics.Process.Start(start)!;
-        hook.StandardInput.Write("""{"hook_event_name":"Stop"}""");
-        hook.StandardInput.Close();
-        Assert.True(hook.WaitForExit(30_000), "the hook did not finish");
+        var (exitCode, stdout) = RunThroughGitBash(HookCommandFor("Stop"), StopJson, new Dictionary<string, string?>
+        {
+            ["CLAUDE_PROJECT_DIR"] = project,
+            ["CLAUDE_CODE_ENTRYPOINT"] = "claude-vscode",
+            ["CLAUDE_CODE_SESSION_ATTENDED"] = "1",
+        });
 
-        Assert.Equal(0, hook.ExitCode);
+        Assert.Equal(0, exitCode);
         Assert.True(File.Exists(called), "the hook never called deskbar.cmd");
-        Assert.Equal($"attention --from \"{project}\"", File.ReadAllText(called).Trim());
+        Assert.Equal($"claude-hook --entry \"claude-vscode\" --attended \"1\" --from \"{project}\"", File.ReadAllText(called).Trim());
+        Assert.Equal(StopJson, File.ReadAllText(input).Trim());
+        Assert.Equal("context for the session", stdout.Trim());
+    }
+
+    // Review focus 1 of the plan: Deskbar is not running when a hook fires. The real client (the Deskbar.exe beside the
+    // tests, through the shim Deskbar writes) asks a pipe nobody serves (DESKBAR_CONTROL_PIPE, ControlCommandLine), so
+    // the session must see nothing at all and the hook must exit 0: a Stop hook that exits 2 tells Claude to keep going.
+    [Theory]
+    [InlineData("Stop")]
+    [InlineData("SessionStart")]
+    public void A_hook_with_deskbar_down_prints_nothing_and_exits_0(string hookEvent)
+    {
+        Directory.CreateDirectory(Path.Combine(home, ".claude"));
+        ClaudeSkill.Sync(true, true, home, Deskbar);
+        var exe = Path.Combine(AppContext.BaseDirectory, "Deskbar.exe");
+        Assert.True(File.Exists(exe), $"no Deskbar.exe beside the tests at {exe}");
+        ControlCommandLine.WriteShim(Deskbar, exe);
+
+        var (exitCode, stdout) = RunThroughGitBash(HookCommandFor(hookEvent),
+            StopJson.Replace("\"Stop\"", $"\"{hookEvent}\""), new Dictionary<string, string?>
+            {
+                ["CLAUDE_PROJECT_DIR"] = Path.Combine(home, "My Project"),
+                ["CLAUDE_CODE_ENTRYPOINT"] = "claude-vscode",
+                ["CLAUDE_CODE_SESSION_ATTENDED"] = "1",
+                ["DESKBAR_CONTROL_PIPE"] = $"Deskbar.Control.Test.{Guid.NewGuid():N}",
+            });
+
+        Assert.Equal(0, exitCode);
+        Assert.Equal("", stdout);
+    }
+
+    // The whole way with the real client: Git Bash, the hook script, the shim Deskbar writes, the Deskbar.exe beside the
+    // tests acting as `ctl`, and a pipe server standing in for the running app (DESKBAR_CONTROL_PIPE points the client
+    // at it, so Petre's own Deskbar is never asked). What the stand-in does not prove, this does: a GUI exe started
+    // through cmd's `call` really receives the hook's stdin, and its answer reaches the session's stdout.
+    [Fact]
+    public void The_real_client_hands_the_hook_to_deskbar_and_its_answer_to_the_session()
+    {
+        Directory.CreateDirectory(Path.Combine(home, ".claude"));
+        ClaudeSkill.Sync(true, true, home, Deskbar);
+        var exe = Path.Combine(AppContext.BaseDirectory, "Deskbar.exe");
+        ControlCommandLine.WriteShim(Deskbar, exe);
+        var pipe = $"Deskbar.Control.Test.{Guid.NewGuid():N}";
+        IReadOnlyList<string>? received = null;
+        using var server = new ControlPipeServer(pipe, args =>
+        {
+            received = args;
+            return Task.FromResult(new global::Deskbar.Core.Control.ControlReply(0, "Your task is X."));
+        });
+        var project = Path.Combine(home, "My Project");
+
+        var (exitCode, stdout) = RunThroughGitBash(HookCommandFor("SessionStart"), StopJson.Replace("Stop", "SessionStart"),
+            new Dictionary<string, string?>
+            {
+                ["CLAUDE_PROJECT_DIR"] = project,
+                ["CLAUDE_CODE_ENTRYPOINT"] = "claude-vscode",
+                ["CLAUDE_CODE_SESSION_ATTENDED"] = "1",
+                ["DESKBAR_CONTROL_PIPE"] = pipe,
+            });
+
+        Assert.Equal(0, exitCode);
+        Assert.Equal("Your task is X.", stdout.Trim());
+        Assert.Equal(["claude-hook", "--entry", "claude-vscode", "--attended", "1", "--from", project,
+            "--json", StopJson.Replace("Stop", "SessionStart")], received);
+    }
+
+    static string[] Ours(string json, string hookEvent) =>
+        Commands(json, hookEvent).Where(c => c.Contains("claude-hook.cmd")).ToArray();
+
+    static readonly string[] AskEvents = ["Notification", "Stop"];
+    static readonly string[] TaskEvents = ["SessionStart", "UserPromptSubmit", "SessionEnd"];
+
+    // The user's own hooks on a task event too, to show they stay put while Deskbar's come and go.
+    const string WithABellAndAStartHook = """
+        {
+          "hooks": {
+            "Stop": [ { "matcher": "", "hooks": [ { "type": "command", "command": "cmd.exe /c C:\\bell.bat" } ] } ],
+            "SessionStart": [ { "hooks": [ { "type": "command", "command": "python title.py" } ] } ]
+          }
+        }
+        """;
+
+    // The setting "Claude Code sessions keep their tasks" (AppState.ClaudeTasks) adds and removes exactly the three task
+    // events' entries; the two ask entries and the user's own hooks stay through both.
+    [Fact]
+    public void The_task_hooks_come_and_go_with_their_setting()
+    {
+        Settled(WithABellAndAStartHook);
+
+        ClaudeSkill.Sync(true, true, home, Deskbar);
+        var on = File.ReadAllText(Settings);
+        Assert.All(AskEvents.Concat(TaskEvents), e => Assert.Single(Ours(on, e)));
+
+        ClaudeSkill.Sync(true, false, home, Deskbar);
+        var off = File.ReadAllText(Settings);
+        Assert.All(AskEvents, e => Assert.Single(Ours(off, e)));
+        Assert.All(TaskEvents, e => Assert.Empty(Ours(off, e)));
+        Assert.Equal(["python title.py"], Commands(off, "SessionStart"));
+        Assert.Contains(@"cmd.exe /c C:\bell.bat", Commands(off, "Stop"));
+        Assert.Null(System.Text.Json.Nodes.JsonNode.Parse(off)!["hooks"]!["UserPromptSubmit"]);
+
+        ClaudeSkill.Sync(true, true, home, Deskbar);
+        Assert.All(TaskEvents, e => Assert.Single(Ours(File.ReadAllText(Settings), e)));
+    }
+
+    // "Teach Claude Code about Deskbar" off takes every entry of Deskbar's, the task ones included, whatever the task
+    // setting says: both write into the same file, and the task hooks without the skill would run for nothing.
+    [Fact]
+    public void Turning_teach_off_takes_the_task_hooks_too()
+    {
+        Settled(WithABellAndAStartHook);
+        ClaudeSkill.Sync(true, true, home, Deskbar);
+
+        ClaudeSkill.Sync(false, true, home, Deskbar);
+
+        var json = File.ReadAllText(Settings);
+        Assert.All(AskEvents.Concat(TaskEvents), e => Assert.Empty(Ours(json, e)));
+        Assert.Equal(["python title.py"], Commands(json, "SessionStart"));
+        Assert.Equal([@"cmd.exe /c C:\bell.bat"], Commands(json, "Stop"));
     }
 
     // A file a parser would lose something from (comments) is not touched.
@@ -150,7 +305,7 @@ public sealed class ClaudeSkillTests : IDisposable
         const string commented = "{\n  // mine\n  \"model\": \"opus\"\n}";
         File.WriteAllText(Settings, commented);
 
-        ClaudeSkill.Sync(true, home, Deskbar);
+        ClaudeSkill.Sync(true, true, home, Deskbar);
 
         Assert.Equal(commented, File.ReadAllText(Settings));
     }
@@ -177,7 +332,7 @@ public sealed class ClaudeSkillTests : IDisposable
     {
         Settled(odd);
 
-        var result = ClaudeHooks.Sync(on, Settings, "\"C:/x/claude-hook.cmd\"");
+        var result = ClaudeHooks.Sync(on, false, Settings, "\"C:/x/claude-hook.cmd\"");
 
         Assert.False(result);
         Assert.Equal(odd, File.ReadAllText(Settings));
@@ -210,7 +365,7 @@ public sealed class ClaudeSkillTests : IDisposable
     {
         Settled(odd);
 
-        var result = ClaudeHooks.Sync(true, Settings, "\"C:/x/claude-hook.cmd\"");
+        var result = ClaudeHooks.Sync(true, false, Settings, "\"C:/x/claude-hook.cmd\"");
 
         Assert.True(result);
         var json = File.ReadAllText(Settings);
@@ -231,7 +386,7 @@ public sealed class ClaudeSkillTests : IDisposable
     {
         Settled(odd);
 
-        var result = ClaudeHooks.Sync(false, Settings, "\"C:/x/claude-hook.cmd\"");
+        var result = ClaudeHooks.Sync(false, false, Settings, "\"C:/x/claude-hook.cmd\"");
 
         Assert.True(result);
         Assert.Equal(odd, File.ReadAllText(Settings));
@@ -244,7 +399,7 @@ public sealed class ClaudeSkillTests : IDisposable
     {
         Settled("""{"hooks":{"Stop":["x",{"hooks":[{"type":"command","command":"\"C:/x/Deskbar/claude-hook.cmd\""}]}]}}""");
 
-        var result = ClaudeHooks.Sync(false, Settings, "\"C:/x/Deskbar/claude-hook.cmd\"");
+        var result = ClaudeHooks.Sync(false, false, Settings, "\"C:/x/Deskbar/claude-hook.cmd\"");
 
         Assert.True(result);
         var stop = System.Text.Json.Nodes.JsonNode.Parse(File.ReadAllText(Settings))!["hooks"]!["Stop"]!.AsArray();
@@ -260,7 +415,7 @@ public sealed class ClaudeSkillTests : IDisposable
     {
         Settled(Repeated);
 
-        ClaudeSkill.Sync(true, home, Deskbar);
+        ClaudeSkill.Sync(true, true, home, Deskbar);
 
         var text = File.ReadAllText(Skill);
         Assert.DoesNotContain("hooks already ask", text);
@@ -268,7 +423,7 @@ public sealed class ClaudeSkillTests : IDisposable
         Assert.Equal(Repeated, File.ReadAllText(Settings));
 
         File.WriteAllText(Settings, "{}");
-        ClaudeSkill.Sync(true, home, Deskbar);
+        ClaudeSkill.Sync(true, true, home, Deskbar);
 
         Assert.Contains("hooks already ask", File.ReadAllText(Skill));
     }
@@ -278,7 +433,7 @@ public sealed class ClaudeSkillTests : IDisposable
     {
         Settled(WithABell);
 
-        ClaudeSkill.Sync(true, home, Deskbar);
+        ClaudeSkill.Sync(true, true, home, Deskbar);
 
         Assert.Contains("hooks already ask", File.ReadAllText(Skill));
     }
@@ -289,7 +444,7 @@ public sealed class ClaudeSkillTests : IDisposable
     [Fact]
     public void Nothing_is_written_without_a_claude_folder()
     {
-        ClaudeSkill.Sync(true, home, Deskbar);
+        ClaudeSkill.Sync(true, true, home, Deskbar);
 
         Assert.False(Directory.Exists(Path.Combine(home, ".claude")));
     }
@@ -299,7 +454,7 @@ public sealed class ClaudeSkillTests : IDisposable
     {
         Directory.CreateDirectory(Path.Combine(home, ".claude"));
 
-        ClaudeSkill.Sync(true, home, Deskbar);
+        ClaudeSkill.Sync(true, true, home, Deskbar);
 
         var text = File.ReadAllText(Skill);
         Assert.StartsWith("---\nname: deskbar\n", text.ReplaceLineEndings("\n"));
@@ -312,11 +467,11 @@ public sealed class ClaudeSkillTests : IDisposable
     public void An_unchanged_skill_is_not_rewritten()
     {
         Directory.CreateDirectory(Path.Combine(home, ".claude"));
-        ClaudeSkill.Sync(true, home, Deskbar);
+        ClaudeSkill.Sync(true, true, home, Deskbar);
         var written = File.GetLastWriteTimeUtc(Skill);
         File.SetLastWriteTimeUtc(Skill, written.AddHours(-1));
 
-        ClaudeSkill.Sync(true, home, Deskbar);
+        ClaudeSkill.Sync(true, true, home, Deskbar);
 
         Assert.Equal(written.AddHours(-1), File.GetLastWriteTimeUtc(Skill));
     }
@@ -326,9 +481,9 @@ public sealed class ClaudeSkillTests : IDisposable
     public void Turning_it_off_removes_the_skill()
     {
         Directory.CreateDirectory(Path.Combine(home, ".claude"));
-        ClaudeSkill.Sync(true, home, Deskbar);
+        ClaudeSkill.Sync(true, true, home, Deskbar);
 
-        ClaudeSkill.Sync(false, home, Deskbar);
+        ClaudeSkill.Sync(false, true, home, Deskbar);
 
         Assert.False(Directory.Exists(Path.GetDirectoryName(Skill)));
         Assert.True(Directory.Exists(Path.Combine(home, ".claude", "skills")));
@@ -341,7 +496,7 @@ public sealed class ClaudeSkillTests : IDisposable
         Directory.CreateDirectory(Path.GetDirectoryName(Skill)!);
         File.WriteAllText(Skill, "my own notes");
 
-        ClaudeSkill.Sync(false, home, Deskbar);
+        ClaudeSkill.Sync(false, true, home, Deskbar);
 
         Assert.Equal("my own notes", File.ReadAllText(Skill));
     }

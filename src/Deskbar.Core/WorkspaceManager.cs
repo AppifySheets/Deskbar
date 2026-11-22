@@ -4178,6 +4178,13 @@ public sealed class WorkspaceManager(
             ? Result.Success()
             : Result.Success().Tap(() => Persist(State with { NoClaudeSkill = !on }));
 
+    // Whether Claude Code sessions keep their tasks (AppState.ClaudeTasks): Manage's box and `claude-tasks on|off`. A
+    // no-op when unchanged, like SetClaudeSkill; the app adds or removes the task hooks on the state pulse this sends.
+    public Result SetClaudeTasks(bool on) =>
+        State.ClaudeTasks == on
+            ? Result.Success()
+            : Result.Success().Tap(() => Persist(State with { NoClaudeTasks = !on }));
+
     // The focus ring (AppState.FocusRing): Manage's checkbox and `focus-ring on|off`. A no-op when unchanged, like
     // SetClaudeSkill, so Manage can set its box on open without writing state.json. The bar draws or clears the
     // outlines on the state pulse Persist sends.
