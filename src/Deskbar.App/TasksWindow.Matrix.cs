@@ -155,6 +155,7 @@ public partial class TasksWindow
     internal (int Row, int Column) CellPlace(Quadrant quadrant) => (Grid.GetRow(cells[quadrant].Box) - 1, Grid.GetColumn(cells[quadrant].Box) - 1);
     internal Quadrant CellOf(Guid id) =>
         cells.First(cell => cell.Value.Lines.Children.OfType<Button>().Any(b => b.Tag is Guid tag && tag == id)).Key;
+    internal ScrollViewer CellScroller(Quadrant quadrant) => (ScrollViewer)cells[quadrant].Lines.Parent;
     internal bool CellStronger(Quadrant quadrant) => Equals(cells[quadrant].Box.Tag, StrongTag);
     internal Point CellCentre(Quadrant quadrant) =>
         cells[quadrant].Box.TranslatePoint(new Point(cells[quadrant].Box.ActualWidth / 2, cells[quadrant].Box.ActualHeight / 2), DragSurface);
@@ -166,6 +167,10 @@ public partial class TasksWindow
         MatrixGrid.Children.Clear();
         MatrixGrid.RowDefinitions.Clear();
         MatrixGrid.ColumnDefinitions.Clear();
+        // EACH CELL KEEPS ITS SCROLL ACROSS A REDRAW (whole-PR review, I-1). A redraw builds the cells anew, so every cell
+        // came back scrolled to the top on any change: a comment on another task, a status line. The offsets the last
+        // cells had are kept by quadrant and given to the new cells' scrollers, which clamp them to what is there.
+        var offsets = cells.ToDictionary(c => c.Key, c => ((ScrollViewer)c.Value.Lines.Parent).VerticalOffset);
         cells.Clear();
         new[] { GridLength.Auto, new GridLength(1, GridUnitType.Star), new GridLength(1, GridUnitType.Star) }.ToList()
             .ForEach(height => MatrixGrid.RowDefinitions.Add(new RowDefinition { Height = height }));
@@ -180,6 +185,7 @@ public partial class TasksWindow
         try
         {
             view.Cells.ToList().ForEach(cell => Place(Cell(cell, view), 1 + (cell.Quadrant.IsImportant() ? 0 : 1), 1 + (cell.Quadrant.IsUrgent() ? 0 : 1)));
+            offsets.Where(o => cells.ContainsKey(o.Key)).ToList().ForEach(o => CellScroller(o.Key).ScrollToVerticalOffset(o.Value));
         }
         finally
         {

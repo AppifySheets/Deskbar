@@ -172,6 +172,7 @@ public partial class TasksWindow : Window
 
     // For the controller and the tests: what is drawn, in order.
     internal int Rebuilds { get; private set; }
+    internal int Presents { get; private set; }
     internal IReadOnlyList<string> Headers { get; private set; } = [];
     internal IReadOnlyList<Guid> Keys { get; private set; } = [];
     internal IReadOnlyList<string> FilterLabels { get; private set; } = [];
@@ -353,6 +354,7 @@ public partial class TasksWindow : Window
     /// <summary>Draws the view, unless it would draw nothing new or must wait (see the header).</summary>
     internal void Present(TasksView view)
     {
+        Presents++;
         latest = view;
         // A view arriving in the middle of a draw (a pulse pumped by something the draw did) is held, and drawn by the
         // Flush at the end of that draw (fix round 1).
@@ -389,7 +391,14 @@ public partial class TasksWindow : Window
     void Draw(TasksView view)
     {
         var signature = Signature(view);
-        if (signature == drawn || drawing) return;
+        // Where a new note would go (AddTarget) is not part of the signature (whole-PR review, I-1): it changes with every
+        // workspace switch, a line's click included, and redrawing every row for it reset the Matrix's scrolls. Only the
+        // add box's chip shows it, painted here in place.
+        if (signature == drawn || drawing)
+        {
+            if (!drawing) PaintAddPlace();
+            return;
+        }
         drawn = signature;
         Rebuilds++;
         drawing = true;
@@ -475,7 +484,6 @@ public partial class TasksWindow : Window
             view.WorkspaceFilterLabel,
             $"{view.Where}",
             string.Join('|', view.Places.Select(p => $"{p.IsGroup}{p.Workspace}{p.Name}{(p.Colour as SolidColorBrush)?.Color}")),
-            PlaceSignature(view.AddTarget),
             view.EmptyText,
             $"{renaming}",
             $"{view.Matrix}",

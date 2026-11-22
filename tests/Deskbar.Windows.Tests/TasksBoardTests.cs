@@ -1318,4 +1318,65 @@ public class TasksBoardTests
         t.Window.UpdateLayout();
         Assert.Equal(new Rect(narrow.Left, narrow.Top, narrow.Width, narrow.Height), t.Window.DeviceRect);
     });
+
+    // --- Whole-PR review, I-1: a redraw keeps each Matrix cell's scroll, and a workspace switch redraws no row --------
+
+    [Fact]
+    public void A_redraw_keeps_each_matrix_cells_scroll() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        Enumerable.Range(1, 30).ToList().ForEach(i => t.Tasks.AddNote($"note {i}", t.Gepha));
+        var other = t.Tasks.AddNote("in quadrant I", t.Gepha).Value.Id;
+        t.Tasks.SetFlag(other, TaskFlag.Important, true);
+        t.Tasks.SetFlag(other, TaskFlag.Urgent, true);
+        Assert.True(t.Harness.Manager.SetTasksMatrix(true).IsSuccess);
+        t.Controller.Open(Rect.Empty);
+        t.Window.UpdateLayout();
+        t.Window.CellScroller(Quadrant.IV).ScrollToVerticalOffset(200);
+        t.Window.UpdateLayout();
+        Assert.Equal(200, t.Window.CellScroller(Quadrant.IV).VerticalOffset, 1);
+        var rebuilds = t.Window.Rebuilds;
+
+        Assert.True(t.Controller.Comment(other, "a comment on another task").IsSuccess);
+        t.Window.UpdateLayout();
+
+        Assert.True(t.Window.Rebuilds > rebuilds, "the comment redrew the window");
+        Assert.Equal(200, t.Window.CellScroller(Quadrant.IV).VerticalOffset, 1);
+    });
+
+    // A line's click switches workspace, which changes where a new note would go: that is the add box's chip alone,
+    // painted in place, and no line is drawn again.
+    [Fact]
+    public void A_workspace_switch_redraws_no_row() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        t.Tasks.AddNote("a", t.Gepha);
+        t.Controller.Open(Rect.Empty);
+        var rebuilds = t.Window.Rebuilds;
+        var sparrow = t.Harness.Manager.State.Workspaces.Single(w => w.Name == "Sparrow");
+
+        t.Harness.Desktops.CurrentId = sparrow.DesktopId!.Value;
+        ((System.Reactive.Subjects.Subject<Guid>)t.Harness.Desktops.CurrentChanged).OnNext(sparrow.DesktopId!.Value);
+
+        Assert.Equal(sparrow.Id, t.Harness.Manager.CurrentWorkspaceId.Value);
+        Assert.Equal(rebuilds, t.Window.Rebuilds);
+        Assert.Contains("on Sparrow", Inside(ButtonNamed(t.Window, "Add to workspace")).OfType<TextBlock>().Single().Text);
+    });
+
+    // Whole-PR review, minor 4: a state pulse the window does not show (here the Claude skill setting) builds no view;
+    // a change of the workspaces does.
+    [Fact]
+    public void Only_a_state_change_the_window_shows_refreshes_it() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        t.Tasks.AddNote("a", t.Gepha);
+        t.Controller.Open(Rect.Empty);
+        var presents = t.Window.Presents;
+
+        Assert.True(t.Harness.Manager.SetClaudeSkill(false).IsSuccess);
+        Assert.Equal(presents, t.Window.Presents);
+
+        Assert.True(t.Harness.Manager.RenameWorkspace(t.Gepha, "GEPHA two").IsSuccess);
+        Assert.True(t.Window.Presents > presents);
+    });
 }
