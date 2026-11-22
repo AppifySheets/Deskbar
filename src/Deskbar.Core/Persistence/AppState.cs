@@ -371,6 +371,14 @@ public sealed record AppState(
     // an option". Off by default, and only meaningful with DockBar on and a second screen beside the bar's.
     public bool DockAcrossScreens { get; init; }
 
+    // The Deskbar Pro reminder's two dates (ProReminder in Core.Licensing has the schedule). Since: the local
+    // date of the first start of a build that has the reminder, stamped once by the app and never moved, so
+    // the two quiet weeks count from then for new and existing copies alike. DismissedOn: the local date
+    // "Not now" was last pressed, so the line stays away for the rest of that day. Both null until set, and a
+    // state.json without them loads as never stamped and never dismissed, so no migration.
+    public DateOnly? ProReminderSince { get; init; }
+    public DateOnly? ProReminderDismissedOn { get; init; }
+
     // The space left between tiled windows and around the grid's edge, in pixels at 100% scaling (the tiler
     // scales it by each monitor's DPI). Read as written: SetTileGap keeps it within 0..64, and a state.json
     // without the key loads the default, so no migration.

@@ -180,9 +180,60 @@ public partial class App : Application
     // posted through the dispatcher. Fire-and-forget like the call it wraps: RefreshAsync never throws, and
     // Tiler.Refresh guards itself. `tiler` is read when the refresh lands, so a refresh racing startup or exit
     // finds it null and does nothing.
+    //
+    // The Pro reminder line is repainted on the same landing: a purchase takes it away, and since this runs on the
+    // five-minute tick, a new day brings it back without a restart (FloatingBar.ProReminder.cs).
     void RefreshEntitlement() =>
         _ = Entitlement.RefreshAsync(barHandle)
-            .ContinueWith(_ => Dispatcher.InvokeAsync(() => tiler?.Refresh()), TaskScheduler.Default);
+            .ContinueWith(_ => Dispatcher.InvokeAsync(() =>
+            {
+                tiler?.Refresh();
+                floatingBar?.PaintProReminder();
+            }), TaskScheduler.Default);
+
+    // Whether the Pro reminder line is due right now: ProReminder.Due (Core.Licensing) over the live verdict, the two
+    // dates in AppState and today's LOCAL date, since "once a day" means the user's day.
+    //
+    // A developer can see the line at once instead of waiting two weeks: DESKBAR_PRO_REMINDER=now, honoured ONLY
+    // together with DESKBAR_APPDATA (a scratch root), the same pairing as ProEntitlement's DESKBAR_PRO, so it can
+    // never turn on in an everyday copy. It skips only the quiet weeks; Pro and "Not now" still hide the line.
+    bool ProReminderDue(WorkspaceManager manager)
+    {
+        var today = DateOnly.FromDateTime(DateTime.Now);
+        var showNow = AppPaths.RootOverridden && Environment.GetEnvironmentVariable("DESKBAR_PRO_REMINDER") == "now";
+        var since = showNow ? today.AddDays(-Core.Licensing.ProReminder.QuietDays) : manager.State.ProReminderSince;
+        return Core.Licensing.ProReminder.Due(Entitlement.Current.IsPro, since, manager.State.ProReminderDismissedOn, today);
+    }
+
+    // "Get Pro" on the reminder line. The Store copy buys the add-on through the Store's own purchase dialog
+    // (StorePurchase), then reads the verdict again at once so the line goes away without waiting for the
+    // five-minute tick. The GitHub copy has no Store licence to hold an add-on, so it opens the Store page, where
+    // Deskbar Pro is bought inside the Store copy (the settings carry over: both copies share %APPDATA%\Deskbar).
+    // A purchase that fails says why and offers the Store page instead; a cancelled dialog says nothing.
+    async void GetPro()
+    {
+        // Store-build behaviour, docs/superpowers/specs/2026-10-24-deskbar-store-packaging-design.md.
+        if (!PackageIdentity.IsPackaged)
+        {
+            OpenUrl(ProStorePage);
+            return;
+        }
+
+        var bought = await Deskbar.Windows.Store.StorePurchase.BuyProAsync(barHandle);
+        ClickTrace.Write($"pro: purchase {(bought.IsSuccess ? (bought.Value ? "owned" : "cancelled") : "failed: " + bought.Error)}");
+        if (bought.IsSuccess)
+        {
+            if (bought.Value) RefreshEntitlement();
+            return;
+        }
+
+        if (MessageBox.Show($"Deskbar Pro could not be bought here: {bought.Error}.\n\nOpen Deskbar in the Microsoft Store instead?",
+                "Deskbar", MessageBoxButton.YesNo, MessageBoxImage.Information) == MessageBoxResult.Yes)
+            OpenUrl(ProStorePage);
+    }
+
+    // The Store listing, where the Deskbar Pro add-on is shown and bought (Store ID 9PJX26NGFPNF).
+    const string ProStorePage = "https://apps.microsoft.com/detail/9PJX26NGFPNF";
 
     // Tiling (docs/superpowers/specs/2026-11-08-tiling-design.md). Called from OnStartup on the UI thread, once,
     // and only once the manager has STARTED: the manager's own desktop-change handling subscribes in
@@ -1292,6 +1343,11 @@ public partial class App : Application
 
             if (firstInstall && started.IsSuccess) SetUpFirstInstall(manager);
 
+            // The Deskbar Pro reminder's start date, stamped on the first start of a build that has the reminder and
+            // never moved after (WorkspaceManager.StampProReminderStart), so its two quiet weeks count from today for a
+            // new install and an existing one alike. Only after a successful Start, so a failed load never writes it.
+            if (started.IsSuccess) manager.StampProReminderStart(DateOnly.FromDateTime(DateTime.Now));
+
             // The aging icons' stamps from before this restart, then saved every minute (LastUsedFile).
             var lastUsedPath = Path.Combine(stateDir, "last-used.json");
             LastUsedFile.Restore(manager, lastUsedPath);
@@ -1603,6 +1659,11 @@ public partial class App : Application
                 AppActions = new FloatingBar.AppCommands(OpenManage, CheckForUpdateNow, ExitApp, () => pendingUpdate, ReportProblem, RestartApp),
                 // ...and the Search button's: quick find, built further down, so reached through the field.
                 OpenFind = () => quickFind?.ToggleFromBar(),
+                // ...and the Deskbar Pro reminder line's (FloatingBar.ProReminder.cs): when it is due, what "Get Pro"
+                // does, and "Not now", which records today so the line stays away until tomorrow.
+                ProReminderDue = () => ProReminderDue(manager),
+                GetPro = GetPro,
+                DismissProReminder = () => manager.DismissProReminder(DateOnly.FromDateTime(DateTime.Now)),
                 // ...and the captions' time today (FloatingBar.WorkspaceTime.cs): the Time tab's own reading
                 // of the same tracker, so the two cannot disagree.
                 TimeToday = id => timeTracker?.Time.On(id, DateOnly.FromDateTime(DateTime.Now)) ?? TimeSpan.Zero,
