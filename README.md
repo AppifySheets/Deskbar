@@ -703,9 +703,12 @@ Left-click the tray icon. Six tabs:
   and **Check again**, which asks the Store at once, for Pro bought on another PC. With or without
   it, **Report a problem…** is there too, because priority support is what Pro adds.
 
-Below the tabs sit the three machine-level settings: **Dock the bar to the edge of its screen**,
-**Start Deskbar with Windows**, and **Check GitHub for new versions**, with the version you are
-running at the bottom right.
+Below the tabs sit the machine-level settings, among them **Dock the bar to the edge of its screen**,
+**Start Deskbar with Windows** and **Check GitHub for new versions**, with the version you are
+running at the bottom right. One of them is the bar's look: **Give the floating bar's workspace rows
+a fine grain texture instead of a flat background**, on unless you untick it (`grain on|off` from a
+script). The grain lies only behind the workspace rows; the top of the bar (Start, search, the
+pinned apps), its footer (stats, tray, clock) and the strips along the top of each screen stay flat.
 
 <p align="center">
   <img src="docs/images/manage-settings.png" alt="Manage on the Settings tab: an explanation that every change applies at once, the Dimming slider at 75 percent with its description, the start of the Before it starts dimming section, Reset to defaults, and below the tabs the three checkboxes for docking, starting with Windows and checking GitHub, with the version at bottom right." />
@@ -788,7 +791,7 @@ Everything the bar's menus do has a command, and each one runs the same code as 
 | Desktops | `name-desktop <id or number> <name>` |
 | Starting | `start <ws> [--create [placement]] [--cwd <folder>] -- <program> [arguments...]`, `open <link> [--from <folder>]` |
 | Windows | `move <ws> [--create [placement]] [--no-follow] (--title <text> \| --hwnd <h>)...`, `rename-window`, `rename-app`, `rename-pattern`, `name-by-folder <hwnd> on\|off`, `restore-title`, `pin`, `unpin` |
-| Bar | `bar minimize\|restore\|dock\|undock\|across\|edge`, `arrange on\|off`, `stats detach\|attach` |
+| Bar | `bar minimize\|restore\|dock\|undock\|across\|edge`, `arrange on\|off`, `stats detach\|attach`, `grain on\|off` |
 | Tasks | `task list`, `task add <title> [--workspace <name>\|none] [--in 1m\|5m\|10m\|30m]`, `task timer <id> (--in ... \| --clear)`, `task done`, `task rename`, `task delete` |
 
 A few more, with `$ts` standing for the batch file:
