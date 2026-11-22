@@ -489,11 +489,11 @@ public partial class TasksWindow : Window
             string.Join('|', view.Filters.Select(f => $"{f.Label}{f.On}{f.Asks}")),
             view.WorkspaceFilterLabel,
             $"{view.Where}",
-            // The goal filter (goals plan, Task 6): its label, the filter in force and every goal either goal menu lists,
-            // so a goal renamed, added or done from the pipe redraws the toolbar. A row's own GoalId is not drawn, so it
-            // is not here.
+            // The goal filter (goals plan, Task 6): whether it shows, its label and the filter in force, which is what the
+            // toolbar draws. NOT the goals the two goal menus list (review M1): both menus are built from `latest` when
+            // they open, so they are current without a redraw, and a redraw for every goal edit rebuilt every row and
+            // reset the Matrix's scrolls. A row's own goal is not drawn either, so it is not here.
             $"{view.ShowsGoals}{view.GoalFilterLabel}{view.GoalFilter}",
-            string.Join('|', view.Goals.Concat(view.GoalFilterChoices).Select(g => $"{g.Goal}{g.Title}{g.Period}")),
             string.Join('|', view.Places.Select(p => $"{p.IsGroup}{p.Workspace}{p.Name}{(p.Colour as SolidColorBrush)?.Color}")),
             view.EmptyText,
             $"{renaming}",
@@ -1147,7 +1147,7 @@ public partial class TasksWindow : Window
         if (latest?.ShowsGoals == true)
         {
             var goal = Item("Goal");
-            GoalItems(id, row.GoalId).ForEach(item => goal.Items.Add(item));
+            GoalItems(id, row.Goal).ForEach(item => goal.Items.Add(item));
             menu.Items.Add(goal);
         }
         menu.Items.Add(new Separator());
@@ -1183,21 +1183,28 @@ public partial class TasksWindow : Window
 
     // The "Goal" choices for one task: "None", then this month's and this week's open goals (the view's Goals), the
     // task's own goal checked, each with "week" or "month" dim beside it. Plain TextBlock headers and no colours: goals
-    // have none. With no open goal this week or month, a disabled line says so, so the submenu is never just "None".
-    List<MenuItem> GoalItems(Guid id, Maybe<Guid> current)
+    // have none. A task linked to a goal the list leaves out (another period's, or one done since) gets that goal at the
+    // end, ticked, so the menu never hides what the task counts toward (review M6); it takes no click, since it is the
+    // link already made. With nothing to offer but "None", a disabled line says why.
+    List<MenuItem> GoalItems(Guid id, GoalChoice? own)
     {
         var none = Item("None", () => Actions?.SetGoal(id, Maybe<Guid>.None));
-        none.IsChecked = current.HasNoValue;
-        var goals = (latest?.Goals ?? []).Select(choice =>
-        {
-            var item = Item(choice.Title, () => Actions?.SetGoal(id, choice.Goal));
-            item.InputGestureText = choice.Period;
-            item.IsChecked = current.HasValue && choice.Goal == current.Value;
-            return item;
-        }).ToList();
+        none.IsChecked = own is null;
+        var offered = latest?.Goals ?? [];
+        var goals = offered.Select(choice => GoalItem(choice, own, () => Actions?.SetGoal(id, choice.Goal)))
+            .Concat(own is not null && offered.All(c => c.Goal != own.Goal) ? [GoalItem(own, own, null)] : Array.Empty<MenuItem>())
+            .ToList();
         return goals.Count > 0
             ? goals.Prepend(none).ToList()
             : [none, new MenuItem { Header = new TextBlock { Text = "No goals this week or month" }, IsEnabled = false }];
+    }
+
+    static MenuItem GoalItem(GoalChoice choice, GoalChoice? own, Action? click)
+    {
+        var item = Item(choice.Title, click);
+        item.InputGestureText = choice.Period;
+        item.IsChecked = own is not null && choice.Goal == own.Goal;
+        return item;
     }
 
     /// <summary>
@@ -1208,7 +1215,7 @@ public partial class TasksWindow : Window
     {
         var row = latest?.Groups.SelectMany(g => g.Rows).FirstOrDefault(r => r.Id == id);
         var menu = new ContextMenu { PlacementTarget = menuButtons.GetValueOrDefault(id), Placement = PlacementMode.Bottom };
-        GoalItems(id, row?.GoalId ?? Maybe<Guid>.None).ForEach(item => menu.Items.Add(item));
+        GoalItems(id, row?.Goal).ForEach(item => menu.Items.Add(item));
         OpenMenu(menu);
         return menu;
     }
