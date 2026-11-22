@@ -57,7 +57,7 @@ public sealed class TasksBoard : IDisposable
     readonly WorkspaceManager manager;
     readonly Func<TaskItem, Result> goTo;
     readonly Func<Guid, Brush?> colourOf;
-    readonly Action<nint>? bringForward;
+    readonly Func<nint, bool>? bringForward;
     readonly Func<TimeSpan, Action, IDisposable> undoTimer;
     readonly Func<DateTimeOffset> now;
     readonly TaskSelection selection;
@@ -75,13 +75,14 @@ public sealed class TasksBoard : IDisposable
     //   colourOf      a workspace's lane colour, the one its row on the bar wears; none for a workspace without one
     //   bringForward  brings the window to Petre by its handle: the App moves it to the desktop in front and then
     //                 activates it (Arrive), through an activator, because a `deskbar.cmd tasks-window show` typed in a
-    //                 terminal carries no right to take the foreground. The window itself never activates while this
-    //                 is set (see Open)
+    //                 terminal carries no right to take the foreground. It answers whether it activated the window: a
+    //                 window left on another desktop is not, and must then not be maximized either (Arrived). The
+    //                 window itself never activates while this is set (see Open)
     //   undoTimer     runs `then` once after the undo window unless disposed first; a dispatcher timer by default, a
     //                 seam so the tests move time by hand
     //   now           the clock a comment's time is told against ("11:42" today, a date before)
     public TasksBoard(TasksWindow window, TaskService tasks, WorkspaceManager manager, Func<TaskItem, Result> goTo,
-        Func<Guid, Brush?>? colourOf = null, Action<nint>? bringForward = null, Func<TimeSpan, Action, IDisposable>? undoTimer = null,
+        Func<Guid, Brush?>? colourOf = null, Func<nint, bool>? bringForward = null, Func<TimeSpan, Action, IDisposable>? undoTimer = null,
         Func<DateTimeOffset>? now = null, TaskSelection? selection = null)
     {
         this.window = window;
@@ -142,7 +143,6 @@ public sealed class TasksBoard : IDisposable
     {
         if (window.IsOpen)
         {
-            window.BringForward();
             Arrived();
             return;
         }
@@ -159,32 +159,44 @@ public sealed class TasksBoard : IDisposable
     }
 
     // The window, shown or restored without activation, comes to Petre: through the App's seam (move, then activate),
-    // or, with no seam (a copy without a desktop service), activated where it is.
+    // or, with no seam (a copy without a desktop service), activated where it is. A window left maximized is maximized
+    // only now, after the move (review I-2), and only when it was really activated: setting Maximized on a window
+    // still on another desktop activates it, and Windows would follow it there (review minor 1 of 187cf4a). It stays
+    // due, so the next arrival that works maximizes it.
     void Arrived()
     {
-        if (bringForward is { } seam) seam(EnsureHandle());
-        else window.ActivateHere();
-        // A window left maximized is maximized only now, after the move (review I-2).
-        window.MaximizeIfRemembered();
+        var activated = bringForward is { } seam ? seam(EnsureHandle()) : ActivatedHere();
+        if (activated) window.MaximizeIfRemembered();
+    }
+
+    bool ActivatedHere()
+    {
+        window.ActivateHere();
+        return true;
     }
 
     /// <summary>
     /// The App's bring-forward, in its order (fix round 1, Critical 1): <paramref name="move"/> the window to the
     /// desktop in front first, and <paramref name="activate"/> it only after. When the move fails, it is activated only
     /// if it is already on the desktop in front (<paramref name="onCurrentDesktop"/>); a window left on another desktop
-    /// is traced and left there, since activating it would take Petre to it.
+    /// is traced and left there, since activating it would take Petre to it. Answers whether it activated the window.
     /// </summary>
-    internal static void Arrive(nint hwnd, Func<Result> move, Func<bool> onCurrentDesktop, Action activate, Action<string> trace)
+    internal static bool Arrive(nint hwnd, Func<Result> move, Func<bool> onCurrentDesktop, Action activate, Action<string> trace)
     {
         var moved = move();
         if (moved.IsSuccess)
         {
             activate();
-            return;
+            return true;
         }
         trace($"tasks window 0x{hwnd:X}: not moved to the desktop in front: {moved.Error}");
-        if (onCurrentDesktop()) activate();
-        else trace($"tasks window 0x{hwnd:X}: left on its own desktop rather than taking you there");
+        if (onCurrentDesktop())
+        {
+            activate();
+            return true;
+        }
+        trace($"tasks window 0x{hwnd:X}: left on its own desktop rather than taking you there");
+        return false;
     }
 
     /// <summary>`tasks-window hide`, as the title bar's X does: hidden, its place remembered.</summary>

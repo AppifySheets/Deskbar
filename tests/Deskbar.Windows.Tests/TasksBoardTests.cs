@@ -75,8 +75,10 @@ public class TasksBoardTests
     // Each read of the task clock is a minute later, so tasks are raised in the order the test makes them. Each read of
     // the click clock is a second later, so a click is never "right after a repaint" unless a test hands in a clock of
     // its own (the click guard's test does).
+    // `bringForward` sees the handle and the seam answers that it activated the window; `activates` overrides that
+    // answer (the seam that left the window on its own desktop).
     static Board Build(Func<TaskItem, Result>? goTo = null, Action<nint>? bringForward = null, Func<DateTime>? clickClock = null,
-        Func<DateTimeOffset>? now = null, TaskSelection? selection = null)
+        Func<DateTimeOffset>? now = null, TaskSelection? selection = null, Func<bool>? activates = null)
     {
         var harness = Harness.Build();
         var minutes = 0;
@@ -89,7 +91,11 @@ public class TasksBoardTests
         {
             went.Add(t.Id);
             return Result.Success();
-        }), bringForward: bringForward, undoTimer: timers.Start, now: () => Start.AddHours(1), selection: selection);
+        }), bringForward: bringForward is null && activates is null ? null : hwnd =>
+        {
+            bringForward?.Invoke(hwnd);
+            return activates?.Invoke() ?? true;
+        }, undoTimer: timers.Start, now: () => Start.AddHours(1), selection: selection);
         return new Board { Harness = harness, Window = window, Controller = controller, Tasks = tasks, Timers = timers, WentTo = went };
     }
 
@@ -495,18 +501,18 @@ public class TasksBoardTests
     public void Arriving_moves_first_then_activates() => StaThread.Run(() =>
     {
         var steps = new List<string>();
-        TasksBoard.Arrive(0x42, () => { steps.Add("move"); return Result.Success(); }, () => { steps.Add("ask"); return false; },
-            () => steps.Add("activate"), trace => steps.Add("trace"));
+        Assert.True(TasksBoard.Arrive(0x42, () => { steps.Add("move"); return Result.Success(); }, () => { steps.Add("ask"); return false; },
+            () => steps.Add("activate"), trace => steps.Add("trace")));
         Assert.Equal(["move", "activate"], steps);
 
         steps.Clear();
-        TasksBoard.Arrive(0x42, () => { steps.Add("move"); return Result.Failure("refused"); }, () => { steps.Add("ask"); return true; },
-            () => steps.Add("activate"), trace => steps.Add("trace"));
+        Assert.True(TasksBoard.Arrive(0x42, () => { steps.Add("move"); return Result.Failure("refused"); }, () => { steps.Add("ask"); return true; },
+            () => steps.Add("activate"), trace => steps.Add("trace")));
         Assert.Equal(["move", "trace", "ask", "activate"], steps);
 
         steps.Clear();
-        TasksBoard.Arrive(0x42, () => { steps.Add("move"); return Result.Failure("refused"); }, () => { steps.Add("ask"); return false; },
-            () => steps.Add("activate"), trace => steps.Add("trace"));
+        Assert.False(TasksBoard.Arrive(0x42, () => { steps.Add("move"); return Result.Failure("refused"); }, () => { steps.Add("ask"); return false; },
+            () => steps.Add("activate"), trace => steps.Add("trace")));
         Assert.Equal(["move", "trace", "ask", "trace"], steps);
     });
 
@@ -689,6 +695,24 @@ public class TasksBoardTests
         Assert.Equal(WindowState.Minimized, seen[1]);
         // The seam here is a fake; the App's activator restores an iconic window after the move.
         Assert.Equal(WindowState.Minimized, t.Window.WindowState);
+    });
+
+    // Review minor 1 of 187cf4a: showing a window maximized activates it, so a window the seam left on its own desktop
+    // (not activated) is not maximized there, which would take Petre to it. It stays due: the next arrival that does
+    // activate it maximizes it.
+    [Fact]
+    public void A_window_left_on_its_own_desktop_is_not_maximized_there() => StaThread.Run(() =>
+    {
+        var activates = false;
+        using var t = Build(activates: () => activates);
+        Assert.True(t.Harness.Manager.SaveTasksWindow(new Deskbar.Core.Persistence.TasksWindowState(120, 90, 900, 640, Maximized: true)).IsSuccess);
+
+        t.Controller.Open(Rect.Empty);
+        Assert.Equal(WindowState.Normal, t.Window.WindowState);
+
+        activates = true;
+        t.Controller.Open(Rect.Empty);
+        Assert.Equal(WindowState.Maximized, t.Window.WindowState);
     });
 
     // Review I-3: at the window's minimum width, with enough lines for the scroll bar, every column stays inside the

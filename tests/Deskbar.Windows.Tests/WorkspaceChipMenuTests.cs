@@ -103,6 +103,26 @@ public class WorkspaceChipMenuTests
         Assert.Equal([Maybe<Guid>.From(state.Workspaces.Single(w => w.Name == "Archive").Id)], picked);
     });
 
+    // Review minor 4 of 187cf4a: one very long workspace name is trimmed inside its chip, the full name in the chip's
+    // tooltip, so it cannot run past the menu's edge.
+    [Fact]
+    public void A_very_long_name_is_trimmed_with_the_whole_name_in_its_tooltip() => StaThread.Run(() =>
+    {
+        var harness = Harness.Build(grouped: true);
+        var sparrow = harness.Manager.State.Workspaces.Single(w => w.Name == "Sparrow").Id;
+        var longName = string.Concat(Enumerable.Repeat("a very long workspace name ", 8)).Trim();
+        Assert.True(harness.Manager.RenameWorkspace(sparrow, longName).IsSuccess);
+
+        var menu = WorkspaceChipMenu.Build(WorkspaceChipMenu.Entries(harness.Manager.State, withNone: true), Maybe<Guid>.None, _ => { }, null);
+        var chip = WorkspaceChipMenu.Chips(menu).Single(c => NameOf(c) == longName);
+        var text = (TextBlock)chip.Content;
+        text.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
+
+        Assert.True(text.DesiredSize.Width <= WorkspaceChipMenu.ChipTextCeiling, $"{text.DesiredSize.Width}");
+        Assert.Equal(TextTrimming.CharacterEllipsis, text.TextTrimming);
+        Assert.Equal(longName, chip.ToolTip);
+    });
+
     // The keyboard still works without menu rows: the chips are focusable buttons the Tab key and the arrows walk in a
     // cycle, Enter on one picks it (a button's own Enter), and the menu opens with the keyboard on the current choice.
     [Fact]

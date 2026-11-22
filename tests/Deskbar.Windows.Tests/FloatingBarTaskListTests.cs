@@ -419,6 +419,64 @@ public class FloatingBarTaskListTests
         Assert.True(t.Bar.TaskListShown);
     });
 
+    // A store whose load fails, for the failed-load line without a file on disk.
+    sealed class UnreadableStore : ITaskStore
+    {
+        public Result<TaskBoard> Load() => Result.Failure<TaskBoard>("Could not read tasks.json: bad");
+
+        public Result Save(TaskBoard board) => Result.Success();
+    }
+
+    // Review minor 3 of 187cf4a: a change of text size moves every line (each grows or shrinks), and so does the
+    // failed-load line going away above them, although neither changes which tasks are on show. Each restarts the
+    // click guard's half second, as a change of the lines themselves does.
+    [Fact]
+    public void A_text_size_change_restarts_the_click_guard() => StaThread.Run(() =>
+    {
+        var now = ClickStart;
+        var went = new List<Guid>();
+        using var t = Build(clickClock: () => now, goTo: id =>
+        {
+            went.Add(id);
+            return Result.Success();
+        });
+        Enumerable.Range(1, 3).ToList().ForEach(i => t.Tasks.AddNote($"Note {i}", t.Gepha));
+        now = now.AddSeconds(1);
+
+        Assert.True(t.Harness.Manager.SetBarTextOffset(3).IsSuccess);
+        t.Bar.RequestRebuild();
+        Click(t.Lines[0]);
+        Assert.Empty(went);
+
+        now = now.AddSeconds(1);
+        Click(t.Lines[0]);
+        Assert.Single(went);
+    });
+
+    [Fact]
+    public void The_load_problem_line_going_restarts_the_click_guard() => StaThread.Run(() =>
+    {
+        var now = ClickStart;
+        var went = new List<Guid>();
+        var service = new TaskService(new UnreadableStore(), () => Start);
+        service.Load();
+        using var t = Build(tasks: service, clickClock: () => now, goTo: id =>
+        {
+            went.Add(id);
+            return Result.Success();
+        });
+        Enumerable.Range(1, 3).ToList().ForEach(i => service.AddNote($"Note {i}", t.Gepha));
+        now = now.AddSeconds(1);
+
+        Click(ButtonNamed(t.List, "Dismiss"));
+        Click(t.Lines[0]);
+        Assert.Empty(went);
+
+        now = now.AddSeconds(1);
+        Click(t.Lines[0]);
+        Assert.Single(went);
+    });
+
     // A tasks.json that could not be read must not pass for an empty list. The real store is used, so the line's
     // promise (a .bak kept beside tasks.json) is checked against what the store really did.
     [Fact]
@@ -1254,6 +1312,67 @@ public class FloatingBarTaskListTests
         Dock(t, 200);
         Settle(t);
         Assert.Equal(3, t.Lines.Count);
+    });
+
+    // Review C-1 of 187cf4a: the pass took one line's height from the FIRST line only. With notes (shorter) above Claude
+    // lines carrying a session window icon (taller), the count flipped 7, 6, 7, 6 for ever, and since each flip queues
+    // another pass above Input priority, the whole UI thread froze. Swept over heights and two text sizes: once settled,
+    // one more pass must change nothing.
+    [Fact]
+    public void A_docked_list_of_mixed_line_heights_settles_at_every_height() => StaThread.Run(() =>
+    {
+        var unsettled = new List<string>();
+        new[] { -2.0, 0.0 }.ToList().ForEach(offset =>
+        {
+            using var t = Build(openWindow: () => { }, sessionWindow: _ => Maybe<nint>.From((nint)0x1234));
+            t.Harness.Manager.SetBarTextOffset(offset);
+            Enumerable.Range(1, 20).ToList().ForEach(i => t.Tasks.Create($"Claude {i}", t.Gepha, Session($"s{i}")));
+            Enumerable.Range(1, 3).ToList().ForEach(i => t.Tasks.AddNote($"Note {i}", t.Gepha));
+            t.Bar.RequestRebuild();
+            t.Bar.SizeToContent = SizeToContent.Manual;
+            for (var height = 450.0; height < 650; height += 0.5)
+            {
+                t.Bar.Height = height;
+                Settle(t);
+                var settled = t.Bar.TaskListSlotCount;
+                t.Bar.UpdateLayout();
+                t.Bar.FitTaskListToFreeHeight();
+                t.Bar.UpdateLayout();
+                if (t.Bar.TaskListSlotCount != settled) unsettled.Add($"offset {offset} height {height}: {settled} then {t.Bar.TaskListSlotCount}");
+            }
+        });
+
+        Assert.True(unsettled.Count == 0, string.Join("\n", unsettled.Take(10)));
+    });
+
+    // Review I-1 of 187cf4a: undocking laid the bar out with the docked line count before the pass after layout could
+    // shrink it, so the position saved on undock was clamped against a bar as tall as the screen. Letting go of the
+    // strip draws three lines before its own layout, and the bar is as tall as a floating bar right then.
+    [Fact]
+    public void Undocking_lays_out_three_lines_from_the_start() => StaThread.Run(() =>
+    {
+        using var t = Build(openWindow: () => { });
+        Enumerable.Range(1, 30).ToList().ForEach(i => t.Tasks.AddNote($"Note {i}", t.Gepha));
+        t.Bar.UpdateLayout();
+        Dock(t, 900);
+        Settle(t);
+        Assert.True(t.Lines.Count > 3, $"{t.Lines.Count} lines docked");
+        var laidOut = new List<int>();
+        t.Bar.LayoutUpdated += (_, _) => laidOut.Add(t.Lines.Count);
+
+        t.Bar.LetGoOfStrip();
+
+        Assert.NotEmpty(laidOut);
+        Assert.All(laidOut, count => Assert.Equal(3, count));
+        Assert.Equal(3, t.Bar.TaskListSlotCount);
+        // The list asks for its floating height as it lets go: the passes that follow change nothing, so the height the
+        // undock places and saves from is already the floating bar's. (The bar's own height is no witness in a test:
+        // the test window, parked off screen, keeps its docked 900 whatever it is asked, measured with an empty task
+        // list too.)
+        var asItLetGo = t.List.DesiredSize.Height;
+        Settle(t);
+        Assert.Equal(3, t.Lines.Count);
+        Assert.Equal(asItLetGo, t.List.DesiredSize.Height, 1);
     });
 
     [Fact]
