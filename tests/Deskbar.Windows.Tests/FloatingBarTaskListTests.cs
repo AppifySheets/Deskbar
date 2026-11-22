@@ -47,17 +47,22 @@ public class FloatingBarTaskListTests
 
     static readonly DateTimeOffset Start = new(2026, 11, 22, 9, 0, 0, TimeSpan.Zero);
 
-    // Each read of the clock is a minute later, so every task is raised at its own time and the pile's order is the
-    // order the test made them in, newest first.
     // The window Petre was typing in before he clicked the bar, as the foreground seam reports it. Made up, like the
     // language tests' editor: a test must never read or move the real foreground.
     const nint Editor = 0x5150;
 
+    static readonly DateTime ClickStart = new(2026, 11, 22, 9, 0, 0, DateTimeKind.Utc);
+
+    // Each read of the task clock is a minute later, so every task is raised at its own time and the pile's order is
+    // the order the test made them in, newest first. Each read of the click clock is a second later, so a click is
+    // never "right after a repaint" unless a test hands in a clock of its own (the click guard's tests do).
     static ListBar Build(Func<Guid, Result>? goTo = null, Action? openWindow = null, TaskService? tasks = null, Func<string, Maybe<nint>>? sessionWindow = null,
-        List<nint>? handedBack = null, bool editorAlive = true)
+        List<nint>? handedBack = null, bool editorAlive = true, Func<DateTime>? clickClock = null, Func<nint>? front = null,
+        Func<nint, bool>? onCurrentDesktop = null)
     {
         var harness = Harness.Build();
         var minutes = 0;
+        var seconds = 0;
         var service = tasks ?? new TaskService(new MemoryStore(), () => Start.AddMinutes(minutes++));
         var bar = new FloatingBar(harness.Manager)
         {
@@ -69,9 +74,11 @@ public class FloatingBarTaskListTests
             GoToTask = goTo ?? (_ => Result.Success()),
             OpenTasksWindow = openWindow,
             SessionWindow = sessionWindow ?? (_ => Maybe<nint>.None),
-            ForegroundWindow = () => Editor,
+            ForegroundWindow = front ?? (() => Editor),
             HandForegroundTo = hwnd => handedBack?.Add(hwnd),
             WindowAlive = hwnd => hwnd == Editor && editorAlive,
+            OnCurrentDesktop = onCurrentDesktop ?? (_ => true),
+            TaskClickClock = clickClock ?? (() => ClickStart.AddSeconds(seconds++)),
         };
         bar.ShowBar();
         bar.UpdateLayout();
@@ -88,6 +95,17 @@ public class FloatingBarTaskListTests
         Inside(scope).OfType<Button>().Any(b => AutomationProperties.GetName(b) == name);
 
     static void Click(Button button) => button.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+
+    // A press of the left button with the click count Windows would give it (2 for the second press of a double
+    // click), then the Click it ends in. ClickCount has no public setter, so it is set the way WPF's own input code
+    // sets it.
+    static void PressAndClick(Button button, int clickCount)
+    {
+        var press = new MouseButtonEventArgs(Mouse.PrimaryDevice, 0, MouseButton.Left) { RoutedEvent = UIElement.PreviewMouseLeftButtonDownEvent };
+        typeof(MouseButtonEventArgs).GetProperty(nameof(MouseButtonEventArgs.ClickCount))!.SetValue(press, clickCount);
+        button.RaiseEvent(press);
+        Click(button);
+    }
 
     static void Press(FloatingBar bar, UIElement target, Key key) =>
         target.RaiseEvent(new KeyEventArgs(Keyboard.PrimaryDevice, PresentationSource.FromVisual(bar), 0, key) { RoutedEvent = Keyboard.PreviewKeyDownEvent });
@@ -445,6 +463,170 @@ public class FloatingBarTaskListTests
             Click(ButtonNamed(t.List, "Add a task"));
             Press(t.Bar, Inside(t.List).OfType<TextBox>().Single(b => Equals(b.Tag, "task-add-box")), Key.Escape);
             Assert.Empty(handed);
+        }
+    });
+
+    // PR A FIX WAVE, Critical 1: on a bar whose width SizeToContent still owns (a floating bar never resized, a new
+    // install's), a line wider than the bar made TakesNoWidth measure at no width and arrange at the real one, the
+    // child's size flipped between the two, and layout never settled. A 120-character title must leave the layout
+    // valid and the bar as wide as it was.
+    [Fact]
+    public void A_long_title_settles_the_layout_and_does_not_widen_the_bar() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        Assert.True(t.Bar.SizeToContent.HasFlag(SizeToContent.Width));
+        var width = t.Bar.ActualWidth;
+
+        t.Tasks.AddNote(string.Concat(Enumerable.Repeat("Check the Store certification email ", 4))[..120], Maybe<Guid>.None);
+        t.Bar.UpdateLayout();
+
+        var holder = ((Border)t.List).Child;
+        Assert.True(t.List.IsMeasureValid && t.List.IsArrangeValid);
+        Assert.True(holder.IsMeasureValid && holder.IsArrangeValid);
+        Assert.InRange(t.Bar.ActualWidth, 0, width + 1);
+    });
+
+    // PR A FIX WAVE, Important 2: a closed note leaves the list and the next line slides under the pointer, so a second
+    // click must not close that one too. A press that is the second of a double click, or a click within half a
+    // second of a repaint that changed the lines, is ignored on a line, its tick, its close button and on "+N".
+    [Fact]
+    public void A_double_click_or_a_click_right_after_a_repaint_is_ignored() => StaThread.Run(() =>
+    {
+        var now = ClickStart;
+        var went = new List<Guid>();
+        using var t = Build(clickClock: () => now, goTo: id =>
+        {
+            went.Add(id);
+            return Result.Success();
+        });
+        Enumerable.Range(1, 5).ToList().ForEach(i => t.Tasks.AddNote($"Note {i}", t.Gepha));
+
+        // Right after the repaint that drew them: nothing takes the click.
+        Click(ButtonNamed(t.Lines[0], "Tick off"));
+        Click(t.Lines[0]);
+        Click(ButtonNamed(t.List, "More tasks"));
+        Assert.Equal(5, t.Tasks.Board.Pile().Count);
+        Assert.Empty(went);
+        Assert.Equal(3, t.Lines.Count);
+
+        // Half a second on, a single click works and closes Note 5...
+        now = now.AddMilliseconds(600);
+        PressAndClick(ButtonNamed(t.Lines[0], "Tick off"), clickCount: 1);
+        Assert.Equal(4, t.Tasks.Board.Pile().Count);
+
+        // ...and the second press of the double click, landing on Note 4's tick a moment later, does not close it.
+        now = now.AddMilliseconds(600);
+        PressAndClick(ButtonNamed(t.Lines[0], "Tick off"), clickCount: 2);
+        PressAndClick(t.Lines[0], clickCount: 2);
+        PressAndClick(ButtonNamed(t.List, "More tasks"), clickCount: 2);
+        Assert.Equal(4, t.Tasks.Board.Pile().Count);
+        Assert.Empty(went);
+        Assert.Equal(3, t.Lines.Count);
+    });
+
+    // The tick and the close button sit inside a line, which is itself a button; their click must never also go to the
+    // task.
+    [Fact]
+    public void A_tick_or_a_close_never_goes_to_the_task() => StaThread.Run(() =>
+    {
+        var went = new List<Guid>();
+        using var t = Build(goTo: id =>
+        {
+            went.Add(id);
+            return Result.Success();
+        });
+        t.Tasks.AddNote("On GEPHA", t.Gepha);
+        var done = t.Tasks.Create("Merged", t.Gepha, Session("s1")).Value;
+        t.Tasks.MarkDone(done.Id);
+
+        Click(ButtonNamed(t.Lines.Single(l => ((TaskLine)l.Tag).Id == done.Id), "Close task"));
+        Click(ButtonNamed(Assert.Single(t.Lines), "Tick off"));
+
+        Assert.Empty(t.Lines);
+        Assert.Empty(went);
+    });
+
+    // PR A FIX WAVE, Important 3: expanded in place, the list shows at most eight lines and scrolls the rest, so dozens
+    // of migrated notes cannot push the workspace rows off a docked bar. Folded, it is the three lines as before.
+    [Fact]
+    public void The_expanded_list_shows_at_most_eight_lines_and_scrolls() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        Enumerable.Range(1, 12).ToList().ForEach(i => t.Tasks.AddNote($"Note {i}", Maybe<Guid>.None));
+        var viewer = Inside(t.List).OfType<ScrollViewer>().Single(v => Equals(v.Tag, "task-lines"));
+        Assert.True(double.IsPositiveInfinity(viewer.MaxHeight));
+
+        Click(ButtonNamed(t.List, "More tasks"));
+        t.Bar.UpdateLayout();
+
+        Assert.Equal(12, t.Lines.Count);
+        var eight = t.Lines.Take(8).Sum(l => l.ActualHeight + l.Margin.Top + l.Margin.Bottom);
+        Assert.Equal(eight, viewer.ViewportHeight, 1);
+        Assert.True(viewer.ExtentHeight > viewer.ViewportHeight + 1, $"the rest scrolls: extent {viewer.ExtentHeight}, viewport {viewer.ViewportHeight}");
+
+        Click(ButtonNamed(t.List, "More tasks"));
+        t.Bar.UpdateLayout();
+        Assert.Equal(3, t.Lines.Count);
+        Assert.True(double.IsPositiveInfinity(viewer.MaxHeight));
+    });
+
+    // PR A FIX WAVE, Minor 7: a long workspace name is trimmed in a line's chip and in the add box's chips, so it cannot
+    // squeeze the title away or push "other…" out of the row.
+    [Fact]
+    public void A_long_workspace_name_is_trimmed_in_the_chips() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        t.Tasks.AddNote("Review the migration", t.Gepha);
+        Click(ButtonNamed(t.List, "Add a task"));
+
+        var labels = Inside(t.List).OfType<Border>().Where(b => Equals(b.Tag, "task-workspace") || Equals(b.Tag, "task-chip"))
+            .Select(b => (TextBlock)b.Child).ToList();
+        Assert.True(labels.Count >= 4);
+        Assert.All(labels, label =>
+        {
+            Assert.True(label.MaxWidth < 200, $"'{label.Text}' has a ceiling");
+            Assert.Equal(TextTrimming.CharacterEllipsis, label.TextTrimming);
+        });
+    });
+
+    // PR A FIX WAVE, Minor 8: the keyboard goes back only to a window on the desktop in front. The window in front at
+    // "+ Add" is the first choice; when that was the bar itself, the last window typed in, but only while it is on the
+    // current desktop. A window on another desktop is refused either way, since giving it the foreground would switch
+    // desktops under Petre.
+    [Fact]
+    public void The_keyboard_goes_back_only_to_a_window_on_this_desktop() => StaThread.Run(() =>
+    {
+        // The remembered window (the bar was in front at "+ Add") is on another desktop: refused.
+        var handed = new List<nint>();
+        nint inFront = Editor;
+        using (var t = Build(handedBack: handed, front: () => inFront, onCurrentDesktop: _ => false))
+        {
+            t.Bar.NoteForeground(Editor);
+            inFront = new System.Windows.Interop.WindowInteropHelper(t.Bar).Handle;
+            Click(ButtonNamed(t.List, "Add a task"));
+            Press(t.Bar, Inside(t.List).OfType<TextBox>().Single(b => Equals(b.Tag, "task-add-box")), Key.Escape);
+            Assert.Empty(handed);
+        }
+
+        // The window in front at "+ Add", whose desktop is no longer the one in front by the time of Esc: refused.
+        var here = true;
+        using (var t = Build(handedBack: handed, onCurrentDesktop: _ => here))
+        {
+            Click(ButtonNamed(t.List, "Add a task"));
+            here = false;
+            Press(t.Bar, Inside(t.List).OfType<TextBox>().Single(b => Equals(b.Tag, "task-add-box")), Key.Escape);
+            Assert.Empty(handed);
+        }
+
+        // And the remembered window, on this desktop, is the one handed back.
+        inFront = Editor;
+        using (var t = Build(handedBack: handed, front: () => inFront, onCurrentDesktop: _ => true))
+        {
+            t.Bar.NoteForeground(Editor);
+            inFront = new System.Windows.Interop.WindowInteropHelper(t.Bar).Handle;
+            Click(ButtonNamed(t.List, "Add a task"));
+            Press(t.Bar, Inside(t.List).OfType<TextBox>().Single(b => Equals(b.Tag, "task-add-box")), Key.Escape);
+            Assert.Equal([Editor], handed);
         }
     });
 
