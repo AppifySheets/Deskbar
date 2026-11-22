@@ -168,9 +168,9 @@ public partial class FloatingBar
 
     // How far in from the bar's inner edge the frost takes to reach full strength, as a share of the bar's width
     // (Frost.Ease). The veil eases over the same share (BarSurface.FrostVeilFrom), so picture and veil arrive
-    // together. A third: Petre asked for the edge to be "less pronounced", and a third of a 210 DIP bar is about
-    // 70 DIP, the width of an icon and a half, so the ramp is gentle without reaching the captions' gutter.
-    internal const double FrostEase = 0.35;
+    // together. A fifth, about 40 DIP of a 210 DIP bar. It shipped at 35% after Petre asked for the edge to be "less
+    // pronounced"; seen on his bar: "easing-in is too much; little less width for the easing".
+    internal const double FrostEase = 0.2;
 
     static FrostImage? Frosted(BitmapSource picture, WallpaperCrop.Area area, WallpaperCrop.Rect bar, FrostSource source)
     {
