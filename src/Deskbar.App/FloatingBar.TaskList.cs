@@ -336,7 +336,7 @@ public partial class FloatingBar
         // made the whole list jump up and down under it.
         taskChipHere = TaskChip("", () => ChooseTaskTarget(taskAddHere));
         taskChipNone = TaskChip("none", () => ChooseTaskTarget(Maybe<Guid>.None));
-        taskChipOther = TaskChip(OtherChipText, OpenOtherWorkspaces);
+        taskChipOther = TaskChip(OtherChipText, () => OpenOtherWorkspaces());
         taskAddOn = new TextBlock { Text = "on", Foreground = TaskDimInk, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(2, 1, 4, 1) };
         taskAddChips = new WrapPanel
         {
@@ -922,14 +922,15 @@ public partial class FloatingBar
         taskAddPlaceholder.Visibility = taskAddBox.Text.Length == 0 ? Visibility.Visible : Visibility.Collapsed;
     }
 
-    // On every paint: the placeholder names the workspace in front, so it follows a desktop switch; and while nobody is
-    // typing, the "here" chip is that workspace too. An empty box's chip follows it; a box holding text keeps the
-    // workspace it was given, which then shows as the "other…" chip if it is no longer the one in front.
+    // On every paint, while nobody is typing, the "here" chip is the workspace in front. An empty box's chip follows it
+    // (and the placeholder with it, so it follows a desktop switch); a box holding text keeps the workspace it was
+    // given, which then shows as the "other…" chip if it is no longer the one in front. The placeholder always names
+    // the chosen chip's workspace (PaintPlaceholder).
     void FollowCurrentWorkspace()
     {
         if (taskAddPlaceholder is null || taskAddBox is null) return;
         var current = manager.CurrentWorkspaceId;
-        taskAddPlaceholder.Text = PlaceholderFor(current.Bind(WorkspaceName));
+        PaintPlaceholder();
         if (taskTyping) return;
         taskAddHere = current;
         if (taskAddBox.Text.Length == 0) taskAddTarget = current;
@@ -986,10 +987,11 @@ public partial class FloatingBar
     }
 
     // "other…": every workspace but the current one, as a menu under the chip. Held open the way the bar's other menus
-    // are (HoldFadeWhileOpen), so the bar neither fades nor rebuilds out from under it.
-    void OpenOtherWorkspaces()
+    // are (HoldFadeWhileOpen), so the bar neither fades nor rebuilds out from under it. Internal, and answering the
+    // menu, for the tests, which pick from it.
+    internal ContextMenu? OpenOtherWorkspaces()
     {
-        if (taskChipOther is null) return;
+        if (taskChipOther is null) return null;
         var menu = new ContextMenu { PlacementTarget = taskChipOther.Button, Placement = PlacementMode.Bottom };
         manager.State.Workspaces
             .Where(w => !taskAddHere.HasValue || w.Id != taskAddHere.Value)
@@ -1001,13 +1003,20 @@ public partial class FloatingBar
                 item.Click += (_, _) => ChooseTaskTarget(w.Id);
                 menu.Items.Add(item);
             });
-        if (menu.Items.Count == 0) return;
+        if (menu.Items.Count == 0) return null;
         HoldFadeWhileOpen(menu);
         menu.IsOpen = true;
+        return menu;
     }
 
     // The chips as the choice stands: the current workspace's (hidden on no workspace), "none", and "other…", which
-    // takes the name of the workspace chosen from its menu. The ticked one has the blue edge.
+    // takes the name of the workspace chosen from its menu.
+    //
+    // EXACTLY ONE CHIP READS AS CHOSEN (Petre's live check: he picked "none", its edge went blue, but the "Deskbar" chip
+    // stayed filled in its purple and still looked chosen). Chosen: filled (a workspace chip in its own colour, "none"
+    // and "other…" in the neutral chip fill) with the blue edge and the bright ink. Not chosen: no fill and dim ink,
+    // with only a thin edge, in the workspace's colour for a workspace chip and the neutral fill for the other two, so a
+    // chip never looks chosen merely by being coloured. The edge is 1 DIP either way, so choosing moves nothing.
     void PaintTaskChips()
     {
         if (taskChipHere is null || taskChipNone is null || taskChipOther is null) return;
@@ -1015,20 +1024,33 @@ public partial class FloatingBar
         var other = taskAddTarget.HasValue && !taskAddTarget.Equals(here) ? taskAddTarget : Maybe<Guid>.None;
 
         taskChipHere.Button.Visibility = here.HasValue ? Visibility.Visible : Visibility.Collapsed;
-        if (here.HasValue) PaintChip(taskChipHere, WorkspaceName(here.Value).GetValueOrDefault("this workspace"), ChipFill(workspaceAccents.GetValueOrDefault(here.Value)));
+        if (here.HasValue)
+            PaintChip(taskChipHere, WorkspaceName(here.Value).GetValueOrDefault("this workspace"), workspaceAccents.GetValueOrDefault(here.Value),
+                chosen: taskAddTarget.Equals(here));
+        PaintChip(taskChipNone, "none", null, chosen: taskAddTarget.HasNoValue);
         PaintChip(taskChipOther, other.HasValue ? WorkspaceName(other.Value).GetValueOrDefault(OtherChipText) : OtherChipText,
-            other.HasValue ? ChipFill(workspaceAccents.GetValueOrDefault(other.Value)) : TaskButtonFill);
-
-        taskChipHere.Face.BorderBrush = here.HasValue && taskAddTarget.Equals(here) ? TaskPickedEdge : Brushes.Transparent;
-        taskChipNone.Face.BorderBrush = taskAddTarget.HasNoValue ? TaskPickedEdge : Brushes.Transparent;
-        taskChipOther.Face.BorderBrush = other.HasValue ? TaskPickedEdge : Brushes.Transparent;
+            other.HasValue ? workspaceAccents.GetValueOrDefault(other.Value) : null, chosen: other.HasValue);
+        PaintPlaceholder();
     }
 
-    static void PaintChip(TaskChipParts chip, string text, Brush fill)
+    // `accent` is the workspace's rail colour, or null for "none" and an unpicked "other…" (and a workspace without a
+    // colour), which take the neutral chip fill.
+    void PaintChip(TaskChipParts chip, string text, Brush? accent, bool chosen)
     {
+        var fill = accent is null ? TaskButtonFill : ChipFill(accent);
         chip.Label.Text = text;
-        chip.Face.Background = fill;
+        chip.Label.Foreground = chosen ? TaskInk : TaskDimInk;
+        chip.Face.Background = chosen ? fill : Brushes.Transparent;
+        chip.Face.BorderBrush = chosen ? TaskPickedEdge : fill;
         AutomationProperties.SetName(chip.Button, text);
+    }
+
+    // The empty box says where a note typed now would go: the chosen chip's workspace ("Add to Sparrow…", also for one
+    // picked through "other…"), or "Add…" for none. Not the workspace in front: after picking "none" the box must not
+    // still promise "Add to Deskbar…".
+    void PaintPlaceholder()
+    {
+        if (taskAddPlaceholder is not null) taskAddPlaceholder.Text = PlaceholderFor(taskAddTarget.Bind(WorkspaceName));
     }
 
     // A line's template: the strip buttons' hover, with the content stretched across the line so the text has the
