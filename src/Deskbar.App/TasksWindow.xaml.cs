@@ -531,7 +531,7 @@ public partial class TasksWindow : Window
         [new(22), new(1, GridUnitType.Star), new(110), new(92), new(40), new(52), new(24)];
 
     // The icon font of Windows 11, with Windows 10's as the fallback.
-    static readonly FontFamily IconFont = new("Segoe Fluent Icons, Segoe MDL2 Assets");
+    static FontFamily IconFont => FloatingBar.IconFont;
 
     static void Quieten(IEnumerable<UIElement> parts, bool loud) => parts.ToList().ForEach(part => part.Opacity = loud ? 1 : 0.5);
 
@@ -545,7 +545,8 @@ public partial class TasksWindow : Window
     // Claude's badge, a note's tick box, or Undo on a line just closed.
     UIElement LeftOf(TaskRowView row) =>
         row.Closing
-            ? Small("↶", "Undo", () => Actions?.Undo(row.Id), "Undo: bring the task back", DoubleClickIgnored)
+            // A sign, not a word (Petre: "undo sign instead of text"), the bar's own (FloatingBar.UndoSign).
+            ? Small(FloatingBar.UndoSign(12, Ink), "Undo", () => Actions?.Undo(row.Id), "Undo", DoubleClickIgnored)
             : row.Claudes
                 ? new Border
                 {

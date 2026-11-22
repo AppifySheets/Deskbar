@@ -670,15 +670,24 @@ public partial class FloatingBar
                 : null,
         }.OfType<UIElement>();
 
-    // "Undo" on a line just closed: the asking orange's opposite, the plain bright ink, in a small pill.
+    // Undo on a line just closed: a sign, not a word (Petre: "undo sign instead of text"), Segoe Fluent Icons' Undo
+    // (U+E7A7, Segoe MDL2 Assets on Windows 10), in the plain bright ink, about the tick box's size and in its place.
+    // Its automation name and tooltip say "Undo".
     Button UndoButton(TaskLine line) =>
-        TaskButton("Undo", new Border
-        {
-            Background = TaskButtonFill,
-            CornerRadius = new CornerRadius(4),
-            Padding = new Thickness(6, 0, 6, 1),
-            Child = new TextBlock { Text = "Undo", Foreground = TaskInk, FontSize = Text(7.5) },
-        }, () => UndoClose(line.Id), "Bring the task back", ignoredWhen: DoubleClickIgnored);
+        TaskButton("Undo", UndoSign(Text(8.5), TaskInk), () => UndoClose(line.Id), "Undo", ignoredWhen: DoubleClickIgnored);
+
+    internal static readonly FontFamily IconFont = new("Segoe Fluent Icons, Segoe MDL2 Assets");
+
+    internal static TextBlock UndoSign(double size, Brush ink) => new()
+    {
+        Tag = "undo-sign",
+        Text = "",
+        FontFamily = IconFont,
+        FontSize = size,
+        Foreground = ink,
+        VerticalAlignment = VerticalAlignment.Center,
+        Margin = new Thickness(1, 0, 1, 0),
+    };
 
     // The CLAUDE tag of the mockup: dark capitals on the asking orange.
     Border ClaudeTag() => new()
