@@ -28,6 +28,24 @@ public class BarSurfaceTests
         Assert.True(BarSurface.FrostVeil.IsFrozen);
     }
 
+    // The veil eases in from the inner edge (Petre: "make edges less pronounced"): none at that edge, half from the
+    // ease's end, on the side the bar faces the desktop.
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void The_eased_veil_starts_clear_at_the_inner_edge_and_is_half_past_the_ease(bool fromLeft)
+    {
+        var veil = Assert.IsType<LinearGradientBrush>(BarSurface.FrostVeilFrom(fromLeft, 0.35));
+        var byOffset = veil.GradientStops.OrderBy(s => s.Offset).ToList();
+        var (edge, inner) = fromLeft ? (byOffset.First(), byOffset.Last()) : (byOffset.Last(), byOffset.First());
+        Assert.Equal(fromLeft ? 0 : 1, edge.Offset, 3);
+        Assert.Equal(fromLeft ? 0.35 : 0.65, inner.Offset, 3);
+        Assert.Equal(0, edge.Color.A);
+        Assert.Equal(0x80, inner.Color.A);
+        Assert.True(veil.IsFrozen);
+        Assert.Same(veil, BarSurface.FrostVeilFrom(fromLeft, 0.35));
+    }
+
     [Fact]
     public void The_flat_surface_is_fully_opaque()
     {

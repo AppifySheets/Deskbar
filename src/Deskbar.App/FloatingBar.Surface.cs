@@ -55,7 +55,10 @@ public partial class FloatingBar
     void PaintBand()
     {
         var frosted = manager.State.SeeThrough && frostSource is not null;
-        RowsSurface.Background = !manager.State.SeeThrough ? BarSurface.Solid : frosted ? BarSurface.FrostVeil : BarSurface.SeeThrough;
+        // Over a frost the veil eases in from the inner edge with the frost itself (BarSurface.FrostVeilFrom).
+        RowsSurface.Background = !manager.State.SeeThrough ? BarSurface.Solid
+            : frostSource is { } source && frosted ? BarSurface.FrostVeilFrom(source.FromLeft, FrostEase)
+            : BarSurface.SeeThrough;
         FrostSurface.Visibility = frosted ? Visibility.Visible : Visibility.Collapsed;
     }
 

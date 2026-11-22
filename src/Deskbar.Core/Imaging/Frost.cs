@@ -5,9 +5,12 @@ namespace Deskbar.Core.Imaging;
 // workspace rows (FloatingBar.Frost.cs). In the mockup Petre picked, it was CSS's `blur(18px) saturate(1.6)`; this is
 // the same idea done once, on the bar's own strip, because WPF has no backdrop blur.
 //
-// The caller shrinks the strip first (an eighth of its size), so a radius of 3 here is about 25 screen pixels of blur
-// and the whole thing is a few tens of thousands of pixels: cheap enough to redo whenever the wallpaper changes, and
-// the result scales back up smoothly because it has no detail left to lose.
+// The caller shrinks the strip first (to half, FrostBlur.Shrink) and picks the radius from the strength setting
+// (FrostBlur.RadiusAt). The running-sum box blur costs the same at any radius, so the strength is free to change.
+//
+// Ease then blends the sharp strip into the frosted one across the side that faces the desktop. Petre, on the first
+// frost: "ease into it", meaning the edge ("Soften the edge"), and "make edges less pronounced": the bar's inner edge
+// had sharp wallpaper on one side and frost under a veil on the other, a hard line down the screen.
 //
 // Pure, on a Bgra32 buffer (blue, green, red, alpha per pixel), so it is testable without WPF. Plain loops rather
 // than LINQ: this is per-pixel arithmetic over flat arrays, where loops say exactly what happens and allocate nothing.
@@ -47,6 +50,34 @@ public static class Frost
             result[i * 4 + 2] = Byte(luma + (r - luma) * saturation);
             result[i * 4 + 3] = 255;
         }
+        return result;
+    }
+
+    // The sharp strip at the bar's inner edge, the frosted one from `ramp` (a fraction of the width) inwards, and a
+    // smoothstep between, column by column. `fromLeft` says which side faces the desktop: the left for a bar docked on
+    // the right of its screen. At the very edge the strip is the wallpaper as it is beside the bar, so nothing marks
+    // where the bar begins; the veil over it eases in the same way (BarSurface.FrostVeilFrom).
+    public static byte[] Ease(ReadOnlySpan<byte> sharp, ReadOnlySpan<byte> frosted, int width, int height, double ramp, bool fromLeft)
+    {
+        if (width <= 0 || height <= 0 || sharp.Length != width * height * 4 || frosted.Length != sharp.Length)
+            throw new ArgumentException($"Expected two {width} x {height} Bgra32 buffers, got {sharp.Length} and {frosted.Length} bytes.");
+
+        // The frost's share of each column: 0 at the inner edge, 1 from the ramp's end, smooth in between.
+        var reach = Math.Max(1.0, ramp * width);
+        var share = Enumerable.Range(0, width)
+            .Select(x => Math.Clamp((fromLeft ? x : width - 1 - x) / reach, 0, 1))
+            .Select(t => t * t * (3 - 2 * t))
+            .ToArray();
+
+        var result = new byte[sharp.Length];
+        for (var y = 0; y < height; y++)
+            for (var x = 0; x < width; x++)
+            {
+                var i = (y * width + x) * 4;
+                for (var c = 0; c < 3; c++)
+                    result[i + c] = Byte(sharp[i + c] + (frosted[i + c] - sharp[i + c]) * share[x]);
+                result[i + 3] = 255;
+            }
         return result;
     }
 
