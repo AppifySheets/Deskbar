@@ -232,6 +232,7 @@ public partial class TasksWindow : Window
     public void CloseForGood()
     {
         closingForGood = true;
+        CancelPendingGo();
         placeWatch.Dispose();
         ageWatch.Dispose();
         Close();
@@ -660,13 +661,16 @@ public partial class TasksWindow : Window
             // A double-click on the title opens the editor (Ruling 38). Handled, so the line neither clicks nor arms a
             // drag; its first click was already dropped from a second Go by the click guard (a double click's second
             // press counts 2).
-            if (e.ClickCount == 2 && !row.Closing && row.Status != TaskStatus.Closed && renaming != row.Id
-                && e.OriginalSource is TextBlock { Tag: TitleTag })
+            var onTitle = e.OriginalSource is TextBlock { Tag: TitleTag };
+            if (e.ClickCount == 2 && !row.Closing && row.Status != TaskStatus.Closed && renaming != row.Id && onTitle)
             {
                 e.Handled = true;
+                // The first click's go, still waiting out the double-click time, is called off (see the Click below).
+                CancelPendingGo();
                 BeginRename(row.Id);
                 return;
             }
+            pressOnTitle = onTitle;
             pressClicks = e.ClickCount;
             DragPress(row.Id, DragMouse.Position(e, DragSurface));
         };
@@ -675,9 +679,43 @@ public partial class TasksWindow : Window
         {
             // A line just closed goes nowhere; Undo is the one thing on it to press. A line being renamed neither.
             if (ClickIgnored() || row.Closing || renaming == row.Id) return;
+            // A click on the TITLE waits out the double-click time before it goes (2026-11-23: a double-click to edit a
+            // title must not first go to the task, which can switch workspace under Petre). A second press on the
+            // title within that time calls the go off and opens the editor instead. A click anywhere else on the line
+            // goes at once, as it always has.
+            if (pressOnTitle)
+            {
+                CancelPendingGo();
+                pendingGo = GoTimer(DoubleClickTime, () =>
+                {
+                    pendingGo = null;
+                    Actions?.Go(row.Id);
+                });
+                return;
+            }
             Actions?.Go(row.Id);
         };
         return line;
+    }
+
+    // THE TITLE'S CLICK WAITS FOR A POSSIBLE SECOND ONE (see the line's Click). pressOnTitle says where the press that
+    // makes this click landed; pendingGo is the go waiting out the double-click time, called off by a double-click on
+    // the title. GoTimer runs `then` once after the time unless disposed first: a dispatcher timer in the app, a seam for
+    // the tests.
+    bool pressOnTitle;
+    IDisposable? pendingGo;
+
+    internal Func<TimeSpan, Action, IDisposable> GoTimer { get; init; } = FloatingBar.DispatcherUndoTimer;
+
+    static TimeSpan DoubleClickTime => TimeSpan.FromMilliseconds(GetDoubleClickTime());
+
+    [DllImport("user32.dll")]
+    static extern uint GetDoubleClickTime();
+
+    void CancelPendingGo()
+    {
+        pendingGo?.Dispose();
+        pendingGo = null;
     }
 
     // The line's columns: tick, title (the star, trimming first), the two flag toggles, sessions, age, workspace chip,

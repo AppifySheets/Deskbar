@@ -86,7 +86,12 @@ public class TasksBoardTests
         var timers = new FakeTimers();
         var went = new List<Guid>();
         var tasks = new TaskService(new MemoryStore(), () => Start.AddMinutes(minutes++));
-        var window = new TasksWindow { Quiet = true, ClickClock = clickClock ?? (() => ClickStart.AddSeconds(seconds++)), Now = now ?? (() => Start.AddHours(1)) };
+        // A title click's go waits for a possible second click on the fake timers too (TasksWindow.GoTimer).
+        var window = new TasksWindow
+        {
+            Quiet = true, ClickClock = clickClock ?? (() => ClickStart.AddSeconds(seconds++)), Now = now ?? (() => Start.AddHours(1)),
+            GoTimer = timers.Start,
+        };
         var controller = new TasksBoard(window, tasks, harness.Manager, goTo ?? (t =>
         {
             went.Add(t.Id);
@@ -1625,13 +1630,19 @@ public class TasksBoardTests
     static TextBlock TitleOf(TasksWindow window, Guid id) =>
         Inside(LineOf(window, id)).OfType<TextBlock>().Single(b => Equals(b.Tag, "task-title"));
 
-    // A double-click on the title opens the in-place editor with the whole title.
+    // A double-click on the title opens the in-place editor with the whole title, and does NOT go to the task: its
+    // first click's go waits out the double-click time, and the second press on the title calls it off.
     [Fact]
     public void A_double_click_on_the_title_opens_the_editor() => StaThread.Run(() =>
     {
         using var t = Build();
         var id = t.Tasks.AddNote("buy body shampoo", t.Gepha).Value.Id;
         t.Controller.Open(Rect.Empty);
+        t.Window.UpdateLayout();
+        // The first click: a press on the title, then the line's Click.
+        TitleOf(t.Window, id).RaiseEvent(TitlePress(1));
+        Click(LineOf(t.Window, id));
+        Assert.Empty(t.WentTo);
 
         // The tunnelling PreviewMouseDown a real press raises: each element on its way down raises its own
         // PreviewMouseLeftButtonDown from it (that one is a direct event, so raising it on the title would reach no
@@ -1642,8 +1653,35 @@ public class TasksBoardTests
         TitleOf(t.Window, id).RaiseEvent(press);
 
         Assert.Equal("buy body shampoo", Assert.IsType<TextBox>(t.Window.Editor).Text);
+        t.Timers.FireAll();
         Assert.Empty(t.WentTo);
     });
+
+    // A single click on the title still goes to the task, once the double-click time has passed with no second click.
+    [Fact]
+    public void A_single_click_on_the_title_goes_once_the_double_click_time_passes() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        var id = t.Tasks.AddNote("buy body shampoo", t.Gepha).Value.Id;
+        t.Controller.Open(Rect.Empty);
+        t.Window.UpdateLayout();
+
+        TitleOf(t.Window, id).RaiseEvent(TitlePress(1));
+        Click(LineOf(t.Window, id));
+        Assert.Empty(t.WentTo);
+        t.Timers.FireAll();
+
+        Assert.Equal([id], t.WentTo);
+        Assert.Null(t.Window.Editor);
+    });
+
+    // The tunnelling press a real click on the title makes (see A_double_click_on_the_title_opens_the_editor).
+    static MouseButtonEventArgs TitlePress(int clicks)
+    {
+        var press = new MouseButtonEventArgs(Mouse.PrimaryDevice, 0, MouseButton.Left) { RoutedEvent = Mouse.PreviewMouseDownEvent };
+        typeof(MouseButtonEventArgs).GetProperty(nameof(MouseButtonEventArgs.ClickCount))!.SetValue(press, clicks);
+        return press;
+    }
 
     // F2 on the selected line opens it too; Enter saves through Rename; Esc cancels.
     [Fact]
