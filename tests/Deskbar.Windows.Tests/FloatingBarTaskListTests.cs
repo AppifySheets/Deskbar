@@ -586,6 +586,56 @@ public class FloatingBarTaskListTests
         Assert.True(t.Bar.TaskAddTarget.HasNoValue);
     });
 
+    // A chip reads as chosen when it is filled and has the blue edge; the rest have neither.
+    static readonly Color PickedBlue = Color.FromRgb(0x4F, 0x8C, 0xFF);
+
+    static Border FaceOf(Button chip) => (Border)chip.Content;
+
+    static bool LooksChosen(Button chip) =>
+        FaceOf(chip).BorderBrush is SolidColorBrush { Color: var edge } && edge == PickedBlue
+        && FaceOf(chip).Background is SolidColorBrush { Color.A: > 0 };
+
+    static IReadOnlyList<string> ChosenChips(ListBar t) =>
+        Inside(t.Chips).OfType<Button>().Where(b => b.Visibility == Visibility.Visible && LooksChosen(b))
+            .Select(b => AutomationProperties.GetName(b)).ToList();
+
+    // Petre's live check: he picked "none", its edge went blue, but the GEPHA chip stayed filled in its colour and the
+    // box still said "Add to GEPHA…". Exactly one chip reads as chosen, and the box names the chosen target.
+    [Fact]
+    public void Picking_none_makes_only_none_look_chosen_and_the_box_says_add() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        Assert.Equal(["GEPHA"], ChosenChips(t));
+        Assert.Equal("Add to GEPHA…", t.Bar.TaskAddPlaceholder);
+
+        ClickBox(t);
+        Click(ButtonNamed(t.List, "none"));
+
+        Assert.Equal(["none"], ChosenChips(t));
+        // The workspace chip keeps no fill of its own colour once it is not the one chosen.
+        Assert.Equal(Colors.Transparent, ((SolidColorBrush)FaceOf(ButtonNamed(t.List, "GEPHA")).Background).Color);
+        Assert.Equal("Add…", t.Bar.TaskAddPlaceholder);
+
+        Click(ButtonNamed(t.List, "GEPHA"));
+        Assert.Equal(["GEPHA"], ChosenChips(t));
+        Assert.Equal("Add to GEPHA…", t.Bar.TaskAddPlaceholder);
+    });
+
+    [Fact]
+    public void A_workspace_picked_through_other_is_named_in_the_box() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        ClickBox(t);
+
+        var menu = t.Bar.OpenOtherWorkspaces()!;
+        var sparrow = menu.Items.OfType<MenuItem>().Single(i => Inside(i.Header).OfType<TextBlock>().Any(x => x.Text == "Sparrow"));
+        sparrow.RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
+        menu.IsOpen = false;
+
+        Assert.Equal("Add to Sparrow…", t.Bar.TaskAddPlaceholder);
+        Assert.Equal(["Sparrow"], ChosenChips(t));
+    });
+
     // FIX ROUND 1, Important 2: after Enter or Esc the keyboard goes back to the window Petre was typing in, so his next
     // keystrokes do not land in a bar with nothing to type into; never to a window that has closed meanwhile.
     [Fact]
