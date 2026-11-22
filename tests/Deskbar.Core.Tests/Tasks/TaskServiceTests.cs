@@ -185,6 +185,35 @@ public sealed class TaskServiceTests
         Assert.Equal(Guid.Parse("abcd0000-0000-0000-0000-000000000002"), s.Board.Tasks.Single().Comments.Single().Id);
     }
 
+    // Goals plan, Task 2: the link to a goal is one more change on the task. Setting the goal it already has, or
+    // detaching a goal no task names, is no change: no save, no pulse.
+    [Fact]
+    public void Setting_a_goal_saves_and_pulses_once_and_not_again_for_the_same_goal()
+    {
+        var s = NewService();
+        var note = s.AddNote("Dishwasher tablets", ws).Value;
+        var goal = Guid.NewGuid();
+        var saves = store.Saves;
+        var pulses = 0;
+        using var sub = s.Changed.Subscribe(_ => pulses++);
+
+        Assert.True(s.SetGoal(note.Id, goal).IsSuccess);
+        Assert.True(s.SetGoal(note.Id, goal).IsSuccess);
+
+        Assert.Equal(saves + 1, store.Saves);
+        Assert.Equal(1, pulses);
+        Assert.Equal(goal, store.Stored.Tasks.Single().GoalId.Value);
+
+        s.DetachGoal(Guid.NewGuid());
+        Assert.Equal(saves + 1, store.Saves);
+        s.DetachGoal(goal);
+        Assert.Equal(saves + 2, store.Saves);
+        Assert.Equal(2, pulses);
+        Assert.True(s.Board.Tasks.Single().GoalId.HasNoValue);
+        Assert.True(s.SetGoal(Guid.NewGuid(), goal).IsFailure);
+        Assert.Equal(saves + 2, store.Saves);
+    }
+
     sealed class FakeTaskStore : ITaskStore
     {
         public TaskBoard Stored { get; set; } = TaskBoard.Empty;

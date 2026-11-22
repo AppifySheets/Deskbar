@@ -26,6 +26,12 @@ namespace Deskbar.Core.Tasks;
 // order the bar showed before ranks existed (Waiting on you, then Done, then the rest, each latest raised first;
 // FallbackRank), so the first start of this build moves no line, and the first save writes the ranks down.
 //
+// THE GOAL (goals plan, Task 2; docs/superpowers/specs/2026-11-22-goals-planner-design.md). `goalId` is an optional
+// field of version 2 too, a Guid or null, the goal the task counts toward. A missing one is no goal. An older version 2
+// build reads the file, ignores it and drops it on its next save, which costs the links and never a task. That same
+// risk is why the goals themselves are in a file of their own, goals.json (spec, "Calls made in writing this up"): an
+// older build put back by the updater never touches it, so at worst the links go and the goals stay.
+//
 // The model uses Maybe, which serialises badly, so the file is written from private DTO records: a Maybe becomes a
 // nullable field (null means none). Every time is converted to UTC before writing AND after reading, so the file
 // means the same on a machine in another time zone, a hand-edited time in local time is still the same instant,
@@ -75,7 +81,8 @@ public sealed class JsonTaskStore(string baseDirectory, Action<string>? trace = 
         IReadOnlyList<CommentDto>? Comments,
         bool? Important = null,
         bool? Urgent = null,
-        double? Rank = null);
+        double? Rank = null,
+        Guid? GoalId = null);
 
     sealed record FileDto(int Version, IReadOnlyList<TaskDto>? Tasks);
 
@@ -177,7 +184,8 @@ public sealed class JsonTaskStore(string baseDirectory, Action<string>? trace = 
                 s.Ended.HasValue ? s.Ended.Value.ToUniversalTime() : null)).ToArray(),
             t.Comments.Select(c => new CommentDto(c.Id, c.SessionId.HasValue ? c.SessionId.Value : null,
                 c.At.ToUniversalTime(), c.Markdown)).ToArray(),
-            t.Important, t.Urgent, t.Rank);
+            t.Important, t.Urgent, t.Rank,
+            t.GoalId.HasValue ? t.GoalId.Value : null);
 
     static TaskItem FromDto(TaskDto d) =>
         new(d.Id, d.Title ?? "",
@@ -191,6 +199,7 @@ public sealed class JsonTaskStore(string baseDirectory, Action<string>? trace = 
             Important = d.Important ?? false,
             Urgent = d.Urgent ?? false,
             Rank = d.Rank ?? FallbackRank(d.Status, d.Raised ?? d.Created),
+            GoalId = d.GoalId is { } goal ? goal : Maybe<Guid>.None,
         };
 
     // The rank a task saved before ranks existed gets, so the tasks keep the order the bar showed them in then:

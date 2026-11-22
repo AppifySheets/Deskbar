@@ -82,6 +82,16 @@ public sealed class TaskService(ITaskStore store, Func<DateTimeOffset> now, Func
 
     public Result Place(Guid id, Quadrant quadrant, TaskPlace place) => ApplyIfChanged(Board.Place(id, quadrant, place, now()));
 
+    /// <summary>
+    /// Links a task to a goal or (none) unlinks it; the goal it already has saves and pulses nothing. Checks nothing
+    /// about the goal: GoalService.LinkTask is the one way the UI and the pipe link a task, and it checks the goal is
+    /// open before it calls this (goals plan, "Calls this plan makes").
+    /// </summary>
+    public Result SetGoal(Guid id, Maybe<Guid> goal) => ApplyIfChanged(Board.SetGoal(id, goal, now()));
+
+    /// <summary>A goal was deleted: its tasks are freed. Saves only when some task named it.</summary>
+    public void DetachGoal(Guid goalId) => CommitIfChanged(Board.DetachGoal(goalId, now()));
+
     public Result Comment(Guid id, Maybe<string> sessionId, string markdown) =>
         Apply(Board.Comment(id, sessionId, markdown, now(), makeId()));
 

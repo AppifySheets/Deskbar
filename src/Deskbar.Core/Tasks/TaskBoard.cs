@@ -223,6 +223,26 @@ public sealed record TaskBoard(IReadOnlyList<TaskItem> Tasks)
             UpdatedAt = now,
         }));
 
+    // --- the goal a task counts toward (goals spec, "Tasks contribute") -----------------------------------
+
+    /// <summary>
+    /// Links the task to a goal, or (<paramref name="goal"/> none) unlinks it. Only the link and UpdatedAt change:
+    /// attaching never moves a task's flags, rank, status or Raised, so its line stays where it is. A closed task takes
+    /// it too, since it stays readable history. Nothing here checks the goal (GoalService.LinkTask does); the goal the
+    /// task already has returns this same board.
+    /// </summary>
+    public Result<TaskBoard> SetGoal(Guid id, Maybe<Guid> goal, DateTimeOffset now) =>
+        Lookup(id).Map(task => task.GoalId == goal ? this : Replaced(task with { GoalId = goal, UpdatedAt = now }));
+
+    /// <summary>
+    /// A goal was deleted: every task that named it is freed and stamped; nothing else about them changes. No task
+    /// naming it returns this same board.
+    /// </summary>
+    public TaskBoard DetachGoal(Guid goalId, DateTimeOffset now) =>
+        Tasks.Any(t => t.GoalId == goalId)
+            ? new TaskBoard(Tasks.Select(t => t.GoalId == goalId ? t with { GoalId = Maybe<Guid>.None, UpdatedAt = now } : t).ToArray())
+            : this;
+
     /// <summary>A workspace that no longer exists frees its tasks; nothing else about them changes.</summary>
     public TaskBoard Prune(IReadOnlySet<Guid> knownWorkspaces, DateTimeOffset now) =>
         new(Tasks.Select(t => t.WorkspaceId.HasValue && !knownWorkspaces.Contains(t.WorkspaceId.Value)
