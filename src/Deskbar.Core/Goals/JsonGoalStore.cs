@@ -38,8 +38,10 @@ namespace Deskbar.Core.Goals;
 //     UpdatedAt directly. A missing time reads as the goal's other time, or the Unix epoch when both are missing.
 //   * A goal with no id or no period (null or missing; a hand edit) is SKIPPED and traced, and the rest of the file
 //     reads (review M1). Failing the whole file over one goal would move every other goal aside to a .bak, and reading
-//     the missing period as 0001-01-01 made Previous() throw. The skipped goal is not written back by the next save:
-//     without an id or a period it was never a goal this build could show.
+//     the missing period as 0001-01-01 made Previous() throw. The skipped goal is not written back by the next save, so
+//     it must not be lost with it: a load that skipped any goal COPIES the file it read aside once, as
+//     `<name>.<yyyyMMdd-HHmmss>.bak` beside it (DurableFile.KeepCopy), and traces where. Copied, not moved: the file
+//     was readable, its other goals are the board, and a crash before the next save must still find them.
 //   * A newer version is read as this one, tolerating what it does not know, rather than failing the whole file.
 public sealed class JsonGoalStore(string baseDirectory, Action<string>? trace = null) : IGoalStore
 {
@@ -68,10 +70,29 @@ public sealed class JsonGoalStore(string baseDirectory, Action<string>? trace = 
 
     string GoalsPath => Path.Combine(baseDirectory, "goals.json");
 
-    // A missing file is the normal first run (an empty board, nothing seen). See the header for the unreadable case.
-    public Result<GoalBoard> Load() =>
-        DurableFile.Read(GoalsPath, Parse, GoalBoard.Empty, line => trace?.Invoke($"goals: {line}"))
-            .MapError(error => $"{error}; {DurableFile.KeepAside(GoalsPath)}");
+    // Whether the last parse skipped a goal (see the header). The store's one piece of state, carried from Parse, which
+    // DurableFile.Read calls, to Load, which keeps the file a skipped goal came from.
+    bool skipped;
+
+    // A missing file is the normal first run (an empty board, nothing seen). See the header for the unreadable case and
+    // for a file with a goal this build cannot read.
+    public Result<GoalBoard> Load()
+    {
+        // A missing file parses nothing, so the flag must not carry over from an earlier load.
+        skipped = false;
+        return DurableFile.Read(GoalsPath, Parse, GoalBoard.Empty, line => trace?.Invoke($"goals: {line}"))
+            .MapError(error => $"{error}; {DurableFile.KeepAside(GoalsPath)}")
+            .Tap(_ => KeepSkippedSource());
+    }
+
+    // The file the board was read from: goals.json when it is still in place, else its previous copy (DurableFile.Read
+    // moves an unreadable goals.json aside before it reads the previous one).
+    void KeepSkippedSource()
+    {
+        if (!skipped) return;
+        var source = File.Exists(GoalsPath) ? GoalsPath : DurableFile.PreviousOf(GoalsPath);
+        trace?.Invoke($"goals: a goal could not be read, so {DurableFile.KeepCopy(source)}");
+    }
 
     public Result Save(GoalBoard board) =>
         Result.Try(() =>
@@ -80,8 +101,11 @@ public sealed class JsonGoalStore(string baseDirectory, Action<string>? trace = 
             DurableFile.Write(GoalsPath, JsonSerializer.Serialize(ToDto(board), Options));
         }, e => $"Could not write {GoalsPath}: {e.Message}");
 
-    GoalBoard Parse(string text) =>
-        FromDto(JsonSerializer.Deserialize<FileDto>(text, Options) ?? throw new JsonException("goals.json deserialized to null"));
+    GoalBoard Parse(string text)
+    {
+        skipped = false;
+        return FromDto(JsonSerializer.Deserialize<FileDto>(text, Options) ?? throw new JsonException("goals.json deserialized to null"));
+    }
 
     static FileDto ToDto(GoalBoard board) =>
         new(CurrentVersion,
@@ -106,8 +130,10 @@ public sealed class JsonGoalStore(string baseDirectory, Action<string>? trace = 
     bool Usable(GoalDto goal)
     {
         var usable = goal.Id is not null && goal.Period is not null;
-        if (!usable) trace?.Invoke($"goals: skipped a goal with no {(goal.Id is null ? "id" : "period")}: '{goal.Title}'");
-        return usable;
+        if (usable) return true;
+        skipped = true;
+        trace?.Invoke($"goals: skipped a goal with no {(goal.Id is null ? "id" : "period")}: '{goal.Title}'");
+        return false;
     }
 
     // Reads an enum from its name in any case and writes it as its lower-case name. Anything else, a name a newer build

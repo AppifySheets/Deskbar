@@ -49,6 +49,16 @@ public sealed class TaskGoalFilterTests
     public void A_monthly_goal_admits_its_own_tasks_and_its_weekly_goals_tasks() =>
         Assert.Equal(["on month", "on week"], Shown(TaskGoalFilter.On(goals.Get(monthly).Value)));
 
+    // Ruling G6 for the filter, the same rule as progress: a monthly goal carried from November to December keeps its
+    // November week naming it, but that week did not serve December, so filtering by the goal leaves its tasks out.
+    [Fact]
+    public void A_carried_monthly_goal_admits_only_the_weeks_of_its_new_month()
+    {
+        var carried = goals.Carry(monthly, GoalPeriod.MonthOf(new DateOnly(2026, 12, 1)), T0).Value;
+
+        Assert.Equal(["on month"], TaskGoalFilter.On(carried.Get(monthly).Value).Narrow(tasks, carried).Tasks.Select(t => t.Title));
+    }
+
     // A filter is a value, so the tasks window can compare it in its redraw signature.
     [Fact]
     public void Filters_compare_by_value()

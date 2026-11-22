@@ -129,6 +129,48 @@ public sealed class JsonGoalStoreTests : IDisposable
         Assert.Contains(traced, line => line.Contains("No id"));
     }
 
+    // A skipped goal is not written back by the next save, so the file it came from is COPIED aside once, as a .bak, and
+    // traced: nothing in it is lost. Copied, not moved: goals.json was readable and its other goals are the board, and
+    // a crash before the next save must still find them. A second load of the same file makes no second copy.
+    [Fact]
+    public void A_file_with_a_skipped_goal_is_kept_aside_once()
+    {
+        const string Text = """
+            { "version": 1, "goals": [
+              { "id": "dddddddd-0000-0000-0000-000000000001", "title": "No period", "kind": "week" },
+              { "id": "dddddddd-0000-0000-0000-000000000009", "title": "Good", "period": "2026-11-23" } ] }
+            """;
+        WriteGoals(Text);
+        var traced = new List<string>();
+        var store = new JsonGoalStore(dir, traced.Add);
+
+        Assert.True(store.Load().IsSuccess);
+        Assert.True(store.Load().IsSuccess);
+
+        var copy = Assert.Single(Quarantined("goals.json"));
+        Assert.Equal(Text, File.ReadAllText(copy));
+        Assert.Equal(Text, File.ReadAllText(GoalsPath));
+        Assert.Single(traced, line => line.Contains($"kept a copy of goals.json as {Path.GetFileName(copy)}"));
+        Assert.Single(traced, line => line.Contains($"already kept as {Path.GetFileName(copy)}"));
+
+        // The next save drops the unusable goal from goals.json; the copy keeps it.
+        Assert.True(store.Save(store.Load().Value).IsSuccess);
+        Assert.DoesNotContain("No period", File.ReadAllText(GoalsPath));
+        Assert.Contains("No period", File.ReadAllText(copy));
+    }
+
+    // A file with nothing skipped makes no copy.
+    [Fact]
+    public void A_clean_file_is_never_copied_aside()
+    {
+        var store = new JsonGoalStore(dir);
+        store.Save(Sample());
+
+        store.Load();
+
+        Assert.Empty(Quarantined("goals.json"));
+    }
+
     // A goal with no times (a hand edit) reads with its created time standing in for both, or the epoch.
     [Fact]
     public void Missing_times_read_as_the_other_time_or_the_epoch()

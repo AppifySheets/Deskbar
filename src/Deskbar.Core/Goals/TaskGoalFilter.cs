@@ -11,7 +11,9 @@ namespace Deskbar.Core.Goals;
 //   * No goal: tasks with no goal AND tasks whose goal no longer exists. A dangling link reads as no goal in every
 //     view (review focus 4), so those tasks are here, where Petre can link them again.
 //   * On a goal: the tasks linked to it. A monthly goal also admits the tasks of its weekly goals (G4): filtering by
-//     the month shows everything that serves it.
+//     the month shows everything that serves it. Only the weekly goals whose week TOUCHES the monthly goal's current
+//     period count, the same rule as GoalProgress (ruling G6): a monthly goal carried from November to December keeps
+//     its November weeks naming it, but they served November, so their tasks are not December's.
 //
 // A filter holds only the goal's id, never a copy of the goal board: whether a task's weekly goal belongs to the
 // month is read from the board at the moment of asking, so a parent set or cleared from the pipe shows at the next
@@ -32,7 +34,12 @@ public sealed record TaskGoalFilter(bool Any, Maybe<Guid> Goal)
     public bool Admits(TaskItem task, GoalBoard goals) =>
         Any || (Goal.HasNoValue
             ? task.GoalId.Bind(goals.Get).HasNoValue
-            : task.GoalId.Bind(goals.Get).Map(g => g.Id == Goal.Value || g.ParentId == Goal.Value).GetValueOrDefault(false));
+            : task.GoalId.Bind(goals.Get).Map(g => g.Id == Goal.Value || ServesTheMonth(g, goals)).GetValueOrDefault(false));
+
+    // A weekly goal naming the filter's goal, in a week that touches that goal's current period (G6).
+    bool ServesTheMonth(Goal weekly, GoalBoard goals) =>
+        weekly.ParentId == Goal.Value
+        && goals.Get(Goal.Value).Map(parent => weekly.Period.Touches(parent.Period)).GetValueOrDefault(false);
 
     /// <summary>The board with only the tasks this filter admits; All returns the same board.</summary>
     public TaskBoard Narrow(TaskBoard board, GoalBoard goals) =>
