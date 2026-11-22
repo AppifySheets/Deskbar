@@ -76,6 +76,7 @@ Untick **Task list** under the strip items in Manage's settings to hide the list
 $ts = "$env:APPDATA\Deskbar\deskbar.cmd"
 & $ts task add "Wait for CI"                # a note on the caller's own workspace
 & $ts task add "Call the bank" --workspace none
+'Buy "the good" soap & tablets' | & $ts task add -   # a title with quotes or &: - reads it from stdin
 & $ts task list                             # JSON: the open tasks in the bar's order
 & $ts task list --closed                    # the closed ones, the latest closed first
 & $ts task reopen 3f2a                      # bring a closed task back
@@ -90,7 +91,7 @@ $ts = "$env:APPDATA\Deskbar\deskbar.cmd"
 The full set:
 
 - `task list [--closed]`
-- `task add <title> [--workspace <name>|none]`
+- `task add <title>|- [--workspace <name>|none]`, with `-` reading the title from stdin
 - `task close <id>` and `task reopen <id>`
 - `task status <id> <backlog|in-progress|waiting|done>`
 - `task rename <id> <title>`
@@ -109,7 +110,7 @@ A Claude Code session's own forms, each with `--session <id>` (see [Claude Code 
 - `task status-line <text>`, `task ask <question>`, `task comment <markdown>` and `task done`, on the session's own task
 - `task later <title>`, a note for later on the session's workspace
 
-Every form that takes text, `task comment <id> <markdown>` included, takes `-` in the text's place and reads the text from stdin. Use it for any text with quotes or `& | < >` in it: `deskbar.cmd` hands its command line to cmd, which could run part of such a text as a command.
+Every form that takes text, `task add <title>` and `task comment <id> <markdown>` included, takes `-` in the text's place and reads the text from stdin. Use it for any text with quotes or `& | < >` in it: `deskbar.cmd` hands its command line to cmd, which could run part of such a text as a command.
 
 ## With Claude sessions
 

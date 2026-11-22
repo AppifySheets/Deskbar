@@ -148,6 +148,25 @@ public class RemoteControlClaudeHookTests
         Assert.Equal(down, ControlArguments.HookReply(["windows"], down));
     }
 
+    // Petre: `task add` takes `-` for its title too, read from stdin, so a note with quotes or & in it is safe from a
+    // script as well; it lands on the caller's workspace (or --workspace) as any note does.
+    [Fact]
+    public void Task_add_takes_its_title_from_stdin()
+    {
+        var manager = Started();
+        Editor(manager, 0x10, "TaskSpaces", "Deskbar");
+        const string title = "Buy \"the good\" soap & tablets > 2";
+
+        var args = ControlArguments.WithInput(["task", "add", "-", "--from", Repo], () => title + "\n");
+        var reply = Ran(manager, [.. args]);
+
+        Assert.Equal(ControlReply.Ok, reply.ExitCode);
+        Assert.Equal(IdOf(manager, "Deskbar"), Titled(title).WorkspaceId.Value);
+        Assert.Equal(["task", "add", title, "--workspace", "none"],
+            ControlArguments.WithInput(["task", "add", "-", "--workspace", "none"], () => title));
+        Assert.Equal("task add (33 characters) --workspace none", ControlArguments.ForTrace(["task", "add", title, "--workspace", "none"]));
+    }
+
     // Review of PR B, I-1: free text never rides cmd's command line. Each text-taking form takes `-` for its text and the
     // client puts its stdin there, the heredoc's last line break dropped; a `-` that is an option's value is not text.
     [Theory]

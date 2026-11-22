@@ -170,7 +170,8 @@ public static class ControlArguments
     // So the text-taking `task` forms accept `-` in the text's place, and the client puts its stdin there: a heredoc in
     // Git Bash (`task comment - --session <id> <<'EOF'`), a pipe in PowerShell. Stdin is bytes to cmd, never parsed.
     // A `-` that is an option's value (after --session, say) is not text. The heredoc's last line break is dropped.
-    static readonly string[] TextVerbs = ["status-line", "ask", "comment", "new", "later"];
+    // `add` too (Petre): a script's note can carry quotes or & just as a session's text can.
+    static readonly string[] TextVerbs = ["status-line", "ask", "comment", "new", "later", "add"];
 
     static bool IsTextForm(IReadOnlyList<string> args) =>
         args.Count > 2 && args[0].Equals("task", StringComparison.OrdinalIgnoreCase)
