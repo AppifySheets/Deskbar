@@ -4157,8 +4157,6 @@ public sealed class WorkspaceManager(
             ? Result.Success()
             : Result.Success().Tap(() => Persist(State with { DetachedStats = state }));
 
-    // Where the tasks window was left (AppState.TasksWindow), so it opens there next time, across restarts. A no-op
-    // when unchanged, so a window closed where it already was writes nothing.
     // The tasks window's List / Matrix switch (AppState.TasksMatrix): the toolbar's switch and `tasks-window
     // list|matrix`. A no-op when unchanged; the window redraws on the state pulse this sends.
     public Result SetTasksMatrix(bool on) =>
@@ -4166,6 +4164,8 @@ public sealed class WorkspaceManager(
             ? Result.Success()
             : Result.Success().Tap(() => Persist(State with { TasksMatrix = on }));
 
+    // Where the tasks window was left (AppState.TasksWindow), so it opens there next time, across restarts. A no-op
+    // when unchanged, so a window closed where it already was writes nothing.
     public Result SaveTasksWindow(TasksWindowState state) =>
         State.TasksWindow == state
             ? Result.Success()

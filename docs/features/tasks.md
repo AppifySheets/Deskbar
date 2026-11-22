@@ -2,7 +2,9 @@
 title: Tasks
 summary: A short task list at the bottom of the bar, for the things you want to remember while you work.
 order: 7
-clip: task-due
+clip: tasks-bar
+# Clips to film: tasks-bar (the bar's list with its toggles and a drag), tasks-window (the List view), tasks-matrix
+# (the Matrix, with a drag between cells). task-due showed the stopwatch build and is retired.
 ---
 
 The bottom of the bar carries a short task list, for the things you want to remember while you work.
@@ -19,7 +21,7 @@ A note has a tick box at the left of its line. Ticking it closes the note at onc
 
 The workspace chip at the end of a line is a button. Click it to move the task: a menu lists **none** and every workspace in its colour, with the task's own ticked. The title shortens to make room, so the chip is never cut off.
 
-Click anywhere else on a line to go to its workspace. A note on no workspace has nowhere to go, so the click does nothing. The task you clicked last stays highlighted, with a lighter background and a thin blue edge on its left, on the bar and in the tasks window alike, until you pick another or the task is closed. A task that is done shows a close button at the right of its line instead of the tick box, since a done task waits for you to look at it and close it. It has the same six seconds of Undo.
+Click anywhere else on a line to go to its workspace. A note on no workspace has nowhere to go, so the click does nothing. The task you clicked last stays highlighted, with a lighter background and a thin blue edge on its left, on the bar and in the tasks window alike, until you pick another or the task is closed. A Claude task that is done shows a close button at the right of its line, since it waits for you to look at it and close it; a note keeps its tick box whatever its status. The close button has the same six seconds of Undo, and Undo puts the task back exactly as it was: its status, its question if it was waiting on you, its place and the selection.
 
 A task is in one of five statuses: backlog (a plain note), in progress, waiting on you, done or closed. Closed tasks leave the list.
 
@@ -51,7 +53,7 @@ Each line has the same two toggles as on the bar, and drags the same way: within
 Each line shows the task's title, then its question or status line under it, then its sessions (a square for each, blue while it is live, with "2 sessions, 1 live" or "1 session, ended"), its workspace and its comment count. A Claude task has an orange edge and a **CL** tag. A note has a tick box that closes it, with the same six seconds of Undo as on the bar.
 
 - Click a line to go to its workspace. The window stays open behind you. The line stays highlighted, as on the bar, and when the window opens it scrolls to that task.
-- Click the comment count (or the arrow on a line with no comments) to open the task's comments. Each comment shows who wrote it, **Claude** or **you**, and when, and its text is formatted: bold, italics, code, code blocks, links and lists. Only web links can be clicked, and they open in your default browser. Type in the box under the comments and press Enter to add one as **you**. Shift+Enter starts a new line.
+- Click the comment glyph (with the count beside it when there are comments) to open the task's comments. Each comment shows who wrote it, **Claude** or **you**, and when, and its text is formatted: bold, italics, code, code blocks, links and lists. Only web links can be clicked, and they open in your default browser. Type in the box under the comments and press Enter to add one as **you**. Shift+Enter starts a new line.
 - **...** at the end of a line sets the status by hand (Backlog, In progress, Waiting on you or Done), closes or reopens the task, renames it in place, moves it to another workspace or deletes it. Delete needs a second click, on **Delete for good**, because it cannot be undone.
 - **+ Add** opens a box for a note. Enter adds it on the workspace its chip shows, which you can change. Esc closes the box.
 

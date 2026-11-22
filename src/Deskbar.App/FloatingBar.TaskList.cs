@@ -36,8 +36,9 @@ namespace Deskbar.App;
 //                   starts typing as a click in the box does. Enter
 //                   adds a Backlog note through TaskService.AddNote and Esc clears the box; either way the keyboard
 //                   goes back to the window Petre was typing in. Clicking away leaves the text where it is.
-//   the lines       the first three of the pile (Waiting on you, then Covey's quadrants I to IV, each in Petre's
-//                   own order; TaskBoard.Pile, and THE FLAGS below). A
+//   the lines       the first lines of the pile, three on a floating bar and as many as fit on a docked one (Waiting
+//                   on you, then Covey's quadrants I to IV, each in Petre's own order, dragged up and down; TaskBoard.Pile,
+//                   THE FLAGS below, FloatingBar.TaskDrag.cs). A
 //                   Claude line (a task with a session) has an orange edge and tint, a CLAUDE tag, the VS Code icon
 //                   of its session's window when one is found, then the task's title in a tan ink and, after a dot,
 //                   the question while it waits on Petre, else its status line, with "no live session" when every
@@ -63,7 +64,8 @@ namespace Deskbar.App;
 // CLICKS. A line goes to its task through GoToTask, which the App points at the workspace switch, the same path the
 // tasks window's lines take (a later change sends a Claude task to its session instead; controller ruling 13); a note
 // on no workspace has nowhere to go, so its click does nothing. The tick box and the close button call TaskService.Close at once (the store stays the truth; only Petre
-// closes, and these are his clicks), and "Undo" calls Reopen.
+// closes, and these are his clicks), and "Undo" calls TaskService.UndoClose, which brings the task back exactly as it
+// was (Ruling 31).
 //
 // WHEN IT IS DRAWN. The lines are rebuilt when TaskService.Changed pulses and after every rebuild of the bar (the
 // workspace names and row colours the lines borrow are refreshed by the rebuild), and only when what they would show

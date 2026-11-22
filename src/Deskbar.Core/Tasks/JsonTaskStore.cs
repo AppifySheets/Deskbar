@@ -20,8 +20,9 @@ namespace Deskbar.Core.Tasks;
 // build) is read as version 2, tolerating what it does not know, rather than failing the whole file.
 //
 // THE FLAGS AND THE ORDER (Task 12, Rulings 24, 25 and 28). `important`, `urgent` and `rank` are optional fields of
-// version 2, not a version 3: an older version 2 build reads the file and ignores them (it would drop them on its next
-// save, which costs the order, never a task). A missing flag is off. A missing rank is derived ONCE, on load, from the
+// version 2, not a version 3: an older version 2 build reads the file and ignores them, and drops them on its next save.
+// That costs the order and the flags (every task falls back to quadrant IV, in the Raised order FallbackRank gives),
+// never a task. A missing flag is off. A missing rank is derived ONCE, on load, from the
 // order the bar showed before ranks existed (Waiting on you, then Done, then the rest, each latest raised first;
 // FallbackRank), so the first start of this build moves no line, and the first save writes the ranks down.
 //
