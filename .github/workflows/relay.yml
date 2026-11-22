@@ -1,0 +1,110 @@
+# Tests and deploys the report relay, the Cloudflare Worker in relay/ behind report.deskbar.app
+# (issue #331). The app's "Report a problem…" window posts there, and the Worker files the report
+# as an issue in the private repo AppifySheets/Deskbar-reports.
+#
+# WHEN IT RUNS
+#   - a pull request that touches relay/ or this file: tests, plus a dry-run deploy that bundles
+#     the Worker and checks wrangler.toml without talking to Cloudflare;
+#   - a merge to main that touches the same paths: the same checks, then the real deploy;
+#   - by hand (workflow_dispatch), to redeploy main after a fix on Cloudflare's side.
+# Nothing under src/ is involved, so a relay change never starts release.yml (which filters on
+# src/**) and the app's version is not affected.
+#
+# SECRETS (repository secrets, set once, see relay/README.md)
+#   CLOUDFLARE_API_TOKEN   a Cloudflare API token that may edit Workers on the deskbar.app account
+#   CLOUDFLARE_ACCOUNT_ID  that account's id
+# The relay's own GitHub token is NOT here. It is set in the Worker's secrets on Cloudflare, so
+# this public repo's workflows never hold a token that can write to the private reports repo.
+name: Relay
+
+on:
+  pull_request:
+    paths: ['relay/**', '.github/workflows/relay.yml']
+  push:
+    branches: [main]
+    paths: ['relay/**', '.github/workflows/relay.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# Two quick merges must not deploy out of order: the newer run cancels the older one.
+concurrency:
+  group: relay-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # Pinned, so a deploy is reproducible and a new Wrangler release cannot change one silently.
+  WRANGLER_VERSION: '4.166.0'
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: relay
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v7
+
+      - name: Install Node
+        # Wrangler needs Node 22.12 or newer; the tests use only Node's built-in runner.
+        uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+
+      - name: Test
+        # node --test with no dependencies: the relay has no package to install.
+        run: node --test
+
+      - name: Dry-run the deploy
+        # Bundles src/index.js and validates wrangler.toml (routes, rate limit bindings) the way
+        # a real deploy would, without credentials and without changing anything on Cloudflare.
+        run: npx --yes wrangler@${{ env.WRANGLER_VERSION }} deploy --dry-run --outdir dist
+
+  deploy:
+    # Only main deploys; a pull request stops after the checks above.
+    needs: test
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v7
+
+      - name: Check the Cloudflare secrets are set
+        # Until Petre adds the two secrets, a merge must not fail red for a reason nobody can fix
+        # in code. Say so in the run's summary and skip the deploy instead.
+        id: secrets
+        env:
+          TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          ACCOUNT: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          if [ -n "$TOKEN" ] && [ -n "$ACCOUNT" ]; then
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::CLOUDFLARE_API_TOKEN or CLOUDFLARE_ACCOUNT_ID is not set; the relay was not deployed. See relay/README.md."
+          fi
+
+      - name: Deploy the Worker
+        if: steps.secrets.outputs.ready == 'true'
+        uses: cloudflare/wrangler-action@v4
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          workingDirectory: relay
+          wranglerVersion: ${{ env.WRANGLER_VERSION }}
+          command: deploy
+
+      - name: Check the relay answers
+        # The custom domain can take a minute to get its certificate on the very first deploy, so
+        # retry for up to two minutes before calling it a failure.
+        if: steps.secrets.outputs.ready == 'true'
+        run: |
+          for i in $(seq 1 12); do
+            if curl -fsS https://report.deskbar.app/ | grep -q "Deskbar report relay"; then
+              echo "report.deskbar.app answers"; exit 0
+            fi
+            sleep 10
+          done
+          echo "::error::report.deskbar.app did not answer after the deploy"; exit 1

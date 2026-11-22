@@ -1,0 +1,44 @@
+# Cloudflare's configuration for the report relay (issue #331). Deployed by
+# .github/workflows/relay.yml on a merge to main that changes relay/; see relay/README.md.
+
+name = "deskbar-report-relay"
+main = "src/index.js"
+compatibility_date = "2026-06-01"
+
+# Only report.deskbar.app, no *.workers.dev address: one public entry point to guard. A custom
+# domain also creates its DNS record, since the deskbar.app zone is on the same Cloudflare account.
+workers_dev = false
+
+[[routes]]
+pattern = "report.deskbar.app"
+custom_domain = true
+
+# Not secrets. The token is NOT here: it is set once in the Worker's secrets (README).
+[vars]
+REPO = "AppifySheets/Deskbar-reports"
+BRANCH = "main"
+
+# Per caller address, per Cloudflare location, per minute (the binding allows only 10 or 60 s).
+# A report is up to six attachments (five screenshots and the dump) and one report call, so 12
+# attachments and 3 reports a minute leave room for a retry and stop a loop or a flood.
+# The namespace ids are arbitrary integers that must be unique in the Cloudflare account.
+[[ratelimits]]
+name = "REPORT_LIMITER"
+namespace_id = "3311"
+
+  [ratelimits.simple]
+  limit = 3
+  period = 60
+
+[[ratelimits]]
+name = "ATTACHMENT_LIMITER"
+namespace_id = "3312"
+
+  [ratelimits.simple]
+  limit = 12
+  period = 60
+
+# Workers Logs: the relay logs one JSON line per upload and per report (ids, sizes, GitHub's
+# status), never the user's text, so a failed send can be traced from the dashboard.
+[observability]
+enabled = true

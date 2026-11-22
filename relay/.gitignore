@@ -1,0 +1,4 @@
+# Wrangler's build output and local state; the dry run in CI writes dist/.
+dist/
+.wrangler/
+node_modules/
