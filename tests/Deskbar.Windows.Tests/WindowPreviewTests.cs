@@ -201,6 +201,9 @@ public class WindowPreviewTests
     //
     // Size and frozen-ness were both correct throughout, which is exactly why neither caught it. So this
     // asserts the PIXELS: the three stripes have to be in there, and every pixel has to be opaque.
+    // Category=Screen: reads what is really on the screen, so it needs the desktop being shown. A hidden
+    // desktop (scripts/test-hidden.ps1) is never composited; CI runs it on the runner's visible desktop.
+    [Trait("Category", "Screen")]
     [Fact]
     public void A_capture_carries_the_windows_own_colours_and_is_opaque() => StaThread.Run(() =>
     {

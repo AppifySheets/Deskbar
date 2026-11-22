@@ -42,6 +42,9 @@ public class TilePreviewOverlayTests
         return window;
     }
 
+    // Category=Screen: reads what is really on the screen, so it needs the desktop being shown. A hidden
+    // desktop (scripts/test-hidden.ps1) is never composited; CI runs it on the runner's visible desktop.
+    [Trait("Category", "Screen")]
     [Fact]
     public void The_preview_is_translucent_on_screen_click_through_and_gone_when_hidden() => StaThread.Run(() =>
     {

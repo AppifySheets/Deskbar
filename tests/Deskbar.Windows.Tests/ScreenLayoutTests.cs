@@ -15,6 +15,9 @@ namespace Deskbar.Windows.Tests;
 // these run against the real machine and assert the shape of what comes back.
 public class ScreenLayoutTests
 {
+    // Category=Screen: reads the windows and monitors of the desktop being shown. A hidden desktop
+    // (scripts/test-hidden.ps1) has neither; CI runs it on the runner's visible desktop.
+    [Trait("Category", "Screen")]
     [Fact]
     public void The_layout_resolves_at_least_one_monitor_for_the_windows_it_finds()
     {
@@ -43,6 +46,9 @@ public class ScreenLayoutTests
     // Deliberately NOT asserted to be display 1. On the setup this was built against the primary
     // is DISPLAY2, which is the whole reason "main monitor" is asked of Windows rather than
     // assumed.
+    // Category=Screen: reads the windows and monitors of the desktop being shown. A hidden desktop
+    // (scripts/test-hidden.ps1) has neither; CI runs it on the runner's visible desktop.
+    [Trait("Category", "Screen")]
     [Fact]
     public void Windows_reports_which_display_is_primary()
     {
