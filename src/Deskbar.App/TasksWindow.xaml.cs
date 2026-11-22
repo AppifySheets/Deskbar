@@ -272,15 +272,6 @@ public partial class TasksWindow : Window
     }
 
     /// <summary>
-    /// An open window, its view untouched. No state change and no activation here (fix round 1, Critical 1; review
-    /// I-2): restoring a minimized window activates it, which would take Petre to the window's desktop. The
-    /// controller's seam moves it to the desktop in front, and the activator it ends with restores an iconic window.
-    /// </summary>
-    public void BringForward()
-    {
-    }
-
-    /// <summary>
     /// The window activating itself, only when the controller has no seam to bring it (and counted for the tests):
     /// restored first if it was minimized, since nothing else will.
     /// </summary>
@@ -564,7 +555,7 @@ public partial class TasksWindow : Window
         };
         AutomationProperties.SetName(line, row.Title);
         line.MouseEnter += (_, _) => Quieten(quiet, loud: true);
-        line.MouseLeave += (_, _) => Quieten(quiet, loud: selectedId == row.Id);
+        line.MouseLeave += (_, _) => Quieten(quiet, loud: Picked(row.Id));
         // The click guard, as on the line's buttons (ClickIgnored).
         line.PreviewMouseLeftButtonDown += (_, e) => pressClicks = e.ClickCount;
         line.Click += (_, _) =>
@@ -623,21 +614,24 @@ public partial class TasksWindow : Window
 
     // THE SELECTED TASK (ruling 21): which line is drawn as picked, the frame of each line on show, and their quiet
     // buttons, which a selected line shows at full strength as hover does.
-    Guid? selectedId;
+    Maybe<Guid> selectedId = Maybe<Guid>.None;
     readonly Dictionary<Guid, (Border Frame, IReadOnlyList<UIElement> Quiet)> selectionFrames = [];
     static readonly Brush SelectedFill = Frozen(0x38, 0xFF, 0xFF, 0xFF);
+
+    // Whether a task is the one picked, as the selection says (IsSelected, for the tests, reads what is drawn).
+    bool Picked(Guid id) => selectedId.HasValue && selectedId.Value == id;
 
     /// <summary>Draws the selection as it now stands, in place.</summary>
     internal void PaintSelection(Maybe<Guid> selected)
     {
-        selectedId = selected.HasValue ? selected.Value : null;
+        selectedId = selected;
         selectionFrames.Keys.ToList().ForEach(PaintFrame);
     }
 
     void PaintFrame(Guid id)
     {
         if (!selectionFrames.TryGetValue(id, out var parts)) return;
-        var selected = selectedId == id;
+        var selected = Picked(id);
         parts.Frame.BorderBrush = selected ? PickedEdge : Brushes.Transparent;
         parts.Frame.Background = selected ? SelectedFill : Brushes.Transparent;
         Quieten(parts.Quiet, loud: selected);
@@ -646,7 +640,7 @@ public partial class TasksWindow : Window
     /// <summary>Brings the selected task's line into view, as the window opens.</summary>
     internal void ScrollToSelected()
     {
-        if (selectedId is not { } id || !selectionFrames.TryGetValue(id, out var parts)) return;
+        if (selectedId.HasNoValue || !selectionFrames.TryGetValue(selectedId.Value, out var parts)) return;
         UpdateLayout();
         // The line's place in the list, a third of the way down the view; the scroll itself runs in the next layout
         // pass, which is run here so the window opens already there.

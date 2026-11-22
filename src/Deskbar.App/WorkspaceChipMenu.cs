@@ -187,13 +187,22 @@ internal static class WorkspaceChipMenu
     // The task lines' chip (FloatingBar.WorkspaceChip) as a button: the name on its colour, faded so the name stays
     // readable, or the grey neutral chip. Its edge is always 1 DIP, blue on the current choice and white while the
     // keyboard is on it (the template), so nothing moves as focus walks. A TextBlock, so an underscore in a name is not
-    // read as an access key.
+    // read as an access key. Its name is trimmed past ChipTextCeiling, the full name in its tooltip, so one very long
+    // workspace name cannot run past the menu's edge (review minor 4 of 187cf4a).
     static Button ChipButton(string name, Brush? colour, bool isWorkspace, bool isCurrent, Action pick, Entry? entry = null)
     {
         var button = new Button
         {
             Tag = entry,
-            Content = new TextBlock { Text = name, FontSize = 11, Foreground = isWorkspace ? Ink : NoneInk },
+            Content = new TextBlock
+            {
+                Text = name,
+                FontSize = 11,
+                Foreground = isWorkspace ? Ink : NoneInk,
+                MaxWidth = ChipTextCeiling,
+                TextTrimming = TextTrimming.CharacterEllipsis,
+            },
+            ToolTip = name,
             Template = ChipTemplate,
             Background = colour is SolidColorBrush { Color: var c } ? Frozen(0x66, c.R, c.G, c.B) : NoneFill,
             BorderBrush = isCurrent ? CurrentEdge : Brushes.Transparent,
@@ -212,6 +221,10 @@ internal static class WorkspaceChipMenu
         };
         return button;
     }
+
+    // The widest a chip's name may be in the menu: about twenty-four characters at its 11 DIP text, wider than any
+    // workspace name Petre uses, narrow enough that a chip always fits the menu's width.
+    internal const double ChipTextCeiling = 160;
 
     // The chip's look: a rounded fill with the button's edge, a little lighter under the pointer, a white edge while
     // the keyboard is on it. No focus rectangle of WPF's own, which would draw a dotted box outside the round chip.

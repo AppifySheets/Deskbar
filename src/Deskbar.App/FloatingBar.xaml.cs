@@ -731,8 +731,12 @@ public partial class FloatingBar : Window
     // display-layout readjustment, which lets go of the old strip only to dock again at the spot this desk
     // remembers: a save in between would write the bar as FLOATING on this desk and wipe the very edge it is
     // about to read back.
-    void LetGoOfStrip()
+    internal void LetGoOfStrip()
     {
+        // The task list folds back to three lines first of all, before the strip goes and before SizeToContent changes
+        // (either can lay the window out at once), so every layout from here on has the floating bar's height and the
+        // position the undock saves is not clamped against the docked list's (review I-1 of 187cf4a).
+        FoldTaskListForFloating();
         appBar?.Remove();
         seamBar?.Remove();
         var wasAcross = AcrossSeam;
