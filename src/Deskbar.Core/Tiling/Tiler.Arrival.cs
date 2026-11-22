@@ -141,7 +141,8 @@ public sealed partial class Tiler
             .Select((window, i) => (Window: window, Offered: i == 0 ? target : Maybe<WindowHandle>.None))
             .Aggregate(without, (b, a) => Joining(workspace, b, a.Window,
                 () => Arrive(workspace, screens, b, a.Window, own[a.Window],
-                    aimed[a.Window].HasValue ? LastUsedOn(b, a.Window, own[a.Window]) : a.Offered)));
+                    aimed[a.Window].HasValue ? LastUsedOn(b, a.Window, own[a.Window]) : a.Offered,
+                    aimed[a.Window].HasValue)));
     }
 
     // The window whose restore from minimized raised the evaluate running now (set and cleared around it by
@@ -165,14 +166,61 @@ public sealed partial class Tiler
             .TryFirst();
 
     // One window's arrival: the target screen is the last-used tile's screen, or the window's own. An opening there,
-    // then an opening on its own screen, then a split of a tile on the target screen.
+    // then an opening on its own screen, then a split of a tile on the target screen (SplitSomewhere, which looks at
+    // another screen only when every tile on the target is locked). `aimed` is a window dropped on a screen or restored
+    // from minimized (KeptScreenOf): it never leaves `own`.
     TileBoard Arrive(Workspace workspace, IReadOnlyDictionary<int, TileScreen> screens, TileBoard board,
-        WindowHandle window, int own, Maybe<WindowHandle> lastUsed)
+        WindowHandle window, int own, Maybe<WindowHandle> lastUsed, bool aimed)
     {
         var target = lastUsed.Bind(board.ScreenOf).GetValueOrDefault(own);
         return IntoOpeningOn(workspace, screens, board, window, target, lastUsed.HasValue ? "the screen of the tile last used" : "its own screen")
             .Or(() => target != own ? IntoOpeningOn(workspace, screens, board, window, own, "its own screen") : Maybe<TileBoard>.None)
-            .GetValueOrDefault(() => Split(workspace, screens, board, window, target, lastUsed));
+            .GetValueOrDefault(() => SplitSomewhere(workspace, screens, board, window, target, lastUsed, aimed));
+    }
+
+    // EVERY TILE ON THE TARGET SCREEN LOCKED (Tiler.Lock.cs; spec 2026-11-22, behaviour step 6). Splitting there would
+    // either halve a locked tile or ignore the lock, so a window that is free to move goes to another screen with an
+    // unlocked tile instead: the screen whose largest unlocked tile is largest in pixels (screens differ in size, so
+    // the layout's fractions cannot compare them), the lower screen number on a tie. It splits that screen's largest
+    // unlocked tile; the tile last used is on the locked screen, so none is offered. With no such screen, or for an
+    // aimed window, the split happens on the target as before, and TileArrival.Choose, finding every tile skipped,
+    // ignores the skip: a window always has to go somewhere.
+    TileBoard SplitSomewhere(Workspace workspace, IReadOnlyDictionary<int, TileScreen> screens, TileBoard board,
+        WindowHandle window, int target, Maybe<WindowHandle> lastUsed, bool aimed)
+    {
+        var here = board.On(target);
+        if (aimed || here.Count == 0 || !here.All(locked.Contains))
+            return Split(workspace, screens, board, window, target, lastUsed);
+        return UnlockedElsewhere(workspace, screens, board, target).Match(
+            other =>
+            {
+                trace?.Invoke($"tile: {workspace.Name}: {window.Value:X} arrived, every tile on screen {target} is locked, it goes to screen {other}");
+                return Split(workspace, screens, board, window, other, Maybe<WindowHandle>.None);
+            },
+            () => Split(workspace, screens, board, window, target, lastUsed));
+    }
+
+    // The other screen whose largest unlocked tile is the largest, in pixels. Maximized tiles (still restoring) do not
+    // count, as TileArrival never splits them either.
+    Maybe<int> UnlockedElsewhere(Workspace workspace, IReadOnlyDictionary<int, TileScreen> screens, TileBoard board, int except) =>
+        screens.Values
+            .Where(s => s.Number != except)
+            .Select(s => (s.Number, Area: LargestUnlockedArea(workspace, s, board.On(s.Number))))
+            .Where(c => c.Area.HasValue)
+            .OrderByDescending(c => c.Area.Value)
+            .ThenBy(c => c.Number)
+            .Select(c => c.Number)
+            .TryFirst();
+
+    Maybe<long> LargestUnlockedArea(Workspace workspace, TileScreen screen, IReadOnlyList<WindowHandle> order)
+    {
+        if (order.Count == 0) return Maybe<long>.None;
+        var slots = SlotsOf(screen, order, ShownLayout(workspace, screen, order.Count));
+        var areas = order
+            .Where(w => !locked.Contains(w) && !surface.IsMaximized(w) && slots.ContainsKey(w))
+            .Select(w => (long)slots[w].Width * slots[w].Height)
+            .ToList();
+        return areas.Count > 0 ? areas.Max() : Maybe<long>.None;
     }
 
     // Step 2: the screen's opening, when its stored layout keeps one for the windows it has. Filled the way Keep's
@@ -221,8 +269,10 @@ public sealed partial class Tiler
         }
 
         // The screen's maximized tiles are never split (TileArrival has the reason): the newcomer would sit behind one.
-        var maximizedHere = order.Where(surface.IsMaximized).ToHashSet();
-        return TileArrival.Choose(order, layout, order.Select(w => slots[w]).ToList(), lastUsed, maximizedHere).Match(
+        // Nor are its locked tiles (Tiler.Lock.cs): that is what a lock is for. When every tile here is skipped,
+        // Choose ignores the skip, because a window has to go somewhere.
+        var skipped = order.Where(surface.IsMaximized).Concat(LockedAmong(order)).ToHashSet();
+        return TileArrival.Choose(order, layout, order.Select(w => slots[w]).ToList(), lastUsed, skipped).Match(
             split =>
             {
                 var (next, splitLayout) = TileArrange.Drop(order, layout, window, split.Target, split.Side);
@@ -235,7 +285,7 @@ public sealed partial class Tiler
                     return board.Join(number, window);
                 }
                 StoreLayout(workspace, KeyOf(screen), splitLayout)
-                    .Tap(() => trace?.Invoke($"tile: {workspace.Name}: {window.Value:X} arrived on screen {number}, split {split.Target.Value:X} {split.Side} ({Why(split, lastUsed)}), sizes {Show(splitLayout)}"))
+                    .Tap(() => trace?.Invoke($"tile: {workspace.Name}: {window.Value:X} arrived on screen {number}, split {split.Target.Value:X} {split.Side} ({Why(split, lastUsed, locked)}), sizes {Show(splitLayout)}"))
                     .TapError(error => trace?.Invoke($"tile: {workspace.Name}: {window.Value:X} arrived on screen {number}, storing the split failed: {error}"));
                 return into;
             },
@@ -247,10 +297,12 @@ public sealed partial class Tiler
     }
 
     // Which rule chose the split's tile, for the trace.
-    static string Why(TileSplit split, Maybe<WindowHandle> lastUsed) =>
+    static string Why(TileSplit split, Maybe<WindowHandle> lastUsed, IReadOnlySet<WindowHandle> locked) =>
         lastUsed.HasValue
             ? split.Target == lastUsed.Value
-                ? "the tile last used"
-                : $"the largest tile, the tile last used ({lastUsed.Value.Value:X}) is too small to split"
+                ? locked.Contains(split.Target) ? "the tile last used, every tile here is locked" : "the tile last used"
+                : locked.Contains(lastUsed.Value)
+                    ? $"the largest unlocked tile, the tile last used ({lastUsed.Value.Value:X}) is locked"
+                    : $"the largest tile, the tile last used ({lastUsed.Value.Value:X}) is too small to split"
             : "the largest tile, no tile last used";
 }

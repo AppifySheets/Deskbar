@@ -27,6 +27,7 @@ namespace Deskbar.Core.Tiling;
 //     the Tiler is un-maximizing itself (`restoring`): it keeps its slot until the restore lands, so it drops in.
 //   - A new window takes half of the tile the user last used, or fills an opening, and no other tile moves
 //     (Tiler.Arrival.cs). A restored one goes back to the place it left when it was minimized (Tiler.Minimize.cs).
+//   - A LOCKED tile is never the one a new window splits (Tiler.Lock.cs; spec 2026-11-22-tile-lock-and-other-screens).
 //   - A tile that leaves takes only its own leaf of the screen's split tree (TileLayout), and the tiles of its
 //     split grow into the room. On a workspace that keeps a closed tile's space (Workspace.TileKeepsSpace), a tile
 //     that CLOSES leaves its leaf as the screen's opening instead (LayoutOn). Otherwise, when it was the last window to
@@ -361,6 +362,8 @@ public sealed partial class Tiler(WorkspaceManager manager, IVirtualDesktopServi
             putBacks.Remove(e.Window.Handle);
             leftAlone.Remove(e.Window.Handle);
             ForgetUsed(e.Window.Handle);
+            // Its lock too (Tiler.Lock.cs): a recycled handle must not come back locked.
+            ForgetLock(e.Window.Handle);
         }
         if (e.Kind == WindowEventKind.Activated)
         {
