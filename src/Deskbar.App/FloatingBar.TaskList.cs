@@ -1104,12 +1104,17 @@ public partial class FloatingBar
         // A closed line in its undo window is struck through.
         if (line.Closing) text.TextDecorations = TextDecorations.Strikethrough;
         var detailInk = line.Status == TaskStatus.WaitingOnYou ? TaskOrange : line.Claudes ? TaskInk : TaskDimInk;
-        text.Inlines.Add(new Run(line.Title) { Foreground = line.Claudes ? TaskTitleInk : TaskInk });
+        // Only the title's first line (Ruling 38: titles may hold line breaks, written in the tasks window's editor); the
+        // tooltip has the whole title.
+        text.Inlines.Add(new Run(FirstLine(line.Title)) { Foreground = line.Claudes ? TaskTitleInk : TaskInk });
         if (line.Detail.Length == 0) return text;
         text.Inlines.Add(new Run(TaskDetailSeparator) { Foreground = line.Claudes ? TaskTitleInk : TaskDimInk });
         text.Inlines.Add(new Run(line.Detail) { Foreground = detailInk });
         return text;
     }
+
+    /// <summary>A title's first line: the bar shows one line of a title that holds line breaks.</summary>
+    internal static string FirstLine(string title) => title.Split('\n')[0].TrimEnd('\r');
 
     // The workspace's chip in its row's colour (the colour the rebuild noted for that row), or a grey "none".
     // THE CHIP MOVES THE TASK (Petre, at the live check: "make workspace changeable"). A button like the tick, with the

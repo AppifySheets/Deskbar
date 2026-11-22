@@ -1568,6 +1568,118 @@ public class TasksBoardTests
         Assert.Equal(Quadrant.I, t.Tasks.Board.Tasks.Single(x => x.Title == "both").Quadrant);
     });
 
+    // Ruling 38 (Petre: "let tasks be multiline and editable"). A long title wraps to show its whole text instead of
+    // ending in an ellipsis, in the List and in the Matrix: its line grows taller, the title is never trimmed.
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void A_long_title_wraps_and_is_not_trimmed(bool matrix) => StaThread.Run(() =>
+    {
+        using var t = Build();
+        var shortOne = t.Tasks.AddNote("short", t.Gepha).Value.Id;
+        var longOne = t.Tasks.AddNote(string.Join(" ", Enumerable.Repeat("a long title that goes on", 12)), t.Gepha).Value.Id;
+        Assert.True(t.Harness.Manager.SetTasksMatrix(matrix).IsSuccess);
+        t.Controller.Open(Rect.Empty);
+        t.Window.UpdateLayout();
+
+        var title = TitleOf(t.Window, longOne);
+        Assert.Equal(TextWrapping.Wrap, title.TextWrapping);
+        Assert.Equal(TextTrimming.None, title.TextTrimming);
+        Assert.True(title.ActualHeight > 2 * TitleOf(t.Window, shortOne).ActualHeight,
+            $"the long title is {title.ActualHeight} high, the short one {TitleOf(t.Window, shortOne).ActualHeight}");
+    });
+
+    static TextBlock TitleOf(TasksWindow window, Guid id) =>
+        Inside(LineOf(window, id)).OfType<TextBlock>().Single(b => Equals(b.Tag, "task-title"));
+
+    // A double-click on the title opens the in-place editor with the whole title.
+    [Fact]
+    public void A_double_click_on_the_title_opens_the_editor() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        var id = t.Tasks.AddNote("buy body shampoo", t.Gepha).Value.Id;
+        t.Controller.Open(Rect.Empty);
+
+        // The tunnelling PreviewMouseDown a real press raises: each element on its way down raises its own
+        // PreviewMouseLeftButtonDown from it (that one is a direct event, so raising it on the title would reach no
+        // ancestor), the line's included.
+        var press = new MouseButtonEventArgs(Mouse.PrimaryDevice, 0, MouseButton.Left) { RoutedEvent = Mouse.PreviewMouseDownEvent };
+        typeof(MouseButtonEventArgs).GetProperty(nameof(MouseButtonEventArgs.ClickCount))!.SetValue(press, 2);
+        t.Window.UpdateLayout();
+        TitleOf(t.Window, id).RaiseEvent(press);
+
+        Assert.Equal("buy body shampoo", Assert.IsType<TextBox>(t.Window.Editor).Text);
+        Assert.Empty(t.WentTo);
+    });
+
+    // F2 on the selected line opens it too; Enter saves through Rename; Esc cancels.
+    [Fact]
+    public void F2_edits_the_selected_line_Enter_saves_and_Esc_cancels() => StaThread.Run(() =>
+    {
+        var selection = new TaskSelection();
+        using var t = Build(selection: selection);
+        var id = t.Tasks.AddNote("iam.ge: transcripts", t.Gepha).Value.Id;
+        t.Controller.Open(Rect.Empty);
+        selection.Select(id);
+
+        PressKey(t.Window, Key.F2);
+        var editor = Assert.IsType<TextBox>(t.Window.Editor);
+        editor.Text = "iam.ge: transcripts for every call";
+        t.Window.SaveEditor();
+        Assert.Null(t.Window.Editor);
+        Assert.Equal("iam.ge: transcripts for every call", t.Tasks.Board.Tasks.Single().Title);
+
+        PressKey(t.Window, Key.F2);
+        Assert.IsType<TextBox>(t.Window.Editor).Text = "thrown away";
+        PressKey(t.Window, Key.Escape);
+        Assert.Null(t.Window.Editor);
+        Assert.Equal("iam.ge: transcripts for every call", t.Tasks.Board.Tasks.Single().Title);
+    });
+
+    // Enter saves and Shift+Enter is a line break, which the title keeps.
+    [Fact]
+    public void Shift_Enter_keeps_a_line_break_in_the_title() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        var id = t.Tasks.AddNote("first", t.Gepha).Value.Id;
+        t.Controller.Open(Rect.Empty);
+
+        Assert.True(TasksWindow.EditorSaves(Key.Enter, ModifierKeys.None));
+        Assert.False(TasksWindow.EditorSaves(Key.Enter, ModifierKeys.Shift));
+        t.Window.BeginRename(id);
+        var editor = Assert.IsType<TextBox>(t.Window.Editor);
+        Assert.True(editor.AcceptsReturn);
+        editor.Text = "first\nsecond";
+        t.Window.SaveEditor();
+
+        Assert.Equal("first\nsecond", t.Tasks.Board.Tasks.Single().Title);
+        Assert.Contains("second", TitleOf(t.Window, id).Text);
+    });
+
+    // A change arriving while the editor is open (a session renaming another task) waits: the editor, its text and the
+    // keyboard survive, and the change is drawn once the editor closes.
+    [Fact]
+    public void A_redraw_does_not_kill_an_edit_in_progress() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        var id = t.Tasks.AddNote("mine", t.Gepha).Value.Id;
+        var other = t.Tasks.AddNote("theirs", t.Gepha).Value.Id;
+        t.Controller.Open(Rect.Empty);
+        t.Window.BeginRename(id);
+        var editor = Assert.IsType<TextBox>(t.Window.Editor);
+        editor.Text = "half typ";
+
+        t.Tasks.Rename(other, "theirs, renamed");
+
+        Assert.Same(editor, t.Window.Editor);
+        Assert.Equal("half typ", editor.Text);
+        PressKey(t.Window, Key.Escape);
+        Assert.Equal("theirs, renamed", TitleOf(t.Window, other).Text);
+    });
+
+    static void PressKey(TasksWindow window, Key key) =>
+        window.RaiseEvent(new KeyEventArgs(Keyboard.PrimaryDevice, PresentationSource.FromVisual(window)!, 0, key) { RoutedEvent = Keyboard.PreviewKeyDownEvent });
+
     // The toolbar's "Workspace: all ▾" was built the same way and had the same fault: a routed click opens its menu, and
     // a pick filters the board.
     [Fact]
