@@ -124,6 +124,12 @@ public sealed class GoalService(
 
     public GoalProgress ProgressOf(Goal goal) => GoalProgress.Of(goal, Board, tasks.Board);
 
+    /// <summary>
+    /// Every task linked to the goal itself (not its weekly goals'), closed ones included, in the task board's order:
+    /// the tasks GoalProgress counts, for the pipe's `taskIds`.
+    /// </summary>
+    public IReadOnlyList<TaskItem> TasksOf(Guid goalId) => tasks.Board.Tasks.Where(t => t.GoalId == goalId).ToArray();
+
     /// <summary>Which prompt the bar shows now (GoalReview.Due on today's local date).</summary>
     public ReviewDue PromptDue() => GoalReview.Due(Board, today());
 

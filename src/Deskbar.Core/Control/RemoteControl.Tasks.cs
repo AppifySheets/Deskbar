@@ -20,6 +20,7 @@ namespace Deskbar.Core.Control;
 //   task delete <id>
 //   task flag <id> important|urgent on|off
 //   task order <id> top|end|<n>
+//   task goal <id> <goal-id>|none     (the goals planner; needs the goal service, RemoteControl.Goals.cs)
 //
 // `flag` and `order` (Task 12, Rulings 25 and 28) are the twins of the toggles on a line and of dragging it. The flags
 // name Covey's quadrant (TaskOrder.cs); a flag that changes the quadrant puts the task on top of its new one, as the
@@ -84,6 +85,7 @@ public sealed partial class RemoteControl
                 .Match(f => TaskChange(service, id, t => service.SetFlag(t.Id, f.Flag, f.On)), ControlReply.Fail),
             ["order", var id, var place] => ParsePlace(place)
                 .Match(p => TaskChange(service, id, t => service.Place(t.Id, t.Quadrant, p)), ControlReply.Fail),
+            ["goal", var id, var goal] => TaskGoal(service, id, goal),
             _ => ControlReply.Fail($"Wrong arguments for task.\n{TaskUsage()}"),
         };
     }
@@ -166,6 +168,9 @@ public sealed partial class RemoteControl
         urgent = task.Urgent,
         quadrant = task.Quadrant.Numeral(),
         order = tasks is { } service && task.IsOpen ? service.Board.PositionOf(task.Id).Map(n => (int?)n).GetValueOrDefault() : null,
+        // The goal it counts toward (goals plan, Task 5), as {id, title}, or null: no link, no goal service, or a link
+        // to a goal that no longer exists (which reads as no goal everywhere).
+        goal = goals?.GoalOf(task).Map(g => (object?)new { id = g.Id, title = g.Title }).GetValueOrDefault(),
     };
 
     string? WorkspaceNameOf(Maybe<Guid> id) =>
@@ -217,6 +222,16 @@ public sealed partial class RemoteControl
         service.Board.Find(id)
             .Bind(task => change(task).Map(() => service.Board.Tasks.First(t => t.Id == task.Id)))
             .Match(task => Success(Describe(task)), ControlReply.Fail);
+
+    // `task goal <id> <goal-id>|none`, the twin of the More menu's "Goal". Both ids are looked up before anything
+    // changes; the link goes through GoalService.LinkTask, the one place a task is linked, so a done or dropped goal is
+    // refused there exactly as in the menu.
+    ControlReply TaskGoal(TaskService service, string id, string goal) =>
+        goals is not { } goalService ? ControlReply.Fail(GoalsUnavailable)
+        : (goal.Trim().Equals("none", StringComparison.OrdinalIgnoreCase)
+            ? Result.Success(Maybe<Guid>.None)
+            : goalService.Board.Find(goal).Map(g => Maybe.From(g.Id)))
+        .Match(g => TaskChange(service, id, t => goalService.LinkTask(t.Id, g)), ControlReply.Fail);
 
     // The reply is the task as it was, since it is gone afterwards.
     ControlReply TaskDelete(TaskService service, string id) =>

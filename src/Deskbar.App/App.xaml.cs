@@ -63,6 +63,9 @@ public partial class App : Application
     // The tasks board (docs/superpowers/specs/2026-11-22-tasks-board-design.md): notes and Claude's tasks, each with a
     // status. Built with the time tracker and handed to the remote control.
     Core.Tasks.TaskService? tasks;
+    // The goals planner (docs/superpowers/specs/2026-11-22-goals-planner-design.md): weekly and monthly goals the tasks
+    // count toward, in goals.json beside tasks.json. Built right after `tasks` and handed to the remote control.
+    Core.Goals.GoalService? goals;
     // Tiling (docs/superpowers/specs/2026-11-08-tiling-design.md): the Tiler decides, the surface does the
     // Win32. Both live for the process, both are null in compatibility mode (there are no desktops to tile),
     // and ExitApp disposes the Tiler and then the surface, so the LOCATIONCHANGE hook goes with them.
@@ -1336,6 +1339,15 @@ public partial class App : Application
             trace: ClickTrace.On ? ClickTrace.Write : null);
         tasks.Load().TapError(err => ClickTrace.Write($"tasks.json not loaded: {err}"));
 
+        // The goals (goals spec, "Calls made": a file of their own, goals.json, so an older build that drops what it
+        // does not know never touches them). Two clocks: the UTC instant for UpdatedAt, and the LOCAL date, which alone
+        // decides "this week" and "this month" (Petre's week, wherever UTC midnight falls). A failed load is traced like
+        // the tasks' and leaves the goals empty; it touches no task link (nothing prunes them).
+        goals = new Core.Goals.GoalService(new Core.Goals.JsonGoalStore(stateDir, ClickTrace.On ? ClickTrace.Write : null), tasks,
+            () => DateTimeOffset.UtcNow, () => DateOnly.FromDateTime(DateTime.Now),
+            trace: ClickTrace.On ? ClickTrace.Write : null);
+        goals.Load().TapError(err => ClickTrace.Write($"goals.json not loaded: {err}"));
+
         // Spec §Error handling: if the COM API is unrecognized (post-Windows-Update),
         // degrade to listing workspaces with a banner -- never crash, never move windows.
         compatibilityMode = desktops.Initialize().IsFailure;
@@ -1487,7 +1499,9 @@ public partial class App : Application
                     if (shown) board.Open(floatingBar?.BarScreenBounds() ?? Rect.Empty);
                     else board.Dismiss();
                 })
-                : Result.Failure("The tasks window is not available in this mode."));
+                : Result.Failure("The tasks window is not available in this mode."),
+            // `goal ...` and `task goal`, the planner's pipe twins (RemoteControl.Goals.cs).
+            goals: goals);
         controlServer = new ControlPipeServer(ControlCommandLine.PipeName,
             args => Dispatcher.InvokeAsync(() =>
             {

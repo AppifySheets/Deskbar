@@ -1,6 +1,7 @@
 using System.Text.Json;
 using CSharpFunctionalExtensions;
 using Deskbar.Core.Domain;
+using Deskbar.Core.Goals;
 using Deskbar.Core.Tasks;
 
 namespace Deskbar.Core.Control;
@@ -62,6 +63,9 @@ namespace Deskbar.Core.Control;
 //
 // `setTasksWindow` shows or hides the tasks window (`tasks-window show|hide`, the twin of the bar's "+N more";
 // TasksBoard in the app). The window is the app's, so the app hands in how; left null, `tasks-window` refuses.
+//
+// `goals` is the goal service for `goal` and `task goal` (RemoteControl.Goals.cs; the goals planner,
+// docs/superpowers/specs/2026-11-22-goals-planner-design.md). Left null, both refuse with "Goals are not available".
 public sealed partial class RemoteControl(WorkspaceManager manager, Func<bool, Result>? setBarVisible = null, Func<ProgramLaunch, Result<int?>>? launch = null,
     Func<Result<string>>? dump = null, Func<Maybe<string>>? defaultBrowser = null,
     Func<(string Version, string? Exe, bool Packaged)>? identity = null,
@@ -71,7 +75,8 @@ public sealed partial class RemoteControl(WorkspaceManager manager, Func<bool, R
     Func<bool>? isPro = null,
     TaskService? tasks = null,
     Func<WindowHandle, bool, Result>? setTileLocked = null,
-    Func<bool, Result>? setTasksWindow = null)
+    Func<bool, Result>? setTasksWindow = null,
+    GoalService? goals = null)
 {
     static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web) { WriteIndented = true };
 
@@ -98,6 +103,7 @@ public sealed partial class RemoteControl(WorkspaceManager manager, Func<bool, R
         ("attention", ["--from", var folder]) => Attention(folder),
         ("task", _) => Task(rest),
         ("tasks-window", [var state]) => TasksWindow(state),
+        ("goal", _) => Goal(rest),
         // A bare `tasks-window` (or one with too many words) gets its own usage line, not the whole usage.
         ("tasks-window", _) => ControlReply.Fail(ControlUsage.LineFor("tasks-window")),
 
