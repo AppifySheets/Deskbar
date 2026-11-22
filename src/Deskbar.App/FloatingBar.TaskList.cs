@@ -95,7 +95,8 @@ public partial class FloatingBar
     // What a click on a line does with the task's id. App sets it to the workspace switch; a refusal is traced.
     internal Func<Guid, Result> GoToTask { get; init; } = _ => Result.Success();
 
-    // What "+N more" opens: the tasks window (TasksBoard.Toggle, set by the App). While it is set, the line under the
+    // What "+N more" opens: the tasks window (TasksBoard.Open, set by the App: it opens the window, or brings an open
+    // one to the desktop in front). While it is set, the line under the
     // list is always there, reading "All tasks" when nothing is out of sight, because the window is the one place the
     // closed tasks can be seen (Petre: "can i see task list in deskbar? all of them, new and old"). Left null (the
     // bar's own tests, or a copy with no window) the button expands the list in place, as before the window existed.

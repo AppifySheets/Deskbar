@@ -70,21 +70,36 @@ public class TasksBoardTests
         }
     }
 
-    // Each read of the task clock is a minute later, so tasks are raised in the order the test makes them.
-    static Board Build(Func<TaskItem, Result>? goTo = null)
+    static readonly DateTime ClickStart = new(2026, 11, 22, 9, 0, 0, DateTimeKind.Utc);
+
+    // Each read of the task clock is a minute later, so tasks are raised in the order the test makes them. Each read of
+    // the click clock is a second later, so a click is never "right after a repaint" unless a test hands in a clock of
+    // its own (the click guard's test does).
+    static Board Build(Func<TaskItem, Result>? goTo = null, Action<nint>? bringForward = null, Func<DateTime>? clickClock = null)
     {
         var harness = Harness.Build();
         var minutes = 0;
+        var seconds = 0;
         var timers = new FakeTimers();
         var went = new List<Guid>();
         var tasks = new TaskService(new MemoryStore(), () => Start.AddMinutes(minutes++));
-        var window = new TasksWindow { Quiet = true };
+        var window = new TasksWindow { Quiet = true, ClickClock = clickClock ?? (() => ClickStart.AddSeconds(seconds++)) };
         var controller = new TasksBoard(window, tasks, harness.Manager, goTo ?? (t =>
         {
             went.Add(t.Id);
             return Result.Success();
-        }), undoTimer: timers.Start, now: () => Start.AddHours(1));
+        }), bringForward: bringForward, undoTimer: timers.Start, now: () => Start.AddHours(1));
         return new Board { Harness = harness, Window = window, Controller = controller, Tasks = tasks, Timers = timers, WentTo = went };
+    }
+
+    // A press with the click count Windows gives it (2 for the second press of a double click), then its Click, as the
+    // bar's task list tests do: ClickCount has no public setter.
+    static void PressAndClick(Button button, int clickCount)
+    {
+        var press = new MouseButtonEventArgs(Mouse.PrimaryDevice, 0, MouseButton.Left) { RoutedEvent = UIElement.PreviewMouseLeftButtonDownEvent };
+        typeof(MouseButtonEventArgs).GetProperty(nameof(MouseButtonEventArgs.ClickCount))!.SetValue(press, clickCount);
+        button.RaiseEvent(press);
+        Click(button);
     }
 
     static TaskSession Session(string id, bool live = true) =>
@@ -228,10 +243,12 @@ public class TasksBoardTests
         Assert.Equal([note], t.Window.Keys);
         Assert.True(t.Window.IsClosing(note));
 
-        // Undo brings it back as it was.
+        // Undo brings it back by the bar's rule, so the two Undos agree: Reopen (Backlog for a note with no live
+        // session), Done only for a task that was Done.
         Click(ButtonNamed(LineOf(t.Window, note), "Undo"));
-        Assert.Equal(TaskStatus.InProgress, t.Tasks.Board.Tasks.Single(x => x.Id == note).Status);
+        Assert.Equal(TaskStatus.Backlog, t.Tasks.Board.Tasks.Single(x => x.Id == note).Status);
         Assert.False(t.Window.IsClosing(note));
+        Assert.True(t.Controller.SetStatus(note, TaskStatus.InProgress).IsSuccess);
 
         // Closed for good once the six seconds are over: it leaves the open view...
         Assert.True(t.Controller.Close(note).IsSuccess);
@@ -450,6 +467,143 @@ public class TasksBoardTests
 
         t.Tasks.Rename(id, "renamed");
         Assert.Equal(before + 1, t.Window.Rebuilds);
+    });
+
+    // FIX ROUND 1, Critical 1: activating a window on another desktop makes Windows follow it there
+    // (WorkspaceManager's own note), so "+N more" on a window left behind on another desktop dragged Petre back to it.
+    // The window never activates itself: opening it shows it without activation, bringing it forward only restores it,
+    // and the App's seam moves it to the desktop in front and only then activates it. Both paths go through the seam.
+    [Fact]
+    public void The_window_never_activates_itself_and_both_paths_go_through_the_seam() => StaThread.Run(() =>
+    {
+        var forward = new List<nint>();
+        using var t = Build(bringForward: forward.Add);
+
+        t.Controller.Open(Rect.Empty);
+        Assert.False(t.Window.ShowActivated);
+        Assert.Equal([t.Controller.EnsureHandle()], forward);
+
+        t.Controller.Open(Rect.Empty);
+        Assert.Equal(2, forward.Count);
+        Assert.Equal(0, t.Window.SelfActivations);
+    });
+
+    // The App's seam, in its order: move to the desktop in front, then activate. A failed move activates only a window
+    // already on the desktop in front; one elsewhere is traced and left where it is.
+    [Fact]
+    public void Arriving_moves_first_then_activates() => StaThread.Run(() =>
+    {
+        var steps = new List<string>();
+        TasksBoard.Arrive(0x42, () => { steps.Add("move"); return Result.Success(); }, () => { steps.Add("ask"); return false; },
+            () => steps.Add("activate"), trace => steps.Add("trace"));
+        Assert.Equal(["move", "activate"], steps);
+
+        steps.Clear();
+        TasksBoard.Arrive(0x42, () => { steps.Add("move"); return Result.Failure("refused"); }, () => { steps.Add("ask"); return true; },
+            () => steps.Add("activate"), trace => steps.Add("trace"));
+        Assert.Equal(["move", "trace", "ask", "activate"], steps);
+
+        steps.Clear();
+        TasksBoard.Arrive(0x42, () => { steps.Add("move"); return Result.Failure("refused"); }, () => { steps.Add("ask"); return false; },
+            () => steps.Add("activate"), trace => steps.Add("trace"));
+        Assert.Equal(["move", "trace", "ask", "trace"], steps);
+    });
+
+    // FIX ROUND 1, Important 1: the bar's click guard (#48, Ruling 10). A press that is the second of a double click, or
+    // a click within half a second of a repaint that changed the lines, is dropped on a line and its buttons; Undo
+    // drops only the double click, since it appears under the pointer on purpose.
+    [Fact]
+    public void A_double_click_or_a_click_right_after_a_repaint_is_ignored() => StaThread.Run(() =>
+    {
+        var now = ClickStart;
+        using var t = Build(clickClock: () => now);
+        var first = t.Tasks.AddNote("first", t.Gepha).Value.Id;
+        var second = t.Tasks.AddNote("second", t.Gepha).Value.Id;
+        t.Controller.Open(Rect.Empty);
+
+        // Right after the draw: nothing takes the click.
+        Click(ButtonNamed(LineOf(t.Window, second), "Close"));
+        Click(LineOf(t.Window, second));
+        Assert.Equal(2, t.Tasks.Board.Pile().Count);
+        Assert.Empty(t.WentTo);
+
+        // Later, one click closes "second"; its line stays with Undo where the tick was.
+        now = now.AddMilliseconds(600);
+        PressAndClick(ButtonNamed(LineOf(t.Window, second), "Close"), clickCount: 1);
+        Assert.Single(t.Tasks.Board.Pile());
+
+        // The second press of that double click lands on Undo and is dropped, and so is one on the next line's tick.
+        now = now.AddMilliseconds(600);
+        PressAndClick(ButtonNamed(LineOf(t.Window, second), "Undo"), clickCount: 2);
+        PressAndClick(ButtonNamed(LineOf(t.Window, first), "Close"), clickCount: 2);
+        PressAndClick(LineOf(t.Window, first), clickCount: 2);
+        Assert.Equal(TaskStatus.Closed, t.Tasks.Board.Tasks.Single(x => x.Id == second).Status);
+        Assert.Equal(TaskStatus.Backlog, t.Tasks.Board.Tasks.Single(x => x.Id == first).Status);
+        Assert.Empty(t.WentTo);
+
+        // A deliberate click on Undo, however soon after the repaint, works.
+        PressAndClick(ButtonNamed(LineOf(t.Window, second), "Undo"), clickCount: 1);
+        Assert.Equal(TaskStatus.Backlog, t.Tasks.Board.Tasks.Single(x => x.Id == second).Status);
+    });
+
+    // FIX ROUND 1, Important 2: a half-typed comment must not freeze the window's own buttons. Every button is
+    // unfocusable, so the comment box keeps the keyboard through any click; a redraw that waited for the box would
+    // never come. The redraw goes ahead, and the box comes back with its text, the keyboard and its caret.
+    [Fact]
+    public void A_half_typed_comment_keeps_its_place_and_the_window_still_redraws() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        var id = t.Tasks.AddNote("note", t.Gepha).Value.Id;
+        var closed = t.Tasks.AddNote("closed", t.Gepha).Value.Id;
+        t.Tasks.Close(closed);
+        t.Controller.Open(Rect.Empty);
+        t.Window.Activate();
+        t.Controller.ToggleThread(id);
+        var box = t.Window.CommentBoxOf(id)!;
+        box.Text = "half a thought";
+        box.Focus();
+        box.CaretIndex = 4;
+        Assert.True(box.IsKeyboardFocused);
+
+        t.Tasks.AddNote("another", t.Gepha);
+
+        // The redraw happened (the new note is drawn; the closed one is not in the open view)...
+        var again = t.Window.CommentBoxOf(id)!;
+        Assert.Equal(2, t.Window.Keys.Count);
+        // ...and the box came back as it was.
+        Assert.Equal("half a thought", again.Text);
+        Assert.True(again.IsKeyboardFocused);
+        Assert.Equal(4, again.CaretIndex);
+    });
+
+    // FIX ROUND 1, Important 3: the remembered place is device pixels, and the window is put there in device pixels
+    // (SetWindowPos on the hidden handle before Show), not through Left/Top, which WPF reads at the DPI of the screen it
+    // was created on. On the screen that holds it, the window's own rectangle is exactly the one remembered.
+    [Fact]
+    public void A_remembered_place_comes_back_in_device_pixels() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        var place = new Deskbar.Core.Persistence.TasksWindowState(120, 90, 900, 640, Maximized: false);
+        Assert.True(t.Harness.Manager.SaveTasksWindow(place).IsSuccess);
+
+        t.Controller.Open(Rect.Empty);
+
+        Assert.Equal(place, t.Window.CurrentPlace());
+    });
+
+    // The window's Undo follows the bar's: a Done task closed from its line comes back Done.
+    [Fact]
+    public void Undo_brings_a_done_task_back_done() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        var id = t.Tasks.Create("merged", t.Gepha, Session("s1")).Value.Id;
+        t.Tasks.MarkDone(id);
+        t.Controller.Open(Rect.Empty);
+
+        Click(ButtonNamed(LineOf(t.Window, id), "Close"));
+        Click(ButtonNamed(LineOf(t.Window, id), "Undo"));
+
+        Assert.Equal(TaskStatus.Done, t.Tasks.Board.Tasks.Single(x => x.Id == id).Status);
     });
 
     // PlaceNear: clear of the bar, inside the work area (the model is commit 183d85e's PlaceUnder).

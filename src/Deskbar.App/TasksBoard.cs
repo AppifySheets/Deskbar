@@ -41,8 +41,8 @@ namespace Deskbar.App;
 // WHEN IT REDRAWS. On every TaskService.Changed and WorkspaceManager.StateChanged while the window is open (a workspace
 // renamed or recoloured changes the chips), and after each of its own actions. The window compares what it would
 // draw with what it drew and redraws nothing when they match, and it waits while one of its menus is open, a rename
-// is under way, a comment is half typed or a press is in flight (TasksWindow.MustWait): the bar's #77 lesson about
-// redrawing under an open menu, applied to this window's own refresh.
+// is under way or a press is in flight (TasksWindow.MustWait): the bar's #77 lesson about redrawing under an open
+// menu, applied to this window's own refresh.
 public sealed class TasksBoard : IDisposable
 {
     // How long a line just closed stays, struck through with Undo: the bar's own window, so the two agree.
@@ -72,9 +72,10 @@ public sealed class TasksBoard : IDisposable
 
     //   goTo          where a line's click goes (see the header)
     //   colourOf      a workspace's lane colour, the one its row on the bar wears; none for a workspace without one
-    //   bringForward  pulls the window to the front by its handle, the way Quick find's is: a `deskbar.cmd tasks-window
-    //                 show` typed in a terminal carries no right to take the foreground, and without this the window
-    //                 would open behind whatever has it
+    //   bringForward  brings the window to Petre by its handle: the App moves it to the desktop in front and then
+    //                 activates it (Arrive), through an activator, because a `deskbar.cmd tasks-window show` typed in a
+    //                 terminal carries no right to take the foreground. The window itself never activates while this
+    //                 is set (see Open)
     //   undoTimer     runs `then` once after the undo window unless disposed first; a dispatcher timer by default, a
     //                 seam so the tests move time by hand
     //   now           the clock a comment's time is told against ("11:42" today, a date before)
@@ -127,12 +128,18 @@ public sealed class TasksBoard : IDisposable
     /// when no screen holds that place any more; every such open starts at the default view: open tasks, every
     /// workspace, no thread open.
     /// </summary>
+    //
+    // THE WINDOW NEVER ACTIVATES ITSELF (fix round 1, Critical 1). Activating a window that lives on another desktop
+    // makes Windows follow it there (WorkspaceManager's note), and this window is a page that stays on the desktop it
+    // was left on: open it, click a line (which switches workspace), click "+N more", and an Activate first would take
+    // Petre straight back. So both paths here only show or restore the window without activating it, and then hand it
+    // to Arrived, whose seam (the App's, through Arrive) moves it to the desktop in front and only then activates it.
     public void Open(Rect near)
     {
         if (window.IsOpen)
         {
             window.BringForward();
-            bringForward?.Invoke(EnsureHandle());
+            Arrived();
             return;
         }
         filter = TaskFilter.Open;
@@ -141,7 +148,34 @@ public sealed class TasksBoard : IDisposable
         window.ShowProblem(null);
         window.Present(View());
         window.Open(near, manager.State.TasksWindow is { } place ? Maybe.From(place) : Maybe<TasksWindowState>.None);
-        bringForward?.Invoke(EnsureHandle());
+        Arrived();
+    }
+
+    // The window, shown or restored without activation, comes to Petre: through the App's seam (move, then activate),
+    // or, with no seam (a copy without a desktop service), activated where it is.
+    void Arrived()
+    {
+        if (bringForward is { } seam) seam(EnsureHandle());
+        else window.ActivateHere();
+    }
+
+    /// <summary>
+    /// The App's bring-forward, in its order (fix round 1, Critical 1): <paramref name="move"/> the window to the
+    /// desktop in front first, and <paramref name="activate"/> it only after. When the move fails, it is activated only
+    /// if it is already on the desktop in front (<paramref name="onCurrentDesktop"/>); a window left on another desktop
+    /// is traced and left there, since activating it would take Petre to it.
+    /// </summary>
+    internal static void Arrive(nint hwnd, Func<Result> move, Func<bool> onCurrentDesktop, Action activate, Action<string> trace)
+    {
+        var moved = move();
+        if (moved.IsSuccess)
+        {
+            activate();
+            return;
+        }
+        trace($"tasks window 0x{hwnd:X}: not moved to the desktop in front: {moved.Error}");
+        if (onCurrentDesktop()) activate();
+        else trace($"tasks window 0x{hwnd:X}: left on its own desktop rather than taking you there");
     }
 
     /// <summary>`tasks-window hide`, as the title bar's X does: hidden, its place remembered.</summary>
@@ -173,7 +207,7 @@ public sealed class TasksBoard : IDisposable
 
     // --- actions ---------------------------------------------------------------------------------------------------
 
-    /// <summary>A line's click (see the header). The window closes when the switch worked.</summary>
+    /// <summary>A line's click (see the header). The window stays open; a refusal shows on its problem line.</summary>
     public Result Go(Guid id)
     {
         var task = tasks.Board.Tasks.TryFirst(t => t.Id == id);
@@ -196,15 +230,15 @@ public sealed class TasksBoard : IDisposable
     }
 
     /// <summary>
-    /// Undo on a line just closed: the task comes back with the status it had. SetStatus takes a closed task back to
-    /// any status but Closed; a question a waiting task carried was dropped by Close (TaskBoard.Close), so a waiting
-    /// task comes back waiting without its question line.
+    /// Undo on a line just closed, by the bar's rule (FloatingBar.UndoClose), so the two Undos agree (fix round 1): a
+    /// task that was Done comes back Done (SetStatus, the board's way back to Done for a closed task); any other comes
+    /// back through Reopen, In progress while a session is live on it, else Backlog.
     /// </summary>
     public Result Undo(Guid id)
     {
         if (!pendingCloses.Remove(id, out var pending)) return Report(Result.Failure("Nothing to undo"));
         pending.Timer.Dispose();
-        var back = tasks.SetStatus(id, pending.Was);
+        var back = pending.Was == TaskStatus.Done ? tasks.SetStatus(id, TaskStatus.Done) : tasks.Reopen(id);
         // SetStatus pulses Changed, which redraws; a refusal (the task is gone) still needs the line taken away.
         if (back.IsFailure) Refresh();
         return Report(back);
