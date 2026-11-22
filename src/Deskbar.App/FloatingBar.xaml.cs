@@ -974,12 +974,6 @@ public partial class FloatingBar : Window
     // by App at startup to decide which of the two states to start in.
     public bool Minimized { get; private set; }
 
-    // Whether nobody can see the bar right now: minimized behind its taskbar button, hidden, stepped aside for a
-    // full-screen window (floating bar dropped out of topmost), or docked while a full-screen app is open
-    // (ABN_FULLSCREENAPP). The due card (DueCard) opens only in these cases, since otherwise the bar's own pie and
-    // stopwatch already say a task came due.
-    internal bool OutOfSight => Minimized || !IsVisible || steppedAside || fullScreenAppOpen;
-
     // Hide, and record it. NOT Close and NOT a new window: the handle has to survive, because it is
     // the one WindowMonitor.Ignore was given at startup and the one ReclaimTopmost addresses.
     // Persisting immediately rather than on exit means a crash or a kill leaves the state Petre
@@ -2255,7 +2249,7 @@ public partial class FloatingBar : Window
         ForgetDrawnFades();           // ...and the fade each workspace row was drawn at (FloatingBar.Recency.cs)
         ForgetWindowFits();          // ...and the maximized and tile badges (FloatingBar.WindowState.cs)
         ForgetWorkspaceTimes();       // ...and so do the captions' time marks
-        ForgetTaskPies();             // ...and the task pies, and the row colours the stopwatch's swatch reads
+        ForgetWorkspaceAccents();     // ...and the rows' colours, kept for the task list (FloatingBar.Tasks.cs)
         // The rows these pointed at have just been thrown away, so every entry is now a Border
         // that is no longer in the tree. Repopulated as the new rows are built.
         rowRings.Clear();
@@ -2465,8 +2459,8 @@ public partial class FloatingBar : Window
                 if (g.Workspace.Id == liveTarget) currentTint = LaneTint(colour, colourSlot);
                 // ...and the bright version of that colour for the bar down the list's side (see ListSpine).
                 if (g.Workspace.Id == liveTarget) currentAccent = ListSpine(colour, colourSlot);
-                // ...and the row's rail colour, for the stopwatch's swatch when this workspace's timer is the one it
-                // shows (FloatingBar.Tasks.cs), so the swatch and the row it points at are one colour.
+                // ...and the row's rail colour, for the task list (FloatingBar.Tasks.cs), so a task's line and the
+                // row of the workspace it belongs to are one colour.
                 NoteWorkspaceAccent(g.Workspace.Id, LaneAccent(colour, colourSlot >= 0 ? colourSlot : ownSlot));
 
                 // Every member of a group is drawn as nested, indented under the group's header: the
@@ -2520,8 +2514,6 @@ public partial class FloatingBar : Window
                     fadeStep: fadeStep,
                     titledList: Expanded(g.Workspace.Id),
                     asking: g.WantsAttention,
-                    // The soonest running task timer on this workspace, drawn as a pie in the caption (Tasks.cs).
-                    timer: g.Timer,
                     // The tile mark after the name, on every tiled row and not only the one you are on (Tiling.cs).
                     // TilingGate.Acts, the Tiler's own test, so a workspace left tiled after Pro lapsed shows nothing:
                     // its flag is set but nothing arranges it.
@@ -3815,7 +3807,7 @@ public partial class FloatingBar : Window
     // instead of an icon row.
     // `fadeStep`: how faded a workspace row's name is drawn, 0 (fresh) to 16 (idle), from FloatingBar.Recency.cs. 0, today's
     // resting colour, for every row that is not a workspace.
-    UIElement GroupRow(string visualLabel, string groupLabel, bool isCurrent, Func<Result>? switchTo, string groupKey, Action<WindowHandle, int?>? onDrop, IEnumerable<WindowRow> rows, Brush? tint = null, Guid? rowKey = null, bool folded = false, bool nested = false, Brush? spine = null, bool pinned = false, Guid? desktopId = null, UIElement? captionContent = null, bool titledList = false, bool asking = false, Maybe<Core.Tasks.TaskTimer> timer = default, bool pinnedWorkspace = false, bool tiled = false, int fadeStep = 0)
+    UIElement GroupRow(string visualLabel, string groupLabel, bool isCurrent, Func<Result>? switchTo, string groupKey, Action<WindowHandle, int?>? onDrop, IEnumerable<WindowRow> rows, Brush? tint = null, Guid? rowKey = null, bool folded = false, bool nested = false, Brush? spine = null, bool pinned = false, Guid? desktopId = null, UIElement? captionContent = null, bool titledList = false, bool asking = false, bool pinnedWorkspace = false, bool tiled = false, int fadeStep = 0)
     {
         // Background MUST be non-null for a panel to take part in hit testing at all --
         // a null Background leaves gaps between icons that swallow nothing and report no
@@ -4011,7 +4003,7 @@ public partial class FloatingBar : Window
         // either, which changes nothing -- RowLabel already returns null for a row with no
         // destination, and the pinned row has never had one.
         var (label, setHover) = captionContent is null
-            ? RowLabel(visualLabel, isCurrent, switchTo, caption: true, currentColour: spine, timeFor: rowKey, fold: foldMark, asking: asking, timer: timer, pin: pinnedWorkspace, tiled: tiled, fadeStep: fadeStep)
+            ? RowLabel(visualLabel, isCurrent, switchTo, caption: true, currentColour: spine, timeFor: rowKey, fold: foldMark, asking: asking, pin: pinnedWorkspace, tiled: tiled, fadeStep: fadeStep)
             : (captionContent, (Action<bool>?)null);
 
         // Collected as they are built, because the hover wiring below needs the BUTTONS and
@@ -4246,7 +4238,7 @@ public partial class FloatingBar : Window
         // by the same hover. Only for a real caption, not the pinned row's header.
         if (AcrossSeam && captionContent is null)
         {
-            var (twin, twinHover) = RowLabel(visualLabel, isCurrent, switchTo, caption: true, currentColour: spine, timeFor: rowKey, fold: foldMark, timer: timer, pin: pinnedWorkspace, tiled: tiled, fadeStep: fadeStep);
+            var (twin, twinHover) = RowLabel(visualLabel, isCurrent, switchTo, caption: true, currentColour: spine, timeFor: rowKey, fold: foldMark, pin: pinnedWorkspace, tiled: tiled, fadeStep: fadeStep);
             if (twin is FrameworkElement twinCaption && label is FrameworkElement firstCaption) twinCaption.Margin = firstCaption.Margin;
             var holder = AtRightHalf(twin);
             Grid.SetRow(holder, 0);
@@ -5638,7 +5630,7 @@ public partial class FloatingBar : Window
     // `tiled`: the workspace is tiled and tiling acts on it, so the name is followed by the tile mark
     // (FloatingBar.Tiling.cs, TiledMark). Read on every row, the one you are on or not, folded or not.
     (UIElement Element, Action<bool>? SetHover) RowLabel(string text, bool isCurrent, Func<Result>? switchTo, bool caption = false,
-        Brush? currentColour = null, Guid? timeFor = null, (int Windows, bool Attention)? fold = null, bool asking = false, Maybe<Core.Tasks.TaskTimer> timer = default,
+        Brush? currentColour = null, Guid? timeFor = null, (int Windows, bool Attention)? fold = null, bool asking = false,
         bool pin = false, bool tiled = false, int fadeStep = 0)
     {
         // Petre: "when switching workspaces, because the caption of the workspace gets bolded,
@@ -5718,12 +5710,8 @@ public partial class FloatingBar : Window
         // name it counts.
         if (fold is { } folded)
             marks.Add(FoldMark(folded.Windows, folded.Attention, textBlock.FontSize, lineHeight));
-        // ...and last, so it sits right against the name: a running task timer's pie, emptying as the time runs out
-        // (FloatingBar.Tasks.cs). Registered there for the clock's tick, which repaints it in place.
-        if (caption && timer.HasValue)
-            marks.Add(TaskPie(timer.Value));
-        // ...and after that, the tile mark, so it reads straight after the name, or after the pin on a pinned
-        // workspace: "Mail ⊞ ◔ · 1 h 5 min". It says the workspace as a whole is tiled, so it belongs with the name
+        // ...and after the fold count, the tile mark, so it reads straight after the name, or after the pin on a
+        // pinned workspace: "Mail ⊞ · 1 h 5 min". It says the workspace as a whole is tiled, so it belongs with the name
         // rather than with any one count or time.
         if (caption && tiled)
             marks.Add(TiledMark(textBlock));

@@ -59,10 +59,9 @@ public partial class App : Application
     DetachedStatsWindow? detachedStats; // the stats line detached into its own always-on-top window, created on first use
     bool detachedStatsPinned;           // its hwnd is pinned to every desktop once, after its first show (see ShowDetachedStats)
     TimeTracker? timeTracker; // #53: active time per workspace, in its own file beside state.json
-    // Parked tasks and their timers (docs/superpowers/specs/2026-11-19-tasks-in-the-bar-design.md). Built with the
-    // time tracker, ticked by the 1 s timer, and handed to the remote control; later tasks read it for the UI.
+    // The tasks board (docs/superpowers/specs/2026-11-22-tasks-board-design.md): notes and Claude's tasks, each with a
+    // status. Built with the time tracker and handed to the remote control.
     Core.Tasks.TaskService? tasks;
-    DueCards? dueCards;
     // Tiling (docs/superpowers/specs/2026-11-08-tiling-design.md): the Tiler decides, the surface does the
     // Win32. Both live for the process, both are null in compatibility mode (there are no desktops to tile),
     // and ExitApp disposes the Tiler and then the surface, so the LOCATIONCHANGE hook goes with them.
@@ -1317,9 +1316,8 @@ public partial class App : Application
         // mixing it into state.json would mean rewriting all of that on every workspace rename.
         timeTracker = new TimeTracker(new JsonTimeStore(stateDir), new InputActivity(), () => DateTime.Now);
 
-        // Tasks in the bar (docs/superpowers/specs/2026-11-19-tasks-in-the-bar-design.md): parked tasks and their
-        // timers, in tasks.json beside state.json. A failed load is traced and leaves the board empty, never fatal.
-        // It is ticked from the 1 s timer below, which only starts after manager.Start() has run.
+        // The tasks board (docs/superpowers/specs/2026-11-22-tasks-board-design.md), in tasks.json beside state.json.
+        // A failed load is traced and leaves the board empty, never fatal.
         tasks = new Core.Tasks.TaskService(new Core.Tasks.JsonTaskStore(stateDir), () => DateTimeOffset.UtcNow,
             trace: ClickTrace.On ? ClickTrace.Write : null);
         tasks.Load().TapError(err => ClickTrace.Write($"tasks.json not loaded: {err}"));
@@ -1517,57 +1515,13 @@ public partial class App : Application
             .DistinctUntilChanged()
             .Subscribe(TaskbarFlashingSwitch.Sync);
 
-        // Tasks and workspaces kept in step (design doc above). Subscribed after Start(), so the pulses of
-        // loading state do not prune against a half-built list.
-        //  - tasks.Changed -> the bar's marks (due / running) are refreshed from the board.
-        //  - manager.StateChanged -> tasks whose workspace was deleted are pruned.
-        // No loop: Prune pulses Changed only when it actually freed something, and SetTaskMarks pulses
-        // StateChanged only when the marks differ from the ones it holds. So a pulse that changes nothing
-        // ends the chain after one hop, and each real change moves the chain at most one step further.
-        tasks!.Changed.Subscribe(_ => manager.SetTaskMarks(tasks.DueWorkspaces(), tasks.RunningWorkspaces()));
-
-        // The due card (DueCard, DueCards): when a task comes due while the bar cannot be seen (minimized, hidden,
-        // stepped aside or a full-screen app open), a small non-activating card says so, since Windows toasts are
-        // unavailable to us (issue #123). A click goes to the task's workspace; a free task opens the stopwatch
-        // menu instead, after showing the bar again if it was minimized. Spec: "When the bar cannot be seen".
-        dueCards = new DueCards(
-            tasks,
-            () => floatingBar?.OutOfSight ?? false,
-            id => manager.State.Workspaces.TryFirst(w => w.Id == id) is { HasValue: true } found
-                ? (found.Value.Name, ToBrush(LaneColour.Of(manager.State, found.Value)))
-                : (null, null),
-            (task, card) =>
-            {
-                if (task.WorkspaceId.HasValue)
-                {
-                    manager.Switch(task.WorkspaceId.Value);
-                    return true;
-                }
-
-                // A free task has no workspace to go to, so the click opens the stopwatch menu. It is anchored to
-                // the CARD, not the bar's strip: the bar may be minimized, hidden, stepped aside or behind a
-                // full-screen app, and the card is by definition where the user is looking. The card stays until
-                // the menu closes, since closing it would take the menu's placement target away.
-                if (floatingBar?.TasksMenu() is not { } menu) return true;
-                menu.PlacementTarget = card;
-                menu.Placement = System.Windows.Controls.Primitives.PlacementMode.Top;
-                menu.Closed += (_, _) => dueCards?.Dismiss(card);
-                menu.IsOpen = true;
-                return false;
-            },
-            // Each card pinned to every virtual desktop once it is shown, like the bar (PinFloatingBar) and the
-            // detached stats window (ShowDetachedStats), and for their reason: a card is about a task on SOME
-            // workspace, so it must still be there after Petre switches desktops to go and answer it, not left
-            // behind on the desktop he was on when it came due. After the show, because a window that has never
-            // been shown is on no desktop and cannot be pinned. A failure is traced, not shown: the card still
-            // works on the desktop it opened on. (Final review I3, Ruling 5.)
-            card => desktops!.Pin(new WindowHandle(new System.Windows.Interop.WindowInteropHelper(card).EnsureHandle()))
-                .TapError(err => ClickTrace.Write($"due card pin failed: {err}")));
+        // Tasks and workspaces kept in step (design doc above): when a workspace is deleted, the tasks on it are pruned.
+        // Subscribed after Start(), so the pulses of loading state do not prune against a half-built list.
         //
         // Threads: manager.StateChanged is pulsed from the virtual-desktop CurrentChanged event, which is raised on
-        // a thread of its own, while the task service (and the manager's mark sets) are UI-thread only. So the prune
-        // is queued onto the dispatcher, as the control pipe does; every other way into the service (Tick, Load, the
-        // control pipe, tasks.Changed which follows from those) is already on the UI thread.
+        // a thread of its own, while the task service is UI-thread only. So the prune is queued onto the dispatcher,
+        // as the control pipe does; every other way into the service (Load, the control pipe) is already on the UI
+        // thread.
         //
         // Pruning frees tasks for good, so when may State.Workspaces lack a workspace that still exists? Reading
         // WorkspaceManager: ids leave the list only in ForgetWorkspace (an explicit delete or a heard desktop close);
@@ -1577,7 +1531,7 @@ public partial class App : Application
         manager.StateChanged.Subscribe(_ => Dispatcher.InvokeAsync(() =>
         {
             var known = manager.State.Workspaces.Select(w => w.Id).ToHashSet();
-            if (known.Count > 0) tasks.Prune(known);
+            if (known.Count > 0) tasks!.Prune(known);
         }));
 
         trayIcon = new TaskbarIcon
@@ -1709,10 +1663,6 @@ public partial class App : Application
                 TimeToday = id => timeTracker?.Time.On(id, DateOnly.FromDateTime(DateTime.Now)) ?? TimeSpan.Zero,
                 // ...and the screen strips it fills on every rebuild (FloatingBar.Strips.cs).
                 Strips = () => stripSet.Current,
-                // ...and the tasks (FloatingBar.Tasks.cs): the stopwatch in the strip and the rows' pies draw this
-                // service's board, and the stopwatch's menu parks and finishes tasks through it. The same instance the
-                // 1 s timer ticks and the control pipe edits, so all three agree.
-                Tasks = tasks,
             };
             // The bar's hwnd is created HERE, before it is ever shown, for two reasons that
             // both hang off the same handle:
@@ -1840,11 +1790,6 @@ public partial class App : Application
                 // eyes: a highlight pointing at the wrong window is misinformation, not a
                 // missing feature, so up to five seconds of it is far worse than up to one.
                 manager.ResyncActiveWindow();
-                // ...and the tasks: arrival dwell and timers running out. This timer starts after manager.Start()
-                // (it is created below the Start block), so CurrentWorkspaceId is resolved before the first tick.
-                // Marks are refreshed every tick too, because a timer running out changes no board state to pulse.
-                tasks.Tick(manager.CurrentWorkspaceId);
-                manager.SetTaskMarks(tasks.DueWorkspaces(), tasks.RunningWorkspaces());
                 // ...and which shell flyout the bar shows as open, which an event can also leave wrong: Esc shuts Start, Windows gives
                 // the foreground to the bar itself, whose windows the monitor never reports, and nothing says the flyout is gone
                 // (FloatingBar.ResyncShellFlyouts). Three field reads unless the bar shows one open.
@@ -2413,14 +2358,6 @@ public partial class App : Application
                          desktops.IsPinned(new WindowHandle(hwnd)).GetValueOrDefault(false));
 
         RefreshTrayMenu();
-    }
-
-    // A "#RRGGBB" lane colour as a frozen brush (static WPF brushes must be frozen), for the due card swatch.
-    static System.Windows.Media.Brush ToBrush(string hex)
-    {
-        var brush = new System.Windows.Media.SolidColorBrush((System.Windows.Media.Color)System.Windows.Media.ColorConverter.ConvertFromString(hex));
-        brush.Freeze();
-        return brush;
     }
 
     // Every way back: the taskbar button, the X on its thumbnail, Alt+Tab, and the tray item.

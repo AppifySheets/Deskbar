@@ -16,5 +16,7 @@ public enum StripItem
     Language,       // the keyboard language switcher, itself shown only with two or more languages
     Clock,          // time over date
     ShowDesktop,    // the sliver at the very edge
-    Tasks,          // the stopwatch: parked tasks and their timers (spec 2026-11-19-tasks-in-the-bar, "The bar")
+    // The tasks (spec 2026-11-22-tasks-board): once the stopwatch, now the task list at the bottom of the bar. The
+    // name stayed, so a state.json that hid the stopwatch hides the list.
+    Tasks,
 }
