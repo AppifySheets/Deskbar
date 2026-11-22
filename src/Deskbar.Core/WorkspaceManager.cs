@@ -1993,6 +1993,19 @@ public sealed class WorkspaceManager(
             ? Result.Success()
             : Result.Success().Tap(() => Persist(State with { QuietTaskbarChoice = quiet }));
 
+    // The Deskbar Pro reminder's start date, stamped ONCE: a second call keeps the first date, so a restart
+    // never restarts the two quiet weeks (AppState.ProReminderSince).
+    public Result StampProReminderStart(DateOnly today) =>
+        State.ProReminderSince is not null
+            ? Result.Success()
+            : Result.Success().Tap(() => Persist(State with { ProReminderSince = today }));
+
+    // "Not now" on the reminder line: quiet for the rest of the given day (AppState.ProReminderDismissedOn).
+    public Result DismissProReminder(DateOnly today) =>
+        State.ProReminderDismissedOn == today
+            ? Result.Success()
+            : Result.Success().Tap(() => Persist(State with { ProReminderDismissedOn = today }));
+
     // Across the seam between two screens, or on one screen's edge (AppState.DockAcrossScreens). Asking for the
     // seam turns docking on as well, in the same write, since the one means nothing without the other.
     public Result SetDockAcrossScreens(bool across) =>

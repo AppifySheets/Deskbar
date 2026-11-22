@@ -64,6 +64,9 @@ public partial class FloatingBar : Window
         // ...and the stats line above it (FloatingBar.Stats.cs), hidden until the first sample.
         BuildStats();
 
+        // ...and the Deskbar Pro reminder above that (FloatingBar.ProReminder.cs), hidden until the App says it is due.
+        BuildProReminder();
+
         // A right-click on bare background, which docking made most of the bar (see BuildBarMenu).
         BuildBarMenu();
 
