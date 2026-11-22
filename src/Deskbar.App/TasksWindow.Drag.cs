@@ -46,6 +46,9 @@ public partial class TasksWindow
 
     internal bool Dragging => drag is { Started: true };
 
+    /// <summary>For the tests: where the drop line is drawn, in the drag's coordinates, while a drag shows one.</summary>
+    internal double? DropLineY => dropShown?.LineY;
+
     bool DragInFlight => drag is not null || dropQueued;
 
     // Wired on both surfaces once; only the one on show ever sees a press.

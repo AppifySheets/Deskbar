@@ -246,6 +246,10 @@ public partial class TasksWindow : Window
         // and maximized only once it has arrived (MaximizeIfRemembered, after the move to the desktop in front): showing
         // maximized activates the window whatever ShowActivated says (review I-2).
         WindowState = WindowState.Normal;
+        // The List's minimum while it is placed, so a remembered List width is not held at the Matrix's; the Matrix
+        // grows it once it is on screen (FitWidthToView, below).
+        listNormal = null;
+        MinWidth = ListMinWidth;
         var placed = remembered.HasValue && PlaceAt(remembered.Value);
         if (!placed) Place();
         maximizeOnArrival = placed && remembered.Value.Maximized;
@@ -255,6 +259,7 @@ public partial class TasksWindow : Window
         // window can show one frame at the scaled size before this puts the remembered device rectangle back.
         if (placed) PlaceDevice(remembered.Value);
         NoteNormal();
+        FitWidthToView(matrixShown);
         Scroller.ScrollToTop();
         Toolbar.Focus();
     }
@@ -300,8 +305,11 @@ public partial class TasksWindow : Window
     }
 
     /// <summary>Where the window is: its normal rectangle in device pixels, and whether it is maximized.</summary>
-    internal TasksWindowState CurrentPlace() =>
-        new((int)lastNormal.Left, (int)lastNormal.Top, (int)lastNormal.Width, (int)lastNormal.Height, WindowState == WindowState.Maximized);
+    // While the Matrix has grown the window, the List's rectangle (ListRect, TasksWindow.Matrix.cs).
+    internal TasksWindowState CurrentPlace() => PlaceOf(ListRect());
+
+    TasksWindowState PlaceOf(Rect place) =>
+        new((int)place.Left, (int)place.Top, (int)place.Width, (int)place.Height, WindowState == WindowState.Maximized);
 
     // The window's rectangle as Windows has it, noted only in the normal state: a maximized window's rectangle is the
     // screen's and a minimized one's is nonsense (CLAUDE.md, Traps), and neither is where it returns to.
@@ -436,7 +444,7 @@ public partial class TasksWindow : Window
         closing.Clear();
         // The List or the Matrix (TasksWindow.Matrix.cs), whichever the switch says; the other is emptied and hidden.
         matrixShown = view.Matrix;
-        FitMinWidthToView(view.Matrix);
+        FitWidthToView(view.Matrix);
         Scroller.Visibility = view.Matrix ? Visibility.Collapsed : Visibility.Visible;
         MatrixGrid.Visibility = view.Matrix ? Visibility.Visible : Visibility.Collapsed;
         MatrixGrid.Children.Clear();

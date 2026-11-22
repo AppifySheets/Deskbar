@@ -1707,8 +1707,11 @@ public class FloatingBarTaskListTests
         line.RaiseEvent(new MouseEventArgs(Mouse.PrimaryDevice, 0) { RoutedEvent = UIElement.PreviewMouseMoveEvent });
 
     // The release, and the Click the button would raise when the release reaches it (see the note above the helpers).
-    static bool RealRelease(Button line)
+    // The line released must still be one of the lines drawn: a repaint under the press (#48) would have replaced it,
+    // and a real release would then land on nothing (review of the fix round, minor 1).
+    static bool RealRelease(ListBar t, Button line)
     {
+        Assert.Contains(line, t.Lines);
         var up = ButtonArgs(UIElement.PreviewMouseUpEvent);
         line.RaiseEvent(up);
         if (up.Handled) return false;
@@ -1720,7 +1723,13 @@ public class FloatingBarTaskListTests
     static void LoseCapture(UIElement on) =>
         on.RaiseEvent(new MouseEventArgs(Mouse.PrimaryDevice, 0) { RoutedEvent = Mouse.LostMouseCaptureEvent });
 
-    static (ListBar Bar, Pointer Pointer, List<Guid> Went) RoutedBar()
+    // How many times a drag took the mouse capture, through the seam (minor 1: a press under the threshold takes none).
+    sealed class Captures
+    {
+        public int Count;
+    }
+
+    static (ListBar Bar, Pointer Pointer, List<Guid> Went) RoutedBar(Captures? captures = null)
     {
         var went = new List<Guid>();
         var t = Build(openWindow: () => { }, goTo: id =>
@@ -1729,7 +1738,11 @@ public class FloatingBarTaskListTests
             return Result.Success();
         });
         var pointer = new Pointer();
-        t.Bar.ArrangeMouseInput = new ArrangeMouse(_ => true, _ => true, (_, _) => pointer.At);
+        t.Bar.ArrangeMouseInput = new ArrangeMouse(_ =>
+        {
+            if (captures is not null) captures.Count++;
+            return true;
+        }, _ => true, (_, _) => pointer.At);
         t.Bar.SizeToContent = SizeToContent.Manual;
         t.Bar.Height = 900;
         Enumerable.Range(1, 3).ToList().ForEach(i => t.Tasks.AddNote($"n{i}", t.Gepha));
@@ -1740,7 +1753,8 @@ public class FloatingBarTaskListTests
     [Fact]
     public void A_routed_press_under_the_threshold_is_still_a_click() => StaThread.Run(() =>
     {
-        var (t, pointer, went) = RoutedBar();
+        var captures = new Captures();
+        var (t, pointer, went) = RoutedBar(captures);
         using var _ = t;
         var before = t.Tasks.Board;
         var line = t.Lines[0];
@@ -1750,7 +1764,8 @@ public class FloatingBarTaskListTests
         pointer.At = new Point(pointer.At.X + 1, pointer.At.Y + 1);
         RealMove(line);
         Assert.False(t.Bar.TaskDragging);
-        Assert.True(RealRelease(line));
+        Assert.True(RealRelease(t, line));
+        Assert.Equal(0, captures.Count);
 
         Assert.Equal([((TaskLine)line.Tag).Id], went);
         Assert.Same(before, t.Tasks.Board);
@@ -1770,7 +1785,7 @@ public class FloatingBarTaskListTests
         pointer.At = In(t, t.Lines[2], 0.8);
         RealMove(line);
         Assert.True(t.Bar.TaskDragging);
-        Assert.False(RealRelease(line));
+        Assert.False(RealRelease(t, line));
         PumpBar(t);
 
         Assert.Empty(went);
@@ -1805,9 +1820,33 @@ public class FloatingBarTaskListTests
         Assert.True(t.Bar.TaskDragging);
         LoseCapture(LinesPanel(t));
         Assert.False(t.Bar.TaskDragging);
-        RealRelease(line);
+        RealRelease(t, line);
         PumpBar(t);
 
         Assert.Same(before, t.Tasks.Board);
+    });
+
+    // Review of the fix round, minor 2: a drop on the waiting block lands at the top of the task's own quadrant, so the
+    // drop line is drawn there, not at the foot of the block.
+    [Fact]
+    public void The_drop_line_on_the_waiting_block_is_where_the_task_lands() => StaThread.Run(() =>
+    {
+        using var t = DragBar(3);
+        var n3 = t.Tasks.Board.Tasks.Single(x => x.Title == "n3").Id;
+        var n2 = t.Tasks.Board.Tasks.Single(x => x.Title == "n2").Id;
+        t.Tasks.SetStatus(n3, Deskbar.Core.Tasks.TaskStatus.WaitingOnYou);
+        t.Tasks.SetFlag(n2, TaskFlag.Important, true);
+        Settle(t);
+        Assert.Equal(["n3", "n2", "n1"], t.Lines.Select(TitleOf));
+        var landing = In(t, t.Lines[2], 0).Y;
+
+        var start = In(t, t.Lines[2], 0.5);
+        t.Bar.TaskDragPress(((TaskLine)t.Lines[2].Tag).Id, start);
+        t.Bar.TaskDragMove(new Point(start.X, start.Y - 8));
+        t.Bar.TaskDragMove(In(t, t.Lines[0], 0.5));
+
+        Assert.Equal(TaskPlace.Top, t.Bar.TaskDropShown!.Place);
+        Assert.Equal(landing, t.Bar.TaskDropShown!.LineY, 1);
+        t.Bar.CancelTaskDrag("test");
     });
 }

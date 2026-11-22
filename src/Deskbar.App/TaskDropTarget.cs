@@ -32,11 +32,21 @@ internal static class TaskDropTarget
         if (lines.Count == 0) return null;
 
         var nearest = lines.OrderBy(p => Distance(p.Bounds, at.Y)).First();
-        if (nearest.Waiting)
-            return new Drop(pinnedTo, TaskPlace.Top, lines.Where(p => p.Waiting).Max(p => p.Bounds.Bottom));
+        if (nearest.Waiting) return new Drop(pinnedTo, TaskPlace.Top, TopOf(lines, pinnedTo));
         return at.Y < nearest.Bounds.Top + nearest.Bounds.Height / 2
             ? new Drop(nearest.Quadrant, TaskPlace.Before(nearest.Id), nearest.Bounds.Top)
             : new Drop(nearest.Quadrant, TaskPlace.After(nearest.Id), nearest.Bounds.Bottom);
+    }
+
+    // Where the top of `quadrant` is among the lines on show, so the drop line is drawn where the task will land (review
+    // of the fix round, minor 2): above the quadrant's first line; with none on show, under the last line of the
+    // quadrants before it (where its first line would be); with no open line at all, under the waiting block.
+    static double TopOf(IReadOnlyList<Placed> lines, Quadrant quadrant)
+    {
+        var open = lines.Where(p => !p.Waiting).OrderBy(p => p.Bounds.Top).ToList();
+        return open.FirstOrDefault(p => p.Quadrant >= quadrant) is { } first ? first.Bounds.Top
+            : open.Count > 0 ? open[^1].Bounds.Bottom
+            : lines.Max(p => p.Bounds.Bottom);
     }
 
     // How far a y is from a box, vertically: 0 inside it.
