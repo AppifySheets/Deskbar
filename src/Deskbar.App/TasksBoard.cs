@@ -162,8 +162,8 @@ public sealed class TasksBoard : IDisposable
         + $"|{manager.CurrentWorkspaceId}|{manager.State.TasksMatrix}";
 
     /// <summary>
-    /// The window's handle, so the App can hand it to WindowMonitor.Ignore before it ever shows: the monitor lists the
-    /// app's own windows, and the bar must never show the tasks window as a window of its own.
+    /// The window's handle, created if it is not yet. The bar lists the tasks window like any app window (App.xaml.cs),
+    /// and the App's bring-forward and tiling know it by this handle.
     /// </summary>
     public nint EnsureHandle() => new WindowInteropHelper(window).EnsureHandle();
 

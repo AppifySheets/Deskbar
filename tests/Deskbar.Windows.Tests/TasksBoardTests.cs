@@ -577,6 +577,34 @@ public class TasksBoardTests
         }
     });
 
+    // (c) "give it a proper icon in the workspaces so i can take it to the correct place": the window is listed on the bar
+    // like any app window, and the bar draws it by the icon the window answers WM_GETICON with (IconCache's own-icon
+    // source). That icon is the tasks checklist, green, not Deskbar's.
+    [Fact]
+    public void The_window_wears_its_own_checklist_icon_on_the_bar() => StaThread.Run(() =>
+    {
+        using var t = Build();
+
+        t.Controller.Open(Rect.Empty);
+
+        Assert.Same(TasksIcon.Image, t.Window.Icon);
+        var drawn = Assert.IsAssignableFrom<System.Windows.Media.Imaging.BitmapSource>(
+            IconCache.For(new Deskbar.Core.Domain.WindowHandle(t.Controller.EnsureHandle()), null));
+        var (r, g, b) = AverageOpaque(drawn);
+        Assert.True(g > r + 40 && g > b + 20, $"the bar's icon averages R={r} G={g} B={b}, not the checklist's green");
+    });
+
+    // The average colour of a bitmap's opaque pixels.
+    static (int R, int G, int B) AverageOpaque(System.Windows.Media.Imaging.BitmapSource source)
+    {
+        var bgra = new System.Windows.Media.Imaging.FormatConvertedBitmap(source, System.Windows.Media.PixelFormats.Bgra32, null, 0);
+        var pixels = new byte[bgra.PixelWidth * bgra.PixelHeight * 4];
+        bgra.CopyPixels(pixels, bgra.PixelWidth * 4, 0);
+        var opaque = Enumerable.Range(0, pixels.Length / 4).Where(i => pixels[i * 4 + 3] > 200).ToList();
+        return opaque.Count == 0 ? (0, 0, 0)
+            : ((int)opaque.Average(i => pixels[i * 4 + 2]), (int)opaque.Average(i => pixels[i * 4 + 1]), (int)opaque.Average(i => pixels[i * 4]));
+    }
+
     // Whether `upper` is above `lower` in the z-order: walking up from `lower` reaches it.
     static bool Above(nint upper, nint lower)
     {
