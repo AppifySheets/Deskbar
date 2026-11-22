@@ -1989,8 +1989,13 @@ public partial class App : Application
             // THE TASKS WINDOW (TasksBoard, TasksWindow; docs/superpowers/specs/2026-11-22-tasks-board-design.md, "The
             // window"): a page with every task, open and closed, and its comments, opened from the bar's "+N more" and
             // from `tasks-window show`. The same TaskService as the bar's list and the control pipe, so all three agree.
-            // Its handle is ignored by the monitor before it ever shows, like quick find's: it is the app's own window
-            // and the bar must not list it, though it is a regular window in Alt+Tab and on the taskbar.
+            // LISTED ON THE BAR LIKE ANY APP WINDOW (2026-11-23, Petre: "give it a proper icon in the workspaces so i
+            // can take it to the correct place"). It used to be ignored by the monitor, like quick find's box, so the bar
+            // never showed it and Petre could not find it or drag it to another workspace. It is a page he works in, not
+            // chrome, so the monitor now reports it the way it reports the Manage window: it sits on its workspace's
+            // row with its own checklist icon (TasksIcon), a click brings it up, and a drag moves it. The three
+            // carve-outs in WorkspaceManager (IsOurs: no auto-placement, no rename, no roster) still apply to it, as to
+            // every window of this process: placement memory and rename rules never touch it.
             var tasksActivator = new WindowActivator();
             tasksBoard = new TasksBoard(new TasksWindow(), tasks!, manager, GoToTask,
                 // The chips wear the colour the bar's rows wear (its last rebuild's rail colours).
@@ -2012,7 +2017,6 @@ public partial class App : Application
                     raise: () => TasksBoard.RaiseToTop(hwnd),
                     activate: () => tasksActivator.Activate(new WindowHandle(hwnd)),
                     trace: ClickTrace.Write));
-            monitor.Ignore(tasksBoard.EnsureHandle());
 
             hotkeys = new HotkeyService(direction => switcher.Step(direction), boundSwitcher,
                 () => quickFind.Show(), boundQuickFind);

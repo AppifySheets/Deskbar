@@ -131,6 +131,9 @@ public partial class TasksWindow : Window
     public TasksWindow()
     {
         InitializeComponent();
+        // Its own checklist icon (TasksIcon): the bar lists this window like any app window and draws it by this icon,
+        // so Petre can find it on a workspace row and drag it where he wants it.
+        Icon = TasksIcon.Image;
         PreviewKeyDown += (_, e) => e.Handled = e.Key == Key.Escape && Escape();
         SourceInitialized += (_, _) =>
         {
