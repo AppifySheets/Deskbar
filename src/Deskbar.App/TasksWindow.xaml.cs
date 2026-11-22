@@ -838,9 +838,11 @@ public partial class TasksWindow : Window
             ? Item("Reopen", () => Actions?.Reopen(id))
             : Item("Close", () => Actions?.Close(id)));
         menu.Items.Add(Item("Rename…", () => BeginRename(id)));
-        // The task list's one workspace menu (WorkspaceChipMenu), the move the bar's line chip makes.
-        var move = WorkspaceChipMenu.Fill(Item("Move to"), latest?.Places ?? [], row.Place.Workspace, workspace => Actions?.MoveTo(id, workspace));
-        menu.Items.Add(move);
+        // The task list's one workspace menu (WorkspaceChipMenu), the move the bar's line chip makes. Its own menu,
+        // opened under the line's "⋯" once this one has closed: the compact chip menu is a context menu of its own, not
+        // a submenu.
+        menu.Items.Add(Item("Move to…", () => Dispatcher.BeginInvoke(() => OpenMoveMenu(id, row.Place.Workspace),
+            System.Windows.Threading.DispatcherPriority.Input)));
         menu.Items.Add(new Separator());
         // Delete cannot be undone, so it takes a second, deliberate step: a submenu item rather than a dialog, which
         // would be one more window to answer for a menu choice already made.
@@ -851,16 +853,21 @@ public partial class TasksWindow : Window
         return menu;
     }
 
-    ContextMenu WorkspaceFilterMenu(TasksView view, Button anchor)
+    // A line's "Move to…": the compact workspace menu under its "⋯", the task's own workspace outlined. Internal, and
+    // answering the menu, for the tests.
+    internal ContextMenu OpenMoveMenu(Guid id, Maybe<Guid> current)
     {
-        var menu = new ContextMenu { PlacementTarget = anchor, Placement = PlacementMode.Bottom };
-        var all = Item("All workspaces", () => Actions?.FilterWorkspace(TaskWorkspaceFilter.All));
-        all.IsChecked = view.Where.Any;
-        menu.Items.Add(all);
-        // With every workspace shown, no chip is ticked: an id no workspace has stands for "none of these".
-        return WorkspaceChipMenu.Fill(menu, view.Places, view.Where.Any ? Maybe.From(Guid.Empty) : view.Where.Workspace,
-            workspace => Actions?.FilterWorkspace(TaskWorkspaceFilter.On(workspace)));
+        var menu = WorkspaceChipMenu.Build(latest?.Places ?? [], current, workspace => Actions?.MoveTo(id, workspace), menuButtons.GetValueOrDefault(id));
+        OpenMenu(menu);
+        return menu;
     }
+
+    // "Workspace: all ▾": "All workspaces" first, then the compact workspace menu, the filter in force outlined. With
+    // every workspace shown, no workspace chip is: an id no workspace has stands for "none of these".
+    ContextMenu WorkspaceFilterMenu(TasksView view, Button anchor) =>
+        WorkspaceChipMenu.Build(view.Places, view.Where.Any ? Maybe.From(Guid.Empty) : view.Where.Workspace,
+            workspace => Actions?.FilterWorkspace(TaskWorkspaceFilter.On(workspace)), anchor,
+            extra: [new WorkspaceChipMenu.Extra("All workspaces", view.Where.Any, () => Actions?.FilterWorkspace(TaskWorkspaceFilter.All))]);
 
     // Every menu of the window opens here, so a redraw waits for it (MustWait) and runs when it closes.
     void OpenMenu(ContextMenu menu)
@@ -911,7 +918,7 @@ public partial class TasksWindow : Window
         chip.Click += (_, _) =>
         {
             var places = latest?.Places ?? [];
-            OpenMenu(WorkspaceChipMenu.Fill(new ContextMenu { PlacementTarget = chip, Placement = PlacementMode.Bottom }, places, target.Workspace,
+            OpenMenu(WorkspaceChipMenu.Build(places, target.Workspace,
                 workspace =>
                 {
                     addChosen = places.Where(p => !p.IsGroup && p.Workspace.Equals(workspace))
@@ -919,7 +926,7 @@ public partial class TasksWindow : Window
                         .FirstOrDefault();
                     PaintAddPlace();
                     AddBox.Focus();
-                }));
+                }, chip));
         };
         AddEnd.Children.Add(chip);
     }

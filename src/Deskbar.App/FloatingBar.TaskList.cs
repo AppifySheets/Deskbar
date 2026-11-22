@@ -753,14 +753,17 @@ public partial class FloatingBar
     internal ContextMenu? OpenTaskMoveMenu(Guid id, UIElement? anchor = null)
     {
         if (taskService?.Board.Tasks.FirstOrDefault(t => t.Id == id) is not { } task) return null;
-        var menu = WorkspaceChipMenu.Fill(new ContextMenu { PlacementTarget = anchor, Placement = PlacementMode.Bottom },
-            WorkspaceChipMenu.Entries(manager.State, withNone: true), task.WorkspaceId,
-            workspace => taskService?.MoveTo(id, workspace).TapError(err => ClickTrace.Write($"task list: not moved: {err}")));
+        var menu = WorkspaceChipMenu.Build(WorkspaceChipMenu.Entries(manager.State, withNone: true), task.WorkspaceId,
+            workspace => taskService?.MoveTo(id, workspace).TapError(err => ClickTrace.Write($"task list: not moved: {err}")),
+            anchor, ChipMenuWidth);
         HoldFadeWhileOpen(menu);
         TaskMoveMenu = menu;
         menu.IsOpen = true;
         return menu;
     }
+
+    // The workspace menus are about 260 DIP wide, or the bar's own width when it is narrower (WorkspaceChipMenu).
+    double ChipMenuWidth => ActualWidth > 0 ? Math.Min(WorkspaceChipMenu.PreferredWidth, ActualWidth) : WorkspaceChipMenu.PreferredWidth;
 
     // The last workspace menu a chip opened, for the tests.
     internal ContextMenu? TaskMoveMenu { get; private set; }
@@ -1026,8 +1029,7 @@ public partial class FloatingBar
         if (taskChipOther is null) return null;
         var entries = WorkspaceChipMenu.Entries(manager.State, withNone: false, w => !taskAddHere.HasValue || w.Id != taskAddHere.Value);
         if (entries.Count == 0) return null;
-        var menu = WorkspaceChipMenu.Fill(new ContextMenu { PlacementTarget = taskChipOther.Button, Placement = PlacementMode.Bottom },
-            entries, taskAddTarget, ChooseTaskTarget);
+        var menu = WorkspaceChipMenu.Build(entries, taskAddTarget, ChooseTaskTarget, taskChipOther.Button, ChipMenuWidth);
         HoldFadeWhileOpen(menu);
         menu.IsOpen = true;
         return menu;
