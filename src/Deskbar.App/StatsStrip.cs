@@ -57,11 +57,16 @@ internal sealed class StatsStrip : UniformGrid
         // past its slot and lost its first digit to the clip. So the value sits in a shrink-only Viewbox: when
         // it does not fit, it gets smaller rather than cut. A smaller "100%" is still true, where "00%" would be
         // another wrong number. DownOnly, so it never grows past its size.
+        //
+        // A shrunk value is also shorter than the name beside it. Centred, as a Viewbox is by default, it floated
+        // up off the line the name stands on; at the bottom of the top line it stays on the name's line, the two
+        // reading as one "MEM 100%".
         public Viewbox Box { get; } = new()
         {
             Stretch = Stretch.Uniform,
             StretchDirection = StretchDirection.DownOnly,
             HorizontalAlignment = HorizontalAlignment.Right,
+            VerticalAlignment = VerticalAlignment.Bottom,
         };
         // The top line: the name takes what it needs (Auto) and the value the rest (*), so the pair can never
         // push the value out of its cell. With the name inside the graph, the value has the whole line.
@@ -80,9 +85,13 @@ internal sealed class StatsStrip : UniformGrid
         public ImmutableList<double> History { get; set; } = [];
     }
 
-    // Each cell's margin either side, and the gap between a name and its value on the top line.
-    const double CellMargin = 3;
-    const double NameGap = 4;
+    // Each cell's margin either side, and the gap between a name and its value on the top line. Both were a DIP
+    // wider (3 and 4) until Petre's own bar, 224 DIP of stats grid by its trace, came out one DIP short of room
+    // for the names beside the values and kept them inside the graphs, the layout he had asked to be rid of
+    // ("cpu and mem ... on the same level"). The three DIP a cell gets back move the switch from about 227 DIP
+    // to about 214 (FitNames), without letting "100%" shrink further than before.
+    const double CellMargin = 2;
+    const double NameGap = 3;
     // How far the widest value ("100%") may shrink before the names leave the top line (FitNames).
     const double LeastValueScale = 0.75;
 
@@ -151,9 +160,10 @@ internal sealed class StatsStrip : UniformGrid
     // widest name ("MEM", 26 DIP at the default text size); below that they go inside the graphs. Measured in
     // FloatingBarStatsTests at the default text size: at 273 DIP everything fits whole; at 233 DIP "MEM 100%"
     // would keep 81% of the value's size, still easy to read; at 180 DIP "98%" beside "MEM" shrank to 40% and at
-    // 130 DIP the values shrank to nothing, which is the "MEM8%" problem again in another form. So the bar
-    // switches at about 225 DIP. "100%" rather than the value now, so the layout does not flip as the numbers
-    // change.
+    // 130 DIP the values shrank to nothing, which is the "MEM8%" problem again in another form. With the margins
+    // above, the bar switches at about 214 DIP: at 226 (Petre's bar) "DISK 100%" keeps 94% of the value's size
+    // and at 218 it keeps 87%, while 210 puts the names inside. "100%" rather than the value now, so the layout
+    // does not flip as the numbers change.
     //
     // Moving a name changes neither the strip's width nor its height (the top line is one text high either way),
     // so this cannot set off another SizeChanged and loop.

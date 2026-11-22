@@ -108,12 +108,16 @@ public class FloatingBarStatsTests(ITestOutputHelper output)
     // clip. Labels sit beside the values where both fit ("text and values same line") and inside the graphs
     // where they do not, so at every width every label shows, no value is cut, and no value shrinks below
     // 75% of its size. Sharing the line at 180 DIP shrank "98%" to 40%, and at 130 DIP to nothing, which is
-    // why those widths put the labels inside the graphs. (Inside a 26 DIP cell at 130 DIP, "MEM" loses its
+    // why those widths put the labels inside the graphs. 226 DIP is Petre's own bar by its trace, where the labels
+    // used to stay inside by one DIP; 218 and 210 sit either side of the switch. (Inside a 26 DIP cell at 130 DIP, "MEM" loses its
     // last 2 DIP to the clip, as it did before the labels ever left the graphs; only a label beside its
     // value is held to being whole.)
     [Theory]
     [InlineData(273, true)]
     [InlineData(233, true)]
+    [InlineData(226, true)]
+    [InlineData(218, true)]
+    [InlineData(210, false)]
     [InlineData(180, false)]
     [InlineData(130, false)]
     public void At_any_width_every_value_is_whole_and_every_label_shows(double width, bool beside) => StaThread.Run(() =>
