@@ -58,7 +58,9 @@ public sealed partial class RemoteControl
     {
         // The reply of `attention` is JSON for a person running it by hand; a hook's session must not read it.
         // An empty --from (cmd passes an unset CLAUDE_PROJECT_DIR as "") is no folder at all (Folder).
-        "Notification" or "Stop" => Quietly(Attention(Folder(from))),
+        // The session's name, read from its transcript (SessionTitle), tells its window apart from others on the
+        // same folder, so the right icon glows and not none of them.
+        "Notification" or "Stop" => Quietly(Attention(Folder(from), SessionTitle.Read(hook.Transcript.GetValueOrDefault()))),
         _ => tasks is { } service && !hook.Headless && manager.State.ClaudeTasksInEffect
             ? TaskEvent(service, hook, Folder(from) ?? Folder(hook.Folder))
             : Quiet,

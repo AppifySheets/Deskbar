@@ -36,7 +36,11 @@ namespace Deskbar.Core.Tasks;
 //     inside a batch file, or as the literal %CLAUDE_CODE_SESSION_ATTENDED% when a command runs at a prompt, so both
 //     count as "not there". Then CLAUDE_CODE_ENTRYPOINT decides: sdk-cli (`claude -p`), sdk-ts and sdk-py (the Agent
 //     SDKs), and no entrypoint at all, are headless; anything else (cli, claude-vscode, ...) is a person's session.
-public sealed record ClaudeHookEvent(string Event, string SessionId, string Folder, Maybe<string> Source, bool Headless)
+//
+//   Transcript transcript_path: the session's JSONL transcript, on every event. Read only by Notification and Stop,
+//              for the session's name (SessionTitle), which picks the asking window out of several on one folder.
+public sealed record ClaudeHookEvent(string Event, string SessionId, string Folder, Maybe<string> Source, bool Headless,
+    Maybe<string> Transcript = default)
 {
     static readonly string[] HeadlessEntrypoints = ["sdk-cli", "sdk-ts", "sdk-py"];
 
@@ -54,7 +58,7 @@ public sealed record ClaudeHookEvent(string Event, string SessionId, string Fold
             if (session.HasNoValue) return Result.Failure<ClaudeHookEvent>("the hook's JSON has no session_id");
 
             return new ClaudeHookEvent(hookEvent.Value, session.Value, Text(root, "cwd").GetValueOrDefault(""),
-                Text(root, "source"), IsHeadless(entrypoint, attended));
+                Text(root, "source"), IsHeadless(entrypoint, attended), Text(root, "transcript_path"));
         }
         catch (JsonException e)
         {

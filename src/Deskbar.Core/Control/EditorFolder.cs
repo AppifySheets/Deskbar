@@ -73,4 +73,39 @@ public static class EditorFolder
             ? []
             : depths.Where(e => e.Depth == depths.Max(d => d.Depth)).Select(e => e.Window).Distinct().ToList();
     }
+
+    // WHICH OF SEVERAL WINDOWS ON ONE FOLDER A SESSION IS IN, by the session's name (SessionTitle). Several VS Code
+    // windows on one folder are the normal case for a repo worked on in worktrees: on Petre's machine five windows
+    // showed TaskSpaces at once, so the folder alone named none of them and an asking session's icon never glowed.
+    //
+    // VS Code's window title starts with the active tab's name, and a Claude panel's tab is the session's name, cut
+    // at 24 characters with an ellipsis (measured: "Deskbar: tasks board, wi… - TaskSpaces - Visual Studio Code"
+    // for the session "Deskbar: tasks board, windows and Claude sessions"). So a window is the session's when the
+    // part of its title before the folder IS the name, or, ending in the ellipsis, is the start of it.
+    //
+    // Only the windows that pass come back, so the caller reads one as an answer and anything else as "the title
+    // does not say": none when the Claude tab is not the window's active tab (the title then names a file), several
+    // when two sessions share a name's first 24 characters. Ordinal, because the tab shows the name as written.
+    public static IReadOnlyList<WindowHandle> ByTitle(string sessionTitle, IEnumerable<(WindowHandle Window, IEnumerable<string> Titles)> editors) =>
+        editors
+            .Where(e => e.Titles.Any(t => Label(t).Map(label => Names(label, sessionTitle.Trim())).GetValueOrDefault(false)))
+            .Select(e => e.Window)
+            .Distinct()
+            .ToList();
+
+    // The part of a VS Code title before its folder: "Deskbar: tasks board, wi…" in the example above. A title
+    // with no folder (not VS Code's shape) has no label either.
+    public static Maybe<string> Label(string title) =>
+        Of(title).Bind(folder =>
+        {
+            var at = title.LastIndexOf($" - {folder}", StringComparison.OrdinalIgnoreCase);
+            return at > 0 ? Maybe.From(title[..at].Trim()) : Maybe<string>.None;
+        });
+
+    // A label names the session when it is the whole name, or the name's start cut with an ellipsis. The ellipsis
+    // alone, or a label that is empty, names nothing.
+    static bool Names(string label, string name) =>
+        label.EndsWith('…')
+            ? label[..^1].TrimEnd() is { Length: > 0 } start && name.StartsWith(start, StringComparison.Ordinal)
+            : label.Length > 0 && label.Equals(name, StringComparison.Ordinal);
 }

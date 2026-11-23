@@ -13,6 +13,8 @@ Supervising coding agents is not one task in one editor. Each agent you run want
 
 When a session finishes a reply, or waits for a permission, while you are on another workspace, that workspace's name and colour rail flash orange on the bar and the session's VS Code icon glows. Both stop once you go there.
 
+Deskbar finds the session's window by its folder. When several VS Code windows show the same folder, say one repo open in a few worktree sessions, it picks the one whose title starts with the session's name, which is there while the session's Claude tab is the active tab in its window. If no title says, the row still blinks but no icon glows, rather than lighting the wrong one.
+
 To go there, click the workspace's row on the bar, or hold `Win+Ctrl` and tap `Tab`. The chord walks your workspaces in most-recently-used order, so when you are alternating between two sessions, one tap takes you back to the other. You land in the window you were last using in that workspace, so you arrive typing.
 
 Quick find (`Win+Alt+Space`) searches every VS Code editor tab on every workspace, and an open Claude Code session is one of them, because each session is a tab named after the session. Type a few letters of its name and press Enter.

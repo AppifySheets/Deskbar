@@ -56,14 +56,24 @@ public sealed partial class RemoteControl
     // only have cost the reply's wording, but they go too, so every caller is matched on the same form.
     sealed record Caller(Workspace? Workspace, Maybe<WindowHandle> Handle, object? Window, string? Missing);
 
-    Caller CallerOf(string? raw)
+    //
+    // `sessionTitle` is the asking session's name (SessionTitle, read from its transcript), given only by the hooks.
+    // When several windows show the caller's folder (one repo open in several worktree sessions), the one whose title
+    // starts with that name is the caller's (EditorFolder.ByTitle). When the name narrows them to exactly one, that
+    // window and its workspace are the answer; otherwise the folder's matches stand as before, so a name that says
+    // nothing never makes the answer worse.
+    Caller CallerOf(string? raw, Maybe<string> sessionTitle = default)
     {
         var from = Folder(raw);
         var editors = manager.KnownWindows
             .Where(EditorFolder.IsEditor)
             .Select(w => (w.Handle, Titles: manager.OriginalTitle(w.Handle).Map(t => (IEnumerable<string>)[w.Title, t]).GetValueOrDefault([w.Title])))
             .ToList();
-        var matches = from is null ? [] : EditorFolder.Best(from, editors);
+        var byFolder = from is null ? [] : EditorFolder.Best(from, editors);
+        var byTitle = byFolder.Count > 1 && sessionTitle.HasValue
+            ? EditorFolder.ByTitle(sessionTitle.Value, editors.Where(e => byFolder.Contains(e.Handle)))
+            : [];
+        var matches = byTitle.Count == 1 ? byTitle : byFolder;
         var places = matches.Select(h => manager.WorkspaceOf(h)).ToList();
         var workspaces = places.Where(p => p.HasValue).Select(p => p.Value).DistinctBy(w => w.Id).ToList();
         var target = places.Count > 0 && places.All(p => p.HasValue) && workspaces.Count == 1 ? workspaces[0] : null;
@@ -85,9 +95,12 @@ public sealed partial class RemoteControl
     // blinks and the window glows (WorkspaceManager.RequestAttention), unless the user is already on that workspace.
     // Answered with what happened either way, never refused for an unknown caller: a Claude Code hook runs this on
     // every notification, and a hook that fails prints an error into the session for nothing.
-    ControlReply Attention(string? from)
+    //
+    // `sessionTitle` comes from a hook (RemoteControl.ClaudeHook.cs): the session's name, which picks its window out
+    // of several on one folder. The `attention` verb run by hand has none.
+    ControlReply Attention(string? from, Maybe<string> sessionTitle = default)
     {
-        var caller = CallerOf(from);
+        var caller = CallerOf(from, sessionTitle);
         if (caller.Workspace is not { } target)
             return Success(new { marked = false, reason = caller.Missing });
 

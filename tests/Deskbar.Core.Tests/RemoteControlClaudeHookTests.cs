@@ -71,6 +71,60 @@ public class RemoteControlClaudeHookTests
         Assert.True(Blinks(manager, "Deskbar"));
     }
 
+    // Petre: "deskbar workspace was blinking but the app in it was not, why not?" Five VS Code windows showed the
+    // TaskSpaces folder, so the folder named none of them. The session's name, read from the transcript the hook
+    // points at, picks its window: that one glows, and the others do not.
+    [Theory]
+    [InlineData("Notification")]
+    [InlineData("Stop")]
+    public void The_session_name_picks_the_asking_window_out_of_several_on_one_folder(string hookEvent)
+    {
+        var manager = Started();
+        Titled(manager, 0x10, "Deskbar: tasks board, wi… - TaskSpaces - Visual Studio Code", "Deskbar");
+        Titled(manager, 0x11, "Deskbar: fix flaky tests - TaskSpaces - Visual Studio Code", "Deskbar");
+        StandOn(manager, "iam.ge");
+        var transcript = Path.Combine(Path.GetTempPath(), $"deskbar-transcript-{Guid.NewGuid():N}.jsonl");
+        try
+        {
+            File.WriteAllText(transcript, """{"type":"custom-title","customTitle":"Deskbar: fix flaky tests","sessionId":"s1"}""" + "\n");
+            var json = $$"""{"session_id":"s1","transcript_path":{{System.Text.Json.JsonSerializer.Serialize(transcript)}},"cwd":"C:\\repos\\TaskSpaces","hook_event_name":"{{hookEvent}}"}""";
+
+            Run(manager, "claude-hook", "--entry", "claude-vscode", "--attended", "1", "--from", @"C:\repos\TaskSpaces", "--json", json);
+
+            var running = manager.WindowsByWorkspace().Value.Workspaces.Single(g => g.Workspace.Name == "Deskbar").Running;
+            Assert.True(Blinks(manager, "Deskbar"));
+            Assert.True(running.Single(r => r.Window.Handle == new WindowHandle(0x11)).Asks);
+            Assert.False(running.Single(r => r.Window.Handle == new WindowHandle(0x10)).Asks);
+        }
+        finally
+        {
+            File.Delete(transcript);
+        }
+    }
+
+    // Without a name that narrows them (here the transcript path leads nowhere), several windows on one folder still
+    // blink the workspace and light no window, as before: a guess would light the wrong one.
+    [Fact]
+    public void Without_a_name_several_windows_on_one_folder_glow_none()
+    {
+        var manager = Started();
+        Titled(manager, 0x10, "Deskbar: tasks board, wi… - TaskSpaces - Visual Studio Code", "Deskbar");
+        Titled(manager, 0x11, "Deskbar: fix flaky tests - TaskSpaces - Visual Studio Code", "Deskbar");
+        StandOn(manager, "iam.ge");
+
+        Run(manager, HookArgs("Stop"));
+
+        Assert.True(Blinks(manager, "Deskbar"));
+        Assert.DoesNotContain(manager.WindowsByWorkspace().Value.Workspaces.Single(g => g.Workspace.Name == "Deskbar").Running, r => r.Asks);
+    }
+
+    void Titled(WorkspaceManager manager, nint hwnd, string title, string workspace)
+    {
+        var window = new WindowInfo(new WindowHandle(hwnd), 100, "Code", @"C:\VS Code\Code.exe", title, null);
+        desktops.WindowPlacements[window.Handle] = DesktopOf(manager, workspace);
+        monitor.Subject.OnNext(new WindowEvent(WindowEventKind.Appeared, window));
+    }
+
     // An ask from a folder no VS Code window shows is still exit 0 and silent: a hook must never print an error into
     // the session.
     [Fact]
