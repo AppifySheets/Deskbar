@@ -55,6 +55,24 @@ public class ClaudeStartTests
     }
 
     [Fact]
+    public void The_first_message_cut_never_splits_a_surrogate_pair()
+    {
+        var join = $"Join this task (deskbar task join {taskId}) and start on it.";
+        var room = 1000 - join.Length - 1;
+        var prefix = $"Deskbar task {taskId}: ";
+        // The emoji's high surrogate lands on the last kept character, so a plain cut would strand it.
+        var title = new string('x', room - prefix.Length - 1) + "\U0001F600" + new string('y', 50);
+
+        var message = ClaudeStart.FirstMessage(Task(taskId, title, Maybe<Guid>.None));
+
+        Assert.True(message.Length <= 1000);
+        Assert.EndsWith("\n" + join, message);
+        Assert.DoesNotContain(message.Select((c, i) => (c, i)), p =>
+            (char.IsHighSurrogate(p.c) && !(p.i + 1 < message.Length && char.IsLowSurrogate(message[p.i + 1])))
+            || (char.IsLowSurrogate(p.c) && !(p.i > 0 && char.IsHighSurrogate(message[p.i - 1]))));
+    }
+
+    [Fact]
     public void A_task_with_sessions_starts_in_its_latest_sessions_folder()
     {
         var task = Task(taskId, "T", Maybe<Guid>.From(ws), "",
