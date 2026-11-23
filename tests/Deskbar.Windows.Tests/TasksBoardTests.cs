@@ -1741,6 +1741,56 @@ public class TasksBoardTests
         Assert.Empty(t.WentTo);
     });
 
+    // RULING 52 (Petre's screenshot, "better alignment": the right-hand parts zigzagged, the lines had different widths,
+    // Claude lines had no tick box and Done ones an X). In the List every line spans the list, and each column, the
+    // flags, the sessions, the age, the chip, the comments and the menu button, starts at the same x on every line,
+    // whatever the line holds: a short or a long title, comments, sessions, flags or none of them.
+    [Fact]
+    public void Every_lines_columns_start_at_the_same_x_and_every_line_spans_the_window() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        t.Tasks.AddNote("short", t.Gepha);
+        var long1 = t.Tasks.AddNote("a much longer title that wraps over a good few lines of the window because it never ends", t.Gepha).Value.Id;
+        t.Tasks.SetFlag(long1, TaskFlag.Important, true);
+        var withComments = t.Tasks.AddNote("commented", Maybe<Guid>.None).Value.Id;
+        t.Tasks.Comment(withComments, Maybe<string>.None, "one");
+        var claude = t.Tasks.Create("Tasks redesign", t.Gepha, Session("s1")).Value.Id;
+        t.Tasks.Join(claude, Session("s2"));
+        var done = t.Tasks.Create("Merged", t.Gepha, Session("s3")).Value.Id;
+        t.Tasks.MarkDone(done);
+        t.Controller.Open(Rect.Empty);
+        t.Window.UpdateLayout();
+
+        var lines = t.Tasks.Board.Pile().Select(x => LineOf(t.Window, x.Id)).ToList();
+        Assert.True(lines.Count >= 5);
+        double Left(FrameworkElement e) => e.TransformToAncestor(t.Window).TransformBounds(new Rect(e.RenderSize)).Left;
+        double Width(FrameworkElement e) => e.TransformToAncestor(t.Window).TransformBounds(new Rect(e.RenderSize)).Width;
+        var grids = lines.Select(line => Inside(line).OfType<Grid>().First(g => g.ColumnDefinitions.Count > 4)).ToList();
+        Assert.All(lines, line => Assert.Equal(Width(lines[0]), Width(line), 0.5));
+        Enumerable.Range(0, grids[0].ColumnDefinitions.Count).ToList().ForEach(c =>
+        {
+            var xs = grids.Select(g => Left(g) + g.ColumnDefinitions[c].Offset).ToList();
+            Assert.True(xs.Max() - xs.Min() < 0.5, $"column {c} starts at {string.Join(", ", xs.Select(x => x.ToString("0.#")))}");
+        });
+    });
+
+    // Claude lines have the tick box a note has in the window, a Done one included, and no X.
+    [Fact]
+    public void A_claude_line_has_a_tick_box_in_the_window_and_a_done_one_no_cross() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        var working = t.Tasks.Create("Working", t.Gepha, Session("s1")).Value.Id;
+        var done = t.Tasks.Create("Merged", t.Gepha, Session("s2")).Value.Id;
+        t.Tasks.MarkDone(done);
+        t.Controller.Open(Rect.Empty);
+
+        Assert.Contains(Inside(LineOf(t.Window, working)).OfType<Button>(), b => AutomationProperties.GetName(b) == "Close");
+        Assert.Contains(Inside(LineOf(t.Window, done)).OfType<Button>(), b => AutomationProperties.GetName(b) == "Close");
+        Assert.DoesNotContain(Inside(LineOf(t.Window, done)).OfType<TextBlock>(), b => b.Text == "✕");
+        Click(ButtonNamed(LineOf(t.Window, done), "Close"));
+        Assert.Equal(TaskStatus.Closed, t.Tasks.Board.Tasks.Single(x => x.Id == done).Status);
+    });
+
     // F2 on the selected line opens it too; Enter saves through Rename; Esc cancels.
     [Fact]
     public void F2_edits_the_selected_line_Enter_saves_and_Esc_cancels() => StaThread.Run(() =>
@@ -1901,7 +1951,7 @@ public class TasksBoardTests
 
         var line = LineOf(t.Window, id);
         Assert.Equal("", t.Window.AgeText(id));
-        Assert.DoesNotContain(Inside(line).OfType<Button>(), b => AutomationProperties.GetName(b) == "Close");
+        Assert.DoesNotContain(Inside(line).OfType<TextBlock>(), b => b.Text == "✕"); // the tick box closes it now (Ruling 52)
         Assert.DoesNotContain(Inside(line).OfType<TextBlock>(), b => b.Text.Contains("session"));
     });
 
