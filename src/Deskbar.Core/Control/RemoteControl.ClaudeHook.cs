@@ -10,12 +10,13 @@ namespace Deskbar.Core.Control;
 // "Asking and the blink", "After Done or Closed", "Non-interactive sessions", "Who gets it"); plan Tasks 7 and 8;
 // measurements in docs/superpowers/notes/2026-11-22-claude-hook-probes.md.
 //
-//   claude-hook [--entry <value>] [--attended <value>] [--from <folder>] --json <text>
+//   claude-hook [--entry <value>] [--attended <value>] [--job <value>] [--from <folder>] --json <text>
 //
 // The hook scripts (written by ClaudeSkill in the app: claude-hook.cmd for Notification and Stop, claude-task-hook.cmd
 // for SessionStart, UserPromptSubmit and SessionEnd) run this on every event they are registered for, with the
 // hook's JSON on the client's stdin; the client sends it on as --json (ControlArguments.WithInput). --entry and
-// --attended are CLAUDE_CODE_ENTRYPOINT and CLAUDE_CODE_SESSION_ATTENDED as the script passed them; ClaudeHookEvent
+// --attended are CLAUDE_CODE_ENTRYPOINT and CLAUDE_CODE_SESSION_ATTENDED as the script passed them, and --job is
+// CLAUDE_JOB_DIR (set only for a background session, which counts as attended though ATTENDED says 0); ClaudeHookEvent
 // turns them into Headless. --from is the session's folder: CLAUDE_PROJECT_DIR, or the client's own folder when Claude
 // Code did not set it (ControlArguments.WithCallerFolder). It is normalised (FolderPath: the long form of an 8.3 path,
 // one kind of slash, no trailing separator) before it finds a VS Code window or is stored on the task's session.
@@ -52,7 +53,7 @@ public sealed partial class RemoteControl
 {
     ControlReply ClaudeHook(IReadOnlyList<string> rest) =>
         ControlArguments.ParseClaudeHook(rest)
-            .Bind(request => ClaudeHookEvent.Parse(request.Json!, request.Entrypoint, request.Attended).Map(hook => (request, hook)))
+            .Bind(request => ClaudeHookEvent.Parse(request.Json!, request.Entrypoint, request.Attended, request.Job).Map(hook => (request, hook)))
             .Match(found => Answer(found.hook, found.request.From), ControlReply.Fail);
 
     ControlReply Answer(ClaudeHookEvent hook, string? from) => hook.Event switch

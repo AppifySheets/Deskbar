@@ -191,7 +191,7 @@ public sealed class ClaudeSkillTests : IDisposable
 
         Assert.True(exitCode == 0, Explain(exitCode, stdout, stderr));
         Assert.True(File.Exists(called), "the hook never called deskbar.cmd");
-        Assert.Equal($"claude-hook --entry \"claude-vscode\" --attended \"1\" --from \"{project}\"", File.ReadAllText(called).Trim());
+        Assert.Equal($"claude-hook --entry \"claude-vscode\" --attended \"1\" --job \"\" --from \"{project}\"", File.ReadAllText(called).Trim());
         Assert.Equal(StopJson, File.ReadAllText(input).Trim());
         Assert.Equal("context for the session", stdout.Trim());
     }
@@ -255,7 +255,7 @@ public sealed class ClaudeSkillTests : IDisposable
         // The diagnosis runs the shim, which asks the same test server, so it runs only once the hook has failed.
         if (exitCode != 0 || stdout.Trim() != "Your task is X.")
             Assert.Fail($"hook: {Explain(exitCode, stdout, stderr)}; {ShimDiagnosis(exe, pipe)}");
-        Assert.Equal(["claude-hook", "--entry", "claude-vscode", "--attended", "1", "--from", project,
+        Assert.Equal(["claude-hook", "--entry", "claude-vscode", "--attended", "1", "--job", "", "--from", project,
             "--json", StopJson.Replace("Stop", "SessionStart")], received);
     }
 
@@ -306,6 +306,19 @@ public sealed class ClaudeSkillTests : IDisposable
             Assert.DoesNotContain(home, script, StringComparison.OrdinalIgnoreCase);
             Assert.True(script.All(c => c < 128), $"{name} is not ASCII");
         });
+    }
+
+    // A background session's hooks run with ATTENDED=0, so Deskbar needs its job directory to count it as attended
+    // (ClaudeHookEvent). Both scripts pass CLAUDE_JOB_DIR on as --job.
+    [Fact]
+    public void The_hook_scripts_pass_the_job_directory()
+    {
+        Directory.CreateDirectory(Path.Combine(home, ".claude"));
+
+        ClaudeSkill.Sync(true, true, home, Deskbar);
+
+        Assert.All(new[] { "claude-hook.cmd", "claude-task-hook.cmd" }, name =>
+            Assert.Contains("--job \"%CLAUDE_JOB_DIR%\"", File.ReadAllText(Path.Combine(Deskbar, name))));
     }
 
     static string[] Ours(string json, string hookEvent) =>

@@ -540,4 +540,115 @@ public class TaskBoardTests
         Assert.Equal(goal, Get(closed.Reopen(id1, clock).Value, id1).GoalId.Value);
         Assert.Equal(goal, Get(board.SetFlag(id1, TaskFlag.Urgent, true, clock).Value, id1).GoalId.Value);
     }
+
+    // --- following Claude's own list of live sessions (plan Task 5) ----------------------------------
+
+    static ClaudeAgent Agent(string id, string name = "", string folder = @"C:\repos\TaskSpaces") =>
+        new(id, Maybe<string>.None, folder, true, false, name);
+
+    [Fact]
+    public void Reconcile_ends_a_live_session_missing_from_the_list()
+    {
+        var board = Claudes(TaskBoard.Empty, id1, ws, "s1");
+        Later();
+
+        var reconciled = board.Reconcile([Agent("other")], clock);
+
+        var session = Get(reconciled, id1).Sessions.Single();
+        Assert.False(session.IsLive);
+        Assert.Equal(clock, session.Ended.Value);
+        Assert.Equal(clock, Get(reconciled, id1).UpdatedAt);
+        Assert.Equal(TaskStatus.InProgress, Get(reconciled, id1).Status);
+    }
+
+    [Fact]
+    public void Reconcile_revives_an_ended_session_the_list_still_shows()
+    {
+        var board = Claudes(TaskBoard.Empty, id1, ws, "s1").SessionEnded("s1", clock);
+        Later();
+
+        var reconciled = board.Reconcile([Agent("s1")], clock);
+
+        Assert.True(Get(reconciled, id1).Sessions.Single().IsLive);
+    }
+
+    [Fact]
+    public void Reconcile_revives_only_the_latest_entry_for_an_id()
+    {
+        var first = Claudes(TaskBoard.Empty, id1, ws, "s1").SessionEnded("s1", clock);
+        Later();
+        var board = Claudes(first, id2, ws, "s1").SessionEnded("s1", clock);
+        Later();
+
+        var reconciled = board.Reconcile([Agent("s1")], clock);
+
+        Assert.False(Get(reconciled, id1).HasLiveSession);
+        Assert.True(Get(reconciled, id2).HasLiveSession);
+    }
+
+    [Fact]
+    public void Reconcile_leaves_tasks_without_sessions_alone()
+    {
+        var board = Note(TaskBoard.Empty, id1, ws);
+
+        Assert.Same(board, board.Reconcile([], clock));
+        Assert.Same(board, board.Reconcile([Agent("s1")], clock));
+    }
+
+    [Fact]
+    public void Reconcile_does_not_change_UpdatedAt_when_nothing_changed()
+    {
+        var board = Claudes(Note(TaskBoard.Empty, id2, ws), id1, ws, "s1");
+        Later();
+
+        var reconciled = board.Reconcile([Agent("s1")], clock);
+
+        Assert.Same(board, reconciled);
+        Assert.NotEqual(clock, Get(reconciled, id1).UpdatedAt);
+    }
+
+    [Fact]
+    public void Reconcile_stamps_only_the_tasks_it_changed()
+    {
+        var board = Claudes(Claudes(TaskBoard.Empty, id1, ws, "s1"), id2, ws, "s2");
+        Later();
+
+        var reconciled = board.Reconcile([Agent("s1")], clock);
+
+        Assert.Equal(Get(board, id1), Get(reconciled, id1));
+        Assert.Equal(clock, Get(reconciled, id2).UpdatedAt);
+    }
+
+    [Fact]
+    public void Adopting_a_session_makes_an_in_progress_Claude_task_titled_by_its_name()
+    {
+        var (board, task) = TaskBoard.Empty.AdoptSession(Agent("s9", "Fix the strip"), ws, clock, id1).Value;
+
+        Assert.Equal("Fix the strip", task.Title);
+        Assert.Equal(TaskStatus.InProgress, task.Status);
+        Assert.Equal(ws, task.WorkspaceId.Value);
+        var session = Assert.Single(task.Sessions);
+        Assert.Equal("s9", session.Id);
+        Assert.Equal(@"C:\repos\TaskSpaces", session.Folder);
+        Assert.Equal(clock, session.Joined);
+        Assert.True(session.IsLive);
+        Assert.Equal(task, Assert.Single(board.Tasks));
+    }
+
+    [Theory]
+    [InlineData(@"C:\repos\TaskSpaces", "TaskSpaces")]
+    [InlineData(@"C:\repos\TaskSpaces\", "TaskSpaces")]
+    [InlineData("", "Claude session")]
+    public void Adopting_a_session_no_name_gives_falls_back_to_the_folder_name(string folder, string title) =>
+        Assert.Equal(title, TaskBoard.Empty.AdoptSession(Agent("s9", "", folder), Free, clock, id1).Value.Task.Title);
+
+    [Fact]
+    public void A_session_that_already_has_a_task_is_not_adopted_again()
+    {
+        var open = Claudes(TaskBoard.Empty, id1, ws, "s1");
+        var closed = open.Close(id1, clock).Value;
+
+        Assert.True(open.AdoptSession(Agent("s1"), ws, clock, id2).IsFailure);
+        Assert.True(closed.AdoptSession(Agent("s1"), ws, clock, id2).IsFailure);
+    }
 }

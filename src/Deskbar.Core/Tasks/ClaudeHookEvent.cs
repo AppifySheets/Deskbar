@@ -44,7 +44,7 @@ public sealed record ClaudeHookEvent(string Event, string SessionId, string Fold
 {
     static readonly string[] HeadlessEntrypoints = ["sdk-cli", "sdk-ts", "sdk-py"];
 
-    public static Result<ClaudeHookEvent> Parse(string json, string? entrypoint, string? attended)
+    public static Result<ClaudeHookEvent> Parse(string json, string? entrypoint, string? attended, string? job = null)
     {
         try
         {
@@ -58,7 +58,7 @@ public sealed record ClaudeHookEvent(string Event, string SessionId, string Fold
             if (session.HasNoValue) return Result.Failure<ClaudeHookEvent>("the hook's JSON has no session_id");
 
             return new ClaudeHookEvent(hookEvent.Value, session.Value, Text(root, "cwd").GetValueOrDefault(""),
-                Text(root, "source"), IsHeadless(entrypoint, attended), Text(root, "transcript_path"));
+                Text(root, "source"), IsHeadless(entrypoint, attended, job), Text(root, "transcript_path"));
         }
         catch (JsonException e)
         {
@@ -72,8 +72,13 @@ public sealed record ClaudeHookEvent(string Event, string SessionId, string Fold
             ? text
             : Maybe<string>.None;
 
-    static bool IsHeadless(string? entrypoint, string? attended) =>
-        Arrived(attended) is { } given
+    // A BACKGROUND SESSION (`claude --bg`) runs its hooks with ATTENDED=0 although a person can attach to it (probe notes,
+    // "What a background session's hooks see"), so the flag alone would drop every one of its hooks. Its hooks carry
+    // CLAUDE_JOB_DIR, which a `claude -p` run does not have: a job directory that arrived means attended. It arrives the
+    // way the other variables do (empty or a literal %NAME% when unset), hence the same Arrived test.
+    static bool IsHeadless(string? entrypoint, string? attended, string? job) =>
+        Arrived(job) is not null ? false
+        : Arrived(attended) is { } given
             ? given != "1"
             : Arrived(entrypoint) is not { } entry || HeadlessEntrypoints.Contains(entry, StringComparer.OrdinalIgnoreCase);
 

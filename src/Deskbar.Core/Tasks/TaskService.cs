@@ -126,6 +126,16 @@ public sealed class TaskService(ITaskStore store, Func<DateTimeOffset> now, Func
 
     public void SessionEnded(string sessionId) => CommitIfChanged(Board.SessionEnded(sessionId, now()));
 
+    /// <summary>
+    /// The board follows Claude Code's list of live sessions (TaskBoard.Reconcile). Called on every poll, nearly always
+    /// with nothing to change, so it saves and pulses only when a session really changed.
+    /// </summary>
+    public void Reconcile(IReadOnlyCollection<ClaudeAgent> live) => CommitIfChanged(Board.Reconcile(live, now()));
+
+    /// <summary>An unknown live session becomes a task (TaskBoard.AdoptSession); one that has a task is refused.</summary>
+    public Result<TaskItem> Adopt(ClaudeAgent agent, Maybe<Guid> workspace) =>
+        Board.AdoptSession(agent, workspace, now(), makeId()).Tap(r => Commit(r.Board)).Map(r => r.Task);
+
     /// <summary>Frees the tasks of workspaces that no longer exist. Saves only when something changed.</summary>
     public void Prune(IReadOnlySet<Guid> knownWorkspaces)
     {

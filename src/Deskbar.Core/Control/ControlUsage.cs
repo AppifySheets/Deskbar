@@ -42,7 +42,7 @@ public static class ControlUsage
                 "ask for the user: the workspace of the VS Code window whose folder holds --from (the caller's own\n"
                 + "      folder if not given) blinks on the bar and that window's icon glows, until the user goes there.\n"
                 + "      Nothing happens when the user is already on that workspace"),
-            new("claude-hook", "[--entry <value>] [--attended <value>] [--from <folder>]",
+            new("claude-hook", "[--entry <value>] [--attended <value>] [--job <value>] [--from <folder>]",
                 "what Claude Code's hooks run (claude-hook.cmd for Notification and Stop, claude-task-hook.cmd for\n"
                 + "      SessionStart, UserPromptSubmit and SessionEnd), with the hook's JSON on stdin: Notification and\n"
                 + "      Stop ask for the user as attention does. Prints only what the session should read, and exits 0\n"

@@ -763,4 +763,25 @@ public class RemoteControlClaudeHookTests
         Assert.False(Titled("Tasks board").HasLiveSession);
         Assert.Equal(TaskStatus.InProgress, Titled("Tasks board").Status);
     }
+
+    // Review focus 1: a background session's SessionEnd arrives when its turn finishes, while `claude agents` still
+    // lists it. The hook still ends it (it cannot tell), and the next reconcile with the session listed revives it.
+    // Its hooks carry ATTENDED=0 and a job directory (--job), which is what lets them through at all.
+    [Fact]
+    public void SessionEnd_of_a_background_session_still_listed_keeps_it_live()
+    {
+        var manager = Started();
+        Editor(manager, 0x10, "TaskSpaces", "Deskbar");
+        Said(manager, "s1", Repo, "new", "Tasks board");
+
+        var reply = Ran(manager, "claude-hook", "--entry", "sdk-cli", "--attended", "0", "--job", @"C:\jobs\884c127f",
+            "--from", Repo, "--json", HookOf("SessionEnd", "s1", null));
+
+        Assert.Equal(ControlReply.Ok, reply.ExitCode);
+        Assert.False(Titled("Tasks board").HasLiveSession);
+
+        tasks.Reconcile([new ClaudeAgent("s1", Maybe<string>.None, Repo, true, false, "")]);
+
+        Assert.True(Titled("Tasks board").HasLiveSession);
+    }
 }
