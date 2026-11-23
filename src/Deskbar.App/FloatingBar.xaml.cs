@@ -434,6 +434,9 @@ public partial class FloatingBar : Window
                 DockToEdge().TapError(error => ClickTrace.Write($"dock on show failed: {error}"));
         }
 
+        // On screen and floating (DockBar off, the default, or a dock that failed): the tasks panel hears it and docks by
+        // the floating rule. A dock above has announced itself instead, and this then says nothing (AnnounceFloating).
+        AnnounceFloating();
         Save();
     }
 
@@ -684,10 +687,13 @@ public partial class FloatingBar : Window
     //     restarting (AppBar.Hook clears Registered, the re-dock registers), and docking after undock or minimize;
     //   * after a dock whose edge or screen differs from the last one announced, even without a fresh registration:
     //     a display change can move the docked bar to another screen while its registration stands;
-    //   * with Edge null when the strip is let go (LetGoOfStrip, which undocking and the display-layout readjustment
-    //     go through; MinimizeToTaskbar; the bar closing), once per letting go. Gone says which: true for minimize and
-    //     close (the bar went away, the panel hides), false for undocking and the readjustment (the bar is still on
-    //     screen, the panel docks by the floating rule). See BarStrip.
+    //   * with Edge null and Gone false when the bar is on screen and floats (AnnounceFloating): undocking
+    //     (UndockFromEdge), the display-layout readjustment letting go before it docks again (LetGoOfStrip), and every
+    //     show that leaves it floating (ShowBar: the first show with DockBar off, a restore while floating). The panel
+    //     docks by the floating rule;
+    //   * with Edge null and Gone true when the bar goes away (AnnounceGone): MinimizeToTaskbar and the bar closing,
+    //     whatever the last notice's edge. The panel hides. See BarStrip.
+    //   Neither repeats itself: a floating notice is not sent after a floating one, nor a gone one after a gone one.
     //
     // It NEVER emits for a re-dock on the same edge and screen that did not register: the shell's position-changed
     // re-ask (OnShellMovedStrips) and the end of a width drag. That is the loop breaker. The panel's own Remove and
@@ -696,11 +702,11 @@ public partial class FloatingBar : Window
     // bar's inner edge is, and the shell tells the panel that itself, through the same position notice.
     //
     // REPLAYS the last notice to a new subscriber. The App and the tasks panel subscribe after the bar may already have
-    // docked at startup (ShowBar, DockToEdge), and the panel waits for a notice with an edge before it docks; with a
-    // plain Subject that first notice was gone and the panel would wait until the next registration, an Explorer
-    // restart or a dock guard repair. Replaying it is safe for the order: the bar's registration it describes is
-    // already older than anything the panel registers next. A late subscriber after close gets the closing let-go
-    // and the completion.
+    // docked or been shown floating at startup (ShowBar, DockToEdge), and the panel waits for a notice before it docks;
+    // with a plain Subject that first notice was gone and the panel would wait until the next registration, an Explorer
+    // restart or a dock guard repair (or for ever, for a bar that floats). Replaying it is safe for the order: the
+    // bar's registration it describes is already older than anything the panel registers next. A late subscriber after
+    // close gets the closing gone notice and the completion.
     //
     // Completed when the bar closes (see the Closed handler, which lets go first). Handed out through AsObservable,
     // so no caller can cast it back to the subject and push into it.
@@ -733,20 +739,38 @@ public partial class FloatingBar : Window
         Announce(pending.Notice, pending.Why);
     }
 
-    // After the strip was given back. Only when the last notice was a dock, so a floating bar being minimized, or a
-    // strip let go twice on one path, says nothing. The screen is the one the bar is on now, read from the window; the
-    // last dock's screen when the window cannot be read.
+    // THE BAR IS ON SCREEN AND FLOATS (BarStrip: Edge null, Gone false): the tasks panel docks by the floating rule, on
+    // the edge of this screen nearer the bar's middle. Sent whenever the bar is visible, not minimized and not docked,
+    // and the last notice was not already this one: on undocking (UndockFromEdge), on the display readjustment letting
+    // go before it docks again (LetGoOfStrip), and on every show that leaves the bar floating (ShowBar: the first show
+    // at start with DockBar off, which is the default, and a restore from minimize while floating). Without the last
+    // two a bar that never docked never said anything, and a requested panel could never open.
     //
-    // `gone` (BarStrip.Gone): true when the bar itself goes away (MinimizeToTaskbar), false when it stays on screen,
-    // floating (UndockFromEdge) or about to dock again (the display-layout readjustment). The panel docks by the
-    // floating rule on false. A floating bar dragged elsewhere later sends nothing, so the panel stays on the edge it
-    // took when the bar undocked: accepted, because Petre always docks the bar (spec "Where it docks").
-    void AnnounceLetGo(bool gone)
+    // The screen is the one the bar is on now, read from the window; the last notice's when the window cannot be read,
+    // and nothing at all when there is neither. The middle likewise, then the screen's own middle.
+    //
+    // A floating bar dragged elsewhere later sends nothing, so the panel stays on the edge it took when the bar started
+    // floating: accepted (Petre always docks the bar; the coordinator's ruling in task 5's report).
+    void AnnounceFloating()
     {
-        if (lastStrip is not { Edge: not null } last) return;
+        if (!IsVisible || Minimized || Docked || lastStrip is { Edge: null, Gone: false }) return;
         var hwnd = new WindowInteropHelper(this).Handle;
-        Announce(new BarStrip(null, ScreenOf(hwnd).GetValueOrDefault(last.Screen), Maybe<WindowRect>.None,
-            MiddleXOf(hwnd).GetValueOrDefault(last.MiddleX), gone), gone ? "let go (bar gone)" : "let go (bar floats)");
+        var read = ScreenOf(hwnd);
+        var screen = read.HasValue ? read.Value : lastStrip?.Screen;
+        if (screen is null) return;
+        var middle = MiddleXOf(hwnd).GetValueOrDefault(lastStrip?.MiddleX ?? (screen.Left + screen.Right) / 2);
+        Announce(new BarStrip(null, screen, Maybe<WindowRect>.None, middle, Gone: false), "floats");
+    }
+
+    // THE BAR WENT AWAY (BarStrip: Edge null, Gone true): minimized (MinimizeToTaskbar) or closing (CompleteStrip). The
+    // panel gives its strip back and hides until the bar is on screen again. Sent whenever the last notice was not
+    // already a gone one, WHATEVER its edge: a floating bar going away must take a panel docked by the floating rule
+    // with it, as much as a docked bar. Nothing when nothing was ever announced: the panel has no place yet then.
+    // Built from the last notice, never from the window, whose handle may be going.
+    void AnnounceGone(string why)
+    {
+        if (lastStrip is not { Gone: false } last) return;
+        Announce(last with { Edge = null, SeamRight = Maybe<WindowRect>.None, Gone = true }, why);
     }
 
     // Never called with `docking` set (dock notices go through FlushStripNotice, let-go notices are sent outside DockTo).
@@ -765,7 +789,7 @@ public partial class FloatingBar : Window
     // the stream ends. Built from the last notice, never from the window, whose handle is being destroyed.
     void CompleteStrip()
     {
-        if (lastStrip is { Edge: not null } last) Announce(last with { Edge = null, SeamRight = Maybe<WindowRect>.None, Gone = true }, "let go (closing)");
+        AnnounceGone("gone (closing)");
         strip.OnCompleted();
     }
 
@@ -852,7 +876,7 @@ public partial class FloatingBar : Window
         // Announced only now that the window is back at its floating spot, so the notice's MiddleX is where the bar
         // floats and the panel takes the edge nearer THAT (BarStrip.Gone false, the floating rule), not the edge the
         // bar has just left.
-        AnnounceLetGo(gone: false);
+        AnnounceFloating();
         Save();
         return Result.Success();
     }
@@ -869,7 +893,7 @@ public partial class FloatingBar : Window
         // the display-layout readjustment, which docks again right after this; that dock registers afresh and is
         // announced in turn, and the panel, answering on its dispatcher, acts on that newer notice. Gone false: the
         // bar is still on screen (BarStrip.Gone).
-        AnnounceLetGo(gone: false);
+        AnnounceFloating();
     }
 
     // The work of letting go, without the notice: UndockFromEdge announces only after it has put the window back at its
@@ -1165,9 +1189,8 @@ public partial class FloatingBar : Window
         appBar?.Remove();
         seamBar?.Remove();
         // The panel closes with the strip and reopens when ShowBar docks again, which registers afresh and is announced
-        // (see Strip). Silent for a bar minimized while floating: it held no strip, so nothing was announced to undo.
-        // The bar itself goes away, so the panel hides with it rather than dock by the floating rule (BarStrip.Gone).
-        AnnounceLetGo(gone: true);
+        // (see Strip). A bar minimized while floating says so too: a panel docked by the floating rule goes with it.
+        AnnounceGone("gone (minimized)");
         Hide();
         Save();
     }

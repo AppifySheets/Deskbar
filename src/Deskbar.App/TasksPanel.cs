@@ -168,7 +168,9 @@ internal sealed class TasksPanel : IDisposable
         var resize = docked && widthDips != width;
         width = widthDips;
         SetWanted(true);
-        if (resize) _ = Dock(fresh: false, "width");
+        // Not while waiting for the bar after an Explorer restart: the in-place AppBar.Dock would register (Registered is
+        // false then) before the bar has. The width is kept; the bar's notice docks at it.
+        if (resize && !awaitingBar) _ = Dock(fresh: false, "width");
         else if (!docked) _ = Dock(fresh: true, "shown");
     }
 
@@ -187,7 +189,8 @@ internal sealed class TasksPanel : IDisposable
     public void SetWidth(double widthDips)
     {
         width = widthDips;
-        if (docked && !shutDown) _ = Dock(fresh: false, "width");
+        // Not while waiting for the bar after an Explorer restart, for the reason Show gives.
+        if (docked && !shutDown && !awaitingBar) _ = Dock(fresh: false, "width");
     }
 
     // THE 1 S GUARD, the docked bar's (FloatingBar.KeepDockedStrip) for the panel: the shell can stop holding a strip
