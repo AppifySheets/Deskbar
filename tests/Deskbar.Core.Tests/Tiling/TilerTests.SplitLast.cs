@@ -182,6 +182,44 @@ public sealed partial class TilerTests
         Assert.Equal(Code(2), SplitOf(W(4)));
     }
 
+    // Final review, I1: the spec puts protected tiles before locked ones. Screen 1 is all locked, screen 2 holds only a
+    // protected VS Code window: the window halves the protected one on screen 2 rather than a locked tile on screen 1.
+    [Fact]
+    public void A_locked_screen_sends_the_window_to_a_protected_tile_before_splitting_a_locked_one()
+    {
+        surface.ScreenList.Add(FakeTileSurface.Screen(2, Area2));
+        Exists(W(1), alpha, screen: 1);
+        Exists(Code(2), alpha, screen: 2);
+        Start();
+        SplitLast(Code(2));
+        Uses(Code(2));
+        Uses(W(1));
+        Assert.True(tiler.SetTileLocked(W(1), true).IsSuccess);
+
+        Opens(W(3), alpha, screen: 1);
+
+        Assert.Equal(Code(2), SplitOf(W(3)));
+        Assert.Equal(2, tiler.Board.ScreenOf(W(3)).Value);
+    }
+
+    // Final review, minor 3 raised: Deskbar restarts several times a day (every merge releases and updates), and
+    // nothing has been activated since. The window in front when tiling starts counts as used, so the VS Code window
+    // being worked in is protected from the first new window on. Without it, the two halves tie and the later slot,
+    // Code(1) (it sits further right), would be split.
+    [Fact]
+    public void The_window_in_front_when_tiling_starts_counts_as_used()
+    {
+        Exists(W(2), alpha);
+        Exists(Code(1), alpha);
+        monitor.ForegroundWindow = Code(1);
+        Start();
+        SplitLast(Code(1));
+
+        Opens(W(3), alpha);
+
+        Assert.Equal(W(2), SplitOf(W(3)));
+    }
+
     [Fact]
     public void The_setting_survives_a_restart()
     {

@@ -227,6 +227,12 @@ public sealed partial class Tiler(WorkspaceManager manager, IVirtualDesktopServi
         subscriptions.Add(OnInputs(manager.StateChanged).Subscribe(_ => Run("state changed", OnStateChanged)));
         subscriptions.Add(OnInputs(manager.WindowMoved).Subscribe(w => Run($"window {w.Value:X} moved to another desktop", () => OnWindowMoved(w))));
 
+        // The window in front counts as used from the start (spec 2026-11-23-split-recent-app-windows-last, final review):
+        // Deskbar restarts several times a day (every merge releases and updates), and until something is activated the
+        // window being worked in would be neither the tile last used nor protected by "Split <app> windows last". With
+        // time 0, "not from a WinEvent", so the hand-out rule never drops it (Tiler.Arrival.cs, Near).
+        monitor.Foreground().Tap(front => used = [(front, 0u)]);
+
         // The screens there are now, so the first ScreensChanged can tell which screen came back.
         Run("remember screens", RememberScreens);
         // The first evaluate reads the current desktop and, if it is tiled, tiles it.
