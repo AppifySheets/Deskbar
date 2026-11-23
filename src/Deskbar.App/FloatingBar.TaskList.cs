@@ -557,7 +557,7 @@ public partial class FloatingBar
         {
             task.Status == TaskStatus.WaitingOnYou && task.Question.HasValue ? task.Question.Value
                 : task.StatusLine.Length > 0 ? task.StatusLine
-                : withDescription ? FirstLine(task.Description) : "",
+                : withDescription ? TaskViews.PlainFirstLine(task.Description) : "",
             task.IsClaudes && !task.HasLiveSession ? NoLiveSession : "",
         }.Where(part => part.Length > 0));
 

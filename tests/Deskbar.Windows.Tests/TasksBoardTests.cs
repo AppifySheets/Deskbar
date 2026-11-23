@@ -2353,7 +2353,7 @@ public class TasksBoardTests
     // --- RULING 63: a thread folds. Click again to collapse; long comments and old ones fold away ------------------------
 
     static List<Button> ButtonsNamed(Board t, string name) =>
-        Inside(t.Window).OfType<Button>().Where(b => AutomationProperties.GetName(b) == name).ToList();
+        Inside(t.Window).OfType<Button>().Where(b => AutomationProperties.GetName(b) == name && b.Visibility == Visibility.Visible).ToList();
 
     [Fact]
     public void A_click_toggles_the_thread_and_escape_collapses_the_selected_one() => StaThread.Run(() =>
@@ -2461,5 +2461,96 @@ public class TasksBoardTests
         Assert.Equal("Hide 4 earlier comments", TextOf(ButtonsNamed(t, "Earlier comments").Single()));
         Assert.Single(ButtonsNamed(t, "Show less"));
         Assert.True(t.Window.ThreadShown(id));
+    });
+
+    // --- review fixes ----------------------------------------------------------------------------------------------------
+
+    // Edit with nothing changed renames nothing and saves nothing: no pulse.
+    [Fact]
+    public void Edit_with_nothing_changed_changes_nothing() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        var id = t.Tasks.AddNote("Pay rent", t.Gepha).Value.Id;
+        t.Tasks.Describe(id, "words");
+        t.Controller.Open(Rect.Empty);
+        var pulses = 0;
+        using var _ = t.Tasks.Changed.Subscribe(_ => pulses++);
+        var before = t.Tasks.Board;
+
+        Assert.True(t.Controller.Edit(id, "  Pay rent  ", "words").IsSuccess);
+
+        Assert.Equal(0, pulses);
+        Assert.Same(before, t.Tasks.Board);
+        // A real change still lands, one pulse per field changed.
+        Assert.True(t.Controller.Edit(id, "Pay rent", "new words").IsSuccess);
+        Assert.Equal("new words", t.Tasks.Board.Tasks.Single().Description);
+    });
+
+    // Esc folds the selected thread, but not while a comment box has the keyboard: there it belongs to the box.
+    [Fact]
+    public void Escape_leaves_the_thread_alone_while_a_comment_box_has_the_keyboard() => StaThread.Run(() =>
+    {
+        var selection = new TaskSelection();
+        using var t = Build(selection: selection);
+        var id = t.Tasks.AddNote("note", t.Gepha).Value.Id;
+        t.Controller.Open(Rect.Empty);
+        t.Controller.Pick(id);
+        Assert.True(t.Window.ThreadShown(id));
+        t.Window.EscapeIgnoresThreadWhile = () => true; // a comment box with the keyboard
+
+        PressKey(t.Window, Key.Escape);
+        Assert.True(t.Window.ThreadShown(id));
+
+        t.Window.EscapeIgnoresThreadWhile = null;
+        PressKey(t.Window, Key.Escape);
+        Assert.False(t.Window.ThreadShown(id));
+    });
+
+    // A re-layout of a thread (an earlier-comments line unfolded, a long comment opened) starts the half second in which a
+    // click is not trusted, as any change of the lines does.
+    [Fact]
+    public void Unfolding_part_of_a_thread_starts_the_click_guard() => StaThread.Run(() =>
+    {
+        var clock = ClickStart;
+        using var t = Build(clickClock: () => clock);
+        var id = t.Tasks.AddNote("note", t.Gepha).Value.Id;
+        var other = t.Tasks.AddNote("other", t.Gepha).Value.Id;
+        Enumerable.Range(1, 5).ToList().ForEach(i => t.Tasks.Comment(id, Maybe<string>.None, $"comment {i}"));
+        t.Controller.Open(Rect.Empty);
+        clock = clock.AddSeconds(2);
+        t.Controller.ToggleThread(id);
+        clock = clock.AddSeconds(2);
+        Click(ButtonsNamed(t, "Earlier comments").Single());
+
+        // At once: the lines have just changed, so this click on another line is not trusted.
+        Click(LineOf(t.Window, other));
+        Assert.False(t.Window.ThreadShown(other));
+
+        clock = clock.AddSeconds(1);
+        Click(LineOf(t.Window, other));
+        Assert.True(t.Window.ThreadShown(other));
+    });
+
+    // A long comment is judged by its real width once the thread is laid out: a single paragraph that the heuristic calls long
+    // but that fits three lines at the window's width has no Show more.
+    [Fact]
+    public void Show_more_follows_the_laid_out_height() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        var id = t.Tasks.AddNote("note", t.Gepha).Value.Id;
+        // Wide glyphs: 290 characters, three lines by the character count but many more once laid out.
+        t.Tasks.Comment(id, Maybe<string>.None, string.Join(" ", Enumerable.Repeat("WWWWWWWWW", 29)));
+        // Narrow glyphs: 350 characters, four lines by the count but two once laid out.
+        t.Tasks.Comment(id, Maybe<string>.None, string.Join(" ", Enumerable.Repeat("iiiiiiiii", 35)));
+        t.Tasks.Comment(id, Maybe<string>.None, Long(9));
+        t.Controller.Open(Rect.Empty);
+        t.Controller.ToggleThread(id);
+        static List<bool> Shown(Board t) => Inside(t.Window).OfType<Button>()
+            .Where(b => AutomationProperties.GetName(b) == "Show more").Select(b => b.Visibility == Visibility.Visible).ToList();
+        Assert.Equal([false, true, true], Shown(t)); // before layout, the character count decides
+
+        t.Window.UpdateLayout();
+
+        Assert.Equal([true, false, true], Shown(t)); // after it, the laid-out height does
     });
 }

@@ -100,7 +100,7 @@ public sealed record TaskBoard(IReadOnlyList<TaskItem> Tasks)
     /// <summary>A session needs a decision: the task waits on Petre, shows the question and moves to the top.</summary>
     public Result<TaskBoard> Ask(Guid id, string question, DateTimeOffset now) =>
         CleanText(question, "An ask needs a question").Bind(q =>
-            ChangeOpen(id, t => t with { Status = TaskStatus.WaitingOnYou, Question = q.Trim(), Raised = now, UpdatedAt = now, Assignee = Assignee.Me }));
+            ChangeOpen(id, t => t with { Status = TaskStatus.WaitingOnYou, Question = q.Trim(), Raised = now, UpdatedAt = now, Assignee = Assignee.Me, WaitingSince = now }));
 
     /// <summary>
     /// Petre sent the session a message. Its task, when Waiting on you or Done, goes back to In progress and drops
@@ -154,7 +154,14 @@ public sealed record TaskBoard(IReadOnlyList<TaskItem> Tasks)
     public Result<TaskBoard> Reopen(Guid id, DateTimeOffset now) =>
         Tasks.FirstOrDefault(t => t.Id == id) is { IsOpen: true }
             ? Result.Failure<TaskBoard>(TaskIsNotClosed)
-            : Change(id, t => OnTopIfClosed(t) with { Status = t.HasLiveSession ? TaskStatus.InProgress : TaskStatus.Backlog, UpdatedAt = now });
+            // The assignee is derived from what the task is now (Ruling 57 review): a session still live on it is Claude's work in
+            // progress, otherwise it is back in the backlog and his.
+            : Change(id, t => OnTopIfClosed(t) with
+            {
+                Status = t.HasLiveSession ? TaskStatus.InProgress : TaskStatus.Backlog,
+                Assignee = Assignee.DerivedFor(t.HasLiveSession, t.HasLiveSession ? TaskStatus.InProgress : TaskStatus.Backlog),
+                UpdatedAt = now,
+            });
 
     /// <summary>
     /// Undo on a line just closed (the bar's and the window's six seconds). UNDO MEANS EXACTLY UNDO (Ruling 31): the
@@ -186,6 +193,14 @@ public sealed record TaskBoard(IReadOnlyList<TaskItem> Tasks)
             {
                 Status = status,
                 Question = status == TaskStatus.WaitingOnYou ? t.Question : Maybe<string>.None,
+                // The assignee follows the status set by hand (Ruling 57 review): waiting on him or done is his; leaving
+                // either for in progress or the backlog derives it again (a Claude task goes back to Claude, a note stays
+                // his); any other change of status leaves it alone.
+                Assignee = status is TaskStatus.WaitingOnYou or TaskStatus.Done ? Assignee.Me
+                    : t.Status is TaskStatus.WaitingOnYou or TaskStatus.Done ? Assignee.DerivedFor(t.IsClaudes, status)
+                    : t.Assignee,
+                // When it began waiting (Ruling 62 review): what `answered` settles comments since.
+                WaitingSince = status == TaskStatus.WaitingOnYou && t.Status != TaskStatus.WaitingOnYou ? now : t.WaitingSince,
                 UpdatedAt = now,
             });
 
@@ -322,10 +337,10 @@ public sealed record TaskBoard(IReadOnlyList<TaskItem> Tasks)
             UpdatedAt = now,
         });
 
-    // The session's own unsettled comments written at or after the question was asked (Raised is the ask's time while the
-    // task waits): the ask's detail and the follow-ups while it was open.
+    // The session's own unsettled comments written at or after the question was asked (WaitingSince, falling back to Raised for a
+    // file saved before it existed): the ask's detail and the follow-ups while it was open.
     static IReadOnlyList<TaskComment> SettledSinceAsk(TaskItem task, string sessionId, DateTimeOffset now) =>
-        task.Comments.Select(c => c.SessionId.HasValue && c.SessionId.Value == sessionId && c.At >= task.Raised && c.Settled.HasNoValue
+        task.Comments.Select(c => c.SessionId.HasValue && c.SessionId.Value == sessionId && c.At >= task.WaitingSince.GetValueOrDefault(task.Raised) && c.Settled.HasNoValue
             ? c with { Settled = now }
             : c).ToArray();
 
@@ -393,14 +408,14 @@ public sealed record TaskBoard(IReadOnlyList<TaskItem> Tasks)
 
     /// <summary>
     /// What a session starting on <paramref name="workspace"/> is offered to join, in the pile's order: the open
-    /// tasks on that workspace that are Claude's to take (Ruling 57: assigned to Claude, or already Claude's work by
-    /// having had a session), plus the open Claude tasks on no workspace. A note of Petre's that stays assigned to him
+    /// tasks on that workspace that are assigned to Claude (Ruling 57; "Assign to Me" withdraws the offer, as the review asked: the
+    /// assignee alone decides), plus the open Claude tasks on no workspace that are still Claude's. A note of Petre's that stays his
     /// is not offered, and neither are his notes on no workspace (errands; spec, "What a session is offered").
     /// </summary>
     public IReadOnlyList<TaskItem> Offered(Maybe<Guid> workspace) =>
         Pile().Where(t => t.WorkspaceId.HasValue
-            ? workspace.HasValue && t.WorkspaceId.Value == workspace.Value && (t.Assignee.IsClaude || t.IsClaudes)
-            : t.IsClaudes).ToArray();
+            ? workspace.HasValue && t.WorkspaceId.Value == workspace.Value && t.Assignee.IsClaude
+            : t.IsClaudes && t.Assignee.IsClaude).ToArray();
 
     /// <summary>
     /// The open tasks in the order the bar shows them (Ruling 25): Waiting on you first, the latest ask on top (by

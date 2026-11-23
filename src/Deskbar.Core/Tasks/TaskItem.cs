@@ -107,6 +107,13 @@ public sealed record TaskItem(
     /// </summary>
     public string Description { get; init; } = "";
 
+    /// <summary>
+    /// When the task last BEGAN waiting on Petre (a session's ask, or a status set to Waiting by hand), or none. What
+    /// `answered` settles a session's comments since: Raised cannot say it, since a status set by hand never moves it. A
+    /// stored optional field; a file without it falls back to Raised.
+    /// </summary>
+    public Maybe<DateTimeOffset> WaitingSince { get; init; }
+
     /// <summary>Covey's quadrant the two flags name (TaskOrder.cs).</summary>
     public Quadrant Quadrant => QuadrantOf.Flags(Important, Urgent);
 

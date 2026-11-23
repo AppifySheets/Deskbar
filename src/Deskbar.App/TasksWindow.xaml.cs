@@ -212,6 +212,8 @@ public partial class TasksWindow : Window
     internal IReadOnlyList<Guid> ShownComments(Guid id) => shownComments.GetValueOrDefault(id) ?? [];
     internal bool IsClosing(Guid id) => closing.GetValueOrDefault(id);
     internal string CommentDraft(Guid id) => commentBoxes.TryGetValue(id, out var box) ? box.Text : drafts.GetValueOrDefault(id, "");
+    /// <summary>For the tests: stands in for "a comment box has the keyboard", which a window that never activates cannot have.</summary>
+    internal Func<bool>? EscapeIgnoresThreadWhile { get; set; }
     internal TextBox? CommentBoxOf(Guid id) => commentBoxes.GetValueOrDefault(id);
 
     // THE CLICK GUARD, the bar's (#48, Ruling 10; FloatingBar.TaskClickIgnored), fix round 1, Important 1. A line
@@ -489,7 +491,10 @@ public partial class TasksWindow : Window
         // ClickIgnored). A redraw that only rewrites what lines say (a session's status line) moves nothing and does
         // not start the half second, or frequent status pulses would eat clicks (review minor).
         var shownRows = view.Matrix ? view.Cells.SelectMany(c => c.Rows).ToArray() : view.Groups.SelectMany(g => g.Rows).ToArray();
-        var placesKey = string.Join('|', shownRows.Select(r => $"{r.Id}{r.Expanded}{r.Closing}").Prepend($"{view.Matrix}"));
+        // Which comments a thread shows, and what is unfolded in it, are part of where things sit (review of the assignee batch,
+        // M4): an earlier-comments line unfolding or a long comment opening moves every line below, so it starts the half second
+        // too.
+        var placesKey = string.Join('|', shownRows.Select(r => $"{r.Id}{r.Expanded}{r.Closing}{ThreadLayoutKey(r)}").Prepend($"{view.Matrix}"));
         if (placesKey != linesPlaces)
         {
             linesPlaces = placesKey;
@@ -1055,6 +1060,22 @@ public partial class TasksWindow : Window
 
     // --- the thread --------------------------------------------------------------------------------------------------
 
+    // The comments a thread draws (settled ones folded away, then only the latest three unless the earlier ones are
+    // unfolded) and how many were left out as earlier. The one place the rule lives: Thread draws from it and the click
+    // guard's key (ThreadLayoutKey) reads it.
+    (IReadOnlyList<TaskCommentView> Shown, int Earlier) ThreadComments(TaskRowView row)
+    {
+        var candidates = row.Comments.Where(c => !c.Settled || settledOpen.Contains(row.Id)).ToList();
+        var earlier = Math.Max(0, candidates.Count - LatestShown);
+        return (earlier > 0 && !earlierOpen.Contains(row.Id) ? candidates.Skip(earlier).ToList() : candidates, earlier);
+    }
+
+    // What an open thread's layout depends on, as text: the comments it shows and which of them are opened in full.
+    string ThreadLayoutKey(TaskRowView row) =>
+        !row.Expanded ? ""
+        : string.Join(',', ThreadComments(row).Shown.Select(c => $"{c.Id}{(longOpen.Contains(c.Id) ? "+" : "")}"))
+          + $"{settledOpen.Contains(row.Id)}{earlierOpen.Contains(row.Id)}";
+
     // The comments, each with its author and time over its markdown, then a box for Petre's next one. RULING 62: the settled
     // ones are folded away behind one dim line at the top, "N settled comments", which unfolds them in place (and reads
     // "Hide N settled comments" while they show). They are kept, so the history stays.
@@ -1063,15 +1084,13 @@ public partial class TasksWindow : Window
         var panel = new StackPanel();
         var settledCount = row.Comments.Count(c => c.Settled);
         var unfolded = settledOpen.Contains(row.Id);
-        var candidates = row.Comments.Where(c => !c.Settled || unfolded).ToList();
+        var (shown, earlier) = ThreadComments(row);
+        var open = earlierOpen.Contains(row.Id);
         // RULING 63: more than three comments show only the latest three, under a dim "N earlier comments" line that
         // unfolds the rest (settled comments, folded above, do not count toward the three).
-        var earlier = Math.Max(0, candidates.Count - LatestShown);
-        var open = earlierOpen.Contains(row.Id);
-        var shown = earlier > 0 && !open ? candidates.Skip(earlier).ToList() : candidates;
         if (settledCount > 0) panel.Children.Add(SettledFold(row.Id, settledCount, unfolded));
         if (earlier > 0) panel.Children.Add(EarlierFold(row.Id, earlier, open));
-        shown.ForEach(comment => panel.Children.Add(CommentOf(comment)));
+        shown.ToList().ForEach(comment => panel.Children.Add(CommentOf(comment)));
         panel.Children.Add(CommentBox(row.Id));
         authors[row.Id] = shown.Select(c => c.Author).ToArray();
         shownComments[row.Id] = shown.Select(c => c.Id).ToArray();
@@ -1170,25 +1189,34 @@ public partial class TasksWindow : Window
             Cursor = Cursors.Arrow,
         };
         // RULING 63: a long comment shows about three lines, clipped, and ends in "Show more", which opens it in place;
-        // "Show less" folds it back. The state is the window's (longOpen), so a redraw keeps it.
+        // "Show less" folds it back. The state is the window's (longOpen), so a redraw keeps it. Whether it is long is
+        // judged by the character count at first (the width is not known while the thread is built), and by the laid-out
+        // height once it has been (review of the batch): a paragraph that fits three lines at the window's width loses its
+        // button, and one that wraps to more gains it.
         var isLong = IsLong(comment.Markdown);
         var full = longOpen.Contains(comment.Id);
-        if (isLong && !full)
+        if (!full)
         {
             body.MaxHeight = ThreeLines;
             body.ClipToBounds = true;
         }
         var parts = new StackPanel { Margin = new Thickness(0, 0, 0, 8), Opacity = comment.Settled ? 0.55 : 1, Children = { header, body } };
-        if (isLong)
-        {
-            var more = Small(new TextBlock { Text = full ? "Show less" : "Show more", Foreground = HeaderInk, FontSize = 10.5 },
-                full ? "Show less" : "Show more", () =>
-                {
-                    if (!longOpen.Remove(comment.Id)) longOpen.Add(comment.Id);
-                    if (latest is not null) Draw(latest);
-                }, full ? "Fold the comment back to three lines" : "Show the whole comment");
-            parts.Children.Add(more);
-        }
+        var more = Small(new TextBlock { Text = full ? "Show less" : "Show more", Foreground = HeaderInk, FontSize = 10.5 },
+            full ? "Show less" : "Show more", () =>
+            {
+                if (!longOpen.Remove(comment.Id)) longOpen.Add(comment.Id);
+                if (latest is not null) Draw(latest);
+            }, full ? "Fold the comment back to three lines" : "Show the whole comment");
+        // Collapsed means it takes no room and is not in the tree for a reader, but it is there for the layout to switch on.
+        more.Visibility = full || isLong ? Visibility.Visible : Visibility.Collapsed;
+        parts.Children.Add(more);
+        if (!full)
+            body.LayoutUpdated += (_, _) =>
+            {
+                if (body.ActualWidth <= 0) return;
+                var wanted = body.ExtentHeight > ThreeLines + 0.5 ? Visibility.Visible : Visibility.Collapsed;
+                if (more.Visibility != wanted) more.Visibility = wanted;
+            };
         // A settled comment, when unfolded, is dim: it is history.
         return parts;
     }
@@ -1781,7 +1809,9 @@ public partial class TasksWindow : Window
         else if (editingComment is not null) EndCommentEdit();
         else if (AddBoxShown) HideAdd();
         // RULING 63: Esc folds the selected line's open thread, the last thing it undoes.
-        else if (selectedId.HasValue && authors.ContainsKey(selectedId.Value)) Actions?.ToggleThread(selectedId.Value);
+        // Not while a comment box has the keyboard: there Esc belongs to the box (review, M5).
+        else if (selectedId.HasValue && authors.ContainsKey(selectedId.Value) && !(EscapeIgnoresThreadWhile?.Invoke() ?? commentBoxes.Values.Any(box => box.IsKeyboardFocusWithin)))
+            Actions?.ToggleThread(selectedId.Value);
         else return false;
         return true;
     }

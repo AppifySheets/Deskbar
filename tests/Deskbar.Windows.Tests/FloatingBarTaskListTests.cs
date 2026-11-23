@@ -2754,4 +2754,15 @@ public class FloatingBarTaskListTests
         t.Tasks.SetFlag(t.Tasks.Board.Tasks.Single(x => x.Title == "urgent").Id, TaskFlag.Important, true);
         Assert.Equal((FontWeights.Bold, FontStyles.Italic), Look("urgent"));
     });
+
+    // Review: the bar's description line is plain text, without markdown markers.
+    [Fact]
+    public void The_bars_description_line_strips_markdown_markers() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        var note = t.Tasks.AddNote("Pay rent", t.Gepha).Value.Id;
+        t.Tasks.Describe(note, "- **Use** the _November_ `invoice`");
+
+        Assert.Equal("Use the November invoice", t.Lines.Select(l => (TaskLine)l.Tag).Single().Detail);
+    });
 }
