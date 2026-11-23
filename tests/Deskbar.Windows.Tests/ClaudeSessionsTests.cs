@@ -483,6 +483,71 @@ public class ClaudeSessionsTests
         Assert.Equal(workspace, adopted.WorkspaceId.GetValueOrDefault());
     }
 
+    // --- resuming at a click (Task 9) -------------------------------------------------------------
+
+    // Going to a task whose session ended resumes it now (ClaudeSessions.ResumeNow), under the keeper's guards: a fresh
+    // read first, one `claude --bg --resume` however many clicks come while it wakes, and once the list shows it, the
+    // session as the list has it, so the caller can attach. A click on a session already listed resumes nothing (that
+    // would start a copy). The click works with the automatic resume off: it is Petre asking, not the keeper.
+    [Fact]
+    public async Task Resuming_now_wakes_an_ended_session_once_and_hands_back_the_listed_one()
+    {
+        using var rig = new Rig();
+        Assert.True(rig.Manager.SetClaudeResume(false).IsSuccess);
+        var (taskId, sessionId) = rig.Dead("Dead one");
+        rig.Cli.ListedAfter = Seconds(3);
+        rig.Begin();
+        rig.RunTo(Seconds(1));
+        var session = rig.Task(taskId).Sessions.Single();
+
+        var first = rig.Sessions!.ResumeNow(taskId, session);
+        rig.Run(Seconds(1));
+        // A second click while it wakes: no second resume.
+        var second = rig.Sessions.ResumeNow(taskId, session);
+        rig.Run(Seconds(10));
+
+        Assert.True(first.IsCompleted && second.IsCompleted);
+        Assert.Equal(sessionId, Assert.Single(rig.Cli.Resumes).Arguments[2]);
+        Assert.Equal(sessionId, (await first).Value.SessionId);
+        Assert.Equal(sessionId, (await second).Value.SessionId);
+        Assert.Contains(rig.Task(taskId).Comments, c => c.Markdown.StartsWith("Resumed by Deskbar", StringComparison.Ordinal));
+
+        // Listed now: a third click hands it back without resuming.
+        var third = rig.Sessions.ResumeNow(taskId, session);
+        rig.Run(Seconds(1));
+        Assert.True(third.IsCompleted);
+        Assert.True((await third).IsSuccess);
+        Assert.Single(rig.Cli.Resumes);
+    }
+
+    // A list that cannot be read is "cannot tell" (Global Constraints): a click resumes nothing on it. A resume that
+    // fails says so in the task's thread with Claude's words, as the keeper's own failed resume does.
+    [Fact]
+    public async Task Resuming_now_on_an_unreadable_list_or_a_failed_resume_says_why()
+    {
+        using var rig = new Rig();
+        Assert.True(rig.Manager.SetClaudeResume(false).IsSuccess);
+        var (taskId, _) = rig.Dead("Dead one");
+        rig.Begin();
+        rig.RunTo(Seconds(1));
+        var session = rig.Task(taskId).Sessions.Single();
+
+        rig.Cli.Agents = () => Result.Failure<string>("Could not run claude: not found.");
+        var unreadable = rig.Sessions!.ResumeNow(taskId, session);
+        rig.Run(Seconds(1));
+        Assert.True(unreadable.IsCompleted);
+        Assert.True((await unreadable).IsFailure);
+        Assert.Empty(rig.Cli.Resumes);
+
+        rig.Cli.Agents = null;
+        rig.Cli.Resume = _ => Result.Failure<string>("Workspace not trusted. Run `claude` in E:\\repos\\Work once and accept the trust prompt, then retry.");
+        var failed = rig.Sessions.ResumeNow(taskId, session);
+        rig.Run(Seconds(1));
+        Assert.True(failed.IsCompleted);
+        Assert.Contains("Workspace not trusted", (await failed).Error);
+        Assert.Contains(rig.Task(taskId).Comments, c => c.Markdown.Contains("Workspace not trusted"));
+    }
+
     // --- starting --------------------------------------------------------------------------------
 
     // Spec, "Starting a session from a task": `claude --bg "<first message>"` in the folder, the short id read from its

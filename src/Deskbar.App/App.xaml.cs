@@ -69,6 +69,10 @@ public partial class App : Application
     // Claude Code's live sessions kept in step with the tasks (ClaudeSessions): the `claude agents --json` poll, adoption,
     // the automatic resume and starting a session from a task. Built after the state is loaded; disposed on every way out.
     ClaudeSessions? claudeSessions;
+    // What a click on a task does with its Claude sessions (ClaudeTaskActions, Task 9): going to its session's window,
+    // "Start Claude on this", the thread's session list and the pipe's `task go|start|open-session`. Built right after
+    // claudeSessions, whose list and starts it uses; disposed with it.
+    ClaudeTaskActions? claudeActions;
     // Tiling (docs/superpowers/specs/2026-11-08-tiling-design.md): the Tiler decides, the surface does the
     // Win32. Both live for the process, both are null in compatibility mode (there are no desktops to tile),
     // and ExitApp disposes the Tiler and then the surface, so the LOCATIONCHANGE hook goes with them.
@@ -895,10 +899,49 @@ public partial class App : Application
     static void OpenReleasePage(ReleaseInfo release) => OpenUrl(release.PageUrl);
 
     // Where a click on a task goes, from the bar's list and the tasks window alike: its workspace, the switch the rows
-    // make. A Claude task on no workspace succeeds without moving. Controller ruling 13 (Task 10): a later change sends a
-    // Claude task to its session (the `vscode://` link, TaskViews.SessionToGoTo names which) by changing this one method.
+    // make, and then its Claude session's window (ClaudeTaskActions.Go, Task 9 of
+    // docs/superpowers/specs/2026-11-23-tasks-open-claude-sessions-design.md: a background session's terminal brought
+    // forward or opened, an interactive one's editor window, an ended one resumed first). A Claude task on no workspace
+    // goes to its session without moving. It stays synchronous for its callers: the switch happens here, and whatever
+    // waits on `claude` runs on and reports through the dispatcher. Without the actions (before they are built), the
+    // workspace switch alone, as before.
     Result GoToTask(Core.Tasks.TaskItem task) =>
-        task.WorkspaceId.HasValue ? manager!.Switch(task.WorkspaceId.Value) : Result.Success();
+        claudeActions?.Go(task) ?? (task.WorkspaceId.HasValue ? manager!.Switch(task.WorkspaceId.Value) : Result.Success());
+
+    // Before ClaudeTaskActions exists (a pipe command in the first moments of a start) there is nothing to start with.
+    const string ClaudeActionsNotReady = "Claude sessions are not ready yet; try again in a moment.";
+
+    // The VS Code window a Claude session works in, from the session's folder, by the rule the control pipe's `open`
+    // and `attention` use to find a caller's window (RemoteControl.CallerOf, EditorFolder.Best), each window offering its
+    // current title and the one it had before a rename. Two windows on the same folder are both VS Code, so the first
+    // serves. Shared by the bar's icon on a Claude line and by going to an interactive session (ClaudeTaskActions).
+    Maybe<nint> SessionWindowOf(string folder) =>
+        EditorFolder.Best(folder, EditorTitles())
+            .TryFirst()
+            .Map(handle => handle.Value);
+
+    IEnumerable<(WindowHandle Window, IEnumerable<string> Titles)> EditorTitles() =>
+        manager!.KnownWindows
+            .Where(EditorFolder.IsEditor)
+            .Select(w => (w.Handle, Titles: manager.OriginalTitle(w.Handle).Map(t => (IEnumerable<string>)[w.Title, t]).GetValueOrDefault([w.Title])));
+
+    // The folders the VS Code windows on a workspace show, by the names their titles carry (EditorFolder.Of). None for
+    // no workspace: a window on an unnamed desktop belongs to no task's workspace.
+    IEnumerable<string> EditorFolderNamesOn(Maybe<Guid> workspace) =>
+        workspace.HasNoValue
+            ? []
+            : EditorTitles()
+                .Where(e => manager!.WorkspaceOf(e.Window).Map(w => w.Id == workspace.Value).GetValueOrDefault(false))
+                .SelectMany(e => e.Titles.Select(EditorFolder.Of).Where(f => f.HasValue).Select(f => f.Value))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+
+    // The pick list's "Choose a folder..." (Task 9): Windows' own folder picker; none when Petre cancels.
+    static Maybe<string> PickClaudeFolder()
+    {
+        var dialog = new Microsoft.Win32.OpenFolderDialog { Title = "Choose the folder to start Claude in" };
+        return dialog.ShowDialog() == true && dialog.FolderName.Length > 0 ? dialog.FolderName : Maybe<string>.None;
+    }
 
     // Whether a window is on the desktop in front: a window pinned to every desktop is, one on the current desktop is,
     // and any failure to ask counts as no, so a doubt never moves Petre. Shared by the task list's keyboard hand-back
@@ -1514,7 +1557,15 @@ public partial class App : Application
             // A caller's folder in its long form (FolderPath): a Claude session can report an 8.3 short path.
             longPath: LongPath.Of,
             // `goal ...` and `task goal`, the planner's pipe twins (RemoteControl.Goals.cs).
-            goals: goals);
+            goals: goals,
+            // `task go|start|open-session` (Task 9), the twins of a line's double-click, "Start Claude on this" and the
+            // thread's Open. The actions are built further down, with ClaudeSessions, so each is read when a command
+            // arrives; before that `go` is the workspace switch and the other two refuse.
+            taskSessions: new TaskSessionCommands(
+                Go: GoToTask,
+                Folders: task => claudeActions?.Folders(task) ?? [],
+                Start: (task, folder) => claudeActions?.Start(task, folder) ?? Result.Failure(ClaudeActionsNotReady),
+                OpenSession: (task, session) => claudeActions?.OpenSession(task, session) ?? Result.Failure(ClaudeActionsNotReady)));
         controlServer = new ControlPipeServer(ControlCommandLine.PipeName,
             args => Dispatcher.InvokeAsync(() =>
             {
@@ -1578,6 +1629,7 @@ public partial class App : Application
         // An adopted session lands on the workspace of the VS Code window showing its folder, by the rule `task new`
         // uses (RemoteControl.CallerOf): the editors whose title names the folder, and only when they all live in ONE
         // workspace; several workspaces, or none, leave the task free.
+        var claudeHome = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".claude");
         claudeSessions = new ClaudeSessions(tasks!, manager, new Deskbar.Windows.Claude.ClaudeCli(),
             new System.Reactive.Concurrency.SynchronizationContextScheduler(new System.Windows.Threading.DispatcherSynchronizationContext(Dispatcher)),
             folder => EditorFolder.Best(folder, manager.KnownWindows
@@ -1587,7 +1639,33 @@ public partial class App : Application
                 .ToList() is { Count: > 0 } places && places.All(p => p.HasValue) && places.Select(p => p.Value.Id).Distinct().Count() == 1
                     ? places[0].Value.Id
                     : Maybe<Guid>.None,
-            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".claude"),
+            claudeHome,
+            trace: ClickTrace.On ? ClickTrace.Write : null);
+
+        // ...and what a click on a task does with those sessions (ClaudeTaskActions, Task 9): the double-click's session
+        // window, "Start Claude on this", the thread's list and Open, the pipe's three verbs. Its answers land on this
+        // thread through the same dispatcher scheduler. The windows it brings forward are brought the way a click on an
+        // icon brings one (WorkspaceManager.JumpTo); the terminals it opens are started through ProgramStarter, like
+        // `deskbar.cmd start`, and expected on the task's workspace (StartIn).
+        var claudeActivator = new WindowActivator();
+        claudeActions = new ClaudeTaskActions(tasks!, manager, claudeSessions.Live, new ClaudeTaskSeams(
+                Start: claudeSessions.Start,
+                Resume: claudeSessions.ResumeNow,
+                Launch: ProgramStarter.Start,
+                EditorWindow: SessionWindowOf,
+                BringForward: window => manager.JumpTo(window, claudeActivator),
+                // "Expired" (the spec, "Ended sessions and transcript retention"): Claude Code deleted the transcript.
+                TranscriptExists: session => File.Exists(Core.Tasks.ClaudeTranscript.PathOf(claudeHome, session.Folder, session.Id)),
+                // The folders the VS Code windows on a workspace show (the one in front for a free task), by name, as
+                // their titles carry them (EditorFolder.Of); ClaudeStart.EditorRepos makes them full paths.
+                EditorFolderNames: workspace => EditorFolderNamesOn(workspace.Or(manager.CurrentWorkspaceId)))
+            {
+                Confirm = question => MessageBox.Show(question, "Deskbar", MessageBoxButton.YesNo, MessageBoxImage.Question) == MessageBoxResult.Yes,
+                PickFolder = PickClaudeFolder,
+                OfferTrustTerminal = message => MessageBox.Show(message, "Deskbar", MessageBoxButton.YesNo, MessageBoxImage.Warning) == MessageBoxResult.Yes,
+                Tell = message => MessageBox.Show(message, "Deskbar", MessageBoxButton.OK, MessageBoxImage.Information),
+            },
+            new System.Reactive.Concurrency.SynchronizationContextScheduler(new System.Windows.Threading.DispatcherSynchronizationContext(Dispatcher)),
             trace: ClickTrace.On ? ClickTrace.Write : null);
 
         // Windows' "Show flashing on taskbar apps", held off while this copy runs when Manage's box says so, and by
@@ -1776,11 +1854,9 @@ public partial class App : Application
                 // control pipe's `open` and `attention` use to find a caller's window (RemoteControl.CallerOf,
                 // EditorFolder.Best), each window offering its current title and the one it had before a rename. Two
                 // windows on the same folder are both VS Code, so the first serves for the icon.
-                SessionWindow = folder => EditorFolder.Best(folder, manager.KnownWindows
-                        .Where(EditorFolder.IsEditor)
-                        .Select(w => (w.Handle, Titles: manager.OriginalTitle(w.Handle).Map(t => (IEnumerable<string>)[w.Title, t]).GetValueOrDefault([w.Title]))))
-                    .TryFirst()
-                    .Map(handle => handle.Value),
+                SessionWindow = SessionWindowOf,
+                // A line menu's "Start Claude on this" (Task 9): ClaudeTaskActions.Offer, which may open a pick list.
+                StartClaude = id => claudeActions?.Offer(id),
                 // Whether a window is on the desktop in front, for the task list's keyboard hand-back, which must never
                 // switch desktops: a window pinned to every desktop is, one on the current desktop is, and any failure
                 // to ask counts as no, so a doubt keeps the keyboard where it is rather than moving Petre.
@@ -2049,6 +2125,12 @@ public partial class App : Application
                 selection: floatingBar?.Selection,
                 // The goals (goals plan, Task 6): a line's More menu "Goal" and the goal filter, while goals exist.
                 goals: goals,
+                // A task's Claude sessions (Task 9): the thread's list and its Open buttons, "Start Claude on this" on the
+                // line menu and in the thread, and a redraw whenever `claude agents --json` gives a new list.
+                sessionsOf: task => claudeActions?.SessionsOf(task) ?? [],
+                startClaude: id => claudeActions?.Offer(id),
+                openSession: (task, session) => claudeActions?.OpenSession(task, session) ?? Result.Failure(ClaudeActionsNotReady),
+                sessionsChanged: claudeActions?.Changed,
                 // Brought to the desktop in front, in that order (TasksBoard.Arrive; fix round 1, Critical 1): a page
                 // left open on another desktop is MOVED here first and only then activated, because activating a window
                 // on another desktop makes Windows follow it there. Activated through the activator, since a
@@ -2217,6 +2299,7 @@ public partial class App : Application
             quietTaskbarWatch?.Dispose();
             TaskbarFlashingSwitch.Sync(false);
             // No more `claude` polls or resumes once the session is ending; running Claude sessions are not touched.
+            claudeActions?.Dispose();
             claudeSessions?.Dispose();
         };
     }
@@ -2610,6 +2693,7 @@ public partial class App : Application
         quietTaskbarWatch?.Dispose();
         TaskbarFlashingSwitch.Sync(false);
         // No more `claude` polls or resumes once the app is going; running Claude sessions are not touched.
+        claudeActions?.Dispose();
         claudeSessions?.Dispose();
         monitor?.Dispose();
         hotkeys?.Dispose(); // unregisters RegisterHotKey chords before the process exits

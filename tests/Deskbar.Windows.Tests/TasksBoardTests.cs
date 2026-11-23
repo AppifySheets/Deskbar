@@ -77,8 +77,11 @@ public class TasksBoardTests
     // its own (the click guard's test does).
     // `bringForward` sees the handle and the seam answers that it activated the window; `activates` overrides that
     // answer (the seam that left the window on its own desktop).
+    // Task 9's seams: a task's sessions as its thread lists them, "Start Claude on this" and a session's Open.
     static Board Build(Func<TaskItem, Result>? goTo = null, Action<nint>? bringForward = null, Func<DateTime>? clickClock = null,
-        Func<DateTimeOffset>? now = null, TaskSelection? selection = null, Func<bool>? activates = null)
+        Func<DateTimeOffset>? now = null, TaskSelection? selection = null, Func<bool>? activates = null,
+        Func<TaskItem, IReadOnlyList<SessionView>>? sessionsOf = null, Action<Guid>? startClaude = null,
+        Func<TaskItem, string, Result>? openSession = null, IObservable<System.Reactive.Unit>? sessionsChanged = null)
     {
         var harness = Harness.Build();
         var minutes = 0;
@@ -101,7 +104,8 @@ public class TasksBoardTests
         {
             bringForward?.Invoke(hwnd);
             return activates?.Invoke() ?? true;
-        }, undoTimer: timers.Start, now: () => Start.AddHours(1), selection: selection);
+        }, undoTimer: timers.Start, now: () => Start.AddHours(1), selection: selection,
+            sessionsOf: sessionsOf, startClaude: startClaude, openSession: openSession, sessionsChanged: sessionsChanged);
         return new Board { Harness = harness, Window = window, Controller = controller, Tasks = tasks, Timers = timers, WentTo = went };
     }
 
@@ -2588,4 +2592,83 @@ public class TasksBoardTests
         Click(ButtonNamed(t.Window, "Matrix"));
         Check("matrix");
     });
+
+    // --- Task 9: a task's Claude sessions --------------------------------------------------------------------------
+
+    // Spec, "Where the clicks are": "Start Claude on this" on the line's menu right after Edit, and as a button in the
+    // task's thread. Both reach the App's ClaudeTaskActions.Offer through `startClaude`, the menu's once the menu closed.
+    [Fact]
+    public void Start_Claude_on_this_is_on_the_window_menu_after_Edit_and_in_the_thread() => StaThread.Run(() =>
+    {
+        var started = new List<Guid>();
+        using var t = Build(startClaude: started.Add);
+        var id = t.Tasks.AddNote("Write the docs", t.Gepha).Value.Id;
+        t.Controller.Open(Rect.Empty);
+
+        var menu = t.Window.OpenMenuFor(id);
+        var items = menu.Items.OfType<MenuItem>().ToList();
+        Assert.Equal(["Edit", "Start Claude on this"], items.Take(2).Select(i => ((TextBlock)i.Header).Text));
+        items[1].RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
+        menu.IsOpen = false;
+        // Run once the menu has closed (an Input-priority dispatch): a lower priority runs after it.
+        t.Window.Dispatcher.Invoke(() => { }, System.Windows.Threading.DispatcherPriority.ApplicationIdle);
+        Assert.Equal([id], started);
+
+        t.Controller.ToggleThread(id);
+        Click(ButtonNamed(t.Window, "Start Claude on this"));
+        Assert.Equal([id, id], started);
+
+        // Without the seam (a copy without Claude sessions) neither shows.
+        using var plain = Build();
+        var other = plain.Tasks.AddNote("Errand", plain.Gepha).Value.Id;
+        plain.Controller.Open(Rect.Empty);
+        plain.Controller.ToggleThread(other);
+        Assert.DoesNotContain(plain.Window.OpenMenuFor(other).Items.OfType<MenuItem>(), i => i.Header is TextBlock { Text: "Start Claude on this" });
+        Assert.DoesNotContain(Inside(plain.Window).OfType<Button>(), b => AutomationProperties.GetName(b) == "Start Claude on this");
+    });
+
+    // Spec, "Task history": the thread lists the task's sessions, newest first, each with when it joined and whether it
+    // is working, idle, ended or expired, and an Open that does what going to that session does; an expired one (its
+    // transcript gone) has no Open. A new list from `claude agents` redraws an open thread.
+    [Fact]
+    public void The_thread_lists_sessions_newest_first_with_Open_except_expired() => StaThread.Run(() =>
+    {
+        var opened = new List<(Guid Task, string Session)>();
+        var states = new Dictionary<string, SessionState> { ["aaaaaaaa-1"] = SessionState.Expired, ["bbbbbbbb-2"] = SessionState.Ended, ["cccccccc-3"] = SessionState.Working };
+        var changed = new System.Reactive.Subjects.Subject<System.Reactive.Unit>();
+        using var t = Build(
+            sessionsOf: task => TaskViews.SessionList(task, Maybe<IReadOnlyCollection<ClaudeAgent>>.None, _ => true)
+                .Select(v => v with { State = states[v.Id] }).ToList(),
+            openSession: (task, session) =>
+            {
+                opened.Add((task.Id, session));
+                return Result.Success();
+            },
+            sessionsChanged: changed);
+        var id = t.Tasks.Create("Fix the bar", t.Gepha, new TaskSession("aaaaaaaa-1", @"C:\repos\Deskbar", Start, Maybe<DateTimeOffset>.None)).Value.Id;
+        t.Tasks.Join(id, new TaskSession("bbbbbbbb-2", @"C:\repos\Deskbar", Start.AddMinutes(5), Maybe<DateTimeOffset>.None));
+        t.Tasks.Join(id, new TaskSession("cccccccc-3", @"C:\repos\Deskbar", Start.AddMinutes(10), Maybe<DateTimeOffset>.None));
+        t.Controller.Open(Rect.Empty);
+        t.Controller.ToggleThread(id);
+
+        var lines = Inside(t.Window).OfType<DockPanel>().Where(d => "session-line".Equals(d.Tag)).ToList();
+        Assert.Equal(["cccccccc", "bbbbbbbb", "aaaaaaaa"], lines.Select(l => Inside(l).OfType<TextBlock>().Select(b => b.Text).First(x => x.StartsWith("Session ", StringComparison.Ordinal))[8..16]));
+        Assert.Contains(Inside(lines[0]).OfType<TextBlock>(), b => b.Text.EndsWith("· working", StringComparison.Ordinal));
+        Assert.Contains(Inside(lines[1]).OfType<TextBlock>(), b => b.Text.EndsWith("· ended", StringComparison.Ordinal));
+        Assert.Contains(Inside(lines[2]).OfType<TextBlock>(), b => b.Text.EndsWith("· expired", StringComparison.Ordinal));
+        Assert.True(HasButton(lines[0], "Open session cccccccc"));
+        Assert.True(HasButton(lines[1], "Open session bbbbbbbb"));
+        Assert.False(HasButton(lines[2], "Open session aaaaaaaa"));
+
+        Click(ButtonNamed(lines[1], "Open session bbbbbbbb"));
+        Assert.Equal([(id, "bbbbbbbb-2")], opened);
+
+        // The working session has stopped: a new list redraws the thread with it ended.
+        states["cccccccc-3"] = SessionState.Ended;
+        changed.OnNext(System.Reactive.Unit.Default);
+        var redrawn = Inside(t.Window).OfType<DockPanel>().First(d => "session-line".Equals(d.Tag));
+        Assert.Contains(Inside(redrawn).OfType<TextBlock>(), b => b.Text.EndsWith("· ended", StringComparison.Ordinal));
+    });
+
+    static bool HasButton(object scope, string name) => Inside(scope).OfType<Button>().Any(b => AutomationProperties.GetName(b) == name);
 }

@@ -160,6 +160,12 @@ public class FloatingBarPinsTests
     [InlineData("ELECTRON_RUN_AS_NODE", true)]
     [InlineData("VSCODE_IPC_HOOK", true)]
     [InlineData("VSCODE_PID", true)]
+    // Task 9: the window on a Claude session is a terminal Deskbar starts through the shell, which cannot strip a
+    // variable per child, so the ones that make `claude` think it is nested go at startup too (Global Constraints).
+    [InlineData("CLAUDECODE", true)]
+    [InlineData("CLAUDE_CODE_ENTRYPOINT", true)]
+    [InlineData("CLAUDE_CODE_SESSION_ATTENDED", true)]
+    [InlineData("CLAUDE_PROJECT_DIR", false)]
     [InlineData("PATH", false)]
     [InlineData("ELECTRON_ENABLE_LOGGING", false)]
     [InlineData("DESKBAR_APPDATA", false)]

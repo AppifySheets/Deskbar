@@ -12,12 +12,22 @@ namespace Deskbar.App;
 //
 // A Deskbar started at login, from Explorer, never has these; removing them makes every other way of
 // starting it (a dev build from a terminal, a script, an agent) behave the same.
+//
+// Claude Code's own three go too (Task 9 of docs/superpowers/specs/2026-11-23-tasks-open-claude-sessions-design.md,
+// Global Constraints): a Deskbar started from a Claude session carries CLAUDECODE, CLAUDE_CODE_ENTRYPOINT and
+// CLAUDE_CODE_SESSION_ATTENDED, and a `claude` that inherits them thinks it is a nested session. ClaudeCli strips them
+// per child, but the terminal on a session (`wt ... claude attach`) is started through the shell, which cannot leave a
+// variable out of one child's block, so they leave Deskbar's own block here instead. CLAUDE_PROJECT_DIR is not one of
+// them: Claude Code sets it for hooks, never for Deskbar.
 public static class LaunchEnvironment
 {
-    // Whether a variable belongs to an Electron or VS Code host process and must not reach Deskbar's children.
+    static readonly IReadOnlyList<string> ClaudeHostVariables = ["CLAUDECODE", "CLAUDE_CODE_ENTRYPOINT", "CLAUDE_CODE_SESSION_ATTENDED"];
+
+    // Whether a variable belongs to an Electron, VS Code or Claude Code host process and must not reach Deskbar's children.
     internal static bool IsHostOnly(string name) =>
         name.Equals("ELECTRON_RUN_AS_NODE", StringComparison.OrdinalIgnoreCase)
-        || name.StartsWith("VSCODE_", StringComparison.OrdinalIgnoreCase);
+        || name.StartsWith("VSCODE_", StringComparison.OrdinalIgnoreCase)
+        || ClaudeHostVariables.Contains(name, StringComparer.OrdinalIgnoreCase);
 
     // Removes them from this process, which is the block every later start inherits.
     public static void Clean() =>
