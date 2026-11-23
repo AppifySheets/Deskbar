@@ -561,7 +561,8 @@ closed VS Code window, Deskbar resumes it in the background with `claude --bg --
 five seconds, and says so in the task's thread; a session whose last turn was cut off is told to continue.
 A session that keeps stopping straight after being woken, whose transcript Claude Code no longer keeps, or
 whose resume fails (Claude's message goes into the thread), is left alone and its task waits on you with the
-reason until you act on it. **Resume the sessions of open tasks after a
+reason until you act on it; answer the question or change the status and it tries again. Marking a task done
+lets its session go. **Resume the sessions of open tasks after a
 restart or a crash**, under the tasks box, turns the resuming off and leaves the rest on
 (`deskbar.cmd claude-resume off`). Claude Code keeps sessions for 30 days; raise `cleanupPeriodDays` in
 `~/.claude/settings.json` to keep them longer.
@@ -575,6 +576,9 @@ opens a window on it. It asks first when the task already has a session running.
 never told to trust puts Claude's message in the thread and offers a terminal there so you can accept the
 trust prompt yourself. A task's thread lists its sessions, newest first, as working, idle, ended or expired,
 each but the expired ones with Open. `deskbar.cmd task go|start|open-session` do the same from a script.
+The window opens in Deskbar's own "Deskbar Claude" Windows Terminal profile (Dark Modern colours, installed
+while the tasks box is ticked), and closing it leaves the session running. This needs the Claude Code CLI on
+the PATH and Windows Terminal.
 
 The first time Deskbar changes `settings.json` it keeps the original as `settings.json.deskbar-backup`,
 and it leaves a file with comments in it alone.

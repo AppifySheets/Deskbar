@@ -457,6 +457,17 @@ throwaway folder Claude Code trusts, and tracing on for the `claude actions:` an
 93. From a terminal: `$ts task go <id>` does what the double-click does; `$ts task start <id>` on a task with one folder
     starts there, and on one with several refuses, naming them, until `--folder <path>` picks one;
     `$ts task open-session <id> <short id>` opens that session. Each answers with the task's JSON.
+94. Reboot the machine (or sign out and back in) with three open Claude tasks, one of them mid-turn when you go.
+    After Deskbar starts, the three sessions come back one at a time about five seconds apart, each with a
+    "Resumed by Deskbar" line in its thread. The mid-turn one says its last turn was cut off and carries on by itself.
+    A task you marked done before the reboot is not resumed. (Steps 78 to 80 cover the same with `claude stop`; this
+    is the real thing, so run it when a reboot is cheap.)
+95. Restart Deskbar itself while a session is in the middle of a turn: the session is untouched (it is not Deskbar's
+    child), the tasks show it running again within 15 seconds, and nothing is resumed twice.
+96. Mark a task with a running session done: the session is left alone. Stop that session with `claude stop`: it is
+    not resumed. Reopen the task: it is resumed at the next poll.
+97. Take a give-up from 82 and answer the task's question (or set its status to In progress): the next poll tries the
+    resume again instead of staying silent.
 
 ## Goals
 
