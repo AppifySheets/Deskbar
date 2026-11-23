@@ -290,7 +290,9 @@ the row's menu; the gap between tiles is set on Manage. Drop a tile on the edge 
 above, below or beside that one, which takes half of its room and leaves the rest alone, so two
 tiles can sit side by side over a third that spans the screen. Drop it close to the screen's own
 edge and it gets that whole side. Dropping on the middle of a tile swaps the two. Drag a separation
-between two tiles to resize them. The layout you make is kept, across restarts too.
+between two tiles to resize them. Where two separations cross, the drag moves only the part beside
+the tile you hold, so the tiles across the crossing keep their size. The layout you make is kept,
+across restarts too.
 
 More in [Tiling](docs/features/tiling.md).
 
