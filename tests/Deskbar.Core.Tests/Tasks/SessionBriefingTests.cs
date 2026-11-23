@@ -139,4 +139,21 @@ public sealed class SessionBriefingTests
     [Fact]
     public void A_prompt_with_no_task_says_how_to_get_one() =>
         Assert.Contains($"task join <id> --session {Sid}", SessionBriefing.Prompt(Sid, Maybe<TaskItem>.None, Maybe<TaskItem>.None));
+
+    // Petre, of a task whose thread was a long log: "why so long?", "i only want the most important things to be here".
+    // The rule in one sentence: say what needs the user, and nothing else.
+    [Fact]
+    public void The_briefing_keeps_tasks_lean()
+    {
+        var text = SessionBriefing.Start(Start(), Maybe<TaskItem>.None, []);
+
+        Assert.Contains("say what needs the user, and nothing else", text);
+        Assert.Contains("title is a few words", text);
+        Assert.Contains("under about 60 characters", text);
+        Assert.Contains("Comments are rare", text);
+        Assert.Contains("no progress logs, measurements, spike notes or findings", text);
+        Assert.Contains("say exactly what the user must do in the first words", text);
+        Assert.DoesNotContain("detail worth keeping", text);
+        Assert.True(text.Length < 10_000, $"{text.Length} characters");
+    }
 }

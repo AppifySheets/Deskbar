@@ -221,13 +221,15 @@ static class ClaudeSkill
         the text as a heredoc in Git Bash,
 
             "$APPDATA/Deskbar/deskbar.cmd" task comment - --session <id> <<'EOF'
-            **Found it**: the guard ran twice
+            PR 512 is ready: merge it when CI is green
             EOF
 
         or pipe it in from PowerShell (`'waiting for CI' | & "$env:APPDATA\Deskbar\deskbar.cmd" task status-line - --session <id>`).
         Never put free text with quotes or & | < > on the command line: deskbar.cmd hands it to cmd, which can run part
         of it as a command.
 
+        - Keep the task lean: say what needs the user, and nothing else. The title is a few words naming the work, the
+          status line one short phrase under about 60 characters saying where it stands, and comments are rare.
         - Join or create. Once you know what the session is working on, join the task it continues with
           `deskbar.cmd task join <id> --session <id>`, or create one with `deskbar.cmd task new - --session <id>` and a
           short title on stdin. Joining one of the user's notes makes it your work. A resumed session keeps its task;
@@ -241,8 +243,11 @@ static class ClaudeSkill
           it, or you settle it yourself, run `deskbar.cmd task answered --session <id>` straight away. The task goes
           back to in progress and the blink stops. Never leave a question open once it is resolved. While it is open,
           each prompt's reminder from Deskbar names it.
-        - Comment with detail: `deskbar.cmd task comment - --session <id>` with markdown on stdin, for what is worth
-          keeping (findings, links, what is left to do). The status line stays short; the detail goes here.
+        - Comment rarely: `deskbar.cmd task comment - --session <id>` with markdown on stdin. A comment is for the user,
+          and only for what needs their attention or a result they must know (a PR to merge, a decision made for them,
+          a blocker), in one or two short lines. No progress logs, measurements, spike notes or findings dumps: those
+          belong in the PR, the repo's notes or the session itself. When the user must act, say exactly what the user
+          must do in the first words, or use `task ask` if it is a decision.
         - Mark it done on a clear finish: `deskbar.cmd task done --session <id>`. Never close or delete a task: only
           the user closes one. A follow-up for later is `deskbar.cmd task later - --session <id>`, its title on stdin,
           a note on your workspace.
