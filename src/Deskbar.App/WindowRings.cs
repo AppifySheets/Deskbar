@@ -36,8 +36,9 @@ sealed class WindowRings : IDisposable
     // The rings asked for by the last Show, re-applied by the timer.
     IReadOnlyList<FocusRings.Ring> wanted = [];
 
-    // What is on each window now: its colour, and the frame drawing it, or null where Windows' border does.
-    readonly Dictionary<nint, (string Colour, RingFrame? Frame)> shown = new();
+    // What is on each window now: its colour, its line (solid, or the trail's dashes or dots), and the frame drawing
+    // it, or null where Windows' border does.
+    readonly Dictionary<nint, (string Colour, FocusRings.Line Line, RingFrame? Frame)> shown = new();
 
     // Frames no window is using, kept for the next maximized window rather than made again: each new one costs an
     // Ignore and a COM call to pin it.
@@ -71,41 +72,62 @@ sealed class WindowRings : IDisposable
         var want = wanted
             .Where(r => NativeMethods.IsWindow(r.Window.Value))
             .GroupBy(r => r.Window.Value)
-            .ToDictionary(g => g.Key, g => g.First().Colour);
+            .ToDictionary(g => g.Key, g => g.First());
 
         shown.Keys.Except(want.Keys).ToList().ForEach(Clear);
-        want.ToList().ForEach(p => Put(p.Key, p.Value));
+        want.ToList().ForEach(p => Put(p.Key, p.Value.Colour, p.Value.Line));
         unpinned.ToList().Where(f => pinToAllDesktops(f.Handle).IsSuccess).ToList().ForEach(f => unpinned.Remove(f));
 
         // Follows the rings: on while any is shown, off when none is.
         recheck.IsEnabled = shown.Count > 0;
     }
 
-    void Put(nint window, string colour)
+    void Put(nint window, string colour, FocusRings.Line line)
     {
-        var had = shown.TryGetValue(window, out var was) ? was : ((string Colour, RingFrame? Frame)?)null;
-        if (FullFrame(window) is { } rect)
+        var had = shown.TryGetValue(window, out var was) ? was : ((string Colour, FocusRings.Line Line, RingFrame? Frame)?)null;
+        var solid = line == FocusRings.Line.Solid;
+        var full = FullFrame(window);
+
+        // THE TRAIL'S RINGS ARE ALWAYS A FRAME. Windows' own border is one solid line with a colour and nothing else: no
+        // dash, no dot. So a dashed or dotted ring is drawn by a frame on every window, round its visible rectangle on
+        // an ordinary window (VisibleFrame) as round the screen on a maximized one (FullFrame). A trail window is one
+        // you are not working in, so it rarely moves while ringed: the second the recheck takes to follow a move,
+        // the reason a solid ring stays on Windows' border, hardly ever shows here.
+        if ((full ?? (solid ? null : VisibleFrame(window))) is { } rect)
         {
-            // Windows' border shows nothing here, so it is put back first if it was ours.
+            // Windows' border is not the ring here, so it is put back first if it was ours.
             if (had is { Frame: null }) Border(window, null);
             var frame = had?.Frame ?? TakeFrame();
-            // One physical pixel: Petre, "can you do 1px?", after 2 DIP and then Windows' own 2 px. Thinner than the
-            // border Windows draws on a normal window, which Deskbar can colour but not thin.
-            frame.Place(rect, colour, window, pixels: 1);
-            shown[window] = (colour, frame);
-            if (had?.Frame is null || had?.Colour != colour)
-                Trace($"ring 0x{window:X}: frame {colour} {rect.Left},{rect.Top},{rect.Right},{rect.Bottom}");
+            // One physical pixel for a solid ring: Petre, "can you do 1px?", after 2 DIP and then Windows' own 2 px.
+            // Thinner than the border Windows draws on a normal window, which Deskbar can colour but not thin. Two for
+            // the trail, Windows' own border at Petre's 225%: a one-pixel dot is a speck, and the dashes must still read
+            // on a window edge without outshouting the focused window's solid ring.
+            frame.Place(rect, colour, window, pixels: solid ? 1 : TrailPixels, line, rounded: full is null);
+            shown[window] = (colour, line, frame);
+            if (had?.Frame is null || had?.Colour != colour || had?.Line != line)
+                Trace($"ring 0x{window:X}: frame {colour} {line} {rect.Left},{rect.Top},{rect.Right},{rect.Bottom}");
+            return;
+        }
+
+        // A trail ring with nothing to go round (minimized, or cloaked in the moment a desktop switch takes): no ring
+        // until there is, and no border either, which could only ever be solid.
+        if (!solid)
+        {
+            if (had is not null) Clear(window);
             return;
         }
 
         if (had?.Frame is { } old) Release(old);
         if (had is not { Frame: null } || had?.Colour != colour) Border(window, colour);
-        shown[window] = (colour, null);
+        shown[window] = (colour, line, null);
     }
+
+    // See Put: thick enough for a dot to be a dot.
+    const int TrailPixels = 2;
 
     void Clear(nint window)
     {
-        var (_, frame) = shown[window];
+        var (_, _, frame) = shown[window];
         if (frame is not null) Release(frame);
         else if (NativeMethods.IsWindow(window)) Border(window, null);
         shown.Remove(window);
@@ -179,6 +201,21 @@ sealed class WindowRings : IDisposable
         return NativeMethods.GetWindowRect(window, out var rect)
                && rect.Left <= screen.Left && rect.Top <= screen.Top && rect.Right >= screen.Right && rect.Bottom >= screen.Bottom
             ? screen
+            : null;
+    }
+
+    // The rectangle a trail ring's frame covers on an ordinary window: what you see of it (DWMWA_EXTENDED_FRAME_BOUNDS),
+    // which is where Windows draws its own border. GetWindowRect would be wrong by the invisible resize borders, 7 px or
+    // more round most windows (FullScreenCover's measurements), and the dashes would float off the window's edge. Null
+    // for a minimized or cloaked window, for FullFrame's reasons.
+    static NativeMethods.RECT? VisibleFrame(nint window)
+    {
+        if (NativeMethods.IsIconic(window)) return null;
+        if (NativeMethods.DwmGetWindowAttribute(window, NativeMethods.DWMWA_CLOAKED, out var cloaked, sizeof(int)) == 0 && cloaked != 0) return null;
+        return NativeMethods.DwmGetWindowAttributeRect(window, NativeMethods.DWMWA_EXTENDED_FRAME_BOUNDS, out var visible,
+                   System.Runtime.InteropServices.Marshal.SizeOf<NativeMethods.RECT>()) == 0
+               && visible.Right > visible.Left && visible.Bottom > visible.Top
+            ? visible
             : null;
     }
 

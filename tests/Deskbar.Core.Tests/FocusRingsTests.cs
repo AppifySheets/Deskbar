@@ -135,4 +135,79 @@ public class FocusRingsTests
     [Fact]
     public void An_asking_window_on_another_workspace_gets_no_border() =>
         Assert.Empty(Asking([], [3], lit: true, unlit: null));
+
+    // THE TRAIL (Petre: "workspaces as inspiration, can you ring windows similarly?"). Rows with a last-focus order, as
+    // WorkspaceManager stamps them: higher is more recent, 0 never focused.
+    static WindowRow Focused(int hwnd, long order, int monitor = 1, bool front = false, bool active = false, bool minimized = false) =>
+        Row(hwnd, monitor, front, active, minimized) with { Activation = order };
+
+    static IReadOnlyList<(int Window, FocusRings.Line Line, string Colour)> Trail(Overview.Overview overview) =>
+        FocusRings.Of(overview, _ => Indigo).Where(r => r.Kind == FocusRings.Kind.Trail)
+            .Select(r => ((int)r.Window.Value, r.Line, r.Colour)).ToList();
+
+    // The workspace trail's own shape: focused solid, the window before it dashed, the one before that dotted, and
+    // nothing further back. In the workspace's colour, like the focused ring.
+    [Fact]
+    public void The_window_before_the_focused_one_is_dashed_and_the_one_before_that_dotted()
+    {
+        var overview = new Overview.Overview([], [Workspace(true,
+            Focused(1, order: 9, front: true, active: true),
+            Focused(2, order: 7),
+            Focused(3, order: 8),
+            Focused(4, order: 2))], []);
+
+        Assert.Equal([(3, FocusRings.Line.Dashed, Indigo), (2, FocusRings.Line.Dotted, Indigo)], Trail(overview));
+        Assert.Contains(FocusRings.Of(overview, _ => Indigo), r => r is { Kind: FocusRings.Kind.Focused, Line: FocusRings.Line.Solid });
+    }
+
+    // A minimized window has nothing to outline, so the next one moves up into its step; a window never focused since
+    // the app started is not somewhere you have been.
+    [Fact]
+    public void Minimized_and_never_focused_windows_are_passed_over()
+    {
+        var overview = new Overview.Overview([], [Workspace(true,
+            Focused(1, order: 9, front: true, active: true),
+            Focused(2, order: 8, minimized: true),
+            Focused(3, order: 0),
+            Focused(4, order: 5),
+            Focused(5, order: 4))], []);
+
+        Assert.Equal([4, 5], Trail(overview).Select(r => r.Window));
+    }
+
+    // Only the desktop you are on: the window you were in on the workspace you left is cloaked. A pinned window is on
+    // every desktop, so it counts, in white.
+    [Fact]
+    public void The_trail_is_the_current_desktops_windows_and_the_pinned_ones()
+    {
+        var overview = new Overview.Overview(
+            [Focused(9, order: 6)],
+            [
+                Workspace(true, Focused(1, order: 10, front: true, active: true), Focused(2, order: 3)),
+                Workspace(false, Focused(7, order: 8)),
+            ], []);
+
+        Assert.Equal([(9, FocusRings.Line.Dashed, FocusRings.White), (2, FocusRings.Line.Dotted, Indigo)], Trail(overview));
+    }
+
+    // With two screens the window in front on the other one is often the one you were just in. It wears the trail's
+    // dashed ring rather than both, and keeps a mark either way.
+    [Fact]
+    public void A_window_in_the_trail_and_in_front_on_the_other_screen_is_ringed_once_as_trail()
+    {
+        var overview = new Overview.Overview([], [Workspace(true,
+            Focused(1, order: 9, monitor: 1, front: true, active: true),
+            Focused(2, order: 8, monitor: 2, front: true))], []);
+
+        Assert.Equal([(1, FocusRings.Kind.Focused, Indigo), (2, FocusRings.Kind.Trail, Indigo)], Rings(overview));
+    }
+
+    // Focus on the taskbar or the desktop leaves no focused window, but you were still somewhere: the trail stays.
+    [Fact]
+    public void The_trail_stays_when_nothing_has_focus()
+    {
+        var overview = new Overview.Overview([], [Workspace(true, Focused(1, order: 4, front: true), Focused(2, order: 3))], []);
+
+        Assert.Equal([(1, FocusRings.Line.Dashed, Indigo), (2, FocusRings.Line.Dotted, Indigo)], Trail(overview));
+    }
 }
