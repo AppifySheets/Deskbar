@@ -71,6 +71,9 @@ public partial class App : Application
     // and ExitApp disposes the Tiler and then the surface, so the LOCATIONCHANGE hook goes with them.
     Core.Tiling.Tiler? tiler;
     Windows.Tiling.TileSurface? tileSurface;
+    // The padlock on each tile (TileLockMarks; spec 2026-11-22-tile-lock-and-other-screens-design.md, "The pin on the
+    // window"). Built with the Tiler, disposed before it, null in compatibility mode like the Tiler.
+    TileLockMarks? tileLockMarks;
 
     // Held for the whole process lifetime, in a FIELD so the GC cannot collect it and quietly
     // release the lock while we are still running. See OnStartup for why it exists.
@@ -312,6 +315,19 @@ public partial class App : Application
             inputs: new System.Reactive.Concurrency.SynchronizationContextScheduler(
                 new System.Windows.Threading.DispatcherSynchronizationContext(Dispatcher)));
         tiler.Start();
+
+        // The lock marks: a padlock left of each tile's minimize button, closed while the tile is locked, open while the
+        // mouse is on an unlocked tile's title bar; a click toggles the lock (TileLockMarks). Every lambda reads the
+        // fields when called, as the bar's TileLockOf does, so a disposed Tiler gives no tiles and no marks. A mark is
+        // ignored by the window list and pinned to every desktop, the two steps every window of the app's own takes.
+        tileLockMarks = new TileLockMarks(
+            tiles: () => tiler?.Board.Screens.Values.SelectMany(s => s).ToList() ?? [],
+            lockOf: handle => tiler?.TileLockOf(handle) ?? Maybe<bool>.None,
+            setLocked: (handle, on) => tiler?.SetTileLocked(handle, on) ?? Result.Failure("Tiling is not running."),
+            settling: handle => tileSurface?.IsSettling(handle) ?? false,
+            ignore: hwnd => monitor!.Ignore(hwnd),
+            pinToAllDesktops: hwnd => desktops!.Pin(new WindowHandle(hwnd)));
+        tileLockMarks.Start();
     }
 
     // Fire-and-forget on purpose: nothing waits for the answer and nothing reports its absence.
@@ -2139,6 +2155,9 @@ public partial class App : Application
             // The grid stands down too: windows closing for the logoff must not make the rest re-tile. Nulled
             // as ExitApp does, so a licence refresh that lands after this (RefreshEntitlement posts its Refresh
             // through the dispatcher) finds no Tiler to poke.
+            // The lock marks first, so no tick reads a Tiler being taken down.
+            tileLockMarks?.Dispose();
+            tileLockMarks = null;
             tiler?.Dispose();
             tiler = null;
             tileSurface?.Dispose();
@@ -2530,7 +2549,10 @@ public partial class App : Application
         windowRings?.Dispose();
         // Then tiling, before anything else is torn down, so no re-tile runs against a half-closed app. The Tiler
         // first (it unsubscribes and narrows the hook to nothing), then the surface (which removes whatever hook
-        // is left and stops its timers). Nulled so a licence refresh landing after this finds no Tiler to poke.
+        // is left and stops its timers). Nulled so a licence refresh landing after this finds no Tiler to poke. The lock
+        // marks go before the Tiler, so no tick reads a Tiler being taken down.
+        tileLockMarks?.Dispose();
+        tileLockMarks = null;
         tiler?.Dispose();
         tiler = null;
         tileSurface?.Dispose();
