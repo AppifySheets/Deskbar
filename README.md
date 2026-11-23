@@ -292,7 +292,8 @@ tiles can sit side by side over a third that spans the screen. Drop it close to 
 edge and it gets that whole side. Dropping on the middle of a tile swaps the two. Drag a separation
 between two tiles to resize them. Where two separations cross, the drag moves only the part beside
 the tile you hold, so the tiles across the crossing keep their size. The layout you make is kept,
-across restarts too.
+across restarts too. Tick **Split Code windows last** on a VS Code icon's menu and a new window
+leaves your three latest VS Code windows alone while any other tile can give it room.
 
 More in [Tiling](docs/features/tiling.md).
 
