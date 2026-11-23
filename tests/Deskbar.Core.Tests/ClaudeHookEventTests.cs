@@ -145,4 +145,28 @@ public class ClaudeHookEventTests
     [Fact]
     public void A_missing_cwd_leaves_the_folder_empty() =>
         Assert.Equal("", Parsed("""{"session_id":"s","hook_event_name":"Stop"}""").Folder);
+
+    // The Stop hook's own fields (stalled tasks, spec 2026-11-23-stalled-claude-tasks-design.md, part 3): whether Claude is
+    // already continuing because a Stop hook said so, and whether it has background work or scheduled wake-ups of its own.
+    [Fact]
+    public void Stop_hook_active_is_read() =>
+        Assert.True(Parsed("""{"session_id":"s","hook_event_name":"Stop","stop_hook_active":true}""").StopHookActive);
+
+    [Theory]
+    [InlineData("""{"session_id":"s","hook_event_name":"Stop","background_tasks":[{"type":"monitor"}]}""")]
+    [InlineData("""{"session_id":"s","hook_event_name":"Stop","session_crons":[{"id":"c"}]}""")]
+    public void Background_tasks_or_session_crons_mean_background_work(string json) =>
+        Assert.True(Parsed(json).BackgroundWork);
+
+    [Theory]
+    [InlineData("""{"session_id":"s","hook_event_name":"Stop"}""")]
+    [InlineData("""{"session_id":"s","hook_event_name":"Stop","stop_hook_active":false,"background_tasks":[],"session_crons":[]}""")]
+    [InlineData("""{"session_id":"s","hook_event_name":"Stop","stop_hook_active":"yes","background_tasks":5}""")]
+    public void Missing_empty_or_odd_stop_fields_read_as_false(string json)
+    {
+        var hook = Parsed(json);
+
+        Assert.False(hook.StopHookActive);
+        Assert.False(hook.BackgroundWork);
+    }
 }

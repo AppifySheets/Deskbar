@@ -62,7 +62,10 @@ public sealed partial class RemoteControl
         // An empty --from (cmd passes an unset CLAUDE_PROJECT_DIR as "") is no folder at all (Folder).
         // The session's name, read from its transcript (SessionTitle), tells its window apart from others on the
         // same folder, so the right icon glows and not none of them.
-        "Notification" or "Stop" => Quietly(Attention(Folder(from), SessionTitle.Read(hook.Transcript.GetValueOrDefault()))),
+        "Notification" => Quietly(Attention(Folder(from), SessionTitle.Read(hook.Transcript.GetValueOrDefault()))),
+        // Stop blinks exactly as before, then may ask a parked session to say so (Parked, below).
+        "Stop" => Quietly(Attention(Folder(from), SessionTitle.Read(hook.Transcript.GetValueOrDefault()))) is var blinked
+            && Parked(hook) ? Said(ParkedBlock) : blinked,
         _ => tasks is { } service && !hook.Headless && manager.State.ClaudeTasksInEffect
             ? TaskEvent(service, hook, Folder(from) ?? Folder(hook.Folder))
             : Quiet,
@@ -83,6 +86,31 @@ public sealed partial class RemoteControl
         service.HeardAttended(hook.SessionId);
         return service;
     }
+
+    // STOP ON A PARKED TASK (stalled tasks, spec docs/superpowers/specs/2026-11-23-stalled-claude-tasks-design.md, part 3).
+    // Sessions often end a turn waiting on Petre without running `task ask`, so their task stays Claude's and off the bar.
+    // Claude Code lets a Stop hook print {"decision":"block","reason":...}: the stop is refused and the reason becomes
+    // Claude's next instruction. This does that when ALL hold:
+    //   * sessions keep their tasks (ClaudeTasksInEffect) and there is a task service, as for the other task events;
+    //   * the session is attended (a headless `claude -p` or SDK run has nobody to ask);
+    //   * stop_hook_active is false, so a turn is nudged at most once (Claude Code also caps the loop at 8);
+    //   * the session has no background work or scheduled wake-up of its own (it is waiting on that, not on Petre);
+    //   * the session's task is open, In progress and Claude's (an ask or done already moved it, and a task Petre took
+    //     is his).
+    // The cost: one short extra turn on most replies of a session with a task, shown as "Stop hook feedback". StalledTasks
+    // still hands back whatever this misses, after 15 quiet minutes.
+    bool Parked(ClaudeHookEvent hook) =>
+        tasks is { } service
+        && manager.State.ClaudeTasksInEffect
+        && !hook.Headless
+        && !hook.StopHookActive
+        && !hook.BackgroundWork
+        && service.Board.TaskOf(hook.SessionId)
+            .Map(t => t is { IsOpen: true, Status: TaskStatus.InProgress } && t.Assignee.IsClaude)
+            .GetValueOrDefault(false);
+
+    static readonly string ParkedBlock =
+        System.Text.Json.JsonSerializer.Serialize(new { decision = "block", reason = SessionBriefing.ParkedNudge });
 
     static readonly ControlReply Quiet = new(ControlReply.Ok, "");
 
