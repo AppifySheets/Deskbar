@@ -696,4 +696,21 @@ public sealed class ClaudeSkillTests : IDisposable
         Assert.Equal(exe, DefaultBrowser.ExeOf($"\"{exe}\" --single-argument %1").Value);
         Assert.True(DefaultBrowser.ExeOf("\"C:\\nowhere\\browser.exe\" %1").HasNoValue);
     }
+
+    // Petre: "i only want the most important things to be here", "otherwise keep the task lean".
+    [Fact]
+    public void The_skill_teaches_lean_tasks()
+    {
+        Settled(WithABell);
+
+        ClaudeSkill.Sync(true, true, home, Deskbar);
+        var on = File.ReadAllText(Skill);
+        Assert.Contains("say what needs the user, and nothing else", on);
+        Assert.Contains("title is a few words", on);
+        Assert.Contains("under about 60 characters", on);
+        Assert.Contains("comments are rare", on);
+        Assert.Contains("progress logs, measurements, spike notes or findings dumps", on);
+        Assert.Contains("say exactly what", on);
+        Assert.DoesNotContain("worth keeping", on);
+    }
 }
