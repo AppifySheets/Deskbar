@@ -321,7 +321,9 @@ Tasks 7 to 9). Needs Claude Code installed and both Claude boxes in Manage ticke
     a live session square in the tasks window, and the status line under the title changes as it works.
 68. Ask the session to ask you something through its task. Switch to another workspace first: the task jumps to the
     top as Waiting on you with the question, in orange, and the session's workspace blinks. Answer in the session:
-    the task goes back to in progress and the question goes.
+    the task goes back to in progress and the question goes, and the line leaves the bar's list (the tasks window
+    still has it, in progress). Before answering, switch to its workspace and to the session's window: the line stays.
+    Ask again: it is back at the top of the bar.
 69. Ask the session to finish and mark its task done: the line has the same tick box as the rest. Send the session another
     message: the task is in progress again. Mark it done again and close it yourself, then send a message: the
     session says its task was closed and makes a new one only for new work.
