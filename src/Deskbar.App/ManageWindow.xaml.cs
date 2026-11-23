@@ -32,8 +32,11 @@ public partial class ManageWindow : Window
 
     // `pro` is what the Deskbar Pro tab's buttons do (ManageWindow.Pro.cs). App always passes it; it is optional only
     // so the tests that build this window without App keep their shape.
+    //
+    // `claudeListProblem` is ClaudeSessions.ListProblem (Ruling 20): why Claude Code's list of sessions cannot be read,
+    // shown in one line under the resume box while it lasts. Optional for the same reason as `pro`.
     public ManageWindow(WorkspaceManager manager, bool compatibilityMode, TimeTracker? timeTracker = null, Func<bool>? taskbarAutoHides = null,
-        ProActions? pro = null)
+        ProActions? pro = null, IObservable<Maybe<string>>? claudeListProblem = null)
     {
         this.manager = manager;
         this.timeTracker = timeTracker;
@@ -84,6 +87,19 @@ public partial class ManageWindow : Window
         Reload();
         // The Deskbar Pro tab, painted now and again when the Store's price arrives (ManageWindow.Pro.cs).
         LoadPro();
+        // Ruling 20. ClaudeSessions publishes on the UI thread, where this window lives, and gives its current value
+        // first, so the line is right from the moment the window opens; the subscription ends with the window.
+        if (claudeListProblem is not null)
+        {
+            var watch = claudeListProblem.Subscribe(ShowClaudeListProblem);
+            Closed += (_, _) => watch.Dispose();
+        }
+    }
+
+    void ShowClaudeListProblem(Maybe<string> problem)
+    {
+        ClaudeListProblem.Text = problem.GetValueOrDefault("");
+        ClaudeListProblem.Visibility = problem.HasValue ? Visibility.Visible : Visibility.Collapsed;
     }
 
     // Fills the Time tab and the shortcut boxes from state. Run when the window opens and after Apply or
