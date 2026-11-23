@@ -866,7 +866,7 @@ public class TasksBoardTests
             var more = ButtonNamed(line, "More");
             var bounds = more.TransformToAncestor(scroller).TransformBounds(new Rect(more.RenderSize));
             Assert.True(bounds.Right <= scroller.ViewportWidth + 0.5, $"More ends at {bounds.Right} in a viewport {scroller.ViewportWidth} wide");
-            var title = Inside(line).OfType<TextBlock>().First(b => b.FontWeight == FontWeights.SemiBold);
+            var title = Inside(line).OfType<TextBlock>().First(b => Equals(b.Tag, "task-title"));
             Assert.True(title.ActualWidth >= 100, $"the title has {title.ActualWidth} DIP");
         });
     });
@@ -1223,7 +1223,7 @@ public class TasksBoardTests
             var more = ButtonNamed(line, "More");
             var bounds = more.TransformToAncestor(scroller).TransformBounds(new Rect(more.RenderSize));
             Assert.True(bounds.Right <= scroller.ViewportWidth + 0.5, $"More ends at {bounds.Right} in a viewport {scroller.ViewportWidth} wide");
-            var title = Inside(line).OfType<TextBlock>().First(b => b.FontWeight == FontWeights.SemiBold);
+            var title = Inside(line).OfType<TextBlock>().First(b => Equals(b.Tag, "task-title"));
             Assert.True(title.ActualWidth >= 100, $"the title has {title.ActualWidth} DIP at a window {t.Window.ActualWidth} wide");
         });
     });
@@ -2233,5 +2233,46 @@ public class TasksBoardTests
         t.Window.BeginEditComment(comment);
 
         Assert.Null(t.Window.CommentEditor);
+    });
+
+    // --- RULING 59: an important task's title is bold, an urgent one's italic (bar, List and Matrix) -------------------
+
+    static (FontWeight Weight, FontStyle Style) TitleLookOf(TasksWindow window, Guid id)
+    {
+        var title = Inside(LineOf(window, id)).OfType<TextBlock>().Single(b => Equals(b.Tag, "task-title"));
+        return (title.FontWeight, title.FontStyle);
+    }
+
+    [Fact]
+    public void Important_titles_are_bold_and_urgent_ones_italic_in_the_list() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        var plain = t.Tasks.AddNote("plain", t.Gepha).Value.Id;
+        var important = t.Tasks.AddNote("important", t.Gepha, Quadrant.II).Value.Id;
+        var urgent = t.Tasks.AddNote("urgent", t.Gepha, Quadrant.III).Value.Id;
+        var both = t.Tasks.AddNote("both", t.Gepha, Quadrant.I).Value.Id;
+        t.Controller.Open(Rect.Empty);
+
+        Assert.Equal((FontWeights.Normal, FontStyles.Normal), TitleLookOf(t.Window, plain));
+        Assert.Equal((FontWeights.Bold, FontStyles.Normal), TitleLookOf(t.Window, important));
+        Assert.Equal((FontWeights.Normal, FontStyles.Italic), TitleLookOf(t.Window, urgent));
+        Assert.Equal((FontWeights.Bold, FontStyles.Italic), TitleLookOf(t.Window, both));
+
+        // The toggles stay: flipping one changes the look.
+        t.Tasks.SetFlag(plain, TaskFlag.Important, true);
+        Assert.Equal(FontWeights.Bold, TitleLookOf(t.Window, plain).Weight);
+    });
+
+    [Fact]
+    public void The_matrix_titles_follow_the_flags_too() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        var both = t.Tasks.AddNote("both", t.Gepha, Quadrant.I).Value.Id;
+        var plain = t.Tasks.AddNote("plain", t.Gepha).Value.Id;
+        Assert.True(t.Harness.Manager.SetTasksMatrix(true).IsSuccess);
+        t.Controller.Open(Rect.Empty);
+
+        Assert.Equal((FontWeights.Bold, FontStyles.Italic), TitleLookOf(t.Window, both));
+        Assert.Equal((FontWeights.Normal, FontStyles.Normal), TitleLookOf(t.Window, plain));
     });
 }

@@ -1270,7 +1270,13 @@ public partial class FloatingBar
         var detailInk = line.Status == TaskStatus.WaitingOnYou ? TaskOrange : line.Claudes ? TaskInk : TaskDimInk;
         // Only the title's first line (Ruling 38: titles may hold line breaks, written in the tasks window's editor); the
         // tooltip has the whole title.
-        text.Inlines.Add(new Run(FirstLine(line.Title)) { Foreground = line.Claudes ? TaskTitleInk : TaskInk });
+        // RULING 59: important is bold and urgent is italic, in the title only (not the detail after it).
+        text.Inlines.Add(new Run(FirstLine(line.Title))
+        {
+            Foreground = line.Claudes ? TaskTitleInk : TaskInk,
+            FontWeight = line.Important ? FontWeights.Bold : FontWeights.Normal,
+            FontStyle = line.Urgent ? FontStyles.Italic : FontStyles.Normal,
+        });
         if (line.Detail.Length == 0) return text;
         text.Inlines.Add(new Run(TaskDetailSeparator) { Foreground = line.Claudes ? TaskTitleInk : TaskDimInk });
         text.Inlines.Add(new Run(line.Detail) { Foreground = detailInk });

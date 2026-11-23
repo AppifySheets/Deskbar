@@ -919,7 +919,11 @@ public partial class TasksWindow : Window
             {
                 Tag = TitleTag,
                 Text = row.Title,
-                FontWeight = FontWeights.SemiBold,
+                // RULING 59 (Petre: an important task bold, an urgent one italic): the flags show in the title itself, here and on
+                // the bar, in the List and the Matrix alike (they share this line). Titles without a flag are plain, so the bold
+                // and the slant mean something; the toggles stay as they were.
+                FontWeight = row.Important ? FontWeights.Bold : FontWeights.Normal,
+                FontStyle = row.Urgent ? FontStyles.Italic : FontStyles.Normal,
                 FontSize = 12,
                 Foreground = row.Claudes ? ClaudeInk : Ink,
                 TextWrapping = TextWrapping.Wrap,

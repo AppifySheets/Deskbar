@@ -30,7 +30,7 @@ A task is in one of five statuses: backlog (a plain note), in progress, waiting 
 
 ## Important and urgent
 
-Every task can be marked important, urgent, both or neither. Each line has two small toggles for it, an exclamation mark for important and a clock for urgent. Off, they stay out of sight until you point at the line or select it, and then show over the end of the title; on, they show in colour just left of the age, red for important and amber for urgent. Hover one to see its name.
+Every task can be marked important, urgent, both or neither. Each line has two small toggles for it, an exclamation mark for important and a clock for urgent. Off, they stay out of sight until you point at the line or select it, and then show over the end of the title; on, they show in colour just left of the age, red for important and amber for urgent. Hover one to see its name. The flags also show in the title itself, on the bar and in the tasks window's List and Matrix: an important task's title is **bold** and an urgent task's is *italic*, so a task that is both is bold italic and a task with neither is plain.
 
 The two flags sort the list into the four quadrants of Stephen Covey's time management matrix, from *The 7 Habits of Highly Effective People*:
 

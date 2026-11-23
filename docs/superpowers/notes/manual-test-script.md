@@ -366,6 +366,10 @@ Tasks 7 to 9). Needs Claude Code installed and both Claude boxes in Manage ticke
     one of Claude's: only yours has Edit beside its time. Edit it, Enter saves and Esc keeps it. From a script,
     `$ts task describe <id> -` with the text on stdin sets the description, and `$ts task comment-edit <comment-id> -`
     rewrites your comment (the ids are in `task list`'s `thread`) and is refused for a Claude comment.
+78. Flags in the title (Ruling 59). With four tasks, one plain, one important, one urgent, one both: on the bar and in
+    the tasks window's List and Matrix the important title is bold, the urgent one italic, the last bold italic and the
+    first plain. Flip a toggle: the title changes with it. At the bar's narrowest width the bold titles still trim
+    with an ellipsis and push nothing off the line.
 
 ## Goals
 
