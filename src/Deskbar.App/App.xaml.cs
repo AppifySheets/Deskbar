@@ -2147,7 +2147,10 @@ public partial class App : Application
             monitor.Ignore(tasksHwnd);
             // Its app bar answers the bar's strip notices (TasksPanel: it registers after every registration of the
             // bar's, so the bar stays the outer strip), and says whether it is shown, which the bar's "All tasks" draws.
-            tasksPanel = new TasksPanel(tasksWindow, bar.Strip);
+            // The tray overflow the bar knows is in front, so the panel's 1 s re-assert steps behind the hidden-icons flyout
+            // as the bar's does (TasksPanel.ReclaimTopmost). The timer runs the bar's ReclaimTopmost first, which reads the
+            // foreground and settles this value, so the panel sees the answer of the same tick.
+            tasksPanel = new TasksPanel(tasksWindow, bar.Strip) { OverflowInFront = () => bar.OverflowInFront };
             tasksPanel.Shown.Subscribe(tasksPanelShown);
             // PINNED TO EVERY DESKTOP once, after its first show, like the bar and the detached stats window (see
             // ShowDetachedStats): a window that has never been shown is on no desktop and cannot be pinned. The panel

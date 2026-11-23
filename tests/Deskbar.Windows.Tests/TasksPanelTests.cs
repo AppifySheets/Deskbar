@@ -66,6 +66,8 @@ public class TasksPanelTests
         public DateTime Now = new(2026, 11, 23, 12, 0, 0, DateTimeKind.Utc);
         public WindowRect Work = Held;
         public bool Tracing = true;
+        // The tray overflow the bar believes is in front (FloatingBar.OverflowInFront), or 0.
+        public nint Overflow;
         public readonly Window Window = new()
         {
             WindowStyle = WindowStyle.None,
@@ -91,6 +93,7 @@ public class TasksPanelTests
                 Clock = () => Now,
                 Tracing = () => Tracing,
                 Trace = Lines.Add,
+                OverflowInFront = () => Overflow,
             };
 
         // Runs whatever the panel queued on its dispatcher (see the top of this file).
@@ -525,6 +528,61 @@ public class TasksPanelTests
         Assert.True(IsTopmost(rig.Window));
         rig.Close();
     });
+
+    // The tray's hidden-icons flyout over the panel (final review, Important 1): the 1 s re-assert puts the panel directly
+    // BEHIND it instead of climbing over it every second, the bug the bar had and fixed (FloatingBar.StepBelowOverflow),
+    // and the panel is back on top on the first tick after the flyout has left the front. A flyout somewhere else on the
+    // screen is none of the panel's business: it keeps the top. The flyout is a real topmost window, placed in physical
+    // pixels over the panel's inner edge on the made-up screen, shown without the focus.
+    [Fact]
+    public void The_panel_steps_behind_the_tray_overflow_over_it_and_is_back_on_top_once_it_has_gone() => StaThread.Run(() =>
+    {
+        var rig = new Rig().Open();
+        var panel = new WindowInteropHelper(rig.Window).Handle;
+        var at = RectOf(rig.Window);
+        var flyout = new Window
+        {
+            WindowStyle = WindowStyle.None,
+            ResizeMode = ResizeMode.NoResize,
+            ShowInTaskbar = false,
+            ShowActivated = false,
+            Topmost = true,
+        };
+        flyout.Show();
+        var over = new WindowInteropHelper(flyout).Handle;
+        NativeMethods.SetWindowPos(over, NativeMethods.HWND_TOPMOST, at.Left - 200, at.Bottom - 300, 400, 300, NativeMethods.SWP_NOACTIVATE);
+        Assert.True(Above(over, panel));
+
+        rig.Overflow = over;
+        rig.Panel.ReclaimTopmost();
+        Assert.Equal(panel, NativeMethods.GetWindow(over, GwHwndNext));
+        Assert.True(IsTopmost(rig.Window));
+        rig.Panel.ReclaimTopmost();
+        Assert.True(Above(over, panel));
+        Assert.Single(rig.Lines, line => line.Contains("steps below the tray overflow"));
+
+        rig.Overflow = 0;
+        rig.Panel.ReclaimTopmost();
+        Assert.True(Above(panel, over));
+        Assert.Single(rig.Lines, line => line.Contains("back on top of the tray overflow"));
+
+        // In front, but nowhere near the panel: the panel keeps the top.
+        NativeMethods.SetWindowPos(over, NativeMethods.HWND_TOPMOST, at.Left - 900, at.Top, 400, 300, NativeMethods.SWP_NOACTIVATE);
+        Assert.True(Above(over, panel));
+        rig.Overflow = over;
+        rig.Panel.ReclaimTopmost();
+        Assert.True(Above(panel, over));
+
+        flyout.Close();
+        rig.Close();
+    });
+
+    // GetWindow's "the window below this one in the z-order".
+    const uint GwHwndNext = 2;
+
+    // Whether `upper` is above `lower` in the z-order: walking down from `upper` reaches `lower`.
+    static bool Above(nint upper, nint lower) =>
+        NativeMethods.GetWindow(upper, GwHwndNext) is var next && next != 0 && (next == lower || Above(next, lower));
 
     // The trace (CLAUDE.md, "Instrumentation"): one line per dock with its reason, and the geometry line (the granted
     // rectangle and the bar's edge) only when it changes. Nothing at all with tracing off.

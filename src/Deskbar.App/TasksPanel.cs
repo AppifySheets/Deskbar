@@ -84,6 +84,12 @@ internal sealed class TasksPanel : IDisposable
     // The time the guard reads, UTC. Faked in the tests to step over the settle time without waiting for it.
     internal Func<DateTime> Clock { get; init; } = () => DateTime.UtcNow;
 
+    // The tray's hidden-icons flyout the BAR believes is in front (FloatingBar.OverflowInFront), or 0. The bar is the one
+    // that hears the foreground changes and the chevron's own press, so the panel asks it rather than keeping a second
+    // copy of that knowledge. 0 by default, so a panel nobody wires never steps aside; the App passes the bar's. A test
+    // hands a window of its own. See ReclaimTopmost.
+    internal Func<nint> OverflowInFront { get; init; } = () => 0;
+
     // Whether tracing is on, asked BEFORE a line is built, and where the lines go: ClickTrace in the app (the one switch,
     // %APPDATA%\Deskbar\trace.on, and the log %TEMP%\deskbar-trace.log, CLAUDE.md "Instrumentation"), a list in the tests.
     internal Func<bool> Tracing { get; init; } = () => ClickTrace.On;
@@ -122,6 +128,9 @@ internal sealed class TasksPanel : IDisposable
     // The shell said a full-screen window is up (ABN_FULLSCREENAPP): out of the topmost band until it closes, and
     // ReclaimTopmost leaves it there meanwhile.
     bool fullScreenOpen;
+
+    // Sitting directly behind the tray's overflow (see ReclaimTopmost), for the trace's once-per-change line.
+    bool belowOverflow;
 
     bool shutDown, windowClosed;
 
@@ -245,11 +254,26 @@ internal sealed class TasksPanel : IDisposable
     // Topmost is a shared band (CLAUDE.md): the taskbar and the Start menu climb over anything in it when activated, so
     // the App re-asserts it on the 1 s timer beside the bar's. Not while a full-screen window is up. SWP_NOACTIVATE is
     // the load-bearing flag: without it this would take the focus from whatever was just clicked.
+    //
+    // NOT OVER THE TRAY'S OVERFLOW. The hidden-icons flyout anchors at the chevron in the corner of the screen the bar is
+    // docked on and can reach past the bar's inner edge onto the panel. Climbing over it every second made the bar's
+    // half of it unclickable, flicker and close by itself (FloatingBar.StepBelowOverflow has the measurement), and the
+    // panel would do the same to the part over it. So while the overflow the bar knows of is in front, visible and over
+    // the panel, the panel sits directly behind it instead, with the bar's own step (FloatingBar.StepBehindOverflow), and
+    // comes back on top on the first tick after the flyout has gone.
     internal void ReclaimTopmost()
     {
         if (!window.IsVisible || fullScreenOpen) return;
         var hwnd = new WindowInteropHelper(window).Handle;
         if (hwnd == 0) return;
+        var overflow = OverflowInFront();
+        var behind = FloatingBar.StepBehindOverflow(hwnd, overflow);
+        if (behind != belowOverflow)
+        {
+            belowOverflow = behind;
+            Say(() => behind ? $"tasks panel: steps below the tray overflow {overflow:X}" : "tasks panel: back on top of the tray overflow");
+        }
+        if (behind) return;
         NativeMethods.SetWindowPos(hwnd, NativeMethods.HWND_TOPMOST, 0, 0, 0, 0,
             NativeMethods.SWP_NOMOVE | NativeMethods.SWP_NOSIZE | NativeMethods.SWP_NOACTIVATE);
     }
