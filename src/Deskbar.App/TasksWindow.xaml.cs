@@ -636,7 +636,7 @@ public partial class TasksWindow : Window
         Text = group.Header.ToUpperInvariant(),
         FontSize = 10,
         Foreground = group.Kind == TaskGroupKind.WaitingOnYou ? Orange : HeaderInk,
-        Margin = new Thickness(12, 10, 12, 3),
+        Margin = new Thickness(12, 6, 12, 1),
     };
 
     // One line: a button across the window, so a click anywhere on it goes to the task; the small buttons inside it
@@ -684,7 +684,10 @@ public partial class TasksWindow : Window
             BorderThickness = new Thickness(3, 0, 0, 0),
             BorderBrush = row.Claudes ? Orange : Brushes.Transparent,
             Background = row.Status == TaskStatus.WaitingOnYou && !row.Closing ? AskTint : Brushes.Transparent,
-            Padding = new Thickness(7, 5, 8, 5),
+            // RULING 64 (Petre: "same here, make more compact", after the bar's line gap went from 8 to 3 DIP): 1.5 DIP above and
+            // below the text (was 5), so lines part by 3 DIP as on the bar and a one-line task is its title and 3 DIP. 4 DIP
+            // before the tick, not 7: the tick column and the orange edge keep their size, the slack goes.
+            Padding = new Thickness(4, 1.5, 8, 1.5),
             Child = grid,
         };
         var frame = new Border { BorderThickness = new Thickness(2, 0, 0, 0), Child = edge };
@@ -919,7 +922,7 @@ public partial class TasksWindow : Window
     // The title over its detail; on a line being renamed, the box that renames it.
     UIElement TextOf(TaskRowView row)
     {
-        var panel = new StackPanel { Margin = new Thickness(4, 0, 8, 0), VerticalAlignment = VerticalAlignment.Center };
+        var panel = new StackPanel { Margin = new Thickness(2, 0, 8, 0), VerticalAlignment = VerticalAlignment.Center };
         if (renaming == row.Id)
         {
             renameBox = RenameBox(row);
@@ -983,7 +986,8 @@ public partial class TasksWindow : Window
             BorderThickness = new Thickness(0),
             Foreground = DimInk,
             Padding = new Thickness(0),
-            Margin = new Thickness(0, 1, 0, 0),
+            // Directly under the title, no gap (Ruling 64).
+            Margin = new Thickness(0),
         };
     }
 
