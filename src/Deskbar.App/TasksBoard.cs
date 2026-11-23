@@ -90,7 +90,7 @@ public sealed class TasksBoard : IDisposable
     readonly WorkspaceManager manager;
     readonly Func<TaskItem, Result> goTo;
     readonly Func<Guid, Brush?> colourOf;
-    readonly Action<nint>? bringForward;
+    readonly Func<nint, bool>? bringForward;
     readonly Func<TimeSpan, Action, IDisposable> undoTimer;
     readonly Func<DateTimeOffset> now;
     readonly TaskSelection selection;
@@ -107,6 +107,8 @@ public sealed class TasksBoard : IDisposable
     TaskGoalFilter goalFilter = TaskGoalFilter.All;
     // The toolbar's "Assigned" filter (Ruling 57); like the others it starts at "all" whenever the window opens.
     TaskAssigneeFilter assigneeFilter = TaskAssigneeFilter.All;
+    // Set by Shutdown, which runs once (see there).
+    bool shutDown;
 
     // What Undo gives back (Ruling 31): the status, the question of a task that waited on Petre, and the selection.
     sealed record PendingClose(TaskStatus Was, IDisposable Timer)
@@ -122,7 +124,9 @@ public sealed class TasksBoard : IDisposable
     //   colourOf      a workspace's lane colour, the one its row on the bar wears; none for a workspace without one
     //   bringForward  brings the window to Petre by its handle: the App raises it and then activates it (Arrive),
     //                 through an activator, because a `deskbar.cmd tasks-window show` typed in a terminal carries no
-    //                 right to take the foreground. The window itself never activates while this is set (see Show)
+    //                 right to take the foreground. It answers whether it activated the window: not when the panel is
+    //                 off the desktop in front (a failed pin), and then the keyboard is left alone too (Arrived). The
+    //                 window itself never activates while this is set (see Show)
     //   undoTimer     runs `then` once after the undo window unless disposed first; a dispatcher timer by default, a
     //                 seam so the tests move time by hand
     //   now           the clock a comment's time is told against ("11:42" today, a date before)
@@ -134,7 +138,7 @@ public sealed class TasksBoard : IDisposable
     //   sessionsChanged  pulses when the sessions' states may have changed, to redraw an open thread
     // Internal because TasksPanel is: only the App and the tests build a board.
     internal TasksBoard(TasksWindow window, TasksPanel panel, TaskService tasks, WorkspaceManager manager, Func<TaskItem, Result> goTo,
-        Func<Guid, Brush?>? colourOf = null, Action<nint>? bringForward = null, Func<TimeSpan, Action, IDisposable>? undoTimer = null,
+        Func<Guid, Brush?>? colourOf = null, Func<nint, bool>? bringForward = null, Func<TimeSpan, Action, IDisposable>? undoTimer = null,
         Func<DateTimeOffset>? now = null, TaskSelection? selection = null, GoalService? goals = null,
         Func<TaskItem, IReadOnlyList<SessionView>>? sessionsOf = null, Action<Guid>? startClaude = null,
         Func<TaskItem, string, Result>? openSession = null, IObservable<System.Reactive.Unit>? sessionsChanged = null)
@@ -263,6 +267,8 @@ public sealed class TasksBoard : IDisposable
     /// </summary>
     public void Hide()
     {
+        // Never once the app is going: the state Shutdown saved is the one the next start reads.
+        if (shutDown) return;
         panel.Hide();
         window.Dismiss();
         Remember(open: false);
@@ -302,17 +308,25 @@ public sealed class TasksBoard : IDisposable
     // seam, activated where it is. The keyboard goes to the toolbar only then (see TasksWindow.FocusBoard). Nothing to
     // bring forward while the window is not on screen yet, before the bar's first notice: activating a hidden window
     // would only take the foreground from Petre's own.
+    // The seam answers whether it activated the window: it does not when the panel is not on the desktop in front (a
+    // failed pin, see Arrive), and then the keyboard is left alone too, since focusing the window would activate it.
     void Arrived()
     {
         if (!window.IsVisible) return;
-        if (bringForward is { } seam) seam(EnsureHandle());
-        else window.ActivateHere();
-        window.FocusBoard();
+        var activated = bringForward is { } seam ? seam(EnsureHandle()) : ActivatedHere();
+        if (activated) window.FocusBoard();
+    }
+
+    bool ActivatedHere()
+    {
+        window.ActivateHere();
+        return true;
     }
 
     /// <summary>
     /// The App's bring-forward, in its order: <paramref name="raise"/> the window to the top of the z-order, then
-    /// <paramref name="activate"/> it, then trace the arrival.
+    /// <paramref name="activate"/> it, then trace the arrival. Only when the panel is on the desktop in front
+    /// (<paramref name="onCurrentDesktop"/>); otherwise it is traced and left alone. Answers whether it activated it.
     /// </summary>
     //
     // RAISED BEFORE IT IS ACTIVATED (2026-11-23, Petre: "tasks should become a top window, now it's behind somewhere").
@@ -323,13 +337,24 @@ public sealed class TasksBoard : IDisposable
     //
     // NO MOVE ANY MORE. The floating window lived on one desktop and was moved to the desktop in front before it was
     // activated, since activating a window on another desktop takes Windows there (fix round 1, Critical 1). The panel
-    // is pinned to every desktop (the App, after its first show), so it is always on the desktop in front.
-    internal static void Arrive(nint hwnd, Action raise, Action activate, Action<string> trace)
+    // is pinned to every desktop (the App, after its first show), so it is normally on the desktop in front.
+    //
+    // BUT A PIN CAN FAIL (it is only traced, and retried on the next show; Task 6 review, Minor 1). A panel whose pin
+    // failed stays on the desktop it was first shown on, and IsVisible still says true from another desktop, so a Show
+    // from there would activate it and Windows would follow it back: the old trap. So it is activated only when it is
+    // on the desktop in front, which a pinned window always is (App.OnDesktopInFront).
+    internal static bool Arrive(nint hwnd, Func<bool> onCurrentDesktop, Action raise, Action activate, Action<string> trace)
     {
+        if (!onCurrentDesktop())
+        {
+            trace($"tasks panel 0x{hwnd:X}: not on the desktop in front (its pin failed?), left there rather than taking you to it");
+            return false;
+        }
         raise();
         activate();
         // One line per arrival, so a live check reads whether the window really ended up in front.
         trace($"tasks panel 0x{hwnd:X}: raised and activated, foreground now 0x{Windows.Monitoring.NativeMethods.GetForegroundWindow():X}");
+        return true;
     }
 
     /// <summary>
@@ -549,8 +574,17 @@ public sealed class TasksBoard : IDisposable
     /// not the user closing the panel, so TasksPanel.Shutdown leaves IsShown alone, and the order here keeps the save from
     /// ever reading the window after it has gone.
     /// </summary>
+    //
+    // EVERY WAY THE APP GOES CALLS THIS FIRST (Task 6 review, Important 1): ExitApp (and so Restart), the in-app update's
+    // hand-over and Windows' sign-out or shutdown (SessionEnding), each before Application.Shutdown. That matters
+    // because Application.Shutdown closes every window, and a close of this window that is not CloseForGood's is
+    // read as the user's Alt+F4 (TasksWindow.OnClosing, ClosePanel, Hide), which saves the panel as closed: an open
+    // panel would not come back after a reboot. Once this has run the window is closed for good, so Application's own
+    // close of it later finds nothing to do. Safe twice.
     public void Shutdown()
     {
+        if (shutDown) return;
+        shutDown = true;
         Remember(open: panel.IsShown);
         Dispose();
         panel.Shutdown();

@@ -823,6 +823,9 @@ public partial class App : Application
         // and skipping it would leave the user's windows wearing names we gave them.
         // The screen strips give their bands back first, as ExitApp has them do: the new version docks its own.
         screenStrips?.RemoveAll();
+        // ...and the tasks panel, BEFORE Shutdown closes its window: saved open if it was, so the new version opens it
+        // again, and its strip given back (TasksBoard.Shutdown says why the order matters).
+        tasksBoard?.Shutdown();
         Shutdown();
         EndIfShutdownHangs();
     }
@@ -2180,6 +2183,9 @@ public partial class App : Application
                 // `tasks-window show` typed in a terminal carries no foreground right. No move to the desktop in front
                 // any more: the panel is pinned to every desktop (above).
                 bringForward: hwnd => TasksBoard.Arrive(hwnd,
+                    // Only on the desktop in front, which a pinned panel always is: a panel whose pin failed is left
+                    // where it is rather than activated, which would take Petre to its desktop (Task 6 review, Minor 1).
+                    onCurrentDesktop: () => OnDesktopInFront(hwnd),
                     // On top of its band before it is activated: activation alone left the floating window under others
                     // ("now it's behind somewhere", see TasksBoard.Arrive).
                     raise: () => TasksBoard.RaiseToTop(hwnd),
@@ -2345,6 +2351,10 @@ public partial class App : Application
             // No more `claude` polls or resumes once the session is ending; running Claude sessions are not touched.
             claudeActions?.Dispose();
             claudeSessions?.Dispose();
+            // The tasks panel, before WPF's Shutdown closes its window (which follows this event when nothing cancels
+            // it): saved open if it was, so it opens again at the next sign-in, and its strip given back. Without
+            // this, that close reads as the user's Alt+F4 and saves it closed (TasksBoard.Shutdown).
+            tasksBoard?.Shutdown();
         };
     }
 
