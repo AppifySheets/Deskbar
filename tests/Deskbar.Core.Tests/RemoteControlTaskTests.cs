@@ -642,10 +642,90 @@ public class RemoteControlTaskTests
             ["list [--closed]", "add <title>|- [--workspace <name>|none] [--important] [--urgent]", "close <id>", "reopen <id>",
              "status <id> <backlog|in-progress|waiting|done>", "rename <id> <title>", "move <id> <workspace>|none",
              "comment <id> <markdown>|-", "delete <id>", "flag <id> important|urgent on|off", "order <id> top|end|<n>",
+             // Task 9: going to a task, starting Claude on it and opening one of its sessions.
+             "go <id>", "start <id> [--folder <path>]", "open-session <id> <session>",
              // A Claude session's own forms (plan Task 8, RemoteControl.ClaudeHook.cs); `-` reads the text from stdin.
              "join <id> --session <session>", "new <title>|- --session <session>", "status-line <text>|- --session <session>",
              "ask <question>|- --session <session>", "answered --session <session>", "done --session <session>", "comment <markdown>|- --session <session>",
              "later <title>|- --session <session>", "comment-settle <comment-id> --session <session>",
              "assign <id> me|claude", "describe <id> <markdown>|-", "comment-edit <comment-id> <markdown>|-", "goal <id> <goal-id>|none"],
             ControlUsage.All.Where(c => c.Verb == "task").Select(c => c.Arguments));
+
+    // --- Task 9: go, start, open-session ---------------------------------------------------------------------------
+
+    // What the three verbs asked the App to do, in order, as "verb:title[:argument]".
+    sealed class FakeSessionCommands
+    {
+        public List<string> Calls { get; } = [];
+
+        public IReadOnlyList<string> Folders { get; set; } = [];
+
+        public TaskSessionCommands Commands => new(
+            Go: t => Done($"go:{t.Title}"),
+            Folders: _ => Folders,
+            Start: (t, folder) => Done($"start:{t.Title}:{folder}"),
+            OpenSession: (t, session) => Done($"open:{t.Title}:{session}"));
+
+        Result Done(string call)
+        {
+            Calls.Add(call);
+            return Result.Success();
+        }
+    }
+
+    ControlReply RunWith(WorkspaceManager manager, FakeSessionCommands commands, params string[] args) =>
+        new RemoteControl(manager, tasks: tasks, goals: goals, taskSessions: commands.Commands).Execute(args);
+
+    // The three pipe twins of the double-click, "Start Claude on this" and the thread's Open (spec, "Where the clicks
+    // are"): each is in ControlUsage, each reaches the App's command with the task found by its id prefix, and each
+    // answers with the task's JSON. `start` with exactly one folder starts there; with several, it refuses and names
+    // them, since a script cannot answer a pick list; --folder chooses. `open-session` takes the session's full id or
+    // its short id, and a session that is not the task's is refused.
+    [Fact]
+    public void Task_go_start_and_open_session_are_in_ControlUsage_and_dispatch()
+    {
+        Assert.Contains(ControlUsage.All, c => c.Verb == "task" && c.Arguments == "go <id>");
+        Assert.Contains(ControlUsage.All, c => c.Verb == "task" && c.Arguments == "start <id> [--folder <path>]");
+        Assert.Contains(ControlUsage.All, c => c.Verb == "task" && c.Arguments == "open-session <id> <session>");
+
+        var manager = Started();
+        var commands = new FakeSessionCommands { Folders = [@"C:\repos\Deskbar"] };
+        var id = tasks.Create("Fix the bar", Maybe<Guid>.None,
+            new TaskSession("884c127f-9633-40eb-bed7-593800bca40f", @"C:\repos\Deskbar", clock, Maybe<DateTimeOffset>.None)).Value.Id;
+        var prefix = id.ToString()[..6];
+
+        var went = RunWith(manager, commands, "task", "go", prefix);
+        Ok(went);
+        Assert.Equal(id.ToString(), Json(went).GetProperty("id").GetString());
+
+        Ok(RunWith(manager, commands, "task", "start", prefix));
+        Ok(RunWith(manager, commands, "task", "start", prefix, "--folder", @"D:\other"));
+        Ok(RunWith(manager, commands, "task", "open-session", prefix, "884c127f"));
+        Ok(RunWith(manager, commands, "task", "open-session", prefix, "884c127f-9633-40eb-bed7-593800bca40f"));
+
+        Assert.Equal(
+            ["go:Fix the bar", @"start:Fix the bar:C:\repos\Deskbar", @"start:Fix the bar:D:\other",
+             "open:Fix the bar:884c127f-9633-40eb-bed7-593800bca40f", "open:Fix the bar:884c127f-9633-40eb-bed7-593800bca40f"],
+            commands.Calls);
+
+        // Several folders: refused, naming them, nothing started.
+        commands.Folders = [@"C:\repos\Deskbar", @"E:\work\iam.ge"];
+        var several = RunWith(manager, commands, "task", "start", prefix);
+        Assert.Equal(ControlReply.Failed, several.ExitCode);
+        Assert.Contains(@"C:\repos\Deskbar", several.Output);
+        Assert.Contains(@"E:\work\iam.ge", several.Output);
+        Assert.Contains("--folder", several.Output);
+
+        // None known: refused, asking for --folder.
+        commands.Folders = [];
+        Assert.Contains("--folder", RunWith(manager, commands, "task", "start", prefix).Output);
+
+        // A session that is not the task's.
+        var stranger = RunWith(manager, commands, "task", "open-session", prefix, "deadbeef");
+        Assert.Equal(ControlReply.Failed, stranger.ExitCode);
+        Assert.Equal(5, commands.Calls.Count);
+
+        // A copy without the commands refuses every one of the three.
+        Assert.Equal(ControlReply.Failed, Run(manager, "task", "go", prefix).ExitCode);
+    }
 }

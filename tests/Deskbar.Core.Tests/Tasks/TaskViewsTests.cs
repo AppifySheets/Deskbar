@@ -198,6 +198,44 @@ public class TaskViewsTests
         Assert.Equal("live", TaskViews.SessionToGoTo(board.Tasks.Single(t => t.Id == id)).Value.Id);
     }
 
+    // Task 9: the thread's session list (spec, "Task history"). Newest joined first; Working or Idle while `claude agents`
+    // lists it (by its Busy); a session it does not list is Ended while its transcript is there and Expired once Claude
+    // Code has deleted it.
+    [Fact]
+    public void The_session_list_is_newest_first_with_its_states()
+    {
+        var id = Claudes("work", ws, "oldest");
+        Change(b => b.Join(id, Session("gone"), clock));
+        Change(b => b.Join(id, Session("idle"), clock));
+        Change(b => b.Join(id, Session("busy"), clock));
+        var task = board.Tasks.Single(t => t.Id == id);
+        IReadOnlyCollection<ClaudeAgent> listed =
+        [
+            new("busy", Maybe.From("busy"), @"C:\repos\TaskSpaces", true, true, ""),
+            new("idle", Maybe.From("idle"), @"C:\repos\TaskSpaces", true, false, ""),
+        ];
+
+        var list = TaskViews.SessionList(task, Maybe.From(listed), s => s.Id != "gone");
+
+        Assert.Equal(["busy:Working", "idle:Idle", "gone:Expired", "oldest:Ended"], list.Select(s => $"{s.Id}:{s.State}"));
+        Assert.Equal(task.Sessions.Single(s => s.Id == "busy").Joined, list[0].Joined);
+    }
+
+    // Without a list ("cannot tell": the feature is off, or `claude` could not be read) the hooks' word stands: a session
+    // they call live is Idle (nothing says it works), an ended one Ended or Expired by its transcript.
+    [Fact]
+    public void Without_a_list_the_session_list_takes_the_hooks_word()
+    {
+        var id = Claudes("work", ws, "live");
+        Change(b => b.Join(id, Session("ended"), clock));
+        board = board.SessionEnded("ended", clock);
+        var task = board.Tasks.Single(t => t.Id == id);
+
+        var list = TaskViews.SessionList(task, Maybe<IReadOnlyCollection<ClaudeAgent>>.None, _ => true);
+
+        Assert.Equal(["ended:Ended", "live:Idle"], list.Select(s => $"{s.Id}:{s.State}"));
+    }
+
     [Fact]
     public void A_note_has_no_session_to_go_to()
     {

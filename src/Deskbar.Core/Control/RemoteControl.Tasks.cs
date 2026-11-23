@@ -24,6 +24,18 @@ namespace Deskbar.Core.Control;
 //   task describe <id> <markdown>|-          (Ruling 58: his own description under the title)
 //   task comment-edit <comment-id> <markdown>|-   (his own comment only; a session's is refused)
 //   task goal <id> <goal-id>|none     (the goals planner; needs the goal service, RemoteControl.Goals.cs)
+//   task go <id>
+//   task start <id> [--folder <path>]
+//   task open-session <id> <session>
+//
+// `go`, `start` and `open-session` (Task 9 of docs/superpowers/specs/2026-11-23-tasks-open-claude-sessions-design.md,
+// "Where the clicks are") are the twins of a line's double-click, "Start Claude on this" and the thread's Open. They
+// act through TaskSessionCommands, which the app hands in, since windows, terminals and `claude` are its business; the
+// pipe only finds the task (and the session) and, for `start`, the folder. A script cannot answer a pick list, so
+// `start` without --folder starts only where exactly one folder is known and otherwise refuses, naming the
+// candidates; nor does it ask before a second session on a task, since a script asking for one means it. `start`
+// answers once the session is on its way: `claude --bg` is waited for off the UI thread, and its failure (an
+// untrusted folder) lands in the task's thread, where the session's own words are.
 //
 // `flag` and `order` (Task 12, Rulings 25 and 28) are the twins of the toggles on a line and of dragging it. The flags
 // name Covey's quadrant (TaskOrder.cs); a flag that changes the quadrant puts the task on top of its new one, as the
@@ -104,6 +116,10 @@ public sealed partial class RemoteControl
             ["assign", var id, var who] => ParseAssignee(who)
                 .Match(a => TaskChange(service, id, t => service.Assign(t.Id, a)), ControlReply.Fail),
             ["goal", var id, var goal] => TaskGoal(service, id, goal),
+            ["go", var id] => WithSessions(c => TaskChange(service, id, c.Go)),
+            ["start", var id] => WithSessions(c => TaskStart(service, c, id, Maybe<string>.None)),
+            ["start", var id, "--folder", var folder] => WithSessions(c => TaskStart(service, c, id, Folder(folder) ?? folder)),
+            ["open-session", var id, var sessionId] => WithSessions(c => TaskOpenSession(service, c, id, sessionId)),
             _ => ControlReply.Fail($"Wrong arguments for task.\n{TaskUsage()}"),
         };
     }
@@ -286,4 +302,48 @@ public sealed partial class RemoteControl
         service.Board.Find(id)
             .Bind(task => service.Delete(task.Id).Map(() => task))
             .Match(task => Success(Describe(task)), ControlReply.Fail);
+
+    // --- a task's Claude sessions (Task 9) ------------------------------------------------------------------------
+
+    ControlReply WithSessions(Func<TaskSessionCommands, ControlReply> act) =>
+        taskSessions is { } commands ? act(commands) : ControlReply.Fail("Claude sessions are not available in this copy of Deskbar");
+
+    // The folder: the one given, or the one the task's candidates leave (ClaudeStart.Folders, as the menu offers them).
+    // Several or none refuse before anything starts, naming what --folder could be.
+    ControlReply TaskStart(TaskService service, TaskSessionCommands commands, string id, Maybe<string> given) =>
+        service.Board.Find(id)
+            .Bind(task => given.Or(() => commands.Folders(task) is [var only] ? only : Maybe<string>.None)
+                .ToResult(FolderRefusal(commands.Folders(task)))
+                .Bind(folder => commands.Start(task, folder))
+                .Map(() => service.Board.Tasks.First(t => t.Id == task.Id)))
+            .Match(task => Success(Describe(task)), ControlReply.Fail);
+
+    static string FolderRefusal(IReadOnlyList<string> folders) =>
+        folders.Count == 0
+            ? "No folder is known for this task; pass --folder <path>"
+            : $"Several folders could be meant: {string.Join("; ", folders)}. Pass --folder <path>";
+
+    // The session by its full id or any unique start of it (its eight-character short id is what `claude agents`
+    // shows), among the task's own sessions only.
+    ControlReply TaskOpenSession(TaskService service, TaskSessionCommands commands, string id, string session) =>
+        TaskChange(service, id, task => task.Sessions
+            .Where(s => s.Id.StartsWith(session.Trim(), StringComparison.OrdinalIgnoreCase))
+            .ToList() switch
+            {
+                [var one] when session.Trim().Length > 0 => commands.OpenSession(task, one.Id),
+                [] or [_] => Result.Failure($"The task has no session {session}"),
+                _ => Result.Failure($"{session} names several of the task's sessions; give more of its id"),
+            });
 }
+
+/// <summary>
+/// What `task go`, `task start` and `task open-session` ask of the app (Task 9; RemoteControl.Tasks.cs): go to a task
+/// (its workspace, then its session's window), the folders a new session could start in (ClaudeStart.Folders over the
+/// task's workspace), start a session in a folder, and open one of the task's sessions by its full id. The app answers
+/// with ClaudeTaskActions; each returns at once and reports a later failure in the task's thread.
+/// </summary>
+public sealed record TaskSessionCommands(
+    Func<TaskItem, Result> Go,
+    Func<TaskItem, IReadOnlyList<string>> Folders,
+    Func<TaskItem, string, Result> Start,
+    Func<TaskItem, string, Result> OpenSession);
