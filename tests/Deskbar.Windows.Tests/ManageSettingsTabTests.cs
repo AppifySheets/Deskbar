@@ -509,6 +509,41 @@ public class ManageSettingsTabTests
         window.Close();
     });
 
+    // Ruling 20: when Claude Code's list of sessions cannot be read, the reason shows in one line under the resume box,
+    // from the moment the window opens, and goes when a read works again.
+    [Fact]
+    public void An_unreadable_Claude_list_shows_under_the_resume_box_until_it_reads_again() => StaThread.Run(() =>
+    {
+        var manager = Built(AppState.Empty);
+        var problem = new System.Reactive.Subjects.BehaviorSubject<Maybe<string>>("Claude Code's list of sessions cannot be read, so nothing is resumed: Could not run claude.");
+
+        var window = new ManageWindow(manager, compatibilityMode: false, claudeListProblem: problem);
+        var line = (TextBlock)window.FindName("ClaudeListProblem")!;
+
+        Assert.Equal(Visibility.Visible, line.Visibility);
+        Assert.Contains("Could not run claude.", line.Text);
+
+        problem.OnNext(Maybe<string>.None);
+        Assert.Equal(Visibility.Collapsed, line.Visibility);
+
+        problem.OnNext("Claude Code's list of sessions cannot be read, so nothing is resumed: not JSON.");
+        Assert.Equal(Visibility.Visible, line.Visibility);
+
+        // Closed, the window stops listening.
+        window.Close();
+        Assert.False(problem.HasObservers);
+    });
+
+    // Without a source (the tests that build Manage without App), the line stays hidden.
+    [Fact]
+    public void Without_Claude_sessions_the_list_line_stays_hidden() => StaThread.Run(() =>
+    {
+        var window = new ManageWindow(Built(AppState.Empty), compatibilityMode: false);
+
+        Assert.Equal(Visibility.Collapsed, ((TextBlock)window.FindName("ClaudeListProblem")!).Visibility);
+        window.Close();
+    });
+
     // Reports Available and off, and refuses to enable, as the startup task does once the user has turned
     // it off in Settings after the window read it.
     sealed class FailingStartupSwitch : IStartupSwitch

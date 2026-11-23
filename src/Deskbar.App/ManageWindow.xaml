@@ -93,6 +93,12 @@
                         </CheckBox>
                         <TextBlock TextWrapping="Wrap" Margin="60,2,0,0" Opacity="0.75"
                                    Text="Claude Code keeps sessions for 30 days; raise cleanupPeriodDays in ~/.claude/settings.json to keep them longer"/>
+                        <!-- Why Claude Code's list of sessions cannot be read (Ruling 20; ClaudeSessions.ListProblem):
+                             `claude` missing from the PATH, or a read that failed or could not be parsed. Then nothing is
+                             resumed or adopted, and without this line nothing in Deskbar would say so. Hidden while the
+                             list reads, and cleared by the next good read. -->
+                        <TextBlock x:Name="ClaudeListProblem" TextWrapping="Wrap" Margin="60,4,0,0" Foreground="#C42B1C"
+                                   Visibility="Collapsed"/>
 
                         <!-- SECTION 2: THE BAR. -->
                         <TextBlock Text="The bar" FontSize="15" FontWeight="SemiBold" Margin="0,20,0,6"/>
