@@ -396,9 +396,11 @@ Manage ticked. Use a throwaway folder Claude Code already trusts, not a real rep
 76. In Manage's Settings tab, "Resume the sessions of open tasks after a restart or a crash" sits under the tasks box,
     with the 30 days / `cleanupPeriodDays` line under it. Untick the tasks box: the resume box greys out and unticks.
     Tick it again: back, ticked. `$ts claude-resume off` unticks it, `$ts claude-resume on` ticks it.
-77. In a terminal in the throwaway folder, start `claude --bg "say hello"` without telling it about any task. Within
-    15 seconds a task named after the session appears, In progress with a live session; with a VS Code window open on
-    that folder, the task is on that window's workspace.
+77. In a terminal in the throwaway folder, start `claude --bg "say hello"` without telling it about any task. For the
+    first two minutes no task appears; then, within 15 seconds more, a task named after the session appears, In
+    progress with a live session; with a VS Code window open on that folder, the task is on that window's workspace.
+    Ask that session to join another task (`deskbar task join <id>`): the task Deskbar made for it disappears. Repeat
+    with a comment added to the made task first: it stays, showing the session ended.
 78. Note the task's session, then end it: `claude stop <short id>` (from `claude agents`). Within 15 seconds the task's
     thread says "Resumed by Deskbar at HH:mm." and `claude agents` lists the session again with the SAME session id
     (not a copy). Close the task and stop the session again: nothing is resumed.
@@ -412,10 +414,12 @@ Manage ticked. Use a throwaway folder Claude Code already trusts, not a real rep
     the next poll.
 82. Make a task whose session's folder Claude Code no longer trusts (however your Claude Code version lets you take
     the trust back; see the probes note's "An untrusted folder"), and stop the session. The thread gets Claude's own
-    "Workspace not trusted" message once, and the trace shows no second resume of it for ten minutes.
+    "Workspace not trusted" message once, the task waits on you with "Deskbar could not resume this session. Claude
+    Code's message is in this task's thread.", and the trace shows no second resume of it, however long you wait.
+    Trust the folder and set the task back to In progress: the next poll resumes it.
 83. Rename `claude.exe` away (or take `%USERPROFILE%\.local\bin` off Deskbar's PATH) and restart Deskbar: the tasks
-    keep showing what they showed, nothing is ended or resumed, and the trace says the list could not be read. Put
-    it back: the next poll picks up as before.
+    keep showing what they showed, nothing is ended or resumed, and the trace says ONCE that the list could not be
+    read, not every 15 seconds. Put it back: the trace says it is read again and the next poll picks up as before.
 
 ## Goals
 

@@ -93,6 +93,7 @@ public class ClaudeSessionsTests
         public string Home { get; } = Path.Combine(Path.GetTempPath(), "deskbar-claude-sessions-" + Guid.NewGuid().ToString("N"));
         public Func<string, Maybe<Guid>> WorkspaceOfFolder { get; set; } = _ => Maybe<Guid>.None;
         public ClaudeSessions? Sessions { get; private set; }
+        public List<string> Traces { get; } = [];
 
         // When Begin ran: the first read happens then.
         public DateTimeOffset T0 { get; private set; }
@@ -112,7 +113,7 @@ public class ClaudeSessionsTests
         public ClaudeSessions Begin()
         {
             T0 = Clock.Now;
-            Sessions = new ClaudeSessions(Tasks, Manager, Cli, Clock, WorkspaceOfFolder, Home, background: Scheduler.Immediate);
+            Sessions = new ClaudeSessions(Tasks, Manager, Cli, Clock, WorkspaceOfFolder, Home, background: Scheduler.Immediate, trace: Traces.Add);
             return Sessions;
         }
 
@@ -214,6 +215,63 @@ public class ClaudeSessionsTests
         Assert.Equal(sessionId, rig.Cli.Resumes.Single().Arguments[2]);
     }
 
+    // Ruling 12: with `claude` missing every read fails. The tasks keep what the hooks said, and the trace says so once
+    // per run of failures, from the start or after a good read, rather than every 15 seconds.
+    [Fact]
+    public void An_unreadable_list_is_traced_once_per_run_of_failures()
+    {
+        using var rig = new Rig();
+        var answers = new Queue<Result<string>>(
+        [
+            Result.Failure<string>("Could not run claude: not found."),
+            Result.Failure<string>("Could not run claude: not found."),
+            Result.Success("[]"),
+            Result.Failure<string>("Could not run claude: not found."),
+            Result.Failure<string>("Could not run claude: not found."),
+        ]);
+        rig.Cli.Agents = () => answers.Count > 0 ? answers.Dequeue() : Result.Success("[]");
+        rig.Begin();
+
+        rig.RunTo(Seconds(60));
+
+        Assert.Equal(5, rig.Cli.Reads.Count);
+        Assert.Equal(2, rig.Traces.Count(t => t.Contains("list not read")));
+        Assert.Single(rig.Traces, t => t.Contains("list read again"));
+    }
+
+    // Ruling 11: a session started by hand joins or creates its own task on its first turn, through its hook, so a
+    // stranger in the list is adopted only after it has been listed for two minutes. One that leaves the list and comes
+    // back starts its two minutes again.
+    [Fact]
+    public void A_session_is_adopted_only_after_two_minutes_listed()
+    {
+        using var rig = new Rig();
+        var steady = Guid.NewGuid().ToString();
+        var flaky = Guid.NewGuid().ToString();
+        rig.Cli.Listed.Add(new Row(steady, @"E:\repos\Work", "Steady"));
+        rig.Cli.Listed.Add(new Row(flaky, @"E:\repos\Work", "Flaky"));
+        rig.Begin();
+        // The flaky one is gone for the reads at 60 s, then back from 75 s on.
+        rig.Clock.Schedule(Seconds(50), () => rig.Cli.Listed.RemoveAll(r => r.SessionId == flaky));
+        rig.Clock.Schedule(Seconds(70), () => rig.Cli.Listed.Add(new Row(flaky, @"E:\repos\Work", "Flaky")));
+
+        bool Adopted(string id) => rig.Tasks.Board.Tasks.Any(t => t.Sessions.Any(s => s.Id == id));
+
+        rig.RunTo(Seconds(105));
+        Assert.False(Adopted(steady));
+        Assert.False(Adopted(flaky));
+
+        rig.RunTo(Seconds(120));
+        Assert.True(Adopted(steady));
+        Assert.True(rig.Tasks.Board.Tasks.Single(t => t.Sessions.Any(s => s.Id == steady)).Adopted);
+        Assert.False(Adopted(flaky));
+
+        rig.RunTo(Seconds(180));
+        Assert.False(Adopted(flaky));
+        rig.RunTo(Seconds(195));
+        Assert.True(Adopted(flaky));
+    }
+
     // --- resuming --------------------------------------------------------------------------------
 
     // Review Focus 2: after a reboot every open task's session is dead at once. They come back one at a time, five
@@ -307,11 +365,11 @@ public class ClaudeSessionsTests
         Assert.Equal(2, rig.Cli.Resumes.Count);
     }
 
-    // Review Focus 4: a folder that was never trusted makes the resume fail. One clear message in the task's thread,
-    // the CLI's own words, and no retry loop: the session is left alone for the loop window, and a retry that fails
-    // the same way says nothing new.
+    // Review Focus 4, Ruling 10: a folder that was never trusted makes the resume fail. One clear message in the task's
+    // thread, the CLI's own words, the task waiting on Petre with the sticky ResumeFailed question, and no retry at all,
+    // however long passes. Once he acts on the task (here: answers, which puts it back in progress), it is judged afresh.
     [Fact]
-    public void A_failed_resume_comments_once_on_the_task_and_is_not_retried_until_the_next_window()
+    public void A_failed_resume_asks_once_and_is_not_retried()
     {
         using var rig = new Rig();
         const string untrusted = "claude exited with code 1.\nWorkspace not trusted. Run `claude` in E:\\repos\\Work once and accept the trust prompt, then retry.";
@@ -319,14 +377,20 @@ public class ClaudeSessionsTests
         var dead = rig.Dead("Untrusted");
         rig.Begin();
 
-        rig.RunTo(TimeSpan.FromMinutes(9));
-        Assert.Equal([Seconds(0)], rig.Cli.Resumes.Select(c => rig.Since(c)));
-        Assert.Single(rig.Task(dead.TaskId).Comments, c => c.Markdown.Contains("Workspace not trusted"));
-        Assert.DoesNotContain(rig.Task(dead.TaskId).Comments, c => c.Markdown.StartsWith("Resumed by Deskbar"));
+        rig.RunTo(TimeSpan.FromMinutes(45));
 
-        rig.RunTo(TimeSpan.FromMinutes(10) + Seconds(1));
-        Assert.Equal([Seconds(0), TimeSpan.FromMinutes(10)], rig.Cli.Resumes.Select(c => rig.Since(c)));
-        Assert.Single(rig.Task(dead.TaskId).Comments, c => c.Markdown.Contains("Workspace not trusted"));
+        Assert.Equal([Seconds(0)], rig.Cli.Resumes.Select(c => rig.Since(c)));
+        var task = rig.Task(dead.TaskId);
+        Assert.Equal(TaskStatus.WaitingOnYou, task.Status);
+        Assert.Equal(SessionKeeper.ResumeFailed, task.Question.GetValueOrDefault(""));
+        var comment = Assert.Single(task.Comments);
+        Assert.Contains("Workspace not trusted", comment.Markdown);
+
+        // Petre trusts the folder and puts the task back in progress: the next poll tries again.
+        rig.Cli.Resume = null;
+        Assert.True(rig.Tasks.SetStatus(dead.TaskId, TaskStatus.InProgress).IsSuccess);
+        rig.Run(Seconds(15));
+        Assert.Equal(2, rig.Cli.Resumes.Count);
     }
 
     // The setting: with automatic resume off, the board still follows the list (a dead session shows ended) and an

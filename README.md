@@ -552,12 +552,14 @@ your messages reminds it of its task in one line, and answers a task that was wa
 with `claude -p` or the Agent SDK are left out. `deskbar.cmd claude-tasks off` turns this off.
 
 While it is on, Deskbar also reads Claude Code's own list of running sessions (`claude agents --json`)
-every 15 seconds. A session no task knows gets a task of its own, on the workspace of the VS Code window
-showing its folder. When the session of an open task is no longer running, after a reboot, a crash or a
+every 15 seconds. A session no task knows, still running after two minutes, gets a task of its own, on the
+workspace of the VS Code window showing its folder; if it later joins a task of its own, the one Deskbar made
+goes away again unless you have commented on it. When the session of an open task is no longer running, after a reboot, a crash or a
 closed VS Code window, Deskbar resumes it in the background with `claude --bg --resume`, one session every
 five seconds, and says so in the task's thread; a session whose last turn was cut off is told to continue.
-A session that keeps stopping straight after being woken, or whose transcript Claude Code no longer keeps,
-is left alone and its task waits on you with the reason. **Resume the sessions of open tasks after a
+A session that keeps stopping straight after being woken, whose transcript Claude Code no longer keeps, or
+whose resume fails (Claude's message goes into the thread), is left alone and its task waits on you with the
+reason until you act on it. **Resume the sessions of open tasks after a
 restart or a crash**, under the tasks box, turns the resuming off and leaves the rest on
 (`deskbar.cmd claude-resume off`). Claude Code keeps sessions for 30 days; raise `cleanupPeriodDays` in
 `~/.claude/settings.json` to keep them longer.

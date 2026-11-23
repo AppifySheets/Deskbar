@@ -24,10 +24,14 @@ namespace Deskbar.App;
 //      Poll (15 s), the first time as soon as the feature is on. Each good read is reconciled into the board, published
 //      on Live, and handed to the keeper. A read that fails or that cannot be parsed means "cannot tell" (Global
 //      Constraints): nothing is ended, nothing resumed, nothing adopted, and any resume waiting in the queue is dropped,
-//      because the list it was decided on can no longer be vouched for.
+//      because the list it was decided on can no longer be vouched for. The task board then shows what the hooks last
+//      said, which is the spec's fallback; the trace says so once per run of failures (Ruling 12), not every 15 s.
 //
 //   2. THE KEEPER'S STEPS. An Adopt makes a task for a session no task knows, on the workspace of the editor window
-//      showing its folder (workspaceOfFolder, the rule `task new` uses). A GiveUp asks Petre through the task. A Resume
+//      showing its folder (workspaceOfFolder, the rule `task new` uses), but only once the session has been listed for
+//      AdoptAfter (2 minutes, Ruling 11): a session started by hand joins or creates its own task on its first turn,
+//      through its SessionStart hook, and adopting it within the first poll left an empty duplicate task beside the
+//      real one. A GiveUp asks Petre through the task. A Resume
 //      goes into a queue that is drained ONE AT A TIME, SessionKeeper.Spacing (5 s) apart, because after a reboot there
 //      can be twenty at once and each `claude.exe` takes hundreds of MB (Review Focus 2). Before each queued resume is
 //      issued, it is checked again against the CURRENT board and the latest good list: the task must still be open, the
@@ -38,8 +42,12 @@ namespace Deskbar.App;
 //   3. STARTING A SESSION FROM A TASK (Start). `claude --bg "<first message>"` in the folder, the short id read from what
 //      it prints, then the full id found in the list and the task JOINED HERE, not left to the session's SessionStart
 //      hook: a background session's hooks can arrive late (Task 1 note), and a join that waits on them leaves the task
-//      without its session for that long. While a `claude --bg` is on its way, adoption waits, since the new session can
-//      be listed before Deskbar knows its short id and would otherwise be adopted as a stranger.
+//      without its session for that long. The two-minute wait before adoption also covers the few seconds in which the
+//      new session is listed but Deskbar does not yet know its short id.
+//
+//   A RESUME THAT FAILS (an untrusted folder, `claude` missing) is not tried again on a timer (Review Focus 4, Ruling 10):
+//   Claude's own message goes into the task's thread, and the task waits on Petre with SessionKeeper.ResumeFailed as
+//   its question, which the keeper treats as a sticky give-up until he acts on the task.
 //
 // THREADS. Every `claude` call runs on `background` (the thread pool in the app), so a slow or hung CLI never stalls the
 // bar; its answer comes back on `scheduler`, which in the app is the UI thread, and that is the only thread that touches
@@ -70,13 +78,13 @@ public sealed class ClaudeSessions : IDisposable
     const int FindAttempts = 6;
     static readonly TimeSpan FindPause = TimeSpan.FromSeconds(2);
 
-    static readonly IReadOnlyList<string> AgentsArguments = ["agents", "--json"];
+    /// <summary>
+    /// How long a session no task knows must have been listed before it gets a task of its own (Ruling 11). A session
+    /// started by hand joins its own task on its first turn; two minutes leaves room for that turn.
+    /// </summary>
+    public static readonly TimeSpan AdoptAfter = TimeSpan.FromMinutes(2);
 
-    // The questions SessionKeeper asks when it gives up on a task. While a task waits on Petre with one of these, the
-    // keeper is silent about it (sticky); once it no longer does, Petre has acted, and the ledger must forget the
-    // session or the next poll would give up again at once (see ForgetAnswered).
-    static readonly IReadOnlySet<string> GiveUpReasons =
-        new HashSet<string> { SessionKeeper.LoopGaveUp, SessionKeeper.TranscriptGone, SessionKeeper.NoFolder };
+    static readonly IReadOnlyList<string> AgentsArguments = ["agents", "--json"];
 
     readonly TaskService tasks;
     readonly WorkspaceManager manager;
@@ -112,21 +120,20 @@ public sealed class ClaudeSessions : IDisposable
     // Whether a list read is in flight: a tick that comes while one is skips, so a hung CLI never piles reads up.
     bool reading;
 
-    // Sessions whose resume failed, with when and the CLI's words: held off for SessionKeeper.LoopWindow, and the same
-    // words again are not said twice (Review Focus 4).
-    ImmutableDictionary<string, FailedResume> failed = ImmutableDictionary<string, FailedResume>.Empty;
+    // Whether the last read failed: the trace line is written on the first failure of a run, not on every poll.
+    bool unreadable;
 
-    // Sessions the keeper gave up on, so the ledger can forget them once Petre has acted (ForgetAnswered).
+    // When each listed session was first seen in an unbroken run of good reads; a session that leaves the list is
+    // forgotten, so one that comes back starts its two minutes again (AdoptAfter).
+    ImmutableDictionary<string, DateTimeOffset> firstSeen = ImmutableDictionary<string, DateTimeOffset>.Empty;
+
+    // Sessions given up on (by the keeper, or here after a failed resume), so the ledger can forget them once Petre has
+    // acted (ForgetAnswered).
     ImmutableHashSet<string> givenUp = ImmutableHashSet<string>.Empty;
 
     // Sessions Start launched whose full id is not yet known, by short id, with the task and folder they belong to. A
     // list that shows one (Start's own search or a poll) joins it to its task.
     ImmutableDictionary<string, StartClaim> claims = ImmutableDictionary<string, StartClaim>.Empty;
-
-    // `claude --bg` calls on their way: adoption waits while there are any (see the class comment).
-    int starting;
-
-    sealed record FailedResume(DateTimeOffset At, string Message);
 
     sealed record StartClaim(Guid TaskId, string Folder);
 
@@ -172,15 +179,12 @@ public sealed class ClaudeSessions : IDisposable
     /// `claude --bg` exit 1 with the reason on stderr (measured), and that reason is what Petre needs to see. Called on
     /// the UI thread; the returned task completes there.
     /// </summary>
-    public Task<Result<string>> Start(TaskItem task, string folder)
-    {
-        starting++;
-        return OffThread(() => cli.Run(["--bg", ClaudeStart.FirstMessage(task)], folder, LaunchTimeout))
+    public Task<Result<string>> Start(TaskItem task, string folder) =>
+        OffThread(() => cli.Run(["--bg", ClaudeStart.FirstMessage(task)], folder, LaunchTimeout))
             .SelectMany(launched => Launched(task, folder, launched))
             .TakeUntil(stopping)
             .DefaultIfEmpty(Result.Failure<string>("Deskbar closed before the session was found."))
             .ToTask();
-    }
 
     public void Dispose()
     {
@@ -210,14 +214,22 @@ public sealed class ClaudeSessions : IDisposable
         var parsed = read.Bind(ClaudeAgents.Parse);
         if (parsed.IsFailure)
         {
-            // Cannot tell. Not even the queue is trusted: it was decided on a list that is now unconfirmed.
+            // Cannot tell. Not even the queue is trusted: it was decided on a list that is now unconfirmed. Said once
+            // per run of failures (Ruling 12): `claude` missing fails every 15 s, and one line says all there is to say.
             queue = ImmutableQueue<KeeperStep.Resume>.Empty;
-            trace?.Invoke($"claude sessions: list not read, nothing changed: {parsed.Error}");
+            if (!unreadable) trace?.Invoke($"claude sessions: list not read, tasks keep what the hooks said: {parsed.Error}");
+            unreadable = true;
             return;
         }
 
+        if (unreadable) trace?.Invoke("claude sessions: list read again");
+        unreadable = false;
         var listed = parsed.Value;
         lastLive = listed;
+        // Each listed session keeps the moment it was first seen; one that left the list is forgotten.
+        var now = scheduler.Now;
+        firstSeen = listed.Select(agent => agent.SessionId).Distinct()
+            .ToImmutableDictionary(id => id, id => firstSeen.TryGetValue(id, out var seen) ? seen : now);
         // Sessions Start launched join their tasks first, so the keeper sees them known and does not adopt them.
         Claim(listed);
         tasks.Reconcile(listed);
@@ -243,7 +255,8 @@ public sealed class ClaudeSessions : IDisposable
     {
         switch (step)
         {
-            case KeeperStep.Adopt adopt when starting == 0:
+            // Only a session listed for AdoptAfter: before that it may still join its own task (Ruling 11).
+            case KeeperStep.Adopt adopt when ListedFor(adopt.Agent.SessionId) >= AdoptAfter:
                 tasks.Adopt(adopt.Agent, workspaceOfFolder(adopt.Agent.Folder))
                     .TapError(e => trace?.Invoke($"claude sessions: {adopt.Agent.SessionId} not adopted: {e}"));
                 break;
@@ -252,11 +265,14 @@ public sealed class ClaudeSessions : IDisposable
                     .Tap(() => LatestSessionOf(giveUp.TaskId).Tap(id => givenUp = givenUp.Add(id)))
                     .TapError(e => trace?.Invoke($"claude sessions: give-up not asked on {giveUp.TaskId}: {e}"));
                 break;
-            case KeeperStep.Resume resume when resuming && !Queued(resume.Session.Id) && !HeldOff(resume.Session.Id):
+            case KeeperStep.Resume resume when resuming && !Queued(resume.Session.Id):
                 queue = queue.Enqueue(resume);
                 break;
         }
     }
+
+    TimeSpan ListedFor(string sessionId) =>
+        firstSeen.TryGetValue(sessionId, out var seen) ? scheduler.Now - seen : TimeSpan.Zero;
 
     // A give-up stays until Petre acts on its task (answers, sets a status, closes it). Once its task no longer waits on
     // him with the keeper's question, the session's resumes are forgotten so the keeper judges it afresh; without this,
@@ -264,18 +280,12 @@ public sealed class ClaudeSessions : IDisposable
     void ForgetAnswered()
     {
         var answered = givenUp.Where(id => !StillGivenUp(id)).ToList();
-        answered.ForEach(id =>
-        {
-            ledger = ledger.Forget(id);
-            failed = failed.Remove(id);
-        });
+        answered.ForEach(id => ledger = ledger.Forget(id));
         givenUp = givenUp.Except(answered);
     }
 
     bool StillGivenUp(string sessionId) =>
-        tasks.Board.Tasks.Any(t => LatestSession(t).Map(s => s.Id == sessionId).GetValueOrDefault(false)
-            && t.Status == TaskStatus.WaitingOnYou
-            && t.Question.Map(GiveUpReasons.Contains).GetValueOrDefault(false));
+        tasks.Board.Tasks.Any(t => LatestSession(t).Map(s => s.Id == sessionId).GetValueOrDefault(false) && SessionKeeper.GivenUp(t));
 
     // --- the resume queue -------------------------------------------------------------------------------------------
 
@@ -335,7 +345,7 @@ public sealed class ClaudeSessions : IDisposable
         manager.State.ClaudeResumeInEffect
         && tasks.Board.Tasks.TryFirst(t => t.Id == resume.TaskId)
             .Map(t => t.Status is TaskStatus.Backlog or TaskStatus.InProgress or TaskStatus.WaitingOnYou
-                && !(t.Status == TaskStatus.WaitingOnYou && t.Question.Map(GiveUpReasons.Contains).GetValueOrDefault(false))
+                && !SessionKeeper.GivenUp(t)
                 && LatestSession(t).Map(s => s.Id == resume.Session.Id).GetValueOrDefault(false))
             .GetValueOrDefault(false)
         && lastLive.All(agent => agent.SessionId != resume.Session.Id);
@@ -344,18 +354,19 @@ public sealed class ClaudeSessions : IDisposable
     {
         if (result.IsSuccess)
         {
-            failed = failed.Remove(sessionId);
             Say(taskId, cutOff
                 ? $"Resumed by Deskbar at {Clock(at)}, its last turn was cut off, so it was told to continue."
                 : $"Resumed by Deskbar at {Clock(at)}.");
             return;
         }
 
-        // Review Focus 4: an untrusted folder or a missing `claude`. The CLI's own words go to the thread once; the
-        // session is left alone for the loop window (HeldOff) instead of being tried every 30 s.
-        var saidBefore = failed.TryGetValue(sessionId, out var before) && before.Message == result.Error;
-        failed = failed.SetItem(sessionId, new FailedResume(at, result.Error));
-        if (!saidBefore) Say(taskId, $"Deskbar could not resume this session at {Clock(at)}:\n\n{result.Error}");
+        // Review Focus 4, Ruling 10: an untrusted folder or a missing `claude`. Claude's own words go to the thread, and
+        // the task waits on Petre with the sticky ResumeFailed question, so the keeper tries nothing more until he acts;
+        // remembered as given up, so the ledger forgets the session once he has (ForgetAnswered).
+        Say(taskId, $"Deskbar could not resume this session at {Clock(at)}:\n\n{result.Error}");
+        tasks.Ask(taskId, SessionKeeper.ResumeFailed)
+            .Tap(() => givenUp = givenUp.Add(sessionId))
+            .TapError(e => trace?.Invoke($"claude sessions: failed resume not asked on {taskId}: {e}"));
     }
 
     void Say(Guid taskId, string markdown) =>
@@ -368,9 +379,6 @@ public sealed class ClaudeSessions : IDisposable
         cutOff ? ["--bg", "--resume", sessionId, ContinueMessage] : ["--bg", "--resume", sessionId];
 
     bool Queued(string sessionId) => queue.Any(r => r.Session.Id == sessionId);
-
-    bool HeldOff(string sessionId) =>
-        failed.TryGetValue(sessionId, out var failure) && failure.At + SessionKeeper.LoopWindow > scheduler.Now;
 
     // --- transcripts ------------------------------------------------------------------------------------------------
 
@@ -395,14 +403,11 @@ public sealed class ClaudeSessions : IDisposable
 
     // --- starting ---------------------------------------------------------------------------------------------------
 
-    IObservable<Result<string>> Launched(TaskItem task, string folder, Result<string> launched)
-    {
-        starting--;
-        return launched
+    IObservable<Result<string>> Launched(TaskItem task, string folder, Result<string> launched) =>
+        launched
             .Bind(output => ClaudeAgents.ShortIdFromStart(output).ToResult($"Claude did not say which session it started: {output}"))
             .Tap(shortId => claims = claims.SetItem(shortId, new StartClaim(task.Id, folder)))
             .Match(shortId => Find(shortId, FindAttempts), error => Observable.Return(Result.Failure<string>(error)));
-    }
 
     // Reads the list until it shows the session, a pause between reads, and joins it to its task.
     IObservable<Result<string>> Find(string shortId, int attemptsLeft) =>
