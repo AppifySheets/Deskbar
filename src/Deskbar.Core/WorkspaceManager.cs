@@ -4393,6 +4393,14 @@ public sealed class WorkspaceManager(
             ? Result.Success()
             : Result.Success().Tap(() => Persist(State with { NoClaudeTasks = !on }));
 
+    // Whether the sessions of open tasks are resumed when they stop running (AppState.ClaudeResume): Manage's box and
+    // `claude-resume on|off`. A no-op when unchanged, like SetClaudeTasks; ClaudeSessions reads the setting before every
+    // resume, so turning it off drops whatever resume was waiting its turn.
+    public Result SetClaudeResume(bool on) =>
+        State.ClaudeResume == on
+            ? Result.Success()
+            : Result.Success().Tap(() => Persist(State with { NoClaudeResume = !on }));
+
     // The focus ring (AppState.FocusRing): Manage's checkbox and `focus-ring on|off`. A no-op when unchanged, like
     // SetClaudeSkill, so Manage can set its box on open without writing state.json. The bar draws or clears the
     // outlines on the state pulse Persist sends.

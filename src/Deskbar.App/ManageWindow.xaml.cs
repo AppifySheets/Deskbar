@@ -324,14 +324,32 @@ public partial class ManageWindow : Window
     {
         ClaudeTasks.IsEnabled = manager.State.ClaudeSkill;
         ClaudeTasks.IsChecked = manager.State.ClaudeTasksInEffect;
+        ShowClaudeResume();
     }
 
     // The app adds or removes the three task hooks from the state pulse this sends (ClaudeSkill.Sync, wired in App).
     // SetClaudeTasks ignores an unchanged value, so ShowClaudeTasks ticking the box writes nothing.
     void OnClaudeTasksToggled(object s, RoutedEventArgs e)
     {
-        if (!ClaudeTasks.IsEnabled) return;
-        manager.SetClaudeTasks(ClaudeTasks.IsChecked == true).TapError(Complain);
+        if (ClaudeTasks.IsEnabled) manager.SetClaudeTasks(ClaudeTasks.IsChecked == true).TapError(Complain);
+        ShowClaudeResume();
+    }
+
+    // "Resume the sessions of open tasks after a restart or a crash" (AppState.ClaudeResume) follows the tasks box the
+    // way that box follows the teaching: usable and showing the stored choice while sessions keep tasks, greyed and
+    // unticked while they do not (AppState.ClaudeResumeInEffect). Greyed first, so the untick is not taken as a choice.
+    void ShowClaudeResume()
+    {
+        ClaudeResume.IsEnabled = manager.State.ClaudeTasksInEffect;
+        ClaudeResume.IsChecked = manager.State.ClaudeResumeInEffect;
+    }
+
+    // ClaudeSessions reads the setting before every resume, so turning it off drops whatever was waiting its turn.
+    // SetClaudeResume ignores an unchanged value, so ShowClaudeResume ticking the box writes nothing.
+    void OnClaudeResumeToggled(object s, RoutedEventArgs e)
+    {
+        if (!ClaudeResume.IsEnabled) return;
+        manager.SetClaudeResume(ClaudeResume.IsChecked == true).TapError(Complain);
     }
 
     // The bar draws or clears the outlines on the next rebuild (FloatingBar.ShowFocusRings).

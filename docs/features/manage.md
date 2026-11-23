@@ -40,11 +40,11 @@ The Windows on the desktop section has the outline around the window you are in,
 
 ## From a script
 
-Some settings have a command: `see-through on|off`, `previous-workspace on|off`, `claude-skill off` and `claude-tasks on|off`. Manage itself deliberately has no command.
+Some settings have a command: `see-through on|off`, `previous-workspace on|off`, `claude-skill off`, `claude-tasks on|off` and `claude-resume on|off`. Manage itself deliberately has no command.
 
 ## With Claude sessions
 
-**Teach Claude Code about Deskbar** installs the skill and hooks that make the bar flash when a session needs you and send a session's links and windows to its own workspace. **Claude Code sessions keep their tasks in the task list**, under it, adds the hooks that tie each session to a task. See [Claude Code sessions](claude-sessions.md).
+**Teach Claude Code about Deskbar** installs the skill and hooks that make the bar flash when a session needs you and send a session's links and windows to its own workspace. **Claude Code sessions keep their tasks in the task list**, under it, adds the hooks that tie each session to a task, and **Resume the sessions of open tasks after a restart or a crash**, under that, wakes the session of an open task that is no longer running. See [Claude Code sessions](claude-sessions.md).
 
 ## Related
 
