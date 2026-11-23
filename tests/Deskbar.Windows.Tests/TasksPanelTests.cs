@@ -41,9 +41,13 @@ public class TasksPanelTests
     // A work area the full width of the screen: the shell is NOT holding the panel's strip.
     static readonly WindowRect Lost = Screen;
 
-    static BarStrip Docked(string edge = "right") => new(edge, Screen, Maybe<WindowRect>.None, Screen.Right - 150);
+    static BarStrip Docked(string edge = "right") => new(edge, Screen, Maybe<WindowRect>.None, Screen.Right - 150, Gone: false);
 
-    static BarStrip LetGo() => new(null, Screen, Maybe<WindowRect>.None, Screen.Right - 150);
+    // The bar went away (minimized or closed): its strip goes and the bar with it.
+    static BarStrip BarGone() => new(null, Screen, Maybe<WindowRect>.None, Screen.Right - 150, Gone: true);
+
+    // The bar let go of its strip but is still on screen, floating with its middle at `middleX`.
+    static BarStrip Floats(int middleX) => new(null, Screen, Maybe<WindowRect>.None, middleX, Gone: false);
 
     // One call the panel made on the shell, in the order it made them.
     sealed record Call(string Name, PanelEdge? Edge = null, WindowRect? On = null, int Px = 0)
@@ -199,14 +203,14 @@ public class TasksPanelTests
         rig.Close();
     });
 
-    // Review focus 5. The bar let its strip go (undocked, minimized, a display readjustment): the panel gives its own
-    // back and hides, still open as far as the user is concerned, and comes back on the next notice with an edge.
+    // Review focus 5. The bar went away (minimized, closed; BarStrip.Gone): the panel gives its strip back and hides,
+    // still open as far as the user is concerned, and comes back on the bar's next docked notice.
     [Fact]
-    public void A_bar_strip_that_goes_takes_the_panel_strip_with_it_and_brings_it_back() => StaThread.Run(() =>
+    public void A_bar_that_goes_away_hides_the_panel_and_its_next_dock_brings_it_back() => StaThread.Run(() =>
     {
         var rig = new Rig().Open();
 
-        rig.Bar.OnNext(LetGo());
+        rig.Bar.OnNext(BarGone());
         rig.Pump();
         Assert.Equal([Call.Undock], rig.Calls);
         Assert.False(rig.Window.IsVisible);
@@ -219,13 +223,36 @@ public class TasksPanelTests
         rig.Close();
     });
 
+    // The bar undocked and floats (BarStrip.Gone false): the panel stays on screen and docks by the floating rule, on
+    // the edge of the bar's screen nearer the bar's middle, as a fresh registration (the only app bar on that edge).
+    // Here the bar floats near the LEFT end of the screen, so the panel leaves the right edge it shared with the bar.
+    // And a bar floating near the right end gives the right edge.
+    [Fact]
+    public void A_floating_bar_notice_docks_the_panel_on_the_edge_nearer_the_bar() => StaThread.Run(() =>
+    {
+        var rig = new Rig().Open();
+
+        rig.Bar.OnNext(Floats(Screen.Left + 300));
+        rig.Pump();
+        Assert.Equal([Call.Undock, Call.Dock(PanelEdge.Left, 690)], rig.Calls);
+        Assert.True(rig.Window.IsVisible);
+        Assert.True(rig.Panel.IsShown);
+
+        rig.Calls.Clear();
+        rig.Bar.OnNext(Floats(Screen.Right - 300));
+        rig.Pump();
+        Assert.Equal([Call.Undock, Call.Dock(PanelEdge.Right, 690)], rig.Calls);
+        Assert.Contains(rig.Lines, line => line.Contains("(bar floats)") && !line.Contains("given back"));
+        rig.Close();
+    });
+
     // The user closing the panel while the bar's strip is gone (the bar minimized) is the user's word: the next notice
     // with an edge does not bring the panel back.
     [Fact]
     public void Hiding_while_the_bar_strip_is_gone_is_not_undone_by_the_next_notice() => StaThread.Run(() =>
     {
         var rig = new Rig().Open();
-        rig.Bar.OnNext(LetGo());
+        rig.Bar.OnNext(BarGone());
         rig.Pump();
 
         rig.Panel.Hide();
@@ -394,7 +421,7 @@ public class TasksPanelTests
         var rig = new Rig().Open();
 
         rig.Bar.OnNext(Docked("right"));
-        rig.Bar.OnNext(LetGo());
+        rig.Bar.OnNext(BarGone());
         rig.Bar.OnNext(Docked("left"));
         Assert.Empty(rig.Calls);
 
