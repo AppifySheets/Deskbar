@@ -251,6 +251,14 @@ page says "Sorry, we couldn't find that page": switch accounts, do not debug the
   window's AppUserModelID. Read that comment before replacing it with something cheaper.
 - **The band carries a dark rim** for the same reason the attention dot does: no palette is
   legible on artwork nobody chose (sky blue vanished on an Edge icon).
+- **The tasks window is a panel docked just inside the bar, never a floating window** (spec
+  `docs/superpowers/specs/2026-11-23-tasks-panel-design.md`). It is a second shell app bar, and it is always
+  registered AFTER the bar's, every time the bar registers, so the bar stays the outer strip (Explorer restarts
+  are the case that breaks it). It is pinned to every virtual desktop, topmost, a tool window, never tiled.
+  Its width is 460 DIP by default, 360 at the least and half the screen at the most; lines go slim below 620 and
+  the Matrix switch shows from 780. A floating bar gets the panel on its nearer screen edge, a minimized bar takes
+  it away, and a full-screen app makes it leave the topmost band. `AppState.TasksWindow` is ignored now. Do not
+  bring the floating mode back.
 - **Other programs drive the app through a named pipe, never by touching its state** (#180).
   The running copy owns state.json, the desktops and the window list, so a second process
   editing them would race it. `ControlPipeServer` listens CurrentUserOnly; the same exe started

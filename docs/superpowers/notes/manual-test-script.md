@@ -271,22 +271,24 @@ The task list at the bottom of the bar (spec `docs/superpowers/specs/2026-11-22-
     let go. `$ts task list` shows `important`, `urgent`, `quadrant` and `order` matching what you see, and
     `$ts task order <id> 2` and `$ts task flag <id> urgent on` move lines as a drag and a click do.
 
-## The tasks window
+## The tasks panel
 
-The tasks window (spec `docs/superpowers/specs/2026-11-22-tasks-board-design.md`, "The window" and "Comments").
+The tasks panel (spec `docs/superpowers/specs/2026-11-22-tasks-board-design.md`, "The window" and "Comments", and
+`docs/superpowers/specs/2026-11-23-tasks-panel-design.md`, which replaced the floating window). Steps 56 to 64 were
+written for the floating window and now describe the panel; 64a to 64k cover what is new.
 
 56. With three or fewer open tasks the button at the right end of the chip row reads "All tasks" ("All" on a narrow bar); with more, "+N more" ("+N"). Click it: a
-    window titled "Tasks" opens beside the bar (not over it), with a dark title bar, on the list and not on a form
-    (no box has the keyboard). It is in Alt+Tab and on the taskbar, and the bar lists it as a window with a checklist icon, which you can drag to a workspace's row.
+    full-height panel opens just inside the bar (not over it), on the list and not on a form
+    (no box has the keyboard). It has no title bar, is not in Alt+Tab or on the taskbar, and the bar does not list it.
 57. Groups read WAITING ON YOU, then the quadrants that have tasks (I to IV), a new task on top. The chips count each
     status. Click "Closed": only closed tasks show, the latest closed first, each with "Reopen"; click "Reopen" on
     one and it goes back to the open view. "Workspace: all" lists every workspace as its coloured chip, grouped;
     pick one, then "none", then "All workspaces".
-58. Click into another app: the window stays open. Resize it and move it to another screen, close it with its X,
-    then click "+N more": it comes back where you left it, same size. Quit and start Deskbar again: it still opens
-    there. Turn that screen off (or edit `TasksWindow` in state.json to an off-screen place): it opens beside the bar.
-59. Leave the window open, switch to another desktop and click "+N more": the window comes to this desktop rather
-    than taking you back. `$ts tasks-window hide` closes it, `$ts tasks-window show` opens or brings it forward.
+58. Click into another app: the panel stays open. Close it with the x in its toolbar, then click "+N more": it
+    comes back with the width you left it at. Quit and start Deskbar again: the width is kept (see 64e for the
+    open state). `TasksWindow` in state.json is ignored.
+59. Leave the panel open and switch to another desktop: it is there too, not moved. `$ts tasks-window hide` closes it,
+    `$ts tasks-window show` opens it.
 60. Click a task's comment count: its thread opens. Post a comment through the pipe with bold, italics, inline code,
     a link to https://deskbar.app and a two-item list: it shows formatted, by "you". Type a comment and press Enter:
     it appears under "you", the box empties and keeps the keyboard. Shift+Enter makes a new line instead. While you
@@ -304,8 +306,39 @@ The tasks window (spec `docs/superpowers/specs/2026-11-22-tasks-board-design.md`
 64. Click "Matrix": a 2 by 2 grid, URGENT and NOT URGENT across the top, IMPORTANT and NOT IMPORTANT down the side,
     I top left, II top right (drawn a little brighter), III bottom left, IV bottom right. A waiting task sits at the
     top of its own cell in orange. Drag a line into another cell, an empty one included: it takes that cell's flags.
-    Add twenty tasks to one cell: that cell scrolls, the others do not move. Close and reopen the window: still the
-    Matrix. `$ts tasks-window list` switches it back.
+    Add twenty tasks to one cell: that cell scrolls, the others do not move. Close and reopen the panel: still the
+    Matrix. `$ts tasks-window list` switches it back. The switch needs a panel 780 DIP wide (see 64c).
+
+64a. Open and close. Click "+N more" (or "All tasks"): the panel opens full height just inside the bar, and the
+    bar stays the outer strip. Click the same button: it closes. Open it again and click the x in the toolbar: it
+    closes. `$ts tasks-window show` and `$ts tasks-window hide` do the same. Maximize an app while it is open: the
+    app fills the space beside the bar and the panel, not under either.
+64b. Width. Drag the panel's inner edge (the one away from the bar). It starts at 460 DIP, stops at 360 on the narrow
+    side and at half the screen on the wide side. Let go and reopen it: the width is kept.
+64c. Layout by width. Drag the width across 620 DIP: below it the lines are slim, with age and assignee in the
+    tooltip and Close and Reopen in the "..." menu; at 620 and above they are the full lines. Drag across 780 DIP:
+    the List and Matrix switch is hidden below it and shows from it. Check the lines follow while you drag, not
+    only after you let go.
+64d. Workspaces. With the panel open, switch to each other virtual desktop: the panel is on every one, at the same
+    place and width, and it is not in Alt+Tab or on the taskbar. Tile a workspace: the panel is not tiled.
+64e. Restart Deskbar with the panel open (exit it from the tray, start it again): the panel comes back open at its
+    width. Close the panel and restart: it stays closed.
+64f. Restart Explorer: `taskkill /f /im explorer.exe`, then `start explorer`. After the taskbar is back, check the
+    bar is still the outer strip and the panel sits inside it, not between the bar and the screen edge, and that
+    maximized windows still leave room for both.
+64g. Minimize the bar (its minimize control): the panel goes away with it and the work area is the screen again.
+    Restore the bar: the panel comes back, still inside the bar.
+64h. Full-screen. Play a video full screen in a browser: neither the bar nor the panel is drawn over it. Leave full
+    screen: the panel is back on top, and nothing was left behind.
+64i. Search. Press Ctrl+F in the panel: the search box has the keyboard. Type two words from different parts of a
+    task (its title and its status line): the task stays; a word that matches nothing hides it. Esc clears the
+    box. Close and reopen the panel: the search is empty.
+64j. Claude working. With one task that has a live Claude session, one with an ended session and one note, click
+    the "Claude working N" chip: only the live one stays, N is 1, and its session square glows while Claude is
+    working. Click the chip again: all tasks are back. Reopen the panel: the filter is cleared.
+64k. Floating bar. Undock the bar so it floats, near the left edge of a screen: the panel opens on that edge, by the
+    bar. Move the bar to the right half: the panel takes the right edge. Dock the bar again: the panel docks inside
+    it.
 
 ## Claude sessions and their tasks
 

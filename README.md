@@ -444,13 +444,22 @@ The bottom of the bar carries a short task list, for the things you want to reme
 Type a note into the box at its top and press Enter, and it lands on the workspace you are on (or on
 none, or another one, by the chip under the box). Tick a note to close it, with six seconds to undo.
 Two small toggles on each line mark a task important or urgent, which sorts the list into Covey's four
-quadrants, and a line drags up or down to reorder it. "+N more" opens the tasks window, with every task,
-its comments, and a Matrix view of the four quadrants side by side.
+quadrants, and a line drags up or down to reorder it. "+N more" (or "All tasks") opens the tasks panel,
+with every task, its comments, and a Matrix view of the four quadrants side by side.
+The panel is a full-height strip docked just inside the bar, on every virtual desktop, and it pushes
+maximized windows aside as the bar does. Click the same button, or the x in the panel's toolbar, to close
+it. Drag its inner edge to change the width (460 to start, 360 at the least, half the screen at the most);
+Deskbar remembers the width and whether the panel was open. A search box (Ctrl+F, Esc clears it) finds
+tasks by every word you type, in titles, status lines and questions. The "Claude working" chip shows only the
+tasks whose Claude session is working right now. Below 620 DIP wide the lines go slim, and the List and
+Matrix switch appears from 780 DIP. A full-screen app makes the panel step back until you leave it.
 A script can add and change tasks with `deskbar.cmd task`, and every Claude Code session keeps a task of
 its own here: it joins the task its work continues or creates one, keeps a short status line on it, asks
 you through it (the task waits on you, in orange, with the question) and marks it done when it has
-finished: a done task gets a green tick, and every line in the tasks window shows its status. Only you close a task. Double-click a Claude task to go to its session, and pick "Start Claude
+finished: a done task gets a green tick, and every line in the tasks panel shows its status (a slim line in its tooltip). Only you close a task. Double-click a Claude task to go to its session, and pick "Start Claude
 on this" on a note's menu to hand it to a new Claude session.
+
+The tasks screencast shows the old floating window and needs filming again for the panel.
 
 More in [Tasks](docs/features/tasks.md).
 
@@ -458,7 +467,7 @@ More in [Tasks](docs/features/tasks.md).
 
 Weekly and monthly goals, after Covey's weekly planning: pick the few things that matter this week or
 this month, and let the tasks serve them. A task can belong to a goal, from its "..." menu in the tasks
-window. The tasks window can filter by goal, and a task's tooltip on the bar names its goal. For now
+panel. The tasks panel can filter by goal, and a task's tooltip on the bar names its goal. For now
 goals are added and changed with `deskbar.cmd goal`, and `goal list` shows how many of each goal's
 tasks are done (a monthly goal also counts the weekly goals that belong to it). A planner window is
 coming.
@@ -586,7 +595,7 @@ for 15 minutes is handed back to you and shows on the bar with Claude's last sta
 stopped with "ready to merge" without asking you is not left out of sight. It goes back to Claude by itself
 once its session works on it again. A task you assign to yourself stays yours.
 
-Double-click a task, on the bar or in the tasks window, to go to its session. You land on the task's
+Double-click a task, on the bar or in the tasks panel, to go to its session. You land on the task's
 workspace, and a background session's Windows Terminal window comes to the front, or opens attached to it
 (`claude attach`) when none is open; an ended session is resumed first. A VS Code session's window comes to
 the front instead. "Start Claude on this", right after Edit on a task's menu and as a button in its thread,
