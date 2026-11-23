@@ -3213,6 +3213,29 @@ public sealed class WorkspaceManager(
                 .Tap(() => { if (on) WorkspaceOf(window).Tap(workspace => RosterAdd(info, workspace.Id)); })
             : Result.Failure("Window no longer exists.");
 
+    // "Split <app> windows last" for one app, from a window's icon menu or `deskbar.cmd split-last` (AppState.SplitLastApps
+    // has Petre's words and the spec). Keyed on the window's process name, so ticking it on one VS Code window covers
+    // every VS Code window, now and after a restart. Refused for Deskbar's own windows, which are never tiles.
+    public Result SetSplitLast(WindowHandle window, bool on) =>
+        knownWindows.TryGetValue(window, out var info)
+            ? IsOurs(window)
+                ? Result.Failure("Deskbar's own windows are never tiles.")
+                : Result.Success().Tap(() => Persist(State with
+                {
+                    SplitLastApps = on
+                        ? [.. Without(State.SplitLastApps, info.ProcessName), info.ProcessName]
+                        : Without(State.SplitLastApps, info.ProcessName),
+                }))
+            : Result.Failure("Window no longer exists.");
+
+    // For the menu's check mark and for the Tiler (Tiler.SplitLast.cs).
+    public bool SplitsLast(string processName) =>
+        State.SplitLastApps.Any(p => p.Equals(processName, StringComparison.OrdinalIgnoreCase));
+
+    // The process name of a window the manager knows, for the Tiler's split-last rule. None for a window it does not.
+    public Maybe<string> ProcessNameOf(WindowHandle window) =>
+        knownWindows.TryGetValue(window, out var info) ? info.ProcessName : Maybe<string>.None;
+
     // For the menu's check mark.
     public bool RemembersWorkspace(string processName) =>
         PlacementMemory.RemembersWorkspace(processName, State);
