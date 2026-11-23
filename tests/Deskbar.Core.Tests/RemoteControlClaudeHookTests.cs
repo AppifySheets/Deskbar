@@ -446,10 +446,11 @@ public class RemoteControlClaudeHookTests
         Assert.Contains("Tasks board", Hooked(manager, "SessionStart", source: "compact"));
     }
 
-    // Petre's next message answers the session's ask: the task goes back to In progress, the question goes, the
-    // workspace's blink stops, and the session reads one line naming its task.
+    // Ruling 49: a prompt no longer settles a question. Any message counts as a prompt, including a /loop or scheduled
+    // check-in that is not the user answering, so the task keeps waiting and the blink stays; the one line the session
+    // reads names the question and says how to resolve it once it is settled.
     [Fact]
-    public void A_prompt_answers_a_waiting_task_and_reminds_the_session()
+    public void A_prompt_leaves_a_waiting_task_waiting_and_names_the_question()
     {
         var manager = Started();
         Editor(manager, 0x10, "TaskSpaces", "Deskbar");
@@ -460,12 +461,94 @@ public class RemoteControlClaudeHookTests
 
         var line = Hooked(manager, "UserPromptSubmit");
 
+        Assert.Equal(TaskStatus.WaitingOnYou, Titled("Tasks board").Status);
+        Assert.Equal("OK to merge?", Titled("Tasks board").Question.Value);
+        Assert.True(Blinks(manager, "Deskbar"));
+        Assert.Contains("OK to merge?", line);
+        Assert.Contains("task answered --session s1", line);
+        Assert.Single(line.Trim().Split('\n'));
+    }
+
+    // A long question is cut in the reminder, as titles are.
+    [Fact]
+    public void The_reminder_cuts_a_long_question()
+    {
+        var manager = Started();
+        Editor(manager, 0x10, "TaskSpaces", "Deskbar");
+        Said(manager, "s1", Repo, "new", "Tasks board");
+        Said(manager, "s1", Repo, "ask", new string('q', 400));
+
+        var line = Hooked(manager, "UserPromptSubmit");
+
+        Assert.DoesNotContain(new string('q', 81), line);
+        Assert.Contains("task answered --session s1", line);
+    }
+
+    // `task answered`: the session says the question is settled. The task goes back to In progress, the question goes
+    // and the workspace stops blinking.
+    [Fact]
+    public void Answered_resumes_the_task_and_clears_the_blink()
+    {
+        var manager = Started();
+        Editor(manager, 0x10, "TaskSpaces", "Deskbar");
+        StandOn(manager, "iam.ge");
+        Said(manager, "s1", Repo, "new", "Tasks board");
+        Said(manager, "s1", Repo, "ask", "OK to merge?");
+        Assert.True(Blinks(manager, "Deskbar"));
+
+        var reply = Said(manager, "s1", Repo, "answered");
+
+        Assert.Equal(ControlReply.Ok, reply.ExitCode);
         Assert.Equal(TaskStatus.InProgress, Titled("Tasks board").Status);
         Assert.True(Titled("Tasks board").Question.HasNoValue);
         Assert.False(Blinks(manager, "Deskbar"));
-        Assert.Contains("Tasks board", line);
-        Assert.Single(line.Trim().Split('\n'));
     }
+
+    // A task that does not wait is left as it is, and the command still succeeds: a session may run it needlessly.
+    [Fact]
+    public void Answered_on_a_task_that_is_not_waiting_is_a_successful_no_op()
+    {
+        var manager = Started();
+        Editor(manager, 0x10, "TaskSpaces", "Deskbar");
+        Said(manager, "s1", Repo, "new", "Tasks board");
+        Said(manager, "s1", Repo, "done");
+        var before = tasks.Board;
+
+        Assert.Equal(ControlReply.Ok, Said(manager, "s1", Repo, "answered").ExitCode);
+
+        Assert.Same(before, tasks.Board);
+        Assert.Equal(TaskStatus.Done, Titled("Tasks board").Status);
+    }
+
+    // Only the session's own task: another session's waiting task keeps waiting.
+    [Fact]
+    public void Answered_touches_only_the_sessions_own_task()
+    {
+        var manager = Started();
+        Editor(manager, 0x10, "TaskSpaces", "Deskbar");
+        Said(manager, "s1", Repo, "new", "Tasks board");
+        Said(manager, "s2", Repo, "new", "Store listing");
+        Said(manager, "s2", Repo, "ask", "Which price?");
+
+        Assert.Equal(ControlReply.Ok, Said(manager, "s1", Repo, "answered").ExitCode);
+
+        Assert.Equal(TaskStatus.WaitingOnYou, Titled("Store listing").Status);
+        Assert.Equal("Which price?", Titled("Store listing").Question.Value);
+    }
+
+    // Like the other own-task forms, it needs --session, and a session with no task is refused.
+    [Fact]
+    public void Answered_needs_a_session_with_a_task()
+    {
+        var manager = Started();
+
+        Assert.Equal(ControlReply.Failed, Said(manager, "s1", Repo, "answered").ExitCode);
+        Assert.Equal(ControlReply.Failed, Ran(manager, "task", "answered", "--from", Repo).ExitCode);
+    }
+
+    [Fact]
+    public void Help_lists_task_answered() =>
+        Assert.Contains(ControlUsage.All, c => c.Verb == "task" && c.Arguments.StartsWith("answered --session", StringComparison.Ordinal));
 
     // Petre closed the task: the session is told on its next prompt, and that new work needs a new task.
     [Fact]

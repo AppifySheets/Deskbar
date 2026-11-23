@@ -235,8 +235,12 @@ static class ClaudeSkill
         - Keep the status line current: `deskbar.cmd task status-line - --session <id>`, one short line on stdin
           ("waiting for CI on #398"), changed when what you are doing changes.
         - Ask through the task. When you need a decision from the user, run `deskbar.cmd task ask - --session <id>`
-          with the question on stdin: the task waits on the user with your question, and your workspace blinks. Their
-          next message to you answers it. A reply finishing is not an ask; do not ask for routine progress.
+          with the question on stdin: the task waits on the user with your question, and your workspace blinks. A reply
+          finishing is not an ask; do not ask for routine progress.
+        - Resolve it yourself. A message from the user does not settle your question: you do. When their reply settles
+          it, or you settle it yourself, run `deskbar.cmd task answered --session <id>` straight away. The task goes
+          back to in progress and the blink stops. Never leave a question open once it is resolved. While it is open,
+          each prompt's reminder from Deskbar names it.
         - Comment with detail: `deskbar.cmd task comment - --session <id>` with markdown on stdin, for what is worth
           keeping (findings, links, what is left to do). The status line stays short; the detail goes here.
         - Mark it done on a clear finish: `deskbar.cmd task done --session <id>`. Never close or delete a task: only

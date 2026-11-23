@@ -40,7 +40,11 @@ public static class SessionBriefing
     /// task, or that it has none yet.
     /// </summary>
     public static string Prompt(string sessionId, Maybe<TaskItem> own, Maybe<TaskItem> closed) =>
-        own.HasValue
+        // Ruling 49: a prompt never settles a question (a /loop or scheduled check-in is not the user answering), so while
+        // the task waits the reminder keeps it open and tells the session how to resolve it.
+        own is { HasValue: true, Value: { Status: TaskStatus.WaitingOnYou } waiting }
+            ? $"Deskbar: your question \"{Cut(waiting.Question.GetValueOrDefault(waiting.Title))}\" is still open, and your task waits on the user. If this message answers it, or the question no longer matters, run {Shim} task answered --session {sessionId}\n"
+        : own.HasValue
             ? $"Deskbar: your task is {Describe(own.Value)}. Keep its status line current: {Shim} task status-line - --session {sessionId}, the line on stdin (a heredoc).\n"
         : closed.HasValue
             ? $"Deskbar: the user closed your task \"{Cut(closed.Value.Title)}\". Work on this prompt needs a new task: {Shim} task new - --session {sessionId}, the title on stdin (a heredoc).\n"
@@ -79,6 +83,8 @@ public static class SessionBriefing
         "While you work on it:",
         $"  {Shim} task status-line - --session {sessionId}   (keep it current, one short line)",
         $"  {Shim} task ask - --session {sessionId}   (when you need a decision from the user; the task waits on them)",
+        $"  {Shim} task answered --session {sessionId}   (when the user's reply settles your question, or you settle it yourself; run it straight away)",
+        "A message from the user never resolves your question by itself: you do, with task answered. Never leave a question open once it is resolved.",
         $"  {Shim} task comment - --session {sessionId}   (detail worth keeping, in markdown: findings, links, what is left)",
         $"  {Shim} task done --session {sessionId}   (on a clear finish; only the user closes a task)",
         $"  {Shim} task later - --session {sessionId}   (the title of a follow-up note on your workspace)",

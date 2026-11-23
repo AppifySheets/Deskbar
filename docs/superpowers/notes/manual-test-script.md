@@ -327,8 +327,9 @@ Tasks 7 to 9). Needs Claude Code installed and both Claude boxes in Manage ticke
     until you send a message.
 71. Run `/clear` in a session that has a task, then send a message. Note whether it keeps its task (same session id)
     or is offered the list again (a new id); either is accepted, but record which.
-72. Send one `/loop` prompt in a session whose task waits on you: note whether the loop's prompt answers the task
-    (a known limitation: it cannot be told apart from your own message).
+72. Send one `/loop` prompt, then a plain message, in a session whose task waits on you: the task keeps waiting and
+    keeps blinking, and the session's reminder names the question and `task answered`. Reply to settle the question:
+    the session runs `task answered`, the task is in progress and the blink stops (Ruling 49).
 73. Run `claude -p "say ok"` in a workspace's folder from a terminal: no task appears and nothing changes on the
     list. Its finish still blinks the workspace, as before.
 74. Quit Deskbar and send a session a message: the reply comes at once, with nothing about Deskbar in it and no error.

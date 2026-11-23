@@ -75,7 +75,7 @@ public sealed partial class RemoteControl
         return args switch
         {
             // A session's form typed without its --session: it cannot know whose task is meant.
-            ["done"] or ["join", _] or ["new", _] or ["status-line", _] or ["ask", _] or ["later", _] =>
+            ["done"] or ["answered"] or ["join", _] or ["new", _] or ["status-line", _] or ["ask", _] or ["later", _] =>
                 ControlReply.Fail($"task {args[0]} is a session's form and needs --session <id>"),
             ["list"] => Success(service.Board.Pile().Select(Describe).ToArray()),
             // The closed tasks, which every other view leaves out, so one closed by mistake can be found and reopened.

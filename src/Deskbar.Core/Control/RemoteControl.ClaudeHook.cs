@@ -34,19 +34,20 @@ namespace Deskbar.Core.Control;
 //   SessionStart         the briefing (SessionBriefing.Start). A session that already has a task (a resumed one keeps its
 //                        id; a compacted one never ended) is named its task, live on it again; any other is offered the
 //                        tasks of its workspace (TaskBoard.Offered) and told how to join one or create its own.
-//   UserPromptSubmit     the user's next message: the session's task, when waiting on the user or Done, goes back to In
-//                        progress (TaskService.Answered) and its workspace stops blinking for it; then one line
-//                        reminding the session of its task (SessionBriefing.Prompt), or that the user closed it.
+//   UserPromptSubmit     the user's next message: the session's task, when Done, goes back to In progress
+//                        (TaskService.Answered). A task waiting on the user does NOT (Ruling 49): the session resolves it
+//                        with `task answered`. Then one line reminding the session of its task, its open question, or that
+//                        the user closed it (SessionBriefing.Prompt).
 //   SessionEnd           the session is marked ended; its task stays open ("no live session"). Nothing to read.
 //
 // The three task events do nothing at all, and print nothing, for a HEADLESS session (`claude -p`, SDK runs, scheduled
 // agents; ClaudeHookEvent's rule), when sessions do not keep tasks (AppState.ClaudeTasksInEffect: a hook entry left
 // behind by a crash must not act on a setting that is off), and in a copy with no task service.
 //
-// KNOWN LIMITATION (Ruling 33): a /loop check-in inside an attended session arrives as a UserPromptSubmit from that
-// attended session, with nothing in the JSON or the environment to tell it from the user's own message (unmeasured;
-// the probes found no such field). So a loop's prompt counts as the user answering: it moves the session's task from
-// Waiting on the user back to In progress. The live check is to send one /loop prompt and look at the hook's JSON.
+// FORMER LIMITATION (Ruling 33, gone with Ruling 49): a /loop check-in inside an attended session arrives as a
+// UserPromptSubmit that cannot be told from the user's own message, so it used to count as the user answering. Now a
+// prompt answers nothing: the session runs `task answered` when the question is settled, and a loop's prompt only
+// repeats the reminder that the question is open.
 public sealed partial class RemoteControl
 {
     ControlReply ClaudeHook(IReadOnlyList<string> rest) =>
@@ -99,13 +100,18 @@ public sealed partial class RemoteControl
         return SessionBriefing.Start(hook, own, offered);
     }
 
-    // UserPromptSubmit: the user answered. A task that was waiting on the user stops asking for them too: its
-    // workspace's blink and its windows' glow go (WorkspaceManager.ClearAttention), since the answer has come.
+    // UserPromptSubmit (Ruling 49): a prompt NO LONGER settles a question. A task Waiting on the user stays waiting, and
+    // its blink stays, until the session itself runs `task answered` (see SessionTask): the session knows best whether
+    // its question is settled, and a prompt is not proof. A /loop check-in or a scheduled prompt arrives as a
+    // UserPromptSubmit from the attended session, indistinguishable from the user's own message (Ruling 33's known
+    // limitation, which this removes: such a prompt can no longer answer anything). Instead the reminder line says the
+    // question is still open (SessionBriefing.Prompt).
+    //
+    // A DONE task going back to In progress on a message stays as it was: that is the user continuing the work, not a
+    // question being settled.
     string Prompted(TaskService service, string sessionId)
     {
-        var waiting = service.Board.TaskOf(sessionId).Where(t => t.Status == TaskStatus.WaitingOnYou);
-        service.Answered(sessionId);
-        waiting.Bind(t => t.WorkspaceId).Tap(w => manager.ClearAttention(w));
+        service.Board.TaskOf(sessionId).Where(t => t.Status == TaskStatus.Done).Tap(_ => service.Answered(sessionId));
         var own = service.Board.TaskOf(sessionId);
         return SessionBriefing.Prompt(sessionId, own, own.HasValue ? Maybe<TaskItem>.None : service.Board.ClosedTaskOf(sessionId));
     }
@@ -123,6 +129,7 @@ public sealed partial class RemoteControl
     //                                           shows the session's folder, or on none when no window does
     //   task status-line <text> --session <sid> the short line under the title ("waiting for CI on #398")
     //   task ask <question> --session <sid>     waiting on the user with the question, and asks for them as `attention`
+    //   task answered --session <sid>           the session's question is settled: back to In progress, the blink stops
     //   task done --session <sid>               the session's clear finish; only the user closes
     //   task comment <markdown> --session <sid> a comment on the session's own task, signed by the session
     //   task later <title> --session <sid>      a Backlog note on the caller's workspace, a follow-up for later
@@ -147,10 +154,22 @@ public sealed partial class RemoteControl
             ["ask", var question] => Changed(Own().Bind(t => service.Ask(t.Id, question).Map(() => t))
                 .Tap(_ => Attention(folder))),
             ["done"] => Changed(Own().Bind(t => service.MarkDone(t.Id).Map(() => t))),
+            // Ruling 49: the session says its question is settled (the user's reply answered it, or the session settled it
+            // itself). Waiting on you goes back to In progress, the question goes and the workspace's blink and glow stop.
+            // A task that is not waiting is left alone and the command still succeeds: a session may run it needlessly.
+            ["answered"] => Changed(Own().Tap(t => Resolve(service, t, session))),
             ["comment", var markdown] => Changed(Own().Bind(t => service.Comment(t.Id, session, markdown).Map(() => t))),
             ["later", var title] => Changed(service.AddNote(title, Here())),
             _ => ControlReply.Fail($"Wrong arguments for a session's task form.\n{TaskUsage()}"),
         };
+    }
+
+    // `task answered`: only a WAITING task is touched (Answered would also resume a Done one, which is not a question).
+    void Resolve(TaskService service, TaskItem task, string session)
+    {
+        if (task.Status != TaskStatus.WaitingOnYou) return;
+        service.Answered(session);
+        task.WorkspaceId.Tap(w => manager.ClearAttention(w));
     }
 
     // `--session <id>` may stand anywhere among a `task` command's words (the client's --from is already off the end).
