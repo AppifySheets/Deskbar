@@ -174,6 +174,7 @@ public sealed partial class RemoteControl(WorkspaceManager manager, Func<bool, R
         ("full-screen", [var mode]) => FullScreen(mode),
         ("claude-skill", [var onOff]) => ClaudeSkill(onOff),
         ("claude-tasks", [var onOff]) => ClaudeTasks(onOff),
+        ("claude-resume", [var onOff]) => ClaudeResume(onOff),
         ("focus-ring", [var onOff]) => FocusRing(onOff),
         ("see-through", [var onOff]) => SeeThrough(onOff),
         ("previous-workspace", [var onOff]) => PreviousWorkspace(onOff),

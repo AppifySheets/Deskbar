@@ -200,4 +200,21 @@ public sealed partial class RemoteControl
         claudeTasks = manager.State.ClaudeTasks ? "on" : "off",
         inEffect = manager.State.ClaudeTasksInEffect,
     };
+
+    // Whether the sessions of open tasks are resumed when they stop running (AppState.ClaudeResume), the remote twin of
+    // Manage's "Resume the sessions of open tasks after a restart or a crash". Like claude-tasks, the reply says whether it
+    // is in effect, since it is off while sessions do not keep tasks at all.
+    ControlReply ClaudeResume(string onOff) =>
+        onOff.ToLowerInvariant() switch
+        {
+            "on" or "true" or "yes" => Reply(manager.SetClaudeResume(true), DescribeClaudeResume),
+            "off" or "false" or "no" => Reply(manager.SetClaudeResume(false), DescribeClaudeResume),
+            _ => ControlReply.Fail(ControlUsage.LineFor("claude-resume")),
+        };
+
+    object DescribeClaudeResume() => new
+    {
+        claudeResume = manager.State.ClaudeResume ? "on" : "off",
+        inEffect = manager.State.ClaudeResumeInEffect,
+    };
 }

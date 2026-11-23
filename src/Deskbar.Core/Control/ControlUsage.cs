@@ -208,6 +208,10 @@ public static class ControlUsage
                 "Manage's \"Claude Code sessions keep their tasks in the task list\" setting: keep Deskbar's SessionStart,\n"
                 + "      UserPromptSubmit and SessionEnd hooks in ~/.claude/settings.json, or remove them (off while\n"
                 + "      claude-skill is off)"),
+            new("claude-resume", "on|off",
+                "Manage's \"Resume the sessions of open tasks after a restart or a crash\" setting: wake an open task's Claude\n"
+                + "      session with claude --bg --resume when claude agents no longer lists it, or leave it ended (off while\n"
+                + "      claude-tasks is off)"),
             new("focus-ring", "on|off",
                 "Outline the focused window in its workspace's colour, and the window in front on each other screen in dim white"),
             new("see-through", "on|off",

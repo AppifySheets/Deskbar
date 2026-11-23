@@ -70,7 +70,7 @@ The Microsoft Store copy also puts `deskbar` on your PATH, so `deskbar windows` 
 
 ## With Claude sessions
 
-Deskbar's Claude Code skill teaches every session on the machine to open links with `open`, start programs with `start` and move the windows it opens with `move --no-follow`, so they land in the session's own workspace. Its hooks run `%APPDATA%\Deskbar\claude-hook.cmd` when a session finishes a reply or waits for a permission, and `claude-task-hook.cmd` when a session starts, gets a message or ends; both hand the hook's details to `deskbar.cmd claude-hook`, which is for the hooks rather than for scripts. `claude-skill off` and `claude-tasks on|off` set the two settings. See [Claude Code sessions](claude-sessions.md).
+Deskbar's Claude Code skill teaches every session on the machine to open links with `open`, start programs with `start` and move the windows it opens with `move --no-follow`, so they land in the session's own workspace. Its hooks run `%APPDATA%\Deskbar\claude-hook.cmd` when a session finishes a reply or waits for a permission, and `claude-task-hook.cmd` when a session starts, gets a message or ends; both hand the hook's details to `deskbar.cmd claude-hook`, which is for the hooks rather than for scripts. `claude-skill off`, `claude-tasks on|off` and `claude-resume on|off` set the three settings. See [Claude Code sessions](claude-sessions.md).
 
 ## Related
 

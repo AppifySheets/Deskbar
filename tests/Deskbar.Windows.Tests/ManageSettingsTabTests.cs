@@ -459,6 +459,56 @@ public class ManageSettingsTabTests
         window.Close();
     });
 
+    // "Resume the sessions of open tasks after a restart or a crash" (AppState.ClaudeResume) sits under the tasks box and
+    // follows it the way the tasks box follows the teaching: usable only while sessions keep tasks, unticked while they
+    // do not, and the stored choice kept, so ticking the tasks box again brings it back as it was.
+    [Fact]
+    public void The_claude_resume_box_follows_the_claude_tasks_box() => StaThread.Run(() =>
+    {
+        var manager = Built(AppState.Empty);
+        var window = new ManageWindow(manager, compatibilityMode: false);
+        Assert.True(Box(window, "ClaudeResume").IsChecked);
+        Assert.True(Box(window, "ClaudeResume").IsEnabled);
+
+        Box(window, "ClaudeResume").IsChecked = false;
+        Assert.False(manager.State.ClaudeResume);
+        Box(window, "ClaudeResume").IsChecked = true;
+        Assert.True(manager.State.ClaudeResume);
+
+        Box(window, "ClaudeTasks").IsChecked = false;
+        Assert.False(Box(window, "ClaudeResume").IsEnabled);
+        Assert.False(Box(window, "ClaudeResume").IsChecked);
+        Assert.True(manager.State.ClaudeResume);
+
+        Box(window, "ClaudeTasks").IsChecked = true;
+        Assert.True(Box(window, "ClaudeResume").IsEnabled);
+        Assert.True(Box(window, "ClaudeResume").IsChecked);
+
+        // The teaching off takes the tasks off, and so the resume too.
+        Box(window, "ClaudeSkill").IsChecked = false;
+        Assert.False(Box(window, "ClaudeResume").IsEnabled);
+        Assert.False(Box(window, "ClaudeResume").IsChecked);
+        Assert.True(manager.State.ClaudeResume);
+
+        window.Close();
+    });
+
+    // Opened with the resume off: unticked but usable, and opening writes nothing.
+    [Fact]
+    public void With_resume_off_the_claude_resume_box_opens_unticked() => StaThread.Run(() =>
+    {
+        var manager = Built(AppState.Empty with { NoClaudeResume = true });
+        var pulses = 0;
+        using var _ = manager.StateChanged.Subscribe(_ => pulses++);
+
+        var window = new ManageWindow(manager, compatibilityMode: false);
+
+        Assert.True(Box(window, "ClaudeResume").IsEnabled);
+        Assert.False(Box(window, "ClaudeResume").IsChecked);
+        Assert.Equal(0, pulses);
+        window.Close();
+    });
+
     // Reports Available and off, and refuses to enable, as the startup task does once the user has turned
     // it off in Settings after the window read it.
     sealed class FailingStartupSwitch : IStartupSwitch

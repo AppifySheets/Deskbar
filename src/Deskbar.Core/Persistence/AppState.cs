@@ -314,6 +314,21 @@ public sealed record AppState(
     // Deskbar" off turns them off too. The choice above is kept, so turning the teaching back on brings them back.
     [JsonIgnore] public bool ClaudeTasksInEffect => ClaudeSkill && ClaudeTasks;
 
+    // Whether Deskbar resumes the Claude Code sessions of open tasks that are no longer running (ClaudeSessions in the
+    // app; design docs/superpowers/specs/2026-11-23-tasks-open-claude-sessions-design.md, "Keeping open tasks running"
+    // and "The setting"): after a reboot, a crash or a closed VS Code window, `claude --bg --resume` brings each back.
+    // The spec asks for a switch that turns the automatic resume off without turning off the rest of the feature, so
+    // the board still follows Claude's list of live sessions and unknown sessions still get tasks. On by default, and
+    // stored as its NEGATION for the reason NoClaudeSkill is: every existing state.json lacks the key and reads false.
+    public bool NoClaudeResume { get; init; }
+
+    // The stored choice, what Manage's box and `claude-resume on|off` set. Not stored.
+    [JsonIgnore] public bool ClaudeResume => !NoClaudeResume;
+
+    // What actually happens: resuming is part of the task feature, so it only runs while that is in effect. The choice
+    // above is kept, so turning the tasks back on brings the resume back as it was.
+    [JsonIgnore] public bool ClaudeResumeInEffect => ClaudeTasksInEffect && ClaudeResume;
+
     // Whether the focused window, and the window in front on each other screen, get an outline on the screen itself
     // (FocusRings in Core, WindowRings in the app). Petre: "can you give each active window a ring, same in color as
     // in the bar?", then "go with proposed", where the proposal was on by default with a box in Manage. Stored as its

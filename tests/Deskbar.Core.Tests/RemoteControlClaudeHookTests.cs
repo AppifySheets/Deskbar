@@ -337,6 +337,31 @@ public class RemoteControlClaudeHookTests
         Assert.Contains(ControlUsage.All, c => c.Verb == "claude-hook");
     }
 
+    // The automatic resume of open tasks' sessions (AppState.ClaudeResume; spec 2026-11-23-tasks-open-claude-sessions,
+    // "The setting"): on by default, `claude-resume` is the remote twin of Manage's box, and it is in effect only while
+    // sessions keep tasks at all, which keeps the stored choice when the tasks go off and come back.
+    [Fact]
+    public void Claude_resume_turns_the_setting_off_and_on()
+    {
+        var manager = Started();
+        Assert.True(manager.State.ClaudeResume);
+        Assert.True(manager.State.ClaudeResumeInEffect);
+
+        Assert.Equal(ControlReply.Ok, Run(manager, "claude-resume", "off").ExitCode);
+        Assert.False(manager.State.ClaudeResume);
+        Assert.Equal(ControlReply.Ok, Run(manager, "claude-resume", "on").ExitCode);
+        Assert.True(manager.State.ClaudeResume);
+        Assert.Equal(ControlReply.Failed, Run(manager, "claude-resume", "maybe").ExitCode);
+
+        Assert.True(manager.SetClaudeTasks(false).IsSuccess);
+        Assert.False(manager.State.ClaudeResumeInEffect);
+        Assert.True(manager.State.ClaudeResume);
+        Assert.True(manager.SetClaudeTasks(true).IsSuccess);
+        Assert.True(manager.State.ClaudeResumeInEffect);
+
+        Assert.Contains(ControlUsage.All, c => c.Verb == "claude-resume");
+    }
+
     // --- sessions join or create a task (plan Task 8) --------------------------------------------
     //
     // The hooks with a real TaskService behind them, and the session-facing `task` forms the briefing tells a session

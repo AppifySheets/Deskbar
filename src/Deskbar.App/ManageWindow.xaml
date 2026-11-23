@@ -81,6 +81,18 @@
                         </CheckBox>
                         <TextBlock TextWrapping="Wrap" Margin="40,2,0,0" Opacity="0.75"
                                    Text="Adds three more hooks, so each session joins or starts a task, keeps its status current and asks you through it."/>
+                        <!-- Resuming the sessions of open tasks (AppState.ClaudeResume, ClaudeSessions; design
+                             docs/superpowers/specs/2026-11-23-tasks-open-claude-sessions-design.md, "Keeping open tasks
+                             running" and "The setting"). The spec asks for a switch that turns the automatic resume off
+                             without turning off the rest of the feature, so it sits under the tasks box and, like that box
+                             under the teaching, is greyed and unticked while the tasks box is. The line under it is the
+                             retention note the spec puts "beside the setting": an ended session can only be resumed while
+                             Claude Code still keeps its transcript, and Deskbar never changes that setting itself. -->
+                        <CheckBox x:Name="ClaudeResume" Margin="40,6,0,0" Checked="OnClaudeResumeToggled" Unchecked="OnClaudeResumeToggled">
+                            <TextBlock TextWrapping="Wrap" Text="Resume the sessions of open tasks after a restart or a crash"/>
+                        </CheckBox>
+                        <TextBlock TextWrapping="Wrap" Margin="60,2,0,0" Opacity="0.75"
+                                   Text="Claude Code keeps sessions for 30 days; raise cleanupPeriodDays in ~/.claude/settings.json to keep them longer"/>
 
                         <!-- SECTION 2: THE BAR. -->
                         <TextBlock Text="The bar" FontSize="15" FontWeight="SemiBold" Margin="0,20,0,6"/>
