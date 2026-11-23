@@ -27,6 +27,11 @@ namespace Deskbar.Core.Tiling;
 // screen is locked the window splits the largest unlocked tile of another screen, and only when nothing anywhere is
 // unlocked is the lock ignored for that one window.
 //
+// Since 2026-11-23 (docs/superpowers/specs/2026-11-23-split-recent-app-windows-last-design.md) a PROTECTED tile is
+// treated like a locked one, but softer: the three latest windows of an app marked "split last" (VS Code) are never the
+// tile last used that gets split, and they send the window to another screen when every tile here is protected or
+// locked; they are split only when no free tile is left anywhere, the oldest first (Tiler.SplitLast.cs).
+//
 // "Last used" is the order windows were activated in, kept for every window and filtered when a target is picked:
 // a new window usually activates itself BEFORE it joins the board, and once it has joined it is the last-used tile
 // like any other. Activations Windows hands out by itself do not count: when a tile closes or is minimized,
@@ -236,12 +241,16 @@ public sealed partial class Tiler
         WindowHandle window, int target, Maybe<WindowHandle> lastUsed, bool aimed)
     {
         var here = board.On(target);
+        var guarded = ProtectedAmong(board);
         var blocked = here.Count == 0
             ? aside.Any(w => surface.ScreenOf(w) == target) ? "shows only a maximized window" : null
-            : here.Any(locked.Contains) && here.All(w => locked.Contains(w) || surface.IsMaximized(w)) ? "has every tile locked" : null;
+            : here.Any(w => locked.Contains(w) || guarded.Contains(w))
+              && here.All(w => locked.Contains(w) || guarded.Contains(w) || surface.IsMaximized(w))
+                ? here.Any(guarded.Contains) ? "has no free tile (protected or locked)" : "has every tile locked"
+                : null;
         if (aimed || blocked is null)
             return Split(workspace, screens, board, window, target, lastUsed);
-        return UnlockedElsewhere(workspace, screens, board, target).Match(
+        return FreeElsewhere(workspace, screens, board, target, guarded).Match(
             other =>
             {
                 trace?.Invoke($"tile: {workspace.Name}: {window.Value:X} arrived, screen {target} {blocked}, it goes to screen {other}");
@@ -250,24 +259,26 @@ public sealed partial class Tiler
             () => Split(workspace, screens, board, window, target, lastUsed));
     }
 
-    // The other screen whose largest unlocked tile is the largest, in pixels. Maximized tiles (still restoring) do not
-    // count, as TileArrival never splits them either.
-    Maybe<int> UnlockedElsewhere(Workspace workspace, IReadOnlyDictionary<int, TileScreen> screens, TileBoard board, int except) =>
+    // The other screen whose largest FREE tile is the largest, in pixels: not locked, not protected (Tiler.SplitLast.cs),
+    // not maximized (still restoring; TileArrival never splits those either).
+    Maybe<int> FreeElsewhere(Workspace workspace, IReadOnlyDictionary<int, TileScreen> screens, TileBoard board, int except,
+        IReadOnlySet<WindowHandle> guarded) =>
         screens.Values
             .Where(s => s.Number != except)
-            .Select(s => (s.Number, Area: LargestUnlockedArea(workspace, s, board.On(s.Number))))
+            .Select(s => (s.Number, Area: LargestFreeArea(workspace, s, board.On(s.Number), guarded)))
             .Where(c => c.Area.HasValue)
             .OrderByDescending(c => c.Area.Value)
             .ThenBy(c => c.Number)
             .Select(c => c.Number)
             .TryFirst();
 
-    Maybe<long> LargestUnlockedArea(Workspace workspace, TileScreen screen, IReadOnlyList<WindowHandle> order)
+    Maybe<long> LargestFreeArea(Workspace workspace, TileScreen screen, IReadOnlyList<WindowHandle> order,
+        IReadOnlySet<WindowHandle> guarded)
     {
         if (order.Count == 0) return Maybe<long>.None;
         var slots = SlotsOf(screen, order, ShownLayout(workspace, screen, order.Count));
         var areas = order
-            .Where(w => !locked.Contains(w) && !surface.IsMaximized(w) && slots.ContainsKey(w))
+            .Where(w => !locked.Contains(w) && !guarded.Contains(w) && !surface.IsMaximized(w) && slots.ContainsKey(w))
             .Select(w => (long)slots[w].Width * slots[w].Height)
             .ToList();
         return areas.Count > 0 ? areas.Max() : Maybe<long>.None;
@@ -322,7 +333,10 @@ public sealed partial class Tiler
         // Nor are its locked tiles (Tiler.Lock.cs): that is what a lock is for. When every tile here is skipped,
         // Choose ignores the skip, because a window has to go somewhere.
         var skipped = order.Where(surface.IsMaximized).Concat(LockedAmong(order)).ToHashSet();
-        return TileArrival.Choose(order, layout, order.Select(w => slots[w]).ToList(), lastUsed, skipped).Match(
+        // The three latest windows of a split-last app are avoided rather than skipped (Tiler.SplitLast.cs): split only
+        // when no tile here is free, the oldest of them first.
+        var guarded = ProtectedAmong(board).Where(w => !skipped.Contains(w)).ToHashSet();
+        return TileArrival.Choose(order, layout, order.Select(w => slots[w]).ToList(), lastUsed, skipped, guarded, AgeOf).Match(
             split =>
             {
                 var (next, splitLayout) = TileArrange.Drop(order, layout, window, split.Target, split.Side);
@@ -335,7 +349,7 @@ public sealed partial class Tiler
                     return board.Join(number, window);
                 }
                 StoreLayout(workspace, KeyOf(screen), splitLayout)
-                    .Tap(() => trace?.Invoke($"tile: {workspace.Name}: {window.Value:X} arrived on screen {number}, split {split.Target.Value:X} {split.Side} ({Why(split, lastUsed, locked)}), sizes {Show(splitLayout)}"))
+                    .Tap(() => trace?.Invoke($"tile: {workspace.Name}: {window.Value:X} arrived on screen {number}, split {split.Target.Value:X} {split.Side} ({Why(split, lastUsed, locked, guarded)}), sizes {Show(splitLayout)}"))
                     .TapError(error => trace?.Invoke($"tile: {workspace.Name}: {window.Value:X} arrived on screen {number}, storing the split failed: {error}"));
                 return into;
             },
@@ -347,12 +361,17 @@ public sealed partial class Tiler
     }
 
     // Which rule chose the split's tile, for the trace.
-    static string Why(TileSplit split, Maybe<WindowHandle> lastUsed, IReadOnlySet<WindowHandle> locked) =>
-        lastUsed.HasValue
-            ? split.Target == lastUsed.Value
-                ? locked.Contains(split.Target) ? "the tile last used, every tile here is locked" : "the tile last used"
-                : locked.Contains(lastUsed.Value)
-                    ? $"the largest unlocked tile, the tile last used ({lastUsed.Value.Value:X}) is locked"
-                    : $"the largest tile, the tile last used ({lastUsed.Value.Value:X}) is too small to split"
-            : "the largest tile, no tile last used";
+    static string Why(TileSplit split, Maybe<WindowHandle> lastUsed, IReadOnlySet<WindowHandle> locked,
+        IReadOnlySet<WindowHandle> guarded) =>
+        guarded.Contains(split.Target)
+            ? "the oldest protected tile, no tile here is free"
+            : lastUsed.HasValue
+                ? split.Target == lastUsed.Value
+                    ? locked.Contains(split.Target) ? "the tile last used, every tile here is locked" : "the tile last used"
+                    : guarded.Contains(lastUsed.Value)
+                        ? $"the largest free tile, the tile last used ({lastUsed.Value.Value:X}) is protected"
+                        : locked.Contains(lastUsed.Value)
+                            ? $"the largest unlocked tile, the tile last used ({lastUsed.Value.Value:X}) is locked"
+                            : $"the largest tile, the tile last used ({lastUsed.Value.Value:X}) is too small to split"
+                : "the largest tile, no tile last used";
 }

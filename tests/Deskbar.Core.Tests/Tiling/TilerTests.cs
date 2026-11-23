@@ -46,7 +46,9 @@ public sealed partial class TilerTests : IDisposable
 
     static WindowHandle W(int n) => new(n);
 
-    static WindowInfo Info(WindowHandle h) => new(h, 1000 + (int)h.Value, "app", null, $"window {h.Value}", null);
+    // Windows numbered 100 or more belong to "Code" (TilerTests.SplitLast.cs, VS Code windows); every other to "app".
+    static WindowInfo Info(WindowHandle h) =>
+        new(h, 1000 + (int)h.Value, h.Value >= 100 ? "Code" : "app", null, $"window {h.Value}", null);
 
     // A window that already exists, on `workspace`'s desktop, at a position that orders it by its number
     // (TileBoard.FirstFill sorts by Left), and nowhere near a slot so the first tidy-up has to move it.

@@ -1,4 +1,4 @@
-﻿using Deskbar.Core.Domain;
+using Deskbar.Core.Domain;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Deskbar.Core.Rules;
@@ -187,6 +187,19 @@ public sealed record AppState(
     // picks up from a drag. A state.json written before this key loads with it empty, so memory is off for
     // every app until one is opted in.
     public IReadOnlyList<string> RememberedApps { get; init; } = [];
+
+    // The apps whose three most recently used windows a new window splits LAST, by process name ("Code"), opted in
+    // from a window's icon menu ("Split <app> windows last") or `deskbar.cmd split-last`. Spec
+    // docs/superpowers/specs/2026-11-23-split-recent-app-windows-last-design.md.
+    //
+    // Petre, 2026-11-23: "i think what i need is that the vscode windows are not affected, or at least not the current
+    // one when oepning a new browser or other window", "so i don't get interrupted", "maybe the last few vscode windows
+    // that were active, last 3". The Tiler (Tiler.SplitLast.cs) still splits the tile last used, unless it is one of
+    // those three; then another tile gives the room, and they are split only when nothing else is free.
+    //
+    // Process names, like RememberedApps and for the same reason: the setting is about an app, survives restarts, and
+    // cannot attach to an unrelated window the way a recycled handle could. Empty by default.
+    public IReadOnlyList<string> SplitLastApps { get; init; } = [];
 
     // The order Petre arranged the bar's icons in, as a sequence of app identities (exe path plus
     // arguments). Petre: "go with the first-seen order, with the possibility of dragging those icons."
