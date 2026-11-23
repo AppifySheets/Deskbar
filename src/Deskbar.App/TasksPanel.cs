@@ -31,8 +31,9 @@ namespace Deskbar.App;
 // `pending` holds the newest notice not yet answered, and only the notice that finds it empty queues an answer.
 //
 // WHAT "SHOWN" MEANS. IsShown and Shown are the USER's word: open since Show, closed since Hide. The panel can be open
-// and still not on screen, while the bar's strip is gone (the bar minimized, undocked, mid-readjustment) or before
-// the bar has docked at all; it comes back by itself on the next notice with an edge. Shutdown is not the user
+// and still not on screen, while the bar itself is gone (minimized or closed, BarStrip.Gone) or before the bar has
+// docked at all; it comes back by itself on the next notice with an edge. A bar that only floats (undocked) keeps the
+// panel on screen, docked by the floating rule (see Answer). Shutdown is not the user
 // closing it either, so the saved state still says "open" and the next start opens it again.
 //
 // THE SEAMS, as ScreenStrip has them, so no test registers a real app bar (that reserves a strip of the real screen
@@ -90,7 +91,7 @@ internal sealed class TasksPanel : IDisposable
     BarStrip? pending;
 
     // Where the panel docks while the bar's strip stands, and the bar's edge for the trace; null before the bar's first
-    // notice and while its strip is gone.
+    // notice and while the bar is gone (minimized or closed). `barEdge` is "floating" while the bar floats.
     PanelPlacement? placement;
     string? barEdge;
 
@@ -285,29 +286,37 @@ internal sealed class TasksPanel : IDisposable
             window.Dispatcher.BeginInvoke(new Action(Answer));
     }
 
-    // The answer, on the dispatcher, to the newest notice. With an edge: the bar's app bar has just registered (or moved
-    // to another edge or screen), so the panel, if open, registers afresh behind it. Without one: the bar let its strip
-    // go, so the panel gives its own back and hides, still open, until the next notice with an edge.
+    // The answer, on the dispatcher, to the newest notice. Three kinds (BarStrip.Gone):
+    //   * with an edge: the bar's app bar has just registered (or moved to another edge or screen), so the panel, if
+    //     open, registers afresh behind it;
+    //   * no edge, Gone: the bar went away (minimized or closed), so the panel gives its strip back and hides, still
+    //     open, until the next notice with an edge;
+    //   * no edge, not Gone: the bar floats (undocked, or let go by the display readjustment, which docks again right
+    //     after). The panel docks by the floating rule, TasksPanelPlacement.For with no edge: the edge of the bar's
+    //     screen nearer the bar's middle, as the only app bar there. A fresh registration all the same, so if the bar
+    //     docks on that edge afterwards, its own notice puts the panel behind it again. A floating bar dragged elsewhere
+    //     sends no notice, so the panel stays on the edge it took when the bar undocked: accepted, Petre always docks
+    //     the bar (the coordinator's ruling on the task 5 report).
     void Answer()
     {
         if (Interlocked.Exchange(ref pending, null) is not { } notice || shutDown) return;
-        barEdge = notice.Edge;
-        if (notice.Edge is null)
+        barEdge = notice.Edge ?? (notice.Gone ? null : "floating");
+        if (notice is { Edge: null, Gone: true })
         {
             placement = null;
-            if (docked) GiveBack("the bar let its strip go");
+            if (docked) GiveBack("the bar went away");
             return;
         }
 
         placement = placementOf(notice);
         awaitingBar = false;
-        if (wanted) _ = Dock(fresh: true, "bar registered");
+        if (wanted) _ = Dock(fresh: true, notice.Edge is null ? "bar floats" : "bar registered");
     }
 
     // Reserves the panel's strip and puts the window in what the shell granted. `fresh` gives the registration up
     // first, so the dock registers anew and is newer than the bar's (every path that follows a registration of the
     // bar's, and the guard); otherwise the registration stays and the shell is only asked again (a width change, the
-    // shell's position notice). Nothing to do before the bar's first notice, or while its strip is gone.
+    // shell's position notice). Nothing to do before the bar's first notice, or while the bar is gone.
     Result Dock(bool fresh, string reason)
     {
         if (docking || shutDown || placement is not { } at) return Result.Success();

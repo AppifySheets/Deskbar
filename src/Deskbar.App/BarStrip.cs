@@ -18,4 +18,9 @@ namespace Deskbar.App;
 //              right half), None otherwise.
 //   MiddleX    the bar window's horizontal middle, from GetWindowRect, read after the window was moved into the strip
 //              the shell granted (or, for a let-go, after it went back to floating).
-internal sealed record BarStrip(string? Edge, WindowRect Screen, Maybe<WindowRect> SeamRight, int MiddleX);
+//   Gone       for a let-go only: whether the bar itself went away (minimized behind its taskbar button, or closed),
+//              rather than just letting go of its strip. True: the panel gives its strip back and hides until the bar
+//              docks again. False: the bar is still on screen, floating (UndockFromEdge), or about to dock again (the
+//              display-layout readjustment lets go first); the panel docks by the floating rule, on the edge of the
+//              bar's screen nearer MiddleX (TasksPanelPlacement.For with no edge). Always false on a docked notice.
+internal sealed record BarStrip(string? Edge, WindowRect Screen, Maybe<WindowRect> SeamRight, int MiddleX, bool Gone);
