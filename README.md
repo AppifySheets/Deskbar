@@ -584,8 +584,9 @@ opens a window on it. It asks first when the task already has a session running.
 never told to trust puts Claude's message in the thread and offers a terminal there so you can accept the
 trust prompt yourself. A task's thread lists its sessions, newest first, as working, idle, ended or expired,
 each but the expired ones with Open. `deskbar.cmd task go|start|open-session` do the same from a script.
-The window opens in Deskbar's own "Deskbar Claude" Windows Terminal profile (Dark Modern colours, installed
-while the tasks box is ticked and removed when either Claude box is unticked), and closing it leaves the
+The window opens in Deskbar's own "Deskbar Claude" Windows Terminal profile (Dark Modern colours, Claude's
+colours and bold text as Claude draws them, installed while the tasks box is ticked and removed when either
+Claude box is unticked), and closing it leaves the
 session running. This needs the Claude Code CLI on the PATH and Windows Terminal; a start or a window that
 fails says so in a message box as well as in the thread.
 

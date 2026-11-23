@@ -23,21 +23,40 @@ namespace Deskbar.App;
 // ClaudeCli strips them per child, but the terminal on a session (`wt ... claude attach`) is started through the
 // shell, which cannot leave a variable out of one child's block, so they leave Deskbar's own block here instead.
 // CLAUDE_PROJECT_DIR is not one of them: Claude Code sets it for hooks, never for Deskbar.
+//
+// NO_COLOR goes too, unless Windows' own environment sets it (Petre: "can we have more beautiful formatting than just
+// text in the terminal?", task f8344a81). Measured 2026-11-23: a Deskbar started from a Claude session's shell carries
+// NO_COLOR=1, and every window it opens on a session inherits it, because Windows Terminal gives a window started by
+// `wt.exe` the CALLER's environment, not its own process's (probed: a marker variable set before `wt -w new` arrived in
+// the new window). `claude attach` honours NO_COLOR and drew the session with 2 style codes instead of 706 (35 of them
+// bold, 216 RGB colours), so every Claude window was one flat grey. The session itself is unaffected: Claude's daemon
+// starts it with FORCE_COLOR=3, which outranks NO_COLOR, but the attach client in the window has no FORCE_COLOR.
+// When the variable is set in the user's or the machine's environment it is Petre's own choice, not something a host
+// passed along, so it stays and reaches every child as usual.
 public static class LaunchEnvironment
 {
     static readonly IReadOnlyList<string> ClaudeHostVariables =
         ["CLAUDECODE", "CLAUDE_CODE_ENTRYPOINT", "CLAUDE_CODE_SESSION_ATTENDED", "CLAUDE_JOB_DIR", "CLAUDE_CODE_CHILD_SESSION"];
 
+    // Variables a host passes along that are also a person's real setting: dropped only when Windows does not set them.
+    static readonly IReadOnlyList<string> HostUnlessSetInWindows = ["NO_COLOR"];
+
     // Whether a variable belongs to an Electron, VS Code or Claude Code host process and must not reach Deskbar's children.
-    internal static bool IsHostOnly(string name) =>
+    // setInWindows answers whether the user's or the machine's environment (the registry) sets a variable.
+    internal static bool IsHostOnly(string name, Func<string, bool> setInWindows) =>
         name.Equals("ELECTRON_RUN_AS_NODE", StringComparison.OrdinalIgnoreCase)
         || name.StartsWith("VSCODE_", StringComparison.OrdinalIgnoreCase)
-        || ClaudeHostVariables.Contains(name, StringComparer.OrdinalIgnoreCase);
+        || ClaudeHostVariables.Contains(name, StringComparer.OrdinalIgnoreCase)
+        || (HostUnlessSetInWindows.Contains(name, StringComparer.OrdinalIgnoreCase) && !setInWindows(name));
+
+    static bool SetInWindows(string name) =>
+        Environment.GetEnvironmentVariable(name, EnvironmentVariableTarget.User) is not null
+        || Environment.GetEnvironmentVariable(name, EnvironmentVariableTarget.Machine) is not null;
 
     // Removes them from this process, which is the block every later start inherits.
     public static void Clean() =>
         Environment.GetEnvironmentVariables().Keys.OfType<string>()
-            .Where(IsHostOnly)
+            .Where(name => IsHostOnly(name, SetInWindows))
             .ToList()
             .ForEach(name => Environment.SetEnvironmentVariable(name, null));
 }

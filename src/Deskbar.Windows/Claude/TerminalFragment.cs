@@ -89,6 +89,10 @@ public static class TerminalFragment
                     cursorShape = "bar",
                     cursorColor = "#D97757",
                     antialiasingMode = "cleartype",
+                    // Claude marks bold with \x1b[1m on RGB-coloured text. Windows Terminal's default, "bright", only
+                    // swaps a palette colour for its bright twin, which an RGB colour does not have, so bold text was
+                    // drawn exactly like plain text. "bold" draws it in the font's bold weight (task f8344a81).
+                    intenseTextStyle = "bold",
                     scrollbarState = "hidden",
                     tabTitle = "Claude",
                     suppressApplicationTitle = true,

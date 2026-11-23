@@ -53,6 +53,8 @@ public sealed class TerminalFragmentTests : IDisposable
         Assert.Equal("bar", profile.GetProperty("cursorShape").GetString());
         Assert.Equal("#D97757", profile.GetProperty("cursorColor").GetString());
         Assert.Equal("cleartype", profile.GetProperty("antialiasingMode").GetString());
+        // Claude's bold is \x1b[1m on RGB text, which Windows Terminal's default ("bright") draws exactly like plain text.
+        Assert.Equal("bold", profile.GetProperty("intenseTextStyle").GetString());
         Assert.Equal("hidden", profile.GetProperty("scrollbarState").GetString());
         Assert.True(profile.GetProperty("suppressApplicationTitle").GetBoolean());
 

@@ -173,17 +173,28 @@ public class FloatingBarPinsTests
     [InlineData("ELECTRON_ENABLE_LOGGING", false)]
     [InlineData("DESKBAR_APPDATA", false)]
     public void Only_the_editor_hosts_variables_are_dropped(string name, bool dropped) =>
-        Assert.Equal(dropped, LaunchEnvironment.IsHostOnly(name));
+        Assert.Equal(dropped, LaunchEnvironment.IsHostOnly(name, setInWindows: _ => false));
+
+    // NO_COLOR reaches Deskbar from the Claude session whose shell started it, and from Deskbar every Claude window it
+    // opens, which then draws without a single colour or bold. It goes, unless Petre set it in Windows himself: then it
+    // is his choice and Deskbar passes it on like any other variable of his.
+    [Theory]
+    [InlineData(false, true)]
+    [InlineData(true, false)]
+    public void NO_COLOR_is_dropped_unless_Windows_itself_sets_it(bool setInWindows, bool dropped) =>
+        Assert.Equal(dropped, LaunchEnvironment.IsHostOnly("NO_COLOR", setInWindows: _ => setInWindows));
 
     [Fact]
     public void Cleaning_removes_them_from_the_process_environment()
     {
         Environment.SetEnvironmentVariable("VSCODE_DESKBAR_TEST_PROBE", "1");
         Environment.SetEnvironmentVariable("DESKBAR_TEST_KEEP", "1");
+        Environment.SetEnvironmentVariable("NO_COLOR", "1");
 
         LaunchEnvironment.Clean();
 
         Assert.Null(Environment.GetEnvironmentVariable("VSCODE_DESKBAR_TEST_PROBE"));
+        Assert.Null(Environment.GetEnvironmentVariable("NO_COLOR"));
         Assert.Null(Environment.GetEnvironmentVariable("ELECTRON_RUN_AS_NODE"));
         Assert.Equal("1", Environment.GetEnvironmentVariable("DESKBAR_TEST_KEEP"));
         Environment.SetEnvironmentVariable("DESKBAR_TEST_KEEP", null);
