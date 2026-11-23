@@ -124,7 +124,8 @@ public sealed partial class RemoteControl
         };
     }
 
-    // `tasks-window show|hide`: the tasks window, opened as the bar's "+N more" opens it (clear of the bar), or hidden.
+    // `tasks-window show|hide`: the tasks panel docked beside the bar, opened as the bar's "All tasks" opens it, or
+    // closed. The verb keeps its old name, so scripts written for the floating window still work.
     // `tasks-window list|matrix`: the window's view switch (Task 12, Ruling 28), a remembered setting
     // (AppState.TasksMatrix), so it needs no window to set. Only the four literal words; anything else is the usage
     // line and asks the app nothing.
@@ -132,7 +133,7 @@ public sealed partial class RemoteControl
     {
         "list" => Reply(manager.SetTasksMatrix(false), () => new { matrix = false }),
         "matrix" => Reply(manager.SetTasksMatrix(true), () => new { matrix = true }),
-        "show" or "hide" when setTasksWindow is null => ControlReply.Fail("This copy of Deskbar has no tasks window."),
+        "show" or "hide" when setTasksWindow is null => ControlReply.Fail("This copy of Deskbar has no tasks panel."),
         "show" => Reply(setTasksWindow!(true), () => new { shown = true }),
         "hide" => Reply(setTasksWindow!(false), () => new { shown = false }),
         _ => ControlReply.Fail(ControlUsage.LineFor("tasks-window")),

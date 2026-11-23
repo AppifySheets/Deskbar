@@ -31,12 +31,7 @@ public partial class FloatingBar
     // a colour.
     internal Brush? WorkspaceAccent(Guid id) => workspaceAccents.GetValueOrDefault(id);
 
-    // The bar's whole rectangle on screen in device pixels, which the tasks window keeps clear of (TasksWindow.PlaceNear;
-    // the bar re-asserts itself at the top of the topmost band every second, so a window over it would be covered).
-    // Empty while the bar is not on screen (minimized to its taskbar button): the window then opens where Quick find
-    // does.
-    internal Rect BarScreenBounds() =>
-        IsVisible && PresentationSource.FromVisual(this) is not null
-            ? new Rect(PointToScreen(new Point(0, 0)), PointToScreen(new Point(ActualWidth, ActualHeight)))
-            : Rect.Empty;
+    // BarScreenBounds, the bar's rectangle the floating tasks window kept clear of, was here; it went with the floating
+    // window (tasks panel plan, docs/superpowers/plans/2026-11-23-tasks-panel.md, Task 6): the panel docks by the bar's
+    // strip notice (FloatingBar.Strip), not by the bar's rectangle.
 }

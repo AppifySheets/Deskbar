@@ -4373,7 +4373,8 @@ public sealed class WorkspaceManager(
             : Result.Success().Tap(() => Persist(State with { TasksMatrix = on }));
 
     // The docked tasks panel's open state and width (AppState.TasksPanel). A no-op when unchanged, so a resize that
-    // ends where it started writes nothing; the panel redraws and re-docks on the state pulse this sends.
+    // ends where it started writes nothing. Only the record: the app's TasksBoard docks the panel at the new width
+    // itself (TasksPanel.SetWidth), not on the state pulse this sends.
     public Result SaveTasksPanel(TasksPanelState state) =>
         State.TasksPanel == state
             ? Result.Success()

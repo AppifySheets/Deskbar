@@ -108,8 +108,8 @@ public static class ControlUsage
                 "settle one of the session's own comments: it stays but folds away in the tasks window. task answered\n"
                 + "      settles the session's comments written since its question was asked; another session's is refused"),
             new("tasks-window", "show|hide|list|matrix",
-                "open the tasks window, as the bar's \"+N more\" does (every task grouped as on the bar, the closed\n"
-                + "      ones under their filter, each with its comments), or close it; list or matrix switches its view\n"
+                "open the tasks panel beside the bar, as the bar's \"All tasks\" does (every task grouped as on the bar,\n"
+                + "      the closed ones under their filter, each with its comments), or close it; list or matrix switches its view\n"
                 + "      (Covey's 2 by 2: urgent and not urgent across, important and not important down), remembered"),
             new("task", "assign <id> me|claude",
                 "hand a task to yourself or to Claude, as the tasks window's \"Assign to\" menu does. The bar lists only the tasks\n"

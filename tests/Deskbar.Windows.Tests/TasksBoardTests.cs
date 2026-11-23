@@ -12,7 +12,9 @@ namespace Deskbar.Windows.Tests;
 // "The window", "Comments", "Statuses", "Going to a session"). The window is display only; the controller decides what
 // it shows and what each click does. Built over the shared two-workspace harness (GEPHA current, Sparrow beside it)
 // with a real TaskService on an in-memory store, so every change goes through the service the App hands the board.
-// The window is Quiet: shown off screen and never activated, so a run neither flashes it nor takes the keyboard.
+// The window is the docked tasks panel (plan 2026-11-23-tasks-panel, Task 6), behind a TasksPanel whose seams are all
+// faked (TasksPanelRig): it docks on a made-up screen far off every real monitor, so a run never reserves a strip of
+// a real screen, and it is Quiet, never activating itself, so a run neither flashes it nor takes the keyboard.
 public class TasksBoardTests
 {
     sealed class MemoryStore : ITaskStore
@@ -55,6 +57,7 @@ public class TasksBoardTests
         public required Harness Harness { get; init; }
         public required TasksWindow Window { get; init; }
         public required TasksBoard Controller { get; init; }
+        public required TasksPanelRig Panel { get; init; }
         public required TaskService Tasks { get; init; }
         public required FakeTimers Timers { get; init; }
         public required List<Guid> WentTo { get; init; }
@@ -75,13 +78,14 @@ public class TasksBoardTests
     // Each read of the task clock is a minute later, so tasks are raised in the order the test makes them. Each read of
     // the click clock is a second later, so a click is never "right after a repaint" unless a test hands in a clock of
     // its own (the click guard's test does).
-    // `bringForward` sees the handle and the seam answers that it activated the window; `activates` overrides that
-    // answer (the seam that left the window on its own desktop).
+    // `bringForward` sees the handle the board brings forward (the App's raise and activate, TasksBoard.Arrive).
     // Task 9's seams: a task's sessions as its thread lists them, "Start Claude on this" and a session's Open.
+    // `edge` is the edge the bar docks on, so the panel docks there too (the grip's side follows it).
     static Board Build(Func<TaskItem, Result>? goTo = null, Action<nint>? bringForward = null, Func<DateTime>? clickClock = null,
-        Func<DateTimeOffset>? now = null, TaskSelection? selection = null, Func<bool>? activates = null,
+        Func<DateTimeOffset>? now = null, TaskSelection? selection = null,
         Func<TaskItem, IReadOnlyList<SessionView>>? sessionsOf = null, Action<Guid>? startClaude = null,
-        Func<TaskItem, string, Result>? openSession = null, IObservable<System.Reactive.Unit>? sessionsChanged = null)
+        Func<TaskItem, string, Result>? openSession = null, IObservable<System.Reactive.Unit>? sessionsChanged = null,
+        string edge = "right")
     {
         var harness = Harness.Build();
         var minutes = 0;
@@ -96,17 +100,17 @@ public class TasksBoardTests
             Quiet = true, ClickClock = clickClock ?? (() => ClickStart.AddSeconds(seconds++)), Now = now ?? (() => Start.AddHours(1)),
         };
 #pragma warning restore WPF0001
-        var controller = new TasksBoard(window, tasks, harness.Manager, goTo ?? (t =>
+        // The floating window's 720 DIP, which every line-layout test here was written against. The panel's own default
+        // (460) is narrower than the full line; the slim line below 620 DIP is Task 8's, with its own tests.
+        Assert.True(harness.Manager.SaveTasksPanel(new Deskbar.Core.Persistence.TasksPanelState(false, 720)).IsSuccess);
+        var panel = new TasksPanelRig(window).Docked(edge);
+        var controller = new TasksBoard(window, panel.Panel, tasks, harness.Manager, goTo ?? (t =>
         {
             went.Add(t.Id);
             return Result.Success();
-        }), bringForward: bringForward is null && activates is null ? null : hwnd =>
-        {
-            bringForward?.Invoke(hwnd);
-            return activates?.Invoke() ?? true;
-        }, undoTimer: timers.Start, now: () => Start.AddHours(1), selection: selection,
+        }), bringForward: bringForward, undoTimer: timers.Start, now: () => Start.AddHours(1), selection: selection,
             sessionsOf: sessionsOf, startClaude: startClaude, openSession: openSession, sessionsChanged: sessionsChanged);
-        return new Board { Harness = harness, Window = window, Controller = controller, Tasks = tasks, Timers = timers, WentTo = went };
+        return new Board { Harness = harness, Window = window, Controller = controller, Panel = panel, Tasks = tasks, Timers = timers, WentTo = went };
     }
 
     // A press with the click count Windows gives it (2 for the second press of a double click), then its Click, as the
@@ -149,7 +153,7 @@ public class TasksBoardTests
         t.Tasks.MarkDone(done);
         t.Tasks.Close(closed);
 
-        t.Controller.Open(Rect.Empty);
+        t.Controller.Show();
 
         Assert.Equal(["Waiting on you", "IV  Not urgent, not important"], t.Window.Headers);
         Assert.Equal([asking, done, working, note], t.Window.Keys);
@@ -169,7 +173,7 @@ public class TasksBoardTests
         var nowhere = t.Tasks.AddNote("nowhere", Maybe<Guid>.None).Value.Id;
         var asking = t.Tasks.Create("asking", t.Sparrow, Session("s1")).Value.Id;
         t.Tasks.Ask(asking, "?");
-        t.Controller.Open(Rect.Empty);
+        t.Controller.Show();
 
         // The chips count what they would show.
         Assert.Contains("Open 4", t.Window.FilterLabels);
@@ -198,7 +202,7 @@ public class TasksBoardTests
         var id = t.Tasks.Create("Tasks redesign", t.Gepha, Session("s1")).Value.Id;
         t.Tasks.Comment(id, "s1", "The branch is **built**.");
         t.Tasks.Comment(id, Maybe<string>.None, "yes, swap");
-        t.Controller.Open(Rect.Empty);
+        t.Controller.Show();
         Assert.False(t.Window.ThreadShown(id));
 
         // The count on the line says how many, and its arrow opens the thread.
@@ -216,7 +220,7 @@ public class TasksBoardTests
     {
         using var t = Build();
         var id = t.Tasks.AddNote("Ask about the runner disk", t.Gepha).Value.Id;
-        t.Controller.Open(Rect.Empty);
+        t.Controller.Show();
         t.Controller.ToggleThread(id);
 
         Assert.True(t.Window.TypeComment(id, "Check **D:** first", Key.Enter));
@@ -235,7 +239,7 @@ public class TasksBoardTests
     {
         using var t = Build();
         var id = t.Tasks.AddNote("note", t.Gepha).Value.Id;
-        t.Controller.Open(Rect.Empty);
+        t.Controller.Show();
         t.Controller.ToggleThread(id);
 
         Assert.False(t.Window.TypeComment(id, "first line", Key.Enter, ModifierKeys.Shift));
@@ -248,7 +252,7 @@ public class TasksBoardTests
     {
         using var t = Build();
         var note = t.Tasks.AddNote("Dishwasher tablets", t.Gepha).Value.Id;
-        t.Controller.Open(Rect.Empty);
+        t.Controller.Show();
 
         // Set by hand.
         Assert.True(t.Controller.SetStatus(note, TaskStatus.InProgress).IsSuccess);
@@ -286,7 +290,7 @@ public class TasksBoardTests
     {
         using var t = Build();
         var id = t.Tasks.AddNote("Dishwasher", t.Gepha).Value.Id;
-        t.Controller.Open(Rect.Empty);
+        t.Controller.Show();
 
         Assert.True(t.Controller.Rename(id, "Dishwasher tablets").IsSuccess);
         Assert.True(t.Controller.MoveTo(id, t.Sparrow).IsSuccess);
@@ -303,7 +307,7 @@ public class TasksBoardTests
     public void Add_is_one_button_that_opens_a_box() => StaThread.Run(() =>
     {
         using var t = Build();
-        t.Controller.Open(Rect.Empty);
+        t.Controller.Show();
         Assert.False(t.Window.AddBoxShown);
 
         Click(ButtonNamed(t.Window, "Add"));
@@ -322,7 +326,7 @@ public class TasksBoardTests
     {
         using var t = Build();
         var id = t.Tasks.AddNote("note", t.Gepha).Value.Id;
-        t.Controller.Open(Rect.Empty);
+        t.Controller.Show();
 
         Assert.True(t.Window.IsOpen);
         Assert.False(t.Window.AddBoxShown);
@@ -332,8 +336,8 @@ public class TasksBoardTests
         // Opened again after typing in a thread, it is still the board, filters reset and threads closed.
         t.Controller.ToggleThread(id);
         t.Controller.Filter(TaskFilter.Closed);
-        t.Window.Dismiss();
-        t.Controller.Open(Rect.Empty);
+        t.Controller.Hide();
+        t.Controller.Show();
         Assert.Equal([id], t.Window.Keys);
         Assert.False(t.Window.ThreadShown(id));
         Assert.DoesNotContain(Inside(t.Window).OfType<TextBox>(), b => b.IsKeyboardFocused || b.IsFocused);
@@ -349,7 +353,7 @@ public class TasksBoardTests
         var id = t.Tasks.Create("Tasks redesign", Maybe<Guid>.None, Session("old")).Value.Id;
         t.Tasks.Join(id, Session("new"));
         t.Tasks.SessionEnded("new");
-        t.Controller.Open(Rect.Empty);
+        t.Controller.Show();
 
         DoubleClick(t.Window, id); // a double-click goes (Ruling 54)
 
@@ -359,25 +363,175 @@ public class TasksBoardTests
         Assert.Equal("old", TaskViews.SessionToGoTo(t.Tasks.Board.Tasks.Single(x => x.Id == id)).Value.Id);
     });
 
-    // Petre: "can i have a separate page for all tasks?". A regular window: a title bar saying Tasks, resizable, in
-    // Alt+Tab and on the taskbar, not topmost.
+    // The panel (spec 2026-11-23-tasks-panel-design.md, "The panel window"; it replaced the regular window "It_is_a_regular_
+    // window" pinned): no title bar, not resizable by Windows (the grip is its own), not on the taskbar, not in Alt+Tab
+    // (WS_EX_TOOLWINDOW), topmost like the bar, and with no minimum width of its own (the panel's 360 DIP floor is
+    // TasksPanelLayout's, applied when it docks).
     [Fact]
-    public void It_is_a_regular_window() => StaThread.Run(() =>
+    public void It_is_a_panel_not_a_regular_window() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        t.Controller.Show();
+
+        Assert.Equal("Tasks", t.Window.Title);
+        Assert.Equal(WindowStyle.None, t.Window.WindowStyle);
+        Assert.Equal(ResizeMode.NoResize, t.Window.ResizeMode);
+        Assert.False(t.Window.ShowInTaskbar);
+        Assert.True(t.Window.Topmost);
+        Assert.Equal(0, t.Window.MinWidth);
+        var exStyle = (long)Deskbar.Windows.Monitoring.NativeMethods.GetWindowLongPtr(t.Controller.EnsureHandle(),
+            Deskbar.Windows.Monitoring.NativeMethods.GWL_EXSTYLE);
+        Assert.NotEqual(0, exStyle & Deskbar.Windows.Monitoring.NativeMethods.WS_EX_TOOLWINDOW);
+    });
+
+    // --- Task 6 of the tasks panel plan: Show, Hide, Toggle, the saved state, the grip --------------------------------
+
+    // The bar's "All tasks" line toggles the panel (spec "Opening and closing").
+    [Fact]
+    public void Toggle_shows_a_hidden_panel_and_hides_a_shown_one() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        Assert.False(t.Controller.IsOpen);
+
+        t.Controller.Toggle();
+        Assert.True(t.Controller.IsOpen);
+        Assert.True(t.Window.IsOpen);
+        Assert.True(t.Window.IsVisible);
+        Assert.Equal(["Undock", $"DockWith Right {Px(t, 720)}"], t.Panel.Calls);
+
+        t.Controller.Toggle();
+        Assert.False(t.Controller.IsOpen);
+        Assert.False(t.Window.IsOpen);
+        Assert.False(t.Window.IsVisible);
+        // Hiding gives the strip back to the shell.
+        Assert.Equal("Undock", t.Panel.Calls[^1]);
+    });
+
+    // Every Show and Hide saves whether the panel is open, with its width, so the next start opens it as it was left
+    // (AppState.TasksPanel). The width is the one saved, never reset by opening or closing.
+    [Fact]
+    public void Showing_and_hiding_remember_whether_the_panel_is_open() => StaThread.Run(() =>
     {
         using var t = Build();
 
-        Assert.Equal("Tasks", t.Window.Title);
-        Assert.Equal(WindowStyle.SingleBorderWindow, t.Window.WindowStyle);
-        Assert.Equal(ResizeMode.CanResize, t.Window.ResizeMode);
-        Assert.True(t.Window.ShowInTaskbar);
-        Assert.False(t.Window.Topmost);
+        t.Controller.Show();
+        Assert.Equal(new Deskbar.Core.Persistence.TasksPanelState(true, 720), t.Harness.Manager.State.TasksPanel);
+
+        t.Controller.Hide();
+        Assert.Equal(new Deskbar.Core.Persistence.TasksPanelState(false, 720), t.Harness.Manager.State.TasksPanel);
     });
+
+    // The app exiting is not the user closing the panel: Shutdown saves it as open when it was, before the panel's own
+    // shutdown gives the strip back and hides the window, so it opens again on the next start.
+    [Fact]
+    public void Shutting_down_an_open_panel_keeps_it_open_for_the_next_start() => StaThread.Run(() =>
+    {
+        var t = Build();
+        t.Controller.Show();
+
+        t.Controller.Shutdown();
+
+        Assert.Equal(new Deskbar.Core.Persistence.TasksPanelState(true, 720), t.Harness.Manager.State.TasksPanel);
+        Assert.Equal("Undock", t.Panel.Calls[^1]);
+    });
+
+    // The start-up reopen of a panel left open: drawn and docked like a Show, but nothing is brought forward or
+    // activated (a start at sign-in must not take the keyboard from whatever Petre opened first).
+    [Fact]
+    public void Restoring_at_start_opens_the_panel_without_bringing_it_forward() => StaThread.Run(() =>
+    {
+        var forward = new List<nint>();
+        using var t = Build(bringForward: forward.Add);
+        var id = t.Tasks.AddNote("note", t.Gepha).Value.Id;
+
+        t.Controller.Restore();
+
+        Assert.True(t.Controller.IsOpen);
+        Assert.True(t.Window.IsVisible);
+        Assert.Equal([id], t.Window.Keys);
+        Assert.Empty(forward);
+    });
+
+    // Every filter starts over on a fresh show, as the window's did: status, workspace, goal (TasksBoardGoalTests) and
+    // assignee. Task 7 adds the search and Claude working to this list.
+    [Fact]
+    public void A_fresh_show_resets_every_filter() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        t.Tasks.AddNote("mine", t.Gepha);
+        t.Tasks.Create("Claude's", t.Sparrow, Session("s1"));
+        t.Controller.Show();
+        t.Controller.Filter(TaskFilter.Closed);
+        t.Controller.FilterWorkspace(TaskWorkspaceFilter.On(t.Sparrow));
+        t.Controller.FilterAssignee(TaskAssigneeFilter.Claude);
+        Assert.Empty(t.Window.Keys);
+
+        t.Controller.Hide();
+        t.Controller.Show();
+
+        Assert.Equal(2, t.Window.Keys.Count);
+        Assert.Equal("Workspace: all", t.Window.WorkspaceFilterLabel);
+        Assert.Equal("Assigned: all", t.Window.AssigneeFilterLabel);
+    });
+
+    // The toolbar's × closes the panel, as `tasks-window hide` does, and Alt+F4 on the panel does the same rather than
+    // closing the WPF window for good (a closed window can never be shown again).
+    [Fact]
+    public void The_close_button_and_alt_f4_close_the_panel() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        t.Controller.Show();
+
+        Click(ButtonNamed(t.Window, "Close the panel"));
+        Assert.False(t.Controller.IsOpen);
+        Assert.False(t.Window.IsVisible);
+
+        t.Controller.Show();
+        t.Window.Close();
+        Assert.False(t.Controller.IsOpen);
+        Assert.False(t.Window.IsVisible);
+        Assert.Equal(new Deskbar.Core.Persistence.TasksPanelState(false, 720), t.Harness.Manager.State.TasksPanel);
+
+        t.Controller.Show();
+        Assert.True(t.Window.IsVisible);
+    });
+
+    // The grip sits on the panel's inner edge, the one facing the windows: its left edge when it docks on the right,
+    // its right edge when it docks on the left (spec "The panel window").
+    [Theory]
+    [InlineData("right", Dock.Left)]
+    [InlineData("left", Dock.Right)]
+    public void The_grip_sits_on_the_edge_facing_the_windows(string barEdge, Dock gripSide) => StaThread.Run(() =>
+    {
+        using var t = Build(edge: barEdge);
+        t.Controller.Show();
+
+        Assert.Equal(gripSide, DockPanel.GetDock(t.Window.Grip));
+    });
+
+    // The grip's drag end hands the new width over: it is saved (AppState.TasksPanel) and the panel re-docks at it, in
+    // place (no Undock: the registration, and so the order behind the bar, stays).
+    [Fact]
+    public void A_width_from_the_grip_is_saved_and_the_panel_redocks_at_it() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        t.Controller.Show();
+        t.Panel.Calls.Clear();
+
+        t.Window.Actions!.ResizePanel(800);
+
+        Assert.Equal(new Deskbar.Core.Persistence.TasksPanelState(true, 800), t.Harness.Manager.State.TasksPanel);
+        Assert.Equal([$"DockWith Right {Px(t, 800)}"], t.Panel.Calls);
+    });
+
+    // A width in DIPs as the panel asks the shell for it: physical pixels at the window's own scale (TasksPanelRig).
+    static int Px(Board t, double dips) => (int)Math.Round(dips * System.Windows.Media.VisualTreeHelper.GetDpi(t.Window).DpiScaleX);
 
     [Fact]
     public void A_click_into_another_app_leaves_it_open() => StaThread.Run(() =>
     {
         using var t = Build();
-        t.Controller.Open(Rect.Empty);
+        t.Controller.Show();
 
         typeof(Window).GetMethod("OnDeactivated", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!
             .Invoke(t.Window, [EventArgs.Empty]);
@@ -393,42 +547,21 @@ public class TasksBoardTests
         using var t = Build();
         var closed = t.Tasks.AddNote("Old errand", t.Gepha).Value.Id;
         t.Tasks.Close(closed);
-        t.Controller.Open(Rect.Empty);
+        t.Controller.Show();
         t.Controller.Filter(TaskFilter.Closed);
 
-        t.Controller.Open(Rect.Empty);
+        t.Controller.Show();
 
         Assert.Equal([closed], t.Window.Keys);
     });
 
-    // Closing it (the title bar's X) hides it, ready to come back, and remembers where it was for next time, across
-    // restarts (AppState.TasksWindow).
-    [Fact]
-    public void Closing_it_hides_it_and_remembers_its_place() => StaThread.Run(() =>
-    {
-        using var t = Build();
-        t.Controller.Open(Rect.Empty);
-
-        t.Window.Close();
-
-        Assert.False(t.Window.IsOpen);
-        Assert.False(t.Window.IsVisible);
-        var place = t.Harness.Manager.State.TasksWindow;
-        Assert.NotNull(place);
-        Assert.True(place.Width > 0 && place.Height > 0);
-        Assert.False(place.Maximized);
-
-        // And it opens again.
-        t.Controller.Open(Rect.Empty);
-        Assert.True(t.Window.IsOpen);
-    });
 
     [Fact]
     public void A_refused_go_says_why_and_stays_open() => StaThread.Run(() =>
     {
         using var t = Build(_ => Result.Failure("That workspace has no desktop."));
         var id = t.Tasks.AddNote("note", t.Gepha).Value.Id;
-        t.Controller.Open(Rect.Empty);
+        t.Controller.Show();
         DoubleClick(t.Window, id); // a double-click goes (Ruling 54)
 
         Assert.True(t.Window.IsOpen);
@@ -442,7 +575,7 @@ public class TasksBoardTests
     {
         using var t = Build();
         var first = t.Tasks.AddNote("first", t.Gepha).Value.Id;
-        t.Controller.Open(Rect.Empty);
+        t.Controller.Show();
 
         var menu = t.Window.OpenMenuFor(first);
         Assert.True(menu.IsOpen);
@@ -460,7 +593,7 @@ public class TasksBoardTests
     {
         using var t = Build();
         var id = t.Tasks.AddNote("note", t.Gepha).Value.Id;
-        t.Controller.Open(Rect.Empty);
+        t.Controller.Show();
         t.Controller.ToggleThread(id);
         t.Window.TypeComment(id, "half a thou", key: null);
 
@@ -474,7 +607,7 @@ public class TasksBoardTests
     {
         using var t = Build();
         var id = t.Tasks.AddNote("note", t.Gepha).Value.Id;
-        t.Controller.Open(Rect.Empty);
+        t.Controller.Show();
         var before = t.Window.Rebuilds;
 
         // A refresh with the board as it was (the workspaces' StateChanged pulses for many reasons) redraws nothing;
@@ -486,46 +619,34 @@ public class TasksBoardTests
         Assert.Equal(before + 1, t.Window.Rebuilds);
     });
 
-    // FIX ROUND 1, Critical 1: activating a window on another desktop makes Windows follow it there
-    // (WorkspaceManager's own note), so "+N more" on a window left behind on another desktop dragged Petre back to it.
-    // The window never activates itself: opening it shows it without activation, bringing it forward only restores it,
-    // and the App's seam moves it to the desktop in front and only then activates it. Both paths go through the seam.
+    // FIX ROUND 1, Critical 1, kept for the panel: the window never activates itself. Opening it shows it without
+    // activation, and both a fresh show and a show of the open panel bring it forward through the App's seam (raise,
+    // then activate; TasksBoard.Arrive). The panel is pinned to every desktop, so there is no move any more.
     [Fact]
     public void The_window_never_activates_itself_and_both_paths_go_through_the_seam() => StaThread.Run(() =>
     {
         var forward = new List<nint>();
         using var t = Build(bringForward: forward.Add);
 
-        t.Controller.Open(Rect.Empty);
+        t.Controller.Show();
         Assert.False(t.Window.ShowActivated);
         Assert.Equal([t.Controller.EnsureHandle()], forward);
 
-        t.Controller.Open(Rect.Empty);
+        t.Controller.Show();
         Assert.Equal(2, forward.Count);
         Assert.Equal(0, t.Window.SelfActivations);
     });
 
-    // The App's seam, in its order: move to the desktop in front, raise to the top of the z-order, then activate
-    // ("tasks should become a top window, now it's behind somewhere"). A failed move raises and activates only a window
-    // already on the desktop in front; one elsewhere is traced and left where it is. Every arrival is traced, so a live
-    // check can read what happened.
+    // The App's seam, in its order: raise to the top of the z-order, then activate ("tasks should become a top window,
+    // now it's behind somewhere"), and trace the arrival so a live check can read what happened. It used to move the
+    // window to the desktop in front first; the panel is pinned to every desktop, so that step and its refusals went
+    // (plan 2026-11-23-tasks-panel, Task 6).
     [Fact]
-    public void Arriving_moves_first_then_raises_then_activates() => StaThread.Run(() =>
+    public void Arriving_raises_then_activates() => StaThread.Run(() =>
     {
         var steps = new List<string>();
-        Assert.True(TasksBoard.Arrive(0x42, () => { steps.Add("move"); return Result.Success(); }, () => { steps.Add("ask"); return false; },
-            () => steps.Add("raise"), () => steps.Add("activate"), trace => steps.Add("trace")));
-        Assert.Equal(["move", "raise", "activate", "trace"], steps);
-
-        steps.Clear();
-        Assert.True(TasksBoard.Arrive(0x42, () => { steps.Add("move"); return Result.Failure("refused"); }, () => { steps.Add("ask"); return true; },
-            () => steps.Add("raise"), () => steps.Add("activate"), trace => steps.Add("trace")));
-        Assert.Equal(["move", "trace", "ask", "raise", "activate", "trace"], steps);
-
-        steps.Clear();
-        Assert.False(TasksBoard.Arrive(0x42, () => { steps.Add("move"); return Result.Failure("refused"); }, () => { steps.Add("ask"); return false; },
-            () => steps.Add("raise"), () => steps.Add("activate"), trace => steps.Add("trace")));
-        Assert.Equal(["move", "trace", "ask", "trace"], steps);
+        TasksBoard.Arrive(0x42, () => steps.Add("raise"), () => steps.Add("activate"), trace => steps.Add("trace"));
+        Assert.Equal(["raise", "activate", "trace"], steps);
     });
 
     // THE ROOT OF "IT'S BEHIND SOMEWHERE" (2026-11-23 live check). Opening the window gave the toolbar the keyboard
@@ -542,22 +663,10 @@ public class TasksBoardTests
         using var t = Build(bringForward: _ => activeAtSeam.Add(window!.IsActive));
         window = t.Window;
 
-        t.Controller.Open(Rect.Empty);
+        t.Controller.Show();
 
         Assert.Equal([false], activeAtSeam);
         Assert.Same(t.Window.Toolbar, FocusManager.GetFocusedElement(t.Window));
-    });
-
-    // An arrival the seam could not complete (the window left on another desktop) leaves the keyboard alone: focusing
-    // the window would activate it, and Windows would follow it to that desktop.
-    [Fact]
-    public void A_window_left_on_another_desktop_is_not_focused() => StaThread.Run(() =>
-    {
-        using var t = Build(activates: () => false);
-
-        t.Controller.Open(Rect.Empty);
-
-        Assert.False(t.Window.IsActive);
     });
 
     // The raise itself, on real windows: a window that is active but has another window over it (the state the live
@@ -586,15 +695,16 @@ public class TasksBoardTests
         }
     });
 
-    // (c) "give it a proper icon in the workspaces so i can take it to the correct place": the window is listed on the bar
-    // like any app window, and the bar draws it by the icon the window answers WM_GETICON with (IconCache's own-icon
-    // source). That icon is the tasks checklist, green, not Deskbar's.
+    // (c) "give it a proper icon in the workspaces so i can take it to the correct place": the window answers WM_GETICON
+    // with the tasks checklist, green, not Deskbar's (IconCache's own-icon source). The panel is no longer listed on the
+    // bar (it opts out like the bar's own window, plan 2026-11-23-tasks-panel, Task 6), but it keeps its own icon
+    // wherever Windows still draws one, a debug dump or a trace.
     [Fact]
-    public void The_window_wears_its_own_checklist_icon_on_the_bar() => StaThread.Run(() =>
+    public void The_window_wears_its_own_checklist_icon() => StaThread.Run(() =>
     {
         using var t = Build();
 
-        t.Controller.Open(Rect.Empty);
+        t.Controller.Show();
 
         Assert.Same(TasksIcon.Image, t.Window.Icon);
         var drawn = Assert.IsAssignableFrom<System.Windows.Media.Imaging.BitmapSource>(
@@ -603,28 +713,19 @@ public class TasksBoardTests
         Assert.True(g > r + 40 && g > b + 20, $"the bar's icon averages R={r} G={g} B={b}, not the checklist's green");
     });
 
-    // (b) "maybe even tile it": the tasks window takes part in tiling like any app window. Deskbar keeps its own windows
-    // out of the grid (the bar, Manage, its dialogs), and the tasks window is the one exception: the tiling surface's
-    // "ours" leaves it out, while any other window of this process stays out of the grid.
+    // A docked panel is not a tile (spec "The panel window"): the floating window's exception ("maybe even tile it",
+    // the test "The_tasks_window_tiles_and_the_apps_other_windows_still_do_not") is gone, and the panel is kept out of
+    // the grid like every other window of this process, the bar, Manage and its dialogs.
     [Fact]
-    public void The_tasks_window_tiles_and_the_apps_other_windows_still_do_not() => StaThread.Run(() =>
+    public void The_panel_is_kept_out_of_tiling() => StaThread.Run(() =>
     {
         using var t = Build();
-        t.Controller.Open(Rect.Empty);
-        var tasksWindow = t.Controller.EnsureHandle();
-        var other = new Window { Width = 200, Height = 200, Left = -30000, Top = -30000, ShowActivated = false, ShowInTaskbar = false };
-        other.Show();
-        try
-        {
-            var surface = new Deskbar.Windows.Tiling.TileSurface(w => TasksBoard.KeptFromTiling(w.Value, tasksWindow));
+        t.Controller.Show();
+        var panel = t.Controller.EnsureHandle();
 
-            Assert.True(surface.CanTile(new Deskbar.Core.Domain.WindowHandle(tasksWindow)));
-            Assert.False(surface.CanTile(new Deskbar.Core.Domain.WindowHandle(new System.Windows.Interop.WindowInteropHelper(other).Handle)));
-        }
-        finally
-        {
-            other.Close();
-        }
+        Assert.True(TasksBoard.KeptFromTiling(panel));
+        var surface = new Deskbar.Windows.Tiling.TileSurface(w => TasksBoard.KeptFromTiling(w.Value));
+        Assert.False(surface.CanTile(new Deskbar.Core.Domain.WindowHandle(panel)));
     });
 
     // The average colour of a bitmap's opaque pixels.
@@ -659,7 +760,7 @@ public class TasksBoardTests
         using var t = Build(clickClock: () => now);
         var first = t.Tasks.AddNote("first", t.Gepha).Value.Id;
         var second = t.Tasks.AddNote("second", t.Gepha).Value.Id;
-        t.Controller.Open(Rect.Empty);
+        t.Controller.Show();
 
         // Right after the draw: nothing takes the click.
         Click(ButtonNamed(LineOf(t.Window, second), "Close"));
@@ -695,7 +796,7 @@ public class TasksBoardTests
         var id = t.Tasks.AddNote("note", t.Gepha).Value.Id;
         var closed = t.Tasks.AddNote("closed", t.Gepha).Value.Id;
         t.Tasks.Close(closed);
-        t.Controller.Open(Rect.Empty);
+        t.Controller.Show();
         t.Window.Activate();
         t.Controller.ToggleThread(id);
         var box = t.Window.CommentBoxOf(id)!;
@@ -715,25 +816,21 @@ public class TasksBoardTests
         Assert.Equal(4, again.CaretIndex);
     });
 
-    // FIX ROUND 1, Important 3: the remembered place is device pixels, and the window is put there in device pixels
-    // (SetWindowPos on the hidden handle before Show), not through Left/Top, which WPF reads at the DPI of the screen it
-    // was created on. On the screen that holds it, the window's own rectangle is exactly the one remembered.
-    //
-    // The place is sized in DIPs at the test screen's own scale, so it clears the window's minimum (620 by 260 DIP) on
-    // any screen. It was a fixed 900 by 640 px, which is 600 DIP wide at 150% but only 400 at 225%: on Petre's machine,
-    // once its 3840 by 2160 screen went to 216 DPI, WPF rightly held the window at its 620 DIP minimum (1260 px) and
-    // the test failed for a reason that was the test's, not the window's (measured; task-12-report.md, fix round 4).
+    // The floating window's remembered place is ignored now (spec "Opening and closing": an old AppState.TasksWindow is
+    // ignored). The test that pinned it coming back in device pixels, "A_remembered_place_comes_back_in_device_pixels",
+    // went with the place memory; this one pins that an old place neither moves the panel nor is written again.
     [Fact]
-    public void A_remembered_place_comes_back_in_device_pixels() => StaThread.Run(() =>
+    public void An_old_floating_place_is_ignored_and_never_written() => StaThread.Run(() =>
     {
         using var t = Build();
-        var scale = TasksWindow.PrimaryScale();
-        var place = new Deskbar.Core.Persistence.TasksWindowState(120, 90, (int)(700 * scale), (int)(480 * scale), Maximized: false);
-        Assert.True(t.Harness.Manager.SaveTasksWindow(place).IsSuccess);
+        var old = new Deskbar.Core.Persistence.TasksWindowState(120, 90, 900, 640, Maximized: true);
+        Assert.True(t.Harness.Manager.SaveTasksWindow(old).IsSuccess);
 
-        t.Controller.Open(Rect.Empty);
+        t.Controller.Show();
+        t.Controller.Hide();
 
-        Assert.Equal(place, t.Window.CurrentPlace());
+        Assert.Equal(old, t.Harness.Manager.State.TasksWindow);
+        Assert.Equal(WindowState.Normal, t.Window.WindowState);
     });
 
     // The window's Undo follows the bar's: a Done task closed from its line comes back Done.
@@ -743,7 +840,7 @@ public class TasksBoardTests
         using var t = Build();
         var id = t.Tasks.Create("merged", t.Gepha, Session("s1")).Value.Id;
         t.Tasks.MarkDone(id);
-        t.Controller.Open(Rect.Empty);
+        t.Controller.Show();
 
         Click(ButtonNamed(LineOf(t.Window, id), "Close"));
         Click(ButtonNamed(LineOf(t.Window, id), "Undo"));
@@ -758,7 +855,7 @@ public class TasksBoardTests
         var now = Start.AddDays(3).AddHours(2);
         using var t = Build(now: () => now);
         var id = t.Tasks.AddNote("note", t.Gepha).Value.Id;
-        t.Controller.Open(Rect.Empty);
+        t.Controller.Show();
         var line = LineOf(t.Window, id);
         var rebuilds = t.Window.Rebuilds;
         Assert.Equal("3d2h", t.Window.AgeText(id));
@@ -780,7 +877,7 @@ public class TasksBoardTests
         using var t = Build(selection: selection);
         var first = t.Tasks.AddNote("first", t.Gepha).Value.Id;
         var second = t.Tasks.AddNote("second", t.Gepha).Value.Id;
-        t.Controller.Open(Rect.Empty);
+        t.Controller.Show();
         Click(LineOf(t.Window, first)); // picks and expands it (Ruling 54)
         Assert.True(selection.IsSelected(first));
         Assert.True(t.Window.IsSelected(first));
@@ -805,62 +902,22 @@ public class TasksBoardTests
         Enumerable.Range(1, 40).ToList().ForEach(i => t.Tasks.AddNote($"note {i}", t.Gepha));
         selection.Select(oldest);
 
-        t.Controller.Open(Rect.Empty);
+        t.Controller.Show();
 
         Assert.True(t.Window.ScrollOffset > 0, $"offset {t.Window.ScrollOffset}");
         Assert.True(t.Window.IsSelected(oldest));
     });
 
-    // Review I-2: restoring a minimized window or showing it maximized activates it, so neither may run before the
-    // seam has moved the window to the desktop in front. The seam sees the window as it was; a remembered maximize
-    // comes after.
+    // Review I-3: at the narrowest width the full line is drawn at (TasksPanelLayout.SlimBelow, 620 DIP, the floating
+    // window's old minimum; narrower, Task 8 draws the slim line), with enough lines for the scroll bar, every column
+    // stays inside the list's viewport and the title keeps a usable width.
     [Fact]
-    public void A_minimized_or_maximized_window_changes_no_state_before_the_move() => StaThread.Run(() =>
-    {
-        var seen = new List<WindowState>();
-        TasksWindow? window = null;
-        using var t = Build(bringForward: _ => seen.Add(window!.WindowState));
-        window = t.Window;
-        Assert.True(t.Harness.Manager.SaveTasksWindow(new Deskbar.Core.Persistence.TasksWindowState(120, 90, 900, 640, Maximized: true)).IsSuccess);
-
-        t.Controller.Open(Rect.Empty);
-        Assert.Equal([WindowState.Normal], seen);
-        Assert.Equal(WindowState.Maximized, t.Window.WindowState);
-
-        t.Window.WindowState = WindowState.Minimized;
-        t.Controller.Open(Rect.Empty);
-        Assert.Equal(WindowState.Minimized, seen[1]);
-        // The seam here is a fake; the App's activator restores an iconic window after the move.
-        Assert.Equal(WindowState.Minimized, t.Window.WindowState);
-    });
-
-    // Review minor 1 of 187cf4a: showing a window maximized activates it, so a window the seam left on its own desktop
-    // (not activated) is not maximized there, which would take Petre to it. It stays due: the next arrival that does
-    // activate it maximizes it.
-    [Fact]
-    public void A_window_left_on_its_own_desktop_is_not_maximized_there() => StaThread.Run(() =>
-    {
-        var activates = false;
-        using var t = Build(activates: () => activates);
-        Assert.True(t.Harness.Manager.SaveTasksWindow(new Deskbar.Core.Persistence.TasksWindowState(120, 90, 900, 640, Maximized: true)).IsSuccess);
-
-        t.Controller.Open(Rect.Empty);
-        Assert.Equal(WindowState.Normal, t.Window.WindowState);
-
-        activates = true;
-        t.Controller.Open(Rect.Empty);
-        Assert.Equal(WindowState.Maximized, t.Window.WindowState);
-    });
-
-    // Review I-3: at the window's minimum width, with enough lines for the scroll bar, every column stays inside the
-    // list's viewport and the title keeps a usable width.
-    [Fact]
-    public void At_the_minimum_width_the_columns_stay_inside_the_viewport() => StaThread.Run(() =>
+    public void At_the_full_lines_narrowest_width_the_columns_stay_inside_the_viewport() => StaThread.Run(() =>
     {
         using var t = Build();
         Enumerable.Range(1, 40).ToList().ForEach(i => t.Tasks.AddNote($"a note with a fairly long title, number {i}", t.Gepha));
-        t.Controller.Open(Rect.Empty);
-        t.Window.Width = t.Window.MinWidth;
+        t.Controller.Show();
+        t.Window.Width = TasksPanelLayout.SlimBelow;
         t.Window.UpdateLayout();
 
         var scroller = Inside(t.Window).OfType<ScrollViewer>().First(s => s.Content is StackPanel);
@@ -883,7 +940,7 @@ public class TasksBoardTests
         var now = ClickStart;
         using var t = Build(clickClock: () => now);
         var id = t.Tasks.Create("work", t.Gepha, Session("s1")).Value.Id;
-        t.Controller.Open(Rect.Empty);
+        t.Controller.Show();
         now = now.AddMilliseconds(600);
 
         t.Tasks.SetStatusLine(id, "waiting for CI");
@@ -909,8 +966,8 @@ public class TasksBoardTests
         var closed = t.Tasks.Create("done one", t.Gepha, Session("s1")).Value.Id;
         t.Tasks.MarkDone(closed);
         t.Tasks.AddNote("iam.ge: transcripts, learnings and every other thing - personalized-health - Visual Studio Code", Maybe<Guid>.None);
-        t.Controller.Open(Rect.Empty);
-        t.Window.Width = t.Window.MinWidth;
+        t.Controller.Show();
+        t.Window.Width = TasksPanelLayout.SlimBelow;
         t.Window.UpdateLayout();
 
         var lines = t.Window.Keys.Select(id => LineOf(t.Window, id)).ToList();
@@ -952,7 +1009,7 @@ public class TasksBoardTests
         t.Tasks.Ask(asking, "Ship it?");
         var done = t.Tasks.Create("finished", t.Gepha, Session("s3")).Value.Id;
         t.Tasks.MarkDone(done);
-        t.Controller.Open(Rect.Empty);
+        t.Controller.Show();
         t.Window.UpdateLayout();
 
         Assert.Equal("Backlog", StatusWordOf(LineOf(t.Window, note)));
@@ -970,9 +1027,9 @@ public class TasksBoardTests
     {
         using var t = Build();
         var id = t.Tasks.AddNote("note", t.Gepha).Value.Id;
-        t.Controller.Open(Rect.Empty);
+        t.Controller.Show();
         t.Controller.ToggleThread(id);
-        t.Window.Width = t.Window.MinWidth;
+        t.Window.Width = TasksPanelLayout.SlimBelow;
         t.Window.UpdateLayout();
 
         var box = t.Window.CommentBoxOf(id)!;
@@ -987,23 +1044,6 @@ public class TasksBoardTests
             Assert.True(part.RenderSize.Width >= part.DesiredSize.Width - part.Margin.Left - part.Margin.Right - 0.5, $"{part.GetType().Name} squeezed");
         });
     });
-
-    // PlaceNear: clear of the bar, inside the work area (the model is commit 183d85e's PlaceUnder).
-    [Fact]
-    public void The_window_opens_below_a_bar_at_the_top() =>
-        Assert.Equal(new Point(100, 304), TasksWindow.PlaceNear(new Rect(100, 0, 300, 300), new Rect(0, 0, 1920, 1040), new Size(720, 560)));
-
-    [Fact]
-    public void The_window_opens_above_a_bar_at_the_bottom() =>
-        Assert.Equal(new Point(100, 1040 - 300 - 4 - 560), TasksWindow.PlaceNear(new Rect(100, 740, 300, 300), new Rect(0, 0, 1920, 1040), new Size(720, 560)));
-
-    [Fact]
-    public void The_window_opens_beside_a_bar_docked_down_an_edge() =>
-        Assert.Equal(new Point(1920 - 320 - 4 - 720, 0), TasksWindow.PlaceNear(new Rect(1600, 0, 320, 1040), new Rect(0, 0, 1600, 1040), new Size(720, 560)));
-
-    [Fact]
-    public void The_window_stays_inside_the_work_area_on_the_right() =>
-        Assert.Equal(new Point(1920 - 720, 304), TasksWindow.PlaceNear(new Rect(1700, 0, 200, 300), new Rect(0, 0, 1920, 1040), new Size(720, 560)));
 
     // --- Task 12: flags, quadrants and drag in the List view ---------------------------------------------------------
 
@@ -1022,7 +1062,7 @@ public class TasksBoardTests
         t.Tasks.SetFlag(c, TaskFlag.Important, true);
         t.Tasks.SetFlag(c, TaskFlag.Urgent, true);
 
-        t.Controller.Open(Rect.Empty);
+        t.Controller.Show();
 
         Assert.Equal(["I  Urgent and important", "II  Important, not urgent", "III  Urgent, not important", "IV  Not urgent, not important"],
             t.Window.Headers);
@@ -1035,7 +1075,7 @@ public class TasksBoardTests
         using var t = Build();
         var a = t.Tasks.AddNote("a", t.Gepha).Value.Id;
         var b = t.Tasks.AddNote("b", t.Gepha).Value.Id;
-        t.Controller.Open(Rect.Empty);
+        t.Controller.Show();
         Assert.Equal([b, a], t.Window.Keys);
         var important = ButtonNamed(LineOf(t.Window, a), "Important");
         Assert.Equal("Important", important.ToolTip);
@@ -1076,7 +1116,7 @@ public class TasksBoardTests
         var b = t.Tasks.AddNote("b", t.Gepha).Value.Id;
         var c = t.Tasks.AddNote("c", t.Gepha).Value.Id;
         t.Window.DragMouse = ArrangeMouse.Held;
-        t.Controller.Open(Rect.Empty);
+        t.Controller.Show();
         t.Window.UpdateLayout();
         Assert.Equal([c, b, a], t.Window.Keys);
 
@@ -1103,7 +1143,7 @@ public class TasksBoardTests
         var w = t.Tasks.AddNote("w", t.Gepha).Value.Id;
         t.Tasks.SetStatus(w, TaskStatus.WaitingOnYou);
         t.Window.DragMouse = ArrangeMouse.Held;
-        t.Controller.Open(Rect.Empty);
+        t.Controller.Show();
         t.Window.UpdateLayout();
         var before = t.Tasks.Board;
 
@@ -1141,7 +1181,7 @@ public class TasksBoardTests
         t.Tasks.SetFlag(b, TaskFlag.Important, true);
         t.Tasks.SetFlag(w, TaskFlag.Important, true);
         t.Tasks.SetStatus(w, TaskStatus.WaitingOnYou);
-        t.Controller.Open(Rect.Empty);
+        t.Controller.Show();
         Assert.False(t.Window.MatrixShown);
 
         Click(ButtonNamed(t.Window, "Matrix"));
@@ -1172,7 +1212,7 @@ public class TasksBoardTests
         t.Tasks.AddNote("a", t.Gepha);
         Assert.True(t.Harness.Manager.SetTasksMatrix(true).IsSuccess);
 
-        t.Controller.Open(Rect.Empty);
+        t.Controller.Show();
 
         Assert.True(t.Window.MatrixShown);
     });
@@ -1194,7 +1234,7 @@ public class TasksBoardTests
         t.Tasks.SetFlag(a, TaskFlag.Important, true);
         Assert.True(t.Harness.Manager.SetTasksMatrix(true).IsSuccess);
         t.Window.DragMouse = ArrangeMouse.Held;
-        t.Controller.Open(Rect.Empty);
+        t.Controller.Show();
         t.Window.UpdateLayout();
         Assert.Equal(Quadrant.II, t.Window.CellOf(a));
 
@@ -1233,7 +1273,7 @@ public class TasksBoardTests
         t.Tasks.SetStatus(w, TaskStatus.WaitingOnYou);
         t.Tasks.SetFlag(c, TaskFlag.Urgent, true);
         t.Window.DragMouse = ArrangeMouse.Held;
-        t.Controller.Open(Rect.Empty);
+        t.Controller.Show();
         t.Window.UpdateLayout();
         Assert.Equal([w, c, b, a], t.Window.Keys);
 
@@ -1245,15 +1285,16 @@ public class TasksBoardTests
 
     // Review of 4fc4441..a1acd60, item 1: at the window's minimum width the Matrix left a line's title 9.8 DIP (80 at
     // 720). With a cell long enough for its own scroll bar, every column stays inside the cell and the title keeps a
-    // usable width, as the List's I-3 test asks.
+    // usable width, as the List's I-3 test asks. The window used to grow to the Matrix's 780 DIP by itself; the panel
+    // does not, and its Matrix switch shows only from TasksPanelLayout.MatrixFrom (780, Task 8), so that is the width here.
     [Fact]
-    public void At_the_minimum_width_the_matrix_keeps_room_for_titles() => StaThread.Run(() =>
+    public void At_the_matrix_narrowest_width_it_keeps_room_for_titles() => StaThread.Run(() =>
     {
         using var t = Build();
         Enumerable.Range(1, 30).ToList().ForEach(i => t.Tasks.AddNote($"a note with a fairly long title, number {i}", t.Gepha));
         Assert.True(t.Harness.Manager.SetTasksMatrix(true).IsSuccess);
-        t.Controller.Open(Rect.Empty);
-        t.Window.Width = t.Window.MinWidth;
+        t.Controller.Show();
+        t.Window.Width = TasksPanelLayout.MatrixFrom;
         t.Window.UpdateLayout();
 
         var line0 = LineOf(t.Window, t.Window.Keys[0]);
@@ -1323,7 +1364,7 @@ public class TasksBoardTests
             if (captures is not null) captures.Count++;
             return true;
         }, _ => true, (_, _) => pointer.At);
-        t.Controller.Open(Rect.Empty);
+        t.Controller.Show();
         t.Window.UpdateLayout();
         return (t, pointer, a, b, c);
     }
@@ -1415,7 +1456,7 @@ public class TasksBoardTests
         t.Tasks.SetStatus(w, TaskStatus.WaitingOnYou);
         t.Tasks.SetFlag(c, TaskFlag.Urgent, true);
         t.Window.DragMouse = ArrangeMouse.Held;
-        t.Controller.Open(Rect.Empty);
+        t.Controller.Show();
         t.Window.UpdateLayout();
         Assert.Equal([w, c, b, a], t.Window.Keys);
 
@@ -1428,61 +1469,24 @@ public class TasksBoardTests
         t.Window.DragRelease();
     });
 
-    // --- Review of the fix round, I-1: the Matrix gives the window back its own width and stays on screen -----------
-
-    // A place wider than the List's minimum (692 DIP since the status chip column) and narrower than the Matrix's (780),
-    // in device pixels at the test screen's own scale, on that screen's work area.
-    static Deskbar.Core.Persistence.TasksWindowState Narrow(Rect work, bool flushRight)
-    {
-        var scale = TasksWindow.PrimaryScale();
-        var (width, height) = ((int)(730 * scale), (int)(480 * scale));
-        return new(flushRight ? (int)work.Right - width : (int)work.Left + 40, (int)work.Top + 40, width, height, Maximized: false);
-    }
-
+    // The floating window grew itself to the Matrix's 780 DIP and gave the List its width back afterwards (the tests
+    // "List_then_matrix_then_list_gives_the_window_back_its_width" and "A_window_flush_with_the_right_edge_stays_on_
+    // screen_in_the_matrix" pinned that). The panel never widens anything (spec "The Matrix"): the switch changes the
+    // view, not the window's width nor the width saved for the panel.
     [Fact]
-    public void List_then_matrix_then_list_gives_the_window_back_its_width() => StaThread.Run(() =>
+    public void The_matrix_never_widens_the_panel() => StaThread.Run(() =>
     {
         using var t = Build();
         t.Tasks.AddNote("a", t.Gepha);
-        var narrow = Narrow(TasksWindow.PrimaryWorkArea(), flushRight: false);
-        Assert.True(t.Harness.Manager.SaveTasksWindow(narrow).IsSuccess);
-        t.Controller.Open(Rect.Empty);
-        Assert.Equal(narrow.Width, (int)t.Window.DeviceRect.Width);
-
-        Click(ButtonNamed(t.Window, "Matrix"));
-        t.Window.UpdateLayout();
-        Assert.True(t.Window.DeviceRect.Width > narrow.Width, $"the Matrix grew the window to {t.Window.DeviceRect.Width}");
-        // While the Matrix has it, the place to remember is still the List's.
-        Assert.Equal(narrow, t.Window.CurrentPlace());
-
-        Click(ButtonNamed(t.Window, "List"));
-        t.Window.UpdateLayout();
-        Assert.Equal(narrow.Width, (int)t.Window.DeviceRect.Width);
-
-        t.Controller.Dismiss();
-        Assert.Equal(narrow, t.Harness.Manager.State.TasksWindow);
-    });
-
-    [Fact]
-    public void A_window_flush_with_the_right_edge_stays_on_screen_in_the_matrix() => StaThread.Run(() =>
-    {
-        using var t = Build();
-        t.Tasks.AddNote("a", t.Gepha);
-        var work = TasksWindow.PrimaryWorkArea();
-        var narrow = Narrow(work, flushRight: true);
-        Assert.True(t.Harness.Manager.SaveTasksWindow(narrow).IsSuccess);
-        t.Controller.Open(Rect.Empty);
+        t.Controller.Show();
+        var before = t.Window.ActualWidth;
 
         Click(ButtonNamed(t.Window, "Matrix"));
         t.Window.UpdateLayout();
 
-        var rect = t.Window.DeviceRect;
-        Assert.True(rect.Width > narrow.Width, $"grown to {rect.Width}");
-        Assert.True(rect.Right <= work.Right + 0.5 && rect.Left >= work.Left - 0.5, $"window {rect} in a work area {work}");
-
-        Click(ButtonNamed(t.Window, "List"));
-        t.Window.UpdateLayout();
-        Assert.Equal(new Rect(narrow.Left, narrow.Top, narrow.Width, narrow.Height), t.Window.DeviceRect);
+        Assert.True(t.Window.MatrixShown);
+        Assert.Equal(before, t.Window.ActualWidth, 0.5);
+        Assert.Equal(720, t.Harness.Manager.State.TasksPanel!.Width);
     });
 
     // --- Whole-PR review, I-1: a redraw keeps each Matrix cell's scroll, and a workspace switch redraws no row --------
@@ -1496,7 +1500,7 @@ public class TasksBoardTests
         t.Tasks.SetFlag(other, TaskFlag.Important, true);
         t.Tasks.SetFlag(other, TaskFlag.Urgent, true);
         Assert.True(t.Harness.Manager.SetTasksMatrix(true).IsSuccess);
-        t.Controller.Open(Rect.Empty);
+        t.Controller.Show();
         t.Window.UpdateLayout();
         t.Window.CellScroller(Quadrant.IV).ScrollToVerticalOffset(200);
         t.Window.UpdateLayout();
@@ -1517,7 +1521,7 @@ public class TasksBoardTests
     {
         using var t = Build();
         t.Tasks.AddNote("a", t.Gepha);
-        t.Controller.Open(Rect.Empty);
+        t.Controller.Show();
         var rebuilds = t.Window.Rebuilds;
         var sparrow = t.Harness.Manager.State.Workspaces.Single(w => w.Name == "Sparrow");
 
@@ -1537,7 +1541,7 @@ public class TasksBoardTests
     public void The_add_rows_workspace_chip_opens_its_menu_and_a_pick_lands() => StaThread.Run(() =>
     {
         using var t = Build();
-        t.Controller.Open(Rect.Empty);
+        t.Controller.Show();
         Click(ButtonNamed(t.Window, "Add"));
 
         Click(ButtonNamed(t.Window, "Add to workspace"));
@@ -1563,7 +1567,7 @@ public class TasksBoardTests
     {
         using var t = Build();
         t.Tasks.AddNote("already there", t.Gepha, QuadrantOf.Flags(important, urgent));
-        t.Controller.Open(Rect.Empty);
+        t.Controller.Show();
         Click(ButtonNamed(t.Window, "Add"));
 
         if (important) Click(ButtonNamed(t.Window, "Add as important"));
@@ -1587,7 +1591,7 @@ public class TasksBoardTests
         using var t = Build();
         t.Tasks.AddNote("urgent one", t.Gepha, Quadrant.III);
         Assert.True(t.Harness.Manager.SetTasksMatrix(true).IsSuccess);
-        t.Controller.Open(Rect.Empty);
+        t.Controller.Show();
         Click(ButtonNamed(t.Window, "Add"));
 
         Assert.Equal(Quadrant.II, t.Window.ActiveCell);
@@ -1618,7 +1622,7 @@ public class TasksBoardTests
     {
         using var t = Build();
         var id = t.Tasks.Create("Still going", t.Gepha, Session("s1")).Value.Id;
-        t.Controller.Open(Rect.Empty);
+        t.Controller.Show();
 
         var menu = t.Window.OpenMenuFor(id);
         var close = menu.Items.OfType<MenuItem>().Single(i => i.Header is TextBlock { Text: "Close" });
@@ -1636,7 +1640,7 @@ public class TasksBoardTests
     {
         using var t = Build();
         var id = t.Tasks.Create("Tasks redesign", t.Gepha, Session("s1")).Value.Id;
-        t.Controller.Open(Rect.Empty);
+        t.Controller.Show();
 
         var line = LineOf(t.Window, id);
         Assert.DoesNotContain(Inside(line).OfType<TextBlock>(), b => b.Text is "CL" or "CLAUDE");
@@ -1653,7 +1657,7 @@ public class TasksBoardTests
     {
         using var t = Build();
         var id = t.Tasks.AddNote("buy body shampoo", t.Gepha).Value.Id;
-        t.Controller.Open(Rect.Empty);
+        t.Controller.Show();
         t.Window.UpdateLayout();
 
         LineOf(t.Window, id).RaiseEvent(RightRelease());
@@ -1677,7 +1681,7 @@ public class TasksBoardTests
     {
         using var t = Build();
         var id = t.Tasks.AddNote("note", t.Gepha).Value.Id;
-        t.Controller.Open(Rect.Empty);
+        t.Controller.Show();
 
         var menu = t.Window.OpenMenuFor(id);
 
@@ -1702,7 +1706,7 @@ public class TasksBoardTests
         var shortOne = t.Tasks.AddNote("short", t.Gepha).Value.Id;
         var longOne = t.Tasks.AddNote(string.Join(" ", Enumerable.Repeat("a long title that goes on", 12)), t.Gepha).Value.Id;
         Assert.True(t.Harness.Manager.SetTasksMatrix(matrix).IsSuccess);
-        t.Controller.Open(Rect.Empty);
+        t.Controller.Show();
         t.Window.UpdateLayout();
 
         var title = TitleOf(t.Window, longOne);
@@ -1724,7 +1728,7 @@ public class TasksBoardTests
         using var t = Build();
         var id = t.Tasks.AddNote("buy body shampoo", t.Gepha).Value.Id;
         t.Tasks.Comment(id, Maybe<string>.None, "a comment");
-        t.Controller.Open(Rect.Empty);
+        t.Controller.Show();
         t.Window.UpdateLayout();
         Assert.False(t.Window.ThreadShown(id));
         Click(LineOf(t.Window, id));
@@ -1740,7 +1744,7 @@ public class TasksBoardTests
     {
         using var t = Build();
         var id = t.Tasks.AddNote("buy body shampoo", t.Gepha).Value.Id;
-        t.Controller.Open(Rect.Empty);
+        t.Controller.Show();
         t.Window.UpdateLayout();
 
         DoubleClick(t.Window, id);
@@ -1777,7 +1781,7 @@ public class TasksBoardTests
         var id = t.Tasks.AddNote("second", t.Gepha).Value.Id;
         Assert.False(t.Window.IsOpen);
 
-        t.Controller.ShowTask(id, Rect.Empty);
+        t.Controller.ShowTask(id);
 
         Assert.True(t.Window.IsOpen);
         Assert.True(t.Window.IsSelected(id));
@@ -1802,7 +1806,7 @@ public class TasksBoardTests
         t.Tasks.Join(claude, Session("s2"));
         var done = t.Tasks.Create("Merged", t.Gepha, Session("s3")).Value.Id;
         t.Tasks.MarkDone(done);
-        t.Controller.Open(Rect.Empty);
+        t.Controller.Show();
         t.Window.UpdateLayout();
 
         var lines = t.Tasks.Board.Pile().Select(x => LineOf(t.Window, x.Id)).ToList();
@@ -1826,7 +1830,7 @@ public class TasksBoardTests
         var working = t.Tasks.Create("Working", t.Gepha, Session("s1")).Value.Id;
         var done = t.Tasks.Create("Merged", t.Gepha, Session("s2")).Value.Id;
         t.Tasks.MarkDone(done);
-        t.Controller.Open(Rect.Empty);
+        t.Controller.Show();
 
         Assert.Contains(Inside(LineOf(t.Window, working)).OfType<Button>(), b => AutomationProperties.GetName(b) == "Close");
         Assert.Contains(Inside(LineOf(t.Window, done)).OfType<Button>(), b => AutomationProperties.GetName(b) == "Close");
@@ -1844,7 +1848,7 @@ public class TasksBoardTests
         var young = t.Tasks.AddNote("young", t.Gepha).Value.Id;
         var claude = t.Tasks.Create("Tasks redesign", t.Gepha, Session("s1")).Value.Id;
         t.Tasks.Join(claude, Session("s2"));
-        t.Controller.Open(Rect.Empty);
+        t.Controller.Show();
         t.Window.UpdateLayout();
 
         double Left(FrameworkElement e) => e.TransformToAncestor(t.Window).TransformBounds(new Rect(e.RenderSize)).Left;
@@ -1866,8 +1870,8 @@ public class TasksBoardTests
         using var t = Build();
         var id = t.Tasks.AddNote("a note with a title that is quite long, long enough to wrap in a narrow window of tasks", t.Gepha).Value.Id;
         t.Tasks.Comment(id, Maybe<string>.None, "A very long comment " + string.Join(" ", Enumerable.Repeat("with many words", 30)) + " `and_a_long_unbreakable_code_span_" + new string('x', 80) + "`");
-        t.Controller.Open(Rect.Empty);
-        t.Window.Width = t.Window.MinWidth;
+        t.Controller.Show();
+        t.Window.Width = TasksPanelLayout.SlimBelow;
         t.Window.UpdateLayout();
         Click(ButtonNamed(LineOf(t.Window, id), "Comments"));
         t.Window.UpdateLayout();
@@ -1887,7 +1891,7 @@ public class TasksBoardTests
         var selection = new TaskSelection();
         using var t = Build(selection: selection);
         var id = t.Tasks.AddNote("iam.ge: transcripts", t.Gepha).Value.Id;
-        t.Controller.Open(Rect.Empty);
+        t.Controller.Show();
         selection.Select(id);
 
         PressKey(t.Window, Key.F2);
@@ -1910,7 +1914,7 @@ public class TasksBoardTests
     {
         using var t = Build();
         var id = t.Tasks.AddNote("first", t.Gepha).Value.Id;
-        t.Controller.Open(Rect.Empty);
+        t.Controller.Show();
 
         Assert.True(TasksWindow.EditorSaves(Key.Enter, ModifierKeys.None));
         Assert.False(TasksWindow.EditorSaves(Key.Enter, ModifierKeys.Shift));
@@ -1932,7 +1936,7 @@ public class TasksBoardTests
         using var t = Build();
         var id = t.Tasks.AddNote("mine", t.Gepha).Value.Id;
         var other = t.Tasks.AddNote("theirs", t.Gepha).Value.Id;
-        t.Controller.Open(Rect.Empty);
+        t.Controller.Show();
         t.Window.BeginRename(id);
         var editor = Assert.IsType<TextBox>(t.Window.Editor);
         editor.Text = "half typ";
@@ -1956,7 +1960,7 @@ public class TasksBoardTests
         using var t = Build();
         t.Tasks.AddNote("here", t.Gepha);
         t.Tasks.AddNote("there", t.Sparrow);
-        t.Controller.Open(Rect.Empty);
+        t.Controller.Show();
 
         Click(ButtonNamed(t.Window, "Workspace filter"));
 
@@ -1976,7 +1980,7 @@ public class TasksBoardTests
     {
         using var t = Build();
         t.Tasks.AddNote("here", t.Gepha);
-        t.Controller.Open(Rect.Empty);
+        t.Controller.Show();
         if (name == "Add to workspace") Click(ButtonNamed(t.Window, "Add"));
         var button = ButtonNamed(t.Window, name);
 
@@ -1997,7 +2001,7 @@ public class TasksBoardTests
     {
         using var t = Build();
         t.Tasks.AddNote("a", t.Gepha);
-        t.Controller.Open(Rect.Empty);
+        t.Controller.Show();
         var presents = t.Window.Presents;
 
         Assert.True(t.Harness.Manager.SetClaudeSkill(false).IsSuccess);
@@ -2015,7 +2019,7 @@ public class TasksBoardTests
         using var t = Build(selection: selection);
         var id = t.Tasks.Create("work", t.Gepha, Session("s1")).Value.Id;
         t.Tasks.Ask(id, "OK to merge?");
-        t.Controller.Open(Rect.Empty);
+        t.Controller.Show();
         selection.Select(id);
 
         Assert.True(t.Controller.Close(id).IsSuccess);
@@ -2036,7 +2040,7 @@ public class TasksBoardTests
         var id = t.Tasks.Create("work", t.Gepha, Session("s1")).Value.Id;
         t.Tasks.MarkDone(id);
         Assert.True(t.Harness.Manager.SetTasksMatrix(true).IsSuccess);
-        t.Controller.Open(Rect.Empty);
+        t.Controller.Show();
 
         var line = LineOf(t.Window, id);
         Assert.Equal("", t.Window.AgeText(id));
@@ -2054,7 +2058,7 @@ public class TasksBoardTests
         Assert.True(t.Harness.Manager.SetTasksMatrix(true).IsSuccess);
         selection.Select(oldest);
 
-        t.Controller.Open(Rect.Empty);
+        t.Controller.Show();
 
         Assert.True(t.Window.CellScroller(Quadrant.IV).VerticalOffset > 0, $"offset {t.Window.CellScroller(Quadrant.IV).VerticalOffset}");
     });
@@ -2070,7 +2074,7 @@ public class TasksBoardTests
         using var t = Build();
         var note = t.Tasks.AddNote("mine", t.Gepha).Value.Id;
         var working = t.Tasks.Create("Claude's", t.Gepha, Session("s1")).Value.Id;
-        t.Controller.Open(Rect.Empty);
+        t.Controller.Show();
 
         Assert.Equal("Me", AssigneeTextOf(t.Window, note));
         Assert.Equal("Claude", AssigneeTextOf(t.Window, working));
@@ -2082,7 +2086,7 @@ public class TasksBoardTests
         using var t = Build();
         var note = t.Tasks.AddNote("mine", t.Gepha).Value.Id;
         var working = t.Tasks.Create("Claude's", t.Gepha, Session("s1")).Value.Id;
-        t.Controller.Open(Rect.Empty);
+        t.Controller.Show();
         Assert.Equal("Assigned: all", t.Window.AssigneeFilterLabel);
         Assert.Contains("Open 2", t.Window.FilterLabels);
 
@@ -2099,8 +2103,8 @@ public class TasksBoardTests
         Assert.Equal(2, t.Window.Keys.Count);
         // A fresh opening starts at "all" again, as the other filters do.
         t.Controller.FilterAssignee(TaskAssigneeFilter.Me);
-        t.Controller.Dismiss();
-        t.Controller.Open(Rect.Empty);
+        t.Controller.Hide();
+        t.Controller.Show();
         Assert.Equal("Assigned: all", t.Window.AssigneeFilterLabel);
     });
 
@@ -2110,7 +2114,7 @@ public class TasksBoardTests
         using var t = Build();
         t.Tasks.AddNote("mine", t.Gepha);
         t.Tasks.Create("Claude's", t.Gepha, Session("s1"));
-        t.Controller.Open(Rect.Empty);
+        t.Controller.Show();
 
         var menu = t.Window.OpenAssigneeFilterMenu();
         Assert.Equal(["Me", "Claude", "All"], menu.Items.OfType<MenuItem>().Select(i => ((TextBlock)i.Header).Text));
@@ -2128,7 +2132,7 @@ public class TasksBoardTests
     {
         using var t = Build();
         var id = t.Tasks.AddNote("mine", t.Gepha).Value.Id;
-        t.Controller.Open(Rect.Empty);
+        t.Controller.Show();
 
         foreach (var atPointer in new[] { false, true })
         {
@@ -2162,7 +2166,7 @@ public class TasksBoardTests
         var id = t.Tasks.AddNote("Pay rent", t.Gepha).Value.Id;
         var plain = t.Tasks.AddNote("No words", t.Gepha).Value.Id;
         t.Tasks.Describe(id, "The **landlord** wants it by Friday");
-        t.Controller.Open(Rect.Empty);
+        t.Controller.Show();
         t.Controller.ToggleThread(id);
 
         Assert.Equal("The landlord wants it by Friday", DescriptionBlockOf(t.Window, id)!.Text);
@@ -2180,7 +2184,7 @@ public class TasksBoardTests
         using var t = Build();
         var id = t.Tasks.AddNote("Profile", t.Gepha).Value.Id;
         t.Tasks.Describe(id, "Parked, pick up **from here**.\n## What to do next\n1. answer the questions");
-        t.Controller.Open(Rect.Empty);
+        t.Controller.Show();
 
         var preview = DescriptionPreviewOf(t.Window, id);
         Assert.Equal("Parked, pick up from here.", preview!.Text);
@@ -2204,7 +2208,7 @@ public class TasksBoardTests
         var id = t.Tasks.Create("Tasks redesign", t.Gepha, Session("s1")).Value.Id;
         t.Tasks.SetStatusLine(id, "waiting for CI");
         t.Tasks.Describe(id, "Petre's brief");
-        t.Controller.Open(Rect.Empty);
+        t.Controller.Show();
         t.Controller.ToggleThread(id);
 
         var texts = Inside(LineOf(t.Window, id)).OfType<TextBlock>().Select(b => b.Text).ToList();
@@ -2218,7 +2222,7 @@ public class TasksBoardTests
         using var t = Build();
         var id = t.Tasks.AddNote("Pay rent", t.Gepha).Value.Id;
         t.Tasks.Describe(id, "old words");
-        t.Controller.Open(Rect.Empty);
+        t.Controller.Show();
 
         t.Window.BeginRename(id);
         Assert.Equal("Pay rent", t.Window.Editor!.Text);
@@ -2239,7 +2243,7 @@ public class TasksBoardTests
         using var t = Build();
         var id = t.Tasks.AddNote("Pay rent", t.Gepha).Value.Id;
         t.Tasks.Describe(id, "old words");
-        t.Controller.Open(Rect.Empty);
+        t.Controller.Show();
 
         t.Window.BeginRename(id);
         t.Window.Editor!.Text = "  ";
@@ -2261,7 +2265,7 @@ public class TasksBoardTests
         var id = t.Tasks.Create("Tasks redesign", t.Gepha, Session("s1")).Value.Id;
         t.Tasks.Comment(id, "s1", "Claude's finding");
         t.Tasks.Comment(id, Maybe<string>.None, "my thought");
-        t.Controller.Open(Rect.Empty);
+        t.Controller.Show();
         t.Controller.ToggleThread(id);
 
         var edits = Inside(t.Window).OfType<Button>().Where(b => AutomationProperties.GetName(b) == "Edit comment").ToList();
@@ -2276,7 +2280,7 @@ public class TasksBoardTests
         var id = t.Tasks.AddNote("note", t.Gepha).Value.Id;
         t.Tasks.Comment(id, Maybe<string>.None, "first draft");
         var comment = t.Tasks.Board.Tasks.Single().Comments.Single().Id;
-        t.Controller.Open(Rect.Empty);
+        t.Controller.Show();
         t.Controller.ToggleThread(id);
 
         Click(Inside(t.Window).OfType<Button>().Single(b => AutomationProperties.GetName(b) == "Edit comment"));
@@ -2301,7 +2305,7 @@ public class TasksBoardTests
         var id = t.Tasks.Create("Tasks redesign", t.Gepha, Session("s1")).Value.Id;
         t.Tasks.Comment(id, "s1", "Claude's finding");
         var comment = t.Tasks.Board.Tasks.Single().Comments.Single().Id;
-        t.Controller.Open(Rect.Empty);
+        t.Controller.Show();
         t.Controller.ToggleThread(id);
 
         t.Window.BeginEditComment(comment);
@@ -2325,7 +2329,7 @@ public class TasksBoardTests
         var important = t.Tasks.AddNote("important", t.Gepha, Quadrant.II).Value.Id;
         var urgent = t.Tasks.AddNote("urgent", t.Gepha, Quadrant.III).Value.Id;
         var both = t.Tasks.AddNote("both", t.Gepha, Quadrant.I).Value.Id;
-        t.Controller.Open(Rect.Empty);
+        t.Controller.Show();
 
         Assert.Equal((FontWeights.Normal, FontStyles.Normal), TitleLookOf(t.Window, plain));
         Assert.Equal((FontWeights.Bold, FontStyles.Normal), TitleLookOf(t.Window, important));
@@ -2344,7 +2348,7 @@ public class TasksBoardTests
         var both = t.Tasks.AddNote("both", t.Gepha, Quadrant.I).Value.Id;
         var plain = t.Tasks.AddNote("plain", t.Gepha).Value.Id;
         Assert.True(t.Harness.Manager.SetTasksMatrix(true).IsSuccess);
-        t.Controller.Open(Rect.Empty);
+        t.Controller.Show();
 
         Assert.Equal((FontWeights.Bold, FontStyles.Italic), TitleLookOf(t.Window, both));
         Assert.Equal((FontWeights.Normal, FontStyles.Normal), TitleLookOf(t.Window, plain));
@@ -2376,7 +2380,7 @@ public class TasksBoardTests
     {
         using var t = Build();
         var (id, _) = Answered(t);
-        t.Controller.Open(Rect.Empty);
+        t.Controller.Show();
         t.Controller.ToggleThread(id);
 
         Assert.Equal(2, t.Window.ShownComments(id).Count); // the older one and his reply
@@ -2399,7 +2403,7 @@ public class TasksBoardTests
         using var t = Build();
         var id = t.Tasks.AddNote("note", t.Gepha).Value.Id;
         t.Tasks.Comment(id, Maybe<string>.None, "mine");
-        t.Controller.Open(Rect.Empty);
+        t.Controller.Show();
         t.Controller.ToggleThread(id);
 
         Assert.DoesNotContain(Inside(t.Window).OfType<Button>(), b => AutomationProperties.GetName(b) == "Settled comments");
@@ -2410,7 +2414,7 @@ public class TasksBoardTests
     {
         using var t = Build();
         var (id, older) = Answered(t);
-        t.Controller.Open(Rect.Empty);
+        t.Controller.Show();
         t.Controller.ToggleThread(id);
 
         var settle = Inside(t.Window).OfType<Button>().Where(b => AutomationProperties.GetName(b) == "Settle comment").ToList();
@@ -2434,7 +2438,7 @@ public class TasksBoardTests
     {
         using var t = Build();
         var id = t.Tasks.AddNote("note", t.Gepha).Value.Id;
-        t.Controller.Open(Rect.Empty);
+        t.Controller.Show();
 
         Click(LineOf(t.Window, id));
         Assert.True(t.Window.ThreadShown(id));
@@ -2456,7 +2460,7 @@ public class TasksBoardTests
         var id = t.Tasks.AddNote("note", t.Gepha).Value.Id;
         t.Tasks.Comment(id, Maybe<string>.None, Long(9));
         t.Tasks.Comment(id, Maybe<string>.None, "short");
-        t.Controller.Open(Rect.Empty);
+        t.Controller.Show();
         t.Controller.ToggleThread(id);
 
         Assert.Single(ButtonsNamed(t, "Show more")); // the short comment has none
@@ -2479,7 +2483,7 @@ public class TasksBoardTests
         var id = t.Tasks.AddNote("note", t.Gepha).Value.Id;
         Enumerable.Range(1, 6).ToList().ForEach(i => t.Tasks.Comment(id, Maybe<string>.None, $"comment {i}"));
         var all = t.Tasks.Board.Tasks.Single().Comments.Select(c => c.Id).ToList();
-        t.Controller.Open(Rect.Empty);
+        t.Controller.Show();
         t.Controller.ToggleThread(id);
 
         Assert.Equal(all.Skip(3), t.Window.ShownComments(id));
@@ -2497,7 +2501,7 @@ public class TasksBoardTests
         using var t = Build();
         var id = t.Tasks.AddNote("note", t.Gepha).Value.Id;
         Enumerable.Range(1, 3).ToList().ForEach(i => t.Tasks.Comment(id, Maybe<string>.None, $"comment {i}"));
-        t.Controller.Open(Rect.Empty);
+        t.Controller.Show();
         t.Controller.ToggleThread(id);
 
         Assert.Empty(ButtonsNamed(t, "Earlier comments"));
@@ -2510,7 +2514,7 @@ public class TasksBoardTests
     {
         using var t = Build();
         var (id, _) = Answered(t);
-        t.Controller.Open(Rect.Empty);
+        t.Controller.Show();
         t.Controller.ToggleThread(id);
 
         Assert.Empty(ButtonsNamed(t, "Earlier comments"));
@@ -2524,7 +2528,7 @@ public class TasksBoardTests
         var id = t.Tasks.AddNote("note", t.Gepha).Value.Id;
         t.Tasks.Comment(id, Maybe<string>.None, Long(9));
         Enumerable.Range(1, 5).ToList().ForEach(i => t.Tasks.Comment(id, Maybe<string>.None, $"comment {i}"));
-        t.Controller.Open(Rect.Empty);
+        t.Controller.Show();
         t.Controller.ToggleThread(id);
         Click(ButtonsNamed(t, "Earlier comments").Single());
         Click(ButtonsNamed(t, "Show more")[0]);
@@ -2546,7 +2550,7 @@ public class TasksBoardTests
         using var t = Build();
         var id = t.Tasks.AddNote("Pay rent", t.Gepha).Value.Id;
         t.Tasks.Describe(id, "words");
-        t.Controller.Open(Rect.Empty);
+        t.Controller.Show();
         var pulses = 0;
         using var _ = t.Tasks.Changed.Subscribe(_ => pulses++);
         var before = t.Tasks.Board;
@@ -2567,7 +2571,7 @@ public class TasksBoardTests
         var selection = new TaskSelection();
         using var t = Build(selection: selection);
         var id = t.Tasks.AddNote("note", t.Gepha).Value.Id;
-        t.Controller.Open(Rect.Empty);
+        t.Controller.Show();
         t.Controller.Pick(id);
         Assert.True(t.Window.ThreadShown(id));
         t.Window.EscapeIgnoresThreadWhile = () => true; // a comment box with the keyboard
@@ -2590,7 +2594,7 @@ public class TasksBoardTests
         var id = t.Tasks.AddNote("note", t.Gepha).Value.Id;
         var other = t.Tasks.AddNote("other", t.Gepha).Value.Id;
         Enumerable.Range(1, 5).ToList().ForEach(i => t.Tasks.Comment(id, Maybe<string>.None, $"comment {i}"));
-        t.Controller.Open(Rect.Empty);
+        t.Controller.Show();
         clock = clock.AddSeconds(2);
         t.Controller.ToggleThread(id);
         clock = clock.AddSeconds(2);
@@ -2617,7 +2621,7 @@ public class TasksBoardTests
         // Narrow glyphs: 350 characters, four lines by the count but two once laid out.
         t.Tasks.Comment(id, Maybe<string>.None, string.Join(" ", Enumerable.Repeat("iiiiiiiii", 35)));
         t.Tasks.Comment(id, Maybe<string>.None, Long(9));
-        t.Controller.Open(Rect.Empty);
+        t.Controller.Show();
         t.Controller.ToggleThread(id);
         static List<bool> Shown(Board t) => Inside(t.Window).OfType<Button>()
             .Where(b => AutomationProperties.GetName(b) == "Show more").Select(b => b.Visibility == Visibility.Visible).ToList();
@@ -2640,8 +2644,8 @@ public class TasksBoardTests
         var one = t.Tasks.AddNote("get a girl", t.Gepha).Value.Id;
         var two = t.Tasks.Create("Tighter spacing", t.Gepha, Session("s1")).Value.Id;
         t.Tasks.SetStatusLine(two, "PR green, ready to merge");
-        t.Controller.Open(Rect.Empty);
-        t.Window.Width = t.Window.MinWidth;
+        t.Controller.Show();
+        t.Window.Width = TasksPanelLayout.SlimBelow;
         t.Window.UpdateLayout();
 
         void Check(string view)
@@ -2673,7 +2677,7 @@ public class TasksBoardTests
         var started = new List<Guid>();
         using var t = Build(startClaude: started.Add);
         var id = t.Tasks.AddNote("Write the docs", t.Gepha).Value.Id;
-        t.Controller.Open(Rect.Empty);
+        t.Controller.Show();
 
         var menu = t.Window.OpenMenuFor(id);
         var items = menu.Items.OfType<MenuItem>().ToList();
@@ -2691,7 +2695,7 @@ public class TasksBoardTests
         // Without the seam (a copy without Claude sessions) neither shows.
         using var plain = Build();
         var other = plain.Tasks.AddNote("Errand", plain.Gepha).Value.Id;
-        plain.Controller.Open(Rect.Empty);
+        plain.Controller.Show();
         plain.Controller.ToggleThread(other);
         Assert.DoesNotContain(plain.Window.OpenMenuFor(other).Items.OfType<MenuItem>(), i => i.Header is TextBlock { Text: "Start Claude on this" });
         Assert.DoesNotContain(Inside(plain.Window).OfType<Button>(), b => AutomationProperties.GetName(b) == "Start Claude on this");
@@ -2718,7 +2722,7 @@ public class TasksBoardTests
         var id = t.Tasks.Create("Fix the bar", t.Gepha, new TaskSession("aaaaaaaa-1", @"C:\repos\Deskbar", Start, Maybe<DateTimeOffset>.None)).Value.Id;
         t.Tasks.Join(id, new TaskSession("bbbbbbbb-2", @"C:\repos\Deskbar", Start.AddMinutes(5), Maybe<DateTimeOffset>.None));
         t.Tasks.Join(id, new TaskSession("cccccccc-3", @"C:\repos\Deskbar", Start.AddMinutes(10), Maybe<DateTimeOffset>.None));
-        t.Controller.Open(Rect.Empty);
+        t.Controller.Show();
         t.Controller.ToggleThread(id);
 
         var lines = Inside(t.Window).OfType<DockPanel>().Where(d => "session-line".Equals(d.Tag)).ToList();

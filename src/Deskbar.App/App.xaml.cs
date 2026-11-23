@@ -47,7 +47,15 @@ public partial class App : Application
     WorkspaceSwitchGesture? switcher; // Alt+Tab-style workspace picker (Win+Ctrl+Tab by default)
     Chord boundSwitcher;              // the chord the picker and the hotkey are currently registered on
     QuickFind? quickFind;             // the search box for every window, tab and app (Win+Alt+Space by default)
-    TasksBoard? tasksBoard;           // the tasks window, a page with every task (the bar's "+N more", `tasks-window show`)
+    TasksBoard? tasksBoard;           // the tasks panel's board, every task (the bar's "All tasks", `tasks-window show`)
+    // The tasks panel's app bar beside the bar's (TasksPanel; spec 2026-11-23-tasks-panel-design.md), built with the
+    // board; the 1 s timer keeps it (Keep, ReclaimTopmost). Null in compatibility mode, like the bar.
+    TasksPanel? tasksPanel;
+    bool tasksPanelPinned;            // its hwnd is pinned to every desktop once, after its first show (see the board's construction)
+    // Whether the tasks panel is shown, for the bar's "All tasks" look. The bar is built before the panel (the panel needs
+    // the bar's strip notices), so the bar gets this relay at its construction and the panel's Shown is fed into it once
+    // the panel exists.
+    readonly System.Reactive.Subjects.BehaviorSubject<bool> tasksPanelShown = new(false);
     Chord boundQuickFind;             // the chord quick find's hotkey is currently registered on
     FloatingBar? floatingBar; // Task 11: created lazily on first show
     // The window list along the top of every screen (ScreenStrips, spec 2026-11-19-screen-strips-design.md): built with
@@ -302,10 +310,10 @@ public partial class App : Application
         if (compatibilityMode || manager is null || monitor is null || desktops is null) return;
 
         // "Ours" is decided the way the bar already decides it (FloatingBar.IsOwnWindow: the window's process
-        // is this process), so Deskbar never tiles its own bar, Manage, or a dialog of its own. The one exception is the
-        // tasks window, a page Petre works in, which tiles like any app window ("maybe even tile it", 2026-11-23;
-        // TasksBoard.KeptFromTiling). It is built after this, so its handle is read when the question is asked.
-        tileSurface = new Windows.Tiling.TileSurface(w => TasksBoard.KeptFromTiling(w.Value, tasksBoard?.KnownHandle ?? 0));
+        // is this process), so Deskbar never tiles its own bar, Manage, a dialog of its own or the tasks panel, which is
+        // docked, not a tile (TasksBoard.KeptFromTiling). The floating tasks window used to be the one exception ("maybe
+        // even tile it", 2026-11-23) until it became the panel (tasks panel plan, Task 6).
+        tileSurface = new Windows.Tiling.TileSurface(w => TasksBoard.KeptFromTiling(w.Value));
         tiler = new Core.Tiling.Tiler(manager, desktops, monitor, tileSurface,
             // Whether this copy may tile: Pro, or anyone while tiling is free (TilingGate.Free, for now).
             () => Core.Tiling.TilingGate.Allowed(Entitlement.Current.IsPro),
@@ -1545,15 +1553,16 @@ public partial class App : Application
             // `lock-tile`, the icon menu's "Don't split this tile" (Tiler.Lock.cs). `tiler` is read when the command
             // arrives: requests run on the UI thread after startup, and a copy with no Tiler refuses.
             setTileLocked: (window, on) => tiler?.SetTileLocked(window, on) ?? Result.Failure("Tiling is not running."),
-            // `tasks-window show|hide`, the twin of the bar's "+N more" and the window's own X. Read when the command
-            // arrives: the window is built later, with quick find, and is missing in compatibility mode.
+            // `tasks-window show|hide`, the twin of the bar's "All tasks" and the panel's ×: shows or hides the tasks
+            // panel (TasksBoard.Show, Hide). Read when the command arrives: the panel is built later, with quick find,
+            // and is missing in compatibility mode.
             setTasksWindow: shown => tasksBoard is { } board
                 ? Result.Success().Tap(() =>
                 {
-                    if (shown) board.Open(floatingBar?.BarScreenBounds() ?? Rect.Empty);
-                    else board.Dismiss();
+                    if (shown) board.Show();
+                    else board.Hide();
                 })
-                : Result.Failure("The tasks window is not available in this mode."),
+                : Result.Failure("The tasks panel is not available in this mode."),
             // A caller's folder in its long form (FolderPath): a Claude session can report an 8.3 short path.
             longPath: LongPath.Of,
             // `goal ...` and `task goal`, the planner's pipe twins (RemoteControl.Goals.cs).
@@ -1849,11 +1858,13 @@ public partial class App : Application
                 // A line's click: to its task's workspace, the switch the rows make (GoToTask below, shared with the
                 // tasks window's lines). A note on no workspace never gets here (the bar does nothing for it).
                 GoToTask = id => tasks!.Board.Tasks.TryFirst(t => t.Id == id).ToResult($"No task with id {id}").Bind(GoToTask),
-                // "+N more" and "All tasks": the tasks window, built with quick find below, so read through the field.
-                // It opens clear of the bar, or brings an open one forward.
-                OpenTasksWindow = () => tasksBoard?.Open(floatingBar?.BarScreenBounds() ?? Rect.Empty),
-                // A line's single click (Ruling 54): the window on that task, picked and expanded. A double-click goes.
-                OpenTaskInWindow = id => tasksBoard?.ShowTask(id, floatingBar?.BarScreenBounds() ?? Rect.Empty),
+                // "+N more" and "All tasks": the tasks panel shown or hidden (TasksBoard.Toggle). The board is built
+                // with quick find below, so it is read through the field.
+                ToggleTasksPanel = () => tasksBoard?.Toggle(),
+                // ...and whether the panel is shown, for that line's "on" look: the relay the panel feeds once it exists.
+                TasksPanelShown = tasksPanelShown,
+                // A line's single click (Ruling 54): the panel on that task, picked and expanded. A double-click goes.
+                OpenTaskInWindow = id => tasksBoard?.ShowTask(id),
                 // A Claude line's icon: the VS Code window whose title names the session's folder, by the rule the
                 // control pipe's `open` and `attention` use to find a caller's window (RemoteControl.CallerOf,
                 // EditorFolder.Best), each window offering its current title and the one it had before a rename. Two
@@ -1981,6 +1992,12 @@ public partial class App : Application
                 // Docked, the strip is checked on the same beat: the shell can stop holding it without a word
                 // (see FloatingBar.KeepDockedStrip). One GetMonitorInfo a second, and nothing more unless lost.
                 floatingBar.KeepDockedStrip();
+                // ...and the tasks panel's, after the bar's, on the same beat (TasksPanel.Keep: the same SettleFor and
+                // RetryEvery clocks, and a repair registers the panel afresh, so behind the bar again), and its place at
+                // the top of the topmost band, which the taskbar and the Start menu climb over as they do over the bar.
+                // Read through the field: the panel is built further down, with quick find.
+                tasksPanel?.Keep();
+                tasksPanel?.ReclaimTopmost();
                 // Petre: "i want to always refresh what's the active window, i can't afford to
                 // think that one window is active and another being highlighted."
                 //
@@ -2111,18 +2128,42 @@ public partial class App : Application
             monitor.Ignore(quickFind.EnsureHandle());
             boundQuickFind = Chord.Parse(manager.QuickFindShortcut).Value;
 
-            // THE TASKS WINDOW (TasksBoard, TasksWindow; docs/superpowers/specs/2026-11-22-tasks-board-design.md, "The
-            // window"): a page with every task, open and closed, and its comments, opened from the bar's "+N more" and
-            // from `tasks-window show`. The same TaskService as the bar's list and the control pipe, so all three agree.
-            // LISTED ON THE BAR LIKE ANY APP WINDOW (2026-11-23, Petre: "give it a proper icon in the workspaces so i
-            // can take it to the correct place"). It used to be ignored by the monitor, like quick find's box, so the bar
-            // never showed it and Petre could not find it or drag it to another workspace. It is a page he works in, not
-            // chrome, so the monitor now reports it the way it reports the Manage window: it sits on its workspace's
-            // row with its own checklist icon (TasksIcon), a click brings it up, and a drag moves it. The three
-            // carve-outs in WorkspaceManager (IsOurs: no auto-placement, no rename, no roster) still apply to it, as to
-            // every window of this process: placement memory and rename rules never touch it.
+            // THE TASKS PANEL (TasksBoard, TasksWindow, TasksPanel; docs/superpowers/specs/2026-11-22-tasks-board-design.md
+            // for the board, docs/superpowers/specs/2026-11-23-tasks-panel-design.md for the panel): every task, open and
+            // closed, and its comments, in a full-height panel docked just inside the bar, toggled by the bar's "All
+            // tasks" and shown or hidden by `tasks-window show|hide`. The same TaskService as the bar's list and the
+            // control pipe, so all three agree. It was a floating window until the tasks panel plan's Task 6.
+            //
+            // PART OF THE BAR NOW, SO NOT LISTED ON IT. The floating window was listed on the bar like any app window
+            // (2026-11-23, "give it a proper icon in the workspaces so i can take it to the correct place"), so it could
+            // be found and dragged to another workspace. The panel is docked beside the bar and pinned to every desktop,
+            // so there is nothing to find or drag: its handle opts out of the window list the way the bar's own does,
+            // BEFORE its first show, or that first EVENT_OBJECT_SHOW slips through and the bar acquires a row for it.
+            var tasksWindow = new TasksWindow();
+            var tasksHwnd = new WindowInteropHelper(tasksWindow).EnsureHandle();
+            monitor.Ignore(tasksHwnd);
+            // Its app bar answers the bar's strip notices (TasksPanel: it registers after every registration of the
+            // bar's, so the bar stays the outer strip), and says whether it is shown, which the bar's "All tasks" draws.
+            tasksPanel = new TasksPanel(tasksWindow, bar.Strip);
+            tasksPanel.Shown.Subscribe(tasksPanelShown);
+            // PINNED TO EVERY DESKTOP once, after its first show, like the bar and the detached stats window (see
+            // ShowDetachedStats): a window that has never been shown is on no desktop and cannot be pinned. The panel
+            // shows itself (on the bar's notice), so the first time it becomes visible is the moment. Queued rather than
+            // done inside IsVisibleChanged, which fires in the middle of the panel's own dock: the pin is a COM call that
+            // pumps messages. A failure is traced, and the next show tries again; meanwhile the panel stays on the
+            // desktop it was shown on.
+            tasksWindow.IsVisibleChanged += (_, _) =>
+            {
+                if (!tasksWindow.IsVisible || tasksPanelPinned) return;
+                tasksPanelPinned = true;
+                _ = Dispatcher.InvokeAsync(() => desktops!.Pin(new WindowHandle(tasksHwnd)).TapError(err =>
+                {
+                    tasksPanelPinned = false;
+                    ClickTrace.Write($"tasks panel pin failed: {err}");
+                }));
+            };
             var tasksActivator = new WindowActivator();
-            tasksBoard = new TasksBoard(new TasksWindow(), tasks!, manager, GoToTask,
+            tasksBoard = new TasksBoard(tasksWindow, tasksPanel, tasks!, manager, GoToTask,
                 // The chips wear the colour the bar's rows wear (its last rebuild's rail colours).
                 colourOf: id => floatingBar?.WorkspaceAccent(id),
                 // The task Petre picked (ruling 21): the bar's selection, so a pick in either view shows in both.
@@ -2135,21 +2176,20 @@ public partial class App : Application
                 startClaude: id => claudeActions?.Offer(id),
                 openSession: (task, session) => claudeActions?.OpenSession(task, session) ?? Result.Failure(ClaudeActionsNotReady),
                 sessionsChanged: claudeActions?.Changed,
-                // Brought to the desktop in front, in that order (TasksBoard.Arrive; fix round 1, Critical 1): a page
-                // left open on another desktop is MOVED here first and only then activated, because activating a window
-                // on another desktop makes Windows follow it there. Activated through the activator, since a
-                // `tasks-window show` typed in a terminal carries no foreground right. A failed move activates the
-                // window only when it is on the desktop in front already; otherwise it is traced and left where it is.
+                // Brought forward: raised, then activated (TasksBoard.Arrive). Activated through the activator, since a
+                // `tasks-window show` typed in a terminal carries no foreground right. No move to the desktop in front
+                // any more: the panel is pinned to every desktop (above).
                 bringForward: hwnd => TasksBoard.Arrive(hwnd,
-                    // Through the manager, which announces the move (WindowMoved), so on a tiled workspace the Tiler
-                    // gives the window its slot as it arrives; nothing about it is remembered.
-                    move: () => manager.MoveWindowToCurrentDesktop(new WindowHandle(hwnd)),
-                    onCurrentDesktop: () => OnDesktopInFront(hwnd),
-                    // On top of the windows in front before it is activated: activation alone left it under them
+                    // On top of its band before it is activated: activation alone left the floating window under others
                     // ("now it's behind somewhere", see TasksBoard.Arrive).
                     raise: () => TasksBoard.RaiseToTop(hwnd),
                     activate: () => tasksActivator.Activate(new WindowHandle(hwnd)),
                     trace: ClickTrace.Write));
+
+            // A panel left open at the last exit (AppState.TasksPanel, saved open by TasksBoard.Shutdown) opens again,
+            // without being brought forward. The bar has shown by now, but the panel answers its strip notice on the
+            // dispatcher, so this only marks it wanted and the panel docks once that answer runs (TasksPanel.Show).
+            if ((manager.State.TasksPanel ?? TasksPanelState.Default).Open) tasksBoard.Restore();
 
             hotkeys = new HotkeyService(direction => switcher.Step(direction), boundSwitcher,
                 () => quickFind.Show(), boundQuickFind);
@@ -2704,7 +2744,8 @@ public partial class App : Application
         monitor?.Dispose();
         hotkeys?.Dispose(); // unregisters RegisterHotKey chords before the process exits
         quickFind?.Dispose();
-        // An open tasks window remembers where it is, so it comes back there after the restart.
+        // The tasks panel: whether it is open is saved first, as it is, so an open panel opens again after the restart;
+        // then its strip goes back to the shell and its window closes for good (TasksBoard.Shutdown).
         tasksBoard?.Shutdown();
         detachedStats?.CloseForGood();
         switcher?.Dispose(); // stops the release poll and closes the picker window

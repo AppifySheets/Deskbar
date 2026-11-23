@@ -58,11 +58,12 @@ namespace Deskbar.App;
 //                   window's List view has the captions).
 //   "+N more"       a small line under the last line when more open tasks are out of sight. When some of the hidden
 //                   ones wait on Petre it says so in the asking orange ("+2 waiting"), so no ask is out of sight
-//                   without a sign (spec, "The bar's order"). It opens the tasks window (OpenTasksWindow, set by the
-//                   App; TasksBoard), and with the window there it is always shown, reading "All tasks" when nothing
-//                   is hidden, since the window is where closed tasks and comment threads are. Without a window (the
-//                   bar's tests) it expands the list in place and reads "Less" at the end of it. Under the lines
-//                   rather than in a header, so it does not move under the pointer when the list opens.
+//                   without a sign (spec, "The bar's order"). It toggles the docked tasks panel (ToggleTasksPanel,
+//                   set by the App; TasksBoard.Toggle) and looks on while the panel is shown (TasksPanelShown), and
+//                   with the panel there it is always shown, reading "All tasks" when nothing is hidden, since the
+//                   panel is where closed tasks and comment threads are. Without a panel (the bar's tests) it expands
+//                   the list in place and reads "Less" at the end of it. Under the lines rather than in a header, so
+//                   it does not move under the pointer when the list opens.
 //
 // CLICKS. A line goes to its task through GoToTask, which the App points at the workspace switch and then the task's
 // Claude session (ClaudeTaskActions.Go, Task 9), the same path the tasks window's lines take; a note
@@ -169,12 +170,34 @@ public partial class FloatingBar
         (taskLinesPanel?.Children.OfType<Button>() ?? []).Any(b => b.Tag is TaskLine line && line.Id == id
             && b.Content is Border { BorderBrush: SolidColorBrush { Color.A: > 0 } });
 
-    // What "+N more" opens: the tasks window (TasksBoard.Open, set by the App: it opens the window, or brings an open
-    // one to the desktop in front). While it is set, the line under the
-    // list is always there, reading "All tasks" when nothing is out of sight, because the window is the one place the
-    // closed tasks can be seen (Petre: "can i see task list in deskbar? all of them, new and old"). Left null (the
-    // bar's own tests, or a copy with no window) the button expands the list in place, as before the window existed.
-    internal Action? OpenTasksWindow { get; init; }
+    // What "+N more" / "All tasks" does: toggles the docked tasks panel (TasksBoard.Toggle, set by the App; plan
+    // 2026-11-23-tasks-panel, Task 6: it used to open the floating tasks window). While it is set, the button is always
+    // there, reading "All tasks" when nothing is out of sight, because the panel is the one place the closed tasks can be
+    // seen (Petre: "can i see task list in deskbar? all of them, new and old"). Left null (the bar's own tests, or a copy
+    // with no panel) the button expands the list in place, as before the window existed.
+    internal Action? ToggleTasksPanel { get; init; }
+
+    // Whether the tasks panel is shown, from the App (TasksPanel.Shown, relayed because the panel is built after the
+    // bar). While it says true the "All tasks" button looks on (PaintTaskMoreLook), so the line that opened the panel
+    // reads as the one that closes it (spec "Opening and closing": its "on" look is the builder's call; the mockup
+    // shows it highlighted). Subscribed here, in the init: the bar lives as long as the app, and the stream completes
+    // when the panel shuts down.
+    internal IObservable<bool>? TasksPanelShown
+    {
+        get => tasksPanelShown;
+        init
+        {
+            tasksPanelShown = value;
+            value?.Subscribe(on =>
+            {
+                tasksPanelOn = on;
+                PaintTaskMoreLook();
+            });
+        }
+    }
+
+    IObservable<bool>? tasksPanelShown;
+    bool tasksPanelOn;
 
     // Whether this copy may use tasks: Deskbar Pro, or any copy while tasks are free (TasksGate.Free, so always, for
     // now). The same seam the stopwatch had, for the tests, which cannot fake a Store licence.
@@ -287,6 +310,8 @@ public partial class FloatingBar
     internal bool TaskListShown => TaskListLine.Visibility == Visibility.Visible;
     internal string TaskListMoreText => taskMoreButton is { Visibility: Visibility.Visible } ? taskMoreFull : "";
     internal string TaskListMoreShown => taskMoreButton is { Visibility: Visibility.Visible } ? taskMoreLabel?.Text ?? "" : "";
+    // Whether "All tasks" looks on, as the tasks panel is shown (TasksPanelShown).
+    internal bool TaskListMoreOn => taskMoreButton is not null && AutomationProperties.GetItemStatus(taskMoreButton) == "on";
     internal bool TaskListAdding => taskTyping;
     internal Maybe<Guid> TaskAddTarget => taskAddTarget;
     internal string TaskAddPlaceholder => taskAddPlaceholder?.Text ?? "";
@@ -877,7 +902,7 @@ public partial class FloatingBar
         allTaskLines = all;
         var problem = taskService.LoadProblem;
         var shape = string.Join("\n", all.Select(ShapeOf).Prepend(
-            $"{taskListExpanded}|{OpenTasksWindow is null}|{TextOffset}|{problem.GetValueOrDefault("")}|{slots}|{editingTask}"));
+            $"{taskListExpanded}|{ToggleTasksPanel is null}|{TextOffset}|{problem.GetValueOrDefault("")}|{slots}|{editingTask}"));
         if (shape == lastTaskListShape) return;
         lastTaskListShape = shape;
 
@@ -947,15 +972,35 @@ public partial class FloatingBar
         var onShow = shownTaskLines.Select(l => l.Id).ToHashSet();
         var hidden = open.Where(l => !onShow.Contains(l.Id)).ToArray();
         var waiting = hidden.Count(l => l.Status == TaskStatus.WaitingOnYou);
-        taskMoreButton.Visibility = hidden.Length > 0 || taskListExpanded || OpenTasksWindow is not null ? Visibility.Visible : Visibility.Collapsed;
+        taskMoreButton.Visibility = hidden.Length > 0 || taskListExpanded || ToggleTasksPanel is not null ? Visibility.Visible : Visibility.Collapsed;
         taskMoreFull = MoreText(hidden.Length, waiting, taskListExpanded);
         taskMoreShort = taskListExpanded ? "Less" : hidden.Length == 0 ? "All" : $"+{hidden.Length}";
         ApplyMoreText();
-        taskMoreLabel.Foreground = waiting > 0 && !taskListExpanded ? TaskOrange : TaskDimInk;
+        taskMoreWaiting = waiting > 0 && !taskListExpanded;
         // The tooltip carries the whole sentence whichever text shows, "+3 more, 1 waiting" cut to "+3" included.
-        taskMoreButton.ToolTip = taskListExpanded ? "Show the first three"
-            : OpenTasksWindow is not null ? $"{(hidden.Length == 0 ? "" : $"{taskMoreFull}. ")}Every task, open and closed, with its comments"
+        taskMoreTip = taskListExpanded ? "Show the first three"
+            : ToggleTasksPanel is not null ? $"{(hidden.Length == 0 ? "" : $"{taskMoreFull}. ")}Every task, open and closed, with its comments"
             : $"{hidden.Length} more {(hidden.Length == 1 ? "task" : "tasks")}";
+        PaintTaskMoreLook();
+    }
+
+    // What PaintTaskMore worked out that the "on" look also needs: whether the words are orange (something hidden waits
+    // on Petre) and the tooltip while the panel is not shown.
+    bool taskMoreWaiting;
+    string taskMoreTip = "";
+
+    // THE "ON" LOOK of "All tasks" while the tasks panel is shown (TasksPanelShown): the picked line's light fill
+    // (TaskSelectedFill) behind it and its words in full ink, unless they are orange for a task waiting on Petre, which
+    // stays the louder signal; the tooltip then says what a click does now. Repainted on every list paint and on every
+    // change of the panel, never rebuilding a line. Its automation status says "on" or "off", as the window's toggles do.
+    void PaintTaskMoreLook()
+    {
+        if (taskMoreButton is null || taskMoreLabel is null) return;
+        var on = tasksPanelOn && ToggleTasksPanel is not null;
+        taskMoreButton.Background = on ? TaskSelectedFill : Brushes.Transparent;
+        taskMoreLabel.Foreground = taskMoreWaiting ? TaskOrange : on ? TaskInk : TaskDimInk;
+        taskMoreButton.ToolTip = on ? "Hide the tasks panel" : taskMoreTip;
+        AutomationProperties.SetItemStatus(taskMoreButton, on ? "on" : "off");
     }
 
     // The button's words in full and cut short (Ruling 50): the label shows the short one when the list is too narrow for
@@ -1492,13 +1537,13 @@ public partial class FloatingBar
         reopened.TapError(_ => PaintTaskList());
     }
 
-    // "+N more": the tasks window when the App gave one, else the list expanded in place, and folded back on the next
-    // click.
+    // "+N more": the tasks panel shown or hidden when the App gave one, else the list expanded in place, and folded back
+    // on the next click.
     void OnTaskMoreClick()
     {
-        if (OpenTasksWindow is { } open)
+        if (ToggleTasksPanel is { } toggle)
         {
-            open();
+            toggle();
             return;
         }
         taskListExpanded = !taskListExpanded;
