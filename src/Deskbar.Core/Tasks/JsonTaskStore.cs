@@ -78,7 +78,8 @@ public sealed class JsonTaskStore(string baseDirectory, Action<string>? trace = 
 
     sealed record SessionDto(string? Id, string? Folder, DateTimeOffset Joined, DateTimeOffset? Ended);
 
-    sealed record CommentDto(Guid Id, string? SessionId, DateTimeOffset At, string? Markdown, DateTimeOffset? Settled = null);
+    sealed record CommentDto(Guid Id, string? SessionId, DateTimeOffset At, string? Markdown,
+        [property: JsonConverter(typeof(TolerantTimeConverter))] DateTimeOffset? Settled = null);
 
     sealed record TaskDto(
         Guid Id,
@@ -96,8 +97,9 @@ public sealed class JsonTaskStore(string baseDirectory, Action<string>? trace = 
         bool? Urgent = null,
         double? Rank = null,
         Guid? GoalId = null,
-        AssigneeDto? Assignee = null,
-        string? Description = null);
+        [property: JsonConverter(typeof(TolerantAssigneeConverter))] AssigneeDto? Assignee = null,
+        [property: JsonConverter(typeof(TolerantStringConverter))] string? Description = null,
+        [property: JsonConverter(typeof(TolerantTimeConverter))] DateTimeOffset? WaitingSince = null);
 
     // The assignee (Ruling 57): kind by name ("me", "claude", "colleague"), plus the id and name a colleague needs.
     sealed record AssigneeDto(string? Kind, string? Id, string? Name);
@@ -186,7 +188,8 @@ public sealed class JsonTaskStore(string baseDirectory, Action<string>? trace = 
             t.Important, t.Urgent, t.Rank,
             t.GoalId.HasValue ? t.GoalId.Value : null,
             new AssigneeDto(t.Assignee.Kind.ToString().ToLowerInvariant(), t.Assignee.Id, t.Assignee.Name),
-            t.Description.Length > 0 ? t.Description : null);
+            t.Description.Length > 0 ? t.Description : null,
+            t.WaitingSince.HasValue ? t.WaitingSince.Value.ToUniversalTime() : null);
 
     static TaskItem FromDto(TaskDto d) =>
         new(d.Id, d.Title ?? "",
@@ -201,6 +204,7 @@ public sealed class JsonTaskStore(string baseDirectory, Action<string>? trace = 
             Important = d.Important ?? false,
             Urgent = d.Urgent ?? false,
             Description = d.Description ?? "",
+            WaitingSince = d.WaitingSince is { } since ? since.ToUniversalTime() : Maybe<DateTimeOffset>.None,
             Rank = d.Rank ?? FallbackRank(d.Status, d.Raised ?? d.Created),
             GoalId = d.GoalId is { } goal ? goal : Maybe<Guid>.None,
             // A task saved before the field existed, or with one this build cannot read, gets it derived (Assignee.DerivedFor).
@@ -230,6 +234,71 @@ public sealed class JsonTaskStore(string baseDirectory, Action<string>? trace = 
             d.DoneAt.HasValue ? TaskStatus.Closed : TaskStatus.Backlog, "", Maybe<string>.None,
             d.Created.ToUniversalTime(), d.UpdatedAt.ToUniversalTime(), d.Created.ToUniversalTime(),
             Array.Empty<TaskSession>(), Array.Empty<TaskComment>());
+
+    // TOLERANT READS of the optional fields added after version 2 shipped (review of the assignee batch): a value of the
+    // wrong type (`"assignee":"me"`, `{"kind":5}`, `"description":5`, `"settled":"garbage"`), from a hand edit or a newer
+    // build, reads as ABSENT (and the assignee is then derived), never as a failed parse: a failed parse makes the whole
+    // file unreadable, which is the one thing this file must not do over a single field. Each skips what it cannot use.
+
+    // An object whose `kind`, `id` and `name` are strings; anything else, an object with other types in them included,
+    // reads as absent for the field that is wrong (Assignee.From then reads a missing kind as none).
+    sealed class TolerantAssigneeConverter : JsonConverter<AssigneeDto?>
+    {
+        public override AssigneeDto? Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
+        {
+            if (reader.TokenType != JsonTokenType.StartObject)
+            {
+                reader.Skip();
+                return null;
+            }
+            string? kind = null, id = null, name = null;
+            while (reader.Read() && reader.TokenType != JsonTokenType.EndObject)
+            {
+                var property = reader.GetString() ?? "";
+                reader.Read();
+                var text = reader.TokenType == JsonTokenType.String ? reader.GetString() : null;
+                reader.Skip();
+                if (property.Equals("kind", StringComparison.OrdinalIgnoreCase)) kind = text;
+                else if (property.Equals("id", StringComparison.OrdinalIgnoreCase)) id = text;
+                else if (property.Equals("name", StringComparison.OrdinalIgnoreCase)) name = text;
+            }
+            return new AssigneeDto(kind, id, name);
+        }
+
+        public override void Write(Utf8JsonWriter writer, AssigneeDto? value, JsonSerializerOptions options) =>
+            JsonSerializer.Serialize(writer, value is null ? null : new { kind = value.Kind, id = value.Id, name = value.Name }, options);
+    }
+
+    // A string, or absent for any other type.
+    sealed class TolerantStringConverter : JsonConverter<string?>
+    {
+        public override string? Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
+        {
+            if (reader.TokenType == JsonTokenType.String) return reader.GetString();
+            reader.Skip();
+            return null;
+        }
+
+        public override void Write(Utf8JsonWriter writer, string? value, JsonSerializerOptions options) => writer.WriteStringValue(value);
+    }
+
+    // A time written as a string that parses, or absent.
+    sealed class TolerantTimeConverter : JsonConverter<DateTimeOffset?>
+    {
+        public override DateTimeOffset? Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
+        {
+            var parsed = reader.TokenType == JsonTokenType.String && reader.TryGetDateTimeOffset(out var time) ? time : (DateTimeOffset?)null;
+            reader.Skip();
+            return parsed;
+        }
+
+        public override void Write(Utf8JsonWriter writer, DateTimeOffset? value, JsonSerializerOptions options)
+        {
+            if (value is { } time) writer.WriteStringValue(time);
+            else writer.WriteNullValue();
+        }
+    }
+
 
     // Reads a TaskStatus from its name in any case and writes it as its name. Anything else, a name a newer build
     // added, a number or null included, reads as Backlog: an open task this build cannot place, which keeps it on

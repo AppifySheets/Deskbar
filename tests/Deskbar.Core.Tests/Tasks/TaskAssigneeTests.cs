@@ -170,4 +170,121 @@ public sealed class TaskAssigneeTests : IDisposable
         Assert.Equal([id2], TaskViews.Grouped(board, TaskFilter.Open, all, TaskAssigneeFilter.Claude).SelectMany(g => g.Tasks).Select(t => t.Id));
         Assert.Equal([id2], TaskViews.Matrix(board, TaskFilter.Open, all, TaskAssigneeFilter.Claude).SelectMany(c => c.Tasks).Select(t => t.Id));
     }
+
+    // --- review fixes: the hand paths keep the assignee honest ----------------------------------------------------------
+
+    [Fact]
+    public void Setting_waiting_or_done_by_hand_assigns_Petre()
+    {
+        var working = Claudes(TaskBoard.Empty, id1);
+        Assert.Equal(Assignee.Claude, Get(working, id1).Assignee);
+
+        Assert.Equal(Assignee.Me, Get(working.SetStatus(id1, TaskStatus.WaitingOnYou, clock).Value, id1).Assignee);
+        Assert.Equal(Assignee.Me, Get(working.SetStatus(id1, TaskStatus.Done, clock).Value, id1).Assignee);
+    }
+
+    // Leaving Waiting or Done by hand for in progress or the backlog hands a Claude task back to Claude, so it does not
+    // stay on the bar as his.
+    [Fact]
+    public void Setting_in_progress_by_hand_after_waiting_gives_a_claude_task_back()
+    {
+        var waiting = Claudes(TaskBoard.Empty, id1).Ask(id1, "OK?", clock).Value;
+        Assert.Equal(Assignee.Me, Get(waiting, id1).Assignee);
+
+        Assert.Equal(Assignee.Claude, Get(waiting.SetStatus(id1, TaskStatus.InProgress, clock).Value, id1).Assignee);
+        // A note of his stays his.
+        var note = Note(TaskBoard.Empty, id2).SetStatus(id2, TaskStatus.WaitingOnYou, clock).Value.SetStatus(id2, TaskStatus.InProgress, clock).Value;
+        Assert.Equal(Assignee.Me, Get(note, id2).Assignee);
+    }
+
+    [Fact]
+    public void Reopening_derives_the_assignee_from_what_the_task_is_now()
+    {
+        // A session still live on it: in progress, Claude's.
+        var live = Claudes(TaskBoard.Empty, id1).Close(id1, clock).Value;
+        Assert.Equal(Assignee.Me, Assignee.DerivedFor(false, TaskStatus.Backlog)); // the rule's two ends
+        Assert.Equal(Assignee.Claude, Get(live.Reopen(id1, clock).Value, id1).Assignee);
+
+        // No live session: back in the backlog, his.
+        var ended = Claudes(TaskBoard.Empty, id2).Assign(id2, Assignee.Claude, clock).Value.SessionEnded("s1", clock).Close(id2, clock).Value;
+        Assert.Equal(Assignee.Me, Get(ended.Reopen(id2, clock).Value, id2).Assignee);
+    }
+
+    [Fact]
+    public void Assigning_a_waiting_task_to_Claude_leaves_it_waiting_with_its_question()
+    {
+        var waiting = Claudes(TaskBoard.Empty, id1).Ask(id1, "OK?", clock).Value;
+
+        var handed = Get(waiting.Assign(id1, Assignee.Claude, clock).Value, id1);
+
+        Assert.Equal(TaskStatus.WaitingOnYou, handed.Status);
+        Assert.Equal("OK?", handed.Question.Value);
+        Assert.Equal(Assignee.Claude, handed.Assignee);
+    }
+
+    [Fact]
+    public void Offering_follows_the_assignee_alone_so_assign_to_me_withdraws_it()
+    {
+        var board = Note(TaskBoard.Empty, id1, ws).Assign(id1, Assignee.Claude, clock).Value;
+        board = Claudes(board, id2); // a Claude task on ws, assigned to Claude
+        Assert.Equal(new[] { id1, id2 }.Order(), board.Offered(ws).Select(t => t.Id).Order());
+
+        board = board.Assign(id2, Assignee.Me, clock).Value;
+        Assert.Equal([id1], board.Offered(ws).Select(t => t.Id));
+        // A free Claude task he took back is not offered either.
+        var free = Claudes(TaskBoard.Empty, id3, "s3").Assign(id3, Assignee.Me, clock).Value;
+        Assert.Empty(free.Offered(Maybe<Guid>.None));
+    }
+
+    // --- tasks.json tolerates a wrong-typed value: absent or derived, never a failed file --------------------------------
+
+    string Written(string taskFields)
+    {
+        Directory.CreateDirectory(dir);
+        File.WriteAllText(Path.Combine(dir, "tasks.json"),
+            $$"""{"version":2,"tasks":[{"id":"{{id1}}","title":"t","status":"InProgress","created":"2026-11-22T09:00:00Z","updatedAt":"2026-11-22T09:00:00Z","sessions":[{"id":"s","folder":"f","joined":"2026-11-22T09:00:00Z"}]{{taskFields}}}]}""");
+        return dir;
+    }
+
+    [Theory]
+    [InlineData(",\"assignee\":\"me\"")]
+    [InlineData(",\"assignee\":{\"kind\":5}")]
+    [InlineData(",\"assignee\":[1,2]")]
+    [InlineData(",\"assignee\":{\"kind\":\"claude\",\"id\":7}")]
+    [InlineData(",\"assignee\":5")]
+    public void A_wrong_typed_assignee_is_derived_not_fatal(string fields)
+    {
+        var board = new JsonTaskStore(Written(fields.Replace("\\\"", "\""))).Load();
+
+        Assert.True(board.IsSuccess, board.IsFailure ? board.Error : "");
+        // A Claude task in progress derives to Claude, whatever the garbage said.
+        Assert.Equal(Assignee.Claude, Get(board.Value, id1).Assignee);
+    }
+
+    [Theory]
+    [InlineData(",\"description\":5")]
+    [InlineData(",\"description\":{\"a\":1}")]
+    [InlineData(",\"description\":[\"x\"]")]
+    [InlineData(",\"description\":true")]
+    public void A_wrong_typed_description_reads_as_none(string fields)
+    {
+        var board = new JsonTaskStore(Written(fields.Replace("\\\"", "\""))).Load();
+
+        Assert.True(board.IsSuccess, board.IsFailure ? board.Error : "");
+        Assert.Equal("", Get(board.Value, id1).Description);
+    }
+
+    [Theory]
+    [InlineData("\"garbage\"")]
+    [InlineData("5")]
+    [InlineData("{\"a\":1}")]
+    [InlineData("true")]
+    public void A_wrong_typed_settled_time_reads_as_not_settled(string settled)
+    {
+        var comment = $$"""{"id":"{{Guid.NewGuid()}}","at":"2026-11-22T09:00:00Z","markdown":"x","settled":{{settled}}}""";
+        var board = new JsonTaskStore(Written($$""","comments":[{{comment}}]""")).Load();
+
+        Assert.True(board.IsSuccess, board.IsFailure ? board.Error : "");
+        Assert.True(Get(board.Value, id1).Comments.Single().Settled.HasNoValue);
+    }
 }

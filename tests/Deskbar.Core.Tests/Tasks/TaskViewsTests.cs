@@ -205,4 +205,18 @@ public class TaskViewsTests
 
         Assert.True(TaskViews.SessionToGoTo(board.Tasks.Single(t => t.Id == id)).HasNoValue);
     }
+
+    // Review: the bar shows a description's first line as text, without markdown markers.
+    [Theory]
+    [InlineData("**Use** the _November_ `invoice`", "Use the November invoice")]
+    [InlineData("- a list item\nsecond", "a list item")]
+    [InlineData("# A heading", "A heading")]
+    [InlineData("> quoted words", "quoted words")]
+    [InlineData("1. first step", "first step")]
+    [InlineData("see [the docs](https://example.com/x) now", "see the docs now")]
+    [InlineData("\n\n  __bold__ and *italic*", "bold and italic")]
+    [InlineData("snake_case_name stays", "snake_case_name stays")]
+    [InlineData("", "")]
+    public void The_first_line_of_markdown_is_plain_text(string markdown, string expected) =>
+        Assert.Equal(expected, TaskViews.PlainFirstLine(markdown));
 }

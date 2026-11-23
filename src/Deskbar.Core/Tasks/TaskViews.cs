@@ -147,6 +147,22 @@ public static class TaskViews
     public static Maybe<TaskSession> SessionToGoTo(TaskItem task) =>
         task.Sessions.OrderByDescending(s => s.IsLive).ThenByDescending(s => s.Joined).TryFirst();
 
+    /// <summary>
+    /// The first non-blank line of a markdown text as plain text, for the bar's one-line description: leading list, quote
+    /// and heading markers go, a link keeps its words, and emphasis and code markers (**, __, *, _, `) are dropped. An
+    /// underscore inside a word (snake_case) is not emphasis and stays. Not a markdown parser, just enough for a line.
+    /// </summary>
+    public static string PlainFirstLine(string markdown)
+    {
+        var line = (markdown ?? "").Split('\n').Select(l => l.Trim()).FirstOrDefault(l => l.Length > 0) ?? "";
+        line = System.Text.RegularExpressions.Regex.Replace(line, @"^(#{1,6}\s+|[-*+]\s+|>\s*|\d+[.)]\s+)", "");
+        line = System.Text.RegularExpressions.Regex.Replace(line, @"\[([^\]]*)\]\([^)]*\)", "$1");
+        line = System.Text.RegularExpressions.Regex.Replace(line, @"(\*\*|__)(.+?)\1", "$2");
+        line = System.Text.RegularExpressions.Regex.Replace(line, @"(?<![\w])([*_])(.+?)\1(?![\w])", "$2");
+        return line.Replace("`", "").Trim();
+    }
+
+
     /// <summary>The words of each status, as the spec spells them.</summary>
     public static string StatusName(TaskStatus status) => status switch
     {

@@ -95,4 +95,32 @@ public sealed class TaskSettleTests : IDisposable
         Assert.Equal(C(board, detail).Settled, C(loaded, detail).Settled);
         Assert.True(C(loaded, before).Settled.HasNoValue);
     }
+
+    // Review: the question's time is when the task LAST BECAME Waiting, not Raised (which a status set by hand never moves).
+    [Fact]
+    public void A_status_set_to_waiting_by_hand_settles_only_comments_written_after_it()
+    {
+        var board = TaskBoard.Empty.Create("Tasks redesign", Maybe<Guid>.None, new TaskSession("s1", "f", clock, Maybe<DateTimeOffset>.None), clock, id1).Value.Board;
+        board = board.Comment(id1, "s1", "written before", Later(1), before).Value;
+        board = board.SetStatus(id1, TaskStatus.WaitingOnYou, Later(1)).Value;
+        board = board.Comment(id1, "s1", "written while waiting", Later(1), detail).Value;
+
+        var answered = board.Answered("s1", Later(1));
+
+        Assert.True(C(answered, before).Settled.HasNoValue);
+        Assert.True(C(answered, detail).Settled.HasValue);
+    }
+
+    [Fact]
+    public void The_time_a_task_began_waiting_survives_a_save_and_load()
+    {
+        var board = Asked();
+        Assert.True(new JsonTaskStore(dir).Save(board).IsSuccess);
+        var loaded = new JsonTaskStore(dir).Load().Value;
+
+        var answered = loaded.Answered("s1", Later(1));
+
+        Assert.True(C(answered, before).Settled.HasNoValue);
+        Assert.True(C(answered, detail).Settled.HasValue);
+    }
 }
