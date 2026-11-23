@@ -83,11 +83,25 @@ public class ClaudeHookEventTests
         Assert.Equal(headless, ClaudeHookEvent.Parse(StartupJson, entrypoint, attended).Value.Headless);
 
     // A background session (`claude --bg`) runs its hooks with ATTENDED=0 although a person can attach to it, so the
-    // attended flag alone drops its hooks. Its hooks do carry CLAUDE_JOB_DIR, which a `claude -p` run does not have.
+    // attended flag alone drops its hooks. Its hooks carry CLAUDE_JOB_DIR, whose last segment is the first 8 characters
+    // of its own session id (measured 2026-11-23, also after a resume). Entrypoint is `cli`, as measured.
+    const string OwnSessionJson =
+        """{"session_id":"1a28e41b-d0ed-42b8-a876-da75a6a38715","cwd":"C:\\repos\\hookproj","hook_event_name":"SessionStart","source":"startup"}""";
+
+    const string OtherSessionJson =
+        """{"session_id":"99999999-d0ed-42b8-a876-da75a6a38715","cwd":"C:\\repos\\hookproj","hook_event_name":"SessionStart","source":"startup"}""";
+
     [Theory]
-    [InlineData(@"C:\Users\p\.claude\jobs\884c127f")]
-    public void A_background_session_with_a_job_directory_is_attended_though_ATTENDED_is_0(string job) =>
-        Assert.False(ClaudeHookEvent.Parse(StartupJson, "sdk-cli", "0", job).Value.Headless);
+    [InlineData(@"C:\Users\u\.claude\jobs\1a28e41b")]
+    [InlineData(@"C:\Users\u\.claude\jobs\1A28E41B\")]
+    public void A_background_session_whose_job_directory_is_its_own_is_attended_though_ATTENDED_is_0(string job) =>
+        Assert.False(ClaudeHookEvent.Parse(OwnSessionJson, "cli", "0", job).Value.Headless);
+
+    // CLAUDE_JOB_DIR is an ordinary variable of the background process, so a `claude -p` run from its Bash tool inherits
+    // it. That directory names ANOTHER session and must override nothing (Ruling 33).
+    [Fact]
+    public void A_claude_p_that_inherited_another_sessions_job_directory_stays_headless() =>
+        Assert.True(ClaudeHookEvent.Parse(OtherSessionJson, "sdk-cli", "0", @"C:\Users\u\.claude\jobs\1a28e41b").Value.Headless);
 
     [Theory]
     [InlineData(null)]
