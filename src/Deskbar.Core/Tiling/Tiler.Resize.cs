@@ -330,7 +330,9 @@ public sealed partial class Tiler
     //
     // On the tree a dragged edge moves the split it belongs to (SplitMove: the nearest split of that edge's axis, up
     // from the tile's leaf, with a neighbour on that side). In Petre's A and C side by side over B, A's bottom edge
-    // moves the boundary between the top pair and B, and C's bottom moves with it: they are one line on screen.
+    // moves the boundary between the top pair and B, and C's bottom moves with it: they are one line on screen (a T).
+    // At a "+" crossing only the piece beside the tile moves (docs/superpowers/specs/2026-11-23-tile-local-split-design.md),
+    // which can regroup the tree and so change the order of its leaves; the screen's windows are reordered to match.
     bool MovedASplit(Workspace workspace, WindowHandle window, WindowRect frame, int screenNow,
         IReadOnlyDictionary<int, TileScreen> screens, TileBoard board,
         IReadOnlyDictionary<WindowHandle, WindowRect> slots, Maybe<TileLayout> layout, bool echo)
@@ -362,9 +364,17 @@ public sealed partial class Tiler
             return true;
         }
 
-        SplitMove.Apply(shown, screen.WorkArea, GapOn(screen), leaf, moved, frame).Map(m => m.Layout).Match(
-            split =>
+        SplitMove.Apply(shown, screen.WorkArea, GapOn(screen), leaf, moved, frame).Match(
+            result =>
             {
+                // A regroup at a crossing put the leaves in a new order (SplitMoved.Order). The screen's windows are
+                // in leaf order, so they are put in the new order FIRST: were the layout stored before the board, any
+                // evaluate in between would lay the old order out on the new tree and windows would trade places.
+                var split = result.Layout;
+                var order = result.Windows(windows, shown);
+                var regrouped = !order.SequenceEqual(windows);
+                if (regrouped) Keep(workspace, board.Reordered(screenNow, order));
+
                 // A CORNER can be half inner, half outer: the top-right corner of a full-height left tile moves the
                 // column split with its right edge, while its top edge faces the screen's edge. SplitMove ignores
                 // that outer edge, so on its own the tile went back to full height. Petre: "resizing a tiled window
@@ -372,9 +382,9 @@ public sealed partial class Tiler
                 // edge is offered to TileArrange.Open on the moved split, as it would be had it moved alone: a pull
                 // deep enough leaves an opening, a nudge (or a screen that has its opening already) changes nothing.
                 // Open only ever acts on an edge that faces the screen's edge, so passing the whole `moved` is safe:
-                // the inner edge SplitMove took is not reconsidered. The split changes shares only, never the tree's
-                // structure, so `leaf` still names the dragged tile in it.
-                var next = TileArrange.Open(split, windows.Count, screen.WorkArea, GapOn(screen), leaf, moved, frame)
+                // the inner edge SplitMove took is not reconsidered. A regroup can move the dragged tile's leaf, so
+                // Open is given its leaf in the NEW tree (SplitMoved.LeafOf).
+                var next = TileArrange.Open(split, windows.Count, screen.WorkArea, GapOn(screen), result.LeafOf(leaf), moved, frame)
                     .GetValueOrDefault(split);
                 // A drag held against the 10% clamp, or one that comes out at the split there already, changes
                 // nothing: no store (final review, item 3). The re-tile below still runs and puts the window back.
@@ -382,7 +392,7 @@ public sealed partial class Tiler
                     trace?.Invoke($"tile: {workspace.Name} screen {screen.Number}: {window.Value:X} resized by its {moved} edge, split unchanged");
                 else
                     StoreLayout(workspace, KeyOf(screen), next)
-                        .Tap(() => trace?.Invoke($"tile: {workspace.Name} screen {screen.Number}: {window.Value:X} resized by its {moved} edge, sizes {Show(next)}"))
+                        .Tap(() => trace?.Invoke($"tile: {workspace.Name} screen {screen.Number}: {window.Value:X} resized by its {moved} edge{(regrouped ? " at a crossing" : "")}, sizes {Show(next)}"))
                         .TapError(error => trace?.Invoke($"tile: {workspace.Name} screen {screen.Number}: storing the moved split failed: {error}"));
                 // One placement per window whose slot changed; the resized window is usually in its new slot already.
                 Retile(workspace, [screenNow]);

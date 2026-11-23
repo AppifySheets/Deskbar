@@ -207,6 +207,73 @@ public sealed class TilerResizeTests : IDisposable
         Assert.Equal(GridLayout.Arrange(Area, 2, Gap, Stored(AreaKey)), FramesOf([W(1), W(2)]));
     }
 
+    // --- half a line at a crossing (docs/superpowers/specs/2026-11-23-tile-local-split-design.md) --------------
+
+    // Four windows at rest in the automatic 2x2, which is two columns: W1 top-left, W2 bottom-left, W3 top-right,
+    // W4 bottom-right. The column split sits at 960 (956 | 964), the row splits at 520 (516 | 524).
+    void StartFour()
+    {
+        new[] { 1, 2, 3, 4 }.ToList().ForEach(n => Exists(W(n), alpha));
+        Start();
+        Assert.Equal(new WindowRect(8, 8, 956, 516), surface.Frames[W(1)]);
+        Assert.Equal(new WindowRect(964, 524, 1912, 1032), surface.Frames[W(4)]);
+    }
+
+    // Petre: "the split could be between a and c, which keeps b and d as they are". Dragging the top-left tile's right
+    // edge moves only the top piece of the column line; the bottom row stays where it was, to the pixel, and the
+    // screen's order follows the regrouped tree (rows now: W1 W3 on top, W2 W4 underneath).
+    [Fact]
+    public void Dragging_the_top_separation_at_a_crossing_leaves_the_bottom_row_alone()
+    {
+        StartFour();
+
+        ResizedByHand(W(1), new WindowRect(8, 8, 1337, 516));
+
+        Assert.Equal(new WindowRect(8, 8, 1337, 516), surface.Frames[W(1)]);
+        Assert.Equal(new WindowRect(1345, 8, 1912, 516), surface.Frames[W(3)]);
+        Assert.Equal(new WindowRect(8, 524, 956, 1032), surface.Frames[W(2)]);
+        Assert.Equal(new WindowRect(964, 524, 1912, 1032), surface.Frames[W(4)]);
+        Assert.Equal([W(1), W(3), W(2), W(4)], tiler.Board.On(1));
+        Assert.Equal(GridLayout.Arrange(Area, 4, Gap, Stored(AreaKey)), FramesOf([W(1), W(3), W(2), W(4)]));
+    }
+
+    // Live, the same rule: only the tile beside the dragged piece follows, and the drop then moves nothing more.
+    [Fact]
+    public void Live_resize_at_a_crossing_moves_only_the_neighbour_in_the_piece()
+    {
+        StartFour();
+        surface.Placed.Clear();
+
+        surface.Settling.Add(W(1));
+        surface.Frames[W(1)] = new WindowRect(8, 8, 1337, 516);
+        surface.MovingSubject.OnNext(W(1));
+
+        Assert.Equal([(W(3), new WindowRect(1345, 8, 1912, 516))], surface.Placed);
+        Assert.Empty(StoredLayouts);
+
+        surface.SettledSubject.OnNext(W(3));
+        surface.Settling.Remove(W(1));
+        ResizedByHand(W(1), new WindowRect(8, 8, 1337, 516));
+        Assert.Single(surface.Placed);
+    }
+
+    // After the half-line drag the column lines are offset (1341 on top, 960 below), so the row line now ends against
+    // them on both sides: a T, and it moves whole. All four heights change, nothing throws, the order stays.
+    [Fact]
+    public void After_a_half_line_drag_the_offset_line_moves_whole()
+    {
+        StartFour();
+        ResizedByHand(W(1), new WindowRect(8, 8, 1337, 516));
+        Echo();
+
+        ResizedByHand(W(1), new WindowRect(8, 8, 1337, 700));
+
+        Assert.Equal(new WindowRect(1345, 8, 1912, 700), surface.Frames[W(3)]);
+        Assert.Equal(708, surface.Frames[W(2)].Top);
+        Assert.Equal(708, surface.Frames[W(4)].Top);
+        Assert.Equal([W(1), W(3), W(2), W(4)], tiler.Board.On(1));
+    }
+
     // The stored sizes are in the Tiler's state key (ruling 3), so "Even out tiles" re-tiles. The Tiler's OWN store
     // must not pay for that with a second full evaluate, which asks WorkspaceOf (COM) of every known window: after
     // its own SetTileLayout the Tiler takes the new key as seen, so its own pulse compares equal (final review, item
