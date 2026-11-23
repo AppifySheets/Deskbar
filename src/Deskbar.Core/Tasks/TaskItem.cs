@@ -114,6 +114,15 @@ public sealed record TaskItem(
     /// </summary>
     public Maybe<DateTimeOffset> WaitingSince { get; init; }
 
+    /// <summary>
+    /// Deskbar made this task for a live session no task knew (TaskBoard.AdoptSession; design
+    /// docs/superpowers/specs/2026-11-23-tasks-open-claude-sessions-design.md, "Every live session has a task"). Kept so
+    /// that when the session joins its own task a moment later (its SessionStart hook can come after the adoption), the
+    /// task made for it can go, if nothing else was added to it (TaskBoard.WithoutSessionElsewhere). An init property like
+    /// the flags: every other task, and every task in a file written before the mark existed, is not adopted.
+    /// </summary>
+    public bool Adopted { get; init; }
+
     /// <summary>Covey's quadrant the two flags name (TaskOrder.cs).</summary>
     public Quadrant Quadrant => QuadrantOf.Flags(Important, Urgent);
 

@@ -66,6 +66,13 @@ public static class SessionKeeper
     public const string NoFolder =
         "Deskbar cannot resume this session: Claude Code never said which folder it ran in.";
 
+    // Asked by Task 8 (ClaudeSessions), not by Plan: `claude --bg --resume` itself failed, for example in a folder Claude
+    // Code was never told to trust or with `claude` missing. Claude's own message goes into the thread as a comment and
+    // this is the question. Sticky like the three above, so a resume that cannot work is tried once, never on a timer
+    // (Review Focus 4: one clear message, no retry loop), until Petre acts on the task.
+    public const string ResumeFailed =
+        "Deskbar could not resume this session. Claude Code's message is in this task's thread.";
+
     public static IReadOnlyList<KeeperStep> Plan(
         TaskBoard board,
         IReadOnlyCollection<ClaudeAgent> live,
@@ -120,11 +127,13 @@ public static class SessionKeeper
 
     static Maybe<KeeperStep> GiveUp(TaskItem task, string reason) => new KeeperStep.GiveUp(task.Id, reason);
 
-    static readonly IReadOnlyList<string> GiveUpReasons = [LoopGaveUp, TranscriptGone, NoFolder];
+    static readonly IReadOnlyList<string> GiveUpReasons = [LoopGaveUp, TranscriptGone, NoFolder, ResumeFailed];
 
     // A give-up shows on the board as the task waiting on Petre with the reason as its question. While it stands, the
-    // keeper says nothing more, so a give-up is said once and the session is never woken behind his back.
-    static bool GivenUp(TaskItem task) =>
+    // keeper says nothing more, so a give-up is said once and the session is never woken behind his back. Public so
+    // Task 8 (ClaudeSessions) asks the same question when it re-checks a queued resume and when it decides Petre has
+    // acted on a give-up, instead of keeping its own copy of the reasons.
+    public static bool GivenUp(TaskItem task) =>
         task.Status == TaskStatus.WaitingOnYou && task.Question.Match(q => GiveUpReasons.Contains(q), () => false);
 }
 

@@ -225,6 +225,7 @@ public class SessionKeeperTests
     [InlineData(SessionKeeper.LoopGaveUp)]
     [InlineData(SessionKeeper.TranscriptGone)]
     [InlineData(SessionKeeper.NoFolder)]
+    [InlineData(SessionKeeper.ResumeFailed)]
     public void A_task_given_up_on_gets_no_step_even_after_the_loop_window(string reason)
     {
         var ledger = ResumeLedger.Empty

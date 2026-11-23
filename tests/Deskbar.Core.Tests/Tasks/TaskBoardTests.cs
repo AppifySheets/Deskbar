@@ -651,4 +651,52 @@ public class TaskBoardTests
         Assert.True(open.AdoptSession(Agent("s1"), ws, clock, id2).IsFailure);
         Assert.True(closed.AdoptSession(Agent("s1"), ws, clock, id2).IsFailure);
     }
+
+    // Ruling 11: Deskbar can adopt a session before the session's own hook joins it to the task it was started for.
+    // When the session then joins (or creates, or rejoins) its own task, the task Deskbar made for it is left with
+    // nothing of its own, and it goes. Only an adopted task, and only one that holds nothing else.
+    [Fact]
+    public void An_adopted_task_whose_session_joins_another_task_is_deleted()
+    {
+        var adopted = TaskBoard.Empty.AdoptSession(Agent("s1", "Stray"), ws, clock, id1).Value.Board;
+        Assert.True(Get(adopted, id1).Adopted);
+        Later();
+
+        var joined = Note(adopted, id2, ws).Join(id2, Session("s1"), clock).Value;
+        Assert.DoesNotContain(joined.Tasks, t => t.Id == id1);
+        Assert.Equal("s1", Get(joined, id2).Sessions.Single().Id);
+
+        var rejoined = Note(adopted, id2, ws).Rejoin(id2, Session("s1"), clock).Value;
+        Assert.DoesNotContain(rejoined.Tasks, t => t.Id == id1);
+
+        var created = adopted.Create("Its own task", ws, Session("s1"), clock, id3).Value.Board;
+        Assert.DoesNotContain(created.Tasks, t => t.Id == id1);
+        Assert.Single(created.Tasks);
+    }
+
+    [Fact]
+    public void An_adopted_task_with_a_comment_is_kept_when_its_session_leaves()
+    {
+        var adopted = TaskBoard.Empty.AdoptSession(Agent("s1", "Stray"), ws, clock, id1).Value.Board
+            .Comment(id1, Maybe<string>.None, "keep this", clock, id5).Value;
+        Later();
+
+        var joined = Note(adopted, id2, ws).Join(id2, Session("s1"), clock).Value;
+
+        var kept = Get(joined, id1);
+        Assert.True(kept.Sessions.Single().Ended.HasValue);
+        Assert.Single(kept.Comments);
+    }
+
+    [Fact]
+    public void A_task_that_was_not_adopted_is_kept_when_its_session_leaves()
+    {
+        var board = Claudes(TaskBoard.Empty, id1, ws, "s1");
+        Assert.False(Get(board, id1).Adopted);
+        Later();
+
+        var joined = Note(board, id2, ws).Join(id2, Session("s1"), clock).Value;
+
+        Assert.True(Get(joined, id1).Sessions.Single().Ended.HasValue);
+    }
 }

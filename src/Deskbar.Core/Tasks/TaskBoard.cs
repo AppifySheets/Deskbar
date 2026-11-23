@@ -173,7 +173,9 @@ public sealed record TaskBoard(IReadOnlyList<TaskItem> Tasks)
     public Result<(TaskBoard Board, TaskItem Task)> AdoptSession(ClaudeAgent agent, Maybe<Guid> workspace, DateTimeOffset now, Guid newId) =>
         Tasks.Any(t => t.Sessions.Any(s => s.Id == agent.SessionId))
             ? Result.Failure<(TaskBoard, TaskItem)>($"Session {agent.SessionId} already has a task")
-            : Create(AdoptedTitle(agent), workspace, new TaskSession(agent.SessionId, agent.Folder, now, Maybe<DateTimeOffset>.None), now, newId);
+            : Create(AdoptedTitle(agent), workspace, new TaskSession(agent.SessionId, agent.Folder, now, Maybe<DateTimeOffset>.None), now, newId)
+                // Marked, so it can go again if the session joins its own task after all (WithoutSessionElsewhere).
+                .Map(made => (made.Board.Replaced(made.Task with { Adopted = true }), made.Task with { Adopted = true }));
 
     static string AdoptedTitle(ClaudeAgent agent) =>
         !string.IsNullOrWhiteSpace(agent.Name) ? agent.Name
@@ -596,15 +598,24 @@ public sealed record TaskBoard(IReadOnlyList<TaskItem> Tasks)
     /// <summary>
     /// Ends the session's live entry on every open task but <paramref name="except"/>, stamping those tasks. Closed
     /// tasks are left alone: SessionEnded still closes the entry there when the session really ends.
+    /// An ADOPTED task (<see cref="TaskItem.Adopted"/>) that this session was all of, with no comment on it, is deleted
+    /// instead (Ruling 11): Deskbar made it for a session that had no task yet, the session has now joined its own, and
+    /// what is left would be an empty duplicate line. Anything added to it (another session, a comment) keeps it.
     /// </summary>
     TaskBoard WithoutSessionElsewhere(string sessionId, Guid except, DateTimeOffset now) =>
-        new(Tasks.Select(t => t.Id != except && t.IsOpen && LiveOn(t, sessionId)
-            ? t with
-            {
-                Sessions = t.Sessions.Select(s => s.Id == sessionId && s.IsLive ? s with { Ended = now } : s).ToArray(),
-                UpdatedAt = now,
-            }
-            : t).ToArray());
+        new(Tasks
+            .Where(t => !(t.Id != except && t.IsOpen && LiveOn(t, sessionId) && OnlyAdoptedFor(t, sessionId)))
+            .Select(t => t.Id != except && t.IsOpen && LiveOn(t, sessionId)
+                ? t with
+                {
+                    Sessions = t.Sessions.Select(s => s.Id == sessionId && s.IsLive ? s with { Ended = now } : s).ToArray(),
+                    UpdatedAt = now,
+                }
+                : t).ToArray());
+
+    // The task holds nothing but this session: adopted for it, no other session, no comment.
+    static bool OnlyAdoptedFor(TaskItem task, string sessionId) =>
+        task.Adopted && task.Sessions.All(s => s.Id == sessionId) && task.Comments.Count == 0;
 
     (TaskBoard Board, TaskItem Task) WithAppended(TaskItem task) => (new TaskBoard(Tasks.Append(task).ToArray()), task);
 
