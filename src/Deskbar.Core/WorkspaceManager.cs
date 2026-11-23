@@ -3529,13 +3529,6 @@ public sealed class WorkspaceManager(
                 RememberPlacement(window, pinned: false);
             });
 
-    // The window brought to the desktop being looked at, and nothing else: no membership, no placement, no "detached"
-    // mark (MoveToDesktop's bookkeeping, which is about Petre dragging a window somewhere on purpose). For the App's own
-    // tasks window, which comes to wherever Petre is when he opens it (TasksBoard.Arrive), through the doorway below so
-    // the Tiler hears it arrive and gives it a slot on a tiled workspace ("maybe even tile it", 2026-11-23).
-    public Result MoveWindowToCurrentDesktop(WindowHandle window) =>
-        desktops.CurrentDesktop().Bind(front => MoveWindowTo(window, front));
-
     // The one doorway for moving a window to another desktop: every move this class makes goes through here,
     // so WindowMoved hears about all of them, and only about the ones that happened. A refused move announces
     // nothing. The callers' own .Tap/.Bind chains around it are unchanged; this adds the announcement and
