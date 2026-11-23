@@ -109,6 +109,22 @@ public partial class FloatingBar
         return item;
     }
 
+    // "Split <app> windows last" (spec 2026-11-23-split-recent-app-windows-last-design; Tiler.SplitLast.cs). Petre: "i
+    // think what i need is that the vscode windows are not affected ... so i don't get interrupted", then "last 3". A
+    // setting of the APP, kept in state by process name, so it is offered on any window of it, tiled or not, and ticking
+    // it on one VS Code window covers all of them. Read again each time the menu opens, because the menu is built once
+    // and kept (LazyMenus) while the pipe's `split-last` or another window of the app can change it meanwhile.
+    MenuItem SplitLastItem(WindowInfo window, ContextMenu menu)
+    {
+        var item = new MenuItem { Header = $"Split {window.ProcessName} windows last", IsCheckable = true, Icon = MenuGlyph("⊟") };
+        void Show() => item.IsChecked = manager.SplitsLast(window.ProcessName);
+        Show();
+        menu.Opened += (_, _) => Show();
+        // Click, not Checked/Unchecked: IsChecked is set by Show as well, and that must not write the setting back.
+        item.Click += (_, _) => Report(manager.SetSplitLast(window.Handle, item.IsChecked));
+        return item;
+    }
+
     // --- the header's tiling button ---------------------------------------------------------------------------
     //
     // Petre, testing tiling live: "maybe add a button at the top of the bar", then from a mockup, "Header, beside

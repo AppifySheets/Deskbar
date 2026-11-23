@@ -7748,8 +7748,11 @@ public partial class FloatingBar : Window
         restore.Click += (_, _) => Report(manager.RestoreTitle(row.Window.Handle));
         menu.Items.Add(restore);
 
-        // "Don't split this tile" (FloatingBar.Tiling.cs): the last item before the closing group, shown only while
-        // the window is a tile of the workspace being looked at.
+        // "Split <app> windows last" and "Don't split this tile" (FloatingBar.Tiling.cs): the last items before the
+        // closing group. The first is about the app and is offered on any of its windows, except Deskbar's own (never
+        // tiles) and a Store app's shared frame, where the process is every Store app at once, as for "Rename all";
+        // the second is about this tile and shows only while the window is one.
+        if (!IsOwnWindow(row.Window.Handle.Value) && !frameHost) menu.Items.Add(SplitLastItem(row.Window, menu));
         menu.Items.Add(TileLockItem(row.Window.Handle, menu));
 
         // CLOSING, at the bottom and behind a separator, away from the renames above. Petre: "right clicking an
