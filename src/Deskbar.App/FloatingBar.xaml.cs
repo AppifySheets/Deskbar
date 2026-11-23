@@ -16,6 +16,7 @@ using Deskbar.Core.Geometry;
 using Deskbar.Core.Overview;
 using Deskbar.Core.Persistence;
 using Deskbar.Core.Rules;
+using Deskbar.Core.Tasks;
 using Deskbar.Windows.Activation;
 using Deskbar.Windows.Dialogs;
 using Deskbar.Windows.Monitoring;
@@ -720,15 +721,18 @@ public partial class FloatingBar : Window
     // The notice a dock decided on, held until DockTo's `finally` has cleared `docking` (see FlushStripNotice).
     (BarStrip Notice, string Why)? pendingStrip;
 
+    // WHETHER to send is decided in ONE place, BarStripNotices.Next in Core, with a test per case (BarStripNoticesTests):
+    // the three methods below only gather what the window knows (where it docked, whether it registered, where it is)
+    // and send what the rule answers. Keep it that way: a new reason to announce goes into the rule and its tests, never
+    // into a condition here.
+
     // After a dock: queued when the app bar registered afresh, or when the edge or the screens differ from the last
-    // notice. `grantedMiddle` stands in for the window's own middle only if GetWindowRect cannot read it.
-    void QueueDockNotice(string edge, WindowRect screen, Maybe<WindowRect> seamRight, bool registeredAfresh, nint hwnd, int grantedMiddle)
-    {
-        var next = new BarStrip(edge, screen, seamRight, MiddleXOf(hwnd).GetValueOrDefault(grantedMiddle), Gone: false);
-        // The loop breaker (see above): a re-dock in place that did not register is not news.
-        if (!registeredAfresh && lastStrip is { } last && SamePlace(last, next)) return;
-        pendingStrip = (next, registeredAfresh ? "registered" : "moved");
-    }
+    // notice (the loop breaker, see above, is the rule's). `grantedMiddle` stands in for the window's own middle only if
+    // GetWindowRect cannot read it.
+    void QueueDockNotice(string edge, WindowRect screen, Maybe<WindowRect> seamRight, bool registeredAfresh, nint hwnd, int grantedMiddle) =>
+        BarStripNotices.Next(lastStrip,
+                new BarStripEvent.Docked(edge, screen, seamRight, MiddleXOf(hwnd).GetValueOrDefault(grantedMiddle), registeredAfresh))
+            .Tap(next => pendingStrip = (next, registeredAfresh ? "registered" : "moved"));
 
     // Sends the queued dock notice, once DockTo is out of its `docking` section. Skipped while `docking` is still set,
     // which only a DockTo nested inside another one could see; the outer DockTo flushes on its own way out.
@@ -753,13 +757,10 @@ public partial class FloatingBar : Window
     // floating: accepted (Petre always docks the bar; the coordinator's ruling in task 5's report).
     void AnnounceFloating()
     {
-        if (!IsVisible || Minimized || Docked || lastStrip is { Edge: null, Gone: false }) return;
+        if (!IsVisible || Minimized || Docked) return;
         var hwnd = new WindowInteropHelper(this).Handle;
-        var read = ScreenOf(hwnd);
-        var screen = read.HasValue ? read.Value : lastStrip?.Screen;
-        if (screen is null) return;
-        var middle = MiddleXOf(hwnd).GetValueOrDefault(lastStrip?.MiddleX ?? (screen.Left + screen.Right) / 2);
-        Announce(new BarStrip(null, screen, Maybe<WindowRect>.None, middle, Gone: false), "floats");
+        BarStripNotices.Next(lastStrip, new BarStripEvent.Floating(ScreenOf(hwnd), MiddleXOf(hwnd)))
+            .Tap(next => Announce(next, "floats"));
     }
 
     // THE BAR WENT AWAY (BarStrip: Edge null, Gone true): minimized (MinimizeToTaskbar) or closing (CompleteStrip). The
@@ -767,11 +768,8 @@ public partial class FloatingBar : Window
     // already a gone one, WHATEVER its edge: a floating bar going away must take a panel docked by the floating rule
     // with it, as much as a docked bar. Nothing when nothing was ever announced: the panel has no place yet then.
     // Built from the last notice, never from the window, whose handle may be going.
-    void AnnounceGone(string why)
-    {
-        if (lastStrip is not { Gone: false } last) return;
-        Announce(last with { Edge = null, SeamRight = Maybe<WindowRect>.None, Gone = true }, why);
-    }
+    void AnnounceGone(string why) =>
+        BarStripNotices.Next(lastStrip, BarStripEvent.Gone.Instance).Tap(next => Announce(next, why));
 
     // Never called with `docking` set (dock notices go through FlushStripNotice, let-go notices are sent outside DockTo).
     // The shell's position notices a subscriber's own Remove and Dock cause are queued (OnShellMovedStrips) and come
@@ -792,9 +790,6 @@ public partial class FloatingBar : Window
         AnnounceGone("gone (closing)");
         strip.OnCompleted();
     }
-
-    // Same edge and same screens; the middle is left out on purpose, since a width drag moves it without registering.
-    static bool SamePlace(BarStrip a, BarStrip b) => a.Edge == b.Edge && a.Screen == b.Screen && a.SeamRight.Equals(b.SeamRight);
 
     static Maybe<int> MiddleXOf(nint hwnd) =>
         hwnd != 0 && NativeMethods.GetWindowRect(hwnd, out var rect) ? (rect.Left + rect.Right) / 2 : Maybe<int>.None;
