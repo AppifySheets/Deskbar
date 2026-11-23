@@ -499,7 +499,15 @@ public sealed record AppState(
     // state.json written before this key: the window then opens beside the bar. Device pixels rather than DIPs, because
     // the screen it sat on may have its own scale; the window turns them into DIPs with that screen's DPI when it
     // opens there, and ignores them when no screen holds them any more.
+    // OBSOLETE (a comment, not [Obsolete], because warnaserror): the floating tasks window is gone, replaced by the
+    // docked panel below (TasksPanel). Nothing writes this after the panel is wired in; it stays only so old state
+    // files still load, and it is ignored.
     public TasksWindowState? TasksWindow { get; init; }
+
+    // The docked tasks panel (docs/superpowers/specs/2026-11-23-tasks-panel-design.md): whether it is open and how wide
+    // it is, in DIPs. Null until it is first opened or resized, which is every state.json written before this key:
+    // read it as TasksPanelState.Default (closed, default width) via `State.TasksPanel ?? TasksPanelState.Default`.
+    public TasksPanelState? TasksPanel { get; init; }
 
     // Whether the tasks window shows its Matrix (Covey's 2 by 2) rather than its List (Task 12, Ruling 28: "a List /
     // Matrix switch in the toolbar (remembered)"). False, the List, in every state.json written before this key.
@@ -781,4 +789,13 @@ public sealed record DetachedStatsState(bool Shown, double Left, double Top);
 
 // Where the tasks window sits (AppState.TasksWindow): its rectangle in device pixels, and whether it was maximized (the
 // rectangle is then the one it returns to).
+// Kept only so old state files load (see the note on AppState.TasksWindow); nothing writes it once the panel is wired in.
 public sealed record TasksWindowState(int Left, int Top, int Width, int Height, bool Maximized);
+
+// The docked tasks panel (AppState.TasksPanel): open or not, and its width in DIPs (clamped by TasksPanelLayout.Clamp
+// against the screen it docks to when it is shown, never here).
+public sealed record TasksPanelState(bool Open, double Width)
+{
+    // What an absent AppState.TasksPanel means: closed, at the default width. Callers use this, not their own copy.
+    public static readonly TasksPanelState Default = new(false, Tasks.TasksPanelLayout.DefaultWidth);
+}

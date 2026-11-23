@@ -371,6 +371,42 @@ public sealed class JsonPersistenceStoreTests : IDisposable
         Assert.Equal(1, pulses);
     }
 
+    // The tasks panel's state (AppState.TasksPanel): through the manager into the file and back, and the same state
+    // again writes nothing.
+    [Fact]
+    public void The_panel_state_survives_a_save_and_load()
+    {
+        var store = new JsonPersistenceStore(dir);
+        var manager = new WorkspaceManager(new FakeDesktops(), new FakeMonitor(), new FakeTitles(), store);
+        Assert.True(manager.Start().IsSuccess);
+        var pulses = 0;
+        using var pulse = manager.StateChanged.Subscribe(_ => pulses++);
+
+        var panel = new TasksPanelState(Open: true, Width: 512.5);
+        Assert.True(manager.SaveTasksPanel(panel).IsSuccess);
+        Assert.Equal(panel, store.Load().Value.TasksPanel);
+        Assert.Equal(1, pulses);
+
+        Assert.True(manager.SaveTasksPanel(panel).IsSuccess);
+        Assert.Equal(1, pulses);
+    }
+
+    [Fact]
+    public void A_file_without_a_panel_state_reads_as_closed_at_the_default_width()
+    {
+        Directory.CreateDirectory(dir);
+        File.WriteAllText(Path.Combine(dir, "state.json"),
+            """{"Workspaces":[],"WorkspaceRules":[],"RenameRules":[],"Inventory":{}}""");
+
+        var loaded = new JsonPersistenceStore(dir).Load();
+
+        Assert.True(loaded.IsSuccess);
+        Assert.Null(loaded.Value.TasksPanel);
+        var panel = loaded.Value.TasksPanel ?? TasksPanelState.Default;
+        Assert.False(panel.Open);
+        Assert.Equal(460, panel.Width);
+    }
+
     [Fact]
     public void An_old_state_file_without_the_key_loads_null()
     {
