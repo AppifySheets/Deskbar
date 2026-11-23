@@ -326,7 +326,10 @@ Tasks 7 to 9). Needs Claude Code installed and both Claude boxes in Manage ticke
 68. Ask the session to ask you something through its task. Switch to another workspace first: the task jumps to the
     top as Waiting on you with the question, in orange, and the session's workspace blinks. Reply in the session:
     your message alone changes nothing (since #435 a prompt no longer answers). When the session runs `task answered`
-    the task goes back to in progress and the question goes. The line stays on the bar all along.
+    the task goes back to in progress and the question goes, and the line leaves the bar's list (the tasks window
+    still has it, in progress). Before that, switch to its workspace and to the session's window, and click and
+    double-click the line: it stays on the bar. Ask again: it is back at the top of the bar. Tick an in-progress Claude
+    task in the tasks window, then Undo: it comes back to the window, not to the bar.
 69. Ask the session to finish and mark its task done: the line has the same tick box as the rest. Send the session another
     message: the task is in progress again. Mark it done again and close it yourself, then send a message: the
     session says its task was closed and makes a new one only for new work.

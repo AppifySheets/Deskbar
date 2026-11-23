@@ -499,6 +499,19 @@ public partial class FloatingBar
 
     // --- the lines, as data -------------------------------------------------------------------------------------
 
+    // RULING 48 (Petre: "when i have responded to a claude session that wanted my attention, i think it's okay if it gets
+    // removed from the tasklist"; and, precisely: "not when i have activated the window, but when i have responded to it").
+    // The BAR lists a Claude task only while it needs him: Waiting on you, or Done (waiting for him to close it). A Claude
+    // task in progress or in the backlog leaves the bar's list and stays in the tasks window, which shows everything.
+    // What takes a waiting task off is the session settling its question with `task answered` after his reply (#435; a
+    // prompt alone no longer does, TaskBoard.Answered,
+    // which moves Waiting on you back to In progress); arriving at the workspace, activating the session's window or
+    // clicking the line never changes a status, so none of them takes it off. When the session asks again the task is
+    // Waiting on you again and comes back at the top of the pile. His own notes are unaffected. "+N more" and the docked
+    // fit pass count only what the bar lists, since both read this list.
+    internal static bool NeedsYou(TaskLine line) =>
+        !line.Claudes || line.Status is TaskStatus.WaitingOnYou or TaskStatus.Done;
+
     /// <summary>
     /// Every open task as the bar draws it, in the pile's order (TaskBoard.Pile). <paramref name="workspaceName"/> and
     /// <paramref name="colour"/> answer for the workspace chip; <paramref name="sessionWindow"/> finds a Claude task's
@@ -842,12 +855,13 @@ public partial class FloatingBar
         // the free height without changing the list.
         if (SizeToContent == SizeToContent.Manual || taskListSlots != TaskListSlots) QueueTaskListFit();
 
-        var open = Lines(taskService.Board, WorkspaceName, id => workspaceAccents.GetValueOrDefault(id), SessionWindow, GoalTitle);
+        // RULING 48: the bar lists a Claude task only while it needs Petre (NeedsYou). The window shows everything.
+        var open = Lines(taskService.Board, WorkspaceName, id => workspaceAccents.GetValueOrDefault(id), SessionWindow, GoalTitle).Where(NeedsYou).ToArray();
         // A closed line whose task is open again (reopened from the pipe, say) is not pending any more: the task is back
         // in the pile under its own line.
         pendingCloses.Where(p => open.Any(l => l.Id == p.Line.Id)).ToList().ForEach(p => ForgetPendingClose(p, repaint: false));
         var slots = TaskSlotsNow;
-        if (open.Count <= slots) taskListExpanded = false;
+        if (open.Length <= slots) taskListExpanded = false;
         var all = WithGroupStarts(WithPendingCloses(open, pendingCloses));
         allTaskLines = all;
         var problem = taskService.LoadProblem;
