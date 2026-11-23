@@ -52,8 +52,9 @@ namespace Deskbar.App;
 //                    AskTint while on (the approved mockup; never the blue selected edge). N is what it would show
 //                    under every other filter (TasksView.ClaudeWorkingCount).
 //
-// Top to bottom: the toolbar (status filters with their counts, the workspace filter, the goal filter while goals
-// exist, "+ Add"), the
+// Top to bottom: the toolbar in the approved mockup's three rows (the title line with "Tasks" and the end buttons,
+// List / Matrix, "+ Add" and ×; then the search row; then the filter chips: the status filters with their counts,
+// "Claude working", the workspace and assignee filters and the goal filter while goals exist, wrapping as needed), the
 // add box while "+ Add" has it open, a line saying why the last action failed, then the groups (Waiting on you, then
 // Covey's quadrants I to IV, captioned; Task 12). Each line: Claude's orange edge (no CL badge since Ruling 42: the
 // edge is the mark) or a note's tick box (Undo in its place for the six seconds after a close), the title over the question or

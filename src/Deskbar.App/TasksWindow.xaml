@@ -81,19 +81,28 @@
            ToolTip="Drag to change the panel's width"/>
     <Border Background="#FF1E1F24">
         <DockPanel>
-            <!-- The toolbar: "Tasks", the status filters with their counts, "Claude working", the workspace filter and
-                 "+ Add", and under them the search row.
+            <!-- The toolbar, the approved mockup's three rows, top to bottom (tasks panel plan, Task 7):
+                   1. the title line: "Tasks" on the left, ToolbarEnd (List / Matrix, "+ Add", ×) on the right, nothing else;
+                   2. the search row, the full width of the panel;
+                   3. the filter chips (Filters: the status chips with their counts, "Claude working", the workspace,
+                      assignee and goal filters), wrapping onto more lines as the panel narrows.
+                 The chips used to share the title line, where a narrow panel squeezed them against the end buttons.
                  Focusable so the window has somewhere to put the keyboard that is not a text box: it opens on
-                 the board, not on a form (TasksWindow.Open). -->
+                 the board, not on a form (TasksWindow.Open). Its bottom hairline runs under all three rows. -->
             <Border x:Name="Toolbar" DockPanel.Dock="Top" BorderBrush="#FF33353C" BorderThickness="0,0,0,1" Padding="10,8"
                     Focusable="True" FocusVisualStyle="{x:Null}">
-                <DockPanel>
-                    <!-- The search row (tasks panel plan, Task 7; spec "The new filters"): under the title line, the full
-                         width of the panel. Typing narrows the list and the Matrix at once; Ctrl+F anywhere in the panel
-                         puts the keyboard here, Esc here empties it and gives the keyboard back to the board
-                         (TasksWindow, "the search box"). Inside the toolbar's border, so the toolbar's hairline runs under
-                         it. Its edge goes blue while it has the keyboard, like the add box's. -->
-                    <Border x:Name="SearchRow" DockPanel.Dock="Bottom" Margin="0,6,0,0" CornerRadius="4"
+                <StackPanel>
+                    <!-- 1. The title line. ToolbarEnd docks right first, so the title, the last child, takes the rest. -->
+                    <DockPanel>
+                        <StackPanel x:Name="ToolbarEnd" DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center"/>
+                        <TextBlock x:Name="ToolbarTitle" Text="Tasks" FontWeight="SemiBold" FontSize="13" Foreground="#FFE6E6E6"
+                                   VerticalAlignment="Center" HorizontalAlignment="Left"/>
+                    </DockPanel>
+                    <!-- 2. The search row (spec "The new filters"): under the title line, the full width of the panel.
+                         Typing narrows the list and the Matrix at once; Ctrl+F anywhere in the panel puts the keyboard
+                         here, Esc here empties it and gives the keyboard back to the board (TasksWindow, "the search
+                         box"). Its edge goes blue while it has the keyboard, like the add box's. -->
+                    <Border x:Name="SearchRow" Margin="0,6,0,0" CornerRadius="4"
                             Background="#FF15161A" BorderThickness="1" Padding="6,3">
                         <Border.Style>
                             <Style TargetType="Border">
@@ -113,13 +122,9 @@
                                        Foreground="#FF8B8F99" IsHitTestVisible="False" Margin="2,0,0,0"/>
                         </Grid>
                     </Border>
-                    <DockPanel>
-                        <TextBlock Text="Tasks" FontWeight="SemiBold" FontSize="13" Foreground="#FFE6E6E6"
-                                   VerticalAlignment="Center" Margin="0,0,10,0"/>
-                        <StackPanel x:Name="ToolbarEnd" DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center"/>
-                        <WrapPanel x:Name="Filters" VerticalAlignment="Center"/>
-                    </DockPanel>
-                </DockPanel>
+                    <!-- 3. The filter chips, built in code-behind (TasksWindow.DrawFilters), wrapping as needed. -->
+                    <WrapPanel x:Name="Filters" Margin="0,6,0,0"/>
+                </StackPanel>
             </Border>
             <!-- The add box, shown by "+ Add" and hidden again by Enter or Esc. -->
             <Border x:Name="AddRow" DockPanel.Dock="Top" Visibility="Collapsed" Padding="10,6,10,6"
