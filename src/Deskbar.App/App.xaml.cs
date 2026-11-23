@@ -1030,6 +1030,18 @@ public partial class App : Application
         // Program.Main answers it before this Application is even made (before the single-instance guard this
         // process would trip, and before WPF loads App.xaml and its theme, which a hook on every prompt paid for).
 
+        // Windows 11 only (build 22000 or later), said out loud. The Store package's manifest already keeps
+        // it off older Windows, but the direct download had nothing that did, and on Windows 10 it started
+        // and ran half-working against a virtual-desktop API it was never built for. Checked before the
+        // single-instance guard, tracing, the 1.x migration and anything else that touches state, so a
+        // refused start leaves the machine exactly as it was. WindowsRequirement holds the cut-off and wording.
+        if (WindowsRequirement.Check(Environment.OSVersion.Version) is { IsFailure: true } unsupported)
+        {
+            MessageBox.Show(unsupported.Error, "Deskbar", MessageBoxButton.OK, MessageBoxImage.Warning);
+            Shutdown(1);
+            return;
+        }
+
         // SINGLE INSTANCE, and it must be the very first thing that happens.
         //
         // Petre hit the visible symptom: "TaskSpaces could not register these keyboard
