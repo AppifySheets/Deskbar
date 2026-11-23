@@ -237,7 +237,6 @@ public partial class TasksWindow : Window
     public void CloseForGood()
     {
         closingForGood = true;
-        CancelPendingGo();
         placeWatch.Dispose();
         ageWatch.Dispose();
         Close();
@@ -322,8 +321,6 @@ public partial class TasksWindow : Window
     public void Dismiss()
     {
         if (!IsOpen) return;
-        // A click's delayed go (the double-click wait) must not fire into a window that is hidden (review, Minor 4).
-        CancelPendingGo();
         IsOpen = false;
         if (openMenu is { IsOpen: true } menu) menu.IsOpen = false;
         renaming = null;
@@ -665,19 +662,19 @@ public partial class TasksWindow : Window
         // (TasksWindow.Drag.cs), armed only, so a press released in place stays this Click.
         line.PreviewMouseLeftButtonDown += (_, e) =>
         {
-            // A double-click on the title opens the editor (Ruling 38). Handled, so the line neither clicks nor arms a
-            // drag; its first click was already dropped from a second Go by the click guard (a double click's second
-            // press counts 2).
-            var onTitle = e.OriginalSource is TextBlock { Tag: TitleTag };
-            if (e.ClickCount == 2 && !row.Closing && row.Status != TaskStatus.Closed && renaming != row.Id && onTitle)
+            // RULING 54 (Petre: "clicking a task should open that task; double clicking takes me to the workspace and
+            // window"): a double-click anywhere on the line goes there, as the bar's does. Handled, so the line neither
+            // clicks again nor arms a drag; its first click already picked and expanded the task (the Click below). A
+            // press on one of the line's own buttons (tick, toggles, chip, comments, "...") is that button's, and one
+            // in the rename editor is the editor's. This replaced the double-click on a title that edited it (Ruling 38):
+            // editing is F2, or Edit in the menu. With it went the title click's half-second wait for a second click:
+            // every click acts at once now.
+            if (e.ClickCount == 2 && !row.Closing && row.Status != TaskStatus.Closed && renaming != row.Id && IsTheLinesOwn(line, e.OriginalSource))
             {
                 e.Handled = true;
-                // The first click's go, still waiting out the double-click time, is called off (see the Click below).
-                CancelPendingGo();
-                BeginRename(row.Id);
+                Actions?.Go(row.Id);
                 return;
             }
-            pressOnTitle = onTitle;
             pressClicks = e.ClickCount;
             DragPress(row.Id, DragMouse.Position(e, DragSurface));
         };
@@ -691,46 +688,25 @@ public partial class TasksWindow : Window
         };
         line.Click += (_, _) =>
         {
-            // A line just closed goes nowhere; Undo is the one thing on it to press. A line being renamed neither.
+            // A line just closed picks nothing; Undo is the one thing on it to press. A line being renamed neither.
             if (ClickIgnored() || row.Closing || renaming == row.Id) return;
-            // A click on the TITLE waits out the double-click time before it goes (2026-11-23: a double-click to edit a
-            // title must not first go to the task, which can switch workspace under Petre). A second press on the
-            // title within that time calls the go off and opens the editor instead. A click anywhere else on the line
-            // goes at once, as it always has.
-            if (pressOnTitle)
-            {
-                CancelPendingGo();
-                pendingGo = GoTimer(DoubleClickTime, () =>
-                {
-                    pendingGo = null;
-                    Actions?.Go(row.Id);
-                });
-                return;
-            }
-            Actions?.Go(row.Id);
+            // A single click picks the task and opens its thread; it goes nowhere (Ruling 54).
+            Actions?.Pick(row.Id);
         };
         return line;
     }
 
-    // THE TITLE'S CLICK WAITS FOR A POSSIBLE SECOND ONE (see the line's Click). pressOnTitle says where the press that
-    // makes this click landed; pendingGo is the go waiting out the double-click time, called off by a double-click on
-    // the title. GoTimer runs `then` once after the time unless disposed first: a dispatcher timer in the app, a seam for
-    // the tests.
-    bool pressOnTitle;
-    IDisposable? pendingGo;
-
-    internal Func<TimeSpan, Action, IDisposable> GoTimer { get; init; } = FloatingBar.DispatcherUndoTimer;
-
-    static TimeSpan DoubleClickTime => TimeSpan.FromMilliseconds(GetDoubleClickTime());
-
-    [DllImport("user32.dll")]
-    static extern uint GetDoubleClickTime();
-
-    void CancelPendingGo()
+    // Whether a press landed on the line itself rather than on a button inside it or on a text box (the rename editor).
+    static bool IsTheLinesOwn(Button line, object? source)
     {
-        pendingGo?.Dispose();
-        pendingGo = null;
+        for (var node = source as DependencyObject; node is not null; node = node is Visual or System.Windows.Media.Media3D.Visual3D ? VisualTreeHelper.GetParent(node) : LogicalTreeHelper.GetParent(node))
+        {
+            if (ReferenceEquals(node, line)) return true;
+            if (node is Button or System.Windows.Controls.Primitives.TextBoxBase) return false;
+        }
+        return false;
     }
+
 
     // The line's columns: tick, title (the star, trimming first), the two flag toggles, sessions, age, workspace chip,
     // comments, action (close or Reopen), "…". Fixed widths, shared by every line, so each column sits at the same x on

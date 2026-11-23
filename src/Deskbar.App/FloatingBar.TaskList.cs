@@ -1028,10 +1028,18 @@ public partial class FloatingBar
         button.Click += (_, _) =>
         {
             MarkPressConsumed();
-            // A closed line goes nowhere: its task is closed, and Undo is the one thing on it to press. A line being
-            // edited neither: the click is in its editor.
-            if (TaskClickIgnored() || line.Closing || editingTask == line.Id) return;
-            OnTaskLineClick(line);
+            // RULING 54 (Petre: "clicking a task should open that task; double clicking takes me to the workspace and
+            // window"): a single click opens the task in the tasks window and goes nowhere; the double-click goes, which
+            // is what a single click did before. A closed line does neither: its task is closed, and Undo is the one
+            // thing on it to press. A line being edited neither: the click is in its editor. Reading the press's click
+            // count consumes it (DoubleClickIgnored's way). The repaint grace (TaskClickIgnored) still drops a single
+            // click aimed at a line that has just moved (#48), but never the second click of a double-click, which comes
+            // within the half second by definition and was aimed at the line the first one landed on.
+            var doubled = taskPressClicks > 1;
+            taskPressClicks = 0;
+            if (line.Closing || editingTask == line.Id) return;
+            if (doubled) OnTaskLineGo(line);
+            else if (TaskClickClock() - taskLinesChangedAt >= RepaintGrace) OnTaskLineOpen(line);
         };
         return button;
     }
@@ -1349,9 +1357,9 @@ public partial class FloatingBar
 
     // --- clicks ----------------------------------------------------------------------------------------------------
 
-    // A line goes to its task. A note on no workspace has nowhere to go; a Claude task goes even on no workspace,
-    // since a later pull request takes it to its session, which the App decides.
-    void OnTaskLineClick(TaskLine line)
+    // A DOUBLE-CLICK on a line goes to its task (Ruling 54). A note on no workspace has nowhere to go; a Claude task goes
+    // even on no workspace, since a later pull request takes it to its session, which the App decides.
+    void OnTaskLineGo(TaskLine line)
     {
         // The click picks the task, in both views, whether or not it has anywhere to go.
         selection.Select(line.Id);
@@ -1360,6 +1368,18 @@ public partial class FloatingBar
         // Shown the way a row's failed switch is (Report), not only traced: a click that goes nowhere must say why.
         Report(GoToTask(line.Id));
     }
+
+    // A SINGLE CLICK on a line opens that task in the tasks window (Ruling 54): picked, scrolled into view and expanded
+    // to its comment thread (OpenTaskInWindow, the App's TasksBoard.ShowTask). It goes nowhere. Without the seam (a bar
+    // with no window) it only picks the task.
+    void OnTaskLineOpen(TaskLine line)
+    {
+        selection.Select(line.Id);
+        OpenTaskInWindow?.Invoke(line.Id);
+    }
+
+    /// <summary>A line's single click: the tasks window on that task (App: TasksBoard.ShowTask). Unset: nothing opens.</summary>
+    internal Action<Guid>? OpenTaskInWindow { get; init; }
 
     // THE UNDO WINDOW (Petre: "when i click on done, there should be undo"; Ruling 10). The task is closed at once
     // through Close, so the store is the truth whatever happens next; its line stays in its place for six seconds,

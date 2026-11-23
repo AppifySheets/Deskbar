@@ -95,7 +95,7 @@ public class FloatingBarTaskListTests
     // never "right after a repaint" unless a test hands in a clock of its own (the click guard's tests do).
     static ListBar Build(Func<Guid, Result>? goTo = null, Action? openWindow = null, TaskService? tasks = null, Func<string, Maybe<nint>>? sessionWindow = null,
         List<nint>? handedBack = null, bool editorAlive = true, Func<DateTime>? clickClock = null, Func<nint>? front = null,
-        Func<nint, bool>? onCurrentDesktop = null, Func<DateTimeOffset>? taskNow = null,
+        Func<nint, bool>? onCurrentDesktop = null, Func<DateTimeOffset>? taskNow = null, Action<Guid>? openTask = null,
         Func<TaskItem, Maybe<string>>? goalTitle = null, IObservable<System.Reactive.Unit>? goalChanges = null)
     {
         var harness = Harness.Build();
@@ -112,6 +112,9 @@ public class FloatingBarTaskListTests
             Tasks = service,
             GoToTask = goTo ?? (_ => Result.Success()),
             OpenTasksWindow = openWindow,
+            // A line's single click opens its task in the window (Ruling 54); a test that hands in a goTo probe sees that click
+            // too, which is what the click-guard tests watch for. A double-click goes through goTo itself.
+            OpenTaskInWindow = openTask ?? (goTo is null ? null : id => goTo(id)),
             SessionWindow = sessionWindow ?? (_ => Maybe<nint>.None),
             ForegroundWindow = front ?? (() => Editor),
             HandForegroundTo = hwnd => handedBack?.Add(hwnd),
@@ -382,10 +385,14 @@ public class FloatingBarTaskListTests
     });
 
     [Fact]
-    public void Clicking_a_line_goes_to_its_workspace() => StaThread.Run(() =>
+    // RULING 54 (Petre: "clicking a task should open that task; double clicking takes me to the workspace and window").
+    // A single click on a line opens the task in the tasks window and goes nowhere; a double-click goes: to the
+    // workspace of a note, or the session's window of a Claude task. A note on no workspace has nowhere to go.
+    public void Clicking_a_line_opens_its_task_and_a_double_click_goes_to_its_workspace() => StaThread.Run(() =>
     {
         var went = new List<Guid>();
-        using var t = Build(goTo: id =>
+        var opened = new List<Guid>();
+        using var t = Build(openTask: opened.Add, goTo: id =>
         {
             went.Add(id);
             return Result.Success();
@@ -394,9 +401,13 @@ public class FloatingBarTaskListTests
         var onGepha = t.Tasks.AddNote("Review the migration", t.Gepha).Value;
 
         Click(t.Lines.Single(l => ((TaskLine)l.Tag).Id == onGepha.Id));
-        Click(t.Lines.Single(l => ((TaskLine)l.Tag).Id == errand.Id));
+        Assert.Equal([onGepha.Id], opened);
+        Assert.Empty(went);
 
-        // The note on no workspace has nowhere to go, so its click does nothing.
+        PressAndClick(t.Lines.Single(l => ((TaskLine)l.Tag).Id == onGepha.Id), clickCount: 2);
+        PressAndClick(t.Lines.Single(l => ((TaskLine)l.Tag).Id == errand.Id), clickCount: 2);
+
+        // The note on no workspace has nowhere to go, so its double-click does nothing.
         Assert.Equal([onGepha.Id], went);
     });
 
@@ -889,7 +900,6 @@ public class FloatingBarTaskListTests
         Assert.True(Closing(t.Lines[0]));
         PressAndClick(ButtonNamed(t.Lines[0], "Undo"), clickCount: 2);
         PressAndClick(ButtonNamed(t.Lines[1], "Tick off"), clickCount: 2);
-        PressAndClick(t.Lines[1], clickCount: 2);
         PressAndClick(ButtonNamed(t.List, "More tasks"), clickCount: 2);
         Assert.Equal(4, t.Tasks.Board.Pile().Count);
         Assert.Empty(went);

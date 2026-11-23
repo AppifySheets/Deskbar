@@ -124,6 +124,7 @@ public sealed class TasksBoard : IDisposable
 
         window.Actions = new TasksWindowActions(
             Go: id => Go(id),
+            Pick: id => Pick(id),
             ToggleThread: ToggleThread,
             Close: id => Close(id),
             Undo: id => Undo(id),
@@ -313,6 +314,34 @@ public sealed class TasksBoard : IDisposable
     }
 
     // --- actions ---------------------------------------------------------------------------------------------------
+
+    /// <summary>
+    /// A single click on a line (Ruling 54, Petre: "clicking a task should open that task; double clicking takes me to the
+    /// workspace and window"): the task is picked, in both views, and its comment thread opens. It goes nowhere; a
+    /// double-click does (<see cref="Go"/>).
+    /// </summary>
+    public void Pick(Guid id)
+    {
+        selection.Select(id);
+        expanded.Add(id);
+        Refresh();
+    }
+
+    /// <summary>
+    /// The bar's single click on a task line (Ruling 54): the window comes forward (opening clear of
+    /// <paramref name="near"/> when it was hidden) on that task, picked, scrolled into view and expanded to its thread.
+    /// It goes nowhere.
+    /// </summary>
+    public void ShowTask(Guid id, Rect near)
+    {
+        selection.Select(id);
+        Open(near);
+        // Open starts a hidden window at the default view (no thread open); the task's own thread opens after it.
+        expanded.Add(id);
+        window.PaintSelection(selection.Current);
+        Refresh();
+        window.ScrollToSelected();
+    }
 
     /// <summary>A line's click (see the header). The window stays open; a refusal shows on its problem line.</summary>
     public Result Go(Guid id)
@@ -678,6 +707,7 @@ internal sealed record TasksView(IReadOnlyList<TaskFilterChip> Filters, string W
 /// </summary>
 internal sealed record TasksWindowActions(
     Action<Guid> Go,
+    Action<Guid> Pick,
     Action<Guid> ToggleThread,
     Action<Guid> Close,
     Action<Guid> Undo,
