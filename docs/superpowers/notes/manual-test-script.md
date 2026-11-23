@@ -436,6 +436,21 @@ L7. A drop stays put. With screen 2 empty, drag a window from another workspace 
 L8. The lock goes with the window. Lock A, close it, open a new window that takes its place: its icon menu shows the
     item unticked.
 
+The padlock on the tile (spec section "The pin on the window", plan `docs/superpowers/plans/2026-11-22-tile-lock-mark.md`).
+Tiles of VS Code, Edge, Explorer and Terminal side by side.
+
+L9. A locked tile shows a closed padlock on a blue square just left of minimize, on each of the four apps. In VS Code
+    it covers VS Code's own pushpin. The trace has `lock mark 0x...: locked`.
+L10. Hover an unlocked tile's title bar: an open grey padlock appears there, and goes when the mouse leaves the title.
+L11. Click the open padlock: it turns closed and blue, the window you were in keeps focus, and the bar's icon menu for
+    that tile shows "Don't split this tile" ticked. Click again: unlocked, unticked.
+L12. Drag a floating window (a dialog, Calculator) over a locked tile's title bar: it covers the padlock. Move it away:
+    the padlock is there again.
+L13. Switch to an untiled desktop: no padlocks anywhere. Back: the locked tiles' padlocks are back.
+L14. Maximize a locked tile: no padlock. Restore it: the padlock is back once it settles.
+L15. Drag a tile by its title bar: its padlock disappears while it moves and comes back where it lands. With a screen
+    at another scale, the padlock sits beside minimize there too.
+
 ## Arranging the bar
 
 Arrange mode (spec `docs/superpowers/specs/2026-11-20-bar-edit-mode-design.md`). Start with

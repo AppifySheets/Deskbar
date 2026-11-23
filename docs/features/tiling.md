@@ -22,7 +22,9 @@ The layout you make is kept, across restarts too.
 
 To tidy up, the row's menu and the tile button's right-click menu offer **Even out tiles** while a split is off centre. Every split goes back to equal and your shape stays. After that the item reads **Reset to grid**, which forgets the shape and goes back to the automatic grid.
 
-A new window goes into a space kept open on any screen, or onto a screen with nothing of the workspace on it, before it takes half of a tile. A window you drop on a screen stays on that screen. To keep a tile from ever being halved by a new window, right-click its icon on the bar and tick **Don't split this tile**. The lock lasts until the window closes or Deskbar restarts.
+A new window goes into a space kept open on any screen, or onto a screen with nothing of the workspace on it, before it takes half of a tile. A window you drop on a screen stays on that screen. To keep a tile from ever being halved by a new window, right-click its icon on the bar and tick **Don't split this tile**, or click the padlock on the tile itself. The lock lasts until the window closes or Deskbar restarts.
+
+The padlock sits in each tile's title bar, just left of the minimize button. A locked tile always shows it, closed on a blue square. An unlocked tile shows an open padlock only while the mouse is over its title bar. Clicking it locks or unlocks the tile without switching to that window. While a tile is moving, its padlock steps out of the way and comes back when the tile settles. In VS Code it covers VS Code's own "always on top" button.
 
 ## Settings
 

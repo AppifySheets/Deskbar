@@ -108,6 +108,12 @@ minimize button, in the title bar.
   uncovered.
 - Hover: my call, a cursor poll (`GetCursorPos`, around 100 ms) that runs only while a tiled workspace is the one
   being looked at, rather than a low-level mouse hook, which costs every mouse event on the machine.
+- As built (plan `docs/superpowers/plans/2026-11-22-tile-lock-mark.md`): that same 100 ms tick also re-reads each
+  tile's rectangles and re-places its mark, instead of a second path on LOCATIONCHANGE. While nothing is tiled on the
+  desktop being looked at, it ticks every 500 ms and only asks the Tiler for its empty board. A tile that is moving
+  (settling: dragged or being placed) has no mark until it settles, rather than a mark trailing it by up to a tick.
+  On every tick the mark is also put directly above its tile again, which covers z-order changes without a separate
+  foreground hook.
 - Deskbar's own windows: the overlays opt out of the bar, placement memory and the roster (`WindowMonitor.Ignore`),
   as the bar does.
 
