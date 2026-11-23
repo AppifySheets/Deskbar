@@ -8224,11 +8224,23 @@ public partial class FloatingBar : Window
         // spot, a visible flicker for nothing. Compared against the layout of the last readjustment rather
         // than of the last dock: the shell's position notices re-dock the bar DURING the burst, on the new
         // desk, long before this runs (measured: 25 docks in two seconds before the settle).
+        //
+        // ...or when the desk did NOT change but the bar is docked on another screen than the one it was docked
+        // on. Petre (2026-11-23): "deskbar reappeared on another monitor after i attempted to connect rdp".
+        // Measured in the trace: both screens dropped out and came back inside ONE debounce, so the only settle
+        // saw the very desk it had settled on before and skipped the branch below. Meanwhile, with the left
+        // screen gone for a moment, Windows had moved the bar onto the primary and the shell's position notices
+        // had re-docked it on the primary's right edge, where the same-desk branch further down then left it.
+        // A docked bar cannot be moved by hand (see the notes above dockedEdge), so a bar on another screen
+        // than its remembered spot was always moved there by Windows, never by Petre.
         var layout = LayoutKey();
         var deskChanged = !MonitorLayoutKey.SameDesk(settledLayout, layout);
         settledLayout = layout;
-        if (deskChanged && Docked && !Minimized && manager.BarPlacementFor(layout).GetValueOrDefault() is { DockedEdge: not null })
+        var remembered = manager.BarPlacementFor(layout).GetValueOrDefault();
+        var strayed = remembered is not null && !OnScreenOf(remembered);
+        if (GoBackToRememberedDock(deskChanged, dockedEdge, Minimized, remembered?.DockedEdge, strayed))
         {
+            if (ClickTrace.On && !deskChanged) ClickTrace.Write("display layout: same desk, but the bar is docked off its remembered screen");
             if (ClickTrace.On) ClickTrace.Write("display layout: this desk has a remembered dock, going back to it");
             LetGoOfStrip();
             floatingBeforeDock = null;
@@ -8250,6 +8262,29 @@ public partial class FloatingBar : Window
         // Records that the bar has been on this layout, so the next change away and back restores what
         // is on screen now rather than falling back to another layout's position.
         Save();
+    }
+
+    // Whether a settle sends a docked bar back to the dock remembered for the desk (ReadjustToDisplayLayout has
+    // the two incidents behind it). Pure, so a test can walk the cases without plugging screens in and out.
+    //
+    // Always when the desk changed. On the same desk only when the bar has strayed off the remembered screen,
+    // and only for an edge dock: a seam dock spans two screens, so "the screen it is on" is a coin toss for it and
+    // asking would undock and re-dock it on every settle, the flicker the same-desk rule exists to avoid.
+    internal static bool GoBackToRememberedDock(
+        bool deskChanged, string? dockedEdge, bool minimized, string? rememberedEdge, bool strayed) =>
+        dockedEdge is not null && !minimized && rememberedEdge is not null
+        && (deskChanged || (strayed && dockedEdge is "left" or "right" && rememberedEdge is "left" or "right"));
+
+    // Whether the bar's window is on the screen a stored placement puts it on. The same probe PositionFrom
+    // uses to pick that screen (the stored Left and Top, as a point), so "its screen" here and "where going back
+    // would put it" cannot disagree. A window with no handle yet counts as on it: there is nothing to move.
+    bool OnScreenOf(FloatingBarState stored)
+    {
+        var hwnd = new WindowInteropHelper(this).Handle;
+        if (hwnd == nint.Zero) return true;
+        var probe = new NativeMethods.POINT { X = (int)stored.Left, Y = (int)stored.Top };
+        return NativeMethods.MonitorFromWindow(hwnd, NativeMethods.MONITOR_DEFAULTTONEAREST)
+            == NativeMethods.MonitorFromPoint(probe, NativeMethods.MONITOR_DEFAULTTONEAREST);
     }
 
     // One place that writes the position, so Right can never be persisted out of step with
