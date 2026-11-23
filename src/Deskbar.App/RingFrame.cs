@@ -32,7 +32,11 @@ sealed class RingFrame : Window
     // at Petre's 225%, then Windows' own border thickness (2 px there), then "can you do 1px?". Converted to DIPs at the
     // target's scale in Place, since WPF draws in DIPs, and snapped to whole pixels so 1 px stays a crisp 1 px rather
     // than a blur across two.
-    readonly Border line;
+    //
+    // A stroked Rectangle rather than a Border since the focus ring's trail (FocusRings.Trail): a Border has no dash
+    // property at all, which is why the bar's own workspace trail is a Rectangle too (FloatingBar's row ring). A
+    // Rectangle keeps its stroke inside its bounds, as the Border did, so a solid line looks exactly as it did.
+    readonly System.Windows.Shapes.Rectangle line;
 
     public RingFrame()
     {
@@ -54,7 +58,7 @@ sealed class RingFrame : Window
         Title = "Deskbar focus ring";
         UseLayoutRounding = true;
         SnapsToDevicePixels = true;
-        line = new Border { BorderThickness = new Thickness(1), Background = Brushes.Transparent, IsHitTestVisible = false, SnapsToDevicePixels = true };
+        line = new System.Windows.Shapes.Rectangle { StrokeThickness = 1, Fill = null, IsHitTestVisible = false, SnapsToDevicePixels = true };
         Content = line;
     }
 
@@ -84,11 +88,15 @@ sealed class RingFrame : Window
     // story). Moving onto such a screen makes Windows rescale the frame, so the rectangle is set again if it came out
     // different.
     // `pixels` is the line's thickness in physical pixels, at the scale of the target's screen.
-    public void Place(NativeMethods.RECT rect, string colour, nint target, int pixels)
+    // `pattern` is the trail's dashes or dots (FocusRings.Line), solid for every other ring. `rounded` follows the
+    // corners Windows 11 gives a window that is neither maximized nor full screen, so a frame round such a window (only
+    // ever a trail ring: a solid one there is Windows' own border) does not cut its corners square across the
+    // window's rounded ones.
+    public void Place(NativeMethods.RECT rect, string colour, nint target, int pixels,
+        Deskbar.Core.Overview.FocusRings.Line pattern = Deskbar.Core.Overview.FocusRings.Line.Solid, bool rounded = false)
     {
-        line.BorderBrush = BrushOf(colour);
         var dpi = NativeMethods.GetDpiForWindow(target);
-        line.BorderThickness = new Thickness(pixels * 96.0 / (dpi == 0 ? 96 : dpi));
+        Draw(colour, pixels * 96.0 / (dpi == 0 ? 96 : dpi), pattern, rounded);
         var hwnd = Handle;
 
         // Into the target's band first: WPF's Topmost is the one switch between the two bands, and setting it again to
@@ -109,6 +117,48 @@ sealed class RingFrame : Window
     }
 
     const long WS_EX_TOPMOST = 0x00000008;
+
+    // The line itself, `thickness` in DIPs. Apart from Place, which also finds the target and moves the window, so the
+    // tests can render the line to pixels without a window to outline (RingFrameTests).
+    internal void Draw(string colour, double thickness, Deskbar.Core.Overview.FocusRings.Line pattern, bool rounded)
+    {
+        line.Stroke = BrushOf(colour);
+        line.StrokeThickness = thickness;
+        // Only when it changes: this runs every second for every ring (WindowRings' recheck), and a new dash array each
+        // time would make WPF redraw a frame that has not changed.
+        if ((pattern, thickness) != shape)
+        {
+            shape = (pattern, thickness);
+            line.StrokeDashArray = Dashes(pattern, thickness);
+        }
+        // Windows 11's window corner is 8 DIP; the stroke sits inside the bounds, so its centre line takes half the
+        // thickness off that to run along the window's own curve.
+        line.RadiusX = line.RadiusY = rounded ? Math.Max(0, WindowCornerDip - thickness / 2) : 0;
+    }
+
+    // For the tests: the element Draw paints.
+    internal FrameworkElement Line => line;
+
+    const double WindowCornerDip = 8;
+
+    // The pattern and thickness the line's dash array was last made for, so Place makes a new one only on a change.
+    (Deskbar.Core.Overview.FocusRings.Line, double) shape = (Deskbar.Core.Overview.FocusRings.Line.Solid, 1);
+
+    // The trail's patterns, the bar's own in DIPs: its row ring is 2 DIP thick with 6 DIP dashes and 2 DIP dots, both
+    // with 4 DIP gaps (FloatingBar's DashedRing and DottedRing, "current - solid - previous - dashed; one before that -
+    // dotted"). A dot is the line's own thickness, so it stays a square whatever the screen's scale. WPF measures a
+    // dash array in multiples of the stroke's thickness, hence the division. Null is a solid line.
+    static DoubleCollection? Dashes(Deskbar.Core.Overview.FocusRings.Line pattern, double thickness)
+    {
+        DoubleCollection? dashes = pattern switch
+        {
+            Deskbar.Core.Overview.FocusRings.Line.Dashed => new DoubleCollection([6 / thickness, 4 / thickness]),
+            Deskbar.Core.Overview.FocusRings.Line.Dotted => new DoubleCollection([1, 4 / thickness]),
+            _ => null,
+        };
+        dashes?.Freeze();
+        return dashes;
+    }
 
     static readonly Dictionary<string, Brush> brushes = new(StringComparer.OrdinalIgnoreCase);
 

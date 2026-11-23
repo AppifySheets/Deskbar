@@ -34,7 +34,7 @@ The section for the bar has **Dock the bar to the edge of its screen**, the see-
 
 You choose a slider's value by watching the bar while you drag. **Reset the bar's look to defaults** puts the sliders and the bottom strip back.
 
-The Windows on the desktop section has the outline around the window you are in, **Stop apps flashing on Windows' taskbar while Deskbar runs**, and the gap between tiled windows, which takes effect when you press Apply.
+The Windows on the desktop section has the outline around the window you are in, which also outlines the window you were in before it in dashes and the one before that in dots, the way the bar rings the workspaces you came from. It also has **Stop apps flashing on Windows' taskbar while Deskbar runs**, and the gap between tiled windows, which takes effect when you press Apply.
 
 **Show the previous workspace on the strips and the taskbar** is in Manage too.
 

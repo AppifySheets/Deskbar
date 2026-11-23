@@ -65,7 +65,13 @@ public sealed record WindowRow(
     Maybe<int> MonitorRank = default,
     // A Claude session in this window asked for the user (`deskbar.cmd attention`), and the user has not looked at
     // it since. Petre: "the app itself should also glow, most likely vscode". Set by WorkspaceManager, see Asking.
-    bool Asks = false);
+    bool Asks = false,
+    // When this window was last focused, as an ORDER rather than a time: higher is more recent, 0 is "not focused since
+    // the app started". Stamped by WorkspaceManager from the same counter #94 keeps (its `activations`), after the
+    // build, like Asks. It is what the focus ring's trail reads (FocusRings.Trail): Petre, "workspaces as inspiration,
+    // can you ring windows similarly?", so the window you were in before the focused one is outlined dashed and the
+    // one before that dotted, as the bar draws the workspaces you came from.
+    long Activation = 0);
 
 // A workspace's slice of the world: live windows + roster entries not running anywhere.
 // There was briefly an `Inherited` list here, carrying the parent's windows so a nested row could

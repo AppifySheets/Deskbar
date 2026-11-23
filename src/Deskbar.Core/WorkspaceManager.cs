@@ -4470,8 +4470,24 @@ public sealed class WorkspaceManager(
             if (clock.ElapsedMilliseconds >= 50)
                 trace?.Invoke($"query: pinned {pinnedMs}ms for {windows.Count} windows, desktopOf {desktopOfMs}ms for {desktopOf.Count}, " +
                               $"screen {clock.ElapsedMilliseconds - pinnedMs - desktopOfMs}ms");
-            return Asking(OverviewBuilder.Build(State, windows.Where(w => !hiddenByShell.Contains(w.Handle)).ToList(), h => ledger.OriginalTitle(h), pinned, desktopOf, live, current, activeWindow, lastActiveByDesktop, screen, wantsAttention, artworkOf));
+            return Activations(Asking(OverviewBuilder.Build(State, windows.Where(w => !hiddenByShell.Contains(w.Handle)).ToList(), h => ledger.OriginalTitle(h), pinned, desktopOf, live, current, activeWindow, lastActiveByDesktop, screen, wantsAttention, artworkOf)));
         }));
+
+    // The overview with each row's last-focus order stamped on (WindowRow.Activation), for the focus ring's trail.
+    // After the build, like Asking, because it is this session's live state and nothing in the build needs it. Every
+    // list of rows, pinned and unnamed desktops included: the trail is worked out on whichever desktop you are on.
+    Overview.Overview Activations(Overview.Overview built)
+    {
+        Core.Overview.WindowRow Stamped(Core.Overview.WindowRow row) =>
+            activations.TryGetValue(row.Window.Handle, out var order) ? row with { Activation = order } : row;
+
+        return built with
+        {
+            Pinned = built.Pinned.Select(Stamped).ToList(),
+            Workspaces = built.Workspaces.Select(g => g with { Running = g.Running.Select(Stamped).ToList() }).ToList(),
+            OtherDesktops = built.OtherDesktops.Select(d => d with { Windows = d.Windows.Select(Stamped).ToList() }).ToList(),
+        };
+    }
 
     // Both now RECORD the placement as well as performing it. Petre's defect: "move Beeper
     // to pinned, close the app, open again, it is incorrectly placed in GEPHA workspace" --
