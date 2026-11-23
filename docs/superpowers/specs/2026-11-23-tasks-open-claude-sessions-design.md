@@ -246,5 +246,12 @@ stops nothing that is running.
 
 ## Settled along the way
 
+- Done stops the session (task 87f899ad, 2026-11-23). "Let go" first meant only "no longer resumed", so a finished
+  session sat in the daemon until a reboot (14 background sessions held about 4.8 GB). Petre: "i want to not have a
+  stagnant session", "i don't want to stop sessions that are asking for my feedback, only those that have been
+  finished". So a Done or Closed task's background session is sent `claude stop` once it has been idle for a minute
+  and no window of Deskbar's is attached; open tasks, including Waiting on you, are never touched. Measured: the stop
+  keeps the conversation, the session leaves `claude agents --json`, and `claude --bg --resume` wakes it under the
+  same id without calling the model. The rule is `SessionKeeper.Stops`; ClaudeSessions issues it (its job 5).
 - The VS Code spike extension `deskbar-spike.claude-window4` is uninstalled (2026-11-23). Its stray tabs ("try 4",
   "try 5") are Petre's to close.
