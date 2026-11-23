@@ -344,6 +344,29 @@ public sealed class JsonTaskStoreTests : IDisposable
         Assert.False(new JsonTaskStore(dir).Load().Value.Tasks.Single().Adopted);
     }
 
+    // Ruling 19: a session /clear replaced keeps the mark across a restart, so the keeper still leaves it alone after a
+    // reboot. A session without it writes no field, and a file written before it existed reads as not replaced.
+    [Fact]
+    public void A_replaced_session_round_trips_and_others_write_nothing()
+    {
+        var store = new JsonTaskStore(dir);
+        var board = Sample();
+        var cleared = T0.AddMinutes(3);
+        board = new TaskBoard(board.Tasks.Select((t, i) => i == 1
+            ? t with { Sessions = t.Sessions.Select(s => s.Id == "s1" ? s with { ReplacedAt = cleared } : s).ToArray() }
+            : t).ToArray());
+
+        Assert.True(store.Save(board).IsSuccess);
+        var loaded = store.Load().Value.Tasks[1].Sessions;
+
+        Assert.Equal(cleared, loaded.Single(s => s.Id == "s1").ReplacedAt.GetValueOrDefault());
+        Assert.False(loaded.Single(s => s.Id == "s2").Replaced);
+        Assert.Single(System.Text.RegularExpressions.Regex.Matches(File.ReadAllText(TasksPath), "\"replacedAt\""));
+
+        File.WriteAllText(TasksPath, Version2(status: "\"InProgress\""));
+        Assert.All(new JsonTaskStore(dir).Load().Value.Tasks.SelectMany(t => t.Sessions), s => Assert.False(s.Replaced));
+    }
+
     // A version 2 file written before the order existed has no rank: the tasks come back in the order the bar showed
     // them then (Waiting on you, then Done, then the rest, each latest raised first), so the first start of this build
     // moves no line. No flags means quadrant IV for every task.

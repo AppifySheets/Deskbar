@@ -110,6 +110,24 @@ public class ClaudeHookEventTests
     public void A_claude_p_session_without_a_job_directory_is_still_headless(string? job) =>
         Assert.True(ClaudeHookEvent.Parse(StartupJson, "sdk-cli", "0", job).Value.Headless);
 
+    // Final review, item 13: only a job folder that is the hook's OWN marks it as from a background session, which is
+    // what lets RemoteControl skip the per-turn SessionEnd. An inherited one, or none, does not.
+    [Fact]
+    public void Background_is_set_only_by_the_sessions_own_job_folder()
+    {
+        Assert.True(ClaudeHookEvent.Parse(OwnSessionJson, "cli", "0", @"C:\Users\u\.claude\jobs\1a28e41b").Value.Background);
+        Assert.False(ClaudeHookEvent.Parse(OtherSessionJson, "cli", "0", @"C:\Users\u\.claude\jobs\1a28e41b").Value.Background);
+        Assert.False(ClaudeHookEvent.Parse(OwnSessionJson, "claude-vscode", "1", null).Value.Background);
+    }
+
+    // Ruling 19: SessionEnd's reason is read, so a /clear can be told from any other end.
+    [Fact]
+    public void SessionEnd_carries_its_reason()
+    {
+        Assert.Equal("clear", Parsed("""{"session_id":"s","hook_event_name":"SessionEnd","reason":"clear"}""").Reason.GetValueOrDefault());
+        Assert.True(Parsed("""{"session_id":"s","hook_event_name":"SessionEnd"}""").Reason.HasNoValue);
+    }
+
     // Anything that is not a hook's JSON is refused, so the verb can exit 1 and print nothing for the session to read.
     [Theory]
     [InlineData("")]

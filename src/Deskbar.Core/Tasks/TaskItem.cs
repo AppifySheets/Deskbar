@@ -29,6 +29,19 @@ public enum TaskStatus { Backlog, InProgress, WaitingOnYou, Done, Closed }
 public sealed record TaskSession(string Id, string Folder, DateTimeOffset Joined, Maybe<DateTimeOffset> Ended)
 {
     public bool IsLive => Ended.HasNoValue;
+
+    /// <summary>
+    /// When Petre ran /clear in this session (its SessionEnd hook said reason "clear"; Ruling 19 of the
+    /// tasks-open-claude-sessions build). /clear starts a fresh conversation in the same window, so this one is over
+    /// for good: SessionKeeper never resumes it, and a session that starts with source "clear" in the same folder
+    /// within TaskBoard.ClearedWithin of this moment takes its place on the task. Whether /clear keeps the session id
+    /// was not measured; if it does, that session's own SessionStart rejoins it as a fresh entry, which drops the mark.
+    /// An init property like TaskItem's flags, so no constructor call has to say it; absent in a file means none.
+    /// </summary>
+    public Maybe<DateTimeOffset> ReplacedAt { get; init; }
+
+    /// <summary>Whether /clear replaced this session (<see cref="ReplacedAt"/>).</summary>
+    public bool Replaced => ReplacedAt.HasValue;
 }
 
 /// <summary>

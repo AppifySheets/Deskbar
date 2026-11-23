@@ -803,11 +803,130 @@ public class RemoteControlClaudeHookTests
         var reply = Ran(manager, "claude-hook", "--entry", "cli", "--attended", "0", "--job", @"C:\jobs\884c127f",
             "--from", Repo, "--json", HookOf("SessionEnd", session, null));
 
+        // Final review, item 13: while sessions keep tasks the list is read every 15 seconds and is the truth, so the
+        // turn's SessionEnd no longer ends it at all (the board used to flicker "ended" until the next poll).
         Assert.Equal(ControlReply.Ok, reply.ExitCode);
-        Assert.False(Titled("Tasks board").HasLiveSession);
-
-        tasks.Reconcile([new ClaudeAgent(session, Maybe<string>.None, Repo, true, false, "")]);
-
         Assert.True(Titled("Tasks board").HasLiveSession);
+
+        // When it really goes, the list says so.
+        tasks.Reconcile([]);
+        Assert.False(Titled("Tasks board").HasLiveSession);
+    }
+
+    // A SessionEnd whose job folder names ANOTHER session (a `claude -p` run from a background session's shell inherits
+    // it) is not that background session's: it ends what it names, as any other SessionEnd does.
+    [Fact]
+    public void SessionEnd_with_an_inherited_job_folder_still_ends_the_session()
+    {
+        var manager = Started();
+        Editor(manager, 0x10, "TaskSpaces", "Deskbar");
+        Said(manager, "s1", Repo, "new", "Tasks board");
+
+        Ran(manager, "claude-hook", "--entry", "claude-vscode", "--attended", "1", "--job", @"C:\jobs\884c127f",
+            "--from", Repo, "--json", HookOf("SessionEnd", "s1", null));
+
+        Assert.False(Titled("Tasks board").HasLiveSession);
+    }
+
+    static string EndedBy(string session, string reason) =>
+        $$"""{"session_id":"{{session}}","cwd":"C:\\repos\\TaskSpaces","hook_event_name":"SessionEnd","reason":"{{reason}}"}""";
+
+    // Ruling 19: /clear starts a fresh conversation in the same window. The cleared session is marked replaced (the
+    // keeper never resumes it) and the session that starts with source "clear" in the same folder takes its place on
+    // the task, which keeps its status.
+    [Fact]
+    public void After_clear_the_new_session_takes_the_cleared_ones_place()
+    {
+        var manager = Started();
+        Editor(manager, 0x10, "TaskSpaces", "Deskbar");
+        Said(manager, "s1", Repo, "new", "Tasks board");
+        Said(manager, "s1", Repo, "ask", "OK to merge?");
+
+        Ran(manager, "claude-hook", "--entry", "claude-vscode", "--attended", "1", "--from", Repo, "--json", EndedBy("s1", "clear"));
+        var cleared = Titled("Tasks board").Sessions.Single(s => s.Id == "s1");
+        Assert.True(cleared.Replaced);
+        Assert.False(cleared.IsLive);
+
+        // The folder arrives in another spelling (forward slashes, a trailing separator): still the same folder.
+        var briefing = Hooked(manager, "SessionStart", session: "s2", source: "clear", from: "C:/repos/TaskSpaces/");
+
+        var task = Titled("Tasks board");
+        Assert.True(task.Sessions.Single(s => s.Id == "s2").IsLive);
+        Assert.Equal(TaskStatus.WaitingOnYou, task.Status);
+        // Briefed on its task, not offered a choice.
+        Assert.Contains("Tasks board", briefing);
+        Assert.Single(tasks.Board.Tasks);
+    }
+
+    // A session that starts with source "clear" where nothing was cleared, or in another folder, is offered tasks as
+    // any new session is, and joins nothing by itself.
+    [Fact]
+    public void A_clear_start_with_no_clear_in_its_folder_joins_nothing()
+    {
+        var manager = Started();
+        Editor(manager, 0x10, "TaskSpaces", "Deskbar");
+        Said(manager, "s1", Repo, "new", "Tasks board");
+        Ran(manager, "claude-hook", "--entry", "claude-vscode", "--attended", "1", "--from", Repo, "--json", EndedBy("s1", "clear"));
+
+        Hooked(manager, "SessionStart", session: "s2", source: "clear", from: @"C:\repos\Other");
+        Hooked(manager, "SessionStart", session: "s3", source: "startup");
+
+        Assert.DoesNotContain(tasks.Board.Tasks.SelectMany(t => t.Sessions), s => s.Id is "s2" or "s3");
+    }
+
+    // Unmeasured whether /clear keeps the session id. If it does, the same id starts again and rejoins as a fresh
+    // entry: no longer replaced, so the keeper may resume it later like any other.
+    [Fact]
+    public void A_cleared_session_starting_again_under_its_own_id_is_no_longer_replaced()
+    {
+        var manager = Started();
+        Editor(manager, 0x10, "TaskSpaces", "Deskbar");
+        Said(manager, "s1", Repo, "new", "Tasks board");
+        Ran(manager, "claude-hook", "--entry", "claude-vscode", "--attended", "1", "--from", Repo, "--json", EndedBy("s1", "clear"));
+
+        Hooked(manager, "SessionStart", session: "s1", source: "clear");
+
+        var session = Titled("Tasks board").Sessions.Single();
+        Assert.True(session.IsLive);
+        Assert.False(session.Replaced);
+    }
+
+    // Ruling 17: SessionStart and UserPromptSubmit from a session a person is at record it as attended, which is what
+    // ClaudeSessions adopts; a headless one (`claude -p`, listed by `claude agents` as interactive) never is.
+    [Fact]
+    public void Attended_hooks_record_the_session_and_headless_ones_do_not()
+    {
+        var manager = Started();
+        Editor(manager, 0x10, "TaskSpaces", "Deskbar");
+
+        Hooked(manager, "SessionStart", session: "person", source: "startup");
+        Hooked(manager, "UserPromptSubmit", session: "typist");
+        Hooked(manager, "SessionStart", session: "script", source: "startup", attended: "0");
+        Hooked(manager, "UserPromptSubmit", session: "script", attended: "0");
+        Hooked(manager, "SessionEnd", session: "ender");
+
+        Assert.True(tasks.WasAttended("person"));
+        Assert.True(tasks.WasAttended("typist"));
+        Assert.False(tasks.WasAttended("script"));
+        Assert.False(tasks.WasAttended("ender"));
+    }
+
+    // Final review, item 14: the hook scripts are rewritten by whichever Deskbar starts last, so a newer script can pass
+    // an option an older running copy does not know. It is skipped with its value, and the hook still works.
+    [Fact]
+    public void An_unknown_option_from_a_newer_hook_script_is_skipped()
+    {
+        var manager = Started();
+        Editor(manager, 0x10, "TaskSpaces", "Deskbar");
+
+        var reply = Ran(manager, "claude-hook", "--entry", "claude-vscode", "--newer", "x", "--attended", "1", "--empty", "",
+            "--from", Repo, "--flag-without-value", "--json", HookOf("SessionStart", "s1", "startup"));
+
+        Assert.Equal(ControlReply.Ok, reply.ExitCode);
+        Assert.True(tasks.WasAttended("s1"));
+        // A word that is no option at all is still refused, and so is a missing --json.
+        Assert.True(ControlArguments.ParseClaudeHook(["stray", "--json", "{}"]).IsFailure);
+        Assert.True(ControlArguments.ParseClaudeHook(["--newer", "x"]).IsFailure);
+        Assert.Equal("{}", ControlArguments.ParseClaudeHook(["--newer", "--json", "{}"]).Value.Json);
     }
 }
