@@ -1664,6 +1664,8 @@ public partial class App : Application
                 PickFolder = PickClaudeFolder,
                 OfferTrustTerminal = message => MessageBox.Show(message, "Deskbar", MessageBoxButton.YesNo, MessageBoxImage.Warning) == MessageBoxResult.Yes,
                 Tell = message => MessageBox.Show(message, "Deskbar", MessageBoxButton.OK, MessageBoxImage.Information),
+                // A double-click that brings back a task the keeper gave up on clears the give-up's resume count.
+                Forget = claudeSessions.Forget,
             },
             new System.Reactive.Concurrency.SynchronizationContextScheduler(new System.Windows.Threading.DispatcherSynchronizationContext(Dispatcher)),
             trace: ClickTrace.On ? ClickTrace.Write : null);
@@ -2420,7 +2422,9 @@ public partial class App : Application
         // problem…, an immediate licence read, and the add-on's price in the user's currency (asked only when packaged).
         manageWindow = new ManageWindow(manager!, compatibilityMode, timeTracker, pro: new ManageWindow.ProActions(
             GetPro, OpenStoreForPro, ReportProblem, RefreshEntitlementAsync,
-            () => Deskbar.Windows.Store.StorePrice.ProPriceAsync(barHandle)));
+            () => Deskbar.Windows.Store.StorePrice.ProPriceAsync(barHandle)),
+            // Ruling 20: why Claude Code's list of sessions cannot be read, under the resume box.
+            claudeListProblem: claudeSessions?.ListProblem);
         manageWindow.Closed += (_, _) => manageWindow = null;
         manageWindow.Show();
     }

@@ -728,4 +728,24 @@ public class RemoteControlTaskTests
         // A copy without the commands refuses every one of the three.
         Assert.Equal(ControlReply.Failed, Run(manager, "task", "go", prefix).ExitCode);
     }
+
+    // Final review, item 12: `task start` on a closed task is refused up front, with or without --folder, and nothing
+    // reaches the App.
+    [Fact]
+    public void Task_start_refuses_a_closed_task()
+    {
+        var manager = Started();
+        var commands = new FakeSessionCommands { Folders = [@"C:\repos\Deskbar"] };
+        var id = tasks.AddNote("Old errand", Maybe<Guid>.None).Value.Id;
+        Assert.True(tasks.Close(id).IsSuccess);
+        var prefix = id.ToString()[..6];
+
+        var refused = RunWith(manager, commands, "task", "start", prefix);
+        var refusedWithFolder = RunWith(manager, commands, "task", "start", prefix, "--folder", @"D:\other");
+
+        Assert.Equal(ControlReply.Failed, refused.ExitCode);
+        Assert.Contains(RemoteControl.ClosedTaskRefusal, refused.Output);
+        Assert.Equal(ControlReply.Failed, refusedWithFolder.ExitCode);
+        Assert.Empty(commands.Calls);
+    }
 }

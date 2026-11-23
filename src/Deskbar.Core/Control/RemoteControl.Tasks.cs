@@ -310,13 +310,19 @@ public sealed partial class RemoteControl
 
     // The folder: the one given, or the one the task's candidates leave (ClaudeStart.Folders, as the menu offers them).
     // Several or none refuse before anything starts, naming what --folder could be.
+    // A closed task is refused before anything else (final review, item 12): a session started on it could not even join
+    // it (a closed task takes none of a session's changes), so `claude --bg` would run for nothing.
     ControlReply TaskStart(TaskService service, TaskSessionCommands commands, string id, Maybe<string> given) =>
         service.Board.Find(id)
+            .Ensure(task => task.IsOpen, ClosedTaskRefusal)
             .Bind(task => given.Or(() => commands.Folders(task) is [var only] ? only : Maybe<string>.None)
                 .ToResult(FolderRefusal(commands.Folders(task)))
                 .Bind(folder => commands.Start(task, folder))
                 .Map(() => service.Board.Tasks.First(t => t.Id == task.Id)))
             .Match(task => Success(Describe(task)), ControlReply.Fail);
+
+    /// <summary>Why Claude is not started on a closed task, said by `task start` and by the menu (ClaudeTaskActions).</summary>
+    public const string ClosedTaskRefusal = "The task is closed. Reopen it to start Claude on it.";
 
     static string FolderRefusal(IReadOnlyList<string> folders) =>
         folders.Count == 0
