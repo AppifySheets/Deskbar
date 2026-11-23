@@ -99,6 +99,11 @@ public static class ControlUsage
             new("task", "assign <id> me|claude",
                 "hand a task to yourself or to Claude, as the tasks window's \"Assign to\" menu does. The bar lists only the tasks\n"
                 + "      assigned to you; a note assigned to Claude is offered to a new session on its workspace"),
+            new("task", "describe <id> <markdown>|-",
+                "set your own description under a task's title, as Edit in the tasks window does; empty clears it. - reads the\n"
+                + "      markdown from stdin. A Claude task's status line is the session's and stays as it is"),
+            new("task", "comment-edit <comment-id> <markdown>|-",
+                "rewrite one of your own comments (ids are in task list's thread); a comment a session wrote is refused"),
             new("task", "goal <id> <goal-id>|none",
                 "count a task toward an open goal of any period, as the tasks window's \"...\" menu \"Goal\" does, or toward none"),
         ]),

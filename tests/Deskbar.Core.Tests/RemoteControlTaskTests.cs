@@ -181,6 +181,53 @@ public class RemoteControlTaskTests
         AssertRefusedAndUnchanged(Run(manager, "task", "assign", Prefix(added), "anna"), before);
     }
 
+    // Ruling 58's pipe twins: `task describe <id> <markdown>` (or `-` for stdin) and `task comment-edit <comment-id> <markdown>`,
+    // which refuses a comment that is not his. `task list` carries the description and the thread's comment ids.
+    [Fact]
+    public void Describe_sets_the_description_and_list_shows_it()
+    {
+        var manager = Started();
+        var id = Prefix(Added(manager));
+
+        var reply = Run(manager, "task", "describe", id, "The **landlord** wants it");
+
+        Assert.Equal(ControlReply.Ok, reply.ExitCode);
+        Assert.Equal("The **landlord** wants it", Only.Description);
+        Assert.Equal("The **landlord** wants it", Json(reply).GetProperty("description").GetString());
+        Assert.Equal("The **landlord** wants it", Json(Run(manager, "task", "list"))[0].GetProperty("description").GetString());
+    }
+
+    [Fact]
+    public void Comment_edit_changes_his_comment_and_refuses_claudes()
+    {
+        var manager = Started();
+        var id = Prefix(Added(manager));
+        Run(manager, "task", "comment", id, "first draft");
+        tasks.Comment(Only.Id, "s1", "Claude's finding");
+        var thread = Json(Run(manager, "task", "list"))[0].GetProperty("thread");
+        Assert.Equal(["you", "claude"], thread.EnumerateArray().Select(c => c.GetProperty("by").GetString()));
+        var (hers, his) = (thread[1].GetProperty("id").GetString()!, thread[0].GetProperty("id").GetString()!);
+
+        var edited = Run(manager, "task", "comment-edit", his, "second draft");
+        Assert.Equal(ControlReply.Ok, edited.ExitCode);
+        Assert.Equal("second draft", Only.Comments[0].Markdown);
+
+        var before = tasks.Board;
+        AssertRefusedAndUnchanged(Run(manager, "task", "comment-edit", hers, "rewritten"), before);
+        Assert.Equal("Only your own comments can be edited", Run(manager, "task", "comment-edit", hers, "x").Output.Trim());
+    }
+
+    [Fact]
+    public void Describe_and_comment_edit_read_their_text_from_stdin()
+    {
+        Assert.Equal(["task", "describe", "3f2a", "a & b\nline two"],
+            ControlArguments.WithInput(["task", "describe", "3f2a", "-"], () => "a & b\nline two\n"));
+        Assert.Equal(["task", "comment-edit", "3f2a", "it's \"quoted\""],
+            ControlArguments.WithInput(["task", "comment-edit", "3f2a", "-"], () => "it's \"quoted\"\r\n"));
+        Assert.Equal("task describe 3f2a (5 characters)", ControlArguments.ForTrace(["task", "describe", "3f2a", "hello"]));
+        Assert.Equal("task comment-edit 3f2a (5 characters)", ControlArguments.ForTrace(["task", "comment-edit", "3f2a", "hello"]));
+    }
+
     [Fact]
     public void Add_to_an_unknown_workspace_is_refused()
     {
@@ -599,6 +646,6 @@ public class RemoteControlTaskTests
              "join <id> --session <session>", "new <title>|- --session <session>", "status-line <text>|- --session <session>",
              "ask <question>|- --session <session>", "answered --session <session>", "done --session <session>", "comment <markdown>|- --session <session>",
              "later <title>|- --session <session>",
-             "assign <id> me|claude", "goal <id> <goal-id>|none"],
+             "assign <id> me|claude", "describe <id> <markdown>|-", "comment-edit <comment-id> <markdown>|-", "goal <id> <goal-id>|none"],
             ControlUsage.All.Where(c => c.Verb == "task").Select(c => c.Arguments));
 }

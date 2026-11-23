@@ -37,6 +37,10 @@ namespace Deskbar.Core.Tasks;
 // in progress or in the backlog goes to Claude, everything else to Petre. An older build ignores the field and drops it
 // on its next save, which costs the assignments and never a task.
 //
+// THE DESCRIPTION (Ruling 58). `description` is an optional string of version 2 as well, Petre's own markdown under the
+// title; missing or null reads as none, and none is written as null, so a file without descriptions is unchanged. An
+// older build ignores it and drops it on its next save, which costs the text and never a task.
+//
 // The model uses Maybe, which serialises badly, so the file is written from private DTO records: a Maybe becomes a
 // nullable field (null means none). Every time is converted to UTC before writing AND after reading, so the file
 // means the same on a machine in another time zone, a hand-edited time in local time is still the same instant,
@@ -89,7 +93,8 @@ public sealed class JsonTaskStore(string baseDirectory, Action<string>? trace = 
         bool? Urgent = null,
         double? Rank = null,
         Guid? GoalId = null,
-        AssigneeDto? Assignee = null);
+        AssigneeDto? Assignee = null,
+        string? Description = null);
 
     // The assignee (Ruling 57): kind by name ("me", "claude", "colleague"), plus the id and name a colleague needs.
     sealed record AssigneeDto(string? Kind, string? Id, string? Name);
@@ -177,7 +182,8 @@ public sealed class JsonTaskStore(string baseDirectory, Action<string>? trace = 
                 c.At.ToUniversalTime(), c.Markdown)).ToArray(),
             t.Important, t.Urgent, t.Rank,
             t.GoalId.HasValue ? t.GoalId.Value : null,
-            new AssigneeDto(t.Assignee.Kind.ToString().ToLowerInvariant(), t.Assignee.Id, t.Assignee.Name));
+            new AssigneeDto(t.Assignee.Kind.ToString().ToLowerInvariant(), t.Assignee.Id, t.Assignee.Name),
+            t.Description.Length > 0 ? t.Description : null);
 
     static TaskItem FromDto(TaskDto d) =>
         new(d.Id, d.Title ?? "",
@@ -190,6 +196,7 @@ public sealed class JsonTaskStore(string baseDirectory, Action<string>? trace = 
         {
             Important = d.Important ?? false,
             Urgent = d.Urgent ?? false,
+            Description = d.Description ?? "",
             Rank = d.Rank ?? FallbackRank(d.Status, d.Raised ?? d.Created),
             GoalId = d.GoalId is { } goal ? goal : Maybe<Guid>.None,
             // A task saved before the field existed, or with one this build cannot read, gets it derived (Assignee.DerivedFor).

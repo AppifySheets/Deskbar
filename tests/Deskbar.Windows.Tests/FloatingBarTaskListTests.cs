@@ -2712,4 +2712,22 @@ public class FloatingBarTaskListTests
 
         Assert.Equal("+1 more", t.Bar.TaskListMoreText);
     });
+
+    // Ruling 58: a note's description shows on the bar where a Claude task shows its status line (its first line); a status
+    // line or a question, when there is one, takes that place.
+    [Fact]
+    public void A_notes_description_shows_in_the_detail_and_a_status_line_wins() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        var note = t.Tasks.AddNote("Pay rent", t.Gepha).Value.Id;
+        t.Tasks.Describe(note, "Use the November invoice\nand the late fee");
+        var claude = t.Tasks.Create("Tasks redesign", t.Gepha, Session("s1")).Value.Id;
+        t.Tasks.Describe(claude, "Petre's brief");
+        t.Tasks.SetStatusLine(claude, "waiting for CI");
+        t.Tasks.MarkDone(claude);
+
+        var lines = t.Lines.Select(l => (TaskLine)l.Tag).ToDictionary(l => l.Id);
+        Assert.Equal("Use the November invoice", lines[note].Detail);
+        Assert.Equal("waiting for CI", lines[claude].Detail);
+    });
 }

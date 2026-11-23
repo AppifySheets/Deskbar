@@ -2103,4 +2103,135 @@ public class TasksBoardTests
             Assert.Equal(!wasMe, t.Tasks.Board.Tasks.Single().Assignee.IsMe);
         }
     });
+
+    // --- RULING 58, edit covers the description and Petre's own comments -------------------------------------------------
+
+    static TextBlock? DescriptionBlockOf(TasksWindow window, Guid id) =>
+        Inside(LineOf(window, id)).OfType<RichTextBox>().FirstOrDefault(b => Equals(b.Tag, "task-description"))?.Document is { } doc
+            ? new TextBlock { Text = new System.Windows.Documents.TextRange(doc.ContentStart, doc.ContentEnd).Text.Trim() }
+            : null;
+
+    [Fact]
+    public void A_description_shows_under_the_title_as_markdown() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        var id = t.Tasks.AddNote("Pay rent", t.Gepha).Value.Id;
+        var plain = t.Tasks.AddNote("No words", t.Gepha).Value.Id;
+        t.Tasks.Describe(id, "The **landlord** wants it by Friday");
+        t.Controller.Open(Rect.Empty);
+
+        Assert.Equal("The landlord wants it by Friday", DescriptionBlockOf(t.Window, id)!.Text);
+        Assert.Null(DescriptionBlockOf(t.Window, plain));
+    });
+
+    [Fact]
+    public void A_claude_tasks_status_line_and_his_description_both_show() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        var id = t.Tasks.Create("Tasks redesign", t.Gepha, Session("s1")).Value.Id;
+        t.Tasks.SetStatusLine(id, "waiting for CI");
+        t.Tasks.Describe(id, "Petre's brief");
+        t.Controller.Open(Rect.Empty);
+
+        var texts = Inside(LineOf(t.Window, id)).OfType<TextBlock>().Select(b => b.Text).ToList();
+        Assert.Contains("waiting for CI", texts);
+        Assert.Equal("Petre's brief", DescriptionBlockOf(t.Window, id)!.Text);
+    });
+
+    [Fact]
+    public void Edit_opens_the_title_and_the_description_together_and_enter_saves_both() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        var id = t.Tasks.AddNote("Pay rent", t.Gepha).Value.Id;
+        t.Tasks.Describe(id, "old words");
+        t.Controller.Open(Rect.Empty);
+
+        t.Window.BeginRename(id);
+        Assert.Equal("Pay rent", t.Window.Editor!.Text);
+        Assert.Equal("old words", t.Window.DescriptionEditor!.Text);
+        t.Window.Editor.Text = "Pay the rent";
+        t.Window.DescriptionEditor.Text = "new **words**\nsecond line";
+        t.Window.SaveEditor();
+
+        var task = t.Tasks.Board.Tasks.Single();
+        Assert.Equal("Pay the rent", task.Title);
+        Assert.Equal("new **words**\nsecond line", task.Description);
+        Assert.Null(t.Window.Editor);
+    });
+
+    [Fact]
+    public void Emptying_the_description_in_the_editor_clears_it_and_an_empty_title_keeps_the_editor_open() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        var id = t.Tasks.AddNote("Pay rent", t.Gepha).Value.Id;
+        t.Tasks.Describe(id, "old words");
+        t.Controller.Open(Rect.Empty);
+
+        t.Window.BeginRename(id);
+        t.Window.Editor!.Text = "  ";
+        t.Window.DescriptionEditor!.Text = "";
+        t.Window.SaveEditor();
+        Assert.NotNull(t.Window.Editor);
+        Assert.Equal("old words", t.Tasks.Board.Tasks.Single().Description);
+
+        t.Window.Editor!.Text = "Pay rent";
+        t.Window.SaveEditor();
+        Assert.Equal("", t.Tasks.Board.Tasks.Single().Description);
+    });
+
+    // His comment has Edit, a session's does not ("i should only be able to edit my own comments, not claude's").
+    [Fact]
+    public void Only_his_own_comments_offer_edit() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        var id = t.Tasks.Create("Tasks redesign", t.Gepha, Session("s1")).Value.Id;
+        t.Tasks.Comment(id, "s1", "Claude's finding");
+        t.Tasks.Comment(id, Maybe<string>.None, "my thought");
+        t.Controller.Open(Rect.Empty);
+        t.Controller.ToggleThread(id);
+
+        var edits = Inside(t.Window).OfType<Button>().Where(b => AutomationProperties.GetName(b) == "Edit comment").ToList();
+        Assert.Single(edits);
+        Assert.Equal(["Claude", "you"], t.Window.CommentAuthors(id));
+    });
+
+    [Fact]
+    public void Editing_a_comment_rewrites_it_in_place_and_escape_keeps_it() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        var id = t.Tasks.AddNote("note", t.Gepha).Value.Id;
+        t.Tasks.Comment(id, Maybe<string>.None, "first draft");
+        var comment = t.Tasks.Board.Tasks.Single().Comments.Single().Id;
+        t.Controller.Open(Rect.Empty);
+        t.Controller.ToggleThread(id);
+
+        Click(Inside(t.Window).OfType<Button>().Single(b => AutomationProperties.GetName(b) == "Edit comment"));
+        Assert.Equal("first draft", t.Window.CommentEditor!.Text);
+        t.Window.CommentEditor.Text = "second draft";
+        t.Window.CancelCommentEdit();
+        Assert.Equal("first draft", t.Tasks.Board.Tasks.Single().Comments.Single().Markdown);
+        Assert.Null(t.Window.CommentEditor);
+
+        t.Window.BeginEditComment(comment);
+        t.Window.CommentEditor!.Text = "second draft";
+        t.Window.SaveCommentEditor();
+        Assert.Equal("second draft", t.Tasks.Board.Tasks.Single().Comments.Single().Markdown);
+        Assert.Null(t.Window.CommentEditor);
+    });
+
+    // A session's comment is refused even when asked for by id (the board says so, and the window shows it).
+    [Fact]
+    public void A_sessions_comment_cannot_be_opened_for_editing() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        var id = t.Tasks.Create("Tasks redesign", t.Gepha, Session("s1")).Value.Id;
+        t.Tasks.Comment(id, "s1", "Claude's finding");
+        var comment = t.Tasks.Board.Tasks.Single().Comments.Single().Id;
+        t.Controller.Open(Rect.Empty);
+        t.Controller.ToggleThread(id);
+
+        t.Window.BeginEditComment(comment);
+
+        Assert.Null(t.Window.CommentEditor);
+    });
 }

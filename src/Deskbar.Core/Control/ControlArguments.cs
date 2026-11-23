@@ -171,7 +171,7 @@ public static class ControlArguments
     // Git Bash (`task comment - --session <id> <<'EOF'`), a pipe in PowerShell. Stdin is bytes to cmd, never parsed.
     // A `-` that is an option's value (after --session, say) is not text. The heredoc's last line break is dropped.
     // `add` too (Petre): a script's note can carry quotes or & just as a session's text can.
-    static readonly string[] TextVerbs = ["status-line", "ask", "comment", "new", "later", "add"];
+    static readonly string[] TextVerbs = ["status-line", "ask", "comment", "new", "later", "add", "describe", "comment-edit"];
 
     static bool IsTextForm(IReadOnlyList<string> args) =>
         args.Count > 2 && args[0].Equals("task", StringComparison.OrdinalIgnoreCase)
@@ -212,10 +212,13 @@ public static class ControlArguments
 
     // The words of a task text form, its text as a length. The positional words are the text, except the id that the
     // user's `task comment <id> <markdown>` names first.
+    static readonly string[] IdFirst = ["comment", "describe", "comment-edit"];
+
     static IEnumerable<string> TextForTrace(IReadOnlyList<string> args)
     {
         var positional = Enumerable.Range(2, args.Count - 2).Where(i => !IsOption(args[i]) && !IsOption(args[i - 1])).ToList();
-        var text = args[1].Equals("comment", StringComparison.OrdinalIgnoreCase) && positional.Count > 1 ? positional.Skip(1) : positional;
+        // `comment`, `describe` and `comment-edit` name an id first (Ruling 58 added the last two).
+        var text = IdFirst.Contains(args[1], StringComparer.OrdinalIgnoreCase) && positional.Count > 1 ? positional.Skip(1) : positional;
         return args.Select((word, i) => text.Contains(i) ? $"({word.Length} characters)" : word);
     }
 

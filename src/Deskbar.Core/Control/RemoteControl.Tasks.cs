@@ -21,6 +21,8 @@ namespace Deskbar.Core.Control;
 //   task flag <id> important|urgent on|off
 //   task order <id> top|end|<n>
 //   task assign <id> me|claude
+//   task describe <id> <markdown>|-          (Ruling 58: his own description under the title)
+//   task comment-edit <comment-id> <markdown>|-   (his own comment only; a session's is refused)
 //   task goal <id> <goal-id>|none     (the goals planner; needs the goal service, RemoteControl.Goals.cs)
 //
 // `flag` and `order` (Task 12, Rulings 25 and 28) are the twins of the toggles on a line and of dragging it. The flags
@@ -97,6 +99,8 @@ public sealed partial class RemoteControl
                 .Match(f => TaskChange(service, id, t => service.SetFlag(t.Id, f.Flag, f.On)), ControlReply.Fail),
             ["order", var id, var place] => ParsePlace(place)
                 .Match(p => TaskChange(service, id, t => service.Place(t.Id, t.Quadrant, p)), ControlReply.Fail),
+            ["describe", var id, var markdown] => TaskChange(service, id, t => service.Describe(t.Id, markdown)),
+            ["comment-edit", var comment, var markdown] => TaskCommentEdit(service, comment, markdown),
             ["assign", var id, var who] => ParseAssignee(who)
                 .Match(a => TaskChange(service, id, t => service.Assign(t.Id, a)), ControlReply.Fail),
             ["goal", var id, var goal] => TaskGoal(service, id, goal),
@@ -191,6 +195,10 @@ public sealed partial class RemoteControl
         urgent = task.Urgent,
         // Ruling 57: who the task is on, "me" or "claude" (a colleague, later, by id).
         assignee = task.Assignee.Id,
+        // Ruling 58: his description (markdown, "" for none), and the thread's comment ids with who wrote each, which
+        // `comment-edit` takes. The comments' text is the window's, as before.
+        description = task.Description,
+        thread = task.Comments.Select(c => new { id = c.Id, by = c.SessionId.HasValue ? "claude" : "you", at = c.At }).ToArray(),
         quadrant = task.Quadrant.Numeral(),
         order = tasks is { } service && task.IsOpen ? service.Board.PositionOf(task.Id).Map(n => (int?)n).GetValueOrDefault() : null,
         // The goal it counts toward (goals plan, Task 5), as {id, title}, or null: no link, no goal service, or a link
@@ -255,6 +263,13 @@ public sealed partial class RemoteControl
         service.Board.Find(id)
             .Bind(task => change(task).Map(() => service.Board.Tasks.First(t => t.Id == task.Id)))
             .Match(task => Success(Describe(task)), ControlReply.Fail);
+
+    // `task comment-edit <comment-id> <markdown>`: finds the comment first, then Board.EditComment refuses one a session
+    // wrote. The reply is the task the comment is on.
+    ControlReply TaskCommentEdit(TaskService service, string comment, string markdown) =>
+        service.Board.FindComment(comment)
+            .Bind(c => service.EditComment(c.Id, markdown).Map(() => c))
+            .Match(c => Success(Describe(service.Board.Tasks.First(t => t.Comments.Any(x => x.Id == c.Id)))), ControlReply.Fail);
 
     // `task goal <id> <goal-id>|none`, the twin of the More menu's "Goal". Both ids are looked up before anything
     // changes; the link goes through GoalService.LinkTask, the one place a task is linked, so a done or dropped goal is

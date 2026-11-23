@@ -92,6 +92,13 @@ public sealed record TaskItem(
     /// </summary>
     public Assignee Assignee { get; init; } = Assignee.Me;
 
+    /// <summary>
+    /// Petre's own description of the task, markdown, "" for none (Ruling 58): the second line or block under the title.
+    /// An init property like the flags, stored as an optional field. It is HIS: a Claude task's status line stays the
+    /// session's and is never edited by him, and a session never writes this (TaskBoard.Describe is Petre's).
+    /// </summary>
+    public string Description { get; init; } = "";
+
     /// <summary>Covey's quadrant the two flags name (TaskOrder.cs).</summary>
     public Quadrant Quadrant => QuadrantOf.Flags(Important, Urgent);
 

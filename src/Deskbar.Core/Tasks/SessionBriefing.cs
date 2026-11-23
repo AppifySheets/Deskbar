@@ -23,6 +23,7 @@ public static class SessionBriefing
 {
     const int TitleLength = 80;
     const int ListLength = 20;
+    const int DescriptionLength = 200;
     const string Shim = "deskbar.cmd";
 
     /// <summary>
@@ -95,10 +96,13 @@ public static class SessionBriefing
     static string Describe(TaskItem t) =>
         $"{t.Id.ToString()[..8]} \"{Cut(t.Title)}\" ({StatusText(t.Status)}{Detail(t)}{(t.WorkspaceId.HasValue ? "" : ", on no workspace")})";
 
+    // Petre's own description (Ruling 58) follows, longer than a title is cut: for a note he handed to Claude it is the
+    // brief. Still bounded, since twenty tasks may be listed; `task list` has the whole text.
     static string Detail(TaskItem t) =>
-        t.Status == TaskStatus.WaitingOnYou && t.Question.HasValue ? $", asked: \"{Cut(t.Question.Value)}\""
+        (t.Status == TaskStatus.WaitingOnYou && t.Question.HasValue ? $", asked: \"{Cut(t.Question.Value)}\""
         : t.StatusLine.Length > 0 ? $", status line: \"{Cut(t.StatusLine)}\""
-        : "";
+        : "")
+        + (t.Description.Length > 0 ? $", the user's description: \"{Cut(t.Description, DescriptionLength)}\"" : "");
 
     static string StatusText(TaskStatus status) => status switch
     {
@@ -109,9 +113,9 @@ public static class SessionBriefing
         _ => "closed",
     };
 
-    static string Cut(string text)
+    static string Cut(string text, int length = TitleLength)
     {
         var line = text.ReplaceLineEndings(" ").Trim();
-        return line.Length <= TitleLength ? line : line[..(TitleLength - 3)] + "...";
+        return line.Length <= length ? line : line[..(length - 3)] + "...";
     }
 }

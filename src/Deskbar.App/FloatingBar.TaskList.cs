@@ -526,7 +526,7 @@ public partial class FloatingBar
         board.Pile().Select(t => new TaskLine(
             t.Id,
             t.Title,
-            DetailOf(t),
+            DetailOf(t, withDescription: true),
             t.Status,
             t.IsClaudes,
             t.WorkspaceId.Bind(workspaceName).Match(name => (string?)name, () => null),
@@ -546,13 +546,18 @@ public partial class FloatingBar
     internal static IReadOnlyList<TaskLine> WithGroupStarts(IReadOnlyList<TaskLine> lines) =>
         lines.Select((line, i) => line with { StartsGroup = i > 0 && lines[i - 1].GroupKey != line.GroupKey }).ToArray();
 
-    // What follows the title: the question while the task waits on Petre, else its status line; and for a Claude task
-    // whose sessions have all ended, "no live session" after that (spec, "A task whose sessions have all ended stays
-    // open and says 'no live session'"). The tasks window's lines say the same (TasksBoard.Row).
-    internal static string DetailOf(TaskItem task) =>
+    // What follows the title: the question while the task waits on Petre, else its status line, else (`withDescription`,
+    // the bar's own lines) the first line of his description (Ruling 58: it shows where a Claude task shows its status
+    // line, and a status line or a question keeps the place); and for a Claude task whose sessions have all ended, "no
+    // live session" after that (spec, "A task whose sessions have all ended stays open and says 'no live session'"). The
+    // tasks window's lines say the same but draw the whole description as a block of their own, so they leave it out here
+    // (TasksBoard.Row).
+    internal static string DetailOf(TaskItem task, bool withDescription = false) =>
         string.Join(TaskDetailSeparator, new[]
         {
-            task.Status == TaskStatus.WaitingOnYou && task.Question.HasValue ? task.Question.Value : task.StatusLine,
+            task.Status == TaskStatus.WaitingOnYou && task.Question.HasValue ? task.Question.Value
+                : task.StatusLine.Length > 0 ? task.StatusLine
+                : withDescription ? FirstLine(task.Description) : "",
             task.IsClaudes && !task.HasLiveSession ? NoLiveSession : "",
         }.Where(part => part.Length > 0));
 
