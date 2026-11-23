@@ -53,11 +53,23 @@ Double-click a task's line, on the bar or in the tasks window, and you go to its
 
 Closing the terminal window only detaches it. The session keeps running, and the next double-click opens a new window on it.
 
+The window uses a Windows Terminal profile of Deskbar's own, "Deskbar Claude": VS Code's Dark Modern colours, JetBrains Mono (Cascadia Mono where that is not installed), Claude's orange bar cursor and no scrollbar. Deskbar installs it while **Claude Code sessions keep their tasks in the task list** is ticked and removes it when you untick the box.
+
+This needs the Claude Code CLI on the PATH (the native install puts `claude.exe` in `%USERPROFILE%\.localin`) and Windows Terminal. Without them the items are hidden or say why they cannot work.
+
 To hand a task to Claude, pick **Start Claude on this** on its menu (right after Edit, on the bar and in the tasks window) or the button of that name in its thread. Deskbar starts a background session with the task as its first message, so it gets to work at once, joins it to the task, and opens a window on it on the task's workspace. The folder is the repo of the task's latest session. A task without sessions offers the repos its workspace knows, from its other tasks' sessions and its VS Code windows: with one, it starts there; with several or none, a short list at the pointer ends with "Choose a folder…". On a task whose session is still running it asks first, since a second session on one task is rarely what you meant.
 
 A folder Claude Code has never been told to trust cannot start a background session. Claude's message goes into the task's thread, and Deskbar offers to open a terminal running `claude` in that folder so you can accept the trust prompt yourself. Deskbar never accepts it for you.
 
 A task's thread lists its sessions, newest first, with when each joined and whether it is working, idle, ended or expired. Open on a line does what the double-click does for that session. An expired session is one whose transcript Claude Code has deleted (after 30 days by default), so it has no Open.
+
+## Tasks keep their sessions running
+
+A task that is open (backlog, in progress or waiting on you) is meant to have a session running. A reboot, a sign-out, a crash of Claude Code's background daemon or a closed VS Code session ends sessions, and Deskbar resumes the ones on open tasks the next time it looks, one every five seconds, a cut-off turn told to continue. Each resume adds a line to the task's thread.
+
+Marking a task done lets its session go: a done or closed task is never resumed. Reopen the task and it is looked after again.
+
+Deskbar gives up on a session when it has been resumed three times in ten minutes, when its transcript is gone, when no folder is known for it or when the resume fails. It says why once, in the thread, and the task waits on you with the reason as its question. It does not try again by itself. Answer the question or change the task's status and the next check tries again.
 
 ## Settings
 
