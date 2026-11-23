@@ -772,15 +772,16 @@ public class RemoteControlClaudeHookTests
     {
         var manager = Started();
         Editor(manager, 0x10, "TaskSpaces", "Deskbar");
-        Said(manager, "s1", Repo, "new", "Tasks board");
+        const string session = "884c127f-9633-40eb-bed7-593800bca40f";
+        Said(manager, session, Repo, "new", "Tasks board");
 
-        var reply = Ran(manager, "claude-hook", "--entry", "sdk-cli", "--attended", "0", "--job", @"C:\jobs\884c127f",
-            "--from", Repo, "--json", HookOf("SessionEnd", "s1", null));
+        var reply = Ran(manager, "claude-hook", "--entry", "cli", "--attended", "0", "--job", @"C:\jobs\884c127f",
+            "--from", Repo, "--json", HookOf("SessionEnd", session, null));
 
         Assert.Equal(ControlReply.Ok, reply.ExitCode);
         Assert.False(Titled("Tasks board").HasLiveSession);
 
-        tasks.Reconcile([new ClaudeAgent("s1", Maybe<string>.None, Repo, true, false, "")]);
+        tasks.Reconcile([new ClaudeAgent(session, Maybe<string>.None, Repo, true, false, "")]);
 
         Assert.True(Titled("Tasks board").HasLiveSession);
     }

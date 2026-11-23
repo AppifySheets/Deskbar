@@ -46,7 +46,7 @@ public sealed record ProgramLaunch(string Program, IReadOnlyList<string> Argumen
 // and so which workspace, the link belongs with (see EditorFolder). The client fills `--from` in itself.
 public sealed record OpenRequest(string Url, string? From);
 
-// `claude-hook`, parsed: CLAUDE_CODE_ENTRYPOINT and CLAUDE_CODE_SESSION_ATTENDED as the hook script passed them (empty
+// `claude-hook`, parsed: CLAUDE_CODE_ENTRYPOINT, CLAUDE_CODE_SESSION_ATTENDED and CLAUDE_JOB_DIR as the hook script passed them (empty
 // or a literal %NAME% when unset; ClaudeHookEvent decides what they mean), the session's folder, and the hook's JSON.
 public sealed record ClaudeHookRequest(string? Entrypoint, string? Attended, string? From, string? Json, string? Job = null);
 

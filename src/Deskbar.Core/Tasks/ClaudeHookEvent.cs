@@ -8,7 +8,7 @@ namespace Deskbar.Core.Tasks;
 // docs/superpowers/notes/2026-11-22-claude-hook-probes.md.
 //
 // Claude Code runs Deskbar's hook scripts (claude-hook.cmd and claude-task-hook.cmd, ClaudeSkill in the app) on five
-// events and hands each run a JSON object on stdin. The script passes it on to the running Deskbar as `claude-hook --json <text>`, together with two
+// events and hands each run a JSON object on stdin. The script passes it on to the running Deskbar as `claude-hook --json <text>`, together with three
 // variables from the hook's environment, and this record is what comes out:
 //
 //   Event      hook_event_name: SessionStart, UserPromptSubmit, Notification, Stop or SessionEnd.
@@ -26,7 +26,8 @@ namespace Deskbar.Core.Tasks;
 // because without those there is nothing to act on, and the verb then exits 1 with nothing printed.
 //
 // HEADLESS (Ruling 33). The hook's JSON says nothing about whether the session is interactive, so the environment
-// decides, and the script passes two variables through:
+// decides, and the script passes three variables through
+// (the third, CLAUDE_JOB_DIR, is for background sessions: see OwnJob):
 //
 //   * CLAUDE_CODE_SESSION_ATTENDED, computed by Claude Code for every session and never inherited: "1" when someone is
 //     at it. It is the main signal because the entrypoint lies in exactly the case that matters: a `claude -p` started
@@ -58,7 +59,7 @@ public sealed record ClaudeHookEvent(string Event, string SessionId, string Fold
             if (session.HasNoValue) return Result.Failure<ClaudeHookEvent>("the hook's JSON has no session_id");
 
             return new ClaudeHookEvent(hookEvent.Value, session.Value, Text(root, "cwd").GetValueOrDefault(""),
-                Text(root, "source"), IsHeadless(entrypoint, attended, job), Text(root, "transcript_path"));
+                Text(root, "source"), IsHeadless(entrypoint, attended, job, session.Value), Text(root, "transcript_path"));
         }
         catch (JsonException e)
         {
@@ -74,13 +75,23 @@ public sealed record ClaudeHookEvent(string Event, string SessionId, string Fold
 
     // A BACKGROUND SESSION (`claude --bg`) runs its hooks with ATTENDED=0 although a person can attach to it (probe notes,
     // "What a background session's hooks see"), so the flag alone would drop every one of its hooks. Its hooks carry
-    // CLAUDE_JOB_DIR, which a `claude -p` run does not have: a job directory that arrived means attended. It arrives the
-    // way the other variables do (empty or a literal %NAME% when unset), hence the same Arrived test.
-    static bool IsHeadless(string? entrypoint, string? attended, string? job) =>
-        Arrived(job) is not null ? false
+    // CLAUDE_JOB_DIR, but only a job directory that is THIS session's own counts (OwnJob). It arrives the way the other
+    // variables do (empty or a literal %NAME% when unset), hence the same Arrived test.
+    static bool IsHeadless(string? entrypoint, string? attended, string? job, string session) =>
+        OwnJob(job, session) ? false
         : Arrived(attended) is { } given
             ? given != "1"
             : Arrived(entrypoint) is not { } entry || HeadlessEntrypoints.Contains(entry, StringComparer.OrdinalIgnoreCase);
+
+    // The job directory's last segment is the first 8 characters of the session id (measured 2026-11-23, before and
+    // after a `claude --bg --resume`). Matching on it is what keeps Ruling 33 shut: CLAUDE_JOB_DIR is an ordinary
+    // environment variable of the background process, so a `claude -p` run from inside its Bash tool inherits it, and
+    // a bare "a job directory arrived" test would count that headless run as attended. An inherited directory names
+    // ANOTHER session, so it overrides nothing and the ATTENDED / entrypoint rule decides as before.
+    static bool OwnJob(string? job, string session) =>
+        Arrived(job) is { } dir
+        && dir.TrimEnd('\\', '/').Split('\\', '/').Last() is { Length: 8 } last
+        && session.StartsWith(last, StringComparison.OrdinalIgnoreCase);
 
     // A variable's value as the script passed it, or null when the variable was not set: empty (cmd in a batch file) or
     // the literal %NAME% (cmd at a prompt).
