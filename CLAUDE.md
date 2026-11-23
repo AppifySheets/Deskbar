@@ -253,8 +253,10 @@ page says "Sorry, we couldn't find that page": switch accounts, do not debug the
   legible on artwork nobody chose (sky blue vanished on an Edge icon).
 - **The tasks window is a panel docked just inside the bar, never a floating window** (spec
   `docs/superpowers/specs/2026-11-23-tasks-panel-design.md`). It is a second shell app bar, and it is always
-  registered AFTER the bar's, every time the bar registers, so the bar stays the outer strip (Explorer restarts
-  are the case that breaks it). It is pinned to every virtual desktop, topmost, a tool window, never tiled.
+  registered AFTER the bar's, every time the bar registers, so the bar stays the outer strip (an Explorer restart
+  is the case this guards against). When the bar announces is one pure rule, `BarStripNotices.Next` in Core, with
+  a test per case; change it there, never with a condition in `FloatingBar`. It is pinned to every virtual
+  desktop, topmost, a tool window, never tiled.
   Its width is 460 DIP by default, 360 at the least and half the screen at the most; lines go slim below 620 and
   the Matrix switch shows from 780. A floating bar gets the panel on its nearer screen edge, a minimized bar takes
   it away, and a full-screen app makes it leave the topmost band. `AppState.TasksWindow` is ignored now. Do not

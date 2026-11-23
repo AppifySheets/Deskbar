@@ -275,7 +275,7 @@ The task list at the bottom of the bar (spec `docs/superpowers/specs/2026-11-22-
 
 The tasks panel (spec `docs/superpowers/specs/2026-11-22-tasks-board-design.md`, "The window" and "Comments", and
 `docs/superpowers/specs/2026-11-23-tasks-panel-design.md`, which replaced the floating window). Steps 56 to 64 were
-written for the floating window and now describe the panel; 64a to 64l cover what is new.
+written for the floating window and now describe the panel; 64a to 64n cover what is new.
 
 56. With three or fewer open tasks the button at the right end of the chip row reads "All tasks" ("All" on a narrow bar); with more, "+N more" ("+N"). Click it: a
     full-height panel opens just inside the bar (not over it), on the list and not on a form
@@ -337,12 +337,21 @@ written for the floating window and now describe the panel; 64a to 64l cover wha
     the "Claude working N" chip: only the live one stays, N is 1, and its session square glows while Claude is
     working. Click the chip again: all tasks are back. Reopen the panel: the filter is cleared.
 64k. Floating bar. Undock the bar so it floats, near the left edge of a screen: the panel opens on that edge, by the
-    bar. Move the bar to the right half: the panel takes the right edge. Dock the bar again: the panel docks inside
-    it.
+    bar. Move the bar to the right half: the panel stays on the left edge (a floating bar's moves are not followed,
+    by decision). Dock the bar again: the panel docks inside it.
 64l. Tray overflow. Dock the bar on the screen whose taskbar has the tray, at the edge where the tray's ^ is, and
     open the panel. Click the bar's tray chevron (or the taskbar's ^): the hidden-icons flyout opens over the bar and
     the panel, stays open for at least five seconds without flickering, and its icons can be clicked, including the
     ones over the panel. Close it (Esc or a click elsewhere): within a second the panel is back on top.
+64m. Scale change. With the panel open beside the docked bar, open Settings, Display and change the bar's screen
+    from 150% to 125% (or any other step). Within a couple of seconds the bar and the panel are re-docked at the new
+    scale: the panel still sits just inside the bar with no gap and no overlap, it is the same width in DIPs as before
+    (its lines slim or full as before), and a maximized window fills the space beside both. Change the scale back:
+    the same.
+64n. Full-screen already up. Play a video full screen on the bar's screen, and from a terminal on another screen run
+    `$ts bar minimize`, then `$ts bar restore`, while the video still plays: the panel comes back behind the video,
+    never over it, not even for a second. Leave full screen: within a second the panel is on top again. Do the same
+    with the panel closed, opening it with `$ts tasks-window show` while the video plays.
 
 ## Claude sessions and their tasks
 
