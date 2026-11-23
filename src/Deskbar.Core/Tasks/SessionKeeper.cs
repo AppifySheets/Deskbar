@@ -30,8 +30,12 @@ namespace Deskbar.Core.Tasks;
 //   * already resumed <see cref="MaxResumesInWindow"/> times within <see cref="LoopWindow"/>: a give-up. A session that
 //     ends again straight after waking is crashing, and waking it forever helps nobody.
 //   * otherwise a resume, with a continue message when the last turn was cut off.
-// A give-up is said ONCE: the board shows it as the task waiting on Petre with the reason as its question, and a task
-// already in that state with that exact question gets no further step, so the next poll does not repeat it.
+// A give-up is said ONCE and is STICKY: the board shows it as the task waiting on Petre with the reason as its question,
+// and a task in that state gets no step at all (no repeat, and no resume either, even after the loop window has passed
+// and the ledger's count has fallen). It stays that way until Petre acts on it. The caller (Task 8) must call
+// ResumeLedger.Forget(sessionId) when a give-up question is answered or the task otherwise leaves
+// WaitingOnYou-with-that-question; otherwise, inside the loop window, the ledger would still hold the old resumes and
+// the next poll would give up again at once and overwrite his action.
 //
 // A session id on two tasks is resumed once, for the task that comes first in the ordering. Listed sessions that no
 // task knows (open or closed, any entry) are adopted: one step each.
@@ -105,17 +109,23 @@ public static class SessionKeeper
     static Maybe<KeeperStep> StepFor(
         TaskItem task, TaskSession session, ResumeLedger ledger,
         Func<TaskSession, bool> transcriptExists, Func<TaskSession, bool> cutOff, DateTimeOffset now) =>
-        ledger.Within(session.Id, now, Grace) > 0 ? Maybe<KeeperStep>.None
+        // Sticky: a task the keeper has given up on gets no step at all, not even a resume once the loop window has
+        // passed and the ledger's count has fallen. It waits for Petre; see the comment on Forget.
+        GivenUp(task) ? Maybe<KeeperStep>.None
+        : ledger.Within(session.Id, now, Grace) > 0 ? Maybe<KeeperStep>.None
         : string.IsNullOrEmpty(session.Folder) ? GiveUp(task, NoFolder)
         : !transcriptExists(session) ? GiveUp(task, TranscriptGone)
         : ledger.Within(session.Id, now, LoopWindow) >= MaxResumesInWindow ? GiveUp(task, LoopGaveUp)
         : new KeeperStep.Resume(task.Id, session, cutOff(session));
 
-    // Said once: a task already waiting on Petre with this very question has had it.
-    static Maybe<KeeperStep> GiveUp(TaskItem task, string reason) =>
-        task.Status == TaskStatus.WaitingOnYou && task.Question.Equals(Maybe.From(reason))
-            ? Maybe<KeeperStep>.None
-            : new KeeperStep.GiveUp(task.Id, reason);
+    static Maybe<KeeperStep> GiveUp(TaskItem task, string reason) => new KeeperStep.GiveUp(task.Id, reason);
+
+    static readonly IReadOnlyList<string> GiveUpReasons = [LoopGaveUp, TranscriptGone, NoFolder];
+
+    // A give-up shows on the board as the task waiting on Petre with the reason as its question. While it stands, the
+    // keeper says nothing more, so a give-up is said once and the session is never woken behind his back.
+    static bool GivenUp(TaskItem task) =>
+        task.Status == TaskStatus.WaitingOnYou && task.Question.Match(q => GiveUpReasons.Contains(q), () => false);
 }
 
 /// <summary>What the keeper wants done. Task 8 executes these; the keeper itself does nothing.</summary>
@@ -150,6 +160,10 @@ public sealed record ResumeLedger(IReadOnlyDictionary<string, IReadOnlyList<Date
         next[sessionId] = kept;
         return new ResumeLedger(next);
     }
+
+    /// <summary>A new ledger without the session: its resumes no longer count, so it can be resumed afresh.</summary>
+    public ResumeLedger Forget(string sessionId) =>
+        new(Resumes.Where(pair => pair.Key != sessionId).ToDictionary(pair => pair.Key, pair => pair.Value));
 
     /// <summary>How many resumes of the session happened in the span ending at <paramref name="now"/>.</summary>
     public int Within(string sessionId, DateTimeOffset now, TimeSpan span) =>
