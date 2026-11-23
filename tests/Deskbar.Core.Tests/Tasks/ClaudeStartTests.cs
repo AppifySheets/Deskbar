@@ -1,0 +1,119 @@
+using CSharpFunctionalExtensions;
+using Deskbar.Core.Tasks;
+// System.Threading.Tasks (an implicit using) has a TaskStatus too; the alias says which one this file means.
+using TaskStatus = Deskbar.Core.Tasks.TaskStatus;
+
+namespace Deskbar.Core.Tests.Tasks;
+
+// What Deskbar says to a new Claude session and where it starts it (design:
+// docs/superpowers/specs/2026-11-23-tasks-open-claude-sessions-design.md). Pure: nothing here starts a process.
+public class ClaudeStartTests
+{
+    static readonly DateTimeOffset t0 = new(2026, 11, 23, 9, 0, 0, TimeSpan.Zero);
+    static readonly Guid taskId = Guid.Parse("aaaaaaaa-0000-0000-0000-000000000001");
+    static readonly Guid ws = Guid.Parse("11111111-1111-1111-1111-111111111111");
+    static readonly Guid otherWs = Guid.Parse("22222222-2222-2222-2222-222222222222");
+
+    static TaskSession Session(string id, string folder, int minutes) =>
+        new(id, folder, t0.AddMinutes(minutes), Maybe<DateTimeOffset>.None);
+
+    static TaskItem Task(Guid id, string title, Maybe<Guid> workspace, string statusLine = "", params TaskSession[] sessions) =>
+        new(id, title, workspace, TaskStatus.InProgress, statusLine, Maybe<string>.None, t0, t0, t0, sessions, []);
+
+    static TaskBoard Board(params TaskItem[] tasks) => new(tasks);
+
+    [Fact]
+    public void The_first_message_names_the_task_and_asks_to_join_it()
+    {
+        var task = Task(taskId, "Fix the bar", Maybe<Guid>.None, "waiting for CI");
+
+        Assert.Equal(
+            $"Deskbar task {taskId}: Fix the bar\nwaiting for CI\nJoin this task (deskbar task join {taskId}) and start on it.",
+            ClaudeStart.FirstMessage(task));
+    }
+
+    [Fact]
+    public void The_first_message_leaves_out_an_empty_status_line()
+    {
+        Assert.Equal(
+            $"Deskbar task {taskId}: Fix the bar\nJoin this task (deskbar task join {taskId}) and start on it.",
+            ClaudeStart.FirstMessage(Task(taskId, "Fix the bar", Maybe<Guid>.None, "")));
+        Assert.Equal(
+            $"Deskbar task {taskId}: Fix the bar\nJoin this task (deskbar task join {taskId}) and start on it.",
+            ClaudeStart.FirstMessage(Task(taskId, "Fix the bar", Maybe<Guid>.None, "   ")));
+    }
+
+    [Fact]
+    public void The_first_message_is_cut_to_1000_characters()
+    {
+        var message = ClaudeStart.FirstMessage(Task(taskId, new string('x', 3000), Maybe<Guid>.None, new string('y', 500)));
+
+        Assert.Equal(1000, message.Length);
+        // The ask to join is what makes the session take the task up, so it is the part that is never cut.
+        Assert.EndsWith($"\nJoin this task (deskbar task join {taskId}) and start on it.", message);
+        Assert.StartsWith($"Deskbar task {taskId}: xxx", message);
+    }
+
+    [Fact]
+    public void A_task_with_sessions_starts_in_its_latest_sessions_folder()
+    {
+        var task = Task(taskId, "T", Maybe<Guid>.From(ws), "",
+            Session("a", @"C:\repos\Old", 1), Session("b", @"C:\repos\New", 5), Session("c", @"C:\repos\Mid", 3));
+        // Another task on the same workspace must not widen the list: a task that has sessions has its own folder.
+        var sibling = Task(Guid.NewGuid(), "S", Maybe<Guid>.From(ws), "", Session("z", @"C:\repos\Sibling", 9));
+
+        Assert.Equal([@"C:\repos\New"], ClaudeStart.Folders(task, Board(task, sibling), [@"C:\repos\Editor"]));
+    }
+
+    [Fact]
+    public void A_task_with_sessions_starts_at_the_repo_not_in_an_old_worktree() =>
+        Assert.Equal([@"C:\repos\Deskbar"],
+            ClaudeStart.Folders(
+                Task(taskId, "T", Maybe<Guid>.None, "", Session("a", @"C:\repos\Deskbar\.claude\worktrees\topic", 1)),
+                Board(), []));
+
+    [Fact]
+    public void A_task_without_sessions_offers_its_workspaces_folders_latest_first()
+    {
+        var task = Task(taskId, "T", Maybe<Guid>.From(ws));
+        var a = Task(Guid.NewGuid(), "A", Maybe<Guid>.From(ws), "", Session("1", @"C:\repos\One", 1), Session("2", @"C:\repos\Two\", 7));
+        var b = Task(Guid.NewGuid(), "B", Maybe<Guid>.From(ws), "", Session("3", @"c:\repos\one", 4), Session("4", "", 8));
+        var elsewhere = Task(Guid.NewGuid(), "E", Maybe<Guid>.From(otherWs), "", Session("5", @"C:\repos\Elsewhere", 9));
+
+        // Two is latest (7), then One (its latest use is 4, the lower-case spelling is the same folder), and the
+        // editor folders follow, minus the one already listed.
+        var folders = ClaudeStart.Folders(task, Board(task, a, b, elsewhere), [@"C:\repos\ONE", @"C:\repos\Editor", ""]);
+
+        Assert.Equal([@"C:\repos\Two\", @"c:\repos\one", @"C:\repos\Editor"], folders);
+    }
+
+    [Fact]
+    public void A_free_task_matches_only_other_free_tasks()
+    {
+        var task = Task(taskId, "T", Maybe<Guid>.None);
+        var free = Task(Guid.NewGuid(), "F", Maybe<Guid>.None, "", Session("1", @"C:\repos\Free", 1));
+        var bound = Task(Guid.NewGuid(), "B", Maybe<Guid>.From(ws), "", Session("2", @"C:\repos\Bound", 2));
+
+        Assert.Equal([@"C:\repos\Free"], ClaudeStart.Folders(task, Board(task, free, bound), []));
+    }
+
+    [Theory]
+    [InlineData(@"C:\repos\Deskbar\.claude\worktrees\topic", @"C:\repos\Deskbar")]
+    [InlineData(@"C:\repos\Deskbar\.CLAUDE\Worktrees\topic\src", @"C:\repos\Deskbar")]
+    [InlineData("C:/repos/Deskbar/.claude/worktrees/topic", "C:/repos/Deskbar")]
+    [InlineData(@"C:\repos\Deskbar", @"C:\repos\Deskbar")]
+    public void A_worktree_folder_maps_to_its_repo(string folder, string repo) =>
+        Assert.Equal(repo, ClaudeStart.RepoOf(folder));
+
+    [Fact]
+    public void The_attach_window_command_is_exact()
+    {
+        var launch = ClaudeStart.AttachWindow("ab12cd34", @"C:\repos\Deskbar", "Fix the bar");
+
+        Assert.Equal("wt.exe", launch.Program);
+        Assert.Equal(
+            ["-w", "new", "--title", "Fix the bar", "-p", "Deskbar Claude", "-d", @"C:\repos\Deskbar", "claude", "attach", "ab12cd34"],
+            launch.Arguments);
+        Assert.Equal(@"C:\repos\Deskbar", launch.WorkingDirectory);
+    }
+}
