@@ -35,10 +35,10 @@ namespace Deskbar.Core.Control;
 //   SessionStart         the briefing (SessionBriefing.Start). A session that already has a task (a resumed one keeps its
 //                        id; a compacted one never ended) is named its task, live on it again; any other is offered the
 //                        tasks of its workspace (TaskBoard.Offered) and told how to join one or create its own.
-//   UserPromptSubmit     the user's next message: the session's task, when Done, goes back to In progress
-//                        (TaskService.Answered). A task waiting on the user does NOT (Ruling 49): the session resolves it
-//                        with `task answered`. Then one line reminding the session of its task, its open question, or that
-//                        the user closed it (SessionBriefing.Prompt).
+//   UserPromptSubmit     the user's next message changes no status. A task waiting on the user stays waiting (Ruling 49):
+//                        the session resolves it with `task answered`. A Done task stays Done (2026-11-23): the session
+//                        runs `task join <id>` if the message gives it more work. Then one line reminding the session of
+//                        its task, its open question, that it is done, or that the user closed it (SessionBriefing.Prompt).
 //   SessionEnd           the session is marked ended; its task stays open ("no live session"). Nothing to read.
 //
 // The three task events do nothing at all, and print nothing, for a HEADLESS session (`claude -p`, SDK runs, scheduled
@@ -98,7 +98,8 @@ public sealed partial class RemoteControl
     // SessionStart. TaskOf finds the task a still-live session is on (compact, clear, or a second SessionStart);
     // LastTaskOf finds the one a resumed session was on before its SessionEnd, and Rejoin makes it live there again (the
     // same id replaces its old entry) WITHOUT touching the task's status (Ruling 34): resuming a session to look at it
-    // is not continuing the work, so a Done or waiting task stays as it is until the user's next message (Prompted).
+    // is not continuing the work, so a Done or waiting task stays as it is until the session itself moves it (`task join`
+    // or `task answered`; a prompt no longer does, see Prompted).
     // Only a session with no open task at all is offered a choice.
     //
     // /clear (Ruling 19): a session /clear marked replaced that starts again under the SAME id (unmeasured whether /clear
@@ -124,11 +125,14 @@ public sealed partial class RemoteControl
     // limitation, which this removes: such a prompt can no longer answer anything). Instead the reminder line says the
     // question is still open (SessionBriefing.Prompt).
     //
-    // A DONE task going back to In progress on a message stays as it was: that is the user continuing the work, not a
-    // question being settled.
+    // A DONE task stays Done on a prompt too (2026-11-23, Petre agreed): a message to a finished session is as often a
+    // question about the work ("is it done?", a screenshot of the board) as more work, and the hook cannot tell the two
+    // apart, so every such question used to reopen the task and leave it In progress on Petre's board. The session can
+    // tell: the reminder for a Done task (SessionBriefing.Prompt) tells it to run `task join <id>` when the message does
+    // give it more work, and Join already moves a Done task back to In progress. Same reasoning as Ruling 49 for a
+    // waiting task: the session decides, a prompt proves nothing.
     string Prompted(TaskService service, string sessionId)
     {
-        service.Board.TaskOf(sessionId).Where(t => t.Status == TaskStatus.Done).Tap(_ => service.Answered(sessionId));
         var own = service.Board.TaskOf(sessionId);
         return SessionBriefing.Prompt(sessionId, own, own.HasValue ? Maybe<TaskItem>.None : service.Board.ClosedTaskOf(sessionId));
     }

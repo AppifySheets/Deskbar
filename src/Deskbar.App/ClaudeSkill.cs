@@ -252,8 +252,9 @@ static class ClaudeSkill
           belong in the PR, the repo's notes or the session itself. When the user must act, say exactly what the user
           must do in the first words, or use `task ask` if it is a decision.
         - Mark it done on a clear finish: `deskbar.cmd task done --session <id>`. Never close or delete a task: only
-          the user closes one. A follow-up for later is `deskbar.cmd task later - --session <id>`, its title on stdin,
-          a note on your workspace.
+          the user closes one. A message from the user leaves a done task done; when it gives you more work on it,
+          run `deskbar.cmd task join <task id> --session <id>` to put it back in progress. A follow-up for later is
+          `deskbar.cmd task later - --session <id>`, its title on stdin, a note on your workspace.
         - Leave the user's own notes alone unless they ask you to change one.
         """;
 

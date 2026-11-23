@@ -480,9 +480,10 @@ public class RemoteControlClaudeHookTests
         Assert.Equal(Assignee.Me, Titled("Tasks board").Assignee);
     }
 
-    // Ruling 34: resuming a session whose task is Done keeps it Done; only the user's next message moves it back.
+    // Ruling 34: resuming a session whose task is Done keeps it Done. Since 2026-11-23 the user's next message keeps it
+    // Done as well (it may only ask about the finished work); the session reopens it with `task join` when it is more work.
     [Fact]
-    public void A_resumed_session_keeps_its_tasks_status_until_the_user_writes()
+    public void A_done_task_stays_done_through_a_resume_and_a_prompt_until_the_session_joins_it()
     {
         var manager = Started();
         Editor(manager, 0x10, "TaskSpaces", "Deskbar");
@@ -496,6 +497,10 @@ public class RemoteControlClaudeHookTests
         Assert.True(Titled("Tasks board").HasLiveSession);
 
         Hooked(manager, "UserPromptSubmit");
+
+        Assert.Equal(TaskStatus.Done, Titled("Tasks board").Status);
+
+        Said(manager, "s1", Repo, "join", Titled("Tasks board").Id.ToString());
 
         Assert.Equal(TaskStatus.InProgress, Titled("Tasks board").Status);
     }
