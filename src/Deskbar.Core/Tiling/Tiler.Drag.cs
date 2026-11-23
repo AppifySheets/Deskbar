@@ -69,7 +69,7 @@ public sealed partial class Tiler
         var windows = Board.On(screen.Number);
         var shown = ShownLayout(workspace, screen, windows.Count);
         var leaf = TileArrange.LeafOf(shown, windows.ToList().IndexOf(window), windows.Count);
-        SplitMove.Apply(shown, screen.WorkArea, GapOn(screen), leaf, moved, frame).Tap(next =>
+        SplitMove.Apply(shown, screen.WorkArea, GapOn(screen), leaf, moved, frame).Map(m => m.Layout).Tap(next =>
             SlotsOf(screen, windows, next)
                 .Where(s => s.Key != window)
                 .ToList()
