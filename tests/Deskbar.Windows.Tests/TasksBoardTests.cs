@@ -106,7 +106,7 @@ public class TasksBoardTests
         };
 #pragma warning restore WPF0001
         // A panel wide enough for everything (Wide, below): the full line and the Matrix switch both need it. The slim line
-        // below 620 DIP and the switch's 780 are Task 8's, with their own tests passing a `width`.
+        // below 692 DIP and the switch's 780 are Task 8's, with their own tests passing a `width`.
         Assert.True(harness.Manager.SaveTasksPanel(new Deskbar.Core.Persistence.TasksPanelState(false, width)).IsSuccess);
         var panel = new TasksPanelRig(window).Docked(edge, screenDips);
         var controller = new TasksBoard(window, panel.Panel, tasks, harness.Manager, goTo ?? (t =>
@@ -1248,7 +1248,7 @@ public class TasksBoardTests
         Assert.True(t.Window.IsSelected(oldest));
     });
 
-    // Review I-3: at the narrowest width the full line is drawn at (TasksPanelLayout.SlimBelow, 620 DIP, the floating
+    // Review I-3: at the narrowest width the full line is drawn at (TasksPanelLayout.SlimBelow, 692 DIP, the floating
     // window's old minimum; narrower, Task 8 draws the slim line), with enough lines for the scroll bar, every column
     // stays inside the list's viewport and the title keeps a usable width.
     [Fact]
@@ -3099,10 +3099,10 @@ public class TasksBoardTests
     static IReadOnlyList<string> MenuWords(ContextMenu menu) =>
         menu.Items.OfType<MenuItem>().Select(i => i.Header is TextBlock text ? text.Text : $"{i.Header}").ToArray();
 
-    // Below 620 DIP a line is slim: no session words, no age, no assignee and no Reopen button on it; its sessions are
+    // Below 692 DIP a line is slim: no session words, no age, no assignee and no Reopen button on it; its sessions are
     // squares only, and the age and assignee move into its tooltip.
     [Fact]
-    public void A_panel_narrower_than_620_draws_slim_lines() => StaThread.Run(() =>
+    public void A_panel_narrower_than_692_draws_slim_lines() => StaThread.Run(() =>
     {
         using var t = Build(width: TasksPanelLayout.SlimBelow - 1);
         var id = t.Tasks.Create("work", t.Gepha, Session("s1")).Value.Id;
@@ -3123,10 +3123,10 @@ public class TasksBoardTests
         Assert.False(HasButton(LineOf(t.Window, closed), "Reopen"));
     });
 
-    // From 620 DIP the line is today's, and the switch between the two happens when the grip's drag ends (ResizePanel),
+    // From 692 DIP the line is today's, and the switch between the two happens when the grip's drag ends (ResizePanel),
     // redrawing every line once.
     [Fact]
-    public void A_panel_620_or_wider_draws_todays_lines() => StaThread.Run(() =>
+    public void A_panel_692_or_wider_draws_todays_lines() => StaThread.Run(() =>
     {
         using var t = Build(width: TasksPanelLayout.SlimBelow);
         var id = t.Tasks.Create("work", t.Gepha, Session("s1")).Value.Id;
@@ -3230,7 +3230,7 @@ public class TasksBoardTests
     // which is the saved width clamped to half the screen it docks on, not the saved width itself. A saved 700 on a
     // screen whose half is 546 DIP is a 546 DIP panel, and its lines are slim.
     [Fact]
-    public void A_panel_clamped_below_620_by_its_screen_draws_slim_lines() => StaThread.Run(() =>
+    public void A_panel_clamped_below_692_by_its_screen_draws_slim_lines() => StaThread.Run(() =>
     {
         using var t = Build(width: 700, screenDips: 1092);
         var id = t.Tasks.Create("work", t.Gepha, Session("s1")).Value.Id;

@@ -451,7 +451,7 @@ maximized windows aside as the bar does. Click the same button, or the x in the 
 it. Drag its inner edge to change the width (460 to start, 360 at the least, half the screen at the most);
 Deskbar remembers the width and whether the panel was open. A search box (Ctrl+F, Esc clears it) finds
 tasks by every word you type, in titles, status lines and questions. The "Claude working" chip shows only the
-tasks whose Claude session is working right now. Below 620 DIP wide the lines go slim, and the List and
+tasks whose Claude session is working right now. Below 692 DIP wide the lines go slim, and the List and
 Matrix switch appears from 780 DIP. A full-screen app makes the panel step back until you leave it.
 A script can add and change tasks with `deskbar.cmd task`, and every Claude Code session keeps a task of
 its own here: it joins the task its work continues or creates one, keeps a short status line on it, asks

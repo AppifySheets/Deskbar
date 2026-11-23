@@ -8,8 +8,12 @@ public static class TasksPanelLayout
     public const double DefaultWidth = 460;
     public const double MinWidth = 360;
 
-    // Below this a task line drops to its slim form (the secondary details leave); from it, the full line.
-    public const double SlimBelow = 620;
+    // Below this a task line drops to its slim form (the secondary details leave); from it, the full line. 692 is the
+    // full line's own floor: 620 was the old floating window's minimum width, the narrowest at which the full line kept a
+    // usable title beside its fixed columns with the scroll bar showing, and the status chip column (72 DIP, "task status
+    // shows on the bar and in the tasks window", 2026-11-23) raised that minimum to 692. A full line below it would
+    // squeeze the title under the width the window was built to guarantee, so the slim line takes over from there.
+    public const double SlimBelow = 692;
 
     // The List / Matrix switch is shown only from this width: the 2 by 2 needs room to be readable.
     public const double MatrixFrom = 780;

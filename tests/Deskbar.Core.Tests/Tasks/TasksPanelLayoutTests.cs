@@ -14,10 +14,12 @@ public class TasksPanelLayoutTests
     public void The_width_is_kept_between_the_minimum_and_half_the_screen(double width, double screen, double expected) =>
         Assert.Equal(expected, TasksPanelLayout.Clamp(width, screen));
 
+    // 692: the full line's floor since the status chip column (72 DIP) joined it; 620 before that.
     [Theory]
-    [InlineData(619.9, true)]
-    [InlineData(620, false)]
-    public void Lines_are_slim_below_620(double w, bool slim) =>
+    [InlineData(620, true)]
+    [InlineData(691.9, true)]
+    [InlineData(692, false)]
+    public void Lines_are_slim_below_692(double w, bool slim) =>
         Assert.Equal(slim, TasksPanelLayout.Slim(w));
 
     [Theory]

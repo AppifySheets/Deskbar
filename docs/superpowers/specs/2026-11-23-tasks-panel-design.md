@@ -102,6 +102,10 @@ is wider than the panel's 460 default, so:
   keeps about 200 DIP at 460 and about 100 at 360 with the scroll bar showing. Exact widths are the builder's.
 - **At 620 DIP and wider** the line is today's, unchanged.
 - The switch happens on resize, at the drag's end like the reservation, and redraws every line once.
+- Later (2026-11-24, rebasing onto main's task status marks): main added a 72 DIP status chip column to the full
+  line and raised the floating window's minimum from 620 to 692 DIP, so the threshold above is 692, not 620. A slim
+  line keeps main's green Done tick in front of its title, has no status chip column, and names the status in its
+  tooltip beside the age and the assignee ("Done · 5h · Claude").
 
 ### The Matrix (Petre's pick: "only when wide")
 
