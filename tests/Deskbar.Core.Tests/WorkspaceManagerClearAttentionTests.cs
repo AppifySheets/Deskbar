@@ -12,9 +12,12 @@ public class WorkspaceManagerClearAttentionTests
     readonly FakeTitles titles = new();
     readonly FakeStore store = new();
 
+    // A clock the tests move, so a focus can come after the arrival's own moment (WorkspaceManager.ArrivalGrace).
+    DateTimeOffset now = new(2026, 11, 23, 9, 0, 0, TimeSpan.Zero);
+
     WorkspaceManager Started()
     {
-        var manager = new WorkspaceManager(desktops, monitor, titles, store, ownProcessId: 4242);
+        var manager = new WorkspaceManager(desktops, monitor, titles, store, clock: () => now, ownProcessId: 4242);
         Assert.True(manager.Start().IsSuccess);
         manager.AddWorkspace("Deskbar");
         manager.AddWorkspace("iam.ge");
@@ -83,8 +86,10 @@ public class WorkspaceManagerClearAttentionTests
             delivered = true;
             // Inside the COM call: a session on iam.ge asks for the user from its terminal...
             Assert.True(manager.RequestAttention(IdOf(manager, "iam.ge"), terminal.Handle).IsSuccess);
-            // ...and the user switches to iam.ge and clicks the browser, whose focus event arrives too.
-            desktops.CurrentDesktopId = manager.State.Workspaces.Single(w => w.Name == "iam.ge").DesktopId!.Value;
+            // ...and the user switches to iam.ge and, a moment after arriving, clicks the browser, whose focus event
+            // arrives too. (A focus in the arrival's own moment is Windows' doing and clears nothing: ArrivingFocus.)
+            StandOn(manager, "iam.ge");
+            now += TimeSpan.FromSeconds(2);
             monitor.Subject.OnNext(new WindowEvent(WindowEventKind.Activated, browser));
         };
 

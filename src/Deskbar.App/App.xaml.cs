@@ -1663,6 +1663,9 @@ public partial class App : Application
                     ignore: hwnd => monitor!.Ignore(hwnd),
                     switchTo: id => manager.Switch(id)),
                 Rings = windowRings,
+                // How long ago the last input was, for the asking border (FloatingBar.FocusRing.cs): whether someone is
+                // here to see a blink, and whether they clicked or typed in the blinking window.
+                SinceLastInput = new InputActivity().SinceLastInput,
                 // The tile badge's question (FloatingBar.WindowState.cs): is this window, on that workspace's row, in a
                 // tile (Tiler.InTile: the board for the workspace you are on, the Tiler's own rule for any other tiled
                 // one). The Tiler is built after the bar, so the lambda reads the field when asked.

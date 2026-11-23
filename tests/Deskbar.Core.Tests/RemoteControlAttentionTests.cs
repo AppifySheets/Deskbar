@@ -14,9 +14,12 @@ public class RemoteControlAttentionTests
     readonly FakeTitles titles = new();
     readonly FakeStore store = new();
 
+    // A clock the tests move, so a focus can come after the arrival's own moment (WorkspaceManager.ArrivalGrace).
+    DateTimeOffset now = new(2026, 11, 23, 9, 0, 0, TimeSpan.Zero);
+
     WorkspaceManager Started()
     {
-        var manager = new WorkspaceManager(desktops, monitor, titles, store, ownProcessId: 4242);
+        var manager = new WorkspaceManager(desktops, monitor, titles, store, clock: () => now, ownProcessId: 4242);
         Assert.True(manager.Start().IsSuccess);
         manager.AddWorkspace("Deskbar");
         manager.AddWorkspace("iam.ge");
@@ -89,6 +92,13 @@ public class RemoteControlAttentionTests
         Assert.False(Group(manager, "Deskbar").WantsAttention);
         Assert.True(Group(manager, "Deskbar").Running.Single(r => r.Window.Handle == editor.Handle).Asks);
 
+        // The focus Windows hands out as you arrive is not you looking at it: the glow stays, so its border can blink.
+        monitor.Subject.OnNext(new WindowEvent(WindowEventKind.Activated, editor));
+        Assert.True(Group(manager, "Deskbar").Running.Single(r => r.Window.Handle == editor.Handle).Asks);
+
+        // A focus you give it afterwards is.
+        now += TimeSpan.FromSeconds(2);
+        monitor.Subject.OnNext(new WindowEvent(WindowEventKind.Activated, Editor(manager, 0x11, "Other", "Deskbar")));
         monitor.Subject.OnNext(new WindowEvent(WindowEventKind.Activated, editor));
         Assert.False(Group(manager, "Deskbar").Running.Single(r => r.Window.Handle == editor.Handle).Asks);
     }

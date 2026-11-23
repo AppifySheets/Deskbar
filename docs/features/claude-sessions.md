@@ -11,7 +11,7 @@ Give each Claude Code session a workspace of its own, and the bar shows every on
 
 Supervising coding agents is not one task in one editor. Each agent you run wants its own editor window, its own terminal and its own browser tabs, often its own running copy of the thing under test. A workspace is a real Windows virtual desktop, so one per session keeps each cluster of windows together and off the taskbar of the others. Related sessions can share a group, for example two agents working on one project.
 
-When a session finishes a reply, or waits for a permission, while you are on another workspace, that workspace's name and colour rail flash orange on the bar and the session's VS Code icon glows. Both stop once you go there.
+When a session finishes a reply, or waits for a permission, while you are on another workspace, that workspace's name and colour rail flash orange on the bar and the session's VS Code icon glows. The row stops once you go there. The window's border then blinks orange for five seconds so you can see which one asked, and the glow ends with it, or as soon as you click or type in that window. A window whose taskbar button flashed, a chat message for example, blinks the same way.
 
 Deskbar finds the session's window by its folder. When several VS Code windows show the same folder, say one repo open in a few worktree sessions, it picks the one whose title starts with the session's name, which is there while the session's Claude tab is the active tab in its window. If no title says, the row still blinks but no icon glows, rather than lighting the wrong one.
 

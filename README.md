@@ -537,7 +537,8 @@ looking at. The file is rewritten when Deskbar updates.
 
 It also adds two hooks to `%USERPROFILE%\.claude\settings.json`, beside any you have: when a session
 finishes a reply or waits for a permission while you are on another workspace, that workspace's name
-and colour rail flash orange on the bar and the session's VS Code icon glows, until you go there. The
+and colour rail flash orange on the bar and the session's VS Code icon glows. When you go there, that
+window's border blinks orange for five seconds, or until you click or type in it. The
 hooks run `%APPDATA%\Deskbar\claude-hook.cmd`, which hands the hook's details to `deskbar.cmd claude-hook`
 and always exits 0. When Deskbar is not running, the hook prints nothing and the session carries on.
 
