@@ -54,6 +54,9 @@ internal sealed class TasksPanelRig
             // The shell holding the strip: the guard never repairs in a board test.
             WorkAreaOf = screen => new WindowRect(screen.Left + 1000, screen.Top, screen.Right - 1000, screen.Bottom),
             Tracing = () => false,
+            // Nothing covers the made-up screen full screen; asked of the real windows, the answer would depend on the
+            // machine running the suite.
+            CoveringWindow = _ => 0,
         };
     }
 

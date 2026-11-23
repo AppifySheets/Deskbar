@@ -68,6 +68,8 @@ public class TasksPanelTests
         public bool Tracing = true;
         // The tray overflow the bar believes is in front (FloatingBar.OverflowInFront), or 0.
         public nint Overflow;
+        // The window covering the panel's screen full screen (TopLevelWindows.CoveringWindow), or 0.
+        public nint Cover;
         public readonly Window Window = new()
         {
             WindowStyle = WindowStyle.None,
@@ -94,6 +96,7 @@ public class TasksPanelTests
                 Tracing = () => Tracing,
                 Trace = Lines.Add,
                 OverflowInFront = () => Overflow,
+                CoveringWindow = _ => Cover,
             };
 
         // Runs whatever the panel queued on its dispatcher (see the top of this file).
@@ -526,6 +529,58 @@ public class TasksPanelTests
 
         rig.Panel.StepAside(fullScreen: false);
         Assert.True(IsTopmost(rig.Window));
+        rig.Close();
+    });
+
+    // A full-screen window still up when the panel comes back (final review, Minor 2). The shell says ABN_FULLSCREENAPP
+    // only when the full-screen state changes, so a panel registering while a video is already full screen (the bar
+    // minimized and restored under it, or the panel opened then) hears nothing. It looks for itself as it shows, stays
+    // behind the covering window, and is back on top on the first tick after that window has gone. The cover is a real
+    // ordinary window, so "behind" is checked in the z-order.
+    [Fact]
+    public void A_panel_that_comes_back_while_a_full_screen_window_is_up_stays_behind_it() => StaThread.Run(() =>
+    {
+        var rig = new Rig().Open();
+        var panel = new WindowInteropHelper(rig.Window).Handle;
+        var video = new Window
+        {
+            WindowStyle = WindowStyle.None,
+            ResizeMode = ResizeMode.NoResize,
+            ShowInTaskbar = false,
+            ShowActivated = false,
+        };
+        video.Show();
+        var cover = new WindowInteropHelper(video).Handle;
+        rig.Panel.StepAside(fullScreen: true);
+        rig.Cover = cover;
+
+        // The bar minimized and restored while the video plays.
+        rig.Bar.OnNext(BarGone());
+        rig.Pump();
+        Assert.False(rig.Window.IsVisible);
+        rig.Bar.OnNext(Docked());
+        rig.Pump();
+        Assert.True(rig.Window.IsVisible);
+        Assert.False(IsTopmost(rig.Window));
+        Assert.True(Above(cover, panel));
+        rig.Panel.ReclaimTopmost();
+        Assert.False(IsTopmost(rig.Window));
+        Assert.Contains(rig.Lines, line => line.Contains("shown behind the full-screen window"));
+
+        // The video ends: back on top on the next tick.
+        rig.Cover = 0;
+        rig.Panel.ReclaimTopmost();
+        Assert.True(IsTopmost(rig.Window));
+        Assert.Contains(rig.Lines, line => line.Contains("has gone, back on top"));
+
+        // Opened while a full-screen window is already up: the same.
+        rig.Panel.Hide();
+        rig.Cover = cover;
+        rig.Panel.Show(TasksPanelLayout.DefaultWidth);
+        Assert.False(IsTopmost(rig.Window));
+        Assert.True(Above(cover, panel));
+
+        video.Close();
         rig.Close();
     });
 
