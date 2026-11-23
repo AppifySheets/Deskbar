@@ -165,6 +165,9 @@ public class FloatingBarPinsTests
     [InlineData("CLAUDECODE", true)]
     [InlineData("CLAUDE_CODE_ENTRYPOINT", true)]
     [InlineData("CLAUDE_CODE_SESSION_ATTENDED", true)]
+    // Final review, item 10: a Deskbar started from a background session's shell carries these two as well.
+    [InlineData("CLAUDE_JOB_DIR", true)]
+    [InlineData("CLAUDE_CODE_CHILD_SESSION", true)]
     [InlineData("CLAUDE_PROJECT_DIR", false)]
     [InlineData("PATH", false)]
     [InlineData("ELECTRON_ENABLE_LOGGING", false)]
