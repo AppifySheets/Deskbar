@@ -78,11 +78,12 @@ public class TasksBoardTests
     // Each read of the task clock is a minute later, so tasks are raised in the order the test makes them. Each read of
     // the click clock is a second later, so a click is never "right after a repaint" unless a test hands in a clock of
     // its own (the click guard's test does).
-    // `bringForward` sees the handle the board brings forward (the App's raise and activate, TasksBoard.Arrive).
+    // `bringForward` sees the handle the board brings forward (the App's raise and activate, TasksBoard.Arrive), and the
+    // seam answers that it activated the window; `activates` overrides that answer (a panel off the desktop in front).
     // Task 9's seams: a task's sessions as its thread lists them, "Start Claude on this" and a session's Open.
     // `edge` is the edge the bar docks on, so the panel docks there too (the grip's side follows it).
     static Board Build(Func<TaskItem, Result>? goTo = null, Action<nint>? bringForward = null, Func<DateTime>? clickClock = null,
-        Func<DateTimeOffset>? now = null, TaskSelection? selection = null,
+        Func<DateTimeOffset>? now = null, TaskSelection? selection = null, Func<bool>? activates = null,
         Func<TaskItem, IReadOnlyList<SessionView>>? sessionsOf = null, Action<Guid>? startClaude = null,
         Func<TaskItem, string, Result>? openSession = null, IObservable<System.Reactive.Unit>? sessionsChanged = null,
         string edge = "right")
@@ -108,7 +109,11 @@ public class TasksBoardTests
         {
             went.Add(t.Id);
             return Result.Success();
-        }), bringForward: bringForward, undoTimer: timers.Start, now: () => Start.AddHours(1), selection: selection,
+        }), bringForward: bringForward is null && activates is null ? null : hwnd =>
+        {
+            bringForward?.Invoke(hwnd);
+            return activates?.Invoke() ?? true;
+        }, undoTimer: timers.Start, now: () => Start.AddHours(1), selection: selection,
             sessionsOf: sessionsOf, startClaude: startClaude, openSession: openSession, sessionsChanged: sessionsChanged);
         return new Board { Harness = harness, Window = window, Controller = controller, Panel = panel, Tasks = tasks, Timers = timers, WentTo = went };
     }
@@ -426,13 +431,33 @@ public class TasksBoardTests
     [Fact]
     public void Shutting_down_an_open_panel_keeps_it_open_for_the_next_start() => StaThread.Run(() =>
     {
-        var t = Build();
+        using var t = Build();
         t.Controller.Show();
 
         t.Controller.Shutdown();
 
         Assert.Equal(new Deskbar.Core.Persistence.TasksPanelState(true, 720), t.Harness.Manager.State.TasksPanel);
         Assert.Equal("Undock", t.Panel.Calls[^1]);
+    });
+
+    // TASK 6 REVIEW, IMPORTANT 1. Application.Shutdown closes every window, and a close of the panel's window used to
+    // read as the user's Alt+F4 (OnClosing, ClosePanel, Hide), saving the panel closed: after a sign-out or the update's
+    // hand-over an open panel did not come back. Every app-shutdown path (ExitApp, the update's hand-over, SessionEnding)
+    // now calls the board's Shutdown before Application.Shutdown, so the close that follows is the app's, and the panel
+    // stays saved as open. Here the second step is what Application.Shutdown does to the window.
+    [Fact]
+    public void An_open_panel_whose_window_the_app_closes_stays_saved_as_open() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        t.Controller.Show();
+
+        t.Controller.Shutdown();
+        t.Window.Close();
+        // A late Hide (a queued pipe command, the bar's toggle) cannot undo the state saved for the next start either.
+        t.Controller.Hide();
+
+        Assert.Equal(new Deskbar.Core.Persistence.TasksPanelState(true, 720), t.Harness.Manager.State.TasksPanel);
+        Assert.True(t.Panel.Panel.IsShown);
     });
 
     // The start-up reopen of a panel left open: drawn and docked like a Show, but nothing is brought forward or
@@ -639,14 +664,34 @@ public class TasksBoardTests
 
     // The App's seam, in its order: raise to the top of the z-order, then activate ("tasks should become a top window,
     // now it's behind somewhere"), and trace the arrival so a live check can read what happened. It used to move the
-    // window to the desktop in front first; the panel is pinned to every desktop, so that step and its refusals went
-    // (plan 2026-11-23-tasks-panel, Task 6).
+    // window to the desktop in front first; the panel is pinned to every desktop, so the move went (plan
+    // 2026-11-23-tasks-panel, Task 6). A panel whose pin failed and that is off the desktop in front is traced and left
+    // alone, since activating it would take Petre to its desktop (Task 6 review, Minor 1).
     [Fact]
-    public void Arriving_raises_then_activates() => StaThread.Run(() =>
+    public void Arriving_raises_then_activates_only_on_the_desktop_in_front() => StaThread.Run(() =>
     {
         var steps = new List<string>();
-        TasksBoard.Arrive(0x42, () => steps.Add("raise"), () => steps.Add("activate"), trace => steps.Add("trace"));
-        Assert.Equal(["raise", "activate", "trace"], steps);
+        Assert.True(TasksBoard.Arrive(0x42, () => { steps.Add("ask"); return true; },
+            () => steps.Add("raise"), () => steps.Add("activate"), trace => steps.Add("trace")));
+        Assert.Equal(["ask", "raise", "activate", "trace"], steps);
+
+        steps.Clear();
+        Assert.False(TasksBoard.Arrive(0x42, () => { steps.Add("ask"); return false; },
+            () => steps.Add("raise"), () => steps.Add("activate"), trace => steps.Add("trace")));
+        Assert.Equal(["ask", "trace"], steps);
+    });
+
+    // An arrival the seam refused (the panel off the desktop in front after a failed pin) leaves the keyboard alone too:
+    // focusing the window would activate it, and Windows would follow it to that desktop.
+    [Fact]
+    public void A_panel_off_the_desktop_in_front_is_not_focused() => StaThread.Run(() =>
+    {
+        using var t = Build(activates: () => false);
+
+        t.Controller.Show();
+
+        Assert.False(t.Window.IsActive);
+        Assert.NotSame(t.Window.Toolbar, FocusManager.GetFocusedElement(t.Window));
     });
 
     // THE ROOT OF "IT'S BEHIND SOMEWHERE" (2026-11-23 live check). Opening the window gave the toolbar the keyboard
