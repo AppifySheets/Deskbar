@@ -240,7 +240,11 @@ public class ControlPipeTests
         string? received = null;
         var serving = Task.Run(async () =>
         {
-            await squatter.WaitForConnectionAsync();
+            // The client refuses the pipe right after connecting and closes it, and that can happen before this wait
+            // completes: Windows then fails the wait with "The pipe is being closed" (seen on the CI runner). That is
+            // the client hanging up without a word, which is what this test wants, so it counts as nothing received.
+            try { await squatter.WaitForConnectionAsync(); }
+            catch (IOException) { return; }
             using var reader = new StreamReader(squatter, new UTF8Encoding(false), false, 1024, leaveOpen: true);
             var read = reader.ReadLineAsync();
             if (await Task.WhenAny(read, Task.Delay(2000)) == read) received = read.Result;
