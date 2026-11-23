@@ -2,19 +2,22 @@
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="Tasks"
-        WindowStyle="SingleBorderWindow" ResizeMode="CanResize" Background="#FF1E1F24"
-        Width="800" Height="560" MinWidth="692" MinHeight="260"
-        ShowInTaskbar="True">
-    <!-- THE TASKS WINDOW (docs/superpowers/specs/2026-11-22-tasks-board-design.md, "The window"; mockup
-         .superpowers/brainstorm/876-1795339550/content/tasks-window.html): every task and its status, grouped, with
-         filters by status and by workspace, and a comment thread under each line. Display only: TasksBoard decides
+        WindowStyle="None" ResizeMode="NoResize" Background="#FF1E1F24"
+        ShowInTaskbar="False" Topmost="True" ShowActivated="False">
+    <!-- THE TASKS PANEL (docs/superpowers/specs/2026-11-23-tasks-panel-design.md, "The panel window"; the board itself
+         is docs/superpowers/specs/2026-11-22-tasks-board-design.md, "The window"): every task and its status, grouped,
+         with filters by status and by workspace, and a comment thread under each line. Display only: TasksBoard decides
          what is shown and what a click does.
 
-         A regular window, a page of its own (Petre: "can i have a separate page for all tasks?"): a title bar, resizable,
-         in Alt+Tab and on the taskbar, and it stays open when he clicks into another app. Closing it hides it, and it
-         opens again where he left it (TasksWindow.Open). Not topmost: it is a page to work in, not a popup over the bar.
-         A size of its own rather than SizeToContent: the list scrolls inside it, so opening a thread or a new task
-         arriving never moves the window's edges.
+         A full-height panel docked just inside the bar, as a second shell app bar (TasksPanel places it and reserves its
+         strip), so maximized windows, Snap and new windows keep clear of it. It replaced the floating window that had a
+         title bar, a remembered place and a size of its own (plan 2026-11-23-tasks-panel, Task 6). So: no title bar, not
+         resizable by Windows, not on the taskbar, not in Alt+Tab (WS_EX_TOOLWINDOW, TasksWindow's SourceInitialized),
+         topmost like the bar. No Width, Height or MinWidth here on purpose: the panel sets the window's rectangle in
+         physical pixels, and a size of WPF's own would be applied again on Show over the docked one. The width is the
+         grip's (below), never under the panel's 360 DIP (TasksPanelLayout). The × at the end of the toolbar closes it,
+         as `tasks-window hide` does. The list scrolls inside it, so opening a thread or a new task arriving never moves
+         its edges.
 
          The rows, the chips and the toolbar's buttons are built in code-behind, like every list in this app, so each
          can carry its workspace's colour. The templates below are the only styling: the app runs WPF's Fluent theme,
@@ -54,7 +57,28 @@
             <ScrollViewer x:Name="PART_ContentHost" Focusable="False"
                           HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Disabled"/>
         </ControlTemplate>
+        <!-- The width grip: a hairline down the middle of a 6 DIP band, the whole band taking the press, and the line
+             going blue under the pointer and while dragged. -->
+        <ControlTemplate x:Key="GripTemplate" TargetType="Thumb">
+            <Border Background="Transparent">
+                <Rectangle x:Name="Line" Width="1" Fill="#FF33353C" HorizontalAlignment="Center"/>
+            </Border>
+            <ControlTemplate.Triggers>
+                <Trigger Property="IsMouseOver" Value="True">
+                    <Setter TargetName="Line" Property="Fill" Value="#FF4F8CFF"/>
+                </Trigger>
+                <Trigger Property="IsDragging" Value="True">
+                    <Setter TargetName="Line" Property="Fill" Value="#FF4F8CFF"/>
+                </Trigger>
+            </ControlTemplate.Triggers>
+        </ControlTemplate>
     </Window.Resources>
+    <!-- The grip on the inner edge, the one facing the windows (TasksWindow.SetInnerEdge moves it to the other side when
+         the panel docks on the left), then the board. Docked beside the board, not over it, so it never covers the
+         list's scroll bar. -->
+    <DockPanel>
+    <Thumb x:Name="Grip" DockPanel.Dock="Left" Width="6" Cursor="SizeWE" Template="{StaticResource GripTemplate}"
+           ToolTip="Drag to change the panel's width"/>
     <Border Background="#FF1E1F24">
         <DockPanel>
             <!-- The toolbar: "Tasks", the status filters with their counts, the workspace filter and "+ Add".
@@ -100,4 +124,5 @@
             </Grid>
         </DockPanel>
     </Border>
+    </DockPanel>
 </Window>

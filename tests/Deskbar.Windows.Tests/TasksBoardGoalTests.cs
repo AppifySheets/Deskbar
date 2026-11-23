@@ -61,7 +61,10 @@ public class TasksBoardGoalTests
         var tasks = new TaskService(new MemoryTasks(), () => Start.AddMinutes(minutes++));
         var goals = new GoalService(new MemoryGoals(), tasks, () => Start.AddMinutes(minutes++), () => Today);
         var window = new TasksWindow { Quiet = true, ClickClock = () => ClickStart.AddSeconds(seconds++), Now = () => Start.AddHours(1) };
-        var controller = new TasksBoard(window, tasks, harness.Manager, _ => Result.Success(), now: () => Start.AddHours(1),
+        // Behind the docked panel, every seam faked (TasksPanelRig), at the floating window's 720 DIP as in TasksBoardTests.
+        harness.Manager.SaveTasksPanel(new Deskbar.Core.Persistence.TasksPanelState(false, 720));
+        var panel = new TasksPanelRig(window).Docked();
+        var controller = new TasksBoard(window, panel.Panel, tasks, harness.Manager, _ => Result.Success(), now: () => Start.AddHours(1),
             goals: withGoals ? goals : null);
         return new Board { Harness = harness, Window = window, Controller = controller, Tasks = tasks, Goals = goals };
     }
@@ -91,7 +94,7 @@ public class TasksBoardGoalTests
     {
         using var t = Build();
         var id = t.Tasks.AddNote("note", t.Gepha).Value.Id;
-        t.Controller.Open(Rect.Empty);
+        t.Controller.Show();
 
         var more = t.Window.OpenMenuFor(id);
         Assert.DoesNotContain(ItemsOf(more), i => TextOf(i) == "Goal");
@@ -117,7 +120,7 @@ public class TasksBoardGoalTests
         var linked = t.Tasks.AddNote("linked", t.Gepha).Value.Id;
         t.Tasks.AddNote("free", t.Gepha);
         t.Goals.LinkTask(linked, goal.Id);
-        t.Controller.Open(Rect.Empty);
+        t.Controller.Show();
 
         GoalFilterButton(t.Window)!.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
 
@@ -134,7 +137,7 @@ public class TasksBoardGoalTests
         using var t = Build(withGoals: false);
         var id = t.Tasks.AddNote("note", t.Gepha).Value.Id;
         t.Goals.Add("Ship it", t.Goals.ThisWeek);
-        t.Controller.Open(Rect.Empty);
+        t.Controller.Show();
 
         Assert.DoesNotContain(ItemsOf(t.Window.OpenMenuFor(id)), i => TextOf(i) == "Goal");
         Assert.Null(GoalFilterButton(t.Window));
@@ -152,7 +155,7 @@ public class TasksBoardGoalTests
         var monthly = t.Goals.Add("Store listing", t.Goals.ThisMonth).Value;
         var id = t.Tasks.AddNote("note", t.Gepha).Value.Id;
         t.Goals.LinkTask(id, weekly.Id);
-        t.Controller.Open(Rect.Empty);
+        t.Controller.Show();
 
         var menu = t.Window.OpenGoalMenu(id);
 
@@ -179,7 +182,7 @@ public class TasksBoardGoalTests
         var id = t.Tasks.AddNote("note", t.Gepha).Value.Id;
         t.Tasks.SetFlag(id, TaskFlag.Important, true);
         var before = t.Tasks.Board.Tasks.Single(x => x.Id == id);
-        t.Controller.Open(Rect.Empty);
+        t.Controller.Show();
         var keys = t.Window.Keys.ToArray();
 
         Named(t.Window.OpenGoalMenu(id), "Ship it").RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
@@ -202,7 +205,7 @@ public class TasksBoardGoalTests
         var goal = t.Goals.Add("Ship it", t.Goals.ThisWeek).Value;
         t.Goals.MarkDone(goal.Id);
         var id = t.Tasks.AddNote("note", t.Gepha).Value.Id;
-        t.Controller.Open(Rect.Empty);
+        t.Controller.Show();
 
         Assert.Equal("The goal is done", t.Controller.SetGoal(id, goal.Id).Error);
         Assert.Equal("The goal is done", t.Window.ProblemText.Text);
@@ -215,7 +218,7 @@ public class TasksBoardGoalTests
         using var t = Build();
         t.Goals.Add("Last week", t.Goals.ThisWeek.Previous());
         var id = t.Tasks.AddNote("note", t.Gepha).Value.Id;
-        t.Controller.Open(Rect.Empty);
+        t.Controller.Show();
 
         var menu = t.Window.OpenGoalMenu(id);
 
@@ -239,7 +242,7 @@ public class TasksBoardGoalTests
         t.Goals.LinkTask(onMonth, monthly.Id);
         t.Goals.LinkTask(onWeek, weekly.Id);
         t.Goals.LinkTask(onOther, other.Id);
-        t.Controller.Open(Rect.Empty);
+        t.Controller.Show();
         Assert.Contains("Open 4", t.Window.FilterLabels);
 
         var filterMenu = t.Window.OpenGoalFilterMenu();
@@ -278,7 +281,7 @@ public class TasksBoardGoalTests
         var goal = t.Goals.Add("Ship it", t.Goals.ThisWeek).Value;
         t.Goals.Add("Keep one", t.Goals.ThisWeek);
         t.Tasks.AddNote("note", t.Gepha);
-        t.Controller.Open(Rect.Empty);
+        t.Controller.Show();
         t.Controller.FilterGoal(TaskGoalFilter.On(goal));
         Assert.Empty(t.Window.Keys);
 
@@ -293,7 +296,7 @@ public class TasksBoardGoalTests
     {
         using var t = Build();
         var goal = t.Goals.Add("Ship it", t.Goals.ThisWeek).Value;
-        t.Controller.Open(Rect.Empty);
+        t.Controller.Show();
         t.Controller.FilterGoal(TaskGoalFilter.On(goal));
         Assert.Equal("Goal: Ship it", t.Window.GoalFilterLabel);
 
@@ -309,7 +312,7 @@ public class TasksBoardGoalTests
         using var t = Build();
         t.Goals.Add("Ship it", t.Goals.ThisWeek);
         var id = t.Tasks.AddNote("note", t.Gepha).Value.Id;
-        t.Controller.Open(Rect.Empty);
+        t.Controller.Show();
         var rebuilds = t.Window.Rebuilds;
 
         var menu = t.Window.OpenGoalMenu(id);
@@ -331,7 +334,7 @@ public class TasksBoardGoalTests
         using var t = Build();
         var goal = t.Goals.Add("Ship it", t.Goals.ThisWeek).Value;
         var id = t.Tasks.AddNote("note", t.Gepha).Value.Id;
-        t.Controller.Open(Rect.Empty);
+        t.Controller.Show();
         var rebuilds = t.Window.Rebuilds;
 
         t.Goals.Rename(goal.Id, "Ship the goals planner");
@@ -353,7 +356,7 @@ public class TasksBoardGoalTests
         var old = t.Goals.Add("Last week's", t.Goals.ThisWeek.Previous()).Value;
         var id = t.Tasks.AddNote("note", t.Gepha).Value.Id;
         t.Goals.LinkTask(id, old.Id);
-        t.Controller.Open(Rect.Empty);
+        t.Controller.Show();
 
         var menu = t.Window.OpenGoalMenu(id);
 
@@ -368,11 +371,11 @@ public class TasksBoardGoalTests
     {
         using var t = Build();
         var goal = t.Goals.Add("Ship it", t.Goals.ThisWeek).Value;
-        t.Controller.Open(Rect.Empty);
+        t.Controller.Show();
         t.Controller.FilterGoal(TaskGoalFilter.On(goal));
-        t.Controller.Dismiss();
+        t.Controller.Hide();
 
-        t.Controller.Open(Rect.Empty);
+        t.Controller.Show();
 
         Assert.Equal("Goal: all", t.Window.GoalFilterLabel);
     });

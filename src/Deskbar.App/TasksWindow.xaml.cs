@@ -1,4 +1,3 @@
-using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Automation;
 using System.Windows.Controls;
@@ -10,7 +9,6 @@ using System.Windows.Media;
 using System.Reactive.Linq;
 using CSharpFunctionalExtensions;
 using Deskbar.Core.Goals;
-using Deskbar.Core.Persistence;
 using Deskbar.Core.Tasks;
 using Deskbar.Windows.Monitoring;
 
@@ -20,16 +18,21 @@ namespace Deskbar.App;
 // .superpowers/brainstorm/876-1795339550/content/tasks-window.html). Display only, like Quick find's window: it draws
 // the TasksView its controller (TasksBoard) hands it and passes every click back through TasksWindowActions.
 //
-//   A PAGE OF ITS OWN (Petre: "can i have a separate page for all tasks?"): a regular window with a title bar,
-//   resizable, in Alt+Tab and on the taskbar, which stays open when he clicks into another app.
-//   Open / Dismiss   Open shows it where he last left it (AppState.TasksWindow: the size, the place and so the
-//                    screen, across restarts), or beside the bar the first time and whenever no screen holds that
-//                    place any more (PlaceNear). Opening a window that is already open brings it forward instead and
-//                    keeps its view (TasksBoard.Open). Closing it (the title bar's X) only hides it until the app
-//                    exits (CloseForGood): a closed WPF window can never be shown again and the next "+N more" would
-//                    throw. Every close, and every move or resize a second after it settles, hands the place to the
-//                    controller to remember. It opens on the board: nothing typed into has the keyboard (the first
-//                    task window opened onto an entry form, and Petre did not like it).
+//   THE DOCKED PANEL (docs/superpowers/specs/2026-11-23-tasks-panel-design.md, "The panel window"; plan
+//   2026-11-23-tasks-panel, Task 6). It was a page of its own, a regular window with a title bar, a place remembered
+//   across restarts (AppState.TasksWindow, now ignored), a maximize and a Matrix that grew it; all of that went when it
+//   became a full-height panel docked inside the bar. TasksPanel places it, reserves its strip and shows or hides it;
+//   this file draws the board and the width grip.
+//   Open / Dismiss   Open readies a fresh view (no add box, no edit, threads folded) and Dismiss ends one (menus
+//                    closed, edits dropped); TasksBoard calls them around TasksPanel's Show and Hide, which do the
+//                    showing. Closing the window (Alt+F4) never closes it: it asks the controller to close the panel
+//                    (ClosePanel), until the app exits (CloseForGood), since a closed WPF window can never be shown
+//                    again and the next "All tasks" would throw. It opens on the board: nothing typed into has the
+//                    keyboard (the first task window opened onto an entry form, and Petre did not like it).
+//   The grip         a 6 DIP band on the inner edge, the one facing the windows (SetInnerEdge): a drag previews the
+//                    new width on the window itself and hands it to the controller only at the drag's end
+//                    (ResizePanel), which saves it and re-docks the panel, as the bar's reservation follows its own
+//                    width drag only when it ends. TasksWindow.Grip.cs.
 //   Present          draws a view. A view that would draw what is already drawn draws nothing, and a view that
 //                    arrives while drawing would pull something out from under Petre waits (MustWait): one of the
 //                    window's menus open (the bar's #77 lesson), a rename under way, or a press in flight on the window
@@ -68,23 +71,9 @@ public partial class TasksWindow : Window
     static readonly Brush NoneFill = Frozen(0xFF, 0x33, 0x33, 0x33);
     static readonly Brush NoneInk = Frozen(0xFF, 0x99, 0x99, 0x99);
 
-    // The gap kept between the bar and the window, and the window's size when the screen allows it (the mockup's
-    // 720 wide; tall enough for a dozen lines and an open thread).
-    const double Gap = 4;
-
-    // How long a move or a resize must have settled before the place is remembered, so a drag writes state.json once
-    // rather than on every pixel.
-    static readonly TimeSpan PlaceSettles = TimeSpan.FromSeconds(1);
-
-    // DWMWA_USE_IMMERSIVE_DARK_MODE: a dark title bar over the dark page.
-    const uint DarkTitleBar = 20;
-
-    // MONITOR_DEFAULTTONULL: no monitor at all for a point on none, rather than the nearest one.
-    const uint MonitorDefaultToNull = 0;
-
-    // 800 since the status chip column (72 DIP) joined the line, so a fresh window's titles keep the width they had at 720.
-    const double PreferredWidth = 800;
-    const double PreferredHeight = 560;
+    // THE FLOATING WINDOW'S PLACEMENT LIVED HERE (Gap, PlaceSettles, the dark title bar, PreferredWidth and Height, Place,
+    // PlaceNear, PlaceAt, CurrentPlace, NoteNormal, MaximizeIfRemembered). Removed with the floating window by the tasks
+    // panel plan (docs/superpowers/plans/2026-11-23-tasks-panel.md, Task 6): the panel's place is TasksPanel's.
 
     // At most this many session squares on a line; the words beside them give the count.
     const int SessionSquares = 3;
@@ -125,13 +114,6 @@ public partial class TasksWindow : Window
     readonly Dictionary<Guid, bool> closing = [];
     readonly Dictionary<Guid, string> drafts = [];
 
-    // Where it first opens: the bar's rectangle in device pixels (empty: centred on the screen of the window that was
-    // in front). And the window's last rectangle in its normal state, in device pixels, which is what is remembered (a
-    // maximized window remembers the rectangle it returns to, and that it was maximized).
-    Rect near = Rect.Empty;
-    nint fallbackAnchor;
-    Rect lastNormal = Rect.Empty;
-    readonly IDisposable placeWatch;
     readonly IDisposable ageWatch;
 
     // The workspace chosen in the add box, or none chosen yet (the view's AddTarget then).
@@ -143,36 +125,21 @@ public partial class TasksWindow : Window
     public TasksWindow()
     {
         InitializeComponent();
-        // Its own checklist icon (TasksIcon): the bar lists this window like any app window and draws it by this icon,
-        // so Petre can find it on a workspace row and drag it where he wants it.
+        // Its own checklist icon (TasksIcon). The panel is no longer listed on the bar (the App opts its handle out, as
+        // it does the bar's own), but Windows still asks a window for its icon in a debug dump or a trace.
         Icon = TasksIcon.Image;
         // Esc undoes the innermost thing; F2 edits the selected line's title in place (Ruling 38).
         PreviewKeyDown += (_, e) => e.Handled = (e.Key == Key.Escape && Escape()) || (e.Key == Key.F2 && EditSelected());
+        // Never in Alt+Tab: WS_EX_TOOLWINDOW, for the reason the bar gives in its own OnSourceInitialized
+        // (ShowInTaskbar false alone keeps a window off the taskbar but not out of Alt+Tab). The panel is part of the
+        // bar, which is not in Alt+Tab either (spec "The panel window").
         SourceInitialized += (_, _) =>
         {
-            var on = 1;
-            _ = NativeMethods.DwmSetWindowAttribute(new WindowInteropHelper(this).Handle, DarkTitleBar, ref on, sizeof(int));
+            var hwnd = new WindowInteropHelper(this).Handle;
+            NativeMethods.SetWindowLongPtr(hwnd, NativeMethods.GWL_EXSTYLE,
+                NativeMethods.GetWindowLongPtr(hwnd, NativeMethods.GWL_EXSTYLE) | (nint)NativeMethods.WS_EX_TOOLWINDOW);
         };
-        // Its place is remembered once a move or a resize has settled (PlaceSettles), and on every close (Dismiss). The
-        // rectangle in the normal state is noted on every change, since a maximized window's own rectangle is the
-        // screen's, not the one it returns to.
-        //
-        // ON A TILED WORKSPACE the window is a tile (it tiles like any app window, App.StartTiling), so the Tiler moves
-        // it, and the place remembered here becomes the tile's rectangle. That is fine and intended: a tiled window
-        // follows its tile, and the Tiler places it again whenever it shows, so the remembered place only matters when
-        // the window opens on a workspace that is not tiled, where it opens where it was last left.
         var context = new System.Windows.Threading.DispatcherSynchronizationContext(Dispatcher);
-        placeWatch = Observable.Merge(
-                Observable.FromEventPattern(this, nameof(LocationChanged)).Select(_ => System.Reactive.Unit.Default),
-                Observable.FromEventPattern(this, nameof(SizeChanged)).Select(_ => System.Reactive.Unit.Default),
-                Observable.FromEventPattern(this, nameof(StateChanged)).Select(_ => System.Reactive.Unit.Default))
-            .Do(_ => NoteNormal())
-            .Throttle(PlaceSettles)
-            .ObserveOn(context)
-            .Subscribe(_ =>
-            {
-                if (IsOpen && !Quiet) Actions?.Remember(CurrentPlace());
-            });
         // The ages' minute (RefreshAges), only while the window is open, on the window's own thread.
         ageWatch = Observable.Interval(TimeSpan.FromMinutes(1)).ObserveOn(context).Subscribe(_ =>
         {
@@ -184,15 +151,18 @@ public partial class TasksWindow : Window
         AddBox.TextChanged += (_, _) => AddPlaceholder.Visibility = AddBox.Text.Length == 0 ? Visibility.Visible : Visibility.Collapsed;
         AddBox.PreviewKeyDown += (_, e) => e.Handled = PressInAdd(e.Key) != KeyOutcome.Ignored;
         WireDrag();
+        WireGrip();
         BuildToolbarEnd();
     }
 
     // The controller's side, set once by TasksBoard's constructor.
     internal TasksWindowActions? Actions { get; set; }
 
-    // For the tests only: shown without taking the focus and parked off the virtual screen, as the bar under test is.
+    // For the tests only: never activates itself (ActivateHere). Where it is shown is the panel's, which the tests dock
+    // on a made-up screen off every real monitor (TasksPanelRig).
     internal bool Quiet { get; init; }
 
+    // The user's open: from Open to Dismiss. TasksBoard keeps it in step with TasksPanel.IsShown.
     public bool IsOpen { get; private set; }
 
     // For the controller and the tests: what is drawn, in order.
@@ -241,12 +211,15 @@ public partial class TasksWindow : Window
         return doubled;
     }
 
+    // Alt+F4 on the panel closes the panel, through the controller, so its strip goes back to the shell and the saved
+    // state says closed, exactly as the toolbar's × does. The WPF window itself is closed only by CloseForGood.
     protected override void OnClosing(System.ComponentModel.CancelEventArgs e)
     {
         if (!closingForGood)
         {
             e.Cancel = true;
-            Dismiss();
+            if (Actions is { } actions) actions.ClosePanel();
+            else Dismiss();
         }
         base.OnClosing(e);
     }
@@ -254,20 +227,17 @@ public partial class TasksWindow : Window
     public void CloseForGood()
     {
         closingForGood = true;
-        placeWatch.Dispose();
         ageWatch.Dispose();
         Close();
     }
 
     /// <summary>
-    /// Shown where it was last left (<paramref name="remembered"/>, when a screen still holds it), else clear of
-    /// <paramref name="bar"/> (the bar's rectangle on screen, device pixels; empty to centre it on the screen of the
-    /// window in front). The keyboard goes to the toolbar, never to a text box: the window opens on the board.
+    /// A fresh view, before the panel shows the window: no add box, nothing being edited or renamed, threads folded, the
+    /// list at its top. It does not show the window: TasksPanel does, once the bar's strip stands. The keyboard goes to
+    /// the toolbar, never to a text box (FocusBoard, after the controller brought the window forward).
     /// </summary>
-    public void Open(Rect bar, Maybe<TasksWindowState> remembered)
+    public void Open()
     {
-        fallbackAnchor = NativeMethods.GetForegroundWindow();
-        near = bar;
         HideAdd();
         settledOpen.Clear();
         earlierOpen.Clear();
@@ -278,69 +248,37 @@ public partial class TasksWindow : Window
         editingComment = null;
         commentEditor = null;
         IsOpen = true;
-        // Shown WITHOUT activation (fix round 1, Critical 1): the controller brings it to Petre afterwards, moving it to
-        // the desktop in front before anything activates it (TasksBoard.Open, Arrive).
+        // Shown WITHOUT activation (fix round 1, Critical 1): the controller brings it forward afterwards (raise, then
+        // activate; TasksBoard.Arrive). The XAML says so too; set again here because a test may flip it.
         ShowActivated = false;
-        // Placed before Show, so it does not open somewhere else first. A maximized window is shown at its normal place
-        // and maximized only once it has arrived (MaximizeIfRemembered, after the move to the desktop in front): showing
-        // maximized activates the window whatever ShowActivated says (review I-2).
-        WindowState = WindowState.Normal;
-        // The List's minimum while it is placed, so a remembered List width is not held at the Matrix's; the Matrix
-        // grows it once it is on screen (FitWidthToView, below).
-        listNormal = null;
-        MinWidth = ListMinWidth;
-        var placed = remembered.HasValue && PlaceAt(remembered.Value);
-        if (!placed) Place();
-        maximizeOnArrival = placed && remembered.Value.Maximized;
-        Show();
-        // Show applies the window's Width and Height at the DPI the window was created with. PlaceAt set them to the
-        // remembered pixels at that DPI, so on the same screen this changes nothing; on a screen of another DPI the
-        // window can show one frame at the scaled size before this puts the remembered device rectangle back.
-        if (placed) PlaceDevice(remembered.Value);
-        NoteNormal();
-        FitWidthToView(matrixShown);
         Scroller.ScrollToTop();
         // NO Toolbar.Focus() HERE (2026-11-23, "tasks should become a top window, now it's behind somewhere"). A WPF
         // Focus() on an element of a window that is not active activates that window (measured on the hidden desktop),
-        // so this used to make the window the foreground one before the controller had moved it to the desktop in
-        // front, and the seam's SetForegroundWindow on what already was the foreground window then raised nothing. The
+        // and the seam's SetForegroundWindow on what already was the foreground window then raised nothing. The
         // controller hands the keyboard over once the window has arrived (FocusBoard, from TasksBoard.Arrived).
     }
 
     /// <summary>
     /// The keyboard to the toolbar, never to a text box (the window opens on the board). Only once the controller has
-    /// brought the window to the desktop in front and activated it: focusing an inactive window activates it.
+    /// brought the window forward and activated it: focusing an inactive window activates it.
     /// </summary>
     internal void FocusBoard() => Toolbar.Focus();
 
-    // Whether the window, opened at its remembered normal place, is to be maximized once it has arrived.
-    bool maximizeOnArrival;
-
     /// <summary>
-    /// Maximizes the window when it was left maximized, once the controller has brought it to the desktop in front
-    /// (review I-2: SW_SHOWMAXIMIZED activates, so it must not run before the move).
-    /// </summary>
-    internal void MaximizeIfRemembered()
-    {
-        if (!maximizeOnArrival) return;
-        maximizeOnArrival = false;
-        WindowState = WindowState.Maximized;
-    }
-
-    /// <summary>
-    /// The window activating itself, only when the controller has no seam to bring it (and counted for the tests):
-    /// restored first if it was minimized, since nothing else will.
+    /// The window activating itself, only when the controller has no seam to bring it (and counted for the tests).
     /// </summary>
     internal void ActivateHere()
     {
         SelfActivations++;
-        if (WindowState == WindowState.Minimized) WindowState = WindowState.Normal;
         if (!Quiet) Activate();
     }
 
     internal int SelfActivations { get; private set; }
 
-    /// <summary>Hides it (the title bar's X, or `tasks-window hide`), remembering where it was.</summary>
+    /// <summary>
+    /// The view ends (the × , Alt+F4 or `tasks-window hide`, through TasksBoard.Hide): a menu on show closes and an edit
+    /// under way is dropped. It does not hide the window: TasksPanel does, after giving its strip back.
+    /// </summary>
     public void Dismiss()
     {
         if (!IsOpen) return;
@@ -351,50 +289,7 @@ public partial class TasksWindow : Window
         descriptionBox = null;
         editingComment = null;
         commentEditor = null;
-        NoteNormal();
-        Actions?.Remember(CurrentPlace());
-        Hide();
     }
-
-    /// <summary>Where the window is: its normal rectangle in device pixels, and whether it is maximized.</summary>
-    // While the Matrix has grown the window, the List's rectangle (ListRect, TasksWindow.Matrix.cs).
-    internal TasksWindowState CurrentPlace() => PlaceOf(ListRect());
-
-    TasksWindowState PlaceOf(Rect place) =>
-        new((int)place.Left, (int)place.Top, (int)place.Width, (int)place.Height, WindowState == WindowState.Maximized);
-
-    // The window's rectangle as Windows has it, noted only in the normal state: a maximized window's rectangle is the
-    // screen's and a minimized one's is nonsense (CLAUDE.md, Traps), and neither is where it returns to.
-    void NoteNormal()
-    {
-        var handle = new WindowInteropHelper(this).Handle;
-        if (handle == 0 || WindowState != WindowState.Normal || !NativeMethods.GetWindowRect(handle, out var rect)) return;
-        if (rect.Right - rect.Left > 0 && rect.Bottom - rect.Top > 0)
-            lastNormal = new Rect(rect.Left, rect.Top, rect.Right - rect.Left, rect.Bottom - rect.Top);
-    }
-
-    // The remembered place, when a screen still holds its middle, put on the window in DEVICE PIXELS (fix round 1,
-    // Important 3). The first version divided by the target screen's DPI and assigned Left/Top, which WPF then turned
-    // back into pixels at the DPI of the screen the window was created on, so on mixed DPI it landed in the wrong place
-    // and size. SetWindowPos on the (still hidden) handle takes the stored pixels as they are. False when no screen
-    // holds the place any more (a monitor unplugged since); the caller then places it beside the bar.
-    bool PlaceAt(TasksWindowState place)
-    {
-        if (place.Width <= 0 || place.Height <= 0) return false;
-        var middle = new NativeMethods.POINT { X = place.Left + place.Width / 2, Y = place.Top + place.Height / 2 };
-        if (NativeMethods.MonitorFromPoint(middle, MonitorDefaultToNull) == 0) return false;
-        PlaceDevice(place);
-        // The same size as WPF's own Width and Height, at the DPI the hidden window has now, so Show does not apply the
-        // XAML size for a frame (review minor: the post-Show placement could flash one frame).
-        var dpi = VisualTreeHelper.GetDpi(this);
-        Width = place.Width / dpi.DpiScaleX;
-        Height = place.Height / dpi.DpiScaleY;
-        return true;
-    }
-
-    void PlaceDevice(TasksWindowState place) =>
-        NativeMethods.SetWindowPos(new WindowInteropHelper(this).EnsureHandle(), 0, place.Left, place.Top, place.Width, place.Height,
-            NativeMethods.SWP_NOZORDER | NativeMethods.SWP_NOACTIVATE);
 
     public void ShowProblem(string? text)
     {
@@ -513,7 +408,6 @@ public partial class TasksWindow : Window
         closing.Clear();
         // The List or the Matrix (TasksWindow.Matrix.cs), whichever the switch says; the other is emptied and hidden.
         matrixShown = view.Matrix;
-        FitWidthToView(view.Matrix);
         Scroller.Visibility = view.Matrix ? Visibility.Collapsed : Visibility.Visible;
         MatrixGrid.Visibility = view.Matrix ? Visibility.Visible : Visibility.Collapsed;
         MatrixGrid.Children.Clear();
@@ -616,8 +510,8 @@ public partial class TasksWindow : Window
     Button? listSwitch;
     Button? matrixSwitch;
 
-    // The view switch and "+ Add", made once. The title bar's X closes the window, so the toolbar has no close button
-    // of its own.
+    // The view switch, "+ Add" and the panel's ×, made once. The × is the panel's close (spec "The panel window": its
+    // toolbar gains a close button at the right end, after "+ Add"), since a panel has no title bar to close it from.
     void BuildToolbarEnd()
     {
         listSwitch = Flat(new TextBlock { Text = "List", Foreground = Ink, FontSize = 11 }, "List", () => Actions?.ShowMatrix(false), new Thickness(8, 2, 8, 2));
@@ -630,6 +524,11 @@ public partial class TasksWindow : Window
         var add = Flat(new TextBlock { Text = "+ Add", Foreground = Ink, FontSize = 11 }, "Add", ShowAdd, new Thickness(10, 2, 10, 2));
         add.ToolTip = "Write a note";
         ToolbarEnd.Children.Add(add);
+        var close = Flat(new TextBlock { Text = "×", Foreground = Ink, FontSize = 13 }, "Close the panel", () => Actions?.ClosePanel(), new Thickness(7, 0, 7, 1));
+        close.Background = Brushes.Transparent;
+        close.Margin = new Thickness(6, 0, 0, 0);
+        close.ToolTip = "Close the tasks panel";
+        ToolbarEnd.Children.Add(close);
     }
 
     UIElement Header(TaskGroupView group) => new TextBlock
@@ -772,8 +671,9 @@ public partial class TasksWindow : Window
     // fits), sessions, assignee (46 DIP, "Claude" fits), age, workspace chip,
     // comments, action (close or Reopen), "…". Fixed widths, shared by every line, so each column sits at the same x on
     // every line. The sessions column is wide enough for "2 sessions, 1 live" (116 DIP, so the words never spill into the
-    // age column; it is empty on a note), the age is left-aligned in its own so its x never follows the text length, and the window's minimum width
-    // (ListMinWidth, 692 DIP since the status column took 72) keeps the title a usable width even with the list's scroll bar showing (review I-3).
+    // age column; it is empty on a note), the age is left-aligned in its own so its x never follows the text length, and
+    // the full line wants 692 DIP (the floating window's old minimum width, 620 before the status column took 72) to keep
+    // the title a usable width even with the list's scroll bar showing (review I-3).
     static readonly IReadOnlyList<GridLength> LineColumns =
         [new(22), new(1, GridUnitType.Star), new(38), new(72), new(116), new(46), new(44), new(88), new(40), new(52), new(24)];
 
@@ -1969,77 +1869,5 @@ public partial class TasksWindow : Window
         var brush = new SolidColorBrush(Color.FromArgb(a, r, g, b));
         brush.Freeze();
         return brush;
-    }
-
-    // --- placement ---------------------------------------------------------------------------------------------------
-
-    // On the bar's screen, in that screen's own DPI (Quick find's reason: a window-scoped DPI query can be stale right
-    // after Show), at the preferred size or as much of it as the work area has, clear of the bar (PlaceNear). Opened
-    // without a bar, centred across the screen of the window that was in front, an eighth of the way down.
-    void Place()
-    {
-        if (Quiet)
-        {
-            Left = Top = -32000;
-            return;
-        }
-        var monitor = near.IsEmpty
-            ? NativeMethods.MonitorFromWindow(fallbackAnchor != 0 ? fallbackAnchor : new WindowInteropHelper(this).Handle, NativeMethods.MONITOR_DEFAULTTONEAREST)
-            : NativeMethods.MonitorFromPoint(new NativeMethods.POINT { X = (int)(near.Left + near.Width / 2), Y = (int)(near.Top + near.Height / 2) }, NativeMethods.MONITOR_DEFAULTTONEAREST);
-        var info = new NativeMethods.MONITORINFO { cbSize = Marshal.SizeOf<NativeMethods.MONITORINFO>() };
-        if (!NativeMethods.GetMonitorInfo(monitor, ref info)) return;
-        NativeMethods.GetDpiForMonitor(monitor, NativeMethods.MDT_EFFECTIVE_DPI, out var dpiX, out var dpiY);
-        var (scaleX, scaleY) = (dpiX / 96.0, dpiY / 96.0);
-        var work = new Rect(info.rcWork.Left / scaleX, info.rcWork.Top / scaleY,
-            (info.rcWork.Right - info.rcWork.Left) / scaleX, (info.rcWork.Bottom - info.rcWork.Top) / scaleY);
-        Width = Math.Max(320, Math.Min(PreferredWidth, work.Width - 2 * Gap));
-        Height = Math.Max(240, Math.Min(PreferredHeight, work.Height - 2 * Gap));
-
-        if (near.IsEmpty)
-        {
-            Left = work.Left + Math.Max(0, (work.Width - Width) / 2);
-            Top = work.Top + Math.Max(0, Math.Min(work.Height / 8, work.Height - Height));
-            return;
-        }
-        var bar = new Rect(near.Left / scaleX, near.Top / scaleY, near.Width / scaleX, near.Height / scaleY);
-        var at = PlaceNear(bar, work, new Size(Width, Height));
-        Left = at.X;
-        Top = at.Y;
-    }
-
-    /// <summary>
-    /// The arithmetic of Place, in DIPs, apart so the tests can check it without a screen: the window's top left for a
-    /// bar covering <paramref name="bar"/> on a screen whose work area is <paramref name="work"/>. Adapted from the
-    /// abandoned task window's PlaceUnder (commit 183d85e), whose reasons hold here: the bar re-asserts itself at the
-    /// top of the topmost band every second (FloatingBar.ReclaimTopmost), so any part of this window over the bar is
-    /// covered within a second; and a docked bar is an app bar, outside the work area. Tried in this order, each kept
-    /// inside the work area:
-    ///   below the bar    left edges lined up (the list and its "+N more" are at the bar's foot)
-    ///   above the bar    a bar near the bottom of the screen, or docked along it
-    ///   beside the bar   a bar docked down the left or right edge: on its left when that fits, else on its right, top
-    ///                    edges lined up
-    ///   anywhere         a screen too small for any of those: as high as the work area allows above the bar, the one
-    ///                    case where an overlap cannot be helped
-    /// </summary>
-    internal static Point PlaceNear(Rect bar, Rect work, Size size)
-    {
-        var (width, height) = (size.Width, size.Height);
-        var (minLeft, maxLeft) = (work.Left, Math.Max(work.Left, work.Right - width));
-        var (minTop, maxTop) = (work.Top, Math.Max(work.Top, work.Bottom - height));
-        var alignedLeft = Math.Clamp(bar.Left, minLeft, maxLeft);
-
-        var below = Math.Max(bar.Bottom + Gap, work.Top);
-        if (below + height <= work.Bottom) return new Point(alignedLeft, below);
-
-        var above = Math.Min(bar.Top - Gap, work.Bottom) - height;
-        if (above >= work.Top) return new Point(alignedLeft, above);
-
-        var besideTop = Math.Clamp(bar.Top, minTop, maxTop);
-        var leftOf = Math.Min(bar.Left - Gap, work.Right) - width;
-        if (leftOf >= work.Left) return new Point(leftOf, besideTop);
-        var rightOf = Math.Max(bar.Right + Gap, work.Left);
-        if (rightOf + width <= work.Right) return new Point(rightOf, besideTop);
-
-        return new Point(alignedLeft, Math.Clamp(above, minTop, maxTop));
     }
 }

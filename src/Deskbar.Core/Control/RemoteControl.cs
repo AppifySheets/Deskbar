@@ -61,8 +61,8 @@ namespace Deskbar.Core.Control;
 // tile"; Tiler.Lock.cs). The lock is the Tiler's, which lives in the app, so the app hands in how; left null,
 // `lock-tile` refuses.
 //
-// `setTasksWindow` shows or hides the tasks window (`tasks-window show|hide`, the twin of the bar's "+N more";
-// TasksBoard in the app). The window is the app's, so the app hands in how; left null, `tasks-window` refuses.
+// `setTasksWindow` shows or hides the tasks panel (`tasks-window show|hide`, the twin of the bar's "All tasks";
+// TasksBoard in the app). The panel is the app's, so the app hands in how; left null, `tasks-window` refuses.
 //
 // `longPath` expands an 8.3 short path (LongPath.Of on the Windows side), so a caller's folder is matched in its long
 // form (FolderPath). Left null, folders are taken as given.

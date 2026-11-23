@@ -97,7 +97,7 @@ public class FloatingBarTaskListTests
         List<nint>? handedBack = null, bool editorAlive = true, Func<DateTime>? clickClock = null, Func<nint>? front = null,
         Func<nint, bool>? onCurrentDesktop = null, Func<DateTimeOffset>? taskNow = null, Action<Guid>? openTask = null,
         Func<TaskItem, Maybe<string>>? goalTitle = null, IObservable<System.Reactive.Unit>? goalChanges = null,
-        Func<Guid, ContextMenu?>? startClaude = null)
+        Func<Guid, ContextMenu?>? startClaude = null, IObservable<bool>? panelShown = null)
     {
         var harness = Harness.Build();
         var minutes = 0;
@@ -115,7 +115,8 @@ public class FloatingBarTaskListTests
             PressSpace = () => { },
             Tasks = service,
             GoToTask = goTo ?? (_ => Result.Success()),
-            OpenTasksWindow = openWindow,
+            ToggleTasksPanel = openWindow,
+            TasksPanelShown = panelShown,
             // A line's single click opens its task in the window (Ruling 54); a test that hands in a goTo probe sees that click
             // too, which is what the click-guard tests watch for. A double-click goes through goTo itself.
             OpenTaskInWindow = openTask ?? (goTo is null ? null : id => goTo(id)),
@@ -479,6 +480,32 @@ public class FloatingBarTaskListTests
 
         Click(ButtonNamed(t.List, "More tasks"));
         Assert.Equal(1, opened);
+    });
+
+    // The tasks panel (plan 2026-11-23-tasks-panel, Task 6): "All tasks" toggles it, and while it is shown the button
+    // looks on, a light fill like a picked line, so the line that opened the panel is the one that closes it. The App
+    // says when the panel is shown (TasksPanelShown, the panel's Shown); the bar only draws it.
+    [Fact]
+    public void The_all_tasks_line_looks_on_while_the_panel_is_shown() => StaThread.Run(() =>
+    {
+        var shown = new System.Reactive.Subjects.BehaviorSubject<bool>(false);
+        using var t = Build(openWindow: () => { }, panelShown: shown);
+        var button = ButtonNamed(t.List, "More tasks");
+        Assert.False(t.Bar.TaskListMoreOn);
+        Assert.Equal("off", AutomationProperties.GetItemStatus(button));
+
+        shown.OnNext(true);
+        Assert.True(t.Bar.TaskListMoreOn);
+        Assert.Equal("on", AutomationProperties.GetItemStatus(button));
+        Assert.Equal("Hide the tasks panel", button.ToolTip);
+
+        // A repaint of the list (a new task) keeps the look.
+        t.Tasks.AddNote("One", Maybe<Guid>.None);
+        Assert.True(t.Bar.TaskListMoreOn);
+
+        shown.OnNext(false);
+        Assert.False(t.Bar.TaskListMoreOn);
+        Assert.NotEqual("Hide the tasks panel", button.ToolTip);
     });
 
     [Fact]

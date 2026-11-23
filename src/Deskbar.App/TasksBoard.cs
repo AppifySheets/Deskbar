@@ -16,6 +16,14 @@ namespace Deskbar.App;
 // The window (TasksWindow) only draws; this decides what it shows and what each click does, the split Quick find has
 // (QuickFind and QuickFindWindow).
 //
+// THE WINDOW IS THE DOCKED TASKS PANEL (docs/superpowers/specs/2026-11-23-tasks-panel-design.md, "The panel window" and
+// "Opening and closing"; plan 2026-11-23-tasks-panel, Task 6). It used to float, a page with a title bar and a place of
+// its own; now it is a full-height panel just inside the docked bar. TasksPanel places it and reserves its strip; this
+// opens and closes it (Show, Hide, Toggle), keeps AppState.TasksPanel (open or not, and the width) in step with every
+// open, close and grip drag, and hands the window the edge it docks on, for its grip. The bar's "All tasks" line
+// toggles it, `tasks-window show|hide` shows or hides it, and the × and Alt+F4 close it. AppState.TasksWindow, the
+// floating window's place, is never read or written any more (old files still load).
+//
 // WHAT IT SHOWS. Every task, grouped as the bar groups them (Task 12, Ruling 28): the open ones by default, Waiting on
 // you first, then Covey's quadrants I to IV under captions in his words, each in Petre's own order (TaskViews.Grouped);
 // a status filter keeps the quadrants and shows that status alone in each; the closed ones only under "Closed", the
@@ -29,8 +37,8 @@ namespace Deskbar.App;
 // WHAT A CLICK DOES. Each action is one method here, calling the same TaskService method the bar and the control pipe
 // call, so a change from the window obeys the rules a click on the bar or a `deskbar.cmd task` does, and every view
 // redraws from TaskService.Changed. A refusal shows on the window's problem line until the next action works.
-//   Go            a line's click: through `goTo`. The window, a page of its own, stays open behind the switch on the
-//                 desktop it is on. The App points goTo at the bar's own GoToTask path: the task's workspace, then its
+//   Go            a line's click: through `goTo`. The panel stays open through the switch: it is pinned to every
+//                 desktop, so it is on the one switched to as well. The App points goTo at the bar's own GoToTask path: the task's workspace, then its
 //                 Claude session's window (ClaudeTaskActions.Go, Task 9; TaskViews.SessionToGoTo names the session). A
 //                 note on no workspace has nowhere to go, so its click opens its thread instead.
 //   Close         at once through TaskService.Close (only Petre closes, and this is his click), with the bar's undo
@@ -77,11 +85,12 @@ public sealed class TasksBoard : IDisposable
         [TaskFilter.Open, TaskFilter.WaitingOnYou, TaskFilter.Done, TaskFilter.InProgress, TaskFilter.Backlog, TaskFilter.Closed];
 
     readonly TasksWindow window;
+    readonly TasksPanel panel;
     readonly TaskService tasks;
     readonly WorkspaceManager manager;
     readonly Func<TaskItem, Result> goTo;
     readonly Func<Guid, Brush?> colourOf;
-    readonly Func<nint, bool>? bringForward;
+    readonly Action<nint>? bringForward;
     readonly Func<TimeSpan, Action, IDisposable> undoTimer;
     readonly Func<DateTimeOffset> now;
     readonly TaskSelection selection;
@@ -107,13 +116,13 @@ public sealed class TasksBoard : IDisposable
         public bool Selected { get; init; }
     }
 
+    //   panel         the panel's app bar and place (TasksPanel), built on the same window by the App, or by the tests
+    //                 with every seam faked; this shows and hides it and hands it the width
     //   goTo          where a line's click goes (see the header)
     //   colourOf      a workspace's lane colour, the one its row on the bar wears; none for a workspace without one
-    //   bringForward  brings the window to Petre by its handle: the App moves it to the desktop in front and then
-    //                 activates it (Arrive), through an activator, because a `deskbar.cmd tasks-window show` typed in a
-    //                 terminal carries no right to take the foreground. It answers whether it activated the window: a
-    //                 window left on another desktop is not, and must then not be maximized either (Arrived). The
-    //                 window itself never activates while this is set (see Open)
+    //   bringForward  brings the window to Petre by its handle: the App raises it and then activates it (Arrive),
+    //                 through an activator, because a `deskbar.cmd tasks-window show` typed in a terminal carries no
+    //                 right to take the foreground. The window itself never activates while this is set (see Show)
     //   undoTimer     runs `then` once after the undo window unless disposed first; a dispatcher timer by default, a
     //                 seam so the tests move time by hand
     //   now           the clock a comment's time is told against ("11:42" today, a date before)
@@ -123,8 +132,9 @@ public sealed class TasksBoard : IDisposable
     //   startClaude   "Start Claude on this" (see the header); none, neither the menu item nor the button shows
     //   openSession   a session's Open (see the header); none, no Open buttons
     //   sessionsChanged  pulses when the sessions' states may have changed, to redraw an open thread
-    public TasksBoard(TasksWindow window, TaskService tasks, WorkspaceManager manager, Func<TaskItem, Result> goTo,
-        Func<Guid, Brush?>? colourOf = null, Func<nint, bool>? bringForward = null, Func<TimeSpan, Action, IDisposable>? undoTimer = null,
+    // Internal because TasksPanel is: only the App and the tests build a board.
+    internal TasksBoard(TasksWindow window, TasksPanel panel, TaskService tasks, WorkspaceManager manager, Func<TaskItem, Result> goTo,
+        Func<Guid, Brush?>? colourOf = null, Action<nint>? bringForward = null, Func<TimeSpan, Action, IDisposable>? undoTimer = null,
         Func<DateTimeOffset>? now = null, TaskSelection? selection = null, GoalService? goals = null,
         Func<TaskItem, IReadOnlyList<SessionView>>? sessionsOf = null, Action<Guid>? startClaude = null,
         Func<TaskItem, string, Result>? openSession = null, IObservable<System.Reactive.Unit>? sessionsChanged = null)
@@ -133,6 +143,7 @@ public sealed class TasksBoard : IDisposable
         this.sessionsOf = sessionsOf ?? (task => TaskViews.SessionList(task, Maybe<IReadOnlyCollection<ClaudeAgent>>.None, _ => true));
         this.openSession = openSession;
         this.window = window;
+        this.panel = panel;
         this.tasks = tasks;
         this.manager = manager;
         this.goTo = goTo;
@@ -164,7 +175,8 @@ public sealed class TasksBoard : IDisposable
             ShowMatrix: on => Report(manager.SetTasksMatrix(on)),
             Filter: Filter,
             FilterWorkspace: FilterWorkspace,
-            Remember: place => manager.SaveTasksWindow(place),
+            ClosePanel: Hide,
+            ResizePanel: ResizePanel,
             SetGoal: (id, goal) => SetGoal(id, goal),
             FilterGoal: FilterGoal,
             Assign: (id, who) => Assign(id, who),
@@ -185,7 +197,10 @@ public sealed class TasksBoard : IDisposable
             // which workspace is in front (where a new note goes) and the List / Matrix switch. Every other state pulse,
             // a window moving or a stats tick, used to rebuild the whole view for nothing; tasks have their own pulse.
             manager.StateChanged.Select(_ => ShownStateKey()).StartWith(ShownStateKey()).DistinctUntilChanged().Skip(1).Subscribe(_ => Refresh()),
-            this.selection.Changed.Subscribe(_ => window.PaintSelection(this.selection.Current)));
+            this.selection.Changed.Subscribe(_ => window.PaintSelection(this.selection.Current)),
+            // The grip goes on the edge facing the windows, which follows the edge the panel docks on (TasksPanel.Edge
+            // says the current one at once, then each change).
+            panel.Edge.Subscribe(window.SetInnerEdge));
     }
 
     // What of the workspace state the window shows, as text: compared, never parsed.
@@ -195,40 +210,69 @@ public sealed class TasksBoard : IDisposable
         + $"|{manager.CurrentWorkspaceId}|{manager.State.TasksMatrix}";
 
     /// <summary>
-    /// The window's handle, created if it is not yet. The bar lists the tasks window like any app window (App.xaml.cs),
-    /// and the App's bring-forward and tiling know it by this handle.
+    /// The window's handle, created if it is not yet: what the App pins to every desktop, opts out of the window list
+    /// and brings forward, and what the tests ask tiling about.
     /// </summary>
-    public nint EnsureHandle() => handle = new WindowInteropHelper(window).EnsureHandle();
+    public nint EnsureHandle() => new WindowInteropHelper(window).EnsureHandle();
 
-    // The handle once EnsureHandle has made it, and 0 before: what the tiling predicate reads, so asking "is this the tasks
-    // window?" never creates a window handle from inside a tiling decision (review, Minor 2).
-    nint handle;
+    /// <summary>Whether the panel is open: the user's word, as TasksPanel keeps it (open from Show to Hide).</summary>
+    public bool IsOpen => panel.IsShown;
 
-    /// <summary>The window's handle if it has one yet, else 0. Never creates it.</summary>
-    public nint KnownHandle => handle;
+    // The panel's saved state (AppState.TasksPanel), or the default for a file that never had one: closed, 460 DIP.
+    TasksPanelState PanelState => manager.State.TasksPanel ?? TasksPanelState.Default;
 
-    public bool IsOpen => window.IsOpen;
+    /// <summary>The bar's "All tasks" (or "+N more") line: a hidden panel shows, a shown one hides.</summary>
+    public void Toggle()
+    {
+        if (IsOpen) Hide();
+        else Show();
+    }
 
     /// <summary>
-    /// The bar's "+N more" and `tasks-window show`. A window already open comes forward with its view as it was. A
-    /// hidden one opens onto the board where Petre last left it (AppState.TasksWindow), or clear of
-    /// <paramref name="near"/> (the bar's rectangle on screen, device pixels; empty to centre it) the first time and
-    /// when no screen holds that place any more; every such open starts at the default view: open tasks, every
-    /// workspace, no thread open.
+    /// `tasks-window show`, and a line's single click on the bar (through ShowTask). A panel already open comes forward
+    /// with its view as it was. A hidden one opens at the default view (open tasks, every workspace, goal and assignee,
+    /// no thread open) and docks at the width saved for it, and the saved state says it is open.
     /// </summary>
     //
-    // THE WINDOW NEVER ACTIVATES ITSELF (fix round 1, Critical 1). Activating a window that lives on another desktop
-    // makes Windows follow it there (WorkspaceManager's note), and this window is a page that stays on the desktop it
-    // was left on: open it, click a line (which switches workspace), click "+N more", and an Activate first would take
-    // Petre straight back. So both paths here only show or restore the window without activating it, and then hand it
-    // to Arrived, whose seam (the App's, through Arrive) moves it to the desktop in front and only then activates it.
-    public void Open(Rect near)
+    // THE WINDOW NEVER ACTIVATES ITSELF (fix round 1, Critical 1, kept for the panel). It is shown without activation and
+    // then handed to Arrived, whose seam (the App's, through Arrive) raises it and then activates it.
+    public void Show()
     {
-        if (window.IsOpen)
+        if (IsOpen)
         {
             Arrived();
             return;
         }
+        OpenFresh();
+        Arrived();
+    }
+
+    /// <summary>
+    /// The start-up reopen of a panel left open (AppState.TasksPanel.Open, kept so by Shutdown): drawn and docked like a
+    /// Show, but never brought forward or activated, so a start at sign-in takes the keyboard from nothing. Until the
+    /// bar's first notice the panel only remembers it is wanted, and docks on that notice (TasksPanel.Show).
+    /// </summary>
+    public void Restore()
+    {
+        if (!IsOpen) OpenFresh();
+    }
+
+    /// <summary>
+    /// `tasks-window hide`, the toolbar's ×, Alt+F4 and the bar's toggle: the panel gives its strip back and hides, the
+    /// view ends, and the saved state says it is closed.
+    /// </summary>
+    public void Hide()
+    {
+        panel.Hide();
+        window.Dismiss();
+        Remember(open: false);
+    }
+
+    // A hidden panel opens: every filter back to its default, every thread folded, the view drawn, then the panel docked
+    // at its saved width (it waits for the bar's first notice if there has been none) and the selected task scrolled into
+    // view (ruling 21: the window scrolls to it when it opens).
+    void OpenFresh()
+    {
         filter = TaskFilter.Open;
         where = TaskWorkspaceFilter.All;
         goalFilter = TaskGoalFilter.All;
@@ -237,83 +281,71 @@ public sealed class TasksBoard : IDisposable
         window.ShowProblem(null);
         window.PaintSelection(selection.Current);
         window.Present(View());
-        window.Open(near, manager.State.TasksWindow is { } place ? Maybe.From(place) : Maybe<TasksWindowState>.None);
-        // The selected task's line comes into view (ruling 21: the window scrolls to it when it opens).
+        window.Open();
+        panel.Show(PanelState.Width);
+        Remember(open: true);
         window.ScrollToSelected();
-        Arrived();
     }
 
-    // The window, shown or restored without activation, comes to Petre: through the App's seam (move, then activate),
-    // or, with no seam (a copy without a desktop service), activated where it is. A window left maximized is maximized
-    // only now, after the move (review I-2), and only when it was really activated: setting Maximized on a window
-    // still on another desktop activates it, and Windows would follow it there (review minor 1 of 187cf4a). It stays
-    // due, so the next arrival that works maximizes it.
-    // The keyboard goes to the toolbar only now, after the activation (see TasksWindow.FocusBoard): a window left on
-    // another desktop is not focused, since focusing it would activate it there.
+    // The grip's drag end (TasksWindowActions.ResizePanel): the width saved, then the panel re-docked at it in place. The
+    // width goes in unclamped; TasksPanel clamps it against the screen it docks on.
+    void ResizePanel(double widthDips)
+    {
+        _ = manager.SaveTasksPanel(PanelState with { Width = widthDips });
+        panel.SetWidth(widthDips);
+    }
+
+    // Whether the panel is open, saved with the width as it is (a no-op when nothing changed, WorkspaceManager).
+    void Remember(bool open) => _ = manager.SaveTasksPanel(PanelState with { Open = open });
+
+    // The window, shown without activation, comes to Petre: through the App's seam (raise, then activate), or, with no
+    // seam, activated where it is. The keyboard goes to the toolbar only then (see TasksWindow.FocusBoard). Nothing to
+    // bring forward while the window is not on screen yet, before the bar's first notice: activating a hidden window
+    // would only take the foreground from Petre's own.
     void Arrived()
     {
-        var activated = bringForward is { } seam ? seam(EnsureHandle()) : ActivatedHere();
-        if (!activated) return;
-        window.MaximizeIfRemembered();
+        if (!window.IsVisible) return;
+        if (bringForward is { } seam) seam(EnsureHandle());
+        else window.ActivateHere();
         window.FocusBoard();
     }
 
-    bool ActivatedHere()
-    {
-        window.ActivateHere();
-        return true;
-    }
-
     /// <summary>
-    /// The App's bring-forward, in its order (fix round 1, Critical 1): <paramref name="move"/> the window to the
-    /// desktop in front first, and <paramref name="activate"/> it only after. When the move fails, it is activated only
-    /// if it is already on the desktop in front (<paramref name="onCurrentDesktop"/>); a window left on another desktop
-    /// is traced and left there, since activating it would take Petre to it. Answers whether it activated the window.
+    /// The App's bring-forward, in its order: <paramref name="raise"/> the window to the top of the z-order, then
+    /// <paramref name="activate"/> it, then trace the arrival.
     /// </summary>
     //
     // RAISED BEFORE IT IS ACTIVATED (2026-11-23, Petre: "tasks should become a top window, now it's behind somewhere").
-    // His trace had four clicks on "+N more", no failed move, no other window taking the foreground, and in between him
-    // dragging and minimizing his tiles to find the window under them. Activation alone does not promise the top of the
-    // z-order: SetForegroundWindow on a window that already is the foreground window changes nothing (measured on the
-    // hidden desktop: an active window with another raised over it stayed under it after WindowActivator.Activate), and
-    // the window could already be the foreground one (TasksWindow.FocusBoard says how). So `raise` puts it on top of
-    // the non-topmost windows first, a z-order change Windows allows a process for its own window without any foreground
-    // right, and only then is it activated. It is never made topmost: it is an ordinary window that tiles.
-    internal static bool Arrive(nint hwnd, Func<Result> move, Func<bool> onCurrentDesktop, Action raise, Action activate, Action<string> trace)
+    // Activation alone does not promise the top of the z-order: SetForegroundWindow on a window that already is the
+    // foreground window changes nothing (measured on the hidden desktop), and the window could already be the foreground
+    // one (TasksWindow.FocusBoard says how). So `raise` puts it on top first, a z-order change Windows allows a process
+    // for its own window without any foreground right, and only then is it activated.
+    //
+    // NO MOVE ANY MORE. The floating window lived on one desktop and was moved to the desktop in front before it was
+    // activated, since activating a window on another desktop takes Windows there (fix round 1, Critical 1). The panel
+    // is pinned to every desktop (the App, after its first show), so it is always on the desktop in front.
+    internal static void Arrive(nint hwnd, Action raise, Action activate, Action<string> trace)
     {
-        var moved = move();
-        if (moved.IsFailure)
-        {
-            trace($"tasks window 0x{hwnd:X}: not moved to the desktop in front: {moved.Error}");
-            if (!onCurrentDesktop())
-            {
-                trace($"tasks window 0x{hwnd:X}: left on its own desktop rather than taking you there");
-                return false;
-            }
-        }
         raise();
         activate();
         // One line per arrival, so a live check reads whether the window really ended up in front.
-        trace($"tasks window 0x{hwnd:X}: raised and activated, foreground now 0x{Windows.Monitoring.NativeMethods.GetForegroundWindow():X}");
-        return true;
+        trace($"tasks panel 0x{hwnd:X}: raised and activated, foreground now 0x{Windows.Monitoring.NativeMethods.GetForegroundWindow():X}");
     }
 
     /// <summary>
-    /// The tiling surface's "ours" (2026-11-23, Petre: "maybe even tile it"): Deskbar keeps its own windows out of the
-    /// grid (the bar, Manage, its dialogs), except the tasks window, a page he works in that tiles like any app window.
+    /// The tiling surface's "ours": Deskbar keeps its own windows out of the grid (the bar, Manage, its dialogs), and the
+    /// tasks panel with them, since a docked panel is not a tile (spec "The panel window"). The floating window was the
+    /// one exception ("maybe even tile it", 2026-11-23) until it became the panel.
     /// </summary>
-    internal static bool KeptFromTiling(nint hwnd, nint tasksWindow) => hwnd != tasksWindow && FloatingBar.IsOwnWindow(hwnd);
+    internal static bool KeptFromTiling(nint hwnd) => FloatingBar.IsOwnWindow(hwnd);
 
     /// <summary>
-    /// Puts the window at the top of the z-order among the windows that are not topmost, without activating it and
+    /// Puts the window at the top of the z-order of its band (the topmost one, for the panel), without activating it and
     /// without moving or sizing it (HWND_TOP, SWP_NOACTIVATE).
     /// </summary>
     internal static void RaiseToTop(nint hwnd) =>
         Windows.Monitoring.NativeMethods.SetWindowPos(hwnd, 0, 0, 0, 0, 0,
             Windows.Monitoring.NativeMethods.SWP_NOMOVE | Windows.Monitoring.NativeMethods.SWP_NOSIZE | Windows.Monitoring.NativeMethods.SWP_NOACTIVATE);
-
-    /// <summary>`tasks-window hide`, as the title bar's X does: hidden, its place remembered.</summary>
-    public void Dismiss() => window.Dismiss();
 
     /// <summary>Redraws an open window from the board as it is now; the window skips it when nothing it shows changed.</summary>
     internal void Refresh()
@@ -370,14 +402,13 @@ public sealed class TasksBoard : IDisposable
     }
 
     /// <summary>
-    /// The bar's single click on a task line (Ruling 54): the window comes forward (opening clear of
-    /// <paramref name="near"/> when it was hidden) on that task, picked, scrolled into view and expanded to its thread.
-    /// It goes nowhere.
+    /// The bar's single click on a task line (Ruling 54): the panel comes forward (opening when it was hidden) on that
+    /// task, picked, scrolled into view and expanded to its thread. It goes nowhere.
     /// </summary>
-    public void ShowTask(Guid id, Rect near)
+    public void ShowTask(Guid id)
     {
         selection.Select(id);
-        Open(near);
+        Show();
         // Open starts a hidden window at the default view (no thread open); the task's own thread opens after it.
         expanded.Add(id);
         window.PaintSelection(selection.Current);
@@ -513,13 +544,16 @@ public sealed class TasksBoard : IDisposable
     }
 
     /// <summary>
-    /// The app is going away: an open window's place is remembered (it opens there after the restart), and the window
-    /// is closed for good.
+    /// The app is going away: whether the panel is open is saved FIRST, as it is (an open panel opens again on the next
+    /// start, Restore), then the panel gives its strip back for good and the window is closed for good. The app exiting is
+    /// not the user closing the panel, so TasksPanel.Shutdown leaves IsShown alone, and the order here keeps the save from
+    /// ever reading the window after it has gone.
     /// </summary>
     public void Shutdown()
     {
-        if (window.IsOpen) manager.SaveTasksWindow(window.CurrentPlace());
+        Remember(open: panel.IsShown);
         Dispose();
+        panel.Shutdown();
         window.CloseForGood();
     }
 
@@ -813,8 +847,9 @@ internal sealed record TasksView(IReadOnlyList<TaskFilterChip> Filters, string W
 /// <summary>
 /// Everything the window can ask for, handed over by the controller once. The window has no events of its own: a click
 /// calls one of these. Rename, Comment and AddNote answer whether it worked, so the window knows whether to clear its
-/// box; every refusal is shown by the controller on the problem line. Remember is handed the window's place whenever it
-/// closes or settles after a move, to keep in AppState.TasksWindow.
+/// box; every refusal is shown by the controller on the problem line. ClosePanel is the toolbar's × and Alt+F4 (the
+/// panel's Hide); ResizePanel is the grip's drag end, with the new width in DIPs (saved, and the panel re-docked at it).
+/// They replaced Remember, which kept the floating window's place in AppState.TasksWindow (tasks panel plan, Task 6).
 /// </summary>
 internal sealed record TasksWindowActions(
     Action<Guid> Go,
@@ -837,7 +872,8 @@ internal sealed record TasksWindowActions(
     Action<bool> ShowMatrix,
     Action<TaskFilter> Filter,
     Action<TaskWorkspaceFilter> FilterWorkspace,
-    Action<TasksWindowState> Remember,
+    Action ClosePanel,
+    Action<double> ResizePanel,
     Action<Guid, Maybe<Guid>> SetGoal,
     Action<TaskGoalFilter> FilterGoal,
     Action<Guid, Assignee> Assign,

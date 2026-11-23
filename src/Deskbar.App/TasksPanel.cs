@@ -56,6 +56,9 @@ internal sealed class TasksPanel : IDisposable
     // late subscriber learns where things stand; says only changes after that.
     readonly BehaviorSubject<bool> shown = new(false);
 
+    // The edge the panel docks on (see Edge). Right until the bar's first notice: Petre's bar docks right.
+    readonly BehaviorSubject<PanelEdge> edge = new(PanelEdge.Right);
+
     // Reserves a strip `thickness` physical pixels wide on the edge of the screen (physical pixels, Right and Bottom
     // exclusive) and returns the rectangle the shell granted. Registers first when not registered. AppBar.Dock in the
     // app; a recording fake in the tests.
@@ -160,6 +163,14 @@ internal sealed class TasksPanel : IDisposable
 
     public IObservable<bool> Shown => shown.AsObservable();
 
+    // THE EDGE THE PANEL DOCKS ON, for its width grip (Task 6, spec "The panel window"): the grip sits on the edge facing
+    // the windows, the left one when the panel docks on the right and the right one when it docks on the left, so the
+    // window has to know which. Each notice from the bar that places the panel says it (Answer), the bar's edge for a
+    // docked bar and the nearer edge for a floating one; a late subscriber gets the current one at once, and only a
+    // change is said again. A notice that the bar went away keeps the last edge: the panel is hidden then, and docks on
+    // the edge the next notice gives.
+    public IObservable<PanelEdge> Edge => edge.DistinctUntilChanged();
+
     // Opens the panel `widthDips` wide. Docks at once when the bar's strip stands; otherwise remembers it, and the bar's
     // next notice with an edge docks it. Opening one already on screen at another width re-docks it at the new one.
     public void Show(double widthDips)
@@ -245,6 +256,7 @@ internal sealed class TasksPanel : IDisposable
         if (!windowClosed && window.IsVisible) window.Hide();
         if (held) Say(() => "tasks panel: strip given back (shutdown)");
         shown.OnCompleted();
+        edge.OnCompleted();
     }
 
     public void Dispose() => Shutdown();
@@ -312,6 +324,7 @@ internal sealed class TasksPanel : IDisposable
         }
 
         placement = placementOf(notice);
+        edge.OnNext(placement.Edge);
         awaitingBar = false;
         if (wanted) _ = Dock(fresh: true, notice.Edge is null ? "bar floats" : "bar registered");
     }
