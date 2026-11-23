@@ -188,8 +188,19 @@ public sealed partial class Tiler
         // Refit keeps a shape while windows leave (the leaver's leaf, else the last leaves) and while they join (the
         // last leaf split at the bottom). Stored unless plain: even splits on the automatic shape are what nothing
         // stored means already, but even splits on a custom shape are not.
+        //
+        // A PLAIN FIT IS STORED TOO WHEN SKIPPING IT WOULD MOVE THE TILES ON THE NEXT RE-TILE (Petre, 2026-11-23:
+        // "when i minimize tiles and maximize them, it seems their position may change"). Not storing a plain fit
+        // leaves the old entry, and the next re-tile (switching to another desktop and back is one) fits that entry
+        // again with no leaver, which drops its LAST leaf, not the leaver's. A over B beside C, A minimized: laid out as
+        // B beside C (plain, two columns), and then, on the next re-tile, B over C. Every reader of ShownLayout (a
+        // minimized tile's spot, a drop, an arrival) saw B over C all along. So the plain fit is stored, which removes
+        // the entry, whenever what would be shown without it differs from what is laid out now. A screen down to one
+        // window is the case the rule above protects ("keep my sizes"), and one leaf is one leaf whatever the entry
+        // holds, so it never drifts and its entry stays.
         var fitted = TileArrange.Refit(start, count, leaving);
-        if (fitted != start && !TileArrange.IsPlain(fitted) && !InGrace(key))
+        var drifts = !stored.Map(s => TileArrange.Refit(s, count, Maybe<int>.None)).GetValueOrDefault(TileLayout.Automatic(count)).Near(fitted);
+        if (fitted != start && (!TileArrange.IsPlain(fitted) || drifts) && !InGrace(key))
             StoreLayout(workspace, key, fitted)
                 .Tap(() => trace?.Invoke($"tile: {workspace.Name} screen {screen.Number}: sizes refitted to {count} windows, {Show(fitted)}"))
                 .TapError(error => trace?.Invoke($"tile: {workspace.Name} screen {screen.Number}: storing refitted sizes failed: {error}"));
