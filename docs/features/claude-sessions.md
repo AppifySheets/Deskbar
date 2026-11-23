@@ -42,6 +42,23 @@ A finished reply or a permission prompt still only blinks the workspace; it does
 
 A session can also add a note for later to its own workspace, and a script can add one with `task add`.
 
+## Going to a session, and starting one
+
+Double-click a task's line, on the bar or in the tasks window, and you go to its workspace and then to its session:
+
+- A background session (one started with `claude --bg`, by Deskbar or by you) gets a Windows Terminal window attached to it with `claude attach`, titled after the task with "· Claude" on the end and in Deskbar's own terminal look. If that window is already open, it comes to the front instead: only one window can be attached to a session at a time, and a second one would take the session from the first.
+- A session you started in VS Code or a terminal brings its VS Code window to the front.
+- A session that has ended is resumed first, then its window opens.
+- A note with no session just takes you to its workspace. A double-click never starts a session.
+
+Closing the terminal window only detaches it. The session keeps running, and the next double-click opens a new window on it.
+
+To hand a task to Claude, pick **Start Claude on this** on its menu (right after Edit, on the bar and in the tasks window) or the button of that name in its thread. Deskbar starts a background session with the task as its first message, so it gets to work at once, joins it to the task, and opens a window on it on the task's workspace. The folder is the repo of the task's latest session. A task without sessions offers the repos its workspace knows, from its other tasks' sessions and its VS Code windows: with one, it starts there; with several or none, a short list at the pointer ends with "Choose a folder…". On a task whose session is still running it asks first, since a second session on one task is rarely what you meant.
+
+A folder Claude Code has never been told to trust cannot start a background session. Claude's message goes into the task's thread, and Deskbar offers to open a terminal running `claude` in that folder so you can accept the trust prompt yourself. Deskbar never accepts it for you.
+
+A task's thread lists its sessions, newest first, with when each joined and whether it is working, idle, ended or expired. Open on a line does what the double-click does for that session. An expired session is one whose transcript Claude Code has deleted (after 30 days by default), so it has no Open.
+
 ## Settings
 
 The setting is **Teach Claude Code about Deskbar**, in the Deskbar on this PC section of Manage's Settings tab. With Claude Code installed (there is a `.claude` folder in your profile) and the box ticked, Deskbar keeps two things in place:
@@ -82,6 +99,14 @@ $ts = "$env:APPDATA\Deskbar\deskbar.cmd"
 
 ```powershell
 & $ts task add "Wait for CI"
+```
+
+The double-click, "Start Claude on this" and a thread's Open have script forms too. `task start` without `--folder` starts only where exactly one folder is known; with several it names them and starts nothing:
+
+```powershell
+& $ts task go <id>
+& $ts task start <id> --folder C:\src\login
+& $ts task open-session <id> <session id or short id>
 ```
 
 A session's own task forms carry `--session` with the session's id, which the start-of-session message gives it. Every form but `join`, `new` and `later` acts only on that session's own task.

@@ -421,6 +421,43 @@ Manage ticked. Use a throwaway folder Claude Code already trusts, not a real rep
     keep showing what they showed, nothing is ended or resumed, and the trace says ONCE that the list could not be
     read, not every 15 seconds. Put it back: the trace says it is read again and the next poll picks up as before.
 
+## Going to a Claude session, and starting one
+
+Task 9 of the same spec ("Where the clicks are", "Choosing the folder", "The window on a session"; `ClaudeTaskActions`
+in the app). Same setup as above: Claude Code with background sessions, Windows Terminal, both Claude boxes ticked, a
+throwaway folder Claude Code trusts, and tracing on for the `claude actions:` and `claude sessions:` lines.
+
+84. Right-click a note on a workspace whose tasks have sessions in the throwaway folder: the menu reads Edit, then
+    "Start Claude on this". The tasks window's "⋯" menu has it in the same place, and an open thread has a
+    "Start Claude on this" button above the comments. A closed task has neither.
+85. Pick "Start Claude on this" on a note whose workspace knows exactly one folder: no question, no list. Within a few
+    seconds a Windows Terminal window titled "<the note's title> · Claude" opens on the note's workspace, in the Deskbar
+    Claude look, attached to a session that is already working on the note (its first message names the task). The
+    note turns into a Claude task with that session.
+86. On a note whose workspace knows two folders (tasks with sessions in two repos, or a VS Code window on a second
+    repo that some session also used): a short list of the folders opens at the pointer, ending with
+    "Choose a folder…". "Choose a folder…" opens Windows' folder picker; cancelling it starts nothing.
+87. "Start Claude on this" on a task whose session is still running asks "This task already has a Claude session
+    running. Start another one?". No starts nothing.
+88. Close the terminal window from 85 (its X). `claude agents` still lists the session, and the task still shows it.
+    Double-click the task's line: you go to its workspace and a new terminal window attaches to the same session.
+    Double-click again while it is open: that same window comes to the front, and no second window opens (a second
+    attach would take the session over and close the first).
+89. `claude stop <short id>` the session, then double-click the task: the thread says "Resumed by Deskbar at HH:mm.",
+    and a few seconds later a terminal window opens on the resumed session (same session id in `claude agents`).
+90. Open the task's thread: its sessions are listed newest first, each "Session <short id> · joined <time> · working,
+    idle or ended", each with Open. Open on an ended one does what 89 does. Rename a session's transcript file under
+    `%USERPROFILE%\.claude\projects\<folder>\` away: within 15 seconds that line says "expired" and has no Open; a
+    double-click on a task whose latest session is expired only switches workspace. Put the file back.
+91. Double-click a task whose session is a VS Code session you are sitting in: you go to its workspace and that VS Code
+    window comes forward; no terminal opens. Double-click a plain note: only the workspace switch.
+92. Start Claude on a note in a folder Claude Code has never trusted: the thread gets Claude's "Workspace not trusted"
+    message, and a box asks "Open a terminal there so you can trust it?". Yes opens a plain Windows Terminal window
+    running `claude` in that folder; accept the trust prompt there, then "Start Claude on this" again works.
+93. From a terminal: `$ts task go <id>` does what the double-click does; `$ts task start <id>` on a task with one folder
+    starts there, and on one with several refuses, naming them, until `--folder <path>` picks one;
+    `$ts task open-session <id> <short id>` opens that session. Each answers with the task's JSON.
+
 ## Goals
 
 Weekly and monthly goals, pull request 1: the pipe, the task's link, the tasks window's menu and filter, the bar's

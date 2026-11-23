@@ -449,7 +449,8 @@ its comments, and a Matrix view of the four quadrants side by side.
 A script can add and change tasks with `deskbar.cmd task`, and every Claude Code session keeps a task of
 its own here: it joins the task its work continues or creates one, keeps a short status line on it, asks
 you through it (the task waits on you, in orange, with the question) and marks it done when it has
-finished. Only you close a task.
+finished. Only you close a task. Double-click a Claude task to go to its session, and pick "Start Claude
+on this" on a note's menu to hand it to a new Claude session.
 
 More in [Tasks](docs/features/tasks.md).
 
@@ -564,6 +565,17 @@ reason until you act on it. **Resume the sessions of open tasks after a
 restart or a crash**, under the tasks box, turns the resuming off and leaves the rest on
 (`deskbar.cmd claude-resume off`). Claude Code keeps sessions for 30 days; raise `cleanupPeriodDays` in
 `~/.claude/settings.json` to keep them longer.
+
+Double-click a task, on the bar or in the tasks window, to go to its session. You land on the task's
+workspace, and a background session's Windows Terminal window comes to the front, or opens attached to it
+(`claude attach`) when none is open; an ended session is resumed first. A VS Code session's window comes to
+the front instead. "Start Claude on this", right after Edit on a task's menu and as a button in its thread,
+starts a background session with the task as its first message, in the task's folder or one you pick, and
+opens a window on it. It asks first when the task already has a session running. A folder Claude Code was
+never told to trust puts Claude's message in the thread and offers a terminal there so you can accept the
+trust prompt yourself. A task's thread lists its sessions, newest first, as working, idle, ended or expired,
+each but the expired ones with Open. `deskbar.cmd task go|start|open-session` do the same from a script.
+
 The first time Deskbar changes `settings.json` it keeps the original as `settings.json.deskbar-backup`,
 and it leaves a file with comments in it alone.
 
