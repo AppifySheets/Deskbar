@@ -1370,7 +1370,7 @@ public class FloatingBarTaskListTests
 
         var undo = ButtonNamed(t.Lines[0], "Undo");
         Assert.Equal("Undo", undo.ToolTip);
-        Assert.Equal("", Inside(undo).OfType<TextBlock>().Single(b => Equals(b.Tag, "undo-sign")).Text);
+        Assert.Equal("↶", Inside(undo).OfType<TextBlock>().Single(b => Equals(b.Tag, "undo-sign")).Text);
         Assert.DoesNotContain(Inside(undo).OfType<TextBlock>(), b => b.Text == "Undo");
     });
 
