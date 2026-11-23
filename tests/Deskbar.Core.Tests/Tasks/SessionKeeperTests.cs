@@ -220,4 +220,31 @@ public class SessionKeeperTests
 
         Assert.Single(ledger.Resumes["s1"]);
     }
+
+    [Theory]
+    [InlineData(SessionKeeper.LoopGaveUp)]
+    [InlineData(SessionKeeper.TranscriptGone)]
+    [InlineData(SessionKeeper.NoFolder)]
+    public void A_task_given_up_on_gets_no_step_even_after_the_loop_window(string reason)
+    {
+        var ledger = ResumeLedger.Empty
+            .Record("s1", Now.AddMinutes(-9)).Record("s1", Now.AddMinutes(-6)).Record("s1", Now.AddMinutes(-3));
+        var task = Task(TaskStatus.WaitingOnYou, 5, Session("s1")) with { Question = reason };
+
+        // 11 minutes on, the oldest resume has left the window and the count is 2: still no step.
+        var later = SessionKeeper.Plan(new TaskBoard([task]), [], ledger, _ => true, _ => false, Now.AddMinutes(11));
+
+        Assert.Empty(later);
+    }
+
+    [Fact]
+    public void After_forget_the_same_session_is_resumed_again()
+    {
+        var ledger = ResumeLedger.Empty
+            .Record("s1", Now.AddMinutes(-9)).Record("s1", Now.AddMinutes(-6)).Record("s1", Now.AddMinutes(-3));
+        var task = Task(TaskStatus.InProgress, 5, Session("s1"));
+
+        Assert.IsType<KeeperStep.GiveUp>(Assert.Single(Plan([task], ledger: ledger)));
+        Assert.IsType<KeeperStep.Resume>(Assert.Single(Plan([task], ledger: ledger.Forget("s1"))));
+    }
 }
