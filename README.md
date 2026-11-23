@@ -575,6 +575,11 @@ tasks after a restart or a crash**, under the tasks box, turns the resuming off 
 (`deskbar.cmd claude-resume off`). Claude Code keeps sessions for 30 days; raise `cleanupPeriodDays` in
 `~/.claude/settings.json` to keep them longer.
 
+The same list says whether each session is working or idle. A Claude task that no session has worked on
+for 15 minutes is handed back to you and shows on the bar with Claude's last status line, so a session that
+stopped with "ready to merge" without asking you is not left out of sight. It goes back to Claude by itself
+once its session works on it again. A task you assign to yourself stays yours.
+
 Double-click a task, on the bar or in the tasks window, to go to its session. You land on the task's
 workspace, and a background session's Windows Terminal window comes to the front, or opens attached to it
 (`claude attach`) when none is open; an ended session is resumed first. A VS Code session's window comes to

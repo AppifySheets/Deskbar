@@ -428,6 +428,12 @@ Manage ticked. Use a throwaway folder Claude Code already trusts, not a real rep
     read, not every 15 seconds. Manage's Settings tab shows the reason in one red line under the resume box (Ruling
     20). Put it back: the trace says it is read again, the line on Manage goes within 15 seconds, and the next poll
     picks up as before.
+89a. Stalled tasks (spec `docs/superpowers/specs/2026-11-23-stalled-claude-tasks-design.md`). Give a VS Code session a
+    task, let it set a status line and stop at the prompt without `task ask`. The task is off the bar (Claude's). Leave
+    it 15 minutes: within 15 seconds after that it is on the bar with its status line, assigned to you in the tasks
+    window, and the trace says `tasks: handed back <id> "<title>"`. Send the session a prompt: once it has been busy
+    for a poll, the task leaves the bar and the trace says `taken back`. Repeat, but assign the task to yourself in the
+    tasks window before prompting: it stays on the bar while the session works.
 
 ## Going to a Claude session, and starting one
 

@@ -164,6 +164,29 @@ public sealed class TaskService(ITaskStore store, Func<DateTimeOffset> now, Func
     /// </summary>
     public void Reconcile(IReadOnlyCollection<ClaudeAgent> live) => CommitIfChanged(Board.Reconcile(live, now()));
 
+    // The quiet clock of StalledTasks: when each watched Claude task last had a session working on it. In memory only;
+    // after a restart StalledTasks measures from the task's UpdatedAt instead (see its header).
+    ImmutableDictionary<Guid, DateTimeOffset> lastBusy = ImmutableDictionary<Guid, DateTimeOffset>.Empty;
+
+    /// <summary>
+    /// Stalled tasks (StalledTasks; spec docs/superpowers/specs/2026-11-23-stalled-claude-tasks-design.md): called on
+    /// every poll of Claude Code's session list with the ids of the sessions working now. A Claude task quiet for
+    /// StalledTasks.After goes to Petre, a handed-back task whose session works again goes back to Claude. Saves and
+    /// pulses only when a task changed hands, and traces each move.
+    /// </summary>
+    public void Stalled(IReadOnlySet<string> working)
+    {
+        var step = StalledTasks.Step(Board, working, lastBusy, now());
+        lastBusy = step.LastBusy;
+        step.HandedBack.Select(id => $"tasks: handed back {Line(step.Board, id)}, no session worked on it for {StalledTasks.After.TotalMinutes:0} minutes")
+            .Concat(step.TakenBack.Select(id => $"tasks: taken back {Line(step.Board, id)}, its session works on it again"))
+            .ToList().ForEach(line => trace?.Invoke(line));
+        CommitIfChanged(step.Board);
+    }
+
+    static string Line(TaskBoard board, Guid id) =>
+        $"{id.ToString()[..8]} \"{board.Tasks.Single(t => t.Id == id).Title}\"";
+
     /// <summary>An unknown live session becomes a task (TaskBoard.AdoptSession); one that has a task is refused.</summary>
     public Result<TaskItem> Adopt(ClaudeAgent agent, Maybe<Guid> workspace) =>
         Board.AdoptSession(agent, workspace, now(), makeId()).Tap(r => Commit(r.Board)).Map(r => r.Task);
