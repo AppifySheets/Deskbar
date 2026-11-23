@@ -559,7 +559,8 @@ public partial class TasksWindow : Window
                 string.Join('\u0004', r.Comments.Select(c => $"{c.Id}{c.Author}{c.When}{c.Markdown}{c.Settled}")))))),
             string.Join('\u0002', view.Groups.Select(g => $"{g.Header}:" + string.Join('\u0003', g.Rows.Select(r =>
                 $"{r.Id}|{r.Title}|{r.Detail}|{r.Description}|{r.Status}|{r.Claudes}|{r.Assignee.Id}|{r.Sessions}|{r.SessionCount}|{r.LiveCount}|{PlaceSignature(r.Place)}|{r.CommentCount}|" +
-                $"{r.Expanded}|{r.Closing}|{r.Important}|{r.Urgent}|" + string.Join('\u0004', r.Comments.Select(c => $"{c.Id}{c.Author}{c.When}{c.Markdown}{c.Settled}")))))));
+                $"{r.Expanded}|{r.Closing}|{r.Important}|{r.Urgent}|" + string.Join('\u0004', r.SessionList.Select(s => $"{s.Id}{s.Joined}{s.State}")) + "|" +
+                string.Join('\u0004', r.Comments.Select(c => $"{c.Id}{c.Author}{c.When}{c.Markdown}{c.Settled}")))))));
 
     static string PlaceSignature(TaskPlaceChoice place) => $"{place.Workspace}{place.Name}{(place.Colour as SolidColorBrush)?.Color}";
 
@@ -1074,18 +1075,29 @@ public partial class TasksWindow : Window
         return (earlier > 0 && !earlierOpen.Contains(row.Id) ? candidates.Skip(earlier).ToList() : candidates, earlier);
     }
 
-    // What an open thread's layout depends on, as text: the comments it shows and which of them are opened in full.
+    // What an open thread's layout depends on, as text: its session lines (Task 9: a session joining adds a line above the
+    // comments and moves every one below), the comments it shows and which of them are opened in full.
     string ThreadLayoutKey(TaskRowView row) =>
         !row.Expanded ? ""
-        : string.Join(',', ThreadComments(row).Shown.Select(c => $"{c.Id}{(longOpen.Contains(c.Id) ? "+" : "")}"))
+        : string.Join(',', row.SessionList.Select(s => s.Id)) + "/"
+          + string.Join(',', ThreadComments(row).Shown.Select(c => $"{c.Id}{(longOpen.Contains(c.Id) ? "+" : "")}"))
           + $"{settledOpen.Contains(row.Id)}{earlierOpen.Contains(row.Id)}";
 
-    // The comments, each with its author and time over its markdown, then a box for Petre's next one. RULING 62: the settled
-    // ones are folded away behind one dim line at the top, "N settled comments", which unfolds them in place (and reads
-    // "Hide N settled comments" while they show). They are kept, so the history stays.
+    // The task's sessions with their Open buttons and "Start Claude on this" (Task 9), then the comments, each with its
+    // author and time over its markdown, then a box for Petre's next one. RULING 62: the settled comments are folded away
+    // behind one dim line above the comments, "N settled comments", which unfolds them in place (and reads "Hide N
+    // settled comments" while they show). They are kept, so the history stays.
     UIElement Thread(TaskRowView row)
     {
         var panel = new StackPanel();
+        row.SessionList.ToList().ForEach(session => panel.Children.Add(SessionLine(row.Id, session)));
+        if (Actions?.StartClaude is { } start && row.Status != TaskStatus.Closed && !row.Closing)
+        {
+            var button = Small(StartClaudeText, StartClaudeText, () => start(row.Id),
+                "Start a background Claude session on this task, with the task as its first message");
+            button.Margin = new Thickness(0, 0, 0, 8);
+            panel.Children.Add(button);
+        }
         var settledCount = row.Comments.Count(c => c.Settled);
         var unfolded = settledOpen.Contains(row.Id);
         var (shown, earlier) = ThreadComments(row);
@@ -1152,6 +1164,44 @@ public partial class TasksWindow : Window
         if (latest is not null) Draw(latest);
     }
 
+    /// <summary>The words of the menu item and the thread's button (Task 9).</summary>
+    internal const string StartClaudeText = "Start Claude on this";
+
+    // One session of the thread (Task 9, the spec's "Task history"): its short id, when it joined and where it stands,
+    // and Open, which does what going to that session does. An expired one has nothing left to open, so no button.
+    UIElement SessionLine(Guid taskId, SessionView session)
+    {
+        var shortId = session.Id[..Math.Min(8, session.Id.Length)];
+        var line = new DockPanel { Tag = "session-line", Margin = new Thickness(0, 0, 0, 4), LastChildFill = true };
+        if (session.State != SessionState.Expired && Actions?.OpenSession is { } open)
+        {
+            var button = Small("Open", $"Open session {shortId}", () => open(taskId, session.Id),
+                "Go to this session's window, resuming it first if it has ended");
+            DockPanel.SetDock(button, Dock.Right);
+            line.Children.Add(button);
+        }
+        line.Children.Add(new TextBlock
+        {
+            Text = $"Session {shortId} · joined {When(session.Joined)} · {StateWords(session.State)}",
+            FontSize = 11,
+            Foreground = session.State is SessionState.Working or SessionState.Idle ? Ink : HeaderInk,
+            TextTrimming = TextTrimming.CharacterEllipsis,
+            VerticalAlignment = VerticalAlignment.Center,
+        });
+        return line;
+    }
+
+    // Today as "11:42", another day as "22 Nov 11:42", the way a comment's time reads.
+    string When(DateTimeOffset at) =>
+        at.ToLocalTime() is var local && local.Date == Now().ToLocalTime().Date ? local.ToString("HH:mm") : local.ToString("d MMM HH:mm");
+
+    static string StateWords(SessionState state) => state switch
+    {
+        SessionState.Working => "working",
+        SessionState.Idle => "idle",
+        SessionState.Ended => "ended",
+        _ => "expired",
+    };
 
     UIElement CommentOf(TaskCommentView comment)
     {
@@ -1567,6 +1617,10 @@ public partial class TasksWindow : Window
         if (row.Status != TaskStatus.Closed && !row.Closing)
         {
             menu.Items.Add(Item("Edit", () => BeginRename(id)));
+            // Task 9: handing the task to Claude, right after Edit (the spec, "Where the clicks are"). Run once this menu
+            // has closed: it may ask a question or open a pick list of folders at the pointer.
+            if (Actions?.StartClaude is { } start)
+                menu.Items.Add(Item(StartClaudeText, () => Dispatcher.BeginInvoke(() => start(id), System.Windows.Threading.DispatcherPriority.Input)));
             menu.Items.Add(new Separator());
         }
 

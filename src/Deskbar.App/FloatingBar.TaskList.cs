@@ -64,8 +64,8 @@ namespace Deskbar.App;
 //                   bar's tests) it expands the list in place and reads "Less" at the end of it. Under the lines
 //                   rather than in a header, so it does not move under the pointer when the list opens.
 //
-// CLICKS. A line goes to its task through GoToTask, which the App points at the workspace switch, the same path the
-// tasks window's lines take (a later change sends a Claude task to its session instead; controller ruling 13); a note
+// CLICKS. A line goes to its task through GoToTask, which the App points at the workspace switch and then the task's
+// Claude session (ClaudeTaskActions.Go, Task 9), the same path the tasks window's lines take; a note
 // on no workspace has nowhere to go, so its click does nothing. The tick box and the close button call TaskService.Close at once (the store stays the truth; only Petre
 // closes, and these are his clicks), and "Undo" calls TaskService.UndoClose, which brings the task back exactly as it
 // was (Ruling 31).
@@ -126,7 +126,8 @@ public partial class FloatingBar
 
     IDisposable? goalChanges;
 
-    // What a click on a line does with the task's id. App sets it to the workspace switch; a refusal is traced.
+    // What a double-click on a line does with the task's id. App sets it to GoToTask (its workspace, then its Claude
+    // session's window); a refusal is shown.
     internal Func<Guid, Result> GoToTask { get; init; } = _ => Result.Success();
 
     // THE SELECTED TASK (Petre: "highlight selected task"; ruling 21): the one his last click on a line picked, here or
@@ -1405,7 +1406,7 @@ public partial class FloatingBar
     // --- clicks ----------------------------------------------------------------------------------------------------
 
     // A DOUBLE-CLICK on a line goes to its task (Ruling 54). A note on no workspace has nowhere to go; a Claude task goes
-    // even on no workspace, since a later pull request takes it to its session, which the App decides.
+    // even on no workspace, to its session, which the App decides (ClaudeTaskActions.Go).
     void OnTaskLineGo(TaskLine line)
     {
         // The click picks the task, in both views, whether or not it has anywhere to go.

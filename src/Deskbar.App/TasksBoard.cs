@@ -30,11 +30,9 @@ namespace Deskbar.App;
 // call, so a change from the window obeys the rules a click on the bar or a `deskbar.cmd task` does, and every view
 // redraws from TaskService.Changed. A refusal shows on the window's problem line until the next action works.
 //   Go            a line's click: through `goTo`. The window, a page of its own, stays open behind the switch on the
-//                 desktop it is on. The App points goTo at the bar's own
-//                 GoToTask path (the task's workspace). Controller ruling 13: a Claude task goes to its workspace too
-//                 until a later change measures the `vscode://` session link; that change swaps goTo alone, and
-//                 TaskViews.SessionToGoTo already names the session it will open. A note on no workspace has nowhere
-//                 to go, so its click opens its thread instead.
+//                 desktop it is on. The App points goTo at the bar's own GoToTask path: the task's workspace, then its
+//                 Claude session's window (ClaudeTaskActions.Go, Task 9; TaskViews.SessionToGoTo names the session). A
+//                 note on no workspace has nowhere to go, so its click opens its thread instead.
 //   Close         at once through TaskService.Close (only Petre closes, and this is his click), with the bar's undo
 //                 window: the line stays in its place for six seconds, struck through, with Undo (Ruling 10).
 //   Undo          exactly undo (Ruling 31): the status it had, its question if it waited on Petre, its place and the
@@ -42,6 +40,16 @@ namespace Deskbar.App;
 //   Reopen        a closed task under the Closed filter: TaskService.Reopen.
 //   SetStatus     Backlog, In progress, Waiting on you or Done by hand. Closed is refused there (Close is the way).
 //   Rename, MoveTo, Delete, AddNote, Comment (as Petre, no session; shown as "you").
+//   StartClaude   "Start Claude on this", from the line's menu and the thread's button: through `startClaude`, the App's
+//                 ClaudeTaskActions.Offer (asks first on a task with a running session, then the folder and the start).
+//   OpenSession   the thread's Open on one of its sessions: through `openSession` (ClaudeTaskActions.OpenSession), what
+//                 going to that session does. Task 9 of docs/superpowers/specs/2026-11-23-tasks-open-claude-sessions-design.md.
+//
+// THE THREAD'S SESSIONS (Task 9, spec "Task history"). An open thread lists the task's sessions, newest first, each with
+// when it joined and whether it is working, idle, ended or expired (`sessionsOf`, the App's ClaudeTaskActions.SessionsOf
+// over the latest `claude agents --json`), with Open on each but an expired one, and under them the button that starts
+// a new one. Only an open thread's list is made, since an ended session's state needs its transcript looked up on disk;
+// `sessionsChanged` (each new list) redraws, and the window redraws only when a state it shows changed.
 //
 // WHEN IT REDRAWS. On every TaskService.Changed and WorkspaceManager.StateChanged while the window is open (a workspace
 // renamed or recoloured changes the chips), and after each of its own actions. The window compares what it would
@@ -78,6 +86,8 @@ public sealed class TasksBoard : IDisposable
     readonly Func<DateTimeOffset> now;
     readonly TaskSelection selection;
     readonly GoalService? goals;
+    readonly Func<TaskItem, IReadOnlyList<SessionView>> sessionsOf;
+    readonly Func<TaskItem, string, Result>? openSession;
     readonly IDisposable subscriptions;
 
     // The lines closed in this window and still in their undo window: the status each had, and its timer.
@@ -108,11 +118,20 @@ public sealed class TasksBoard : IDisposable
     //                 seam so the tests move time by hand
     //   now           the clock a comment's time is told against ("11:42" today, a date before)
     //   goals         the goal service, for the "Goal" menu and the goal filter (see the header); none, no goals UI
+    //   sessionsOf    a task's sessions as its thread lists them (see the header); by default the hooks' word alone,
+    //                 every transcript taken as there (TaskViews.SessionList with no list)
+    //   startClaude   "Start Claude on this" (see the header); none, neither the menu item nor the button shows
+    //   openSession   a session's Open (see the header); none, no Open buttons
+    //   sessionsChanged  pulses when the sessions' states may have changed, to redraw an open thread
     public TasksBoard(TasksWindow window, TaskService tasks, WorkspaceManager manager, Func<TaskItem, Result> goTo,
         Func<Guid, Brush?>? colourOf = null, Func<nint, bool>? bringForward = null, Func<TimeSpan, Action, IDisposable>? undoTimer = null,
-        Func<DateTimeOffset>? now = null, TaskSelection? selection = null, GoalService? goals = null)
+        Func<DateTimeOffset>? now = null, TaskSelection? selection = null, GoalService? goals = null,
+        Func<TaskItem, IReadOnlyList<SessionView>>? sessionsOf = null, Action<Guid>? startClaude = null,
+        Func<TaskItem, string, Result>? openSession = null, IObservable<System.Reactive.Unit>? sessionsChanged = null)
     {
         this.goals = goals;
+        this.sessionsOf = sessionsOf ?? (task => TaskViews.SessionList(task, Maybe<IReadOnlyCollection<ClaudeAgent>>.None, _ => true));
+        this.openSession = openSession;
         this.window = window;
         this.tasks = tasks;
         this.manager = manager;
@@ -149,13 +168,19 @@ public sealed class TasksBoard : IDisposable
             SetGoal: (id, goal) => SetGoal(id, goal),
             FilterGoal: FilterGoal,
             Assign: (id, who) => Assign(id, who),
-            FilterAssignee: FilterAssignee);
+            FilterAssignee: FilterAssignee)
+        {
+            StartClaude = startClaude,
+            OpenSession = openSession is null ? null : (id, session) => OpenSession(id, session),
+        };
 
         subscriptions = new CompositeDisposable(
             tasks.Changed.Subscribe(_ => Refresh()),
             // A goal added, renamed, done or deleted (from the pipe, later the planner) changes the goal filter's label
             // and choices and, with G1, whether goals show at all.
             goals?.Changed.Subscribe(_ => Refresh()) ?? Disposable.Empty,
+            // A new list of Claude's sessions may change what an open thread says of them (working, idle, ended).
+            sessionsChanged?.Subscribe(_ => Refresh()) ?? Disposable.Empty,
             // Only a change the window shows (whole-PR review, minor 4): the workspaces (names, colours, groups, order),
             // which workspace is in front (where a new note goes) and the List / Matrix switch. Every other state pulse,
             // a window moving or a stats tick, used to rebuild the whole view for nothing; tasks have their own pulse.
@@ -373,6 +398,19 @@ public sealed class TasksBoard : IDisposable
             return Report(Result.Success());
         }
         return Report(goTo(task.Value));
+    }
+
+    /// <summary>
+    /// A session's Open in the thread (see the header): what going to that session does, through `openSession`. The
+    /// task is picked, as a click on its line picks it; a refusal shows on the problem line.
+    /// </summary>
+    public Result OpenSession(Guid id, string sessionId)
+    {
+        if (openSession is null) return Report(Result.Failure("Sessions cannot be opened in this copy"));
+        var task = tasks.Board.Tasks.TryFirst(t => t.Id == id);
+        if (task.HasNoValue) return Report(Result.Failure($"No task with id {id}"));
+        selection.Select(id);
+        return Report(openSession(task.Value, sessionId));
     }
 
     /// <summary>Closes the task at once, keeping its line in place with Undo for the undo window (see the header).</summary>
@@ -603,6 +641,8 @@ public sealed class TasksBoard : IDisposable
         Urgent = task.Urgent,
         // Null for no goal and for a link to a goal that no longer exists, which reads as no goal everywhere.
         Goal = goals?.GoalOf(task).Map(ChoiceOf).GetValueOrDefault(),
+        // Only an open thread shows them, and an ended one's state looks on disk for its transcript (see the header).
+        SessionList = expanded.Contains(task.Id) ? sessionsOf(task) : [],
     };
 
     // The mockup's sessions column: how many, and whether any is still live. Empty for a note.
@@ -716,6 +756,12 @@ internal sealed record TaskRowView(Guid Id, string Title, string Detail, TaskSta
     /// redraw signature.
     /// </summary>
     public GoalChoice? Goal { get; init; }
+
+    /// <summary>
+    /// The task's sessions as its open thread lists them (Task 9): newest first, each working, idle, ended or expired.
+    /// Empty while the thread is closed.
+    /// </summary>
+    public IReadOnlyList<SessionView> SessionList { get; init; } = [];
 }
 
 /// <summary>
@@ -795,4 +841,11 @@ internal sealed record TasksWindowActions(
     Action<Guid, Maybe<Guid>> SetGoal,
     Action<TaskGoalFilter> FilterGoal,
     Action<Guid, Assignee> Assign,
-    Action<TaskAssigneeFilter> FilterAssignee);
+    Action<TaskAssigneeFilter> FilterAssignee)
+{
+    /// <summary>"Start Claude on this" (Task 9): the line menu's item and the thread's button. None, neither shows.</summary>
+    public Action<Guid>? StartClaude { get; init; }
+
+    /// <summary>A session's Open in the thread (Task 9): the task's id and the session's. None, no Open buttons.</summary>
+    public Action<Guid, string>? OpenSession { get; init; }
+}

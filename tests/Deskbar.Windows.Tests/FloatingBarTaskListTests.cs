@@ -96,7 +96,8 @@ public class FloatingBarTaskListTests
     static ListBar Build(Func<Guid, Result>? goTo = null, Action? openWindow = null, TaskService? tasks = null, Func<string, Maybe<nint>>? sessionWindow = null,
         List<nint>? handedBack = null, bool editorAlive = true, Func<DateTime>? clickClock = null, Func<nint>? front = null,
         Func<nint, bool>? onCurrentDesktop = null, Func<DateTimeOffset>? taskNow = null, Action<Guid>? openTask = null,
-        Func<TaskItem, Maybe<string>>? goalTitle = null, IObservable<System.Reactive.Unit>? goalChanges = null)
+        Func<TaskItem, Maybe<string>>? goalTitle = null, IObservable<System.Reactive.Unit>? goalChanges = null,
+        Func<Guid, ContextMenu?>? startClaude = null)
     {
         var harness = Harness.Build();
         var minutes = 0;
@@ -130,6 +131,7 @@ public class FloatingBarTaskListTests
             TaskAgeTimer = (_, _) => System.Reactive.Disposables.Disposable.Empty,
             GoalTitle = goalTitle ?? (_ => Maybe<string>.None),
             GoalChanges = goalChanges,
+            StartClaude = startClaude,
         };
         bar.ShowBar();
         bar.UpdateLayout();
@@ -2764,5 +2766,34 @@ public class FloatingBarTaskListTests
         t.Tasks.Describe(note, "- **Use** the _November_ `invoice`");
 
         Assert.Equal("Use the November invoice", t.Lines.Select(l => (TaskLine)l.Tag).Single().Detail);
+    });
+
+    // Task 9 (spec, "Where the clicks are"): "Start Claude on this" on a line's menu right after Edit. It reaches the App's
+    // ClaudeTaskActions.Offer once the menu has closed; a bar the App gave no such seam shows no such item.
+    [Fact]
+    public void Start_Claude_on_this_is_on_the_bar_menu_after_Edit() => StaThread.Run(() =>
+    {
+        var started = new List<Guid>();
+        using var t = Build(startClaude: id =>
+        {
+            started.Add(id);
+            return null;
+        });
+        var id = t.Tasks.AddNote("Write the docs", t.Gepha).Value.Id;
+
+        var menu = t.Bar.OpenTaskLineMenu(id)!;
+        var items = menu.Items.OfType<MenuItem>().ToList();
+        Assert.Equal(["Edit", "Start Claude on this"], items.Take(2).Select(i => ((TextBlock)i.Header).Text));
+        items[1].RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
+        menu.IsOpen = false;
+        // Run once the menu has closed (an Input-priority dispatch): a lower priority runs after it.
+        t.Bar.Dispatcher.Invoke(() => { }, System.Windows.Threading.DispatcherPriority.ApplicationIdle);
+        Assert.Equal([id], started);
+
+        using var plain = Build();
+        var other = plain.Tasks.AddNote("Errand", plain.Gepha).Value.Id;
+        var plainMenu = plain.Bar.OpenTaskLineMenu(other)!;
+        Assert.DoesNotContain(plainMenu.Items.OfType<MenuItem>(), i => i.Header is TextBlock { Text: "Start Claude on this" });
+        plainMenu.IsOpen = false;
     });
 }

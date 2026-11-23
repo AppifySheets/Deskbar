@@ -12,8 +12,8 @@ namespace Deskbar.App;
 // A TASK LINE'S RIGHT-CLICK MENU AND ITS IN-PLACE EDITOR ON THE BAR (Ruling 44; Petre: "task rightclick should let me
 // edit it first, first option"). Design: docs/superpowers/specs/2026-11-22-tasks-board-design.md, "The bar".
 //
-// Right-clicking a task line opens its menu, Edit first: Edit, then the line's other actions (the two flags, Move to
-// workspace…, Close). Held open the way the bar's other menus are (HoldFadeWhileOpen): the bar neither fades nor
+// Right-clicking a task line opens its menu, Edit first: Edit, "Start Claude on this" (Task 9, when the App wires it),
+// then the line's other actions (the two flags, Move to workspace…, Close). Held open the way the bar's other menus are (HoldFadeWhileOpen): the bar neither fades nor
 // repaints under it.
 //
 // Edit opens an editor in the line itself, over the title: a box with the whole title (a title may hold line breaks;
@@ -42,6 +42,12 @@ public partial class FloatingBar
     /// <summary>For the tests: the last line menu opened by a right-click.</summary>
     internal ContextMenu? TaskLineMenu { get; private set; }
 
+    /// <summary>
+    /// "Start Claude on this" (Task 9): the App's ClaudeTaskActions.Offer, which asks first on a task with a running
+    /// session, starts in the task's one folder or answers the pick list it opened. Unset, the item is not shown.
+    /// </summary>
+    internal Func<Guid, ContextMenu?>? StartClaude { get; init; }
+
     // The title, or on the line being edited, the editor in its place.
     UIElement TitleOrEditor(TaskLine line) => editingTask == line.Id && !line.Closing ? TaskEditBox(line) : TextOf(line);
 
@@ -54,7 +60,7 @@ public partial class FloatingBar
         };
 
     /// <summary>
-    /// A line's menu, Edit first, then its flags, Move to workspace… and Close. Internal, and answering the menu, for
+    /// A line's menu, Edit first, then "Start Claude on this" when wired, its flags, Move to workspace… and Close. Internal, and answering the menu, for
     /// the tests. Nothing for a line in its undo window, whose task is closed.
     /// </summary>
     internal ContextMenu? OpenTaskLineMenu(Guid id)
@@ -63,6 +69,14 @@ public partial class FloatingBar
         if (taskService is null || line is null || line.Closing) return null;
         var menu = new ContextMenu { Placement = PlacementMode.MousePoint };
         menu.Items.Add(TaskMenuItem("Edit", () => BeginTaskEdit(id)));
+        // Task 9: handing the task to Claude, right after Edit (the spec, "Where the clicks are"). Run once this menu has
+        // closed, as "Move to workspace…" is: it may ask first, and may open a pick list of folders at the pointer, which
+        // holds the bar still the way the bar's own menus do.
+        if (StartClaude is { } start)
+            menu.Items.Add(TaskMenuItem(TasksWindow.StartClaudeText, () => Dispatcher.BeginInvoke(() =>
+            {
+                if (start(id) is { } pick) HoldFadeWhileOpen(pick);
+            }, System.Windows.Threading.DispatcherPriority.Input)));
         menu.Items.Add(new Separator());
         menu.Items.Add(TaskMenuItem("Important", () => taskService?.SetFlag(id, TaskFlag.Important, !line.Important), line.Important));
         menu.Items.Add(TaskMenuItem("Urgent", () => taskService?.SetFlag(id, TaskFlag.Urgent, !line.Urgent), line.Urgent));

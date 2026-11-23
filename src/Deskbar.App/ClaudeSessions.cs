@@ -54,7 +54,14 @@ namespace Deskbar.App;
 // TaskService or this class's fields. So nothing here locks. Tests pass a virtual-time scheduler and an immediate
 // `background`, which makes every call and every timer exact.
 //
-// NOTHING HERE OPENS A WINDOW OR A TERMINAL. Putting a window on a session is the caller's (Task 9).
+//   4. RESUMING ONE SESSION NOW, AT A CLICK (ResumeNow, Task 9): going to a task whose session has ended. It is the
+//      keeper's resume under the same guards, not a second way round them: the list is read FRESH first, and a session
+//      it shows is handed back as it is, never resumed (that would start a COPY); a session already being woken (the
+//      queue's in flight, or another click's) or woken within SessionKeeper.Grace is not resumed again either, only
+//      looked for in the list; one waiting in the queue is taken out of it and woken now; and the resume goes into the
+//      ledger like any other, so the keeper's grace and loop guard count it.
+//
+// NOTHING HERE OPENS A WINDOW OR A TERMINAL. Putting a window on a session is the caller's (ClaudeTaskActions, Task 9).
 public sealed class ClaudeSessions : IDisposable
 {
     /// <summary>How often `claude agents --json` is read while the feature is on.</summary>
@@ -144,6 +151,10 @@ public sealed class ClaudeSessions : IDisposable
 
     sealed record StartClaim(Guid TaskId, string Folder);
 
+    // Sessions a click is resuming right now (ResumeNow), apart from the queue's one in flight so neither ends the
+    // other's turn: both count as queued, so no poll queues them meanwhile.
+    ImmutableHashSet<string> wakingNow = ImmutableHashSet<string>.Empty;
+
     /// <param name="scheduler">Where answers land and timers run: the UI thread in the app.</param>
     /// <param name="workspaceOfFolder">The workspace of the editor window showing a folder, or none, for adopted sessions.</param>
     /// <param name="claudeHome">The folder that holds Claude Code's `projects`, normally %USERPROFILE%\.claude.</param>
@@ -192,6 +203,82 @@ public sealed class ClaudeSessions : IDisposable
             .TakeUntil(stopping)
             .DefaultIfEmpty(Result.Failure<string>("Deskbar closed before the session was found."))
             .ToTask();
+
+    /// <summary>
+    /// Resumes one session now, for a click on its task (Task 9; see the header, job 4), and answers it as the list
+    /// shows it once it runs, so the caller can attach a window to it. A session the fresh list already shows comes back
+    /// at once, untouched. A failure carries the reason, and has been said in the task's thread too (a failed resume as
+    /// the keeper's own is), so a click that opened nothing has its reason where Petre looks. Called on the UI thread;
+    /// the returned task completes there.
+    /// </summary>
+    public Task<Result<ClaudeAgent>> ResumeNow(Guid taskId, TaskSession session) =>
+        OffThread(() => cli.Run(AgentsArguments, null, ReadTimeout))
+            .SelectMany(read => read.Bind(ClaudeAgents.Parse).Match(
+                list => list.TryFirst(agent => agent.SessionId == session.Id) is { HasValue: true } listed
+                    ? Observable.Return(Result.Success(listed.Value))
+                    : WakeNow(taskId, session),
+                // Cannot tell (Global Constraints): nothing is resumed on a list that could not be read.
+                error => Observable.Return(Said(taskId, Result.Failure<ClaudeAgent>(
+                    $"Claude Code's list of sessions could not be read, so the session was not resumed:\n\n{error}")))))
+            .TakeUntil(stopping)
+            .DefaultIfEmpty(Result.Failure<ClaudeAgent>("Deskbar closed before the session was resumed."))
+            .ToTask();
+
+    // Runs on `scheduler` (inside ResumeNow's SelectMany), so it may touch the state.
+    IObservable<Result<ClaudeAgent>> WakeNow(Guid taskId, TaskSession session)
+    {
+        // Already being woken, or woken a moment ago and not listed yet: a second resume would start a copy.
+        if (Waking(session.Id) || AnsweredWithinGrace(session.Id))
+            return Listed(taskId, session.Id, FindAttempts);
+
+        // Waiting its turn in the queue: woken now instead, so the queue does not wake it a second time.
+        queue = ImmutableQueue.CreateRange(queue.Where(r => r.Session.Id != session.Id));
+        var at = scheduler.Now;
+        ledger = ledger.Record(session.Id, at);
+        wakingNow = wakingNow.Add(session.Id);
+        return OffThread(async () =>
+            {
+                // Read here, on `background`, for the reason given in Heard.
+                var cutOff = CutOff(session);
+                return (CutOff: cutOff, Result: await cli.Run(ResumeArguments(session.Id, cutOff), session.Folder, LaunchTimeout));
+            })
+            // A fault the CLI did not turn into a Result is a failure like any other (Ruling 13), not a dispatcher crash.
+            .Catch((Exception e) => Observable.Return((CutOff: false, Result: Result.Failure<string>(e.Message))))
+            .SelectMany(answer =>
+            {
+                wakingNow = wakingNow.Remove(session.Id);
+                // From this answer on, the session is left alone for Grace, as after the queue's own resume (Settled).
+                var now = scheduler.Now;
+                answered = answered.Where(pair => pair.Value + SessionKeeper.Grace > now).ToImmutableDictionary().SetItem(session.Id, now);
+                Answered(taskId, session.Id, answer.CutOff, answer.Result, at);
+                return answer.Result.IsSuccess
+                    ? Listed(taskId, session.Id, FindAttempts)
+                    : Observable.Return(Result.Failure<ClaudeAgent>(answer.Result.Error));
+            });
+    }
+
+    // Being resumed right now: the queue's one in flight, or a click's.
+    bool Waking(string sessionId) => inFlight.Map(id => id == sessionId).GetValueOrDefault(false) || wakingNow.Contains(sessionId);
+
+    // Reads the list until it shows the session, a pause between reads (about ten seconds in all, as Start's Find).
+    // Not found in time is said in the task's thread, so a click that opened nothing has its reason where Petre looks.
+    IObservable<Result<ClaudeAgent>> Listed(Guid taskId, string sessionId, int attemptsLeft) =>
+        OffThread(() => cli.Run(AgentsArguments, null, ReadTimeout))
+            .SelectMany(read => read.Bind(ClaudeAgents.Parse)
+                    .Map(list => list.TryFirst(agent => agent.SessionId == sessionId))
+                    .GetValueOrDefault(Maybe<ClaudeAgent>.None) is { HasValue: true } found
+                ? Observable.Return(Result.Success(found.Value))
+                : attemptsLeft > 1
+                    ? Observable.Timer(FindPause, scheduler).SelectMany(_ => Listed(taskId, sessionId, attemptsLeft - 1))
+                    : Observable.Return(Said(taskId, Result.Failure<ClaudeAgent>(
+                        $"Session {sessionId} was resumed, but Claude Code did not list it within {FindAttempts * FindPause.TotalSeconds:0} seconds, so no window was opened on it."))));
+
+    // A click's failure, said in the task's thread and handed back.
+    Result<ClaudeAgent> Said(Guid taskId, Result<ClaudeAgent> failure)
+    {
+        Say(taskId, failure.Error);
+        return failure;
+    }
 
     public void Dispose()
     {
@@ -419,7 +506,7 @@ public sealed class ClaudeSessions : IDisposable
 
     // Waiting in the queue, or being resumed right now.
     bool Queued(string sessionId) =>
-        queue.Any(r => r.Session.Id == sessionId) || inFlight.Map(id => id == sessionId).GetValueOrDefault(false);
+        queue.Any(r => r.Session.Id == sessionId) || inFlight.Map(id => id == sessionId).GetValueOrDefault(false) || wakingNow.Contains(sessionId);
 
     bool AnsweredWithinGrace(string sessionId) =>
         answered.TryGetValue(sessionId, out var at) && at + SessionKeeper.Grace > scheduler.Now;
