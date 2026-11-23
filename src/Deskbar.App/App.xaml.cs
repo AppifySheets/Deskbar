@@ -298,7 +298,7 @@ public partial class App : Application
         // is this process), so Deskbar never tiles its own bar, Manage, or a dialog of its own. The one exception is the
         // tasks window, a page Petre works in, which tiles like any app window ("maybe even tile it", 2026-11-23;
         // TasksBoard.KeptFromTiling). It is built after this, so its handle is read when the question is asked.
-        tileSurface = new Windows.Tiling.TileSurface(w => TasksBoard.KeptFromTiling(w.Value, tasksBoard?.EnsureHandle() ?? 0));
+        tileSurface = new Windows.Tiling.TileSurface(w => TasksBoard.KeptFromTiling(w.Value, tasksBoard?.KnownHandle ?? 0));
         tiler = new Core.Tiling.Tiler(manager, desktops, monitor, tileSurface,
             // Whether this copy may tile: Pro, or anyone while tiling is free (TilingGate.Free, for now).
             () => Core.Tiling.TilingGate.Allowed(Entitlement.Current.IsPro),

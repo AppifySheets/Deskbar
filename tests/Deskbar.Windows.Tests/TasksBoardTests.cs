@@ -1721,6 +1721,23 @@ public class TasksBoardTests
         Assert.Null(t.Window.Editor);
     });
 
+    // Review, Minor 4: hiding the window calls off a click's delayed go, so it never fires into a hidden window.
+    [Fact]
+    public void Dismissing_the_window_cancels_a_pending_go() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        var id = t.Tasks.AddNote("buy body shampoo", t.Gepha).Value.Id;
+        t.Controller.Open(Rect.Empty);
+        t.Window.UpdateLayout();
+        TitleOf(t.Window, id).RaiseEvent(TitlePress(1));
+        Click(LineOf(t.Window, id));
+
+        t.Window.Dismiss();
+        t.Timers.FireAll();
+
+        Assert.Empty(t.WentTo);
+    });
+
     // The tunnelling press a real click on the title makes (see A_double_click_on_the_title_opens_the_editor).
     static MouseButtonEventArgs TitlePress(int clicks)
     {

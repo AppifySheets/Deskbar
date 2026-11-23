@@ -322,6 +322,8 @@ public partial class TasksWindow : Window
     public void Dismiss()
     {
         if (!IsOpen) return;
+        // A click's delayed go (the double-click wait) must not fire into a window that is hidden (review, Minor 4).
+        CancelPendingGo();
         IsOpen = false;
         if (openMenu is { IsOpen: true } menu) menu.IsOpen = false;
         renaming = null;

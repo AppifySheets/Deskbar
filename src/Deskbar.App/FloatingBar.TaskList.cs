@@ -645,6 +645,12 @@ public partial class FloatingBar
 
         var host = new TakesNoWidth(VisibleWidthOf) { Child = new StackPanel { Children = { taskProblemHost, addRow, taskLinesScroller, taskMoreButton } } };
         TaskListLine.Child = host;
+        // A RIGHT-CLICK IN THE LIST NEVER OPENS THE BAR'S MENU (Petre's screenshot: right-clicking a task line opened New
+        // workspace, Window list, Arrange, Dock, Manage, Exit). The bar's menu is the Root's ContextMenu, and a
+        // ContextMenuOpening that nothing below it handles bubbles up to it. A task line has its own menu (Edit first;
+        // FloatingBar.TaskEdit.cs) and the text boxes their own (cut, copy, paste), and both handle the event first. For
+        // the rest of the list (the chip row, the toggles, "All tasks", the gaps) this stops it here: nothing opens.
+        TaskListLine.ContextMenuOpening += (_, e) => e.Handled = true;
         // The width the list is laid out at follows the bar's window (VisibleWidthOf), and a footer laid out wider than
         // the window keeps the host's own slot unchanged when the window narrows, so nothing would arrange it again:
         // every change of the bar's size asks it to (measured: the lines stayed at the width of the bar before).
@@ -959,6 +965,8 @@ public partial class FloatingBar
         // of the line (FloatingBar.TaskDrag.cs), armed only, so a press released in place stays this Click.
         button.PreviewMouseLeftButtonDown += (_, e) =>
         {
+            // A press inside the line's own editor is the editor's: selecting text must not drag the line (review, I-1).
+            if (editingTask == line.Id) return;
             taskPressClicks = e.ClickCount;
             if (taskLinesPanel is not null) TaskDragPress(line.Id, ArrangeMouseInput.Position(e, taskLinesPanel));
         };
@@ -1090,8 +1098,13 @@ public partial class FloatingBar
     // Shows or hides a line's off toggles; the on ones are always at full strength.
     static void ShowQuietFlags(Button line, bool show)
     {
+        // Hidden toggles are not pressable either (review, Minor 1): an invisible one over the title's tail took clicks.
         LogicalDescendants(line).OfType<Button>().Where(b => Equals(b.Tag, FlagOffTag)).ToList()
-            .ForEach(toggle => toggle.Opacity = show ? QuietFlagOpacity : 0);
+            .ForEach(toggle =>
+            {
+                toggle.Opacity = show ? QuietFlagOpacity : 0;
+                toggle.IsHitTestVisible = show;
+            });
         // Their fill only while they show: otherwise the title's tail under them reads through.
         LogicalDescendants(line).OfType<Border>().Where(b => Equals(b.Tag, QuietFlagsTag)).ToList()
             .ForEach(overlay => overlay.Background = show ? QuietFlagsFill : Brushes.Transparent);

@@ -52,7 +52,7 @@ public partial class FloatingBar
     internal TaskDropPreview? TaskDropShown => taskDropShown;
 
     // Whether the list must wait for a task drag (TaskListMustWait and Rebuild read it).
-    bool TaskDragInFlight => taskDrag is not null || taskDropQueued;
+    internal bool TaskDragInFlight => taskDrag is not null || taskDropQueued;
 
     // Wired once, from BuildTaskList, on the lines panel: the moves, the release and a lost capture while a drag is on.
     void WireTaskDrag(StackPanel panel)
