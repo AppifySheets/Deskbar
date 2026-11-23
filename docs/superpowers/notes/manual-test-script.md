@@ -315,8 +315,9 @@ written for the floating window and now describe the panel; 64a to 64n cover wha
     app fills the space beside the bar and the panel, not under either.
 64b. Width. Drag the panel's inner edge (the one away from the bar). It starts at 460 DIP, stops at 360 on the narrow
     side and at half the screen on the wide side. Let go and reopen it: the width is kept.
-64c. Layout by width. Drag the width across 620 DIP: below it the lines are slim, with age and assignee in the
-    tooltip and Close and Reopen in the "..." menu; at 620 and above they are the full lines. Drag across 780 DIP:
+64c. Layout by width. Drag the width across 692 DIP: below it the lines are slim, with the status ("Done · 5h ·
+    Claude"), age and assignee in the tooltip, a done task's green tick still on the line, and Close and Reopen in the
+    "..." menu; at 692 and above they are the full lines, each with its status chip. Drag across 780 DIP:
     the List and Matrix switch is hidden below it and shows from it. Check the lines follow while you drag, not
     only after you let go.
 64d. Workspaces. With the panel open, switch to each other virtual desktop: the panel is on every one, at the same
@@ -477,9 +478,9 @@ Manage ticked. Use a throwaway folder Claude Code already trusts, not a real rep
 89a. Stalled tasks (spec `docs/superpowers/specs/2026-11-23-stalled-claude-tasks-design.md`). Give a VS Code session a
     task, let it set a status line and stop at the prompt without `task ask`. The task is off the bar (Claude's). Leave
     it 15 minutes: within 15 seconds after that it is on the bar with its status line, assigned to you in the tasks
-    window, and the trace says `tasks: handed back <id> "<title>"`. Send the session a prompt: once it has been busy
+    panel, and the trace says `tasks: handed back <id> "<title>"`. Send the session a prompt: once it has been busy
     for a poll, the task leaves the bar and the trace says `taken back`. Repeat, but assign the task to yourself in the
-    tasks window before prompting: it stays on the bar while the session works.
+    tasks panel before prompting: it stays on the bar while the session works.
 
 ## Going to a Claude session, and starting one
 

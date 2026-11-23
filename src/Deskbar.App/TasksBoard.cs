@@ -85,7 +85,7 @@ namespace Deskbar.App;
 // apply), so it too says how many it would show. Neither is saved: both start over on a fresh open, with the rest.
 //
 // THE PANEL'S WIDTH (spec "Lines at panel width" and "The Matrix"; plan 2026-11-23-tasks-panel, Task 8). The view says
-// whether lines are slim (below 620 DIP) and whether the Matrix is allowed (from 780), both from the width the panel
+// whether lines are slim (below 692 DIP) and whether the Matrix is allowed (from 780), both from the width the panel
 // docked at (TasksPanel.DockedWidth; View has why that one), and shows the Matrix only when the setting asks for it AND
 // it is allowed. That width changes only when the panel docks (the grip's drag end, another screen, a scale change),
 // whose pulse makes the view again, so every line redraws once then and never during a drag.
@@ -231,7 +231,7 @@ public sealed class TasksBoard : IDisposable
             // says the current one at once, then each change).
             panel.Edge.Subscribe(window.SetInnerEdge),
             // The width the panel docked at (Task 8 fix round 1): a dock at a new width, on another screen, at another
-            // scale or from the grip, may cross 620 or 780, so the view is made again (View reads it). The window's
+            // scale or from the grip, may cross 692 or 780, so the view is made again (View reads it). The window's
             // signature holds only the two flags, so a new width that crosses neither draws nothing.
             panel.DockedWidth.Subscribe(width =>
             {
@@ -334,7 +334,7 @@ public sealed class TasksBoard : IDisposable
 
     // The grip's drag end (TasksWindowActions.ResizePanel): the width saved, then the panel re-docked at it in place. The
     // width goes in unclamped; TasksPanel clamps it against the screen it docks on.
-    // The new width may cross one of the lines' thresholds (slim below 620, the Matrix from 780; Task 8), so every line
+    // The new width may cross one of the lines' thresholds (slim below 692, the Matrix from 780; Task 8), so every line
     // redraws once, here at the drag's end and never during it. The re-dock's DockedWidth pulse does that (see the
     // constructor); the Refresh after it draws nothing then (the signature is the same), and covers a panel not docked
     // yet, whose view still reads the saved width. A drag that crosses neither threshold draws nothing.
@@ -711,7 +711,7 @@ public sealed class TasksBoard : IDisposable
             .Select(c => new TaskCellView(c.Quadrant, TaskViews.GroupName(TaskViews.KindOf(c.Quadrant)), c.Tasks.Select(Row).ToArray()))
             .ToArray();
         var (menuGoals, filterGoals) = showsGoals ? GoalChoices(goalBoard) : NoGoalChoices;
-        // THE PANEL'S WIDTH DECIDES TWO THINGS (Task 8; spec "Lines at panel width", "The Matrix"): slim lines below 620
+        // THE PANEL'S WIDTH DECIDES TWO THINGS (Task 8; spec "Lines at panel width", "The Matrix"): slim lines below 692
         // DIP, and the List / Matrix switch only from 780. It is the width the panel DOCKED at (TasksPanel.DockedWidth,
         // fix round 1), which is the saved width clamped to half the screen it docks on: after a move to a smaller
         // screen or a scale change the panel is narrower than the saved width, and the lines must follow what is drawn

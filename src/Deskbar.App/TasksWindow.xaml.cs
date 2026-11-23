@@ -51,8 +51,8 @@ namespace Deskbar.App;
 //   Claude working   a chip with the status chips, "Claude working N", orange-edged (Orange) on or off, filled with
 //                    AskTint while on (the approved mockup; never the blue selected edge). N is what it would show
 //                    under every other filter (TasksView.ClaudeWorkingCount).
-//   The width        (tasks panel plan, Task 8; spec "Lines at panel width" and "The Matrix") below 620 DIP the lines are
-//                    slim (the view's Slim: squares for sessions, no assignee, age or Reopen; "Lines at panel width"
+//   The width        (tasks panel plan, Task 8; spec "Lines at panel width" and "The Matrix") below 692 DIP the lines are
+//                    slim (the view's Slim: squares for sessions, no status chip, assignee, age or Reopen; "Lines at panel width"
 //                    below Line), and the List / Matrix switch shows only from 780 (MatrixAllowed, PaintViewSwitch in
 //                    TasksWindow.Matrix.cs). Both come with the view, made again at the grip's drag end, never during it.
 //                    A session Claude is busy in wears a 2 DIP halo on its square, on either line (SessionSquare).
@@ -743,15 +743,16 @@ public partial class TasksWindow : Window
     // comments, action (close or Reopen), "…". Fixed widths, shared by every line, so each column sits at the same x on
     // every line. The sessions column is wide enough for "2 sessions, 1 live" (116 DIP, so the words never spill into the
     // age column; it is empty on a note), the age is left-aligned in its own so its x never follows the text length, and this
-    // line is drawn only from 620 DIP (TasksPanelLayout.SlimBelow; narrower, the slim line below), so the title keeps a
-    // usable width even with the list's scroll bar showing (review I-3). The panel itself goes down to 360 DIP.
+    // line is drawn only from 692 DIP (TasksPanelLayout.SlimBelow: the old floating window's minimum, 620 until the status
+    // chip column took 72; narrower, the slim line below), so the title keeps a usable width even with the list's scroll
+    // bar showing (review I-3). The panel itself goes down to 360 DIP.
     static readonly IReadOnlyList<GridLength> LineColumns =
         [new(22), new(1, GridUnitType.Star), new(38), new(72), new(116), new(46), new(44), new(88), new(40), new(52), new(24)];
 
     // LINES AT PANEL WIDTH (spec docs/superpowers/specs/2026-11-23-tasks-panel-design.md, "Lines at panel width"; Petre's
     // pick, "slim line when narrow"; plan 2026-11-23-tasks-panel, Task 8). The full line's fixed columns come to 542 DIP
     // (470 before the 72 DIP status chip column), more than the panel's default 460, so below TasksPanelLayout.SlimBelow
-    // (620 DIP; the view's Slim) a line is slim: tick, title (a Done task's green tick still in front of it), the two
+    // (692 DIP; the view's Slim) a line is slim: tick, title (a Done task's green tick still in front of it), the two
     // toggles, the sessions as squares alone (no words), the workspace chip, the comment count and "⋯". The status chip,
     // the assignee and the age move into the line's tooltip (SlimTip, "Done · 5h · Claude"); Close and Reopen were already in "⋯"
     // (OpenMenuFor), so the Reopen button goes without anything becoming unreachable. Same column indexes as the full

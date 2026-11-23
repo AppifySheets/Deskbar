@@ -257,7 +257,7 @@ page says "Sorry, we couldn't find that page": switch accounts, do not debug the
   is the case this guards against). When the bar announces is one pure rule, `BarStripNotices.Next` in Core, with
   a test per case; change it there, never with a condition in `FloatingBar`. It is pinned to every virtual
   desktop, topmost, a tool window, never tiled.
-  Its width is 460 DIP by default, 360 at the least and half the screen at the most; lines go slim below 620 and
+  Its width is 460 DIP by default, 360 at the least and half the screen at the most; lines go slim below 692 and
   the Matrix switch shows from 780. A floating bar gets the panel on its nearer screen edge, a minimized bar takes
   it away, and a full-screen app makes it leave the topmost band. `AppState.TasksWindow` is ignored now. Do not
   bring the floating mode back.
