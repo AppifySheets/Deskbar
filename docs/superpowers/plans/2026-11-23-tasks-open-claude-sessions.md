@@ -38,7 +38,9 @@ on Deskbar task 8f70d8ea.
 - The first message, exactly (title and status line as stored, the whole cut to 1000 characters):
   `Deskbar task <id>: <title>\n<status line>\nJoin this task (deskbar task join <id>) and start on it.` with the
   status line row left out when empty. `<id>` is the task's full Guid.
-- "continue" is sent as the message `continue`.
+- The resume message for a cut-off turn, exactly: `Continue from where you left off. Note: this session was resumed by Deskbar after it stopped.` (mirrors the message Claude Code's own daemon sends after a crash, Task 1 note).
+- Never `claude --bg --resume` a session that `claude agents --json` lists: that starts a COPY with a new id (Task 1 note). A listed session is shown by attaching.
+- Test commands on the hidden desktop: `pwsh scripts/test-hidden.ps1 -Arguments 'tests/Deskbar.Windows.Tests --filter FullyQualifiedName~<Name>'` (the script has no `-Filter`).
 - Every pipe verb added appears in `ControlUsage` (a test fails otherwise); README and the manual test script are
   updated in the task that adds the behaviour.
 
@@ -58,7 +60,12 @@ Each item has its test in the task that owns it (Tasks 5, 6, 6, 8, 6).
 
 ---
 
-### Task 1: Probe the unmeasured behaviours
+### Task 1: Probe the unmeasured behaviours (DONE 2026-11-23)
+
+Done by the controller; results in `docs/superpowers/notes/2026-11-23-claude-background-probes.md`. Consequences
+already folded into Tasks 4 to 8 below: background sessions' hooks need `CLAUDE_JOB_DIR` (Task 5), the daemon
+restarts a session that crashes mid-turn by itself (Task 6), the resume message (Global Constraints), and the font
+choice (Task 7).
 
 Measure before building (spec, Constraints). Use a throwaway folder that has been trusted once and a hidden or
 off-screen window where possible; stop and `claude rm` every probe session afterwards.
@@ -144,7 +151,7 @@ off-screen window where possible; stop and `claude rm` every probe session after
   `claude --bg` hands the session to its own daemon, so nothing started here outlives the call. In the packaged build
   this is a child of the package; record that as checked in Task 1's note if it can be, otherwise leave a
   `PackageIdentity.IsPackaged` comment naming the store packaging spec.
-- [ ] **Step 4:** `pwsh scripts/test-hidden.ps1 -Filter ClaudeCliTests`; expect PASS.
+- [ ] **Step 4:** `pwsh scripts/test-hidden.ps1 -Arguments 'tests/Deskbar.Windows.Tests --filter FullyQualifiedName~ClaudeCliTests'`; expect PASS.
 - [ ] **Step 5:** Commit `feat: run the Claude CLI and read its output`.
 
 ### Task 4: Transcripts: where they are, expired, cut off
@@ -186,6 +193,17 @@ off-screen window where possible; stop and `claude rm` every probe session after
 - Modify: `src/Deskbar.Core/Tasks/TaskBoard.cs`, `src/Deskbar.Core/Tasks/TaskService.cs` (the SessionEnd hook in
   `src/Deskbar.Core/Control/RemoteControl.ClaudeHook.cs:119` stays as it is; `Reconcile` corrects it)
 - Test: `tests/Deskbar.Core.Tests/Tasks/TaskBoardTests.cs`, `TaskServiceTests.cs`, `RemoteControlClaudeHookTests.cs`
+
+Also in this task (Task 1 note, "What a background session's hooks see"): a background session's hooks arrive with
+`CLAUDE_CODE_SESSION_ATTENDED=0`, so Deskbar drops them as headless. Pass the job directory through and count a
+session that has one as attended:
+- Modify: `src/Deskbar.App/ClaudeSkill.cs` (both hook scripts gain `--job "%CLAUDE_JOB_DIR%"`),
+  `src/Deskbar.Core/Tasks/ClaudeHookEvent.cs` (`Parse(string json, string? entrypoint, string? attended, string? job)`;
+  `IsHeadless` is false when a job directory arrived, using the same "arrived" test as the others),
+  `src/Deskbar.Core/Control/RemoteControl.ClaudeHook.cs` (read `--job`).
+- Tests: `A_background_session_with_a_job_directory_is_attended_though_ATTENDED_is_0` and
+  `A_claude_p_session_without_a_job_directory_is_still_headless` in the ClaudeHookEvent tests;
+  `The_hook_scripts_pass_the_job_directory` in `tests/Deskbar.Windows.Tests/ClaudeSkillTests.cs`.
 
 **Interfaces:**
 - Consumes: `ClaudeAgent` (Task 2).
@@ -236,7 +254,10 @@ off-screen window where possible; stop and `claude rm` every probe session after
   `A_session_on_two_tasks_is_resumed_once`,
   `Steps_come_in_task_order_waiting_first_so_answers_come_back_first`.
 - [ ] **Step 2:** Run; expect build failure.
-- [ ] **Step 3:** Implement as a pure function. Comment the rule and Petre's words ("if a session has ended and done
+- [ ] **Step 3:** Implement as a pure function. In its comment: Claude Code's daemon restarts a session that crashed
+  mid-turn by itself and sends it a continue (Task 1 note), so the keeper only ever acts on sessions the list does
+  not show, which after the grace means the daemon could not bring them back (a reboot, a sign-out, a killed daemon,
+  a closed VS Code session). Comment the rule and Petre's words ("if a session has ended and done
   its work, i will mark the task as done").
 - [ ] **Step 4:** Run; expect PASS.
 - [ ] **Step 5:** Commit `feat: decide which Claude sessions to resume`.
@@ -256,9 +277,9 @@ off-screen window where possible; stop and `claude rm` every probe session after
   - `public static string ClaudeStart.RepoOf(string folder)` (the part before `\.claude\worktrees\`).
   - `public static ProgramLaunch ClaudeStart.AttachWindow(string shortId, string folder, string title)`: `wt.exe`
     with `-w new --title <title> -p "Deskbar Claude" -d <folder> claude attach <shortId>`.
-  - `public static class TerminalFragment { public static Result Sync(bool on, string localAppData); public const string ProfileName = "Deskbar Claude"; }`:
+  - `public static class TerminalFragment { public static Result Sync(bool on, string localAppData, Func<string, bool> fontInstalled); public const string ProfileName = "Deskbar Claude"; }`:
     writes `Microsoft\Windows Terminal\Fragments\Deskbar\deskbar-claude.json` (one profile, one scheme, values in
-    Global Constraints, font face from Task 1 step 5), deletes `Fragments\DeskbarClaudeTry`; `on: false` deletes
+    Global Constraints; font face "JetBrains Mono" when `fontInstalled("JetBrains Mono")`, else "Cascadia Mono"), deletes `Fragments\DeskbarClaudeTry`; `on: false` deletes
     Deskbar's folder.
 
 - [ ] **Step 1: Write the failing tests:** `The_first_message_names_the_task_and_asks_to_join_it`,
@@ -266,7 +287,7 @@ off-screen window where possible; stop and `claude rm` every probe session after
   `A_task_with_sessions_starts_in_its_latest_sessions_folder`,
   `A_task_without_sessions_offers_its_workspaces_folders_latest_first`,
   `A_worktree_folder_maps_to_its_repo`, `The_attach_window_command_is_exact` (assert the whole argument list),
-  `The_fragment_has_the_Dark_Modern_values` (parse the written JSON, assert background, cursor, font size 10,
+  `The_font_falls_back_to_Cascadia_Mono_when_JetBrains_Mono_is_missing`, `The_fragment_has_the_Dark_Modern_values` (parse the written JSON, assert background, cursor, font size 10,
   `suppressApplicationTitle`), `Turning_off_removes_the_fragment_and_the_trial_one`.
 - [ ] **Step 2:** Run; expect failures.
 - [ ] **Step 3:** Implement. `TerminalFragment` writes through the same durable-write helper state.json uses.
@@ -294,16 +315,17 @@ off-screen window where possible; stop and `claude rm` every probe session after
   `It_polls_every_15_seconds_only_while_Claude_tasks_are_on`,
   `A_failed_or_unknown_read_changes_nothing` (Global Constraints),
   `Resumes_run_one_at_a_time_five_seconds_apart` (Review Focus 2: twenty dead sessions, assert the CLI call times),
-  `A_resume_passes_continue_only_for_a_cut_off_turn` (assert the exact argument lists
-  `--bg --resume <id>` and `--bg --resume <id> continue`),
+  `A_resume_passes_the_continue_message_only_for_a_cut_off_turn` (assert the exact argument lists
+  `--bg --resume <id>` and `--bg --resume <id> <the resume message of Global Constraints>`),
+  `A_listed_session_is_never_resumed_even_when_its_task_wants_it` (it would start a copy),
   `A_queued_resume_for_a_task_closed_meanwhile_is_dropped` (Review Focus 5),
   `A_failed_resume_comments_once_on_the_task_and_is_not_retried_until_the_next_window` (Review Focus 4),
   `With_resume_off_nothing_is_resumed_but_adoption_and_liveness_still_run`,
   `Start_runs_claude_bg_with_the_first_message_in_the_folder_and_joins_the_task_itself` (fake returns
   `backgrounded · 6785e6b5`, then the next `agents` read shows `6785e6b5-...`; assert `Join` with that full id: the
-  join must not depend on the hook, see Task 1 step 3),
+  join must not depend on the hook, see the Task 1 note),
   `Start_in_an_untrusted_folder_fails_with_Claude_s_message`.
-- [ ] **Step 2:** Run with `pwsh scripts/test-hidden.ps1 -Filter ClaudeSessionsTests`; expect failures.
+- [ ] **Step 2:** Run with `pwsh scripts/test-hidden.ps1 -Arguments 'tests/Deskbar.Windows.Tests --filter FullyQualifiedName~ClaudeSessionsTests'`; expect failures.
 - [ ] **Step 3:** Implement: `Observable.Interval(15 s, scheduler)` while `ClaudeTasksInEffect`, the CLI call off the
   UI thread, `ObserveOn` the dispatcher, then `tasks.Reconcile`, `SessionKeeper.Plan`, and the steps (`Adopt` via
   `tasks.Adopt` with `workspaceOfFolder`; `GiveUp` via `tasks.Ask`; `Resume` queued and drained one per `Spacing`,
@@ -341,7 +363,9 @@ off-screen window where possible; stop and `claude rm` every probe session after
   `The_thread_lists_sessions_newest_first_with_Open_except_expired`,
   `task_go_start_and_open_session_are_in_ControlUsage_and_dispatch`.
 - [ ] **Step 2:** Run; expect failures.
-- [ ] **Step 3:** Implement. The attach window is found by its title (`<task title> · Claude`, Task 1 step 5) among
+- [ ] **Step 3:** Implement. Only one window can be attached to a session: a second `claude attach` takes the
+  session over and the first window closes by itself (Task 1 note), so going again must bring the open window forward
+  rather than attach again. The attach window is found by its title (`<task title> · Claude`; the Task 1 note measured that the title holds) among
   `manager.KnownWindows` and moved to the task's workspace like any new window; going again activates it. The pick
   list is a `ContextMenu` at the line. Untrusted folder: a thread comment with Claude's message and a menu item
   "Open a terminal there to trust it" (plain `wt -d <folder> claude`, Petre accepts the prompt himself).
