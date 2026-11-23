@@ -485,6 +485,9 @@ public partial class FloatingBar
     // The click guard's two facts (TaskClickIgnored): the click count of the last press on one of the list's guarded
     // buttons, and when the lines were last redrawn.
     int taskPressClicks;
+
+    // The task the last single click on a line landed on, for the double-click guard (TaskLineButton).
+    Guid? lastClickedTask;
     string taskLinePlaces = "";
     DateTime taskLinesChangedAt = DateTime.MinValue;
 
@@ -500,7 +503,8 @@ public partial class FloatingBar
     // removed from the tasklist"; and, precisely: "not when i have activated the window, but when i have responded to it").
     // The BAR lists a Claude task only while it needs him: Waiting on you, or Done (waiting for him to close it). A Claude
     // task in progress or in the backlog leaves the bar's list and stays in the tasks window, which shows everything.
-    // What takes a waiting task off is his answer, his next prompt to that session (UserPromptSubmit, TaskBoard.Answered,
+    // What takes a waiting task off is the session settling its question with `task answered` after his reply (#435; a
+    // prompt alone no longer does, TaskBoard.Answered,
     // which moves Waiting on you back to In progress); arriving at the workspace, activating the session's window or
     // clicking the line never changes a status, so none of them takes it off. When the session asks again the task is
     // Waiting on you again and comes back at the top of the pile. His own notes are unaffected. "+N more" and the docked
@@ -662,6 +666,7 @@ public partial class FloatingBar
         Grid.SetColumn(taskMoreButton, 1);
         var addRow = new StackPanel { Margin = new Thickness(0, 0, 0, 3), Children = { box, chipRow } };
         addRow.SizeChanged += (_, _) => ApplyMoreText();
+        taskAddChips.SizeChanged += (_, _) => ApplyMoreText();
 
         taskLinesPanel = new StackPanel();
         WireTaskDrag(taskLinesPanel);
@@ -947,17 +952,26 @@ public partial class FloatingBar
     string taskMoreFull = "";
     string taskMoreShort = "";
 
-    // Below this list width (content DIP) the button reads "All" or "+3". At the default docked width the row holds
-    // "on", the chip and the two toggles with room for little else; this is where the full words stop fitting.
-    const double MoreShortBelow = 200;
 
     // Run on every paint of the button and whenever the add row's width changes, text only: it changes no line.
+    // THE FULL WORDS SHOW ONLY WHEN THEY FIT (the first version cut at a fixed 200 DIP, which a large text size outgrew:
+    // at TextOffset +3.5 the button clipped). The room is the row's width less what the chip and the toggles take on one
+    // line (their measured widths); the need is the full words at the label's own font size, plus the button's padding
+    // and margin. So it follows the text size, the chip's name and the bar's width.
     void ApplyMoreText()
     {
-        if (taskMoreLabel is null) return;
-        var width = taskMoreLabel.Parent is null ? 0 : (taskMoreButton?.Parent as FrameworkElement)?.ActualWidth ?? 0;
-        taskMoreLabel.Text = width > 0 && width < MoreShortBelow ? taskMoreShort : taskMoreFull;
+        if (taskMoreLabel is null || taskMoreButton is null) return;
+        var row = (taskMoreButton.Parent as FrameworkElement)?.ActualWidth ?? 0;
+        var chips = taskAddChips?.Children.OfType<UIElement>().Where(c => c.Visibility != Visibility.Collapsed).Sum(c => c.DesiredSize.Width) ?? 0;
+        var need = FullMoreWidth() + taskMoreButton.Padding.Left + taskMoreButton.Padding.Right + taskMoreButton.Margin.Left;
+        taskMoreLabel.Text = row > 0 && chips > 0 && row - chips < need ? taskMoreShort : taskMoreFull;
     }
+
+    // The full words' width at the label's font and size.
+    double FullMoreWidth() =>
+        taskMoreLabel is null ? 0 : new FormattedText(taskMoreFull, System.Globalization.CultureInfo.CurrentCulture, FlowDirection.LeftToRight,
+            new Typeface(taskMoreLabel.FontFamily, taskMoreLabel.FontStyle, taskMoreLabel.FontWeight, taskMoreLabel.FontStretch),
+            taskMoreLabel.FontSize, Brushes.White, VisualTreeHelper.GetDpi(taskMoreLabel).PixelsPerDip).Width;
 
     // One task's line: a button the width of the list, so a click anywhere on it goes to the task.
     Button TaskLineButton(TaskLine line)
@@ -1038,8 +1052,21 @@ public partial class FloatingBar
             var doubled = taskPressClicks > 1;
             taskPressClicks = 0;
             if (line.Closing || editingTask == line.Id) return;
-            if (doubled) OnTaskLineGo(line);
-            else if (TaskClickClock() - taskLinesChangedAt >= RepaintGrace) OnTaskLineOpen(line);
+            // A DOUBLE-CLICK GOES ONLY TO THE LINE ITS FIRST CLICK LANDED ON (#48's class: a reshuffle between the two
+            // presses puts another task under the pointer, and the second press would send him to it). The id the last
+            // single click landed on is remembered whether or not it acted (the repaint grace may have dropped it);
+            // a second press on any other line is ignored.
+            if (doubled)
+            {
+                if (lastClickedTask == line.Id)
+                {
+                    lastClickedTask = null;
+                    OnTaskLineGo(line);
+                }
+                return;
+            }
+            lastClickedTask = line.Id;
+            if (TaskClickClock() - taskLinesChangedAt >= RepaintGrace) OnTaskLineOpen(line);
         };
         return button;
     }

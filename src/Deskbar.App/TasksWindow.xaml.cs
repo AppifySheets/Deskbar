@@ -710,10 +710,11 @@ public partial class TasksWindow : Window
 
     // The line's columns: tick, title (the star, trimming first), the two flag toggles, sessions, age, workspace chip,
     // comments, action (close or Reopen), "…". Fixed widths, shared by every line, so each column sits at the same x on
-    // every line. The sessions column is narrow (its words trim; it is empty on a note) and the window's minimum width
-    // is 560 DIP, so the title keeps a usable width there even with the list's scroll bar showing (review I-3).
+    // every line. The sessions column is wide enough for "2 sessions, 1 live" (116 DIP, so the words never spill into the
+    // age column; it is empty on a note), the age is left-aligned in its own so its x never follows the text length, and the window's minimum width
+    // is 620 DIP, so the title keeps a usable width there even with the list's scroll bar showing (review I-3).
     static readonly IReadOnlyList<GridLength> LineColumns =
-        [new(22), new(1, GridUnitType.Star), new(38), new(64), new(44), new(88), new(40), new(52), new(24)];
+        [new(22), new(1, GridUnitType.Star), new(38), new(116), new(44), new(88), new(40), new(52), new(24)];
 
     // THE TWO TOGGLES (Task 12), the bar's (FloatingBar.FlagToggle): important, Segoe Fluent Icons' "Important" U+E8C9,
     // and urgent, its "Recent" clock U+E823 (Segoe MDL2 Assets carries both on Windows 10). On, the glyph wears its
@@ -766,10 +767,10 @@ public partial class TasksWindow : Window
             Text = TaskAge.Format(Now() - row.Created),
             FontSize = 10.5,
             Foreground = HeaderInk,
-            HorizontalAlignment = HorizontalAlignment.Right,
+            HorizontalAlignment = HorizontalAlignment.Left,
             VerticalAlignment = VerticalAlignment.Center,
             TextTrimming = TextTrimming.CharacterEllipsis,
-            Margin = new Thickness(0, 0, 6, 0),
+            Margin = new Thickness(6, 0, 0, 0),
             ToolTip = row.Created.ToLocalTime().ToString("dddd d MMMM yyyy, HH:mm"),
         };
         ages[row.Id] = (text, row.Created);

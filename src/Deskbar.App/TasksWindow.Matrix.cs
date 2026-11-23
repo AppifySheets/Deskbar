@@ -59,7 +59,7 @@ public partial class TasksWindow
     // meanwhile gets the List's rectangle back (only its size, when it was moved meanwhile); one Petre resized keeps his
     // size. While grown and not resized, the place remembered (CurrentPlace, hence Dismiss and the settle timer) is the
     // List's, so state.json never learns the Matrix's width.
-    const double ListMinWidth = 560;
+    const double ListMinWidth = 620; // 560 before the sessions column was widened to hold "2 sessions, 1 live" (Ruling 52 follow-up)
     const double MatrixMinWidth = 780;
 
     Rect? listNormal;
