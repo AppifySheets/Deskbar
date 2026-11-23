@@ -75,6 +75,14 @@ namespace Deskbar.App;
 // with no goals looks exactly as before. A filter whose goal no longer exists falls back to every goal (review M7),
 // rather than showing an empty list under a filter nobody can see. The window redraws on GoalService.Changed too, since
 // the filter's label and choices show goal titles.
+//
+// SEARCH AND CLAUDE WORKING (docs/superpowers/specs/2026-11-23-tasks-panel-design.md, "The new filters"; plan
+// 2026-11-23-tasks-panel, Task 7). The panel's search box (TaskSearch: case-insensitive, every typed word must match, in
+// the title, the status line or the question) and its "Claude working N" chip (ClaudeWorking: only tasks with a live
+// session) narrow the board right after the goal filter, so, like it, BEFORE the groups, the Matrix's cells and every
+// chip's count are made: what a chip says is always what it would show. The Claude working chip's own count is taken on
+// the board narrowed by every OTHER filter (goal, search, and the status, workspace and assignee filters the chips
+// apply), so it too says how many it would show. Neither is saved: both start over on a fresh open, with the rest.
 public sealed class TasksBoard : IDisposable
 {
     // How long a line just closed stays, struck through with Undo: the bar's own window, so the two agree.
@@ -107,6 +115,9 @@ public sealed class TasksBoard : IDisposable
     TaskGoalFilter goalFilter = TaskGoalFilter.All;
     // The toolbar's "Assigned" filter (Ruling 57); like the others it starts at "all" whenever the window opens.
     TaskAssigneeFilter assigneeFilter = TaskAssigneeFilter.All;
+    // The search box's text and the "Claude working" chip (Task 7, see the header); both start over on a fresh open.
+    TaskSearch search = TaskSearch.None;
+    bool claudeWorking;
     // Set by Shutdown, which runs once (see there).
     bool shutDown;
 
@@ -184,7 +195,9 @@ public sealed class TasksBoard : IDisposable
             SetGoal: (id, goal) => SetGoal(id, goal),
             FilterGoal: FilterGoal,
             Assign: (id, who) => Assign(id, who),
-            FilterAssignee: FilterAssignee)
+            FilterAssignee: FilterAssignee,
+            Search: Search,
+            FilterClaudeWorking: FilterClaudeWorking)
         {
             StartClaude = startClaude,
             OpenSession = openSession is null ? null : (id, session) => OpenSession(id, session),
@@ -283,6 +296,9 @@ public sealed class TasksBoard : IDisposable
         where = TaskWorkspaceFilter.All;
         goalFilter = TaskGoalFilter.All;
         assigneeFilter = TaskAssigneeFilter.All;
+        // The window empties its search box in its own Open (TasksWindow.Open), so the box and this agree.
+        search = TaskSearch.None;
+        claudeWorking = false;
         expanded.Clear();
         window.ShowProblem(null);
         window.PaintSelection(selection.Current);
@@ -401,6 +417,28 @@ public sealed class TasksBoard : IDisposable
     public void FilterAssignee(TaskAssigneeFilter shown)
     {
         assigneeFilter = shown;
+        Refresh();
+    }
+
+    /// <summary>
+    /// The search box's text, on every keystroke (see the header). Text that is the same as before (the window emptying
+    /// an already empty box on a fresh open) redraws nothing.
+    /// </summary>
+    //
+    // NO DEBOUNCE, ON PURPOSE. A board holds tens of tasks, so narrowing, grouping and counting them is far under a
+    // keystroke's time, and the window draws nothing when what it would draw is unchanged (TasksWindow.Draw). Narrowing
+    // at once is what makes the box feel live; a delay would only add lag. Revisit if a board ever holds thousands.
+    public void Search(string text)
+    {
+        if (search.Text == text) return;
+        search = new TaskSearch(text);
+        Refresh();
+    }
+
+    /// <summary>The "Claude working" chip: only the tasks with a live session while on (see the header).</summary>
+    public void FilterClaudeWorking(bool on)
+    {
+        claudeWorking = on;
         Refresh();
     }
 
@@ -604,7 +642,12 @@ public sealed class TasksBoard : IDisposable
         var showsGoals = goals is not null && goalBoard.Goals.Count > 0;
         if (!showsGoals || goalFilter.Goal.Map(id => goalBoard.Get(id).HasNoValue).GetValueOrDefault(false))
             goalFilter = TaskGoalFilter.All;
-        var board = goalFilter.Narrow(WithPendingCloses(tasks.Board), goalBoard);
+        // The search and Claude working come right after it (Task 7, see the header), for the same reason. `searched` is the
+        // board before Claude working: the chip's own count is taken on it, so the chip says how many it would show
+        // under every other filter, whether it is on or off.
+        var searched = search.Narrow(goalFilter.Narrow(WithPendingCloses(tasks.Board), goalBoard));
+        var board = ClaudeWorking.Narrow(searched, claudeWorking);
+        var claudeWorkingCount = TaskViews.Count(ClaudeWorking.Narrow(searched, true), filter, where, assigneeFilter);
         var groups = TaskViews.Grouped(board, filter, where, assigneeFilter)
             .Select(g => new TaskGroupView(g.Kind, TaskViews.GroupName(g.Kind), g.Tasks.Select(Row).ToArray()))
             .ToArray();
@@ -621,7 +664,7 @@ public sealed class TasksBoard : IDisposable
             .Select(c => new TaskCellView(c.Quadrant, TaskViews.GroupName(TaskViews.KindOf(c.Quadrant)), c.Tasks.Select(Row).ToArray()))
             .ToArray();
         var (menuGoals, filterGoals) = showsGoals ? GoalChoices(goalBoard) : NoGoalChoices;
-        return new TasksView(filters, WorkspaceFilterLabel(), where, places, groups, EmptyText(filter), addTarget)
+        return new TasksView(filters, WorkspaceFilterLabel(), where, places, groups, EmptyText(), addTarget)
         {
             Matrix = manager.State.TasksMatrix,
             Cells = cells,
@@ -632,8 +675,18 @@ public sealed class TasksBoard : IDisposable
             GoalFilterLabel = showsGoals ? GoalFilterLabel(goalBoard) : "",
             AssigneeFilter = assigneeFilter,
             AssigneeFilterLabel = AssigneeFilterLabel(),
+            Search = search.Text,
+            ClaudeWorking = claudeWorking,
+            ClaudeWorkingCount = claudeWorkingCount,
         };
     }
+
+    // What an empty list says: under a search or Claude working, that THEY found nothing, since "Nothing open" would be
+    // wrong while open tasks are only hidden by them; otherwise the status filter's own line.
+    string EmptyText() =>
+        !search.IsBlank ? "No task matches the search. Esc clears it."
+        : claudeWorking ? "Claude is not working on any of these."
+        : EmptyText(filter);
 
     // STALE AT MIDNIGHT (review M7, known): "this week" and "this month" are read when a view is made, and nothing makes
     // a view when the day changes, so a window left open over midnight into a new week offers last week's goals until
@@ -876,6 +929,17 @@ internal sealed record TasksView(IReadOnlyList<TaskFilterChip> Filters, string W
     public TaskAssigneeFilter AssigneeFilter { get; init; } = TaskAssigneeFilter.All;
 
     public string AssigneeFilterLabel { get; init; } = "Assigned: all";
+
+    /// <summary>
+    /// The search in force (Task 7), "" for none. The window never writes it back into its box, which is the box's own
+    /// text: a redraw while Petre types must not touch the box (TasksWindow, "the search box").
+    /// </summary>
+    public string Search { get; init; } = "";
+
+    /// <summary>Whether the "Claude working" chip is on, and how many tasks it would show under every other filter.</summary>
+    public bool ClaudeWorking { get; init; }
+
+    public int ClaudeWorkingCount { get; init; }
 }
 
 /// <summary>
@@ -884,6 +948,7 @@ internal sealed record TasksView(IReadOnlyList<TaskFilterChip> Filters, string W
 /// box; every refusal is shown by the controller on the problem line. ClosePanel is the toolbar's × and Alt+F4 (the
 /// panel's Hide); ResizePanel is the grip's drag end, with the new width in DIPs (saved, and the panel re-docked at it).
 /// They replaced Remember, which kept the floating window's place in AppState.TasksWindow (tasks panel plan, Task 6).
+/// Search is the search box's text on every keystroke and FilterClaudeWorking the "Claude working" chip (Task 7).
 /// </summary>
 internal sealed record TasksWindowActions(
     Action<Guid> Go,
@@ -911,7 +976,9 @@ internal sealed record TasksWindowActions(
     Action<Guid, Maybe<Guid>> SetGoal,
     Action<TaskGoalFilter> FilterGoal,
     Action<Guid, Assignee> Assign,
-    Action<TaskAssigneeFilter> FilterAssignee)
+    Action<TaskAssigneeFilter> FilterAssignee,
+    Action<string> Search,
+    Action<bool> FilterClaudeWorking)
 {
     /// <summary>"Start Claude on this" (Task 9): the line menu's item and the thread's button. None, neither shows.</summary>
     public Action<Guid>? StartClaude { get; init; }
