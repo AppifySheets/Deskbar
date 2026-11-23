@@ -55,7 +55,7 @@ Closing the terminal window only detaches it. The session keeps running, and the
 
 The window uses a Windows Terminal profile of Deskbar's own, "Deskbar Claude": VS Code's Dark Modern colours, JetBrains Mono (Cascadia Mono where that is not installed), Claude's orange bar cursor and no scrollbar. Deskbar installs it while **Claude Code sessions keep their tasks in the task list** is ticked and removes it when you untick the box.
 
-This needs the Claude Code CLI on the PATH (the native install puts `claude.exe` in `%USERPROFILE%\.localin`) and Windows Terminal. Without them the items are hidden or say why they cannot work.
+This needs the Claude Code CLI on the PATH (the native install puts `claude.exe` in `%USERPROFILE%\.local\bin`) and Windows Terminal. Without them the items are hidden or say why they cannot work.
 
 To hand a task to Claude, pick **Start Claude on this** on its menu (right after Edit, on the bar and in the tasks window) or the button of that name in its thread. Deskbar starts a background session with the task as its first message, so it gets to work at once, joins it to the task, and opens a window on it on the task's workspace. The folder is the repo of the task's latest session. A task without sessions offers the repos its workspace knows, from its other tasks' sessions and its VS Code windows: with one, it starts there; with several or none, a short list at the pointer ends with "Choose a folder…". On a task whose session is still running it asks first, since a second session on one task is rarely what you meant.
 
