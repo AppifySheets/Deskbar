@@ -457,6 +457,20 @@ L7. A drop stays put. With screen 2 empty, drag a window from another workspace 
 L8. The lock goes with the window. Lock A, close it, open a new window that takes its place: its icon menu shows the
     item unticked.
 
+## Recent windows of an app split last
+
+Spec `docs/superpowers/specs/2026-11-23-split-recent-app-windows-last-design.md`. A tiled workspace with VS Code and a
+browser, the trace on.
+
+S1. Right-click a VS Code icon: "Split Code windows last" sits just above "Don't split this tile", unticked. Tick it.
+    A Store app (Calculator) and Deskbar's own windows do not offer it.
+S2. Click into VS Code, open a browser window from it (a link). VS Code keeps its size; the browser halves the other
+    tile. The trace says `the largest free tile, the tile last used (...) is protected`.
+S3. Click into the browser and open another browser window: it halves the browser, as before.
+S4. With four VS Code windows used one after another, a new window halves the one used first (the fourth back).
+S5. With only VS Code windows on screen 1 and anything on screen 2, a window opened from VS Code goes to screen 2.
+S6. `$ts split-last 0x... off` unticks it (the menu shows it next time it opens); `maybe` prints the usage line.
+
 ## Arranging the bar
 
 Arrange mode (spec `docs/superpowers/specs/2026-11-20-bar-edit-mode-design.md`). Start with

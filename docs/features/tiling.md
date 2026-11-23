@@ -24,13 +24,15 @@ To tidy up, the row's menu and the tile button's right-click menu offer **Even o
 
 A new window goes into a space kept open on any screen, or onto a screen with nothing of the workspace on it, before it takes half of a tile. A window you drop on a screen stays on that screen. To keep a tile from ever being halved by a new window, right-click its icon on the bar and tick **Don't split this tile**. The lock lasts until the window closes or Deskbar restarts.
 
+To keep the windows you work in from shrinking, right-click one of their icons and tick **Split <app> windows last** (for VS Code, **Split Code windows last**). A new window then still lands beside the window you were using, unless that window is one of the app's three you used most recently: then the largest other tile gives it room, on this screen or another. Those three are halved only when no other tile is left, the one used longest ago first. The setting covers every window of the app and is kept across restarts.
+
 ## Settings
 
 The gap between tiled windows is in the Windows on the desktop section of Manage's Settings tab. It takes effect when you press Apply.
 
 ## From a script
 
-`deskbar.cmd lock-tile <hwnd> on` does what **Don't split this tile** does. The window handle comes from `deskbar.cmd windows`.
+`deskbar.cmd split-last <hwnd> on` does what **Split <app> windows last** does, for the app owning that window. `deskbar.cmd lock-tile <hwnd> on` does what **Don't split this tile** does. The window handle comes from `deskbar.cmd windows`.
 
 ## Related
 
