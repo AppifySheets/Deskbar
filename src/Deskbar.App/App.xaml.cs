@@ -66,6 +66,9 @@ public partial class App : Application
     // The goals planner (docs/superpowers/specs/2026-11-22-goals-planner-design.md): weekly and monthly goals the tasks
     // count toward, in goals.json beside tasks.json. Built right after `tasks` and handed to the remote control.
     Core.Goals.GoalService? goals;
+    // Claude Code's live sessions kept in step with the tasks (ClaudeSessions): the `claude agents --json` poll, adoption,
+    // the automatic resume and starting a session from a task. Built after the state is loaded; disposed on every way out.
+    ClaudeSessions? claudeSessions;
     // Tiling (docs/superpowers/specs/2026-11-08-tiling-design.md): the Tiler decides, the surface does the
     // Win32. Both live for the process, both are null in compatibility mode (there are no desktops to tile),
     // and ExitApp disposes the Tiler and then the surface, so the LOCATIONCHANGE hook goes with them.
@@ -1549,6 +1552,44 @@ public partial class App : Application
             .DistinctUntilChanged()
             .Subscribe(settings => ClaudeSkill.Sync(settings.ClaudeSkill, settings.ClaudeTasks));
 
+        // ...and the Windows Terminal profile "Deskbar Claude" (TerminalFragment), which the windows on background sessions
+        // open with: the spec ("The setting") installs it while sessions keep tasks and removes it when they stop, and
+        // removing it stops nothing that is running. JetBrains Mono when it is installed, Cascadia Mono otherwise; WPF's
+        // own list of installed families answers that, by the family name.
+        var localAppData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+        static bool FontInstalled(string family) =>
+            System.Windows.Media.Fonts.SystemFontFamilies.Any(f => string.Equals(f.Source, family, StringComparison.OrdinalIgnoreCase)
+                || f.FamilyNames.Values.Contains(family, StringComparer.OrdinalIgnoreCase));
+        manager.StateChanged
+            .Select(_ => manager.State.ClaudeTasksInEffect)
+            .StartWith(manager.State.ClaudeTasksInEffect)
+            .DistinctUntilChanged()
+            .Subscribe(on => Deskbar.Windows.Claude.TerminalFragment.Sync(on, localAppData, FontInstalled)
+                .TapError(err => ClickTrace.Write($"terminal profile not synced: {err}")));
+
+        // Claude Code's own list of live sessions, kept in step with the task board (ClaudeSessions; design
+        // docs/superpowers/specs/2026-11-23-tasks-open-claude-sessions-design.md): it polls `claude agents --json` while
+        // sessions keep tasks, adopts sessions no task knows, resumes the sessions of open tasks that stopped running
+        // (unless Manage's resume box is off) and starts a session from a task. Built here rather than beside the task
+        // service because its first read adopts sessions onto the workspaces of the editor windows showing their
+        // folders, which needs the state loaded and the window monitor running. Its answers land on this thread (the
+        // scheduler below posts to the dispatcher); the `claude` calls themselves run on the thread pool.
+        //
+        // An adopted session lands on the workspace of the VS Code window showing its folder, by the rule `task new`
+        // uses (RemoteControl.CallerOf): the editors whose title names the folder, and only when they all live in ONE
+        // workspace; several workspaces, or none, leave the task free.
+        claudeSessions = new ClaudeSessions(tasks!, manager, new Deskbar.Windows.Claude.ClaudeCli(),
+            new System.Reactive.Concurrency.SynchronizationContextScheduler(new System.Windows.Threading.DispatcherSynchronizationContext(Dispatcher)),
+            folder => EditorFolder.Best(folder, manager.KnownWindows
+                    .Where(EditorFolder.IsEditor)
+                    .Select(w => (w.Handle, Titles: manager.OriginalTitle(w.Handle).Map(t => (IEnumerable<string>)[w.Title, t]).GetValueOrDefault([w.Title]))))
+                .Select(handle => manager.WorkspaceOf(handle))
+                .ToList() is { Count: > 0 } places && places.All(p => p.HasValue) && places.Select(p => p.Value.Id).Distinct().Count() == 1
+                    ? places[0].Value.Id
+                    : Maybe<Guid>.None,
+            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".claude"),
+            trace: ClickTrace.On ? ClickTrace.Write : null);
+
         // Windows' "Show flashing on taskbar apps", held off while this copy runs when Manage's box says so, and by
         // default whenever the taskbar auto-hides (AppState.QuietTaskbarChoice, TaskbarFlashing.Wanted;
         // docs/superpowers/specs/2026-11-18-taskbar-flashing-switch-design.md): now, whenever the box changes, and
@@ -2175,6 +2216,8 @@ public partial class App : Application
             // The watch goes first, so its poll cannot take hold again behind this.
             quietTaskbarWatch?.Dispose();
             TaskbarFlashingSwitch.Sync(false);
+            // No more `claude` polls or resumes once the session is ending; running Claude sessions are not touched.
+            claudeSessions?.Dispose();
         };
     }
 
@@ -2566,6 +2609,8 @@ public partial class App : Application
         // watch goes first, so its poll cannot take hold again behind this.
         quietTaskbarWatch?.Dispose();
         TaskbarFlashingSwitch.Sync(false);
+        // No more `claude` polls or resumes once the app is going; running Claude sessions are not touched.
+        claudeSessions?.Dispose();
         monitor?.Dispose();
         hotkeys?.Dispose(); // unregisters RegisterHotKey chords before the process exits
         quickFind?.Dispose();
