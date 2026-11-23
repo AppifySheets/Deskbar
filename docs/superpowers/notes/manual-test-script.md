@@ -379,6 +379,11 @@ Tasks 7 to 9). Needs Claude Code installed and both Claude boxes in Manage ticke
     On a task with nine long comments the thread shows the latest three, each cut to about three lines with "Show more"; "3
     earlier comments" unfolds the rest, and "Show less" folds a long one back. Add a comment from a script or let a session add
     one: what you unfolded stays unfolded. Close the window with its X and open it again: all threads are folded again.
+81. Compact lines (Ruling 64). In the tasks window's List and Matrix, a task with no second line is one text line tall plus
+    a few DIP, and a task with a status line or description is two small lines, the dim one right under the title with no
+    gap. Lines sit about as close as on the bar, a group's header has little space above and below, and the tick box and
+    the orange edge start close to the window's left edge. Hover and select a line: the background still covers the whole
+    line. The tick box, the two toggles, the comments button and "..." still click first time.
 
 ## Goals
 

@@ -2553,4 +2553,39 @@ public class TasksBoardTests
 
         Assert.Equal([true, false, true], Shown(t)); // after it, the laid-out height does
     });
+
+    // RULING 64 (Petre: "same here, make more compact", of the window's List after the bar's line gap went from 8 to 3
+    // DIP): a line is as tall as its text and a few DIP, not 30. The small buttons (tick, flags, comments, "...") used
+    // to be taller than the title and set the line's height, so the line is measured, not just the text: a one-line task
+    // is at most its title's height + 6, a two-line task at most its two text lines + 6, in the List and in the Matrix
+    // (which shares the line), and the tick still hit-tests at its size.
+    [Fact]
+    public void A_line_is_as_tall_as_its_text_and_a_few_dip() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        var one = t.Tasks.AddNote("get a girl", t.Gepha).Value.Id;
+        var two = t.Tasks.Create("Tighter spacing", t.Gepha, Session("s1")).Value.Id;
+        t.Tasks.SetStatusLine(two, "PR green, ready to merge");
+        t.Controller.Open(Rect.Empty);
+        t.Window.Width = t.Window.MinWidth;
+        t.Window.UpdateLayout();
+
+        void Check(string view)
+        {
+            t.Window.UpdateLayout();
+            var oneTitle = TitleOf(t.Window, one).ActualHeight;
+            var oneLine = LineOf(t.Window, one).ActualHeight;
+            var twoTexts = ((FrameworkElement)TitleOf(t.Window, two).Parent).ActualHeight;
+            var twoLine = LineOf(t.Window, two).ActualHeight;
+            Console.WriteLine($"MEASURED {view}: one-line {oneLine} (title {oneTitle}), two-line {twoLine} (texts {twoTexts})");
+            Assert.True(oneLine <= oneTitle + 6, $"{view}: a one-line task is {oneLine} high, its title {oneTitle}");
+            Assert.True(twoLine <= twoTexts + 6, $"{view}: a two-line task is {twoLine} high, its texts {twoTexts}");
+        }
+        Check("list");
+        // The tick box keeps a click target of its own size or more.
+        var tick = ButtonNamed(LineOf(t.Window, one), "Close");
+        Assert.True(tick.ActualHeight >= 11 && tick.ActualWidth >= 11, $"tick {tick.ActualWidth}x{tick.ActualHeight}");
+        Click(ButtonNamed(t.Window, "Matrix"));
+        Check("matrix");
+    });
 }
