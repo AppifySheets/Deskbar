@@ -1019,6 +1019,7 @@ public partial class FloatingBar
             BorderThickness = new Thickness(0),
             Template = TaskLineTemplate,
             HorizontalContentAlignment = HorizontalAlignment.Stretch,
+            HorizontalAlignment = HorizontalAlignment.Stretch, // explicit: Fluent's Button style says Left (see TasksWindow.Line)
             Focusable = false,
             Cursor = Cursors.Hand,
             ToolTip = line.Closing ? "Closed. Undo brings it back." : TipOf(line),
