@@ -411,6 +411,15 @@ T6. Minimized together, back in place. Make A over B on the left and C full heig
     3. Minimize A, then B, each with its own minimize button. Restore A, then B: the same shape again.
     4. Minimize A only. B and C are side by side. Switch to another desktop and back: B and C are still side by
        side (they used to flip to B over C). Restore A: back above B.
+T7. Half a line at a crossing. Tile four windows on one screen: A B on top, C D underneath, the separations
+    crossing in a "+".
+    1. Drag the separation between A and B to the right. While dragging, only B follows; let go: A and B change
+       width, C and D stay exactly where they were. The trace line ends `at a crossing, sizes ...`.
+    2. Reset to grid, then drag the separation between A and C down. Only C follows; B and D stay.
+    3. Reset to grid, drag the separation between A and B as in step 1, then drag the one under A: the vertical
+       separations no longer line up, so the horizontal one moves whole and all four heights change.
+    4. Reset to grid and drag A's bottom right corner, at the crossing: both whole separations move, all four
+       tiles change. In every step the tiles where they were let go match what the drag showed.
 
 ## Locked tiles and other screens on arrival
 

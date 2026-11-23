@@ -16,7 +16,7 @@ Rearrange the tiles by dragging:
 - Drop a tile on the edge of another to put it above, below or beside that one. It takes half of that tile's room and leaves the rest alone, so two tiles can sit side by side over a third that spans the screen.
 - Drop a tile close to the screen's own edge and it gets that whole side.
 - Drop a tile on the middle of another to swap the two.
-- Drag the separation between two tiles to resize them.
+- Drag the separation between two tiles to resize them. Where two separations cross, the drag moves only the part beside the tile you hold, so in four tiles in a square, widening the top left one leaves the bottom two as they are. Once the separations no longer line up, a separation that ends against another one moves whole.
 
 The layout you make is kept, across restarts too.
 
