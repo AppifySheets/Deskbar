@@ -374,6 +374,11 @@ public static class NativeMethods
     public static extern int DwmGetWindowAttributeRect(nint hwnd, uint attribute, out RECT value, int size);
     public const uint DWMWA_EXTENDED_FRAME_BOUNDS = 9;
 
+    // Where the window's minimize, maximize and close buttons are, in WINDOW coordinates (relative to GetWindowRect's
+    // top-left). The lock mark sits just left of them (LockMarks). An app that draws its own buttons (VS Code) answers
+    // with a zero-width rectangle: docs/superpowers/notes/2026-11-22-tile-pin-probes.md.
+    public const uint DWMWA_CAPTION_BUTTON_BOUNDS = 5;
+
     // Rounded corners for a tiled window (spec, "Rounded corners"). Windows 11 only: Windows 10 has no such
     // attribute and answers with an error HRESULT, which the caller ignores.
     [DllImport("dwmapi.dll")] public static extern int DwmSetWindowAttribute(nint hwnd, uint attribute, ref int value, int size);
