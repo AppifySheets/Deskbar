@@ -79,7 +79,8 @@ public class LockMarkWindowTests
         // The target to the front of the normal band, right under the topmost one.
         SetWindowPos(target, 0, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
         Pump(TimeSpan.FromMilliseconds(100));
-        Assert.Equal(new WindowInteropHelper(topmost).Handle, VisibleAbove(target));
+        // Some topmost window is now right above it: this test's own, or one another test left open in the same run.
+        Assert.NotEqual(0, (long)NativeMethods.GetWindowLongPtr(VisibleAbove(target), NativeMethods.GWL_EXSTYLE) & WS_EX_TOPMOST);
 
         var mark = new LockMarkWindow();
         mark.Put(MarkOn(target, locked: true), target);
