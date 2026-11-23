@@ -109,6 +109,9 @@ public partial class TasksWindow : Window
     // RULING 62: the tasks whose settled comments are unfolded in their threads. A view state of the window alone, kept while
     // the window is open (cleared when it opens, with the threads), and part of the redraw signature.
     readonly HashSet<Guid> settledOpen = [];
+    // RULING 63: the tasks whose earlier comments (all but the latest three) are unfolded, and the long comments shown in full.
+    readonly HashSet<Guid> earlierOpen = [];
+    readonly HashSet<Guid> longOpen = [];
     Guid? editingComment;
     TextBox? commentEditor;
 
@@ -264,6 +267,8 @@ public partial class TasksWindow : Window
         near = bar;
         HideAdd();
         settledOpen.Clear();
+        earlierOpen.Clear();
+        longOpen.Clear();
         renaming = null;
         renameBox = null;
         descriptionBox = null;
@@ -542,7 +547,7 @@ public partial class TasksWindow : Window
             $"{view.AssigneeFilterLabel}",
             string.Join('|', view.Places.Select(p => $"{p.IsGroup}{p.Workspace}{p.Name}{(p.Colour as SolidColorBrush)?.Color}")),
             view.EmptyText,
-            $"{renaming}{editingComment}{string.Join(",", settledOpen.Order())}",
+            $"{renaming}{editingComment}{string.Join(",", settledOpen.Order())}|{string.Join(",", earlierOpen.Order())}|{string.Join(",", longOpen.Order())}",
             $"{view.Matrix}",
             string.Join('\u0002', view.Cells.Select(c => $"{c.Header}:" + string.Join('\u0003', c.Rows.Select(r =>
                 $"{r.Id}|{r.Title}|{r.Detail}|{r.Description}|{r.Status}|{r.Claudes}|{r.Assignee.Id}|{PlaceSignature(r.Place)}|{r.CommentCount}|{r.Expanded}|{r.Closing}|{r.Important}|{r.Urgent}|" +
@@ -1058,8 +1063,14 @@ public partial class TasksWindow : Window
         var panel = new StackPanel();
         var settledCount = row.Comments.Count(c => c.Settled);
         var unfolded = settledOpen.Contains(row.Id);
-        var shown = row.Comments.Where(c => !c.Settled || unfolded).ToList();
+        var candidates = row.Comments.Where(c => !c.Settled || unfolded).ToList();
+        // RULING 63: more than three comments show only the latest three, under a dim "N earlier comments" line that
+        // unfolds the rest (settled comments, folded above, do not count toward the three).
+        var earlier = Math.Max(0, candidates.Count - LatestShown);
+        var open = earlierOpen.Contains(row.Id);
+        var shown = earlier > 0 && !open ? candidates.Skip(earlier).ToList() : candidates;
         if (settledCount > 0) panel.Children.Add(SettledFold(row.Id, settledCount, unfolded));
+        if (earlier > 0) panel.Children.Add(EarlierFold(row.Id, earlier, open));
         shown.ForEach(comment => panel.Children.Add(CommentOf(comment)));
         panel.Children.Add(CommentBox(row.Id));
         authors[row.Id] = shown.Select(c => c.Author).ToArray();
@@ -1085,6 +1096,32 @@ public partial class TasksWindow : Window
         fold.Margin = new Thickness(0, 0, 0, 6);
         return fold;
     }
+
+    // How many comments a thread shows before the rest fold behind "N earlier comments" (Ruling 63).
+    const int LatestShown = 3;
+
+    // "3 earlier comments", dim, a button: unfolds the older comments, then folds them again.
+    UIElement EarlierFold(Guid task, int count, bool unfolded)
+    {
+        var words = count == 1 ? "1 earlier comment" : $"{count} earlier comments";
+        var fold = Small(new TextBlock { Text = unfolded ? $"Hide {words}" : words, Foreground = HeaderInk, FontSize = 10.5 },
+            "Earlier comments", () =>
+            {
+                if (!earlierOpen.Remove(task)) earlierOpen.Add(task);
+                if (latest is not null) Draw(latest);
+            }, "Only the latest three comments show");
+        fold.Margin = new Thickness(0, 0, 0, 6);
+        return fold;
+    }
+
+    // About three lines of a comment show; a longer one ends in "Show more" (Ruling 63). A line is counted by its text, a
+    // hundred characters to a line: the width is not known when the thread is built, and a test needs the same answer.
+    internal static bool IsLong(string markdown) =>
+        markdown.Split('\n').Sum(line => Math.Max(1, (int)Math.Ceiling(line.TrimEnd('\r').Length / 100.0))) > 3;
+
+    // Three lines of 11.5-point text, with a little to spare for a paragraph's spacing.
+    const double ThreeLines = 54;
+
 
     void ToggleSettled(Guid task)
     {
@@ -1132,8 +1169,28 @@ public partial class TasksWindow : Window
             Focusable = true,
             Cursor = Cursors.Arrow,
         };
+        // RULING 63: a long comment shows about three lines, clipped, and ends in "Show more", which opens it in place;
+        // "Show less" folds it back. The state is the window's (longOpen), so a redraw keeps it.
+        var isLong = IsLong(comment.Markdown);
+        var full = longOpen.Contains(comment.Id);
+        if (isLong && !full)
+        {
+            body.MaxHeight = ThreeLines;
+            body.ClipToBounds = true;
+        }
+        var parts = new StackPanel { Margin = new Thickness(0, 0, 0, 8), Opacity = comment.Settled ? 0.55 : 1, Children = { header, body } };
+        if (isLong)
+        {
+            var more = Small(new TextBlock { Text = full ? "Show less" : "Show more", Foreground = HeaderInk, FontSize = 10.5 },
+                full ? "Show less" : "Show more", () =>
+                {
+                    if (!longOpen.Remove(comment.Id)) longOpen.Add(comment.Id);
+                    if (latest is not null) Draw(latest);
+                }, full ? "Fold the comment back to three lines" : "Show the whole comment");
+            parts.Children.Add(more);
+        }
         // A settled comment, when unfolded, is dim: it is history.
-        return new StackPanel { Margin = new Thickness(0, 0, 0, 8), Opacity = comment.Settled ? 0.55 : 1, Children = { header, body } };
+        return parts;
     }
 
     // --- editing one of his comments in place (Ruling 58) -------------------------------------------------------------
@@ -1723,6 +1780,8 @@ public partial class TasksWindow : Window
         if (renaming is not null) EndRename();
         else if (editingComment is not null) EndCommentEdit();
         else if (AddBoxShown) HideAdd();
+        // RULING 63: Esc folds the selected line's open thread, the last thing it undoes.
+        else if (selectedId.HasValue && authors.ContainsKey(selectedId.Value)) Actions?.ToggleThread(selectedId.Value);
         else return false;
         return true;
     }

@@ -333,12 +333,14 @@ public sealed class TasksBoard : IDisposable
     /// <summary>
     /// A single click on a line (Ruling 54, Petre: "clicking a task should open that task; double clicking takes me to the
     /// workspace and window"): the task is picked, in both views, and its comment thread opens. It goes nowhere; a
-    /// double-click does (<see cref="Go"/>).
+    /// double-click does (<see cref="Go"/>). RULING 63 (Petre: "it should also be collapsible"): a click TOGGLES, so a click on
+    /// a line whose thread is open collapses it again (the task stays picked). Esc collapses the selected one too
+    /// (TasksWindow.Escape).
     /// </summary>
     public void Pick(Guid id)
     {
         selection.Select(id);
-        expanded.Add(id);
+        if (!expanded.Remove(id)) expanded.Add(id);
         Refresh();
     }
 

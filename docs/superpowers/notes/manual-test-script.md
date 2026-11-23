@@ -375,6 +375,10 @@ Tasks 7 to 9). Needs Claude Code installed and both Claude boxes in Manage ticke
     comments" line, and your own comment and any written before the ask are still there. Click the line: they unfold, dim,
     and it reads "Hide 2 settled comments". "Settle" beside any comment folds it away; "Unsettle" brings it back. The
     comments are still in `task list`'s `thread` with their `settled` time, and survive a restart.
+80. Folding a thread (Ruling 63). Click a task's line: its thread opens. Click it again: it closes. Open it and press Esc: it closes.
+    On a task with nine long comments the thread shows the latest three, each cut to about three lines with "Show more"; "3
+    earlier comments" unfolds the rest, and "Show less" folds a long one back. Add a comment from a script or let a session add
+    one: what you unfolded stays unfolded. Close the window with its X and open it again: all threads are folded again.
 
 ## Goals
 
