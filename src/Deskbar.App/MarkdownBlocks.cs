@@ -19,9 +19,12 @@ namespace Deskbar.App;
 //                     session, and a click must never run a program, so file:, ms-settings: and every other scheme
 //                     stay the text they were written as.
 //   - item / * item   a bullet list; 1. item, a numbered list starting at its first number
+//   # .. ###### title a heading: one line, semibold, with a little room above it. Every level looks the same, because
+//                     the text is 11 or 12 points in a narrow column and sizes there would only jump about. Added
+//                     2026-11-23 for task descriptions, which Petre writes as sections under "## ..." lines.
 //
-// Anything else (headings, quotes, tables, an unclosed **) shows as the text it is, in a paragraph: a comment is never
-// lost to a construct this does not know.
+// Anything else (quotes, tables, an unclosed **) shows as the text it is, in a paragraph: a comment is never lost to a
+// construct this does not know.
 //
 // A link opens through `open`, which the window hands in; left null it opens the way `deskbar.cmd open` opens a link
 // "as usual" (RemoteControl.Open's last branch): the shell hands it to the default browser, on the desktop in front.
@@ -35,6 +38,9 @@ internal static class MarkdownBlocks
     /// <summary>The Tag of a fenced code block's paragraph.</summary>
     internal const string CodeBlockTag = "code-block";
 
+    /// <summary>The Tag of a heading's paragraph.</summary>
+    internal const string HeadingTag = "heading";
+
     static readonly FontFamily CodeFont = new("Cascadia Mono, Consolas, Courier New");
     static readonly FontFamily TextFont = new("Segoe UI");
     static readonly Brush CodeFill = Frozen(Color.FromRgb(0x2A, 0x2C, 0x33));
@@ -43,6 +49,10 @@ internal static class MarkdownBlocks
     // A list item: a dash, star or plus then a space; or a number with a full stop or a bracket then a space.
     static readonly Regex Bullet = new(@"^\s*[-*+]\s+(.*)$", RegexOptions.Compiled);
     static readonly Regex Numbered = new(@"^\s*(\d{1,9})[.)]\s+(.*)$", RegexOptions.Compiled);
+
+    // A heading: up to three spaces, one to six hashes, a space, then its text; trailing hashes (the closing kind,
+    // "## Title ##") are dropped. "#tag" with no space is not a heading, as on GitHub.
+    static readonly Regex Heading = new(@"^ {0,3}#{1,6}\s+(.*?)(?:\s+#+)?\s*$", RegexOptions.Compiled);
 
     // The inline constructs, tried left to right, the first match winning at each place: code first, so nothing
     // inside it is read; then bold before italic, so ** is not read as two empty italics; then links, then a bare
@@ -90,6 +100,7 @@ internal static class MarkdownBlocks
         if (first.TrimStart().StartsWith("```", StringComparison.Ordinal)) return Fenced(lines);
         if (Bullet.IsMatch(first)) return ListOf(lines, Bullet, TextMarkerStyle.Disc, open);
         if (Numbered.IsMatch(first)) return ListOf(lines, Numbered, TextMarkerStyle.Decimal, open);
+        if (Heading.Match(first) is { Success: true } heading) return (HeadingOf(heading.Groups[1].Value, open), 1);
 
         // A paragraph runs to the next blank line, fence or list item.
         var taken = lines.TakeWhile((line, i) => i == 0 || !EndsParagraph(line)).ToArray();
@@ -97,7 +108,17 @@ internal static class MarkdownBlocks
     }
 
     static bool EndsParagraph(string line) =>
-        string.IsNullOrWhiteSpace(line) || line.TrimStart().StartsWith("```", StringComparison.Ordinal) || Bullet.IsMatch(line) || Numbered.IsMatch(line);
+        string.IsNullOrWhiteSpace(line) || line.TrimStart().StartsWith("```", StringComparison.Ordinal) || Bullet.IsMatch(line) || Numbered.IsMatch(line)
+        || Heading.IsMatch(line);
+
+    // A heading's one line, read for inline markdown like any other, in semibold with room above it to set it off
+    // from the section before. No size of its own: it takes the document's, which the caller sets.
+    static Paragraph HeadingOf(string text, Action<Uri> open)
+    {
+        var paragraph = new Paragraph { Tag = HeadingTag, FontWeight = FontWeights.SemiBold, Margin = new Thickness(0, 6, 0, 2) };
+        Inlines(text.TrimEnd(), open).ToList().ForEach(paragraph.Inlines.Add);
+        return paragraph;
+    }
 
     // Lines joined by line breaks, each read for inline markdown.
     static Paragraph ParagraphOf(IReadOnlyList<string> lines, Action<Uri> open)

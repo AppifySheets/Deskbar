@@ -152,15 +152,30 @@ public class MarkdownBlocksTests
     [Fact]
     public void Unknown_markdown_shows_as_text() => StaThread.Run(() =>
     {
-        var document = MarkdownBlocks.Render("# Heading\n> quoted\n| a | b |\n**unclosed");
+        var document = MarkdownBlocks.Render("#tag\n> quoted\n| a | b |\n**unclosed");
 
         Assert.All(document.Blocks, b => Assert.IsType<Paragraph>(b));
         var text = TextOf(document);
-        Assert.Contains("# Heading", text);
+        // "#tag" has no space after its hash, so it is not a heading (as on GitHub) and stays as written.
+        Assert.Contains("#tag", text);
         Assert.Contains("> quoted", text);
         Assert.Contains("| a | b |", text);
         Assert.Contains("**unclosed", text);
         Assert.Empty(InlinesOf(document).OfType<Bold>());
+    });
+
+    // Task descriptions are written in sections under "## ..." lines (2026-11-23): each heading is its own semibold
+    // paragraph without its hashes, the closing kind of hashes dropped too, and it ends the paragraph above it.
+    [Fact]
+    public void Headings_are_semibold_lines_without_their_hashes() => StaThread.Run(() =>
+    {
+        var document = MarkdownBlocks.Render("intro line\n## What you need to do next\n1. answer\n### Done ###");
+
+        var headings = document.Blocks.OfType<Paragraph>().Where(p => Equals(p.Tag, MarkdownBlocks.HeadingTag)).ToList();
+        Assert.Equal(["What you need to do next", "Done"], headings.Select(h => TextOf(h).Trim()));
+        Assert.All(headings, h => Assert.Equal(FontWeights.SemiBold, h.FontWeight));
+        Assert.Equal("intro line", TextOf(document.Blocks.First()).Trim());
+        Assert.Single(document.Blocks.OfType<List>());
     });
 
     [Fact]
