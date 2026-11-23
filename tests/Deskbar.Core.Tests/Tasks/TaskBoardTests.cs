@@ -688,6 +688,73 @@ public class TaskBoardTests
         Assert.Single(kept.Comments);
     }
 
+    // Ruling 11b: "deleted if nothing else was added", and Petre's own edits are things added. Any edit only he makes
+    // clears the mark for good, so the task stays when its session leaves.
+    [Fact]
+    public void A_renamed_adopted_task_is_kept_when_its_session_leaves()
+    {
+        var adopted = TaskBoard.Empty.AdoptSession(Agent("s1", "Stray"), ws, clock, id1).Value.Board
+            .Rename(id1, "Mine now", clock).Value;
+        Assert.False(Get(adopted, id1).Adopted);
+        Later();
+
+        var joined = Note(adopted, id2, ws).Join(id2, Session("s1"), clock).Value;
+
+        Assert.Equal("Mine now", Get(joined, id1).Title);
+    }
+
+    [Theory]
+    [InlineData("goal")]
+    [InlineData("flag")]
+    [InlineData("move")]
+    [InlineData("status")]
+    [InlineData("comment")]
+    // Main's assignee and description edits (Rulings 57 and 58) are Petre's only, so they count too.
+    [InlineData("assign")]
+    [InlineData("describe")]
+    public void An_adopted_task_Petre_edited_is_kept_when_its_session_leaves(string edit)
+    {
+        var adopted = TaskBoard.Empty.AdoptSession(Agent("s1", "Stray"), ws, clock, id1).Value.Board;
+        var edited = (edit switch
+        {
+            "goal" => adopted.SetGoal(id1, goal, clock),
+            "flag" => adopted.SetFlag(id1, TaskFlag.Important, true, clock),
+            "move" => adopted.MoveTo(id1, other, clock),
+            "status" => adopted.SetStatus(id1, TaskStatus.Backlog, clock),
+            "assign" => adopted.Assign(id1, Assignee.Me, clock),
+            "describe" => adopted.Describe(id1, "mine", clock),
+            _ => adopted.Comment(id1, Maybe<string>.None, "mine", clock, id5),
+        }).Value;
+        Assert.False(Get(edited, id1).Adopted);
+        Later();
+
+        var joined = Note(edited, id2, ws).Join(id2, Session("s1"), clock).Value;
+
+        Assert.Contains(joined.Tasks, t => t.Id == id1);
+    }
+
+    // A session's own comment is not Petre's edit: the mark stays (the comment alone still keeps the task).
+    [Fact]
+    public void A_session_comment_leaves_the_adopted_mark()
+    {
+        var adopted = TaskBoard.Empty.AdoptSession(Agent("s1", "Stray"), ws, clock, id1).Value.Board
+            .Comment(id1, "s1", "from the session", clock, id5).Value;
+
+        Assert.True(Get(adopted, id1).Adopted);
+    }
+
+    // Settling a comment (Ruling 62) follows the same line: the session settling its own leaves the mark, Petre settling
+    // it is his edit and clears it.
+    [Fact]
+    public void Settling_a_comment_clears_the_adopted_mark_only_when_Petre_does_it()
+    {
+        var commented = TaskBoard.Empty.AdoptSession(Agent("s1", "Stray"), ws, clock, id1).Value.Board
+            .Comment(id1, "s1", "from the session", clock, id5).Value;
+
+        Assert.True(Get(commented.SettleComment(id5, true, "s1", clock).Value, id1).Adopted);
+        Assert.False(Get(commented.SettleComment(id5, true, null, clock).Value, id1).Adopted);
+    }
+
     [Fact]
     public void A_task_that_was_not_adopted_is_kept_when_its_session_leaves()
     {

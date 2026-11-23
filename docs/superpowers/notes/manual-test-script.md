@@ -400,7 +400,7 @@ Manage ticked. Use a throwaway folder Claude Code already trusts, not a real rep
     first two minutes no task appears; then, within 15 seconds more, a task named after the session appears, In
     progress with a live session; with a VS Code window open on that folder, the task is on that window's workspace.
     Ask that session to join another task (`deskbar task join <id>`): the task Deskbar made for it disappears. Repeat
-    with a comment added to the made task first: it stays, showing the session ended.
+    with the made task renamed (or commented, flagged, moved) first: it stays, showing the session ended.
 78. Note the task's session, then end it: `claude stop <short id>` (from `claude agents`). Within 15 seconds the task's
     thread says "Resumed by Deskbar at HH:mm." and `claude agents` lists the session again with the SAME session id
     (not a copy). Close the task and stop the session again: nothing is resumed.
