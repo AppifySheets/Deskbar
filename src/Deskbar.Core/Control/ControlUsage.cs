@@ -73,6 +73,16 @@ public static class ControlUsage
             new("task", "order <id> top|end|<n>",
                 "move a task within its quadrant, as a drag does: to the top, the end or place n counting from 1.\n"
                 + "      A task waiting on you stays on top until it is answered"),
+            // Task 9 (docs/superpowers/specs/2026-11-23-tasks-open-claude-sessions-design.md): the twins of a line's
+            // double-click, "Start Claude on this" and the thread's Open (RemoteControl.Tasks.cs, TaskSessionCommands).
+            new("task", "go <id>",
+                "go to a task as a double-click on its line does: its workspace, then its Claude session's window (a\n"
+                + "      background session's terminal is brought forward or opened, an ended one is resumed first)"),
+            new("task", "start <id> [--folder <path>]",
+                "start a background Claude session on the task, with the task as its first message, and open a window\n"
+                + "      on it; without --folder it starts where exactly one folder is known and otherwise names them"),
+            new("task", "open-session <id> <session>",
+                "open one of the task's sessions (its full id or short id) as its thread's Open button does"),
             // A Claude Code session's own forms (RemoteControl.ClaudeHook.cs). --session is the session's id, which the
             // hooks' briefing hands it; every form but join, new and later acts on that session's own task. `-` in a
             // text's place reads the text from stdin (ControlArguments.WithTextInput): free text on cmd's command line

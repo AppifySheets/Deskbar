@@ -63,6 +63,66 @@ public static class ClaudeStart
     /// The Windows Terminal command that opens a NEW window on a background session: the "Deskbar Claude" profile
     /// (TerminalFragment), the folder as its directory, and `claude attach` with the session's short id.
     /// </summary>
+    //
+    // The folder goes WITHOUT a trailing separator (Task 9): wt reads its own command line, and a folder that ends in a
+    // backslash arrives as `"C:\repos\x\"`, whose last backslash escapes the closing quote. A drive's root keeps its
+    // own ("C:\"), since "C:" alone means the drive's current folder.
     public static ProgramLaunch AttachWindow(string shortId, string folder, string title) =>
-        new("wt.exe", ["-w", "new", "--title", title, "-p", "Deskbar Claude", "-d", folder, "claude", "attach", shortId], folder);
+        new("wt.exe", ["-w", "new", "--title", title, "-p", "Deskbar Claude", "-d", Bare(folder), "claude", "attach", shortId], Bare(folder));
+
+    /// <summary>
+    /// The window Deskbar opens when a folder was never trusted: a NEW Windows Terminal window running plain `claude`
+    /// there, with Windows Terminal's default profile, so Petre answers Claude's trust prompt himself (the spec: Deskbar
+    /// never accepts trust for him). Once he has, "Start Claude on this" works in that folder.
+    /// </summary>
+    public static ProgramLaunch TrustWindow(string folder) =>
+        new("wt.exe", ["-w", "new", "-d", Bare(folder), "claude"], Bare(folder));
+
+    // The longest title the window is given; the rest of a long title is in the task.
+    const int MaxTitle = 80;
+
+    /// <summary>
+    /// The title of the window on a task's session: the task's title made safe for wt's command line, then " · Claude".
+    /// Deskbar finds the window again by this exact title (Windows Terminal draws every window from one process, so the
+    /// title is the only thing that tells them apart; the "Deskbar Claude" profile's suppressApplicationTitle keeps it).
+    /// </summary>
+    //
+    // wt splits its command line into commands at every ';', so each becomes ','. A leading '-' would be read as one of
+    // wt's options, so leading dashes and spaces go. A title can hold line breaks (the editors take Shift+Enter), which a
+    // window title cannot show: its first line is used, the one the bar shows. Then the whole is cut to 80 characters,
+    // stepping back over a split emoji as FirstMessage does.
+    public static string AttachTitle(string taskTitle)
+    {
+        var firstLine = taskTitle.Split('\n')[0].Replace('\r', ' ');
+        var clean = firstLine.Replace(';', ',').TrimStart('-', ' ', '\t').Trim();
+        var cut = clean.Length > MaxTitle && char.IsHighSurrogate(clean[MaxTitle - 1]) ? MaxTitle - 1 : MaxTitle;
+        return (clean.Length > MaxTitle ? clean[..cut] : clean) + " · Claude";
+    }
+
+    /// <summary>
+    /// The folders a workspace's VS Code windows show, as full paths (spec, "Choosing the folder": the editor windows'
+    /// folders, "resolved to full paths through those session folders"). A VS Code title names only the folder
+    /// (EditorFolder.Of), so each name is matched, ignoring case, against the last segment of the repo of every session
+    /// the board knows; a name no repo ends in is left out, since a session cannot be started in a bare name. Each repo
+    /// comes once, the most recently joined session's spelling first.
+    /// </summary>
+    public static IReadOnlyList<string> EditorRepos(IEnumerable<string> folderNames, TaskBoard board)
+    {
+        var repos = board.Tasks.SelectMany(t => t.Sessions)
+            .Where(s => s.Folder != "")
+            .OrderByDescending(s => s.Joined)
+            .Select(s => Bare(RepoOf(s.Folder)))
+            .DistinctBy(f => f, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        return folderNames
+            .SelectMany(name => repos.Where(repo => LastSegment(repo).Equals(name.Trim(), StringComparison.OrdinalIgnoreCase)).Take(1))
+            .DistinctBy(f => f, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+    }
+
+    static string LastSegment(string folder) => folder.Split(['\\', '/'], StringSplitOptions.RemoveEmptyEntries).LastOrDefault() ?? "";
+
+    // A folder without its trailing separators, except a drive's root (see AttachWindow).
+    static string Bare(string folder) =>
+        folder.TrimEnd('\\', '/') is var trimmed && trimmed.Length == 2 && trimmed[1] == ':' && folder.Length > 2 ? folder[..3] : trimmed;
 }

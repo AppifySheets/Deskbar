@@ -134,4 +134,57 @@ public class ClaudeStartTests
             launch.Arguments);
         Assert.Equal(@"C:\repos\Deskbar", launch.WorkingDirectory);
     }
+
+    // Task 9: wt reads its own command line, so a folder ending in a separator ("C:\repos\Deskbar\") would hand it a
+    // quote escaped by that backslash. The folder goes without it; a drive's root keeps its own.
+    [Theory]
+    [InlineData(@"C:\repos\Deskbar\", @"C:\repos\Deskbar")]
+    [InlineData("C:/repos/Deskbar/", "C:/repos/Deskbar")]
+    [InlineData(@"C:\", @"C:\")]
+    public void The_attach_window_passes_the_folder_without_a_trailing_separator(string folder, string passed)
+    {
+        var launch = ClaudeStart.AttachWindow("ab12cd34", folder, "T · Claude");
+
+        Assert.Equal(passed, launch.Arguments[launch.Arguments.ToList().IndexOf("-d") + 1]);
+    }
+
+    // The window's title (Task 9 decision): the task's title cleaned for wt, then " · Claude". wt splits its command
+    // line at ';', so each becomes ','; a leading '-' would read as an option; the title is cut to 80 characters; and a
+    // title with line breaks gives its first line, the one the bar shows.
+    [Theory]
+    [InlineData("Fix the bar", "Fix the bar · Claude")]
+    [InlineData("Fix; the bar;", "Fix, the bar, · Claude")]
+    [InlineData(" --  dash first", "dash first · Claude")]
+    [InlineData("First line\nsecond line", "First line · Claude")]
+    public void The_attach_title_is_the_clean_title_and_Claude(string title, string expected) =>
+        Assert.Equal(expected, ClaudeStart.AttachTitle(title));
+
+    [Fact]
+    public void The_attach_title_cuts_a_long_title_to_80_characters() =>
+        Assert.Equal(new string('x', 80) + " · Claude", ClaudeStart.AttachTitle(new string('x', 120)));
+
+    // "Open a terminal there so you can trust it?": plain `claude` in the folder, a new window, no profile, so Petre
+    // answers the trust prompt himself.
+    [Fact]
+    public void The_trust_window_runs_plain_claude_in_the_folder()
+    {
+        var launch = ClaudeStart.TrustWindow(@"C:\repos\Deskbar\");
+
+        Assert.Equal("wt.exe", launch.Program);
+        Assert.Equal(["-w", "new", "-d", @"C:\repos\Deskbar", "claude"], launch.Arguments);
+        Assert.Equal(@"C:\repos\Deskbar", launch.WorkingDirectory);
+    }
+
+    // The folders of a workspace's VS Code windows are only names (EditorFolder.Of reads them from the titles); the spec
+    // resolves them to full paths through the sessions' folders. A name no session's repo ends in cannot be started in
+    // and is left out; the repo of a worktree session counts, so "Deskbar" finds C:\repos\Deskbar.
+    [Fact]
+    public void Editor_folders_resolve_to_full_paths_through_known_session_folders()
+    {
+        var a = Task(Guid.NewGuid(), "A", Maybe<Guid>.From(ws), "", Session("1", @"C:\repos\Deskbar\.claude\worktrees\topic", 1));
+        var b = Task(Guid.NewGuid(), "B", Maybe<Guid>.From(otherWs), "", Session("2", @"E:\work\iam.ge", 2));
+
+        Assert.Equal([@"C:\repos\Deskbar", @"E:\work\iam.ge"],
+            ClaudeStart.EditorRepos(["deskbar", "iam.ge", "Unknown", "Deskbar"], Board(a, b)));
+    }
 }

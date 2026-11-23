@@ -68,6 +68,11 @@ namespace Deskbar.Core.Control;
 // form (FolderPath). Left null, folders are taken as given.
 // `goals` is the goal service for `goal` and `task goal` (RemoteControl.Goals.cs; the goals planner,
 // docs/superpowers/specs/2026-11-22-goals-planner-design.md). Left null, both refuse with "Goals are not available".
+//
+// `taskSessions` is how `task go`, `task start` and `task open-session` reach a task's Claude sessions (Task 9 of
+// docs/superpowers/specs/2026-11-23-tasks-open-claude-sessions-design.md): going to its workspace and its session's
+// window, starting `claude --bg` in a folder and opening one session. Windows, terminals and `claude` are the app's
+// business, so the app hands them in (ClaudeTaskActions); left null, the three refuse.
 public sealed partial class RemoteControl(WorkspaceManager manager, Func<bool, Result>? setBarVisible = null, Func<ProgramLaunch, Result<int?>>? launch = null,
     Func<Result<string>>? dump = null, Func<Maybe<string>>? defaultBrowser = null,
     Func<(string Version, string? Exe, bool Packaged)>? identity = null,
@@ -79,7 +84,8 @@ public sealed partial class RemoteControl(WorkspaceManager manager, Func<bool, R
     Func<WindowHandle, bool, Result>? setTileLocked = null,
     Func<bool, Result>? setTasksWindow = null,
     Func<string, string>? longPath = null,
-    GoalService? goals = null)
+    GoalService? goals = null,
+    TaskSessionCommands? taskSessions = null)
 {
     // `longPath` turns an 8.3 short path into its long form (GetLongPathNameW, LongPath on the Windows side), for
     // FolderPath. Left null, a path is taken as it is, which is all a test that names long paths needs.

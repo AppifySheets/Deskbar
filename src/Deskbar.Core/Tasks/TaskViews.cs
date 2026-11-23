@@ -70,6 +70,16 @@ sealed record Admit(TaskWorkspaceFilter Workspace, TaskAssigneeFilter Assignee)
     public bool Admits(TaskItem task) => Workspace.Admits(task) && Assignee.Admits(task);
 }
 
+/// <summary>
+/// Where one of a task's Claude sessions stands, as its thread shows it (TaskViews.SessionList): working or idle while
+/// `claude agents --json` lists it, ended once it does not, expired once its transcript is gone too (Claude Code deletes
+/// transcripts after 30 days by default), which is the one state with no Open button, since nothing is left to resume.
+/// </summary>
+public enum SessionState { Working, Idle, Ended, Expired }
+
+/// <summary>One line of a task's session list: the session's full id, when it joined the task, and where it stands.</summary>
+public sealed record SessionView(string Id, DateTimeOffset Joined, SessionState State);
+
 public static class TaskViews
 {
     static readonly IReadOnlyList<(TaskGroupKind Kind, Quadrant Quadrant)> Quadrants =
@@ -162,6 +172,29 @@ public static class TaskViews
         return line.Replace("`", "").Trim();
     }
 
+    /// <summary>
+    /// The task's sessions as its thread lists them (spec, "Task history"; tasks-open-claude-sessions design): newest
+    /// joined first, each Working or Idle while <paramref name="listed"/> (the latest `claude agents --json`) shows it,
+    /// by its Busy; a session the list does not show is Ended while its transcript is there and Expired once Claude Code
+    /// has deleted it (<paramref name="transcriptExists"/>), and only an Expired one cannot be opened.
+    /// </summary>
+    //
+    // No list (None) is "cannot tell" (Global Constraints): the feature is off, or `claude` could not be read. The hooks'
+    // word stands then, as everywhere else: a session they call live is Idle, since nothing says it is working, and one
+    // they ended is Ended or Expired by its transcript. Nothing is ever shown ended BECAUSE the list was unreadable.
+    public static IReadOnlyList<SessionView> SessionList(TaskItem task, Maybe<IReadOnlyCollection<ClaudeAgent>> listed,
+        Func<TaskSession, bool> transcriptExists) =>
+        task.Sessions
+            .OrderByDescending(s => s.Joined)
+            .Select(s => new SessionView(s.Id, s.Joined, listed.Match(
+                list => list.FirstOrDefault(a => a.SessionId == s.Id) is { } agent
+                    ? agent.Busy ? SessionState.Working : SessionState.Idle
+                    : Gone(s, transcriptExists),
+                () => s.IsLive ? SessionState.Idle : Gone(s, transcriptExists))))
+            .ToList();
+
+    static SessionState Gone(TaskSession session, Func<TaskSession, bool> transcriptExists) =>
+        transcriptExists(session) ? SessionState.Ended : SessionState.Expired;
 
     /// <summary>The words of each status, as the spec spells them.</summary>
     public static string StatusName(TaskStatus status) => status switch
