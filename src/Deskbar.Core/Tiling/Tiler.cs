@@ -374,8 +374,10 @@ public sealed partial class Tiler(WorkspaceManager manager, IVirtualDesktopServi
             RaiseTogether(e.Window.Handle);
             return;
         }
-        // Remembered BEFORE the evaluate takes it out of the grid, so it can come back to its place.
-        if (e.Kind == WindowEventKind.MinimizeChanged) NoteAway(e.Window.Handle);
+        // Remembered BEFORE the evaluate takes it out of the grid, so it can come back to its place. Every minimized
+        // tile, not only this event's window: a minimize-all reaches here with all of them minimized already, and this
+        // evaluate takes them all off the board (Tiler.Minimize.cs, "Several tiles away at once").
+        if (e.Kind == WindowEventKind.MinimizeChanged) NoteAwayTogether(e.Window.Handle);
 
         // A window that OPENS maximized on a tiled workspace is restored into the slot it joins. Petre: "opening a new
         // window in a tiled bar should automatically unmaximize it and put it into the tile". A browser remembers

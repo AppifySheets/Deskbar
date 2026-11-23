@@ -401,6 +401,15 @@ T4. A restart keeps a hand-made layout. Make A | C over B again and drag one spl
     `state.json` has the tree under the workspace's `TileLayouts` and `"TileSizes": []`.
 T5. Upgrade from a build before the split tree, on a profile that build tiled with a dragged split. After the
     update the grid looks exactly as it did, to the pixel, and Even out offers itself as before.
+T6. Minimized together, back in place. Make A over B on the left and C full height on the right (T1, step 3).
+    1. Minimize all three at once (Win+D, or Win+M) and bring them back the same way (Win+D again, or
+       Win+Shift+M). Each tile is where it was. The trace has one `came back to its place` line per window and no
+       `arrived` line.
+    2. Minimize all three again and bring them back one at a time from the taskbar, in any order: C first has the
+       screen; A next sits left of C; B last goes below A, and the shape is whole again.
+    3. Minimize A, then B, each with its own minimize button. Restore A, then B: the same shape again.
+    4. Minimize A only. B and C are side by side. Switch to another desktop and back: B and C are still side by
+       side (they used to flip to B over C). Restore A: back above B.
 
 ## Locked tiles and other screens on arrival
 

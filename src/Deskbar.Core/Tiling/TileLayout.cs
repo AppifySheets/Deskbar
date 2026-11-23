@@ -96,6 +96,23 @@ public sealed record TileLayout(TileNode Root)
     // The structure is equal, shares ignored. The opening is not part of the structure (compare it separately).
     public bool SameShapeAs(TileLayout other) => SameStructure(Root, other.Root);
 
+    // The same layout up to rounding: the same structure and opening, every share within a millionth of the other's.
+    // Two routes to one layout (leaves removed in another order, Tiler.Minimize.cs's EarlierScreen) can differ in the
+    // last bits of a share, which exact record equality would call a different layout; a millionth of a 4K screen is
+    // far below a pixel.
+    public bool Near(TileLayout other) => Opening == other.Opening && NearNode(Root, other.Root);
+
+    static bool NearNode(TileNode a, TileNode b) =>
+        (a, b) switch
+        {
+            (TileLeaf, TileLeaf) => true,
+            (TileBranch x, TileBranch y) =>
+                x.Axis == y.Axis
+                && x.Children.Count == y.Children.Count
+                && x.Children.Zip(y.Children, (l, r) => Math.Abs(l.Share - r.Share) < 1e-6 && NearNode(l.Node, r.Node)).All(near => near),
+            _ => false
+        };
+
     // The leaf's share of the INNER area on each axis: the product of the shares of the Across splits (width) and of
     // the Down splits (height) on its path. TileArrival's floor and largest-tile rules read these where they read
     // Columns[c] and Rows[c][r] today.

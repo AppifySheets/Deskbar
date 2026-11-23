@@ -345,6 +345,28 @@ public static partial class TileArrange
             });
     }
 
+    // The layout of `order` with only the windows of `kept` left in it: every other window's leaf is taken out
+    // (TileLayout.Remove, its share going to its siblings in proportion), from the last leaf back so the indices still
+    // to remove do not move. So the windows kept stay where they were relative to each other, and keeping them all gives
+    // the layout back unchanged. An opening stays open (Remove moves it with the leaves). A stale opening mark (one leaf
+    // per window, and an Opening still named) is dropped first, as Returned does. For a minimized tile coming back while
+    // others of its screen are still away (Tiler.Minimize.cs, "Several tiles away at once").
+    //
+    // None when the layout does not describe `order`, or when `kept` holds no window of `order` (there would be nothing
+    // left to lay out).
+    public static Maybe<TileLayout> Kept(IReadOnlyList<WindowHandle> order, TileLayout layout, IReadOnlyCollection<WindowHandle> kept)
+    {
+        layout = layout.Opening is not null && !layout.HasOpeningFor(order.Count) ? layout with { Opening = null } : layout;
+        if (!Describes(order, layout) || !order.Any(kept.Contains))
+            return Maybe<TileLayout>.None;
+        return order
+            .Select((w, slot) => (Window: w, Leaf: LeafOf(layout, slot, order.Count)))
+            .Where(p => !kept.Contains(p.Window))
+            .Select(p => p.Leaf)
+            .OrderByDescending(leaf => leaf)
+            .Aggregate(layout, (current, leaf) => current.Remove(leaf));
+    }
+
     // The window in leaf `leaf`: None for the opening's leaf (when the layout has one for `order`) or a leaf past the
     // windows.
     static Maybe<WindowHandle> WindowIn(IReadOnlyList<WindowHandle> order, TileLayout layout, int leaf)

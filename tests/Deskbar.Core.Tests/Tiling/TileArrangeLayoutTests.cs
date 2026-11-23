@@ -16,6 +16,34 @@ public sealed class TileArrangeLayoutTests
 
     static void Is(string expected, TileLayout layout) => Assert.Equal(expected, Text(layout));
 
+    // --- kept: a remembered screen with only some of its windows (minimized tiles coming back) ---------------------
+
+    // A over B beside C (Petre's shape). With B still away, A and C keep their columns; with A and C away, B has it all.
+    [Fact]
+    public void Kept_takes_the_absent_leaves_out_and_keeps_the_others_where_they_were()
+    {
+        var shape = Tree(Across(C(Down(C(L, .5), C(L, .5)), .4), C(L, .6)));
+
+        Is("A[L 0.4, L 0.6]", TileArrange.Kept([A, B, Cw], shape, [A, Cw]).GetValueOrThrow());
+        Is("D[L 0.5, L 0.5]", TileArrange.Kept([A, B, Cw], shape, [A, B]).GetValueOrThrow());
+        Is("L", TileArrange.Kept([A, B, Cw], shape, [B]).GetValueOrThrow());
+        Assert.Equal(Text(shape), Text(TileArrange.Kept([A, B, Cw], shape, [A, B, Cw]).GetValueOrThrow()));
+    }
+
+    // An opening stays open and moves with the leaves; a layout that does not describe the windows, or keeping none
+    // of them, gives nothing.
+    [Fact]
+    public void Kept_keeps_the_opening_and_refuses_what_it_cannot_describe()
+    {
+        var open = Tree(Across(C(L, .25), C(L, .25), C(L, .25), C(L, .25)), opening: 1);
+
+        var kept = TileArrange.Kept([A, B, Cw], open, [B, Cw]).GetValueOrThrow();
+        Assert.Equal(3, kept.Count);
+        Assert.Equal(0, kept.Opening);
+        Assert.True(TileArrange.Kept([A, B], open, [A]).HasNoValue);
+        Assert.True(TileArrange.Kept([A, B, Cw], open, [X]).HasNoValue);
+    }
+
     // --- drops beside a tile -------------------------------------------------------------------------------------
 
     // Petre's case, the reason for the tree: A over B on the left, C full height on the right, C dropped on A's right.
