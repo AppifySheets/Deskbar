@@ -329,6 +329,12 @@ public sealed class ClaudeTaskActions : IDisposable
     /// <summary>The task's sessions as its thread lists them (TaskViews.SessionList).</summary>
     public IReadOnlyList<SessionView> SessionsOf(TaskItem task) => TaskViews.SessionList(task, Latest, seams.TranscriptExists);
 
+    /// <summary>
+    /// How many of the task's live sessions the latest list shows busy (TaskViews.WorkingCount), for the tasks panel's
+    /// session halos (tasks panel plan, Task 8). 0 before the first list and while the feature is off (Latest).
+    /// </summary>
+    public int WorkingCount(TaskItem task) => TaskViews.WorkingCount(task, Latest);
+
     // --- helpers ----------------------------------------------------------------------------------------------------
 
     Maybe<TaskItem> Current(Guid id) => tasks.Board.Tasks.TryFirst(t => t.Id == id);

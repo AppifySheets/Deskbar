@@ -83,6 +83,11 @@ namespace Deskbar.App;
 // chip's count are made: what a chip says is always what it would show. The Claude working chip's own count is taken on
 // the board narrowed by every OTHER filter (goal, search, and the status, workspace and assignee filters the chips
 // apply), so it too says how many it would show. Neither is saved: both start over on a fresh open, with the rest.
+//
+// THE PANEL'S WIDTH (spec "Lines at panel width" and "The Matrix"; plan 2026-11-23-tasks-panel, Task 8). The view says
+// whether lines are slim (below 620 DIP) and whether the Matrix is allowed (from 780), both from the width saved for
+// the panel (View has why that one), and shows the Matrix only when the setting asks for it AND it is allowed. The
+// width changes only at the grip's drag end (ResizePanel), which makes the view again, so every line redraws once then.
 public sealed class TasksBoard : IDisposable
 {
     // How long a line just closed stays, struck through with Undo: the bar's own window, so the two agree.
@@ -105,6 +110,7 @@ public sealed class TasksBoard : IDisposable
     readonly GoalService? goals;
     readonly Func<TaskItem, IReadOnlyList<SessionView>> sessionsOf;
     readonly Func<TaskItem, string, Result>? openSession;
+    readonly Func<TaskItem, int> workingOf;
     readonly IDisposable subscriptions;
 
     // The lines closed in this window and still in their undo window: the status each had, and its timer.
@@ -147,13 +153,18 @@ public sealed class TasksBoard : IDisposable
     //   startClaude   "Start Claude on this" (see the header); none, neither the menu item nor the button shows
     //   openSession   a session's Open (see the header); none, no Open buttons
     //   sessionsChanged  pulses when the sessions' states may have changed, to redraw an open thread
+    //   workingOf     how many of a task's live sessions Claude is busy in now (Task 8; the App's ClaudeTaskActions
+    //                 .WorkingCount over the latest `claude agents --json`); their squares wear a halo. None, 0 for all.
+    //                 A new list pulses sessionsChanged, so a line redraws when only this count moved
     // Internal because TasksPanel is: only the App and the tests build a board.
     internal TasksBoard(TasksWindow window, TasksPanel panel, TaskService tasks, WorkspaceManager manager, Func<TaskItem, Result> goTo,
         Func<Guid, Brush?>? colourOf = null, Func<nint, bool>? bringForward = null, Func<TimeSpan, Action, IDisposable>? undoTimer = null,
         Func<DateTimeOffset>? now = null, TaskSelection? selection = null, GoalService? goals = null,
         Func<TaskItem, IReadOnlyList<SessionView>>? sessionsOf = null, Action<Guid>? startClaude = null,
-        Func<TaskItem, string, Result>? openSession = null, IObservable<System.Reactive.Unit>? sessionsChanged = null)
+        Func<TaskItem, string, Result>? openSession = null, IObservable<System.Reactive.Unit>? sessionsChanged = null,
+        Func<TaskItem, int>? workingOf = null)
     {
+        this.workingOf = workingOf ?? (_ => 0);
         this.goals = goals;
         this.sessionsOf = sessionsOf ?? (task => TaskViews.SessionList(task, Maybe<IReadOnlyCollection<ClaudeAgent>>.None, _ => true));
         this.openSession = openSession;
@@ -311,10 +322,14 @@ public sealed class TasksBoard : IDisposable
 
     // The grip's drag end (TasksWindowActions.ResizePanel): the width saved, then the panel re-docked at it in place. The
     // width goes in unclamped; TasksPanel clamps it against the screen it docks on.
+    // The new width may cross one of the lines' thresholds (slim below 620, the Matrix from 780; Task 8), so the view is
+    // made again from the width just saved and every line redraws once, here at the drag's end and never during it. A
+    // drag that crosses neither draws nothing: the window's signature holds the two flags, not the width.
     void ResizePanel(double widthDips)
     {
         _ = manager.SaveTasksPanel(PanelState with { Width = widthDips });
         panel.SetWidth(widthDips);
+        Refresh();
     }
 
     // Whether the panel is open, saved with the width as it is (a no-op when nothing changed, WorkspaceManager).
@@ -683,9 +698,21 @@ public sealed class TasksBoard : IDisposable
             .Select(c => new TaskCellView(c.Quadrant, TaskViews.GroupName(TaskViews.KindOf(c.Quadrant)), c.Tasks.Select(Row).ToArray()))
             .ToArray();
         var (menuGoals, filterGoals) = showsGoals ? GoalChoices(goalBoard) : NoGoalChoices;
+        // THE PANEL'S WIDTH DECIDES TWO THINGS (Task 8; spec "Lines at panel width", "The Matrix"): slim lines below 620
+        // DIP, and the List / Matrix switch only from 780. It is the width SAVED for the panel (AppState.TasksPanel), the
+        // one the grip's drag end just wrote and the panel docks at, because the window's own ActualWidth is not known at
+        // the first draw: OpenFresh draws before the panel docks. TasksPanel clamps the width to half the screen it docks
+        // on, so on a screen narrower than twice the width the drawn panel can be narrower than this says; the grip's own
+        // preview clamps to that same half, so a width chosen by dragging always matches.
+        var width = PanelState.Width;
+        var matrixAllowed = TasksPanelLayout.MatrixAllowed(width);
         return new TasksView(filters, WorkspaceFilterLabel(), where, places, groups, EmptyText(), addTarget)
         {
-            Matrix = manager.State.TasksMatrix,
+            // The setting is Petre's and the width never changes it: a panel too narrow for the Matrix shows the List and
+            // leaves AppState.TasksMatrix as it is, so widening it again brings the Matrix back.
+            Matrix = manager.State.TasksMatrix && matrixAllowed,
+            MatrixAllowed = matrixAllowed,
+            Slim = TasksPanelLayout.Slim(width),
             Cells = cells,
             ShowsGoals = showsGoals,
             Goals = menuGoals,
@@ -783,6 +810,8 @@ public sealed class TasksBoard : IDisposable
         Goal = goals?.GoalOf(task).Map(ChoiceOf).GetValueOrDefault(),
         // Only an open thread shows them, and an ended one's state looks on disk for its transcript (see the header).
         SessionList = expanded.Contains(task.Id) ? sessionsOf(task) : [],
+        // Of its live sessions, how many Claude is busy in now (Task 8): their squares wear a halo.
+        WorkingCount = workingOf(task),
     };
 
     // The mockup's sessions column: how many, and whether any is still live. Empty for a note.
@@ -902,6 +931,12 @@ internal sealed record TaskRowView(Guid Id, string Title, string Detail, TaskSta
     /// Empty while the thread is closed.
     /// </summary>
     public IReadOnlyList<SessionView> SessionList { get; init; } = [];
+
+    /// <summary>
+    /// How many of the task's live sessions Claude is working in right now (tasks panel plan, Task 8): the first that many
+    /// live squares on the line wear a halo. From the board's `workingOf`, 0 with none or before the first agents list.
+    /// </summary>
+    public int WorkingCount { get; init; }
 }
 
 /// <summary>
@@ -924,8 +959,17 @@ internal sealed record TasksView(IReadOnlyList<TaskFilterChip> Filters, string W
     IReadOnlyList<WorkspaceChipMenu.Entry> Places,
     IReadOnlyList<TaskGroupView> Groups, string EmptyText, TaskPlaceChoice AddTarget)
 {
-    /// <summary>Whether the window shows the Matrix (Task 12) rather than the List; its four cells.</summary>
+    /// <summary>
+    /// Whether the window shows the Matrix (Task 12) rather than the List; its four cells. Only while the panel is wide
+    /// enough for it (MatrixAllowed), whatever AppState.TasksMatrix says.
+    /// </summary>
     public bool Matrix { get; init; }
+
+    /// <summary>Whether the panel is wide enough for the Matrix (TasksPanelLayout.MatrixAllowed): the List / Matrix switch shows only then.</summary>
+    public bool MatrixAllowed { get; init; } = true;
+
+    /// <summary>Whether the panel is narrow enough for slim lines (TasksPanelLayout.Slim; tasks panel plan, Task 8).</summary>
+    public bool Slim { get; init; }
 
     public IReadOnlyList<TaskCellView> Cells { get; init; } = [];
 
