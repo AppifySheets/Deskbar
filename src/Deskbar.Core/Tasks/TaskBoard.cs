@@ -348,7 +348,31 @@ public sealed record TaskBoard(IReadOnlyList<TaskItem> Tasks)
     /// </summary>
     public Result<TaskBoard> Assign(Guid id, Assignee assignee, DateTimeOffset now) =>
         // Handing it over is an edit only Petre makes, so it clears the adopted mark (Ruling 11b).
-        Lookup(id).Map(task => task.Assignee == assignee ? this : Replaced(task with { Assignee = assignee, UpdatedAt = now, Adopted = false }));
+        // A handed-back task (StalledTasks) he assigns, even to himself, is his decision from now on, so the mark goes and a
+        // busy session no longer takes it back.
+        Lookup(id).Map(task => task.Assignee == assignee && task.HandedBack.HasNoValue
+            ? this
+            : Replaced(task with { Assignee = assignee, UpdatedAt = now, Adopted = false, HandedBack = Maybe<DateTimeOffset>.None }));
+
+    /// <summary>
+    /// A Claude task no session has worked on for a while comes back to Petre (StalledTasks; spec
+    /// docs/superpowers/specs/2026-11-23-stalled-claude-tasks-design.md). It stays In progress, so the bar shows Claude's
+    /// status line, and carries the mark that lets <see cref="TakeBack"/> return it. Only an open, In progress task with
+    /// sessions that is Claude's is handed back; anything else returns this same board.
+    /// </summary>
+    public TaskBoard HandBack(Guid id, DateTimeOffset now) =>
+        Tasks.FirstOrDefault(t => t.Id == id) is { IsOpen: true, Status: TaskStatus.InProgress, IsClaudes: true } task && task.Assignee.IsClaude
+            ? Replaced(task with { Assignee = Assignee.Me, HandedBack = now, UpdatedAt = now })
+            : this;
+
+    /// <summary>
+    /// A handed-back task's session works on it again: it is Claude's again and the mark goes. Only a task that carries
+    /// the mark and is still Petre's moves, so one he assigned to himself stays his; anything else returns this same board.
+    /// </summary>
+    public TaskBoard TakeBack(Guid id, DateTimeOffset now) =>
+        Tasks.FirstOrDefault(t => t.Id == id) is { HandedBack.HasValue: true } task && task.Assignee.IsMe
+            ? Replaced(task with { Assignee = Assignee.Claude, HandedBack = Maybe<DateTimeOffset>.None, UpdatedAt = now })
+            : this;
 
     public Result<TaskBoard> Delete(Guid id) =>
         Tasks.Any(t => t.Id == id)
@@ -676,8 +700,17 @@ public sealed record TaskBoard(IReadOnlyList<TaskItem> Tasks)
 
     Result<TaskBoard> Change(Guid id, Func<TaskItem, TaskItem> change) =>
         Tasks.Any(t => t.Id == id)
-            ? new TaskBoard(Tasks.Select(t => t.Id == id ? change(t) : t).ToArray())
+            ? new TaskBoard(Tasks.Select(t => t.Id == id ? Unmarked(t, change(t)) : t).ToArray())
             : Result.Failure<TaskBoard>(NoTask(id.ToString()));
+
+    // The handed-back mark (StalledTasks) means "Deskbar gave this to Petre because it went quiet". Once anything else
+    // moves the assignee or the status (an ask, done, close, a status by hand, a session joining), that is no longer why
+    // the task is where it is, so the mark goes. A status line or a comment moves neither and keeps it. HandBack and
+    // TakeBack do not come through here: they set the mark themselves.
+    static TaskItem Unmarked(TaskItem was, TaskItem now) =>
+        now.HandedBack.HasValue && (now.Assignee != was.Assignee || now.Status != was.Status)
+            ? now with { HandedBack = Maybe<DateTimeOffset>.None }
+            : now;
 
     /// <summary><see cref="Change"/> for the changes a closed task refuses (see the header).</summary>
     Result<TaskBoard> ChangeOpen(Guid id, Func<TaskItem, TaskItem> change) =>

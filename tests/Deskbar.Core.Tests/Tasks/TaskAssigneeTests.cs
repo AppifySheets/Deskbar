@@ -287,4 +287,106 @@ public sealed class TaskAssigneeTests : IDisposable
         Assert.True(board.IsSuccess, board.IsFailure ? board.Error : "");
         Assert.True(Get(board.Value, id1).Comments.Single().Settled.HasNoValue);
     }
+
+    // --- stalled tasks (spec 2026-11-23-stalled-claude-tasks-design.md): the handed-back mark --------------------------
+
+    [Fact]
+    public void HandBack_gives_a_quiet_task_to_Petre_and_marks_it()
+    {
+        var task = Get(Claudes(TaskBoard.Empty, id1).HandBack(id1, clock), id1);
+
+        Assert.Equal(Assignee.Me, task.Assignee);
+        Assert.Equal(clock, task.HandedBack.Value);
+        Assert.Equal(TaskStatus.InProgress, task.Status);
+    }
+
+    [Fact]
+    public void TakeBack_returns_a_handed_back_task_to_Claude_and_clears_the_mark()
+    {
+        var task = Get(Claudes(TaskBoard.Empty, id1).HandBack(id1, clock).TakeBack(id1, clock), id1);
+
+        Assert.Equal(Assignee.Claude, task.Assignee);
+        Assert.True(task.HandedBack.HasNoValue);
+    }
+
+    [Fact]
+    public void TakeBack_leaves_a_task_Petre_assigned_to_himself()
+    {
+        var board = Claudes(TaskBoard.Empty, id1).Assign(id1, Assignee.Me, clock).Value;
+
+        Assert.Same(board, board.TakeBack(id1, clock));
+    }
+
+    [Fact]
+    public void Assigning_a_handed_back_task_to_himself_clears_the_mark()
+    {
+        var task = Get(Claudes(TaskBoard.Empty, id1).HandBack(id1, clock).Assign(id1, Assignee.Me, clock).Value, id1);
+
+        Assert.True(task.HandedBack.HasNoValue);
+        Assert.Equal(Assignee.Me, task.Assignee);
+    }
+
+    [Theory]
+    [InlineData("ask")]
+    [InlineData("done")]
+    [InlineData("close")]
+    [InlineData("status-backlog")]
+    [InlineData("join")]
+    public void Any_other_change_of_assignee_or_status_clears_the_mark(string change)
+    {
+        var handed = Claudes(TaskBoard.Empty, id1).HandBack(id1, clock);
+        var board = change switch
+        {
+            "ask" => handed.Ask(id1, "OK?", clock).Value,
+            "done" => handed.MarkDone(id1, clock).Value,
+            "close" => handed.Close(id1, clock).Value,
+            "join" => handed.Join(id1, Session("s2"), clock).Value,
+            _ => handed.SetStatus(id1, TaskStatus.Backlog, clock).Value,
+        };
+
+        Assert.True(Get(board, id1).HandedBack.HasNoValue);
+    }
+
+    [Fact]
+    public void A_status_line_keeps_the_mark()
+    {
+        var board = Claudes(TaskBoard.Empty, id1).HandBack(id1, clock).SetStatusLine(id1, "still here", clock).Value;
+
+        Assert.True(Get(board, id1).HandedBack.HasValue);
+    }
+
+    [Fact]
+    public void HandBack_ignores_a_note_and_a_task_waiting_on_Petre()
+    {
+        var note = Note(TaskBoard.Empty, id1);
+        Assert.Same(note, note.HandBack(id1, clock));
+
+        var waiting = Claudes(TaskBoard.Empty, id2).Ask(id2, "OK?", clock).Value;
+        Assert.Same(waiting, waiting.HandBack(id2, clock));
+    }
+
+    [Fact]
+    public void The_mark_survives_a_save_and_a_load()
+    {
+        Directory.CreateDirectory(dir);
+        var store = new JsonTaskStore(dir);
+        store.Save(Claudes(TaskBoard.Empty, id1).HandBack(id1, clock));
+
+        var loaded = Get(store.Load().Value, id1);
+
+        Assert.Equal(clock, loaded.HandedBack.Value);
+        Assert.Equal(Assignee.Me, loaded.Assignee);
+    }
+
+    [Theory]
+    [InlineData("\"garbage\"")]
+    [InlineData("5")]
+    [InlineData("{\"a\":1}")]
+    public void A_wrong_typed_handed_back_time_reads_as_none(string handedBack)
+    {
+        var board = new JsonTaskStore(Written($",\"handedBack\":{handedBack}")).Load();
+
+        Assert.True(board.IsSuccess, board.IsFailure ? board.Error : "");
+        Assert.True(Get(board.Value, id1).HandedBack.HasNoValue);
+    }
 }
