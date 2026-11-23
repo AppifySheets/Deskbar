@@ -1,4 +1,6 @@
-﻿using System.Runtime.InteropServices;
+﻿using System.Reactive.Linq;
+using System.Reactive.Subjects;
+using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Interop;
 using System.Windows.Controls;
@@ -672,6 +674,10 @@ public partial class FloatingBar : Window
     // change of the bar's strip, emitted on the UI thread, synchronously, after the window has been moved into the
     // rectangle the shell granted. Rx rather than an event, as the bar's other outward notices (LayoutSettled).
     //
+    // A dock's notice goes out only once DockTo has cleared `docking` (see FlushStripNotice), so a subscriber may call
+    // back into the bar synchronously, a DockTo included, without the re-entry guard swallowing it, and an exception
+    // a subscriber throws does not leave `docking` set.
+    //
     // It emits:
     //   * after a dock (DockTo, DockAcrossSeam) whose app bar registered afresh (AppBar.RegisteredOnLastDock; for a
     //     seam dock, either of its two). That covers the dock guard (KeepDockedStrip removes, then docks), Explorer
@@ -687,22 +693,42 @@ public partial class FloatingBar : Window
     // the panel would re-register again, which sends another notice, for ever. A width drag changes only where the
     // bar's inner edge is, and the shell tells the panel that itself, through the same position notice.
     //
-    // Completed when the bar closes (see the Closed handler, which lets go first).
-    readonly System.Reactive.Subjects.Subject<BarStrip> strip = new();
+    // REPLAYS the last notice to a new subscriber. The App and the tasks panel subscribe after the bar may already have
+    // docked at startup (ShowBar, DockToEdge), and the panel waits for a notice with an edge before it docks; with a
+    // plain Subject that first notice was gone and the panel would wait until the next registration, an Explorer
+    // restart or a dock guard repair. Replaying it is safe for the order: the bar's registration it describes is
+    // already older than anything the panel registers next. A late subscriber after close gets the closing let-go
+    // and the completion.
+    //
+    // Completed when the bar closes (see the Closed handler, which lets go first). Handed out through AsObservable,
+    // so no caller can cast it back to the subject and push into it.
+    readonly ReplaySubject<BarStrip> strip = new(1);
 
-    internal IObservable<BarStrip> Strip => strip;
+    internal IObservable<BarStrip> Strip => strip.AsObservable();
 
     // The last notice sent, for the "differs from the last one" rule and for letting go once. Null until the first dock.
     BarStrip? lastStrip;
 
-    // After a dock: announced when the app bar registered afresh, or when the edge or the screens differ from the last
+    // The notice a dock decided on, held until DockTo's `finally` has cleared `docking` (see FlushStripNotice).
+    (BarStrip Notice, string Why)? pendingStrip;
+
+    // After a dock: queued when the app bar registered afresh, or when the edge or the screens differ from the last
     // notice. `grantedMiddle` stands in for the window's own middle only if GetWindowRect cannot read it.
-    void AnnounceDock(string edge, WindowRect screen, Maybe<WindowRect> seamRight, bool registeredAfresh, nint hwnd, int grantedMiddle)
+    void QueueDockNotice(string edge, WindowRect screen, Maybe<WindowRect> seamRight, bool registeredAfresh, nint hwnd, int grantedMiddle)
     {
         var next = new BarStrip(edge, screen, seamRight, MiddleXOf(hwnd).GetValueOrDefault(grantedMiddle));
         // The loop breaker (see above): a re-dock in place that did not register is not news.
         if (!registeredAfresh && lastStrip is { } last && SamePlace(last, next)) return;
-        Announce(next, registeredAfresh ? "registered" : "moved");
+        pendingStrip = (next, registeredAfresh ? "registered" : "moved");
+    }
+
+    // Sends the queued dock notice, once DockTo is out of its `docking` section. Skipped while `docking` is still set,
+    // which only a DockTo nested inside another one could see; the outer DockTo flushes on its own way out.
+    void FlushStripNotice()
+    {
+        if (docking || pendingStrip is not { } pending) return;
+        pendingStrip = null;
+        Announce(pending.Notice, pending.Why);
     }
 
     // After the strip was given back. Only when the last notice was a dock, so a floating bar being minimized, or a
@@ -716,8 +742,9 @@ public partial class FloatingBar : Window
             MiddleXOf(hwnd).GetValueOrDefault(last.MiddleX)), "let go");
     }
 
-    // A subscriber runs inside DockTo while `docking` is set, so a DockTo it causes synchronously is a no-op; the shell's
-    // position notices it causes are queued (OnShellMovedStrips) and come back as plain re-docks, which are not announced.
+    // Never called with `docking` set (dock notices go through FlushStripNotice, let-go notices are sent outside DockTo).
+    // The shell's position notices a subscriber's own Remove and Dock cause are queued (OnShellMovedStrips) and come
+    // back as plain re-docks, which are not announced.
     void Announce(BarStrip next, string why)
     {
         lastStrip = next;
@@ -846,7 +873,8 @@ public partial class FloatingBar : Window
         UpdateLayout();
 
         // The strip is gone and the window is floating-sized again: the tasks panel gives its own strip back (see Strip).
-        // The readjustment docks again right after this, and that dock registers afresh, so it is announced in turn.
+        // When the caller is the display-layout readjustment, it docks again right after this, and that dock registers
+        // afresh, so it is announced in turn. An undock (UndockFromEdge) docks nothing after it.
         AnnounceLetGo();
     }
 
@@ -859,7 +887,17 @@ public partial class FloatingBar : Window
 
     // Reserves the strip and moves the window into it. Also the way to RE-dock, after a width drag, a
     // display change or a notification that something else on the edge moved.
+    //
+    // The work is DockInside; this wrapper sends the notice it queued (see Strip) only after DockInside's `finally` has
+    // cleared `docking`, so a subscriber that calls back into the bar is never swallowed by the re-entry guard.
     Result DockTo(string edge)
+    {
+        var docked = DockInside(edge);
+        FlushStripNotice();
+        return docked;
+    }
+
+    Result DockInside(string edge)
     {
         if (docking) return Result.Success();
         var hwnd = new WindowInteropHelper(this).Handle;
@@ -916,8 +954,9 @@ public partial class FloatingBar : Window
             Height = (granted.B - granted.T) / scaleY;
 
             Save();
-            // The window is in the granted strip now: tell the tasks panel, if this dock is news (see Strip).
-            AnnounceDock(edge, AsWindowRect(info.rcMonitor), Maybe<WindowRect>.None, appBar.RegisteredOnLastDock, hwnd,
+            // The window is in the granted strip now: queue the tasks panel's notice, if this dock is news; DockTo sends
+            // it once `docking` is cleared (see Strip).
+            QueueDockNotice(edge, AsWindowRect(info.rcMonitor), Maybe<WindowRect>.None, appBar.RegisteredOnLastDock, hwnd,
                 (granted.L + granted.R) / 2);
             return Result.Success();
         }
@@ -981,10 +1020,11 @@ public partial class FloatingBar : Window
         Save();
         // The rows mirror their left edge in this mode, so they are drawn again the first time it starts.
         if (!wasAcross) Rebuild();
-        // Both strips are reserved and the window spans them: tell the tasks panel, if this dock is news (see Strip).
-        // Fresh when EITHER half registered, because the panel docks inside the right half and must follow any new
-        // registration on the seam. The screen is the seam's left-hand one, SeamRight the screen the panel docks on.
-        AnnounceDock("seam", AsWindowRect(seam.Left), Maybe.From(AsWindowRect(seam.Right)),
+        // Both strips are reserved and the window spans them: queue the tasks panel's notice, if this dock is news;
+        // DockTo sends it once `docking` is cleared (see Strip). Fresh when EITHER half registered, because the panel
+        // docks inside the right half and must follow any new registration on the seam. The screen is the seam's
+        // left-hand one, SeamRight the screen the panel docks on.
+        QueueDockNotice("seam", AsWindowRect(seam.Left), Maybe.From(AsWindowRect(seam.Right)),
             appBar.RegisteredOnLastDock || seamBar.RegisteredOnLastDock, hwnd, (left.L + right.R) / 2);
         return Result.Success();
     }
