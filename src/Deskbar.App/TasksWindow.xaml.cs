@@ -846,15 +846,14 @@ public partial class TasksWindow : Window
         grid.Children.Add(part);
     }
 
-    // A note's tick box, or Undo on a line just closed. A Claude line has no badge here (Ruling 42, Petre: "don't say
+    // The tick box of a note or a Claude task (Ruling 40, and the Done follow-up: all lines look alike), or Undo on a line
+    // just closed. A Claude line has no badge here (Ruling 42, Petre: "don't say
     // claude"): the orange edge at the line's start is its mark.
     UIElement LeftOf(TaskRowView row) =>
         row.Closing
             // A sign, not a word (Petre: "undo sign instead of text"), the bar's own (FloatingBar.UndoSign).
             ? Small(FloatingBar.UndoSign(12, Ink), "Undo", () => Actions?.Undo(row.Id), "Undo", DoubleClickIgnored)
-            : row.Claudes
-                ? new TextBlock()
-                : row.Status == TaskStatus.Closed
+            : row.Status == TaskStatus.Closed
                     ? new TextBlock()
                     : Small(new Border
                     {
@@ -863,7 +862,7 @@ public partial class TasksWindow : Window
                         BorderBrush = TickEdge,
                         BorderThickness = new Thickness(1),
                         CornerRadius = new CornerRadius(3),
-                    }, "Close", () => Actions?.Close(row.Id), "Tick off: closes the note");
+                    }, "Close", () => Actions?.Close(row.Id), row.Claudes ? "Tick off: closes Claude's task" : "Tick off: closes the note");
 
     // The title over its detail; on a line being renamed, the box that renames it.
     UIElement TextOf(TaskRowView row)
@@ -948,11 +947,10 @@ public partial class TasksWindow : Window
         return Small(content, "Comments", () => Actions?.ToggleThread(row.Id), "Comments");
     }
 
-    // A done Claude task's close button (it waits for Petre to look and close it), or Reopen on a closed task.
+    // Reopen on a closed task. A done Claude task has no close button any more (Ruling 52): its tick box closes it, as on a note.
     UIElement? ActionOf(TaskRowView row) =>
         row.Closing ? null
         : row.Status == TaskStatus.Closed ? Small("Reopen", "Reopen", () => Actions?.Reopen(row.Id), "Bring the task back")
-        : row.Status == TaskStatus.Done && row.Claudes ? Small("✕", "Close", () => Actions?.Close(row.Id), "Done: close this task")
         : null;
 
     // --- the thread --------------------------------------------------------------------------------------------------
