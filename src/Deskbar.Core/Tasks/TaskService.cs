@@ -82,6 +82,11 @@ public sealed class TaskService(ITaskStore store, Func<DateTimeOffset> now, Func
 
     public Result Rename(Guid id, string title) => Apply(Board.Rename(id, title, now()));
 
+    // Ruling 58: Petre's description and his own comments. The same text saves and pulses nothing.
+    public Result Describe(Guid id, string markdown) => ApplyIfChanged(Board.Describe(id, markdown, now()));
+
+    public Result EditComment(Guid commentId, string markdown) => ApplyIfChanged(Board.EditComment(commentId, markdown, now()));
+
     public Result MoveTo(Guid id, Maybe<Guid> workspace) => Apply(Board.MoveTo(id, workspace, now()));
 
     public Result Delete(Guid id) => Apply(Board.Delete(id));

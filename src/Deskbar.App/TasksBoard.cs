@@ -133,6 +133,8 @@ public sealed class TasksBoard : IDisposable
             Reopen: id => Reopen(id),
             SetStatus: (id, status) => SetStatus(id, status),
             Rename: (id, title) => Rename(id, title).IsSuccess,
+            Edit: (id, title, description) => Edit(id, title, description).IsSuccess,
+            EditComment: (comment, markdown) => EditComment(comment, markdown).IsSuccess,
             MoveTo: (id, workspace) => MoveTo(id, workspace),
             Delete: id => Delete(id),
             Comment: (id, markdown) => Comment(id, markdown).IsSuccess,
@@ -405,6 +407,19 @@ public sealed class TasksBoard : IDisposable
 
     public Result Rename(Guid id, string title) => Report(tasks.Rename(id, title));
 
+    /// <summary>
+    /// Edit in the window (Ruling 58): the title and the description together. The title first: a refused one (empty) stops
+    /// there and the description is left alone, so a failed save changes nothing. A title that is the same is not renamed
+    /// again, and a description that is the same saves nothing (TaskService.Describe).
+    /// </summary>
+    public Result Edit(Guid id, string title, string description) =>
+        Report(tasks.Board.Tasks.TryFirst(t => t.Id == id).Match(
+            task => (title.Trim() == task.Title ? Result.Success() : tasks.Rename(id, title)).Bind(() => tasks.Describe(id, description)),
+            () => Result.Failure($"No task with id {id}")));
+
+    /// <summary>One of HIS comments rewritten (Ruling 58); a session's is refused by the board.</summary>
+    public Result EditComment(Guid comment, string markdown) => Report(tasks.EditComment(comment, markdown));
+
     public Result MoveTo(Guid id, Maybe<Guid> workspace) => Report(tasks.MoveTo(id, workspace));
 
     /// <summary>
@@ -577,6 +592,7 @@ public sealed class TasksBoard : IDisposable
     {
         Created = task.Created,
         Assignee = task.Assignee,
+        Description = task.Description,
         Important = task.Important,
         Urgent = task.Urgent,
         // Null for no goal and for a link to a goal that no longer exists, which reads as no goal everywhere.
@@ -671,6 +687,9 @@ internal sealed record TaskRowView(Guid Id, string Title, string Detail, TaskSta
     /// <summary>Who the task is on (Ruling 57): the assignee column and the "Assign to" menu's tick.</summary>
     public Assignee Assignee { get; init; } = Assignee.Me;
 
+    /// <summary>Petre's own markdown under the title (Ruling 58), "" for none.</summary>
+    public string Description { get; init; } = "";
+
     /// <summary>The task's two flags (Task 12), drawn as the line's toggles.</summary>
     public bool Important { get; init; }
 
@@ -747,6 +766,8 @@ internal sealed record TasksWindowActions(
     Action<Guid> Reopen,
     Action<Guid, TaskStatus> SetStatus,
     Func<Guid, string, bool> Rename,
+    Func<Guid, string, string, bool> Edit,
+    Func<Guid, string, bool> EditComment,
     Action<Guid, Maybe<Guid>> MoveTo,
     Action<Guid> Delete,
     Func<Guid, string, bool> Comment,

@@ -256,6 +256,50 @@ public sealed record TaskBoard(IReadOnlyList<TaskItem> Tasks)
             UpdatedAt = now,
         }));
 
+    // --- Petre's own words on a task (Ruling 58) ---------------------------------------------------------
+
+    /// <summary>
+    /// Petre's description of a task, markdown (empty or blank clears it). Only the description and UpdatedAt change, so
+    /// the line keeps its place; the text it already has returns this same board. Never touches a Claude task's status
+    /// line, which stays the session's. A closed task takes it too, as comments do.
+    /// </summary>
+    public Result<TaskBoard> Describe(Guid id, string markdown, DateTimeOffset now) =>
+        Lookup(id).Map(task => (markdown ?? "").Trim() is var text && task.Description == text
+            ? this
+            : Replaced(task with { Description = text, UpdatedAt = now }));
+
+    /// <summary>
+    /// A comment by full id or by a unique prefix of at least four characters, as <see cref="Find"/> does for tasks:
+    /// `task comment-edit` names a comment this way.
+    /// </summary>
+    public Result<TaskComment> FindComment(string idOrPrefix) =>
+        (idOrPrefix ?? "").Trim() is var text && text.Length >= MinPrefix
+            ? Tasks.SelectMany(t => t.Comments).Where(c => c.Id.ToString().StartsWith(text, StringComparison.OrdinalIgnoreCase)).ToArray() switch
+            {
+                [var only] => only,
+                [] => Result.Failure<TaskComment>($"No comment with id {text}"),
+                _ => Result.Failure<TaskComment>($"'{text}' matches several comments")
+            }
+            : Result.Failure<TaskComment>($"No comment with id {text}");
+
+    /// <summary>
+    /// Petre rewrites one of HIS comments. A comment a session wrote is refused ("i should only be able to edit my own
+    /// comments, not claude's"); so is an empty one. The thread keeps its order and the comment its time, so a late edit
+    /// does not reorder anything; the same text returns this same board. A closed task's comments can be edited, since
+    /// it stays readable and a note on why it closed belongs to it.
+    /// </summary>
+    public Result<TaskBoard> EditComment(Guid commentId, string markdown, DateTimeOffset now) =>
+        Tasks.FirstOrDefault(t => t.Comments.Any(c => c.Id == commentId)) is not { } task ? Result.Failure<TaskBoard>($"No comment with id {commentId}")
+        : task.Comments.First(c => c.Id == commentId) is { SessionId.HasValue: true } ? Result.Failure<TaskBoard>("Only your own comments can be edited")
+        : CleanText(markdown, "A comment needs text").Map(_ => markdown.TrimEnd().TrimStart('\r', '\n') is var clean
+            && task.Comments.First(c => c.Id == commentId).Markdown == clean
+                ? this
+                : Replaced(task with
+                {
+                    Comments = task.Comments.Select(c => c.Id == commentId ? c with { Markdown = clean } : c).ToArray(),
+                    UpdatedAt = now,
+                }));
+
     // --- the goal a task counts toward (goals spec, "Tasks contribute") -----------------------------------
 
     /// <summary>

@@ -104,6 +104,10 @@ public partial class TasksWindow : Window
     ContextMenu? openMenu;
     Guid? renaming;
     TextBox? renameBox;
+    // Ruling 58: the editor's second box (the description, under the title's), and the comment being rewritten in place.
+    TextBox? descriptionBox;
+    Guid? editingComment;
+    TextBox? commentEditor;
 
     // Per line, rebuilt with the rows: the "⋯" button a menu hangs from, the thread's comment box and its authors.
     // The drafts outlive a redraw, so a comment half typed survives a change arriving from a session.
@@ -255,6 +259,9 @@ public partial class TasksWindow : Window
         HideAdd();
         renaming = null;
         renameBox = null;
+        descriptionBox = null;
+        editingComment = null;
+        commentEditor = null;
         IsOpen = true;
         // Shown WITHOUT activation (fix round 1, Critical 1): the controller brings it to Petre afterwards, moving it to
         // the desktop in front before anything activates it (TasksBoard.Open, Arrive).
@@ -326,6 +333,9 @@ public partial class TasksWindow : Window
         if (openMenu is { IsOpen: true } menu) menu.IsOpen = false;
         renaming = null;
         renameBox = null;
+        descriptionBox = null;
+        editingComment = null;
+        commentEditor = null;
         NoteNormal();
         Actions?.Remember(CurrentPlace());
         Hide();
@@ -400,6 +410,7 @@ public partial class TasksWindow : Window
     bool MustWait =>
         openMenu?.IsOpen == true
         || renaming is not null
+        || editingComment is not null
         // A line armed, dragged, or its drop still queued (TasksWindow.Drag.cs): no redraw under it (#48).
         || DragInFlight
         || (Mouse.LeftButton == MouseButtonState.Pressed && IsMouseOver);
@@ -436,6 +447,8 @@ public partial class TasksWindow : Window
         {
             drawing = false;
         }
+        // An edit of a comment that is no longer drawn (its thread closed, the task gone) ends, or a redraw would wait for ever.
+        if (editingComment is not null && commentEditor is null) editingComment = null;
         // A comment box that had the keyboard gets it back in its new form, its text (from `drafts`) and its caret where
         // they were, so typing carries on through a redraw and a second comment can follow the first without a click.
         // Likewise the rename box.
@@ -445,6 +458,7 @@ public partial class TasksWindow : Window
             again.CaretIndex = Math.Min(caretWas, again.Text.Length);
         }
         renameBox?.Focus();
+        commentEditor?.Focus();
         // A view that arrived during the draw is drawn now.
         Flush();
     }
@@ -455,6 +469,7 @@ public partial class TasksWindow : Window
 
     void DrawRows(TasksView view)
     {
+        commentEditor = null; // set again by CommentOf when its comment is drawn
         keyboardWasIn = commentBoxes.FirstOrDefault(pair => pair.Value.IsKeyboardFocusWithin).Key;
         caretWas = keyboardWasIn != Guid.Empty ? commentBoxes[keyboardWasIn].CaretIndex : 0;
         // When the lines on show change (which tasks, their order, which threads are open, which are closing), a line
@@ -519,13 +534,13 @@ public partial class TasksWindow : Window
             $"{view.AssigneeFilterLabel}",
             string.Join('|', view.Places.Select(p => $"{p.IsGroup}{p.Workspace}{p.Name}{(p.Colour as SolidColorBrush)?.Color}")),
             view.EmptyText,
-            $"{renaming}",
+            $"{renaming}{editingComment}",
             $"{view.Matrix}",
             string.Join('\u0002', view.Cells.Select(c => $"{c.Header}:" + string.Join('\u0003', c.Rows.Select(r =>
-                $"{r.Id}|{r.Title}|{r.Detail}|{r.Status}|{r.Claudes}|{r.Assignee.Id}|{PlaceSignature(r.Place)}|{r.CommentCount}|{r.Expanded}|{r.Closing}|{r.Important}|{r.Urgent}|" +
+                $"{r.Id}|{r.Title}|{r.Detail}|{r.Description}|{r.Status}|{r.Claudes}|{r.Assignee.Id}|{PlaceSignature(r.Place)}|{r.CommentCount}|{r.Expanded}|{r.Closing}|{r.Important}|{r.Urgent}|" +
                 string.Join('\u0004', r.Comments.Select(c => $"{c.Id}{c.Author}{c.When}{c.Markdown}")))))),
             string.Join('\u0002', view.Groups.Select(g => $"{g.Header}:" + string.Join('\u0003', g.Rows.Select(r =>
-                $"{r.Id}|{r.Title}|{r.Detail}|{r.Status}|{r.Claudes}|{r.Assignee.Id}|{r.Sessions}|{r.SessionCount}|{r.LiveCount}|{PlaceSignature(r.Place)}|{r.CommentCount}|" +
+                $"{r.Id}|{r.Title}|{r.Detail}|{r.Description}|{r.Status}|{r.Claudes}|{r.Assignee.Id}|{r.Sessions}|{r.SessionCount}|{r.LiveCount}|{PlaceSignature(r.Place)}|{r.CommentCount}|" +
                 $"{r.Expanded}|{r.Closing}|{r.Important}|{r.Urgent}|" + string.Join('\u0004', r.Comments.Select(c => $"{c.Id}{c.Author}{c.When}{c.Markdown}")))))));
 
     static string PlaceSignature(TaskPlaceChoice place) => $"{place.Workspace}{place.Name}{(place.Colour as SolidColorBrush)?.Color}";
@@ -890,13 +905,16 @@ public partial class TasksWindow : Window
         if (renaming == row.Id)
         {
             renameBox = RenameBox(row);
+            descriptionBox = DescriptionBox(row);
             panel.Children.Add(renameBox);
+            panel.Children.Add(descriptionBox);
         }
         else
+        {
             // THE WHOLE TITLE (Ruling 38; Petre, of the Matrix's "…": "let tasks be multiline and editable"). It wraps in
             // its column instead of ending in an ellipsis, and keeps any line break it holds, so a long title makes its
-            // line taller and every other column keeps its place. Double-click it, or press F2 on the selected line, to
-            // edit it in place (RenameBox).
+            // line taller and every other column keeps its place. Select the line and press F2, or choose Edit in its
+            // menu, to edit it in place (RenameBox).
             panel.Children.Add(new TextBlock
             {
                 Tag = TitleTag,
@@ -907,6 +925,10 @@ public partial class TasksWindow : Window
                 TextWrapping = TextWrapping.Wrap,
                 TextDecorations = row.Closing ? TextDecorations.Strikethrough : null,
             });
+            // THE DESCRIPTION (Ruling 58): Petre's markdown under the title, a block of its own. Not hit-testable and not
+            // focusable, so a click on it is a click on the line (a RichTextBox would swallow it).
+            if (row.Description.Length > 0) panel.Children.Add(DescriptionBlock(row));
+        }
         if (row.Detail.Length > 0)
             panel.Children.Add(new TextBlock
             {
@@ -918,6 +940,33 @@ public partial class TasksWindow : Window
             });
         return panel;
     }
+
+    // THE DESCRIPTION UNDER A TITLE (Ruling 58): Petre's markdown, rendered as a comment's is (MarkdownBlocks), dim, a
+    // block of its own under the title. A read-only box that takes no hits and no focus, so a click on it falls through to
+    // the line (selecting it) and a link in it is not clickable here; the full text is a click away in Edit.
+    RichTextBox DescriptionBlock(TaskRowView row)
+    {
+        var document = MarkdownBlocks.Render(row.Description);
+        document.FontSize = 11;
+        document.Foreground = DimInk;
+        return new RichTextBox
+        {
+            Tag = DescriptionTag,
+            Document = document,
+            IsReadOnly = true,
+            IsHitTestVisible = false,
+            Focusable = false,
+            Template = (ControlTemplate)FindResource("BareRichTextBox"),
+            Background = Brushes.Transparent,
+            BorderThickness = new Thickness(0),
+            Foreground = DimInk,
+            Padding = new Thickness(0),
+            Margin = new Thickness(0, 1, 0, 0),
+        };
+    }
+
+    const string DescriptionTag = "task-description";
+
 
     // The assignee column (Ruling 57): "Me" or "Claude" (a colleague by name, later), dim like the age. Shown on every line,
     // closed ones too: it says who had the task. Changed only in the "Assign to" menu.
@@ -1013,6 +1062,16 @@ public partial class TasksWindow : Window
         var header = new StackPanel { Orientation = Orientation.Horizontal };
         header.Children.Add(new TextBlock { Tag = "comment-author", Text = comment.Author, FontWeight = FontWeights.Bold, FontSize = 11, Foreground = comment.ByClaude ? ClaudeInk : Ink });
         header.Children.Add(new TextBlock { Text = $" · {comment.When}", FontSize = 11, Foreground = HeaderInk });
+        // RULING 58 ("i should only be able to edit my own comments, not claude's"): his own comments, and only those, have
+        // an Edit button beside the time; the board refuses a session's comment too (TaskBoard.EditComment).
+        var editing = editingComment == comment.Id && !comment.ByClaude;
+        if (!comment.ByClaude && !editing)
+        {
+            var edit = Small("Edit", "Edit comment", () => BeginEditComment(comment.Id), "Edit your comment");
+            edit.Margin = new Thickness(8, 0, 0, 0);
+            header.Children.Add(edit);
+        }
+        if (editing) return new StackPanel { Margin = new Thickness(0, 0, 0, 8), Children = { header, CommentEditorBox(comment) } };
         var document = MarkdownBlocks.Render(comment.Markdown);
         document.FontSize = 11.5;
         document.Foreground = Ink;
@@ -1033,6 +1092,84 @@ public partial class TasksWindow : Window
         };
         return new StackPanel { Margin = new Thickness(0, 0, 0, 8), Children = { header, body } };
     }
+
+    // --- editing one of his comments in place (Ruling 58) -------------------------------------------------------------
+
+    // The box a comment is rewritten in: its markdown, wrapping, Enter saves (EditComment, TaskBoard.EditComment) and
+    // Shift+Enter starts a new line; Esc, or a click away, keeps the comment as it was. A redraw waits while it is open
+    // (MustWait), and it keeps the keyboard through one (Draw).
+    TextBox CommentEditorBox(TaskCommentView comment)
+    {
+        var box = new TextBox
+        {
+            Text = comment.Markdown,
+            Template = (ControlTemplate)FindResource("BareTextBox"),
+            Background = Frozen(0xFF, 0x15, 0x16, 0x1A),
+            Foreground = Ink,
+            CaretBrush = Brushes.White,
+            BorderBrush = PickedEdge,
+            BorderThickness = new Thickness(1),
+            FontSize = 12,
+            Padding = new Thickness(3, 1, 3, 1),
+            Margin = new Thickness(0, 2, 0, 0),
+            TextWrapping = TextWrapping.Wrap,
+            AcceptsReturn = true,
+            MaxHeight = 160,
+            ToolTip = "Markdown works. Enter saves, Shift+Enter starts a new line, Esc keeps the comment as it was.",
+        };
+        AutomationProperties.SetName(box, "Edit your comment");
+        commentEditor = box;
+        box.Loaded += (_, _) =>
+        {
+            box.SelectAll();
+            box.Focus();
+        };
+        box.PreviewKeyDown += (_, e) =>
+        {
+            if (!EditorSaves(e.Key, Keyboard.Modifiers)) return;
+            e.Handled = true;
+            SaveCommentEditor();
+        };
+        box.LostKeyboardFocus += (_, _) =>
+        {
+            if (commentEditor == box && !drawing) CancelCommentEdit();
+        };
+        return box;
+    }
+
+    /// <summary>
+    /// Opens one of his comments for editing in its open thread. A session's comment, or one not on show, opens nothing
+    /// (the board would refuse it anyway). Internal for the tests; the "Edit" beside a comment's time calls it.
+    /// </summary>
+    internal void BeginEditComment(Guid commentId)
+    {
+        var shown = (latest?.Groups.SelectMany(g => g.Rows) ?? []).Concat(latest?.Cells.SelectMany(c => c.Rows) ?? [])
+            .SelectMany(r => r.Comments).FirstOrDefault(c => c.Id == commentId);
+        if (shown is null || shown.ByClaude) return;
+        editingComment = commentId;
+        if (latest is not null) Draw(latest);
+    }
+
+    /// <summary>For the tests: the open comment editor's box, if any.</summary>
+    internal TextBox? CommentEditor => commentEditor;
+
+    /// <summary>For the tests: Enter in the open comment editor, the save its key press makes.</summary>
+    internal void SaveCommentEditor()
+    {
+        if (commentEditor is null || editingComment is not { } id) return;
+        if (Actions?.EditComment(id, commentEditor.Text) != false) EndCommentEdit();
+    }
+
+    /// <summary>Esc or a click away: the comment stays as it was.</summary>
+    internal void CancelCommentEdit() => EndCommentEdit();
+
+    void EndCommentEdit()
+    {
+        editingComment = null;
+        commentEditor = null;
+        if (latest is not null) Present(latest);
+    }
+
 
     // Petre's next comment: Enter adds it, Shift+Enter starts a new line (markdown lists need them). What is typed is
     // kept in `drafts`, so a redraw while he types (from a session's change) loses nothing.
@@ -1162,16 +1299,39 @@ public partial class TasksWindow : Window
     // The title's TextBlock, so a double-click on it can be told from one elsewhere on the line.
     const string TitleTag = "task-title";
 
-    // THE IN-PLACE EDITOR (Ruling 38), the rename this window always had, grown to the whole title: it wraps like the
-    // title and takes line breaks. Enter saves through Rename (TaskService.Rename, `task rename`'s twin), Shift+Enter
-    // adds a line break, Esc (Escape) or a click away cancels. While it is open a redraw waits (MustWait: `renaming`),
-    // so a change arriving from a session never takes the text from under the keyboard; it is drawn when the editor
-    // closes.
+    // THE IN-PLACE EDITOR (Ruling 38, grown by Ruling 58): Edit opens the title AND the description together, two boxes one
+    // above the other in the line. Each wraps and takes line breaks (the description is markdown). Enter in either saves
+    // both through Edit (TaskService.Rename and TaskService.Describe, `task rename` and `task describe`'s twins),
+    // Shift+Enter adds a line break, Esc or a click away from both cancels; Tab moves between them, and the keyboard
+    // moving from one box to the other is not "a click away" (EditorKeepsFocus). While it is open a redraw waits
+    // (MustWait: `renaming`), so a change arriving from a session never takes the text from under the keyboard; it is drawn
+    // when the editor closes. A Claude task's status line is not here: it is the session's.
     TextBox RenameBox(TaskRowView row)
+    {
+        var box = EditorBox(row, row.Title, "Rename task");
+        box.Loaded += (_, _) =>
+        {
+            box.SelectAll();
+            box.Focus();
+        };
+        return box;
+    }
+
+    // The description's box: the same look, taller, empty for a task with none.
+    TextBox DescriptionBox(TaskRowView row)
+    {
+        var box = EditorBox(row, row.Description, "Task description");
+        box.MinHeight = 38;
+        box.Margin = new Thickness(0, 3, 0, 0);
+        box.ToolTip = "A description, in markdown. Enter saves, Shift+Enter starts a new line.";
+        return box;
+    }
+
+    TextBox EditorBox(TaskRowView row, string text, string name)
     {
         var box = new TextBox
         {
-            Text = row.Title,
+            Text = text,
             Template = (ControlTemplate)FindResource("BareTextBox"),
             Background = Frozen(0xFF, 0x15, 0x16, 0x1A),
             Foreground = Ink,
@@ -1183,26 +1343,25 @@ public partial class TasksWindow : Window
             TextWrapping = TextWrapping.Wrap,
             AcceptsReturn = true,
         };
-        AutomationProperties.SetName(box, "Rename task");
-        box.Loaded += (_, _) =>
-        {
-            box.SelectAll();
-            box.Focus();
-        };
+        AutomationProperties.SetName(box, name);
         box.PreviewKeyDown += (_, e) =>
         {
             // Shift+Enter is left to the box, which takes it as a line break (AcceptsReturn).
             if (!EditorSaves(e.Key, Keyboard.Modifiers)) return;
             e.Handled = true;
-            SaveRename(row.Id, box.Text);
+            SaveEditor();
         };
-        // A click elsewhere abandons the rename; only Enter keeps it.
-        box.LostKeyboardFocus += (_, _) =>
+        // A click elsewhere abandons the edit; only Enter keeps it. The keyboard going to the editor's other box does not.
+        box.LostKeyboardFocus += (_, e) =>
         {
-            if (renameBox == box && !drawing) EndRename();
+            if (renameBox is not null && !drawing && !EditorKeepsFocus(e.NewFocus)) EndRename();
         };
         return box;
     }
+
+    // Whether the keyboard is moving to one of the editor's own boxes (title and description).
+    bool EditorKeepsFocus(IInputElement? next) =>
+        next is not null && (ReferenceEquals(next, renameBox) || ReferenceEquals(next, descriptionBox));
 
     internal void BeginRename(Guid id)
     {
@@ -1210,11 +1369,11 @@ public partial class TasksWindow : Window
         if (latest is not null) Draw(latest);
     }
 
-    // Enter in the editor: saved through Rename, and the editor closes once the rename is taken (a refused title, an
-    // empty one, keeps it open with the problem line saying why).
-    void SaveRename(Guid id, string title)
+    // Enter in the editor: saved through Edit, and the editor closes once it is taken (a refused title, an empty one,
+    // keeps it open with the problem line saying why; the description is not touched then).
+    void SaveEdit(Guid id, string title, string description)
     {
-        if (Actions?.Rename(id, title) != false) EndRename();
+        if (Actions?.Edit(id, title, description) != false) EndRename();
     }
 
     // F2: the selected line's title, when the line is on show, open and nothing is being edited already.
@@ -1227,8 +1386,11 @@ public partial class TasksWindow : Window
         return true;
     }
 
-    /// <summary>For the tests: the open editor, if any.</summary>
+    /// <summary>For the tests: the open editor, if any (the title's box).</summary>
     internal TextBox? Editor => renameBox;
+
+    /// <summary>For the tests: the open editor's description box, if any.</summary>
+    internal TextBox? DescriptionEditor => descriptionBox;
 
     /// <summary>
     /// Whether a key in the editor saves: Enter without Shift. Shift+Enter is left to the box, which takes it as a line
@@ -1240,13 +1402,14 @@ public partial class TasksWindow : Window
     /// <summary>For the tests: Enter in the open editor, the save its key press makes.</summary>
     internal void SaveEditor()
     {
-        if (renameBox is not null && renaming is { } id) SaveRename(id, renameBox.Text);
+        if (renameBox is not null && renaming is { } id) SaveEdit(id, renameBox.Text, descriptionBox?.Text ?? "");
     }
 
     void EndRename()
     {
         renaming = null;
         renameBox = null;
+        descriptionBox = null;
         if (latest is not null) Present(latest);
     }
 
@@ -1515,6 +1678,7 @@ public partial class TasksWindow : Window
     bool Escape()
     {
         if (renaming is not null) EndRename();
+        else if (editingComment is not null) EndCommentEdit();
         else if (AddBoxShown) HideAdd();
         else return false;
         return true;

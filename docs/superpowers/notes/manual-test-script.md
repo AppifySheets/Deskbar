@@ -357,6 +357,15 @@ Tasks 7 to 9). Needs Claude Code installed and both Claude boxes in Manage ticke
     the bar; `task answered` makes it **Claude** and takes it off; `task done` makes it **Me** again. `$ts task assign
     <id> claude` does the same as the menu, and `$ts task list` shows `assignee`. Quit and start Deskbar: every
     assignment is as it was; an old tasks.json with no assignees gives a Claude task in progress to Claude and the rest to you.
+77. Description and comments (Ruling 58). Select a note's line and press F2 (or choose Edit in its menu, or right-click
+    the line): two boxes open, the title and a description under it. Type markdown such as `the **landlord** wants it`
+    in the description, press Tab and back, and press Enter: the line shows the title with the description rendered
+    under it, and the bar's line shows the description's first line after the title. Edit again, empty the description:
+    it goes. Press Esc in the editor: nothing changes. Do the same on a Claude task: its status line stays Claude's
+    (change it with `task status-line` and your description is untouched). Open a thread with one of your comments and
+    one of Claude's: only yours has Edit beside its time. Edit it, Enter saves and Esc keeps it. From a script,
+    `$ts task describe <id> -` with the text on stdin sets the description, and `$ts task comment-edit <comment-id> -`
+    rewrites your comment (the ids are in `task list`'s `thread`) and is refused for a Claude comment.
 
 ## Goals
 
