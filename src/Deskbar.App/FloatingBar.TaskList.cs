@@ -994,7 +994,9 @@ public partial class FloatingBar
             BorderBrush = line.Claudes ? TaskOrange : Brushes.Transparent,
             Background = line.Claudes ? TaskClaudeTint : Brushes.Transparent,
             CornerRadius = new CornerRadius(4),
-            Padding = new Thickness(5, 3, 5, 3),
+            // 1 DIP above and below the text (was 3; Petre 2026-11-23: "no need for vertical spacing this big"). Enough
+            // for the Claude tint and the selection fill to clear the text, and no more.
+            Padding = new Thickness(5, 1, 5, 1),
             Child = face,
         };
         // The selection's frame (see Selection): always 2 DIP on the left, clear unless this line is selected.
@@ -1014,7 +1016,8 @@ public partial class FloatingBar
             Content = frame,
             Padding = new Thickness(0),
             // A group's first line has a little space above it (see the header: the groups are not named on the bar).
-            Margin = new Thickness(0, line.StartsGroup ? GroupGap : 1, 0, 1),
+            // Otherwise one DIP between lines, below each (was 1 above and 1 below), so two tinted lines still part.
+            Margin = new Thickness(0, line.StartsGroup ? GroupGap : 0, 0, 1),
             Background = Brushes.Transparent,
             BorderThickness = new Thickness(0),
             Template = TaskLineTemplate,
