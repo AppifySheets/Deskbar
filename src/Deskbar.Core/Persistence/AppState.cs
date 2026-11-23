@@ -1,4 +1,4 @@
-using Deskbar.Core.Domain;
+﻿using Deskbar.Core.Domain;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Deskbar.Core.Rules;

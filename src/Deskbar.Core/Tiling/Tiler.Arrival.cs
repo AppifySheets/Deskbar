@@ -250,7 +250,14 @@ public sealed partial class Tiler
                 : null;
         if (aimed || blocked is null)
             return Split(workspace, screens, board, window, target, lastUsed);
-        return FreeElsewhere(workspace, screens, board, target, guarded).Match(
+        // A second look elsewhere that counts protected tiles too, when this screen has none of its own to give (it is
+        // all locked, or shows only a maximized window): the spec splits a protected tile before a locked one, and never
+        // lands a window under a maximized one (final review, I1). A screen WITH a protected tile keeps the window, and
+        // TileArrival splits the oldest protected tile there.
+        var protectedHere = here.Any(w => guarded.Contains(w) && !locked.Contains(w) && !surface.IsMaximized(w));
+        return FreeElsewhere(workspace, screens, board, target, guarded)
+            .Or(() => protectedHere ? Maybe<int>.None : FreeElsewhere(workspace, screens, board, target, new HashSet<WindowHandle>()))
+            .Match(
             other =>
             {
                 trace?.Invoke($"tile: {workspace.Name}: {window.Value:X} arrived, screen {target} {blocked}, it goes to screen {other}");
