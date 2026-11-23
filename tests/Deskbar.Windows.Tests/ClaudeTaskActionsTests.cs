@@ -39,6 +39,8 @@ public class ClaudeTaskActionsTests
         public List<(string Title, string Folder)> Starts { get; } = [];
         public List<string> Asked { get; } = [];
         public List<string> Told { get; } = [];
+        public List<string> Forgotten { get; } = [];
+        public Func<ProgramLaunch, Result<int?>> LaunchAnswer { get; set; } = _ => Result.Success<int?>(4321);
 
         public Func<TaskSession, Result<ClaudeAgent>> ResumeAnswer { get; set; } = s => Agent(s.Id, background: true);
         public Func<string, Result<string>> StartAnswer { get; set; } = _ => Result.Success(SessionId);
@@ -65,7 +67,7 @@ public class ClaudeTaskActionsTests
                 Launch: launch =>
                 {
                     Launches.Add(launch);
-                    return Result.Success<int?>(4321);
+                    return LaunchAnswer(launch);
                 },
                 EditorWindow: _ => Editor,
                 BringForward: window =>
@@ -87,6 +89,7 @@ public class ClaudeTaskActionsTests
                     return TrustsTerminal;
                 },
                 Tell = Told.Add,
+                Forget = Forgotten.Add,
             }, Clock);
 
         public Guid Gepha => Harness.Manager.State.Workspaces.Single(w => w.Name == "GEPHA").Id;
@@ -307,6 +310,108 @@ public class ClaudeTaskActionsTests
         Assert.True(rig.Actions.Start(task, Folder).IsFailure);
 
         Assert.Equal([ClaudeTaskActions.FeatureOff], rig.Told);
+        Assert.Empty(rig.Starts);
+    });
+
+    // Final review, item 4: a resumed session goes through the same rule as one found listed. One the list shows as
+    // interactive (someone sits in it) is not attached to: its editor window comes forward instead.
+    [Fact]
+    public void A_resumed_session_that_is_interactive_goes_to_its_editor_not_a_terminal()
+    {
+        using var rig = new Rig { Editor = Maybe.From((nint)0x77), ResumeAnswer = s => Agent(s.Id, background: false) };
+        var task = rig.ClaudeTask();
+        rig.Listed();
+
+        Assert.True(rig.Actions.Go(task).IsSuccess);
+        rig.Settle();
+
+        Assert.Single(rig.Resumes);
+        Assert.Empty(rig.Launches);
+        Assert.Equal([new WindowHandle(0x77)], rig.BroughtForward);
+    }
+
+    // Final review, item 3: a task the keeper gave up on waits for Petre. A double-click that brings its session back
+    // (resumed, or found running) is him acting on it: the task goes back to In progress with no question, and the
+    // session's old resumes are forgotten so the loop guard does not give up again at once.
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void Bringing_back_a_given_up_task_clears_the_give_up(bool alreadyListed)
+    {
+        using var rig = new Rig();
+        var task = rig.ClaudeTask();
+        Assert.True(rig.Tasks.Ask(task.Id, SessionKeeper.LoopGaveUp).IsSuccess);
+        if (alreadyListed) rig.Listed(Agent(SessionId, background: true));
+        else rig.Listed();
+
+        Assert.True(rig.Actions.Go(rig.TaskOf(task.Id)).IsSuccess);
+        rig.Settle();
+
+        var now = rig.TaskOf(task.Id);
+        Assert.Equal(Deskbar.Core.Tasks.TaskStatus.InProgress, now.Status);
+        Assert.True(now.Question.HasNoValue);
+        Assert.Equal([SessionId], rig.Forgotten);
+        Assert.Single(rig.Launches);
+        Assert.Equal(alreadyListed ? 0 : 1, rig.Resumes.Count);
+    }
+
+    // A question a SESSION asked is not a give-up: bringing its window forward answers nothing.
+    [Fact]
+    public void Going_to_a_task_waiting_on_a_sessions_question_leaves_it_waiting()
+    {
+        using var rig = new Rig();
+        var task = rig.ClaudeTask();
+        Assert.True(rig.Tasks.Ask(task.Id, "OK to merge?").IsSuccess);
+        rig.Listed(Agent(SessionId, background: true));
+
+        Assert.True(rig.Actions.Go(rig.TaskOf(task.Id)).IsSuccess);
+
+        Assert.Equal(Deskbar.Core.Tasks.TaskStatus.WaitingOnYou, rig.TaskOf(task.Id).Status);
+        Assert.Empty(rig.Forgotten);
+    }
+
+    // Final review, item 12: `claude` missing makes the start fail after Start answered "under way". The reason goes to
+    // the thread and to Petre at once; so does a terminal that cannot open (`wt` missing).
+    [Fact]
+    public void A_start_that_fails_or_a_window_that_cannot_open_is_told()
+    {
+        using var rig = new Rig();
+        var task = rig.ClaudeTask();
+        rig.Listed();
+        rig.StartAnswer = _ => Result.Failure<string>("Could not run claude: The system cannot find the file specified.");
+
+        Assert.True(rig.Actions.Start(task, Folder).IsSuccess);
+        rig.Settle();
+
+        Assert.Contains(rig.Told, t => t.Contains("Could not run claude"));
+        Assert.Contains(rig.TaskOf(task.Id).Comments, c => c.Markdown.Contains("Could not run claude"));
+        Assert.Empty(rig.Asked);
+
+        rig.Told.Clear();
+        rig.StartAnswer = _ => Result.Success("6785e6b5-0d8f-4a51-9a3e-1c2b3d4e5f60");
+        rig.LaunchAnswer = _ => Result.Failure<int?>("Could not start wt: The system cannot find the file specified.");
+        Assert.True(rig.Actions.Start(task, Folder).IsSuccess);
+        rig.Settle();
+
+        Assert.Contains(rig.Told, t => t.Contains("Could not start wt"));
+        Assert.Contains(rig.TaskOf(task.Id).Comments, c => c.Markdown.Contains("Could not start wt"));
+    }
+
+    // Item 12: a closed task is refused up front, from the menu and from `task start` alike, before any question.
+    [Fact]
+    public void Starting_on_a_closed_task_is_refused_up_front() => StaThread.Run(() =>
+    {
+        using var rig = new Rig { Confirms = true };
+        var task = rig.ClaudeTask();
+        rig.Listed(Agent(SessionId, background: true));
+        Assert.True(rig.Tasks.Close(task.Id).IsSuccess);
+
+        Assert.Null(rig.Actions.Offer(task.Id));
+        var started = rig.Actions.Start(task, Folder);
+
+        Assert.Equal([RemoteControl.ClosedTaskRefusal], rig.Told);
+        Assert.Equal(RemoteControl.ClosedTaskRefusal, started.Error);
+        Assert.Empty(rig.Asked);
         Assert.Empty(rig.Starts);
     });
 

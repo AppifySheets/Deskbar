@@ -134,13 +134,12 @@ public sealed class ClaudeTaskActions : IDisposable
     {
         if (Latest is not { HasValue: true } listed)
         {
-            ToEditor(session);
+            ToEditor(session.Folder, session.Id);
             return;
         }
         if (listed.Value.TryFirst(a => a.SessionId == session.Id) is { HasValue: true } agent)
         {
-            if (agent.Value.Background) Attach(task, agent.Value);
-            else ToEditor(session);
+            Shown(task, agent.Value);
             return;
         }
         if (!seams.TranscriptExists(session))
@@ -152,19 +151,38 @@ public sealed class ClaudeTaskActions : IDisposable
     }
 
     // An interactive session's window, as the bar found it before: the VS Code window showing its folder.
-    void ToEditor(TaskSession session) =>
-        seams.EditorWindow(session.Folder).Tap(hwnd => seams.BringForward(new WindowHandle(hwnd))
-            .TapError(e => trace?.Invoke($"claude actions: editor window of {session.Id} not brought forward: {e}")));
+    void ToEditor(string folder, string sessionId) =>
+        seams.EditorWindow(folder).Tap(hwnd => seams.BringForward(new WindowHandle(hwnd))
+            .TapError(e => trace?.Invoke($"claude actions: editor window of {sessionId} not brought forward: {e}")));
 
-    // Resumed off the UI thread; attached once ClaudeSessions finds it listed. A failure was said in the thread there.
+    // Resumed off the UI thread; shown once ClaudeSessions finds it listed. A failure was said in the thread there.
     void Resume(TaskItem task, TaskSession session) =>
         Observable.FromAsync(() => seams.Resume(task.Id, session))
             .ObserveOn(scheduler)
             .Subscribe(
                 woken => woken
-                    .Tap(agent => Current(task.Id).Tap(t => Attach(t, agent)))
+                    .Tap(agent => Current(task.Id).Tap(t => Shown(t, agent)))
                     .TapError(e => trace?.Invoke($"claude actions: {session.Id} not resumed: {e}")),
                 error => trace?.Invoke($"claude actions: resume of {session.Id} threw: {error.Message}"));
+
+    // A session the list shows, found at once or after a resume: ONE rule for both (final review, item 4), so a resumed
+    // session someone sits in is never handed a terminal. Background: the window attached to it. Interactive: its
+    // editor window.
+    //
+    // A task the keeper had given up on is running again now (final review, item 3), so the give-up goes: back to In
+    // progress with no question, and the session's old resumes forgotten (seams.Forget, ClaudeSessions.Forget), or the
+    // loop guard would still count them and give up again on the next poll. A double-click on such a task is Petre acting
+    // on it, which is what the give-up was waiting for.
+    void Shown(TaskItem task, ClaudeAgent agent)
+    {
+        var current = Current(task.Id).GetValueOrDefault(task);
+        if (SessionKeeper.GivenUp(current))
+            tasks.SetStatus(current.Id, Deskbar.Core.Tasks.TaskStatus.InProgress)
+                .Tap(() => seams.Forget(agent.SessionId))
+                .TapError(e => trace?.Invoke($"claude actions: give-up on {current.Id} not cleared: {e}"));
+        if (agent.Background) Attach(current, agent);
+        else ToEditor(current.Sessions.TryFirst(s => s.Id == agent.SessionId).Map(s => s.Folder).GetValueOrDefault(agent.Folder), agent.SessionId);
+    }
 
     // The window on a background session: the open one brought forward, else a new one (see the header).
     void Attach(TaskItem task, ClaudeAgent agent)
@@ -179,9 +197,11 @@ public sealed class ClaudeTaskActions : IDisposable
 
         // A background session's short id is the first eight characters of its id (measured, also after a resume).
         var shortId = agent.ShortId.GetValueOrDefault(agent.SessionId[..Math.Min(8, agent.SessionId.Length)]);
+        // A launch that fails (wt missing from the PATH, say) is said in the thread AND to Petre at once (final review,
+        // item 12): he clicked and no window came, and the thread is not where he is looking.
         Launch(task, ClaudeStart.AttachWindow(shortId, agent.Folder, title))
             .Tap(() => attaching = attaching.SetItem(agent.SessionId, scheduler.Now))
-            .TapError(e => Say(task.Id, $"Deskbar could not open a window on session {shortId}:\n\n{e}"));
+            .TapError(e => SayAndTell(task.Id, $"Deskbar could not open a window on session {shortId}:\n\n{e}"));
     }
 
     // A Windows Terminal window with this title, as it reads now or read before a rename rule shortened it.
@@ -223,6 +243,12 @@ public sealed class ClaudeTaskActions : IDisposable
             seams.Tell(FeatureOff);
             return null;
         }
+        // Final review, item 12: refused up front, before any question or pick list (see Start).
+        if (!task.IsOpen)
+        {
+            seams.Tell(RemoteControl.ClosedTaskRefusal);
+            return null;
+        }
         if (HasRunningSession(task) && !seams.Confirm(AnotherSessionQuestion)) return null;
 
         var folders = Folders(task);
@@ -256,6 +282,9 @@ public sealed class ClaudeTaskActions : IDisposable
     public Result Start(TaskItem task, string folder)
     {
         if (!manager.State.ClaudeTasksInEffect) return Result.Failure(FeatureOff);
+        // A closed task takes no session (TaskBoard refuses the join), so `claude --bg` would run for nothing (final
+        // review, item 12). Judged on the task as the board has it now, not as the caller last saw it.
+        if (!Current(task.Id).GetValueOrDefault(task).IsOpen) return Result.Failure(RemoteControl.ClosedTaskRefusal);
         Observable.FromAsync(() => seams.Start(task, folder))
             .ObserveOn(scheduler)
             .Subscribe(
@@ -268,14 +297,20 @@ public sealed class ClaudeTaskActions : IDisposable
     }
 
     // Claude's words in the thread; an untrusted folder (measured: "Workspace not trusted. Run `claude` in <folder> once
-    // and accept the trust prompt, then retry.") also offers the terminal in which Petre can trust it.
+    // and accept the trust prompt, then retry.") also offers the terminal in which Petre can trust it. Any other failure
+    // (`claude` missing from the PATH, say) is also told to him at once (final review, item 12): Start answered
+    // "under way" a moment ago, and a failure that only reaches the thread looks like nothing happened.
     void StartFailed(Guid taskId, string folder, string error)
     {
         Say(taskId, $"Deskbar could not start a Claude session in {folder}:\n\n{error}");
-        if (!error.Contains("not trusted", StringComparison.OrdinalIgnoreCase)) return;
+        if (!error.Contains("not trusted", StringComparison.OrdinalIgnoreCase))
+        {
+            seams.Tell($"Deskbar could not start a Claude session in {folder}:\n\n{error}");
+            return;
+        }
         if (!seams.OfferTrustTerminal($"{error}\n\n{TrustQuestion}")) return;
         Current(taskId).Tap(task => Launch(task, ClaudeStart.TrustWindow(folder))
-            .TapError(e => Say(taskId, $"Deskbar could not open a terminal in {folder}:\n\n{e}")));
+            .TapError(e => SayAndTell(taskId, $"Deskbar could not open a terminal in {folder}:\n\n{e}")));
     }
 
     // --- the thread -------------------------------------------------------------------------------------------------
@@ -290,6 +325,12 @@ public sealed class ClaudeTaskActions : IDisposable
     void Say(Guid taskId, string markdown) =>
         tasks.Comment(taskId, Maybe<string>.None, markdown)
             .TapError(e => trace?.Invoke($"claude actions: no comment on {taskId}: {e}"));
+
+    void SayAndTell(Guid taskId, string markdown)
+    {
+        Say(taskId, markdown);
+        seams.Tell(markdown);
+    }
 
     public void Dispose()
     {
@@ -323,6 +364,12 @@ public sealed record ClaudeTaskSeams(
     /// <summary>The untrusted folder's message with its Yes/No question; yes opens the terminal.</summary>
     public Func<string, bool> OfferTrustTerminal { get; init; } = _ => false;
 
-    /// <summary>A refusal said to Petre at once (the feature is off, say).</summary>
+    /// <summary>A refusal or a failure said to Petre at once (the feature is off, `claude` or `wt` missing).</summary>
     public Action<string> Tell { get; init; } = _ => { };
+
+    /// <summary>
+    /// Forget a session's past resumes (ClaudeSessions.Forget), when a click brings back a task the keeper had given up
+    /// on; nothing by default.
+    /// </summary>
+    public Action<string> Forget { get; init; } = _ => { };
 }
