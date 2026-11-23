@@ -1,11 +1,12 @@
 using CSharpFunctionalExtensions;
 using Deskbar.Core.Domain;
 
-namespace Deskbar.App;
+namespace Deskbar.Core.Tasks;
 
 // What the docked bar announces through FloatingBar.Strip: where its shell app bar now stands, so the tasks panel can
 // register its own app bar AFTER it and so stay inside it (spec 2026-11-23-tasks-panel-design.md, "Keeping the bar
-// outside").
+// outside"). In Core, beside the rule that decides when one is sent (BarStripNotices), so that rule can be pinned by
+// tests that never touch a window or the shell.
 //
 // All in physical virtual-screen pixels, the units GetMonitorInfo's rcMonitor and GetWindowRect give and the shell's
 // app bar messages speak; the panel converts to DIPs with its own monitor's DPI, as DockTo does.
@@ -23,4 +24,4 @@ namespace Deskbar.App;
 //              docks again. False: the bar is still on screen, floating (UndockFromEdge), or about to dock again (the
 //              display-layout readjustment lets go first); the panel docks by the floating rule, on the edge of the
 //              bar's screen nearer MiddleX (TasksPanelPlacement.For with no edge). Always false on a docked notice.
-internal sealed record BarStrip(string? Edge, WindowRect Screen, Maybe<WindowRect> SeamRight, int MiddleX, bool Gone);
+public sealed record BarStrip(string? Edge, WindowRect Screen, Maybe<WindowRect> SeamRight, int MiddleX, bool Gone);
