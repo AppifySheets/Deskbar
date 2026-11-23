@@ -174,11 +174,14 @@ public class TasksPanelTests
         rig.Work = Lost;
         rig.Now += TimeSpan.FromSeconds(9);
         rig.Panel.Keep();
+        // A width change meanwhile is kept, not docked: the in-place re-ask would register before the bar.
+        rig.Panel.SetWidth(500);
+        rig.Panel.Show(500);
         Assert.Empty(rig.Calls);
 
         rig.Bar.OnNext(Docked("right"));
         rig.Pump();
-        Assert.Equal([Call.Undock, Call.Dock(PanelEdge.Right, 690)], rig.Calls);
+        Assert.Equal([Call.Undock, Call.Dock(PanelEdge.Right, 750)], rig.Calls);
         rig.Close();
     });
 
@@ -243,6 +246,61 @@ public class TasksPanelTests
         rig.Pump();
         Assert.Equal([Call.Undock, Call.Dock(PanelEdge.Right, 690)], rig.Calls);
         Assert.Contains(rig.Lines, line => line.Contains("(bar floats)") && !line.Contains("given back"));
+        rig.Close();
+    });
+
+    // A bar that floats from the start (DockBar off, the default) announces that on its first show and never docks: a
+    // panel asked for before that notice opens on it, by the floating rule, and no docked notice is ever needed.
+    [Fact]
+    public void A_floating_notice_as_the_very_first_notice_opens_a_requested_panel() => StaThread.Run(() =>
+    {
+        var rig = new Rig();
+        rig.Panel.Show(TasksPanelLayout.DefaultWidth);
+        Assert.Empty(rig.Calls);
+
+        rig.Bar.OnNext(Floats(Screen.Right - 300));
+        rig.Pump();
+
+        Assert.Equal([Call.Undock, Call.Dock(PanelEdge.Right, 690)], rig.Calls);
+        Assert.True(rig.Window.IsVisible);
+        rig.Close();
+    });
+
+    // A floating bar minimized: the panel docked by the floating rule goes with it, as it does with a docked bar, and
+    // stays open as far as the user is concerned.
+    [Fact]
+    public void A_floating_bar_that_goes_away_hides_the_panel() => StaThread.Run(() =>
+    {
+        var rig = new Rig();
+        rig.Bar.OnNext(Floats(Screen.Left + 300));
+        rig.Pump();
+        rig.Panel.Show(TasksPanelLayout.DefaultWidth);
+        rig.Calls.Clear();
+
+        rig.Bar.OnNext(BarGone());
+        rig.Pump();
+
+        Assert.Equal([Call.Undock], rig.Calls);
+        Assert.False(rig.Window.IsVisible);
+        Assert.True(rig.Panel.IsShown);
+        rig.Close();
+    });
+
+    // A bar restored from minimize while floating announces it floats: the panel that went with it comes back, by the
+    // floating rule.
+    [Fact]
+    public void A_bar_that_went_away_and_comes_back_floating_brings_the_panel_back() => StaThread.Run(() =>
+    {
+        var rig = new Rig().Open();
+        rig.Bar.OnNext(BarGone());
+        rig.Pump();
+        Assert.False(rig.Window.IsVisible);
+
+        rig.Bar.OnNext(Floats(Screen.Left + 300));
+        rig.Pump();
+
+        Assert.Equal([Call.Undock, Call.Undock, Call.Dock(PanelEdge.Left, 690)], rig.Calls);
+        Assert.True(rig.Window.IsVisible);
         rig.Close();
     });
 
