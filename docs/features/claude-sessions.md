@@ -32,6 +32,7 @@ Every Claude Code session works on a task in the bar's [task list](tasks.md), so
 - The session keeps a short status line under the task's title, such as "waiting for CI on #398".
 - When it needs a decision from you, it asks through its task. The task moves to the top as "Waiting on you" with the question, and the workspace blinks. The session itself says when the question is settled, with `task answered`: it runs that once your reply settles the question, or once it settles it itself, and the task goes back to in progress and the blink stops. Your message alone does not do it, so a `/loop` or scheduled check-in cannot answer for you. While the question is open, each prompt reminds the session of it.
 - It adds comments with the detail worth keeping, in markdown, and marks the task done when it has clearly finished. Only you close a task. A message to a session whose task is done takes it back to in progress. If you close a session's task, its next prompt tells it so, and new work needs a new task.
+- On the bar a Claude task is told from your notes by its orange edge alone: it has no VS Code icon, and its title starts right after the tick box, as a note's does.
 - A resumed session keeps its task as it was; a session that ends leaves its task open, with "no live session".
 - Sessions run without anyone at them, such as `claude -p`, Agent SDK runs and scheduled agents, are told nothing and make no tasks.
 

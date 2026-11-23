@@ -246,8 +246,8 @@ The task list at the bottom of the bar (spec `docs/superpowers/specs/2026-11-22-
 55a. Dock the bar to a screen edge with twenty or so open tasks: the list fills the empty height between the last
     workspace row and the footer, at least three lines, "+N more" counting the rest. Add workspaces or shorten the
     screen: the list gives up lines, never below three. Float the bar again: three lines, and the bar lands where
-    it floated before, not clamped against the docked height. With notes above Claude lines that show a session's
-    window icon, at the smallest text size, the docked list settles on one count and the bar stays responsive.
+    it floated before, not clamped against the docked height. With notes above Claude lines (orange edge, no icon,
+    the title starting at the same x as a note's), at the smallest text size, the docked list settles on one count and the bar stays responsive.
 55b. Click a line: it stays highlighted (a lighter background and a blue edge on its left). Open the tasks window:
     the same task is highlighted there and scrolled into view. Click another line in the window: the bar's
     highlight follows. Close the highlighted task: no line is highlighted any more.

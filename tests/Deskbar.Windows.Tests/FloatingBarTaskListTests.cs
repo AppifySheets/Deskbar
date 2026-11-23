@@ -250,7 +250,7 @@ public class FloatingBarTaskListTests
 
         var claude = t.Lines.Single(l => ((TaskLine)l.Tag).Claudes);
         Assert.Equal((nint)101, ((TaskLine)claude.Tag).Window.Value);
-        Assert.Contains(Inside(claude).OfType<FrameworkElement>(), e => Equals(e.Tag, "task-window-icon"));
+        Assert.DoesNotContain(Inside(claude).OfType<FrameworkElement>(), e => Equals(e.Tag, "task-window-icon"));
         Assert.Contains(@"C:\repos\Deskbar", asked);
         var note = t.Lines.Single(l => !((TaskLine)l.Tag).Claudes);
         Assert.DoesNotContain(Inside(note).OfType<FrameworkElement>(), e => Equals(e.Tag, "task-window-icon"));
@@ -299,7 +299,7 @@ public class FloatingBarTaskListTests
         var again = t.Lines.Single();
         Assert.False(Closing(again));
         Assert.Equal(Orange, ((SolidColorBrush)EdgeOf(again).BorderBrush).Color);
-        Assert.Contains(Inside(again).OfType<FrameworkElement>(), e => Equals(e.Tag, "task-window-icon"));
+        Assert.DoesNotContain(Inside(again).OfType<FrameworkElement>(), e => Equals(e.Tag, "task-window-icon"));
         Assert.True(HasButtonNamed(again, "Tick off"));
     });
 
@@ -2412,6 +2412,28 @@ public class FloatingBarTaskListTests
         var bounds = more.TransformToAncestor(t.List).TransformBounds(new Rect(more.RenderSize));
         Assert.True(bounds.Right <= t.List.ActualWidth + 0.5, $"button {bounds} in a list {t.List.ActualWidth} wide");
         Assert.True(more.RenderSize.Width >= more.DesiredSize.Width - more.Margin.Left - more.Margin.Right - 0.5, $"the button is squeezed: {more.RenderSize.Width} of {more.DesiredSize.Width}");
+    });
+
+    // RULING 47 (Petre: "i'm not sure on the vscode icon and surely the space between icon and text is huge"). A Claude
+    // line has no icon element on the bar, and its title starts at the same x as a note line's: nothing is reserved
+    // between the tick box and the title.
+    [Fact]
+    public void A_claude_lines_title_starts_where_a_notes_does_and_it_has_no_icon() => StaThread.Run(() =>
+    {
+        using var t = Build(sessionWindow: _ => Maybe.From((nint)101));
+        t.Tasks.Create("Tasks redesign", t.Gepha, Session("s1"));
+        t.Tasks.AddNote("Dishwasher tablets", t.Gepha);
+        t.Bar.UpdateLayout();
+
+        var claude = t.Lines.Single(l => ((TaskLine)l.Tag).Claudes);
+        var note = t.Lines.Single(l => !((TaskLine)l.Tag).Claudes);
+        Assert.DoesNotContain(Inside(claude).OfType<Image>(), _ => true);
+        double TitleX(Button line)
+        {
+            var title = Inside(line).OfType<TextBlock>().Single(b => Equals(b.Tag, "task-text"));
+            return title.TransformToAncestor(line).TransformBounds(new Rect(title.RenderSize)).Left;
+        }
+        Assert.Equal(TitleX(note), TitleX(claude), 0.5);
     });
     // --- Ruling 41: a title wraps to a second line when it does not fit, never a third ------------------------------
 

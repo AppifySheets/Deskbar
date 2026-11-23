@@ -115,7 +115,7 @@ Every form that takes text, `task add <title>` and `task comment <id> <markdown>
 
 ## With Claude sessions
 
-Every Claude Code session keeps a task in this list. When it starts, it is offered the open tasks on its workspace, joins the one its work continues or creates its own, and keeps a short status line under the title. A task a session works on is Claude's: it has an orange edge, and a session that joins one of your notes makes it Claude's work.
+Every Claude Code session keeps a task in this list. When it starts, it is offered the open tasks on its workspace, joins the one its work continues or creates its own, and keeps a short status line under the title. A task a session works on is Claude's: it has an orange edge (and no icon: the title starts right after the tick box, as on a note), and a session that joins one of your notes makes it Claude's work.
 
 When a session needs a decision from you, its task moves to the top as **Waiting on you**, with the question on the line, and the workspace blinks. Your next message to that session answers it, and the task goes back to in progress. A session marks its task done when it has finished; the line keeps its place and has the same tick box as any other, because only you close a task. A message to a session whose task is done takes it back to in progress, and a session whose task you closed is told that new work needs a new task.
 
