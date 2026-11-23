@@ -236,7 +236,7 @@ public sealed class ClaudeSkillTests : IDisposable
         ControlCommandLine.WriteShim(Deskbar, exe);
         var pipe = $"Deskbar.Control.Test.{Guid.NewGuid():N}";
         IReadOnlyList<string>? received = null;
-        using var server = new ControlPipeServer(pipe, args =>
+        using var server = TestPipes.Serving(pipe, args =>
         {
             received = args;
             return Task.FromResult(new global::Deskbar.Core.Control.ControlReply(0, "Your task is X."));
@@ -269,7 +269,7 @@ public sealed class ClaudeSkillTests : IDisposable
         ControlCommandLine.WriteShim(Deskbar, exe);
         var pipe = $"Deskbar.Control.Test.{Guid.NewGuid():N}";
         IReadOnlyList<string>? received = null;
-        using var server = new ControlPipeServer(pipe, args =>
+        using var server = TestPipes.Serving(pipe, args =>
         {
             received = args;
             return Task.FromResult(new global::Deskbar.Core.Control.ControlReply(0, "{}"));
