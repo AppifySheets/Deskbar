@@ -206,7 +206,7 @@ The task list at the bottom of the bar (spec `docs/superpowers/specs/2026-11-22-
     typing in. Click the tick box: the line stays for six seconds, struck through, with
     "Undo" in the tick box's place, then leaves.
 43. `$ts task add "a"`, "b", "c", "d" and "e" (five tasks). The list shows three lines and a small "+2 more"
-    under them. Click it: all five show and "Less" is at the end. Click "Less": back to three.
+    at the right end of the chip row under the box (no line of its own at the bottom). Click it: all five show and "Less" is at the end. Click "Less": back to three.
 44. With the five tasks of step 43 open, `$ts task status <id> waiting` on all five. They sort to the top, three
     show and the two hidden ones wait on you: the line under them reads "+2 waiting" in orange. Set two of them
     back to `backlog`: it reads "+2 more" in the plain ink again.
@@ -271,7 +271,7 @@ The task list at the bottom of the bar (spec `docs/superpowers/specs/2026-11-22-
 
 The tasks window (spec `docs/superpowers/specs/2026-11-22-tasks-board-design.md`, "The window" and "Comments").
 
-56. With three or fewer open tasks the line under the list reads "All tasks"; with more, "+N more". Click it: a
+56. With three or fewer open tasks the button at the right end of the chip row reads "All tasks" ("All" on a narrow bar); with more, "+N more" ("+N"). Click it: a
     window titled "Tasks" opens beside the bar (not over it), with a dark title bar, on the list and not on a form
     (no box has the keyboard). It is in Alt+Tab and on the taskbar, and the bar does not list it as a window.
 57. Groups read WAITING ON YOU, then the quadrants that have tasks (I to IV), a new task on top. The chips count each
