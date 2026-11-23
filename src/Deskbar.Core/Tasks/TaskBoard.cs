@@ -249,6 +249,7 @@ public sealed record TaskBoard(IReadOnlyList<TaskItem> Tasks)
                     : t.Assignee,
                 // When it began waiting (Ruling 62 review): what `answered` settles comments since.
                 WaitingSince = status == TaskStatus.WaitingOnYou && t.Status != TaskStatus.WaitingOnYou ? now : t.WaitingSince,
+                Adopted = false,
                 UpdatedAt = now,
             });
 
@@ -267,7 +268,7 @@ public sealed record TaskBoard(IReadOnlyList<TaskItem> Tasks)
     Result<TaskBoard> ToQuadrant(TaskItem task, Quadrant quadrant, DateTimeOffset now) =>
         !task.IsOpen ? Result.Failure<TaskBoard>(TaskIsClosed)
         : task.Quadrant == quadrant ? this
-        : Replaced(WithFlags(task, quadrant) with { Rank = TopRank(quadrant, task.Id), UpdatedAt = now });
+        : Replaced(WithFlags(task, quadrant) with { Rank = TopRank(quadrant, task.Id), UpdatedAt = now, Adopted = false });
 
     /// <summary>
     /// A drag, or `task order`: the task goes to <paramref name="place"/> in <paramref name="quadrant"/>, and dropping
@@ -294,10 +295,10 @@ public sealed record TaskBoard(IReadOnlyList<TaskItem> Tasks)
             .ToArray();
 
     public Result<TaskBoard> Rename(Guid id, string title, DateTimeOffset now) =>
-        CleanTitle(title).Bind(clean => Change(id, t => t with { Title = clean, UpdatedAt = now }));
+        CleanTitle(title).Bind(clean => Change(id, t => t with { Title = clean, UpdatedAt = now, Adopted = false }));
 
     public Result<TaskBoard> MoveTo(Guid id, Maybe<Guid> workspace, DateTimeOffset now) =>
-        Change(id, t => t with { WorkspaceId = workspace, UpdatedAt = now });
+        Change(id, t => t with { WorkspaceId = workspace, UpdatedAt = now, Adopted = false });
 
     /// <summary>
     /// Petre hands a task to someone (Ruling 57), in the tasks window or by `task assign`. Any task, closed ones too (it
@@ -305,7 +306,8 @@ public sealed record TaskBoard(IReadOnlyList<TaskItem> Tasks)
     /// its place; the assignee it already has returns this same board.
     /// </summary>
     public Result<TaskBoard> Assign(Guid id, Assignee assignee, DateTimeOffset now) =>
-        Lookup(id).Map(task => task.Assignee == assignee ? this : Replaced(task with { Assignee = assignee, UpdatedAt = now }));
+        // Handing it over is an edit only Petre makes, so it clears the adopted mark (Ruling 11b).
+        Lookup(id).Map(task => task.Assignee == assignee ? this : Replaced(task with { Assignee = assignee, UpdatedAt = now, Adopted = false }));
 
     public Result<TaskBoard> Delete(Guid id) =>
         Tasks.Any(t => t.Id == id)
@@ -323,6 +325,8 @@ public sealed record TaskBoard(IReadOnlyList<TaskItem> Tasks)
         {
             Comments = t.Comments.Append(new TaskComment(newId, sessionId, now, markdown.TrimEnd().TrimStart('\r', '\n'))).ToArray(),
             UpdatedAt = now,
+            // Petre's comment is his edit (Ruling 11b, see WithoutSessionElsewhere); a session's leaves the mark.
+            Adopted = t.Adopted && sessionId.HasValue,
         }));
 
     // --- Petre's own words on a task (Ruling 58) ---------------------------------------------------------
@@ -335,7 +339,8 @@ public sealed record TaskBoard(IReadOnlyList<TaskItem> Tasks)
     public Result<TaskBoard> Describe(Guid id, string markdown, DateTimeOffset now) =>
         Lookup(id).Map(task => (markdown ?? "").Trim() is var text && task.Description == text
             ? this
-            : Replaced(task with { Description = text, UpdatedAt = now }));
+            // His description is his edit, so it clears the adopted mark (Ruling 11b).
+            : Replaced(task with { Description = text, UpdatedAt = now, Adopted = false }));
 
     /// <summary>
     /// A comment by full id or by a unique prefix of at least four characters, as <see cref="Find"/> does for tasks:
@@ -367,6 +372,8 @@ public sealed record TaskBoard(IReadOnlyList<TaskItem> Tasks)
                 {
                     Comments = task.Comments.Select(c => c.Id == commentId ? c with { Markdown = clean } : c).ToArray(),
                     UpdatedAt = now,
+                    // Only Petre edits a comment, so it is his edit (Ruling 11b); his comment already cleared the mark.
+                    Adopted = false,
                 }));
 
     /// <summary>
@@ -383,6 +390,8 @@ public sealed record TaskBoard(IReadOnlyList<TaskItem> Tasks)
         {
             Comments = task.Comments.Select(c => c.Id == commentId ? c with { Settled = settle ? now : Maybe<DateTimeOffset>.None } : c).ToArray(),
             UpdatedAt = now,
+            // Petre settling a comment is his edit (Ruling 11b); a session settling its own leaves the mark, as its comment does.
+            Adopted = task.Adopted && bySession is not null,
         });
 
     // The session's own unsettled comments written at or after the question was asked (WaitingSince, falling back to Raised for a
@@ -401,7 +410,7 @@ public sealed record TaskBoard(IReadOnlyList<TaskItem> Tasks)
     /// task already has returns this same board.
     /// </summary>
     public Result<TaskBoard> SetGoal(Guid id, Maybe<Guid> goal, DateTimeOffset now) =>
-        Lookup(id).Map(task => task.GoalId == goal ? this : Replaced(task with { GoalId = goal, UpdatedAt = now }));
+        Lookup(id).Map(task => task.GoalId == goal ? this : Replaced(task with { GoalId = goal, UpdatedAt = now, Adopted = false }));
 
     /// <summary>
     /// A goal was deleted: every task that named it is freed and stamped; nothing else about them changes. No task
@@ -600,7 +609,10 @@ public sealed record TaskBoard(IReadOnlyList<TaskItem> Tasks)
     /// tasks are left alone: SessionEnded still closes the entry there when the session really ends.
     /// An ADOPTED task (<see cref="TaskItem.Adopted"/>) that this session was all of, with no comment on it, is deleted
     /// instead (Ruling 11): Deskbar made it for a session that had no task yet, the session has now joined its own, and
-    /// what is left would be an empty duplicate line. Anything added to it (another session, a comment) keeps it.
+    /// what is left would be an empty duplicate line. Anything added to it (another session, a comment) keeps it, and so
+    /// does any edit only Petre makes (Ruling 11b): Rename, MoveTo, SetFlag, SetGoal, SetStatus, Assign, Describe, his own
+    /// Comment, EditComment and his SettleComment clear the mark for good. A drag within the order (Place) does not; it
+    /// says nothing about wanting the task. A session settling its own comment does not either.
     /// </summary>
     TaskBoard WithoutSessionElsewhere(string sessionId, Guid except, DateTimeOffset now) =>
         new(Tasks
