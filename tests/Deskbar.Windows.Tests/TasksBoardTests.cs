@@ -921,7 +921,7 @@ public class TasksBoardTests
         Assert.All(chips.Concat(comments).Concat(mores), b => Assert.True(b.Right <= ContentWidth(t.Window) + 0.5, $"{b} in {ContentWidth(t.Window)}"));
         // The icons explain themselves.
         Assert.Equal("Comments", ButtonNamed(lines[0], "Comments").ToolTip);
-        Assert.Equal("Status, move, rename, delete", ButtonNamed(lines[0], "More").ToolTip);
+        Assert.Equal("Edit, status, move, delete", ButtonNamed(lines[0], "More").ToolTip);
     });
 
     // Petre's screenshot: the placeholder "Comment as you, in markdow…" was cut off and the box squeezed. A short
@@ -1605,6 +1605,52 @@ public class TasksBoardTests
         Assert.Equal(System.Windows.Media.Color.FromRgb(FloatingBar.AskingOrange.R, FloatingBar.AskingOrange.G, FloatingBar.AskingOrange.B),
             ((System.Windows.Media.SolidColorBrush)edge.BorderBrush).Color);
     });
+
+    // Ruling 44 (Petre: "task rightclick should let me edit it first, first option"). A right-click on a line opens its
+    // menu at the pointer, the same menu as its "⋯", and Edit is its first item; Edit opens the in-place editor and a
+    // save renames.
+    [Fact]
+    public void A_right_click_opens_the_lines_menu_with_Edit_first() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        var id = t.Tasks.AddNote("buy body shampoo", t.Gepha).Value.Id;
+        t.Controller.Open(Rect.Empty);
+        t.Window.UpdateLayout();
+
+        LineOf(t.Window, id).RaiseEvent(RightRelease());
+
+        var menu = Assert.IsAssignableFrom<ContextMenu>(t.Window.OpenedMenu);
+        Assert.True(menu.IsOpen);
+        var first = Assert.IsType<MenuItem>(menu.Items[0]);
+        Assert.Equal("Edit", ((TextBlock)first.Header).Text);
+        first.RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
+        menu.IsOpen = false;
+        var editor = Assert.IsType<TextBox>(t.Window.Editor);
+        editor.Text = "buy body shampoo and soap";
+        t.Window.SaveEditor();
+        Assert.Equal("buy body shampoo and soap", t.Tasks.Board.Tasks.Single().Title);
+        Assert.Empty(t.WentTo);
+    });
+
+    // The "⋯" menu has Edit first too, in place of the old "Rename…".
+    [Fact]
+    public void The_more_menu_has_Edit_first() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        var id = t.Tasks.AddNote("note", t.Gepha).Value.Id;
+        t.Controller.Open(Rect.Empty);
+
+        var menu = t.Window.OpenMenuFor(id);
+
+        Assert.Equal("Edit", ((TextBlock)Assert.IsType<MenuItem>(menu.Items[0]).Header).Text);
+        Assert.DoesNotContain(menu.Items.OfType<MenuItem>(), i => i.Header is TextBlock { Text: "Rename…" });
+        menu.IsOpen = false;
+    });
+
+    // The tunnelling release a real right-click makes: each element on its way down raises its own
+    // PreviewMouseRightButtonUp from it, the line's included.
+    static MouseButtonEventArgs RightRelease() =>
+        new(Mouse.PrimaryDevice, 0, MouseButton.Right) { RoutedEvent = Mouse.PreviewMouseUpEvent };
 
     // Ruling 38 (Petre: "let tasks be multiline and editable"). A long title wraps to show its whole text instead of
     // ending in an ellipsis, in the List and in the Matrix: its line grows taller, the title is never trimmed.

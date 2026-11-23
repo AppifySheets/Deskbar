@@ -217,7 +217,9 @@ public partial class FloatingBar
         (Mouse.LeftButton == MouseButtonState.Pressed && (IsMouseOver || PointerOnStrip()))
         || arrangeDrag is not null || arrangeDropQueued || draggingWindow || openMenu?.IsOpen == true
         // A task line armed, dragged, or its drop still queued (FloatingBar.TaskDrag.cs).
-        || TaskDragInFlight;
+        || TaskDragInFlight
+        // A line's title being edited in place (FloatingBar.TaskEdit.cs): no paint takes the text from under the keyboard.
+        || editingTask is not null;
 
     // For the tests: whether the list is on screen, what "+N more" says ("" while it is hidden), whether the box has
     // the keyboard, where a note added now would go, what the empty box says, and the lines on show.
@@ -756,7 +758,7 @@ public partial class FloatingBar
         allTaskLines = all;
         var problem = taskService.LoadProblem;
         var shape = string.Join("\n", all.Select(ShapeOf).Prepend(
-            $"{taskListExpanded}|{OpenTasksWindow is null}|{TextOffset}|{problem.GetValueOrDefault("")}|{slots}"));
+            $"{taskListExpanded}|{OpenTasksWindow is null}|{TextOffset}|{problem.GetValueOrDefault("")}|{slots}|{editingTask}"));
         if (shape == lastTaskListShape) return;
         lastTaskListShape = shape;
 
@@ -837,7 +839,7 @@ public partial class FloatingBar
         // Laid out by TaskLineFace (see its header): the title takes every DIP the shown parts leave, the flags that are
         // off lie over the title's end instead of beside it, and the chip turns into a dot when the title would keep
         // less than its share of the line.
-        var face = new TaskLineFace(LeftOf(line).ToList(), TextOf(line), RightOf(line).ToList(), WorkspaceChipButton(line),
+        var face = new TaskLineFace(LeftOf(line).ToList(), TitleOrEditor(line), RightOf(line).ToList(), WorkspaceChipButton(line),
             WorkspaceDot(line), QuietFlags(line));
         // A closed line in its undo window is dimmed, all but its Undo, which is the one thing on it to press.
         if (line.Closing)
@@ -893,11 +895,14 @@ public partial class FloatingBar
             taskPressClicks = e.ClickCount;
             if (taskLinesPanel is not null) TaskDragPress(line.Id, ArrangeMouseInput.Position(e, taskLinesPanel));
         };
+        // Right-click: the line's menu, Edit first (FloatingBar.TaskEdit.cs).
+        WireTaskLineMenu(button, line);
         button.Click += (_, _) =>
         {
             MarkPressConsumed();
-            // A closed line goes nowhere: its task is closed, and Undo is the one thing on it to press.
-            if (TaskClickIgnored() || line.Closing) return;
+            // A closed line goes nowhere: its task is closed, and Undo is the one thing on it to press. A line being
+            // edited neither: the click is in its editor.
+            if (TaskClickIgnored() || line.Closing || editingTask == line.Id) return;
             OnTaskLineClick(line);
         };
         return button;
@@ -1338,6 +1343,8 @@ public partial class FloatingBar
     {
         base.OnDeactivated(e);
         if (taskTyping) EndTyping(clear: false);
+        // A click into another app abandons an edit in progress; the keyboard is already where he took it.
+        if (editingTask is not null) CancelTaskEdit(handBack: false);
     }
 
     // The placeholder as the box stands: shown while the box is empty. (The chips under it are always shown.)
