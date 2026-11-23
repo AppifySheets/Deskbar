@@ -14,6 +14,7 @@ namespace Deskbar.Windows.Tests;
 // 2026-11-22-tile-lock-and-other-screens-design.md, "The pin on the window"). What is pinned down here is the part a
 // screenshot cannot show: where it sits in z-order relative to its tile, the rectangle it lands on, the styles that
 // keep it from ever taking focus, and that a click is reported. Run on a hidden desktop (scripts/test-hidden.ps1).
+[Collection(ZOrderCollection.Name)]
 public class LockMarkWindowTests
 {
     static void Pump(TimeSpan span)

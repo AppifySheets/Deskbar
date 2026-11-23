@@ -15,6 +15,7 @@ namespace Deskbar.Windows.Tests;
 // 2026-11-22-tile-lock-and-other-screens-design.md, "The pin on the window"). The Tiler, the pointer, the windows'
 // geometry and whether a tile can be drawn on are fakes; the marks are real windows over real stand-in tiles, so the
 // tests see what would be on the screen. Run on a hidden desktop (scripts/test-hidden.ps1).
+[Collection(ZOrderCollection.Name)]
 public class TileLockMarksTests
 {
     // The world one test controls: which windows are tiles, which are locked, where the pointer is, and which tiles are

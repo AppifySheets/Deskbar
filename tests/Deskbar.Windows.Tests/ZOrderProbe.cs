@@ -31,3 +31,13 @@ static class ZOrderProbe
     [DllImport("user32.dll", CharSet = CharSet.Unicode)]
     static extern bool SetWindowPos(nint hwnd, nint after, int x, int y, int width, int height, uint flags);
 }
+
+// The z-order tests (LockMarkWindowTests, TileLockMarksTests) run with nothing else in parallel: they ask which window is
+// directly above another, and a window some other test class opens at the same moment goes to the front of the band and
+// changes the answer. Measured on CI: the window right above a tile brought to the front was another test's, not the
+// topmost one the test had opened.
+[CollectionDefinition(Name, DisableParallelization = true)]
+public sealed class ZOrderCollection
+{
+    public const string Name = "Z-order, alone";
+}
