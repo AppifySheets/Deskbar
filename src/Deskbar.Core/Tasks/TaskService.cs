@@ -87,6 +87,9 @@ public sealed class TaskService(ITaskStore store, Func<DateTimeOffset> now, Func
 
     public Result EditComment(Guid commentId, string markdown) => ApplyIfChanged(Board.EditComment(commentId, markdown, now()));
 
+    // Ruling 62: a session settles its own comment (bySession), Petre any (null). The state it has saves and pulses nothing.
+    public Result SettleComment(Guid commentId, bool settle, string? bySession = null) => ApplyIfChanged(Board.SettleComment(commentId, settle, bySession, now()));
+
     public Result MoveTo(Guid id, Maybe<Guid> workspace) => Apply(Board.MoveTo(id, workspace, now()));
 
     public Result Delete(Guid id) => Apply(Board.Delete(id));

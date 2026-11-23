@@ -110,7 +110,13 @@ public sealed record TaskBoard(IReadOnlyList<TaskItem> Tasks)
     public TaskBoard Answered(string sessionId, DateTimeOffset now) =>
         TaskOf(sessionId)
             .Where(t => t.Status is TaskStatus.WaitingOnYou or TaskStatus.Done)
-            .Map(t => Replaced(t with { Status = TaskStatus.InProgress, Question = Maybe<string>.None, UpdatedAt = now, Assignee = Assignee.Claude }))
+            // RULING 62: answering a QUESTION settles the session's comments written since it was asked (a Done task resuming
+            // was no question, so it settles none). Kept, not deleted.
+            .Map(t => Replaced(t with
+            {
+                Status = TaskStatus.InProgress, Question = Maybe<string>.None, UpdatedAt = now, Assignee = Assignee.Claude,
+                Comments = t.Status == TaskStatus.WaitingOnYou ? SettledSinceAsk(t, sessionId, now) : t.Comments,
+            }))
             .GetValueOrDefault(this);
 
     /// <summary>
@@ -299,6 +305,29 @@ public sealed record TaskBoard(IReadOnlyList<TaskItem> Tasks)
                     Comments = task.Comments.Select(c => c.Id == commentId ? c with { Markdown = clean } : c).ToArray(),
                     UpdatedAt = now,
                 }));
+
+    /// <summary>
+    /// Settles a comment, or (<paramref name="settle"/> false) brings it back (Ruling 62). <paramref name="bySession"/> is the
+    /// session asking, none (null) for Petre: a session settles only its own comments, Petre any. The state it already
+    /// has returns this same board; the settled time is "now" and the comment keeps its place in the thread.
+    /// </summary>
+    public Result<TaskBoard> SettleComment(Guid commentId, bool settle, string? bySession, DateTimeOffset now) =>
+        Tasks.FirstOrDefault(t => t.Comments.Any(c => c.Id == commentId)) is not { } task ? Result.Failure<TaskBoard>($"No comment with id {commentId}")
+        : task.Comments.First(c => c.Id == commentId) is var comment && bySession is not null && comment.SessionId.GetValueOrDefault() != bySession
+            ? Result.Failure<TaskBoard>("A session can settle only its own comments")
+        : comment.Settled.HasValue == settle ? this
+        : Replaced(task with
+        {
+            Comments = task.Comments.Select(c => c.Id == commentId ? c with { Settled = settle ? now : Maybe<DateTimeOffset>.None } : c).ToArray(),
+            UpdatedAt = now,
+        });
+
+    // The session's own unsettled comments written at or after the question was asked (Raised is the ask's time while the
+    // task waits): the ask's detail and the follow-ups while it was open.
+    static IReadOnlyList<TaskComment> SettledSinceAsk(TaskItem task, string sessionId, DateTimeOffset now) =>
+        task.Comments.Select(c => c.SessionId.HasValue && c.SessionId.Value == sessionId && c.At >= task.Raised && c.Settled.HasNoValue
+            ? c with { Settled = now }
+            : c).ToArray();
 
     // --- the goal a task counts toward (goals spec, "Tasks contribute") -----------------------------------
 

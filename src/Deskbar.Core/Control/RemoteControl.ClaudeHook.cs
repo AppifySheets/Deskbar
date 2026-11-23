@@ -132,6 +132,7 @@ public sealed partial class RemoteControl
     //   task answered --session <sid>           the session's question is settled: back to In progress, the blink stops
     //   task done --session <sid>               the session's clear finish; only the user closes
     //   task comment <markdown> --session <sid> a comment on the session's own task, signed by the session
+    //   task comment-settle <id> --session <sid> settle one of the session's own comments (folds away; answered settles them since its ask)
     //   task later <title> --session <sid>      a Backlog note on the caller's workspace, a follow-up for later
     //
     // Everything but join, new and later acts on the session's OWN task (TaskBoard.TaskOf), which is the spec's rule that
@@ -159,6 +160,10 @@ public sealed partial class RemoteControl
             // A task that is not waiting is left alone and the command still succeeds: a session may run it needlessly.
             ["answered"] => Changed(Own().Tap(t => Resolve(service, t, session))),
             ["comment", var markdown] => Changed(Own().Bind(t => service.Comment(t.Id, session, markdown).Map(() => t))),
+            // Ruling 62: the session settles one of its OWN comments by id (answered settles the ones since its ask); the board
+            // refuses another session's or Petre's.
+            ["comment-settle", var comment] => Changed(service.Board.FindComment(comment)
+                .Bind(c => service.SettleComment(c.Id, true, session).Map(() => service.Board.Tasks.First(t => t.Comments.Any(x => x.Id == c.Id))))),
             ["later", var title] => Changed(service.AddNote(title, Here())),
             _ => ControlReply.Fail($"Wrong arguments for a session's task form.\n{TaskUsage()}"),
         };

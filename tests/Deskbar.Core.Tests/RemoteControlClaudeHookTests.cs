@@ -407,6 +407,34 @@ public class RemoteControlClaudeHookTests
         Assert.Contains("task join <id> --session s1", briefing);
     }
 
+    // Ruling 62: `task answered` settles the session's comments since its ask; `task comment-settle <comment-id>` settles
+    // one of its own and refuses another session's; `task list` shows the settled time in the thread.
+    [Fact]
+    public void Answering_and_comment_settle_fold_a_sessions_comments()
+    {
+        var manager = Started();
+        Editor(manager, 0x10, "TaskSpaces", "Deskbar");
+        Said(manager, "s1", Repo, "new", "Tasks board");
+        Said(manager, "s1", Repo, "ask", "Merge?");
+        Said(manager, "s1", Repo, "comment", "detail of the question");
+        Said(manager, "s1", Repo, "comment", "second");
+        var detail = Titled("Tasks board").Comments[0].Id.ToString();
+        var second = Titled("Tasks board").Comments[1].Id.ToString();
+
+        // Another session cannot settle it, and nothing changes.
+        var refused = Said(manager, "s2", Repo, "comment-settle", detail);
+        Assert.Equal(ControlReply.Failed, refused.ExitCode);
+        Assert.True(Titled("Tasks board").Comments[0].Settled.HasNoValue);
+
+        Assert.Equal(ControlReply.Ok, Said(manager, "s1", Repo, "comment-settle", second).ExitCode);
+        Assert.True(Titled("Tasks board").Comments[1].Settled.HasValue);
+
+        Said(manager, "s1", Repo, "answered");
+        Assert.All(Titled("Tasks board").Comments, c => Assert.True(c.Settled.HasValue));
+        var thread = System.Text.Json.JsonDocument.Parse(Ran(manager, "task", "list").Output).RootElement[0].GetProperty("thread");
+        Assert.NotEqual(System.Text.Json.JsonValueKind.Null, thread[0].GetProperty("settled").ValueKind);
+    }
+
     // Ruling 57: the assignee follows the session. `task ask` hands the task to Petre, `task answered` back to Claude, and
     // `task done` to Petre, who closes it.
     [Fact]

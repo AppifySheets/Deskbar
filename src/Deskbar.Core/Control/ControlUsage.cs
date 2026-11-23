@@ -92,6 +92,9 @@ public static class ControlUsage
             new("task", "later <title>|- --session <session>",
                 "a backlog note on the caller's workspace, a follow-up for later. In every form that takes text, -\n"
                 + "      reads the text from stdin (a heredoc in Git Bash): free text never goes on the command line"),
+            new("task", "comment-settle <comment-id> --session <session>",
+                "settle one of the session's own comments: it stays but folds away in the tasks window. task answered\n"
+                + "      settles the session's comments written since its question was asked; another session's is refused"),
             new("tasks-window", "show|hide|list|matrix",
                 "open the tasks window, as the bar's \"+N more\" does (every task grouped as on the bar, the closed\n"
                 + "      ones under their filter, each with its comments), or close it; list or matrix switches its view\n"

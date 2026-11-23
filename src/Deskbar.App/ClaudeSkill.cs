@@ -241,7 +241,9 @@ static class ClaudeSkill
           finishing is not an ask; do not ask for routine progress.
         - Resolve it yourself. A message from the user does not settle your question: you do. When their reply settles
           it, or you settle it yourself, run `deskbar.cmd task answered --session <id>` straight away. The task goes
-          back to in progress and the blink stops. Never leave a question open once it is resolved. While it is open,
+          back to in progress, the blink stops, and your comments written since you asked are settled: kept, but folded
+          away for the user. `deskbar.cmd task comment-settle <comment-id> --session <id>` settles one of your own
+          comments that no longer matters. Never leave a question open once it is resolved. While it is open,
           each prompt's reminder from Deskbar names it.
         - Comment rarely: `deskbar.cmd task comment - --session <id>` with markdown on stdin. A comment is for the user,
           and only for what needs their attention or a result they must know (a PR to merge, a decision made for them,
