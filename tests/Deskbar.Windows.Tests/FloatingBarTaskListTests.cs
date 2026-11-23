@@ -103,8 +103,11 @@ public class FloatingBarTaskListTests
         var seconds = 0;
         var timers = new FakeTimers();
         var service = tasks ?? new TaskService(new MemoryStore(), () => Start.AddMinutes(minutes++));
+#pragma warning disable WPF0001 // ThemeMode is experimental: the app runs under ThemeMode="System" (App.xaml), so the bar tests do too
         var bar = new FloatingBar(harness.Manager)
         {
+            ThemeMode = ThemeMode.System,
+#pragma warning restore WPF0001
             Left = -32000,
             Top = -32000,
             SendShellKeys = _ => { },

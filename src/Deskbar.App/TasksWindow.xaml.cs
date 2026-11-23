@@ -651,6 +651,11 @@ public partial class TasksWindow : Window
             Template = (ControlTemplate)FindResource("LineButton"),
             Background = Brushes.Transparent,
             HorizontalContentAlignment = HorizontalAlignment.Stretch,
+            // EXPLICIT: the app runs under ThemeMode="System" (App.xaml), whose Fluent Button style sets HorizontalAlignment to
+            // Left. A line left to the default shrank to its own content, so every line had its own width and the columns
+            // followed each line's own right edge (Petre's zigzag, 2.5.238). Tests build the window without that theme unless
+            // they ask for it, which is why they passed.
+            HorizontalAlignment = HorizontalAlignment.Stretch,
             Focusable = false,
             Cursor = Cursors.Hand,
             ToolTip = row.Closing ? "Closed. Undo brings it back." : $"{TaskViews.StatusName(row.Status)}: {row.Title}",

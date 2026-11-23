@@ -86,10 +86,13 @@ public class TasksBoardTests
         var timers = new FakeTimers();
         var went = new List<Guid>();
         var tasks = new TaskService(new MemoryStore(), () => Start.AddMinutes(minutes++));
+#pragma warning disable WPF0001 // ThemeMode is experimental: the app runs under ThemeMode="System" (App.xaml), so the window tests do too
         var window = new TasksWindow
         {
+            ThemeMode = ThemeMode.System,
             Quiet = true, ClickClock = clickClock ?? (() => ClickStart.AddSeconds(seconds++)), Now = now ?? (() => Start.AddHours(1)),
         };
+#pragma warning restore WPF0001
         var controller = new TasksBoard(window, tasks, harness.Manager, goTo ?? (t =>
         {
             went.Add(t.Id);
@@ -1811,6 +1814,29 @@ public class TasksBoardTests
         var words = Inside(LineOf(t.Window, claude)).OfType<TextBlock>().Single(b => b.Text.Contains("sessions"));
         Assert.True(words.ActualWidth >= words.DesiredSize.Width - words.Margin.Left - words.Margin.Right - 0.5, $"'{words.Text}' is trimmed to {words.ActualWidth} of {words.DesiredSize.Width}");
         Assert.True(Right(words) <= Left(AgeIn(claude)) + 0.5, $"the sessions words end at {Right(words)}, the age starts at {Left(AgeIn(claude))}");
+    });
+
+    // Petre's second screenshot (2.5.238): the expanded comment panel ("Add a comment...") ran past the window's right
+    // edge and was clipped. Under the app's own theme (Build puts the window under ThemeMode="System"), a thread and
+    // its comment box stay inside the list's width, on a narrow window and with a long comment too.
+    [Fact]
+    public void An_expanded_thread_stays_inside_the_windows_width() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        var id = t.Tasks.AddNote("a note with a title that is quite long, long enough to wrap in a narrow window of tasks", t.Gepha).Value.Id;
+        t.Tasks.Comment(id, Maybe<string>.None, "A very long comment " + string.Join(" ", Enumerable.Repeat("with many words", 30)) + " `and_a_long_unbreakable_code_span_" + new string('x', 80) + "`");
+        t.Controller.Open(Rect.Empty);
+        t.Window.Width = t.Window.MinWidth;
+        t.Window.UpdateLayout();
+        Click(ButtonNamed(LineOf(t.Window, id), "Comments"));
+        t.Window.UpdateLayout();
+
+        var box = t.Window.CommentBoxOf(id)!;
+        var scroller = Inside(t.Window).OfType<ScrollViewer>().First(s => s.Content is StackPanel);
+        double Right(FrameworkElement e) => e.TransformToAncestor(scroller).TransformBounds(new Rect(e.RenderSize)).Right;
+        Assert.True(Right(box) <= scroller.ViewportWidth + 0.5, $"the comment box ends at {Right(box)} in a viewport {scroller.ViewportWidth} wide");
+        var thread = Inside(t.Window).OfType<Border>().Where(b => b.IsAncestorOf(box) && b.Child is StackPanel).OrderBy(b => b.ActualWidth).Last();
+        Assert.True(Right(thread) <= scroller.ViewportWidth + 0.5, $"the thread ends at {Right(thread)} in a viewport {scroller.ViewportWidth} wide");
     });
 
     // F2 on the selected line opens it too; Enter saves through Rename; Esc cancels.
