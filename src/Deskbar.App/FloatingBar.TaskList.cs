@@ -1023,9 +1023,11 @@ public partial class FloatingBar
         return button;
     }
 
-    // Left of the text: the tick box, or "Undo" in its place on a line just closed, then on Claude's lines the session's
-    // window icon. No CLAUDE tag since Ruling 42 (Petre: "don't say claude"): the orange edge at the line's start is the
-    // mark.
+    // Left of the text: the tick box, or "Undo" in its place on a line just closed, and nothing else. No CLAUDE tag since
+    // Ruling 42 (Petre: "don't say claude"): the orange edge at the line's start is the mark. No VS Code icon either since
+    // Ruling 47 (Petre: "not sure on the vscode icon and surely the space between icon and text is huge"): it was the same
+    // on every Claude line and told him nothing, and it took 19 DIP before the title. The title now starts right after the
+    // tick box with the same spacing a note has; no column is reserved for it.
     //
     // A CLAUDE TASK HAS THE TICK BOX TOO (Ruling 40, Petre: "how do i mark claude as done?"). Only Petre closes, and a
     // tick is Petre: it closes the task at once with the note's six seconds of Undo, and Undo gives back exactly what
@@ -1045,7 +1047,6 @@ public partial class FloatingBar
                 Background = Brushes.Transparent,
                 Margin = new Thickness(1, 0, 1, 0),
             }, () => CloseWithUndo(line), line.Claudes ? "Tick off: closes Claude's task" : "Tick off: closes the note", ignoredWhen: TaskClickIgnored),
-            line.Claudes && line.Window.HasValue ? WindowIconOf(line.Window.Value) : null,
         }.OfType<UIElement>();
 
     // Right of the text, left to right, between the title and the chip (TaskLineFace): the flags that are ON (a flag that is off is a quiet
@@ -1176,22 +1177,6 @@ public partial class FloatingBar
         VerticalAlignment = VerticalAlignment.Center,
         Margin = new Thickness(1, 0, 1, 0),
     };
-
-    // The session's VS Code window's own icon, from the same cache the rows draw from.
-    UIElement WindowIconOf(nint hwnd)
-    {
-        var handle = new WindowHandle(hwnd);
-        var path = manager.KnownWindows.FirstOrDefault(w => w.Handle == handle)?.ProcessPath;
-        return new Image
-        {
-            Tag = "task-window-icon",
-            Source = IconCache.For(handle, path),
-            Width = 14,
-            Height = 14,
-            Margin = new Thickness(0, 0, 5, 0),
-            VerticalAlignment = VerticalAlignment.Center,
-        };
-    }
 
     // The title, then a dot and the detail. On Claude's lines the title is the tan of the mockup's session title and
     // the detail is the bright text, since the detail (the question, the status line) is the news; on a note the
