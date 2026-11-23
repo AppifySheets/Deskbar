@@ -2137,4 +2137,123 @@ public class FloatingBarTaskListTests
         Assert.Equal("mine", t.Tasks.Board.Tasks.Single(x => x.Id == id).Title);
         Assert.Equal(2, t.Lines.Count);
     });
+    // --- Ruling 41: a title wraps to a second line when it does not fit, never a third ------------------------------
+
+    static TextBlock TextBlockOf(Button line) => Inside(line).OfType<TextBlock>().Single(b => Equals(b.Tag, "task-text"));
+
+    // A long title takes two lines and ends in an ellipsis after the second; a short one stays one line. The parts
+    // beside the text stay in the first line's row.
+    [Theory]
+    [InlineData(158.4)]
+    [InlineData(240)]
+    public void A_long_title_wraps_to_two_lines_at_most_and_a_short_one_stays_one(double width) => StaThread.Run(() =>
+    {
+        using var t = Build();
+        var shortId = t.Tasks.AddNote("Call the bank", t.Gepha).Value.Id;
+        var longId = t.Tasks.AddNote("Send the invoices for November to every client, with the late fee, and chase the ones from October as well", t.Gepha).Value.Id;
+        t.Bar.ApplyWidth(width);
+        t.Bar.RequestRebuild();
+        t.Bar.UpdateLayout();
+
+        var shortText = TextBlockOf(t.Lines.Single(l => ((TaskLine)l.Tag).Id == shortId));
+        var longText = TextBlockOf(t.Lines.Single(l => ((TaskLine)l.Tag).Id == longId));
+        var oneLine = shortText.LineHeight;
+        Assert.InRange(shortText.ActualHeight, oneLine - 0.5, oneLine + 0.5);
+        Assert.InRange(longText.ActualHeight, 2 * oneLine - 0.5, 2 * oneLine + 0.5);
+        Assert.Equal(TextTrimming.CharacterEllipsis, longText.TextTrimming);
+        // Laid out at its width with no height limit it would need more than two lines: the second is cut, with "…".
+        var unbounded = new TextBlock { FontSize = longText.FontSize, LineHeight = longText.LineHeight, LineStackingStrategy = longText.LineStackingStrategy,
+            TextWrapping = TextWrapping.Wrap, Text = "Send the invoices for November to every client, with the late fee, and chase the ones from October as well" };
+        unbounded.Measure(new Size(longText.ActualWidth, double.PositiveInfinity));
+        Assert.True(unbounded.DesiredSize.Height > 2 * oneLine + 0.5, $"the probe title needs {unbounded.DesiredSize.Height}, two lines are {2 * oneLine}");
+        // The chip (or its dot) stays in the first line's row of the two-line line.
+        var line = t.Lines.Single(l => ((TaskLine)l.Tag).Id == longId);
+        var end = Inside(line).OfType<FrameworkElement>().Single(e => (Equals(e.Tag, "task-workspace") || Equals(e.Tag, "task-workspace-dot")) && e.IsVisible);
+        var endBounds = end.TransformToAncestor(longText.Parent as Visual ?? line).TransformBounds(new Rect(end.RenderSize));
+        Assert.True(endBounds.Bottom <= oneLine + 1, $"the chip sits at {endBounds}, the first row is {oneLine} high");
+    });
+
+    // Two-line lines drag like one-line ones: a drop on the bottom part of a two-line line puts the dragged one below it.
+    [Fact]
+    public void A_two_line_line_drags_and_takes_a_drop_like_any_other() => StaThread.Run(() =>
+    {
+        var t = Build(openWindow: () => { });
+        t.Bar.ArrangeMouseInput = ArrangeMouse.Held;
+        t.Bar.ApplyWidth(158.4);
+        t.Bar.SizeToContent = SizeToContent.Manual;
+        t.Bar.Height = 900;
+        t.Tasks.AddNote("n1", t.Gepha);
+        t.Tasks.AddNote("a much longer note that will need two lines on the narrow bar for sure", t.Gepha);
+        t.Tasks.AddNote("n3", t.Gepha);
+        Settle(t);
+        Assert.True(t.Lines[1].ActualHeight > t.Lines[0].ActualHeight + 4, "the middle line is two lines");
+
+        Drag(t, t.Lines[0], In(t, t.Lines[1], 0.85));
+
+        Assert.Equal(["a much longer note that will need two lines on the narrow bar for sure", "n3", "n1"], t.Tasks.Board.Pile().Select(x => x.Title));
+        Assert.False(t.Bar.TaskDragging);
+        t.Dispose();
+    });
+
+    // Review C-1's oscillation, again with one-line and two-line lines mixed (Claude lines with an icon, short notes, long
+    // notes), at text offsets -2, 0, +1 and 3.5: once settled, one more pass changes nothing; and with the real queued
+    // pass running on the dispatcher, Input-priority work still runs (a pass that kept re-queuing itself above Input
+    // would starve it, the freeze C-1 was).
+    [Fact]
+    public void A_docked_list_of_one_and_two_line_lines_settles_and_lets_input_run() => StaThread.Run(() =>
+    {
+        var unsettled = new List<string>();
+        var starved = new List<string>();
+        new[] { -2.0, 0.0, 1.0, 3.5 }.ToList().ForEach(offset =>
+        {
+            using var t = Build(openWindow: () => { }, sessionWindow: _ => Maybe<nint>.From((nint)0x1234));
+            t.Harness.Manager.SetBarTextOffset(offset);
+            t.Bar.ApplyWidth(158.4);
+            Enumerable.Range(1, 8).ToList().ForEach(i => t.Tasks.Create($"Claude {i}", t.Gepha, Session($"s{i}")));
+            Enumerable.Range(1, 6).ToList().ForEach(i => t.Tasks.AddNote(i % 2 == 0 ? $"Note {i}" : $"Note {i}, which runs on long enough to need a second line on this bar", t.Gepha));
+            t.Bar.RequestRebuild();
+            t.Bar.SizeToContent = SizeToContent.Manual;
+            for (var height = 400.0; height < 640; height += 1)
+            {
+                t.Bar.Height = height;
+                Settle(t);
+                var settled = t.Bar.TaskListSlotCount;
+                t.Bar.UpdateLayout();
+                t.Bar.FitTaskListToFreeHeight();
+                t.Bar.UpdateLayout();
+                if (t.Bar.TaskListSlotCount != settled) unsettled.Add($"offset {offset} height {height}: {settled} then {t.Bar.TaskListSlotCount}");
+                if (height % 20 == 0)
+                {
+                    // The real path: a paint queues the pass at Loaded priority; the dispatcher runs it, and input with it.
+                    t.Bar.PaintTaskList(evenUnderPress: true);
+                    var ticks = InputTicksWhilePumping(t.Bar.Dispatcher, TimeSpan.FromMilliseconds(60));
+                    if (ticks == 0) starved.Add($"offset {offset} height {height}");
+                }
+            }
+        });
+
+        Assert.True(unsettled.Count == 0, string.Join("\n", unsettled.Take(10)));
+        Assert.True(starved.Count == 0, "input starved at " + string.Join(", ", starved.Take(10)));
+    });
+
+    // Pumps the dispatcher for `span`, posting an Input-priority tick that re-posts itself, and answers how many ran. A
+    // safety timer above every other priority ends the pump after two seconds, so a starved dispatcher fails the test
+    // instead of hanging it.
+    static int InputTicksWhilePumping(Dispatcher dispatcher, TimeSpan span)
+    {
+        var ticks = 0;
+        var frame = new DispatcherFrame();
+        var end = DateTime.UtcNow + span;
+        void Tick() => dispatcher.BeginInvoke(DispatcherPriority.Input, () =>
+        {
+            ticks++;
+            if (DateTime.UtcNow < end) Tick();
+            else frame.Continue = false;
+        });
+        var safety = new DispatcherTimer(TimeSpan.FromSeconds(2), DispatcherPriority.Send, (_, _) => frame.Continue = false, dispatcher);
+        Tick();
+        Dispatcher.PushFrame(frame);
+        safety.Stop();
+        return ticks;
+    }
 }

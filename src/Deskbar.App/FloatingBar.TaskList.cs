@@ -345,7 +345,9 @@ public partial class FloatingBar
     }
 
     // What a line's height follows: everything it shows, and the text size.
-    string HeightKeyOf(TaskLine line) => $"{TextOffset}|{ShapeOf(line)}";
+    // Since Ruling 41 a line's text can wrap to two lines, so the width it is laid out at is part of the key as well:
+    // the same line is one line on a wide list and two on a narrow one.
+    string HeightKeyOf(TaskLine line) => $"{TextOffset}|{Math.Round(taskLinesPanel?.ActualWidth ?? 0)}|{ShapeOf(line)}";
 
     // Expanded in place, at most this many lines show and the rest scroll (PR A review, Important 3): dozens of
     // migrated notes must not push the workspace rows off a docked bar.
@@ -1071,14 +1073,26 @@ public partial class FloatingBar
     // The title, then a dot and the detail. On Claude's lines the title is the tan of the mockup's session title and
     // the detail is the bright text, since the detail (the question, the status line) is the news; on a note the
     // title is the news. A question waiting on Petre is orange either way.
+    //
+    // TWO LINES AT MOST (Ruling 41, which overrides Ruling 38's "the bar stays one line"; Petre: "give long tasks two
+    // lines, when needed"). The text wraps onto a second line when it does not fit, and an ellipsis ends the second when
+    // even two are not enough; a short one stays one line. The line height is fixed (BlockLineHeight), so two lines are
+    // exactly 2 x TaskTextLineHeight and MaxHeight cuts at the second line's foot. The parts beside the text (the tick,
+    // the icon, the flags, the chip) stay in the first line's row (TaskLineFace.FirstRow). The tooltip keeps the whole
+    // text.
     TextBlock TextOf(TaskLine line)
     {
+        var lineHeight = TaskTextLineHeight;
         var text = new TextBlock
         {
             Tag = "task-text",
             FontSize = Text(9.5),
+            TextWrapping = TextWrapping.Wrap,
             TextTrimming = TextTrimming.CharacterEllipsis,
-            VerticalAlignment = VerticalAlignment.Center,
+            LineStackingStrategy = LineStackingStrategy.BlockLineHeight,
+            LineHeight = lineHeight,
+            MaxHeight = 2 * lineHeight,
+            VerticalAlignment = VerticalAlignment.Top,
             Margin = new Thickness(4, 0, 4, 0),
         };
         // A closed line in its undo window is struck through.
@@ -1092,6 +1106,11 @@ public partial class FloatingBar
         text.Inlines.Add(new Run(line.Detail) { Foreground = detailInk });
         return text;
     }
+
+    // One line of a task's text: its font's own spacing at the text size, rounded up to a whole DIP.
+    double TaskTextLineHeight => Math.Ceiling(Text(9.5) * TaskTextFont.LineSpacing);
+
+    static readonly FontFamily TaskTextFont = SystemFonts.MessageFontFamily;
 
     /// <summary>A title's first line: the bar shows one line of a title that holds line breaks.</summary>
     internal static string FirstLine(string title) => title.Split('\n')[0].TrimEnd('\r');
