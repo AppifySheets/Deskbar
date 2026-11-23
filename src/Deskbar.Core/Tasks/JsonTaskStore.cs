@@ -105,7 +105,10 @@ public sealed class JsonTaskStore(string baseDirectory, Action<string>? trace = 
         [property: JsonConverter(typeof(TolerantStringConverter))] string? Description = null,
         [property: JsonConverter(typeof(TolerantTimeConverter))] DateTimeOffset? WaitingSince = null,
         // TaskItem.Adopted; missing in a file written before it existed, which reads as false. Still version 2.
-        bool? Adopted = null);
+        bool? Adopted = null,
+        // TaskItem.HandedBack (stalled tasks, spec 2026-11-23-stalled-claude-tasks-design.md): optional, read tolerantly
+        // like WaitingSince, so a wrong-typed value reads as not handed back. Still version 2.
+        [property: JsonConverter(typeof(TolerantTimeConverter))] DateTimeOffset? HandedBack = null);
 
     // The assignee (Ruling 57): kind by name ("me", "claude", "colleague"), plus the id and name a colleague needs.
     sealed record AssigneeDto(string? Kind, string? Id, string? Name);
@@ -197,7 +200,8 @@ public sealed class JsonTaskStore(string baseDirectory, Action<string>? trace = 
             new AssigneeDto(t.Assignee.Kind.ToString().ToLowerInvariant(), t.Assignee.Id, t.Assignee.Name),
             t.Description.Length > 0 ? t.Description : null,
             t.WaitingSince.HasValue ? t.WaitingSince.Value.ToUniversalTime() : null,
-            t.Adopted);
+            t.Adopted,
+            t.HandedBack.HasValue ? t.HandedBack.Value.ToUniversalTime() : null);
 
     static TaskItem FromDto(TaskDto d) =>
         new(d.Id, d.Title ?? "",
@@ -222,6 +226,7 @@ public sealed class JsonTaskStore(string baseDirectory, Action<string>? trace = 
             Assignee = (d.Assignee is { } a ? Assignee.From(a.Kind, a.Id, a.Name) : Maybe<Assignee>.None)
                 .GetValueOrDefault(Assignee.DerivedFor((d.Sessions ?? []).Count > 0, d.Status)),
             Adopted = d.Adopted ?? false,
+            HandedBack = d.HandedBack is { } handed ? handed.ToUniversalTime() : Maybe<DateTimeOffset>.None,
         };
 
     // The rank a task saved before ranks existed gets, so the tasks keep the order the bar showed them in then:

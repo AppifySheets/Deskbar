@@ -128,6 +128,15 @@ public sealed record TaskItem(
     public Maybe<DateTimeOffset> WaitingSince { get; init; }
 
     /// <summary>
+    /// When Deskbar handed this Claude task back to Petre because no session had worked on it for a while
+    /// (StalledTasks; spec docs/superpowers/specs/2026-11-23-stalled-claude-tasks-design.md), or none. The mark is what
+    /// tells such a task apart from one Petre assigned to himself: only a marked task goes back to Claude when its
+    /// session works again (TaskBoard.TakeBack). Any other change of assignee or status clears it (TaskBoard.Change),
+    /// and so does Petre assigning it himself (TaskBoard.Assign). A stored optional field, read tolerantly.
+    /// </summary>
+    public Maybe<DateTimeOffset> HandedBack { get; init; }
+
+    /// <summary>
     /// Deskbar made this task for a live session no task knew (TaskBoard.AdoptSession; design
     /// docs/superpowers/specs/2026-11-23-tasks-open-claude-sessions-design.md, "Every live session has a task"). Kept so
     /// that when the session joins its own task a moment later (its SessionStart hook can come after the adoption), the
