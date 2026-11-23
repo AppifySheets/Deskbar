@@ -68,7 +68,12 @@ public static class SplitMove
     // and moving a Down boundary never changes any width. A moved outer edge alongside an inner one is ignored. The
     // opening, if any, is untouched (apart from following a regroup). A leaf the layout does not have is a caller bug
     // and throws (TileLayout.PathTo).
-    public static Maybe<SplitMoved> Apply(TileLayout layout, WindowRect area, int gap, int leaf, Edges moved, WindowRect frame)
+    //
+    // `regroup` false turns crossings off: the caller knows the tiles on screen are not where this layout alone puts
+    // them (a window that will not shrink stretched its tile, Tiler.Unstretched), so a "+" in the layout may not be
+    // one on screen, and only the whole-line move is safe.
+    public static Maybe<SplitMoved> Apply(TileLayout layout, WindowRect area, int gap, int leaf, Edges moved, WindowRect frame,
+        bool regroup = true)
     {
         var inner = GridLayout.InnerArea(area, gap);
         var path = layout.PathTo(leaf);
@@ -85,7 +90,7 @@ public static class SplitMove
         }.Where(s => s.HasValue).Select(s => s.Value).ToList();
 
         var identity = (IReadOnlyList<int>)Enumerable.Range(0, layout.Count).ToList();
-        var (start, order) = sides.Count == 1
+        var (start, order) = regroup && sides.Count == 1
             ? Regrouped(layout, inner, leaf, sides[0]).GetValueOrDefault((layout, identity))
             : (layout, identity);
 

@@ -257,6 +257,27 @@ public sealed class TilerResizeTests : IDisposable
         Assert.Single(surface.Placed);
     }
 
+    // A window that will not shrink (#398) stretches its tile past the layout's line, so the tiles that look like a
+    // "+" in the layout do not meet in one on screen. A regroup would then hand the stretch to the other column and
+    // move B and D by hundreds of pixels (final review, Important 1), so the drag moves the whole line as before:
+    // B and D keep their heights and the order stays.
+    [Fact]
+    public void A_stretched_tile_turns_the_crossing_off()
+    {
+        new[] { 1, 2, 3, 4 }.ToList().ForEach(n => Exists(W(n), alpha));
+        surface.MinimumSize[W(1)] = (900, 700);
+        Start();
+        Echo();
+        var (b, d) = (surface.Frames[W(3)], surface.Frames[W(4)]);
+
+        ResizedByHand(W(1), surface.Frames[W(1)] with { Right = 1337 });
+
+        Assert.Equal((b.Top, b.Bottom), (surface.Frames[W(3)].Top, surface.Frames[W(3)].Bottom));
+        Assert.Equal((d.Top, d.Bottom), (surface.Frames[W(4)].Top, surface.Frames[W(4)].Bottom));
+        Assert.Equal(1345, surface.Frames[W(4)].Left);
+        Assert.Equal([W(1), W(2), W(3), W(4)], tiler.Board.On(1));
+    }
+
     // After the half-line drag the column lines are offset (1341 on top, 960 below), so the row line now ends against
     // them on both sides: a T, and it moves whole. All four heights change, nothing throws, the order stays.
     [Fact]

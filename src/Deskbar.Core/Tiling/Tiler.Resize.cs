@@ -316,6 +316,19 @@ public sealed partial class Tiler
     // Is this Settled the echo of our own Place? Asked once, first thing in OnSettled, and the answer is taken.
     bool EchoOfOurPlace(WindowHandle window) => awaitingEcho.Remove(window);
 
+    // Whether every tile on this screen sits exactly where the layout alone puts it, with no learned minimum (#398,
+    // Tiler.Minimums.cs) stretching one. Crossings are found on the layout (SplitMove), and a stretched tile pushes a
+    // line off the place the layout gives it: what is a "+" in the layout is then two T's on screen, and regrouping
+    // there hands the stretch to the other side, moving tiles the drag should have left alone (final review of the
+    // crossing work, Important 1: B and D jumped 196 px). So a stretched screen keeps the whole-line move. A slot list
+    // that does not fit (empty) counts as stretched.
+    bool Unstretched(TileScreen screen, IReadOnlyList<WindowHandle> windows, TileLayout layout)
+    {
+        var slots = SlotsOf(screen, windows, layout);
+        return slots.Count == windows.Count
+            && windows.Select(w => slots[w]).SequenceEqual(GridLayout.Arrange(screen.WorkArea, windows.Count, GapOn(screen), layout));
+    }
+
     // OnSettled's step 6. True when this Settled was a resize by hand and has been dealt with here: a split moved
     // and the screen re-tiled, or (no moved edge faces a neighbour) the window put back into its slot, through
     // PutBack so the backstop counts it. False for everything else, which goes on to the move rules unchanged:
@@ -364,7 +377,7 @@ public sealed partial class Tiler
             return true;
         }
 
-        SplitMove.Apply(shown, screen.WorkArea, GapOn(screen), leaf, moved, frame).Match(
+        SplitMove.Apply(shown, screen.WorkArea, GapOn(screen), leaf, moved, frame, Unstretched(screen, windows, shown)).Match(
             result =>
             {
                 // A regroup at a crossing put the leaves in a new order (SplitMoved.Order). The screen's windows are

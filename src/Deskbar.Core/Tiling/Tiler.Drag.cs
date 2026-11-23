@@ -72,7 +72,7 @@ public sealed partial class Tiler
         // At a crossing the move regroups the tree and reorders its leaves (SplitMoved), so the neighbours are laid
         // out in the new order. Nothing is stored and the board is left alone: the drop recomputes the same move from
         // the stored layout and the release frame (Tiler.Resize.MovedASplit), and reorders the board then.
-        SplitMove.Apply(shown, screen.WorkArea, GapOn(screen), leaf, moved, frame).Tap(next =>
+        SplitMove.Apply(shown, screen.WorkArea, GapOn(screen), leaf, moved, frame, Unstretched(screen, windows, shown)).Tap(next =>
             SlotsOf(screen, next.Windows(windows, shown), next.Layout)
                 .Where(s => s.Key != window)
                 .ToList()
