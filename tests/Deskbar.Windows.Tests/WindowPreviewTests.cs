@@ -2,6 +2,7 @@
 using System.Windows.Controls;
 using System.Windows.Interop;
 using System.Windows.Media;
+using CSharpFunctionalExtensions;
 using Deskbar.App;
 using Deskbar.Core.Domain;
 
@@ -203,31 +204,74 @@ public class WindowPreviewTests
     // asserts the PIXELS: the three stripes have to be in there, and every pixel has to be opaque.
     // Category=Screen: reads what is really on the screen, so it needs the desktop being shown. A hidden
     // desktop (scripts/test-hidden.ps1) is never composited; CI runs it on the runner's visible desktop.
+    //
+    // THE CAPTURE IS RETRIED, BOUNDED, before the colours are judged. It still failed on a runner after
+    // WaitForFirstFrame went in: CI run 45250069293 on 2026-11-23, "only 1 distinct colours: the capture
+    // is blank", 55ms into the test, with ContentRendered already raised. So a raised ContentRendered does
+    // not promise that DWM holds the frame yet: WPF composes on its own render thread, and ContentRendered
+    // only says the UI thread handed the first frame over.
+    //
+    // What was measured before choosing this, on the runner itself (draft Deskbar #448): 500 fresh windows
+    // captured straight after ContentRendered, 300 of them with every core kept busy, and not one blank
+    // capture. The race is real, it is rare (three failures since August, about one suite run in two
+    // hundred), and it does not reproduce on demand. So the test waits for the picture the way it already
+    // waits for the frame: it asks again until the stripes show, for up to 5 seconds.
+    //
+    // This does not hide a real regression. A capture that is ALWAYS blank, like the transparent-image bug
+    // this test was written for, never shows three colours, so the wait runs out and the test fails. And
+    // when it does fail, the message names the flat colour that came back and how long it waited, because
+    // that colour says which way it broke: black is a surface DWM never got, and anything else is a frame
+    // that did get painted, only not with our stripes.
     [Trait("Category", "Screen")]
     [Fact]
     public void A_capture_carries_the_windows_own_colours_and_is_opaque() => StaThread.Run(() =>
     {
         var window = Striped(300, 240);
 
-        var picture = WindowPreview.Of(HandleOf(window), 1.0, 520, 340);
+        var clock = System.Diagnostics.Stopwatch.StartNew();
+        var attempts = 0;
+        (Maybe<System.Windows.Media.Imaging.BitmapSource> Picture, IReadOnlyCollection<int> Colours) Capture()
+        {
+            attempts++;
+            var picture = WindowPreview.Of(HandleOf(window), 1.0, 520, 340);
+            return (picture, picture.HasValue ? DistinctColours(picture.Value) : []);
+        }
 
-        Assert.True(picture.HasValue);
-        var pixels = new byte[picture.Value.PixelWidth * picture.Value.PixelHeight * 4];
-        picture.Value.CopyPixels(pixels, picture.Value.PixelWidth * 4, 0);
+        var shot = Capture();
+        while (shot.Colours.Count < 3 && clock.Elapsed < TimeSpan.FromSeconds(5))
+        {
+            // Same reason as in WaitForFirstFrame: keep the dispatcher turning while the test waits, since
+            // nothing else pumps this bare STA thread.
+            System.Windows.Threading.Dispatcher.CurrentDispatcher.Invoke(
+                () => { }, System.Windows.Threading.DispatcherPriority.SystemIdle);
+            Thread.Sleep(20);
+            shot = Capture();
+        }
 
-        var colours = new HashSet<int>();
-        for (var i = 0; i < pixels.Length; i += 4)
-            colours.Add(pixels[i] | (pixels[i + 1] << 8) | (pixels[i + 2] << 16));
+        Assert.True(shot.Picture.HasValue, $"no capture at all after {attempts} attempts in {clock.ElapsedMilliseconds}ms");
 
         // Red, green and blue bands, so a real capture cannot come back as one flat colour.
-        Assert.True(colours.Count >= 3, $"only {colours.Count} distinct colours: the capture is blank");
+        Assert.True(shot.Colours.Count >= 3,
+            $"only {shot.Colours.Count} distinct colours after {attempts} attempts in {clock.ElapsedMilliseconds}ms: "
+            + $"the capture is blank (colour {string.Join(", ", shot.Colours.Select(c => $"#{c:X6}"))})");
 
         // Bgr32 has no alpha channel to misread, which is the whole fix: the format itself is the
         // guarantee, so the assertion is on the format rather than on a sample of bytes.
-        Assert.Equal(System.Windows.Media.PixelFormats.Bgr32, picture.Value.Format);
+        Assert.Equal(System.Windows.Media.PixelFormats.Bgr32, shot.Picture.Value.Format);
 
         window.Close();
     });
+
+    // Every distinct RGB value in a Bgr32 picture, as 0xRRGGBB. Alpha is left out on purpose: Bgr32's
+    // fourth byte is padding, and the test is about colour, not opacity.
+    static IReadOnlyCollection<int> DistinctColours(System.Windows.Media.Imaging.BitmapSource picture)
+    {
+        var pixels = new byte[picture.PixelWidth * picture.PixelHeight * 4];
+        picture.CopyPixels(pixels, picture.PixelWidth * 4, 0);
+        return Enumerable.Range(0, pixels.Length / 4)
+            .Select(i => pixels[i * 4] | (pixels[i * 4 + 1] << 8) | (pixels[i * 4 + 2] << 16))
+            .ToHashSet();
+    }
 
     // The frozen requirement is not cosmetic: an unfrozen WPF bitmap takes thread affinity, and this one
     // is built on whichever thread the hover happened on. The same rule the bar's static brushes follow.
