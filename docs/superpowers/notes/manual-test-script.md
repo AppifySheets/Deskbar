@@ -393,34 +393,35 @@ The `claude agents --json` poll, adoption and the automatic resume (spec
 Manage ticked. Use a throwaway folder Claude Code already trusts, not a real repo. Turn tracing on
 (`%APPDATA%\Deskbar\trace.on`) to see the `claude sessions:` lines in `%TEMP%\deskbar-trace.log`.
 
-76. In Manage's Settings tab, "Resume the sessions of open tasks after a restart or a crash" sits under the tasks box,
+82. In Manage's Settings tab, "Resume the sessions of open tasks after a restart or a crash" sits under the tasks box,
     with the 30 days / `cleanupPeriodDays` line under it. Untick the tasks box: the resume box greys out and unticks.
     Tick it again: back, ticked. `$ts claude-resume off` unticks it, `$ts claude-resume on` ticks it.
-77. In a terminal in the throwaway folder, start `claude --bg "say hello"` without telling it about any task. For the
+83. In a terminal in the throwaway folder, start `claude --bg "say hello"` without telling it about any task. For the
     first two minutes no task appears; then, within 15 seconds more, a task named after the session appears, In
     progress with a live session; with a VS Code window open on that folder, the task is on that window's workspace.
     Run `claude -p "say hi"` in the same folder while it works: `claude agents` lists it as interactive, yet it never
     gets a task (its hooks are headless, Ruling 17).
     Ask that session to join another task (`deskbar task join <id>`): the task Deskbar made for it disappears. Repeat
-    with the made task renamed (or commented, flagged, moved) first: it stays, showing the session ended.
-78. Note the task's session, then end it: `claude stop <short id>` (from `claude agents`). Nothing happens for two
+    with the made task renamed (or commented, flagged, moved, assigned to you, described) first: it stays, showing the
+    session ended.
+84. Note the task's session, then end it: `claude stop <short id>` (from `claude agents`). Nothing happens for two
     minutes (Ruling 18: VS Code might be bringing it back by itself); within 15 seconds after that the task's
     thread says "Resumed by Deskbar at HH:mm." and `claude agents` lists the session again with the SAME session id
     (not a copy). Close the task and stop the session again: nothing is resumed.
-79. Make five tasks with sessions as in 77, then stop all five at once. They come back one at a time, about five
+85. Make five tasks with sessions as in 83, then stop all five at once. They come back one at a time, about five
     seconds apart (the thread times, or `claude agents` refreshed while it happens), and none of them twice. The bar
     stays usable throughout.
-80. Stop a session in the middle of a long reply (kill its `claude.exe` from Task Manager while it is working). Its
+86. Stop a session in the middle of a long reply (kill its `claude.exe` from Task Manager while it is working). Its
     resume says "its last turn was cut off, so it was told to continue", and the session carries on by itself.
-81. Untick the resume box and stop a task's session: the task shows the session ended and nothing resumes it; start a
+87. Untick the resume box and stop a task's session: the task shows the session ended and nothing resumes it; start a
     new `claude --bg` in another folder and it still gets a task. Tick the box again: the ended session is resumed at
     the next poll (once it has been gone two minutes).
-82. Make a task whose session's folder Claude Code no longer trusts (however your Claude Code version lets you take
+88. Make a task whose session's folder Claude Code no longer trusts (however your Claude Code version lets you take
     the trust back; see the probes note's "An untrusted folder"), and stop the session. The thread gets Claude's own
     "Workspace not trusted" message once, the task waits on you with "Deskbar could not resume this session. Claude
     Code's message is in this task's thread.", and the trace shows no second resume of it, however long you wait.
     Trust the folder and set the task back to In progress: the next poll resumes it.
-83. Rename `claude.exe` away (or take `%USERPROFILE%\.local\bin` off Deskbar's PATH) and restart Deskbar: the tasks
+89. Rename `claude.exe` away (or take `%USERPROFILE%\.local\bin` off Deskbar's PATH) and restart Deskbar: the tasks
     keep showing what they showed, nothing is ended or resumed, and the trace says ONCE that the list could not be
     read, not every 15 seconds. Manage's Settings tab shows the reason in one red line under the resume box (Ruling
     20). Put it back: the trace says it is read again, the line on Manage goes within 15 seconds, and the next poll
@@ -432,65 +433,65 @@ Task 9 of the same spec ("Where the clicks are", "Choosing the folder", "The win
 in the app). Same setup as above: Claude Code with background sessions, Windows Terminal, both Claude boxes ticked, a
 throwaway folder Claude Code trusts, and tracing on for the `claude actions:` and `claude sessions:` lines.
 
-84. Right-click a note on a workspace whose tasks have sessions in the throwaway folder: the menu reads Edit, then
+90. Right-click a note on a workspace whose tasks have sessions in the throwaway folder: the menu reads Edit, then
     "Start Claude on this". The tasks window's "⋯" menu has it in the same place, and an open thread has a
     "Start Claude on this" button above the comments. A closed task has neither.
-85. Pick "Start Claude on this" on a note whose workspace knows exactly one folder: no question, no list. Within a few
+91. Pick "Start Claude on this" on a note whose workspace knows exactly one folder: no question, no list. Within a few
     seconds a Windows Terminal window titled "<the note's title> · Claude" opens on the note's workspace, in the Deskbar
     Claude look, attached to a session that is already working on the note (its first message names the task). The
     note turns into a Claude task with that session.
-86. On a note whose workspace knows two folders (tasks with sessions in two repos, or a VS Code window on a second
+92. On a note whose workspace knows two folders (tasks with sessions in two repos, or a VS Code window on a second
     repo that some session also used): a short list of the folders opens at the pointer, ending with
     "Choose a folder…". "Choose a folder…" opens Windows' folder picker; cancelling it starts nothing.
-87. "Start Claude on this" on a task whose session is still running asks "This task already has a Claude session
+93. "Start Claude on this" on a task whose session is still running asks "This task already has a Claude session
     running. Start another one?". No starts nothing.
-88. Close the terminal window from 85 (its X). `claude agents` still lists the session, and the task still shows it.
+94. Close the terminal window from 91 (its X). `claude agents` still lists the session, and the task still shows it.
     Double-click the task's line: you go to its workspace and a new terminal window attaches to the same session.
     Double-click again while it is open: that same window comes to the front, and no second window opens (a second
     attach would take the session over and close the first).
-89. `claude stop <short id>` the session, then double-click the task: the thread says "Resumed by Deskbar at HH:mm.",
+95. `claude stop <short id>` the session, then double-click the task: the thread says "Resumed by Deskbar at HH:mm.",
     and a few seconds later a terminal window opens on the resumed session (same session id in `claude agents`).
-90. Open the task's thread: its sessions are listed newest first, each "Session <short id> · joined <time> · working,
-    idle or ended", each with Open. Open on an ended one does what 89 does. Rename a session's transcript file under
+96. Open the task's thread: its sessions are listed newest first, each "Session <short id> · joined <time> · working,
+    idle or ended", each with Open. Open on an ended one does what 95 does. Rename a session's transcript file under
     `%USERPROFILE%\.claude\projects\<folder>\` away: within 15 seconds that line says "expired" and has no Open; a
     double-click on a task whose latest session is expired only switches workspace. Put the file back.
-91. Double-click a task whose session is a VS Code session you are sitting in: you go to its workspace and that VS Code
+97. Double-click a task whose session is a VS Code session you are sitting in: you go to its workspace and that VS Code
     window comes forward; no terminal opens. Double-click a plain note: only the workspace switch.
-92. Start Claude on a note in a folder Claude Code has never trusted: the thread gets Claude's "Workspace not trusted"
+98. Start Claude on a note in a folder Claude Code has never trusted: the thread gets Claude's "Workspace not trusted"
     message, and a box asks "Open a terminal there so you can trust it?". Yes opens a plain Windows Terminal window
     running `claude` in that folder; accept the trust prompt there, then "Start Claude on this" again works. With
-    `claude.exe` renamed away as in 83, "Start Claude on this" shows a message box with the reason as well as writing
+    `claude.exe` renamed away as in 89, "Start Claude on this" shows a message box with the reason as well as writing
     it in the thread. `$ts task start <id>` on a closed task is refused at once with "The task is closed. Reopen it to
     start Claude on it."
-93. From a terminal: `$ts task go <id>` does what the double-click does; `$ts task start <id>` on a task with one folder
+99. From a terminal: `$ts task go <id>` does what the double-click does; `$ts task start <id>` on a task with one folder
     starts there, and on one with several refuses, naming them, until `--folder <path>` picks one;
     `$ts task open-session <id> <short id>` opens that session. Each answers with the task's JSON.
-94. Reboot the machine (or sign out and back in) with three open Claude tasks, one of them mid-turn when you go.
+100. Reboot the machine (or sign out and back in) with three open Claude tasks, one of them mid-turn when you go.
     Nothing is resumed for the first two minutes after Deskbar starts; then the three sessions come back one at a
     time about five seconds apart, each with a
     "Resumed by Deskbar" line in its thread. The mid-turn one says its last turn was cut off and carries on by itself.
-    A task you marked done before the reboot is not resumed. (Steps 78 to 80 cover the same with `claude stop`; this
+    A task you marked done before the reboot is not resumed. (Steps 84 to 86 cover the same with `claude stop`; this
     is the real thing, so run it when a reboot is cheap.)
-95. Restart Deskbar itself while a session is in the middle of a turn: the session is untouched (it is not Deskbar's
+101. Restart Deskbar itself while a session is in the middle of a turn: the session is untouched (it is not Deskbar's
     child), the tasks show it running again within 15 seconds, and nothing is resumed twice.
-96. Mark a task with a running session done: the session is left alone. Stop that session with `claude stop`: it is
+102. Mark a task with a running session done: the session is left alone. Stop that session with `claude stop`: it is
     not resumed. Reopen the task: it is resumed at the next poll.
-97. Take a give-up from 82 and set the task's status (to In progress, say; a keeper's question has no answer box): the
+103. Take a give-up from 88 and set the task's status (to In progress, say; a keeper's question has no answer box): the
     next poll tries the resume again instead of staying silent.
-98. Esc, then close: in a background session's terminal window, ask for a long reply and press Esc halfway through it,
+104. Esc, then close: in a background session's terminal window, ask for a long reply and press Esc halfway through it,
     then `claude stop <short id>`. Two minutes later the session is resumed WITHOUT the "told to continue" wording:
     the thread says only "Resumed by Deskbar at HH:mm.", and the session sits idle waiting for you rather than
     finishing the reply you stopped.
-99. A VS Code window reload with a Claude panel open on a task's session: Developer: Reload Window. The panel comes
+105. A VS Code window reload with a Claude panel open on a task's session: Developer: Reload Window. The panel comes
     back on the same session within a few seconds, and Deskbar starts no background copy: `claude agents` never shows
     a second entry for it, and the thread gets no "Resumed by Deskbar" line (the two-minute wait covers the reload).
     The same after closing VS Code and opening it again within two minutes.
-100. /clear in a VS Code session that is on a task: the old session shows ended on the task, the new conversation is on
+106. /clear in a VS Code session that is on a task: the old session shows ended on the task, the new conversation is on
     the same task at once (its SessionStart hook says "clear"; the task keeps its status), and the cleared session is
     never resumed, however long you wait (the thread gets no "Resumed by Deskbar" line for it). A /clear in a session
     with no task joins nothing. Note in the thread's session list whether the new conversation has a new session id:
     if it kept the old one, there is a single live line instead (unmeasured so far; either way nothing is resumed).
-101. Double-click a task the keeper gave up on (a give-up from 82 after trusting the folder again, or one that hit "3
+107. Double-click a task the keeper gave up on (a give-up from 88 after trusting the folder again, or one that hit "3
     resumes in 10 minutes"): its session is resumed and its window opens, and the task goes back to In progress
     with no question. The next stop of that session is resumed again two minutes later, not given up on at once.
 
