@@ -60,7 +60,7 @@ $ts = "$env:APPDATA\Deskbar\deskbar.cmd"
 
 ## With Claude sessions
 
-When a Claude Code session finishes a reply or waits for a permission while you are on another workspace, that workspace's name and colour rail flash orange on the bar and the session's VS Code icon glows, until you go there. See [Claude Code sessions](claude-sessions.md).
+When a Claude Code session finishes a reply or waits for a permission while you are on another workspace, that workspace's name and colour rail flash orange on the bar and the session's VS Code icon glows. When you go there, the window's own border blinks orange for five seconds, or until you click or type in it, so you can tell which window asked. A window whose taskbar button flashed blinks the same way. See [Claude Code sessions](claude-sessions.md).
 
 ## Related
 

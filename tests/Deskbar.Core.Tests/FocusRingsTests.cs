@@ -93,4 +93,46 @@ public class FocusRingsTests
 
         Assert.Empty(Rings(overview));
     }
+
+    // THE BLINKING BORDER (FocusRings.WithAsking): Petre's "a" from the mockup. Window 1 has focus (its ring is the
+    // workspace's colour), window 2 is asking for him, window 3 is on a workspace he is not on.
+    static readonly Overview.Overview Arrived = new([], [
+        Workspace(true, Row(1, 1, front: true, active: true), Row(2, 1, front: false)),
+        Workspace(false, Row(3, 1, front: true)),
+    ], []);
+
+    static IReadOnlyList<(int Window, string Colour)> Asking(IReadOnlyList<FocusRings.Ring> rings, int[] blinking, bool lit, string? unlit) =>
+        FocusRings.WithAsking(rings, Arrived, blinking.Select(w => new WindowHandle(w)).ToList(), lit, unlit)
+            .Select(r => ((int)r.Window.Value, r.Colour)).OrderBy(r => r.Item1).ToList();
+
+    [Fact]
+    public void On_the_lit_beat_an_asking_window_is_orange()
+    {
+        var rings = FocusRings.Of(Arrived, _ => Indigo);
+
+        Assert.Equal([(1, Indigo), (2, FocusRings.Asking)], Asking(rings, [2], lit: true, FocusRings.DimWhite));
+    }
+
+    // On the dark beat it goes back to the ring it would have had: the focused one to its workspace colour...
+    [Fact]
+    public void On_the_dark_beat_a_focused_asking_window_has_its_focus_ring() =>
+        Assert.Equal([(1, Indigo)], Asking(FocusRings.Of(Arrived, _ => Indigo), [1], lit: false, FocusRings.DimWhite));
+
+    // ...and one with no ring to the dim white, so the line flips between two colours rather than coming and going.
+    [Fact]
+    public void On_the_dark_beat_an_asking_window_with_no_ring_is_dim_white() =>
+        Assert.Equal([(1, Indigo), (2, FocusRings.DimWhite)], Asking(FocusRings.Of(Arrived, _ => Indigo), [2], lit: false, FocusRings.DimWhite));
+
+    // With the focus ring setting off there are no other rings, and the dark beat draws nothing: Windows' own border.
+    [Fact]
+    public void With_the_setting_off_only_the_lit_beat_draws()
+    {
+        Assert.Equal([(2, FocusRings.Asking)], Asking([], [2], lit: true, unlit: null));
+        Assert.Empty(Asking([], [2], lit: false, unlit: null));
+    }
+
+    // A window asking on a workspace you are not on is cloaked: nothing to outline.
+    [Fact]
+    public void An_asking_window_on_another_workspace_gets_no_border() =>
+        Assert.Empty(Asking([], [3], lit: true, unlit: null));
 }

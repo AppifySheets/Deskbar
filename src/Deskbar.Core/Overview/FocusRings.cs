@@ -31,7 +31,7 @@ public static class FocusRings
     // = 115 = 0x73. On a dark window edge it reads as dim white, which is what the mockup showed.
     public const string DimWhite = "#737373";
 
-    public enum Kind { Focused, Elsewhere }
+    public enum Kind { Focused, Elsewhere, Asking }
 
     public sealed record Ring(WindowHandle Window, Kind Kind, string Colour);
 
@@ -65,5 +65,34 @@ public static class FocusRings
             .Select(h => new Ring(h, Kind.Elsewhere, DimWhite));
 
         return focusedRing.Concat(elsewhere).ToList();
+    }
+
+    // The attention orange, the bar's AttentionDot and the asking row's blink, so the screen and the bar say "this one
+    // wants you" in one colour.
+    public const string Asking = "#FFA726";
+
+    // THE BLINKING BORDER of a window asking for you (WorkspaceManager.seenAt; Petre picked "a" from the mockup at
+    // https://claude.ai/artifact/PPhYsVsC8x8647K3MAjF4m). `rings` are the focus rings worked out by Of, or none when
+    // the focus ring setting is off, and `blinking` the windows to blink. On the lit beat each blinking window on the
+    // desktop in front gets the orange; on the dark beat it gets back the ring it would have had, or `unlit` where it
+    // has none (the dim white with the setting on, so the line flips between two colours rather than coming and going;
+    // null with the setting off, so the border goes back to Windows' own between beats).
+    //
+    // Only windows the overview has on the desktop in front: a window that asked on a workspace you have since left is
+    // cloaked, and an outline on it would show nothing. A minimized one is left out too, as Of leaves it out.
+    public static IReadOnlyList<Ring> WithAsking(IReadOnlyList<Ring> rings, Overview overview, IReadOnlyCollection<WindowHandle> blinking,
+        bool lit, string? unlit)
+    {
+        var here = overview.Workspaces.FirstOrDefault(w => w.IsCurrent)?.Running
+                   ?? overview.OtherDesktops.FirstOrDefault(d => d.IsCurrent)?.Windows
+                   ?? [];
+        var visible = here.Concat(overview.Pinned).Where(r => !r.IsMinimized).Select(r => r.Window.Handle).ToHashSet();
+        var asking = blinking.Where(visible.Contains).ToHashSet();
+
+        var beats = asking.Select(w => lit
+                ? new Ring(w, Kind.Asking, Asking)
+                : rings.FirstOrDefault(r => r.Window == w) ?? (unlit is { } colour ? new Ring(w, Kind.Asking, colour) : null))
+            .OfType<Ring>();
+        return rings.Where(r => !asking.Contains(r.Window)).Concat(beats).ToList();
     }
 }

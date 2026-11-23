@@ -205,8 +205,9 @@ public class RemoteControlStartTests
         Activate(browser);
         Assert.True(RowOf(manager, "Research", 0x70).WantsAttention);
 
-        // Going there and looking at it is.
+        // Going there and looking at it is, once the arrival's own focus (WorkspaceManager.ArrivalGrace) has passed.
         StandOn(manager, "Research");
+        now += TimeSpan.FromSeconds(2);
         Activate(browser);
         Assert.False(RowOf(manager, "Research", 0x70).WantsAttention);
     }

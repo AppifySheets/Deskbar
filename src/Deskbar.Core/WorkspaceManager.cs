@@ -684,6 +684,96 @@ public sealed class WorkspaceManager(
     readonly HashSet<Guid> askingWorkspaces = [];
     readonly HashSet<WindowHandle> askingWindows = [];
 
+    // THE ASKING WINDOW, POINTED AT ON THE SCREEN. Petre: "when i activate the deskbar where an app is blinking; can you
+    // have a blinking border for that window that's asking for attention?", then "a" from the mockup
+    // (https://claude.ai/artifact/PPhYsVsC8x8647K3MAjF4m): the window's own 1 px border blinks orange, on the beat of
+    // the bar row's blink, and stops on whichever comes first, a click or keystroke in that window or five seconds.
+    //
+    // A marked window (one whose session asked, askingWindows, or whose taskbar button flashed, wantsAttention) is SEEN
+    // once it is on the desktop in front while somebody is at the machine: arriving there is the usual way, and a
+    // flash landing on the desktop you are on is the other. From that moment it blinks (BlinkingWindows; the bar draws
+    // it through the focus rings, FocusRings.WithAsking), and SettleAsks, run by the bar's blink timer, ends the mark:
+    //
+    //   * five seconds after it was seen (AskingBlink): you have been shown it;
+    //   * sooner, on input while it is the window in front, after the arrival's own moment (ArrivalGrace): you have
+    //     clicked or typed in it, which is answering it.
+    //
+    // "Somebody is at the machine" is input within PresentWithin, so a flash on the desktop in front while Petre is
+    // away waits for him, and blinks when he is back, rather than spending its five seconds on an empty room.
+    //
+    // seenAt holds when each marked window was first seen; a window is blinking exactly while it is in here.
+    readonly Dictionary<WindowHandle, DateTimeOffset> seenAt = [];
+
+    // When the desktop in front last changed (OnDesktopChanged), for ArrivingFocus.
+    DateTimeOffset lastArrival = DateTimeOffset.MinValue;
+
+    // How long the border blinks: the "few seconds" of Petre's "yes on both" (click into it, or a few seconds).
+    public static readonly TimeSpan AskingBlink = TimeSpan.FromSeconds(5);
+
+    // The arrival's own moment. A focus this soon after arriving is the one Windows (or Deskbar's own switch, which
+    // restores the remembered window) hands out, not one the user chose; input this soon is the chord or click that
+    // made the switch.
+    static readonly TimeSpan ArrivalGrace = TimeSpan.FromSeconds(1);
+
+    // How recent input must be for the machine to count as attended when a marked window comes into view.
+    static readonly TimeSpan PresentWithin = TimeSpan.FromSeconds(5);
+
+    // The windows blinking now (see seenAt). A snapshot, for the same reason AskingWorkspaces is one.
+    public IReadOnlyCollection<WindowHandle> BlinkingWindows => [.. seenAt.Keys];
+
+    // Whether any window carries a mark, so the bar runs its blink timer only while there is something to settle.
+    public bool HasWindowMarks => wantsAttention.Count > 0 || askingWindows.Count > 0;
+
+    // Starts and ends the blinks (see seenAt), given how long ago the last keyboard or mouse input was (the app reads it
+    // with GetLastInputInfo, IInputActivity). Called by the bar's blink timer, every 600 ms while HasWindowMarks.
+    // Pulses StateChanged only when a window starts or stops blinking, never on a tick that changes nothing.
+    //
+    // A mark on a window the app no longer knows (closed meanwhile) is dropped here too: nothing else would ever clear
+    // it, and it would keep the timer running for nothing.
+    public void SettleAsks(TimeSpan sinceLastInput)
+    {
+        if (!HasWindowMarks && seenAt.Count == 0) return;
+        var at = now();
+        var marked = wantsAttention.Concat(askingWindows).Distinct().ToList();
+        var gone = marked.Where(w => !knownWindows.ContainsKey(w)).ToList();
+
+        // Asked of the shell (OnDesktopInFront) only for a marked window not yet seen, and only while someone is here.
+        var fresh = sinceLastInput < PresentWithin
+            ? marked.Except(gone).Where(w => !seenAt.ContainsKey(w) && OnDesktopInFront(w)).ToList()
+            : [];
+        fresh.ForEach(w => seenAt[w] = at);
+
+        var lastInput = at - sinceLastInput;
+        var answered = seenAt
+            .Where(p => at - p.Value >= AskingBlink
+                        || (activeWindow.Equals(Maybe<WindowHandle>.From(p.Key)) && lastInput > p.Value + ArrivalGrace))
+            .Select(p => p.Key);
+        var cleared = gone.Concat(answered).Distinct().ToList();
+        cleared.ForEach(w => Unmark(w));
+
+        if (fresh.Count + cleared.Count == 0) return;
+        trace?.Invoke($"asking border: blinking [{string.Join(", ", fresh.Select(w => $"0x{w.Value:X}"))}] " +
+                      $"settled [{string.Join(", ", cleared.Select(w => $"0x{w.Value:X}"))}]");
+        stateChanged.OnNext(Unit.Default);
+    }
+
+    // Takes every mark off a window: its glow, its dot and its blink. True when there was one.
+    bool Unmark(WindowHandle window)
+    {
+        var removed = wantsAttention.Remove(window) | askingWindows.Remove(window);
+        return seenAt.Remove(window) | removed;
+    }
+
+    // Whether a focus change happening now is the arrival's own (ArrivalGrace), not the user's choice. Two shapes,
+    // both measured in the trace: on a switch Windows makes, the focus event arrives BEFORE the desktop change (see the
+    // note on currentDesktopId), so the shell already has the new desktop in front while currentDesktopId still names
+    // the old one; on a switch Deskbar makes, the desktop change comes first and Deskbar then focuses the remembered
+    // window a few milliseconds later ("arrived ...", then "focus: ledger window=..."). A failure to ask the shell
+    // counts as no arrival, which keeps the old rule: focus clears the mark.
+    bool ArrivingFocus() =>
+        now() - lastArrival < ArrivalGrace
+        || desktops.CurrentDesktop().Map(front => currentDesktopId.Map(known => known != front).GetValueOrDefault(false)).GetValueOrDefault(false);
+
     // True when the row was marked, false when the workspace is the one in front and so nothing was.
     public Result<bool> RequestAttention(Guid workspaceId, Maybe<WindowHandle> window)
     {
@@ -728,7 +818,12 @@ public sealed class WorkspaceManager(
             .Where(w => desktop is { } on && desktops.DesktopOf(w).Match(d => d == on, _ => false))
             .ToList();
         var unlit = glowing.Where(askingWindows.Contains).ToList();
-        unlit.ForEach(w => askingWindows.Remove(w));
+        // Its blink goes with it, unless the same window also flashed its taskbar button, which is a separate ask.
+        unlit.ForEach(w =>
+        {
+            askingWindows.Remove(w);
+            if (!wantsAttention.Contains(w)) seenAt.Remove(w);
+        });
         var cleared = removed || unlit.Count > 0;
         if (cleared) stateChanged.OnNext(Unit.Default);
         return cleared;
@@ -790,9 +885,16 @@ public sealed class WorkspaceManager(
         // change does (see the note on currentDesktopId), so the cached value would still name the desktop you left
         // and the mark would survive your looking at it. Asked only for a window that has a mark to clear, so an
         // ordinary focus change costs no COM call.
-        var settled = wantsAttention.Contains(window) && OnDesktopInFront(window) && wantsAttention.Remove(window);
-        // A session's window that asked for you (RequestAttention) stops glowing by the same rule.
-        settled |= askingWindows.Contains(window) && OnDesktopInFront(window) && askingWindows.Remove(window);
+        //
+        // ...and not the focus that ARRIVING hands out (ArrivingFocus). Windows focuses the last window you used on a
+        // desktop as you switch to it, and when that is the window asking for you, clearing on that focus took the
+        // mark off before anyone could see it, so the blinking border (seenAt) would never have shown. A focus you
+        // choose afterwards still answers it, as does a click or keystroke in it (SettleAsks).
+        //
+        // A session's window that asked for you (RequestAttention) stops glowing by the same rule. Asked of the shell
+        // only for a window that carries a mark, as before.
+        var settled = (wantsAttention.Contains(window) || askingWindows.Contains(window))
+                      && OnDesktopInFront(window) && !ArrivingFocus() && Unmark(window);
         if (activeWindow.Equals(Maybe<WindowHandle>.From(window)))
         {
             if (settled) stateChanged.OnNext(Unit.Default);
@@ -1182,9 +1284,11 @@ public sealed class WorkspaceManager(
                       $"foreground={monitor.Foreground().GetValueOrDefault().Value:X}");
 
         currentDesktopId = arriving;
+        lastArrival = now();
 
         // Arriving is what answers a workspace that asked for you (see RequestAttention): its row stops blinking.
-        // The session's window keeps its glow until you look at IT (MarkActive), which is usually a moment later.
+        // The session's window keeps its glow, and its border blinks (seenAt), until you click or type in it or five
+        // seconds pass (SettleAsks).
         if (State.Workspaces.FirstOrDefault(w => w.DesktopId == arriving) is { } here && askingWorkspaces.Remove(here.Id))
             stateChanged.OnNext(Unit.Default);
 
