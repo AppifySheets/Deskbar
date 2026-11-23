@@ -199,10 +199,10 @@ The task list at the bottom of the bar (spec `docs/superpowers/specs/2026-11-22-
 `%APPDATA%\Deskbar\deskbar.cmd`.
 
 42. The list has no header: the text box is its first line, reading "Add to <the workspace you are on>…".
-    Under it, always, the chips: the current workspace's ticked, then "none" and "other...". Switch desktops:
-    the box names the new one ("Add…" on an unnamed desktop) and the ticked chip follows, and nothing in the
+    Under it, always, "on" and ONE chip with a small arrow, naming the current workspace. Switch desktops:
+    the box names the new one ("Add…" on an unnamed desktop) and the chip follows, and nothing in the
     list jumps. Click in the box, type "probe", press Enter: the note appears as a line with an empty tick box
-    and the workspace's chip, the chips stay where they are, and the keyboard is back in the window you were
+    and the workspace's chip, the add chip stays where it is, and the keyboard is back in the window you were
     typing in. Click the tick box: the line stays for six seconds, struck through, with
     "Undo" in the tick box's place, then leaves.
 43. `$ts task add "a"`, "b", "c", "d" and "e" (five tasks). The list shows three lines and a small "+2 more"
@@ -233,13 +233,13 @@ The task list at the bottom of the bar (spec `docs/superpowers/specs/2026-11-22-
     brings it back done. After the six seconds, `$ts task list --closed` lists the closed note first and
     `$ts task reopen <id>` brings it back.
 53. Make the bar as narrow as it goes (drag its edge in). Nothing in the list is cut off at the right: the box,
-    "+N more", the lines' chips, and the add chips, which wrap onto a second line, a long workspace name
-    trimmed with an ellipsis.
-54. Click in the box and pick "none": only "none" is filled and outlined in blue, the workspace chip loses its fill
-    and dims, and the box reads "Add…". Pick a workspace through "other…": the menu shows each workspace as its
-    chip in its colour, in the bar's order, grouped workspaces under their group's name (which cannot be clicked),
-    and the box reads "Add to <that workspace>…". With twenty or so workspaces the menu scrolls rather than running
-    off the screen.
+    "+N more", the lines' chips, and the add row ("on", the chip and the two toggles), which wraps onto a second
+    line, a long workspace name trimmed with an ellipsis.
+54. Click the add chip ("on Deskbar ▾"): a menu opens with "none" first, then each workspace as its chip in its
+    colour, in the bar's order, grouped workspaces under their group's name (which cannot be clicked), the chosen
+    one ticked. Pick "none": the chip reads "none" and the box reads "Add…". Open it again and pick a workspace:
+    the chip is that workspace's, in its colour, and the box reads "Add to <that workspace>…". There is no separate
+    "none" or "other…" chip. With twenty or so workspaces the menu scrolls rather than running off the screen.
 55. Click a line's workspace chip: a menu of "none" and every workspace in its colour opens, the task's own ticked,
     and the click does not switch workspaces. Pick another: the line's chip changes, and `$ts task list` agrees. Add
     a note with a title longer than the bar on a narrow bar: the title ends in an ellipsis and the chip is whole.

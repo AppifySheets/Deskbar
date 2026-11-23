@@ -439,7 +439,7 @@ More in [Quick find](docs/features/quick-find.md).
 
 The bottom of the bar carries a short task list, for the things you want to remember while you work.
 Type a note into the box at its top and press Enter, and it lands on the workspace you are on (or on
-none, or another one, by the chips under the box). Tick a note to close it, with six seconds to undo.
+none, or another one, by the chip under the box). Tick a note to close it, with six seconds to undo.
 Two small toggles on each line mark a task important or urgent, which sorts the list into Covey's four
 quadrants, and a line drags up or down to reorder it. "+N more" opens the tasks window, with every task,
 its comments, and a Matrix view of the four quadrants side by side.
