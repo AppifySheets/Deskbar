@@ -408,6 +408,15 @@ public sealed class ClaudeSessions : IDisposable
         // Sessions Start launched join their tasks first, so the keeper sees them known and does not adopt them.
         Claim(listed);
         tasks.Reconcile(listed);
+        // Stalled tasks (spec docs/superpowers/specs/2026-11-23-stalled-claude-tasks-design.md): a Claude task no session
+        // has worked on for 15 minutes goes back to Petre, and back to Claude once its session works again. A session
+        // counts as working only when the list says busy AND it has been listed for BusyGrace, because a session just
+        // resumed reports busy for up to 30 seconds while idle. An unreadable list never gets here (see above), so
+        // "cannot tell" moves nothing.
+        tasks.Stalled(listed
+            .Where(agent => agent.Busy && now - firstSeen[agent.SessionId] >= StalledTasks.BusyGrace)
+            .Select(agent => agent.SessionId)
+            .ToHashSet());
         ForgetAnswered();
 
         // With the resume off, the keeper is still asked (for its adoptions), but told every transcript exists, so it

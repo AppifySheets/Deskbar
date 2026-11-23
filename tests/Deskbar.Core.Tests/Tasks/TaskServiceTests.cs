@@ -269,6 +269,38 @@ public sealed class TaskServiceTests
         Assert.Single(s.Board.Tasks);
     }
 
+    // Stalled tasks (spec 2026-11-23-stalled-claude-tasks-design.md): the service keeps the quiet clock between polls,
+    // saves only when a task changed hands, and says so in the trace.
+    [Fact]
+    public void Stalled_keeps_the_clock_saves_on_a_hand_back_and_traces_it()
+    {
+        var traced = new List<string>();
+        var s = new TaskService(store, () => clock, trace: traced.Add);
+        var task = s.Create("Tasks redesign", ws, Session("s1", clock)).Value;
+        var busy = new HashSet<string> { "s1" };
+        var nobody = new HashSet<string>();
+
+        clock = clock.AddMinutes(60);
+        var saves = store.Saves;
+        s.Stalled(busy);                  // busy an hour after creation: the clock starts now, nothing saved
+        Assert.Equal(saves, store.Saves);
+
+        clock = clock.AddMinutes(10);
+        s.Stalled(nobody);                // quiet for 10 minutes since the busy poll: still Claude's
+        Assert.Equal(Assignee.Claude, s.Board.Tasks.Single().Assignee);
+        Assert.Equal(saves, store.Saves);
+
+        clock = clock.AddMinutes(5);
+        s.Stalled(nobody);                // 15 minutes: handed back, saved, traced
+        Assert.Equal(Assignee.Me, s.Board.Tasks.Single().Assignee);
+        Assert.Equal(saves + 1, store.Saves);
+        Assert.Contains(traced, line => line.Contains("handed back") && line.Contains(task.Id.ToString()[..8]));
+
+        s.Stalled(busy);                  // the session works again: taken back
+        Assert.Equal(Assignee.Claude, s.Board.Tasks.Single().Assignee);
+        Assert.Contains(traced, line => line.Contains("taken back"));
+    }
+
     sealed class FakeTaskStore : ITaskStore
     {
         public TaskBoard Stored { get; set; } = TaskBoard.Empty;
