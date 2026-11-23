@@ -65,8 +65,18 @@ public sealed class ClaudeCli(string executable = "claude") : IClaudeCli
             }
             catch (OperationCanceledException)
             {
-                // Past its time: end it and anything it started, so nothing is left holding the pipes.
-                process.Kill(entireProcessTree: true);
+                // Past its time: end it and anything it started, so nothing is left holding the pipes. Killing a tree
+                // can itself throw (an AggregateException when a child cannot be ended, InvalidOperationException when
+                // the program exited meanwhile, Win32Exception when access is denied); none of that changes the answer,
+                // which is that the call timed out, and none of it may escape as an exception (Ruling 13).
+                try
+                {
+                    process.Kill(entireProcessTree: true);
+                }
+                catch (Exception e) when (e is AggregateException or InvalidOperationException or System.ComponentModel.Win32Exception)
+                {
+                    return Result.Failure<string>($"{executable} timed out after {timeout.TotalSeconds:0.#} s and could not be ended: {e.Message}");
+                }
                 return Result.Failure<string>($"{executable} timed out after {timeout.TotalSeconds:0.#} s and was ended.");
             }
 
