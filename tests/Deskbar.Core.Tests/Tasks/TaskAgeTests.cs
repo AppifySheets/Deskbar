@@ -27,4 +27,21 @@ public class TaskAgeTests
     // negative age.
     [Fact]
     public void A_future_stamp_reads_now() => Assert.Equal("now", TaskAge.Format(TimeSpan.FromMinutes(-3)));
+
+    // Ruling 46: the age's own tooltip says it in words, "Added 2 hours 3 minutes ago", so "2h3m" cannot be taken for a
+    // timer or a due time. Same bands and rounding as Format.
+    [Theory]
+    [InlineData(0, "Added just now")]
+    [InlineData(59, "Added just now")]
+    [InlineData(60, "Added 1 minute ago")]
+    [InlineData(45 * 60, "Added 45 minutes ago")]
+    [InlineData(3600, "Added 1 hour ago")]
+    [InlineData(2 * 3600 + 3 * 60, "Added 2 hours 3 minutes ago")]
+    [InlineData(2 * 3600 + 60, "Added 2 hours 1 minute ago")]
+    [InlineData(86400, "Added 1 day ago")]
+    [InlineData(3 * 86400 + 3600, "Added 3 days 1 hour ago")]
+    [InlineData(28 * 86400, "Added 4 weeks ago")]
+    [InlineData(-180, "Added just now")]
+    public void The_words_say_how_long_ago_it_was_added(int seconds, string expected) =>
+        Assert.Equal(expected, TaskAge.Words(TimeSpan.FromSeconds(seconds)));
 }

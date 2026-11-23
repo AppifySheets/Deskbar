@@ -20,6 +20,22 @@ public static class TaskAge
         : age < TimeSpan.FromDays(28) ? Two((int)age.TotalDays, "d", age.Hours, "h")
         : $"{(int)age.TotalDays / 7}w";
 
+    /// <summary>
+    /// The same age in words for a tooltip ("Added 2 hours 3 minutes ago"), so the compact "2h3m" is not misread as a
+    /// timer or a due time (Ruling 46). Same bands and rounding as <see cref="Format"/>.
+    /// </summary>
+    public static string Words(TimeSpan age) =>
+        age < TimeSpan.FromMinutes(1) ? "Added just now"
+        : age < TimeSpan.FromHours(1) ? $"Added {Unit((int)age.TotalMinutes, "minute")} ago"
+        : age < TimeSpan.FromDays(1) ? $"Added {Pair((int)age.TotalHours, "hour", age.Minutes, "minute")} ago"
+        : age < TimeSpan.FromDays(28) ? $"Added {Pair((int)age.TotalDays, "day", age.Hours, "hour")} ago"
+        : $"Added {Unit((int)age.TotalDays / 7, "week")} ago";
+
+    static string Unit(int n, string name) => n == 1 ? $"1 {name}" : $"{n} {name}s";
+
+    static string Pair(int big, string bigName, int small, string smallName) =>
+        small == 0 ? Unit(big, bigName) : $"{Unit(big, bigName)} {Unit(small, smallName)}";
+
     static string Two(int big, string bigUnit, int small, string smallUnit) =>
         small == 0 ? $"{big}{bigUnit}" : $"{big}{bigUnit}{small}{smallUnit}";
 }

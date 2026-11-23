@@ -95,7 +95,7 @@ public class FloatingBarTaskListTests
     // never "right after a repaint" unless a test hands in a clock of its own (the click guard's tests do).
     static ListBar Build(Func<Guid, Result>? goTo = null, Action? openWindow = null, TaskService? tasks = null, Func<string, Maybe<nint>>? sessionWindow = null,
         List<nint>? handedBack = null, bool editorAlive = true, Func<DateTime>? clickClock = null, Func<nint>? front = null,
-        Func<nint, bool>? onCurrentDesktop = null,
+        Func<nint, bool>? onCurrentDesktop = null, Func<DateTimeOffset>? taskNow = null,
         Func<TaskItem, Maybe<string>>? goalTitle = null, IObservable<System.Reactive.Unit>? goalChanges = null)
     {
         var harness = Harness.Build();
@@ -119,6 +119,9 @@ public class FloatingBarTaskListTests
             OnCurrentDesktop = onCurrentDesktop ?? (_ => true),
             TaskClickClock = clickClock ?? (() => ClickStart.AddSeconds(seconds++)),
             TaskUndoTimer = timers.Start,
+            TaskNow = taskNow ?? (() => Start.AddHours(1)),
+            // The minute's tick of the ages is driven by the tests (RefreshTaskAges), never by a real timer.
+            TaskAgeTimer = (_, _) => System.Reactive.Disposables.Disposable.Empty,
             GoalTitle = goalTitle ?? (_ => Maybe<string>.None),
             GoalChanges = goalChanges,
         };
@@ -1371,17 +1374,54 @@ public class FloatingBarTaskListTests
         Assert.DoesNotContain(Inside(undo).OfType<TextBlock>(), b => b.Text == "Undo");
     });
 
-    // Ruling 43 (Petre: "i don't think task times makes sense yet"): the bar's lines show no age; the line's tooltip
-    // still says when the task was made.
+    // Ruling 46 (reverses 43; Petre: "bring back the times on tasks.."). Each line says its age just before its chip,
+    // dim, in the compact form; a minute passing rewrites that text and nothing else (the line is the same element).
+    // The age has its own tooltip in words ("Added 2 hours 3 minutes ago", then the date), since Petre "misread them for
+    // what they were"; the line's tooltip keeps the created date.
     [Fact]
-    public void A_line_shows_no_age_and_its_tooltip_says_when_it_was_made() => StaThread.Run(() =>
+    public void A_line_says_its_age_and_a_minute_rewrites_only_that() => StaThread.Run(() =>
     {
-        using var t = Build();
+        var now = Start.AddHours(2).AddMinutes(3);
+        using var t = Build(taskNow: () => now);
         t.Tasks.AddNote("note", t.Gepha);
         var line = t.Lines.Single();
-
-        Assert.DoesNotContain(Inside(line).OfType<TextBlock>(), b => Equals(b.Tag, "task-age"));
+        TextBlock Age() => Inside(t.Lines.Single()).OfType<TextBlock>().Single(b => Equals(b.Tag, "task-age"));
+        Assert.Equal("2h3m", Age().Text);
+        Assert.Equal(TaskListFor_DimInk(), ((SolidColorBrush)Age().Foreground).Color);
+        var tip = (string)Age().ToolTip;
+        Assert.StartsWith("Added 2 hours 3 minutes ago\n", tip);
+        Assert.Contains($"{Start.ToLocalTime():dddd d MMMM yyyy}", tip);
         Assert.Contains($"Created {Start.ToLocalTime():dddd d MMMM yyyy}", (string)line.ToolTip);
+
+        now = now.AddMinutes(1);
+        t.Bar.RefreshTaskAges();
+
+        Assert.Equal("2h4m", Age().Text);
+        Assert.StartsWith("Added 2 hours 4 minutes ago\n", (string)Age().ToolTip);
+        Assert.Same(line, t.Lines.Single());
+    });
+
+    static Color TaskListFor_DimInk() => Color.FromRgb(0xA9, 0xAD, 0xB8);
+
+    // The age sits on the first row, right before the chip, after the flags; and it is counted in the title's share, so
+    // at the default docked width the title still keeps its room and the chip still gives way to a dot when it must.
+    [Fact]
+    public void The_age_sits_right_before_the_chip_and_the_title_keeps_its_share() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        t.Tasks.AddNote("Make the hero video for the home page", t.Gepha);
+        t.Bar.ApplyWidth(158.4);
+        t.Bar.RequestRebuild();
+        t.Bar.UpdateLayout();
+
+        var line = t.Lines.Single();
+        var age = Inside(line).OfType<TextBlock>().Single(b => Equals(b.Tag, "task-age"));
+        var end = Inside(line).OfType<FrameworkElement>().Single(b => (Equals(b.Tag, "task-workspace") || Equals(b.Tag, "task-workspace-dot")) && b.IsVisible);
+        var title = Inside(line).OfType<TextBlock>().Single(b => Equals(b.Tag, "task-text"));
+        Rect In(FrameworkElement e) => e.TransformToAncestor(line).TransformBounds(new Rect(e.RenderSize));
+        Assert.True(In(age).Right <= In(end).Left + 6, $"age {In(age)} then chip {In(end)}");
+        Assert.True(In(title).Right <= In(age).Left + 0.5, $"title {In(title)} then age {In(age)}");
+        Assert.True(title.ActualWidth >= TaskLineFace.TitleShare * line.ActualWidth * 0.5, $"title has {title.ActualWidth} of {line.ActualWidth}");
     });
 
     // Petre: "highlight selected task" (ruling 21). A click on a line picks its task: drawn with the blue edge, kept
