@@ -385,6 +385,38 @@ Tasks 7 to 9). Needs Claude Code installed and both Claude boxes in Manage ticke
     the orange edge start close to the window's left edge. Hover and select a line: the background still covers the whole
     line. The tick box, the two toggles, the comments button and "..." still click first time.
 
+## Claude sessions kept running
+
+The `claude agents --json` poll, adoption and the automatic resume (spec
+`docs/superpowers/specs/2026-11-23-tasks-open-claude-sessions-design.md`, "Which sessions are live" to "The setting";
+`ClaudeSessions` in the app). Needs Claude Code with background sessions (`claude --bg`), and both Claude boxes in
+Manage ticked. Use a throwaway folder Claude Code already trusts, not a real repo. Turn tracing on
+(`%APPDATA%\Deskbar\trace.on`) to see the `claude sessions:` lines in `%TEMP%\deskbar-trace.log`.
+
+76. In Manage's Settings tab, "Resume the sessions of open tasks after a restart or a crash" sits under the tasks box,
+    with the 30 days / `cleanupPeriodDays` line under it. Untick the tasks box: the resume box greys out and unticks.
+    Tick it again: back, ticked. `$ts claude-resume off` unticks it, `$ts claude-resume on` ticks it.
+77. In a terminal in the throwaway folder, start `claude --bg "say hello"` without telling it about any task. Within
+    15 seconds a task named after the session appears, In progress with a live session; with a VS Code window open on
+    that folder, the task is on that window's workspace.
+78. Note the task's session, then end it: `claude stop <short id>` (from `claude agents`). Within 15 seconds the task's
+    thread says "Resumed by Deskbar at HH:mm." and `claude agents` lists the session again with the SAME session id
+    (not a copy). Close the task and stop the session again: nothing is resumed.
+79. Make five tasks with sessions as in 77, then stop all five at once. They come back one at a time, about five
+    seconds apart (the thread times, or `claude agents` refreshed while it happens), and none of them twice. The bar
+    stays usable throughout.
+80. Stop a session in the middle of a long reply (kill its `claude.exe` from Task Manager while it is working). Its
+    resume says "its last turn was cut off, so it was told to continue", and the session carries on by itself.
+81. Untick the resume box and stop a task's session: the task shows the session ended and nothing resumes it; start a
+    new `claude --bg` in another folder and it still gets a task. Tick the box again: the ended session is resumed at
+    the next poll.
+82. Make a task whose session's folder Claude Code no longer trusts (however your Claude Code version lets you take
+    the trust back; see the probes note's "An untrusted folder"), and stop the session. The thread gets Claude's own
+    "Workspace not trusted" message once, and the trace shows no second resume of it for ten minutes.
+83. Rename `claude.exe` away (or take `%USERPROFILE%\.local\bin` off Deskbar's PATH) and restart Deskbar: the tasks
+    keep showing what they showed, nothing is ended or resumed, and the trace says the list could not be read. Put
+    it back: the next poll picks up as before.
+
 ## Goals
 
 Weekly and monthly goals, pull request 1: the pipe, the task's link, the tasks window's menu and filter, the bar's
