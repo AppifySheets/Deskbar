@@ -2682,4 +2682,34 @@ public class FloatingBarTaskListTests
         safety.Stop();
         return ticks;
     }
+
+    // --- RULING 57, the assignee: the bar lists only the tasks assigned to Petre -----------------------------------------
+
+    [Fact]
+    public void The_bar_lists_the_tasks_assigned_to_him_whoever_made_them() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        t.Tasks.AddNote("mine", t.Gepha);
+        var handedOver = t.Tasks.AddNote("handed to Claude", t.Gepha).Value;
+        t.Tasks.Assign(handedOver.Id, Assignee.Claude);
+        var working = t.Tasks.Create("Claude is on it", t.Gepha, Session("s1")).Value;
+        var takenBack = t.Tasks.Create("taken back", t.Gepha, Session("s2")).Value;
+        t.Tasks.Assign(takenBack.Id, Assignee.Me);
+
+        Assert.Equal(["taken back", "mine"], OnTheBar(t).OrderBy(x => x == "taken back" ? 0 : 1));
+        Assert.DoesNotContain("handed to Claude", OnTheBar(t));
+        Assert.DoesNotContain("Claude is on it", OnTheBar(t));
+        // They stay open on the board: the window shows them.
+        Assert.True(t.Tasks.Board.Tasks.Single(x => x.Id == handedOver.Id).IsOpen);
+    });
+
+    [Fact]
+    public void The_more_count_follows_the_assignee_rule() => StaThread.Run(() =>
+    {
+        using var t = Build(openWindow: () => { });
+        Enumerable.Range(1, 4).ToList().ForEach(i => t.Tasks.AddNote($"Note {i}", t.Gepha));
+        Enumerable.Range(1, 3).ToList().ForEach(i => t.Tasks.Assign(t.Tasks.AddNote($"Claude's {i}", t.Gepha).Value.Id, Assignee.Claude));
+
+        Assert.Equal("+1 more", t.Bar.TaskListMoreText);
+    });
 }

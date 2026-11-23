@@ -85,6 +85,13 @@ public sealed record TaskItem(
     /// </summary>
     public Maybe<Guid> GoalId { get; init; }
 
+    /// <summary>
+    /// Who the task is on (Ruling 57, Assignee.cs). An init property like the flags: a task made by Petre is his, which
+    /// is the default; TaskBoard sets Claude where a session makes or takes a task, and JsonTaskStore derives it for a
+    /// task saved before the field existed.
+    /// </summary>
+    public Assignee Assignee { get; init; } = Assignee.Me;
+
     /// <summary>Covey's quadrant the two flags name (TaskOrder.cs).</summary>
     public Quadrant Quadrant => QuadrantOf.Flags(Important, Urgent);
 

@@ -389,7 +389,9 @@ public class RemoteControlClaudeHookTests
     {
         var manager = Started();
         Editor(manager, 0x10, "TaskSpaces", "Deskbar");
-        tasks.AddNote("Fix the strip", IdOf(manager, "Deskbar"));
+        // Ruling 57: only a note Petre assigned to Claude is offered; one still on him is not.
+        tasks.Assign(tasks.AddNote("Fix the strip", IdOf(manager, "Deskbar")).Value.Id, Assignee.Claude);
+        tasks.AddNote("Still mine", IdOf(manager, "Deskbar"));
         tasks.AddNote("Dishwasher tablets", Maybe<Guid>.None);
         tasks.AddNote("Portal accounts", IdOf(manager, "iam.ge"));
         tasks.Create("Free Claude work", Maybe<Guid>.None, tasks.NewSession("old", @"C:\elsewhere"));
@@ -400,8 +402,29 @@ public class RemoteControlClaudeHookTests
         Assert.Contains("Fix the strip", briefing);
         Assert.Contains("Free Claude work", briefing);
         Assert.DoesNotContain("Dishwasher tablets", briefing);
+        Assert.DoesNotContain("Still mine", briefing);
         Assert.DoesNotContain("Portal accounts", briefing);
         Assert.Contains("task join <id> --session s1", briefing);
+    }
+
+    // Ruling 57: the assignee follows the session. `task ask` hands the task to Petre, `task answered` back to Claude, and
+    // `task done` to Petre, who closes it.
+    [Fact]
+    public void A_sessions_forms_move_the_assignee()
+    {
+        var manager = Started();
+        Editor(manager, 0x10, "TaskSpaces", "Deskbar");
+        Said(manager, "s1", Repo, "new", "Tasks board");
+        Assert.Equal(Assignee.Claude, Titled("Tasks board").Assignee);
+
+        Said(manager, "s1", Repo, "ask", "Ship it?");
+        Assert.Equal(Assignee.Me, Titled("Tasks board").Assignee);
+
+        Said(manager, "s1", Repo, "answered");
+        Assert.Equal(Assignee.Claude, Titled("Tasks board").Assignee);
+
+        Said(manager, "s1", Repo, "done");
+        Assert.Equal(Assignee.Me, Titled("Tasks board").Assignee);
     }
 
     // Ruling 34: resuming a session whose task is Done keeps it Done; only the user's next message moves it back.

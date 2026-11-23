@@ -152,6 +152,35 @@ public class RemoteControlTaskTests
         Assert.Contains("--workspace", reply.Output);
     }
 
+    // Ruling 57: `task assign <id> me|claude` and `assignee` in the JSON.
+    [Fact]
+    public void Assign_hands_a_task_to_claude_or_back_and_list_says_who_has_it()
+    {
+        var manager = Started();
+        var added = Added(manager);
+        Assert.Equal("me", added.GetProperty("assignee").GetString());
+
+        var reply = Run(manager, "task", "assign", Prefix(added), "claude");
+
+        Assert.Equal(ControlReply.Ok, reply.ExitCode);
+        Assert.Equal(Assignee.Claude, Only.Assignee);
+        Assert.Equal("claude", Json(reply).GetProperty("assignee").GetString());
+        Assert.Equal("claude", Json(Run(manager, "task", "list"))[0].GetProperty("assignee").GetString());
+
+        Run(manager, "task", "assign", Prefix(added), "ME");
+        Assert.Equal(Assignee.Me, Only.Assignee);
+    }
+
+    [Fact]
+    public void Assign_refuses_a_name_that_is_not_me_or_claude_and_changes_nothing()
+    {
+        var manager = Started();
+        var added = Added(manager);
+        var before = tasks.Board;
+
+        AssertRefusedAndUnchanged(Run(manager, "task", "assign", Prefix(added), "anna"), before);
+    }
+
     [Fact]
     public void Add_to_an_unknown_workspace_is_refused()
     {
@@ -570,6 +599,6 @@ public class RemoteControlTaskTests
              "join <id> --session <session>", "new <title>|- --session <session>", "status-line <text>|- --session <session>",
              "ask <question>|- --session <session>", "answered --session <session>", "done --session <session>", "comment <markdown>|- --session <session>",
              "later <title>|- --session <session>",
-             "goal <id> <goal-id>|none"],
+             "assign <id> me|claude", "goal <id> <goal-id>|none"],
             ControlUsage.All.Where(c => c.Verb == "task").Select(c => c.Arguments));
 }

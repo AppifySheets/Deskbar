@@ -509,8 +509,12 @@ public partial class FloatingBar
     // clicking the line never changes a status, so none of them takes it off. When the session asks again the task is
     // Waiting on you again and comes back at the top of the pile. His own notes are unaffected. "+N more" and the docked
     // fit pass count only what the bar lists, since both read this list.
-    internal static bool NeedsYou(TaskLine line) =>
-        !line.Claudes || line.Status is TaskStatus.WaitingOnYou or TaskStatus.Done;
+    //
+    // RULING 57 REPLACES THE STATUS TEST with the assignee: the bar lists the tasks assigned to Petre. The rules that move
+    // the assignee (TaskBoard) make a Claude task his exactly while it is waiting on him or done, so for Claude's tasks this
+    // is the same list as before; and a note he handed to Claude in the tasks window leaves the bar, which the status
+    // test could not say. Assigning is only ever done in the tasks window, never from the bar.
+    internal static bool NeedsYou(TaskLine line) => line.Assignee.IsMe;
 
     /// <summary>
     /// Every open task as the bar draws it, in the pile's order (TaskBoard.Pile). <paramref name="workspaceName"/> and
@@ -530,6 +534,7 @@ public partial class FloatingBar
             t.IsClaudes ? TaskViews.SessionToGoTo(t).Bind(s => sessionWindow(s.Folder)) : Maybe<nint>.None)
         {
             Created = t.Created,
+            Assignee = t.Assignee,
             Important = t.Important,
             Urgent = t.Urgent,
             // The goal it counts toward, for the tooltip only (see GoalTitle).
@@ -926,7 +931,7 @@ public partial class FloatingBar
     static string ShapeOf(TaskLine line) =>
         $"{line.Id}|{line.Status}|{line.Title}|{line.Detail}|{line.Claudes}|{line.WorkspaceName}|" +
         $"{(line.Colour as SolidColorBrush)?.Color}|{line.Window.Match(w => w.ToString(), () => "")}|{line.Closing}|" +
-        $"{line.Important}|{line.Urgent}|{line.StartsGroup}|{line.GoalTitle}";
+        $"{line.Important}|{line.Urgent}|{line.StartsGroup}|{line.GoalTitle}|{line.Assignee.Id}";
 
     // "+N more" counts the open tasks out of sight; a closed line in its undo window is not an open task, so it is
     // neither counted nor allowed to hide one from the count.
@@ -1788,6 +1793,9 @@ internal sealed record TaskLine(Guid Id, string Title, string Detail, TaskStatus
     /// <summary>When the task appeared, for the age the line shows (TaskAge). Not part of the line's shape: the age is
     /// rewritten in place once a minute, never by a repaint.</summary>
     public DateTimeOffset Created { get; init; }
+
+    /// <summary>Who the task is on (Ruling 57). The bar lists only the lines assigned to Petre (NeedsYou).</summary>
+    public Assignee Assignee { get; init; } = Assignee.Me;
 
     /// <summary>The task's two flags (Task 12), drawn as the line's toggles.</summary>
     public bool Important { get; init; }

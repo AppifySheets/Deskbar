@@ -20,6 +20,7 @@ namespace Deskbar.Core.Control;
 //   task delete <id>
 //   task flag <id> important|urgent on|off
 //   task order <id> top|end|<n>
+//   task assign <id> me|claude
 //   task goal <id> <goal-id>|none     (the goals planner; needs the goal service, RemoteControl.Goals.cs)
 //
 // `flag` and `order` (Task 12, Rulings 25 and 28) are the twins of the toggles on a line and of dragging it. The flags
@@ -96,6 +97,8 @@ public sealed partial class RemoteControl
                 .Match(f => TaskChange(service, id, t => service.SetFlag(t.Id, f.Flag, f.On)), ControlReply.Fail),
             ["order", var id, var place] => ParsePlace(place)
                 .Match(p => TaskChange(service, id, t => service.Place(t.Id, t.Quadrant, p)), ControlReply.Fail),
+            ["assign", var id, var who] => ParseAssignee(who)
+                .Match(a => TaskChange(service, id, t => service.Assign(t.Id, a)), ControlReply.Fail),
             ["goal", var id, var goal] => TaskGoal(service, id, goal),
             _ => ControlReply.Fail($"Wrong arguments for task.\n{TaskUsage()}"),
         };
@@ -146,6 +149,15 @@ public sealed partial class RemoteControl
             _ => Result.Failure<(TaskFlag, bool)>($"'{flag}' is not a flag; use important or urgent"),
         };
 
+    // `me` or `claude`, in any case (Ruling 57). A colleague is not assignable from here yet.
+    static Result<Assignee> ParseAssignee(string who) =>
+        who.Trim().ToLowerInvariant() switch
+        {
+            "me" => Assignee.Me,
+            "claude" => Assignee.Claude,
+            _ => Result.Failure<Assignee>($"'{who}' is not an assignee; use me or claude"),
+        };
+
     // `top`, `end` or a position counted from 1. Zero and below are refused rather than read as the top, since they
     // are more likely a script counting from 0 than a wish for the top.
     static Result<TaskPlace> ParsePlace(string place) =>
@@ -177,6 +189,8 @@ public sealed partial class RemoteControl
         updatedAt = task.UpdatedAt,
         important = task.Important,
         urgent = task.Urgent,
+        // Ruling 57: who the task is on, "me" or "claude" (a colleague, later, by id).
+        assignee = task.Assignee.Id,
         quadrant = task.Quadrant.Numeral(),
         order = tasks is { } service && task.IsOpen ? service.Board.PositionOf(task.Id).Map(n => (int?)n).GetValueOrDefault() : null,
         // The goal it counts toward (goals plan, Task 5), as {id, title}, or null: no link, no goal service, or a link
