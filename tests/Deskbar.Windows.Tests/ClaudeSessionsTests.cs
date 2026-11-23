@@ -177,6 +177,10 @@ public class ClaudeSessionsTests
 
     static TimeSpan Seconds(double s) => TimeSpan.FromSeconds(s);
 
+    // Ruling 18: nothing is resumed in the first two minutes after ClaudeSessions starts watching, so the first resume
+    // of a session dead from the start comes with the poll at two minutes.
+    static readonly TimeSpan Settle = SessionKeeper.Settle;
+
     // --- polling ---------------------------------------------------------------------------------
 
     // Spec, "Which sessions are live": the list is read on a timer while the feature is on. Off stops the timer; on again
@@ -224,9 +228,12 @@ public class ClaudeSessionsTests
         Assert.Same(board, rig.Tasks.Board);
         Assert.Empty(rig.Cli.Resumes);
 
-        // The fourth read is a real, empty list: now the session is known dead and is woken.
+        // The fourth read is a real, empty list: now the session is known dead, and is woken once the two minutes since
+        // the start have passed (Ruling 18).
         rig.RunTo(Seconds(45));
         Assert.True(rig.Task(taskId).Sessions.Single().Ended.HasValue);
+        Assert.Empty(rig.Cli.Resumes);
+        rig.RunTo(Settle);
         Assert.Equal(sessionId, rig.Cli.Resumes.Single().Arguments[2]);
     }
 
@@ -256,7 +263,7 @@ public class ClaudeSessionsTests
 
     // Ruling 11: a session started by hand joins or creates its own task on its first turn, through its hook, so a
     // stranger in the list is adopted only after it has been listed for two minutes. One that leaves the list and comes
-    // back starts its two minutes again.
+    // back starts its two minutes again. Both were heard from as attended (Ruling 17, the next test).
     [Fact]
     public void A_session_is_adopted_only_after_two_minutes_listed()
     {
@@ -265,6 +272,8 @@ public class ClaudeSessionsTests
         var flaky = Guid.NewGuid().ToString();
         rig.Cli.Listed.Add(new Row(steady, @"E:\repos\Work", "Steady"));
         rig.Cli.Listed.Add(new Row(flaky, @"E:\repos\Work", "Flaky"));
+        rig.Tasks.HeardAttended(steady);
+        rig.Tasks.HeardAttended(flaky);
         rig.Begin();
         // The flaky one is gone for the reads at 60 s, then back from 75 s on.
         rig.Clock.Schedule(Seconds(50), () => rig.Cli.Listed.RemoveAll(r => r.SessionId == flaky));
@@ -287,10 +296,35 @@ public class ClaudeSessionsTests
         Assert.True(Adopted(flaky));
     }
 
+    // Ruling 17: `claude agents` lists a `claude -p` run as "interactive", so the list cannot tell it from a person's
+    // session. Only a session whose hooks said a person is at it (TaskService.HeardAttended, from SessionStart or
+    // UserPromptSubmit) is adopted, still after its two minutes; one never heard from that way never is.
+    [Fact]
+    public void Only_a_session_heard_from_as_attended_is_adopted()
+    {
+        using var rig = new Rig();
+        var person = Guid.NewGuid().ToString();
+        var script = Guid.NewGuid().ToString();
+        rig.Cli.Listed.Add(new Row(person, @"E:\repos\Work", "Person"));
+        rig.Cli.Listed.Add(new Row(script, @"E:\repos\Work", "claude -p"));
+        rig.Begin();
+        // The person's next prompt comes a minute in, after Deskbar started.
+        rig.Clock.Schedule(Seconds(60), () => rig.Tasks.HeardAttended(person));
+
+        bool Adopted(string id) => rig.Tasks.Board.Tasks.Any(t => t.Sessions.Any(s => s.Id == id));
+
+        rig.RunTo(Seconds(105));
+        Assert.False(Adopted(person));
+        rig.RunTo(Settle);
+        Assert.True(Adopted(person));
+        rig.RunTo(TimeSpan.FromMinutes(10));
+        Assert.False(Adopted(script));
+    }
+
     // --- resuming --------------------------------------------------------------------------------
 
     // Review Focus 2: after a reboot every open task's session is dead at once. They come back one at a time, five
-    // seconds apart, each exactly once.
+    // seconds apart, each exactly once, from two minutes after the start (Ruling 18).
     [Fact]
     public void Resumes_run_one_at_a_time_five_seconds_apart()
     {
@@ -298,10 +332,10 @@ public class ClaudeSessionsTests
         var dead = Enumerable.Range(1, 20).Select(i => rig.Dead($"Task {i}")).ToList();
         rig.Begin();
 
-        rig.RunTo(Seconds(150));
+        rig.RunTo(Settle + Seconds(150));
 
         var resumes = rig.Cli.Resumes;
-        Assert.Equal(Enumerable.Range(0, 20).Select(i => Seconds(5 * i)), resumes.Select(c => rig.Since(c)));
+        Assert.Equal(Enumerable.Range(0, 20).Select(i => Settle + Seconds(5 * i)), resumes.Select(c => rig.Since(c)));
         Assert.Equal(dead.Select(d => d.SessionId).Order(), resumes.Select(c => c.Arguments[2]).Order());
     }
 
@@ -315,7 +349,7 @@ public class ClaudeSessionsTests
         var done = rig.Dead("Finished", folder: @"E:\repos\Done", cutOff: false);
         rig.Begin();
 
-        rig.RunTo(Seconds(10));
+        rig.RunTo(Settle + Seconds(10));
 
         var byId = rig.Cli.Resumes.ToDictionary(c => c.Arguments[2]);
         Assert.Equal(["--bg", "--resume", cut.SessionId, ContinueText], byId[cut.SessionId].Arguments);
@@ -343,21 +377,20 @@ public class ClaudeSessionsTests
         rig.Tasks.SessionEnded(listedId);
         rig.Cli.Listed.Add(new Row(listedId, @"E:\repos\Work", "Listed"));
 
-        // Seven dead ones: the queue runs at 0, 5, 10, ... 30 s. Just after the third, every session not yet woken
-        // shows up in the list (woken by somebody else), so the read at 15 s drops what is left in the queue.
+        // Seven dead ones: the queue runs at 2:00, 2:05, 2:10, ... Just after the third, every session not yet woken
+        // shows up in the list (woken by somebody else), so the fresh read before the one due at 2:15 drops it, and the
+        // poll at 2:15 finds the rest listed.
         var dead = Enumerable.Range(1, 7).Select(i => rig.Dead($"Dead {i}")).ToList();
         rig.Begin();
-        rig.Clock.Schedule(Seconds(12), () =>
+        rig.Clock.Schedule(Settle + Seconds(12), () =>
             dead.Where(d => rig.Cli.Resumes.All(c => c.Arguments[2] != d.SessionId)).ToList()
                 .ForEach(d => rig.Cli.Listed.Add(new Row(d.SessionId, @"E:\repos\Work", "woken elsewhere"))));
 
-        rig.RunTo(Seconds(120));
+        rig.RunTo(Settle + Seconds(120));
 
         Assert.DoesNotContain(rig.Cli.Resumes, c => c.Arguments[2] == listedId);
         Assert.True(rig.Task(listedTask.Id).Sessions.Single().IsLive);
-        // 0, 5 and 10 went; the one due at 15 may go if it runs before that read; nothing after.
-        Assert.InRange(rig.Cli.Resumes.Count, 3, 4);
-        Assert.All(rig.Cli.Resumes, c => Assert.True(rig.Since(c) <= Seconds(15)));
+        Assert.Equal([Settle, Settle + Seconds(5), Settle + Seconds(10)], rig.Cli.Resumes.Select(c => rig.Since(c)));
     }
 
     // Review Focus 5: Petre closes a task while its resume waits in the queue. The resume is dropped.
@@ -368,12 +401,12 @@ public class ClaudeSessionsTests
         var dead = Enumerable.Range(1, 3).Select(i => rig.Dead($"Dead {i}")).ToList();
         rig.Begin();
 
-        rig.Run(Seconds(1));
+        rig.RunTo(Settle + Seconds(1));
         Assert.Single(rig.Cli.Resumes);
         var waiting = dead.Where(d => rig.Cli.Resumes.All(c => c.Arguments[2] != d.SessionId)).ToList();
         Assert.True(rig.Tasks.Close(waiting[0].TaskId).IsSuccess);
 
-        rig.RunTo(Seconds(120));
+        rig.RunTo(Settle + Seconds(120));
 
         Assert.DoesNotContain(rig.Cli.Resumes, c => c.Arguments[2] == waiting[0].SessionId);
         Assert.Contains(rig.Cli.Resumes, c => c.Arguments[2] == waiting[1].SessionId);
@@ -388,12 +421,12 @@ public class ClaudeSessionsTests
     {
         using var rig = new Rig();
         rig.Cli.ResumeTakes = Seconds(35);
-        // The daemon lists it 20 s after the answer, at 55 s.
+        // The daemon lists it 20 s after the answer, 55 s after the resume went out.
         rig.Cli.ListedAfter = Seconds(20);
         var dead = rig.Dead("Slow");
         rig.Begin();
 
-        rig.RunTo(Seconds(120));
+        rig.RunTo(Settle + Seconds(120));
 
         Assert.Equal([dead.SessionId], rig.Cli.Resumes.Select(c => c.Arguments[2]));
         // The polls kept going through it.
@@ -419,11 +452,11 @@ public class ClaudeSessionsTests
         rig.Begin();
 
         // Not thrown out of the scheduler: AdvanceTo would rethrow it here.
-        rig.RunTo(Seconds(60));
+        rig.RunTo(Settle + Seconds(60));
 
         Assert.Equal(1, readsThrown);
         Assert.True(rig.Cli.Reads.Count >= 4);
-        // The read at 0 threw; the one at 15 queued both; the first resume threw, and the queue still went on.
+        // The read at 0 threw; the one at 2:00 queued both; the first resume threw, and the queue still went on.
         var resumed = rig.Cli.Resumes.Select(c => c.Arguments[2]).ToList();
         Assert.True(resumed.Count >= 2);
         Assert.Contains(first.SessionId, resumed);
@@ -446,7 +479,7 @@ public class ClaudeSessionsTests
 
         rig.RunTo(TimeSpan.FromMinutes(45));
 
-        Assert.Equal([Seconds(0)], rig.Cli.Resumes.Select(c => rig.Since(c)));
+        Assert.Equal([Settle], rig.Cli.Resumes.Select(c => rig.Since(c)));
         var task = rig.Task(dead.TaskId);
         Assert.Equal(TaskStatus.WaitingOnYou, task.Status);
         Assert.Equal(SessionKeeper.ResumeFailed, task.Question.GetValueOrDefault(""));
@@ -472,6 +505,7 @@ public class ClaudeSessionsTests
         var dead = rig.Dead("Dead");
         var strangerId = Guid.NewGuid().ToString();
         rig.Cli.Listed.Add(new Row(strangerId, @"E:\repos\Other", "Started in a terminal"));
+        rig.Tasks.HeardAttended(strangerId);
         rig.Begin();
 
         rig.RunTo(Seconds(120));
@@ -481,6 +515,123 @@ public class ClaudeSessionsTests
         var adopted = Assert.Single(rig.Tasks.Board.Tasks, t => t.Sessions.Any(s => s.Id == strangerId));
         Assert.Equal("Started in a terminal", adopted.Title);
         Assert.Equal(workspace, adopted.WorkspaceId.GetValueOrDefault());
+    }
+
+    // Final review, item 2: the queue was decided on a poll that can be minutes old by a resume's turn. Right before each
+    // resume the list is read again, and a session it shows (VS Code brought it back, Petre opened it) is not resumed:
+    // that would start a copy.
+    [Fact]
+    public void A_session_listed_between_the_poll_and_its_turn_is_not_resumed()
+    {
+        using var rig = new Rig();
+        var first = rig.Dead("First");
+        var second = rig.Dead("Second");
+        rig.Begin();
+        // The poll at 2:00 queues both; the first goes at once, the second is due at 2:05. At 2:02 the second is back.
+        rig.RunTo(Settle + Seconds(1));
+        var woken = Assert.Single(rig.Cli.Resumes).Arguments[2];
+        var other = woken == first.SessionId ? second.SessionId : first.SessionId;
+        rig.Cli.Listed.Add(new Row(other, @"E:\repos\Work", "back by itself"));
+
+        rig.RunTo(Settle + Seconds(60));
+
+        Assert.Equal([woken], rig.Cli.Resumes.Select(c => c.Arguments[2]));
+        // The fresh read happened at 2:05, before any poll could have seen it (the next is at 2:15).
+        Assert.Contains(rig.Cli.Reads, c => rig.Since(c) == Settle + Seconds(5));
+    }
+
+    // Item 2: a fresh read that fails is "cannot tell", so the resume does not go, and neither does the rest of the queue;
+    // the next good poll queues them again.
+    [Fact]
+    public void A_failed_fresh_read_drops_the_queue()
+    {
+        using var rig = new Rig();
+        var dead = Enumerable.Range(1, 3).Select(i => rig.Dead($"Dead {i}")).ToList();
+        rig.Begin();
+        rig.RunTo(Settle + Seconds(1));
+        Assert.Single(rig.Cli.Resumes);
+        // Every read fails from now (2:01) to 2:20: the fresh read at 2:05 and the poll at 2:15.
+        rig.Cli.Agents = () => Result.Failure<string>("claude exited with code 1.");
+        rig.Clock.Schedule(Seconds(19), () => rig.Cli.Agents = null);
+
+        rig.RunTo(Settle + Seconds(29));
+        Assert.Single(rig.Cli.Resumes);
+
+        // The poll at 2:30 reads again and the two left are queued and woken.
+        rig.RunTo(Settle + Seconds(60));
+        Assert.Equal(dead.Select(d => d.SessionId).Order(), rig.Cli.Resumes.Select(c => c.Arguments[2]).Order());
+    }
+
+    // Ruling 18: VS Code restores and reloads its Claude panels by itself a little after a restart, so nothing is
+    // resumed in the first two minutes after ClaudeSessions starts, and a session that was listed and then went missing
+    // waits two minutes from the first read that missed it.
+    [Fact]
+    public void A_session_is_resumed_only_after_two_minutes_missing()
+    {
+        using var rig = new Rig();
+        var (taskId, sessionId) = rig.Dead("Comes and goes");
+        rig.Cli.Listed.Add(new Row(sessionId, @"E:\repos\Work", "running"));
+        rig.Begin();
+        // It goes at 3:20, so the read at 3:30 is the first to miss it.
+        rig.Clock.Schedule(Seconds(200), () => rig.Cli.Listed.RemoveAll(r => r.SessionId == sessionId));
+
+        rig.RunTo(Seconds(325));
+        Assert.Empty(rig.Cli.Resumes);
+        Assert.False(rig.Task(taskId).HasLiveSession);
+
+        rig.RunTo(Seconds(330));
+        Assert.Equal([Seconds(330)], rig.Cli.Resumes.Select(c => rig.Since(c)));
+    }
+
+    // Ruling 18 again: one that comes back within the two minutes is never resumed, and its next absence starts the
+    // two minutes afresh.
+    [Fact]
+    public void A_session_back_within_two_minutes_is_not_resumed()
+    {
+        using var rig = new Rig();
+        var (_, sessionId) = rig.Dead("Reloaded");
+        var row = new Row(sessionId, @"E:\repos\Work", "running");
+        rig.Cli.Listed.Add(row);
+        rig.Begin();
+        // A window reload: gone from 2:30 to 3:30.
+        rig.Clock.Schedule(Seconds(150), () => rig.Cli.Listed.Remove(row));
+        rig.Clock.Schedule(Seconds(210), () => rig.Cli.Listed.Add(row));
+
+        rig.RunTo(TimeSpan.FromMinutes(10));
+
+        Assert.Empty(rig.Cli.Resumes);
+    }
+
+    // Ruling 20: a list that cannot be read is said on Manage, in one line, until a read works again.
+    [Fact]
+    public void An_unreadable_list_is_published_for_Manage_and_cleared_by_a_good_read()
+    {
+        using var rig = new Rig();
+        var answers = new Queue<Result<string>>(
+        [
+            Result.Failure<string>("Could not run claude:\nThe system cannot find the file specified."),
+            Result.Success("not json"),
+            Result.Success("[]"),
+        ]);
+        rig.Cli.Agents = () => answers.Count > 0 ? answers.Dequeue() : Result.Success("[]");
+        var sessions = rig.Begin();
+        var seen = new List<Maybe<string>>();
+        using var watch = sessions.ListProblem.Subscribe(seen.Add);
+
+        rig.RunTo(Seconds(30));
+
+        Assert.True(seen.Last().HasNoValue);
+        var problems = seen.Where(p => p.HasValue).Select(p => p.Value).ToList();
+        Assert.Contains(problems, p => p.Contains("The system cannot find the file specified.") && !p.Contains('\n'));
+        Assert.True(problems.Count >= 1);
+
+        // Turning the feature off clears it too.
+        rig.Cli.Agents = () => Result.Failure<string>("gone");
+        rig.RunTo(Seconds(45));
+        Assert.True(seen.Last().HasValue);
+        Assert.True(rig.Manager.SetClaudeTasks(false).IsSuccess);
+        rig.Run(Seconds(1));
+        Assert.True(seen.Last().HasNoValue);
     }
 
     // --- resuming at a click (Task 9) -------------------------------------------------------------
