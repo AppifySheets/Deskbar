@@ -34,10 +34,18 @@ namespace Deskbar.App;
 //      real one. A GiveUp asks Petre through the task. A Resume
 //      goes into a queue that is drained ONE AT A TIME, SessionKeeper.Spacing (5 s) apart, because after a reboot there
 //      can be twenty at once and each `claude.exe` takes hundreds of MB (Review Focus 2). Before each queued resume is
-//      issued, it is checked again against the CURRENT board and the latest good list: the task must still be open, the
-//      session must still be its latest, and the session must NOT be listed, because resuming a listed session starts a
-//      COPY with a new id (Task 1 note). Anything else drops it (Review Focus 5: Petre closed the task meanwhile).
+//      issued, the list is read AGAIN (final review, item 2; see Issue) and the resume checked against the CURRENT board
+//      and that fresh list: the task must still be open, the session must still be its latest, and the session must NOT
+//      be listed, because resuming a listed session starts a COPY with a new id (Task 1 note). Anything else drops it
+//      (Review Focus 5: Petre closed the task meanwhile), and a fresh read that fails drops the whole queue.
 //      With the automatic resume off (AppState.ClaudeResume) only the adoption runs, and the reconcile, as the spec asks.
+//
+//      THE WAITS (Rulings 17 and 18). Nothing is resumed in the first SessionKeeper.Settle (2 minutes) after this class
+//      starts watching (built at Deskbar's start, or the feature turned on), and a session must have been missing from
+//      the good reads for that long before it is: VS Code brings sessions back by itself after a restart or a reload.
+//      A stranger is adopted only when its hooks have said since Deskbar started that a person is at it
+//      (TaskService.WasAttended), since the list shows a `claude -p` run as "interactive". When the list cannot be read
+//      at all, ListProblem says why, for Manage (Ruling 20).
 //
 //   3. STARTING A SESSION FROM A TASK (Start). `claude --bg "<first message>"` in the folder, the short id read from what
 //      it prints, then the full id found in the list and the task JOINED HERE, not left to the session's SessionStart
@@ -155,6 +163,18 @@ public sealed class ClaudeSessions : IDisposable
     // other's turn: both count as queued, so no poll queues them meanwhile.
     ImmutableHashSet<string> wakingNow = ImmutableHashSet<string>.Empty;
 
+    // RULING 18: when this class started watching (built, or the feature turned on), and since when each session that
+    // a good read listed has been missing from every good read after it. The keeper acts on a session only once it has
+    // been missing for SessionKeeper.Settle; one never listed since watching began counts as missing since then, which
+    // is what keeps the first two minutes after a start free of resumes. A failed read changes neither: it says
+    // nothing about who is listed.
+    DateTimeOffset watchingSince;
+    ImmutableDictionary<string, DateTimeOffset> goneSince = ImmutableDictionary<string, DateTimeOffset>.Empty;
+
+    // RULING 20: why the list cannot be read, in one line, for Manage to show under the resume box; none after a good
+    // read and while the feature is off.
+    readonly BehaviorSubject<Maybe<string>> listProblem = new(Maybe<string>.None);
+
     /// <param name="scheduler">Where answers land and timers run: the UI thread in the app.</param>
     /// <param name="workspaceOfFolder">The workspace of the editor window showing a folder, or none, for adopted sessions.</param>
     /// <param name="claudeHome">The folder that holds Claude Code's `projects`, normally %USERPROFILE%\.claude.</param>
@@ -171,15 +191,22 @@ public sealed class ClaudeSessions : IDisposable
         this.claudeHome = claudeHome;
         this.trace = trace;
         lastIssued = scheduler.Now - SessionKeeper.Spacing;
+        watchingSince = scheduler.Now;
 
         // The poll, alive only while the feature is in effect: turning it on reads at once (StartWith), off stops the
         // timer (Switch to Never). StateChanged can pulse from the virtual-desktop thread, so the setting is read there
-        // and only its CHANGES are moved onto the scheduler.
+        // and only its CHANGES are moved onto the scheduler. Turning it on starts the watch afresh (Ruling 18: nothing
+        // was read while it was off, so nobody's absence is known); turning it off clears Manage's line (Ruling 20).
         subscriptions.Add(manager.StateChanged
             .Select(_ => manager.State.ClaudeTasksInEffect)
             .StartWith(manager.State.ClaudeTasksInEffect)
             .DistinctUntilChanged()
             .ObserveOn(scheduler)
+            .Do(on =>
+            {
+                if (on) StartWatching();
+                else listProblem.OnNext(Maybe<string>.None);
+            })
             .Select(on => on ? Observable.Interval(Poll, scheduler).StartWith(scheduler, 0L) : Observable.Never<long>())
             .Switch()
             .Subscribe(_ => Read()));
@@ -190,6 +217,23 @@ public sealed class ClaudeSessions : IDisposable
 
     /// <summary>Every list `claude agents --json` gave that could be read, latest first to a new subscriber.</summary>
     public IObservable<IReadOnlyCollection<ClaudeAgent>> Live => live.AsObservable();
+
+    /// <summary>
+    /// Why `claude agents --json` cannot be read right now, in one line (Ruling 20: `claude` missing from the PATH, a
+    /// failed or unparseable read), or none once a read works again and while the feature is off. Manage shows it under
+    /// the resume box. Pulses on `scheduler` (the UI thread in the app), the current value first to a new subscriber.
+    /// </summary>
+    public IObservable<Maybe<string>> ListProblem => listProblem.DistinctUntilChanged();
+
+    /// <summary>
+    /// Petre acted on a session the keeper gave up on (ClaudeTaskActions: a double-click that brought it back): its
+    /// resumes no longer count, so the loop guard judges it afresh.
+    /// </summary>
+    public void Forget(string sessionId)
+    {
+        ledger = ledger.Forget(sessionId);
+        givenUp = givenUp.Remove(sessionId);
+    }
 
     /// <summary>
     /// Starts a background session on the task in <paramref name="folder"/> with the task as its first message, joins
@@ -285,6 +329,7 @@ public sealed class ClaudeSessions : IDisposable
         stopping.OnNext(System.Reactive.Unit.Default);
         subscriptions.Dispose();
         live.OnCompleted();
+        listProblem.OnCompleted();
     }
 
     // --- the poll ---------------------------------------------------------------------------------------------------
@@ -305,8 +350,25 @@ public sealed class ClaudeSessions : IDisposable
             {
                 reading = false;
                 trace?.Invoke($"claude sessions: list read threw: {error.Message}");
+                if (manager.State.ClaudeTasksInEffect) listProblem.OnNext(Problem(error.Message));
             });
     }
+
+    // Ruling 18: a fresh watch. Nobody's absence is known yet, so every session counts as missing from now.
+    void StartWatching()
+    {
+        watchingSince = scheduler.Now;
+        goneSince = ImmutableDictionary<string, DateTimeOffset>.Empty;
+    }
+
+    // Since when a session has been missing from the good reads (Ruling 18): the read that first missed it after it was
+    // listed, and never before the watch began.
+    DateTimeOffset AbsentSince(string sessionId) =>
+        goneSince.TryGetValue(sessionId, out var gone) && gone > watchingSince ? gone : watchingSince;
+
+    // Ruling 20: Manage's line. One line, since Claude's message can run to several.
+    static Maybe<string> Problem(string error) =>
+        $"Claude Code's list of sessions cannot be read, so nothing is resumed: {string.Join(" ", error.Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))}";
 
     void Heard(Result<string> read)
     {
@@ -321,15 +383,26 @@ public sealed class ClaudeSessions : IDisposable
             queue = ImmutableQueue<KeeperStep.Resume>.Empty;
             if (!unreadable) trace?.Invoke($"claude sessions: list not read, tasks keep what the hooks said: {parsed.Error}");
             unreadable = true;
+            listProblem.OnNext(Problem(parsed.Error));
             return;
         }
 
         if (unreadable) trace?.Invoke("claude sessions: list read again");
         unreadable = false;
+        listProblem.OnNext(Maybe<string>.None);
         var listed = parsed.Value;
+        var now = scheduler.Now;
+        // Ruling 18: a session the last good read listed and this one does not has been missing since now; one listed
+        // again is no longer missing. Entries older than Settle say no more than the watch's start does, so they go.
+        var listedIds = listed.Select(agent => agent.SessionId).ToHashSet();
+        goneSince = goneSince
+            .Where(pair => !listedIds.Contains(pair.Key) && pair.Value > now - SessionKeeper.Settle)
+            .Concat(lastLive.Select(agent => agent.SessionId).Distinct()
+                .Where(id => !listedIds.Contains(id) && !goneSince.ContainsKey(id))
+                .Select(id => KeyValuePair.Create(id, now)))
+            .ToImmutableDictionary();
         lastLive = listed;
         // Each listed session keeps the moment it was first seen; one that left the list is forgotten.
-        var now = scheduler.Now;
         firstSeen = listed.Select(agent => agent.SessionId).Distinct()
             .ToImmutableDictionary(id => id, id => firstSeen.TryGetValue(id, out var seen) ? seen : now);
         // Sessions Start launched join their tasks first, so the keeper sees them known and does not adopt them.
@@ -345,7 +418,9 @@ public sealed class ClaudeSessions : IDisposable
                 // Whether a turn was cut off is read when the resume is ISSUED, off the UI thread (Issue), not here: a
                 // transcript can run to tens of MB and this runs on every poll for every session waiting in the queue.
                 _ => false,
-                scheduler.Now)
+                scheduler.Now,
+                // Ruling 18: no step for a session missing less than SessionKeeper.Settle.
+                AbsentSince)
             .ToList()
             .ForEach(step => Take(step, resuming));
 
@@ -357,8 +432,10 @@ public sealed class ClaudeSessions : IDisposable
     {
         switch (step)
         {
-            // Only a session listed for AdoptAfter: before that it may still join its own task (Ruling 11).
-            case KeeperStep.Adopt adopt when ListedFor(adopt.Agent.SessionId) >= AdoptAfter:
+            // Only a session listed for AdoptAfter: before that it may still join its own task (Ruling 11). And only one
+            // whose hooks have said, since Deskbar started, that a person is at it (Ruling 17): `claude agents` lists a
+            // `claude -p` run as "interactive" (measured 2026-11-23), so the list alone would adopt every scripted call.
+            case KeeperStep.Adopt adopt when ListedFor(adopt.Agent.SessionId) >= AdoptAfter && tasks.WasAttended(adopt.Agent.SessionId):
                 tasks.Adopt(adopt.Agent, workspaceOfFolder(adopt.Agent.Folder))
                     .TapError(e => trace?.Invoke($"claude sessions: {adopt.Agent.SessionId} not adopted: {e}"));
                 break;
@@ -401,6 +478,12 @@ public sealed class ClaudeSessions : IDisposable
         drainTimer.Disposable = scheduler.Schedule(wait > TimeSpan.Zero ? wait : TimeSpan.Zero, Issue);
     }
 
+    // THE FRESH LIST (final review, item 2). The queue was decided on a poll up to minutes old (five seconds a step, after
+    // a reboot twenty steps), and in that time VS Code may have brought the session back by itself, or Petre opened it.
+    // Resuming a listed session starts a COPY (Global Constraints), so right before each resume the list is read again,
+    // off the UI thread (about 230 ms, measured 2026-11-23, and it writes nothing to ~/.claude.json), and the resume
+    // goes only if that list does not show the session. A read that fails is "cannot tell": the resume and the rest of
+    // the queue are dropped, as a failed poll drops them; the next good poll queues them again.
     void Issue()
     {
         var next = NextWanted();
@@ -411,6 +494,34 @@ public sealed class ClaudeSessions : IDisposable
         }
 
         var resume = next.Value;
+        // Counts as queued while the list is read, so a poll meanwhile cannot queue it a second time.
+        inFlight = resume.Session.Id;
+        resumeCall.Disposable = OffThread(() => cli.Run(AgentsArguments, null, ReadTimeout))
+            .Subscribe(
+                read => Rechecked(resume, read.Bind(ClaudeAgents.Parse)),
+                error => Dropped(resume, $"the list read threw: {error.Message}", wholeQueue: true));
+    }
+
+    void Rechecked(KeeperStep.Resume resume, Result<IReadOnlyList<ClaudeAgent>> fresh)
+    {
+        if (fresh.IsFailure) Dropped(resume, $"the list could not be read: {fresh.Error}", wholeQueue: true);
+        else if (fresh.Value.Any(agent => agent.SessionId == resume.Session.Id)) Dropped(resume, "the list shows it again", wholeQueue: false);
+        else if (!StillWanted(resume)) Dropped(resume, "no longer wanted", wholeQueue: false);
+        else Wake(resume);
+    }
+
+    // A queued resume that does not go: the queue moves on (or is emptied, when the list cannot be read).
+    void Dropped(KeeperStep.Resume resume, string why, bool wholeQueue)
+    {
+        inFlight = Maybe<string>.None;
+        draining = false;
+        if (wholeQueue) queue = ImmutableQueue<KeeperStep.Resume>.Empty;
+        trace?.Invoke($"claude sessions: queued resume of {resume.Session.Id} dropped, {why}");
+        Drain();
+    }
+
+    void Wake(KeeperStep.Resume resume)
+    {
         var session = resume.Session;
         var at = scheduler.Now;
         ledger = ledger.Record(session.Id, at);
