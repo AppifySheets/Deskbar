@@ -41,10 +41,10 @@ public partial class TasksWindow
     static readonly Brush StrongCellFill = Frozen(0xFF, 0x22, 0x24, 0x2A);
     const string StrongTag = "matrix-strong";
 
-    // The compact columns of a Matrix line: tick, title, flags, (no sessions, no age), chip, comments, (no action), "…".
+    // The compact columns of a Matrix line: tick, title, flags, (no sessions, no assignee, no age), chip, comments, (no action), "…".
     // 178 DIP of fixed columns, so a line in a cell keeps a title of 100 DIP or more at MatrixMinWidth.
     static readonly IReadOnlyList<GridLength> CompactColumns =
-        [new(22), new(1, GridUnitType.Star), new(34), new(0), new(0), new(64), new(34), new(0), new(24)];
+        [new(22), new(1, GridUnitType.Star), new(34), new(0), new(0), new(0), new(64), new(34), new(0), new(24)];
 
     // THE WINDOW'S WIDTH FOLLOWS THE VIEW (review of 4fc4441..a1acd60, item 1, and of the fix round, I-1). Two cells side
     // by side, each with its own scroll bar, leave a line half the List's width: at the List's 560 DIP the title got

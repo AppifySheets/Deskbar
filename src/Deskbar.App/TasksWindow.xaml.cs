@@ -192,6 +192,7 @@ public partial class TasksWindow : Window
     internal string WorkspaceFilterLabel { get; private set; } = "";
     // The goal filter's words, "" while it is not shown (ruling G1: no goals, no goal filter).
     internal string GoalFilterLabel { get; private set; } = "";
+    internal string AssigneeFilterLabel { get; private set; } = "";
     internal bool AddBoxShown => AddRow.Visibility == Visibility.Visible;
     internal string? Problem => ProblemText.Visibility == Visibility.Visible ? ProblemText.Text : null;
     internal bool ThreadShown(Guid id) => authors.ContainsKey(id);
@@ -514,15 +515,17 @@ public partial class TasksWindow : Window
             // they open, so they are current without a redraw, and a redraw for every goal edit rebuilt every row and
             // reset the Matrix's scrolls. A row's own goal is not drawn either, so it is not here.
             $"{view.ShowsGoals}{view.GoalFilterLabel}{view.GoalFilter}",
+            // The "Assigned" filter (Ruling 57): its label is what the toolbar draws.
+            $"{view.AssigneeFilterLabel}",
             string.Join('|', view.Places.Select(p => $"{p.IsGroup}{p.Workspace}{p.Name}{(p.Colour as SolidColorBrush)?.Color}")),
             view.EmptyText,
             $"{renaming}",
             $"{view.Matrix}",
             string.Join('\u0002', view.Cells.Select(c => $"{c.Header}:" + string.Join('\u0003', c.Rows.Select(r =>
-                $"{r.Id}|{r.Title}|{r.Detail}|{r.Status}|{r.Claudes}|{PlaceSignature(r.Place)}|{r.CommentCount}|{r.Expanded}|{r.Closing}|{r.Important}|{r.Urgent}|" +
+                $"{r.Id}|{r.Title}|{r.Detail}|{r.Status}|{r.Claudes}|{r.Assignee.Id}|{PlaceSignature(r.Place)}|{r.CommentCount}|{r.Expanded}|{r.Closing}|{r.Important}|{r.Urgent}|" +
                 string.Join('\u0004', r.Comments.Select(c => $"{c.Id}{c.Author}{c.When}{c.Markdown}")))))),
             string.Join('\u0002', view.Groups.Select(g => $"{g.Header}:" + string.Join('\u0003', g.Rows.Select(r =>
-                $"{r.Id}|{r.Title}|{r.Detail}|{r.Status}|{r.Claudes}|{r.Sessions}|{r.SessionCount}|{r.LiveCount}|{PlaceSignature(r.Place)}|{r.CommentCount}|" +
+                $"{r.Id}|{r.Title}|{r.Detail}|{r.Status}|{r.Claudes}|{r.Assignee.Id}|{r.Sessions}|{r.SessionCount}|{r.LiveCount}|{PlaceSignature(r.Place)}|{r.CommentCount}|" +
                 $"{r.Expanded}|{r.Closing}|{r.Important}|{r.Urgent}|" + string.Join('\u0004', r.Comments.Select(c => $"{c.Id}{c.Author}{c.When}{c.Markdown}")))))));
 
     static string PlaceSignature(TaskPlaceChoice place) => $"{place.Workspace}{place.Name}{(place.Colour as SolidColorBrush)?.Color}";
@@ -546,6 +549,14 @@ public partial class TasksWindow : Window
         workspace = Flat(new TextBlock { Text = $"{view.WorkspaceFilterLabel} ▾", Foreground = Ink, FontSize = 11 }, "Workspace filter",
             () => OpenMenu(WorkspaceFilterMenu(view, workspace!)), new Thickness(8, 2, 8, 2));
         Filters.Children.Add(workspace);
+        // The assignee filter (Ruling 57): me, Claude or all. Its menu opens from Flat's own press, like the others.
+        Button? assignee = null;
+        assignee = Flat(new TextBlock { Text = $"{view.AssigneeFilterLabel} ▾", Foreground = Ink, FontSize = 11 }, "Assignee filter",
+            () => OpenAssigneeFilterMenu(), new Thickness(8, 2, 8, 2));
+        assignee.Margin = new Thickness(6, 0, 0, 0);
+        assigneeFilterButton = assignee;
+        Filters.Children.Add(assignee);
+        AssigneeFilterLabel = view.AssigneeFilterLabel;
         // The goal filter, beside the workspace one, only while goals exist (ruling G1).
         goalFilterButton = null;
         if (view.ShowsGoals)
@@ -612,15 +623,17 @@ public partial class TasksWindow : Window
         // A Matrix line (compact) has no column for the sessions, the age or the close button, so they are not made at
         // all (whole-PR review, minor 5): no element in a zero-width column, and no age for the minute's tick to rewrite.
         Cell(grid, 3, compactLines ? null : SessionsOf(row));
-        Cell(grid, 4, compactLines ? null : AgeOf(row));
-        Cell(grid, 5, Chip(row.Place));
+        // Who the task is on (Ruling 57): "Me" or "Claude", dim; none in a Matrix line (no column there).
+        Cell(grid, 4, compactLines ? null : AssigneeOf(row));
+        Cell(grid, 5, compactLines ? null : AgeOf(row));
+        Cell(grid, 6, Chip(row.Place));
         var comments = CommentsButton(row);
-        Cell(grid, 6, comments);
-        Cell(grid, 7, compactLines ? null : ActionOf(row));
+        Cell(grid, 7, comments);
+        Cell(grid, 8, compactLines ? null : ActionOf(row));
         var more = Small(new TextBlock { Text = "", FontFamily = IconFont, FontSize = 12, Foreground = Ink }, "More",
             () => OpenMenuFor(row.Id), "Edit, status, move, delete");
         menuButtons[row.Id] = more;
-        Cell(grid, 8, more);
+        Cell(grid, 9, more);
         if (row.Closing)
             grid.Children.OfType<UIElement>().Where(part => Grid.GetColumn(part) != 0).ToList().ForEach(part => part.Opacity = 0.45);
         // The comments and "…" buttons are quiet until the pointer is on their line, like the bar's quiet controls.
@@ -713,13 +726,13 @@ public partial class TasksWindow : Window
     }
 
 
-    // The line's columns: tick, title (the star, trimming first), the two flag toggles, sessions, age, workspace chip,
+    // The line's columns: tick, title (the star, trimming first), the two flag toggles, sessions, assignee (46 DIP, "Claude" fits), age, workspace chip,
     // comments, action (close or Reopen), "…". Fixed widths, shared by every line, so each column sits at the same x on
     // every line. The sessions column is wide enough for "2 sessions, 1 live" (116 DIP, so the words never spill into the
     // age column; it is empty on a note), the age is left-aligned in its own so its x never follows the text length, and the window's minimum width
     // is 620 DIP, so the title keeps a usable width there even with the list's scroll bar showing (review I-3).
     static readonly IReadOnlyList<GridLength> LineColumns =
-        [new(22), new(1, GridUnitType.Star), new(38), new(116), new(44), new(88), new(40), new(52), new(24)];
+        [new(22), new(1, GridUnitType.Star), new(38), new(116), new(46), new(44), new(88), new(40), new(52), new(24)];
 
     // THE TWO TOGGLES (Task 12), the bar's (FloatingBar.FlagToggle): important, Segoe Fluent Icons' "Important" U+E8C9,
     // and urgent, its "Recent" clock U+E823 (Segoe MDL2 Assets carries both on Windows 10). On, the glyph wears its
@@ -905,6 +918,21 @@ public partial class TasksWindow : Window
             });
         return panel;
     }
+
+    // The assignee column (Ruling 57): "Me" or "Claude" (a colleague by name, later), dim like the age. Shown on every line,
+    // closed ones too: it says who had the task. Changed only in the "Assign to" menu.
+    UIElement AssigneeOf(TaskRowView row) => new TextBlock
+    {
+        Tag = AssigneeTag,
+        Text = row.Assignee.Name,
+        FontSize = 10,
+        Foreground = row.Assignee.IsClaude ? ClaudeInk : DimInk,
+        VerticalAlignment = VerticalAlignment.Center,
+        TextTrimming = TextTrimming.CharacterEllipsis,
+        ToolTip = $"Assigned to {row.Assignee.Name}",
+    };
+
+    const string AssigneeTag = "task-assignee";
 
     // The sessions, a square each (blue while live), then the words: "2 sessions, 1 live". Empty for a note.
     UIElement? SessionsOf(TaskRowView row)
@@ -1261,6 +1289,15 @@ public partial class TasksWindow : Window
         // The task list's one workspace menu (WorkspaceChipMenu), the move the bar's line chip makes. Its own menu,
         // opened under the line's "⋯" once this one has closed: the compact chip menu is a context menu of its own, not
         // a submenu.
+        // Who the task is on (Ruling 57), here and nowhere on the bar: Me or Claude, the task's own ticked.
+        var assign = Item("Assign to");
+        new[] { Assignee.Me, Assignee.Claude }.ToList().ForEach(who =>
+        {
+            var item = Item(who.Name, () => Actions?.Assign(id, who));
+            item.IsChecked = row.Assignee == who;
+            assign.Items.Add(item);
+        });
+        menu.Items.Add(assign);
         menu.Items.Add(Item("Move to…", () => Dispatcher.BeginInvoke(() => OpenMoveMenu(id, row.Place.Workspace),
             System.Windows.Threading.DispatcherPriority.Input)));
         // The goal the task counts toward (goals plan, Task 6): a plain submenu, only while goals exist (ruling G1).
@@ -1297,6 +1334,26 @@ public partial class TasksWindow : Window
             extra: [new WorkspaceChipMenu.Extra("All workspaces", view.Where.Any, () => Actions?.FilterWorkspace(TaskWorkspaceFilter.All))]);
 
     // --- goals (goals plan, Task 6) -------------------------------------------------------------------------------------
+
+    // The assignee filter's button: the anchor its menu opens under (Ruling 57).
+    Button? assigneeFilterButton;
+
+    /// <summary>
+    /// "Assigned: all ▾": Me, Claude, All, the filter in force checked. Internal, and answering the menu, for the tests.
+    /// </summary>
+    internal ContextMenu OpenAssigneeFilterMenu()
+    {
+        var shown = latest?.AssigneeFilter ?? TaskAssigneeFilter.All;
+        var menu = new ContextMenu { PlacementTarget = assigneeFilterButton, Placement = PlacementMode.Bottom };
+        new[] { ("Me", TaskAssigneeFilter.Me), ("Claude", TaskAssigneeFilter.Claude), ("All", TaskAssigneeFilter.All) }.ToList().ForEach(choice =>
+        {
+            var item = Item(choice.Item1, () => Actions?.FilterAssignee(choice.Item2));
+            item.IsChecked = shown == choice.Item2;
+            menu.Items.Add(item);
+        });
+        OpenMenu(menu);
+        return menu;
+    }
 
     // The goal filter's button, while it is shown: the anchor its menu opens under.
     Button? goalFilterButton;

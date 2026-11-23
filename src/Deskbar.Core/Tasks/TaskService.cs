@@ -77,6 +77,9 @@ public sealed class TaskService(ITaskStore store, Func<DateTimeOffset> now, Func
 
     public Result SetStatus(Guid id, TaskStatus status) => Apply(Board.SetStatus(id, status, now()));
 
+    // Ruling 57: Petre's hand-over from the tasks window or `task assign`; the same assignee saves and pulses nothing.
+    public Result Assign(Guid id, Assignee assignee) => ApplyIfChanged(Board.Assign(id, assignee, now()));
+
     public Result Rename(Guid id, string title) => Apply(Board.Rename(id, title, now()));
 
     public Result MoveTo(Guid id, Maybe<Guid> workspace) => Apply(Board.MoveTo(id, workspace, now()));

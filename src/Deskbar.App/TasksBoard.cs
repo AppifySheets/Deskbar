@@ -86,6 +86,8 @@ public sealed class TasksBoard : IDisposable
     TaskFilter filter = TaskFilter.Open;
     TaskWorkspaceFilter where = TaskWorkspaceFilter.All;
     TaskGoalFilter goalFilter = TaskGoalFilter.All;
+    // The toolbar's "Assigned" filter (Ruling 57); like the others it starts at "all" whenever the window opens.
+    TaskAssigneeFilter assigneeFilter = TaskAssigneeFilter.All;
 
     // What Undo gives back (Ruling 31): the status, the question of a task that waited on Petre, and the selection.
     sealed record PendingClose(TaskStatus Was, IDisposable Timer)
@@ -142,7 +144,9 @@ public sealed class TasksBoard : IDisposable
             FilterWorkspace: FilterWorkspace,
             Remember: place => manager.SaveTasksWindow(place),
             SetGoal: (id, goal) => SetGoal(id, goal),
-            FilterGoal: FilterGoal);
+            FilterGoal: FilterGoal,
+            Assign: (id, who) => Assign(id, who),
+            FilterAssignee: FilterAssignee);
 
         subscriptions = new CompositeDisposable(
             tasks.Changed.Subscribe(_ => Refresh()),
@@ -200,6 +204,7 @@ public sealed class TasksBoard : IDisposable
         filter = TaskFilter.Open;
         where = TaskWorkspaceFilter.All;
         goalFilter = TaskGoalFilter.All;
+        assigneeFilter = TaskAssigneeFilter.All;
         expanded.Clear();
         window.ShowProblem(null);
         window.PaintSelection(selection.Current);
@@ -307,6 +312,13 @@ public sealed class TasksBoard : IDisposable
         Refresh();
     }
 
+    /// <summary>The toolbar's "Assigned" filter (Ruling 57): me, Claude or all.</summary>
+    public void FilterAssignee(TaskAssigneeFilter shown)
+    {
+        assigneeFilter = shown;
+        Refresh();
+    }
+
     public void ToggleThread(Guid id)
     {
         if (!expanded.Remove(id)) expanded.Add(id);
@@ -395,6 +407,12 @@ public sealed class TasksBoard : IDisposable
 
     public Result MoveTo(Guid id, Maybe<Guid> workspace) => Report(tasks.MoveTo(id, workspace));
 
+    /// <summary>
+    /// The "Assign to" menu (Ruling 57): hands the task to Petre or to Claude. Only here and in `task assign`, never on
+    /// the bar. Nothing else about the task changes, so its line keeps its place.
+    /// </summary>
+    public Result Assign(Guid id, Assignee who) => Report(tasks.Assign(id, who));
+
     /// <summary>A toggle on a line: the flag on or off; the task goes to the top of the quadrant it lands in.</summary>
     public Result SetFlag(Guid id, TaskFlag flag, bool on) => Report(tasks.SetFlag(id, flag, on));
 
@@ -460,10 +478,10 @@ public sealed class TasksBoard : IDisposable
         if (!showsGoals || goalFilter.Goal.Map(id => goalBoard.Get(id).HasNoValue).GetValueOrDefault(false))
             goalFilter = TaskGoalFilter.All;
         var board = goalFilter.Narrow(WithPendingCloses(tasks.Board), goalBoard);
-        var groups = TaskViews.Grouped(board, filter, where)
+        var groups = TaskViews.Grouped(board, filter, where, assigneeFilter)
             .Select(g => new TaskGroupView(g.Kind, TaskViews.GroupName(g.Kind), g.Tasks.Select(Row).ToArray()))
             .ToArray();
-        var filters = FilterOrder.Select(f => (Filter: f, Count: TaskViews.Count(board, f, where)))
+        var filters = FilterOrder.Select(f => (Filter: f, Count: TaskViews.Count(board, f, where, assigneeFilter)))
             .Select(x => new TaskFilterChip(x.Filter, $"{FilterName(x.Filter)} {x.Count}", x.Filter == filter,
                 x.Filter == TaskFilter.WaitingOnYou && x.Count > 0))
             .ToArray();
@@ -472,7 +490,7 @@ public sealed class TasksBoard : IDisposable
         var places = WorkspaceChipMenu.Entries(manager.State, withNone: true);
         var addTarget = where.Any ? PlaceOf(manager.CurrentWorkspaceId) : PlaceOf(where.Workspace);
         // The Matrix's four cells (Ruling 28), drawn instead of the groups while the switch says so (AppState.TasksMatrix).
-        var cells = TaskViews.Matrix(board, filter, where)
+        var cells = TaskViews.Matrix(board, filter, where, assigneeFilter)
             .Select(c => new TaskCellView(c.Quadrant, TaskViews.GroupName(TaskViews.KindOf(c.Quadrant)), c.Tasks.Select(Row).ToArray()))
             .ToArray();
         var (menuGoals, filterGoals) = showsGoals ? GoalChoices(goalBoard) : NoGoalChoices;
@@ -485,6 +503,8 @@ public sealed class TasksBoard : IDisposable
             GoalFilterChoices = filterGoals,
             GoalFilter = goalFilter,
             GoalFilterLabel = showsGoals ? GoalFilterLabel(goalBoard) : "",
+            AssigneeFilter = assigneeFilter,
+            AssigneeFilterLabel = AssigneeFilterLabel(),
         };
     }
 
@@ -556,6 +576,7 @@ public sealed class TasksBoard : IDisposable
         expanded.Contains(task.Id) ? task.Comments.Select(CommentView).ToArray() : [])
     {
         Created = task.Created,
+        Assignee = task.Assignee,
         Important = task.Important,
         Urgent = task.Urgent,
         // Null for no goal and for a link to a goal that no longer exists, which reads as no goal everywhere.
@@ -587,6 +608,10 @@ public sealed class TasksBoard : IDisposable
         workspace.Bind(id => manager.State.Workspaces.TryFirst(w => w.Id == id))
             .Map(w => new TaskPlaceChoice(w.Id, w.Name, colourOf(w.Id)))
             .GetValueOrDefault(new TaskPlaceChoice(Maybe<Guid>.None, "none", null));
+
+    // "Assigned: all", "Assigned: me" or "Assigned: Claude" (Ruling 57).
+    string AssigneeFilterLabel() =>
+        assigneeFilter.Kind.Match(kind => kind == AssigneeKind.Me ? "Assigned: me" : "Assigned: Claude", () => "Assigned: all");
 
     string WorkspaceFilterLabel() =>
         where.Any ? "Workspace: all" : $"Workspace: {PlaceOf(where.Workspace).Name}";
@@ -643,6 +668,9 @@ internal sealed record TaskRowView(Guid Id, string Title, string Detail, TaskSta
     /// <summary>When the task appeared, for its age (TaskAge), which the window rewrites in place once a minute.</summary>
     public DateTimeOffset Created { get; init; }
 
+    /// <summary>Who the task is on (Ruling 57): the assignee column and the "Assign to" menu's tick.</summary>
+    public Assignee Assignee { get; init; } = Assignee.Me;
+
     /// <summary>The task's two flags (Task 12), drawn as the line's toggles.</summary>
     public bool Important { get; init; }
 
@@ -697,6 +725,11 @@ internal sealed record TasksView(IReadOnlyList<TaskFilterChip> Filters, string W
 
     /// <summary>"Goal: all", "Goal: none" or "Goal: &lt;title&gt;"; "" while ShowsGoals is false.</summary>
     public string GoalFilterLabel { get; init; } = "";
+
+    /// <summary>The "Assigned" filter in force (Ruling 57), and its toolbar label.</summary>
+    public TaskAssigneeFilter AssigneeFilter { get; init; } = TaskAssigneeFilter.All;
+
+    public string AssigneeFilterLabel { get; init; } = "Assigned: all";
 }
 
 /// <summary>
@@ -725,4 +758,6 @@ internal sealed record TasksWindowActions(
     Action<TaskWorkspaceFilter> FilterWorkspace,
     Action<TasksWindowState> Remember,
     Action<Guid, Maybe<Guid>> SetGoal,
-    Action<TaskGoalFilter> FilterGoal);
+    Action<TaskGoalFilter> FilterGoal,
+    Action<Guid, Assignee> Assign,
+    Action<TaskAssigneeFilter> FilterAssignee);

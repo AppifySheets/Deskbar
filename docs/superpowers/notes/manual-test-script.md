@@ -348,6 +348,15 @@ Tasks 7 to 9). Needs Claude Code installed and both Claude boxes in Manage ticke
 75. Swap back to an older Deskbar build and start a session: the bar does not blink on session start or on each
     message (the task hooks reach a script the older build leaves alone), and Notification and Stop still blink.
     Start the current build again: `$ts help` lists `claude-tasks` and the session forms of `task`.
+76. The assignee (Ruling 57). Add a note: the tasks window's line says **Me** in its assignee column, and it is on the
+    bar. In the window's menu (the "..." button, and a right-click on the line) choose **Assign to**, **Claude**: the
+    column says **Claude** and the note leaves the bar ("+N more" shrinks with it). There is no assign control on the bar.
+    Start a Claude session on that workspace: its briefing offers the note. **Assign to**, **Me** brings it back to the
+    bar. The "Assigned" button in the window's toolbar offers Me, Claude and All and narrows the list, the Matrix and the
+    chip counts; it starts at all each time the window opens. Ask a session something: its task says **Me** and is on
+    the bar; `task answered` makes it **Claude** and takes it off; `task done` makes it **Me** again. `$ts task assign
+    <id> claude` does the same as the menu, and `$ts task list` shows `assignee`. Quit and start Deskbar: every
+    assignment is as it was; an old tasks.json with no assignees gives a Claude task in progress to Claude and the rest to you.
 
 ## Goals
 

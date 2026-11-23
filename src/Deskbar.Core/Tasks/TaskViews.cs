@@ -40,6 +40,19 @@ public sealed record TaskWorkspaceFilter(bool Any, Maybe<Guid> Workspace)
 }
 
 /// <summary>
+/// The window's "Assigned" filter (Ruling 57): every task (<see cref="All"/>), or only the tasks assigned to Petre or to
+/// Claude. It narrows the List's groups and the Matrix's cells the way the workspace filter does.
+/// </summary>
+public sealed record TaskAssigneeFilter(Maybe<AssigneeKind> Kind)
+{
+    public static readonly TaskAssigneeFilter All = new(Maybe<AssigneeKind>.None);
+    public static readonly TaskAssigneeFilter Me = new(AssigneeKind.Me);
+    public static readonly TaskAssigneeFilter Claude = new(AssigneeKind.Claude);
+
+    public bool Admits(TaskItem task) => Kind.HasNoValue || task.Assignee.Kind == Kind.Value;
+}
+
+/// <summary>
 /// Which group of the window a task is drawn in: the pinned Waiting on you block, one of Covey's quadrants (named as
 /// the book numbers them), or the closed tasks.
 /// </summary>
@@ -51,6 +64,12 @@ public sealed record TaskGroup(TaskGroupKind Kind, IReadOnlyList<TaskItem> Tasks
 /// <summary>One cell of the window's Matrix: its quadrant, and its tasks in the order they are drawn.</summary>
 public sealed record TaskCell(Quadrant Quadrant, IReadOnlyList<TaskItem> Tasks);
 
+// Both of the window's filters at once, so the helpers below take one thing to ask.
+sealed record Admit(TaskWorkspaceFilter Workspace, TaskAssigneeFilter Assignee)
+{
+    public bool Admits(TaskItem task) => Workspace.Admits(task) && Assignee.Admits(task);
+}
+
 public static class TaskViews
 {
     static readonly IReadOnlyList<(TaskGroupKind Kind, Quadrant Quadrant)> Quadrants =
@@ -60,7 +79,10 @@ public static class TaskViews
     /// The groups the window draws for a filter, empty groups left out (see the header): Waiting on you by its latest
     /// ask, each quadrant in its manual order, the closed tasks the latest closed first.
     /// </summary>
-    public static IReadOnlyList<TaskGroup> Grouped(TaskBoard board, TaskFilter filter, TaskWorkspaceFilter where) =>
+    public static IReadOnlyList<TaskGroup> Grouped(TaskBoard board, TaskFilter filter, TaskWorkspaceFilter workspaceFilter, TaskAssigneeFilter? who = null) =>
+        Grouped(board, filter, new Admit(workspaceFilter, who ?? TaskAssigneeFilter.All));
+
+    static IReadOnlyList<TaskGroup> Grouped(TaskBoard board, TaskFilter filter, Admit where) =>
         (filter switch
         {
             TaskFilter.Closed => [new TaskGroup(TaskGroupKind.Closed,
@@ -78,7 +100,10 @@ public static class TaskViews
     /// the latest ask first), each drawn orange as everywhere. The status filter narrows every cell as it narrows the
     /// List; the closed tasks have no quadrant order, so under "Closed" every cell is empty.
     /// </summary>
-    public static IReadOnlyList<TaskCell> Matrix(TaskBoard board, TaskFilter filter, TaskWorkspaceFilter where) =>
+    public static IReadOnlyList<TaskCell> Matrix(TaskBoard board, TaskFilter filter, TaskWorkspaceFilter workspaceFilter, TaskAssigneeFilter? who = null) =>
+        Matrix(board, filter, new Admit(workspaceFilter, who ?? TaskAssigneeFilter.All));
+
+    static IReadOnlyList<TaskCell> Matrix(TaskBoard board, TaskFilter filter, Admit where) =>
         Quadrants.Select(q => new TaskCell(q.Quadrant, filter == TaskFilter.Closed ? []
             : board.Tasks.Where(t => t.Status == TaskStatus.WaitingOnYou && t.Quadrant == q.Quadrant).OrderByDescending(t => t.Raised)
                 .Concat(board.Group(q.Quadrant))
@@ -102,16 +127,16 @@ public static class TaskViews
             q => $"{q.Numeral()}  {q.Words()}",
             () => kind == TaskGroupKind.WaitingOnYou ? StatusName(TaskStatus.WaitingOnYou) : StatusName(TaskStatus.Closed));
 
-    static TaskGroup Waiting(TaskBoard board, TaskWorkspaceFilter where) =>
+    static TaskGroup Waiting(TaskBoard board, Admit where) =>
         new(TaskGroupKind.WaitingOnYou, board.Tasks.Where(t => t.Status == TaskStatus.WaitingOnYou && where.Admits(t))
             .OrderByDescending(t => t.Raised).ToArray());
 
-    static IEnumerable<TaskGroup> QuadrantGroups(TaskBoard board, TaskWorkspaceFilter where, Func<TaskItem, bool> shows) =>
+    static IEnumerable<TaskGroup> QuadrantGroups(TaskBoard board, Admit where, Func<TaskItem, bool> shows) =>
         Quadrants.Select(q => new TaskGroup(q.Kind, board.Group(q.Quadrant).Where(t => where.Admits(t) && shows(t)).ToArray()));
 
     /// <summary>How many tasks a filter shows, for its chip.</summary>
-    public static int Count(TaskBoard board, TaskFilter filter, TaskWorkspaceFilter where) =>
-        board.Tasks.Count(t => StatusesOf(filter).Contains(t.Status) && where.Admits(t));
+    public static int Count(TaskBoard board, TaskFilter filter, TaskWorkspaceFilter where, TaskAssigneeFilter? who = null) =>
+        board.Tasks.Count(t => StatusesOf(filter).Contains(t.Status) && where.Admits(t) && (who ?? TaskAssigneeFilter.All).Admits(t));
 
     /// <summary>
     /// The session a click on a Claude task goes to (spec, "Going to a session": the one waiting on Petre, else the

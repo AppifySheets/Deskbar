@@ -56,7 +56,7 @@ public sealed record TaskBoard(IReadOnlyList<TaskItem> Tasks)
     public Result<(TaskBoard Board, TaskItem Task)> Create(string title, Maybe<Guid> workspace, TaskSession session, DateTimeOffset now, Guid newId) =>
         CleanTitle(title).Map(clean =>
             WithoutSessionElsewhere(session.Id, newId, now)
-                .WithAppended(NewTask(newId, clean, workspace, TaskStatus.InProgress, [session], now) with { Rank = TopRank(Quadrant.IV, newId) }));
+                .WithAppended(NewTask(newId, clean, workspace, TaskStatus.InProgress, [session], now) with { Rank = TopRank(Quadrant.IV, newId), Assignee = Assignee.Claude }));
 
     // --- what a session does -----------------------------------------------------------------------
 
@@ -71,6 +71,8 @@ public sealed record TaskBoard(IReadOnlyList<TaskItem> Tasks)
         {
             Sessions = WithSession(t.Sessions, session),
             Status = t.Status == TaskStatus.WaitingOnYou ? t.Status : TaskStatus.InProgress,
+            // Ruling 57: the session works on it now, so it is Claude's; a task still waiting on Petre stays his.
+            Assignee = t.Status == TaskStatus.WaitingOnYou ? t.Assignee : Assignee.Claude,
             UpdatedAt = now,
         }).Map(joined => joined.WithoutSessionElsewhere(session.Id, id, now));
 
@@ -98,7 +100,7 @@ public sealed record TaskBoard(IReadOnlyList<TaskItem> Tasks)
     /// <summary>A session needs a decision: the task waits on Petre, shows the question and moves to the top.</summary>
     public Result<TaskBoard> Ask(Guid id, string question, DateTimeOffset now) =>
         CleanText(question, "An ask needs a question").Bind(q =>
-            ChangeOpen(id, t => t with { Status = TaskStatus.WaitingOnYou, Question = q.Trim(), Raised = now, UpdatedAt = now }));
+            ChangeOpen(id, t => t with { Status = TaskStatus.WaitingOnYou, Question = q.Trim(), Raised = now, UpdatedAt = now, Assignee = Assignee.Me }));
 
     /// <summary>
     /// Petre sent the session a message. Its task, when Waiting on you or Done, goes back to In progress and drops
@@ -108,7 +110,7 @@ public sealed record TaskBoard(IReadOnlyList<TaskItem> Tasks)
     public TaskBoard Answered(string sessionId, DateTimeOffset now) =>
         TaskOf(sessionId)
             .Where(t => t.Status is TaskStatus.WaitingOnYou or TaskStatus.Done)
-            .Map(t => Replaced(t with { Status = TaskStatus.InProgress, Question = Maybe<string>.None, UpdatedAt = now }))
+            .Map(t => Replaced(t with { Status = TaskStatus.InProgress, Question = Maybe<string>.None, UpdatedAt = now, Assignee = Assignee.Claude }))
             .GetValueOrDefault(this);
 
     /// <summary>
@@ -131,7 +133,7 @@ public sealed record TaskBoard(IReadOnlyList<TaskItem> Tasks)
     /// <see cref="TaskItem.Raised"/>, which orders the Done group; a task already Done keeps its stamp.
     /// </summary>
     public Result<TaskBoard> MarkDone(Guid id, DateTimeOffset now) =>
-        ChangeOpen(id, t => BecameDone(t, now) with { Question = Maybe<string>.None, UpdatedAt = now });
+        ChangeOpen(id, t => BecameDone(t, now) with { Question = Maybe<string>.None, UpdatedAt = now, Assignee = Assignee.Me });
 
     // --- what Petre does ---------------------------------------------------------------------------
 
@@ -228,6 +230,14 @@ public sealed record TaskBoard(IReadOnlyList<TaskItem> Tasks)
     public Result<TaskBoard> MoveTo(Guid id, Maybe<Guid> workspace, DateTimeOffset now) =>
         Change(id, t => t with { WorkspaceId = workspace, UpdatedAt = now });
 
+    /// <summary>
+    /// Petre hands a task to someone (Ruling 57), in the tasks window or by `task assign`. Any task, closed ones too (it
+    /// stays readable history, as moving and commenting do). Only the assignee and UpdatedAt change, so the line keeps
+    /// its place; the assignee it already has returns this same board.
+    /// </summary>
+    public Result<TaskBoard> Assign(Guid id, Assignee assignee, DateTimeOffset now) =>
+        Lookup(id).Map(task => task.Assignee == assignee ? this : Replaced(task with { Assignee = assignee, UpdatedAt = now }));
+
     public Result<TaskBoard> Delete(Guid id) =>
         Tasks.Any(t => t.Id == id)
             ? new TaskBoard(Tasks.Where(t => t.Id != id).ToArray())
@@ -310,12 +320,13 @@ public sealed record TaskBoard(IReadOnlyList<TaskItem> Tasks)
 
     /// <summary>
     /// What a session starting on <paramref name="workspace"/> is offered to join, in the pile's order: the open
-    /// tasks on that workspace, notes included, plus the open Claude tasks on no workspace. Petre's notes on no
-    /// workspace (errands) are never offered (spec, "What a session is offered").
+    /// tasks on that workspace that are Claude's to take (Ruling 57: assigned to Claude, or already Claude's work by
+    /// having had a session), plus the open Claude tasks on no workspace. A note of Petre's that stays assigned to him
+    /// is not offered, and neither are his notes on no workspace (errands; spec, "What a session is offered").
     /// </summary>
     public IReadOnlyList<TaskItem> Offered(Maybe<Guid> workspace) =>
         Pile().Where(t => t.WorkspaceId.HasValue
-            ? workspace.HasValue && t.WorkspaceId.Value == workspace.Value
+            ? workspace.HasValue && t.WorkspaceId.Value == workspace.Value && (t.Assignee.IsClaude || t.IsClaudes)
             : t.IsClaudes).ToArray();
 
     /// <summary>

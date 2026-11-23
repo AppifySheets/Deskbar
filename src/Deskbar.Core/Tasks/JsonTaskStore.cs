@@ -32,6 +32,11 @@ namespace Deskbar.Core.Tasks;
 // risk is why the goals themselves are in a file of their own, goals.json (spec, "Calls made in writing this up"): an
 // older build put back by the updater never touches it, so at worst the links go and the goals stay.
 //
+// THE ASSIGNEE (Ruling 57). `assignee` is an optional object of version 2 too, `{"kind":"me|claude|colleague","id":..,"name":..}`,
+// so no version bump. A missing or unreadable one is DERIVED on load (Assignee.DerivedFor): a task with sessions that is
+// in progress or in the backlog goes to Claude, everything else to Petre. An older build ignores the field and drops it
+// on its next save, which costs the assignments and never a task.
+//
 // The model uses Maybe, which serialises badly, so the file is written from private DTO records: a Maybe becomes a
 // nullable field (null means none). Every time is converted to UTC before writing AND after reading, so the file
 // means the same on a machine in another time zone, a hand-edited time in local time is still the same instant,
@@ -83,7 +88,11 @@ public sealed class JsonTaskStore(string baseDirectory, Action<string>? trace = 
         bool? Important = null,
         bool? Urgent = null,
         double? Rank = null,
-        Guid? GoalId = null);
+        Guid? GoalId = null,
+        AssigneeDto? Assignee = null);
+
+    // The assignee (Ruling 57): kind by name ("me", "claude", "colleague"), plus the id and name a colleague needs.
+    sealed record AssigneeDto(string? Kind, string? Id, string? Name);
 
     sealed record FileDto(int Version, IReadOnlyList<TaskDto>? Tasks);
 
@@ -167,7 +176,8 @@ public sealed class JsonTaskStore(string baseDirectory, Action<string>? trace = 
             t.Comments.Select(c => new CommentDto(c.Id, c.SessionId.HasValue ? c.SessionId.Value : null,
                 c.At.ToUniversalTime(), c.Markdown)).ToArray(),
             t.Important, t.Urgent, t.Rank,
-            t.GoalId.HasValue ? t.GoalId.Value : null);
+            t.GoalId.HasValue ? t.GoalId.Value : null,
+            new AssigneeDto(t.Assignee.Kind.ToString().ToLowerInvariant(), t.Assignee.Id, t.Assignee.Name));
 
     static TaskItem FromDto(TaskDto d) =>
         new(d.Id, d.Title ?? "",
@@ -182,6 +192,9 @@ public sealed class JsonTaskStore(string baseDirectory, Action<string>? trace = 
             Urgent = d.Urgent ?? false,
             Rank = d.Rank ?? FallbackRank(d.Status, d.Raised ?? d.Created),
             GoalId = d.GoalId is { } goal ? goal : Maybe<Guid>.None,
+            // A task saved before the field existed, or with one this build cannot read, gets it derived (Assignee.DerivedFor).
+            Assignee = (d.Assignee is { } a ? Assignee.From(a.Kind, a.Id, a.Name) : Maybe<Assignee>.None)
+                .GetValueOrDefault(Assignee.DerivedFor((d.Sessions ?? []).Count > 0, d.Status)),
         };
 
     // The rank a task saved before ranks existed gets, so the tasks keep the order the bar showed them in then:

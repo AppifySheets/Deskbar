@@ -96,6 +96,9 @@ public static class ControlUsage
                 "open the tasks window, as the bar's \"+N more\" does (every task grouped as on the bar, the closed\n"
                 + "      ones under their filter, each with its comments), or close it; list or matrix switches its view\n"
                 + "      (Covey's 2 by 2: urgent and not urgent across, important and not important down), remembered"),
+            new("task", "assign <id> me|claude",
+                "hand a task to yourself or to Claude, as the tasks window's \"Assign to\" menu does. The bar lists only the tasks\n"
+                + "      assigned to you; a note assigned to Claude is offered to a new session on its workspace"),
             new("task", "goal <id> <goal-id>|none",
                 "count a task toward an open goal of any period, as the tasks window's \"...\" menu \"Goal\" does, or toward none"),
         ]),

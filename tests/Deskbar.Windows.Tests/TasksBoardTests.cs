@@ -2017,4 +2017,90 @@ public class TasksBoardTests
 
         Assert.True(t.Window.CellScroller(Quadrant.IV).VerticalOffset > 0, $"offset {t.Window.CellScroller(Quadrant.IV).VerticalOffset}");
     });
+
+    // --- RULING 57, the assignee: a column, a filter, and "Assign to" (in the window only, never on the bar) ---------
+
+    static string AssigneeTextOf(TasksWindow window, Guid id) =>
+        Inside(LineOf(window, id)).OfType<TextBlock>().Single(b => Equals(b.Tag, "task-assignee")).Text;
+
+    [Fact]
+    public void Each_line_names_its_assignee() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        var note = t.Tasks.AddNote("mine", t.Gepha).Value.Id;
+        var working = t.Tasks.Create("Claude's", t.Gepha, Session("s1")).Value.Id;
+        t.Controller.Open(Rect.Empty);
+
+        Assert.Equal("Me", AssigneeTextOf(t.Window, note));
+        Assert.Equal("Claude", AssigneeTextOf(t.Window, working));
+    });
+
+    [Fact]
+    public void The_assigned_filter_narrows_the_lines_and_the_chip_counts() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        var note = t.Tasks.AddNote("mine", t.Gepha).Value.Id;
+        var working = t.Tasks.Create("Claude's", t.Gepha, Session("s1")).Value.Id;
+        t.Controller.Open(Rect.Empty);
+        Assert.Equal("Assigned: all", t.Window.AssigneeFilterLabel);
+        Assert.Contains("Open 2", t.Window.FilterLabels);
+
+        t.Controller.FilterAssignee(TaskAssigneeFilter.Claude);
+        Assert.Equal([working], t.Window.Keys);
+        Assert.Equal("Assigned: Claude", t.Window.AssigneeFilterLabel);
+        Assert.Contains("Open 1", t.Window.FilterLabels);
+
+        t.Controller.FilterAssignee(TaskAssigneeFilter.Me);
+        Assert.Equal([note], t.Window.Keys);
+        Assert.Equal("Assigned: me", t.Window.AssigneeFilterLabel);
+
+        t.Controller.FilterAssignee(TaskAssigneeFilter.All);
+        Assert.Equal(2, t.Window.Keys.Count);
+        // A fresh opening starts at "all" again, as the other filters do.
+        t.Controller.FilterAssignee(TaskAssigneeFilter.Me);
+        t.Controller.Dismiss();
+        t.Controller.Open(Rect.Empty);
+        Assert.Equal("Assigned: all", t.Window.AssigneeFilterLabel);
+    });
+
+    [Fact]
+    public void The_assigned_filter_has_a_menu_of_me_claude_and_all() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        t.Tasks.AddNote("mine", t.Gepha);
+        t.Tasks.Create("Claude's", t.Gepha, Session("s1"));
+        t.Controller.Open(Rect.Empty);
+
+        var menu = t.Window.OpenAssigneeFilterMenu();
+        Assert.Equal(["Me", "Claude", "All"], menu.Items.OfType<MenuItem>().Select(i => ((TextBlock)i.Header).Text));
+        menu.Items.OfType<MenuItem>().Single(i => i.Header is TextBlock { Text: "Claude" }).RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
+        menu.IsOpen = false;
+        t.Window.Dispatcher.Invoke(() => { }, System.Windows.Threading.DispatcherPriority.Background);
+
+        Assert.Equal("Assigned: Claude", t.Window.AssigneeFilterLabel);
+    });
+
+    // Both the "..." menu and the right-click menu (one menu, OpenMenuFor) have "Assign to" with Me and Claude, the
+    // task's own ticked; a pick goes through TaskService.Assign.
+    [Fact]
+    public void Assign_to_in_the_menu_hands_the_task_over() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        var id = t.Tasks.AddNote("mine", t.Gepha).Value.Id;
+        t.Controller.Open(Rect.Empty);
+
+        foreach (var atPointer in new[] { false, true })
+        {
+            var menu = t.Window.OpenMenuFor(id, atPointer);
+            var assign = menu.Items.OfType<MenuItem>().Single(i => i.Header is TextBlock { Text: "Assign to" });
+            var choices = assign.Items.OfType<MenuItem>().ToList();
+            Assert.Equal(["Me", "Claude"], choices.Select(i => ((TextBlock)i.Header).Text));
+            var wasMe = t.Tasks.Board.Tasks.Single().Assignee.IsMe;
+            Assert.Equal(wasMe, choices[0].IsChecked);
+            choices[wasMe ? 1 : 0].RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
+            menu.IsOpen = false;
+            t.Window.Dispatcher.Invoke(() => { }, System.Windows.Threading.DispatcherPriority.Background);
+            Assert.Equal(!wasMe, t.Tasks.Board.Tasks.Single().Assignee.IsMe);
+        }
+    });
 }

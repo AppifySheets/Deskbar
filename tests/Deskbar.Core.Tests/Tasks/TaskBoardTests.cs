@@ -366,7 +366,8 @@ public class TaskBoardTests
     [Fact]
     public void Offered_is_this_workspaces_open_tasks_and_claudes_free_ones()
     {
-        var board = Note(TaskBoard.Empty, id1, ws, "note on ws");
+        // Ruling 57: a note is offered once Petre has assigned it to Claude.
+        var board = Note(TaskBoard.Empty, id1, ws, "note on ws").Assign(id1, Assignee.Claude, clock).Value;
         board = Claudes(board, id2, other, "s2", "on other");
         board = Note(board, id3, Free, "errand");
         board = Claudes(board, id4, Free, "s4", "free claude task");
