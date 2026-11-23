@@ -135,6 +135,52 @@ public sealed record TaskBoard(IReadOnlyList<TaskItem> Tasks)
             : this;
 
     /// <summary>
+    /// Makes the board agree with Claude Code's own list of live sessions (`claude agents --json`, ClaudeAgents), which
+    /// is the truth: the SessionEnd hook is only a hint. It never arrives after a crash or a reboot, and a background
+    /// session sends it at the end of every turn while the list still shows the session.
+    ///   * END: every live session entry whose id the list does not show is marked ended now.
+    ///   * REVIVE: for an id the list shows, the LATEST entry (by Joined, across all tasks) that had ended is live again.
+    ///     Older entries of that id stay as they were, so one session is live on one task only.
+    /// Only sessions change, never a task's status, and a task's UpdatedAt moves only when one of its sessions did, so a
+    /// poll that finds nothing returns this same board and the caller saves nothing. Tasks without sessions (Petre's
+    /// notes) are not touched. The caller must not pass an unreadable list as an empty one: an empty list here means
+    /// every session is gone, and "cannot tell" ends nothing (global constraints), which is the caller's rule.
+    /// </summary>
+    public TaskBoard Reconcile(IReadOnlyCollection<ClaudeAgent> live, DateTimeOffset now)
+    {
+        var listed = live.Select(a => a.SessionId).ToHashSet();
+        var latest = Tasks
+            .SelectMany(t => t.Sessions.Select(s => (Task: t.Id, Session: s)))
+            .Where(x => listed.Contains(x.Session.Id))
+            .GroupBy(x => x.Session.Id)
+            .Select(g => (Task: g.OrderByDescending(x => x.Session.Joined).First().Task, Session: g.Key))
+            .ToHashSet();
+        var reconciled = Tasks.Select(t => (Old: t, Sessions: t.Sessions.Select(s =>
+            listed.Contains(s.Id)
+                ? (latest.Contains((t.Id, s.Id)) && s.Ended.HasValue ? s with { Ended = Maybe<DateTimeOffset>.None } : s)
+                : (s.IsLive ? s with { Ended = now } : s)).ToArray())).ToArray();
+        return reconciled.All(x => x.Sessions.SequenceEqual(x.Old.Sessions))
+            ? this
+            : new TaskBoard(reconciled.Select(x => x.Sessions.SequenceEqual(x.Old.Sessions) ? x.Old : x.Old with { Sessions = x.Sessions, UpdatedAt = now }).ToArray());
+    }
+
+    /// <summary>
+    /// A live session Claude Code lists that no task knows (started in a terminal, or by another tool): it becomes a
+    /// new In progress Claude task so it shows on the board. The title is the agent's name, else the last segment of
+    /// its folder, else "Claude session". A session that already has a task, open or closed, is refused, so one session
+    /// never makes two tasks (a closed one is Petre's decision to leave alone).
+    /// </summary>
+    public Result<(TaskBoard Board, TaskItem Task)> AdoptSession(ClaudeAgent agent, Maybe<Guid> workspace, DateTimeOffset now, Guid newId) =>
+        Tasks.Any(t => t.Sessions.Any(s => s.Id == agent.SessionId))
+            ? Result.Failure<(TaskBoard, TaskItem)>($"Session {agent.SessionId} already has a task")
+            : Create(AdoptedTitle(agent), workspace, new TaskSession(agent.SessionId, agent.Folder, now, Maybe<DateTimeOffset>.None), now, newId);
+
+    static string AdoptedTitle(ClaudeAgent agent) =>
+        !string.IsNullOrWhiteSpace(agent.Name) ? agent.Name
+        : agent.Folder.TrimEnd('\\', '/').Split('\\', '/').Last() is { Length: > 0 } folder ? folder
+        : "Claude session";
+
+    /// <summary>
     /// Claude's clear finish. The task stays in the list, waiting for Petre to close it. Becoming Done stamps
     /// <see cref="TaskItem.Raised"/>, which orders the Done group; a task already Done keeps its stamp.
     /// </summary>

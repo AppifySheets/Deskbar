@@ -48,7 +48,7 @@ public sealed record OpenRequest(string Url, string? From);
 
 // `claude-hook`, parsed: CLAUDE_CODE_ENTRYPOINT and CLAUDE_CODE_SESSION_ATTENDED as the hook script passed them (empty
 // or a literal %NAME% when unset; ClaudeHookEvent decides what they mean), the session's folder, and the hook's JSON.
-public sealed record ClaudeHookRequest(string? Entrypoint, string? Attended, string? From, string? Json);
+public sealed record ClaudeHookRequest(string? Entrypoint, string? Attended, string? From, string? Json, string? Job = null);
 
 // The command line after `ctl`, with the parsing kept apart from the doing so both halves can be tested
 // without a pipe or a running app.
@@ -222,7 +222,7 @@ public static class ControlArguments
         return args.Select((word, i) => text.Contains(i) ? $"({word.Length} characters)" : word);
     }
 
-    // `claude-hook [--entry <value>] [--attended <value>] [--from <folder>] --json <text>`, in any order, as the server
+    // `claude-hook [--entry <value>] [--attended <value>] [--job <value>] [--from <folder>] --json <text>`, in any order, as the server
     // receives it. Values may be EMPTY: cmd passes an unset variable as "" inside a batch file, and that is an answer
     // (ClaudeHookEvent reads it as "not set"), not a missing value. --json is required.
     public static Result<ClaudeHookRequest> ParseClaudeHook(IReadOnlyList<string> args) =>
@@ -234,6 +234,7 @@ public static class ControlArguments
         [] => so,
         ["--entry", var value, .. var tail] => HookOptions(so with { Entrypoint = value }, tail),
         ["--attended", var value, .. var tail] => HookOptions(so with { Attended = value }, tail),
+        ["--job", var value, .. var tail] => HookOptions(so with { Job = value }, tail),
         ["--from", var value, .. var tail] => HookOptions(so with { From = value }, tail),
         ["--json", var value, .. var tail] => HookOptions(so with { Json = value }, tail),
         [var unknown, ..] => Result.Failure<ClaudeHookRequest>($"'{unknown}' is not an option of claude-hook, or it is missing its value."),

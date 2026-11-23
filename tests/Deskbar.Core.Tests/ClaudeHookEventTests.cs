@@ -82,6 +82,20 @@ public class ClaudeHookEventTests
     public void Parse_marks_headless_entrypoints(string? attended, string? entrypoint, bool headless) =>
         Assert.Equal(headless, ClaudeHookEvent.Parse(StartupJson, entrypoint, attended).Value.Headless);
 
+    // A background session (`claude --bg`) runs its hooks with ATTENDED=0 although a person can attach to it, so the
+    // attended flag alone drops its hooks. Its hooks do carry CLAUDE_JOB_DIR, which a `claude -p` run does not have.
+    [Theory]
+    [InlineData(@"C:\Users\p\.claude\jobs\884c127f")]
+    public void A_background_session_with_a_job_directory_is_attended_though_ATTENDED_is_0(string job) =>
+        Assert.False(ClaudeHookEvent.Parse(StartupJson, "sdk-cli", "0", job).Value.Headless);
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("%CLAUDE_JOB_DIR%")]
+    public void A_claude_p_session_without_a_job_directory_is_still_headless(string? job) =>
+        Assert.True(ClaudeHookEvent.Parse(StartupJson, "sdk-cli", "0", job).Value.Headless);
+
     // Anything that is not a hook's JSON is refused, so the verb can exit 1 and print nothing for the session to read.
     [Theory]
     [InlineData("")]

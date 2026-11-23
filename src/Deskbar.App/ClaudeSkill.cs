@@ -149,9 +149,10 @@ static class ClaudeSkill
     //     only ask for the user, and nothing at all when it is not running (ControlArguments.HookReply). Stderr still
     //     goes to nul: an error from Deskbar is not the session's business.
     //   * STDIN PASSES THROUGH too: cmd's `call` and the shim hand theirs to Deskbar.exe, which reads it as the JSON.
-    //   * Two variables ride along as arguments, because the running Deskbar cannot see the hook's environment:
+    //   * Three variables ride along as arguments, because the running Deskbar cannot see the hook's environment:
     //     CLAUDE_CODE_ENTRYPOINT and CLAUDE_CODE_SESSION_ATTENDED, which tell a headless session from one a person is
-    //     in (ClaudeHookEvent). An unset one arrives as "" (cmd in a batch file), which ClaudeHookEvent reads as unset.
+    //     in, and CLAUDE_JOB_DIR, which only a background session has and which makes it count as attended although
+    //     ATTENDED says 0 (ClaudeHookEvent). An unset one arrives as "" (cmd in a batch file), which ClaudeHookEvent reads as unset.
     //
     // The no-folder branch stays: without CLAUDE_PROJECT_DIR there is no --from, and the client adds its own folder.
     //
@@ -162,7 +163,7 @@ static class ClaudeSkill
     // and cmd fills in the folder itself, in whatever letters it has.
     static void WriteHookScript(string path)
     {
-        var hook = $"call \"%~dp0{ControlCommandLine.ShimName}\" claude-hook --entry \"%CLAUDE_CODE_ENTRYPOINT%\" --attended \"%CLAUDE_CODE_SESSION_ATTENDED%\"";
+        var hook = $"call \"%~dp0{ControlCommandLine.ShimName}\" claude-hook --entry \"%CLAUDE_CODE_ENTRYPOINT%\" --attended \"%CLAUDE_CODE_SESSION_ATTENDED%\" --job \"%CLAUDE_JOB_DIR%\"";
         var text = string.Join("\r\n",
             "@rem Written by Deskbar for Claude Code's hooks: tells the bar what the session that runs it is doing. Do not edit.",
             $"@if defined CLAUDE_PROJECT_DIR ({hook} --from \"%CLAUDE_PROJECT_DIR%\" 2>nul) else ({hook} 2>nul)",

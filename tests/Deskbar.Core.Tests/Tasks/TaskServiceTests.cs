@@ -236,6 +236,39 @@ public sealed class TaskServiceTests
         Assert.Equal(saves + 2, store.Saves);
     }
 
+    // The poll runs every few seconds and nearly always finds nothing to change: it must not save or pulse then.
+    [Fact]
+    public void Reconcile_saves_and_pulses_only_when_a_session_changed()
+    {
+        var s = NewService();
+        s.Create("Tasks redesign", ws, Session("s1", clock));
+        var pulses = 0;
+        using var _ = s.Changed.Subscribe(_ => pulses++);
+        var saves = store.Saves;
+        var agent = new ClaudeAgent("s1", Maybe<string>.None, @"C:\repos\TaskSpaces", true, false, "");
+
+        s.Reconcile([agent]);
+        Assert.Equal((saves, 0), (store.Saves, pulses));
+
+        s.Reconcile([]);
+        Assert.Equal((saves + 1, 1), (store.Saves, pulses));
+        Assert.False(s.Board.Tasks.Single().HasLiveSession);
+    }
+
+    [Fact]
+    public void Adopt_makes_a_task_saves_it_and_refuses_a_session_twice()
+    {
+        var s = NewService();
+        var agent = new ClaudeAgent("s9", Maybe<string>.None, @"C:\repos\TaskSpaces", true, false, "Fix the strip");
+
+        var task = s.Adopt(agent, ws).Value;
+
+        Assert.Equal("Fix the strip", task.Title);
+        Assert.Equal(task, store.Stored.Tasks.Single());
+        Assert.True(s.Adopt(agent, ws).IsFailure);
+        Assert.Single(s.Board.Tasks);
+    }
+
     sealed class FakeTaskStore : ITaskStore
     {
         public TaskBoard Stored { get; set; } = TaskBoard.Empty;
