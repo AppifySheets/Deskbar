@@ -554,16 +554,23 @@ with `claude -p` or the Agent SDK are left out. `deskbar.cmd claude-tasks off` t
 
 While it is on, Deskbar also reads Claude Code's own list of running sessions (`claude agents --json`)
 every 15 seconds. A session no task knows, still running after two minutes, gets a task of its own, on the
-workspace of the VS Code window showing its folder; if it later joins a task of its own, the one Deskbar made
+workspace of the VS Code window showing its folder, once its hooks have said someone is at it (so `claude -p`
+runs stay off the board); if it later joins a task of its own, the one Deskbar made
 goes away again unless you have changed it (renamed, moved, flagged, linked to a goal, set its status or
 commented on it). When the session of an open task is no longer running, after a reboot, a crash or a
 closed VS Code window, Deskbar resumes it in the background with `claude --bg --resume`, one session every
-five seconds, and says so in the task's thread; a session whose last turn was cut off is told to continue.
+five seconds, and says so in the task's thread; a session whose last turn was cut off is told to continue,
+and one you stopped with Esc is not. Deskbar waits two minutes first: nothing is resumed in the first two
+minutes after it starts, and a session must have been gone for two minutes, because VS Code brings its own
+sessions back by itself after a restart or a window reload. After a reboot that means the sessions come back
+two minutes after Deskbar next starts. A session you cleared with `/clear` is not resumed; the new one takes
+its place on the task.
 A session that keeps stopping straight after being woken, whose transcript Claude Code no longer keeps, or
 whose resume fails (Claude's message goes into the thread), is left alone and its task waits on you with the
-reason until you act on it; answer the question or change the status and it tries again. Marking a task done
-lets its session go. **Resume the sessions of open tasks after a
-restart or a crash**, under the tasks box, turns the resuming off and leaves the rest on
+reason until you act on it: set its status and it tries again, or double-click it to bring the session back
+and clear the give-up. Marking a task done lets its session go. When Claude Code's list cannot be read
+(`claude` missing from the PATH, say), Manage says why under the resume box. **Resume the sessions of open
+tasks after a restart or a crash**, under the tasks box, turns the resuming off and leaves the rest on
 (`deskbar.cmd claude-resume off`). Claude Code keeps sessions for 30 days; raise `cleanupPeriodDays` in
 `~/.claude/settings.json` to keep them longer.
 
@@ -577,8 +584,9 @@ never told to trust puts Claude's message in the thread and offers a terminal th
 trust prompt yourself. A task's thread lists its sessions, newest first, as working, idle, ended or expired,
 each but the expired ones with Open. `deskbar.cmd task go|start|open-session` do the same from a script.
 The window opens in Deskbar's own "Deskbar Claude" Windows Terminal profile (Dark Modern colours, installed
-while the tasks box is ticked), and closing it leaves the session running. This needs the Claude Code CLI on
-the PATH and Windows Terminal.
+while the tasks box is ticked and removed when either Claude box is unticked), and closing it leaves the
+session running. This needs the Claude Code CLI on the PATH and Windows Terminal; a start or a window that
+fails says so in a message box as well as in the thread.
 
 The first time Deskbar changes `settings.json` it keeps the original as `settings.json.deskbar-backup`,
 and it leaves a file with comments in it alone.
