@@ -18,15 +18,19 @@ namespace Deskbar.Windows.Claude;
 // harmless for the same reason, and has not been measured on a packaged install (see
 // docs/superpowers/specs/2026-10-24-deskbar-store-packaging-design.md); the session itself lives in the daemon.
 //
-// The environment: the four variables below are removed from the child's block. They describe the Claude Code or
-// Electron host that started Deskbar (a dev build run from a Claude session carries CLAUDECODE, one run from VS
-// Code's terminal carries ELECTRON_RUN_AS_NODE), and a `claude` that inherits them thinks it is a nested session
-// or runs as a bare Node script. LaunchEnvironment.Clean strips only the Electron and VSCODE_ ones from Deskbar's
-// own process, so the Claude ones are stripped here, per child, on top.
+// The environment: the variables below are removed from the child's block. They describe the Claude Code or
+// Electron host that started Deskbar (a dev build run from a Claude session carries CLAUDECODE, one run from a
+// background session's shell also CLAUDE_JOB_DIR and CLAUDE_CODE_CHILD_SESSION, one run from VS Code's terminal
+// ELECTRON_RUN_AS_NODE), and a `claude` that inherits them thinks it is a nested session or runs as a bare Node
+// script. LaunchEnvironment.Clean already removes all of them from Deskbar's own process at startup (Ruling 14), so
+// in the app this list is a second line of defence; it is kept because ClaudeCli is also used without the app (its
+// tests, a probe) and the per-child block is the one place that cannot be undone by something setting a variable
+// on the process later.
 public sealed class ClaudeCli(string executable = "claude") : IClaudeCli
 {
     static readonly IReadOnlyList<string> StrippedVariables =
-        ["CLAUDECODE", "CLAUDE_CODE_ENTRYPOINT", "CLAUDE_CODE_SESSION_ATTENDED", "ELECTRON_RUN_AS_NODE"];
+        ["CLAUDECODE", "CLAUDE_CODE_ENTRYPOINT", "CLAUDE_CODE_SESSION_ATTENDED", "CLAUDE_JOB_DIR", "CLAUDE_CODE_CHILD_SESSION",
+            "ELECTRON_RUN_AS_NODE"];
 
     public async Task<Result<string>> Run(IReadOnlyList<string> arguments, string? workingDirectory, TimeSpan timeout)
     {

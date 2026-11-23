@@ -52,8 +52,11 @@ public class ClaudeCliTests
     [Fact]
     public async Task The_Claude_and_Electron_variables_are_not_passed_on()
     {
-        var before = Environment.GetEnvironmentVariable("CLAUDECODE");
-        Environment.SetEnvironmentVariable("CLAUDECODE", "1");
+        // Every Claude variable the child must not see (final review, item 10, added the two a background session's
+        // shell carries), set on this process for the length of the test and put back after.
+        string[] names = ["CLAUDECODE", "CLAUDE_CODE_ENTRYPOINT", "CLAUDE_CODE_SESSION_ATTENDED", "CLAUDE_JOB_DIR", "CLAUDE_CODE_CHILD_SESSION"];
+        var before = names.ToDictionary(name => name, Environment.GetEnvironmentVariable);
+        names.ToList().ForEach(name => Environment.SetEnvironmentVariable(name, "1"));
         try
         {
             // `set CLAUDE` lists every variable starting with CLAUDE; a clean child has none, and cmd then
@@ -61,11 +64,11 @@ public class ClaudeCliTests
             var result = await Cmd.Run(["/c", "set CLAUDE"], null, Generous);
 
             var text = result.IsSuccess ? result.Value : result.Error;
-            Assert.DoesNotContain("CLAUDECODE=", text);
+            Assert.All(names, name => Assert.DoesNotContain(name + "=", text));
         }
         finally
         {
-            Environment.SetEnvironmentVariable("CLAUDECODE", before);
+            before.ToList().ForEach(pair => Environment.SetEnvironmentVariable(pair.Key, pair.Value));
         }
     }
 
