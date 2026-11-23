@@ -95,7 +95,9 @@ Block the stop ONCE per turn, with `{"decision":"block","reason":...}`, when all
 - `stop_hook_active` is false (so a turn is nudged at most once; Claude Code also caps the loop at 8);
 - the session's task is open, In progress and assigned to Claude;
 - `background_tasks` and `session_crons` are empty (a session waiting on its own watch is not parked);
-- the session has not changed its task's status during this turn (it ran no ask, answered or done).
+- (built as a check of the task's state now, not of what the turn did: an ask or done this turn has already moved
+  the task out of In progress, and a turn that ran `task answered` and then stops waiting on Petre again should be
+  nudged, so "ran no ask, answered or done this turn" adds nothing.)
 
 The reason is short and leaves an out: "If the next move is Petre's (a PR to merge, something to try, a decision),
 run `deskbar.cmd task ask` with what he must do. If it is not, stop without saying anything." The blink happens as it

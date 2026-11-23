@@ -282,21 +282,21 @@ public sealed class TaskServiceTests
 
         clock = clock.AddMinutes(60);
         var saves = store.Saves;
-        s.Stalled(busy);                  // busy an hour after creation: the clock starts now, nothing saved
+        s.Stalled(busy, busy);                // busy an hour after creation: the clock starts now, nothing saved
         Assert.Equal(saves, store.Saves);
 
         clock = clock.AddMinutes(10);
-        s.Stalled(nobody);                // quiet for 10 minutes since the busy poll: still Claude's
+        s.Stalled(nobody, nobody);              // quiet for 10 minutes since the busy poll: still Claude's
         Assert.Equal(Assignee.Claude, s.Board.Tasks.Single().Assignee);
         Assert.Equal(saves, store.Saves);
 
         clock = clock.AddMinutes(5);
-        s.Stalled(nobody);                // 15 minutes: handed back, saved, traced
+        s.Stalled(nobody, nobody);              // 15 minutes: handed back, saved, traced
         Assert.Equal(Assignee.Me, s.Board.Tasks.Single().Assignee);
         Assert.Equal(saves + 1, store.Saves);
         Assert.Contains(traced, line => line.Contains("handed back") && line.Contains(task.Id.ToString()[..8]));
 
-        s.Stalled(busy);                  // the session works again: taken back
+        s.Stalled(busy, busy);                // the session works again: taken back
         Assert.Equal(Assignee.Claude, s.Board.Tasks.Single().Assignee);
         Assert.Contains(traced, line => line.Contains("taken back"));
     }
