@@ -69,8 +69,11 @@ public sealed partial class Tiler
         var windows = Board.On(screen.Number);
         var shown = ShownLayout(workspace, screen, windows.Count);
         var leaf = TileArrange.LeafOf(shown, windows.ToList().IndexOf(window), windows.Count);
-        SplitMove.Apply(shown, screen.WorkArea, GapOn(screen), leaf, moved, frame).Map(m => m.Layout).Tap(next =>
-            SlotsOf(screen, windows, next)
+        // At a crossing the move regroups the tree and reorders its leaves (SplitMoved), so the neighbours are laid
+        // out in the new order. Nothing is stored and the board is left alone: the drop recomputes the same move from
+        // the stored layout and the release frame (Tiler.Resize.MovedASplit), and reorders the board then.
+        SplitMove.Apply(shown, screen.WorkArea, GapOn(screen), leaf, moved, frame).Tap(next =>
+            SlotsOf(screen, next.Windows(windows, shown), next.Layout)
                 .Where(s => s.Key != window)
                 .ToList()
                 .ForEach(s => PerWindow(s.Key, "live place", () => PlaceLive(s.Key, s.Value))));
