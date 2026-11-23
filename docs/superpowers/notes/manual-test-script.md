@@ -216,7 +216,10 @@ The task list at the bottom of the bar (spec `docs/superpowers/specs/2026-11-22-
     box empty and idle, click a chip: it starts a note, as a click in the box does.
 46. Click in the box, then the "other..." chip, and pick a workspace: the chip takes its name and is ticked,
     the text stays, and Enter files the note there.
-47. Click a line of a note on another workspace: you go there. Click a note on "none": nothing happens.
+47. Click a line of a note on another workspace: the tasks window opens (or comes forward) on that task, selected,
+    scrolled into view and expanded to its comments, and you stay where you are. Double-click the line: you go to
+    its workspace. Double-click a note on "none": nothing happens. In the window, a click on a line selects and
+    expands it, a double-click goes, and F2 (or Edit in the menu) edits the title; a double-click on a title no longer edits.
 48. Untick "Task list" in Manage's Settings tab (strip items): the list disappears from the bar. Tick it
     again: it is back, with the same tasks.
 49. Quit Deskbar, put a version 1 `tasks.json` (with timers) in the state folder and start it. The tasks

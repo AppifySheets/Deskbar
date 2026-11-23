@@ -1729,6 +1729,8 @@ public partial class App : Application
                 // "+N more" and "All tasks": the tasks window, built with quick find below, so read through the field.
                 // It opens clear of the bar, or brings an open one forward.
                 OpenTasksWindow = () => tasksBoard?.Open(floatingBar?.BarScreenBounds() ?? Rect.Empty),
+                // A line's single click (Ruling 54): the window on that task, picked and expanded. A double-click goes.
+                OpenTaskInWindow = id => tasksBoard?.ShowTask(id, floatingBar?.BarScreenBounds() ?? Rect.Empty),
                 // A Claude line's icon: the VS Code window whose title names the session's folder, by the rule the
                 // control pipe's `open` and `attention` use to find a caller's window (RemoteControl.CallerOf,
                 // EditorFolder.Best), each window offering its current title and the one it had before a rename. Two

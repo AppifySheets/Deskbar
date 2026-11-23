@@ -86,11 +86,9 @@ public class TasksBoardTests
         var timers = new FakeTimers();
         var went = new List<Guid>();
         var tasks = new TaskService(new MemoryStore(), () => Start.AddMinutes(minutes++));
-        // A title click's go waits for a possible second click on the fake timers too (TasksWindow.GoTimer).
         var window = new TasksWindow
         {
             Quiet = true, ClickClock = clickClock ?? (() => ClickStart.AddSeconds(seconds++)), Now = now ?? (() => Start.AddHours(1)),
-            GoTimer = timers.Start,
         };
         var controller = new TasksBoard(window, tasks, harness.Manager, goTo ?? (t =>
         {
@@ -346,7 +344,7 @@ public class TasksBoardTests
         t.Tasks.SessionEnded("new");
         t.Controller.Open(Rect.Empty);
 
-        Click(LineOf(t.Window, id));
+        DoubleClick(t.Window, id); // a double-click goes (Ruling 54)
 
         Assert.Equal([id], t.WentTo);
         // A page of its own: it stays open behind the switch.
@@ -424,8 +422,7 @@ public class TasksBoardTests
         using var t = Build(_ => Result.Failure("That workspace has no desktop."));
         var id = t.Tasks.AddNote("note", t.Gepha).Value.Id;
         t.Controller.Open(Rect.Empty);
-
-        Click(LineOf(t.Window, id));
+        DoubleClick(t.Window, id); // a double-click goes (Ruling 54)
 
         Assert.True(t.Window.IsOpen);
         Assert.Equal("That workspace has no desktop.", t.Window.Problem);
@@ -672,7 +669,6 @@ public class TasksBoardTests
         now = now.AddMilliseconds(600);
         PressAndClick(ButtonNamed(LineOf(t.Window, second), "Undo"), clickCount: 2);
         PressAndClick(ButtonNamed(LineOf(t.Window, first), "Close"), clickCount: 2);
-        PressAndClick(LineOf(t.Window, first), clickCount: 2);
         Assert.Equal(TaskStatus.Closed, t.Tasks.Board.Tasks.Single(x => x.Id == second).Status);
         Assert.Equal(TaskStatus.Backlog, t.Tasks.Board.Tasks.Single(x => x.Id == first).Status);
         Assert.Empty(t.WentTo);
@@ -778,11 +774,10 @@ public class TasksBoardTests
         var first = t.Tasks.AddNote("first", t.Gepha).Value.Id;
         var second = t.Tasks.AddNote("second", t.Gepha).Value.Id;
         t.Controller.Open(Rect.Empty);
-        var rebuilds = t.Window.Rebuilds;
-
-        Click(LineOf(t.Window, first));
+        Click(LineOf(t.Window, first)); // picks and expands it (Ruling 54)
         Assert.True(selection.IsSelected(first));
         Assert.True(t.Window.IsSelected(first));
+        var rebuilds = t.Window.Rebuilds;
 
         // Picked on the bar: the window follows, in place.
         selection.Select(second);
@@ -885,7 +880,7 @@ public class TasksBoardTests
         now = now.AddMilliseconds(600);
 
         t.Tasks.SetStatusLine(id, "waiting for CI");
-        Click(LineOf(t.Window, id));
+        DoubleClick(t.Window, id);
 
         Assert.Equal([id], t.WentTo);
     });
@@ -1306,7 +1301,7 @@ public class TasksBoardTests
         Assert.True(RealRelease(t, line));
         Assert.Equal(0, captures.Count);
 
-        Assert.Equal([c], t.WentTo);
+        Assert.Empty(t.WentTo); // a press that stays a click picks the task and goes nowhere (Ruling 54)
         Assert.Same(before, t.Tasks.Board);
     });
 
@@ -1676,67 +1671,49 @@ public class TasksBoardTests
     static TextBlock TitleOf(TasksWindow window, Guid id) =>
         Inside(LineOf(window, id)).OfType<TextBlock>().Single(b => Equals(b.Tag, "task-title"));
 
-    // A double-click on the title opens the in-place editor with the whole title, and does NOT go to the task: its
-    // first click's go waits out the double-click time, and the second press on the title calls it off.
+    // RULING 54 (Petre: "clicking a task should open that task; double clicking takes me to the workspace and window").
+    // A single click on a line picks it and expands its comment thread, and goes nowhere; every click acts at once now
+    // (there is no wait for a second click, so no delayed go to call off).
     [Fact]
-    public void A_double_click_on_the_title_opens_the_editor() => StaThread.Run(() =>
+    public void A_click_on_a_line_picks_and_expands_it_and_goes_nowhere() => StaThread.Run(() =>
     {
         using var t = Build();
         var id = t.Tasks.AddNote("buy body shampoo", t.Gepha).Value.Id;
+        t.Tasks.Comment(id, Maybe<string>.None, "a comment");
         t.Controller.Open(Rect.Empty);
         t.Window.UpdateLayout();
-        // The first click: a press on the title, then the line's Click.
-        TitleOf(t.Window, id).RaiseEvent(TitlePress(1));
+        Assert.False(t.Window.ThreadShown(id));
         Click(LineOf(t.Window, id));
-        Assert.Empty(t.WentTo);
 
-        // The tunnelling PreviewMouseDown a real press raises: each element on its way down raises its own
-        // PreviewMouseLeftButtonDown from it (that one is a direct event, so raising it on the title would reach no
-        // ancestor), the line's included.
-        var press = new MouseButtonEventArgs(Mouse.PrimaryDevice, 0, MouseButton.Left) { RoutedEvent = Mouse.PreviewMouseDownEvent };
-        typeof(MouseButtonEventArgs).GetProperty(nameof(MouseButtonEventArgs.ClickCount))!.SetValue(press, 2);
-        t.Window.UpdateLayout();
-        TitleOf(t.Window, id).RaiseEvent(press);
-
-        Assert.Equal("buy body shampoo", Assert.IsType<TextBox>(t.Window.Editor).Text);
-        t.Timers.FireAll();
         Assert.Empty(t.WentTo);
+        Assert.True(t.Window.ThreadShown(id));
+        Assert.Null(t.Window.Editor);
     });
 
-    // A single click on the title still goes to the task, once the double-click time has passed with no second click.
+    // A double-click anywhere on the line goes to the task, and does not edit it (editing is F2 or Edit in the menu).
     [Fact]
-    public void A_single_click_on_the_title_goes_once_the_double_click_time_passes() => StaThread.Run(() =>
+    public void A_double_click_on_a_line_goes_to_its_task_and_does_not_edit() => StaThread.Run(() =>
     {
         using var t = Build();
         var id = t.Tasks.AddNote("buy body shampoo", t.Gepha).Value.Id;
         t.Controller.Open(Rect.Empty);
         t.Window.UpdateLayout();
 
-        TitleOf(t.Window, id).RaiseEvent(TitlePress(1));
-        Click(LineOf(t.Window, id));
-        Assert.Empty(t.WentTo);
-        t.Timers.FireAll();
+        DoubleClick(t.Window, id);
 
         Assert.Equal([id], t.WentTo);
         Assert.Null(t.Window.Editor);
     });
 
-    // Review, Minor 4: hiding the window calls off a click's delayed go, so it never fires into a hidden window.
-    [Fact]
-    public void Dismissing_the_window_cancels_a_pending_go() => StaThread.Run(() =>
+    // The second press of a double-click is the line's, handled before it clicks again, so one double-click is one go.
+    static void DoubleClick(TasksWindow window, Guid id)
     {
-        using var t = Build();
-        var id = t.Tasks.AddNote("buy body shampoo", t.Gepha).Value.Id;
-        t.Controller.Open(Rect.Empty);
-        t.Window.UpdateLayout();
-        TitleOf(t.Window, id).RaiseEvent(TitlePress(1));
-        Click(LineOf(t.Window, id));
-
-        t.Window.Dismiss();
-        t.Timers.FireAll();
-
-        Assert.Empty(t.WentTo);
-    });
+        window.UpdateLayout();
+        var line = LineOf(window, id);
+        line.RaiseEvent(TitlePress(1));
+        Click(line);
+        line.RaiseEvent(TitlePress(2));
+    }
 
     // The tunnelling press a real click on the title makes (see A_double_click_on_the_title_opens_the_editor).
     static MouseButtonEventArgs TitlePress(int clicks)
@@ -1745,6 +1722,24 @@ public class TasksBoardTests
         typeof(MouseButtonEventArgs).GetProperty(nameof(MouseButtonEventArgs.ClickCount))!.SetValue(press, clicks);
         return press;
     }
+
+    // The bar's single click (Ruling 54): the window opens on that task, picked and expanded to its thread, and goes
+    // nowhere. With the window already open the same click brings it forward on the task.
+    [Fact]
+    public void The_bars_click_opens_the_window_on_that_task_picked_and_expanded() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        t.Tasks.AddNote("first", t.Gepha);
+        var id = t.Tasks.AddNote("second", t.Gepha).Value.Id;
+        Assert.False(t.Window.IsOpen);
+
+        t.Controller.ShowTask(id, Rect.Empty);
+
+        Assert.True(t.Window.IsOpen);
+        Assert.True(t.Window.IsSelected(id));
+        Assert.True(t.Window.ThreadShown(id));
+        Assert.Empty(t.WentTo);
+    });
 
     // F2 on the selected line opens it too; Enter saves through Rename; Esc cancels.
     [Fact]
