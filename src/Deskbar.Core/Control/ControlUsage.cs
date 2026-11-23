@@ -164,6 +164,8 @@ public static class ControlUsage
                 + "follow it when you move one; off: they open where they are opened)"),
             new("restore-title", "<hwnd>", "Restore title"),
             new("lock-tile", "<hwnd> on|off", "Don't split this tile: a new window never takes half of it"),
+            new("split-last", "<hwnd> on|off",
+                "Split <app> windows last: a new window halves the app's three latest windows only when no other tile is free"),
             new("pin", "<hwnd>", "show the window on every workspace, as dropping it on the pin row does"),
             new("unpin", "<hwnd>", "undo pin"),
             new("close-window", "<hwnd>", "Close (asks the window to close, as its X does)"),

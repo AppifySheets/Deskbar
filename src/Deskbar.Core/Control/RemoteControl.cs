@@ -155,6 +155,7 @@ public sealed partial class RemoteControl(WorkspaceManager manager, Func<bool, R
         ("rename-pattern", [var pattern, var name]) => RenamePattern(pattern, name),
         ("name-by-folder", [var hwnd, var onOff]) => NameByFolder(hwnd, onOff),
         ("remember-workspace", [var hwnd, var onOff]) => RememberWorkspace(hwnd, onOff),
+        ("split-last", [var hwnd, var onOff]) => SplitLast(hwnd, onOff),
         ("restore-title", [var hwnd]) => RestoreTitle(hwnd),
         ("lock-tile", [var hwnd, var onOff]) => LockTile(hwnd, onOff),
         ("pin", [var hwnd]) => Pin(hwnd, pin: true),

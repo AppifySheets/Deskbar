@@ -151,6 +151,16 @@ public sealed partial class RemoteControl
             _ => ControlReply.Fail(ControlUsage.LineFor("remember-workspace")),
         };
 
+    // The icon menu's "Split <app> windows last" (WorkspaceManager.SetSplitLast): the three latest windows of the app
+    // owning the window are split only when no other tile is free (Tiler.SplitLast.cs). Per app, like workspace memory.
+    ControlReply SplitLast(string hwnd, string onOff) =>
+        onOff.ToLowerInvariant() switch
+        {
+            "on" or "true" or "yes" => OnWindow(hwnd, w => manager.SetSplitLast(w.Handle, true)),
+            "off" or "false" or "no" => OnWindow(hwnd, w => manager.SetSplitLast(w.Handle, false)),
+            _ => ControlReply.Fail(ControlUsage.LineFor("split-last")),
+        };
+
     // The icon menu's "Don't split this tile" (Tiler.Lock.cs): a locked tile is never the one a new window halves.
     // The Tiler refuses a window that is not a tile, and that refusal is the reply.
     ControlReply LockTile(string hwnd, string onOff) =>
