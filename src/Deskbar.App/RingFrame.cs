@@ -71,18 +71,9 @@ sealed class RingFrame : Window
     }
 
     const long WS_EX_TRANSPARENT = 0x00000020, WS_EX_LAYERED = 0x00080000, WS_EX_NOACTIVATE = 0x08000000;
-    const uint SWP_SHOWWINDOW = 0x0040;
-    const uint GW_HWNDPREV = 3;
-
-    [System.Runtime.InteropServices.DllImport("user32.dll")]
-    static extern nint GetWindow(nint hwnd, uint command);
 
     // `rect` is the target's visible rectangle in physical pixels, `colour` #RRGGBB, `target` the window it outlines.
-    //
-    // Pixels through SetWindowPos, never Left/Top/Width/Height, which are DIPs at the frame's OWN scale: wrong exactly
-    // when the target is on a screen at another scale than the one the frame was last on (ScreenStrip.PlaceAt has the
-    // story). Moving onto such a screen makes Windows rescale the frame, so the rectangle is set again if it came out
-    // different.
+    // Placed in pixels, never through Left/Top/Width/Height (ZOrder.PlaceDirectlyAbove says why).
     // `pixels` is the line's thickness in physical pixels, at the scale of the target's screen.
     public void Place(NativeMethods.RECT rect, string colour, nint target, int pixels)
     {
@@ -95,17 +86,8 @@ sealed class RingFrame : Window
         // the same value does nothing.
         Topmost = (NativeMethods.GetWindowLongPtr(target, NativeMethods.GWL_EXSTYLE) & WS_EX_TOPMOST) != 0;
 
-        // Directly above the target: behind whatever is above it. When the frame already is the window above it,
-        // the z-order is left alone (it is checked every second, and moving it to the front of the band would lift it
-        // over windows that are in front of the target). When nothing is above it, the front of the band.
-        var above = GetWindow(target, GW_HWNDPREV);
-        var keepOrder = above == hwnd;
-        var insertAfter = above == 0 ? (Topmost ? NativeMethods.HWND_TOPMOST : NativeMethods.HWND_TOP) : above;
-        var (x, y, w, h) = (rect.Left, rect.Top, rect.Right - rect.Left, rect.Bottom - rect.Top);
-        NativeMethods.SetWindowPos(hwnd, insertAfter, x, y, w, h,
-            NativeMethods.SWP_NOACTIVATE | SWP_SHOWWINDOW | (keepOrder ? NativeMethods.SWP_NOZORDER : 0));
-        if (NativeMethods.GetWindowRect(hwnd, out var now) && (now.Left != x || now.Top != y || now.Right - now.Left != w || now.Bottom - now.Top != h))
-            NativeMethods.SetWindowPos(hwnd, 0, x, y, w, h, NativeMethods.SWP_NOACTIVATE | NativeMethods.SWP_NOZORDER);
+        // Directly above the target, the rule shared with the lock marks (ZOrder.PlaceDirectlyAbove has the reasoning).
+        ZOrder.PlaceDirectlyAbove(hwnd, target, rect.Left, rect.Top, rect.Right - rect.Left, rect.Bottom - rect.Top, Topmost);
     }
 
     const long WS_EX_TOPMOST = 0x00000008;
