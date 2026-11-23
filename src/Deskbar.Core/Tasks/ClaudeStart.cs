@@ -29,7 +29,10 @@ public static class ClaudeStart
             .Where(line => !string.IsNullOrWhiteSpace(line)));
         // The room in front of the last line is the limit less that line and the newline that joins them.
         var room = Math.Max(0, MaxMessage - join.Length - 1);
-        return (head.Length > room ? head[..room] : head) + "\n" + join;
+        // A cut between the two halves of a surrogate pair (an emoji) would leave a lone high surrogate, which is not
+        // valid text on a command line; step back one so the pair goes whole or not at all.
+        var cut = room > 0 && room < head.Length && char.IsHighSurrogate(head[room - 1]) ? room - 1 : room;
+        return (head.Length > room ? head[..cut] : head) + "\n" + join;
     }
 
     /// <summary>
