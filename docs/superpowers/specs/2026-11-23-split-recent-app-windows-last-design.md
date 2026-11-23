@@ -35,9 +35,13 @@ clicked a link in it), so the window you are working in is the one that shrinks.
 
 For which tile a window splits:
 
-- Big enough, then oldest (picked): tiles at least half as big as the largest count, and of those the one used
-  longest ago is split.
-- A score, size times time since last use. Dropped: it balances finely, but nobody can predict it by looking.
+- Middle way (picked): keep "split the tile last used" (predictable placement, 2026-11-19: a new window lands beside
+  the one you were using), except when that tile is protected; then the largest other free tile.
+- Big enough, then oldest: tiles at least half as big as the largest count, and of those the one used longest ago is
+  split. Petre first asked for it ("one that's not been used most recently", and size "should" count), then, asked
+  why the last-used rule existed ("why did we want last window split again?"), chose the middle way: the oldest rule
+  brings back the "where did my window go" confusion that the 2026-11-19 change fixed.
+- A score, size times time since last use. Dropped: nobody can predict it by looking.
 
 For protecting VS Code:
 
@@ -55,23 +59,17 @@ Arrival order for one new window, from the lock design, with the new tier marked
 2. A window dropped on a screen or restored from minimized stays on that screen (unchanged), and the tiers below
    apply within that screen only.
 3. A kept opening, then an empty screen (unchanged).
-4. Changed: split a tile that is neither protected nor locked, chosen by SIZE, then AGE. Petre: "one that's not been
-   used most recently", and on size, "it should" count; he picked "big enough, then oldest" over a size-times-age
-   score, which could not be predicted by looking.
-   - The candidates are those tiles on the target screen (the screen of the tile last used, else the window's own
-     screen) whose split passes the quarter floor.
-   - Big enough: a candidate whose area is at least half the area of the largest candidate.
-   - Of the big-enough ones, the tile used longest ago is split (the Tiler's activation order, `used`; a tile never
-     activated counts as older than any that was). Ties by area, larger first.
-   - No candidate on the target screen: the same rule over every other screen's tiles together.
-   This replaces "split the tile last used" for a window free to move. The new window no longer lands beside the
-   window it was opened from; that is the price of not being interrupted.
-5. New: split a protected tile, the least recently used of them first, so the window in use now is split last.
-6. Split a locked tile (unchanged: the lock is ignored only when nothing else is left).
+4. Unchanged rule, new exception: split the tile last used when it passes the quarter floor and is neither protected
+   nor locked. A browser opened from a browser still lands beside it.
+5. Changed: when the tile last used is protected (or locked, or too small), split the LARGEST free tile on the target
+   screen (free: not protected, not locked, not maximized). With no free tile there, the largest free tile on another
+   screen (the lock design's redirect, now also for protected tiles). Aimed windows stay on their screen.
+6. New: split a protected tile, the least recently used of them first, so the window in use now is split last.
+7. Split a locked tile (unchanged: the lock is ignored only when nothing else is left).
 
-Example: a full-height browser, a half-height Explorer and a quarter-size Terminal on one screen, none protected. The
-browser is the largest, the Explorer is at least half its size and the Terminal is not; of the browser and the
-Explorer, whichever was used longer ago is split.
+Example: you are in VS Code (protected) on screen 1, beside an Explorer; you open a browser from VS Code. Today it
+halves VS Code; now it halves the Explorer. With only VS Code windows on screen 1 and a Terminal on screen 2, it halves
+the Terminal on screen 2.
 
 "Protected" means: a tile of an app whose setting is on, and among that app's tiles on the board, one of the three
 activated most recently (the Tiler's existing activation order, `used`, which already drops activations Windows hands
