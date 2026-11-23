@@ -1154,19 +1154,23 @@ public partial class FloatingBar
     static IEnumerable<DependencyObject> LogicalDescendants(DependencyObject node) =>
         LogicalTreeHelper.GetChildren(node).OfType<DependencyObject>().SelectMany(LogicalDescendants).Prepend(node);
 
-    // Undo on a line just closed: a sign, not a word (Petre: "undo sign instead of text"), Segoe Fluent Icons' Undo
-    // (U+E7A7, Segoe MDL2 Assets on Windows 10), in the plain bright ink, about the tick box's size and in its place.
+    // Undo on a line just closed: a sign, not a word (Petre: "undo sign instead of text"), the plain half-circle back arrow
+    // U+21B6 (Ruling 51; the Segoe Fluent glyph E7A7 it replaced reads as a hook), in the plain bright ink, about the tick
+    // box's size and in its place.
     // Its automation name and tooltip say "Undo".
     Button UndoButton(TaskLine line) =>
         TaskButton("Undo", UndoSign(Text(8.5), TaskInk), () => UndoClose(line.Id), "Undo", ignoredWhen: DoubleClickIgnored);
 
     internal static readonly FontFamily IconFont = new("Segoe Fluent Icons, Segoe MDL2 Assets");
 
+    // The undo arrow's own font: Segoe UI Symbol has the glyph, Segoe UI is the fallback (Ruling 51).
+    static readonly FontFamily UndoFont = new("Segoe UI Symbol, Segoe UI");
+
     internal static TextBlock UndoSign(double size, Brush ink) => new()
     {
         Tag = "undo-sign",
-        Text = "",
-        FontFamily = IconFont,
+        Text = "↶",
+        FontFamily = UndoFont,
         FontSize = size,
         Foreground = ink,
         VerticalAlignment = VerticalAlignment.Center,
