@@ -198,9 +198,68 @@ public partial class FloatingBar
     // or half a second later, without waiting.
     internal Func<DateTime> TaskClickClock { get; init; } = () => DateTime.UtcNow;
 
-    // NO AGE ON THE BAR'S LINES (Ruling 43, Petre: "i don't think task times makes sense yet"). Ruling 26 had put a dim
-    // "2h3m" before the chip, rewritten once a minute; it is gone from the bar, with its minute's tick. The line's
-    // tooltip still says when the task was made (TipOf), and the tasks window keeps its age column for now.
+    // THE AGE ON EACH LINE, BACK (Ruling 46, which reverses Ruling 43; Petre: "bring back the times on tasks.."; the
+    // first version was Ruling 26, f911e1f took it away). A dim text on the line's first row, right before the
+    // workspace chip, TaskAge's compact form ("now", "16m", "7h55m", "3d3h"). It is one of the line's RIGHT parts
+    // (RightOf), so TaskLineFace counts its width in the fixed part the title yields to, and the chip-to-dot rule (the
+    // title keeps 55%) counts it too. Once a minute only those texts are rewritten (RefreshTaskAges), never the lines: a
+    // repaint would change the list's shape and could slide a line under the pointer (#48). Not while a paint would wait
+    // either (TaskListMustWait: a press, a drag, a menu). TaskNow is the clock they are told against; TaskAgeTimer
+    // starts the minute's tick. Both are seams for the tests.
+    //
+    // Petre "misread them for what they were" (a timer or a due time), so the age has a tooltip of its own in words,
+    // "Added 2 hours 3 minutes ago" and the date (TaskAge.Words); the line's own tooltip keeps the created date too.
+    internal Func<DateTimeOffset> TaskNow { get; init; } = () => DateTimeOffset.UtcNow;
+    internal Func<TimeSpan, Action, IDisposable> TaskAgeTimer { get; init; } = RepeatingTimer;
+
+    static readonly TimeSpan AgeTick = TimeSpan.FromMinutes(1);
+
+    // The age texts on show, by task, with when each task appeared.
+    readonly Dictionary<Guid, (TextBlock Text, DateTimeOffset Created)> taskAges = [];
+    IDisposable? taskAgeTick;
+
+    /// <summary>Rewrites every age on show for the time now; nothing else on the lines changes.</summary>
+    internal void RefreshTaskAges()
+    {
+        if (TaskListMustWait) return;
+        var now = TaskNow();
+        taskAges.Values.ToList().ForEach(age =>
+        {
+            age.Text.Text = TaskAge.Format(now - age.Created);
+            age.Text.ToolTip = AgeTip(now, age.Created);
+        });
+    }
+
+    // "Added 2 hours 3 minutes ago", then the date and time, so the compact text cannot be taken for a timer.
+    static string AgeTip(DateTimeOffset now, DateTimeOffset created) =>
+        $"{TaskAge.Words(now - created)}\n{created.ToLocalTime():dddd d MMMM yyyy, HH:mm}";
+
+    // A dispatcher timer that runs `then` every `every` until disposed.
+    static IDisposable RepeatingTimer(TimeSpan every, Action then)
+    {
+        var timer = new DispatcherTimer { Interval = every };
+        timer.Tick += (_, _) => then();
+        timer.Start();
+        return Disposable.Create(timer.Stop);
+    }
+
+    // The age text of a line: dim, never pushing the chip (TaskLineFace gives it its own width).
+    TextBlock AgeOf(TaskLine line)
+    {
+        var now = TaskNow();
+        var text = new TextBlock
+        {
+            Tag = "task-age",
+            Text = TaskAge.Format(now - line.Created),
+            FontSize = Text(7.5),
+            Foreground = TaskDimInk,
+            VerticalAlignment = VerticalAlignment.Center,
+            Margin = new Thickness(4, 0, 0, 0),
+            ToolTip = AgeTip(now, line.Created),
+        };
+        taskAges[line.Id] = (text, line.Created);
+        return text;
+    }
 
     // How a closed line's six seconds are timed: run `then` once after `after`, unless the returned handle is disposed
     // first (Undo, or the bar closing). A dispatcher timer in the app, so `then` runs on the UI thread; a seam so the
@@ -603,6 +662,7 @@ public partial class FloatingBar
         {
             taskChanges?.Dispose();
             goalChanges?.Dispose();
+            taskAgeTick?.Dispose();
             selectionChanges?.Dispose();
             // Every closed line's timer goes with the bar; the tasks are closed already, nothing is left to do.
             pendingCloses.ForEach(pending => pending.Timer.Dispose());
@@ -768,6 +828,9 @@ public partial class FloatingBar
 
         shownTaskLines = taskListExpanded ? all : all.Take(slots).ToArray();
         taskLinesPanel.Children.Clear();
+        taskAges.Clear();
+        // The minute's tick of the ages starts with the first lines drawn and lives as long as the bar.
+        taskAgeTick ??= TaskAgeTimer(AgeTick, RefreshTaskAges);
         if (taskProblemHost is not null)
         {
             taskProblemHost.Child = problem.HasValue ? LoadProblemRow(problem.Value) : null;
@@ -938,13 +1001,14 @@ public partial class FloatingBar
         }.OfType<UIElement>();
 
     // Right of the text, left to right, between the title and the chip (TaskLineFace): the flags that are ON (a flag that is off is a quiet
-    // control laid over the title's end instead, QuietFlags). No age (Ruling 43), and no close button: every line,
-    // a Done Claude task's included, closes from its tick box (LeftOf).
+    // control laid over the title's end instead, QuietFlags), then the age (Ruling 46), right before the chip. No close
+    // button: every line, a Done Claude task's included, closes from its tick box (LeftOf).
     IEnumerable<UIElement> RightOf(TaskLine line) =>
         new UIElement?[]
         {
             line.Closing || !line.Important ? null : FlagToggle(line, TaskFlag.Important),
             line.Closing || !line.Urgent ? null : FlagToggle(line, TaskFlag.Urgent),
+            AgeOf(line),
         }.OfType<UIElement>();
 
     // THE FLAGS THAT ARE OFF, as a quiet overlay (2026-11-23, the squeezed titles): laid over the right end of the title
@@ -1193,7 +1257,7 @@ public partial class FloatingBar
             line.Detail,
             line.Quadrant == Quadrant.IV ? "" : $"{line.Quadrant.Numeral()}: {line.Quadrant.Words()}",
             line.WorkspaceName is { } name ? $"On {name}" : "On no workspace",
-            // When it was made: the line itself shows no age any more (Ruling 43).
+            // When it was made (the age on the line has its own tooltip, Ruling 46).
             line.Created == default ? "" : $"Created {line.Created.ToLocalTime():dddd d MMMM yyyy, HH:mm}",
             line.GoalTitle is { } goal ? $"Goal: {goal}" : "",
         }.Where(part => part.Length > 0));

@@ -252,6 +252,9 @@ The task list at the bottom of the bar (spec `docs/superpowers/specs/2026-11-22-
     the same task is highlighted there and scrolled into view. Click another line in the window: the bar's
     highlight follows. Close the highlighted task: no line is highlighted any more.
 
+55b2. Each line says how old its task is, dim, just before its chip ("now", "16m", "2h3m", "3d3h"); after a minute the
+    text moves on without the line redrawing. Point at it: "Added 2 hours 3 minutes ago" and the date.
+
 55c. Point at a note's line: two dim toggles appear over the end of its title, an exclamation mark and a clock. Click the
     exclamation mark: it turns red and stays, and the line moves above the plain ones. Click the clock on another
     line: amber, and that line moves above the plain ones but below the important one. Set both on a third: it goes
