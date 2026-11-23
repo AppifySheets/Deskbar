@@ -14,6 +14,9 @@ task (`TaskItem.Sessions`: id, folder, joined, ended). He wants the task to be t
 - "i'd have tasks for all running claude sessions, without uis; or with uis"
 - "i'd close it and come back to it by clicking the question or task", and the session keeps working meanwhile.
 - "deskbar is being restarted often", so nothing may depend on Deskbar staying up.
+- "if i restart a computer or claude sessions end, i want to resume all claude sessions; i want to see all claude
+  sessions working in the tasks window", and "if a session has ended and done its work, i will mark the task as
+  done".
 
 ## Goals
 
@@ -27,6 +30,9 @@ task (`TaskItem.Sessions`: id, folder, joined, ended). He wants the task to be t
 - The task shows whether its session is working or idle, from what Claude Code itself reports, not from hooks that a
   crash never sends.
 - The task's thread lists every session that worked on it, and each one can be reopened from there.
+- Every open Claude task keeps its session running. After a reboot, a crash or any other end, Deskbar resumes it in
+  the background, and a turn that was cut off carries on by itself. Marking the task done is how a session is let go.
+- Every live Claude session on the machine has a task, so the tasks window shows all of them working or idle.
 
 ## Non-goals
 
@@ -42,10 +48,13 @@ task (`TaskItem.Sessions`: id, folder, joined, ended). He wants the task to be t
 
 ## Anti-goals
 
-- Starting anything on its own. A session starts only on Petre's click (CLAUDE.md: "No launching, no restore
-  prompt"; this is a launch at his request, like `deskbar.cmd start`). A reboot does not bring sessions back by
-  itself either.
+- Starting a NEW session on its own. A new session starts only on Petre's click. Resuming the session of an open task
+  is the one automatic start, and Petre asked for it by name (2026-11-23); CLAUDE.md's "No launching, no restore
+  prompt" was about apps and workspaces and still holds for them.
 - Stopping a session Petre did not ask to stop. Closing a window never stops one.
+- Resuming the session of a task that is done or closed.
+- A resume loop: a session that ends again straight after being resumed is not resumed forever (see "Keeping open
+  tasks running").
 - Two drivers on one session: Deskbar never starts `--bg --resume` on a session `claude agents` already lists.
 
 ## What was measured
@@ -113,6 +122,39 @@ and says so in the task's thread once.
 Restarting Deskbar loses nothing: the task to session link is in `tasks.json`, and the next read of
 `claude agents --json` finds every session that is still running.
 
+### Every live session has a task
+
+A live session in `claude agents --json` that no task knows gets a task from Deskbar: its title is the session's
+`name`, it is a Claude task with that session joined, and it lands on the workspace of the VS Code window showing the
+session's folder, or on none, as `task new` does. The SessionStart hook stays the first way in (the session names or
+joins its own task); this only catches the sessions that did not. A session the hook joins a moment later moves to that
+task, and the task Deskbar made for it is deleted if nothing else was added to it.
+
+### Keeping open tasks running
+
+The rule, checked on every read of `claude agents --json`: the latest session of every open Claude task (backlog, in
+progress or waiting on Petre; not done, not closed) is running. When it is not:
+
+1. Resume it: `claude --bg --resume <session id>` in the session's folder, through `ProgramStarter`.
+2. If its last turn was cut off (the transcript ends without the assistant's closing reply), send it `continue` as its
+   first message, so the work carries on by itself. Petre chose this on 2026-11-23 over coming back idle, knowing a
+   command that was half done can run twice; Claude checks the state before redoing anything.
+3. Say so in the task's thread: "Resumed after <reason>" with the time.
+
+This one rule covers a reboot (every session is gone when Deskbar starts at sign-in), a crash, a closed VS Code window,
+and a session ended by hand on a task that is still open. A Deskbar restart resumes nothing, because every session is
+still running. A session started in VS Code comes back as a background session, not in VS Code.
+
+Guards:
+
+- Done and closed tasks are skipped: "if a session has ended and done its work, i will mark the task as done".
+- A session that ends again within a few minutes of being resumed is resumed at most twice more, with a growing pause.
+  After that its task waits on Petre with the reason, and nothing more happens until he clicks it.
+- A session whose transcript has expired cannot be resumed; its task says so once and waits on Petre.
+- Resumes are spread out (one at a time, a few seconds apart), since after a reboot there may be twenty at once and
+  each `claude.exe` takes hundreds of MB.
+- A switch in Manage turns the automatic resume off without turning off the rest of the feature.
+
 ### Starting a session from a task
 
 1. Choose the folder (below).
@@ -149,10 +191,12 @@ An untrusted folder makes `claude --bg` fail. Deskbar shows the message and offe
 
 ### The window on a session
 
-- Windows Terminal, one window per session: `wt -w new` with the chosen profile, the session's folder, a title naming
-  the task, and `claude attach <id>`. The profile is one of the three looks on trial (Dark Modern, Night, Warm, all
-  10 pt, in a Windows Terminal fragment); Petre picks one, and Deskbar ships it as its own fragment so the profile
-  exists on any machine with the feature on.
+- Windows Terminal, one window per session: `wt -w new` with Deskbar's profile, the session's folder, a title naming
+  the task, and `claude attach <id>`. The profile is the "Dark Modern" look Petre picked on 2026-11-23 from three on
+  trial: VS Code's Dark Modern colours, JetBrains Mono 10 pt, line height 1.15, Claude's orange bar cursor, no
+  scrollbar. Deskbar ships it as its own Windows Terminal fragment so the profile exists on any machine with the
+  feature on, and removes the trial fragment (`Fragments\DeskbarClaudeTry`). JetBrains Mono is not part of Windows,
+  so the profile falls back to Cascadia Mono where it is missing.
 - Deskbar finds the new window by its title (Windows Terminal draws all its windows from one process, so the process
   does not tell them apart; `suppressApplicationTitle` keeps the title Deskbar gave) and puts it on the task's
   workspace the way it places any new window.
@@ -166,8 +210,8 @@ change the user's retention setting on its own (a privacy choice). The thread sh
 is gone as "expired" without an Open button, and Manage, beside the setting, says once that Claude Code keeps sessions
 for 30 days unless `cleanupPeriodDays` is raised in `~/.claude/settings.json`.
 
-A reboot or sign-out ends every background session. Clicking the task afterwards resumes it as an ended session:
-the conversation comes back, a turn that was running when the machine went down does not.
+A reboot or sign-out ends every background session. Deskbar resumes the ones on open tasks when it starts (see
+"Keeping open tasks running"), and a turn that was cut off is sent `continue`.
 
 ### The setting
 
@@ -182,10 +226,11 @@ stops nothing that is running.
 - The CLI's background sessions are new. Deskbar depends on four things only: `claude --bg`, `claude attach`,
   `claude --bg --resume` and `claude agents --json`, and treats an unknown JSON shape as "cannot tell", never as
   "ended".
-- Measure, don't theorise (project CLAUDE.md). Three behaviours are unmeasured and come first in the plan, in a
-  throwaway folder and off Petre's screen where possible: closing a real Windows Terminal window on an attached
-  session, attaching from a second window while one is attached, and Deskbar being killed while it is starting a
-  session.
+- Measure, don't theorise (project CLAUDE.md). These are unmeasured and come first in the plan, in a throwaway folder
+  and off Petre's screen where possible: closing a real Windows Terminal window on an attached session; attaching from
+  a second window while one is attached; Deskbar being killed while it is starting a session; whether
+  `claude --bg --resume <id>` takes a first message; whether a resume with no message calls the model at all; how to
+  tell a cut-off turn from the transcript's last lines; and what one idle background session costs in memory.
 - The control pipe stays the only way other programs drive Deskbar.
 - No test may start Claude or a terminal on Petre's desktop. The pure parts (folder choice, first message, parsing
   `claude agents --json`, matching sessions to tasks, the retention check) are Core and unit-tested; the live path is
