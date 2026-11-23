@@ -91,6 +91,43 @@ public class TaskBoardTests
         Assert.True(Assert.Single(task.Sessions).IsLive);
     }
 
+    // Ruling 19: /clear marks the session replaced and ended, its task keeps its status, and a session starting with
+    // source "clear" in the same folder within a minute finds that task; later, or in another folder, it does not.
+    [Fact]
+    public void A_cleared_session_is_replaced_and_its_task_found_for_a_minute()
+    {
+        var board = Claudes(TaskBoard.Empty, id1, ws);
+        var cleared = clock;
+
+        board = board.SessionCleared("s1", clock);
+
+        var session = Assert.Single(Get(board, id1).Sessions);
+        Assert.Equal(cleared, session.ReplacedAt.GetValueOrDefault());
+        Assert.Equal(cleared, session.Ended.GetValueOrDefault());
+        Assert.Equal(TaskStatus.InProgress, Get(board, id1).Status);
+        Assert.Same(board, board.SessionCleared("nobody", clock));
+
+        bool Here(string folder) => folder == @"C:\repos\TaskSpaces";
+        Assert.Equal(id1, board.ClearedTaskIn(Here, cleared.AddSeconds(59)).GetValueOrDefault()?.Id);
+        Assert.True(board.ClearedTaskIn(folder => false, cleared.AddSeconds(5)).HasNoValue);
+        Assert.True(board.ClearedTaskIn(Here, cleared.AddSeconds(61)).HasNoValue);
+        Assert.True(board.ClearedTaskIn(Here, cleared.AddSeconds(-1)).HasNoValue);
+    }
+
+    // A session that had already ended keeps its end; the clear is still recorded.
+    [Fact]
+    public void Clearing_an_ended_session_keeps_its_end()
+    {
+        var ended = clock;
+        var board = Claudes(TaskBoard.Empty, id1, ws).SessionEnded("s1", clock);
+        Later();
+
+        var session = Get(board.SessionCleared("s1", clock), id1).Sessions.Single();
+
+        Assert.Equal(ended, session.Ended.GetValueOrDefault());
+        Assert.Equal(clock, session.ReplacedAt.GetValueOrDefault());
+    }
+
     // Ruling 34: a resumed session coming back to its OWN task keeps the task's status. Only the user's next message
     // (Answered) moves Done or Waiting on you back to In progress; resuming a session to look at it moves nothing.
     [Theory]

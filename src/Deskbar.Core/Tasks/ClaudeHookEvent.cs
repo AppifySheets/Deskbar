@@ -19,6 +19,7 @@ namespace Deskbar.Core.Tasks;
 //              window's title is Task 8's job, which normalises both sides (long path, one separator, case) first, so
 //              nothing is lost by storing it raw here.
 //   Source     source, SessionStart only: startup, resume, clear, compact or fork.
+//   Reason     reason, SessionEnd only (an init property): "clear" when /clear ended it (Ruling 19).
 //   Headless   whether nobody is sitting in this session (below).
 //
 // Unknown fields are skipped, not refused: Claude Code adds fields between versions (the probes saw a resume add four,
@@ -45,6 +46,19 @@ public sealed record ClaudeHookEvent(string Event, string SessionId, string Fold
 {
     static readonly string[] HeadlessEntrypoints = ["sdk-cli", "sdk-ts", "sdk-py"];
 
+    /// <summary>
+    /// reason, SessionEnd only: why the session ended (clear, logout, prompt_input_exit, other, ...). "clear" is the one
+    /// Deskbar acts on (Ruling 19, TaskBoard.SessionCleared). An init property, so no constructor call has to say it.
+    /// </summary>
+    public Maybe<string> Reason { get; init; }
+
+    /// <summary>
+    /// Whether the hook came from a background session (`claude --bg`): its CLAUDE_JOB_DIR names this session's own job
+    /// (OwnJob). Such a session sends SessionEnd at the end of every turn while `claude agents` still lists it, so while
+    /// the list is read that SessionEnd is not taken as the end (final review, item 13; RemoteControl.Ended).
+    /// </summary>
+    public bool Background { get; init; }
+
     public static Result<ClaudeHookEvent> Parse(string json, string? entrypoint, string? attended, string? job = null)
     {
         try
@@ -59,7 +73,11 @@ public sealed record ClaudeHookEvent(string Event, string SessionId, string Fold
             if (session.HasNoValue) return Result.Failure<ClaudeHookEvent>("the hook's JSON has no session_id");
 
             return new ClaudeHookEvent(hookEvent.Value, session.Value, Text(root, "cwd").GetValueOrDefault(""),
-                Text(root, "source"), IsHeadless(entrypoint, attended, job, session.Value), Text(root, "transcript_path"));
+                Text(root, "source"), IsHeadless(entrypoint, attended, job, session.Value), Text(root, "transcript_path"))
+            {
+                Reason = Text(root, "reason"),
+                Background = OwnJob(job, session.Value),
+            };
         }
         catch (JsonException e)
         {

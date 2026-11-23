@@ -76,7 +76,11 @@ public sealed class JsonTaskStore(string baseDirectory, Action<string>? trace = 
     // Text fields are nullable because a hand-edited file can say `"title": null`; FromDto makes that "". A missing
     // Raised reads as Created, missing lists as empty, a missing status as Backlog (the enum's default).
 
-    sealed record SessionDto(string? Id, string? Folder, DateTimeOffset Joined, DateTimeOffset? Ended);
+    // ReplacedAt: TaskSession.ReplacedAt (Ruling 19, /clear). Left out of the file when there is none, so a file
+    // written before it existed and one written now read the same way, and every ordinary session stays as short as it
+    // was. Still version 2.
+    sealed record SessionDto(string? Id, string? Folder, DateTimeOffset Joined, DateTimeOffset? Ended,
+        [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] DateTimeOffset? ReplacedAt = null);
 
     sealed record CommentDto(Guid Id, string? SessionId, DateTimeOffset At, string? Markdown,
         [property: JsonConverter(typeof(TolerantTimeConverter))] DateTimeOffset? Settled = null);
@@ -184,7 +188,8 @@ public sealed class JsonTaskStore(string baseDirectory, Action<string>? trace = 
             t.Question.HasValue ? t.Question.Value : null,
             t.Created.ToUniversalTime(), t.UpdatedAt.ToUniversalTime(), t.Raised.ToUniversalTime(),
             t.Sessions.Select(s => new SessionDto(s.Id, s.Folder, s.Joined.ToUniversalTime(),
-                s.Ended.HasValue ? s.Ended.Value.ToUniversalTime() : null)).ToArray(),
+                s.Ended.HasValue ? s.Ended.Value.ToUniversalTime() : null,
+                s.ReplacedAt.HasValue ? s.ReplacedAt.Value.ToUniversalTime() : null)).ToArray(),
             t.Comments.Select(c => new CommentDto(c.Id, c.SessionId.HasValue ? c.SessionId.Value : null,
                 c.At.ToUniversalTime(), c.Markdown, c.Settled.HasValue ? c.Settled.Value.ToUniversalTime() : null)).ToArray(),
             t.Important, t.Urgent, t.Rank,
@@ -200,7 +205,10 @@ public sealed class JsonTaskStore(string baseDirectory, Action<string>? trace = 
             d.Status, d.StatusLine ?? "", Maybe.From(d.Question),
             d.Created.ToUniversalTime(), d.UpdatedAt.ToUniversalTime(), (d.Raised ?? d.Created).ToUniversalTime(),
             (d.Sessions ?? []).Select(s => new TaskSession(s.Id ?? "", s.Folder ?? "", s.Joined.ToUniversalTime(),
-                s.Ended is { } ended ? ended.ToUniversalTime() : Maybe<DateTimeOffset>.None)).ToArray(),
+                s.Ended is { } ended ? ended.ToUniversalTime() : Maybe<DateTimeOffset>.None)
+            {
+                ReplacedAt = s.ReplacedAt is { } replaced ? replaced.ToUniversalTime() : Maybe<DateTimeOffset>.None,
+            }).ToArray(),
             (d.Comments ?? []).Select(c => new TaskComment(c.Id, Maybe.From(c.SessionId), c.At.ToUniversalTime(), c.Markdown ?? "")
             { Settled = c.Settled is { } settled ? settled.ToUniversalTime() : Maybe<DateTimeOffset>.None }).ToArray())
         {

@@ -1,3 +1,4 @@
+using System.Collections.Immutable;
 using System.Reactive;
 using System.Reactive.Subjects;
 using CSharpFunctionalExtensions;
@@ -125,6 +126,37 @@ public sealed class TaskService(ITaskStore store, Func<DateTimeOffset> now, Func
     public void Answered(string sessionId) => CommitIfChanged(Board.Answered(sessionId, now()));
 
     public void SessionEnded(string sessionId) => CommitIfChanged(Board.SessionEnded(sessionId, now()));
+
+    /// <summary>/clear ended the session (Ruling 19, TaskBoard.SessionCleared). Saves only when it was on a task.</summary>
+    public void SessionCleared(string sessionId) => CommitIfChanged(Board.SessionCleared(sessionId, now()));
+
+    /// <summary>
+    /// A session that started with source "clear": when a session was cleared in its folder within
+    /// TaskBoard.ClearedWithin, it rejoins that task in the cleared one's place, status kept as a resumed session's is
+    /// (TaskBoard.Rejoin). Returns the task it joined, or none.
+    /// </summary>
+    public Maybe<TaskItem> JoinAfterClear(string sessionId, string folder, Func<string, bool> inFolder) =>
+        Board.ClearedTaskIn(inFolder, now()) is { HasValue: true } cleared && Rejoin(cleared.Value.Id, NewSession(sessionId, folder)).IsSuccess
+            ? cleared
+            : Maybe<TaskItem>.None;
+
+    // --- which sessions a person is at (Ruling 17) ---
+    //
+    // `claude agents --json` lists a `claude -p` run as "interactive", so the list cannot tell a person's session from a
+    // script's (measured 2026-11-23), and adopting a headless run would put a task on the board for every scripted call.
+    // The hooks can: ClaudeHookEvent.Headless. So the hooks record every session they hear from as attended
+    // (SessionStart or UserPromptSubmit with Headless false) and ClaudeSessions adopts only those. Kept in memory: a
+    // session not heard from since Deskbar started is not adopted until its next prompt, the ruling's stated cost.
+    // Written by the control pipe and read by the poll, both on the UI thread; the immutable set keeps a stray reader on
+    // another thread safe anyway.
+
+    ImmutableHashSet<string> attended = ImmutableHashSet<string>.Empty;
+
+    /// <summary>A hook from this session said a person is at it (Ruling 17).</summary>
+    public void HeardAttended(string sessionId) => ImmutableInterlocked.Update(ref attended, set => set.Add(sessionId));
+
+    /// <summary>Whether a hook has said, since Deskbar started, that a person is at this session (Ruling 17).</summary>
+    public bool WasAttended(string sessionId) => attended.Contains(sessionId);
 
     /// <summary>
     /// The board follows Claude Code's list of live sessions (TaskBoard.Reconcile). Called on every poll, nearly always

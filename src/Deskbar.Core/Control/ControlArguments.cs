@@ -237,8 +237,17 @@ public static class ControlArguments
         ["--job", var value, .. var tail] => HookOptions(so with { Job = value }, tail),
         ["--from", var value, .. var tail] => HookOptions(so with { From = value }, tail),
         ["--json", var value, .. var tail] => HookOptions(so with { Json = value }, tail),
+        // AN OPTION THIS COPY DOES NOT KNOW IS SKIPPED, with its value (final review, item 14). The hook scripts are
+        // rewritten by whichever Deskbar starts last, so a newer script that passes one more variable can reach an
+        // older Deskbar still running, and refusing it would silence every hook of every session until a restart.
+        // The value is the next word unless that is one of the options above, so an unknown flag written without a
+        // value cannot swallow --json. A stray word that is no option at all is still refused.
+        [var unknown, var value, .. var tail] when IsOption(unknown) && !HookOptionNames.Contains(value) => HookOptions(so, tail),
+        [var unknown, .. var tail] when IsOption(unknown) => HookOptions(so, tail),
         [var unknown, ..] => Result.Failure<ClaudeHookRequest>($"'{unknown}' is not an option of claude-hook, or it is missing its value."),
     };
+
+    static readonly IReadOnlyList<string> HookOptionNames = ["--entry", "--attended", "--job", "--from", "--json"];
 
     // `create <name> [--group <g> | --position <n> | --before <ws> | --after <ws>]`
     public static Result<CreateRequest> ParseCreate(IReadOnlyList<string> args) =>

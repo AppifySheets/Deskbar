@@ -68,13 +68,21 @@ public sealed partial class RemoteControl
             : Quiet,
     };
 
+    // SessionStart and UserPromptSubmit reach here only when the hook is not headless, so they also tell the task
+    // service a person is at the session (Ruling 17, TaskService.HeardAttended): only such sessions are adopted.
     ControlReply TaskEvent(TaskService service, ClaudeHookEvent hook, string? folder) => hook.Event switch
     {
-        "SessionStart" => Said(SessionStarted(service, hook, folder)),
-        "UserPromptSubmit" => Said(Prompted(service, hook.SessionId)),
-        "SessionEnd" => Ended(service, hook.SessionId),
+        "SessionStart" => Said(SessionStarted(Attended(service, hook), hook, folder)),
+        "UserPromptSubmit" => Said(Prompted(Attended(service, hook), hook.SessionId)),
+        "SessionEnd" => Ended(service, hook),
         _ => Quiet,
     };
+
+    static TaskService Attended(TaskService service, ClaudeHookEvent hook)
+    {
+        service.HeardAttended(hook.SessionId);
+        return service;
+    }
 
     static readonly ControlReply Quiet = new(ControlReply.Ok, "");
 
@@ -92,10 +100,18 @@ public sealed partial class RemoteControl
     // same id replaces its old entry) WITHOUT touching the task's status (Ruling 34): resuming a session to look at it
     // is not continuing the work, so a Done or waiting task stays as it is until the user's next message (Prompted).
     // Only a session with no open task at all is offered a choice.
+    //
+    // /clear (Ruling 19): a session /clear marked replaced that starts again under the SAME id (unmeasured whether /clear
+    // keeps it) rejoins as a fresh entry, which drops the mark, so the keeper may resume it again later. A session with
+    // no task at all that starts with source "clear" takes the place of the session cleared in its folder within the
+    // last minute (TaskService.JoinAfterClear), so the task Petre was working on follows him into the fresh conversation.
     string SessionStarted(TaskService service, ClaudeHookEvent hook, string? folder)
     {
-        if (service.Board.TaskOf(hook.SessionId).HasNoValue)
+        var current = service.Board.TaskOf(hook.SessionId);
+        if (current.HasNoValue || current.Value.Sessions.Any(s => s.Id == hook.SessionId && s.Replaced))
             service.Board.LastTaskOf(hook.SessionId).Tap(t => service.Rejoin(t.Id, service.NewSession(hook.SessionId, folder ?? "")));
+        if (service.Board.LastTaskOf(hook.SessionId).HasNoValue && hook.Source.Map(s => s == "clear").GetValueOrDefault(false) && folder is not null)
+            service.JoinAfterClear(hook.SessionId, folder, stored => FolderPath.Same(stored, folder, LongPath));
         var own = service.Board.TaskOf(hook.SessionId);
         var offered = own.HasValue ? [] : service.Board.Offered(CallerOf(folder).Workspace is { } w ? w.Id : Maybe<Guid>.None);
         return SessionBriefing.Start(hook, own, offered);
@@ -117,9 +133,19 @@ public sealed partial class RemoteControl
         return SessionBriefing.Prompt(sessionId, own, own.HasValue ? Maybe<TaskItem>.None : service.Board.ClosedTaskOf(sessionId));
     }
 
-    static ControlReply Ended(TaskService service, string sessionId)
+    // SessionEnd. Three cases:
+    //   * reason "clear" (Ruling 19): the session is marked replaced and ended, whatever kind it is, so the keeper never
+    //     resumes the conversation Petre cleared, and the fresh session that follows can take its place (SessionStarted).
+    //   * a BACKGROUND session's own hook (final review, item 13): it sends SessionEnd at the end of every turn while
+    //     `claude agents --json` still lists it (Review Focus 1). This branch runs only while sessions keep their tasks
+    //     (Answer checks ClaudeTasksInEffect), which is exactly when ClaudeSessions reads that list every 15 seconds,
+    //     and the list is the truth: it ends the session when it really goes (TaskBoard.Reconcile). Ending it here only
+    //     made the board flicker "ended" after every turn until the next poll revived it, so it is skipped.
+    //   * anything else: the session is marked ended; its task stays open.
+    static ControlReply Ended(TaskService service, ClaudeHookEvent hook)
     {
-        service.SessionEnded(sessionId);
+        if (hook.Reason.Map(r => r == "clear").GetValueOrDefault(false)) service.SessionCleared(hook.SessionId);
+        else if (!hook.Background) service.SessionEnded(hook.SessionId);
         return Quiet;
     }
 

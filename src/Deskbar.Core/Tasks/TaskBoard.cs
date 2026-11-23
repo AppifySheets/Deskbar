@@ -135,6 +135,46 @@ public sealed record TaskBoard(IReadOnlyList<TaskItem> Tasks)
             : this;
 
     /// <summary>
+    /// How long after a /clear a session starting with source "clear" in the same folder is taken for its successor
+    /// (Ruling 19, <see cref="ClearedTaskIn"/>). The two hooks come from one keypress, so a minute is generous.
+    /// </summary>
+    public static readonly TimeSpan ClearedWithin = TimeSpan.FromMinutes(1);
+
+    /// <summary>
+    /// Petre ran /clear in the session (its SessionEnd hook said reason "clear"; Ruling 19): every entry of it on an
+    /// open task is marked replaced now (<see cref="TaskSession.ReplacedAt"/>) and ended if it was live, and those tasks
+    /// keep their status. The conversation it held is over, so SessionKeeper never resumes it; the fresh one that
+    /// follows joins the task through <see cref="ClearedTaskIn"/>. No entry of that id returns this same board.
+    /// </summary>
+    public TaskBoard SessionCleared(string sessionId, DateTimeOffset now) =>
+        Tasks.Any(t => t.IsOpen && t.Sessions.Any(s => s.Id == sessionId))
+            ? new TaskBoard(Tasks.Select(t => t.IsOpen && t.Sessions.Any(s => s.Id == sessionId)
+                ? t with
+                {
+                    Sessions = t.Sessions.Select(s => s.Id == sessionId
+                        ? s with { Ended = s.Ended.HasValue ? s.Ended : now, ReplacedAt = now }
+                        : s).ToArray(),
+                    UpdatedAt = now,
+                }
+                : t).ToArray())
+            : this;
+
+    /// <summary>
+    /// The open task whose session was cleared (<see cref="SessionCleared"/>) within <see cref="ClearedWithin"/> before
+    /// <paramref name="now"/> in a folder <paramref name="inFolder"/> accepts, the latest clear first: where a session
+    /// that starts with source "clear" there belongs. The caller compares folders (RemoteControl normalises both sides,
+    /// FolderPath.Same), so this needs no file system.
+    /// </summary>
+    public Maybe<TaskItem> ClearedTaskIn(Func<string, bool> inFolder, DateTimeOffset now) =>
+        Tasks.Where(t => t.IsOpen)
+            .SelectMany(t => t.Sessions
+                .Where(s => s.ReplacedAt.HasValue && s.ReplacedAt.Value <= now && now - s.ReplacedAt.Value <= ClearedWithin && inFolder(s.Folder))
+                .Select(s => (Task: t, At: s.ReplacedAt.Value)))
+            .OrderByDescending(x => x.At)
+            .Select(x => x.Task)
+            .TryFirst();
+
+    /// <summary>
     /// Makes the board agree with Claude Code's own list of live sessions (`claude agents --json`, ClaudeAgents), which
     /// is the truth: the SessionEnd hook is only a hint. It never arrives after a crash or a reboot, and a background
     /// session sends it at the end of every turn while the list still shows the session.
