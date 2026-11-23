@@ -26,6 +26,15 @@ public sealed record TileSplit(WindowHandle Target, TileArrange.Zone Side);
 // Only when every tile of the screen is skipped does the rule run as if nothing were: a window still has to go
 // somewhere, and the newcomer then lands in the slot the maximized window will come back to half of.
 //
+// AVOIDED TILES (spec 2026-11-23-split-recent-app-windows-last-design.md): the three latest windows of an app marked
+// "split last" (VS Code), passed in `avoid` by the Tiler. Petre: "do it so that vscode windows are the last to be
+// affected", then "maybe the last few vscode windows that were active, last 3", and of the ways offered, the middle
+// one: keep splitting the tile last used (a new window lands beside what you were using), except an avoided one. So the
+// tiers are: the FREE tiles (in neither set) by rules 1 and 2; only when no tile is free, the avoided ones, the OLDEST
+// first by `age` (0 is the window activated most recently), so the window in use now is split last of all, the floor
+// still respected; and only when those are gone too, every tile, as above. An avoided tile is never the "last used"
+// choice, which is the whole point: the window you are working in does not shrink.
+//
 // Pure, like TileArrange: `tiles` is aligned with `order` (the slots GridLayout lays out), and the Tiler calls this.
 public static class TileArrival
 {
@@ -47,17 +56,27 @@ public static class TileArrival
     // leaves that are not the windows'.
     public static Maybe<TileSplit> Choose(
         IReadOnlyList<WindowHandle> order, TileLayout layout, IReadOnlyList<WindowRect> tiles, Maybe<WindowHandle> lastUsed,
-        IReadOnlySet<WindowHandle> skip)
+        IReadOnlySet<WindowHandle> skip, IReadOnlySet<WindowHandle>? avoid = null, Func<WindowHandle, int>? age = null)
     {
         var read = layout.Count == order.Count || layout.HasOpeningFor(order.Count) ? layout : TileLayout.Automatic(order.Count);
-        var everySkipped = order.All(skip.Contains);
-        // Slots and leaves are counted over the whole order first, so a skipped tile still holds its place.
-        var candidates = order
-            .Select((window, slot) => (Window: window, Slot: slot, Share: read.ShareOf(TileArrange.LeafOf(read, slot, order.Count))))
-            .Where(t => everySkipped || !skip.Contains(t.Window))
-            .Select(t => (t.Window, t.Share, Side: tiles[t.Slot].Width > tiles[t.Slot].Height ? TileArrange.Zone.Right : TileArrange.Zone.Bottom))
+        var avoided = avoid ?? new HashSet<WindowHandle>();
+        // Slots and leaves are counted over the whole order first, so a skipped or avoided tile still holds its place.
+        var all = order
+            .Select((window, slot) => (Window: window, Share: read.ShareOf(TileArrange.LeafOf(read, slot, order.Count)),
+                Side: tiles[slot].Width > tiles[slot].Height ? TileArrange.Zone.Right : TileArrange.Zone.Bottom))
             .ToList();
+        var free = all.Where(t => !skip.Contains(t.Window) && !avoided.Contains(t.Window)).ToList();
+        var avoidedOnly = all.Where(t => !skip.Contains(t.Window) && avoided.Contains(t.Window)).ToList();
+        return free.Count > 0 ? LastUsedOrLargest(free, lastUsed)
+            : avoidedOnly.Count > 0 ? OldestOrLargest(avoidedOnly, age ?? (_ => int.MaxValue))
+            : LastUsedOrLargest(all, lastUsed);
+    }
 
+    // Rules 1 and 2 over `candidates`: the tile last used when it passes the floor, otherwise the largest.
+    static Maybe<TileSplit> LastUsedOrLargest(
+        IReadOnlyList<(WindowHandle Window, (double Width, double Height) Share, TileArrange.Zone Side)> candidates,
+        Maybe<WindowHandle> lastUsed)
+    {
         var preferred = candidates
             .Where(t => lastUsed.HasValue && t.Window == lastUsed.Value && PassesFloor(t.Share, t.Side))
             .Select(t => Maybe.From(t))
@@ -71,6 +90,18 @@ public static class TileArrival
 
         return preferred.Or(largest).Map(t => new TileSplit(t.Window, t.Side));
     }
+
+    // The avoided tier: the oldest tile (largest `age`) that passes the floor, the later slot winning a tie; when none
+    // passes, the largest, as rule 2 would.
+    static Maybe<TileSplit> OldestOrLargest(
+        IReadOnlyList<(WindowHandle Window, (double Width, double Height) Share, TileArrange.Zone Side)> candidates,
+        Func<WindowHandle, int> age) =>
+        candidates
+            .Where(t => PassesFloor(t.Share, t.Side))
+            .OrderBy(t => age(t.Window))
+            .Select(t => Maybe.From(new TileSplit(t.Window, t.Side)))
+            .LastOrDefault(Maybe<TileSplit>.None)
+            .Or(() => LastUsedOrLargest(candidates, Maybe<WindowHandle>.None));
 
     // Both halves keep a quarter of the screen's width share and height share, by fractions.
     static bool PassesFloor((double Width, double Height) share, TileArrange.Zone side) =>

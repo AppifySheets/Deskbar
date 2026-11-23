@@ -78,6 +78,47 @@ public sealed class TileArrivalLayoutTests
         Assert.Equal(Split(1, TileArrange.Zone.Right),
             Choose(1, TileLayout.Automatic(1), Maybe.From(W(1)), new HashSet<WindowHandle> { W(1) }));
 
+    // AVOIDED TILES (spec 2026-11-23-split-recent-app-windows-last-design.md): the three latest windows of an app
+    // marked "split last" (VS Code). Petre: "do it so that vscode windows are the last to be affected", and of the two
+    // ways offered, the middle one: the tile last used is still split, unless it is avoided.
+    static Maybe<TileSplit> ChooseAvoiding(int count, TileLayout layout, Maybe<WindowHandle> lastUsed,
+        IReadOnlySet<WindowHandle> avoid, int[]? ages = null, IReadOnlySet<WindowHandle>? skip = null) =>
+        TileArrival.Choose(Order(count), layout, Tiles(count, layout), lastUsed, skip ?? new HashSet<WindowHandle>(), avoid,
+            w => ages is null ? int.MaxValue : ages[(int)w.Value - 1]);
+
+    // W1 | W3 over W2 with W3 at 20% height: W1 is 50% x 100%, W2 50% x 80%, W3 50% x 20% (too short to halve).
+    static readonly TileLayout TallShortPair = Tree(Across(C(L, .5), C(Down(C(L, .8), C(L, .2)), .5)));
+
+    [Fact]
+    public void An_avoided_last_used_tile_hands_the_split_to_the_largest_free_one() =>
+        Assert.Equal(Split(2, TileArrange.Zone.Bottom),
+            ChooseAvoiding(2, TileLayout.Automatic(2), Maybe.From(W(1)), new HashSet<WindowHandle> { W(1) }));
+
+    // Every tile avoided: the oldest one (the largest age) is split, not the tile last used.
+    [Fact]
+    public void Avoided_tiles_are_split_only_when_no_tile_is_free() =>
+        Assert.Equal(Split(2, TileArrange.Zone.Bottom),
+            ChooseAvoiding(2, TileLayout.Automatic(2), Maybe.From(W(1)), new HashSet<WindowHandle> { W(1), W(2) }, [0, 1]));
+
+    // W3 is the oldest but too short to halve, so the next oldest, W2, is split (960x832, wider than tall: to its right).
+    [Fact]
+    public void Among_avoided_tiles_the_oldest_that_passes_the_floor_is_split() =>
+        Assert.Equal(Split(2, TileArrange.Zone.Right),
+            ChooseAvoiding(3, TallShortPair, Maybe<WindowHandle>.None, new HashSet<WindowHandle> { W(1), W(2), W(3) }, [0, 1, 2]));
+
+    [Fact]
+    public void Skipped_tiles_still_come_after_avoided_ones() =>
+        Assert.Equal(Split(1, TileArrange.Zone.Bottom),
+            ChooseAvoiding(2, TileLayout.Automatic(2), Maybe<WindowHandle>.None, new HashSet<WindowHandle> { W(1) },
+                skip: new HashSet<WindowHandle> { W(2) }));
+
+    // Plan review focus 5: the only free tile is too small to halve; it is still the one split (wide, so to its right),
+    // never an avoided tile.
+    [Fact]
+    public void When_every_free_tile_fails_the_floor_the_largest_free_one_is_split_not_an_avoided_one() =>
+        Assert.Equal(Split(3, TileArrange.Zone.Right),
+            ChooseAvoiding(3, TallShortPair, Maybe<WindowHandle>.None, new HashSet<WindowHandle> { W(1), W(2) }));
+
     // The leaves' shares come from the tree: in Down[Across[W1, W3], W2] the top pair's tiles are a quarter of the
     // screen each, W2 half, so W2 is the largest.
     [Fact]
