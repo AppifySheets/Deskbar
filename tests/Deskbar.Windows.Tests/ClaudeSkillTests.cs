@@ -594,6 +594,8 @@ public sealed class ClaudeSkillTests : IDisposable
         Assert.Contains("task ask", on);
         Assert.Contains("task comment", on);
         Assert.Contains("task done", on);
+        // Ruling 49: the session resolves its own question.
+        Assert.Contains("task answered --session", on);
         Assert.Contains("Never close", on);
         Assert.DoesNotContain("—", on);
         // Review of PR B, I-1: free text on stdin, never on the command line. M-6: the description says to load the

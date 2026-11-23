@@ -83,6 +83,9 @@ public static class ControlUsage
             new("task", "status-line <text>|- --session <session>", "the short line a session keeps current on its task"),
             new("task", "ask <question>|- --session <session>",
                 "the session's task waits on you with the question, and its workspace blinks as attention does"),
+            new("task", "answered --session <session>",
+                "the session's question is settled: its task goes back to in progress and the blink stops. A prompt\n"
+                + "      never settles it; the session runs this"),
             new("task", "done --session <session>", "a session marks its own task done; only you close it"),
             new("task", "comment <markdown>|- --session <session>", "a comment on the session's own task, signed by the session"),
             new("task", "later <title>|- --session <session>",

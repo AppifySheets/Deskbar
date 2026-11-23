@@ -99,6 +99,31 @@ public sealed class SessionBriefingTests
         Assert.DoesNotContain(Dashes, d => text.Contains(d));
     }
 
+    // Ruling 49: a waiting task's reminder keeps the question open and says how to resolve it.
+    [Fact]
+    public void A_prompt_for_a_waiting_task_names_the_question_and_task_answered()
+    {
+        var own = Task("Tasks board", TaskStatus.WaitingOnYou) with { Question = "OK to merge? " + new string('q', 300) };
+
+        var text = SessionBriefing.Prompt(Sid, own, Maybe<TaskItem>.None);
+
+        Assert.Single(text.Trim().Split('\n'));
+        Assert.Contains("OK to merge?", text);
+        Assert.DoesNotContain(new string('q', 81), text);
+        Assert.Contains($"task answered --session {Sid}", text);
+        Assert.DoesNotContain(Dashes, d => text.Contains(d));
+    }
+
+    [Fact]
+    public void The_briefing_teaches_task_answered()
+    {
+        var text = SessionBriefing.Start(Start(), Task("Tasks board"), []);
+
+        Assert.Contains($"task answered --session {Sid}", text);
+        Assert.Contains("never leave a question open", text, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain(Dashes, d => text.Contains(d));
+    }
+
     [Fact]
     public void A_prompt_after_the_user_closed_the_task_says_new_work_needs_a_new_task()
     {
