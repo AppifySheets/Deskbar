@@ -359,7 +359,7 @@ public class FloatingBarTaskListTests
         // "none" makes it a free note.
         ClickBox(t);
         box().Text = "Dishwasher tablets";
-        Click(ButtonNamed(t.List, "none"));
+        PickTarget(t, "none");
         Press(t.Bar, box(), Key.Enter);
 
         var free = t.Tasks.Board.Tasks.Single(x => x.Title == "Dishwasher tablets");
@@ -579,7 +579,7 @@ public class FloatingBarTaskListTests
 
         ClickBox(t);
         t.Box.Text = "Half a thought";
-        Click(ButtonNamed(t.List, "none"));
+        PickTarget(t, "none");
         Assert.True(t.Bar.HoldsFullStrength);
 
         // Window.OnDeactivated is what WPF calls when another window takes the foreground.
@@ -618,7 +618,7 @@ public class FloatingBarTaskListTests
         Assert.False(t.Bar.TaskListAdding);
         Assert.Equal(Visibility.Visible, t.Chips.Visibility);
 
-        Click(ButtonNamed(t.List, "none"));
+        PickTarget(t, "none");
 
         Assert.True(t.Bar.TaskListAdding);
         Assert.True(t.Bar.HoldsFullStrength);
@@ -659,7 +659,7 @@ public class FloatingBarTaskListTests
         using var t = Build();
         Assert.False(t.Bar.TaskListAdding);
 
-        Click(ButtonNamed(t.List, "none"));
+        PickTarget(t, "none");
 
         Assert.True(t.Bar.TaskListAdding);
         Assert.True(t.Bar.HoldsFullStrength);
@@ -692,60 +692,114 @@ public class FloatingBarTaskListTests
         // Text held with "none" picked: a switch leaves the choice alone.
         ClickBox(t);
         t.Box.Text = "Dishwasher tablets";
-        Click(ButtonNamed(t.List, "none"));
+        PickTarget(t, "none");
         typeof(Window).GetMethod("OnDeactivated", BindingFlags.NonPublic | BindingFlags.Instance)!.Invoke(t.Bar, [EventArgs.Empty]);
         SwitchTo(gephaDesktop);
         Assert.True(t.Bar.TaskAddTarget.HasNoValue);
     });
 
-    // A chip reads as chosen when it is filled and has the blue edge; the rest have neither.
-    static readonly Color PickedBlue = Color.FromRgb(0x4F, 0x8C, 0xFF);
+    // RULING 45 (Petre, of the add box's chip row, "on [Deskbar] [none] [other…]": "those buttons could be only one, or
+    // two - selected or nothing"). The row is "on" and ONE chip, the chosen target, with a small arrow: the current
+    // workspace's by default, or "none". Its press opens the compact workspace menu, none first; a pick changes the chip.
+    const string AddChipName = "Add to workspace";
 
-    static Border FaceOf(Button chip) => (Border)chip.Content;
+    static Button AddChip(ListBar t) => ButtonNamed(t.Chips, AddChipName);
 
-    static bool LooksChosen(Button chip) =>
-        FaceOf(chip).BorderBrush is SolidColorBrush { Color: var edge } && edge == PickedBlue
-        && FaceOf(chip).Background is SolidColorBrush { Color.A: > 0 };
+    // The chip's own words: the first text in it (the arrow is the second).
+    static string ChipText(ListBar t) => Inside(AddChip(t)).OfType<TextBlock>().First().Text;
 
-    static IReadOnlyList<string> ChosenChips(ListBar t) =>
-        // The chips only: the row also holds the add toggles (Ruling 37), which are not chips.
-        Inside(t.Chips).OfType<Button>().Where(b => b.Visibility == Visibility.Visible && b.Content is Border && LooksChosen(b))
-            .Select(b => AutomationProperties.GetName(b)).ToList();
+    // Presses the chip as a click does and picks `name` from the menu it opens, then lets the menu go.
+    static void PickTarget(ListBar t, string name)
+    {
+        Click(AddChip(t));
+        var menu = t.Bar.TaskAddMenu!;
+        Click(WorkspaceChipMenu.Chips(menu).Single(c => AutomationProperties.GetName(c) == name));
+        menu.IsOpen = false;
+    }
 
-    // Petre's live check: he picked "none", its edge went blue, but the GEPHA chip stayed filled in its colour and the
-    // box still said "Add to GEPHA…". Exactly one chip reads as chosen, and the box names the chosen target.
     [Fact]
-    public void Picking_none_makes_only_none_look_chosen_and_the_box_says_add() => StaThread.Run(() =>
+    public void The_chip_row_is_on_and_one_chip_naming_the_current_workspace() => StaThread.Run(() =>
     {
         using var t = Build();
-        Assert.Equal(["GEPHA"], ChosenChips(t));
+
+        // One chip, no "none" or "other…" beside it; the toggles are not chips.
+        var chips = Inside(t.Chips).OfType<Button>().Where(b => b.Content is Border { Tag: "task-chip" }).ToList();
+        Assert.Single(chips);
+        Assert.Equal("GEPHA", ChipText(t));
+        Assert.Single(Inside(t.Chips).OfType<TextBlock>(), b => b.Text == "on");
+        Assert.Contains("▾", Inside(AddChip(t)).OfType<TextBlock>().Select(b => b.Text));
+        Assert.False(HasButtonNamed(t.List, "none"));
+        Assert.False(HasButtonNamed(t.List, "other…"));
+        Assert.Equal("Add to GEPHA…", t.Bar.TaskAddPlaceholder);
+    });
+
+    // A click routed to the chip opens the menu (it opens from the chip button's own press, never from a second Click
+    // handler: a handled click does not reach one, which broke the tasks window's dropdown on 2026-11-23). The menu
+    // lists none first, then every workspace, the chosen one ticked.
+    [Fact]
+    public void A_click_on_the_chip_opens_the_workspace_menu() => StaThread.Run(() =>
+    {
+        using var t = Build();
+
+        Click(AddChip(t));
+
+        var menu = Assert.IsAssignableFrom<ContextMenu>(t.Bar.TaskAddMenu);
+        Assert.True(menu.IsOpen);
+        var items = WorkspaceChipMenu.Chips(menu);
+        Assert.Equal(["none", "GEPHA", "Sparrow"], items.Select(i => AutomationProperties.GetName(i)));
+        Assert.Equal(["GEPHA"], items.Where(i => AutomationProperties.GetItemStatus(i) == WorkspaceChipMenu.CurrentStatus)
+            .Select(i => AutomationProperties.GetName(i)));
+        menu.IsOpen = false;
+    });
+
+    // Petre's earlier live check, still true: the box names the chosen target ("none" must not leave "Add to GEPHA…").
+    [Fact]
+    public void Picking_none_changes_the_chip_and_the_placeholder() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        Assert.Equal("GEPHA", ChipText(t));
         Assert.Equal("Add to GEPHA…", t.Bar.TaskAddPlaceholder);
 
-        ClickBox(t);
-        Click(ButtonNamed(t.List, "none"));
+        PickTarget(t, "none");
 
-        Assert.Equal(["none"], ChosenChips(t));
-        // The workspace chip keeps no fill of its own colour once it is not the one chosen.
-        Assert.Equal(Colors.Transparent, ((SolidColorBrush)FaceOf(ButtonNamed(t.List, "GEPHA")).Background).Color);
+        Assert.Equal("none", ChipText(t));
         Assert.Equal("Add…", t.Bar.TaskAddPlaceholder);
+        Assert.True(t.Bar.TaskAddTarget.HasNoValue);
 
-        Click(ButtonNamed(t.List, "GEPHA"));
-        Assert.Equal(["GEPHA"], ChosenChips(t));
+        PickTarget(t, "GEPHA");
+        Assert.Equal("GEPHA", ChipText(t));
         Assert.Equal("Add to GEPHA…", t.Bar.TaskAddPlaceholder);
     });
 
     [Fact]
-    public void A_workspace_picked_through_other_is_named_in_the_box() => StaThread.Run(() =>
+    public void Picking_another_workspace_changes_the_chip_and_the_placeholder() => StaThread.Run(() =>
     {
         using var t = Build();
         ClickBox(t);
 
-        var menu = t.Bar.OpenOtherWorkspaces()!;
-        Click(WorkspaceChipMenu.Chips(menu).Single(c => AutomationProperties.GetName(c) == "Sparrow"));
-        menu.IsOpen = false;
+        PickTarget(t, "Sparrow");
 
+        Assert.Equal("Sparrow", ChipText(t));
         Assert.Equal("Add to Sparrow…", t.Bar.TaskAddPlaceholder);
-        Assert.Equal(["Sparrow"], ChosenChips(t));
+    });
+
+    // A note added lands where the chip says.
+    [Fact]
+    public void A_note_lands_where_the_chip_says() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        var sparrow = t.Harness.Manager.State.Workspaces.Single(w => w.Name == "Sparrow").Id;
+
+        PickTarget(t, "Sparrow");
+        t.Box.Text = "Water the plants";
+        Press(t.Bar, t.Box, Key.Enter);
+        Assert.Equal(sparrow, t.Tasks.Board.Tasks.Single(x => x.Title == "Water the plants").WorkspaceId.Value);
+        Assert.Equal("GEPHA", ChipText(t));
+
+        PickTarget(t, "none");
+        t.Box.Text = "Call the plumber";
+        Press(t.Bar, t.Box, Key.Enter);
+        Assert.True(t.Tasks.Board.Tasks.Single(x => x.Title == "Call the plumber").WorkspaceId.HasNoValue);
     });
 
     // FIX ROUND 1, Important 2: after Enter or Esc the keyboard goes back to the window Petre was typing in, so his next
@@ -895,8 +949,9 @@ public class FloatingBarTaskListTests
         ClickBox(t);
 
         var labels = Inside(t.List).OfType<Border>().Where(b => Equals(b.Tag, "task-workspace") || Equals(b.Tag, "task-chip"))
-            .Select(b => (TextBlock)b.Child).ToList();
-        Assert.True(labels.Count >= 4);
+            // The add chip holds its name and an arrow (Ruling 45): the name is the first text in it.
+            .Select(b => b.Child as TextBlock ?? Inside(b).OfType<TextBlock>().First()).ToList();
+        Assert.True(labels.Count >= 2);
         Assert.All(labels, label =>
         {
             Assert.True(label.MaxWidth < 200, $"'{label.Text}' has a ceiling");

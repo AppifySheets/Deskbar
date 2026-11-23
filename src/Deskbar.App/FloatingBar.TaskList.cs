@@ -30,9 +30,10 @@ namespace Deskbar.App;
 //                   when the truth is "your tasks could not be read".
 //   the text box    always there, with a placeholder naming where a note would go ("Add to Deskbar…", or
 //                   "Add…" on an unnamed desktop) that follows a desktop switch. A click in it takes the
-//                   keyboard (BeginTyping). Under it, always, the chips choosing where the note goes: the current
-//                   workspace (ticked to begin with), "none" and "other…", which lists the other workspaces; they
-//                   wrap onto a second line on a narrow bar rather than clip. A chip pressed while the box is idle
+//                   keyboard (BeginTyping). Under it, always, "on" and ONE chip choosing where the note goes
+//                   (Ruling 45): the current workspace to begin with, or "none", with a small arrow; its press opens
+//                   the compact workspace menu (none first) and a pick changes the chip. The row wraps onto a second
+//                   line on a narrow bar rather than clip. A chip pressed while the box is idle
 //                   starts typing as a click in the box does. Enter
 //                   adds a Backlog note through TaskService.AddNote and Esc clears the box; either way the keyboard
 //                   goes back to the window Petre was typing in. Clicking away leaves the text where it is.
@@ -360,7 +361,6 @@ public partial class FloatingBar
     internal static readonly TimeSpan UndoWindow = TimeSpan.FromSeconds(6);
     const string NoLiveSession = "no live session";
     const string TaskDetailSeparator = " · ";
-    const string OtherChipText = "other…";
 
     // The colours, from the chosen mockup and the bar's own palette: the asking orange for anything Claude's or
     // waiting on Petre, the mockup's light and dim inks, its tan for a Claude task's title, and quick find's blue
@@ -392,9 +392,7 @@ public partial class FloatingBar
     TextBlock? taskAddPlaceholder;
     WrapPanel? taskAddChips;
     TextBlock? taskAddOn;
-    TaskChipParts? taskChipHere;
-    TaskChipParts? taskChipNone;
-    TaskChipParts? taskChipOther;
+    TaskChipParts? taskAddChip;
     StackPanel? taskLinesPanel;
     ScrollViewer? taskLinesScroller;
 
@@ -434,7 +432,7 @@ public partial class FloatingBar
     // per bar, frozen.
     readonly Dictionary<Color, Brush> taskChipFills = [];
 
-    sealed record TaskChipParts(Button Button, Border Face, TextBlock Label);
+    sealed record TaskChipParts(Button Button, Border Face, TextBlock Label, TextBlock Arrow);
 
     // --- the lines, as data -------------------------------------------------------------------------------------
 
@@ -546,9 +544,10 @@ public partial class FloatingBar
         // The chips, wrapping onto a second line on a narrow bar instead of clipping (Petre's 320 px screenshot had
         // them cut off). Always shown (Ruling 12, Petre: "present always"): a row that came and went with the keyboard
         // made the whole list jump up and down under it.
-        taskChipHere = TaskChip("", () => ChooseTaskTarget(taskAddHere));
-        taskChipNone = TaskChip("none", () => ChooseTaskTarget(Maybe<Guid>.None));
-        taskChipOther = TaskChip(OtherChipText, () => OpenOtherWorkspaces());
+        // RULING 45: ONE chip, the chosen target, whose press opens the workspace menu (OpenAddTargetMenu). The menu
+        // opens from the chip button's own press (TaskButton's Click), never from a second Click handler: that marks the
+        // click handled, so a later handler never runs (the tasks window's dropdown, 2026-11-23).
+        taskAddChip = TaskChip("", () => OpenAddTargetMenu());
         taskAddOn = new TextBlock { Text = "on", Foreground = TaskDimInk, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(2, 1, 4, 1) };
         // The important and urgent toggles of a task line, for the note about to be added (Ruling 37), at the end of the
         // chip row: in the wrap, so on a narrow bar they wrap with the chips instead of widening the bar (the whole list
@@ -559,7 +558,7 @@ public partial class FloatingBar
         {
             Tag = "task-add-chips",
             Margin = new Thickness(0, 3, 0, 0),
-            Children = { taskAddOn, taskChipHere.Button, taskChipNone.Button, taskChipOther.Button, taskAddImportant.Button, taskAddUrgent.Button },
+            Children = { taskAddOn, taskAddChip.Button, taskAddImportant.Button, taskAddUrgent.Button },
         };
         PaintAddFlags();
         var addRow = new StackPanel { Margin = new Thickness(0, 0, 0, 3), Children = { box, taskAddChips } };
@@ -682,6 +681,8 @@ public partial class FloatingBar
     {
         // Trimmed under a ceiling (ApplyTaskListTextSize), so a long workspace name cannot push "other…" out of the row.
         var label = new TextBlock { Text = text, Foreground = TaskInk, VerticalAlignment = VerticalAlignment.Center, TextTrimming = TextTrimming.CharacterEllipsis };
+        // The small arrow says the chip opens a menu; its own text, so a long name trims and the arrow stays.
+        var arrow = new TextBlock { Text = "▾", Foreground = TaskDimInk, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(4, 0, 0, 0) };
         var face = new Border
         {
             Tag = "task-chip",
@@ -690,11 +691,11 @@ public partial class FloatingBar
             BorderThickness = new Thickness(1),
             CornerRadius = new CornerRadius(8),
             Padding = new Thickness(7, 0, 7, 1),
-            Child = label,
+            Child = new StackPanel { Orientation = Orientation.Horizontal, Children = { label, arrow } },
         };
-        var button = TaskButton(text, face, press);
+        var button = TaskButton("Add to workspace", face, press, "Choose the workspace for the note");
         button.Margin = new Thickness(0, 1, 4, 1);
-        return new TaskChipParts(button, face, label);
+        return new TaskChipParts(button, face, label, arrow);
     }
 
     // The widest a workspace chip's name may be, in a line or in the add box: about eight characters of chip text,
@@ -707,11 +708,12 @@ public partial class FloatingBar
         Sized(taskMoreLabel, 8);
         Sized(taskAddOn, 7.5);
         Sized(taskAddPlaceholder, 9.5);
-        new[] { taskChipHere, taskChipNone, taskChipOther }.ToList().ForEach(chip =>
+        if (taskAddChip is not null)
         {
-            Sized(chip?.Label, 7.5);
-            if (chip is not null) chip.Label.MaxWidth = ChipTextCeiling;
-        });
+            Sized(taskAddChip.Label, 7.5);
+            Sized(taskAddChip.Arrow, 7.5);
+            taskAddChip.Label.MaxWidth = ChipTextCeiling;
+        }
         if (taskAddBox is not null) taskAddBox.FontSize = Text(9.5);
     }
 
@@ -1479,59 +1481,42 @@ public partial class FloatingBar
             AutomationProperties.SetItemStatus(toggle.Button, on ? "on" : "off");
         });
 
-    // "other…": every workspace but the current one, as a menu under the chip, each drawn as its chip in its colour and
-    // grouped as on the bar (WorkspaceChipMenu), the chosen one ticked. Held open the way the bar's other menus are
-    // (HoldFadeWhileOpen), so the bar neither fades nor rebuilds out from under it. Internal, and answering the menu,
-    // for the tests, which pick from it.
-    internal ContextMenu? OpenOtherWorkspaces()
+    // The chip's menu (Ruling 45): "none" first, then every workspace as its chip in its colour, grouped as on the bar
+    // (WorkspaceChipMenu), the chosen target ticked; a pick goes through ChooseTaskTarget and changes the chip. Held open
+    // the way the bar's other menus are (HoldFadeWhileOpen), so the bar neither fades nor rebuilds out from under it
+    // (#48: no repaint during an open menu). Internal, and answering the menu, for the tests, which pick from it.
+    internal ContextMenu? OpenAddTargetMenu()
     {
-        if (taskChipOther is null) return null;
-        var entries = WorkspaceChipMenu.Entries(manager.State, withNone: false, w => !taskAddHere.HasValue || w.Id != taskAddHere.Value);
-        if (entries.Count == 0) return null;
-        var menu = WorkspaceChipMenu.Build(entries, taskAddTarget, ChooseTaskTarget, taskChipOther.Button, ChipMenuWidth);
+        if (taskAddChip is null) return null;
+        var menu = WorkspaceChipMenu.Build(WorkspaceChipMenu.Entries(manager.State, withNone: true), taskAddTarget, ChooseTaskTarget,
+            taskAddChip.Button, ChipMenuWidth);
         HoldFadeWhileOpen(menu);
+        TaskAddMenu = menu;
         menu.IsOpen = true;
         return menu;
     }
 
-    // The chips as the choice stands: the current workspace's (hidden on no workspace), "none", and "other…", which
-    // takes the name of the workspace chosen from its menu.
-    //
-    // EXACTLY ONE CHIP READS AS CHOSEN (Petre's live check: he picked "none", its edge went blue, but the "Deskbar" chip
-    // stayed filled in its purple and still looked chosen). Chosen: filled (a workspace chip in its own colour, "none"
-    // and "other…" in the neutral chip fill) with the blue edge and the bright ink. Not chosen: no fill and dim ink,
-    // with only a thin edge, in the workspace's colour for a workspace chip and the neutral fill for the other two, so a
-    // chip never looks chosen merely by being coloured. The edge is 1 DIP either way, so choosing moves nothing.
+    // The last menu the add chip opened, for the tests.
+    internal ContextMenu? TaskAddMenu { get; private set; }
+
+    // The one chip as the choice stands: the chosen workspace's name in its row's colour, or "none" in the neutral
+    // fill. It is always the chosen thing, so it is always filled and bright, with its own fill as its 1 DIP edge, so a
+    // pick moves nothing. (Before Ruling 45 three chips took turns at looking chosen; there is nothing to choose between
+    // now.) Then the placeholder follows it.
     void PaintTaskChips()
     {
-        if (taskChipHere is null || taskChipNone is null || taskChipOther is null) return;
-        var here = taskAddHere;
-        var other = taskAddTarget.HasValue && !taskAddTarget.Equals(here) ? taskAddTarget : Maybe<Guid>.None;
-
-        taskChipHere.Button.Visibility = here.HasValue ? Visibility.Visible : Visibility.Collapsed;
-        if (here.HasValue)
-            PaintChip(taskChipHere, WorkspaceName(here.Value).GetValueOrDefault("this workspace"), workspaceAccents.GetValueOrDefault(here.Value),
-                chosen: taskAddTarget.Equals(here));
-        PaintChip(taskChipNone, "none", null, chosen: taskAddTarget.HasNoValue);
-        PaintChip(taskChipOther, other.HasValue ? WorkspaceName(other.Value).GetValueOrDefault(OtherChipText) : OtherChipText,
-            other.HasValue ? workspaceAccents.GetValueOrDefault(other.Value) : null, chosen: other.HasValue);
+        if (taskAddChip is null) return;
+        var target = taskAddTarget;
+        var accent = target.HasValue ? workspaceAccents.GetValueOrDefault(target.Value) : null;
+        var fill = accent is null ? TaskButtonFill : ChipFill(accent);
+        taskAddChip.Label.Text = target.HasValue ? WorkspaceName(target.Value).GetValueOrDefault("this workspace") : "none";
+        taskAddChip.Label.Foreground = TaskInk;
+        taskAddChip.Face.Background = fill;
+        taskAddChip.Face.BorderBrush = fill;
         PaintPlaceholder();
     }
 
-    // `accent` is the workspace's rail colour, or null for "none" and an unpicked "other…" (and a workspace without a
-    // colour), which take the neutral chip fill.
-    void PaintChip(TaskChipParts chip, string text, Brush? accent, bool chosen)
-    {
-        var fill = accent is null ? TaskButtonFill : ChipFill(accent);
-        chip.Label.Text = text;
-        chip.Label.Foreground = chosen ? TaskInk : TaskDimInk;
-        chip.Face.Background = chosen ? fill : Brushes.Transparent;
-        chip.Face.BorderBrush = chosen ? TaskPickedEdge : fill;
-        AutomationProperties.SetName(chip.Button, text);
-    }
-
-    // The empty box says where a note typed now would go: the chosen chip's workspace ("Add to Sparrow…", also for one
-    // picked through "other…"), or "Add…" for none. Not the workspace in front: after picking "none" the box must not
+    // The empty box says where a note typed now would go: the chosen chip's workspace ("Add to Sparrow…"), or "Add…" for none. Not the workspace in front: after picking "none" the box must not
     // still promise "Add to Deskbar…".
     void PaintPlaceholder()
     {
