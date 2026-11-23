@@ -22,7 +22,9 @@ namespace Deskbar.Core.Tasks;
 // <see cref="Spacing"/> apart, and records each resume in the ledger.
 //
 // THE STEPS, per task, for its latest session (the one with the greatest Joined):
-//   * listed: nothing, ever.
+//   * any of the task's sessions listed: nothing, ever (final review, item 9).
+//   * replaced by /clear (Ruling 19): nothing, ever.
+//   * missing from the list for less than <see cref="Settle"/> (Ruling 18): nothing yet.
 //   * resumed within <see cref="Grace"/>: nothing. The list may not show the woken session yet, or shows it busy while
 //     it is idle (measured, up to 30 s), and a second resume would start a copy.
 //   * no folder: a give-up, since `claude --bg --resume` runs in a folder and there is none to run it in.
@@ -73,24 +75,49 @@ public static class SessionKeeper
     public const string ResumeFailed =
         "Deskbar could not resume this session. Claude Code's message is in this task's thread.";
 
+    /// <summary>
+    /// How long a session must have been missing from the list before the keeper does anything about it (Ruling 18),
+    /// and so also how long after Deskbar starts before the first resume: a session never seen since then counts as
+    /// missing since then. VS Code restores its Claude panels after a restart and reloads them after an update or a
+    /// window reload, and each brings its session back BY ITSELF a little later; resuming in that gap would start a
+    /// background copy beside the one VS Code is about to open. Two minutes covers that and costs a reboot's resumes
+    /// two minutes.
+    /// </summary>
+    public static readonly TimeSpan Settle = TimeSpan.FromMinutes(2);
+
+    /// <param name="absentSince">
+    /// Since when a session has been missing from every list that could be read (Ruling 18; ClaudeSessions keeps it).
+    /// A session gets no step at all until <see cref="Settle"/> has passed since then. Left out, every session counts as
+    /// long gone, which is what the tests of the other rules want.
+    /// </param>
     public static IReadOnlyList<KeeperStep> Plan(
         TaskBoard board,
         IReadOnlyCollection<ClaudeAgent> live,
         ResumeLedger ledger,
         Func<TaskSession, bool> transcriptExists,
         Func<TaskSession, bool> cutOff,
-        DateTimeOffset now)
+        DateTimeOffset now,
+        Func<string, DateTimeOffset>? absentSince = null)
     {
         var listed = live.Select(agent => agent.SessionId).ToHashSet();
+        var missingSince = absentSince ?? (_ => DateTimeOffset.MinValue);
 
         var resumes = board.Tasks
             .Where(task => task.IsClaudes && task.Status is TaskStatus.Backlog or TaskStatus.InProgress or TaskStatus.WaitingOnYou)
+            // A task with ANY of its sessions listed is running (final review, item 9). The latest by Joined is not
+            // always the one alive: a resumed or rejoined older entry, or a second session started on the task, can be
+            // listed while the latest has ended, and waking the ended one would put two sessions on one task.
+            .Where(task => !task.Sessions.Any(session => listed.Contains(session.Id)))
             .OrderBy(task => StatusRank(task.Status))
             .ThenByDescending(task => task.UpdatedAt)
             .Select(task => (Task: task, Session: task.Sessions.MaxBy(session => session.Joined)!))
             // A session on two tasks belongs to the first in the ordering; the later task is not looked at.
             .DistinctBy(pair => pair.Session.Id)
-            .Where(pair => !listed.Contains(pair.Session.Id))
+            // /clear ended that conversation for good (Ruling 19): never resumed, and no give-up either, since nothing
+            // went wrong. The fresh session that followed joins the task by its own hook.
+            .Where(pair => !pair.Session.Replaced)
+            // Ruling 18: missing for less than Settle, it may still come back by itself.
+            .Where(pair => now - missingSince(pair.Session.Id) >= Settle)
             .Select(pair => StepFor(pair.Task, pair.Session, ledger, transcriptExists, cutOff, now))
             .Where(step => step.HasValue)
             .Select(step => step.Value);

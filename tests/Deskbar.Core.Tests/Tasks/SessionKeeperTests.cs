@@ -61,6 +61,44 @@ public class SessionKeeperTests
         Assert.Empty(Plan([task], [Agent("s1", busy: true)]));
     }
 
+    // Final review, item 9: the latest session is not always the live one (an older one rejoined, a second one started
+    // and ended). Any listed session means the task is running, and waking the ended latest would add a second.
+    [Fact]
+    public void A_task_with_an_older_session_listed_is_left_alone()
+    {
+        var task = Task(TaskStatus.InProgress, 5, Session("old", 120), Session("new", 10));
+
+        Assert.Empty(Plan([task], [Agent("old")]));
+    }
+
+    // Ruling 19: /clear ended that conversation on purpose. It is never resumed, and nothing is asked either.
+    [Fact]
+    public void A_session_replaced_by_clear_is_never_resumed()
+    {
+        var cleared = Session("s1") with { Ended = Now.AddMinutes(-30), ReplacedAt = Now.AddMinutes(-30) };
+
+        Assert.Empty(Plan([Task(TaskStatus.InProgress, 5, cleared)]));
+        Assert.Empty(Plan([Task(TaskStatus.InProgress, 5, cleared)], transcriptExists: _ => false));
+    }
+
+    // Ruling 18: a session missing from the list for less than two minutes may still come back by itself (VS Code
+    // restoring or reloading its panel), so it gets no step, not even a give-up; from two minutes on it is resumed.
+    [Fact]
+    public void A_session_missing_for_less_than_two_minutes_gets_no_step()
+    {
+        var task = Task(TaskStatus.InProgress, 5, Session("s1"));
+        var board = new TaskBoard([task]);
+        IReadOnlyList<KeeperStep> PlanGoneFor(TimeSpan gone, Func<TaskSession, bool>? transcript = null) =>
+            SessionKeeper.Plan(board, [], ResumeLedger.Empty, transcript ?? (_ => true), _ => false, Now, _ => Now - gone);
+
+        Assert.Equal(TimeSpan.FromMinutes(2), SessionKeeper.Settle);
+        Assert.Empty(PlanGoneFor(TimeSpan.Zero));
+        Assert.Empty(PlanGoneFor(TimeSpan.FromSeconds(119)));
+        Assert.Empty(PlanGoneFor(TimeSpan.FromSeconds(119), transcript: _ => false));
+        Assert.IsType<KeeperStep.Resume>(Assert.Single(PlanGoneFor(TimeSpan.FromMinutes(2))));
+        Assert.IsType<KeeperStep.GiveUp>(Assert.Single(PlanGoneFor(TimeSpan.FromMinutes(5), transcript: _ => false)));
+    }
+
     [Fact]
     public void Only_the_latest_session_of_a_task_is_resumed()
     {
