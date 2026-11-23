@@ -216,10 +216,10 @@ The task list at the bottom of the bar (spec `docs/superpowers/specs/2026-11-22-
     box empty and idle, click a chip: it starts a note, as a click in the box does.
 46. Click in the box, then the "other..." chip, and pick a workspace: the chip takes its name and is ticked,
     the text stays, and Enter files the note there.
-47. Click a line of a note on another workspace: the tasks window opens (or comes forward, and takes the foreground) on that task, selected,
+47. Click a line of a note on another workspace: the tasks panel opens (or comes forward, and takes the foreground) on that task, selected,
     scrolled into view and expanded to its comments, and you stay where you are. Double-click the line: you go to
     its workspace (only when both presses land on the same line: click one line and double-click the line beside
-    it, and nothing goes). Double-click a note on "none": nothing happens. In the window, a click on a line selects and
+    it, and nothing goes). Double-click a note on "none": nothing happens. In the panel, a click on a line selects and
     expands it, a double-click goes, and F2 (or Edit in the menu) edits the title; a double-click on a title no longer edits.
 48. Untick "Task list" in Manage's Settings tab (strip items): the list disappears from the bar. Tick it
     again: it is back, with the same tasks.
@@ -252,8 +252,8 @@ The task list at the bottom of the bar (spec `docs/superpowers/specs/2026-11-22-
     screen: the list gives up lines, never below three. Float the bar again: three lines, and the bar lands where
     it floated before, not clamped against the docked height. With notes above Claude lines (orange edge, no icon,
     the title starting at the same x as a note's), at the smallest text size, the docked list settles on one count and the bar stays responsive.
-55b. Click a line: it stays highlighted (a lighter background and a blue edge on its left). Open the tasks window:
-    the same task is highlighted there and scrolled into view. Click another line in the window: the bar's
+55b. Click a line: it stays highlighted (a lighter background and a blue edge on its left). Open the tasks panel:
+    the same task is highlighted there and scrolled into view. Click another line in the panel: the bar's
     highlight follows. Close the highlighted task: no line is highlighted any more.
 
 55b2. Each line says how old its task is, dim, just before its chip ("now", "16m", "2h3m", "3d3h"); after a minute the
@@ -298,9 +298,9 @@ written for the floating window and now describe the panel; 64a to 64k cover wha
     coloured workspace menu), Close (the line stays struck through with Undo for six seconds; Undo brings back
     the status it had, a waiting task its question too, and the selection) and Delete, then Delete for good. While that menu is open, change a task from the pipe:
     nothing moves until the menu closes.
-62. Click a note's line on a workspace: you go there and the window stays open on its own desktop. "+ Add": a box
+62. Click a note's line on a workspace: you go there and the panel stays open. "+ Add": a box
     opens, "on <workspace> ▾" says where; Enter adds the note there, Esc closes the box.
-63. With flagged tasks, the window's List shows Waiting on you, then the quadrants captioned "I Urgent and
+63. With flagged tasks, the panel's List shows Waiting on you, then the quadrants captioned "I Urgent and
     important" to "IV Not urgent, not important". The toggles and the drag work as on the bar, and the bar
     follows every change. Pick the "In progress" chip: the quadrants stay, with only tasks in progress.
 64. Click "Matrix": a 2 by 2 grid, URGENT and NOT URGENT across the top, IMPORTANT and NOT IMPORTANT down the side,
@@ -355,14 +355,14 @@ Tasks 7 to 9). Needs Claude Code installed and both Claude boxes in Manage ticke
     knows its session id and lists the note among the tasks it could join (ask it what Deskbar told it). A note of
     yours on no workspace is not in that list.
 67. Ask the session to start some work. It joins the note or creates a task: the line turns orange with a CL tag and
-    a live session square in the tasks window, and the status line under the title changes as it works.
+    a live session square in the tasks panel, and the status line under the title changes as it works.
 68. Ask the session to ask you something through its task. Switch to another workspace first: the task jumps to the
     top as Waiting on you with the question, in orange, and the session's workspace blinks. Reply in the session:
     your message alone changes nothing (since #435 a prompt no longer answers). When the session runs `task answered`
-    the task goes back to in progress and the question goes, and the line leaves the bar's list (the tasks window
+    the task goes back to in progress and the question goes, and the line leaves the bar's list (the tasks panel
     still has it, in progress). Before that, switch to its workspace and to the session's window, and click and
     double-click the line: it stays on the bar. Ask again: it is back at the top of the bar. Tick an in-progress Claude
-    task in the tasks window, then Undo: it comes back to the window, not to the bar.
+    task in the tasks panel, then Undo: it comes back to the panel, not to the bar.
 69. Ask the session to finish and mark its task done: the line has the same tick box as the rest. Send the session another
     message: the task is in progress again. Mark it done again and close it yourself, then send a message: the
     session says its task was closed and makes a new one only for new work.
@@ -381,12 +381,12 @@ Tasks 7 to 9). Needs Claude Code installed and both Claude boxes in Manage ticke
 75. Swap back to an older Deskbar build and start a session: the bar does not blink on session start or on each
     message (the task hooks reach a script the older build leaves alone), and Notification and Stop still blink.
     Start the current build again: `$ts help` lists `claude-tasks` and the session forms of `task`.
-76. The assignee (Ruling 57). Add a note: the tasks window's line says **Me** in its assignee column, and it is on the
-    bar. In the window's menu (the "..." button, and a right-click on the line) choose **Assign to**, **Claude**: the
+76. The assignee (Ruling 57). Add a note: the tasks panel's line says **Me** in its assignee column, and it is on the
+    bar. In the panel's menu (the "..." button, and a right-click on the line) choose **Assign to**, **Claude**: the
     column says **Claude** and the note leaves the bar ("+N more" shrinks with it). There is no assign control on the bar.
     Start a Claude session on that workspace: its briefing offers the note. **Assign to**, **Me** brings it back to the
-    bar. The "Assigned" button in the window's toolbar offers Me, Claude and All and narrows the list, the Matrix and the
-    chip counts; it starts at all each time the window opens. Ask a session something: its task says **Me** and is on
+    bar. The "Assigned" button in the panel's toolbar offers Me, Claude and All and narrows the list, the Matrix and the
+    chip counts; it starts at all each time the panel opens. Ask a session something: its task says **Me** and is on
     the bar; `task answered` makes it **Claude** and takes it off; `task done` makes it **Me** again. `$ts task assign
     <id> claude` does the same as the menu, and `$ts task list` shows `assignee`. Quit and start Deskbar: every
     assignment is as it was; an old tasks.json with no assignees gives a Claude task in progress to Claude and the rest to you.
@@ -402,22 +402,22 @@ Tasks 7 to 9). Needs Claude Code installed and both Claude boxes in Manage ticke
     `$ts task describe <id> -` with the text on stdin sets the description, and `$ts task comment-edit <comment-id> -`
     rewrites your comment (the ids are in `task list`'s `thread`) and is refused for a Claude comment.
 78. Flags in the title (Ruling 59). With four tasks, one plain, one important, one urgent, one both: on the bar and in
-    the tasks window's List and Matrix the important title is bold, the urgent one italic, the last bold italic and the
+    the tasks panel's List and Matrix the important title is bold, the urgent one italic, the last bold italic and the
     first plain. Flip a toggle: the title changes with it. At the bar's narrowest width the bold titles still trim
     with an ellipsis and push nothing off the line.
 79. Settled comments (Ruling 62). Have a session ask a question with a comment of detail and a follow-up, then answer it (the
-    session runs `task answered`): open the task's thread in the tasks window. Those comments are gone behind a dim "2 settled
+    session runs `task answered`): open the task's thread in the tasks panel. Those comments are gone behind a dim "2 settled
     comments" line, and your own comment and any written before the ask are still there. Click the line: they unfold, dim,
     and it reads "Hide 2 settled comments". "Settle" beside any comment folds it away; "Unsettle" brings it back. The
     comments are still in `task list`'s `thread` with their `settled` time, and survive a restart.
 80. Folding a thread (Ruling 63). Click a task's line: its thread opens. Click it again: it closes. Open it and press Esc: it closes.
     On a task with nine long comments the thread shows the latest three, each cut to about three lines with "Show more"; "3
     earlier comments" unfolds the rest, and "Show less" folds a long one back. Add a comment from a script or let a session add
-    one: what you unfolded stays unfolded. Close the window with its X and open it again: all threads are folded again.
-81. Compact lines (Ruling 64). In the tasks window's List and Matrix, a task with no second line is one text line tall plus
+    one: what you unfolded stays unfolded. Close the panel with its x and open it again: all threads are folded again.
+81. Compact lines (Ruling 64). In the tasks panel's List and Matrix, a task with no second line is one text line tall plus
     a few DIP, and a task with a status line or description is two small lines, the dim one right under the title with no
     gap. Lines sit about as close as on the bar, a group's header has little space above and below, and the tick box and
-    the orange edge start close to the window's left edge. Hover and select a line: the background still covers the whole
+    the orange edge start close to the panel's left edge. Hover and select a line: the background still covers the whole
     line. The tick box, the two toggles, the comments button and "..." still click first time.
 
 ## Claude sessions kept running
@@ -475,7 +475,7 @@ in the app). Same setup as above: Claude Code with background sessions, Windows 
 throwaway folder Claude Code trusts, and tracing on for the `claude actions:` and `claude sessions:` lines.
 
 90. Right-click a note on a workspace whose tasks have sessions in the throwaway folder: the menu reads Edit, then
-    "Start Claude on this". The tasks window's "⋯" menu has it in the same place, and an open thread has a
+    "Start Claude on this". The tasks panel's "⋯" menu has it in the same place, and an open thread has a
     "Start Claude on this" button above the comments. A closed task has neither.
 91. Pick "Start Claude on this" on a note whose workspace knows exactly one folder: no question, no list. Within a few
     seconds a Windows Terminal window titled "<the note's title> · Claude" opens on the note's workspace, in the Deskbar
@@ -542,7 +542,7 @@ throwaway folder Claude Code trusts, and tracing on for the `claude actions:` an
 
 ## Goals
 
-Weekly and monthly goals, pull request 1: the pipe, the task's link, the tasks window's menu and filter, the bar's
+Weekly and monthly goals, pull request 1: the pipe, the task's link, the tasks panel's menu and filter, the bar's
 tooltip (spec `docs/superpowers/specs/2026-11-22-goals-planner-design.md`). The planner window and the bar's "Plan
 this week" line come with pull request 2. `$ts` is `%APPDATA%\Deskbar\deskbar.cmd`.
 
