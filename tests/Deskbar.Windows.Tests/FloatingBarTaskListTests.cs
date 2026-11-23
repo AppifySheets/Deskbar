@@ -215,6 +215,7 @@ public class FloatingBarTaskListTests
     {
         using var t = Build();
         var task = t.Tasks.Create("Tasks redesign", t.Gepha, Session("s1")).Value;
+        t.Tasks.MarkDone(task.Id); // on the bar while it needs him (Ruling 48)
         t.Tasks.SetStatusLine(task.Id, "waiting for CI on #398");
         t.Tasks.AddNote("Dishwasher tablets", Maybe<Guid>.None);
 
@@ -251,7 +252,7 @@ public class FloatingBarTaskListTests
             asked.Add(folder);
             return Maybe.From((nint)101);
         });
-        t.Tasks.Create("Tasks redesign", t.Gepha, Session("s1"));
+        t.Tasks.MarkDone(t.Tasks.Create("Tasks redesign", t.Gepha, Session("s1")).Value.Id); // Done: a Claude task shows on the bar while it needs him (Ruling 48)
         t.Tasks.AddNote("Dishwasher tablets", Maybe<Guid>.None);
 
         var claude = t.Lines.Single(l => ((TaskLine)l.Tag).Claudes);
@@ -318,9 +319,8 @@ public class FloatingBarTaskListTests
         var done = t.Tasks.Create("Merged", t.Gepha, Session("s2")).Value;
         t.Tasks.MarkDone(done.Id);
 
-        var workingLine = t.Lines.Single(l => ((TaskLine)l.Tag).Id == working.Id);
-        Assert.False(HasButtonNamed(workingLine, "Close task"));
-        Assert.True(HasButtonNamed(workingLine, "Tick off"));
+        // A Claude task still in progress is not on the bar (Ruling 48); the Done one has the same tick box as a note.
+        Assert.DoesNotContain(t.Lines, line => ((TaskLine)line.Tag).Id == working.Id);
 
         var doneLine = t.Lines.Single(l => ((TaskLine)l.Tag).Id == done.Id);
         Assert.False(HasButtonNamed(doneLine, "Close task"));
@@ -337,6 +337,7 @@ public class FloatingBarTaskListTests
     {
         using var t = Build();
         var task = t.Tasks.Create("Portal last seen", t.Gepha, Session("s1")).Value;
+        t.Tasks.MarkDone(task.Id); // on the bar while it needs him (Ruling 48)
         t.Tasks.SetStatusLine(task.Id, "migration ready");
         t.Tasks.SessionEnded("s1");
 
@@ -2434,7 +2435,7 @@ public class FloatingBarTaskListTests
     public void A_claude_lines_title_starts_where_a_notes_does_and_it_has_no_icon() => StaThread.Run(() =>
     {
         using var t = Build(sessionWindow: _ => Maybe.From((nint)101));
-        t.Tasks.Create("Tasks redesign", t.Gepha, Session("s1"));
+        t.Tasks.MarkDone(t.Tasks.Create("Tasks redesign", t.Gepha, Session("s1")).Value.Id); // Done: a Claude task shows on the bar while it needs him (Ruling 48)
         t.Tasks.AddNote("Dishwasher tablets", t.Gepha);
         t.Bar.UpdateLayout();
 
@@ -2447,6 +2448,71 @@ public class FloatingBarTaskListTests
             return title.TransformToAncestor(line).TransformBounds(new Rect(title.RenderSize)).Left;
         }
         Assert.Equal(TitleX(note), TitleX(claude), 0.5);
+    });
+
+    // RULING 48 (Petre: "when i have responded to a claude session that wanted my attention, i think it's okay if it gets
+    // removed from the tasklist"; "not when i have activated the window, but when i have responded to it"). The bar lists
+    // a Claude task only while it needs him: Waiting on you, or Done. In progress and Backlog Claude tasks leave the bar
+    // and stay in the tasks window (the board holds them all). His notes are unaffected.
+    static IReadOnlyList<string> OnTheBar(ListBar t) => t.Lines.Select(l => ((TaskLine)l.Tag).Title).ToList();
+
+    [Fact]
+    public void Only_a_claude_task_that_needs_him_is_on_the_bar_and_notes_always_are() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        t.Tasks.AddNote("a note", t.Gepha);
+        var working = t.Tasks.Create("working", t.Gepha, Session("s1")).Value;
+        var waiting = t.Tasks.Create("waiting", t.Gepha, Session("s2")).Value;
+        t.Tasks.Ask(waiting.Id, "OK?");
+        var done = t.Tasks.Create("done", t.Gepha, Session("s3")).Value;
+        t.Tasks.MarkDone(done.Id);
+
+        Assert.Equal(["waiting", "a note", "done"], OnTheBar(t).OrderBy(x => x == "waiting" ? 0 : x == "a note" ? 1 : 2));
+        Assert.DoesNotContain("working", OnTheBar(t));
+        // The window shows everything: the board still holds the task, open.
+        Assert.True(t.Tasks.Board.Tasks.Single(x => x.Id == working.Id).IsOpen);
+    });
+
+    // Answering a waiting task (his next prompt to the session, UserPromptSubmit) takes it off the bar but not out of the
+    // board; a new ask brings it back at the top. Arriving at its workspace or clicking its line does not take it off.
+    [Fact]
+    public void Answering_removes_a_waiting_task_from_the_bar_and_a_new_ask_brings_it_back() => StaThread.Run(() =>
+    {
+        var went = new List<Guid>();
+        using var t = Build(goTo: id =>
+        {
+            went.Add(id);
+            return Result.Success();
+        });
+        t.Tasks.AddNote("a note", t.Gepha);
+        var task = t.Tasks.Create("Ship it", t.Gepha, Session("s1")).Value;
+        t.Tasks.Ask(task.Id, "Ship it?");
+        Assert.Equal("Ship it", OnTheBar(t)[0]);
+
+        // Activating: a click on the line goes to its workspace and the line stays.
+        Click(t.Lines.Single(l => ((TaskLine)l.Tag).Id == task.Id));
+        Assert.Contains("Ship it", OnTheBar(t));
+
+        // His answer: the next prompt to that session.
+        t.Tasks.Answered("s1");
+        Assert.DoesNotContain("Ship it", OnTheBar(t));
+        Assert.Equal(["a note"], OnTheBar(t));
+        Assert.Equal(TaskStatus.InProgress, t.Tasks.Board.Tasks.Single(x => x.Id == task.Id).Status);
+
+        // The session asks again: back on the bar, above the note.
+        t.Tasks.Ask(task.Id, "And now?");
+        Assert.Equal(["Ship it", "a note"], OnTheBar(t));
+    });
+
+    // "+N more" counts only what the bar lists: a Claude task in progress is not hidden by the cap, it is not on the bar.
+    [Fact]
+    public void The_more_count_ignores_claude_tasks_that_are_not_on_the_bar() => StaThread.Run(() =>
+    {
+        using var t = Build(openWindow: () => { });
+        Enumerable.Range(1, 4).ToList().ForEach(i => t.Tasks.AddNote($"Note {i}", t.Gepha));
+        Enumerable.Range(1, 3).ToList().ForEach(i => t.Tasks.Create($"Working {i}", t.Gepha, Session($"w{i}")));
+
+        Assert.Equal("+1 more", t.Bar.TaskListMoreText);
     });
 
     // #48's class: a double-click goes only to the line its first click landed on. A reshuffle between the two presses
