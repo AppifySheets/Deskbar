@@ -45,6 +45,10 @@ public static class SessionBriefing
         // the task waits the reminder keeps it open and tells the session how to resolve it.
         own is { HasValue: true, Value: { Status: TaskStatus.WaitingOnYou } waiting }
             ? $"Deskbar: your question \"{Cut(waiting.Question.GetValueOrDefault(waiting.Title))}\" is still open, and your task waits on the user. If this message answers it, or the question no longer matters, run {Shim} task answered --session {sessionId}\n"
+        // A prompt leaves a Done task Done (RemoteControl.Prompted): a question about finished work must not reopen it.
+        // When the message is more work on it, the session reopens it itself; Join moves Done back to In progress.
+        : own is { HasValue: true, Value: { Status: TaskStatus.Done } done }
+            ? $"Deskbar: your task is {Describe(done)}. If this message gives you more work on it, run {Shim} task join {done.Id.ToString()[..8]} --session {sessionId} to put it back in progress; if it only asks about the finished work, leave it done.\n"
         : own.HasValue
             ? $"Deskbar: your task is {Describe(own.Value)}. Keep its status line current: {Shim} task status-line - --session {sessionId}, the line on stdin (a heredoc).\n"
         : closed.HasValue

@@ -99,6 +99,21 @@ public sealed class SessionBriefingTests
         Assert.DoesNotContain(Dashes, d => text.Contains(d));
     }
 
+    // 2026-11-23: a prompt leaves a Done task Done, so its reminder tells the session how to reopen it when the message is
+    // more work (task join with the task's own id), and to leave it alone when it only asks about the finished work.
+    [Fact]
+    public void A_prompt_for_a_done_task_says_how_to_reopen_it()
+    {
+        var own = Task("Tasks board", TaskStatus.Done);
+
+        var text = SessionBriefing.Prompt(Sid, own, Maybe<TaskItem>.None);
+
+        Assert.Single(text.Trim().Split('\n'));
+        Assert.Contains("done", text);
+        Assert.Contains($"task join {own.Id.ToString()[..8]} --session {Sid}", text);
+        Assert.DoesNotContain(Dashes, d => text.Contains(d));
+    }
+
     // Ruling 49: a waiting task's reminder keeps the question open and says how to resolve it.
     [Fact]
     public void A_prompt_for_a_waiting_task_names_the_question_and_task_answered()

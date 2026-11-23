@@ -23,8 +23,9 @@ namespace Deskbar.Core.Tasks;
 //   * A session works on one task at a time. Joining or creating a task ends that session's live entry on any other
 //     open task, so TaskOf and Answered can only ever mean the task it is on now (controller ruling 4, which the
 //     hooks rely on).
-//   * Answering is Petre's next message to a session: it moves that session's task from Waiting on you, or from
-//     Done (he is continuing the work), back to In progress, and touches no other task.
+//   * Answering moves that session's task from Waiting on you back to In progress and touches no other task. Since
+//     Ruling 49 it runs only when the session says its question is settled (`task answered`), and since 2026-11-23 a
+//     prompt no longer moves a Done task either: the session reopens it with Join when Petre's message is more work.
 public sealed record TaskBoard(IReadOnlyList<TaskItem> Tasks)
 {
     public static readonly TaskBoard Empty = new(Array.Empty<TaskItem>());
@@ -79,8 +80,8 @@ public sealed record TaskBoard(IReadOnlyList<TaskItem> Tasks)
     /// <summary>
     /// A session coming back to its OWN task (a resumed conversation keeps its id; RemoteControl's SessionStart finds
     /// the task by TaskBoard.LastTaskOf): live on it again, as <see cref="Join"/> makes it, but the task KEEPS ITS
-    /// STATUS (Ruling 34). Resuming a session to look at it is not continuing the work; only the user's next message
-    /// (<see cref="Answered"/>) moves Done or Waiting on you back to In progress. A closed task refuses, and the session
+    /// STATUS (Ruling 34). Resuming a session to look at it is not continuing the work; only the session itself moves
+    /// the task on (<see cref="Join"/> for a Done one, <see cref="Answered"/> for a waiting one). A closed task refuses, and the session
     /// leaves any other open task it was live on, both as Join does.
     /// </summary>
     public Result<TaskBoard> Rejoin(Guid id, TaskSession session, DateTimeOffset now) =>
@@ -103,7 +104,7 @@ public sealed record TaskBoard(IReadOnlyList<TaskItem> Tasks)
             ChangeOpen(id, t => t with { Status = TaskStatus.WaitingOnYou, Question = q.Trim(), Raised = now, UpdatedAt = now, Assignee = Assignee.Me, WaitingSince = now }));
 
     /// <summary>
-    /// Petre sent the session a message. Its task, when Waiting on you or Done, goes back to In progress and drops
+    /// The session's question is settled (`task answered`). Its task, when Waiting on you or Done, goes back to In progress and drops
     /// the question. Anything else, or a session with no open task, returns this same board, so the caller can
     /// tell nothing changed by reference and skip the save.
     /// </summary>
