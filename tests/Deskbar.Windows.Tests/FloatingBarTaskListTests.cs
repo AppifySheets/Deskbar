@@ -2730,4 +2730,28 @@ public class FloatingBarTaskListTests
         Assert.Equal("Use the November invoice", lines[note].Detail);
         Assert.Equal("waiting for CI", lines[claude].Detail);
     });
+
+    // Ruling 59 (Petre: important bold, urgent italic): the title's run on the bar.
+    [Fact]
+    public void An_important_title_is_bold_and_an_urgent_one_italic_on_the_bar() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        t.Tasks.AddNote("plain", t.Gepha);
+        t.Tasks.AddNote("important", t.Gepha, Quadrant.II);
+        t.Tasks.AddNote("urgent", t.Gepha, Quadrant.III);
+
+        (FontWeight, FontStyle) Look(string title)
+        {
+            var line = t.Lines.Single(l => ((TaskLine)l.Tag).Title == title);
+            var run = Inside(line).OfType<TextBlock>().Single(b => Equals(b.Tag, "task-text")).Inlines.OfType<System.Windows.Documents.Run>().First();
+            return (run.FontWeight, run.FontStyle);
+        }
+
+        Assert.Equal((FontWeights.Normal, FontStyles.Normal), Look("plain"));
+        Assert.Equal((FontWeights.Bold, FontStyles.Normal), Look("important"));
+        Assert.Equal((FontWeights.Normal, FontStyles.Italic), Look("urgent"));
+        // Both flags: bold and italic (the bar lists three lines, so the third task takes the second flag).
+        t.Tasks.SetFlag(t.Tasks.Board.Tasks.Single(x => x.Title == "urgent").Id, TaskFlag.Important, true);
+        Assert.Equal((FontWeights.Bold, FontStyles.Italic), Look("urgent"));
+    });
 }
