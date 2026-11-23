@@ -49,12 +49,25 @@ public class ClaudeSessionsTests
         public Func<string, Result<string>>? Resume { get; set; }
         public Func<string, string?, Result<string>>? Start { get; set; }
 
+        // A slow `claude --bg --resume`: the virtual clock moves on this far while the call runs, without running what
+        // was due meanwhile, which then runs late, the way a poll that fires during a slow call is handled after it.
+        public TimeSpan ResumeTakes { get; set; }
+
+        // How long after the resume the daemon lists the woken session; none means at once.
+        public TimeSpan? ListedAfter { get; set; }
+
+        // Calls that fault instead of answering, as an exception the CLI did not turn into a Result would.
+        public Func<IReadOnlyList<string>, bool>? Throws { get; set; }
+
         public IReadOnlyList<Call> Resumes => Calls.Where(c => c.Arguments is ["--bg", "--resume", ..]).ToList();
         public IReadOnlyList<Call> Reads => Calls.Where(c => c.Arguments is ["agents", "--json"]).ToList();
 
         public Task<Result<string>> Run(IReadOnlyList<string> arguments, string? workingDirectory, TimeSpan timeout)
         {
             Calls.Add(new Call(clock.Now, arguments.ToList(), workingDirectory));
+            if (Throws?.Invoke(arguments) == true)
+                return Task.FromException<Result<string>>(new AggregateException(new InvalidOperationException("the tree could not be killed")));
+            if (arguments is ["--bg", "--resume", ..] && ResumeTakes > TimeSpan.Zero) clock.Sleep(ResumeTakes.Ticks);
             return Task.FromResult(arguments switch
             {
                 ["agents", "--json"] => Agents?.Invoke() ?? Result.Success(Json()),
@@ -67,7 +80,9 @@ public class ClaudeSessionsTests
         // A resumed session is running again, so the next list shows it.
         Result<string> Woken(string id, string? folder)
         {
-            Listed.Add(new Row(id, folder ?? "", "resumed"));
+            var row = new Row(id, folder ?? "", "resumed");
+            if (ListedAfter is { } after) clock.Schedule(after, () => Listed.Add(row));
+            else Listed.Add(row);
             return Result.Success($"backgrounded · {id[..8]} · resumed");
         }
 
@@ -363,6 +378,58 @@ public class ClaudeSessionsTests
         Assert.DoesNotContain(rig.Cli.Resumes, c => c.Arguments[2] == waiting[0].SessionId);
         Assert.Contains(rig.Cli.Resumes, c => c.Arguments[2] == waiting[1].SessionId);
         Assert.Equal(2, rig.Cli.Resumes.Count);
+    }
+
+    // Ruling 13: `claude --bg --resume` can take longer than the keeper's 30 s grace, which counts from the issue. The polls
+    // that come meanwhile see the session neither listed nor in grace; they must not queue it again, and once it answers
+    // it is left alone for the grace from the ANSWER, since the list read before then does not show it yet. One resume.
+    [Fact]
+    public void A_session_is_not_resumed_twice_when_a_slow_resume_answers_after_the_grace()
+    {
+        using var rig = new Rig();
+        rig.Cli.ResumeTakes = Seconds(35);
+        // The daemon lists it 20 s after the answer, at 55 s.
+        rig.Cli.ListedAfter = Seconds(20);
+        var dead = rig.Dead("Slow");
+        rig.Begin();
+
+        rig.RunTo(Seconds(120));
+
+        Assert.Equal([dead.SessionId], rig.Cli.Resumes.Select(c => c.Arguments[2]));
+        // The polls kept going through it.
+        Assert.True(rig.Cli.Reads.Count >= 8);
+    }
+
+    // Ruling 13: a call that faults instead of answering (ClaudeCli's kill can throw an AggregateException) is traced,
+    // never thrown onto the dispatcher, and neither the polling nor the resume queue stops behind it.
+    [Fact]
+    public void A_throwing_cli_neither_stops_resuming_nor_escapes()
+    {
+        using var rig = new Rig();
+        var first = rig.Dead("First");
+        var second = rig.Dead("Second");
+        var readsThrown = 0;
+        var resumesThrown = 0;
+        rig.Cli.Throws = arguments => arguments switch
+        {
+            ["agents", "--json"] when rig.Cli.Reads.Count == 1 && readsThrown++ == 0 => true,
+            ["--bg", "--resume", ..] when resumesThrown++ == 0 => true,
+            _ => false,
+        };
+        rig.Begin();
+
+        // Not thrown out of the scheduler: AdvanceTo would rethrow it here.
+        rig.RunTo(Seconds(60));
+
+        Assert.Equal(1, readsThrown);
+        Assert.True(rig.Cli.Reads.Count >= 4);
+        // The read at 0 threw; the one at 15 queued both; the first resume threw, and the queue still went on.
+        var resumed = rig.Cli.Resumes.Select(c => c.Arguments[2]).ToList();
+        Assert.True(resumed.Count >= 2);
+        Assert.Contains(first.SessionId, resumed);
+        Assert.Contains(second.SessionId, resumed);
+        Assert.Contains(rig.Traces, t => t.Contains("list read threw"));
+        Assert.Contains(rig.Traces, t => t.Contains("threw") && t.Contains("resume of"));
     }
 
     // Review Focus 4, Ruling 10: a folder that was never trusted makes the resume fail. One clear message in the task's

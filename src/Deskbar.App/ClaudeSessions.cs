@@ -113,6 +113,13 @@ public sealed class ClaudeSessions : IDisposable
     bool draining;
     DateTimeOffset lastIssued;
 
+    // The session whose resume has been issued and not yet answered: it counts as queued, so a poll in the meantime
+    // cannot queue it again (Ruling 13).
+    Maybe<string> inFlight = Maybe<string>.None;
+
+    // When each recent resume ANSWERED; a session is not resumed again within SessionKeeper.Grace of that (Settled).
+    ImmutableDictionary<string, DateTimeOffset> answered = ImmutableDictionary<string, DateTimeOffset>.Empty;
+
     // The latest list that could be read. Empty until the first good read; only used to re-check a queued resume, and
     // the queue is empty until a good read has filled it.
     IReadOnlyCollection<ClaudeAgent> lastLive = [];
@@ -199,11 +206,19 @@ public sealed class ClaudeSessions : IDisposable
     {
         if (reading) return;
         reading = true;
-        readCall.Disposable = OffThread(() => cli.Run(AgentsArguments, null, ReadTimeout)).Subscribe(read =>
-        {
-            reading = false;
-            Heard(read);
-        });
+        // The error path matters (Ruling 13): a fault the CLI did not turn into a Result would otherwise be an unhandled
+        // exception on the dispatcher, and `reading` would stay set, so no list would ever be read again.
+        readCall.Disposable = OffThread(() => cli.Run(AgentsArguments, null, ReadTimeout)).Subscribe(
+            read =>
+            {
+                reading = false;
+                Heard(read);
+            },
+            error =>
+            {
+                reading = false;
+                trace?.Invoke($"claude sessions: list read threw: {error.Message}");
+            });
     }
 
     void Heard(Result<string> read)
@@ -313,18 +328,40 @@ public sealed class ClaudeSessions : IDisposable
         var at = scheduler.Now;
         ledger = ledger.Record(session.Id, at);
         lastIssued = at;
+        inFlight = session.Id;
         resumeCall.Disposable = OffThread(async () =>
             {
                 // Read here, on `background`, for the reason given in Heard.
                 var cutOff = CutOff(session);
                 return (CutOff: cutOff, Result: await cli.Run(ResumeArguments(session.Id, cutOff), session.Folder, LaunchTimeout));
             })
-            .Subscribe(answer =>
-            {
-                Answered(resume.TaskId, session.Id, answer.CutOff, answer.Result, at);
-                draining = false;
-                Drain();
-            });
+            .Subscribe(
+                answer =>
+                {
+                    // The queue is freed BEFORE the answer is acted on, so nothing Answered does can leave it stuck.
+                    Settled(session.Id);
+                    Answered(resume.TaskId, session.Id, answer.CutOff, answer.Result, at);
+                    Drain();
+                },
+                error =>
+                {
+                    // Ruling 13: a fault is traced, not thrown onto the dispatcher, and the queue moves on. The ledger
+                    // already holds this resume, so the keeper's grace and loop guard still apply to the session.
+                    Settled(session.Id);
+                    trace?.Invoke($"claude sessions: resume of {session.Id} threw: {error.Message}");
+                    Drain();
+                });
+    }
+
+    // The resume in flight has answered (or failed): the next may go, and for Grace from NOW the session is left alone.
+    // `claude --bg --resume` can take up to its timeout, longer than the keeper's grace counted from the ISSUE, and a
+    // list read before the answer does not show the woken session yet; resuming it again would start a copy (Ruling 13).
+    void Settled(string sessionId)
+    {
+        draining = false;
+        inFlight = Maybe<string>.None;
+        var now = scheduler.Now;
+        answered = answered.Where(pair => pair.Value + SessionKeeper.Grace > now).ToImmutableDictionary().SetItem(sessionId, now);
     }
 
     // The next queued resume that is still wanted; the ones that are not are dropped on the way.
@@ -340,9 +377,11 @@ public sealed class ClaudeSessions : IDisposable
     }
 
     // The re-check before a queued resume goes out (Review Focus 5, Global Constraints): the setting is still on, the
-    // task is still open and not given up, the session is still its latest, and the latest list does not show it.
+    // task is still open and not given up, the session is still its latest, the latest list does not show it, and its
+    // last resume did not answer within the grace (Ruling 13, see Settled).
     bool StillWanted(KeeperStep.Resume resume) =>
         manager.State.ClaudeResumeInEffect
+        && !AnsweredWithinGrace(resume.Session.Id)
         && tasks.Board.Tasks.TryFirst(t => t.Id == resume.TaskId)
             .Map(t => t.Status is TaskStatus.Backlog or TaskStatus.InProgress or TaskStatus.WaitingOnYou
                 && !SessionKeeper.GivenUp(t)
@@ -378,7 +417,12 @@ public sealed class ClaudeSessions : IDisposable
     static IReadOnlyList<string> ResumeArguments(string sessionId, bool cutOff) =>
         cutOff ? ["--bg", "--resume", sessionId, ContinueMessage] : ["--bg", "--resume", sessionId];
 
-    bool Queued(string sessionId) => queue.Any(r => r.Session.Id == sessionId);
+    // Waiting in the queue, or being resumed right now.
+    bool Queued(string sessionId) =>
+        queue.Any(r => r.Session.Id == sessionId) || inFlight.Map(id => id == sessionId).GetValueOrDefault(false);
+
+    bool AnsweredWithinGrace(string sessionId) =>
+        answered.TryGetValue(sessionId, out var at) && at + SessionKeeper.Grace > scheduler.Now;
 
     // --- transcripts ------------------------------------------------------------------------------------------------
 
