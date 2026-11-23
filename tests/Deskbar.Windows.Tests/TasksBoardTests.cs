@@ -726,6 +726,30 @@ public class TasksBoardTests
         Assert.Equal(askTint, ColourOf(on.Background));
     });
 
+    // The toolbar is the approved mockup's three rows (Task 7 fix round 2): the title line ("Tasks" and the end buttons
+    // only), then the search row, then the filter chips. Measured after layout, each row wholly below the one before.
+    [Fact]
+    public void The_toolbar_is_the_title_line_then_the_search_row_then_the_filter_chips() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        t.Tasks.AddNote("note", t.Gepha);
+        t.Controller.Show();
+        t.Window.UpdateLayout();
+        double Top(FrameworkElement e) => e.TranslatePoint(new Point(0, 0), t.Window.Toolbar).Y;
+        double Bottom(FrameworkElement e) => Top(e) + e.ActualHeight;
+
+        // The title and the end buttons share the first line, and no chip is on it.
+        Assert.True(Bottom(t.Window.ToolbarTitle) <= Top(t.Window.SearchRow));
+        Assert.True(Bottom(t.Window.ToolbarEnd) <= Top(t.Window.SearchRow));
+        Assert.True(Top(t.Window.ToolbarTitle) < Bottom(t.Window.ToolbarEnd) && Top(t.Window.ToolbarEnd) < Bottom(t.Window.ToolbarTitle));
+        // The search row, then the chips, Claude working among them.
+        Assert.True(Bottom(t.Window.SearchRow) <= Top(t.Window.Filters));
+        Assert.True(t.Window.Filters.ActualHeight > 0);
+        Assert.Contains(ButtonNamed(t.Window, "Filter: Claude working"), t.Window.Filters.Children.OfType<Button>());
+        // The search row is the panel's full width inside the toolbar's padding, as wide as the title line.
+        Assert.Equal(((FrameworkElement)t.Window.ToolbarTitle.Parent).ActualWidth, t.Window.SearchRow.ActualWidth, 1);
+    });
+
     // Task 7 review, ruling on ShowTask: a task clicked on the bar that the search or the Claude working chip hides is put
     // on screen by clearing whichever of the two hides it (the box emptied too); one that only the other hides keeps the
     // first in force.
