@@ -22,7 +22,7 @@ public class ControlPipeTests
     {
         var pipe = UniquePipe();
         IReadOnlyList<string>? received = null;
-        using var server = new ControlPipeServer(pipe, args =>
+        using var server = TestPipes.Serving(pipe, args =>
         {
             received = args;
             return Task.FromResult(new ControlReply(ControlReply.Ok, "{\"done\":true}"));
@@ -70,7 +70,7 @@ public class ControlPipeTests
     public async Task Clients_arriving_together_are_all_answered()
     {
         var pipe = UniquePipe();
-        using var server = new ControlPipeServer(pipe, _ => Task.FromResult(new ControlReply(ControlReply.Ok, "fine")));
+        using var server = TestPipes.Serving(pipe, _ => Task.FromResult(new ControlReply(ControlReply.Ok, "fine")));
         // The first answer proves the server is up before the crowd arrives.
         Assert.Equal("fine", (await ControlClient.SendAsync(pipe, ["windows"], Patience)).Output);
 
@@ -87,7 +87,7 @@ public class ControlPipeTests
     {
         var pipe = UniquePipe();
         using var release = new ManualResetEventSlim();
-        using var server = new ControlPipeServer(pipe, async args =>
+        using var server = TestPipes.Serving(pipe, async args =>
         {
             if (args is ["stuck"]) await Task.Run(() => release.Wait(TimeSpan.FromSeconds(10)));
             return new ControlReply(ControlReply.Ok, "fine");
@@ -115,7 +115,7 @@ public class ControlPipeTests
     public async Task A_client_after_one_that_gave_up_is_still_answered()
     {
         var pipe = UniquePipe();
-        using var server = new ControlPipeServer(pipe, async args =>
+        using var server = TestPipes.Serving(pipe, async args =>
         {
             if (args is ["slow"]) await Task.Delay(300);
             return new ControlReply(ControlReply.Ok, "fine");
@@ -138,7 +138,7 @@ public class ControlPipeTests
     {
         var pipe = UniquePipe();
         var count = 0;
-        using var server = new ControlPipeServer(pipe, _ =>
+        using var server = TestPipes.Serving(pipe, _ =>
             Task.FromResult(new ControlReply(ControlReply.Ok, $"{Interlocked.Increment(ref count)}")));
 
         var first = await ControlClient.SendAsync(pipe, ["windows"], Patience);
@@ -154,7 +154,7 @@ public class ControlPipeTests
     {
         var pipe = UniquePipe();
         var attempts = new List<IReadOnlyList<string>>();
-        using var server = new ControlPipeServer(pipe, args =>
+        using var server = TestPipes.Serving(pipe, args =>
         {
             attempts.Add(args);
             return Task.FromResult(attempts.Count < 3
@@ -174,7 +174,7 @@ public class ControlPipeTests
     {
         var pipe = UniquePipe();
         var attempts = 0;
-        using var server = new ControlPipeServer(pipe, _ =>
+        using var server = TestPipes.Serving(pipe, _ =>
         {
             attempts++;
             return Task.FromResult(new ControlReply(ControlReply.NothingMatched, "not yet"));
@@ -192,7 +192,7 @@ public class ControlPipeTests
     {
         var pipe = UniquePipe();
         var calls = 0;
-        using var server = new ControlPipeServer(pipe, _ => ++calls == 1
+        using var server = TestPipes.Serving(pipe, _ => ++calls == 1
             ? throw new InvalidOperationException("boom")
             : Task.FromResult(new ControlReply(ControlReply.Ok, "fine")));
 
@@ -209,7 +209,7 @@ public class ControlPipeTests
     public async Task A_malformed_request_is_refused_and_the_server_keeps_serving()
     {
         var pipe = UniquePipe();
-        using var server = new ControlPipeServer(pipe, _ => Task.FromResult(new ControlReply(ControlReply.Ok, "fine")));
+        using var server = TestPipes.Serving(pipe, _ => Task.FromResult(new ControlReply(ControlReply.Ok, "fine")));
 
         await using (var raw = new NamedPipeClientStream(".", pipe, PipeDirection.InOut, PipeOptions.Asynchronous))
         {
@@ -261,7 +261,7 @@ public class ControlPipeTests
     public async Task The_servers_pipe_denies_the_network_and_keeps_current_user_only()
     {
         var pipe = UniquePipe();
-        using var server = new ControlPipeServer(pipe, _ => Task.FromResult(new ControlReply(ControlReply.Ok, "fine")));
+        using var server = TestPipes.Serving(pipe, _ => Task.FromResult(new ControlReply(ControlReply.Ok, "fine")));
         Assert.Equal("fine", (await ControlClient.SendAsync(pipe, ["windows"], Patience)).Output);
         await using var client = new NamedPipeClientStream(".", pipe, PipeDirection.InOut, PipeOptions.Asynchronous);
         await client.ConnectAsync(5000);
