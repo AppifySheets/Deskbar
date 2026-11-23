@@ -4372,7 +4372,15 @@ public sealed class WorkspaceManager(
             ? Result.Success()
             : Result.Success().Tap(() => Persist(State with { TasksMatrix = on }));
 
-    // Where the tasks window was left (AppState.TasksWindow), so it opens there next time, across restarts. A no-op
+    // The docked tasks panel's open state and width (AppState.TasksPanel). A no-op when unchanged, so a resize that
+    // ends where it started writes nothing; the panel redraws and re-docks on the state pulse this sends.
+    public Result SaveTasksPanel(TasksPanelState state) =>
+        State.TasksPanel == state
+            ? Result.Success()
+            : Result.Success().Tap(() => Persist(State with { TasksPanel = state }));
+
+    // OBSOLETE (a comment, not [Obsolete], because warnaserror): the floating window it served is gone and Task 6
+    // stops calling it; kept only so old files load. Where the tasks window was left (AppState.TasksWindow). A no-op
     // when unchanged, so a window closed where it already was writes nothing.
     public Result SaveTasksWindow(TasksWindowState state) =>
         State.TasksWindow == state
