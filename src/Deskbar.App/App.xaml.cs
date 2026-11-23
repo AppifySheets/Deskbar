@@ -320,13 +320,23 @@ public partial class App : Application
         // mouse is on an unlocked tile's title bar; a click toggles the lock (TileLockMarks). Every lambda reads the
         // fields when called, as the bar's TileLockOf does, so a disposed Tiler gives no tiles and no marks. A mark is
         // ignored by the window list and pinned to every desktop, the two steps every window of the app's own takes.
+        var uiThread = new System.Reactive.Concurrency.SynchronizationContextScheduler(
+            new System.Windows.Threading.DispatcherSynchronizationContext(Dispatcher));
         tileLockMarks = new TileLockMarks(
             tiles: () => tiler?.Board.Screens.Values.SelectMany(s => s).ToList() ?? [],
             lockOf: handle => tiler?.TileLockOf(handle) ?? Maybe<bool>.None,
             setLocked: (handle, on) => tiler?.SetTileLocked(handle, on) ?? Result.Failure("Tiling is not running."),
             settling: handle => tileSurface?.IsSettling(handle) ?? false,
             ignore: hwnd => monitor!.Ignore(hwnd),
-            pinToAllDesktops: hwnd => desktops!.Pin(new WindowHandle(hwnd)));
+            pinToAllDesktops: hwnd => desktops!.Pin(new WindowHandle(hwnd)),
+            // A desktop switch hides every mark at once, and an activation or a minimize re-places them at once, rather
+            // than on the next tick (TileLockMarks' header). Windows raises the desktop change on a thread of its own,
+            // so both are observed on this (the UI) thread, as the Tiler's inputs are.
+            hideNow: desktops.CurrentChanged.Select(_ => System.Reactive.Unit.Default).ObserveOn(uiThread),
+            recheckNow: monitor.Events
+                .Where(e => e.Kind is WindowEventKind.Activated or WindowEventKind.MinimizeChanged)
+                .Select(_ => System.Reactive.Unit.Default)
+                .ObserveOn(uiThread));
         tileLockMarks.Start();
     }
 

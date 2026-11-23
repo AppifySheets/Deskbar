@@ -47,7 +47,7 @@ public class LockMarkWindowTests
         mark.Put(MarkOn(target, locked: true), target);
         Pump(TimeSpan.FromMilliseconds(100));
 
-        Assert.True(mark.Handle == VisibleAbove(target), Describe(target, mark.Handle));
+        Assert.True(mark.Handle == ZOrderProbe.VisibleAbove(target), Describe(target, mark.Handle));
         mark.Close();
         window.Close();
     });
@@ -77,20 +77,39 @@ public class LockMarkWindowTests
         topmost.Show();
         var (window, target) = Target("lock mark front tile");
         // The target to the front of the normal band, right under the topmost one.
-        SetWindowPos(target, 0, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+        ZOrderProbe.ToFront(target);
         Pump(TimeSpan.FromMilliseconds(100));
         // Some topmost window is now right above it: this test's own, or one another test left open in the same run.
-        Assert.NotEqual(0, (long)NativeMethods.GetWindowLongPtr(VisibleAbove(target), NativeMethods.GWL_EXSTYLE) & WS_EX_TOPMOST);
+        Assert.NotEqual(0, (long)NativeMethods.GetWindowLongPtr(ZOrderProbe.VisibleAbove(target), NativeMethods.GWL_EXSTYLE) & WS_EX_TOPMOST);
 
         var mark = new LockMarkWindow();
         mark.Put(MarkOn(target, locked: true), target);
         Pump(TimeSpan.FromMilliseconds(100));
 
-        Assert.Equal(mark.Handle, VisibleAbove(target));
+        Assert.Equal(mark.Handle, ZOrderProbe.VisibleAbove(target));
         Assert.Equal(0, (long)NativeMethods.GetWindowLongPtr(mark.Handle, NativeMethods.GWL_EXSTYLE) & WS_EX_TOPMOST);
         mark.Close();
         window.Close();
         topmost.Close();
+    });
+
+    // Review I3: a tile can be topmost (VS Code's own "always on top" pin, which sits right where the mark goes). Its mark
+    // must go into the topmost band with it, or it lands under its own tile and the lock can be neither seen nor clicked.
+    [Fact]
+    public void A_topmost_tile_keeps_its_mark_above_it() => StaThread.Run(() =>
+    {
+        var (window, target) = Target("lock mark topmost tile");
+        window.Topmost = true;
+        Pump(TimeSpan.FromMilliseconds(100));
+
+        var mark = new LockMarkWindow();
+        mark.Put(MarkOn(target, locked: true), target);
+        Pump(TimeSpan.FromMilliseconds(100));
+
+        Assert.Equal(mark.Handle, ZOrderProbe.VisibleAbove(target));
+        Assert.NotEqual(0, (long)NativeMethods.GetWindowLongPtr(mark.Handle, NativeMethods.GWL_EXSTYLE) & WS_EX_TOPMOST);
+        mark.Close();
+        window.Close();
     });
 
     // A floating window over the tile covers the mark too: a second Put of the same mark must not lift it back over the
@@ -110,7 +129,7 @@ public class LockMarkWindowTests
         Pump(TimeSpan.FromMilliseconds(100));
 
         Assert.True(Above(coverHandle, mark.Handle), "the window in front of the tile stays in front of its mark");
-        Assert.Equal(mark.Handle, VisibleAbove(target));
+        Assert.Equal(mark.Handle, ZOrderProbe.VisibleAbove(target));
         cover.Close();
         mark.Close();
         window.Close();
@@ -165,20 +184,10 @@ public class LockMarkWindowTests
         frame.Place(new NativeMethods.RECT { Left = r.Left, Top = r.Top, Right = r.Right, Bottom = r.Bottom }, "#FFFFFF", target, pixels: 1);
         Pump(TimeSpan.FromMilliseconds(100));
 
-        Assert.True(frame.Handle == VisibleAbove(target), Describe(target, frame.Handle));
+        Assert.True(frame.Handle == ZOrderProbe.VisibleAbove(target), Describe(target, frame.Handle));
         frame.Close();
         window.Close();
     });
-
-    // The first VISIBLE window above `target` in z-order: the one that would show over it. Invisible windows are
-    // skipped because WPF keeps an invisible helper ("Hidden Window") per thread, which the z-order can put anywhere
-    // and which covers nothing. Found when the full suite first ran: the helper sat between a tile and its mark.
-    static nint VisibleAbove(nint target)
-    {
-        var w = GetWindow(target, GW_HWNDPREV);
-        while (w != 0 && !IsWindowVisible(w)) w = GetWindow(w, GW_HWNDPREV);
-        return w;
-    }
 
     // The windows from the top of the z-order down to `target`, for a failure message: which window came between.
     static string Describe(nint target, nint overlay)
@@ -214,10 +223,7 @@ public class LockMarkWindowTests
 
     const uint GW_HWNDPREV = 3;
     const long WS_EX_TOPMOST = 0x8, WS_EX_TRANSPARENT = 0x20, WS_EX_TOOLWINDOW = 0x80, WS_EX_NOACTIVATE = 0x08000000;
-    const uint SWP_NOSIZE = 0x1, SWP_NOMOVE = 0x2, SWP_NOACTIVATE = 0x10;
 
-    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
-    static extern bool SetWindowPos(nint hwnd, nint after, int x, int y, int width, int height, uint flags);
 
     [StructLayout(LayoutKind.Sequential)]
     struct RECT { public int Left, Top, Right, Bottom; }

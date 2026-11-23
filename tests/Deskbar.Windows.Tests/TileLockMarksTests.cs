@@ -1,6 +1,8 @@
 using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Input;
+using System.Reactive;
+using System.Reactive.Subjects;
 using System.Windows.Interop;
 using CSharpFunctionalExtensions;
 using Deskbar.App;
@@ -27,6 +29,8 @@ public class TileLockMarksTests
         public Maybe<(int X, int Y)> Pointer { get; set; } = Maybe<(int X, int Y)>.None;
         public List<(WindowHandle Window, bool On)> SetCalls { get; } = [];
         public int Ignored { get; set; }
+        public Subject<Unit> DesktopChanging { get; } = new();
+        public Subject<Unit> Activated { get; } = new();
 
         public TileLockMarks Marks() => new(
             tiles: () => Tiles.ToList(),
@@ -42,7 +46,9 @@ public class TileLockMarksTests
             pinToAllDesktops: _ => Result.Success(),
             geometryOf: w => Closed.Contains(w) ? Maybe<LockMarkGeometry>.None : GeometryOf(w),
             pointer: () => Pointer,
-            drawable: w => !Hidden.Contains(w));
+            drawable: w => !Hidden.Contains(w),
+            hideNow: DesktopChanging,
+            recheckNow: Activated);
     }
 
     // The geometry of a stand-in tile as DWM would give it with no caption buttons reported: at 96 DPI the mark is 24 px,
@@ -201,6 +207,41 @@ public class TileLockMarksTests
         Assert.Equal(1, world.Ignored);
         first.Close();
         second.Close();
+    });
+
+    // Review I1: the marks are pinned to every desktop, so on a desktop switch they would stay where they were, over the
+    // desktop just arrived on, until the next tick. The switch hides them all at once.
+    [Fact]
+    public void A_desktop_change_hides_every_mark_at_once() => StaThread.Run(() =>
+    {
+        var (window, tile) = Tile();
+        var world = new World { Tiles = { tile }, Locked = { tile } };
+        using var marks = world.Marks();
+        marks.Tick();
+        var mark = Assert.Single(marks.Shown).Value;
+
+        world.DesktopChanging.OnNext(Unit.Default);
+        Assert.Empty(marks.Shown);
+        Assert.False(mark.IsVisible);
+        window.Close();
+    });
+
+    // Review I2: clicking into a tile brings it to the front, over its own mark; the activation puts the mark back above
+    // it at once rather than on the next tick, so a locked padlock does not blink on every focus change.
+    [Fact]
+    public void An_activation_puts_the_marks_back_above_their_tiles_at_once() => StaThread.Run(() =>
+    {
+        var (window, tile) = Tile();
+        var world = new World { Tiles = { tile }, Locked = { tile } };
+        using var marks = world.Marks();
+        marks.Tick();
+        var mark = Assert.Single(marks.Shown).Value;
+
+        ZOrderProbe.ToFront(tile.Value);
+        Assert.NotEqual(mark.Handle, ZOrderProbe.VisibleAbove(tile.Value));
+        world.Activated.OnNext(Unit.Default);
+        Assert.Equal(mark.Handle, ZOrderProbe.VisibleAbove(tile.Value));
+        window.Close();
     });
 
     [Fact]

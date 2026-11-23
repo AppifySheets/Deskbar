@@ -1,3 +1,4 @@
+using System.Reactive;
 using System.Windows.Threading;
 using CSharpFunctionalExtensions;
 using Deskbar.Core.Domain;
@@ -23,6 +24,13 @@ namespace Deskbar.App;
 // What the tick reads of each tile never waits on the tile's thread (LockMarkNatives), so a hung app cannot freeze the
 // bar through this; and the mark is never owned by the tile, for the same reason (LockMarkWindow's header).
 //
+// TWO THINGS DO NOT WAIT FOR THE TICK (the final review's I1 and I2):
+//   * a desktop switch (`hideNow`) hides every mark at once. The marks are pinned to every desktop, so without this they
+//     would stay put over the desktop just arrived on while the old desktop's windows slide away;
+//   * a window activated or minimized (`recheckNow`) ticks at once. Clicking into a tile brings it to the front, over its
+//     own mark, and a locked padlock would otherwise blink out until the next tick on every focus change.
+// Both arrive on the UI thread (App observes them there).
+//
 // A click on a mark toggles the lock through the Tiler (the same call as the icon menu's "Don't split this tile" and the
 // pipe's `lock-tile`), then ticks at once so the new look shows without waiting for the timer.
 sealed class TileLockMarks : IDisposable
@@ -40,6 +48,7 @@ sealed class TileLockMarks : IDisposable
     readonly Func<Maybe<(int X, int Y)>> pointer;
     readonly Func<WindowHandle, bool> drawable;
     readonly DispatcherTimer timer;
+    readonly List<IDisposable> subscriptions = [];
 
     // The mark on each tile now.
     readonly Dictionary<WindowHandle, LockMarkWindow> shown = new();
@@ -66,7 +75,9 @@ sealed class TileLockMarks : IDisposable
         Func<nint, Result> pinToAllDesktops,
         Func<WindowHandle, Maybe<LockMarkGeometry>>? geometryOf = null,
         Func<Maybe<(int X, int Y)>>? pointer = null,
-        Func<WindowHandle, bool>? drawable = null)
+        Func<WindowHandle, bool>? drawable = null,
+        IObservable<Unit>? hideNow = null,
+        IObservable<Unit>? recheckNow = null)
     {
         this.tiles = tiles;
         this.lockOf = lockOf;
@@ -79,6 +90,8 @@ sealed class TileLockMarks : IDisposable
         this.drawable = drawable ?? LockMarkNatives.Drawable;
         timer = new DispatcherTimer(DispatcherPriority.Background) { Interval = Slow };
         timer.Tick += (_, _) => Tick();
+        if (hideNow is not null) subscriptions.Add(hideNow.Subscribe(_ => HideAll()));
+        if (recheckNow is not null) subscriptions.Add(recheckNow.Subscribe(_ => Tick()));
     }
 
     // How often the timer ticks now: Fast while there are tiles, Slow while there are none.
@@ -120,6 +133,14 @@ sealed class TileLockMarks : IDisposable
         {
             Trace($"lock marks: tick failed: {e.GetType().Name}: {e.Message}");
         }
+    }
+
+    // Every mark hidden now, for a desktop switch. The next tick shows the marks of whatever is tiled on the desktop
+    // arrived on: by then the old desktop's tiles are cloaked (LockMarkNatives.Drawable) or off the Tiler's board.
+    void HideAll()
+    {
+        if (disposed) return;
+        shown.Keys.ToList().ForEach(Release);
     }
 
     void Put(LockMark mark)
@@ -179,6 +200,8 @@ sealed class TileLockMarks : IDisposable
         if (disposed) return;
         disposed = true;
         timer.Stop();
+        subscriptions.ForEach(s => s.Dispose());
+        subscriptions.Clear();
         made.ForEach(m => m.Close());
         made.Clear();
         shown.Clear();

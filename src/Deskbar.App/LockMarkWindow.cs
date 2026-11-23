@@ -101,15 +101,22 @@ sealed class LockMarkWindow : Window
 
     const long WS_EX_NOACTIVATE = 0x08000000;
 
-    // Shows `mark`'s look on `mark.Frame` (physical pixels), directly above `target`. A tile is never topmost, so neither
-    // is the mark. Shown first if hidden, so WPF's idea of the window's visibility matches what SetWindowPos does.
+    // Shows `mark`'s look on `mark.Frame` (physical pixels), directly above `target`. Shown first if hidden, so WPF's
+    // idea of the window's visibility matches what SetWindowPos does.
+    //
+    // Into the tile's band first, as RingFrame does: a tile CAN be topmost (VS Code's own "always on top" pin, which sits
+    // right where this mark goes), and a mark left in the normal band would land under its own tile (final review, I3).
+    // WPF's Topmost is the one switch between the bands, and setting it again to the same value does nothing.
     public void Put(LockMark mark, nint target)
     {
         if (mark.Locked != LockedLook) Look(mark.Locked);
         if (!IsVisible) Show();
+        Topmost = (NativeMethods.GetWindowLongPtr(target, NativeMethods.GWL_EXSTYLE) & WS_EX_TOPMOST) != 0;
         var f = mark.Frame;
-        ZOrder.PlaceDirectlyAbove(Handle, target, f.Left, f.Top, f.Width, f.Height);
+        ZOrder.PlaceDirectlyAbove(Handle, target, f.Left, f.Top, f.Width, f.Height, Topmost);
     }
+
+    const long WS_EX_TOPMOST = 0x00000008;
 
     void Look(bool locked)
     {
