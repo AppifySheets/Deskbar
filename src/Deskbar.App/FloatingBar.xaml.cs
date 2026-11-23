@@ -222,6 +222,8 @@ public partial class FloatingBar : Window
         // appBar.Remove gives the docked strip back on a normal exit. A crash is covered by the shell
         // itself, which was measured reclaiming a dead app bar's strip within a second (see AppBar).
         Closed += (_, _) => { iconWatch.Stop(); fadeDelay.Stop(); subscription?.Dispose(); settleWatch?.Dispose(); appBar?.Remove(); seamBar?.Remove(); };
+        // ...and the tasks panel hears that the strip went and that no more notices will come (see Strip).
+        Closed += (_, _) => CompleteStrip();
     }
 
     // --- fading while the pointer is elsewhere ---------------------------------------
@@ -662,6 +664,96 @@ public partial class FloatingBar : Window
 
     AppBar? appBar;
 
+    // --- announcing the strip, for the tasks panel ------------------------------------------------
+    //
+    // The shell places a NEWER app bar registration inside an older one on the same edge, so the tasks panel stays
+    // inside the bar only while it registers after the bar, every time the bar's app bar registers (spec
+    // 2026-11-23-tasks-panel-design.md, "Keeping the bar outside"). This is how the panel hears of it: one notice per
+    // change of the bar's strip, emitted on the UI thread, synchronously, after the window has been moved into the
+    // rectangle the shell granted. Rx rather than an event, as the bar's other outward notices (LayoutSettled).
+    //
+    // It emits:
+    //   * after a dock (DockTo, DockAcrossSeam) whose app bar registered afresh (AppBar.RegisteredOnLastDock; for a
+    //     seam dock, either of its two). That covers the dock guard (KeepDockedStrip removes, then docks), Explorer
+    //     restarting (AppBar.Hook clears Registered, the re-dock registers), and docking after undock or minimize;
+    //   * after a dock whose edge or screen differs from the last one announced, even without a fresh registration:
+    //     a display change can move the docked bar to another screen while its registration stands;
+    //   * with Edge null when the strip is let go (LetGoOfStrip, which undocking and the display-layout readjustment
+    //     go through; MinimizeToTaskbar; the bar closing), once per letting go.
+    //
+    // It NEVER emits for a re-dock on the same edge and screen that did not register: the shell's position-changed
+    // re-ask (OnShellMovedStrips) and the end of a width drag. That is the loop breaker. The panel's own Remove and
+    // Dock send ABN_POSCHANGED to every app bar, the bar answers by docking again, and if that re-dock were announced
+    // the panel would re-register again, which sends another notice, for ever. A width drag changes only where the
+    // bar's inner edge is, and the shell tells the panel that itself, through the same position notice.
+    //
+    // Completed when the bar closes (see the Closed handler, which lets go first).
+    readonly System.Reactive.Subjects.Subject<BarStrip> strip = new();
+
+    internal IObservable<BarStrip> Strip => strip;
+
+    // The last notice sent, for the "differs from the last one" rule and for letting go once. Null until the first dock.
+    BarStrip? lastStrip;
+
+    // After a dock: announced when the app bar registered afresh, or when the edge or the screens differ from the last
+    // notice. `grantedMiddle` stands in for the window's own middle only if GetWindowRect cannot read it.
+    void AnnounceDock(string edge, WindowRect screen, Maybe<WindowRect> seamRight, bool registeredAfresh, nint hwnd, int grantedMiddle)
+    {
+        var next = new BarStrip(edge, screen, seamRight, MiddleXOf(hwnd).GetValueOrDefault(grantedMiddle));
+        // The loop breaker (see above): a re-dock in place that did not register is not news.
+        if (!registeredAfresh && lastStrip is { } last && SamePlace(last, next)) return;
+        Announce(next, registeredAfresh ? "registered" : "moved");
+    }
+
+    // After the strip was given back. Only when the last notice was a dock, so a floating bar being minimized, or a
+    // strip let go twice on one path, says nothing. The screen is the one the bar is on now, read from the window; the
+    // last dock's screen when the window cannot be read.
+    void AnnounceLetGo()
+    {
+        if (lastStrip is not { Edge: not null } last) return;
+        var hwnd = new WindowInteropHelper(this).Handle;
+        Announce(new BarStrip(null, ScreenOf(hwnd).GetValueOrDefault(last.Screen), Maybe<WindowRect>.None,
+            MiddleXOf(hwnd).GetValueOrDefault(last.MiddleX)), "let go");
+    }
+
+    // A subscriber runs inside DockTo while `docking` is set, so a DockTo it causes synchronously is a no-op; the shell's
+    // position notices it causes are queued (OnShellMovedStrips) and come back as plain re-docks, which are not announced.
+    void Announce(BarStrip next, string why)
+    {
+        lastStrip = next;
+        if (ClickTrace.On)
+            ClickTrace.Write($"strip: {why}, edge {next.Edge ?? "none"}, screen {Describe(next.Screen)}"
+                             + $"{next.SeamRight.Map(r => $", seam right {Describe(r)}").GetValueOrDefault("")}, middle x {next.MiddleX}");
+        strip.OnNext(next);
+    }
+
+    // The bar closing: the strip goes with it (the Closed handler removes both app bars), so a docked bar says so before
+    // the stream ends. Built from the last notice, never from the window, whose handle is being destroyed.
+    void CompleteStrip()
+    {
+        if (lastStrip is { Edge: not null } last) Announce(last with { Edge = null, SeamRight = Maybe<WindowRect>.None }, "let go (closing)");
+        strip.OnCompleted();
+    }
+
+    // Same edge and same screens; the middle is left out on purpose, since a width drag moves it without registering.
+    static bool SamePlace(BarStrip a, BarStrip b) => a.Edge == b.Edge && a.Screen == b.Screen && a.SeamRight.Equals(b.SeamRight);
+
+    static Maybe<int> MiddleXOf(nint hwnd) =>
+        hwnd != 0 && NativeMethods.GetWindowRect(hwnd, out var rect) ? (rect.Left + rect.Right) / 2 : Maybe<int>.None;
+
+    static Maybe<WindowRect> ScreenOf(nint hwnd)
+    {
+        if (hwnd == 0) return Maybe<WindowRect>.None;
+        var info = new NativeMethods.MONITORINFO { cbSize = Marshal.SizeOf<NativeMethods.MONITORINFO>() };
+        return NativeMethods.GetMonitorInfo(NativeMethods.MonitorFromWindow(hwnd, NativeMethods.MONITOR_DEFAULTTONEAREST), ref info)
+            ? AsWindowRect(info.rcMonitor)
+            : Maybe<WindowRect>.None;
+    }
+
+    static WindowRect AsWindowRect(NativeMethods.RECT r) => new(r.Left, r.Top, r.Right, r.Bottom);
+    static WindowRect AsWindowRect(AppBar.Rect r) => new(r.L, r.T, r.R, r.B);
+    static string Describe(WindowRect r) => $"{r.Left},{r.Top} to {r.Right},{r.Bottom}";
+
     // Where the bar floated before it was docked, so Save can keep persisting THAT while docked and
     // undocking can return to it. Null while floating.
     FloatingBarState? floatingBeforeDock;
@@ -752,6 +844,10 @@ public partial class FloatingBar : Window
         Height = double.NaN;
         if (chosenWidth is { } chosen) Width = chosen;
         UpdateLayout();
+
+        // The strip is gone and the window is floating-sized again: the tasks panel gives its own strip back (see Strip).
+        // The readjustment docks again right after this, and that dock registers afresh, so it is announced in turn.
+        AnnounceLetGo();
     }
 
     // The shell saying something on an edge moved, so the strip is asked for again. Queued, because the
@@ -820,6 +916,9 @@ public partial class FloatingBar : Window
             Height = (granted.B - granted.T) / scaleY;
 
             Save();
+            // The window is in the granted strip now: tell the tasks panel, if this dock is news (see Strip).
+            AnnounceDock(edge, AsWindowRect(info.rcMonitor), Maybe<WindowRect>.None, appBar.RegisteredOnLastDock, hwnd,
+                (granted.L + granted.R) / 2);
             return Result.Success();
         }
         finally
@@ -882,6 +981,11 @@ public partial class FloatingBar : Window
         Save();
         // The rows mirror their left edge in this mode, so they are drawn again the first time it starts.
         if (!wasAcross) Rebuild();
+        // Both strips are reserved and the window spans them: tell the tasks panel, if this dock is news (see Strip).
+        // Fresh when EITHER half registered, because the panel docks inside the right half and must follow any new
+        // registration on the seam. The screen is the seam's left-hand one, SeamRight the screen the panel docks on.
+        AnnounceDock("seam", AsWindowRect(seam.Left), Maybe.From(AsWindowRect(seam.Right)),
+            appBar.RegisteredOnLastDock || seamBar.RegisteredOnLastDock, hwnd, (left.L + right.R) / 2);
         return Result.Success();
     }
 
@@ -1001,6 +1105,9 @@ public partial class FloatingBar : Window
         // edge is remembered (dockedEdge stays set and is saved), and ShowBar docks it again.
         appBar?.Remove();
         seamBar?.Remove();
+        // The panel closes with the strip and reopens when ShowBar docks again, which registers afresh and is announced
+        // (see Strip). Silent for a bar minimized while floating: it held no strip, so nothing was announced to undo.
+        AnnounceLetGo();
         Hide();
         Save();
     }

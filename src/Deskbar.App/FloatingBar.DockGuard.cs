@@ -52,6 +52,10 @@ public partial class FloatingBar
         lastStripRepair = now;
         stripRepairs++;
         ClickTrace.Write($"dock: the shell is not holding the {dockedEdge} strip (bar {DebugDump.Format(state.Bar)}, work {DebugDump.Format(state.Work)}), registering again");
+        // Remove first, so the DockTo below sends ABM_NEW: a fresh registration, which DockTo announces through Strip
+        // (AppBar.RegisteredOnLastDock). The tasks panel registers again behind it, because the shell would otherwise put
+        // the bar's newer registration inside the panel's. Nothing is announced for the Remove on its own: the dock
+        // follows at once, and a let-go notice in between would only make the panel give its strip back for a moment.
         appBar.Remove();
         DockTo(dockedEdge).TapError(error => ClickTrace.Write($"dock: registering again failed: {error}"));
     }

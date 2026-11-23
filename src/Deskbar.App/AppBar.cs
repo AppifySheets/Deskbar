@@ -37,6 +37,19 @@ sealed class AppBar
 
     public bool Registered { get; private set; }
 
+    // Whether the LAST Dock call registered this window afresh: it sent ABM_NEW and the shell said yes (on the first
+    // try or on the remove-and-retry below). False after every Dock that found the window already registered, which
+    // is every re-dock the shell's own position notice asks for, and false after a Dock whose ABM_NEW was refused.
+    //
+    // The tasks panel's order depends on it. The shell places a NEWER registration inside an older one on the same
+    // edge, so the bar stays the outer strip only while the panel registers after it. Every time the bar's app bar
+    // registers again (the dock guard, Explorer restarting, a dock after undock, minimize or a display change), the
+    // bar announces it (FloatingBar.Strip) and the panel removes and re-registers its own behind it. A re-dock that
+    // did NOT register must not be announced, or the bar's re-dock and the panel's would answer each other for ever
+    // through the position notices both of them send. Registered alone cannot tell the two apart: it is true either
+    // way once the dock is done.
+    public bool RegisteredOnLastDock { get; private set; }
+
     // Whether the shell may be holding a strip for this window: set by every Dock, cleared only by Remove. Kept
     // apart from Registered on purpose. Registered is what ABM_NEW last answered, and that answer can be wrong
     // about the shell: ABM_NEW returns FALSE for a window that is ALREADY registered (Microsoft's docs, ABM_NEW),
@@ -74,6 +87,8 @@ sealed class AppBar
     {
         var data = Data();
         claimed = true;
+        // Set again below only when this call sends ABM_NEW and it is granted (see RegisteredOnLastDock).
+        RegisteredOnLastDock = false;
         if (!Registered)
         {
             data.uCallbackMessage = callbackMessage;
@@ -89,6 +104,9 @@ sealed class AppBar
                 SHAppBarMessage(ABM_REMOVE, ref data);
                 Registered = SHAppBarMessage(ABM_NEW, ref data) != 0;
             }
+
+            // This call sent ABM_NEW; whether the shell finally granted it is what Registered now says.
+            RegisteredOnLastDock = Registered;
         }
 
         data.uEdge = (uint)edge;
