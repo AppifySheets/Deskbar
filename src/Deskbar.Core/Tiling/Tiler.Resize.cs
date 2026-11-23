@@ -362,7 +362,7 @@ public sealed partial class Tiler
             return true;
         }
 
-        SplitMove.Apply(shown, screen.WorkArea, GapOn(screen), leaf, moved, frame).Match(
+        SplitMove.Apply(shown, screen.WorkArea, GapOn(screen), leaf, moved, frame).Map(m => m.Layout).Match(
             split =>
             {
                 // A CORNER can be half inner, half outer: the top-right corner of a full-height left tile moves the

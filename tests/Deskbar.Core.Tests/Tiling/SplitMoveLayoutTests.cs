@@ -23,11 +23,11 @@ public class SplitMoveLayoutTests
 
     // Two full-height tiles, Across[.5, .5].
     static Maybe<TileLayout> Apply(int leaf, Edges moved, WindowRect frame, int gap = 0) =>
-        SplitMove.Apply(TileLayout.Automatic(2), Area, gap, leaf, moved, frame);
+        SplitMove.Apply(TileLayout.Automatic(2), Area, gap, leaf, moved, frame).Map(m => m.Layout);
 
     // A full-height tile on the left, a stack of two on the right.
     static Maybe<TileLayout> ApplyRows(int leaf, Edges moved, WindowRect frame) =>
-        SplitMove.Apply(TileLayout.Automatic(3), Area, 0, leaf, moved, frame);
+        SplitMove.Apply(TileLayout.Automatic(3), Area, 0, leaf, moved, frame).Map(m => m.Layout);
 
     static int GapBetweenColumnsAfter(TileLayout layout, int gap = 8)
     {
@@ -72,7 +72,7 @@ public class SplitMoveLayoutTests
     // A corner moves one split per axis: the root's Across and the left stack's Down.
     [Fact] public void A_corner_moves_the_column_split_and_that_columns_row_split()
     {
-        var layout = SplitMove.Apply(Tree(Across(C(Down(C(L, .5), C(L, .5)), .5), C(L, .5))), Area, 0, 0, Edges.Right | Edges.Bottom, new(0, 0, 700, 200)).Value;
+        var layout = SplitMove.Apply(Tree(Across(C(Down(C(L, .5), C(L, .5)), .5), C(L, .5))), Area, 0, 0, Edges.Right | Edges.Bottom, new(0, 0, 700, 200)).Value.Layout;
         AssertClose([0.7, 0.3], Shares(layout.Root));
         AssertClose([1.0 / 3, 2.0 / 3], Shares(Child(layout.Root, 0)));
     }
@@ -89,7 +89,7 @@ public class SplitMoveLayoutTests
     {
         var pair = Tree(Down(C(Across(C(L, .5), C(L, .5)), .5), C(L, .5)));
 
-        var layout = SplitMove.Apply(pair, Area, 0, 0, Edges.Bottom, new(0, 0, 500, 400)).Value;
+        var layout = SplitMove.Apply(pair, Area, 0, 0, Edges.Bottom, new(0, 0, 500, 400)).Value.Layout;
 
         Is("D[A[L 0.5, L 0.5] 0.666667, L 0.333333]", layout);
     }
@@ -100,7 +100,7 @@ public class SplitMoveLayoutTests
     {
         var nested = Tree(Across(C(L, .5), C(Down(C(Across(C(L, .5), C(L, .5)), .5), C(L, .5)), .5)));
 
-        var layout = SplitMove.Apply(nested, Area, 0, 1, Edges.Right, new(500, 0, 800, 300)).Value;
+        var layout = SplitMove.Apply(nested, Area, 0, 1, Edges.Right, new(500, 0, 800, 300)).Value.Layout;
 
         Is("A[L 0.5, D[A[L 0.6, L 0.4] 0.5, L 0.5] 0.5]", layout);
     }
@@ -110,7 +110,7 @@ public class SplitMoveLayoutTests
     {
         var nested = Tree(Across(C(L, .5), C(Down(C(Across(C(L, .5), C(L, .5)), .5), C(L, .5)), .5)));
 
-        var layout = SplitMove.Apply(nested, Area, 0, 1, Edges.Right, new(500, 0, 990, 300)).Value;
+        var layout = SplitMove.Apply(nested, Area, 0, 1, Edges.Right, new(500, 0, 990, 300)).Value.Layout;
 
         Is("A[L 0.5, D[A[L 0.9, L 0.1] 0.5, L 0.5] 0.5]", layout);
     }
@@ -120,7 +120,7 @@ public class SplitMoveLayoutTests
     {
         var opened = Tree(Across(C(L, .5), C(L, .5)), opening: 1);
 
-        Assert.Equal(1, SplitMove.Apply(opened, Area, 0, 0, Edges.Right, new(0, 0, 700, 600)).Value.Opening);
+        Assert.Equal(1, SplitMove.Apply(opened, Area, 0, 0, Edges.Right, new(0, 0, 700, 600)).Value.Layout.Opening);
     }
 
     static void Is(string expected, TileLayout layout) => Assert.Equal(expected, Text(layout));
