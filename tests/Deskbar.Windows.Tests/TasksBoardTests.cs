@@ -2275,4 +2275,75 @@ public class TasksBoardTests
         Assert.Equal((FontWeights.Bold, FontStyles.Italic), TitleLookOf(t.Window, both));
         Assert.Equal((FontWeights.Normal, FontStyles.Normal), TitleLookOf(t.Window, plain));
     });
+
+    // --- RULING 62: settled comments fold away behind one dim line ---------------------------------------------------------
+
+    static Button SettledFold(Board t) =>
+        Inside(t.Window).OfType<Button>().Single(b => AutomationProperties.GetName(b) == "Settled comments");
+
+    static string TextOf(Button button) => Inside(button).OfType<TextBlock>().First().Text;
+
+    // A thread whose question was answered: two comments settled (the session's, since the ask), one before it and one of
+    // his not.
+    static (Guid Task, Guid Older) Answered(Board t)
+    {
+        var id = t.Tasks.Create("Tasks redesign", t.Gepha, Session("s1")).Value.Id;
+        t.Tasks.Comment(id, "s1", "older finding");
+        t.Tasks.Ask(id, "Merge?");
+        t.Tasks.Comment(id, "s1", "detail of the question");
+        t.Tasks.Comment(id, "s1", "follow-up");
+        t.Tasks.Comment(id, Maybe<string>.None, "my reply");
+        t.Tasks.Answered("s1");
+        return (id, t.Tasks.Board.Tasks.Single().Comments[0].Id);
+    }
+
+    [Fact]
+    public void Settled_comments_are_hidden_behind_a_line_that_expands_them() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        var (id, _) = Answered(t);
+        t.Controller.Open(Rect.Empty);
+        t.Controller.ToggleThread(id);
+
+        Assert.Equal(2, t.Window.ShownComments(id).Count); // the older one and his reply
+        Assert.Equal("2 settled comments", TextOf(SettledFold(t)));
+
+        Click(SettledFold(t));
+        Assert.Equal(4, t.Window.ShownComments(id).Count);
+        Assert.Equal("Hide 2 settled comments", TextOf(SettledFold(t)));
+
+        Click(SettledFold(t));
+        Assert.Equal(2, t.Window.ShownComments(id).Count);
+    });
+
+    [Fact]
+    public void A_thread_with_nothing_settled_has_no_line() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        var id = t.Tasks.AddNote("note", t.Gepha).Value.Id;
+        t.Tasks.Comment(id, Maybe<string>.None, "mine");
+        t.Controller.Open(Rect.Empty);
+        t.Controller.ToggleThread(id);
+
+        Assert.DoesNotContain(Inside(t.Window).OfType<Button>(), b => AutomationProperties.GetName(b) == "Settled comments");
+    });
+
+    [Fact]
+    public void Petre_settles_any_comment_from_its_button_and_unsettles_it() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        var (id, older) = Answered(t);
+        t.Controller.Open(Rect.Empty);
+        t.Controller.ToggleThread(id);
+
+        var settle = Inside(t.Window).OfType<Button>().Where(b => AutomationProperties.GetName(b) == "Settle comment").ToList();
+        Assert.Equal(2, settle.Count); // the older one and his reply; the settled ones offer Unsettle
+        Click(settle[0]);
+        Assert.True(t.Tasks.Board.Tasks.Single().Comments.Single(c => c.Id == older).Settled.HasValue);
+        Assert.Equal("3 settled comments", TextOf(SettledFold(t)));
+
+        Click(SettledFold(t));
+        Click(Inside(t.Window).OfType<Button>().First(b => AutomationProperties.GetName(b) == "Unsettle comment"));
+        Assert.Equal(2, t.Tasks.Board.Tasks.Single().Comments.Count(c => c.Settled.HasNoValue));
+    });
 }

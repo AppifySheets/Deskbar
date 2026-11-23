@@ -37,6 +37,9 @@ namespace Deskbar.Core.Tasks;
 // in progress or in the backlog goes to Claude, everything else to Petre. An older build ignores the field and drops it
 // on its next save, which costs the assignments and never a task.
 //
+// SETTLED COMMENTS (Ruling 62). A comment's optional `settled` time, null for none, in version 2 as well; an older build drops
+// it on its next save, which costs the folding and never a comment.
+//
 // THE DESCRIPTION (Ruling 58). `description` is an optional string of version 2 as well, Petre's own markdown under the
 // title; missing or null reads as none, and none is written as null, so a file without descriptions is unchanged. An
 // older build ignores it and drops it on its next save, which costs the text and never a task.
@@ -75,7 +78,7 @@ public sealed class JsonTaskStore(string baseDirectory, Action<string>? trace = 
 
     sealed record SessionDto(string? Id, string? Folder, DateTimeOffset Joined, DateTimeOffset? Ended);
 
-    sealed record CommentDto(Guid Id, string? SessionId, DateTimeOffset At, string? Markdown);
+    sealed record CommentDto(Guid Id, string? SessionId, DateTimeOffset At, string? Markdown, DateTimeOffset? Settled = null);
 
     sealed record TaskDto(
         Guid Id,
@@ -179,7 +182,7 @@ public sealed class JsonTaskStore(string baseDirectory, Action<string>? trace = 
             t.Sessions.Select(s => new SessionDto(s.Id, s.Folder, s.Joined.ToUniversalTime(),
                 s.Ended.HasValue ? s.Ended.Value.ToUniversalTime() : null)).ToArray(),
             t.Comments.Select(c => new CommentDto(c.Id, c.SessionId.HasValue ? c.SessionId.Value : null,
-                c.At.ToUniversalTime(), c.Markdown)).ToArray(),
+                c.At.ToUniversalTime(), c.Markdown, c.Settled.HasValue ? c.Settled.Value.ToUniversalTime() : null)).ToArray(),
             t.Important, t.Urgent, t.Rank,
             t.GoalId.HasValue ? t.GoalId.Value : null,
             new AssigneeDto(t.Assignee.Kind.ToString().ToLowerInvariant(), t.Assignee.Id, t.Assignee.Name),
@@ -192,7 +195,8 @@ public sealed class JsonTaskStore(string baseDirectory, Action<string>? trace = 
             d.Created.ToUniversalTime(), d.UpdatedAt.ToUniversalTime(), (d.Raised ?? d.Created).ToUniversalTime(),
             (d.Sessions ?? []).Select(s => new TaskSession(s.Id ?? "", s.Folder ?? "", s.Joined.ToUniversalTime(),
                 s.Ended is { } ended ? ended.ToUniversalTime() : Maybe<DateTimeOffset>.None)).ToArray(),
-            (d.Comments ?? []).Select(c => new TaskComment(c.Id, Maybe.From(c.SessionId), c.At.ToUniversalTime(), c.Markdown ?? "")).ToArray())
+            (d.Comments ?? []).Select(c => new TaskComment(c.Id, Maybe.From(c.SessionId), c.At.ToUniversalTime(), c.Markdown ?? "")
+            { Settled = c.Settled is { } settled ? settled.ToUniversalTime() : Maybe<DateTimeOffset>.None }).ToArray())
         {
             Important = d.Important ?? false,
             Urgent = d.Urgent ?? false,

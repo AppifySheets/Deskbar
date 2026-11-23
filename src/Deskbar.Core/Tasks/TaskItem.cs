@@ -35,7 +35,15 @@ public sealed record TaskSession(string Id, string Folder, DateTimeOffset Joined
 /// One comment in a task's thread, as markdown. <see cref="SessionId"/> names the Claude session that wrote it;
 /// none means Petre wrote it.
 /// </summary>
-public sealed record TaskComment(Guid Id, Maybe<string> SessionId, DateTimeOffset At, string Markdown);
+public sealed record TaskComment(Guid Id, Maybe<string> SessionId, DateTimeOffset At, string Markdown)
+{
+    /// <summary>
+    /// When the comment was settled (Ruling 62), or none. A settled comment is kept, never deleted, and the tasks window
+    /// folds it away behind one line. An init property like the task's flags: a comment saved before it existed is not
+    /// settled. `task answered` settles the session's comments since its ask; a session settles one of its own, Petre any.
+    /// </summary>
+    public Maybe<DateTimeOffset> Settled { get; init; }
+}
 
 /// <summary>
 /// One task. <see cref="WorkspaceId"/> is none for a free task. <see cref="StatusLine"/> is the short line a session

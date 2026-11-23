@@ -106,6 +106,9 @@ public partial class TasksWindow : Window
     TextBox? renameBox;
     // Ruling 58: the editor's second box (the description, under the title's), and the comment being rewritten in place.
     TextBox? descriptionBox;
+    // RULING 62: the tasks whose settled comments are unfolded in their threads. A view state of the window alone, kept while
+    // the window is open (cleared when it opens, with the threads), and part of the redraw signature.
+    readonly HashSet<Guid> settledOpen = [];
     Guid? editingComment;
     TextBox? commentEditor;
 
@@ -114,6 +117,7 @@ public partial class TasksWindow : Window
     readonly Dictionary<Guid, Button> menuButtons = [];
     readonly Dictionary<Guid, TextBox> commentBoxes = [];
     readonly Dictionary<Guid, IReadOnlyList<string>> authors = [];
+    readonly Dictionary<Guid, IReadOnlyList<Guid>> shownComments = [];
     readonly Dictionary<Guid, bool> closing = [];
     readonly Dictionary<Guid, string> drafts = [];
 
@@ -201,6 +205,8 @@ public partial class TasksWindow : Window
     internal string? Problem => ProblemText.Visibility == Visibility.Visible ? ProblemText.Text : null;
     internal bool ThreadShown(Guid id) => authors.ContainsKey(id);
     internal IReadOnlyList<string> CommentAuthors(Guid id) => authors.GetValueOrDefault(id) ?? [];
+    /// <summary>For the tests: the ids of the comments drawn in a task's thread, in order (settled ones folded away are not).</summary>
+    internal IReadOnlyList<Guid> ShownComments(Guid id) => shownComments.GetValueOrDefault(id) ?? [];
     internal bool IsClosing(Guid id) => closing.GetValueOrDefault(id);
     internal string CommentDraft(Guid id) => commentBoxes.TryGetValue(id, out var box) ? box.Text : drafts.GetValueOrDefault(id, "");
     internal TextBox? CommentBoxOf(Guid id) => commentBoxes.GetValueOrDefault(id);
@@ -257,6 +263,7 @@ public partial class TasksWindow : Window
         fallbackAnchor = NativeMethods.GetForegroundWindow();
         near = bar;
         HideAdd();
+        settledOpen.Clear();
         renaming = null;
         renameBox = null;
         descriptionBox = null;
@@ -491,6 +498,7 @@ public partial class TasksWindow : Window
         ages.Clear();
         selectionFrames.Clear();
         authors.Clear();
+        shownComments.Clear();
         closing.Clear();
         // The List or the Matrix (TasksWindow.Matrix.cs), whichever the switch says; the other is emptied and hidden.
         matrixShown = view.Matrix;
@@ -534,14 +542,14 @@ public partial class TasksWindow : Window
             $"{view.AssigneeFilterLabel}",
             string.Join('|', view.Places.Select(p => $"{p.IsGroup}{p.Workspace}{p.Name}{(p.Colour as SolidColorBrush)?.Color}")),
             view.EmptyText,
-            $"{renaming}{editingComment}",
+            $"{renaming}{editingComment}{string.Join(",", settledOpen.Order())}",
             $"{view.Matrix}",
             string.Join('\u0002', view.Cells.Select(c => $"{c.Header}:" + string.Join('\u0003', c.Rows.Select(r =>
                 $"{r.Id}|{r.Title}|{r.Detail}|{r.Description}|{r.Status}|{r.Claudes}|{r.Assignee.Id}|{PlaceSignature(r.Place)}|{r.CommentCount}|{r.Expanded}|{r.Closing}|{r.Important}|{r.Urgent}|" +
-                string.Join('\u0004', r.Comments.Select(c => $"{c.Id}{c.Author}{c.When}{c.Markdown}")))))),
+                string.Join('\u0004', r.Comments.Select(c => $"{c.Id}{c.Author}{c.When}{c.Markdown}{c.Settled}")))))),
             string.Join('\u0002', view.Groups.Select(g => $"{g.Header}:" + string.Join('\u0003', g.Rows.Select(r =>
                 $"{r.Id}|{r.Title}|{r.Detail}|{r.Description}|{r.Status}|{r.Claudes}|{r.Assignee.Id}|{r.Sessions}|{r.SessionCount}|{r.LiveCount}|{PlaceSignature(r.Place)}|{r.CommentCount}|" +
-                $"{r.Expanded}|{r.Closing}|{r.Important}|{r.Urgent}|" + string.Join('\u0004', r.Comments.Select(c => $"{c.Id}{c.Author}{c.When}{c.Markdown}")))))));
+                $"{r.Expanded}|{r.Closing}|{r.Important}|{r.Urgent}|" + string.Join('\u0004', r.Comments.Select(c => $"{c.Id}{c.Author}{c.When}{c.Markdown}{c.Settled}")))))));
 
     static string PlaceSignature(TaskPlaceChoice place) => $"{place.Workspace}{place.Name}{(place.Colour as SolidColorBrush)?.Color}";
 
@@ -1042,13 +1050,20 @@ public partial class TasksWindow : Window
 
     // --- the thread --------------------------------------------------------------------------------------------------
 
-    // The comments, each with its author and time over its markdown, then a box for Petre's next one.
+    // The comments, each with its author and time over its markdown, then a box for Petre's next one. RULING 62: the settled
+    // ones are folded away behind one dim line at the top, "N settled comments", which unfolds them in place (and reads
+    // "Hide N settled comments" while they show). They are kept, so the history stays.
     UIElement Thread(TaskRowView row)
     {
         var panel = new StackPanel();
-        row.Comments.ToList().ForEach(comment => panel.Children.Add(CommentOf(comment)));
+        var settledCount = row.Comments.Count(c => c.Settled);
+        var unfolded = settledOpen.Contains(row.Id);
+        var shown = row.Comments.Where(c => !c.Settled || unfolded).ToList();
+        if (settledCount > 0) panel.Children.Add(SettledFold(row.Id, settledCount, unfolded));
+        shown.ForEach(comment => panel.Children.Add(CommentOf(comment)));
         panel.Children.Add(CommentBox(row.Id));
-        authors[row.Id] = row.Comments.Select(c => c.Author).ToArray();
+        authors[row.Id] = shown.Select(c => c.Author).ToArray();
+        shownComments[row.Id] = shown.Select(c => c.Id).ToArray();
         return new Border
         {
             Background = ThreadFill,
@@ -1060,6 +1075,23 @@ public partial class TasksWindow : Window
             Child = panel,
         };
     }
+
+    // "N settled comments" (Ruling 62), dim, a button of its own: unfolds the thread's settled comments, then folds them again.
+    UIElement SettledFold(Guid task, int count, bool unfolded)
+    {
+        var words = count == 1 ? "1 settled comment" : $"{count} settled comments";
+        var fold = Small(new TextBlock { Text = unfolded ? $"Hide {words}" : words, Foreground = HeaderInk, FontSize = 10.5 },
+            "Settled comments", () => ToggleSettled(task), "Settled comments are kept, folded away");
+        fold.Margin = new Thickness(0, 0, 0, 6);
+        return fold;
+    }
+
+    void ToggleSettled(Guid task)
+    {
+        if (!settledOpen.Remove(task)) settledOpen.Add(task);
+        if (latest is not null) Draw(latest);
+    }
+
 
     UIElement CommentOf(TaskCommentView comment)
     {
@@ -1075,6 +1107,12 @@ public partial class TasksWindow : Window
             edit.Margin = new Thickness(8, 0, 0, 0);
             header.Children.Add(edit);
         }
+        // RULING 62: any comment can be settled (a question that has its answer) or brought back, from its own button; the
+        // comment stays either way.
+        var settle = Small(comment.Settled ? "Unsettle" : "Settle", comment.Settled ? "Unsettle comment" : "Settle comment",
+            () => Actions?.SettleComment(comment.Id, !comment.Settled), comment.Settled ? "Show it with the thread again" : "Fold this comment away, keeping it");
+        settle.Margin = new Thickness(4, 0, 0, 0);
+        if (!editing) header.Children.Add(settle);
         if (editing) return new StackPanel { Margin = new Thickness(0, 0, 0, 8), Children = { header, CommentEditorBox(comment) } };
         var document = MarkdownBlocks.Render(comment.Markdown);
         document.FontSize = 11.5;
@@ -1094,7 +1132,8 @@ public partial class TasksWindow : Window
             Focusable = true,
             Cursor = Cursors.Arrow,
         };
-        return new StackPanel { Margin = new Thickness(0, 0, 0, 8), Children = { header, body } };
+        // A settled comment, when unfolded, is dim: it is history.
+        return new StackPanel { Margin = new Thickness(0, 0, 0, 8), Opacity = comment.Settled ? 0.55 : 1, Children = { header, body } };
     }
 
     // --- editing one of his comments in place (Ruling 58) -------------------------------------------------------------

@@ -198,7 +198,7 @@ public sealed partial class RemoteControl
         // Ruling 58: his description (markdown, "" for none), and the thread's comment ids with who wrote each, which
         // `comment-edit` takes. The comments' text is the window's, as before.
         description = task.Description,
-        thread = task.Comments.Select(c => new { id = c.Id, by = c.SessionId.HasValue ? "claude" : "you", at = c.At }).ToArray(),
+        thread = task.Comments.Select(c => new { id = c.Id, by = c.SessionId.HasValue ? "claude" : "you", at = c.At, settled = c.Settled.HasValue ? (DateTimeOffset?)c.Settled.Value : null }).ToArray(),
         quadrant = task.Quadrant.Numeral(),
         order = tasks is { } service && task.IsOpen ? service.Board.PositionOf(task.Id).Map(n => (int?)n).GetValueOrDefault() : null,
         // The goal it counts toward (goals plan, Task 5), as {id, title}, or null: no link, no goal service, or a link

@@ -645,7 +645,7 @@ public class RemoteControlTaskTests
              // A Claude session's own forms (plan Task 8, RemoteControl.ClaudeHook.cs); `-` reads the text from stdin.
              "join <id> --session <session>", "new <title>|- --session <session>", "status-line <text>|- --session <session>",
              "ask <question>|- --session <session>", "answered --session <session>", "done --session <session>", "comment <markdown>|- --session <session>",
-             "later <title>|- --session <session>",
+             "later <title>|- --session <session>", "comment-settle <comment-id> --session <session>",
              "assign <id> me|claude", "describe <id> <markdown>|-", "comment-edit <comment-id> <markdown>|-", "goal <id> <goal-id>|none"],
             ControlUsage.All.Where(c => c.Verb == "task").Select(c => c.Arguments));
 }

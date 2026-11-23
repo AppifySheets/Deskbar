@@ -135,6 +135,7 @@ public sealed class TasksBoard : IDisposable
             Rename: (id, title) => Rename(id, title).IsSuccess,
             Edit: (id, title, description) => Edit(id, title, description).IsSuccess,
             EditComment: (comment, markdown) => EditComment(comment, markdown).IsSuccess,
+            SettleComment: (comment, settle) => SettleComment(comment, settle),
             MoveTo: (id, workspace) => MoveTo(id, workspace),
             Delete: id => Delete(id),
             Comment: (id, markdown) => Comment(id, markdown).IsSuccess,
@@ -420,6 +421,9 @@ public sealed class TasksBoard : IDisposable
     /// <summary>One of HIS comments rewritten (Ruling 58); a session's is refused by the board.</summary>
     public Result EditComment(Guid comment, string markdown) => Report(tasks.EditComment(comment, markdown));
 
+    /// <summary>Ruling 62: Petre settles any comment from its button (or brings a settled one back); kept either way.</summary>
+    public Result SettleComment(Guid comment, bool settle) => Report(tasks.SettleComment(comment, settle));
+
     public Result MoveTo(Guid id, Maybe<Guid> workspace) => Report(tasks.MoveTo(id, workspace));
 
     /// <summary>
@@ -615,7 +619,10 @@ public sealed class TasksBoard : IDisposable
         var at = comment.At.ToLocalTime();
         var today = now().ToLocalTime().Date == at.Date;
         return new TaskCommentView(comment.Id, comment.SessionId.HasValue ? "Claude" : "you", comment.SessionId.HasValue,
-            today ? at.ToString("HH:mm") : at.ToString("d MMM HH:mm"), comment.Markdown);
+            today ? at.ToString("HH:mm") : at.ToString("d MMM HH:mm"), comment.Markdown)
+        {
+            Settled = comment.Settled.HasValue,
+        };
     }
 
     // A workspace as a chip: its name and lane colour, or "none". A workspace that no longer exists reads as none, the
@@ -670,7 +677,11 @@ internal sealed record TaskFilterChip(TaskFilter Filter, string Label, bool On, 
 internal sealed record TaskPlaceChoice(Maybe<Guid> Workspace, string Name, Brush? Colour);
 
 /// <summary>One comment: "Claude" or "you", its time as shown, and its markdown.</summary>
-internal sealed record TaskCommentView(Guid Id, string Author, bool ByClaude, string When, string Markdown);
+internal sealed record TaskCommentView(Guid Id, string Author, bool ByClaude, string When, string Markdown)
+{
+    /// <summary>Settled (Ruling 62): kept, but folded away behind the thread's "N settled comments" line.</summary>
+    public bool Settled { get; init; }
+}
 
 /// <summary>
 /// One line: the task's title and detail (the question while it waits, else its status line, plus "no live session"),
@@ -768,6 +779,7 @@ internal sealed record TasksWindowActions(
     Func<Guid, string, bool> Rename,
     Func<Guid, string, string, bool> Edit,
     Func<Guid, string, bool> EditComment,
+    Action<Guid, bool> SettleComment,
     Action<Guid, Maybe<Guid>> MoveTo,
     Action<Guid> Delete,
     Func<Guid, string, bool> Comment,

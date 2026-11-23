@@ -156,4 +156,14 @@ public sealed class SessionBriefingTests
         Assert.DoesNotContain("detail worth keeping", text);
         Assert.True(text.Length < 10_000, $"{text.Length} characters");
     }
+
+    [Fact]
+    public void The_briefing_says_answered_settles_the_questions_comments()
+    {
+        var text = SessionBriefing.Start(Start(), Maybe<TaskItem>.None, []);
+
+        Assert.Contains("also settles, that is folds away, your comments written since you asked", text);
+        Assert.Contains($"task comment-settle <comment-id> --session {Sid}", text);
+        Assert.True(text.Length < 10_000, $"{text.Length} characters");
+    }
 }

@@ -370,6 +370,11 @@ Tasks 7 to 9). Needs Claude Code installed and both Claude boxes in Manage ticke
     the tasks window's List and Matrix the important title is bold, the urgent one italic, the last bold italic and the
     first plain. Flip a toggle: the title changes with it. At the bar's narrowest width the bold titles still trim
     with an ellipsis and push nothing off the line.
+79. Settled comments (Ruling 62). Have a session ask a question with a comment of detail and a follow-up, then answer it (the
+    session runs `task answered`): open the task's thread in the tasks window. Those comments are gone behind a dim "2 settled
+    comments" line, and your own comment and any written before the ask are still there. Click the line: they unfold, dim,
+    and it reads "Hide 2 settled comments". "Settle" beside any comment folds it away; "Unsettle" brings it back. The
+    comments are still in `task list`'s `thread` with their `settled` time, and survive a restart.
 
 ## Goals
 

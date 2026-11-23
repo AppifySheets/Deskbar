@@ -713,4 +713,15 @@ public sealed class ClaudeSkillTests : IDisposable
         Assert.Contains("say exactly what", on);
         Assert.DoesNotContain("worth keeping", on);
     }
+
+    [Fact]
+    public void The_skill_says_answered_settles_the_questions_comments()
+    {
+        Settled(WithABell);
+
+        ClaudeSkill.Sync(true, true, home, Deskbar);
+        var on = File.ReadAllText(Skill);
+        Assert.Contains("your comments written since you asked are settled", on);
+        Assert.Contains("task comment-settle <comment-id> --session", on);
+    }
 }
