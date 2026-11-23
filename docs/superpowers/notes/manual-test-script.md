@@ -275,7 +275,7 @@ The task list at the bottom of the bar (spec `docs/superpowers/specs/2026-11-22-
 
 The tasks panel (spec `docs/superpowers/specs/2026-11-22-tasks-board-design.md`, "The window" and "Comments", and
 `docs/superpowers/specs/2026-11-23-tasks-panel-design.md`, which replaced the floating window). Steps 56 to 64 were
-written for the floating window and now describe the panel; 64a to 64k cover what is new.
+written for the floating window and now describe the panel; 64a to 64l cover what is new.
 
 56. With three or fewer open tasks the button at the right end of the chip row reads "All tasks" ("All" on a narrow bar); with more, "+N more" ("+N"). Click it: a
     full-height panel opens just inside the bar (not over it), on the list and not on a form
@@ -339,6 +339,10 @@ written for the floating window and now describe the panel; 64a to 64k cover wha
 64k. Floating bar. Undock the bar so it floats, near the left edge of a screen: the panel opens on that edge, by the
     bar. Move the bar to the right half: the panel takes the right edge. Dock the bar again: the panel docks inside
     it.
+64l. Tray overflow. Dock the bar on the screen whose taskbar has the tray, at the edge where the tray's ^ is, and
+    open the panel. Click the bar's tray chevron (or the taskbar's ^): the hidden-icons flyout opens over the bar and
+    the panel, stays open for at least five seconds without flickering, and its icons can be clicked, including the
+    ones over the panel. Close it (Esc or a click elsewhere): within a second the panel is back on top.
 
 ## Claude sessions and their tasks
 

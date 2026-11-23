@@ -731,10 +731,7 @@ public partial class FloatingBar
     bool StepBelowOverflow(nint bar)
     {
         var overflow = overflowInFront;
-        if (overflow == 0 || !NativeMethods.GetWindowRect(overflow, out var over)
-            || !NativeMethods.GetWindowRect(bar, out var mine)
-            || !TrayOverflowCover.ShouldStepBelow(true, NativeMethods.IsWindowVisible(overflow),
-                new(over.Left, over.Top, over.Right, over.Bottom), new(mine.Left, mine.Top, mine.Right, mine.Bottom)))
+        if (!StepBehindOverflow(bar, overflow))
         {
             if (belowOverflow)
             {
@@ -744,16 +741,34 @@ public partial class FloatingBar
             return false;
         }
 
-        // Directly behind the overflow, and nothing else: the same call StepAsideIfCovered makes for an ordinary window. Behind a
-        // topmost window the bar stays in the topmost band, so it is still above everything ordinary; behind an ordinary one it
-        // leaves the band, which is where the flyout is. SWP_NOACTIVATE, so the flyout keeps the focus it has.
-        NativeMethods.SetWindowPos(bar, overflow, 0, 0, 0, 0,
-            NativeMethods.SWP_NOMOVE | NativeMethods.SWP_NOSIZE | NativeMethods.SWP_NOACTIVATE);
         if (!belowOverflow)
         {
             belowOverflow = true;
             ClickTrace.Write($"tray overflow: bar steps below {overflow:X} class={TopLevelWindows.ClassOf(overflow)}");
         }
+        return true;
+    }
+
+    // THE STEP ITSELF, shared with the tasks panel (TasksPanel.ReclaimTopmost). The panel docks just inside the bar, full
+    // height, on the same screen, so the flyout that straddles the bar reaches over the panel too whenever it is wider than
+    // the bar (final review of the tasks panel branch, Important 1), and the panel's own 1 s re-assert would bring back the
+    // flicker this section describes. One rule for both windows, so they cannot drift apart: `overflow` is the window the
+    // BAR believes is in front (OverflowInFront; 0 for none), and `window` steps directly behind it only when
+    // TrayOverflowCover says the two rectangles overlap and the flyout is visible. True when it stepped, so the caller
+    // does not climb back on top. No trace here: each caller says it in its own words, once per change.
+    internal static bool StepBehindOverflow(nint window, nint overflow)
+    {
+        if (overflow == 0 || !NativeMethods.GetWindowRect(overflow, out var over)
+            || !NativeMethods.GetWindowRect(window, out var mine)
+            || !TrayOverflowCover.ShouldStepBelow(true, NativeMethods.IsWindowVisible(overflow),
+                new(over.Left, over.Top, over.Right, over.Bottom), new(mine.Left, mine.Top, mine.Right, mine.Bottom)))
+            return false;
+
+        // Directly behind the overflow, and nothing else: the same call StepAsideIfCovered makes for an ordinary window. Behind a
+        // topmost window the caller stays in the topmost band, so it is still above everything ordinary; behind an ordinary one
+        // it leaves the band, which is where the flyout is. SWP_NOACTIVATE, so the flyout keeps the focus it has.
+        NativeMethods.SetWindowPos(window, overflow, 0, 0, 0, 0,
+            NativeMethods.SWP_NOMOVE | NativeMethods.SWP_NOSIZE | NativeMethods.SWP_NOACTIVATE);
         return true;
     }
 
