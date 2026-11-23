@@ -193,6 +193,19 @@ public static class TaskViews
                 () => s.IsLive ? SessionState.Idle : Gone(s, transcriptExists))))
             .ToList();
 
+    /// <summary>
+    /// How many of the task's sessions Claude is working in right now (tasks panel plan, Task 8): its LIVE sessions that
+    /// <paramref name="listed"/> (the latest `claude agents --json`) shows Busy. The tasks panel draws each as a session
+    /// square with a halo. No list ("cannot tell") is 0: nothing is shown working that nothing says is working.
+    /// </summary>
+    //
+    // Live by the hooks' word AND busy by the list: a session the hooks have ended can linger in the list for a poll, and
+    // a halo on an ended session's square would contradict the square's own dim colour.
+    public static int WorkingCount(TaskItem task, Maybe<IReadOnlyCollection<ClaudeAgent>> listed) =>
+        listed.Match(
+            list => task.Sessions.Count(s => s.IsLive && list.Any(a => a.Busy && a.SessionId == s.Id)),
+            () => 0);
+
     static SessionState Gone(TaskSession session, Func<TaskSession, bool> transcriptExists) =>
         transcriptExists(session) ? SessionState.Ended : SessionState.Expired;
 

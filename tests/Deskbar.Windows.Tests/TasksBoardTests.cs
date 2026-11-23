@@ -75,6 +75,10 @@ public class TasksBoardTests
 
     static readonly DateTime ClickStart = new(2026, 11, 22, 9, 0, 0, DateTimeKind.Utc);
 
+    // The panel's saved width in most tests: past TasksPanelLayout.MatrixFrom (780), so the full line and the List / Matrix
+    // switch both show (Task 8). It was the floating window's 720 DIP until the switch was gated on 780.
+    const double Wide = 800;
+
     // Each read of the task clock is a minute later, so tasks are raised in the order the test makes them. Each read of
     // the click clock is a second later, so a click is never "right after a repaint" unless a test hands in a clock of
     // its own (the click guard's test does).
@@ -86,7 +90,7 @@ public class TasksBoardTests
         Func<DateTimeOffset>? now = null, TaskSelection? selection = null, Func<bool>? activates = null,
         Func<TaskItem, IReadOnlyList<SessionView>>? sessionsOf = null, Action<Guid>? startClaude = null,
         Func<TaskItem, string, Result>? openSession = null, IObservable<System.Reactive.Unit>? sessionsChanged = null,
-        string edge = "right")
+        string edge = "right", double width = Wide, Func<TaskItem, int>? workingOf = null)
     {
         var harness = Harness.Build();
         var minutes = 0;
@@ -101,9 +105,9 @@ public class TasksBoardTests
             Quiet = true, ClickClock = clickClock ?? (() => ClickStart.AddSeconds(seconds++)), Now = now ?? (() => Start.AddHours(1)),
         };
 #pragma warning restore WPF0001
-        // The floating window's 720 DIP, which every line-layout test here was written against. The panel's own default
-        // (460) is narrower than the full line; the slim line below 620 DIP is Task 8's, with its own tests.
-        Assert.True(harness.Manager.SaveTasksPanel(new Deskbar.Core.Persistence.TasksPanelState(false, 720)).IsSuccess);
+        // A panel wide enough for everything (Wide, below): the full line and the Matrix switch both need it. The slim line
+        // below 620 DIP and the switch's 780 are Task 8's, with their own tests passing a `width`.
+        Assert.True(harness.Manager.SaveTasksPanel(new Deskbar.Core.Persistence.TasksPanelState(false, width)).IsSuccess);
         var panel = new TasksPanelRig(window).Docked(edge);
         var controller = new TasksBoard(window, panel.Panel, tasks, harness.Manager, goTo ?? (t =>
         {
@@ -114,7 +118,8 @@ public class TasksBoardTests
             bringForward?.Invoke(hwnd);
             return activates?.Invoke() ?? true;
         }, undoTimer: timers.Start, now: () => Start.AddHours(1), selection: selection,
-            sessionsOf: sessionsOf, startClaude: startClaude, openSession: openSession, sessionsChanged: sessionsChanged);
+            sessionsOf: sessionsOf, startClaude: startClaude, openSession: openSession, sessionsChanged: sessionsChanged,
+            workingOf: workingOf);
         return new Board { Harness = harness, Window = window, Controller = controller, Panel = panel, Tasks = tasks, Timers = timers, WentTo = went };
     }
 
@@ -402,7 +407,7 @@ public class TasksBoardTests
         Assert.True(t.Controller.IsOpen);
         Assert.True(t.Window.IsOpen);
         Assert.True(t.Window.IsVisible);
-        Assert.Equal(["Undock", $"DockWith Right {Px(t, 720)}"], t.Panel.Calls);
+        Assert.Equal(["Undock", $"DockWith Right {Px(t, Wide)}"], t.Panel.Calls);
 
         t.Controller.Toggle();
         Assert.False(t.Controller.IsOpen);
@@ -420,10 +425,10 @@ public class TasksBoardTests
         using var t = Build();
 
         t.Controller.Show();
-        Assert.Equal(new Deskbar.Core.Persistence.TasksPanelState(true, 720), t.Harness.Manager.State.TasksPanel);
+        Assert.Equal(new Deskbar.Core.Persistence.TasksPanelState(true, Wide), t.Harness.Manager.State.TasksPanel);
 
         t.Controller.Hide();
-        Assert.Equal(new Deskbar.Core.Persistence.TasksPanelState(false, 720), t.Harness.Manager.State.TasksPanel);
+        Assert.Equal(new Deskbar.Core.Persistence.TasksPanelState(false, Wide), t.Harness.Manager.State.TasksPanel);
     });
 
     // The app exiting is not the user closing the panel: Shutdown saves it as open when it was, before the panel's own
@@ -436,7 +441,7 @@ public class TasksBoardTests
 
         t.Controller.Shutdown();
 
-        Assert.Equal(new Deskbar.Core.Persistence.TasksPanelState(true, 720), t.Harness.Manager.State.TasksPanel);
+        Assert.Equal(new Deskbar.Core.Persistence.TasksPanelState(true, Wide), t.Harness.Manager.State.TasksPanel);
         Assert.Equal("Undock", t.Panel.Calls[^1]);
     });
 
@@ -456,7 +461,7 @@ public class TasksBoardTests
         // A late Hide (a queued pipe command, the bar's toggle) cannot undo the state saved for the next start either.
         t.Controller.Hide();
 
-        Assert.Equal(new Deskbar.Core.Persistence.TasksPanelState(true, 720), t.Harness.Manager.State.TasksPanel);
+        Assert.Equal(new Deskbar.Core.Persistence.TasksPanelState(true, Wide), t.Harness.Manager.State.TasksPanel);
         Assert.True(t.Panel.Panel.IsShown);
     });
 
@@ -805,7 +810,7 @@ public class TasksBoardTests
         t.Window.Close();
         Assert.False(t.Controller.IsOpen);
         Assert.False(t.Window.IsVisible);
-        Assert.Equal(new Deskbar.Core.Persistence.TasksPanelState(false, 720), t.Harness.Manager.State.TasksPanel);
+        Assert.Equal(new Deskbar.Core.Persistence.TasksPanelState(false, Wide), t.Harness.Manager.State.TasksPanel);
 
         t.Controller.Show();
         Assert.True(t.Window.IsVisible);
@@ -833,10 +838,10 @@ public class TasksBoardTests
         t.Controller.Show();
         t.Panel.Calls.Clear();
 
-        t.Window.Actions!.ResizePanel(800);
+        t.Window.Actions!.ResizePanel(900);
 
-        Assert.Equal(new Deskbar.Core.Persistence.TasksPanelState(true, 800), t.Harness.Manager.State.TasksPanel);
-        Assert.Equal([$"DockWith Right {Px(t, 800)}"], t.Panel.Calls);
+        Assert.Equal(new Deskbar.Core.Persistence.TasksPanelState(true, 900), t.Harness.Manager.State.TasksPanel);
+        Assert.Equal([$"DockWith Right {Px(t, 900)}"], t.Panel.Calls);
     });
 
     // A width in DIPs as the panel asks the shell for it: physical pixels at the window's own scale (TasksPanelRig).
@@ -1821,7 +1826,7 @@ public class TasksBoardTests
 
         Assert.True(t.Window.MatrixShown);
         Assert.Equal(before, t.Window.ActualWidth, 0.5);
-        Assert.Equal(720, t.Harness.Manager.State.TasksPanel!.Width);
+        Assert.Equal(Wide, t.Harness.Manager.State.TasksPanel!.Width);
     });
 
     // --- Whole-PR review, I-1: a redraw keeps each Matrix cell's scroll, and a workspace switch redraws no row --------
@@ -3080,4 +3085,165 @@ public class TasksBoardTests
     });
 
     static bool HasButton(object scope, string name) => Inside(scope).OfType<Button>().Any(b => AutomationProperties.GetName(b) == name);
+
+    // --- Tasks panel plan, Task 8: lines at the panel's width, the Matrix from 780, the working halo ------------------
+    // (spec docs/superpowers/specs/2026-11-23-tasks-panel-design.md, "Lines at panel width" and "The Matrix")
+
+    // A line's session squares, in order, by what each says: "session-live", "session-ended" or "session-working".
+    static IReadOnlyList<string> SquaresOf(Button line) =>
+        Inside(line).OfType<Border>().Select(b => b.Tag as string).OfType<string>().Where(tag => tag.StartsWith("session-", StringComparison.Ordinal)).ToArray();
+
+    // A line's tooltip as text: a slim line's is a TextBlock (its age is rewritten in place each minute), a full line's a string.
+    static string TipOf(Button line) => line.ToolTip is TextBlock text ? text.Text : $"{line.ToolTip}";
+
+    static IReadOnlyList<string> MenuWords(ContextMenu menu) =>
+        menu.Items.OfType<MenuItem>().Select(i => i.Header is TextBlock text ? text.Text : $"{i.Header}").ToArray();
+
+    // Below 620 DIP a line is slim: no session words, no age, no assignee and no Reopen button on it; its sessions are
+    // squares only, and the age and assignee move into its tooltip.
+    [Fact]
+    public void A_panel_narrower_than_620_draws_slim_lines() => StaThread.Run(() =>
+    {
+        using var t = Build(width: TasksPanelLayout.SlimBelow - 1);
+        var id = t.Tasks.Create("work", t.Gepha, Session("s1")).Value.Id;
+        t.Tasks.Join(id, Session("s2", live: false));
+        var closed = t.Tasks.AddNote("old errand", t.Gepha).Value.Id;
+        t.Tasks.Close(closed);
+        t.Controller.Show();
+
+        var line = LineOf(t.Window, id);
+        Assert.DoesNotContain(Inside(line).OfType<TextBlock>(), b => b.Text.Contains("session", StringComparison.Ordinal));
+        Assert.DoesNotContain(Inside(line).OfType<TextBlock>(), b => Equals(b.Tag, "task-age") || Equals(b.Tag, "task-assignee"));
+        Assert.Equal("", t.Window.AgeText(id));
+        Assert.Equal(["session-live", "session-ended"], SquaresOf(line));
+        var task = t.Tasks.Board.Tasks.Single(x => x.Id == id);
+        Assert.Contains($"{TaskAge.Format(Start.AddHours(1) - task.Created)} · {task.Assignee.Name}", TipOf(line));
+
+        t.Controller.Filter(TaskFilter.Closed);
+        Assert.False(HasButton(LineOf(t.Window, closed), "Reopen"));
+    });
+
+    // From 620 DIP the line is today's, and the switch between the two happens when the grip's drag ends (ResizePanel),
+    // redrawing every line once.
+    [Fact]
+    public void A_panel_620_or_wider_draws_todays_lines() => StaThread.Run(() =>
+    {
+        using var t = Build(width: TasksPanelLayout.SlimBelow);
+        var id = t.Tasks.Create("work", t.Gepha, Session("s1")).Value.Id;
+        t.Controller.Show();
+
+        var line = LineOf(t.Window, id);
+        Assert.Contains(Inside(line).OfType<TextBlock>(), b => b.Text == "1 session");
+        Assert.Contains(Inside(line).OfType<TextBlock>(), b => Equals(b.Tag, "task-assignee"));
+        Assert.NotEqual("", t.Window.AgeText(id));
+
+        var rebuilds = t.Window.Rebuilds;
+        t.Window.Actions!.ResizePanel(TasksPanelLayout.DefaultWidth);
+        Assert.Equal(rebuilds + 1, t.Window.Rebuilds);
+        Assert.DoesNotContain(Inside(LineOf(t.Window, id)).OfType<TextBlock>(), b => b.Text == "1 session");
+
+        t.Window.Actions!.ResizePanel(TasksPanelLayout.SlimBelow);
+        Assert.Contains(Inside(LineOf(t.Window, id)).OfType<TextBlock>(), b => b.Text == "1 session");
+    });
+
+    // The status at both widths (main's status marks met the panel in the rebase onto 7df6328): a full line has the
+    // status chip; a slim line has no chip column, names the status in its tooltip beside the age and the assignee, and
+    // a Done line keeps the green tick in front of its title at either width.
+    [Fact]
+    public void A_slim_line_names_its_status_in_the_tooltip_and_keeps_the_done_tick() => StaThread.Run(() =>
+    {
+        using var t = Build(width: TasksPanelLayout.SlimBelow - 1);
+        var done = t.Tasks.Create("finished", t.Gepha, Session("s1")).Value.Id;
+        t.Tasks.MarkDone(done);
+        var working = t.Tasks.Create("working", t.Gepha, Session("s2")).Value.Id;
+        t.Controller.Show();
+
+        var line = LineOf(t.Window, done);
+        Assert.Null(StatusChipOf(line));
+        Assert.True(HasDoneTick(line));
+        var task = t.Tasks.Board.Tasks.Single(x => x.Id == done);
+        Assert.StartsWith("finished\n", TipOf(line), StringComparison.Ordinal);
+        Assert.Contains($"Done · {TaskAge.Format(Start.AddHours(1) - task.Created)} · {task.Assignee.Name}", TipOf(line));
+        Assert.Null(StatusChipOf(LineOf(t.Window, working)));
+        Assert.False(HasDoneTick(LineOf(t.Window, working)));
+
+        t.Window.Actions!.ResizePanel(TasksPanelLayout.SlimBelow);
+        Assert.Equal("Done", StatusWordOf(LineOf(t.Window, done)));
+        Assert.True(HasDoneTick(LineOf(t.Window, done)));
+        Assert.Equal("In progress", StatusWordOf(LineOf(t.Window, working)));
+    });
+
+    // The List / Matrix switch shows only from 780 DIP. Narrower, the List shows and the switch hides, but the setting
+    // (AppState.TasksMatrix) is left as it is, so widening the panel again brings the Matrix back.
+    [Fact]
+    public void The_Matrix_switch_shows_only_from_780_and_the_setting_survives_a_narrow_panel() => StaThread.Run(() =>
+    {
+        using var t = Build(width: TasksPanelLayout.MatrixFrom);
+        t.Tasks.AddNote("a", t.Gepha);
+        t.Controller.Show();
+        Assert.Equal(Visibility.Visible, ButtonNamed(t.Window, "Matrix").Visibility);
+        Click(ButtonNamed(t.Window, "Matrix"));
+        Assert.True(t.Window.MatrixShown);
+
+        t.Window.Actions!.ResizePanel(TasksPanelLayout.MatrixFrom - 1);
+        Assert.False(t.Window.MatrixShown);
+        Assert.Equal(Visibility.Collapsed, ButtonNamed(t.Window, "Matrix").Visibility);
+        Assert.Equal(Visibility.Collapsed, ButtonNamed(t.Window, "List").Visibility);
+        Assert.True(t.Harness.Manager.State.TasksMatrix);
+
+        // Reopened narrow, still the List.
+        t.Controller.Hide();
+        t.Controller.Show();
+        Assert.False(t.Window.MatrixShown);
+
+        t.Window.Actions!.ResizePanel(TasksPanelLayout.MatrixFrom);
+        Assert.True(t.Window.MatrixShown);
+        Assert.Equal(Visibility.Visible, ButtonNamed(t.Window, "Matrix").Visibility);
+    });
+
+    // A session Claude is working in right now (`workingOf`: the task's live sessions the latest `claude agents --json`
+    // lists busy) wears a 2 DIP halo round its live blue square. A new list redraws the line even when only that count
+    // changed.
+    [Fact]
+    public void A_session_that_is_working_draws_a_halo() => StaThread.Run(() =>
+    {
+        var working = 0;
+        var changed = new System.Reactive.Subjects.Subject<System.Reactive.Unit>();
+        using var t = Build(width: TasksPanelLayout.DefaultWidth, sessionsChanged: changed, workingOf: _ => working);
+        var id = t.Tasks.Create("work", t.Gepha, Session("s1")).Value.Id;
+        t.Tasks.Join(id, Session("s2"));
+        t.Controller.Show();
+        Assert.Equal(["session-live", "session-live"], SquaresOf(LineOf(t.Window, id)));
+
+        working = 1;
+        changed.OnNext(System.Reactive.Unit.Default);
+
+        var line = LineOf(t.Window, id);
+        Assert.Equal(["session-working", "session-live"], SquaresOf(line));
+        var halo = Inside(line).OfType<Border>().First(b => Equals(b.Tag, "session-working"));
+        Assert.Equal(new Thickness(2), halo.Padding);
+        var square = Assert.IsType<Border>(halo.Child);
+        Assert.Equal(8, square.Width);
+    });
+
+    // Close and Reopen leave a slim line (no column for them) but stay in its "⋯" menu, which already offered both.
+    [Fact]
+    public void A_slim_line_keeps_close_and_reopen_in_its_menu() => StaThread.Run(() =>
+    {
+        using var t = Build(width: TasksPanelLayout.DefaultWidth);
+        var id = t.Tasks.AddNote("note", t.Gepha).Value.Id;
+        t.Controller.Show();
+
+        var menu = t.Window.OpenMenuFor(id);
+        Assert.Contains("Close", MenuWords(menu));
+        menu.IsOpen = false;
+        t.Window.Dispatcher.Invoke(() => { }, System.Windows.Threading.DispatcherPriority.Background);
+
+        t.Tasks.Close(id);
+        t.Controller.Filter(TaskFilter.Closed);
+        Assert.False(HasButton(LineOf(t.Window, id), "Reopen"));
+        menu = t.Window.OpenMenuFor(id);
+        Assert.Contains("Reopen", MenuWords(menu));
+        menu.IsOpen = false;
+    });
 }

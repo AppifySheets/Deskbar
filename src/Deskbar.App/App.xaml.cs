@@ -2179,6 +2179,10 @@ public partial class App : Application
                 startClaude: id => claudeActions?.Offer(id),
                 openSession: (task, session) => claudeActions?.OpenSession(task, session) ?? Result.Failure(ClaudeActionsNotReady),
                 sessionsChanged: claudeActions?.Changed,
+                // How many of a task's live sessions Claude is busy in, by the same latest list (tasks panel plan,
+                // Task 8): their squares wear a halo. 0 before the first list; each new list pulses sessionsChanged
+                // above, which redraws a line whose count moved.
+                workingOf: task => claudeActions?.WorkingCount(task) ?? 0,
                 // Brought forward: raised, then activated (TasksBoard.Arrive). Activated through the activator, since a
                 // `tasks-window show` typed in a terminal carries no foreground right. No move to the desktop in front
                 // any more: the panel is pinned to every desktop (above).

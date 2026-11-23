@@ -46,8 +46,29 @@ public partial class TasksWindow
     // grownNormal, ListMinWidth and MatrixMinWidth as the window's MinWidth): two cells side by side need about 780 DIP,
     // so the floating window widened itself while the Matrix showed and gave the List its width back afterwards. The
     // docked panel never widens anything (spec 2026-11-23-tasks-panel-design.md, "The Matrix"), so all of it was removed
-    // by the tasks panel plan (docs/superpowers/plans/2026-11-23-tasks-panel.md, Task 6). For now the Matrix draws at
-    // whatever width the panel has; Task 8 shows its switch only from TasksPanelLayout.MatrixFrom (780 DIP).
+    // by the tasks panel plan (docs/superpowers/plans/2026-11-23-tasks-panel.md, Task 6).
+    //
+    // ONLY WHEN WIDE (spec "The Matrix", Petre's pick "only when wide"; the plan's Task 8). Two cells side by side need
+    // TasksPanelLayout.MatrixFrom (780 DIP), so the List / Matrix switch shows only while the panel is at least that wide
+    // (the view's MatrixAllowed, from the panel's saved width). Narrower, the List shows, which already groups the tasks
+    // under the quadrants I to IV, and the switch is hidden. AppState.TasksMatrix is never changed by the width: the
+    // controller shows the Matrix only when the setting asks AND the width allows (TasksBoard.View), so a panel narrowed
+    // on the Matrix and widened again comes back to it, and one opened narrow opens on the List.
+    void PaintViewSwitch(TasksView view)
+    {
+        var shown = view.MatrixAllowed ? Visibility.Visible : Visibility.Collapsed;
+        // Outlined like a filter chip, the one on show.
+        if (listSwitch is not null)
+        {
+            listSwitch.Visibility = shown;
+            listSwitch.BorderBrush = view.Matrix ? Brushes.Transparent : PickedEdge;
+        }
+        if (matrixSwitch is not null)
+        {
+            matrixSwitch.Visibility = shown;
+            matrixSwitch.BorderBrush = view.Matrix ? PickedEdge : Brushes.Transparent;
+        }
+    }
 
     // For the tests: whether the Matrix is on show, where a quadrant's cell sits (row, column), which cell holds a
     // task, whether a cell is drawn the stronger way, and a cell's centre in the drag's coordinates.

@@ -51,6 +51,11 @@ namespace Deskbar.App;
 //   Claude working   a chip with the status chips, "Claude working N", orange-edged (Orange) on or off, filled with
 //                    AskTint while on (the approved mockup; never the blue selected edge). N is what it would show
 //                    under every other filter (TasksView.ClaudeWorkingCount).
+//   The width        (tasks panel plan, Task 8; spec "Lines at panel width" and "The Matrix") below 620 DIP the lines are
+//                    slim (the view's Slim: squares for sessions, no assignee, age or Reopen; "Lines at panel width"
+//                    below Line), and the List / Matrix switch shows only from 780 (MatrixAllowed, PaintViewSwitch in
+//                    TasksWindow.Matrix.cs). Both come with the view, made again at the grip's drag end, never during it.
+//                    A session Claude is busy in wears a 2 DIP halo on its square, on either line (SessionSquare).
 //
 // Top to bottom: the toolbar in the approved mockup's three rows (the title line with "Tasks" and the end buttons,
 // List / Matrix, "+ Add" and ×; then the search row; then the filter chips: the status filters with their counts,
@@ -429,6 +434,7 @@ public partial class TasksWindow : Window
         dragLines.Clear();
         commentBoxes.Clear();
         ages.Clear();
+        slimTips.Clear();
         selectionFrames.Clear();
         authors.Clear();
         shownComments.Clear();
@@ -438,6 +444,11 @@ public partial class TasksWindow : Window
         Scroller.Visibility = view.Matrix ? Visibility.Collapsed : Visibility.Visible;
         MatrixGrid.Visibility = view.Matrix ? Visibility.Visible : Visibility.Collapsed;
         MatrixGrid.Children.Clear();
+        // Slim lines on a narrow panel (Task 8, see "Lines at panel width" below Line). The Matrix's compact lines are
+        // their own, and the Matrix never shows on a panel that narrow anyway. The squares' column is as wide as the line
+        // with the most squares needs, the same on every line so the chip after it sits at one x.
+        slimLines = view.Slim && !view.Matrix;
+        slimSquaresWidth = SquaresColumn(shownRows.Select(r => r.SessionCount).DefaultIfEmpty(0).Max());
         if (view.Matrix) DrawMatrix(view);
         else
             view.Groups.ToList().ForEach(group =>
@@ -478,16 +489,26 @@ public partial class TasksWindow : Window
             string.Join('|', view.Places.Select(p => $"{p.IsGroup}{p.Workspace}{p.Name}{(p.Colour as SolidColorBrush)?.Color}")),
             view.EmptyText,
             $"{renaming}{editingComment}{string.Join(",", settledOpen.Order())}|{string.Join(",", earlierOpen.Order())}|{string.Join(",", longOpen.Order())}",
-            $"{view.Matrix}",
+            // The two width flags (Task 8): which line is drawn and whether the view switch shows. Not the width itself, so
+            // a grip drag that crosses neither threshold redraws nothing.
+            $"{view.Matrix}{view.MatrixAllowed}{view.Slim}",
+            // A row's WorkingCount is here (Task 8): a new agents list that only starts or stops Claude working changes the
+            // squares' halos and nothing else, and must still redraw the line.
             string.Join('\u0002', view.Cells.Select(c => $"{c.Header}:" + string.Join('\u0003', c.Rows.Select(r =>
-                $"{r.Id}|{r.Title}|{r.Detail}|{r.Description}|{r.Status}|{r.Claudes}|{r.Assignee.Id}|{PlaceSignature(r.Place)}|{r.CommentCount}|{r.Expanded}|{r.Closing}|{r.Important}|{r.Urgent}|" +
+                $"{r.Id}|{r.Title}|{r.Detail}|{r.Description}|{r.Status}|{r.Claudes}|{r.Assignee.Id}|{PlaceSignature(r.Place)}|{r.CommentCount}|{r.Expanded}|{r.Closing}|{r.Important}|{r.Urgent}|{r.WorkingCount}|" +
                 string.Join('\u0004', r.Comments.Select(c => $"{c.Id}{c.Author}{c.When}{c.Markdown}{c.Settled}")))))),
             string.Join('\u0002', view.Groups.Select(g => $"{g.Header}:" + string.Join('\u0003', g.Rows.Select(r =>
                 $"{r.Id}|{r.Title}|{r.Detail}|{r.Description}|{r.Status}|{r.Claudes}|{r.Assignee.Id}|{r.Sessions}|{r.SessionCount}|{r.LiveCount}|{PlaceSignature(r.Place)}|{r.CommentCount}|" +
-                $"{r.Expanded}|{r.Closing}|{r.Important}|{r.Urgent}|" + string.Join('\u0004', r.SessionList.Select(s => $"{s.Id}{s.Joined}{s.State}")) + "|" +
+                $"{r.Expanded}|{r.Closing}|{r.Important}|{r.Urgent}|{r.WorkingCount}|" + string.Join('\u0004', r.SessionList.Select(s => $"{s.Id}{s.Joined}{s.State}")) + "|" +
                 string.Join('\u0004', r.Comments.Select(c => $"{c.Id}{c.Author}{c.When}{c.Markdown}{c.Settled}")))))));
 
     static string PlaceSignature(TaskPlaceChoice place) => $"{place.Workspace}{place.Name}{(place.Colour as SolidColorBrush)?.Color}";
+
+    // THE GAP BETWEEN WRAPPED ROWS OF CHIPS (the Task 7 review's deferred minor, fixed in Task 8): every chip has this
+    // bottom margin, so on a narrow panel, where the chips wrap onto two or three rows, the rows stand 4 DIP apart as in
+    // the approved mockup instead of touching. The Filters panel's -4 bottom margin (TasksWindow.xaml) gives the last
+    // row's back, so the toolbar is no taller for it.
+    const double ChipRowGap = 4;
 
     // The status chips and the workspace filter, redrawn with the rows.
     void DrawFilters(TasksView view)
@@ -498,7 +519,7 @@ public partial class TasksWindow : Window
             var button = Flat(new TextBlock { Text = chip.Label, Foreground = chip.Asks ? Orange : Ink, FontSize = 11 }, $"Filter: {chip.Label}",
                 () => Actions?.Filter(chip.Filter), new Thickness(8, 2, 8, 2));
             button.BorderBrush = chip.On ? PickedEdge : Brushes.Transparent;
-            button.Margin = new Thickness(0, 0, 6, 0);
+            button.Margin = new Thickness(0, 0, 6, ChipRowGap);
             Filters.Children.Add(button);
         });
         // "Claude working N" (Task 7, see the header), with the status chips; the WrapPanel lets it wrap on a narrow panel.
@@ -508,7 +529,7 @@ public partial class TasksWindow : Window
             "Filter: Claude working", () => Actions?.FilterClaudeWorking(!view.ClaudeWorking), new Thickness(8, 2, 8, 2));
         working.BorderBrush = Orange;
         working.Background = view.ClaudeWorking ? AskTint : ButtonFill;
-        working.Margin = new Thickness(0, 0, 6, 0);
+        working.Margin = new Thickness(0, 0, 6, ChipRowGap);
         working.ToolTip = "Only the tasks Claude has a live session on";
         Filters.Children.Add(working);
         ClaudeWorkingLabel = $"Claude working {view.ClaudeWorkingCount}";
@@ -519,12 +540,13 @@ public partial class TasksWindow : Window
         Button? workspace = null;
         workspace = Flat(new TextBlock { Text = $"{view.WorkspaceFilterLabel} ▾", Foreground = Ink, FontSize = 11 }, "Workspace filter",
             () => OpenMenu(WorkspaceFilterMenu(view, workspace!)), new Thickness(8, 2, 8, 2));
+        workspace.Margin = new Thickness(0, 0, 0, ChipRowGap);
         Filters.Children.Add(workspace);
         // The assignee filter (Ruling 57): me, Claude or all. Its menu opens from Flat's own press, like the others.
         Button? assignee = null;
         assignee = Flat(new TextBlock { Text = $"{view.AssigneeFilterLabel} ▾", Foreground = Ink, FontSize = 11 }, "Assignee filter",
             () => OpenAssigneeFilterMenu(), new Thickness(8, 2, 8, 2));
-        assignee.Margin = new Thickness(6, 0, 0, 0);
+        assignee.Margin = new Thickness(6, 0, 0, ChipRowGap);
         assigneeFilterButton = assignee;
         Filters.Children.Add(assignee);
         AssigneeFilterLabel = view.AssigneeFilterLabel;
@@ -536,15 +558,14 @@ public partial class TasksWindow : Window
             // after Flat's was never called, because Flat's own handler marks the click handled.
             var goal = Flat(new TextBlock { Text = $"{view.GoalFilterLabel} ▾", Foreground = Ink, FontSize = 11 }, "Goal filter",
                 () => OpenGoalFilterMenu(), new Thickness(8, 2, 8, 2));
-            goal.Margin = new Thickness(6, 0, 0, 0);
+            goal.Margin = new Thickness(6, 0, 0, ChipRowGap);
             goalFilterButton = goal;
             Filters.Children.Add(goal);
         }
         GoalFilterLabel = view.GoalFilterLabel;
         FilterLabels = view.Filters.Select(f => f.Label).ToArray();
-        // The view switch shows which view is on, outlined like a filter chip.
-        if (listSwitch is not null) listSwitch.BorderBrush = view.Matrix ? Brushes.Transparent : PickedEdge;
-        if (matrixSwitch is not null) matrixSwitch.BorderBrush = view.Matrix ? PickedEdge : Brushes.Transparent;
+        // The view switch: which view is on, and whether it shows at all at this width (TasksWindow.Matrix.cs).
+        PaintViewSwitch(view);
         WorkspaceFilterLabel = view.WorkspaceFilterLabel;
     }
 
@@ -591,7 +612,10 @@ public partial class TasksWindow : Window
         // Every column but the title's is a fixed width, the same on every line of every group, so each sits at the
         // same x, flush to the right edge; the title takes the star column and trims first.
         var grid = new Grid();
-        (compactLines ? CompactColumns : LineColumns).ToList().ForEach(width => grid.ColumnDefinitions.Add(new ColumnDefinition { Width = width }));
+        (compactLines ? CompactColumns : slimLines ? SlimColumns(slimSquaresWidth) : LineColumns).ToList()
+            .ForEach(width => grid.ColumnDefinitions.Add(new ColumnDefinition { Width = width }));
+        // Only the full line has the session words, the assignee, the age and the Reopen button.
+        var full = !compactLines && !slimLines;
         Cell(grid, 0, LeftOf(row));
         Cell(grid, 1, TextOf(row));
         var flags = FlagsOf(row);
@@ -599,17 +623,20 @@ public partial class TasksWindow : Window
         // A Matrix line (compact) has no column for the sessions, the age or the close button, so they are not made at
         // all (whole-PR review, minor 5): no element in a zero-width column, and no age for the minute's tick to rewrite.
         // The status in words (Petre, 2026-11-23: "i can't currently see statuses"; TaskStatusMarks.Chip), in its own
-        // column so it sits at the same x on every line. None in a Matrix line (no room there; its Done tick still shows),
-        // none on a line in its undo window (it is closed).
-        Cell(grid, 3, compactLines || row.Closing ? null : TaskStatusMarks.Chip(row.Status));
-        Cell(grid, 4, compactLines ? null : SessionsOf(row));
+        // column so it sits at the same x on every line. Only on a full line: none in a Matrix line (no room there; its
+        // Done tick still shows) and none on a slim one (the tick still shows, and the status is named in its tooltip,
+        // SlimTip), and none on a line in its undo window (it is closed).
+        Cell(grid, 3, full && !row.Closing ? TaskStatusMarks.Chip(row.Status) : null);
+        // A slim line has the sessions as squares alone, and no assignee, age or Reopen (Task 8): those are in its tooltip
+        // and its "⋯" menu (SlimTip, OpenMenuFor).
+        Cell(grid, 4, compactLines ? null : slimLines ? SquaresOf(row) : SessionsOf(row));
         // Who the task is on (Ruling 57): "Me" or "Claude", dim; none in a Matrix line (no column there).
-        Cell(grid, 5, compactLines ? null : AssigneeOf(row));
-        Cell(grid, 6, compactLines ? null : AgeOf(row));
+        Cell(grid, 5, full ? AssigneeOf(row) : null);
+        Cell(grid, 6, full ? AgeOf(row) : null);
         Cell(grid, 7, Chip(row.Place));
         var comments = CommentsButton(row);
         Cell(grid, 8, comments);
-        Cell(grid, 9, compactLines ? null : ActionOf(row));
+        Cell(grid, 9, full ? ActionOf(row) : null);
         var more = Small(new TextBlock { Text = "", FontFamily = IconFont, FontSize = 12, Foreground = Ink }, "More",
             () => OpenMenuFor(row.Id), "Edit, status, move, delete");
         menuButtons[row.Id] = more;
@@ -654,7 +681,8 @@ public partial class TasksWindow : Window
             HorizontalAlignment = HorizontalAlignment.Stretch,
             Focusable = false,
             Cursor = Cursors.Hand,
-            ToolTip = row.Closing ? "Closed. Undo brings it back." : $"{TaskViews.StatusName(row.Status)}: {row.Title}",
+            // A slim line's tooltip also carries the age and the assignee its line has no room for (SlimTip).
+            ToolTip = slimLines ? SlimTip(row, row.Closing ? LineTip(row) : row.Title) : LineTip(row),
         };
         AutomationProperties.SetName(line, row.Title);
         line.MouseEnter += (_, _) => Quieten(quiet, loud: true);
@@ -719,6 +747,109 @@ public partial class TasksWindow : Window
     static readonly IReadOnlyList<GridLength> LineColumns =
         [new(22), new(1, GridUnitType.Star), new(38), new(72), new(116), new(46), new(44), new(88), new(40), new(52), new(24)];
 
+    // LINES AT PANEL WIDTH (spec docs/superpowers/specs/2026-11-23-tasks-panel-design.md, "Lines at panel width"; Petre's
+    // pick, "slim line when narrow"; plan 2026-11-23-tasks-panel, Task 8). The full line's fixed columns come to 542 DIP
+    // (470 before the 72 DIP status chip column), more than the panel's default 460, so below TasksPanelLayout.SlimBelow
+    // (620 DIP; the view's Slim) a line is slim: tick, title (a Done task's green tick still in front of it), the two
+    // toggles, the sessions as squares alone (no words), the workspace chip, the comment count and "⋯". The status chip,
+    // the assignee and the age move into the line's tooltip (SlimTip, "Done · 5h · Claude"); Close and Reopen were already in "⋯"
+    // (OpenMenuFor), so the Reopen button goes without anything becoming unreachable. Same column indexes as the full
+    // line, the dropped ones zero wide and left empty. The switch happens only when the width changes at the grip's drag
+    // end, never during a drag (TasksBoard.ResizePanel), and then every line redraws once.
+    bool slimLines;
+    GridLength slimSquaresWidth = new(0);
+
+    static IReadOnlyList<GridLength> SlimColumns(GridLength squares) =>
+        [new(22), new(1, GridUnitType.Star), new(38), new(0), squares, new(0), new(0), new(88), new(40), new(0), new(24)];
+
+    // A slim line's squares: 8 DIP each, 3 DIP apart. The column fits the line with the most squares and no more than
+    // SlimSquares of them (47 DIP, inside the plan's 48), with 3 DIP to spare before the chip; zero on a board of notes.
+    const double SlimSquare = 8;
+    const double SquareGap = 3;
+    const int SlimSquares = 4;
+    const double SquaresColumnMost = 48;
+
+    static GridLength SquaresColumn(int widest) =>
+        widest == 0 ? new(0) : new(Math.Min(SquaresColumnMost, Math.Min(widest, SlimSquares) * (SlimSquare + SquareGap) + SquareGap));
+
+    // The sessions of a slim line: one square per session up to SlimSquares, the live ones first (the working ones first
+    // of those), then the ended ones. No words: the counts are in the thread.
+    UIElement? SquaresOf(TaskRowView row)
+    {
+        if (row.SessionCount == 0) return null;
+        var panel = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center };
+        Enumerable.Range(0, Math.Min(SlimSquares, row.SessionCount)).ToList()
+            .ForEach(i => panel.Children.Add(SessionSquare(SlimSquare, MarkOf(row, i))));
+        return panel;
+    }
+
+    enum SessionMark { Ended, Live, Working }
+
+    // Square i of a line: the first WorkingCount are working, the rest of the first LiveCount live, the others ended.
+    static SessionMark MarkOf(TaskRowView row, int i) =>
+        i < Math.Min(row.WorkingCount, row.LiveCount) ? SessionMark.Working
+        : i < row.LiveCount ? SessionMark.Live
+        : SessionMark.Ended;
+
+    // ONE SESSION'S SQUARE, on the full line (10 DIP) and the slim one (8): the dim fill once ended, the live blue while
+    // live, and the live blue inside a 2 DIP halo while Claude is busy in it (Task 8: the row's WorkingCount, from the
+    // latest `claude agents --json`). The halo is a translucent ring drawn OUTSIDE the square's footprint (negative
+    // margins), so a working square takes exactly the room a plain one does and nothing on the line moves when Claude
+    // starts or stops. Tagged with its mark for the tests.
+    static Border SessionSquare(double size, SessionMark mark)
+    {
+        var square = new Border
+        {
+            Width = size,
+            Height = size,
+            CornerRadius = new CornerRadius(2),
+            Background = mark == SessionMark.Ended ? EndedSession : LiveSession,
+        };
+        if (mark != SessionMark.Working)
+        {
+            square.Tag = mark == SessionMark.Live ? "session-live" : "session-ended";
+            square.Margin = new Thickness(0, 0, SquareGap, 0);
+            return square;
+        }
+        return new Border
+        {
+            Tag = "session-working",
+            Width = size + 2 * HaloWidth,
+            Height = size + 2 * HaloWidth,
+            Padding = new Thickness(HaloWidth),
+            CornerRadius = new CornerRadius(2 + HaloWidth),
+            Background = Halo,
+            Margin = new Thickness(-HaloWidth, -HaloWidth, SquareGap - HaloWidth, -HaloWidth),
+            Child = square,
+            ToolTip = "Claude is working in this session",
+        };
+    }
+
+    const double HaloWidth = 2;
+    static readonly Brush Halo = Frozen(0x66, 0x3B, 0x82, 0xF6);
+
+    // What a line's tooltip says: its status and title, or that it was just closed.
+    static string LineTip(TaskRowView row) =>
+        row.Closing ? "Closed. Undo brings it back." : $"{TaskViews.StatusName(row.Status)}: {row.Title}";
+
+    // A slim line's tooltip: its title (or that it was just closed), then what the line has no columns for: the status the
+    // full line shows in its chip, the age and the assignee ("Done · 5h · Claude"). The title alone heads it, without the
+    // full line's "Done: " in front, since the status follows on the next line. A TextBlock rather than a string so the
+    // minute's tick (RefreshAges) rewrites its age in place, as it does the full line's age column, and an open tooltip
+    // never shows an age frozen at the last redraw.
+    readonly Dictionary<Guid, (TextBlock Tip, string Head, string Status, DateTimeOffset Created, string Assignee)> slimTips = [];
+
+    TextBlock SlimTip(TaskRowView row, string head)
+    {
+        var tip = new TextBlock { Tag = "task-line-tip" };
+        slimTips[row.Id] = (tip, head, TaskViews.StatusName(row.Status), row.Created, row.Assignee.Name);
+        WriteSlimTip(slimTips[row.Id], Now());
+        return tip;
+    }
+
+    static void WriteSlimTip((TextBlock Tip, string Head, string Status, DateTimeOffset Created, string Assignee) tip, DateTimeOffset now) =>
+        tip.Tip.Text = $"{tip.Head}\n{tip.Status} · {TaskAge.Format(now - tip.Created)} · {tip.Assignee}";
+
     // THE TWO TOGGLES (Task 12), the bar's (FloatingBar.FlagToggle): important, Segoe Fluent Icons' "Important" U+E8C9,
     // and urgent, its "Recent" clock U+E823 (Segoe MDL2 Assets carries both on Windows 10). On, the glyph wears its
     // colour; off it is dim and quiet: invisible until the line is hovered or selected (Quieten), still clickable.
@@ -758,6 +889,8 @@ public partial class TasksWindow : Window
         if (MustWait) return;
         var now = Now();
         ages.Values.ToList().ForEach(age => age.Text.Text = TaskAge.Format(now - age.Created));
+        // A slim line's age is in its tooltip (Task 8).
+        slimTips.Values.ToList().ForEach(tip => WriteSlimTip(tip, now));
     }
 
     internal string AgeText(Guid id) => ages.TryGetValue(id, out var age) ? age.Text.Text : "";
@@ -993,19 +1126,14 @@ public partial class TasksWindow : Window
 
     const string AssigneeTag = "task-assignee";
 
-    // The sessions, a square each (blue while live), then the words: "2 sessions, 1 live". Empty for a note.
+    // The sessions, a square each (blue while live, haloed while Claude works in it; SessionSquare), then the words:
+    // "2 sessions, 1 live". Empty for a note.
     UIElement? SessionsOf(TaskRowView row)
     {
         if (row.Sessions.Length == 0) return null;
         var panel = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center };
-        Enumerable.Range(0, Math.Min(SessionSquares, row.SessionCount)).ToList().ForEach(i => panel.Children.Add(new Border
-        {
-            Width = 10,
-            Height = 10,
-            CornerRadius = new CornerRadius(2),
-            Background = i < row.LiveCount ? LiveSession : EndedSession,
-            Margin = new Thickness(0, 0, 3, 0),
-        }));
+        Enumerable.Range(0, Math.Min(SessionSquares, row.SessionCount)).ToList()
+            .ForEach(i => panel.Children.Add(SessionSquare(10, MarkOf(row, i))));
         panel.Children.Add(new TextBlock { Text = row.Sessions, FontSize = 10, Foreground = DimInk, Margin = new Thickness(2, 0, 0, 0), TextTrimming = TextTrimming.CharacterEllipsis });
         return panel;
     }

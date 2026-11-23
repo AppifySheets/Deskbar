@@ -236,6 +236,29 @@ public class TaskViewsTests
         Assert.Equal(["ended:Ended", "live:Idle"], list.Select(s => $"{s.Id}:{s.State}"));
     }
 
+    // Tasks panel plan, Task 8: how many of a task's sessions Claude is working in right now, for the slim line's halo.
+    // Only a LIVE session the latest list shows Busy counts: one the hooks ended does not, even if the list still has it
+    // busy for a moment, and with no list ("cannot tell") nothing does.
+    [Fact]
+    public void The_working_count_is_the_live_sessions_the_list_shows_busy()
+    {
+        var id = Claudes("work", ws, "busy");
+        Change(b => b.Join(id, Session("idle"), clock));
+        Change(b => b.Join(id, Session("ended"), clock));
+        board = board.SessionEnded("ended", clock);
+        var task = board.Tasks.Single(t => t.Id == id);
+        IReadOnlyCollection<ClaudeAgent> listed =
+        [
+            new("busy", Maybe.From("busy"), @"C:\repos\TaskSpaces", true, true, ""),
+            new("idle", Maybe.From("idle"), @"C:\repos\TaskSpaces", true, false, ""),
+            new("ended", Maybe.From("ended"), @"C:\repos\TaskSpaces", true, true, ""),
+            new("elsewhere", Maybe.From("elsewhere"), @"C:\repos\TaskSpaces", true, true, ""),
+        ];
+
+        Assert.Equal(1, TaskViews.WorkingCount(task, Maybe.From(listed)));
+        Assert.Equal(0, TaskViews.WorkingCount(task, Maybe<IReadOnlyCollection<ClaudeAgent>>.None));
+    }
+
     [Fact]
     public void A_note_has_no_session_to_go_to()
     {

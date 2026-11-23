@@ -61,8 +61,8 @@ public class TasksBoardGoalTests
         var tasks = new TaskService(new MemoryTasks(), () => Start.AddMinutes(minutes++));
         var goals = new GoalService(new MemoryGoals(), tasks, () => Start.AddMinutes(minutes++), () => Today);
         var window = new TasksWindow { Quiet = true, ClickClock = () => ClickStart.AddSeconds(seconds++), Now = () => Start.AddHours(1) };
-        // Behind the docked panel, every seam faked (TasksPanelRig), at the floating window's 720 DIP as in TasksBoardTests.
-        harness.Manager.SaveTasksPanel(new Deskbar.Core.Persistence.TasksPanelState(false, 720));
+        // Behind the docked panel, every seam faked (TasksPanelRig), at TasksBoardTests' 800 DIP, wide enough for the Matrix switch (Task 8).
+        harness.Manager.SaveTasksPanel(new Deskbar.Core.Persistence.TasksPanelState(false, 800));
         var panel = new TasksPanelRig(window).Docked();
         var controller = new TasksBoard(window, panel.Panel, tasks, harness.Manager, _ => Result.Success(), now: () => Start.AddHours(1),
             goals: withGoals ? goals : null);
