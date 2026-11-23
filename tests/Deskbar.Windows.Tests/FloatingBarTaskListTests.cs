@@ -2347,6 +2347,72 @@ public class FloatingBarTaskListTests
         });
         Assert.False(barMenu.IsOpen);
     });
+
+    // RULING 50 (Petre: "move all tasks to the top to save vertical space, next to workspace selection"). The button that
+    // says "All tasks" or "+N more" sits in the chip row, right-aligned after the chip and the toggles; there is no
+    // bottom line, so the footer is the box, the chip row and the lines, and the docked fit pass (which measures the
+    // footer) gives the line's height to the task lines.
+    [Fact]
+    public void All_tasks_sits_in_the_chip_row_and_there_is_no_bottom_line() => StaThread.Run(() =>
+    {
+        using var t = Build(openWindow: () => { });
+        t.Tasks.AddNote("one", t.Gepha);
+        t.Bar.UpdateLayout();
+        var more = ButtonNamed(t.List, "More tasks");
+        var row = Assert.IsType<Grid>(more.Parent);
+        Assert.Contains(t.Chips, row.Children.Cast<UIElement>());
+        Assert.Equal("All tasks", t.Bar.TaskListMoreText);
+
+        // Right-aligned, on the chip row's own line, after the chip and the toggles.
+        Rect In(FrameworkElement e) => e.TransformToAncestor(t.List).TransformBounds(new Rect(e.RenderSize));
+        var chip = In(AddChip(t));
+        var urgent = In(ButtonNamed(t.Chips, "Add as urgent"));
+        Assert.True(In(more).Left >= urgent.Right - 0.5, $"button {In(more)} after the toggles {urgent}");
+        Assert.True(In(more).Top < chip.Bottom, $"button {In(more)} on the chip's row {chip}");
+        Assert.True(In(more).Right >= t.List.ActualWidth - 8, $"button {In(more)} at the right of a list {t.List.ActualWidth} wide");
+
+        // Nothing under the lines: the footer is its box, the chip row and the lines, to the pixel.
+        var lines = Inside(t.List).OfType<ScrollViewer>().Single(s => Equals(s.Tag, "task-lines"));
+        Assert.True(t.List.ActualHeight <= In(lines).Bottom + 8, $"footer {t.List.ActualHeight} high, the lines end at {In(lines).Bottom}");
+    });
+
+    // The "+N more" count is the same button, in the same place, and clicking it opens the window from its own press.
+    [Fact]
+    public void The_more_count_is_in_the_chip_row_and_opens_the_window() => StaThread.Run(() =>
+    {
+        var opened = 0;
+        using var t = Build(openWindow: () => opened++);
+        Enumerable.Range(1, 5).ToList().ForEach(i => t.Tasks.AddNote($"Note {i}", t.Gepha));
+        t.Bar.UpdateLayout();
+
+        Assert.Equal("+2 more", t.Bar.TaskListMoreText);
+        var more = ButtonNamed(t.List, "More tasks");
+        Assert.Same(((FrameworkElement)t.Chips).Parent, more.Parent);
+
+        Click(more);
+        Assert.Equal(1, opened);
+    });
+
+    // At a narrow width the button shortens (to "All", or "+2") instead of wrapping to a line of its own or widening
+    // the bar; its tooltip keeps the whole words, and the count the tests read stays the full sentence.
+    [Fact]
+    public void At_a_narrow_width_the_button_shortens_and_stays_on_the_row() => StaThread.Run(() =>
+    {
+        using var t = Build(openWindow: () => { });
+        Enumerable.Range(1, 5).ToList().ForEach(i => t.Tasks.AddNote($"Note {i}", t.Gepha));
+        t.Bar.ApplyWidth(140);
+        t.Bar.RequestRebuild();
+        t.Bar.UpdateLayout();
+
+        Assert.Equal("+2 more", t.Bar.TaskListMoreText);
+        Assert.Equal("+2", t.Bar.TaskListMoreShown);
+        var more = ButtonNamed(t.List, "More tasks");
+        t.Bar.UpdateLayout(); // the text changed by the row's own size change is laid out
+        Assert.Contains("+2 more", (string)more.ToolTip);
+        var bounds = more.TransformToAncestor(t.List).TransformBounds(new Rect(more.RenderSize));
+        Assert.True(bounds.Right <= t.List.ActualWidth + 0.5, $"button {bounds} in a list {t.List.ActualWidth} wide");
+        Assert.True(more.RenderSize.Width >= more.DesiredSize.Width - more.Margin.Left - more.Margin.Right - 0.5, $"the button is squeezed: {more.RenderSize.Width} of {more.DesiredSize.Width}");
+    });
     // --- Ruling 41: a title wraps to a second line when it does not fit, never a third ------------------------------
 
     static TextBlock TextBlockOf(Button line) => Inside(line).OfType<TextBlock>().Single(b => Equals(b.Tag, "task-text"));

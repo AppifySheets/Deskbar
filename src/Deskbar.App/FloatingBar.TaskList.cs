@@ -284,7 +284,8 @@ public partial class FloatingBar
     // For the tests: whether the list is on screen, what "+N more" says ("" while it is hidden), whether the box has
     // the keyboard, where a note added now would go, what the empty box says, and the lines on show.
     internal bool TaskListShown => TaskListLine.Visibility == Visibility.Visible;
-    internal string TaskListMoreText => taskMoreButton is { Visibility: Visibility.Visible } ? taskMoreLabel?.Text ?? "" : "";
+    internal string TaskListMoreText => taskMoreButton is { Visibility: Visibility.Visible } ? taskMoreFull : "";
+    internal string TaskListMoreShown => taskMoreButton is { Visibility: Visibility.Visible } ? taskMoreLabel?.Text ?? "" : "";
     internal bool TaskListAdding => taskTyping;
     internal Maybe<Guid> TaskAddTarget => taskAddTarget;
     internal string TaskAddPlaceholder => taskAddPlaceholder?.Text ?? "";
@@ -620,7 +621,35 @@ public partial class FloatingBar
             Children = { taskAddOn, taskAddChip.Button, taskAddImportant.Button, taskAddUrgent.Button },
         };
         PaintAddFlags();
-        var addRow = new StackPanel { Margin = new Thickness(0, 0, 0, 3), Children = { box, taskAddChips } };
+        // RULING 50 (Petre: "move all tasks to the top to save vertical space, next to workspace selection"). "All tasks" /
+        // "+N more" / "+N waiting" / "Less" used to be a line of its own under the last task. It sits in the chip row now,
+        // right-aligned after the chip and the flag toggles, so the bottom line is gone and the docked fit pass (which
+        // measures what the footer needs) hands that line's height to the task lines. The row is a Grid: the wrapping
+        // chip row takes what is left and the button its own width, so the button never wraps. On a narrow list its text
+        // shortens ("All", "+3") with the full words in the tooltip (ApplyMoreText), so nothing widens the bar (the whole
+        // list sits in TakesNoWidth). Like every task button it acts on its own press (TaskButton's Click, with the click
+        // guard), never a second Click handler (#48).
+        taskMoreLabel = new TextBlock
+        {
+            Foreground = TaskDimInk,
+            TextTrimming = TextTrimming.CharacterEllipsis,
+            VerticalAlignment = VerticalAlignment.Center,
+        };
+        taskMoreButton = TaskButton("More tasks", taskMoreLabel, OnTaskMoreClick, ignoredWhen: TaskClickIgnored);
+        taskMoreButton.HorizontalAlignment = HorizontalAlignment.Right;
+        taskMoreButton.VerticalAlignment = VerticalAlignment.Top;
+        taskMoreButton.Padding = new Thickness(6, 1, 6, 1);
+        taskMoreButton.Margin = new Thickness(4, 4, 0, 0);
+        taskMoreButton.Visibility = Visibility.Collapsed;
+        var chipRow = new Grid
+        {
+            Tag = "task-add-row",
+            ColumnDefinitions = { new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) }, new ColumnDefinition { Width = GridLength.Auto } },
+            Children = { taskAddChips, taskMoreButton },
+        };
+        Grid.SetColumn(taskMoreButton, 1);
+        var addRow = new StackPanel { Margin = new Thickness(0, 0, 0, 3), Children = { box, chipRow } };
+        addRow.SizeChanged += (_, _) => ApplyMoreText();
 
         taskLinesPanel = new StackPanel();
         WireTaskDrag(taskLinesPanel);
@@ -634,16 +663,7 @@ public partial class FloatingBar
             HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
             Focusable = false,
         };
-
-        // "+N more" / "Less": a small line under the last line, at the left, trimmed rather than clipped.
-        taskMoreLabel = new TextBlock { Foreground = TaskDimInk, TextTrimming = TextTrimming.CharacterEllipsis };
-        taskMoreButton = TaskButton("More tasks", taskMoreLabel, OnTaskMoreClick, ignoredWhen: TaskClickIgnored);
-        taskMoreButton.HorizontalAlignment = HorizontalAlignment.Left;
-        taskMoreButton.Padding = new Thickness(6, 1, 6, 1);
-        taskMoreButton.Margin = new Thickness(0, 1, 0, 0);
-        taskMoreButton.Visibility = Visibility.Collapsed;
-
-        var host = new TakesNoWidth(VisibleWidthOf) { Child = new StackPanel { Children = { taskProblemHost, addRow, taskLinesScroller, taskMoreButton } } };
+        var host = new TakesNoWidth(VisibleWidthOf) { Child = new StackPanel { Children = { taskProblemHost, addRow, taskLinesScroller } } };
         TaskListLine.Child = host;
         // A RIGHT-CLICK IN THE LIST NEVER OPENS THE BAR'S MENU (Petre's screenshot: right-clicking a task line opened New
         // workspace, Window list, Arrange, Dock, Manage, Exit). The bar's menu is the Root's ContextMenu, and a
@@ -899,11 +919,31 @@ public partial class FloatingBar
         var hidden = open.Where(l => !onShow.Contains(l.Id)).ToArray();
         var waiting = hidden.Count(l => l.Status == TaskStatus.WaitingOnYou);
         taskMoreButton.Visibility = hidden.Length > 0 || taskListExpanded || OpenTasksWindow is not null ? Visibility.Visible : Visibility.Collapsed;
-        taskMoreLabel.Text = MoreText(hidden.Length, waiting, taskListExpanded);
+        taskMoreFull = MoreText(hidden.Length, waiting, taskListExpanded);
+        taskMoreShort = taskListExpanded ? "Less" : hidden.Length == 0 ? "All" : $"+{hidden.Length}";
+        ApplyMoreText();
         taskMoreLabel.Foreground = waiting > 0 && !taskListExpanded ? TaskOrange : TaskDimInk;
+        // The tooltip carries the whole sentence whichever text shows, "+3 more, 1 waiting" cut to "+3" included.
         taskMoreButton.ToolTip = taskListExpanded ? "Show the first three"
-            : OpenTasksWindow is not null ? "Every task, open and closed, with its comments"
+            : OpenTasksWindow is not null ? $"{(hidden.Length == 0 ? "" : $"{taskMoreFull}. ")}Every task, open and closed, with its comments"
             : $"{hidden.Length} more {(hidden.Length == 1 ? "task" : "tasks")}";
+    }
+
+    // The button's words in full and cut short (Ruling 50): the label shows the short one when the list is too narrow for
+    // the full one beside the chip and the toggles, rather than wrapping to a line of its own or widening the bar.
+    string taskMoreFull = "";
+    string taskMoreShort = "";
+
+    // Below this list width (content DIP) the button reads "All" or "+3". At the default docked width the row holds
+    // "on", the chip and the two toggles with room for little else; this is where the full words stop fitting.
+    const double MoreShortBelow = 200;
+
+    // Run on every paint of the button and whenever the add row's width changes, text only: it changes no line.
+    void ApplyMoreText()
+    {
+        if (taskMoreLabel is null) return;
+        var width = taskMoreLabel.Parent is null ? 0 : (taskMoreButton?.Parent as FrameworkElement)?.ActualWidth ?? 0;
+        taskMoreLabel.Text = width > 0 && width < MoreShortBelow ? taskMoreShort : taskMoreFull;
     }
 
     // One task's line: a button the width of the list, so a click anywhere on it goes to the task.
