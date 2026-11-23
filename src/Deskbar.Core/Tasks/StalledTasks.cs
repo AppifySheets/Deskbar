@@ -11,9 +11,11 @@ namespace Deskbar.Core.Tasks;
 // Petre: "i want the tasks that haven't had any progress from claude and are still open to reappear for me to act upon".
 //
 // THE SIGNAL is Claude Code's own list of sessions (`claude agents --json`), which ClaudeSessions already reads every
-// 15 seconds: every row, VS Code tabs included, says busy or idle. The caller passes the ids of the sessions that are
-// WORKING (busy, and listed long enough for busy to mean it: see BusyGrace). A session missing from the list is simply
-// not working, so a task whose session has gone counts as quiet too.
+// 15 seconds: every row, VS Code tabs included, says busy or idle. The caller passes two sets: every session listed
+// BUSY, which keeps a task with Claude and restarts its clock, and the busy sessions listed long enough for busy to mean
+// it (WORKING, see BusyGrace), which alone take a task back. Two sets because the grace guards only the take-back: right
+// after a Deskbar restart every session is inside it, and a busy one must still not be handed back (final review,
+// Important 1). A session missing from the list is simply not busy, so a task whose session has gone counts as quiet.
 //
 // THE RULE, per open task that is In progress and has sessions (Petre's own notes are never touched):
 //   * working (any of its sessions is in the set): LastBusy becomes now.
@@ -38,15 +40,20 @@ public static class StalledTasks
     /// </summary>
     public static readonly TimeSpan BusyGrace = TimeSpan.FromSeconds(30);
 
-    public static StalledStep Step(TaskBoard board, IReadOnlySet<string> working,
+    /// <param name="busy">Every session the list shows busy now. Keeps a task with Claude and restarts its clock.</param>
+    /// <param name="working">The busy sessions listed for at least <see cref="BusyGrace"/>. Only these take a task back.</param>
+    public static StalledStep Step(TaskBoard board, IReadOnlySet<string> busy, IReadOnlySet<string> working,
         ImmutableDictionary<Guid, DateTimeOffset> lastBusy, DateTimeOffset now)
     {
         var watched = board.Tasks.Where(t => t is { IsOpen: true, Status: TaskStatus.InProgress, IsClaudes: true }).ToArray();
-        var busy = watched.Where(t => t.Sessions.Any(s => working.Contains(s.Id))).Select(t => t.Id).ToHashSet();
+        // Only LIVE entries count: a session that moved to another task (Join, Create) leaves an ended entry with the same
+        // id on the old one, and its work there is not work on the old task (final review, Important 2).
+        var worked = watched.Where(t => t.Sessions.Any(s => s.IsLive && busy.Contains(s.Id))).Select(t => t.Id).ToHashSet();
+        var settled = watched.Where(t => t.Sessions.Any(s => s.IsLive && working.Contains(s.Id))).Select(t => t.Id).ToHashSet();
         // The clock after this poll: now for a task being worked on, what it had for the rest, and nothing for a task no
         // longer watched (closed, done, waiting on Petre or gone).
         var clock = watched
-            .Select(t => busy.Contains(t.Id) ? KeyValuePair.Create(t.Id, now)
+            .Select(t => worked.Contains(t.Id) ? KeyValuePair.Create(t.Id, now)
                 : lastBusy.TryGetValue(t.Id, out var at) ? KeyValuePair.Create(t.Id, at)
                 : (KeyValuePair<Guid, DateTimeOffset>?)null)
             .OfType<KeyValuePair<Guid, DateTimeOffset>>()
@@ -56,10 +63,10 @@ public static class StalledTasks
             clock.TryGetValue(t.Id, out var at) && at > t.UpdatedAt ? at : t.UpdatedAt;
 
         var handBack = watched
-            .Where(t => t.Assignee.IsClaude && !busy.Contains(t.Id) && now - QuietSince(t) >= After)
+            .Where(t => t.Assignee.IsClaude && !worked.Contains(t.Id) && now - QuietSince(t) >= After)
             .Select(t => t.Id).ToArray();
         var takeBack = watched
-            .Where(t => t.HandedBack.HasValue && t.Assignee.IsMe && busy.Contains(t.Id))
+            .Where(t => t.HandedBack.HasValue && t.Assignee.IsMe && settled.Contains(t.Id))
             .Select(t => t.Id).ToArray();
 
         var next = takeBack.Aggregate(handBack.Aggregate(board, (b, id) => b.HandBack(id, now)), (b, id) => b.TakeBack(id, now));

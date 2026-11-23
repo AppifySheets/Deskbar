@@ -174,9 +174,9 @@ public sealed class TaskService(ITaskStore store, Func<DateTimeOffset> now, Func
     /// StalledTasks.After goes to Petre, a handed-back task whose session works again goes back to Claude. Saves and
     /// pulses only when a task changed hands, and traces each move.
     /// </summary>
-    public void Stalled(IReadOnlySet<string> working)
+    public void Stalled(IReadOnlySet<string> busy, IReadOnlySet<string> working)
     {
-        var step = StalledTasks.Step(Board, working, lastBusy, now());
+        var step = StalledTasks.Step(Board, busy, working, lastBusy, now());
         lastBusy = step.LastBusy;
         step.HandedBack.Select(id => $"tasks: handed back {Line(step.Board, id)}, no session worked on it for {StalledTasks.After.TotalMinutes:0} minutes")
             .Concat(step.TakenBack.Select(id => $"tasks: taken back {Line(step.Board, id)}, its session works on it again"))
