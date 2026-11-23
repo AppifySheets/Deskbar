@@ -103,6 +103,31 @@ public sealed class TerminalFragmentTests : IDisposable
         Assert.True(File.Exists(Path.Combine(foreign, "x.json")));
     }
 
+    // Final review, item 11: the trial folder is clutter, so a file in it held open (Windows Terminal reading it, an
+    // editor) must not stop Deskbar's profile being written, nor make the sync fail. Once it is let go, the next sync
+    // removes it.
+    [Fact]
+    public void A_locked_trial_folder_does_not_block_the_profile()
+    {
+        var trial = Path.Combine(Fragments, "DeskbarClaudeTry");
+        Directory.CreateDirectory(trial);
+        var held = Path.Combine(trial, "claude-looks.json");
+        File.WriteAllText(held, "{}");
+
+        using (new FileStream(held, FileMode.Open, FileAccess.Read, FileShare.Read))
+        {
+            Assert.True(TerminalFragment.Sync(true, root, _ => true).IsSuccess);
+            Assert.True(File.Exists(FragmentFile));
+            Assert.True(Directory.Exists(trial));
+
+            Assert.True(TerminalFragment.Sync(false, root, _ => true).IsSuccess);
+            Assert.False(Directory.Exists(Path.Combine(Fragments, "Deskbar")));
+        }
+
+        Assert.True(TerminalFragment.Sync(true, root, _ => true).IsSuccess);
+        Assert.False(Directory.Exists(trial));
+    }
+
     [Fact]
     public void Turning_off_with_nothing_installed_succeeds() =>
         Assert.True(TerminalFragment.Sync(false, root, _ => true).IsSuccess);

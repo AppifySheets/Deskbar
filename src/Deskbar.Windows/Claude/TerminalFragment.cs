@@ -44,10 +44,14 @@ public static class TerminalFragment
     /// folder and the trial one, and leaves every other fragment alone.
     /// <paramref name="fontInstalled"/> answers whether a font family is installed.
     /// </summary>
-    public static Result Sync(bool on, string localAppData, Func<string, bool> fontInstalled) =>
-        Result.Try(() =>
+    //
+    // The trial folder goes LAST and in its own try (final review, item 11): it is only clutter, so a file in it that
+    // Windows Terminal or an editor holds open must never stop Deskbar's own profile from being written or removed. Its
+    // failure is not reported either; the next Sync (every start, every toggle) tries again.
+    public static Result Sync(bool on, string localAppData, Func<string, bool> fontInstalled)
+    {
+        var synced = Result.Try(() =>
         {
-            DeleteFolder(TrialFolder(localAppData));
             if (!on)
             {
                 DeleteFolder(DeskbarFolder(localAppData));
@@ -56,6 +60,10 @@ public static class TerminalFragment
             Directory.CreateDirectory(DeskbarFolder(localAppData));
             DurableFile.Write(FragmentPath(localAppData), Content(fontInstalled(PreferredFont) ? PreferredFont : FallbackFont));
         }, e => $"Could not update the Windows Terminal profile: {e.Message}");
+        // Tried whatever happened above, and its own failure dropped (see above).
+        Result.Try(() => DeleteFolder(TrialFolder(localAppData)));
+        return synced;
+    }
 
     static void DeleteFolder(string folder)
     {
