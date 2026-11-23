@@ -69,6 +69,21 @@ public class ClaudeCliTests
         }
     }
 
+    // `claude --bg` hands its session to a daemon; one that inherits our stdout handle keeps the pipe open after
+    // claude itself has exited. Here cmd exits at once while a background ping holds the inherited pipe for ~8 s.
+    // The call must return near the pipe grace (2 s), not wait for the pipe, and still give what was printed.
+    [Fact]
+    public async Task A_grandchild_holding_the_pipe_open_does_not_hold_the_call()
+    {
+        var clock = System.Diagnostics.Stopwatch.StartNew();
+        var result = await Cmd.Run(["/c", "start /b ping -n 8 127.0.0.1 & echo hi"], null, TimeSpan.FromSeconds(5));
+        clock.Stop();
+
+        Assert.True(result.IsSuccess, result.IsFailure ? result.Error : "");
+        Assert.Contains("hi", result.Value);
+        Assert.True(clock.Elapsed < TimeSpan.FromSeconds(5), $"took {clock.Elapsed}");
+    }
+
     [Fact]
     public async Task A_missing_executable_is_a_failure_not_an_exception()
     {

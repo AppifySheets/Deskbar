@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.IO;
+using System.Text;
 using CSharpFunctionalExtensions;
 using Deskbar.Core.Tasks;
 
@@ -49,10 +50,13 @@ public sealed class ClaudeCli(string executable = "claude") : IClaudeCli
             // No input is ever sent: closing stdin now means a program that waits for some gets end-of-file.
             process.StandardInput.Close();
 
-            // Both streams are read at once, to the end, so a full pipe on one cannot stall the program while
-            // this waits on the other.
-            var stdout = process.StandardOutput.ReadToEndAsync();
-            var stderr = process.StandardError.ReadToEndAsync();
+            // Both streams are read at once, so a full pipe on one cannot stall the program while this waits on
+            // the other. They are pumped into buffers, not read with ReadToEndAsync, because end-of-file can
+            // arrive late: `claude --bg` hands the session to a daemon, and a daemon that inherited our stdout
+            // or stderr handle keeps the pipe open for as long as it lives. The pumps may then never finish, so
+            // after the program exits the wait for them is bounded (PipeGrace) and whatever was read is used.
+            var stdout = new Pump(process.StandardOutput);
+            var stderr = new Pump(process.StandardError);
 
             using var cts = new CancellationTokenSource(timeout);
             try
@@ -66,8 +70,19 @@ public sealed class ClaudeCli(string executable = "claude") : IClaudeCli
                 return Result.Failure<string>($"{executable} timed out after {timeout.TotalSeconds:0.#} s and was ended.");
             }
 
-            var output = (await stdout).TrimEnd();
-            var errors = (await stderr).TrimEnd();
+            // The program is gone; give the pipes a moment to deliver their last bytes, then stop waiting.
+            // The whole call is therefore bounded by timeout + PipeGrace.
+            try
+            {
+                await Task.WhenAll(stdout.Done, stderr.Done).WaitAsync(PipeGrace);
+            }
+            catch (TimeoutException)
+            {
+                // A pipe is still held open by something the program started; use what has arrived.
+            }
+
+            var output = stdout.Text.TrimEnd();
+            var errors = stderr.Text.TrimEnd();
             return process.ExitCode == 0
                 ? Result.Success(output)
                 : Result.Failure<string>(FailureText(process.ExitCode, output, errors));
@@ -76,6 +91,30 @@ public sealed class ClaudeCli(string executable = "claude") : IClaudeCli
         {
             // A missing program, a folder that does not exist, access denied: expected situations, so a value.
             return Result.Failure<string>($"Could not run {executable}: {e.Message}");
+        }
+    }
+
+    // How long the pipes get to deliver their last bytes after the program has exited.
+    static readonly TimeSpan PipeGrace = TimeSpan.FromSeconds(2);
+
+    // Reads a stream chunk by chunk into a buffer, so a partial read is available when the end never comes.
+    sealed class Pump
+    {
+        readonly StringBuilder buffer = new();
+        public Task Done { get; }
+
+        public Pump(StreamReader reader) =>
+            Done = Task.Run(async () =>
+            {
+                var chunk = new char[4096];
+                int read;
+                while ((read = await reader.ReadAsync(chunk, 0, chunk.Length)) > 0)
+                    lock (buffer) buffer.Append(chunk, 0, read);
+            });
+
+        public string Text
+        {
+            get { lock (buffer) return buffer.ToString(); }
         }
     }
 
