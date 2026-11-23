@@ -90,6 +90,12 @@ internal sealed class TasksPanel : IDisposable
     // hands a window of its own. See ReclaimTopmost.
     internal Func<nint> OverflowInFront { get; init; } = () => 0;
 
+    // The window that covers the panel's screen full screen right now (TopLevelWindows.CoveringWindow, the floating
+    // bar's own test, measured on Petre's machine), or 0 for none. Asked only when the panel comes back on screen and,
+    // after that, on the 1 s tick while it believes a full-screen window it found that way is still up. See Dock and
+    // ReclaimTopmost. Faked in the tests.
+    internal Func<nint, nint> CoveringWindow { get; init; } = hwnd => TopLevelWindows.CoveringWindow(hwnd) ?? 0;
+
     // Whether tracing is on, asked BEFORE a line is built, and where the lines go: ClickTrace in the app (the one switch,
     // %APPDATA%\Deskbar\trace.on, and the log %TEMP%\deskbar-trace.log, CLAUDE.md "Instrumentation"), a list in the tests.
     internal Func<bool> Tracing { get; init; } = () => ClickTrace.On;
@@ -128,6 +134,14 @@ internal sealed class TasksPanel : IDisposable
     // The shell said a full-screen window is up (ABN_FULLSCREENAPP): out of the topmost band until it closes, and
     // ReclaimTopmost leaves it there meanwhile.
     bool fullScreenOpen;
+
+    // A full-screen window the panel FOUND as it came back on screen (Dock), rather than heard of from the shell. The
+    // shell says ABN_FULLSCREENAPP only when the full-screen state CHANGES, so a panel that registers while a video is
+    // already full screen (the bar minimized and restored meanwhile, or the panel opened then) hears nothing, and would
+    // show itself topmost over the video (final review, Minor 2). While this is set, ReclaimTopmost asks CoveringWindow
+    // again each tick and puts the panel back on top once nothing covers the screen, in case the shell's "closed"
+    // notice never comes for a state it never told this registration about. The shell's own notice, either way, wins.
+    bool fullScreenFound;
 
     // Sitting directly behind the tray's overflow (see ReclaimTopmost), for the trace's once-per-change line.
     bool belowOverflow;
@@ -261,11 +275,23 @@ internal sealed class TasksPanel : IDisposable
     // panel would do the same to the part over it. So while the overflow the bar knows of is in front, visible and over
     // the panel, the panel sits directly behind it instead, with the bar's own step (FloatingBar.StepBehindOverflow), and
     // comes back on top on the first tick after the flyout has gone.
+    //
+    // A full-screen window the panel found by itself as it came back (fullScreenFound) is asked about again here: while
+    // it still covers the screen the panel stays behind it, and once it has gone the panel climbs back on top, the shell's
+    // notice or not.
     internal void ReclaimTopmost()
     {
-        if (!window.IsVisible || fullScreenOpen) return;
+        if (!window.IsVisible) return;
         var hwnd = new WindowInteropHelper(window).Handle;
         if (hwnd == 0) return;
+        if (fullScreenFound)
+        {
+            if (StepBehindCovering(hwnd, CoveringWindow(hwnd))) return;
+            fullScreenFound = false;
+            fullScreenOpen = false;
+            Say(() => "tasks panel: the full-screen window it found has gone, back on top");
+        }
+        if (fullScreenOpen) return;
         var overflow = OverflowInFront();
         var behind = FloatingBar.StepBehindOverflow(hwnd, overflow);
         if (behind != belowOverflow)
@@ -326,6 +352,8 @@ internal sealed class TasksPanel : IDisposable
     internal void StepAside(bool fullScreen)
     {
         fullScreenOpen = fullScreen;
+        // The shell's word replaces whatever the panel found by looking (see fullScreenFound).
+        fullScreenFound = false;
         var hwnd = new WindowInteropHelper(window).Handle;
         if (hwnd == 0) return;
         NativeMethods.SetWindowPos(hwnd, fullScreen ? HwndNoTopmost : NativeMethods.HWND_TOPMOST, 0, 0, 0, 0,
@@ -399,11 +427,7 @@ internal sealed class TasksPanel : IDisposable
             // switch) has done so by the time the window appears at it.
             dockedWidth.OnNext(Maybe.From(dips));
             PlaceAt(got, at.Screen, scale);
-            if (!window.IsVisible)
-            {
-                window.Topmost = true;
-                window.Show();
-            }
+            if (!window.IsVisible) ShowOnTop();
 
             Say(() => $"tasks panel: docked ({reason}), {at.Edge} edge, {thickness} px{(fresh ? ", registered afresh" : "")}");
             TraceGeometry();
@@ -413,6 +437,36 @@ internal sealed class TasksPanel : IDisposable
         {
             docking = false;
         }
+    }
+
+    // Shows the docked window at the top of the topmost band, UNLESS a full-screen window already covers its screen: the
+    // shell does not say so to a registration made while one is up (see fullScreenFound), so the panel looks for itself,
+    // with the floating bar's test, and shows behind it instead. The window is already in its strip (PlaceAt), so the
+    // screen asked about is the one it docks on.
+    void ShowOnTop()
+    {
+        var hwnd = new WindowInteropHelper(window).Handle;
+        var covered = CoveringWindow(hwnd);
+        window.Topmost = covered == 0;
+        window.Show();
+        if (!StepBehindCovering(hwnd, covered)) return;
+        fullScreenOpen = true;
+        fullScreenFound = true;
+        Say(() => $"tasks panel: shown behind the full-screen window {covered:X} already up");
+    }
+
+    // Out of the topmost band and just behind `covered`, as the floating bar's StepAsideIfCovered does and for its
+    // reason: leaving the band is enough under a topmost player, and an ordinary window (a browser in F11) needs the panel
+    // put directly behind it as well. False, and nothing done, for 0 (nothing covers the screen).
+    static bool StepBehindCovering(nint hwnd, nint covered)
+    {
+        if (covered == 0) return false;
+        NativeMethods.SetWindowPos(hwnd, HwndNoTopmost, 0, 0, 0, 0,
+            NativeMethods.SWP_NOMOVE | NativeMethods.SWP_NOSIZE | NativeMethods.SWP_NOACTIVATE);
+        if (!TopLevelWindows.IsTopmost(covered))
+            NativeMethods.SetWindowPos(hwnd, covered, 0, 0, 0, 0,
+                NativeMethods.SWP_NOMOVE | NativeMethods.SWP_NOSIZE | NativeMethods.SWP_NOACTIVATE);
+        return true;
     }
 
     // A dock that did not happen. The window hides, because a panel shown with no strip reserved sits topmost over the
@@ -435,7 +489,9 @@ internal sealed class TasksPanel : IDisposable
         docked = false;
         granted = null;
         awaitingBar = false;
+        // Forgotten with the registration the shell said it to; the next show looks again (ShowOnTop).
         fullScreenOpen = false;
+        fullScreenFound = false;
         if (window.IsVisible) window.Hide();
         Say(() => $"tasks panel: strip given back ({why})");
         TraceGeometry();
