@@ -40,6 +40,17 @@ namespace Deskbar.App;
 //                    comment does not hold a redraw; its text, keyboard and caret are carried through it instead.
 //   Clicks           a line and its buttons take the bar's click guard (ClickIgnored): no second press of a double
 //                    click, and nothing in the half second after the lines were redrawn.
+//   The search box   (tasks panel plan, Task 7; spec 2026-11-23-tasks-panel-design.md, "The new filters") the row under
+//                    the toolbar's title line, made once in the XAML and never rebuilt, so a redraw while Petre types
+//                    cannot reset it: Draw clears and rebuilds the rows and the chips, never the box, and nothing writes
+//                    the view's Search back into it. Its text, caret and keyboard therefore survive every redraw without
+//                    the carrying-over a comment box needs. Each keystroke goes to the controller (Search), which narrows
+//                    the board and hands back a new view. Ctrl+F anywhere in the panel focuses it (Press); Esc in it
+//                    empties it and gives the keyboard back to the board (Escape, FocusBoard). Emptied on Open, since a
+//                    fresh open resets every filter; not saved anywhere.
+//   Claude working   a chip with the status chips, "Claude working N", orange-edged (Orange) while off and with the
+//                    chips' selected look (the blue edge) while on, its words then orange so it keeps its colour. N is
+//                    what it would show under every other filter (TasksView.ClaudeWorkingCount).
 //
 // Top to bottom: the toolbar (status filters with their counts, the workspace filter, the goal filter while goals
 // exist, "+ Add"), the
@@ -128,8 +139,9 @@ public partial class TasksWindow : Window
         // Its own checklist icon (TasksIcon). The panel is no longer listed on the bar (the App opts its handle out, as
         // it does the bar's own), but Windows still asks a window for its icon in a debug dump or a trace.
         Icon = TasksIcon.Image;
-        // Esc undoes the innermost thing; F2 edits the selected line's title in place (Ruling 38).
-        PreviewKeyDown += (_, e) => e.Handled = (e.Key == Key.Escape && Escape()) || (e.Key == Key.F2 && EditSelected());
+        // Esc undoes the innermost thing; F2 edits the selected line's title in place (Ruling 38); Ctrl+F goes to the
+        // search box (Task 7). Through Press, so the tests can hand it the modifiers a synthetic key event cannot carry.
+        PreviewKeyDown += (_, e) => e.Handled = Press(e.Key, Keyboard.Modifiers);
         // Never in Alt+Tab: WS_EX_TOOLWINDOW, for the reason the bar gives in its own OnSourceInitialized
         // (ShowInTaskbar false alone keeps a window off the taskbar but not out of Alt+Tab). The panel is part of the
         // bar, which is not in Alt+Tab either (spec "The panel window").
@@ -150,6 +162,14 @@ public partial class TasksWindow : Window
         AddHandler(MouseLeftButtonUpEvent, new MouseButtonEventHandler((_, _) => Flush()), handledEventsToo: true);
         AddBox.TextChanged += (_, _) => AddPlaceholder.Visibility = AddBox.Text.Length == 0 ? Visibility.Visible : Visibility.Collapsed;
         AddBox.PreviewKeyDown += (_, e) => e.Handled = PressInAdd(e.Key) != KeyOutcome.Ignored;
+        // The search box: every keystroke goes to the controller at once, which narrows and redraws (no debounce, see
+        // TasksBoard.Search for why). The box is never written by a redraw, only read, so typing keeps its text, caret
+        // and keyboard through every redraw ("the search box" below).
+        SearchBox.TextChanged += (_, _) =>
+        {
+            SearchPlaceholder.Visibility = SearchBox.Text.Length == 0 ? Visibility.Visible : Visibility.Collapsed;
+            Actions?.Search(SearchBox.Text);
+        };
         WireDrag();
         WireGrip();
         BuildToolbarEnd();
@@ -175,6 +195,9 @@ public partial class TasksWindow : Window
     // The goal filter's words, "" while it is not shown (ruling G1: no goals, no goal filter).
     internal string GoalFilterLabel { get; private set; } = "";
     internal string AssigneeFilterLabel { get; private set; } = "";
+    // The "Claude working" chip's words ("Claude working 2") and whether it is on (Task 7).
+    internal string ClaudeWorkingLabel { get; private set; } = "";
+    internal bool ClaudeWorkingOn { get; private set; }
     internal bool AddBoxShown => AddRow.Visibility == Visibility.Visible;
     internal string? Problem => ProblemText.Visibility == Visibility.Visible ? ProblemText.Text : null;
     internal bool ThreadShown(Guid id) => authors.ContainsKey(id);
@@ -247,6 +270,9 @@ public partial class TasksWindow : Window
         descriptionBox = null;
         editingComment = null;
         commentEditor = null;
+        // The search starts over with every other filter (TasksBoard.OpenFresh has already reset its own). Emptied
+        // before IsOpen is set, so the TextChanged it raises redraws nothing (the controller's search is "" already).
+        SearchBox.Text = "";
         IsOpen = true;
         // Shown WITHOUT activation (fix round 1, Critical 1): the controller brings it forward afterwards (raise, then
         // activate; TasksBoard.Arrive). The XAML says so too; set again here because a test may flip it.
@@ -445,6 +471,9 @@ public partial class TasksWindow : Window
             $"{view.ShowsGoals}{view.GoalFilterLabel}{view.GoalFilter}",
             // The "Assigned" filter (Ruling 57): its label is what the toolbar draws.
             $"{view.AssigneeFilterLabel}",
+            // The "Claude working" chip (Task 7): on or off, and its count. NOT the search text: the box is not drawn from
+            // the view, and the lines it narrows are below, so a keystroke that changes no line redraws nothing.
+            $"{view.ClaudeWorking}{view.ClaudeWorkingCount}",
             string.Join('|', view.Places.Select(p => $"{p.IsGroup}{p.Workspace}{p.Name}{(p.Colour as SolidColorBrush)?.Color}")),
             view.EmptyText,
             $"{renaming}{editingComment}{string.Join(",", settledOpen.Order())}|{string.Join(",", earlierOpen.Order())}|{string.Join(",", longOpen.Order())}",
@@ -471,6 +500,17 @@ public partial class TasksWindow : Window
             button.Margin = new Thickness(0, 0, 6, 0);
             Filters.Children.Add(button);
         });
+        // "Claude working N" (Task 7, see the header), with the status chips; the WrapPanel lets it wrap on a narrow panel.
+        // A click flips it. Orange-edged while off; while on, the chips' selected look (the blue edge) with orange words,
+        // so it still reads as the Claude chip.
+        var working = Flat(new TextBlock { Text = $"Claude working {view.ClaudeWorkingCount}", Foreground = view.ClaudeWorking ? Orange : Ink, FontSize = 11 },
+            "Filter: Claude working", () => Actions?.FilterClaudeWorking(!view.ClaudeWorking), new Thickness(8, 2, 8, 2));
+        working.BorderBrush = view.ClaudeWorking ? PickedEdge : Orange;
+        working.Margin = new Thickness(0, 0, 6, 0);
+        working.ToolTip = "Only the tasks Claude has a live session on";
+        Filters.Children.Add(working);
+        ClaudeWorkingLabel = $"Claude working {view.ClaudeWorkingCount}";
+        ClaudeWorkingOn = view.ClaudeWorking;
         // The menu opens from Flat's own press, never from a Click handler added afterwards: Flat's handler marks the
         // click handled, and WPF does not call a later += handler on a handled event, so such a menu never opened
         // (2026-11-23, "dropdown doesn't work"; TasksBoardTests.The_add_rows_workspace_chip_opens_its_menu_and_a_pick_lands).
@@ -1504,7 +1544,8 @@ public partial class TasksWindow : Window
     {
         if (renaming is not null || selectedId.HasNoValue) return false;
         var id = selectedId.Value;
-        if (!Keys.Contains(id) || closing.GetValueOrDefault(id) || AddBoxShown && AddBox.IsKeyboardFocusWithin) return false;
+        // Not from a box being typed in (the add box, the search box): F2 there is the box's.
+        if (!Keys.Contains(id) || closing.GetValueOrDefault(id) || AddBoxShown && AddBox.IsKeyboardFocusWithin || SearchBox.IsKeyboardFocusWithin) return false;
         BeginRename(id);
         return true;
     }
@@ -1800,11 +1841,34 @@ public partial class TasksWindow : Window
         return PressInAdd(key) == KeyOutcome.Posted;
     }
 
-    // Esc undoes the innermost thing: a rename, else the add box. It does not close the page: a page of its own closes
-    // from its title bar, like any other window.
+    /// <summary>
+    /// A key pressed anywhere in the panel (its PreviewKeyDown), answering whether it was taken: Esc (Escape), F2 (edit the
+    /// selected line) and Ctrl+F (the search box). Internal so the tests can press Ctrl+F, whose modifier a synthetic key
+    /// event cannot carry.
+    /// </summary>
+    internal bool Press(Key key, ModifierKeys modifiers) =>
+        (key == Key.Escape && Escape())
+        || (key == Key.F2 && EditSelected())
+        || (key == Key.F && modifiers == ModifierKeys.Control && FocusSearch());
+
+    // Ctrl+F (Task 7): the keyboard to the search box, its text selected so typing replaces it, as a browser's find does.
+    // Not while a rename or a comment edit is open: those hold every redraw (MustWait), so a search typed then would seem
+    // dead until the edit ended, and the edit's box takes the keyboard back on the next draw anyway. A TextBox does
+    // nothing of its own with Ctrl+F, so leaving it unhandled there costs nothing.
+    bool FocusSearch()
+    {
+        if (renaming is not null || editingComment is not null) return false;
+        SearchBox.Focus();
+        SearchBox.SelectAll();
+        return true;
+    }
+
+    // Esc undoes the innermost thing: in the search box, the search (Task 7: emptied, and the keyboard back to the board);
+    // else a rename, else the add box. It does not close the panel: the × and Alt+F4 do.
     bool Escape()
     {
-        if (renaming is not null) EndRename();
+        if (SearchBox.IsKeyboardFocusWithin) EndSearch();
+        else if (renaming is not null) EndRename();
         else if (editingComment is not null) EndCommentEdit();
         else if (AddBoxShown) HideAdd();
         // RULING 63: Esc folds the selected line's open thread, the last thing it undoes.
@@ -1813,6 +1877,15 @@ public partial class TasksWindow : Window
             Actions?.ToggleThread(selectedId.Value);
         else return false;
         return true;
+    }
+
+    // Esc in the search box: emptied (its TextChanged hands "" to the controller, which shows everything again), then the
+    // keyboard back on the board, as when the panel opens (FocusBoard). The window has the keyboard already, so focusing
+    // the toolbar activates nothing.
+    void EndSearch()
+    {
+        SearchBox.Text = "";
+        FocusBoard();
     }
 
     // --- small parts -------------------------------------------------------------------------------------------------

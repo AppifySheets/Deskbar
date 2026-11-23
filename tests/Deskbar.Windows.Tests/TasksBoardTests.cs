@@ -478,7 +478,7 @@ public class TasksBoardTests
     });
 
     // Every filter starts over on a fresh show, as the window's did: status, workspace, goal (TasksBoardGoalTests) and
-    // assignee. Task 7 adds the search and Claude working to this list.
+    // assignee. The search and Claude working start over too (Task 7, A_fresh_show_clears_the_search_and_Claude_working).
     [Fact]
     public void A_fresh_show_resets_every_filter() => StaThread.Run(() =>
     {
@@ -497,6 +497,207 @@ public class TasksBoardTests
         Assert.Equal(2, t.Window.Keys.Count);
         Assert.Equal("Workspace: all", t.Window.WorkspaceFilterLabel);
         Assert.Equal("Assigned: all", t.Window.AssigneeFilterLabel);
+    });
+
+    // --- Task 7 of the tasks panel plan: the search box and the Claude working chip -----------------------------------
+    // Spec 2026-11-23-tasks-panel-design.md, "The new filters". Both narrow the board BEFORE it is grouped and counted,
+    // as the goal filter does, so every chip's count agrees with what is shown.
+
+    // The box narrows as Petre types: every word must match, ignoring case, in the title, the status line or the question.
+    // The status chips count only what the search admits.
+    [Fact]
+    public void Searching_narrows_the_groups_and_the_chip_counts_alike() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        var submission = t.Tasks.AddNote("Store submission", t.Gepha).Value.Id;
+        var screenshots = t.Tasks.Create("Store screenshots", t.Gepha, Session("s1")).Value.Id;
+        t.Tasks.Ask(screenshots, "Which price tier?");
+        var dishes = t.Tasks.AddNote("Dishwasher tablets", t.Gepha).Value.Id;
+        t.Controller.Show();
+        Assert.Contains("Open 3", t.Window.FilterLabels);
+
+        t.Window.SearchBox.Text = "STORE";
+
+        Assert.Equal([screenshots, submission], t.Window.Keys);
+        Assert.Contains("Open 2", t.Window.FilterLabels);
+        Assert.Contains("Waiting on you 1", t.Window.FilterLabels);
+
+        // Two words, both must match: "tier" is only in the question.
+        t.Window.SearchBox.Text = "store  tier";
+        Assert.Equal([screenshots], t.Window.Keys);
+        Assert.Contains("Open 1", t.Window.FilterLabels);
+        Assert.Equal("Claude working 1", t.Window.ClaudeWorkingLabel);
+
+        t.Window.SearchBox.Text = "nothing like it";
+        Assert.Empty(t.Window.Keys);
+        Assert.Contains("Open 0", t.Window.FilterLabels);
+        Assert.Equal("Claude working 0", t.Window.ClaudeWorkingLabel);
+
+        // Cleared, everything is back.
+        t.Window.SearchBox.Text = "";
+        Assert.Equal([screenshots, dishes, submission], t.Window.Keys);
+        Assert.Contains("Open 3", t.Window.FilterLabels);
+    });
+
+    // The chip keeps only tasks with at least one LIVE session (an ended session does not count), and says how many it
+    // would show, on or off. Its count follows every other filter; the status chips follow it.
+    [Fact]
+    public void Claude_working_keeps_only_tasks_with_a_live_session_and_counts_them() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        var note = t.Tasks.AddNote("Dishwasher tablets", t.Gepha).Value.Id;
+        var live = t.Tasks.Create("DurableFile move guard", t.Gepha, Session("s1")).Value.Id;
+        var ended = t.Tasks.Create("Store screenshots", t.Gepha, Session("s2", live: false)).Value.Id;
+        t.Controller.Show();
+        Assert.Equal("Claude working 1", t.Window.ClaudeWorkingLabel);
+        Assert.False(t.Window.ClaudeWorkingOn);
+
+        Click(ButtonNamed(t.Window, "Filter: Claude working"));
+
+        Assert.True(t.Window.ClaudeWorkingOn);
+        Assert.Equal([live], t.Window.Keys);
+        Assert.Equal("Claude working 1", t.Window.ClaudeWorkingLabel);
+        Assert.Contains("Open 1", t.Window.FilterLabels);
+
+        // A session ending takes its task out of the filter as it happens.
+        t.Tasks.SessionEnded("s1");
+        Assert.Empty(t.Window.Keys);
+        Assert.Equal("Claude working 0", t.Window.ClaudeWorkingLabel);
+
+        Click(ButtonNamed(t.Window, "Filter: Claude working"));
+        Assert.False(t.Window.ClaudeWorkingOn);
+        Assert.Equal(3, t.Window.Keys.Count);
+        Assert.Contains(note, t.Window.Keys);
+        Assert.Contains(ended, t.Window.Keys);
+    });
+
+    // The two new filters combine with the status, workspace and assignee ones, and the Claude working count is what the
+    // chip would show under all the others.
+    [Fact]
+    public void Search_and_Claude_working_combine_with_the_status_and_workspace_filters() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        var guard = t.Tasks.Create("deploy guard", t.Gepha, Session("s1")).Value.Id;
+        var notes = t.Tasks.Create("deploy notes", t.Sparrow, Session("s2")).Value.Id;
+        t.Tasks.Ask(notes, "Ship it?");
+        var fix = t.Tasks.Create("deploy fix", t.Gepha, Session("s3", live: false)).Value.Id;
+        var list = t.Tasks.AddNote("deploy list", t.Gepha).Value.Id;
+        var other = t.Tasks.Create("runner disk", t.Gepha, Session("s4")).Value.Id;
+        t.Controller.Show();
+        Assert.Equal("Claude working 3", t.Window.ClaudeWorkingLabel);
+
+        t.Controller.Search("deploy");
+        Assert.Equal("Claude working 2", t.Window.ClaudeWorkingLabel);
+        Assert.DoesNotContain(other, t.Window.Keys);
+
+        t.Controller.FilterWorkspace(TaskWorkspaceFilter.On(t.Gepha));
+        Assert.Equal("Claude working 1", t.Window.ClaudeWorkingLabel);
+        Assert.Equal(3, t.Window.Keys.Count);
+        Assert.Contains(fix, t.Window.Keys);
+        Assert.Contains(list, t.Window.Keys);
+
+        t.Controller.FilterClaudeWorking(true);
+        Assert.Equal([guard], t.Window.Keys);
+        Assert.Contains("Open 1", t.Window.FilterLabels);
+
+        // Waiting on you, every workspace: only the live task that asks.
+        t.Controller.FilterWorkspace(TaskWorkspaceFilter.All);
+        t.Controller.Filter(TaskFilter.WaitingOnYou);
+        Assert.Equal([notes], t.Window.Keys);
+        Assert.Equal("Claude working 1", t.Window.ClaudeWorkingLabel);
+        Assert.Contains("Waiting on you 1", t.Window.FilterLabels);
+
+        // Assigned to me: the task that asks is on Petre (an ask hands it to him), the one Claude works on is not.
+        t.Controller.Filter(TaskFilter.Open);
+        t.Controller.FilterAssignee(TaskAssigneeFilter.Me);
+        Assert.Equal([notes], t.Window.Keys);
+        Assert.Equal("Claude working 1", t.Window.ClaudeWorkingLabel);
+
+        // A search nothing matches leaves nothing, and the chip says so.
+        t.Controller.FilterAssignee(TaskAssigneeFilter.All);
+        t.Controller.Search("deploy nowhere");
+        Assert.Empty(t.Window.Keys);
+        Assert.Equal("Claude working 0", t.Window.ClaudeWorkingLabel);
+    });
+
+    // A fresh show starts with no search and Claude working off, the box empty, like every other filter.
+    [Fact]
+    public void A_fresh_show_clears_the_search_and_Claude_working() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        t.Tasks.AddNote("Dishwasher tablets", t.Gepha);
+        var live = t.Tasks.Create("DurableFile move guard", t.Gepha, Session("s1")).Value.Id;
+        t.Controller.Show();
+        t.Window.SearchBox.Text = "guard";
+        Click(ButtonNamed(t.Window, "Filter: Claude working"));
+        Assert.Equal([live], t.Window.Keys);
+
+        t.Controller.Hide();
+        t.Controller.Show();
+
+        Assert.Equal("", t.Window.SearchBox.Text);
+        Assert.False(t.Window.ClaudeWorkingOn);
+        Assert.Equal(2, t.Window.Keys.Count);
+        // The box does not take the keyboard on a show: the panel opens on the board.
+        Assert.False(t.Window.SearchBox.IsKeyboardFocused);
+    });
+
+    // A redraw while Petre types (a session's pulse, a task arriving) never touches the box: its text, the keyboard and
+    // the caret stay as they were, as a half-typed comment's do.
+    [Fact]
+    public void Typing_into_the_search_box_keeps_its_text_and_caret_through_a_redraw() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        var dishes = t.Tasks.AddNote("Dishwasher tablets", t.Gepha).Value.Id;
+        t.Tasks.AddNote("Runner disk", t.Gepha);
+        t.Controller.Show();
+        t.Window.Activate();
+        var box = t.Window.SearchBox;
+        box.Focus();
+        box.Text = "dish";
+        box.CaretIndex = 2;
+        Assert.True(box.IsKeyboardFocused);
+        Assert.Equal([dishes], t.Window.Keys);
+        var rebuilds = t.Window.Rebuilds;
+
+        var more = t.Tasks.AddNote("Dish soap", t.Gepha).Value.Id;
+
+        // The redraw happened (the new match is drawn)...
+        Assert.True(t.Window.Rebuilds > rebuilds);
+        Assert.Equal([more, dishes], t.Window.Keys);
+        // ...and the box is as it was.
+        Assert.Same(box, t.Window.SearchBox);
+        Assert.Equal("dish", box.Text);
+        Assert.True(box.IsKeyboardFocused);
+        Assert.Equal(2, box.CaretIndex);
+    });
+
+    // Ctrl+F anywhere in the panel puts the keyboard in the box; Esc in the box empties it and gives the keyboard back to
+    // the board, with every task back.
+    [Fact]
+    public void Ctrl_f_focuses_the_search_and_esc_clears_it_and_gives_the_board_back() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        var dishes = t.Tasks.AddNote("Dishwasher tablets", t.Gepha).Value.Id;
+        var disk = t.Tasks.AddNote("Runner disk", t.Gepha).Value.Id;
+        t.Controller.Show();
+        t.Window.Activate();
+        t.Window.FocusBoard();
+
+        Assert.True(t.Window.Press(Key.F, ModifierKeys.Control));
+        Assert.True(t.Window.SearchBox.IsKeyboardFocused);
+        // F alone is typing, not the shortcut.
+        Assert.False(t.Window.Press(Key.F, ModifierKeys.None));
+
+        t.Window.SearchBox.Text = "runner";
+        Assert.Equal([disk], t.Window.Keys);
+
+        PressKey(t.Window, Key.Escape);
+
+        Assert.Equal("", t.Window.SearchBox.Text);
+        Assert.False(t.Window.SearchBox.IsKeyboardFocusWithin);
+        Assert.True(t.Window.Toolbar.IsKeyboardFocused);
+        Assert.Equal([disk, dishes], t.Window.Keys);
     });
 
     // The toolbar's × closes the panel, as `tasks-window hide` does, and Alt+F4 on the panel does the same rather than
