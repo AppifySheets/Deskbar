@@ -85,9 +85,10 @@ namespace Deskbar.App;
 // apply), so it too says how many it would show. Neither is saved: both start over on a fresh open, with the rest.
 //
 // THE PANEL'S WIDTH (spec "Lines at panel width" and "The Matrix"; plan 2026-11-23-tasks-panel, Task 8). The view says
-// whether lines are slim (below 620 DIP) and whether the Matrix is allowed (from 780), both from the width saved for
-// the panel (View has why that one), and shows the Matrix only when the setting asks for it AND it is allowed. The
-// width changes only at the grip's drag end (ResizePanel), which makes the view again, so every line redraws once then.
+// whether lines are slim (below 620 DIP) and whether the Matrix is allowed (from 780), both from the width the panel
+// docked at (TasksPanel.DockedWidth; View has why that one), and shows the Matrix only when the setting asks for it AND
+// it is allowed. That width changes only when the panel docks (the grip's drag end, another screen, a scale change),
+// whose pulse makes the view again, so every line redraws once then and never during a drag.
 public sealed class TasksBoard : IDisposable
 {
     // How long a line just closed stays, struck through with Undo: the bar's own window, so the two agree.
@@ -228,8 +229,19 @@ public sealed class TasksBoard : IDisposable
             this.selection.Changed.Subscribe(_ => window.PaintSelection(this.selection.Current)),
             // The grip goes on the edge facing the windows, which follows the edge the panel docks on (TasksPanel.Edge
             // says the current one at once, then each change).
-            panel.Edge.Subscribe(window.SetInnerEdge));
+            panel.Edge.Subscribe(window.SetInnerEdge),
+            // The width the panel docked at (Task 8 fix round 1): a dock at a new width, on another screen, at another
+            // scale or from the grip, may cross 620 or 780, so the view is made again (View reads it). The window's
+            // signature holds only the two flags, so a new width that crosses neither draws nothing.
+            panel.DockedWidth.Subscribe(width =>
+            {
+                dockedWidth = width;
+                Refresh();
+            }));
     }
+
+    // The width the panel last docked at, DIPs; None before its first dock (View falls back to the saved width then).
+    Maybe<double> dockedWidth = Maybe<double>.None;
 
     // What of the workspace state the window shows, as text: compared, never parsed.
     string ShownStateKey() =>
@@ -322,9 +334,10 @@ public sealed class TasksBoard : IDisposable
 
     // The grip's drag end (TasksWindowActions.ResizePanel): the width saved, then the panel re-docked at it in place. The
     // width goes in unclamped; TasksPanel clamps it against the screen it docks on.
-    // The new width may cross one of the lines' thresholds (slim below 620, the Matrix from 780; Task 8), so the view is
-    // made again from the width just saved and every line redraws once, here at the drag's end and never during it. A
-    // drag that crosses neither draws nothing: the window's signature holds the two flags, not the width.
+    // The new width may cross one of the lines' thresholds (slim below 620, the Matrix from 780; Task 8), so every line
+    // redraws once, here at the drag's end and never during it. The re-dock's DockedWidth pulse does that (see the
+    // constructor); the Refresh after it draws nothing then (the signature is the same), and covers a panel not docked
+    // yet, whose view still reads the saved width. A drag that crosses neither threshold draws nothing.
     void ResizePanel(double widthDips)
     {
         _ = manager.SaveTasksPanel(PanelState with { Width = widthDips });
@@ -699,12 +712,12 @@ public sealed class TasksBoard : IDisposable
             .ToArray();
         var (menuGoals, filterGoals) = showsGoals ? GoalChoices(goalBoard) : NoGoalChoices;
         // THE PANEL'S WIDTH DECIDES TWO THINGS (Task 8; spec "Lines at panel width", "The Matrix"): slim lines below 620
-        // DIP, and the List / Matrix switch only from 780. It is the width SAVED for the panel (AppState.TasksPanel), the
-        // one the grip's drag end just wrote and the panel docks at, because the window's own ActualWidth is not known at
-        // the first draw: OpenFresh draws before the panel docks. TasksPanel clamps the width to half the screen it docks
-        // on, so on a screen narrower than twice the width the drawn panel can be narrower than this says; the grip's own
-        // preview clamps to that same half, so a width chosen by dragging always matches.
-        var width = PanelState.Width;
+        // DIP, and the List / Matrix switch only from 780. It is the width the panel DOCKED at (TasksPanel.DockedWidth,
+        // fix round 1), which is the saved width clamped to half the screen it docks on: after a move to a smaller
+        // screen or a scale change the panel is narrower than the saved width, and the lines must follow what is drawn
+        // (review Important 1: a saved 800 on a 640 DIP panel offered the Matrix). Before the first dock (OpenFresh draws
+        // before the panel docks) it is the saved width; the first dock's pulse then redraws if the clamp moved it.
+        var width = dockedWidth.GetValueOrDefault(PanelState.Width);
         var matrixAllowed = TasksPanelLayout.MatrixAllowed(width);
         return new TasksView(filters, WorkspaceFilterLabel(), where, places, groups, EmptyText(), addTarget)
         {
