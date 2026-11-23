@@ -471,12 +471,31 @@ public sealed class TasksBoard : IDisposable
     public void ShowTask(Guid id)
     {
         selection.Select(id);
+        RevealPastSearch(id);
         Show();
         // Open starts a hidden window at the default view (no thread open); the task's own thread opens after it.
         expanded.Add(id);
         window.PaintSelection(selection.Current);
         Refresh();
         window.ScrollToSelected();
+    }
+
+    // THE TASK PETRE CLICKED ON THE BAR IS ON SCREEN (Task 7 review, ruling on ShowTask). On an open panel the search and
+    // the Claude working chip stay as they were, and either could hide the very task asked for, so the one that hides it
+    // is cleared: the search (emptied in the box too, TasksWindow.ClearSearch) when it does not admit the task, the chip
+    // when the task has no live session. Only those two: the status, workspace, goal and assignee filters keep their
+    // behaviour, as ruled. On a hidden panel this is moot, since OpenFresh resets everything anyway.
+    void RevealPastSearch(Guid id)
+    {
+        var task = tasks.Board.Tasks.TryFirst(t => t.Id == id);
+        if (task.HasNoValue) return;
+        if (!search.Admits(task.Value))
+        {
+            // The controller's search first, so the TextChanged the box raises finds nothing to change (Search).
+            search = TaskSearch.None;
+            window.ClearSearch();
+        }
+        if (claudeWorking && !task.Value.HasLiveSession) claudeWorking = false;
     }
 
     /// <summary>A line's click (see the header). The window stays open; a refusal shows on its problem line.</summary>
@@ -684,7 +703,7 @@ public sealed class TasksBoard : IDisposable
     // What an empty list says: under a search or Claude working, that THEY found nothing, since "Nothing open" would be
     // wrong while open tasks are only hidden by them; otherwise the status filter's own line.
     string EmptyText() =>
-        !search.IsBlank ? "No task matches the search. Esc clears it."
+        !search.IsBlank ? "No task matches the search."
         : claudeWorking ? "Claude is not working on any of these."
         : EmptyText(filter);
 
