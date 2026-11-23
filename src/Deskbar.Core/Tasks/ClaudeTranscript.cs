@@ -35,6 +35,23 @@ public static class ClaudeTranscript
     // api-request-blob) and is skipped. Only `type` decides: api-request-blob carries a message with a role, yet it is
     // not a user or assistant entry. Lines that do not parse are skipped too, so a half-written last line is no
     // verdict. An empty or unreadable transcript is "not cut off": there is nothing to continue.
+    //
+    // Some type:"user" entries are not a prompt waiting for a reply, and reading them as one would make Deskbar tell
+    // a session Petre stopped on purpose to carry on (final review, item 1). Shapes copied from real transcripts in
+    // %USERPROFILE%\.claude\projects (2026-11-23):
+    //   * an Esc interrupt is written as a user entry whose text is "[Request interrupted by user]" or
+    //     "[Request interrupted by user for tool use]" (a text block in a list, after the assistant's partial
+    //     reply). Petre stopped that turn himself, so it counts as FINISHED: the session is resumed without the
+    //     "continue" message and waits for him.
+    //   * isMeta:true entries (the <local-command-caveat> before a local slash command, a skill's injected body),
+    //     isCompactSummary:true (the summary /compact writes) and isSidechain:true (a subagent's turns, which older
+    //     versions wrote into the parent's file; assistant ones too) are skipped like metadata.
+    //   * a local slash command (/model, /cost, /clear, /compact) writes its own name and its output as plain user
+    //     entries WITHOUT isMeta: "<command-name>/model</command-name>..." and
+    //     "<local-command-stdout>Set model to ...</local-command-stdout>" (measured). They run without a turn, so
+    //     they are skipped too: the turn before them decides. A skill invoked as a slash command (/summary) also
+    //     starts with <command-message>/<command-name>, and one cut off before its reply is then read as finished;
+    //     that errs toward not continuing, the safe side.
     public static bool WasCutOff(IEnumerable<string> jsonLines) =>
         jsonLines
             .Select(Entry)
@@ -52,9 +69,16 @@ public static class ClaudeTranscript
             using var document = JsonDocument.Parse(line);
             var root = document.RootElement;
             if (root.ValueKind != JsonValueKind.Object || !root.TryGetProperty("type", out var type)) return null;
+            if (IsTrue(root, "isSidechain")) return null;
             return type.GetString() switch
             {
-                "user" => new Turn(false),
+                "user" when IsTrue(root, "isMeta") || IsTrue(root, "isCompactSummary") => null,
+                "user" => TextOf(root) switch
+                {
+                    { } text when text.StartsWith("[Request interrupted by user", StringComparison.Ordinal) => new Turn(true),
+                    { } text when LocalCommandPrefixes.Any(p => text.StartsWith(p, StringComparison.Ordinal)) => null,
+                    _ => new Turn(false),
+                },
                 "assistant" => new Turn(root.TryGetProperty("message", out var message)
                     && message.ValueKind == JsonValueKind.Object
                     && message.TryGetProperty("stop_reason", out var reason)
@@ -68,4 +92,30 @@ public static class ClaudeTranscript
             return null;
         }
     }
+
+    // The openings a local slash command's own entries start with (see WasCutOff). The caveat is normally isMeta, and
+    // is listed in case a version writes it without the flag.
+    static readonly IReadOnlyList<string> LocalCommandPrefixes =
+        ["<command-name>", "<command-message>", "<local-command-stdout>", "<local-command-stderr>", "<local-command-caveat>"];
+
+    static bool IsTrue(JsonElement root, string name) =>
+        root.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.True;
+
+    // A user entry's text: the content itself when it is a string, else the first text block of the list. A list
+    // with only tool_result blocks has no text and returns null (it is a reply waiting to be answered).
+    static string? TextOf(JsonElement root) =>
+        !root.TryGetProperty("message", out var message) || message.ValueKind != JsonValueKind.Object
+            || !message.TryGetProperty("content", out var content)
+            ? null
+            : content.ValueKind switch
+            {
+                JsonValueKind.String => content.GetString(),
+                JsonValueKind.Array => content.EnumerateArray()
+                    .Where(b => b.ValueKind == JsonValueKind.Object
+                        && b.TryGetProperty("type", out var t) && t.ValueKind == JsonValueKind.String && t.GetString() == "text"
+                        && b.TryGetProperty("text", out var x) && x.ValueKind == JsonValueKind.String)
+                    .Select(b => b.GetProperty("text").GetString())
+                    .FirstOrDefault(),
+                _ => null,
+            };
 }
