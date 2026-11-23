@@ -58,9 +58,15 @@ internal sealed class TasksPanelRig
     }
 
     // The bar docks on `edge` ("right" or "left") of the fake screen and announces it; answered before this returns.
-    public TasksPanelRig Docked(string edge = "right")
+    // `screenDips` makes the fake screen that many DIPs wide at the window's scale instead of 4000 px, so the panel's
+    // clamp to half the screen bites (Task 8 fix round 1: the lines follow the width the panel docks at). Called again,
+    // it is the bar moving to another screen: the panel registers afresh there.
+    public TasksPanelRig Docked(string edge = "right", double? screenDips = null)
     {
-        Bar.OnNext(new BarStrip(edge, Screen, Maybe<WindowRect>.None, edge == "left" ? Screen.Left + 150 : Screen.Right - 150, Gone: false));
+        var screen = screenDips is { } dips
+            ? Screen with { Right = Screen.Left + (int)Math.Round(dips * VisualTreeHelper.GetDpi(window).DpiScaleX) }
+            : Screen;
+        Bar.OnNext(new BarStrip(edge, screen, Maybe<WindowRect>.None, edge == "left" ? screen.Left + 150 : screen.Right - 150, Gone: false));
         Pump();
         return this;
     }

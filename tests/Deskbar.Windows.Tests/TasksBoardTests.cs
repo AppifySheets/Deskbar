@@ -90,7 +90,7 @@ public class TasksBoardTests
         Func<DateTimeOffset>? now = null, TaskSelection? selection = null, Func<bool>? activates = null,
         Func<TaskItem, IReadOnlyList<SessionView>>? sessionsOf = null, Action<Guid>? startClaude = null,
         Func<TaskItem, string, Result>? openSession = null, IObservable<System.Reactive.Unit>? sessionsChanged = null,
-        string edge = "right", double width = Wide, Func<TaskItem, int>? workingOf = null)
+        string edge = "right", double width = Wide, Func<TaskItem, int>? workingOf = null, double? screenDips = null)
     {
         var harness = Harness.Build();
         var minutes = 0;
@@ -108,7 +108,7 @@ public class TasksBoardTests
         // A panel wide enough for everything (Wide, below): the full line and the Matrix switch both need it. The slim line
         // below 620 DIP and the switch's 780 are Task 8's, with their own tests passing a `width`.
         Assert.True(harness.Manager.SaveTasksPanel(new Deskbar.Core.Persistence.TasksPanelState(false, width)).IsSuccess);
-        var panel = new TasksPanelRig(window).Docked(edge);
+        var panel = new TasksPanelRig(window).Docked(edge, screenDips);
         var controller = new TasksBoard(window, panel.Panel, tasks, harness.Manager, goTo ?? (t =>
         {
             went.Add(t.Id);
@@ -3224,6 +3224,55 @@ public class TasksBoardTests
         Assert.Equal(new Thickness(2), halo.Padding);
         var square = Assert.IsType<Border>(halo.Child);
         Assert.Equal(8, square.Width);
+    });
+
+    // TASK 8 REVIEW, IMPORTANT 1: the lines and the switch follow the width the panel DOCKS at (TasksPanel.DockedWidth),
+    // which is the saved width clamped to half the screen it docks on, not the saved width itself. A saved 700 on a
+    // screen whose half is 546 DIP is a 546 DIP panel, and its lines are slim.
+    [Fact]
+    public void A_panel_clamped_below_620_by_its_screen_draws_slim_lines() => StaThread.Run(() =>
+    {
+        using var t = Build(width: 700, screenDips: 1092);
+        var id = t.Tasks.Create("work", t.Gepha, Session("s1")).Value.Id;
+        t.Controller.Show();
+
+        var line = LineOf(t.Window, id);
+        Assert.DoesNotContain(Inside(line).OfType<TextBlock>(), b => b.Text == "1 session");
+        Assert.Equal(["session-live"], SquaresOf(line));
+        // The saved width is the user's and stays whole, for a wider screen later.
+        Assert.Equal(700, t.Harness.Manager.State.TasksPanel!.Width);
+    });
+
+    // A saved 800 on a screen whose half is 640 DIP: a 640 DIP panel, too narrow for the Matrix, so the switch hides and
+    // the List shows, with the setting left on.
+    [Fact]
+    public void A_panel_clamped_below_780_by_its_screen_hides_the_Matrix() => StaThread.Run(() =>
+    {
+        using var t = Build(width: 800, screenDips: 1280);
+        t.Tasks.AddNote("a", t.Gepha);
+        Assert.True(t.Harness.Manager.SetTasksMatrix(true).IsSuccess);
+        t.Controller.Show();
+
+        Assert.False(t.Window.MatrixShown);
+        Assert.Equal(Visibility.Collapsed, ButtonNamed(t.Window, "Matrix").Visibility);
+        Assert.True(t.Harness.Manager.State.TasksMatrix);
+    });
+
+    // The bar moving to a wider screen re-docks the panel there at its whole saved width, and the full lines come back,
+    // every line redrawn once.
+    [Fact]
+    public void A_redock_on_a_wider_screen_brings_the_full_lines_back() => StaThread.Run(() =>
+    {
+        using var t = Build(width: 700, screenDips: 1092);
+        var id = t.Tasks.Create("work", t.Gepha, Session("s1")).Value.Id;
+        t.Controller.Show();
+        Assert.DoesNotContain(Inside(LineOf(t.Window, id)).OfType<TextBlock>(), b => b.Text == "1 session");
+        var rebuilds = t.Window.Rebuilds;
+
+        t.Panel.Docked();
+
+        Assert.Equal(rebuilds + 1, t.Window.Rebuilds);
+        Assert.Contains(Inside(LineOf(t.Window, id)).OfType<TextBlock>(), b => b.Text == "1 session");
     });
 
     // Close and Reopen leave a slim line (no column for them) but stay in its "⋯" menu, which already offered both.

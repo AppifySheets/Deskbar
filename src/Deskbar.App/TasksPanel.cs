@@ -59,6 +59,9 @@ internal sealed class TasksPanel : IDisposable
     // The edge the panel docks on (see Edge). Right until the bar's first notice: Petre's bar docks right.
     readonly BehaviorSubject<PanelEdge> edge = new(PanelEdge.Right);
 
+    // The width the panel last docked at, DIPs (see DockedWidth). None until the first dock.
+    readonly BehaviorSubject<Maybe<double>> dockedWidth = new(Maybe<double>.None);
+
     // Reserves a strip `thickness` physical pixels wide on the edge of the screen (physical pixels, Right and Bottom
     // exclusive) and returns the rectangle the shell granted. Registers first when not registered. AppBar.Dock in the
     // app; a recording fake in the tests.
@@ -171,6 +174,17 @@ internal sealed class TasksPanel : IDisposable
     // the edge the next notice gives.
     public IObservable<PanelEdge> Edge => edge.DistinctUntilChanged();
 
+    // THE WIDTH THE PANEL ACTUALLY DOCKS AT, in DIPs of the screen it docks on (tasks panel plan, Task 8 fix round 1). The
+    // width asked for (Show, SetWidth) is the user's and is kept whole; each dock clamps it to half of THAT screen
+    // (TasksPanelLayout.Clamp), so after a move to a smaller screen, a resolution or a scale change the panel is drawn
+    // narrower than the saved width. The lines (slim below 620) and the Matrix switch (from 780) must follow what is
+    // drawn, so the board reads this rather than the saved width. Every dock and re-dock sets it: a notice from the bar
+    // (another screen, a display change), a width from the grip, the shell's re-ask, the guard. None before the first
+    // dock, and the board then falls back to the saved width. A late subscriber gets the current value at once; after
+    // that only a change is said, so a re-dock at the same width redraws nothing. It is the clamped width, not the shell's
+    // granted rectangle over the scale, which rounds to whole pixels and could put 620 at 619.7, a slim line.
+    public IObservable<Maybe<double>> DockedWidth => dockedWidth.DistinctUntilChanged();
+
     // Opens the panel `widthDips` wide. Docks at once when the bar's strip stands; otherwise remembers it, and the bar's
     // next notice with an edge docks it. Opening one already on screen at another width re-docks it at the new one.
     public void Show(double widthDips)
@@ -257,6 +271,7 @@ internal sealed class TasksPanel : IDisposable
         if (held) Say(() => "tasks panel: strip given back (shutdown)");
         shown.OnCompleted();
         edge.OnCompleted();
+        dockedWidth.OnCompleted();
     }
 
     public void Dispose() => Shutdown();
@@ -349,12 +364,16 @@ internal sealed class TasksPanel : IDisposable
                 return Refuse($"the screen {Format(at.Screen)} cannot be read right now");
 
             // The width clamped to the panel's minimum and half of THIS screen, in this screen's DIPs, then its pixels.
-            var thickness = (int)Math.Round(TasksPanelLayout.Clamp(width, at.Screen.Width / scale) * scale);
+            var dips = TasksPanelLayout.Clamp(width, at.Screen.Width / scale);
+            var thickness = (int)Math.Round(dips * scale);
             var got = DockWith(at.Edge, at.Screen, thickness);
             if (got.Width <= 0 || got.Height <= 0)
                 return Refuse($"the shell granted no room on {Format(at.Screen)}");
 
             granted = got;
+            // Said before the window is placed and shown, so a board redrawing for a new width (slim lines, the Matrix
+            // switch) has done so by the time the window appears at it.
+            dockedWidth.OnNext(Maybe.From(dips));
             PlaceAt(got, at.Screen, scale);
             if (!window.IsVisible)
             {

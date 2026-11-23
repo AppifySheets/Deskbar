@@ -492,10 +492,11 @@ public partial class TasksWindow : Window
             // The two width flags (Task 8): which line is drawn and whether the view switch shows. Not the width itself, so
             // a grip drag that crosses neither threshold redraws nothing.
             $"{view.Matrix}{view.MatrixAllowed}{view.Slim}",
-            // A row's WorkingCount is here (Task 8): a new agents list that only starts or stops Claude working changes the
-            // squares' halos and nothing else, and must still redraw the line.
+            // A List row's WorkingCount is in its line below (Task 8): a new agents list that only starts or stops Claude
+            // working changes the squares' halos and nothing else, and must still redraw the line. Not in a Matrix cell's:
+            // a compact line draws no sessions, so it would only rebuild the Matrix for nothing (review minor 2).
             string.Join('\u0002', view.Cells.Select(c => $"{c.Header}:" + string.Join('\u0003', c.Rows.Select(r =>
-                $"{r.Id}|{r.Title}|{r.Detail}|{r.Description}|{r.Status}|{r.Claudes}|{r.Assignee.Id}|{PlaceSignature(r.Place)}|{r.CommentCount}|{r.Expanded}|{r.Closing}|{r.Important}|{r.Urgent}|{r.WorkingCount}|" +
+                $"{r.Id}|{r.Title}|{r.Detail}|{r.Description}|{r.Status}|{r.Claudes}|{r.Assignee.Id}|{PlaceSignature(r.Place)}|{r.CommentCount}|{r.Expanded}|{r.Closing}|{r.Important}|{r.Urgent}|" +
                 string.Join('\u0004', r.Comments.Select(c => $"{c.Id}{c.Author}{c.When}{c.Markdown}{c.Settled}")))))),
             string.Join('\u0002', view.Groups.Select(g => $"{g.Header}:" + string.Join('\u0003', g.Rows.Select(r =>
                 $"{r.Id}|{r.Title}|{r.Detail}|{r.Description}|{r.Status}|{r.Claudes}|{r.Assignee.Id}|{r.Sessions}|{r.SessionCount}|{r.LiveCount}|{PlaceSignature(r.Place)}|{r.CommentCount}|" +
@@ -741,9 +742,9 @@ public partial class TasksWindow : Window
     // fits), sessions, assignee (46 DIP, "Claude" fits), age, workspace chip,
     // comments, action (close or Reopen), "…". Fixed widths, shared by every line, so each column sits at the same x on
     // every line. The sessions column is wide enough for "2 sessions, 1 live" (116 DIP, so the words never spill into the
-    // age column; it is empty on a note), the age is left-aligned in its own so its x never follows the text length, and
-    // the full line wants 692 DIP (the floating window's old minimum width, 620 before the status column took 72) to keep
-    // the title a usable width even with the list's scroll bar showing (review I-3).
+    // age column; it is empty on a note), the age is left-aligned in its own so its x never follows the text length, and this
+    // line is drawn only from 620 DIP (TasksPanelLayout.SlimBelow; narrower, the slim line below), so the title keeps a
+    // usable width even with the list's scroll bar showing (review I-3). The panel itself goes down to 360 DIP.
     static readonly IReadOnlyList<GridLength> LineColumns =
         [new(22), new(1, GridUnitType.Star), new(38), new(72), new(116), new(46), new(44), new(88), new(40), new(52), new(24)];
 
@@ -839,10 +840,13 @@ public partial class TasksWindow : Window
     // never shows an age frozen at the last redraw.
     readonly Dictionary<Guid, (TextBlock Tip, string Head, string Status, DateTimeOffset Created, string Assignee)> slimTips = [];
 
+    // A line with more sessions than it has squares for (SlimSquares) also says them in words, "6 sessions, 2 live", so
+    // the ones past the fourth leave a trace (review minor 3).
     TextBlock SlimTip(TaskRowView row, string head)
     {
         var tip = new TextBlock { Tag = "task-line-tip" };
-        slimTips[row.Id] = (tip, head, TaskViews.StatusName(row.Status), row.Created, row.Assignee.Name);
+        slimTips[row.Id] = (tip, row.SessionCount > SlimSquares ? $"{head}\n{row.Sessions}" : head, TaskViews.StatusName(row.Status),
+            row.Created, row.Assignee.Name);
         WriteSlimTip(slimTips[row.Id], Now());
         return tip;
     }
