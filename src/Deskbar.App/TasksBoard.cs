@@ -165,7 +165,14 @@ public sealed class TasksBoard : IDisposable
     /// The window's handle, created if it is not yet. The bar lists the tasks window like any app window (App.xaml.cs),
     /// and the App's bring-forward and tiling know it by this handle.
     /// </summary>
-    public nint EnsureHandle() => new WindowInteropHelper(window).EnsureHandle();
+    public nint EnsureHandle() => handle = new WindowInteropHelper(window).EnsureHandle();
+
+    // The handle once EnsureHandle has made it, and 0 before: what the tiling predicate reads, so asking "is this the tasks
+    // window?" never creates a window handle from inside a tiling decision (review, Minor 2).
+    nint handle;
+
+    /// <summary>The window's handle if it has one yet, else 0. Never creates it.</summary>
+    public nint KnownHandle => handle;
 
     public bool IsOpen => window.IsOpen;
 

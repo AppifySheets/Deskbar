@@ -108,8 +108,13 @@ public partial class FloatingBar
     internal void SaveTaskEdit()
     {
         if (editingTask is not { } id || taskEditBox is null) return;
-        var text = taskEditBox.Text;
-        taskService?.Rename(id, text).TapError(err => ClickTrace.Write($"task list: not renamed: {err}"));
+        // A refused rename (an empty title) keeps the editor open with what was typed, as the tasks window's editor does
+        // (review, Minor 3): Esc is the way out without saving.
+        if (taskService?.Rename(id, taskEditBox.Text) is { IsFailure: true } refused)
+        {
+            ClickTrace.Write($"task list: not renamed: {refused.Error}");
+            return;
+        }
         EndTaskEdit(handBack: true);
     }
 
@@ -123,8 +128,11 @@ public partial class FloatingBar
         taskEditBox = null;
         var back = taskEditReturnTo;
         taskEditReturnTo = 0;
-        // What the editor held back is painted now.
+        // What the editor held back is painted now, and the rebuild it deferred is served (Rebuild), and the docked fit
+        // pass queued again: it declines to run while the editor is open (review, Minor 5).
         PaintTaskList();
+        FlushDeferredRebuild();
+        QueueTaskListFit();
         UpdateFade();
         if (handBack && back != 0 && !IsOwnWindow(back) && WindowAlive(back) && OnCurrentDesktop(back)) HandForegroundTo(back);
     }

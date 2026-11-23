@@ -2232,6 +2232,121 @@ public class FloatingBarTaskListTests
         Assert.Equal("mine", t.Tasks.Board.Tasks.Single(x => x.Id == id).Title);
         Assert.Equal(2, t.Lines.Count);
     });
+
+    // REVIEW OF db2b993..fa395f8, CRITICAL 1: while the editor was open the bar rebuilt without end (the rebuild ended by
+    // painting the list, which waited and queued another rebuild) and input starved: no Input tick in two seconds. A
+    // rebuild requested during an edit waits, and the dispatcher keeps serving input.
+    [Fact]
+    public void A_rebuild_requested_during_an_edit_waits_and_input_keeps_running() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        var id = t.Tasks.AddNote("mine", t.Gepha).Value.Id;
+        t.Bar.BeginTaskEdit(id);
+        t.Bar.RequestRebuild();
+
+        var ticks = InputTicksWhilePumping(t.Bar.Dispatcher, TimeSpan.FromMilliseconds(300));
+
+        Assert.True(ticks > 5, $"input ticks {ticks}");
+        Assert.NotNull(t.Bar.TaskEditor);
+        t.Bar.CancelTaskEdit();
+    });
+
+    // The Edit menu's own close serves the deferred rebuild (FlushDeferredRebuild); with the editor open that must not
+    // loop either, and closing the editor serves it once.
+    [Fact]
+    public void A_rebuild_flushed_by_the_edit_menus_close_does_not_loop() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        var id = t.Tasks.AddNote("mine", t.Gepha).Value.Id;
+        var menu = t.Bar.OpenTaskLineMenu(id)!;
+        t.Bar.RequestRebuild();
+        menu.Items.OfType<MenuItem>().First().RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
+        menu.IsOpen = false;
+
+        var ticks = InputTicksWhilePumping(t.Bar.Dispatcher, TimeSpan.FromMilliseconds(300));
+        Assert.True(ticks > 5, $"input ticks {ticks}");
+
+        t.Bar.CancelTaskEdit();
+        Assert.True(InputTicksWhilePumping(t.Bar.Dispatcher, TimeSpan.FromMilliseconds(300)) > 5);
+        Assert.Single(t.Lines);
+    });
+
+    // I-1: a press inside the editor is the editor's; it must not arm a drag of the line, so selecting text with a move
+    // of more than the drag distance never drags the line.
+    [Fact]
+    public void A_press_inside_the_editor_does_not_arm_a_line_drag() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        var id = t.Tasks.AddNote("mine", t.Gepha).Value.Id;
+        t.Tasks.AddNote("other", t.Gepha);
+        t.Bar.BeginTaskEdit(id);
+        var editor = Assert.IsType<TextBox>(t.Bar.TaskEditor);
+
+        editor.RaiseEvent(new MouseButtonEventArgs(Mouse.PrimaryDevice, 0, MouseButton.Left) { RoutedEvent = Mouse.PreviewMouseDownEvent, Source = editor });
+
+        Assert.False(t.Bar.TaskDragInFlight);
+        t.Bar.CancelTaskEdit();
+    });
+
+    // M-3: a refused rename (an empty title) keeps the editor open with what was typed, as the window's editor does.
+    [Fact]
+    public void A_refused_rename_keeps_the_bar_editor_open() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        var id = t.Tasks.AddNote("mine", t.Gepha).Value.Id;
+        t.Bar.BeginTaskEdit(id);
+        Assert.IsType<TextBox>(t.Bar.TaskEditor).Text = "   ";
+
+        t.Bar.SaveTaskEdit();
+
+        Assert.NotNull(t.Bar.TaskEditor);
+        Assert.Equal("mine", t.Tasks.Board.Tasks.Single(x => x.Id == id).Title);
+        t.Bar.CancelTaskEdit();
+    });
+
+    // M-1: the off flags are invisible until the line is pointed at, and while invisible they take no clicks.
+    [Fact]
+    public void The_hidden_flag_toggles_are_not_hit_testable() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        t.Tasks.AddNote("mine", t.Gepha);
+        var toggles = Inside(t.Lines.Single()).OfType<Button>().Where(b => Equals(b.Tag, "task-flag-off") && b.Opacity == 0).ToList();
+        Assert.NotEmpty(toggles);
+        Assert.All(toggles, toggle => Assert.False(toggle.IsHitTestVisible));
+    });
+
+    // Petre's screenshot: a right-click on a task line opened the bar's own menu (New workspace, Window list, Arrange,
+    // Dock, Manage, Exit). In the list a right-click opens the line's own menu, or the box's text menu, or nothing, and
+    // the ContextMenuOpening that would reach the bar's menu is handled before it gets there.
+    static ContextMenuEventArgs Opening(UIElement source) =>
+        (ContextMenuEventArgs)Activator.CreateInstance(typeof(ContextMenuEventArgs),
+            System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Public,
+            null, [source, true, 0d, 0d], null)!;
+
+    [Fact]
+    public void A_right_click_in_the_list_never_opens_the_bars_menu() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        var id = t.Tasks.AddNote("mine", t.Gepha).Value.Id;
+        var barMenu = ((FrameworkElement)t.Bar.FindName("Root")!).ContextMenu!;
+        var line = t.Lines.Single();
+
+        // The line: a routed right-click opens its own menu, Edit first, and the bar's stays shut.
+        line.RaiseEvent(new MouseButtonEventArgs(Mouse.PrimaryDevice, 0, MouseButton.Right) { RoutedEvent = UIElement.PreviewMouseRightButtonUpEvent, Source = line });
+        Assert.True(t.Bar.TaskLineMenu is { IsOpen: true });
+        Assert.Equal("Edit", ((TextBlock)t.Bar.TaskLineMenu!.Items.OfType<MenuItem>().First().Header).Text);
+        t.Bar.TaskLineMenu.IsOpen = false;
+        Assert.False(barMenu.IsOpen);
+
+        // Anything else in the list: the add box (its own text menu), the chip row, the lines: the event ends in the list.
+        new UIElement[] { t.Chips, AddChip(t), ButtonNamed(t.Chips, "Add as important"), line }.ToList().ForEach(source =>
+        {
+            var opening = Opening(source);
+            source.RaiseEvent(opening);
+            Assert.True(opening.Handled, $"{source.GetType().Name} let a right-click reach the bar's menu");
+        });
+        Assert.False(barMenu.IsOpen);
+    });
     // --- Ruling 41: a title wraps to a second line when it does not fit, never a third ------------------------------
 
     static TextBlock TextBlockOf(Button line) => Inside(line).OfType<TextBlock>().Single(b => Equals(b.Tag, "task-text"));

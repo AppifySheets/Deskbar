@@ -2119,6 +2119,16 @@ public partial class FloatingBar : Window
             return;
         }
 
+        // ...and while a TASK LINE'S TITLE IS BEING EDITED in place (FloatingBar.TaskEdit.cs; review of db2b993..fa395f8,
+        // Critical 1). TaskListMustWait already holds the list's PAINT back for the editor, but a rebuild that ran anyway
+        // ended by painting the list, which waited and set rebuildRequested, which queued another rebuild, without end:
+        // measured, no Input tick ran in two seconds. So the rebuild waits too, and EndTaskEdit serves it.
+        if (editingTask is not null)
+        {
+            rebuildRequested = true;
+            return;
+        }
+
         // Stage 2, and the one this bug keeps coming back to: a rebuild that runs BETWEEN a press
         // and its release destroys the pressed Button, and a Button that no longer exists raises
         // no Click. The deferral above is supposed to make that impossible while a button is down

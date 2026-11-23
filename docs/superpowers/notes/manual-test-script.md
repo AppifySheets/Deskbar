@@ -229,7 +229,7 @@ The task list at the bottom of the bar (spec `docs/superpowers/specs/2026-11-22-
 52. Double-click the tick box of the first note: only that note closes; its line stays struck through with
     "Undo" where the tick box was, and the second click does not undo it or close the next note. Click "Undo"
     within six seconds: the note is back as it was. Tick two notes in a row: both lines stay in place, each with
-    its own Undo, and leave after their six seconds. A done Claude task's close button does the same, and Undo
+    its own Undo, and leave after their six seconds. A done Claude task's tick box does the same, and Undo
     brings it back done. After the six seconds, `$ts task list --closed` lists the closed note first and
     `$ts task reopen <id>` brings it back.
 53. Make the bar as narrow as it goes (drag its edge in). Nothing in the list is cut off at the right: the box,
@@ -288,7 +288,7 @@ The tasks window (spec `docs/superpowers/specs/2026-11-22-tasks-board-design.md`
     it appears under "you", the box empties and keeps the keyboard. Shift+Enter makes a new line instead. While you
     type, add a task from the pipe: what you typed stays. Click the link: it opens in the default browser. A `file:`
     link in a comment shows as plain text.
-61. "…" on a line: set the status to each of the four, Rename… (Enter keeps it, Esc drops it), Move to (the
+61. "…" on a line: set the status to each of the four, Edit (opens the title in place: Enter keeps it, Esc drops it), Move to (the
     coloured workspace menu), Close (the line stays struck through with Undo for six seconds; Undo brings back
     the status it had, a waiting task its question too, and the selection) and Delete, then Delete for good. While that menu is open, change a task from the pipe:
     nothing moves until the menu closes.
@@ -322,7 +322,7 @@ Tasks 7 to 9). Needs Claude Code installed and both Claude boxes in Manage ticke
 68. Ask the session to ask you something through its task. Switch to another workspace first: the task jumps to the
     top as Waiting on you with the question, in orange, and the session's workspace blinks. Answer in the session:
     the task goes back to in progress and the question goes.
-69. Ask the session to finish and mark its task done: the line shows a close button. Send the session another
+69. Ask the session to finish and mark its task done: the line has the same tick box as the rest. Send the session another
     message: the task is in progress again. Mark it done again and close it yourself, then send a message: the
     session says its task was closed and makes a new one only for new work.
 70. Close the session's VS Code tab: the task stays open with "no live session". Resume the session (the history
