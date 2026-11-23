@@ -2309,6 +2309,9 @@ public class TasksBoardTests
         Assert.Equal("2 settled comments", TextOf(SettledFold(t)));
 
         Click(SettledFold(t));
+        // Four now (RULING 63: only the latest three show; the earlier line unfolds the fourth).
+        Assert.Equal(3, t.Window.ShownComments(id).Count);
+        Click(ButtonsNamed(t, "Earlier comments").Single());
         Assert.Equal(4, t.Window.ShownComments(id).Count);
         Assert.Equal("Hide 2 settled comments", TextOf(SettledFold(t)));
 
@@ -2345,5 +2348,118 @@ public class TasksBoardTests
         Click(SettledFold(t));
         Click(Inside(t.Window).OfType<Button>().First(b => AutomationProperties.GetName(b) == "Unsettle comment"));
         Assert.Equal(2, t.Tasks.Board.Tasks.Single().Comments.Count(c => c.Settled.HasNoValue));
+    });
+
+    // --- RULING 63: a thread folds. Click again to collapse; long comments and old ones fold away ------------------------
+
+    static List<Button> ButtonsNamed(Board t, string name) =>
+        Inside(t.Window).OfType<Button>().Where(b => AutomationProperties.GetName(b) == name).ToList();
+
+    [Fact]
+    public void A_click_toggles_the_thread_and_escape_collapses_the_selected_one() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        var id = t.Tasks.AddNote("note", t.Gepha).Value.Id;
+        t.Controller.Open(Rect.Empty);
+
+        Click(LineOf(t.Window, id));
+        Assert.True(t.Window.ThreadShown(id));
+        Click(LineOf(t.Window, id));
+        Assert.False(t.Window.ThreadShown(id));
+        Click(LineOf(t.Window, id));
+        Assert.True(t.Window.ThreadShown(id));
+
+        PressKey(t.Window, Key.Escape);
+        Assert.False(t.Window.ThreadShown(id));
+    });
+
+    static string Long(int lines) => string.Join("\n\n", Enumerable.Range(1, lines).Select(i => $"line {i} of a long finding"));
+
+    [Fact]
+    public void A_long_comment_shows_about_three_lines_with_show_more_and_show_less() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        var id = t.Tasks.AddNote("note", t.Gepha).Value.Id;
+        t.Tasks.Comment(id, Maybe<string>.None, Long(9));
+        t.Tasks.Comment(id, Maybe<string>.None, "short");
+        t.Controller.Open(Rect.Empty);
+        t.Controller.ToggleThread(id);
+
+        Assert.Single(ButtonsNamed(t, "Show more")); // the short comment has none
+        var body = Inside(t.Window).OfType<RichTextBox>().First(b => b.IsReadOnly && b.Tag is null);
+        Assert.True(body.MaxHeight < 80, $"clamped to {body.MaxHeight}");
+
+        Click(ButtonsNamed(t, "Show more")[0]);
+        Assert.Empty(ButtonsNamed(t, "Show more"));
+        Assert.Single(ButtonsNamed(t, "Show less"));
+        Assert.True(double.IsPositiveInfinity(Inside(t.Window).OfType<RichTextBox>().First(b => b.IsReadOnly && b.Tag is null).MaxHeight));
+
+        Click(ButtonsNamed(t, "Show less")[0]);
+        Assert.Single(ButtonsNamed(t, "Show more"));
+    });
+
+    [Fact]
+    public void Only_the_latest_three_comments_show_with_a_line_for_the_earlier_ones() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        var id = t.Tasks.AddNote("note", t.Gepha).Value.Id;
+        Enumerable.Range(1, 6).ToList().ForEach(i => t.Tasks.Comment(id, Maybe<string>.None, $"comment {i}"));
+        var all = t.Tasks.Board.Tasks.Single().Comments.Select(c => c.Id).ToList();
+        t.Controller.Open(Rect.Empty);
+        t.Controller.ToggleThread(id);
+
+        Assert.Equal(all.Skip(3), t.Window.ShownComments(id));
+        var earlier = ButtonsNamed(t, "Earlier comments").Single();
+        Assert.Equal("3 earlier comments", TextOf(earlier));
+
+        Click(earlier);
+        Assert.Equal(all, t.Window.ShownComments(id));
+        Assert.Equal("Hide 3 earlier comments", TextOf(ButtonsNamed(t, "Earlier comments").Single()));
+    });
+
+    [Fact]
+    public void Three_or_fewer_comments_have_no_earlier_line() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        var id = t.Tasks.AddNote("note", t.Gepha).Value.Id;
+        Enumerable.Range(1, 3).ToList().ForEach(i => t.Tasks.Comment(id, Maybe<string>.None, $"comment {i}"));
+        t.Controller.Open(Rect.Empty);
+        t.Controller.ToggleThread(id);
+
+        Assert.Empty(ButtonsNamed(t, "Earlier comments"));
+        Assert.Equal(3, t.Window.ShownComments(id).Count);
+    });
+
+    // Settled comments stay folded separately: they do not count toward the three.
+    [Fact]
+    public void Settled_comments_do_not_count_toward_the_three() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        var (id, _) = Answered(t);
+        t.Controller.Open(Rect.Empty);
+        t.Controller.ToggleThread(id);
+
+        Assert.Empty(ButtonsNamed(t, "Earlier comments"));
+        Assert.Single(ButtonsNamed(t, "Settled comments"));
+    });
+
+    [Fact]
+    public void The_fold_state_survives_a_redraw_and_a_new_comment() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        var id = t.Tasks.AddNote("note", t.Gepha).Value.Id;
+        t.Tasks.Comment(id, Maybe<string>.None, Long(9));
+        Enumerable.Range(1, 5).ToList().ForEach(i => t.Tasks.Comment(id, Maybe<string>.None, $"comment {i}"));
+        t.Controller.Open(Rect.Empty);
+        t.Controller.ToggleThread(id);
+        Click(ButtonsNamed(t, "Earlier comments").Single());
+        Click(ButtonsNamed(t, "Show more")[0]);
+
+        t.Tasks.Comment(id, Maybe<string>.None, "a newer one");
+        t.Tasks.AddNote("another task", t.Gepha);
+
+        Assert.Equal("Hide 4 earlier comments", TextOf(ButtonsNamed(t, "Earlier comments").Single()));
+        Assert.Single(ButtonsNamed(t, "Show less"));
+        Assert.True(t.Window.ThreadShown(id));
     });
 }
