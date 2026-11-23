@@ -619,7 +619,7 @@ public partial class TasksWindow : Window
         Cell(grid, 6, comments);
         Cell(grid, 7, compactLines ? null : ActionOf(row));
         var more = Small(new TextBlock { Text = "", FontFamily = IconFont, FontSize = 12, Foreground = Ink }, "More",
-            () => OpenMenuFor(row.Id), "Status, move, rename, delete");
+            () => OpenMenuFor(row.Id), "Edit, status, move, delete");
         menuButtons[row.Id] = more;
         Cell(grid, 8, more);
         if (row.Closing)
@@ -680,6 +680,13 @@ public partial class TasksWindow : Window
             DragPress(row.Id, DragMouse.Position(e, DragSurface));
         };
         dragLines[row.Id] = (row.Quadrant, row.Status == TaskStatus.WaitingOnYou && !row.Closing, row.Closing || row.Status == TaskStatus.Closed);
+        // A right-click anywhere on the line opens its menu at the pointer, Edit first (Ruling 44, OpenMenuFor).
+        line.PreviewMouseRightButtonUp += (_, e) =>
+        {
+            if (renaming == row.Id) return; // a right-click in the editor is the editor's own
+            e.Handled = true;
+            OpenMenuFor(row.Id, atPointer: true);
+        };
         line.Click += (_, _) =>
         {
             // A line just closed goes nowhere; Undo is the one thing on it to press. A line being renamed neither.
@@ -1239,11 +1246,24 @@ public partial class TasksWindow : Window
     /// A line's "⋯" menu: status, close or reopen, rename, move, delete. Internal so the tests can open one and check a
     /// redraw waits for it.
     /// </summary>
-    internal ContextMenu OpenMenuFor(Guid id)
+    //
+    // EDIT FIRST (Ruling 44; Petre: "task rightclick should let me edit it first, first option"). The same menu opens
+    // from "⋯" and from a right-click anywhere on the line (`atPointer`: at the pointer instead of under "⋯"), and its
+    // first item is Edit, the in-place editor (BeginRename). Edit took the place of the old "Rename…", which did the same.
+    internal ContextMenu OpenMenuFor(Guid id, bool atPointer = false)
     {
         var row = latest?.Groups.SelectMany(g => g.Rows).FirstOrDefault(r => r.Id == id);
-        var menu = new ContextMenu { PlacementTarget = menuButtons.GetValueOrDefault(id), Placement = PlacementMode.Bottom };
+        var menu = atPointer
+            ? new ContextMenu { Placement = PlacementMode.MousePoint }
+            : new ContextMenu { PlacementTarget = menuButtons.GetValueOrDefault(id), Placement = PlacementMode.Bottom };
         if (row is null) return menu;
+
+        // A closed task's title is not edited: it is history, and Reopen brings it back first.
+        if (row.Status != TaskStatus.Closed && !row.Closing)
+        {
+            menu.Items.Add(Item("Edit", () => BeginRename(id)));
+            menu.Items.Add(new Separator());
+        }
 
         var status = Item("Status");
         SettableStatuses.ToList().ForEach(s =>
@@ -1256,7 +1276,6 @@ public partial class TasksWindow : Window
         menu.Items.Add(row.Status == TaskStatus.Closed && !row.Closing
             ? Item("Reopen", () => Actions?.Reopen(id))
             : Item("Close", () => Actions?.Close(id)));
-        menu.Items.Add(Item("Rename…", () => BeginRename(id)));
         // The task list's one workspace menu (WorkspaceChipMenu), the move the bar's line chip makes. Its own menu,
         // opened under the line's "⋯" once this one has closed: the compact chip menu is a context menu of its own, not
         // a submenu.

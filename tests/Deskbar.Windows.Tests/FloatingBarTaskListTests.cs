@@ -2083,4 +2083,58 @@ public class FloatingBarTaskListTests
         Assert.Contains(ButtonNamed(t.List, "Add as important"), chips.Children.OfType<Button>());
         Assert.Contains(ButtonNamed(t.List, "Add as urgent"), chips.Children.OfType<Button>());
     });
+    // Ruling 44 on the bar: a right-click on a task line opens its menu, Edit first, then the rest of the line's actions.
+    // Edit opens an editor in the line itself with the whole title; Enter saves through Rename, the keyboard goes back
+    // to the window Petre was typing in, and the line shows the new title.
+    [Fact]
+    public void A_right_click_on_a_bar_line_opens_its_menu_with_Edit_first_and_Edit_renames() => StaThread.Run(() =>
+    {
+        var handed = new List<nint>();
+        using var t = Build(handedBack: handed);
+        var id = t.Tasks.AddNote("iam.ge: transcripts", t.Gepha).Value.Id;
+        t.Bar.UpdateLayout();
+
+        t.Lines.Single().RaiseEvent(new MouseButtonEventArgs(Mouse.PrimaryDevice, 0, MouseButton.Right) { RoutedEvent = Mouse.PreviewMouseUpEvent });
+
+        var menu = Assert.IsAssignableFrom<ContextMenu>(t.Bar.TaskLineMenu);
+        var items = menu.Items.OfType<MenuItem>().Select(i => ((TextBlock)i.Header).Text).ToList();
+        Assert.Equal("Edit", items[0]);
+        Assert.Contains("Move to workspace…", items);
+        Assert.Contains("Close", items);
+        menu.Items.OfType<MenuItem>().First().RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
+        menu.IsOpen = false;
+
+        var editor = Assert.IsType<TextBox>(t.Bar.TaskEditor);
+        Assert.Equal("iam.ge: transcripts", editor.Text);
+        Assert.True(t.Bar.HoldsFullStrength);
+        editor.Text = "iam.ge: transcripts for every call";
+        t.Bar.SaveTaskEdit();
+
+        Assert.Null(t.Bar.TaskEditor);
+        Assert.Equal("iam.ge: transcripts for every call", t.Tasks.Board.Tasks.Single(x => x.Id == id).Title);
+        Assert.Equal([Editor], handed);
+        Assert.False(t.Bar.HoldsFullStrength);
+    });
+
+    // While the editor is open no paint runs under it: a task arriving from a session waits, the editor and its text
+    // survive, and the list is painted when the editor closes. Esc cancels and keeps the old title.
+    [Fact]
+    public void A_bar_paint_waits_while_a_line_is_edited_and_Esc_cancels() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        var id = t.Tasks.AddNote("mine", t.Gepha).Value.Id;
+        t.Bar.BeginTaskEdit(id);
+        var editor = Assert.IsType<TextBox>(t.Bar.TaskEditor);
+        editor.Text = "half typ";
+
+        t.Tasks.AddNote("arrived meanwhile", t.Gepha);
+
+        Assert.Single(t.Lines);
+        Assert.Same(editor, t.Bar.TaskEditor);
+        Assert.Equal("half typ", editor.Text);
+        t.Bar.CancelTaskEdit();
+        Assert.Null(t.Bar.TaskEditor);
+        Assert.Equal("mine", t.Tasks.Board.Tasks.Single(x => x.Id == id).Title);
+        Assert.Equal(2, t.Lines.Count);
+    });
 }
