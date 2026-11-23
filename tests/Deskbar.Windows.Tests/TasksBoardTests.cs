@@ -712,9 +712,9 @@ public class TasksBoardTests
     // (SetWindowPos on the hidden handle before Show), not through Left/Top, which WPF reads at the DPI of the screen it
     // was created on. On the screen that holds it, the window's own rectangle is exactly the one remembered.
     //
-    // The place is sized in DIPs at the test screen's own scale, so it clears the window's minimum (560 by 260 DIP) on
+    // The place is sized in DIPs at the test screen's own scale, so it clears the window's minimum (620 by 260 DIP) on
     // any screen. It was a fixed 900 by 640 px, which is 600 DIP wide at 150% but only 400 at 225%: on Petre's machine,
-    // once its 3840 by 2160 screen went to 216 DPI, WPF rightly held the window at its 560 DIP minimum (1260 px) and
+    // once its 3840 by 2160 screen went to 216 DPI, WPF rightly held the window at its 620 DIP minimum (1260 px) and
     // the test failed for a reason that was the test's, not the window's (measured; task-12-report.md, fix round 4).
     [Fact]
     public void A_remembered_place_comes_back_in_device_pixels() => StaThread.Run(() =>
@@ -1789,6 +1789,28 @@ public class TasksBoardTests
         Assert.DoesNotContain(Inside(LineOf(t.Window, done)).OfType<TextBlock>(), b => b.Text == "✕");
         Click(ButtonNamed(LineOf(t.Window, done), "Close"));
         Assert.Equal(TaskStatus.Closed, t.Tasks.Board.Tasks.Single(x => x.Id == done).Status);
+    });
+
+    // The age is left-aligned in its column, so its x does not follow the text length ("now" and "3d3h" start together),
+    // and the sessions column holds "2 sessions, 1 live" without spilling into the age's.
+    [Fact]
+    public void The_age_starts_at_one_x_and_the_sessions_words_stay_in_their_column() => StaThread.Run(() =>
+    {
+        using var t = Build(now: () => Start.AddDays(3).AddHours(3));
+        var young = t.Tasks.AddNote("young", t.Gepha).Value.Id;
+        var claude = t.Tasks.Create("Tasks redesign", t.Gepha, Session("s1")).Value.Id;
+        t.Tasks.Join(claude, Session("s2"));
+        t.Controller.Open(Rect.Empty);
+        t.Window.UpdateLayout();
+
+        double Left(FrameworkElement e) => e.TransformToAncestor(t.Window).TransformBounds(new Rect(e.RenderSize)).Left;
+        double Right(FrameworkElement e) => e.TransformToAncestor(t.Window).TransformBounds(new Rect(e.RenderSize)).Right;
+        TextBlock AgeIn(Guid id) => Inside(LineOf(t.Window, id)).OfType<TextBlock>().Single(b => Equals(b.Tag, "task-age"));
+        Assert.Equal(Left(AgeIn(young)), Left(AgeIn(claude)), 0.5);
+
+        var words = Inside(LineOf(t.Window, claude)).OfType<TextBlock>().Single(b => b.Text.Contains("sessions"));
+        Assert.True(words.ActualWidth >= words.DesiredSize.Width - words.Margin.Left - words.Margin.Right - 0.5, $"'{words.Text}' is trimmed to {words.ActualWidth} of {words.DesiredSize.Width}");
+        Assert.True(Right(words) <= Left(AgeIn(claude)) + 0.5, $"the sessions words end at {Right(words)}, the age starts at {Left(AgeIn(claude))}");
     });
 
     // F2 on the selected line opens it too; Enter saves through Rename; Esc cancels.

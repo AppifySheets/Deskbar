@@ -2511,6 +2511,55 @@ public class FloatingBarTaskListTests
 
         Assert.Equal("+1 more", t.Bar.TaskListMoreText);
     });
+
+    // #48's class: a double-click goes only to the line its first click landed on. A reshuffle between the two presses
+    // puts another task under the pointer, and the second press must not send him there.
+    [Fact]
+    public void A_double_click_after_a_reshuffle_does_not_go_to_the_other_line() => StaThread.Run(() =>
+    {
+        var went = new List<Guid>();
+        using var t = Build(openTask: _ => { }, goTo: id =>
+        {
+            went.Add(id);
+            return Result.Success();
+        });
+        var a = t.Tasks.AddNote("A", t.Gepha).Value.Id;
+        var b = t.Tasks.AddNote("B", t.Gepha).Value.Id;
+        Button LineFor(Guid id) => t.Lines.Single(l => ((TaskLine)l.Tag).Id == id);
+
+        Click(LineFor(a)); // the first click lands on A...
+        PressAndClick(LineFor(b), clickCount: 2); // ...the list reshuffles, and the second press lands on B
+        Assert.Empty(went);
+
+        PressAndClick(LineFor(a), clickCount: 2); // the same line twice goes
+        Assert.Equal([a], went);
+    });
+
+    // The shortening of "All tasks" follows what fits (the measured widths), not a fixed width: at a large text size
+    // the full words stop fitting at a width a fixed cut would have called wide, and the button must never clip.
+    [Theory]
+    [InlineData(200)]
+    [InlineData(230)]
+    [InlineData(260)]
+    [InlineData(300)]
+    public void The_all_tasks_button_never_clips_at_a_large_text_size(double width) => StaThread.Run(() =>
+    {
+        using var t = Build(openWindow: () => { });
+        Enumerable.Range(1, 5).ToList().ForEach(i => t.Tasks.AddNote($"Note {i}", t.Gepha));
+        Assert.True(t.Harness.Manager.SetBarTextOffset(3.5).IsSuccess);
+        t.Bar.ApplyWidth(width);
+        t.Bar.RequestRebuild();
+        t.Bar.UpdateLayout();
+        t.Bar.UpdateLayout();
+
+        var more = ButtonNamed(t.List, "More tasks");
+        var bounds = more.TransformToAncestor(t.List).TransformBounds(new Rect(more.RenderSize));
+        Assert.True(bounds.Right <= t.List.ActualWidth + 0.5, $"button {bounds} in a list {t.List.ActualWidth} wide at {width}");
+        var label = Inside(more).OfType<TextBlock>().Single();
+        Assert.True(label.ActualWidth >= label.DesiredSize.Width - 0.5, $"'{label.Text}' is clipped: {label.ActualWidth} of {label.DesiredSize.Width}");
+        var chips = Inside(t.Chips).OfType<Button>().Where(b => b.IsVisible).Select(b => b.TransformToAncestor(t.List).TransformBounds(new Rect(b.RenderSize))).ToList();
+        Assert.All(chips, c => Assert.True(c.Right <= t.List.ActualWidth + 0.5 || c.Top > bounds.Top, "a chip is cut at the right"));
+    });
     // --- Ruling 41: a title wraps to a second line when it does not fit, never a third ------------------------------
 
     static TextBlock TextBlockOf(Button line) => Inside(line).OfType<TextBlock>().Single(b => Equals(b.Tag, "task-text"));

@@ -216,9 +216,10 @@ The task list at the bottom of the bar (spec `docs/superpowers/specs/2026-11-22-
     box empty and idle, click a chip: it starts a note, as a click in the box does.
 46. Click in the box, then the "other..." chip, and pick a workspace: the chip takes its name and is ticked,
     the text stays, and Enter files the note there.
-47. Click a line of a note on another workspace: the tasks window opens (or comes forward) on that task, selected,
+47. Click a line of a note on another workspace: the tasks window opens (or comes forward, and takes the foreground) on that task, selected,
     scrolled into view and expanded to its comments, and you stay where you are. Double-click the line: you go to
-    its workspace. Double-click a note on "none": nothing happens. In the window, a click on a line selects and
+    its workspace (only when both presses land on the same line: click one line and double-click the line beside
+    it, and nothing goes). Double-click a note on "none": nothing happens. In the window, a click on a line selects and
     expands it, a double-click goes, and F2 (or Edit in the menu) edits the title; a double-click on a title no longer edits.
 48. Untick "Task list" in Manage's Settings tab (strip items): the list disappears from the bar. Tick it
     again: it is back, with the same tasks.
@@ -276,7 +277,7 @@ The tasks window (spec `docs/superpowers/specs/2026-11-22-tasks-board-design.md`
 
 56. With three or fewer open tasks the button at the right end of the chip row reads "All tasks" ("All" on a narrow bar); with more, "+N more" ("+N"). Click it: a
     window titled "Tasks" opens beside the bar (not over it), with a dark title bar, on the list and not on a form
-    (no box has the keyboard). It is in Alt+Tab and on the taskbar, and the bar does not list it as a window.
+    (no box has the keyboard). It is in Alt+Tab and on the taskbar, and the bar lists it as a window with a checklist icon, which you can drag to a workspace's row.
 57. Groups read WAITING ON YOU, then the quadrants that have tasks (I to IV), a new task on top. The chips count each
     status. Click "Closed": only closed tasks show, the latest closed first, each with "Reopen"; click "Reopen" on
     one and it goes back to the open view. "Workspace: all" lists every workspace as its coloured chip, grouped;
@@ -323,10 +324,12 @@ Tasks 7 to 9). Needs Claude Code installed and both Claude boxes in Manage ticke
 67. Ask the session to start some work. It joins the note or creates a task: the line turns orange with a CL tag and
     a live session square in the tasks window, and the status line under the title changes as it works.
 68. Ask the session to ask you something through its task. Switch to another workspace first: the task jumps to the
-    top as Waiting on you with the question, in orange, and the session's workspace blinks. Answer in the session:
+    top as Waiting on you with the question, in orange, and the session's workspace blinks. Reply in the session:
+    your message alone changes nothing (since #435 a prompt no longer answers). When the session runs `task answered`
     the task goes back to in progress and the question goes, and the line leaves the bar's list (the tasks window
-    still has it, in progress). Before answering, switch to its workspace and to the session's window: the line stays.
-    Ask again: it is back at the top of the bar.
+    still has it, in progress). Before that, switch to its workspace and to the session's window, and click and
+    double-click the line: it stays on the bar. Ask again: it is back at the top of the bar. Tick an in-progress Claude
+    task in the tasks window, then Undo: it comes back to the window, not to the bar.
 69. Ask the session to finish and mark its task done: the line has the same tick box as the rest. Send the session another
     message: the task is in progress again. Mark it done again and close it yourself, then send a message: the
     session says its task was closed and makes a new one only for new work.
