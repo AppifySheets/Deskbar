@@ -953,7 +953,11 @@ public partial class TasksWindow : Window
             });
             // THE DESCRIPTION (Ruling 58): Petre's markdown under the title, a block of its own. Not hit-testable and not
             // focusable, so a click on it is a click on the line (a RichTextBox would swallow it).
-            if (row.Description.Length > 0) panel.Children.Add(DescriptionBlock(row));
+            // IN FULL ONLY WHEN THE LINE IS OPEN (Petre, 2026-11-23, of a long brief that filled the window: "i want that
+            // after i go to details"). A closed line shows the description's first line, plain and dim, cut to one line,
+            // so a line with a description still says so and stays one line tall; a click on the line opens it, and then
+            // the whole description shows, rendered, above the thread.
+            if (row.Description.Length > 0) panel.Children.Add(row.Expanded ? DescriptionBlock(row) : DescriptionPreview(row));
         }
         if (row.Detail.Length > 0)
             panel.Children.Add(new TextBlock
@@ -993,6 +997,21 @@ public partial class TasksWindow : Window
     }
 
     const string DescriptionTag = "task-description";
+
+    // THE DESCRIPTION'S PREVIEW on a closed line: its first line without markdown markers (TaskViews.PlainFirstLine, the
+    // same text the bar shows for it), dim like the description, one line ending in an ellipsis. A TextBlock takes no
+    // focus and passes its clicks to the line, so a click on it opens the line like a click anywhere else on it.
+    TextBlock DescriptionPreview(TaskRowView row) => new()
+    {
+        Tag = DescriptionPreviewTag,
+        Text = TaskViews.PlainFirstLine(row.Description),
+        FontSize = 11,
+        Foreground = DimInk,
+        TextWrapping = TextWrapping.NoWrap,
+        TextTrimming = TextTrimming.CharacterEllipsis,
+    };
+
+    const string DescriptionPreviewTag = "task-description-preview";
 
 
     // The assignee column (Ruling 57): "Me" or "Claude" (a colleague by name, later), dim like the age. Shown on every line,

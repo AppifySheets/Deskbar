@@ -2115,17 +2115,49 @@ public class TasksBoardTests
             ? new TextBlock { Text = new System.Windows.Documents.TextRange(doc.ContentStart, doc.ContentEnd).Text.Trim() }
             : null;
 
+    static TextBlock? DescriptionPreviewOf(TasksWindow window, Guid id) =>
+        Inside(LineOf(window, id)).OfType<TextBlock>().FirstOrDefault(b => Equals(b.Tag, "task-description-preview"));
+
     [Fact]
-    public void A_description_shows_under_the_title_as_markdown() => StaThread.Run(() =>
+    public void A_description_shows_under_the_title_as_markdown_once_the_line_is_open() => StaThread.Run(() =>
     {
         using var t = Build();
         var id = t.Tasks.AddNote("Pay rent", t.Gepha).Value.Id;
         var plain = t.Tasks.AddNote("No words", t.Gepha).Value.Id;
         t.Tasks.Describe(id, "The **landlord** wants it by Friday");
         t.Controller.Open(Rect.Empty);
+        t.Controller.ToggleThread(id);
 
         Assert.Equal("The landlord wants it by Friday", DescriptionBlockOf(t.Window, id)!.Text);
+        Assert.Null(DescriptionPreviewOf(t.Window, id));
         Assert.Null(DescriptionBlockOf(t.Window, plain));
+        Assert.Null(DescriptionPreviewOf(t.Window, plain));
+    });
+
+    // Petre, 2026-11-23, of a long brief that filled the window: "i want that after i go to details". A closed line
+    // shows only the description's first line, plain, cut to one line; opening the line shows the whole of it, and
+    // closing it again goes back to the one line.
+    [Fact]
+    public void A_closed_line_shows_only_the_descriptions_first_line() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        var id = t.Tasks.AddNote("Profile", t.Gepha).Value.Id;
+        t.Tasks.Describe(id, "Parked, pick up **from here**.\n## What to do next\n1. answer the questions");
+        t.Controller.Open(Rect.Empty);
+
+        var preview = DescriptionPreviewOf(t.Window, id);
+        Assert.Equal("Parked, pick up from here.", preview!.Text);
+        Assert.Equal(TextWrapping.NoWrap, preview.TextWrapping);
+        Assert.Equal(TextTrimming.CharacterEllipsis, preview.TextTrimming);
+        Assert.Null(DescriptionBlockOf(t.Window, id));
+
+        t.Controller.ToggleThread(id);
+        Assert.Contains("answer the questions", DescriptionBlockOf(t.Window, id)!.Text);
+        Assert.Null(DescriptionPreviewOf(t.Window, id));
+
+        t.Controller.ToggleThread(id);
+        Assert.NotNull(DescriptionPreviewOf(t.Window, id));
+        Assert.Null(DescriptionBlockOf(t.Window, id));
     });
 
     [Fact]
@@ -2136,6 +2168,7 @@ public class TasksBoardTests
         t.Tasks.SetStatusLine(id, "waiting for CI");
         t.Tasks.Describe(id, "Petre's brief");
         t.Controller.Open(Rect.Empty);
+        t.Controller.ToggleThread(id);
 
         var texts = Inside(LineOf(t.Window, id)).OfType<TextBlock>().Select(b => b.Text).ToList();
         Assert.Contains("waiting for CI", texts);
