@@ -73,6 +73,9 @@ public static partial class ClaudeAgents
             ? text
             : Maybe<string>.None;
 
-    [GeneratedRegex("backgrounded · ([0-9a-f]{8})")]
+    // Any run of non-hex characters between the word and the id, not the literal "·": if the output is ever decoded
+    // with the wrong code page the separator arrives as "Â·" (it did once, see ClaudeCli), and "Â" is a letter, so
+    // \W would not cover it. The id must still be found.
+    [GeneratedRegex(@"backgrounded[^0-9a-f]+([0-9a-f]{8})\b")]
     private static partial Regex Backgrounded();
 }

@@ -70,4 +70,10 @@ public class ClaudeAgentsTests
             ClaudeAgents.ShortIdFromStart("Starting background service…\nbackgrounded · 6785e6b5 · deskbar probe\n").Value);
         Assert.True(ClaudeAgents.ShortIdFromStart("Workspace not trusted. Run `claude` in X once").HasNoValue);
     }
+
+    // What Petre's Deskbar actually received on 2026-11-23 when the pipe was decoded with the ANSI code page.
+    [Fact]
+    public void The_short_id_is_read_when_the_separator_was_decoded_with_the_wrong_code_page() =>
+        Assert.Equal("d5edbad6",
+            ClaudeAgents.ShortIdFromStart("backgrounded Â· d5edbad6\n  claude agents             list sessions\n").Value);
 }
