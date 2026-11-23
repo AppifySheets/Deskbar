@@ -1640,7 +1640,9 @@ public partial class App : Application
                     ? places[0].Value.Id
                     : Maybe<Guid>.None,
             claudeHome,
-            trace: ClickTrace.On ? ClickTrace.Write : null);
+            trace: ClickTrace.On ? ClickTrace.Write : null,
+            // A finished task's session is stopped only while no window of Deskbar's is attached to it (task 87f899ad).
+            windowOpen: task => ClaudeTaskActions.HasWindow(manager, task));
 
         // ...and what a click on a task does with those sessions (ClaudeTaskActions, Task 9): the double-click's session
         // window, "Start Claude on this", the thread's list and Open, the pipe's three verbs. Its answers land on this

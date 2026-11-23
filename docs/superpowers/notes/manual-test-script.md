@@ -476,8 +476,12 @@ throwaway folder Claude Code trusts, and tracing on for the `claude actions:` an
     is the real thing, so run it when a reboot is cheap.)
 101. Restart Deskbar itself while a session is in the middle of a turn: the session is untouched (it is not Deskbar's
     child), the tasks show it running again within 15 seconds, and nothing is resumed twice.
-102. Mark a task with a running session done: the session is left alone. Stop that session with `claude stop`: it is
-    not resumed. Reopen the task: it is resumed at the next poll.
+102. Close any window on a task's background session and mark the task done. About a minute after the session goes
+    idle, the thread says "Stopped by Deskbar at HH:mm, since the task is finished" and `claude agents` no longer
+    lists it; nothing resumes it. Double-click the task: the session comes back under the SAME id and its window
+    opens, and it keeps running while that window is open. Close the window: within a minute and a quarter it is
+    stopped again. Reopen the task (In progress): it is resumed at the next poll and is not stopped. A task waiting
+    on you, with its session idle, is never stopped.
 103. Take a give-up from 88 and set the task's status (to In progress, say; a keeper's question has no answer box): the
     next poll tries the resume again instead of staying silent.
 104. Esc, then close: in a background session's terminal window, ask for a long reply and press Esc halfway through it,

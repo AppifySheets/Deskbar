@@ -48,6 +48,10 @@ public class ClaudeSessionsTests
         public Func<Result<string>>? Agents { get; set; }
         public Func<string, Result<string>>? Resume { get; set; }
         public Func<string, string?, Result<string>>? Start { get; set; }
+        public Func<string, Result<string>>? Stop { get; set; }
+
+        // Sessions the list shows busy; every other row is idle.
+        public HashSet<string> Busy { get; } = [];
 
         // A slow `claude --bg --resume`: the virtual clock moves on this far while the call runs, without running what
         // was due meanwhile, which then runs late, the way a poll that fires during a slow call is handled after it.
@@ -61,6 +65,7 @@ public class ClaudeSessionsTests
 
         public IReadOnlyList<Call> Resumes => Calls.Where(c => c.Arguments is ["--bg", "--resume", ..]).ToList();
         public IReadOnlyList<Call> Reads => Calls.Where(c => c.Arguments is ["agents", "--json"]).ToList();
+        public IReadOnlyList<Call> Stops => Calls.Where(c => c.Arguments is ["stop", _]).ToList();
 
         public Task<Result<string>> Run(IReadOnlyList<string> arguments, string? workingDirectory, TimeSpan timeout)
         {
@@ -73,6 +78,7 @@ public class ClaudeSessionsTests
                 ["agents", "--json"] => Agents?.Invoke() ?? Result.Success(Json()),
                 ["--bg", "--resume", var id, ..] => Resume?.Invoke(id) ?? Woken(id, workingDirectory),
                 ["--bg", var message] => Start?.Invoke(message, workingDirectory) ?? Result.Failure<string>("no start scripted"),
+                ["stop", var shortId] => Stop?.Invoke(shortId) ?? Stopped(shortId),
                 _ => Result.Failure<string>($"unexpected claude call: {string.Join(" ", arguments)}"),
             });
         }
@@ -86,6 +92,13 @@ public class ClaudeSessionsTests
             return Result.Success($"backgrounded · {id[..8]} · resumed");
         }
 
+        // `claude stop` as measured: the session leaves the list at once and the CLI prints "stopped <short id>".
+        Result<string> Stopped(string shortId)
+        {
+            Listed.RemoveAll(row => row.SessionId.StartsWith(shortId, StringComparison.Ordinal));
+            return Result.Success($"stopped {shortId}");
+        }
+
         string Json() => JsonSerializer.Serialize(Listed.Select(row => new
         {
             pid = 1,
@@ -94,8 +107,8 @@ public class ClaudeSessionsTests
             kind = "background",
             sessionId = row.SessionId,
             name = row.Name,
-            status = "idle",
-            state = "done",
+            status = Busy.Contains(row.SessionId) ? "busy" : "idle",
+            state = Busy.Contains(row.SessionId) ? "working" : "done",
         }));
     }
 
@@ -107,6 +120,7 @@ public class ClaudeSessionsTests
         public FakeCli Cli { get; }
         public string Home { get; } = Path.Combine(Path.GetTempPath(), "deskbar-claude-sessions-" + Guid.NewGuid().ToString("N"));
         public Func<string, Maybe<Guid>> WorkspaceOfFolder { get; set; } = _ => Maybe<Guid>.None;
+        public Func<TaskItem, bool> WindowOpen { get; set; } = _ => false;
         public ClaudeSessions? Sessions { get; private set; }
         public List<string> Traces { get; } = [];
 
@@ -128,7 +142,8 @@ public class ClaudeSessionsTests
         public ClaudeSessions Begin()
         {
             T0 = Clock.Now;
-            Sessions = new ClaudeSessions(Tasks, Manager, Cli, Clock, WorkspaceOfFolder, Home, background: Scheduler.Immediate, trace: Traces.Add);
+            Sessions = new ClaudeSessions(Tasks, Manager, Cli, Clock, WorkspaceOfFolder, Home, background: Scheduler.Immediate, trace: Traces.Add,
+                windowOpen: task => WindowOpen(task));
             return Sessions;
         }
 
@@ -167,6 +182,16 @@ public class ClaudeSessionsTests
         }
 
         public TaskItem Task(Guid id) => Tasks.Board.Tasks.Single(t => t.Id == id);
+
+        // A task whose background session `claude agents` lists, idle unless the test marks it busy.
+        public (Guid TaskId, string SessionId) Running(string title, string folder = @"E:\repos\Work")
+        {
+            var id = Guid.NewGuid().ToString();
+            var task = Tasks.Create(title, Maybe<Guid>.None, Tasks.NewSession(id, folder)).Value;
+            Cli.Listed.Add(new Row(id, folder, title));
+            Clock.AdvanceBy(TimeSpan.FromSeconds(1).Ticks);
+            return (task.Id, id);
+        }
 
         public void Dispose()
         {
@@ -749,5 +774,109 @@ public class ClaudeSessionsTests
         Assert.True(result.IsFailure);
         Assert.Contains("Workspace not trusted", result.Error);
         Assert.Empty(rig.Task(note.Id).Sessions);
+    }
+    // --- stopping finished sessions (task 87f899ad) ----------------------------------------------------------------
+
+    // Petre: "i want to not have a stagnant session". A Done task's background session is stopped once it has been idle
+    // for a minute of reads, with its short id, and the thread says so. The keeper never wakes it again on its own.
+    [Fact]
+    public void A_done_tasks_idle_session_is_stopped_after_a_minute_and_the_thread_says_so()
+    {
+        using var rig = new Rig();
+        var (taskId, sessionId) = rig.Running("Finished work");
+        Assert.True(rig.Tasks.SetStatus(taskId, TaskStatus.Done).IsSuccess);
+        rig.Begin();
+
+        rig.RunTo(Seconds(45));
+        Assert.Empty(rig.Cli.Stops);
+
+        rig.RunTo(SessionKeeper.StopAfter);
+        var stop = Assert.Single(rig.Cli.Stops);
+        Assert.Equal(["stop", sessionId[..8]], stop.Arguments);
+        Assert.Equal(SessionKeeper.StopAfter, rig.Since(stop));
+        Assert.Contains(rig.Task(taskId).Comments, c => c.Markdown.StartsWith("Stopped by Deskbar at"));
+
+        // Gone from the list, and the task is Done: nothing resumes it, nothing stops it again.
+        rig.RunTo(TimeSpan.FromMinutes(10));
+        Assert.Single(rig.Cli.Stops);
+        Assert.Empty(rig.Cli.Resumes);
+        Assert.Equal(TaskStatus.Done, rig.Task(taskId).Status);
+    }
+
+    // "only those that have been finished": a session waiting on Petre, or working on any open task, is left running.
+    [Theory]
+    [InlineData(TaskStatus.Backlog)]
+    [InlineData(TaskStatus.InProgress)]
+    [InlineData(TaskStatus.WaitingOnYou)]
+    public void An_open_tasks_idle_session_is_never_stopped(TaskStatus status)
+    {
+        using var rig = new Rig();
+        var (taskId, _) = rig.Running("Still open");
+        if (status != TaskStatus.InProgress) Assert.True(rig.Tasks.SetStatus(taskId, status).IsSuccess);
+        rig.Begin();
+
+        rig.RunTo(TimeSpan.FromMinutes(10));
+
+        Assert.Empty(rig.Cli.Stops);
+    }
+
+    // The minute counts from the last read that saw it busy: a session that said `task done` is still finishing its turn.
+    [Fact]
+    public void A_busy_session_is_stopped_a_minute_after_it_goes_idle()
+    {
+        using var rig = new Rig();
+        var (taskId, sessionId) = rig.Running("Wrapping up");
+        Assert.True(rig.Tasks.SetStatus(taskId, TaskStatus.Done).IsSuccess);
+        rig.Cli.Busy.Add(sessionId);
+        rig.Begin();
+
+        rig.RunTo(Seconds(90));
+        Assert.Empty(rig.Cli.Stops);
+
+        // Idle from the read at 105 s on: stopped by the read a minute after that.
+        rig.Clock.Schedule(Seconds(10), () => rig.Cli.Busy.Remove(sessionId));
+        rig.RunTo(Seconds(150));
+        Assert.Empty(rig.Cli.Stops);
+        rig.RunTo(Seconds(165));
+        Assert.Equal(Seconds(165), rig.Since(Assert.Single(rig.Cli.Stops)));
+    }
+
+    // A window Deskbar attached to the session (Petre reading the answer of a Done task he opened) keeps it running;
+    // the first read after the window closes stops it.
+    [Fact]
+    public void A_session_with_a_window_open_is_stopped_once_the_window_closes()
+    {
+        using var rig = new Rig();
+        var (taskId, _) = rig.Running("Being read");
+        Assert.True(rig.Tasks.SetStatus(taskId, TaskStatus.Done).IsSuccess);
+        var open = true;
+        rig.WindowOpen = task => open && task.Id == taskId;
+        rig.Begin();
+
+        rig.RunTo(TimeSpan.FromMinutes(5));
+        Assert.Empty(rig.Cli.Stops);
+
+        open = false;
+        rig.RunTo(TimeSpan.FromMinutes(5) + Seconds(15));
+        Assert.Single(rig.Cli.Stops);
+    }
+
+    // A stop that fails leaves the session listed. It is traced, and sent again only after ten minutes, not every poll.
+    [Fact]
+    public void A_failed_stop_is_retried_after_ten_minutes_not_every_poll()
+    {
+        using var rig = new Rig();
+        var (taskId, _) = rig.Running("Stubborn");
+        Assert.True(rig.Tasks.SetStatus(taskId, TaskStatus.Done).IsSuccess);
+        rig.Cli.Stop = _ => Result.Failure<string>("claude exited with code 1.");
+        rig.Begin();
+
+        rig.RunTo(TimeSpan.FromMinutes(10));
+        Assert.Single(rig.Cli.Stops);
+        Assert.Contains(rig.Traces, t => t.Contains("failed"));
+        Assert.DoesNotContain(rig.Task(taskId).Comments, c => c.Markdown.StartsWith("Stopped by Deskbar"));
+
+        rig.RunTo(TimeSpan.FromMinutes(11) + Seconds(15));
+        Assert.Equal(2, rig.Cli.Stops.Count);
     }
 }

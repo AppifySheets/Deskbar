@@ -69,6 +69,12 @@ namespace Deskbar.App;
 //      looked for in the list; one waiting in the queue is taken out of it and woken now; and the resume goes into the
 //      ledger like any other, so the keeper's grace and loop guard count it.
 //
+//   5. STOPPING FINISHED SESSIONS (task 87f899ad; SessionKeeper.Stops has the rule and its reasons). On every good read,
+//      a Done or Closed task's background session that has been idle for SessionKeeper.StopAfter, with no window of
+//      Deskbar's attached to it, is sent `claude stop <short id>`, which keeps its conversation (measured). The task's
+//      thread says so. A stop is sent once; while the session is still listed it is not sent again for StopRetry, so a
+//      stop that fails is traced and retried now and then, never every poll. Going to the task resumes it (job 4).
+//
 // NOTHING HERE OPENS A WINDOW OR A TERMINAL. Putting a window on a session is the caller's (ClaudeTaskActions, Task 9).
 public sealed class ClaudeSessions : IDisposable
 {
@@ -101,12 +107,18 @@ public sealed class ClaudeSessions : IDisposable
 
     static readonly IReadOnlyList<string> AgentsArguments = ["agents", "--json"];
 
+    // A stop sent to a session that the list still shows after this long is sent again (job 5). `claude stop` answers
+    // in about a second and the session leaves the list at once (measured), so a session still listed this long after
+    // has not stopped; ten minutes keeps a stop that keeps failing to a trace line now and then.
+    static readonly TimeSpan StopRetry = TimeSpan.FromMinutes(10);
+
     readonly TaskService tasks;
     readonly WorkspaceManager manager;
     readonly IClaudeCli cli;
     readonly IScheduler scheduler;
     readonly IScheduler background;
     readonly Func<string, Maybe<Guid>> workspaceOfFolder;
+    readonly Func<TaskItem, bool> windowOpen;
     readonly string claudeHome;
     readonly Action<string>? trace;
 
@@ -171,6 +183,11 @@ public sealed class ClaudeSessions : IDisposable
     DateTimeOffset watchingSince;
     ImmutableDictionary<string, DateTimeOffset> goneSince = ImmutableDictionary<string, DateTimeOffset>.Empty;
 
+    // Job 5: since when each listed session has been idle in every good read; one seen busy, or gone from the list, is
+    // dropped, so its minute starts again. And when a stop was sent to each session the list still shows.
+    ImmutableDictionary<string, DateTimeOffset> idleSince = ImmutableDictionary<string, DateTimeOffset>.Empty;
+    ImmutableDictionary<string, DateTimeOffset> stopSent = ImmutableDictionary<string, DateTimeOffset>.Empty;
+
     // RULING 20: why the list cannot be read, in one line, for Manage to show under the resume box; none after a good
     // read and while the feature is off.
     readonly BehaviorSubject<Maybe<string>> listProblem = new(Maybe<string>.None);
@@ -179,9 +196,15 @@ public sealed class ClaudeSessions : IDisposable
     /// <param name="workspaceOfFolder">The workspace of the editor window showing a folder, or none, for adopted sessions.</param>
     /// <param name="claudeHome">The folder that holds Claude Code's `projects`, normally %USERPROFILE%\.claude.</param>
     /// <param name="background">Where `claude` runs and transcripts are read: the thread pool unless a test says otherwise.</param>
+    /// <param name="windowOpen">
+    /// Whether a window of Deskbar's is attached to the task's session (ClaudeTaskActions.HasWindow); a finished task's
+    /// session is not stopped while one is (job 5). Left out, none ever is.
+    /// </param>
     public ClaudeSessions(TaskService tasks, WorkspaceManager manager, IClaudeCli cli, IScheduler scheduler,
-        Func<string, Maybe<Guid>> workspaceOfFolder, string claudeHome, IScheduler? background = null, Action<string>? trace = null)
+        Func<string, Maybe<Guid>> workspaceOfFolder, string claudeHome, IScheduler? background = null, Action<string>? trace = null,
+        Func<TaskItem, bool>? windowOpen = null)
     {
+        this.windowOpen = windowOpen ?? (_ => false);
         this.tasks = tasks;
         this.manager = manager;
         this.cli = cli;
@@ -424,8 +447,38 @@ public sealed class ClaudeSessions : IDisposable
             .ToList()
             .ForEach(step => Take(step, resuming));
 
+        // Job 5: finished tasks' idle sessions are stopped. Asked after the keeper's steps, on the same board and list.
+        idleSince = listed.Where(agent => !agent.Busy).Select(agent => agent.SessionId).Distinct()
+            .ToImmutableDictionary(id => id, id => idleSince.TryGetValue(id, out var since) ? since : now);
+        stopSent = stopSent.Where(pair => listedIds.Contains(pair.Key)).ToImmutableDictionary();
+        SessionKeeper.Stops(tasks.Board, listed, id => idleSince.TryGetValue(id, out var since) ? since : now, windowOpen, now)
+            // Not while it is being resumed (a click on the Done task), and not again while a stop sent is on its way.
+            .Where(stop => !Queued(stop.Agent.SessionId) && !AnsweredWithinGrace(stop.Agent.SessionId))
+            .Where(stop => !stopSent.TryGetValue(stop.Agent.SessionId, out var sent) || now - sent >= StopRetry)
+            .ToList()
+            .ForEach(Stop);
+
         live.OnNext(listed);
         Drain();
+    }
+
+    // `claude stop <short id>` off the UI thread. The short id is what the stop takes (`claude --bg` prints it, and it is
+    // the first eight characters of the session id, also after a resume: measured). Success is said in the task's
+    // thread, so the session shown as ended there has its reason; a failure is traced only, and retried after StopRetry.
+    void Stop(KeeperStep.Stop stop)
+    {
+        var sessionId = stop.Agent.SessionId;
+        var shortId = stop.Agent.ShortId.GetValueOrDefault(sessionId[..Math.Min(8, sessionId.Length)]);
+        var at = scheduler.Now;
+        stopSent = stopSent.SetItem(sessionId, at);
+        trace?.Invoke($"claude sessions: stopping {sessionId}, its task {stop.TaskId} is finished");
+        OffThread(() => cli.Run(["stop", shortId], null, LaunchTimeout))
+            .TakeUntil(stopping)
+            .Subscribe(
+                result => result
+                    .Tap(() => Say(stop.TaskId, $"Stopped by Deskbar at {Clock(at)}, since the task is finished. Open the task to resume it."))
+                    .TapError(e => trace?.Invoke($"claude sessions: stop of {sessionId} failed: {e}")),
+                error => trace?.Invoke($"claude sessions: stop of {sessionId} threw: {error.Message}"));
     }
 
     void Take(KeeperStep step, bool resuming)

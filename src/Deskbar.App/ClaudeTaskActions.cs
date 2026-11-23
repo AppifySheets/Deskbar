@@ -188,7 +188,7 @@ public sealed class ClaudeTaskActions : IDisposable
     void Attach(TaskItem task, ClaudeAgent agent)
     {
         var title = ClaudeStart.AttachTitle(task.Title);
-        if (manager.KnownWindows.FirstOrDefault(w => Titled(w, title)) is { } open)
+        if (manager.KnownWindows.FirstOrDefault(w => Titled(manager, w, title)) is { } open)
         {
             seams.BringForward(open.Handle).TapError(e => trace?.Invoke($"claude actions: window on {agent.SessionId} not brought forward: {e}"));
             return;
@@ -204,8 +204,19 @@ public sealed class ClaudeTaskActions : IDisposable
             .TapError(e => SayAndTell(task.Id, $"Deskbar could not open a window on session {shortId}:\n\n{e}"));
     }
 
+    /// <summary>
+    /// Whether a window Deskbar opened on the task's session is open: the Windows Terminal window titled for the task, as
+    /// Attach finds it. ClaudeSessions leaves a finished task's session running while one is (job 5 there), so a stop
+    /// never closes the window Petre is reading.
+    /// </summary>
+    public static bool HasWindow(WorkspaceManager manager, TaskItem task)
+    {
+        var title = ClaudeStart.AttachTitle(task.Title);
+        return manager.KnownWindows.Any(w => Titled(manager, w, title));
+    }
+
     // A Windows Terminal window with this title, as it reads now or read before a rename rule shortened it.
-    bool Titled(WindowInfo window, string title) =>
+    static bool Titled(WorkspaceManager manager, WindowInfo window, string title) =>
         window.ProcessName.Equals(TerminalProcess, StringComparison.OrdinalIgnoreCase)
         && (window.Title == title || manager.OriginalTitle(window.Handle).Map(t => t == title).GetValueOrDefault(false));
 

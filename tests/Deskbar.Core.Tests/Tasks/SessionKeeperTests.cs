@@ -286,4 +286,92 @@ public class SessionKeeperTests
         Assert.IsType<KeeperStep.GiveUp>(Assert.Single(Plan([task], ledger: ledger)));
         Assert.IsType<KeeperStep.Resume>(Assert.Single(Plan([task], ledger: ledger.Forget("s1"))));
     }
+    // --- Stops: finished tasks' idle background sessions (task 87f899ad) ------------------------------------------
+
+    static ClaudeAgent Background(string sessionId, bool busy = false) =>
+        new(sessionId, Maybe<string>.None, @"E:\repos\X", true, busy, "");
+
+    // Idle since two minutes ago unless the test says otherwise, so StopAfter (one minute) has passed.
+    static IReadOnlyList<KeeperStep.Stop> Stops(
+        IEnumerable<TaskItem> tasks, IReadOnlyCollection<ClaudeAgent> live,
+        Func<string, DateTimeOffset>? idleSince = null, Func<TaskItem, bool>? windowOpen = null) =>
+        SessionKeeper.Stops(new TaskBoard(tasks.ToList()), live, idleSince ?? (_ => Now.AddMinutes(-2)), windowOpen ?? (_ => false), Now);
+
+    [Theory]
+    [InlineData(TaskStatus.Done)]
+    [InlineData(TaskStatus.Closed)]
+    public void A_finished_tasks_idle_background_session_is_stopped(TaskStatus status)
+    {
+        var task = Task(status, 5, Session("s1"));
+
+        var stop = Assert.Single(Stops([task], [Background("s1")]));
+
+        Assert.Equal(task.Id, stop.TaskId);
+        Assert.Equal("s1", stop.Agent.SessionId);
+    }
+
+    // Petre: "i don't want to stop sessions that are asking for my feedback, only those that have been finished".
+    [Theory]
+    [InlineData(TaskStatus.Backlog)]
+    [InlineData(TaskStatus.InProgress)]
+    [InlineData(TaskStatus.WaitingOnYou)]
+    public void An_open_tasks_session_is_never_stopped(TaskStatus status) =>
+        Assert.Empty(Stops([Task(status, 5, Session("s1"))], [Background("s1")]));
+
+    [Fact]
+    public void A_busy_session_is_not_stopped_while_it_finishes_its_turn() =>
+        Assert.Empty(Stops([Task(TaskStatus.Done, 5, Session("s1"))], [Background("s1", busy: true)]));
+
+    [Fact]
+    public void A_session_idle_for_less_than_StopAfter_is_not_stopped_yet()
+    {
+        var task = Task(TaskStatus.Done, 5, Session("s1"));
+
+        Assert.Empty(Stops([task], [Background("s1")], _ => Now - SessionKeeper.StopAfter + TimeSpan.FromSeconds(1)));
+        Assert.Single(Stops([task], [Background("s1")], _ => Now - SessionKeeper.StopAfter));
+    }
+
+    // An interactive session is Petre's own VS Code or terminal window, and `claude stop` only knows background ones.
+    [Fact]
+    public void An_interactive_session_is_never_stopped() =>
+        Assert.Empty(Stops([Task(TaskStatus.Done, 5, Session("s1"))], [Agent("s1")]));
+
+    [Fact]
+    public void A_session_with_a_window_attached_is_not_stopped_until_the_window_closes()
+    {
+        var task = Task(TaskStatus.Done, 5, Session("s1"));
+
+        Assert.Empty(Stops([task], [Background("s1")], windowOpen: t => t.Id == task.Id));
+        Assert.Single(Stops([task], [Background("s1")], windowOpen: _ => false));
+    }
+
+    [Fact]
+    public void A_session_an_open_task_also_holds_is_not_stopped()
+    {
+        var done = Task(TaskStatus.Done, 5, Session("s1"));
+        var open = Task(TaskStatus.InProgress, 5, Session("s1"));
+
+        Assert.Empty(Stops([done, open], [Background("s1")]));
+    }
+
+    [Fact]
+    public void A_session_on_two_finished_tasks_is_stopped_once()
+    {
+        var first = Task(TaskStatus.Done, 5, Session("s1"));
+        var second = Task(TaskStatus.Closed, 5, Session("s1"));
+
+        Assert.Single(Stops([first, second], [Background("s1")]));
+    }
+
+    [Fact]
+    public void An_unlisted_session_of_a_finished_task_has_nothing_to_stop() =>
+        Assert.Empty(Stops([Task(TaskStatus.Done, 5, Session("s1"))], [Background("other")]));
+
+    [Fact]
+    public void Only_the_listed_session_of_a_finished_task_with_several_is_stopped()
+    {
+        var task = Task(TaskStatus.Done, 5, Session("old", 120), Session("new", 10));
+
+        Assert.Equal("old", Assert.Single(Stops([task], [Background("old")])).Agent.SessionId);
+    }
 }

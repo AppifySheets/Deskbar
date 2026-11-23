@@ -569,7 +569,10 @@ its place on the task.
 A session that keeps stopping straight after being woken, whose transcript Claude Code no longer keeps, or
 whose resume fails (Claude's message goes into the thread), is left alone and its task waits on you with the
 reason until you act on it: set its status and it tries again, or double-click it to bring the session back
-and clear the give-up. Marking a task done lets its session go. When Claude Code's list cannot be read
+and clear the give-up. Marking a task done lets its session go: once a done or closed task's background
+session has sat idle for a minute, Deskbar stops it with `claude stop`, which keeps the conversation, and says so
+in the thread. A session asking for your answer, any open task's session, a VS Code session and one you have
+Deskbar's window open on all keep running. Double-click the task to bring the session back. When Claude Code's list cannot be read
 (`claude` missing from the PATH, say), Manage says why under the resume box. **Resume the sessions of open
 tasks after a restart or a crash**, under the tasks box, turns the resuming off and leaves the rest on
 (`deskbar.cmd claude-resume off`). Claude Code keeps sessions for 30 days; raise `cleanupPeriodDays` in

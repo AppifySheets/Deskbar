@@ -2,7 +2,7 @@ using CSharpFunctionalExtensions;
 
 namespace Deskbar.Core.Tasks;
 
-// DECIDING WHICH CLAUDE SESSIONS TO WAKE. Design: docs/superpowers/specs/2026-11-23-tasks-open-claude-sessions-design.md,
+// DECIDING WHICH CLAUDE SESSIONS TO WAKE, AND WHICH FINISHED ONES TO STOP (Stops, below). Design: docs/superpowers/specs/2026-11-23-tasks-open-claude-sessions-design.md,
 // "Keeping open tasks running"; measurements: docs/superpowers/notes/2026-11-23-claude-background-probes.md.
 //
 // THE RULE. An open task (Backlog, In progress or Waiting on you) whose latest session `claude agents --json` does not
@@ -133,6 +133,57 @@ public static class SessionKeeper
         return resumes.Concat(adopts).ToList();
     }
 
+    /// <summary>
+    /// How long a finished task's background session must have sat idle, in every list read meanwhile, before
+    /// <see cref="Stops"/> names it. One idle read is not enough: a session that has just called `task done` is still
+    /// finishing its turn, and between two tool calls a list can catch it idle for a moment.
+    /// </summary>
+    public static readonly TimeSpan StopAfter = TimeSpan.FromMinutes(1);
+
+    // STOPPING FINISHED SESSIONS (task 87f899ad, 2026-11-23). Petre: "i want to not have a stagnant session", "i don't
+    // want to stop sessions that are asking for my feedback, only those that have been finished". A background session
+    // stays in Claude Code's daemon until a reboot, about 350 MB a session (measured: 14 sessions, 4.8 GB), and before
+    // this nothing ever ended one. "Finished" is the task's word, not the CLI's: the task is Done (the session said
+    // `task done`, or Petre marked it) or Closed. A task waiting on Petre is not finished, so a session asking for his
+    // feedback is never stopped, and neither is any session of an open task.
+    //
+    // `claude stop <id>` keeps the conversation (measured 2026-11-23): the session leaves `claude agents --json`, a second
+    // stop is harmless, and `claude --bg --resume <id>` brings it back under the same id, idle, without calling the
+    // model. So nothing is lost: going to the task resumes it (ClaudeTaskActions), and moving the task back to an open
+    // status lets the keeper's Plan resume it like any other open task's session.
+    //
+    // A session is named only when ALL of these hold:
+    //   * one of a Done or Closed task's sessions, and no open task holds the same session id;
+    //   * listed as a BACKGROUND session: an interactive one (VS Code, a terminal) is Petre's window, and `claude stop`
+    //     only knows background ones anyway;
+    //   * idle, and idle in every read for <see cref="StopAfter"/> (<paramref name="idleSince"/>);
+    //   * no window of Deskbar's is attached to it (<paramref name="windowOpen"/>): stopping it would close the window
+    //     under Petre while he reads the answer of a Done task he opened. Once he closes the window it is stopped.
+    // A session on two finished tasks is named once, for the first.
+    public static IReadOnlyList<KeeperStep.Stop> Stops(
+        TaskBoard board,
+        IReadOnlyCollection<ClaudeAgent> live,
+        Func<string, DateTimeOffset> idleSince,
+        Func<TaskItem, bool> windowOpen,
+        DateTimeOffset now)
+    {
+        var heldOpen = board.Tasks.Where(task => !Finished(task)).SelectMany(task => task.Sessions).Select(s => s.Id).ToHashSet();
+        return board.Tasks
+            .Where(Finished)
+            .SelectMany(task => live
+                .Where(agent => task.Sessions.Any(session => session.Id == agent.SessionId))
+                .Select(agent => (Task: task, Agent: agent)))
+            .Where(pair => pair.Agent.Background && !pair.Agent.Busy)
+            .Where(pair => !heldOpen.Contains(pair.Agent.SessionId))
+            .Where(pair => now - idleSince(pair.Agent.SessionId) >= StopAfter)
+            .Where(pair => !windowOpen(pair.Task))
+            .DistinctBy(pair => pair.Agent.SessionId)
+            .Select(pair => new KeeperStep.Stop(pair.Task.Id, pair.Agent))
+            .ToList();
+    }
+
+    static bool Finished(TaskItem task) => task.Status is TaskStatus.Done or TaskStatus.Closed;
+
     static int StatusRank(TaskStatus status) => status switch
     {
         TaskStatus.WaitingOnYou => 0,
@@ -175,6 +226,9 @@ public abstract record KeeperStep
 
     /// <summary>A live session no task knows: make it a task.</summary>
     public sealed record Adopt(ClaudeAgent Agent) : KeeperStep;
+
+    /// <summary>A finished task's idle background session: `claude stop` it (SessionKeeper.Stops).</summary>
+    public sealed record Stop(Guid TaskId, ClaudeAgent Agent) : KeeperStep;
 }
 
 /// <summary>
