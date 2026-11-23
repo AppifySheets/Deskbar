@@ -556,8 +556,8 @@ While it is on, Deskbar also reads Claude Code's own list of running sessions (`
 every 15 seconds. A session no task knows, still running after two minutes, gets a task of its own, on the
 workspace of the VS Code window showing its folder, once its hooks have said someone is at it (so `claude -p`
 runs stay off the board); if it later joins a task of its own, the one Deskbar made
-goes away again unless you have changed it (renamed, moved, flagged, linked to a goal, set its status or
-commented on it). When the session of an open task is no longer running, after a reboot, a crash or a
+goes away again unless you have changed it (renamed, moved, flagged, linked to a goal, set its status,
+assigned it, described it or commented on it). When the session of an open task is no longer running, after a reboot, a crash or a
 closed VS Code window, Deskbar resumes it in the background with `claude --bg --resume`, one session every
 five seconds, and says so in the task's thread; a session whose last turn was cut off is told to continue,
 and one you stopped with Esc is not. Deskbar waits two minutes first: nothing is resumed in the first two
