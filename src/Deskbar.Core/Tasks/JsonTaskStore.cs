@@ -99,7 +99,9 @@ public sealed class JsonTaskStore(string baseDirectory, Action<string>? trace = 
         Guid? GoalId = null,
         [property: JsonConverter(typeof(TolerantAssigneeConverter))] AssigneeDto? Assignee = null,
         [property: JsonConverter(typeof(TolerantStringConverter))] string? Description = null,
-        [property: JsonConverter(typeof(TolerantTimeConverter))] DateTimeOffset? WaitingSince = null);
+        [property: JsonConverter(typeof(TolerantTimeConverter))] DateTimeOffset? WaitingSince = null,
+        // TaskItem.Adopted; missing in a file written before it existed, which reads as false. Still version 2.
+        bool? Adopted = null);
 
     // The assignee (Ruling 57): kind by name ("me", "claude", "colleague"), plus the id and name a colleague needs.
     sealed record AssigneeDto(string? Kind, string? Id, string? Name);
@@ -189,7 +191,8 @@ public sealed class JsonTaskStore(string baseDirectory, Action<string>? trace = 
             t.GoalId.HasValue ? t.GoalId.Value : null,
             new AssigneeDto(t.Assignee.Kind.ToString().ToLowerInvariant(), t.Assignee.Id, t.Assignee.Name),
             t.Description.Length > 0 ? t.Description : null,
-            t.WaitingSince.HasValue ? t.WaitingSince.Value.ToUniversalTime() : null);
+            t.WaitingSince.HasValue ? t.WaitingSince.Value.ToUniversalTime() : null,
+            t.Adopted);
 
     static TaskItem FromDto(TaskDto d) =>
         new(d.Id, d.Title ?? "",
@@ -210,6 +213,7 @@ public sealed class JsonTaskStore(string baseDirectory, Action<string>? trace = 
             // A task saved before the field existed, or with one this build cannot read, gets it derived (Assignee.DerivedFor).
             Assignee = (d.Assignee is { } a ? Assignee.From(a.Kind, a.Id, a.Name) : Maybe<Assignee>.None)
                 .GetValueOrDefault(Assignee.DerivedFor((d.Sessions ?? []).Count > 0, d.Status)),
+            Adopted = d.Adopted ?? false,
         };
 
     // The rank a task saved before ranks existed gets, so the tasks keep the order the bar showed them in then:

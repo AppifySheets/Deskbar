@@ -324,6 +324,26 @@ public sealed class JsonTaskStoreTests : IDisposable
         Assert.True(loaded.Value.Tasks.Single().GoalId.HasNoValue);
     }
 
+    // A task Deskbar made for a session nobody had given a task (TaskBoard.AdoptSession) says so in `adopted`, so the
+    // mark survives a restart and an empty adopted task can still be cleared when its session joins its own task. A
+    // file written before the mark existed reads every task as not adopted.
+    [Fact]
+    public void Adopted_round_trips_and_defaults_to_false()
+    {
+        var store = new JsonTaskStore(dir);
+        var board = Sample();
+        board = new TaskBoard(board.Tasks.Select((t, i) => i == 1 ? t with { Adopted = true } : t).ToArray());
+
+        Assert.True(store.Save(board).IsSuccess);
+        var loaded = store.Load().Value;
+
+        Assert.Equal([false, true, false], loaded.Tasks.Select(t => t.Adopted));
+        Assert.Contains("\"adopted\": true", File.ReadAllText(TasksPath));
+
+        File.WriteAllText(TasksPath, Version2(status: "\"Backlog\""));
+        Assert.False(new JsonTaskStore(dir).Load().Value.Tasks.Single().Adopted);
+    }
+
     // A version 2 file written before the order existed has no rank: the tasks come back in the order the bar showed
     // them then (Waiting on you, then Done, then the rest, each latest raised first), so the first start of this build
     // moves no line. No flags means quadrant IV for every task.
