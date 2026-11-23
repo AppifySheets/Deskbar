@@ -41,6 +41,11 @@ public sealed class ClaudeCli(string executable = "claude") : IClaudeCli
             RedirectStandardError = true,
             RedirectStandardInput = true,
             CreateNoWindow = true,
+            // Claude Code writes UTF-8. Without these .NET decodes the pipe with the console's ANSI code page, and
+            // the "·" of "backgrounded · <id>" arrived as "Â·" (measured on Petre's machine, 2026-11-23: Start then
+            // could not find the short id), and non-Latin session names in `agents --json` would be garbled too.
+            StandardOutputEncoding = Encoding.UTF8,
+            StandardErrorEncoding = Encoding.UTF8,
         };
         arguments.ToList().ForEach(info.ArgumentList.Add);
         if (workingDirectory is not null) info.WorkingDirectory = workingDirectory;
