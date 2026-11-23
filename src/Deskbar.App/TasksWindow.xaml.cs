@@ -48,9 +48,9 @@ namespace Deskbar.App;
 //                    the board and hands back a new view. Ctrl+F anywhere in the panel focuses it (Press); Esc in it
 //                    empties it and gives the keyboard back to the board (Escape, FocusBoard). Emptied on Open, since a
 //                    fresh open resets every filter; not saved anywhere.
-//   Claude working   a chip with the status chips, "Claude working N", orange-edged (Orange) while off and with the
-//                    chips' selected look (the blue edge) while on, its words then orange so it keeps its colour. N is
-//                    what it would show under every other filter (TasksView.ClaudeWorkingCount).
+//   Claude working   a chip with the status chips, "Claude working N", orange-edged (Orange) on or off, filled with
+//                    AskTint while on (the approved mockup; never the blue selected edge). N is what it would show
+//                    under every other filter (TasksView.ClaudeWorkingCount).
 //
 // Top to bottom: the toolbar (status filters with their counts, the workspace filter, the goal filter while goals
 // exist, "+ Add"), the
@@ -501,11 +501,12 @@ public partial class TasksWindow : Window
             Filters.Children.Add(button);
         });
         // "Claude working N" (Task 7, see the header), with the status chips; the WrapPanel lets it wrap on a narrow panel.
-        // A click flips it. Orange-edged while off; while on, the chips' selected look (the blue edge) with orange words,
-        // so it still reads as the Claude chip.
-        var working = Flat(new TextBlock { Text = $"Claude working {view.ClaudeWorkingCount}", Foreground = view.ClaudeWorking ? Orange : Ink, FontSize = 11 },
+        // A click flips it. As the approved mockup draws it: the orange edge ALWAYS (it is the Claude chip, on or off), and
+        // while on the AskTint fill under it, never the other chips' blue selected edge, which would lose the orange.
+        var working = Flat(new TextBlock { Text = $"Claude working {view.ClaudeWorkingCount}", Foreground = Ink, FontSize = 11 },
             "Filter: Claude working", () => Actions?.FilterClaudeWorking(!view.ClaudeWorking), new Thickness(8, 2, 8, 2));
-        working.BorderBrush = view.ClaudeWorking ? PickedEdge : Orange;
+        working.BorderBrush = Orange;
+        working.Background = view.ClaudeWorking ? AskTint : ButtonFill;
         working.Margin = new Thickness(0, 0, 6, 0);
         working.ToolTip = "Only the tasks Claude has a live session on";
         Filters.Children.Add(working);
@@ -1884,9 +1885,15 @@ public partial class TasksWindow : Window
     // the toolbar activates nothing.
     void EndSearch()
     {
-        SearchBox.Text = "";
+        ClearSearch();
         FocusBoard();
     }
+
+    /// <summary>
+    /// The search box emptied, the keyboard left where it is: Esc's half of EndSearch, and the controller's when a task
+    /// clicked on the bar is hidden by the search (TasksBoard.RevealPastSearch). Its TextChanged tells the controller.
+    /// </summary>
+    internal void ClearSearch() => SearchBox.Text = "";
 
     // --- small parts -------------------------------------------------------------------------------------------------
 

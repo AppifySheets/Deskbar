@@ -700,6 +700,71 @@ public class TasksBoardTests
         Assert.Equal([disk, dishes], t.Window.Keys);
     });
 
+    // The chip as the approved mockup draws it (Task 7 review, Important): the orange edge on or off, the normal chip fill
+    // while off and the AskTint fill while on, never the other chips' blue selected edge.
+    [Fact]
+    public void The_Claude_working_chip_keeps_its_orange_edge_and_fills_when_on() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        t.Tasks.Create("DurableFile move guard", t.Gepha, Session("s1"));
+        t.Controller.Show();
+        var orange = FloatingBar.AskingOrange;
+        var normalFill = System.Windows.Media.Color.FromRgb(0x2A, 0x2C, 0x33);
+        var askTint = System.Windows.Media.Color.FromRgb(0x3A, 0x2C, 0x1C);
+        static System.Windows.Media.Color ColourOf(System.Windows.Media.Brush brush) =>
+            Assert.IsType<System.Windows.Media.SolidColorBrush>(brush).Color;
+
+        var off = ButtonNamed(t.Window, "Filter: Claude working");
+        Assert.Equal(orange, ColourOf(off.BorderBrush));
+        Assert.Equal(normalFill, ColourOf(off.Background));
+
+        Click(off);
+
+        var on = ButtonNamed(t.Window, "Filter: Claude working");
+        Assert.True(t.Window.ClaudeWorkingOn);
+        Assert.Equal(orange, ColourOf(on.BorderBrush));
+        Assert.Equal(askTint, ColourOf(on.Background));
+    });
+
+    // Task 7 review, ruling on ShowTask: a task clicked on the bar that the search or the Claude working chip hides is put
+    // on screen by clearing whichever of the two hides it (the box emptied too); one that only the other hides keeps the
+    // first in force.
+    [Fact]
+    public void Showing_a_task_the_search_or_Claude_working_hides_clears_what_hides_it() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        var note = t.Tasks.AddNote("Runner disk", t.Gepha).Value.Id;
+        var guard = t.Tasks.Create("DurableFile move guard", t.Gepha, Session("s1")).Value.Id;
+        var ended = t.Tasks.Create("DurableFile cleanup", t.Gepha, Session("s2", live: false)).Value.Id;
+        t.Controller.Show();
+        t.Window.SearchBox.Text = "durablefile";
+        Click(ButtonNamed(t.Window, "Filter: Claude working"));
+        Assert.Equal([guard], t.Window.Keys);
+
+        // Matches the search, but has no live session: only the chip goes off.
+        t.Controller.ShowTask(ended);
+        Assert.Equal("durablefile", t.Window.SearchBox.Text);
+        Assert.False(t.Window.ClaudeWorkingOn);
+        Assert.Contains(ended, t.Window.Keys);
+        Assert.DoesNotContain(note, t.Window.Keys);
+
+        // Turned back on, then a task hidden by both: the box empties and the chip goes off.
+        Click(ButtonNamed(t.Window, "Filter: Claude working"));
+        t.Controller.ShowTask(note);
+        Assert.Equal("", t.Window.SearchBox.Text);
+        Assert.False(t.Window.ClaudeWorkingOn);
+        Assert.Contains(note, t.Window.Keys);
+        Assert.True(t.Window.ThreadShown(note));
+
+        // A live task the search admits: neither is touched.
+        t.Window.SearchBox.Text = "guard";
+        Click(ButtonNamed(t.Window, "Filter: Claude working"));
+        t.Controller.ShowTask(guard);
+        Assert.Equal("guard", t.Window.SearchBox.Text);
+        Assert.True(t.Window.ClaudeWorkingOn);
+        Assert.Equal([guard], t.Window.Keys);
+    });
+
     // The toolbar's × closes the panel, as `tasks-window hide` does, and Alt+F4 on the panel does the same rather than
     // closing the WPF window for good (a closed window can never be shown again).
     [Fact]
