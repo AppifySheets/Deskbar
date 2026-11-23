@@ -82,7 +82,8 @@ public partial class TasksWindow : Window
     // MONITOR_DEFAULTTONULL: no monitor at all for a point on none, rather than the nearest one.
     const uint MonitorDefaultToNull = 0;
 
-    const double PreferredWidth = 720;
+    // 800 since the status chip column (72 DIP) joined the line, so a fresh window's titles keep the width they had at 720.
+    const double PreferredWidth = 800;
     const double PreferredHeight = 560;
 
     // At most this many session squares on a line; the words beside them give the count.
@@ -656,18 +657,22 @@ public partial class TasksWindow : Window
         Cell(grid, 2, flags);
         // A Matrix line (compact) has no column for the sessions, the age or the close button, so they are not made at
         // all (whole-PR review, minor 5): no element in a zero-width column, and no age for the minute's tick to rewrite.
-        Cell(grid, 3, compactLines ? null : SessionsOf(row));
+        // The status in words (Petre, 2026-11-23: "i can't currently see statuses"; TaskStatusMarks.Chip), in its own
+        // column so it sits at the same x on every line. None in a Matrix line (no room there; its Done tick still shows),
+        // none on a line in its undo window (it is closed).
+        Cell(grid, 3, compactLines || row.Closing ? null : TaskStatusMarks.Chip(row.Status));
+        Cell(grid, 4, compactLines ? null : SessionsOf(row));
         // Who the task is on (Ruling 57): "Me" or "Claude", dim; none in a Matrix line (no column there).
-        Cell(grid, 4, compactLines ? null : AssigneeOf(row));
-        Cell(grid, 5, compactLines ? null : AgeOf(row));
-        Cell(grid, 6, Chip(row.Place));
+        Cell(grid, 5, compactLines ? null : AssigneeOf(row));
+        Cell(grid, 6, compactLines ? null : AgeOf(row));
+        Cell(grid, 7, Chip(row.Place));
         var comments = CommentsButton(row);
-        Cell(grid, 7, comments);
-        Cell(grid, 8, compactLines ? null : ActionOf(row));
+        Cell(grid, 8, comments);
+        Cell(grid, 9, compactLines ? null : ActionOf(row));
         var more = Small(new TextBlock { Text = "", FontFamily = IconFont, FontSize = 12, Foreground = Ink }, "More",
             () => OpenMenuFor(row.Id), "Edit, status, move, delete");
         menuButtons[row.Id] = more;
-        Cell(grid, 9, more);
+        Cell(grid, 10, more);
         if (row.Closing)
             grid.Children.OfType<UIElement>().Where(part => Grid.GetColumn(part) != 0).ToList().ForEach(part => part.Opacity = 0.45);
         // The comments and "…" buttons are quiet until the pointer is on their line, like the bar's quiet controls.
@@ -763,13 +768,14 @@ public partial class TasksWindow : Window
     }
 
 
-    // The line's columns: tick, title (the star, trimming first), the two flag toggles, sessions, assignee (46 DIP, "Claude" fits), age, workspace chip,
+    // The line's columns: tick, title (the star, trimming first), the two flag toggles, status chip (72 DIP, "In progress"
+    // fits), sessions, assignee (46 DIP, "Claude" fits), age, workspace chip,
     // comments, action (close or Reopen), "…". Fixed widths, shared by every line, so each column sits at the same x on
     // every line. The sessions column is wide enough for "2 sessions, 1 live" (116 DIP, so the words never spill into the
     // age column; it is empty on a note), the age is left-aligned in its own so its x never follows the text length, and the window's minimum width
-    // is 620 DIP, so the title keeps a usable width there even with the list's scroll bar showing (review I-3).
+    // (ListMinWidth, 692 DIP since the status column took 72) keeps the title a usable width even with the list's scroll bar showing (review I-3).
     static readonly IReadOnlyList<GridLength> LineColumns =
-        [new(22), new(1, GridUnitType.Star), new(38), new(116), new(46), new(44), new(88), new(40), new(52), new(24)];
+        [new(22), new(1, GridUnitType.Star), new(38), new(72), new(116), new(46), new(44), new(88), new(40), new(52), new(24)];
 
     // THE TWO TOGGLES (Task 12), the bar's (FloatingBar.FlagToggle): important, Segoe Fluent Icons' "Important" U+E8C9,
     // and urgent, its "Recent" clock U+E823 (Segoe MDL2 Assets carries both on Windows 10). On, the glyph wears its
@@ -937,7 +943,7 @@ public partial class TasksWindow : Window
             // its column instead of ending in an ellipsis, and keeps any line break it holds, so a long title makes its
             // line taller and every other column keeps its place. Select the line and press F2, or choose Edit in its
             // menu, to edit it in place (RenameBox).
-            panel.Children.Add(new TextBlock
+            var title = new TextBlock
             {
                 Tag = TitleTag,
                 Text = row.Title,
@@ -950,7 +956,23 @@ public partial class TasksWindow : Window
                 Foreground = row.Claudes ? ClaudeInk : Ink,
                 TextWrapping = TextWrapping.Wrap,
                 TextDecorations = row.Closing ? TextDecorations.Strikethrough : null,
-            });
+            };
+            // A DONE TASK'S TICK in front of its title, the bar's own (TaskStatusMarks.DoneTick; Petre, 2026-11-23, "build
+            // both"). Docked left of the title so the title still wraps in what is left; at the first line's height (top).
+            // Not on a line in its undo window, which is closed.
+            if (row.Status == TaskStatus.Done && !row.Closing)
+            {
+                var tick = TaskStatusMarks.DoneTick(12);
+                tick.Margin = new Thickness(0, 2, 5, 0);
+                tick.VerticalAlignment = VerticalAlignment.Top;
+                var titleRow = new DockPanel();
+                DockPanel.SetDock(tick, Dock.Left);
+                titleRow.Children.Add(tick);
+                titleRow.Children.Add(title);
+                panel.Children.Add(titleRow);
+            }
+            else
+                panel.Children.Add(title);
             // THE DESCRIPTION (Ruling 58): Petre's markdown under the title, a block of its own. Not hit-testable and not
             // focusable, so a click on it is a click on the line (a RichTextBox would swallow it).
             // IN FULL ONLY WHEN THE LINE IS OPEN (Petre, 2026-11-23, of a long brief that filled the window: "i want that

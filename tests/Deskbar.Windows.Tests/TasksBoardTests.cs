@@ -914,16 +914,53 @@ public class TasksBoardTests
         t.Window.UpdateLayout();
 
         var lines = t.Window.Keys.Select(id => LineOf(t.Window, id)).ToList();
-        var chips = lines.Select(l => BoundsIn(t.Window, Inside(l).OfType<Border>().Single(b => b.Child is TextBlock && b.CornerRadius.TopLeft == 8))).ToList();
+        // The workspace chip; the status chip (TaskStatusMarks) is rounded the same way, so it is told apart by its tag.
+        var chips = lines.Select(l => BoundsIn(t.Window, Inside(l).OfType<Border>()
+            .Single(b => b.Child is TextBlock && b.CornerRadius.TopLeft == 8 && !Equals(b.Tag, TaskStatusMarks.ChipTag)))).ToList();
+        var statuses = lines.Select(l => BoundsIn(t.Window, StatusChipOf(l)!)).ToList();
         var comments = lines.Select(l => BoundsIn(t.Window, ButtonNamed(l, "Comments"))).ToList();
         var mores = lines.Select(l => BoundsIn(t.Window, ButtonNamed(l, "More"))).ToList();
         Assert.True(chips.Max(b => b.Left) - chips.Min(b => b.Left) < 0.5, string.Join(", ", chips.Select(b => b.Left)));
+        Assert.True(statuses.Max(b => b.Left) - statuses.Min(b => b.Left) < 0.5, string.Join(", ", statuses.Select(b => b.Left)));
+        Assert.All(statuses, b => Assert.True(b.Right <= chips[0].Left, $"status chip {b} runs into the workspace column"));
         Assert.True(comments.Max(b => b.Left) - comments.Min(b => b.Left) < 0.5, string.Join(", ", comments.Select(b => b.Left)));
         Assert.True(mores.Max(b => b.Left) - mores.Min(b => b.Left) < 0.5, string.Join(", ", mores.Select(b => b.Left)));
         Assert.All(chips.Concat(comments).Concat(mores), b => Assert.True(b.Right <= ContentWidth(t.Window) + 0.5, $"{b} in {ContentWidth(t.Window)}"));
         // The icons explain themselves.
         Assert.Equal("Comments", ButtonNamed(lines[0], "Comments").ToolTip);
         Assert.Equal("Edit, status, move, delete", ButtonNamed(lines[0], "More").ToolTip);
+    });
+
+    // The status chip of a line (TaskStatusMarks.Chip), or null when it has none.
+    static Border? StatusChipOf(DependencyObject line) =>
+        Inside(line).OfType<Border>().SingleOrDefault(b => Equals(b.Tag, TaskStatusMarks.ChipTag));
+
+    static string? StatusWordOf(DependencyObject line) => (StatusChipOf(line)?.Child as TextBlock)?.Text;
+
+    static bool HasDoneTick(DependencyObject line) =>
+        Inside(line).OfType<FrameworkElement>().Any(e => Equals(e.Tag, TaskStatusMarks.DoneTickTag));
+
+    // Petre, 2026-11-23: "i can't currently see statuses". Every line says its status in a chip, and a Done line also has
+    // the green tick in front of its title; no other line has the tick.
+    [Fact]
+    public void Every_line_shows_its_status_and_only_a_done_line_has_the_tick() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        var note = t.Tasks.AddNote("a note", t.Gepha).Value.Id;
+        var working = t.Tasks.Create("working", t.Gepha, Session("s1")).Value.Id;
+        var asking = t.Tasks.Create("asking", t.Gepha, Session("s2")).Value.Id;
+        t.Tasks.Ask(asking, "Ship it?");
+        var done = t.Tasks.Create("finished", t.Gepha, Session("s3")).Value.Id;
+        t.Tasks.MarkDone(done);
+        t.Controller.Open(Rect.Empty);
+        t.Window.UpdateLayout();
+
+        Assert.Equal("Backlog", StatusWordOf(LineOf(t.Window, note)));
+        Assert.Equal("In progress", StatusWordOf(LineOf(t.Window, working)));
+        Assert.Equal("Waiting", StatusWordOf(LineOf(t.Window, asking)));
+        Assert.Equal("Done", StatusWordOf(LineOf(t.Window, done)));
+        Assert.True(HasDoneTick(LineOf(t.Window, done)));
+        Assert.False(new[] { note, working, asking }.Any(id => HasDoneTick(LineOf(t.Window, id))));
     });
 
     // Petre's screenshot: the placeholder "Comment as you, in markdow…" was cut off and the box squeezed. A short
@@ -1393,12 +1430,12 @@ public class TasksBoardTests
 
     // --- Review of the fix round, I-1: the Matrix gives the window back its own width and stays on screen -----------
 
-    // A place wider than the List's minimum (560 DIP) and narrower than the Matrix's (780), in device pixels at the
-    // test screen's own scale, on that screen's work area.
+    // A place wider than the List's minimum (692 DIP since the status chip column) and narrower than the Matrix's (780),
+    // in device pixels at the test screen's own scale, on that screen's work area.
     static Deskbar.Core.Persistence.TasksWindowState Narrow(Rect work, bool flushRight)
     {
         var scale = TasksWindow.PrimaryScale();
-        var (width, height) = ((int)(660 * scale), (int)(480 * scale));
+        var (width, height) = ((int)(730 * scale), (int)(480 * scale));
         return new(flushRight ? (int)work.Right - width : (int)work.Left + 40, (int)work.Top + 40, width, height, Maximized: false);
     }
 

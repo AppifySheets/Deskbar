@@ -312,6 +312,27 @@ public class FloatingBarTaskListTests
         Assert.True(HasButtonNamed(again, "Tick off"));
     });
 
+    // Petre, 2026-11-23: "i can't currently see statuses". A Done task's line carries the green tick in front of its title
+    // (TaskStatusMarks.DoneTick); a note does not, and the tick goes once the line is closed (in its undo window).
+    [Fact]
+    public void A_done_task_has_the_done_tick_and_a_note_does_not() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        var note = t.Tasks.AddNote("A note", t.Gepha).Value.Id;
+        var done = t.Tasks.Create("Merged", t.Gepha, Session("s1")).Value.Id;
+        t.Tasks.MarkDone(done);
+        static bool Ticked(Button line) => Inside(line).OfType<FrameworkElement>().Any(e => Equals(e.Tag, TaskStatusMarks.DoneTickTag));
+        Button LineFor(Guid id) => t.Lines.Single(l => ((TaskLine)l.Tag).Id == id);
+
+        Assert.True(Ticked(LineFor(done)));
+        Assert.False(Ticked(LineFor(note)));
+        // The title's text is unchanged: the tick is a picture, not a character.
+        Assert.StartsWith("Merged", TextOf(LineFor(done)));
+
+        Click(ButtonNamed(LineFor(done), "Tick off"));
+        Assert.False(Ticked(LineFor(done)));
+    });
+
     // Every Claude line, a Done one included, has the tick box and no close button: all lines look alike.
     [Fact]
     public void A_done_claude_task_closes_from_its_tick_box() => StaThread.Run(() =>

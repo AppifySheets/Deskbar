@@ -449,7 +449,7 @@ its comments, and a Matrix view of the four quadrants side by side.
 A script can add and change tasks with `deskbar.cmd task`, and every Claude Code session keeps a task of
 its own here: it joins the task its work continues or creates one, keeps a short status line on it, asks
 you through it (the task waits on you, in orange, with the question) and marks it done when it has
-finished. Only you close a task. Double-click a Claude task to go to its session, and pick "Start Claude
+finished: a done task gets a green tick, and every line in the tasks window shows its status. Only you close a task. Double-click a Claude task to go to its session, and pick "Start Claude
 on this" on a note's menu to hand it to a new Claude session.
 
 More in [Tasks](docs/features/tasks.md).
@@ -549,7 +549,8 @@ and always exits 0. When Deskbar is not running, the hook prints nothing and the
 With **Claude Code sessions keep their tasks in the task list** ticked under it (on by default), three more
 hooks, on SessionStart, UserPromptSubmit and SessionEnd, run `claude-task-hook.cmd`. A starting session
 is told its task, or the open tasks on its workspace it could join and how to create its own; each of
-your messages reminds it of its task in one line, and answers a task that was waiting on you. Sessions run
+your messages reminds it of its task in one line. Your message changes no status: the session says when your
+reply settled its question, and puts a done task back in progress only when your message gives it more work. Sessions run
 with `claude -p` or the Agent SDK are left out. `deskbar.cmd claude-tasks off` turns this off.
 
 While it is on, Deskbar also reads Claude Code's own list of running sessions (`claude agents --json`)

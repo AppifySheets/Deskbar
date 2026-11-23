@@ -1271,6 +1271,15 @@ public partial class FloatingBar
         var detailInk = line.Status == TaskStatus.WaitingOnYou ? TaskOrange : line.Claudes ? TaskInk : TaskDimInk;
         // Only the title's first line (Ruling 38: titles may hold line breaks, written in the tasks window's editor); the
         // tooltip has the whole title.
+        // A DONE TASK'S TICK (Petre, 2026-11-23, "build both"; TaskStatusMarks): a green disc in front of the title, so a
+        // finished Claude task, waiting for Petre to close it, no longer reads like work in progress. Sized to the text,
+        // centred on it, inline so it wraps with the title. Not on a line in its undo window (it is closed, struck through).
+        if (line.Status == TaskStatus.Done && !line.Closing)
+        {
+            var tick = TaskStatusMarks.DoneTick(Math.Round(Text(9.5)));
+            tick.Margin = new Thickness(0, 0, 4, 0);
+            text.Inlines.Add(new InlineUIContainer(tick) { BaselineAlignment = BaselineAlignment.Center });
+        }
         // RULING 59: important is bold and urgent is italic, in the title only (not the detail after it).
         text.Inlines.Add(new Run(FirstLine(line.Title))
         {
