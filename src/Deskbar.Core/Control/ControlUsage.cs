@@ -45,7 +45,9 @@ public static class ControlUsage
             new("claude-hook", "[--entry <value>] [--attended <value>] [--job <value>] [--from <folder>]",
                 "what Claude Code's hooks run (claude-hook.cmd for Notification and Stop, claude-task-hook.cmd for\n"
                 + "      SessionStart, UserPromptSubmit and SessionEnd), with the hook's JSON on stdin: Notification and\n"
-                + "      Stop ask for the user as attention does. Prints only what the session should read, and exits 0\n"
+                + "      Stop ask for the user as attention does, and Stop asks a session whose task is still in progress,\n"
+                + "      with no background work, to run task ask when the next move is the user's (once per turn).\n"
+                + "      Prints only what the session should read, and exits 0\n"
                 + "      even when Deskbar is not running; JSON that is not a hook's exits 1"),
         ]),
         new("Tasks", [

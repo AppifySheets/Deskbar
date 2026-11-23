@@ -546,7 +546,10 @@ window's border blinks orange for five seconds, or until you click or type in it
 hooks run `%APPDATA%\Deskbar\claude-hook.cmd`, which hands the hook's details to `deskbar.cmd claude-hook`
 and always exits 0. When Deskbar is not running, the hook prints nothing and the session carries on.
 
-With **Claude Code sessions keep their tasks in the task list** ticked under it (on by default), three more
+With **Claude Code sessions keep their tasks in the task list** ticked under it (on by default), the Stop hook also
+nudges a session whose turn ends with its task still in progress and nothing of its own running in the
+background: once per reply, it tells the session to run `task ask` if the next move is yours, so the task
+comes to you with a question instead of sitting out of sight. Three more
 hooks, on SessionStart, UserPromptSubmit and SessionEnd, run `claude-task-hook.cmd`. A starting session
 is told its task, or the open tasks on its workspace it could join and how to create its own; each of
 your messages reminds it of its task in one line, and answers a task that was waiting on you. Sessions run

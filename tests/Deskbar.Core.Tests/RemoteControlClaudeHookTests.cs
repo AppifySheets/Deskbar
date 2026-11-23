@@ -386,15 +386,16 @@ public class RemoteControlClaudeHookTests
     ControlReply Ran(WorkspaceManager manager, params string[] args) =>
         new RemoteControl(manager, tasks: tasks, longPath: LongPath).Execute(args);
 
-    static string HookOf(string hookEvent, string session, string? source) =>
-        $$"""{"session_id":"{{session}}","cwd":"C:\\repos\\TaskSpaces","hook_event_name":"{{hookEvent}}"{{(source is null ? "" : $",\"source\":\"{source}\"")}}}""";
+    // `extra` is more of the hook's fields, each with its leading comma (the Stop hook's stop_hook_active, say).
+    static string HookOf(string hookEvent, string session, string? source, string extra = "") =>
+        $$"""{"session_id":"{{session}}","cwd":"C:\\repos\\TaskSpaces","hook_event_name":"{{hookEvent}}"{{(source is null ? "" : $",\"source\":\"{source}\"")}}{{extra}}}""";
 
     // One hook, as the script runs it for an attended VS Code session (attended "0" for a headless one).
     string Hooked(WorkspaceManager manager, string hookEvent, string session = "s1", string? source = null,
-        string from = Repo, string attended = "1")
+        string from = Repo, string attended = "1", string extra = "")
     {
         var reply = Ran(manager, "claude-hook", "--entry", "claude-vscode", "--attended", attended, "--from", from,
-            "--json", HookOf(hookEvent, session, source));
+            "--json", HookOf(hookEvent, session, source, extra));
         Assert.Equal(ControlReply.Ok, reply.ExitCode);
         return reply.Output;
     }
@@ -458,6 +459,85 @@ public class RemoteControlClaudeHookTests
         Assert.All(Titled("Tasks board").Comments, c => Assert.True(c.Settled.HasValue));
         var thread = System.Text.Json.JsonDocument.Parse(Ran(manager, "task", "list").Output).RootElement[0].GetProperty("thread");
         Assert.NotEqual(System.Text.Json.JsonValueKind.Null, thread[0].GetProperty("settled").ValueKind);
+    }
+
+    // --- the Stop hook asks a parked session to say so (stalled tasks, spec 2026-11-23-stalled-claude-tasks-design.md) ---
+    //
+    // When a session's turn ends with its task still In progress and Claude's, and nothing of its own running in the
+    // background, the Stop hook blocks the stop ONCE with a reason telling it to run `task ask` if the next move is Petre's.
+
+    WorkspaceManager WithTask(string session = "s1")
+    {
+        var manager = Started();
+        Editor(manager, 0x10, "TaskSpaces", "Deskbar");
+        Said(manager, session, Repo, "new", "Tasks board");
+        return manager;
+    }
+
+    static System.Text.Json.JsonElement Json(string output) => System.Text.Json.JsonDocument.Parse(output).RootElement;
+
+    [Fact]
+    public void Stop_on_a_parked_task_asks_the_session_to_say_so()
+    {
+        var output = Hooked(WithTask(), "Stop");
+
+        Assert.Equal("block", Json(output).GetProperty("decision").GetString());
+        Assert.Equal(SessionBriefing.ParkedNudge, Json(output).GetProperty("reason").GetString());
+    }
+
+    [Fact]
+    public void Stop_after_a_nudge_lets_the_session_stop() =>
+        Assert.Equal("", Hooked(WithTask(), "Stop", extra: ",\"stop_hook_active\":true"));
+
+    [Fact]
+    public void Stop_with_background_work_lets_the_session_stop() =>
+        Assert.Equal("", Hooked(WithTask(), "Stop", extra: ",\"background_tasks\":[{\"type\":\"monitor\"}]"));
+
+    [Fact]
+    public void Stop_on_a_task_waiting_on_Petre_lets_the_session_stop()
+    {
+        var manager = WithTask();
+        Said(manager, "s1", Repo, "ask", "Merge?");
+
+        Assert.Equal("", Hooked(manager, "Stop"));
+    }
+
+    [Fact]
+    public void Stop_from_a_headless_session_never_blocks()
+    {
+        var manager = WithTask();
+
+        Assert.Equal("", Hooked(manager, "Stop", attended: "0"));
+    }
+
+    [Fact]
+    public void Stop_without_a_task_lets_the_session_stop()
+    {
+        var manager = Started();
+        Editor(manager, 0x10, "TaskSpaces", "Deskbar");
+
+        Assert.Equal("", Hooked(manager, "Stop"));
+    }
+
+    [Fact]
+    public void Stop_while_sessions_keep_no_tasks_lets_the_session_stop()
+    {
+        var manager = WithTask();
+        Run(manager, "claude-tasks", "off");
+
+        Assert.Equal("", Hooked(manager, "Stop"));
+    }
+
+    [Fact]
+    public void Stop_still_blinks_when_it_blocks()
+    {
+        var manager = WithTask();
+        StandOn(manager, "iam.ge");
+
+        var output = Hooked(manager, "Stop");
+
+        Assert.Equal("block", Json(output).GetProperty("decision").GetString());
+        Assert.True(Blinks(manager, "Deskbar"));
     }
 
     // Ruling 57: the assignee follows the session. `task ask` hands the task to Petre, `task answered` back to Claude, and

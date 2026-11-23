@@ -27,6 +27,16 @@ public static class SessionBriefing
     const string Shim = "deskbar.cmd";
 
     /// <summary>
+    /// What the Stop hook tells a session whose turn ended with its task still In progress and Claude's (stalled tasks,
+    /// spec docs/superpowers/specs/2026-11-23-stalled-claude-tasks-design.md, part 3; RemoteControl.ClaudeHook). Sessions
+    /// often stop with a status line like "ready to merge" and never ask, so the task stays off the bar. This asks once
+    /// per turn and leaves an out, so a turn that really is not waiting on the user ends with nothing more said.
+    /// </summary>
+    public const string ParkedNudge =
+        $"If the next move is the user's (a pull request to merge, something to try, a decision), run {Shim} task ask with " +
+        "what they must do, the text on stdin. If it is not, stop without saying anything.";
+
+    /// <summary>
     /// What a session reads when it starts, resumes, clears or compacts: its own task when it has one, otherwise the
     /// tasks it is offered and how to join one or create its own.
     /// </summary>

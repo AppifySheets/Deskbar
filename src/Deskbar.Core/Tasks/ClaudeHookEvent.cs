@@ -59,6 +59,20 @@ public sealed record ClaudeHookEvent(string Event, string SessionId, string Fold
     /// </summary>
     public bool Background { get; init; }
 
+    /// <summary>
+    /// A Stop hook's stop_hook_active: Claude is already continuing because a Stop hook blocked the stop, so this turn
+    /// was nudged once and must be let go (stalled tasks, spec 2026-11-23-stalled-claude-tasks-design.md, part 3). Only
+    /// a JSON true counts; anything else reads as false.
+    /// </summary>
+    public bool StopHookActive { get; init; }
+
+    /// <summary>
+    /// A Stop hook's background_tasks or session_crons is a non-empty array: the session has a shell, monitor, subagent
+    /// or scheduled wake-up of its own running, so it is waiting on its own work and not parked on Petre. A missing or
+    /// odd-typed field reads as none.
+    /// </summary>
+    public bool BackgroundWork { get; init; }
+
     public static Result<ClaudeHookEvent> Parse(string json, string? entrypoint, string? attended, string? job = null)
     {
         try
@@ -77,6 +91,8 @@ public sealed record ClaudeHookEvent(string Event, string SessionId, string Fold
             {
                 Reason = Text(root, "reason"),
                 Background = OwnJob(job, session.Value),
+                StopHookActive = root.TryGetProperty("stop_hook_active", out var active) && active.ValueKind == JsonValueKind.True,
+                BackgroundWork = NonEmptyArray(root, "background_tasks") || NonEmptyArray(root, "session_crons"),
             };
         }
         catch (JsonException e)
@@ -86,6 +102,9 @@ public sealed record ClaudeHookEvent(string Event, string SessionId, string Fold
     }
 
     // A non-empty string field, or nothing: a number or an empty string where a name belongs is as good as missing.
+    static bool NonEmptyArray(JsonElement root, string name) =>
+        root.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.Array && value.GetArrayLength() > 0;
+
     static Maybe<string> Text(JsonElement root, string name) =>
         root.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.String && value.GetString() is { Length: > 0 } text
             ? text
