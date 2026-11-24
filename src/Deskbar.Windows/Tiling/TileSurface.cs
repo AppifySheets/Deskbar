@@ -1,4 +1,5 @@
 using System.Reactive;
+using System.Reactive.Concurrency;
 using System.Reactive.Disposables;
 using System.Reactive.Linq;
 using System.Reactive.Subjects;
@@ -424,7 +425,34 @@ public sealed class TileSurface : ITileSurface, IDisposable
     // 0x0 one that is never shown, as ShellHookAttentionMonitor's is. Not a message-only window (HWND_MESSAGE),
     // which broadcasts never reach. It exists only while someone is subscribed, and on the subscribing thread,
     // which has to be the UI thread (it needs a message loop).
+    // REFUSED, task c1e6c1ae: the listener is a window, and on 2026-11-25, with the desktop heap full, Windows would not
+    // make it. The Win32Exception went to the Tiler's subscriber as OnError, which has no error handler, so Rx rethrew it
+    // on the dispatcher and the app died (RefusedWindow has the event log). Now a refused listener is asked for again
+    // after RetryListener, on the thread that subscribed (the UI thread, see the class header; an HwndSource belongs to
+    // the thread that makes it), and the work area goes unwatched in between. Display changes keep arriving through
+    // DisplaySettingsChanged meanwhile. Only a refusal the app can live through is retried; anything else still fails
+    // the subscription as before.
     static IObservable<Unit> WorkAreaChanged() =>
+        Observable.Defer(() => SynchronizationContext.Current is { } ui
+            ? RetriedWhenRefused(WorkAreaListener(), RetryListener, new SynchronizationContextScheduler(ui), Diagnostics.RefusedWindow.Survivable)
+            // No context to come back to (never the case on the UI thread): as it always was.
+            : WorkAreaListener());
+
+    // How long a refused work-area listener waits before it is asked for again.
+    static readonly TimeSpan RetryListener = TimeSpan.FromSeconds(30);
+
+    // `source` subscribed to again `wait` after each refusal the app can live through, on `retryOn`; any other error
+    // passes through. The wait's timer completes, and Repeat subscribes again; `source` itself never completes (a
+    // listener runs until disposed), so nothing repeats except after a refusal. Internal for the tests, which drive it
+    // on a TestScheduler (TileSurfaceRefusedListenerTests).
+    internal static IObservable<T> RetriedWhenRefused<T>(IObservable<T> source, TimeSpan wait, IScheduler retryOn, Func<Exception, bool> survivable) =>
+        source
+            .Catch((System.ComponentModel.Win32Exception refused) => survivable(refused)
+                ? Observable.Timer(wait, retryOn).SelectMany(_ => Observable.Empty<T>())
+                : Observable.Throw<T>(refused))
+            .Repeat();
+
+    static IObservable<Unit> WorkAreaListener() =>
         Observable.Create<Unit>(observer =>
         {
             var listener = new HwndSource(new HwndSourceParameters("Deskbar tiling work-area listener")

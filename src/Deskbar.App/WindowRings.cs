@@ -184,9 +184,11 @@ sealed class WindowRings : IDisposable
         // the price of having a ring at all.
         if ((full ?? (solid && bordersWork ? null : VisibleFrame(window))) is { } rect)
         {
-            // Windows' border is not the ring here, so it is put back first if it was ours.
+            // The frame first: Windows may refuse to make one (TakeFrame), and then whatever ring the window had stays,
+            // and the next pass asks again.
+            if ((had?.Frame ?? TakeFrame()) is not { } frame) return;
+            // Windows' border is not the ring here, so it is put back if it was ours.
             if (had is { Frame: null }) Border(window, null);
-            var frame = had?.Frame ?? TakeFrame();
             // One physical pixel for a solid ring: Petre, "can you do 1px?", after 2 DIP and then Windows' own 2 px.
             // Thinner than the border Windows draws on a normal window, which Deskbar can colour but not thin. Two for
             // the trail, Windows' own border at Petre's 225%: a one-pixel dot is a speck, and the dashes must still read
@@ -240,7 +242,16 @@ sealed class WindowRings : IDisposable
         Trace($"ring 0x{window:X}: cleared");
     }
 
-    RingFrame TakeFrame()
+    // A frame to draw with, or null where Windows refuses to make one.
+    //
+    // REFUSED, task c1e6c1ae: on 2026-11-25 the desktop heap was full and a new frame's handle could not be made. The
+    // Win32Exception left through FloatingBar's rebuild, which was running inside an Rx subscription to the manager's
+    // StateChanged, and the app died of it twice (RefusedWindow has the event log). A ring is the most dispensable
+    // window the app makes, so a refused one is no ring for now: traced once per streak of refusals, and asked for again
+    // on the next pass (the recheck, or the next rebuild) in case the heap has room by then. Only a refusal the app can
+    // live through is caught (RefusedWindow.Survivable); this copy running out of its own handles is a leak and still
+    // goes to the crash handler, which starts a fresh copy.
+    RingFrame? TakeFrame()
     {
         if (idle.TryPop(out var reused))
         {
@@ -248,11 +259,29 @@ sealed class WindowRings : IDisposable
             return reused;
         }
         var frame = new RingFrame();
-        ignore(frame.Handle);
-        frame.Show();
+        try
+        {
+            ignore(frame.Handle);
+            frame.Show();
+        }
+        catch (Exception refused) when (Deskbar.Windows.Diagnostics.RefusedWindow.Survivable(refused))
+        {
+            if (!framesRefused) Trace($"ring: Windows refused a frame, no ring until it has room ({refused.Message})");
+            framesRefused = true;
+            // A Window joins Application.Windows when it is constructed, so the half-made one is closed rather than
+            // dropped. Closing one that never got a handle may itself complain while Windows is this short; it is
+            // going either way.
+            try { frame.Close(); }
+            catch (Exception) { /* nothing to undo */ }
+            return null;
+        }
+        framesRefused = false;
         unpinned.Add(frame);
         return frame;
     }
+
+    // Whether the last attempt at a new frame was refused, so the trace says so once per streak.
+    bool framesRefused;
 
     void Release(RingFrame frame)
     {

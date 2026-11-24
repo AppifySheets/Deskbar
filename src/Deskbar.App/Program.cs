@@ -20,16 +20,48 @@ namespace Deskbar.App;
 // whole, and compiling a Main that names App made the runtime load PresentationFramework, System.Xaml and WindowsBase
 // for a `ctl` that never runs those lines (measured: they were in the client's module list). With the App lines in a
 // method of their own, nothing WPF is loaded until RunApp is first called, which a `ctl` never does.
+//
+// RunApp also catches the one start failure worth living through: Windows refusing a window because the desktop heap is
+// full (RefusedWindow, RefusedStart; task c1e6c1ae). The next copy is started, and waits until windows can be made.
 static class Program
 {
     [STAThread]
-    static int Main(string[] args) => ControlCommandLine.Wants(args) ? ControlCommandLine.Run(args) : RunApp();
+    static int Main(string[] args) => ControlCommandLine.Wants(args) ? ControlCommandLine.Run(args) : RunApp(args);
 
     [MethodImpl(MethodImplOptions.NoInlining)]
-    static int RunApp()
+    static int RunApp(string[] args)
     {
-        var app = new App();
-        app.InitializeComponent();
-        return app.Run();
+        // A copy started because the last one was refused a window waits first, before it asks Windows for one
+        // (RefusedStart). Nothing exists yet that could be kept waiting: no window, no mutex, no tray icon.
+        var attempt = Windows.Recovery.RefusedStart.AttemptOf(args);
+        if (attempt > 0)
+        {
+            ClickTrace.Write($"refused window: start {attempt} of {Windows.Recovery.RefusedStart.MaxAttempts}, waiting until a window can be made");
+            var room = Windows.Recovery.RefusedStart.WaitForWindows(Windows.Diagnostics.RefusedWindow.CanCreateWindow, System.Threading.Thread.Sleep);
+            ClickTrace.Write(room ? "refused window: a probe window was made, starting" : "refused window: still no window after the wait, trying anyway");
+        }
+
+        try
+        {
+            var app = new App();
+            app.InitializeComponent();
+            return app.Run();
+        }
+        // Windows refused the start a window: in `new App()` (the dispatcher's message window), in App.xaml (WPF's
+        // system-resources listener), or in OnStartup before its crash handler is in place. Five of the eight crashes
+        // in the desktop heap incident were here (RefusedWindow has them). Nothing is on screen and nothing can be
+        // retried in this process, so the next copy is started to try again once windows can be made, and this one
+        // ends. No message box: showing one needs the very thing Windows is refusing.
+        catch (Exception fault) when (Windows.Diagnostics.RefusedWindow.Is(fault))
+        {
+            ClickTrace.Write($"refused window while starting: {fault.GetType().Name}: {fault.Message}");
+            var next = Windows.Recovery.RefusedStart.Start(Environment.ProcessPath, args);
+            ClickTrace.Write(next.IsSuccess ? "refused window: the next copy will try again" : $"refused window: {next.Error}");
+            return RefusedExitCode;
+        }
     }
+
+    // The exit code of a start Windows refused a window. Any nonzero code would do; this one (ERROR_NOT_ENOUGH_MEMORY)
+    // is easy to recognise in a log.
+    const int RefusedExitCode = 8;
 }

@@ -904,6 +904,25 @@ public partial class App : Application
         return started.IsSuccess;
     }
 
+    // Starts the copy that waits until windows can be made and tries again, for a start Windows refused a window (task c1e6c1ae).
+    // This copy's own arguments are passed on with the attempt counted, so a chain of refused starts ends after
+    // RefusedStart.MaxAttempts. Traced like RelaunchAfterCrash, and WER's restart is withdrawn for the same reason.
+    static bool StartAgainAfterRefusal()
+    {
+        var started = RefusedStart.Start(Environment.ProcessPath, Environment.GetCommandLineArgs().Skip(1).ToList());
+        ClickTrace.Write(started.IsSuccess ? "refused window: the next copy will try again" : $"refused window: {started.Error}");
+        if (started.IsSuccess)
+            CrashRestart.Unregister().TapError(ClickTrace.Write);
+        return started.IsSuccess;
+    }
+
+    // Set once OnStartup has run to its end and the dispatcher has served what it queued (see the end of OnStartup).
+    // Before that, a refused window is a failed start, not something to carry on past (the dispatcher handler).
+    bool startupFinished;
+
+    // How many refused windows this copy has lived through, for the trace's 1, 10, 100... lines.
+    int refusedSurvived;
+
     static void EndIfShutdownHangs() =>
         shutdownWatchdog = new System.Threading.Timer(
             _ =>
@@ -1334,6 +1353,42 @@ public partial class App : Application
                 ClickTrace.Write($"survived WPF's tablet race: {args.Exception.Message}");
                 args.Handled = true;
                 return;
+            }
+
+            // WINDOWS REFUSED A WINDOW (task c1e6c1ae): the desktop heap is full, and every program on the desktop is
+            // being told "not enough memory" when it asks for one. RefusedWindow has the incident and the reasoning.
+            if (RefusedWindow.Is(args.Exception))
+            {
+                var mine = GuiObjects.OfThisProcess();
+
+                // Once the app is up, it carries on without the one window it could not have (a ring frame, a
+                // tooltip, a menu). The bar, the strips and the tray icon already exist, and a restart would only
+                // meet the same full heap with nothing on screen at all. Counted, and traced at 1, 10, 100... so a
+                // heap that stays full all evening is a handful of lines rather than one per second.
+                if (startupFinished && RefusedWindow.Survivable(args.Exception, mine))
+                {
+                    refusedSurvived++;
+                    if (refusedSurvived is 1 or 10 or 100 or 1000 or 10000)
+                        ClickTrace.Write($"survived refused window #{refusedSurvived} ({mine}): {args.Exception.Message}");
+                    args.Handled = true;
+                    return;
+                }
+
+                // Not survivable here: still starting (half a start is worse than none: no bar, or a bar with nothing
+                // wired to it), or this copy's own objects are nearly at the quota, a leak a fresh process cures. So
+                // titles go back and the next copy is started: at once after a long life (CrashRelaunch), or after
+                // RefusedStart's wait when the start itself was refused. Never the message box below: it needs a
+                // window too, and in the incident its message loop ran a bar timer that crashed a second time inside it.
+                ClickTrace.Write($"refused window {(startupFinished ? $"with this copy near its quota ({mine})" : "while starting")}: {args.Exception.Message}");
+                try { manager?.RestoreAllTitles(); }
+                catch (Exception restoreFailed) { ClickTrace.Write($"crash: restoring titles threw {restoreFailed.GetType().Name}"); }
+                // Read before RelaunchAfterCrash claims the one relaunch: false from it then means "not worthwhile yet"
+                // or "could not start", and only then is the waiting successor started, never as a second successor.
+                var unclaimed = relaunchClaimed == 0;
+                var successor = RelaunchAfterCrash(args.Exception) || (unclaimed && StartAgainAfterRefusal());
+                Environment.FailFast(successor
+                    ? $"Windows refused Deskbar a window; the next copy will try again: {args.Exception.Message}"
+                    : $"Windows refused Deskbar a window: {args.Exception.Message}", args.Exception);
             }
 
             // Guarded, because the commonest death here is OutOfMemoryException, and a restore that
@@ -2467,6 +2522,12 @@ public partial class App : Application
             // this, that close reads as the user's Alt+F4 and saves it closed (TasksBoard.Shutdown).
             tasksBoard?.Shutdown();
         };
+
+        // The start is over once the dispatcher has nothing left to do: OnStartup queues work (the bar's first build,
+        // the strips, the tasks panel) that runs after it returns, and a window refused there is still a failed start.
+        // ApplicationIdle runs after all of that. From here on the dispatcher handler lives through a refused window
+        // instead of starting the next copy (task c1e6c1ae).
+        Dispatcher.BeginInvoke(System.Windows.Threading.DispatcherPriority.ApplicationIdle, () => startupFinished = true);
     }
 
     // The Store copy's first start takes autostart over from the direct build: it deletes the Run value
