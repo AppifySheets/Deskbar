@@ -34,7 +34,7 @@ public class IconCacheWatchTests
         var window = OffScreenWindow();
         window.Show();
         var handle = new WindowHandle(new WindowInteropHelper(window).Handle);
-        IconCache.For(handle, null);
+        IconCache.For(handle, null, null);
         Assert.True(IconCache.HasPendingIcons, "a window with no icon of its own should still be being asked");
 
         window.Icon = OpaqueIcon();
@@ -53,7 +53,7 @@ public class IconCacheWatchTests
         var window = OffScreenWindow();
         window.Show();
         var handle = new WindowHandle(new WindowInteropHelper(window).Handle);
-        IconCache.For(handle, null);
+        IconCache.For(handle, null, null);
         Thread.Sleep(1100);
 
         // Other tests can leave windows of their own pending, so this asks about this window only: still pending,

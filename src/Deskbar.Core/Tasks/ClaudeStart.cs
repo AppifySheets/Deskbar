@@ -96,8 +96,51 @@ public static class ClaudeStart
         var firstLine = taskTitle.Split('\n')[0].Replace('\r', ' ');
         var clean = firstLine.Replace(';', ',').TrimStart('-', ' ', '\t').Trim();
         var cut = clean.Length > MaxTitle && char.IsHighSurrogate(clean[MaxTitle - 1]) ? MaxTitle - 1 : MaxTitle;
-        return (clean.Length > MaxTitle ? clean[..cut] : clean) + " · Claude";
+        return (clean.Length > MaxTitle ? clean[..cut] : clean) + TitleSuffix;
     }
+
+    /// <summary>What every <see cref="AttachTitle"/> ends with, and so what tells a session's window from other terminals.</summary>
+    public const string TitleSuffix = " · Claude";
+
+    // Windows Terminal draws every one of its windows from this one process (no extension, as WindowInfo.ProcessName has it).
+    const string TerminalProcess = "WindowsTerminal";
+
+    /// <summary>
+    /// Whether a window is one Deskbar opened on a Claude session: a Windows Terminal window titled by
+    /// <see cref="AttachTitle"/>. The bar draws Claude's icon for it instead of the terminal's (task 0bd79d0e).
+    /// </summary>
+    //
+    // The TITLE, because it is all there is: Windows Terminal hosts every window in one process, so the process and its
+    // command line are the same for a Claude window and a PowerShell one, and the window's own icon is the terminal's
+    // logo whatever profile its tab runs (measured: WM_GETICON's ICON_BIG on a "Deskbar Claude" window is the class
+    // icon, Windows Terminal's own). The "Deskbar Claude" profile's suppressApplicationTitle keeps the title fixed, and a
+    // second tab opened in the window takes the title with it, which is right: the window then shows that tab, not Claude.
+    //
+    // The process is matched by its exe's file name, so a path from any install location (Store, unpackaged, Preview's
+    // WindowsTerminal.exe too) qualifies, and a stray "· Claude" title on any other app does not.
+    public static bool IsSessionWindow(string? processPath, string? title) =>
+        title is not null
+        && title.EndsWith(TitleSuffix, StringComparison.Ordinal)
+        && processPath is not null
+        && Path.GetFileNameWithoutExtension(processPath).Equals(TerminalProcess, StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// Where the Claude Code CLI's own exe is, for its icon: the first <c>claude.exe</c> on the PATH, else the native
+    /// installer's <c>%USERPROFILE%\.local\bin\claude.exe</c>; None when neither exists.
+    /// </summary>
+    //
+    // An exe only, because the icon is read from it: an npm install puts a claude.cmd on the PATH, which runs node and
+    // carries no icon, so it is passed over (and with nothing else the bar keeps the terminal's icon). The installer's
+    // folder is the fallback because Deskbar's own PATH is the one it started with, which can predate the install.
+    // <paramref name="exists"/> answers whether a file exists, so the rule is a test without a disk.
+    public static Maybe<string> ExecutableIn(string? pathVariable, string home, Func<string, bool> exists) =>
+        (pathVariable ?? "")
+            .Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Select(folder => folder.Trim('"'))
+            .Where(folder => folder.Length > 0)
+            .Append(Path.Combine(home, ".local", "bin"))
+            .Select(folder => Path.Combine(folder, "claude.exe"))
+            .TryFirst(exists);
 
     /// <summary>
     /// The folders a workspace's VS Code windows show, as full paths (spec, "Choosing the folder": the editor windows'

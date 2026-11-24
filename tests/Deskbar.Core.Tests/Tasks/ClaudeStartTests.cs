@@ -187,4 +187,45 @@ public class ClaudeStartTests
         Assert.Equal([@"C:\repos\Deskbar", @"E:\work\iam.ge"],
             ClaudeStart.EditorRepos(["deskbar", "iam.ge", "Unknown", "Deskbar"], Board(a, b)));
     }
+
+    // Task 0bd79d0e: the bar draws Claude's icon on the window Deskbar opened on a session, which is told from every other
+    // terminal window by the title AttachTitle gave it, since Windows Terminal draws all of its windows from one process.
+    const string Terminal = @"C:\Program Files\WindowsApps\Microsoft.WindowsTerminal_1.25.3131.0_x64__8wekyb3d8bbwe\WindowsTerminal.exe";
+
+    [Fact]
+    public void A_terminal_window_with_an_attach_title_is_a_session_window() =>
+        Assert.True(ClaudeStart.IsSessionWindow(Terminal, ClaudeStart.AttachTitle("give claude sessions claude icon")));
+
+    [Theory]
+    [InlineData(Terminal, "Windows PowerShell")]                                          // a terminal running something else
+    [InlineData(Terminal, "Claude Code")]                                                 // no suffix
+    [InlineData(Terminal, "notes · Claude · draft")]                                      // the suffix is not at the end
+    [InlineData(Terminal, null)]
+    [InlineData(@"C:\Program Files\Microsoft VS Code\Code.exe", "fix the bar · Claude")]  // another app with such a title
+    [InlineData(null, "fix the bar · Claude")]                                            // an elevated window: no readable path
+    public void Any_other_window_is_not_a_session_window(string? processPath, string? title) =>
+        Assert.False(ClaudeStart.IsSessionWindow(processPath, title));
+
+    [Fact]
+    public void The_terminal_is_matched_by_its_file_name_in_any_case() =>
+        Assert.True(ClaudeStart.IsSessionWindow(@"D:\tools\terminal\windowsterminal.EXE", "x · Claude"));
+
+    [Fact]
+    public void The_first_claude_exe_on_the_path_is_the_executable()
+    {
+        var files = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { @"D:\b\claude.exe", @"C:\Users\me\.local\bin\claude.exe" };
+
+        Assert.Equal(@"D:\b\claude.exe",
+            ClaudeStart.ExecutableIn(@"C:\Windows;  ""D:\b"" ;;C:\a", @"C:\Users\me", files.Contains).GetValueOrDefault());
+    }
+
+    [Fact]
+    public void Without_one_on_the_path_the_native_install_folder_is_tried() =>
+        Assert.Equal(@"C:\Users\me\.local\bin\claude.exe",
+            ClaudeStart.ExecutableIn(null, @"C:\Users\me", f => f == @"C:\Users\me\.local\bin\claude.exe").GetValueOrDefault());
+
+    // An npm install puts a claude.cmd on the PATH, which carries no icon, so only an exe counts.
+    [Fact]
+    public void A_claude_cmd_alone_is_no_executable() =>
+        Assert.True(ClaudeStart.ExecutableIn(@"C:\npm", @"C:\Users\me", f => f == @"C:\npm\claude.cmd").HasNoValue);
 }

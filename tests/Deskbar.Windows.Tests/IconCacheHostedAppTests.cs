@@ -101,13 +101,13 @@ public class IconCacheHostedAppTests
         WithShell(shell, () =>
         {
             var handle = new WindowHandle((nint)0x5A0001);
-            IconCache.For(handle, FrameHost);
+            IconCache.For(handle, FrameHost, null);
             Assert.True(IconCache.IsPending(handle, FrameHost), "a frame window with no icon of its own should still be asked");
 
             ProbeUntil(() => !IconCache.IsPending(handle, FrameHost));
 
             Assert.False(IconCache.IsPending(handle, FrameHost));
-            var icon = IconCache.For(handle, FrameHost);
+            var icon = IconCache.For(handle, FrameHost, null);
             Assert.NotNull(icon);
             Assert.Equal(PrintOf(IconCache.ToImageSource(image)), PrintOf(icon));
             Assert.Equal(1, shell.AppIdCallsFor(handle));
@@ -128,13 +128,13 @@ public class IconCacheHostedAppTests
             IconCache.HostedIconArrived += onArrived;
             try
             {
-                IconCache.For(handle, FrameHost);
+                IconCache.For(handle, FrameHost, null);
                 Assert.True(arrived.Wait(900), "the icon should be raised without waiting for a probe");
             }
             finally { IconCache.HostedIconArrived -= onArrived; }
 
             // No Sleep and no ProbePending: the answer is already waiting for the next lookup.
-            var icon = IconCache.For(handle, FrameHost);
+            var icon = IconCache.For(handle, FrameHost, null);
             Assert.NotNull(icon);
             Assert.Equal(PrintOf(IconCache.ToImageSource(image)), PrintOf(icon));
             Assert.False(IconCache.IsPending(handle, FrameHost));
@@ -149,7 +149,7 @@ public class IconCacheHostedAppTests
         WithShell(shell, () =>
         {
             var handle = new WindowHandle((nint)0x5A0002);
-            IconCache.For(handle, FrameHost);
+            IconCache.For(handle, FrameHost, null);
 
             // The first ask runs on a pool thread. Wait (bounded) for all its reads, then a moment for it to return.
             for (var i = 0; i < 100 && shell.AppIdCallsFor(handle) < IconCache.AppIdTries; i++) Thread.Sleep(20);
@@ -175,7 +175,7 @@ public class IconCacheHostedAppTests
         WithShell(shell, () =>
         {
             var handle = new WindowHandle((nint)0x5A0003);
-            IconCache.For(handle, FrameHost);
+            IconCache.For(handle, FrameHost, null);
             Thread.Sleep(1100);
             IconCache.ProbePending();
             Thread.Sleep(1100);
@@ -194,7 +194,7 @@ public class IconCacheHostedAppTests
         WithShell(shell, () =>
         {
             var handle = new WindowHandle((nint)0x5A0004);
-            IconCache.For(handle, @"C:\Program Files\Some\app.exe");
+            IconCache.For(handle, @"C:\Program Files\Some\app.exe", null);
             Thread.Sleep(1100);
             IconCache.ProbePending();
             Thread.Sleep(1100);

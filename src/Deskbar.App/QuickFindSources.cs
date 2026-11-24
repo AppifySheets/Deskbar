@@ -51,7 +51,7 @@ public static class QuickFindSources
 
     // The icon the bar would draw: by window when there is one, so a PWA shows its own and not the browser's.
     public static ImageSource? IconOf(FindResult result) =>
-        result.Window is { } window ? IconCache.For(window, result.IconPath) : IconCache.For(result.IconPath);
+        result.Window is { } window ? IconCache.For(window, result.IconPath, result.Title) : IconCache.For(result.IconPath);
 
     // Enter on an open result: go to its window as clicking its icon on the bar does (JumpTo switches only when
     // the window is on another desktop). A window that has closed fails here, and QuickFind drops its row.

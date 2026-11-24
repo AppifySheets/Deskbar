@@ -494,7 +494,8 @@ throwaway folder Claude Code trusts, and tracing on for the `claude actions:` an
 91. Pick "Start Claude on this" on a note whose workspace knows exactly one folder: no question, no list. Within a few
     seconds a Windows Terminal window titled "<the note's title> · Claude" opens on the note's workspace, in the Deskbar
     Claude look, attached to a session that is already working on the note (its first message names the task). The
-    note turns into a Claude task with that session.
+    note turns into a Claude task with that session. The window's icon on the bar is Claude's orange mark, not
+    Windows Terminal's; a second tab opened in it (Ctrl+Shift+T) turns the icon back into the terminal's.
 92. On a note whose workspace knows two folders (tasks with sessions in two repos, or a VS Code window on a second
     repo that some session also used): a short list of the folders opens at the pointer, ending with
     "Choose a folder…". "Choose a folder…" opens Windows' folder picker; cancelling it starts nothing.

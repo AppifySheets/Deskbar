@@ -3536,7 +3536,7 @@ public partial class FloatingBar : Window
             .Select(row => $"  band {row.Label}: " + string.Join(", ", row.Windows.Select(r =>
                 $"{r.Window.Handle.Value:X}/{r.Window.ProcessName}" +
                 $"/ord={(r.Ordinal.HasValue ? r.Ordinal.Value.ToString() : "-")}" +
-                $"/key={IconCache.ArtworkKeyOf(r.Window.Handle, r.Window.ProcessPath) ?? "path"}"))));
+                $"/key={IconCache.ArtworkKeyOf(r.Window.Handle, r.Window.ProcessPath, r.Window.Title) ?? "path"}"))));
 
         if (bands == lastBands) return;
         lastBands = bands;
@@ -6691,7 +6691,7 @@ public partial class FloatingBar : Window
         // for whatsapp app" -- WhatsApp.Root.exe is an MSIX launcher stub carrying no icon,
         // so the exe-only lookup returned Windows' generic default and there was nothing to
         // detect as a failure. Asking the window gets the icon the taskbar itself draws.
-        var icon = Cost("icons", () => IconCache.For(row.Window.Handle, row.Window.ProcessPath));
+        var icon = Cost("icons", () => IconCache.For(row.Window.Handle, row.Window.ProcessPath, row.Window.Title));
         // Petre: "something popped up in unplaced, then disappeared, but now i see the
         // unplaced section" -- with the row looking empty. It was NOT empty. OverviewBuilder
         // only emits a group that has at least one window, so there was a window there; the

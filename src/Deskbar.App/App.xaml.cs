@@ -1389,7 +1389,7 @@ public partial class App : Application
             // is the only layer that knows what that is. A pure read of the icon cache -- no probing, no
             // bitmap creation -- so it is safe to call while an overview is being built, and it answers
             // None for a window whose icon has not arrived yet, which the builder falls back for.
-            artworkOf: w => IconCache.ArtworkKeyOf(w.Handle, w.ProcessPath) is { } key
+            artworkOf: w => IconCache.ArtworkKeyOf(w.Handle, w.ProcessPath, w.Title) is { } key
                 ? key
                 : Maybe<string>.None);
 

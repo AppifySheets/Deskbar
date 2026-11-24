@@ -1048,7 +1048,7 @@ public class TasksBoardTests
 
         Assert.Same(TasksIcon.Image, t.Window.Icon);
         var drawn = Assert.IsAssignableFrom<System.Windows.Media.Imaging.BitmapSource>(
-            IconCache.For(new Deskbar.Core.Domain.WindowHandle(t.Controller.EnsureHandle()), null));
+            IconCache.For(new Deskbar.Core.Domain.WindowHandle(t.Controller.EnsureHandle()), null, null));
         var (r, g, b) = AverageOpaque(drawn);
         Assert.True(g > r + 40 && g > b + 20, $"the bar's icon averages R={r} G={g} B={b}, not the checklist's green");
     });

@@ -46,7 +46,7 @@ A session can also add a note for later to its own workspace, and a script can a
 
 Double-click a task's line, on the bar or in the tasks window, and you go to its workspace and then to its session:
 
-- A background session (one started with `claude --bg`, by Deskbar or by you) gets a Windows Terminal window attached to it with `claude attach`, titled after the task with "· Claude" on the end and in Deskbar's own terminal look. If that window is already open, it comes to the front instead: only one window can be attached to a session at a time, and a second one would take the session from the first.
+- A background session (one started with `claude --bg`, by Deskbar or by you) gets a Windows Terminal window attached to it with `claude attach`, titled after the task with "· Claude" on the end and in Deskbar's own terminal look. On the bar and in quick find it carries Claude's icon, taken from your `claude.exe`, rather than the terminal's, so a session's window stands out from your other terminals. If that window is already open, it comes to the front instead: only one window can be attached to a session at a time, and a second one would take the session from the first.
 - A session you started in VS Code or a terminal brings its VS Code window to the front.
 - A session that has ended is resumed first, then its window opens.
 - A note with no session just takes you to its workspace. A double-click never starts a session.

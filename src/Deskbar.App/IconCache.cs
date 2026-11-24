@@ -6,6 +6,7 @@ using System.Windows.Media.Imaging;
 using CSharpFunctionalExtensions;
 using Deskbar.Core.Domain;
 using Deskbar.Core.Rehydration;
+using Deskbar.Core.Tasks;
 using Deskbar.Windows.Monitoring;
 using Deskbar.Windows.Shell;
 
@@ -117,8 +118,73 @@ public static class IconCache
     // all three. The first probe stays here, so a new window's icon is drawn as soon as it appears; every
     // later one is the icon watch's (ProbePending, from the bar's 1s timer), which redraws only when an icon
     // arrives. A rebuild between probes gets the provisional icon without touching Win32 at all.
-    public static ImageSource? For(WindowHandle window, string? processPath) =>
-        Lookup(window, processPath, mayProbe: !probing.ContainsKey((window.Value, processPath ?? "")));
+    //
+    // THE TITLE is for one case only: a Windows Terminal window Deskbar opened on a Claude session gets Claude's icon,
+    // not the terminal's (ClaudeStart.IsSessionWindow, task 0bd79d0e). It is checked on every call and never stored
+    // under the window, because the window's title can change: a second tab opened in it takes the title, and the
+    // window should then look like the terminal it has become. The terminal's own icon keeps its usual entry below, so
+    // switching back and forth costs nothing either way.
+    public static ImageSource? For(WindowHandle window, string? processPath, string? title) =>
+        ClaudeIconFor(processPath, title)
+        ?? Lookup(window, processPath, mayProbe: !probing.ContainsKey((window.Value, processPath ?? "")));
+
+    // Claude's icon, read from the Claude Code CLI's own exe, when the window is a session's; null for every other window
+    // and when no claude.exe can be found (an npm install has only a claude.cmd), which leaves the terminal's icon.
+    //
+    // From the installed exe rather than a copy in this repo: the mark is Anthropic's, and the exe is what the person
+    // running these sessions already has. Measured on Petre's machine: %USERPROFILE%\.local\bin\claude.exe carries the
+    // orange mark, 32x32.
+    static ImageSource? ClaudeIconFor(string? processPath, string? title) =>
+        ClaudeStart.IsSessionWindow(processPath, title) && ClaudeExecutable() is { } exe ? ClaudeIcon(exe) : null;
+
+    // Where claude.exe is, or null. A seam for the tests, like Shell above: a CI runner has no Claude Code installed, so
+    // a test points this at an exe it knows carries an icon.
+    internal static Func<string?> ClaudeExecutable { get; set; } = ClaudeExe;
+
+    // At the exe's own size (32x32), not FromExe's 16x16: this one stands in for a window's own icon, and those are kept
+    // at their native size so WPF scales them DOWN to the bar's 20px (see Convert). One bitmap per exe path, so every
+    // Claude window shares one instance and ArtworkKeyOf fingerprints it once.
+    static readonly Dictionary<string, ImageSource?> claudeIcons = new(StringComparer.OrdinalIgnoreCase);
+
+    static ImageSource? ClaudeIcon(string exe)
+    {
+        if (claudeIcons.TryGetValue(exe, out var hit)) return hit;
+        ImageSource? source = null;
+        try
+        {
+            using var icon = System.Drawing.Icon.ExtractAssociatedIcon(exe);
+            if (icon is not null)
+            {
+                var bitmap = Imaging.CreateBitmapSourceFromHIcon(icon.Handle, Int32Rect.Empty, BitmapSizeOptions.FromEmptyOptions());
+                bitmap.Freeze();
+                source = IsBlank(bitmap) ? null : bitmap;
+            }
+        }
+        catch (Exception) { /* an exe that will not give up its icon: the terminal's icon stays */ }
+        // A miss is kept as well, as FromExe keeps one: a file's icon does not arrive later.
+        claudeIcons[exe] = source;
+        return source;
+    }
+
+    // Where claude.exe is. A found path is kept for the session, since the CLI updates itself in place; a miss is asked
+    // again a minute later rather than kept, because Claude Code can be installed while Deskbar runs ("never cache a
+    // lookup failure that can succeed later"), and a minute keeps the PATH walk off every rebuild.
+    static string? claudeExe;
+    static DateTime claudeExeMissedAt = DateTime.MinValue;
+    static readonly TimeSpan ClaudeExeRetry = TimeSpan.FromMinutes(1);
+
+    static string? ClaudeExe()
+    {
+        if (claudeExe is not null) return claudeExe;
+        if (DateTime.UtcNow - claudeExeMissedAt < ClaudeExeRetry) return null;
+        claudeExe = ClaudeStart.ExecutableIn(
+                Environment.GetEnvironmentVariable("PATH"),
+                Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+                System.IO.File.Exists)
+            .GetValueOrDefault();
+        if (claudeExe is null) claudeExeMissedAt = DateTime.UtcNow;
+        return claudeExe;
+    }
 
     static ImageSource? Lookup(WindowHandle window, string? processPath, bool mayProbe)
     {
@@ -372,9 +438,14 @@ public static class IconCache
     // it did before -- and by the next rebuild (there is one per window event) the icon is cached and
     // the band is right. Never negative-cached, for the reason this class exists: an icon arrives
     // asynchronously, and the first null is not the answer.
-    public static string? ArtworkKeyOf(WindowHandle window, string? processPath)
+    //
+    // The title, as For takes it: a Claude session's window is drawn with Claude's icon, so it groups with the other
+    // Claude windows, by that picture, and not with the terminals it shares a process with.
+    public static string? ArtworkKeyOf(WindowHandle window, string? processPath, string? title)
     {
-        if (!byWindow.TryGetValue((window.Value, processPath ?? ""), out var icon) || icon is not BitmapSource bitmap)
+        var drawn = ClaudeIconFor(processPath, title)
+                    ?? (byWindow.TryGetValue((window.Value, processPath ?? ""), out var cached) ? cached : null);
+        if (drawn is not BitmapSource bitmap)
             return null;
 
         if (fingerprints.TryGetValue(bitmap, out var known)) return known;

@@ -607,7 +607,8 @@ each but the expired ones with Open. `deskbar.cmd task go|start|open-session` do
 The window opens in Deskbar's own "Deskbar Claude" Windows Terminal profile (Dark Modern colours, Claude's
 colours and bold text as Claude draws them, installed while the tasks box is ticked and removed when either
 Claude box is unticked), and closing it leaves the
-session running. This needs the Claude Code CLI on the PATH and Windows Terminal; a start or a window that
+session running. On the bar the window carries Claude's icon, read from `claude.exe`, instead of the terminal's.
+This needs the Claude Code CLI on the PATH and Windows Terminal; a start or a window that
 fails says so in a message box as well as in the thread.
 
 The first time Deskbar changes `settings.json` it keeps the original as `settings.json.deskbar-backup`,
