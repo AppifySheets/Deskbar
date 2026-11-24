@@ -336,13 +336,28 @@ public class SessionKeeperTests
     public void An_interactive_session_is_never_stopped() =>
         Assert.Empty(Stops([Task(TaskStatus.Done, 5, Session("s1"))], [Agent("s1")]));
 
+    // A Done task's session may still have its report on Petre's screen: not stopped while its window is open.
     [Fact]
-    public void A_session_with_a_window_attached_is_not_stopped_until_the_window_closes()
+    public void A_done_tasks_session_with_a_window_attached_is_not_stopped_until_the_window_closes()
     {
         var task = Task(TaskStatus.Done, 5, Session("s1"));
 
         Assert.Empty(Stops([task], [Background("s1")], windowOpen: t => t.Id == task.Id));
         Assert.Single(Stops([task], [Background("s1")], windowOpen: _ => false));
+    }
+
+    // Task 8556944b (Petre: "can a claude session window close on its own when a task has been closed?"). Only Petre
+    // closes a task, so a Closed task's session is stopped with its window open, and `claude stop` closes the window
+    // (measured). Still idle first, and still only after StopAfter: a turn in flight finishes.
+    [Fact]
+    public void A_closed_tasks_session_is_stopped_even_with_its_window_open()
+    {
+        var task = Task(TaskStatus.Closed, 5, Session("s1"));
+
+        var stop = Assert.Single(Stops([task], [Background("s1")], windowOpen: _ => true));
+        Assert.Equal(task.Id, stop.TaskId);
+        Assert.Empty(Stops([task], [Background("s1", busy: true)], windowOpen: _ => true));
+        Assert.Empty(Stops([task], [Background("s1")], _ => Now - SessionKeeper.StopAfter + TimeSpan.FromSeconds(1), windowOpen: _ => true));
     }
 
     [Fact]

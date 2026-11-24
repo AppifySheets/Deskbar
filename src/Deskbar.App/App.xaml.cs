@@ -1699,7 +1699,8 @@ public partial class App : Application
                     : Maybe<Guid>.None,
             claudeHome,
             trace: ClickTrace.On ? ClickTrace.Write : null,
-            // A finished task's session is stopped only while no window of Deskbar's is attached to it (task 87f899ad).
+            // A Done task's session is stopped only while no window of Deskbar's is attached to it (task 87f899ad); a
+            // Closed task's is stopped regardless, and the stop closes its window (task 8556944b, SessionKeeper.Stops).
             windowOpen: task => ClaudeTaskActions.HasWindow(manager, task));
 
         // Petre's comment on a task reaches its Claude session, waking it if idle (CommentWaker; plan

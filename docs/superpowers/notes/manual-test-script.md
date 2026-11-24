@@ -556,6 +556,11 @@ throwaway folder Claude Code trusts, and tracing on for the `claude actions:` an
     on you, with its session idle, is never stopped. Do it once with a session that joined from the repo and then
     entered a git worktree: once stopped, its row in the thread reads "ended" with an Open button, never "expired",
     and Open brings it back under the same id.
+102b. Open a task's background session in its window (double-click the task) and let it go idle, then close the task
+    (tick it off). About a minute later the window closes by itself, the thread says "Stopped by Deskbar at HH:mm,
+    since the task is finished" and `claude agents` no longer lists it. Do the same with Done instead of closing: the
+    window stays open and the session keeps running until you close the window. A session that is also on an open
+    task (it joined a new one) is not stopped when the old task is closed.
 103. Take a give-up from 88 and set the task's status (to In progress, say; a keeper's question has no answer box): the
     next poll tries the resume again instead of staying silent.
 104. Esc, then close: in a background session's terminal window, ask for a long reply and press Esc halfway through it,

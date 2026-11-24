@@ -70,8 +70,9 @@ namespace Deskbar.App;
 //      ledger like any other, so the keeper's grace and loop guard count it.
 //
 //   5. STOPPING FINISHED SESSIONS (task 87f899ad; SessionKeeper.Stops has the rule and its reasons). On every good read,
-//      a Done or Closed task's background session that has been idle for SessionKeeper.StopAfter, with no window of
-//      Deskbar's attached to it, is sent `claude stop <short id>`, which keeps its conversation (measured). The task's
+//      a Done or Closed task's background session that has been idle for SessionKeeper.StopAfter, for a Done task only
+//      with no window of Deskbar's attached to it, is sent `claude stop <short id>`, which keeps its conversation
+//      (measured) and closes a Closed task's attached window with it (task 8556944b, measured). The task's
 //      thread says so. A stop is sent once; while the session is still listed it is not sent again for StopRetry, so a
 //      stop that fails is traced and retried now and then, never every poll. Going to the task resumes it (job 4).
 //
