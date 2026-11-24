@@ -46,6 +46,20 @@ public static class SessionBriefing
         "what they must do, the text on stdin. If it is not, stop without saying anything.";
 
     /// <summary>
+    /// What a session reads when Petre's comment wakes it (CommentWake; its waiting Stop hook or a resume hands it this).
+    /// The comment whole, image paths already absolute (TaskService.ExpandImages), so a picture in it can be read at once;
+    /// and for a Done task the same rule a prompt gets: more work reopens it, a question about the work leaves it done.
+    /// </summary>
+    public static string Commented(TaskItem task, string expandedMarkdown) =>
+        $"Deskbar: the user commented on your task {task.Id.ToString()[..8]} \"{Cut(task.Title)}\":\n\n{expandedMarkdown.Trim()}\n"
+        // An expanded image line is `![image](<C:\...>)` (TaskImages.Expand); its angle brackets are how it is told apart.
+        + (System.Text.RegularExpressions.Regex.IsMatch(expandedMarkdown, @"!\[[^\]\n]*\]\(<[^>\n]+>\)")
+            ? "\nRead each image path above with your Read tool.\n" : "")
+        + (task.Status == TaskStatus.Done
+            ? $"\nYour task is done. If this comment gives you more work on it, run {Shim} task join {task.Id.ToString()[..8]} --session <your session id> to put it back in progress; if it only asks about the finished work, leave it done.\n"
+            : "");
+
+    /// <summary>
     /// What a session reads when it starts, resumes, clears or compacts: its own task when it has one, otherwise the
     /// tasks it is offered and how to join one or create its own.
     /// </summary>
