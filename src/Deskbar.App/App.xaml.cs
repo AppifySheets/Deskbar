@@ -824,15 +824,19 @@ public partial class App : Application
             return;
         }
 
-        // Stand down so the new instance can take the mutex. Shutdown rather than Environment.Exit:
-        // the ordinary exit path restores every renamed window title and disposes the tray icon,
-        // and skipping it would leave the user's windows wearing names we gave them.
-        // The screen strips give their bands back first, as ExitApp has them do: the new version docks its own.
-        screenStrips?.RemoveAll();
-        // ...and the tasks panel, BEFORE Shutdown closes its window: saved open if it was, so the new version opens it
-        // again, and its strip given back (TasksBoard.Shutdown says why the order matters).
-        tasksBoard?.Shutdown();
-        Shutdown();
+        // Stand down so the new instance can take the mutex, through ExitApp, the ordinary exit path that Restart
+        // Deskbar also takes: it gives the screen strips' bands back (the new version docks its own), saves the tasks
+        // panel open if it was and gives its strip back, restores every renamed window title, disposes the tray icon,
+        // and puts back every window border the focus rings coloured.
+        //
+        // This used to be a bare Shutdown, in the belief that Shutdown ran that path. It does not: ExitApp is called by
+        // name, and Shutdown alone runs none of it. The strips and the tasks panel had been added here by hand; the
+        // rings had not, and the cost was Petre's "two windows have a solid line": the 2.5.396 copy left its teal
+        // border on an Edge window as it handed over to 2.5.399, and the new copy, which knew nothing of it, drew its
+        // own ring on the terminal beside it. ExitApp is the one list of what a leaving copy puts back, so the update
+        // cannot fall behind it again. Releasing the mutexes a second time there is harmless (ReleaseInstanceMutexes
+        // nulls what it released).
+        ExitApp();
         EndIfShutdownHangs();
     }
 
@@ -1855,7 +1859,9 @@ public partial class App : Application
             // two steps, ignored before its first show and pinned to every desktop after it.
             windowRings = new WindowRings(
                 ignore: hwnd => monitor.Ignore(hwnd),
-                pinToAllDesktops: hwnd => desktops!.Pin(new WindowHandle(hwnd)));
+                pinToAllDesktops: hwnd => desktops!.Pin(new WindowHandle(hwnd)),
+                // The ledger of coloured borders: puts back any an earlier copy left when it was killed or crashed.
+                ledgerPath: RingBorderLedger.DefaultPath);
             // Counting Deskbar's open menus from before the first one can open, so the bar, the strips and the tasks panel
             // never climb over one (OwnMenus).
             OwnMenus.Start();

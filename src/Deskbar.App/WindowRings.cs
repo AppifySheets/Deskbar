@@ -1,3 +1,4 @@
+using System.IO;
 using System.Windows.Threading;
 using CSharpFunctionalExtensions;
 using Deskbar.Core.Overview;
@@ -51,10 +52,21 @@ sealed class WindowRings : IDisposable
 
     bool disposed;
 
-    public WindowRings(Action<nint> ignore, Func<nint, Result> pinToAllDesktops)
+    // The file listing the windows whose border this copy has coloured (RingBorderLedger), or null for none (a test
+    // host). Rewritten only when that set changes (SaveLedger), which is at most once per focus change.
+    readonly string? ledgerPath;
+
+    // The windows the ledger file lists now, so an unchanged set is never written again.
+    IReadOnlySet<nint> ledgered = new HashSet<nint>();
+
+    public WindowRings(Action<nint> ignore, Func<nint, Result> pinToAllDesktops, string? ledgerPath = null)
     {
         this.ignore = ignore;
         this.pinToAllDesktops = pinToAllDesktops;
+        this.ledgerPath = ledgerPath;
+        // Before this copy colours anything: put back the borders an earlier copy left behind when it went without its
+        // tidy exit (RingBorderLedger has the screenshot that started it).
+        PutBackLeftovers();
         // Once a second, like the bar's own topmost check: often enough to follow a window going full screen, and
         // nothing at all while no ring is shown (the timer runs only then).
         recheck = new DispatcherTimer(DispatcherPriority.Background) { Interval = TimeSpan.FromSeconds(1) };
@@ -92,9 +104,64 @@ sealed class WindowRings : IDisposable
         shown.Keys.Except(want.Keys).ToList().ForEach(Clear);
         want.ToList().ForEach(p => Put(p.Key, p.Value.Colour, p.Value.Line));
         unpinned.ToList().Where(f => pinToAllDesktops(f.Handle).IsSuccess).ToList().ForEach(f => unpinned.Remove(f));
+        SaveLedger();
 
         // Follows the rings: on while any is shown, off when none is.
         recheck.IsEnabled = shown.Count > 0;
+    }
+
+    // The windows whose ring is Windows' own border right now: an entry with no frame (see `shown`).
+    IReadOnlySet<nint> Bordered() => shown.Where(p => p.Value.Frame is null).Select(p => p.Key).ToHashSet();
+
+    // Keeps the ledger file in step with the bordered windows, writing only when the set changed, and deleting the file
+    // when it is empty so a tidy exit leaves nothing behind. Never throws: a ledger that cannot be written costs only the
+    // clean-up after a crash, and must not cost the ring.
+    void SaveLedger()
+    {
+        if (ledgerPath is null) return;
+        var now = Bordered();
+        if (now.SetEquals(ledgered)) return;
+        try
+        {
+            if (now.Count == 0)
+                File.Delete(ledgerPath);
+            else
+                File.WriteAllText(ledgerPath, RingBorderLedger.Format(now.Select(w =>
+                {
+                    NativeMethods.GetWindowThreadProcessId(w, out var process);
+                    return new RingBorderLedger.Entry(w, process);
+                })));
+            ledgered = now;
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+        {
+            Trace($"ring ledger: not written ({e.GetType().Name})");
+        }
+    }
+
+    // Reads the ledger an earlier copy left, puts back the border of every window it lists that is still the same
+    // window, and deletes the file. A tidy exit deletes the file itself (Dispose), so finding one means the last copy
+    // was killed or crashed, or was a version whose update hand-over skipped the rings (RingBorderLedger).
+    void PutBackLeftovers()
+    {
+        if (ledgerPath is null || !File.Exists(ledgerPath)) return;
+        try
+        {
+            RingBorderLedger.Leftovers(RingBorderLedger.Parse(File.ReadAllText(ledgerPath)),
+                    isWindow: NativeMethods.IsWindow,
+                    processOf: w => NativeMethods.GetWindowThreadProcessId(w, out var process) == 0 ? 0 : process)
+                .ToList()
+                .ForEach(w =>
+                {
+                    Border(w, null, quiet: true);
+                    Trace($"ring 0x{w:X}: border an earlier copy left put back to default");
+                });
+            File.Delete(ledgerPath);
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+        {
+            Trace($"ring ledger: not read ({e.GetType().Name})");
+        }
     }
 
     void Put(nint window, string colour, FocusRings.Line line)
@@ -295,6 +362,8 @@ sealed class WindowRings : IDisposable
         recheck.Stop();
         settle.Stop();
         shown.Keys.ToList().ForEach(Clear);
+        // Every border is back to Windows' default now, so the ledger goes (an empty set deletes the file).
+        SaveLedger();
         idle.ToList().ForEach(f => f.Close());
         idle.Clear();
     }
