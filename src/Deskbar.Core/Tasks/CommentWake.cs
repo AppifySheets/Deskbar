@@ -44,7 +44,9 @@ public static class CommentWake
             ? new WakePlan.Nothing("No session of this task can be resumed, so the comment was not sent to Claude.")
             : listed.TryFirst(agent => agent.SessionId == chosen.Value.Id) is not { HasValue: true } running
                 ? new WakePlan.Resume(chosen.Value)
-                : waiterLapsed(chosen.Value.Id) && running.Value is { Background: true, ShortId: { HasValue: true } shortId }
+                // Never a busy one (final review, I3): stopping it would kill the turn it is in; the waiter its turn's Stop starts
+                // finds the inbox at once.
+                : waiterLapsed(chosen.Value.Id) && running.Value is { Background: true, Busy: false, ShortId: { HasValue: true } shortId }
                     ? new WakePlan.StopThenResume(chosen.Value, shortId.Value)
                     : new WakePlan.Inbox(chosen.Value.Id);
 }

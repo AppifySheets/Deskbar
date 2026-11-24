@@ -305,6 +305,8 @@ public sealed class ClaudeSessions : IDisposable
                     ? Observable.Return(Result.Failure("The session is running or being resumed already."))
                     : WakeNow(taskId, session, message).Select(woken => woken.IsSuccess ? Result.Success() : Result.Failure(woken.Error)),
                 error => Observable.Return(Result.Failure($"Claude Code's list of sessions could not be read: {error}"))))
+            // A fault the CLI did not turn into a Result is a failure (the caller then uses the inbox), never a crash.
+            .Catch((Exception e) => Observable.Return(Result.Failure(e.Message)))
             .TakeUntil(stopping)
             .DefaultIfEmpty(Result.Failure("Deskbar closed before the session was resumed."))
             .ToTask();
@@ -349,7 +351,11 @@ public sealed class ClaudeSessions : IDisposable
                 answered = answered.Where(pair => pair.Value + SessionKeeper.Grace > now).ToImmutableDictionary().SetItem(session.Id, now);
                 Answered(taskId, session.Id, answer.CutOff, answer.Result, at);
                 return answer.Result.IsSuccess
-                    ? Listed(taskId, session.Id, FindAttempts)
+                    // A comment's resume (ResumeWith) is done once the command ran: the comment went with it, and waiting for
+                    // the list would call a late listing a failure (final review, I4).
+                    ? message is not null
+                        ? Observable.Return(Result.Success(new ClaudeAgent(session.Id, Maybe<string>.None, session.Folder, true, true, "")))
+                        : Listed(taskId, session.Id, FindAttempts)
                     : Observable.Return(Result.Failure<ClaudeAgent>(answer.Result.Error));
             });
     }

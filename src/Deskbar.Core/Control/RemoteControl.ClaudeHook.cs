@@ -58,15 +58,17 @@ public sealed partial class RemoteControl
 
     // CLAUDE-WAIT: a session's comment waiter registering (plan docs/superpowers/plans/2026-11-24-comment-wakes-session.md,
     // Task 3). The waiting Stop hook (claude-wait-hook.cmd, ClaudeSkill) calls this once, its hook JSON on stdin like any
-    // hook, and reads three lines back: the inbox file it watches, the gen file it checks, and its own generation
-    // (CommentInbox). Nothing at all for a headless run (nobody would read a comment there), with the task events off, or
+    // hook, and reads ONE line of ASCII back: the session id and its own generation (CommentInbox). It builds the inbox and
+    // gen file paths itself from its own folder, claude-inbox under the shim's (the state folder): a path sent back
+    // through the client would reach cmd garbled when it holds a letter outside ASCII, and the client's LF line endings
+    // broke `set /p` (final review of the branch, C1 and I2, both measured). Nothing at all for a headless run (nobody would read a comment there), with the task events off, or
     // without an inbox: the script then exits 0 and the session simply has no waiter this turn.
     ControlReply ClaudeWait(IReadOnlyList<string> rest) =>
         ControlArguments.ParseClaudeHook(rest)
             .Bind(request => ClaudeHookEvent.Parse(request.Json!, request.Entrypoint, request.Attended, request.Job))
             .Match(hook => inbox is { } box && !hook.Headless && manager.State.ClaudeTasksInEffect
                     ? box.Register(hook.SessionId).Match(
-                        waiter => Said($"{waiter.InboxPath}\n{waiter.GenPath}\n{waiter.Generation}\n"),
+                        waiter => Said($"{hook.SessionId} {waiter.Generation}\r\n"),
                         _ => Quiet)
                     : Quiet,
                 ControlReply.Fail);
@@ -197,8 +199,11 @@ public sealed partial class RemoteControl
         if (hook.Reason.Map(r => r == "clear").GetValueOrDefault(false)) service.SessionCleared(hook.SessionId);
         else if (!hook.Background) service.SessionEnded(hook.SessionId);
         // A comment wakes its session: an ended session's inbox and gen file go with it (its waiter, if any, then finds
-        // no gen file of its number and exits). A comment for it later resumes it instead (CommentWake).
-        inbox?.Forget(hook.SessionId);
+        // no gen file of its number and exits). A comment for it later resumes it instead (CommentWake). NOT a background
+        // session's, unless /clear ended it: it sends SessionEnd at the end of every turn while it lives on (the reason the
+        // board ignores it above), and forgetting then would stop its waiter and delete a comment waiting for it (final
+        // review of the branch, C2). Its files stay until it really goes; a comment for it then resumes it all the same.
+        if (!hook.Background || hook.Reason.Map(r => r == "clear").GetValueOrDefault(false)) inbox?.Forget(hook.SessionId);
         return Quiet;
     }
 

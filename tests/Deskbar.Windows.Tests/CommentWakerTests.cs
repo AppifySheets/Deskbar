@@ -143,6 +143,24 @@ public sealed class CommentWakerTests : IDisposable
         Assert.Contains("keep this", InboxText("aaaaaaaa-1"));
     }
 
+    // Final review, I5: one delivery that throws (a resume whose call faulted) does not stop the waker; the next comment
+    // still goes, and the one that faulted waits in the inbox.
+    [Fact]
+    public void A_fault_in_one_delivery_does_not_stop_the_next()
+    {
+        var id = ClaudeTask("aaaaaaaa-1");
+        live.OnNext([]);
+        var calls = 0;
+        resumeAnswer = _ => ++calls == 1 ? throw new InvalidOperationException("the call faulted") : Result.Success();
+        using var waker = Waker();
+
+        tasks.Comment(id, Maybe<string>.None, "first");
+        tasks.Comment(id, Maybe<string>.None, "second");
+
+        Assert.Equal(2, resumed.Count);
+        Assert.Contains("first", InboxText("aaaaaaaa-1"));
+    }
+
     [Fact]
     public void A_task_with_nothing_to_resume_says_so_in_its_thread()
     {

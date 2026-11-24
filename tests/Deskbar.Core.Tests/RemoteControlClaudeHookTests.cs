@@ -1025,16 +1025,19 @@ public class RemoteControlClaudeHookTests
 
     // The waiter script reads three lines: the inbox it watches, the gen file it checks, and its own generation.
     [Fact]
-    public void Claude_wait_answers_the_inbox_the_gen_file_and_a_generation()
+    // Final review, C1 and I2: ONE line of ASCII, the session id and the generation. The script builds the two paths
+    // itself from its own folder (%~dp0), because a path read back through `set /p` or `for /f` comes out garbled when it
+    // holds a letter outside ASCII, and the client's LF line endings broke `set /p`.
+    public void Claude_wait_answers_the_session_and_its_generation()
     {
         try
         {
-            var lines = Waited(Started(), "s1").Output.Split('\n', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
+            var words = Waited(Started(), "s1").Output.Trim().Split(' ');
 
-            Assert.Equal(3, lines.Length);
-            Assert.Equal(Path.Combine(InboxFolder, "s1.md"), lines[0]);
-            Assert.Equal(Path.Combine(InboxFolder, "s1.gen"), lines[1]);
-            Assert.Equal(File.ReadAllText(lines[1]).Trim(), lines[2]);
+            Assert.Equal(2, words.Length);
+            Assert.Equal("s1", words[0]);
+            Assert.Equal(File.ReadAllText(Path.Combine(InboxFolder, "s1.gen")).Trim(), words[1]);
+            Assert.All(Waited(Started(), "s1").Output, c => Assert.True(c < 128));
         }
         finally { if (Directory.Exists(InboxFolder)) Directory.Delete(InboxFolder, true); }
     }
@@ -1051,14 +1054,39 @@ public class RemoteControlClaudeHookTests
         try
         {
             var manager = Started();
-            var lines = Waited(manager, "s1").Output.Split('\n', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
-            File.WriteAllText(lines[0], "unread");
+            Waited(manager, "s1");
+            File.WriteAllText(Path.Combine(InboxFolder, "s1.md"), "unread");
 
             new RemoteControl(manager, tasks: tasks, longPath: LongPath, inbox: new CommentInbox(InboxFolder, () => DateTimeOffset.UtcNow))
                 .Execute(["claude-hook", "--entry", "claude-vscode", "--attended", "1", "--from", Repo, "--json", HookOf("SessionEnd", "s1", null)]);
 
-            Assert.False(File.Exists(lines[0]));
-            Assert.False(File.Exists(lines[1]));
+            Assert.False(File.Exists(Path.Combine(InboxFolder, "s1.md")));
+            Assert.False(File.Exists(Path.Combine(InboxFolder, "s1.gen")));
+        }
+        finally { if (Directory.Exists(InboxFolder)) Directory.Delete(InboxFolder, true); }
+    }
+
+    // Final review, C2: a background session sends SessionEnd at the end of EVERY turn while it lives on (the board
+    // ignores it for the same reason), so its inbox and gen file stay: its waiter keeps watching, and a comment waiting
+    // there is not deleted.
+    // A background session's id starts with its job folder's name (ClaudeHookEvent.OwnJob).
+    const string Bg = "884c127f-9633-40eb-bed7-593800bca40f";
+
+    [Fact]
+    public void A_background_sessions_turn_end_keeps_its_inbox()
+    {
+        try
+        {
+            var manager = Started();
+            Waited(manager, Bg);
+            File.WriteAllText(Path.Combine(InboxFolder, Bg + ".md"), "unread");
+
+            new RemoteControl(manager, tasks: tasks, longPath: LongPath, inbox: new CommentInbox(InboxFolder, () => DateTimeOffset.UtcNow))
+                .Execute(["claude-hook", "--entry", "cli", "--attended", "0", "--job", @"C:\jobs\884c127f", "--from", Repo,
+                    "--json", HookOf("SessionEnd", Bg, null)]);
+
+            Assert.True(File.Exists(Path.Combine(InboxFolder, Bg + ".md")));
+            Assert.True(File.Exists(Path.Combine(InboxFolder, Bg + ".gen")));
         }
         finally { if (Directory.Exists(InboxFolder)) Directory.Delete(InboxFolder, true); }
     }
