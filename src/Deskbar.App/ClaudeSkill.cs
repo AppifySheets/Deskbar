@@ -255,6 +255,11 @@ static class ClaudeSkill
           the user closes one. A message from the user leaves a done task done; when it gives you more work on it,
           run `deskbar.cmd task join <task id> --session <id>` to put it back in progress. A follow-up for later is
           `deskbar.cmd task later - --session <id>`, its title on stdin, a note on your workspace.
+        - Subtasks. A task can have subtasks, one level deep. When you join one, the join reply's `family` names the
+          parent, the siblings and their sessions with transcript files: read the end of the parent session's
+          transcript before you start, and stay clear of what the siblings are doing. `deskbar.cmd task family
+          --session <id>` prints it again later. To split off a piece of your own work for another session, run
+          `deskbar.cmd task subtask - --session <id>` with its title on stdin.
         - Leave the user's own notes alone unless they ask you to change one.
         """;
 

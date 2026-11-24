@@ -143,8 +143,10 @@ public sealed partial class RemoteControl
             service.JoinAfterClear(hook.SessionId, folder, stored => FolderPath.Same(stored, folder, LongPath));
         var own = service.Board.TaskOf(hook.SessionId);
         var offered = own.HasValue ? [] : service.Board.Offered(CallerOf(folder).Workspace is { } w ? w.Id : Maybe<Guid>.None);
+        // A session coming back to a subtask (or a parent) reads its family again: siblings moved on while it was away.
+        var family = own.Bind(t => FamilyOf(service, t)).GetValueOrDefault("");
         // The own task's description images are listed with absolute paths (images in tasks, TaskService.ExpandImages).
-        return SessionBriefing.Start(hook, own, offered, service.ExpandImages);
+        return SessionBriefing.Start(hook, own, offered, service.ExpandImages, family);
     }
 
     // UserPromptSubmit (Ruling 49): a prompt NO LONGER settles a question. A task Waiting on the user stays waiting, and
@@ -194,6 +196,8 @@ public sealed partial class RemoteControl
     //   task comment <markdown> --session <sid> a comment on the session's own task, signed by the session
     //   task comment-settle <id> --session <sid> settle one of the session's own comments (folds away; answered settles them since its ask)
     //   task later <title> --session <sid>      a Backlog note on the caller's workspace, a follow-up for later
+    //   task subtask <title> --session <sid>    a Backlog subtask of the session's own task (a sibling when that is a subtask)
+    //   task family --session <sid>             the family text of the session's own task (subtasks spec)
     //
     // Everything but join, new and later acts on the session's OWN task (TaskBoard.TaskOf), which is the spec's rule that
     // a session only settles tasks it is working on: there is no id to point at someone else's. A session with no open
@@ -209,7 +213,14 @@ public sealed partial class RemoteControl
 
         return args switch
         {
-            ["join", var id] => Changed(service.Board.Find(id).Bind(t => service.Join(t.Id, service.NewSession(session, folder ?? "")).Map(() => t))),
+            // The join reply carries the task's family (subtasks spec): a session started on a subtask reads it here,
+            // since its SessionStart briefing ran before it had a task.
+            ["join", var id] => service.Board.Find(id).Bind(t => service.Join(t.Id, service.NewSession(session, folder ?? "")).Map(() => t))
+                .Map(t => service.Board.Tasks.First(x => x.Id == t.Id))
+                .Match(t => Success(WithFamily(service, t)), ControlReply.Fail),
+            ["family"] => Own().Match(t => Said(FamilyOf(service, t).GetValueOrDefault(NoFamily)), ControlReply.Fail),
+            // A session splits its work: a subtask of its own task, or a sibling when its task is already a subtask.
+            ["subtask", var title] => Changed(service.AddSubtask(session, title)),
             ["new", var title] => Changed(service.Create(title, Here(), service.NewSession(session, folder ?? ""))),
             ["status-line", var text] => Changed(Own().Bind(t => service.SetStatusLine(t.Id, text).Map(() => t))),
             ["ask", var question] => Changed(Own().Bind(t => service.Ask(t.Id, question).Map(() => t))

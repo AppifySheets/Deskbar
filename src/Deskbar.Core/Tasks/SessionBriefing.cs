@@ -217,6 +217,10 @@ public static class SessionBriefing
         $"  {Shim} task comment - --session {sessionId}   (rare: only what the user must act on or know, in one or two short lines)",
         $"  {Shim} task done --session {sessionId}   (on a clear finish; only the user closes a task)",
         $"  {Shim} task later - --session {sessionId}   (the title of a follow-up note on your workspace)",
+        // Subtasks spec: a session splitting its work makes a subtask, which the next session picks up with this one's
+        // context (its join reply names this session and its transcript). `task family` is not listed here: the join
+        // reply, the start briefing and a subtask's prompt line carry it where it matters.
+        $"  {Shim} task subtask - --session {sessionId}   (split off a piece of your work as a subtask; the session that takes it up is briefed on your task and this session)",
         "Keep the task lean: say what needs the user, and nothing else. The title is a few words naming the work. The status line is one short phrase, under about 60 characters, saying where it stands. Comments are rare: a comment is for the user and only for what needs their attention or a result they must know (a PR to merge, a decision made for them, a blocker), in one or two short lines, with no progress logs, measurements, spike notes or findings dumps (those belong in the PR, the repo's notes or the session itself). When the user must act, say exactly what the user must do in the first words, or use task ask if it is a decision.",
         "Never close or delete a task, and leave the user's own notes alone unless they ask.",
     ];

@@ -90,7 +90,7 @@ public sealed partial class RemoteControl
         return args switch
         {
             // A session's form typed without its --session: it cannot know whose task is meant.
-            ["done"] or ["answered"] or ["join", _] or ["new", _] or ["status-line", _] or ["ask", _] or ["later", _] =>
+            ["done"] or ["answered"] or ["join", _] or ["new", _] or ["status-line", _] or ["ask", _] or ["later", _] or ["subtask", _] =>
                 ControlReply.Fail($"task {args[0]} is a session's form and needs --session <id>"),
             ["list"] => Success(service.Board.Pile().Select(Listed).ToArray()),
             // The closed tasks, which every other view leaves out, so one closed by mistake can be found and reopened.
@@ -116,6 +116,10 @@ public sealed partial class RemoteControl
             ["assign", var id, var who] => ParseAssignee(who)
                 .Match(a => TaskChange(service, id, t => service.Assign(t.Id, a)), ControlReply.Fail),
             ["goal", var id, var goal] => TaskGoal(service, id, goal),
+            // Subtasks (docs/superpowers/specs/2026-11-24-subtasks-design.md): put a task under another or free it, and read
+            // the family text a session on it would read.
+            ["parent", var id, var parent] => TaskParent(service, id, parent),
+            ["family", var id] => service.Board.Find(id).Match(t => Said(FamilyOf(service, t).GetValueOrDefault(NoFamily)), ControlReply.Fail),
             ["go", var id] => WithSessions(c => TaskChange(service, id, c.Go)),
             ["start", var id] => WithSessions(c => TaskStart(service, c, id, Maybe<string>.None)),
             ["start", var id, "--folder", var folder] => WithSessions(c => TaskStart(service, c, id, Folder(folder) ?? folder)),
@@ -246,10 +250,42 @@ public sealed partial class RemoteControl
         // The goal it counts toward (goals plan, Task 5), as {id, title}, or null: no link, no goal service, or a link
         // to a goal that no longer exists (which reads as no goal everywhere).
         goal = goals?.GoalOf(task).Map(g => (object?)new { id = g.Id, title = g.Title }).GetValueOrDefault(),
+        // Subtasks: the parent as {id, title} (null for none, or a parent no longer on the board) and the ids of the
+        // task's own subtasks, open and closed.
+        parent = tasks?.Board.Family(task.Id).Bind(f => f.Parent).Map(p => (object?)new { id = p.Id, title = p.Title }).GetValueOrDefault(),
+        subtasks = tasks?.Board.Tasks.Where(t => t.ParentId == task.Id).Select(t => t.Id).ToArray() ?? [],
     };
 
     // Markdown as a session reads it: image paths absolute, through the task service (as stored without one).
     string Expanded(string markdown) => tasks is { } service ? service.ExpandImages(markdown) : markdown;
+
+    // --- subtasks -------------------------------------------------------------------------------------------------
+
+    const string NoFamily = "This task has no parent and no subtasks.";
+
+    // The family text a session on this task reads (SessionBriefing.Family), with transcripts found by the app
+    // (TaskSessionCommands.Transcript); none for a task with no parent and no subtasks.
+    Maybe<string> FamilyOf(TaskService service, TaskItem task) =>
+        service.Board.Family(task.Id).Map(f => SessionBriefing.Family(f, Transcript));
+
+    Maybe<string> Transcript(TaskSession session) =>
+        taskSessions is { } commands ? commands.Transcript(session) : Maybe<string>.None;
+
+    // A task's JSON with its family text added as `family` (null for none): the `task join` reply, which is what a
+    // session reads when it takes a task up (SessionStart ran before it joined, so the briefing could not say it).
+    object WithFamily(TaskService service, TaskItem task)
+    {
+        var json = System.Text.Json.JsonSerializer.SerializeToNode(Describe(task), Json)!.AsObject();
+        json["family"] = FamilyOf(service, task).Map(text => (System.Text.Json.Nodes.JsonNode?)text).GetValueOrDefault();
+        return json;
+    }
+
+    // `task parent <id> <parent-id>|none`: both ids are looked up first; the board refuses a second level.
+    ControlReply TaskParent(TaskService service, string id, string parent) =>
+        (parent.Trim().Equals("none", StringComparison.OrdinalIgnoreCase)
+            ? Result.Success(Maybe<Guid>.None)
+            : service.Board.Find(parent).Map(p => Maybe.From(p.Id)))
+        .Match(p => TaskChange(service, id, t => service.SetParent(t.Id, p)), ControlReply.Fail);
 
     string? WorkspaceNameOf(Maybe<Guid> id) =>
         id.Bind(w => manager.State.Workspaces.TryFirst(x => x.Id == w)).Map(w => w.Name).GetValueOrDefault();
@@ -258,6 +294,9 @@ public sealed partial class RemoteControl
 
     sealed record TaskAddOptions(string? Title, string? Workspace, string? Bad)
     {
+        // --parent: the task the note is a subtask of (subtasks spec).
+        public string? Parent { get; init; }
+
         public bool Important { get; init; }
 
         public bool Urgent { get; init; }
@@ -272,6 +311,7 @@ public sealed partial class RemoteControl
         ["--workspace", var w, .. var more] when o.Workspace is null => ParseAddFrom(more, o with { Workspace = w }),
         ["--important", .. var more] when !o.Important => ParseAddFrom(more, o with { Important = true }),
         ["--urgent", .. var more] when !o.Urgent => ParseAddFrom(more, o with { Urgent = true }),
+        ["--parent", var p, .. var more] when o.Parent is null => ParseAddFrom(more, o with { Parent = p }),
         [var option, ..] when option.StartsWith("--", StringComparison.Ordinal) => o with { Bad = $"Unexpected {option}" },
         [var title, .. var more] when o.Title is null => ParseAddFrom(more, o with { Title = title }),
         [var extra, ..] => o with { Bad = $"Unexpected '{extra}': a title with spaces needs quotes" },
@@ -287,8 +327,13 @@ public sealed partial class RemoteControl
             : null;
         if (failure is not null) return ControlReply.Fail(failure);
 
-        return ResolveWorkspace(o.Workspace, from)
-            .Bind(workspace => service.AddNote(o.Title!, workspace, QuadrantOf.Flags(o.Important, o.Urgent)))
+        // With --parent and no --workspace the note goes where its parent is, not to the caller's workspace (subtasks
+        // spec, after the builder check): a subtask belongs with its parent. TaskBoard.AddNote takes the parent's
+        // workspace when given none.
+        var parent = o.Parent is { } p ? service.Board.Find(p).Map(t => Maybe.From(t.Id)) : Result.Success(Maybe<Guid>.None);
+        return parent
+            .Bind(up => (up.HasValue && o.Workspace is null ? Result.Success(Maybe<Guid>.None) : ResolveWorkspace(o.Workspace, from))
+                .Bind(workspace => service.AddNote(o.Title!, workspace, QuadrantOf.Flags(o.Important, o.Urgent), up)))
             .Match(task => Success(Describe(task)), ControlReply.Fail);
     }
 
@@ -381,4 +426,12 @@ public sealed record TaskSessionCommands(
     Func<TaskItem, Result> Go,
     Func<TaskItem, IReadOnlyList<string>> Folders,
     Func<TaskItem, string, Result> Start,
-    Func<TaskItem, string, Result> OpenSession);
+    Func<TaskItem, string, Result> OpenSession)
+{
+    /// <summary>
+    /// Where a session's transcript file is, when the app finds one (ClaudeSessions.TranscriptOf), for the family text a
+    /// session on a subtask reads (subtasks spec). An init property so every construction that predates it still
+    /// compiles; the default finds none, and the family text then lists sessions without a transcript.
+    /// </summary>
+    public Func<TaskSession, Maybe<string>> Transcript { get; init; } = _ => Maybe<string>.None;
+}

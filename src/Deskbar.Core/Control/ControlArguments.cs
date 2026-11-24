@@ -171,7 +171,7 @@ public static class ControlArguments
     // Git Bash (`task comment - --session <id> <<'EOF'`), a pipe in PowerShell. Stdin is bytes to cmd, never parsed.
     // A `-` that is an option's value (after --session, say) is not text. The heredoc's last line break is dropped.
     // `add` too (Petre): a script's note can carry quotes or & just as a session's text can.
-    static readonly string[] TextVerbs = ["status-line", "ask", "comment", "new", "later", "add", "describe", "comment-edit"];
+    static readonly string[] TextVerbs = ["status-line", "ask", "comment", "new", "later", "add", "describe", "comment-edit", "subtask"];
 
     static bool IsTextForm(IReadOnlyList<string> args) =>
         args.Count > 2 && args[0].Equals("task", StringComparison.OrdinalIgnoreCase)
