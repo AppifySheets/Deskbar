@@ -157,8 +157,16 @@ public static class SessionKeeper
     //   * listed as a BACKGROUND session: an interactive one (VS Code, a terminal) is Petre's window, and `claude stop`
     //     only knows background ones anyway;
     //   * idle, and idle in every read for <see cref="StopAfter"/> (<paramref name="idleSince"/>);
-    //   * no window of Deskbar's is attached to it (<paramref name="windowOpen"/>): stopping it would close the window
-    //     under Petre while he reads the answer of a Done task he opened. Once he closes the window it is stopped.
+    //   * for a DONE task, no window of Deskbar's is attached to it (<paramref name="windowOpen"/>): stopping it would
+    //     close the window under Petre while he reads the answer of a Done task he opened (a session marks its own task
+    //     Done, often with its report still on screen). Once he closes the window it is stopped.
+    //     A CLOSED task's session is stopped window or not, and its window goes with it (task 8556944b, Petre: "can a
+    //     claude session window close on its own when a task has been closed?"). Only Petre closes a task, so the close
+    //     is his "finished with this", unlike Done. Nothing here closes the window: `claude stop` does, by ending the
+    //     `claude attach` the window runs (measured 2026-11-25: a window opened as ClaudeStart.AttachWindow opens one,
+    //     on a session stopped while idle, was gone 2 to 4 seconds after the stop). The conversation is kept, and opening
+    //     the task again resumes it, so the stop loses nothing. Still only once idle for StopAfter: a turn in flight
+    //     finishes first.
     // A session on two finished tasks is named once, for the first.
     public static IReadOnlyList<KeeperStep.Stop> Stops(
         TaskBoard board,
@@ -176,7 +184,7 @@ public static class SessionKeeper
             .Where(pair => pair.Agent.Background && !pair.Agent.Busy)
             .Where(pair => !heldOpen.Contains(pair.Agent.SessionId))
             .Where(pair => now - idleSince(pair.Agent.SessionId) >= StopAfter)
-            .Where(pair => !windowOpen(pair.Task))
+            .Where(pair => pair.Task.Status == TaskStatus.Closed || !windowOpen(pair.Task))
             .DistinctBy(pair => pair.Agent.SessionId)
             .Select(pair => new KeeperStep.Stop(pair.Task.Id, pair.Agent))
             .ToList();
