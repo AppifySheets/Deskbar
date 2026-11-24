@@ -1685,6 +1685,15 @@ public partial class App : Application
                 // claude.exe's full path for the terminal windows, looked up at each launch like ClaudeCli's own calls
                 // (task dbe25323); the bare name when it is nowhere, and wt then says so in its own window.
                 Claude = () => Deskbar.Windows.Claude.ClaudeLocator.Find().GetValueOrDefault("claude"),
+                // Windows Terminal when it is installed, else a console window of claude.exe's own (task abfe1db8: Windows
+                // Server 2022 has no Windows Terminal). The console's title is kept by CLAUDE_CODE_DISABLE_TERMINAL_TITLE,
+                // since it is how the window is found again.
+                HasWindowsTerminal = Deskbar.Windows.Claude.ClaudeLocator.HasWindowsTerminal,
+                OpenConsole = console => Deskbar.Windows.Processes.DetachedLauncher.StartConsole(
+                    Deskbar.Core.Tasks.ClaudeStart.CommandLine(console), console.WorkingDirectory, console.Title.GetValueOrDefault(),
+                    console.Title.HasValue
+                        ? new Dictionary<string, string> { [Deskbar.Core.Tasks.ClaudeStart.KeepTitleVariable] = "1" }
+                        : new Dictionary<string, string>()),
             },
             new System.Reactive.Concurrency.SynchronizationContextScheduler(new System.Windows.Threading.DispatcherSynchronizationContext(Dispatcher)),
             trace: ClickTrace.On ? ClickTrace.Write : null);

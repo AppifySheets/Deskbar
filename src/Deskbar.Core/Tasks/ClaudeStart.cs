@@ -83,6 +83,56 @@ public static class ClaudeStart
     public static ProgramLaunch TrustWindow(string folder, string claude = "claude") =>
         new("wt.exe", ["-w", "new", "-d", Bare(folder), claude], Bare(folder));
 
+    // WITHOUT WINDOWS TERMINAL (task abfe1db8, "win2022"). Windows Server 2022 ships no Windows Terminal, and a colleague's
+    // terminal server showed what that did: "Deskbar could not open a terminal in C:\Users\...\repos\stock: Could not
+    // start wt.exe ... The system cannot find the file specified." Neither the trust window nor the window on a session
+    // could open. So where wt.exe is not installed (HasWindowsTerminal), Deskbar starts claude.exe ITSELF in a console
+    // window of its own, the classic one Windows gives any console program, and these two say how.
+    //
+    // The console's title comes from CreateProcess (STARTUPINFO.lpTitle), since there is no wt to pass --title to and no
+    // profile to keep it: CLAUDE_CODE_DISABLE_TERMINAL_TITLE=1 stops Claude Code from retitling the window, which is the
+    // job the "Deskbar Claude" profile's suppressApplicationTitle does in Windows Terminal. The title is how Deskbar finds
+    // the window again (ClaudeTaskActions.Titled), so it must stay.
+    //
+    // Measured 2026-11-24 on Windows 11 with a conhost probe: a classic console window reports its CLIENT as its owner
+    // (GetWindowThreadProcessId gave cmd's pid, not conhost's), so this window shows as process "claude", which is the
+    // name Deskbar expects it by.
+
+    /// <summary>
+    /// The console window on a background session, for a machine without Windows Terminal: claude.exe started on
+    /// `attach &lt;short id&gt;` in the folder, titled <paramref name="title"/> and kept so.
+    /// </summary>
+    public static ConsoleLaunch AttachConsole(string shortId, string folder, string title, string claude = "claude") =>
+        new(claude, ["attach", shortId], Bare(folder), Maybe.From(title));
+
+    /// <summary>
+    /// The trust window for a machine without Windows Terminal: plain claude.exe in the folder, in a console window, with
+    /// Claude Code free to title it as it likes (as the default profile leaves it in Windows Terminal).
+    /// </summary>
+    public static ConsoleLaunch TrustConsole(string folder, string claude = "claude") =>
+        new(claude, [], Bare(folder), Maybe<string>.None);
+
+    /// <summary>
+    /// Whether Windows Terminal's <c>wt.exe</c> can be started: on the PATH (Deskbar's own, then the user's and the
+    /// machine's, as ClaudeLocator searches), or as the execution alias Windows Terminal's package puts in
+    /// <c>%LOCALAPPDATA%\Microsoft\WindowsApps</c>, which the shell finds even when that folder is not on the PATH.
+    /// </summary>
+    //
+    // The alias is a zero-byte reparse point, and File.Exists answers true for it (measured on this machine). An
+    // unpackaged Windows Terminal (a zip or portable copy) is found through the PATH, as wt itself would be.
+    // <paramref name="exists"/> answers whether a file exists, so the rule is a test without a disk.
+    public static bool HasWindowsTerminal(string? pathVariable, string localAppData, Func<string, bool> exists) =>
+        (pathVariable ?? "")
+            .Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Select(folder => folder.Trim('"'))
+            .Where(folder => folder.Length > 0)
+            .Append(Path.Combine(localAppData, "Microsoft", "WindowsApps"))
+            .Select(folder => Path.Combine(folder, "wt.exe"))
+            .Any(exists);
+
+    /// <summary>The variable that stops Claude Code from retitling its console window (see AttachConsole).</summary>
+    public const string KeepTitleVariable = "CLAUDE_CODE_DISABLE_TERMINAL_TITLE";
+
     // The longest title the window is given; the rest of a long title is in the task.
     const int MaxTitle = 80;
 
@@ -167,6 +217,19 @@ public static class ClaudeStart
             .DistinctBy(f => f, StringComparer.OrdinalIgnoreCase)
             .ToList();
     }
+
+    /// <summary>
+    /// The command line CreateProcess is given for a console launch: the program quoted, then each argument, quoted only
+    /// when it holds a space, a tab or a quote, by the C runtime's rules (a quote as \", and the backslashes before a quote
+    /// or the closing quote doubled), which is how claude.exe splits it again.
+    /// </summary>
+    public static string CommandLine(ConsoleLaunch launch) =>
+        string.Join(" ", new[] { $"\"{launch.Program}\"" }.Concat(launch.Arguments.Select(QuoteArgument)));
+
+    static string QuoteArgument(string argument) =>
+        argument.Length > 0 && !argument.Any(c => c is ' ' or '\t' or '"')
+            ? argument
+            : "\"" + Regex.Replace(Regex.Replace(argument, @"(\\*)""", @"$1$1\"""), @"(\\+)$", "$1$1") + "\"";
 
     static string LastSegment(string folder) => folder.Split(['\\', '/'], StringSplitOptions.RemoveEmptyEntries).LastOrDefault() ?? "";
 

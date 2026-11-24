@@ -102,6 +102,63 @@ public static class DetachedLauncher
                         : Result.Failure($"{Path.GetFileName(program)} exited with code {code}")),
             e => e.Message).Bind(result => result);
 
+    // STARTS A CONSOLE PROGRAM IN A CONSOLE WINDOW OF ITS OWN, titled, with a few variables added to its environment:
+    // the window on a Claude session on a machine without Windows Terminal (task abfe1db8, ClaudeStart.AttachConsole).
+    // Neither the shell nor Process.Start can give a console its title (STARTUPINFO.lpTitle) or one child a variable,
+    // so this is CreateProcess directly, with CREATE_NEW_CONSOLE (Deskbar has no console to share, but the flag says
+    // so rather than relying on it) and the same breakaway attribute as the packaged path, which an unpackaged parent
+    // may pass too, so one path serves both copies and the session's window is never ended along with Deskbar's
+    // package. No cmd hop: the program is claude.exe by its full path, or a bare name CreateProcess finds on the PATH
+    // (it appends .exe), so nothing re-parses the arguments.
+    //
+    // The environment is this process's own (LaunchEnvironment has already cleaned it of its hosts' variables, as
+    // for every other start) with `variables` laid over it. The answer is the new process's id: the window belongs
+    // to it (a classic console window reports its client as its owner), so WorkspaceManager.StartIn can expect the
+    // window by process.
+    public static Result<int?> StartConsole(string commandLine, string workingDirectory, string? title, IReadOnlyDictionary<string, string> variables) =>
+        Result.Try(() =>
+        {
+            var block = EnvironmentBlock(variables);
+            var titleText = title is null ? 0 : Marshal.StringToHGlobalUni(title);
+            var environment = Marshal.StringToHGlobalUni(block);
+            try
+            {
+                var process = default(ProcessInformation);
+                WithBreakawayAttribute(attributes =>
+                {
+                    var startup = new StartupInfoEx
+                    {
+                        StartupInfo = new StartupInfo { Size = Marshal.SizeOf<StartupInfoEx>(), Title = titleText },
+                        AttributeList = attributes,
+                    };
+                    // CreateProcessW may write into the command line, so it goes as a StringBuilder (see the extern).
+                    if (!CreateProcessW(null, new StringBuilder(commandLine), 0, 0, false,
+                            ExtendedStartupInfoPresent | CreateNewConsole | CreateUnicodeEnvironment, environment,
+                            workingDirectory, ref startup, out process))
+                        throw new Win32Exception(Marshal.GetLastWin32Error());
+                });
+                CloseHandle(process.Thread);
+                CloseHandle(process.Process);
+                return (int?)process.ProcessId;
+            }
+            finally
+            {
+                Marshal.FreeHGlobal(environment);
+                if (titleText != 0) Marshal.FreeHGlobal(titleText);
+            }
+        }, e => e.Message);
+
+    // A Unicode environment block: NAME=value entries, each ended by a NUL, the whole ended by one more, sorted by name
+    // without regard to case as Windows keeps its own blocks. The added variables replace any of the same name.
+    static string EnvironmentBlock(IReadOnlyDictionary<string, string> variables) =>
+        string.Concat(Environment.GetEnvironmentVariables()
+            .Cast<System.Collections.DictionaryEntry>()
+            .Select(entry => (Name: (string)entry.Key, Value: entry.Value as string ?? ""))
+            .Where(entry => !variables.Keys.Any(k => k.Equals(entry.Name, StringComparison.OrdinalIgnoreCase)))
+            .Concat(variables.Select(pair => (Name: pair.Key, Value: pair.Value)))
+            .OrderBy(entry => entry.Name, StringComparer.OrdinalIgnoreCase)
+            .Select(entry => $"{entry.Name}={entry.Value}\0")) + "\0";
+
     // cmdArguments is everything after cmd's own name: CommandLineQuoting's `/d /v:off /c start "" ...` line.
     static Result<int?> StartBrokenAway(string cmdArguments) =>
         Result.Try(() => CreateBrokenAway(cmdArguments, _ => (int?)null), e => e.Message);
@@ -163,8 +220,11 @@ public static class DetachedLauncher
     const uint DesktopAppBreakawayEnableProcessTree = 0x01;
     const uint ExtendedStartupInfoPresent = 0x00080000;
     const uint CreateNoWindow = 0x08000000;
+    const uint CreateNewConsole = 0x00000010;
+    const uint CreateUnicodeEnvironment = 0x00000400;
 
-    // STARTUPINFOW. The string fields are pointers left at zero, which keeps the struct blittable.
+    // STARTUPINFOW. The string fields are pointers, left at zero or set to unmanaged memory the caller frees (StartConsole's
+    // title), which keeps the struct blittable.
     [StructLayout(LayoutKind.Sequential)]
     struct StartupInfo
     {
@@ -193,7 +253,7 @@ public static class DetachedLauncher
 
     // lpCommandLine is a StringBuilder because CreateProcessW may write into it, so it must not be a string.
     [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
-    static extern bool CreateProcessW(string applicationName, StringBuilder commandLine, nint processAttributes, nint threadAttributes,
+    static extern bool CreateProcessW(string? applicationName, StringBuilder commandLine, nint processAttributes, nint threadAttributes,
         bool inheritHandles, uint creationFlags, nint environment, string? currentDirectory, ref StartupInfoEx startupInfo, out ProcessInformation processInformation);
 
     [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]

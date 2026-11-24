@@ -519,6 +519,11 @@ throwaway folder Claude Code trusts, and tracing on for the `claude actions:` an
     `claude.exe` renamed away as in 89, "Start Claude on this" shows a message box with the reason as well as writing
     it in the thread. `$ts task start <id>` on a closed task is refused at once with "The task is closed. Reopen it to
     start Claude on it."
+    On a machine without Windows Terminal (Windows Server 2022, or a test machine where `wt.exe` is not on the PATH and
+    not in `%LOCALAPPDATA%\Microsoft\WindowsApps`), the same Yes opens a plain console window running `claude`, and a
+    double-click on a task with a background session opens a console window titled "<the task's title> · Claude"
+    running `claude attach`; the title stays while Claude works, and a second double-click brings that window forward
+    instead of opening another.
 99. From a terminal: `$ts task go <id>` does what the double-click does; `$ts task start <id>` on a task with one folder
     starts there, and on one with several refuses, naming them, until `--folder <path>` picks one;
     `$ts task open-session <id> <short id>` opens that session. Each answers with the task's JSON.
