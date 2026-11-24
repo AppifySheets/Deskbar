@@ -3674,14 +3674,59 @@ public class TasksBoardTests
     {
         using var t = Build(width: TasksPanelLayout.SlimBelow);
         var parent = t.Tasks.AddNote("Ship the release", t.Gepha).Value;
-        var child = t.Tasks.AddNote("Write the notes", t.Gepha, parent: parent.Id).Value;
+        var child = t.Tasks.AddNote("Write the notes", t.Sparrow, parent: parent.Id).Value;
         t.Controller.Show();
 
-        Assert.Equal("↳ Ship the release › Write the notes", RunsOf(TitleOf(t.Window, child.Id)));
-        Assert.Equal("Ship the release · 1 subtask", RunsOf(TitleOf(t.Window, parent.Id)));
+        // Under its parent the arrow alone says whose it is; the count after the parent's title stays on one line.
+        Assert.Equal("↳ Write the notes", RunsOf(TitleOf(t.Window, child.Id)));
+        Assert.Equal("Ship the release ·\u00A01\u00A0subtask", RunsOf(TitleOf(t.Window, parent.Id)));
 
+        // With the parent filtered out the subtask is in its own place and names its parent.
+        t.Controller.FilterWorkspace(TaskWorkspaceFilter.On(t.Sparrow));
+        Assert.Equal("↳ Ship the release › Write the notes", RunsOf(TitleOf(t.Window, child.Id)));
         t.Tasks.Rename(parent.Id, "Release 2.6");
         Assert.Equal("↳ Release 2.6 › Write the notes", RunsOf(TitleOf(t.Window, child.Id)));
+    });
+
+    // Follow-up: the List draws a subtask right under its parent, in the parent's group, whatever its own flags.
+    static IReadOnlyList<Guid> ListOrder(TasksWindow window) =>
+        Inside(window).OfType<Button>().Where(b => b.Tag is Guid).Select(b => (Guid)b.Tag).ToArray();
+
+    [Fact]
+    public void The_list_draws_a_subtask_right_under_its_parent() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        var parent = t.Tasks.AddNote("Ship the release", t.Gepha).Value;
+        t.Tasks.AddNote("Unrelated", t.Gepha);
+        var child = t.Tasks.AddNote("Write the notes", t.Gepha, Quadrant.II, parent.Id).Value;
+        t.Controller.Show();
+
+        var order = ListOrder(t.Window).ToList();
+        Assert.Equal(order.IndexOf(parent.Id) + 1, order.IndexOf(child.Id));
+    });
+
+    // Follow-up (Petre's screenshot of an open parent with no subtasks in it): the open thread lists them, each a button
+    // that shows that subtask, and ends with "Add subtask".
+    [Fact]
+    public void An_open_parent_lists_its_subtasks_and_offers_add_subtask() => StaThread.Run(() =>
+    {
+        var selection = new TaskSelection();
+        using var t = Build(selection: selection);
+        var parent = t.Tasks.AddNote("Ship the release", t.Gepha).Value;
+        var child = t.Tasks.AddNote("Write the notes", t.Gepha, parent: parent.Id).Value;
+        t.Tasks.SetStatusLine(child.Id, "draft done");
+        t.Controller.Show();
+        t.Controller.ToggleThread(parent.Id);
+
+        var entry = ButtonNamed(t.Window, "Subtask Write the notes");
+        Assert.Contains("draft done", string.Concat(Inside(entry).OfType<TextBlock>().Select(RunsOf)));
+        Click(entry);
+        Assert.Equal(child.Id, selection.Current.Value);
+
+        // The parent's thread is still open.
+        Click(ButtonNamed(t.Window, "Add subtask"));
+        Assert.True(t.Window.AddBoxShown);
+        Assert.Equal(FloatingBar.SubtaskPlaceholder, t.Window.AddPlaceholderText);
     });
 
     [Fact]

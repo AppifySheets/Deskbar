@@ -216,6 +216,7 @@ public sealed class TasksBoard : IDisposable
             SubtaskParent = id => tasks.Board.SubtaskParentFor(id)
                 .Match(p => new SubtaskParentView(p.Id, p.Title, p.WorkspaceId), () => (SubtaskParentView?)null),
             AddSubtask = (title, workspace, quadrant, parent) => AddNote(title, workspace, quadrant, parent).IsSuccess,
+            ShowTask = ShowTask,
         };
 
         subscriptions = new CompositeDisposable(
@@ -698,8 +699,11 @@ public sealed class TasksBoard : IDisposable
         var searched = search.Narrow(goalFilter.Narrow(WithPendingCloses(tasks.Board), goalBoard));
         var board = ClaudeWorking.Narrow(searched, claudeWorking);
         var claudeWorkingCount = TaskViews.Count(ClaudeWorking.Narrow(searched, true), filter, where, assigneeFilter);
-        var groups = TaskViews.Grouped(board, filter, where, assigneeFilter)
-            .Select(g => new TaskGroupView(g.Kind, TaskViews.GroupName(g.Kind), g.Tasks.Select(Row).ToArray()))
+        // Follow-up to the subtasks spec: a subtask is drawn right under its parent, in the parent's group (TaskViews.UnderParents);
+        // such a line is Nested, so it shows the arrow without the parent's name.
+        var (listed, nested) = TaskViews.UnderParents(TaskViews.Grouped(board, filter, where, assigneeFilter));
+        var groups = listed
+            .Select(g => new TaskGroupView(g.Kind, TaskViews.GroupName(g.Kind), g.Tasks.Select(t => Row(t) with { Nested = nested.Contains(t.Id) }).ToArray()))
             .ToArray();
         var filters = FilterOrder.Select(f => (Filter: f, Count: TaskViews.Count(board, f, where, assigneeFilter)))
             .Select(x => new TaskFilterChip(x.Filter, $"{FilterName(x.Filter)} {x.Count}", x.Filter == filter,
@@ -831,6 +835,11 @@ public sealed class TasksBoard : IDisposable
         // Subtasks (Petre's pick A): the parent's title in front of a subtask's, and a parent's open subtasks' count.
         ParentTitle = tasks.Board.ParentOf(task).Map(p => (string?)FloatingBar.FirstLine(p.Title)).GetValueOrDefault(),
         SubtaskCount = tasks.Board.OpenSubtaskCount(task.Id),
+        // An open thread lists the task's subtasks (follow-up: an open parent showed none of them).
+        Subtasks = expanded.Contains(task.Id)
+            ? tasks.Board.Family(task.Id).Map(f => f.Subtasks.Select(c => new SubtaskView(c.Id, FloatingBar.FirstLine(c.Title), c.Status, c.StatusLine)).ToArray())
+                .GetValueOrDefault([])
+            : [],
     };
 
     // The mockup's sessions column: how many, and whether any is still live. Empty for a note.
@@ -971,6 +980,12 @@ internal sealed record TaskRowView(Guid Id, string Title, string Detail, TaskSta
 
     /// <summary>How many open subtasks the task has, drawn after its title ("· 2 subtasks"); 0 for none.</summary>
     public int SubtaskCount { get; init; }
+
+    /// <summary>Drawn right under its parent (TaskViews.UnderParents), so the arrow needs no parent's name.</summary>
+    public bool Nested { get; init; }
+
+    /// <summary>The task's subtasks while its thread is open, for the thread's list; empty while closed.</summary>
+    public IReadOnlyList<SubtaskView> Subtasks { get; init; } = [];
 }
 
 /// <summary>
@@ -1092,7 +1107,13 @@ internal sealed record TasksWindowActions(
 
     /// <summary>Adds a subtask under the parent (the last argument), as AddNote adds a note; whether it worked.</summary>
     public Func<string, Maybe<Guid>, Quadrant, Guid, bool>? AddSubtask { get; init; }
+
+    /// <summary>Shows one task: picked, its thread open, scrolled into view (TasksBoard.ShowTask). A subtask in a thread uses it.</summary>
+    public Action<Guid>? ShowTask { get; init; }
 }
+
+/// <summary>A subtask as its parent's open thread lists it: id, title (first line), status and status line.</summary>
+internal sealed record SubtaskView(Guid Id, string Title, TaskStatus Status, string StatusLine);
 
 /// <summary>The parent "Add subtask…" puts a new task under: its id, its title for the chip and its workspace.</summary>
 internal sealed record SubtaskParentView(Guid Id, string Title, Maybe<Guid> Workspace);

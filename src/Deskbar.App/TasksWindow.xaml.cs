@@ -523,7 +523,8 @@ public partial class TasksWindow : Window
                 string.Join('\u0004', r.Comments.Select(c => $"{c.Id}{c.Author}{c.When}{c.Markdown}{c.Settled}")))))),
             string.Join('\u0002', view.Groups.Select(g => $"{g.Header}:" + string.Join('\u0003', g.Rows.Select(r =>
                 $"{r.Id}|{r.Title}|{r.Detail}|{r.Description}|{r.Status}|{r.Claudes}|{r.Assignee.Id}|{r.Sessions}|{r.SessionCount}|{r.LiveCount}|{PlaceSignature(r.Place)}|{r.CommentCount}|" +
-                $"{r.Expanded}|{r.Closing}|{r.Important}|{r.Urgent}|{r.WorkingCount}|{r.ParentTitle}|{r.SubtaskCount}|" + string.Join('\u0004', r.SessionList.Select(s => $"{s.Id}{s.Joined}{s.State}")) + "|" +
+                $"{r.Expanded}|{r.Closing}|{r.Important}|{r.Urgent}|{r.WorkingCount}|{r.ParentTitle}|{r.SubtaskCount}|{r.Nested}|" +
+                string.Join('\u0004', r.Subtasks.Select(c => $"{c.Id}{c.Title}{c.Status}{c.StatusLine}")) + "|" + string.Join('\u0004', r.SessionList.Select(s => $"{s.Id}{s.Joined}{s.State}")) + "|" +
                 string.Join('\u0004', r.Comments.Select(c => $"{c.Id}{c.Author}{c.When}{c.Markdown}{c.Settled}")))))));
 
     static string PlaceSignature(TaskPlaceChoice place) => $"{place.Workspace}{place.Name}{(place.Colour as SolidColorBrush)?.Color}";
@@ -1068,11 +1069,11 @@ public partial class TasksWindow : Window
             {
                 title.Inlines.Clear();
                 if (row.ParentTitle is not null)
-                    title.Inlines.Add(new Run(TaskViews.Breadcrumb(row.ParentTitle, full: !slimLines && !compactLines))
+                    title.Inlines.Add(new Run(TaskViews.Breadcrumb(row.ParentTitle, full: !slimLines && !compactLines && !row.Nested))
                         { Foreground = HeaderInk, FontWeight = FontWeights.Normal, FontStyle = FontStyles.Normal });
                 title.Inlines.Add(new Run(row.Title));
                 if (row.SubtaskCount > 0)
-                    title.Inlines.Add(new Run($" · {TaskViews.SubtaskCountText(row.SubtaskCount)}")
+                    title.Inlines.Add(new Run(TaskViews.SubtaskCountSeparator + TaskViews.SubtaskCountText(row.SubtaskCount))
                         { Foreground = HeaderInk, FontWeight = FontWeights.Normal, FontStyle = FontStyles.Normal });
             }
             // A DONE TASK'S TICK in front of its title, the bar's own (TaskStatusMarks.DoneTick; Petre, 2026-11-23, "build
@@ -1242,7 +1243,7 @@ public partial class TasksWindow : Window
     // comments and moves every one below), the comments it shows and which of them are opened in full.
     string ThreadLayoutKey(TaskRowView row) =>
         !row.Expanded ? ""
-        : string.Join(',', row.SessionList.Select(s => s.Id)) + "/"
+        : string.Join(',', row.SessionList.Select(s => s.Id)) + "/" + string.Join(',', row.Subtasks.Select(c => c.Id)) + "/"
           + string.Join(',', ThreadComments(row).Shown.Select(c => $"{c.Id}{(longOpen.Contains(c.Id) ? "+" : "")}"))
           + $"{settledOpen.Contains(row.Id)}{earlierOpen.Contains(row.Id)}";
 
@@ -1260,6 +1261,16 @@ public partial class TasksWindow : Window
                 "Start a background Claude session on this task, with the task as its first message");
             button.Margin = new Thickness(0, 0, 0, 8);
             panel.Children.Add(button);
+        }
+        // SUBTASKS IN THE THREAD (follow-up: Petre's screenshot of an open parent that said "2 subtasks" and showed none).
+        // Each is a button that shows that subtask (picked, its thread open, scrolled to); then "Add subtask", the twin of
+        // the menu's "Add subtask…".
+        row.Subtasks.ToList().ForEach(sub => panel.Children.Add(SubtaskEntry(sub)));
+        if (Actions?.SubtaskParent is not null && row.Status != TaskStatus.Closed && !row.Closing)
+        {
+            var add = Small("Add subtask", "Add subtask", () => BeginSubtaskAdd(row.Id), "Add a subtask under this task");
+            add.Margin = new Thickness(0, 0, 0, 8);
+            panel.Children.Add(add);
         }
         var settledCount = row.Comments.Count(c => c.Settled);
         var unfolded = settledOpen.Contains(row.Id);
@@ -1332,6 +1343,24 @@ public partial class TasksWindow : Window
 
     // One session of the thread (Task 9, the spec's "Task history"): its short id, when it joined and where it stands,
     // and Open, which does what going to that session does. An expired one has nothing left to open, so no button.
+    // One subtask in its parent's thread: "↳ title · status · status line", dim when it is done or closed. The whole line
+    // is a button that shows the subtask (TasksBoard.ShowTask).
+    UIElement SubtaskEntry(SubtaskView sub)
+    {
+        var text = new TextBlock { FontSize = 11, TextTrimming = TextTrimming.CharacterEllipsis, VerticalAlignment = VerticalAlignment.Center };
+        var finished = sub.Status is TaskStatus.Done or TaskStatus.Closed;
+        text.Inlines.Add(new Run("↳ ") { Foreground = HeaderInk });
+        text.Inlines.Add(new Run(sub.Title) { Foreground = finished ? HeaderInk : Ink });
+        text.Inlines.Add(new Run($" · {TaskViews.StatusName(sub.Status)}") { Foreground = HeaderInk });
+        if (sub.StatusLine.Length > 0) text.Inlines.Add(new Run($" · {sub.StatusLine}") { Foreground = HeaderInk });
+        var entry = Flat(text, $"Subtask {sub.Title}", () => Actions?.ShowTask?.Invoke(sub.Id), new Thickness(4, 1, 4, 1));
+        entry.Background = Brushes.Transparent;
+        entry.HorizontalAlignment = HorizontalAlignment.Left;
+        entry.Margin = new Thickness(0, 0, 0, 4);
+        entry.ToolTip = "Show this subtask";
+        return entry;
+    }
+
     UIElement SessionLine(Guid taskId, SessionView session)
     {
         var shortId = session.Id[..Math.Min(8, session.Id.Length)];

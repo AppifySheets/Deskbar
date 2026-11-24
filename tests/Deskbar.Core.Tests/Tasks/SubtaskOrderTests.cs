@@ -79,6 +79,47 @@ public class SubtaskOrderTests
         Assert.Equal(list.Select(t => t.Id).OrderBy(i => i), Nest(list).Select(t => t.Id).OrderBy(i => i));
     }
 
+    // --- the tasks panel's groups ------------------------------------------------------------------
+
+    [Fact]
+    public void In_the_panel_an_important_subtask_moves_into_its_parents_group()
+    {
+        var parent = Task("Parent");
+        var child = Task("Child", parent.Id) with { Important = true };
+        var groups = new[] { new TaskGroup(TaskGroupKind.II, [child, Task("Two")]), new TaskGroup(TaskGroupKind.IV, [Task("Four"), parent, Task("Last")]) };
+
+        var (nested, moved) = TaskViews.UnderParents(groups);
+
+        Assert.Equal(["Two"], Titles(nested.Single(g => g.Kind == TaskGroupKind.II).Tasks));
+        Assert.Equal(["Four", "Parent", "Child", "Last"], Titles(nested.Single(g => g.Kind == TaskGroupKind.IV).Tasks));
+        Assert.Equal([child.Id], moved);
+    }
+
+    [Fact]
+    public void In_the_panel_waiting_stays_waiting_on_either_side()
+    {
+        var parent = Task("Parent", status: TaskStatus.WaitingOnYou);
+        var child = Task("Child", parent.Id);
+        var askingChild = Task("Asking", parent.Id, TaskStatus.WaitingOnYou);
+        var groups = new[] { new TaskGroup(TaskGroupKind.WaitingOnYou, [askingChild, parent]), new TaskGroup(TaskGroupKind.IV, [child]) };
+
+        var (nested, moved) = TaskViews.UnderParents(groups);
+
+        Assert.Equal(["Asking", "Parent"], Titles(nested.Single(g => g.Kind == TaskGroupKind.WaitingOnYou).Tasks));
+        Assert.Equal(["Child"], Titles(nested.Single(g => g.Kind == TaskGroupKind.IV).Tasks));
+        Assert.Empty(moved);
+    }
+
+    [Fact]
+    public void A_group_emptied_by_the_move_is_left_out()
+    {
+        var parent = Task("Parent");
+        var child = Task("Child", parent.Id) with { Important = true };
+        var groups = new[] { new TaskGroup(TaskGroupKind.II, [child]), new TaskGroup(TaskGroupKind.IV, [parent]) };
+
+        Assert.Equal([TaskGroupKind.IV], TaskViews.UnderParents(groups).Groups.Select(g => g.Kind));
+    }
+
     // --- "Subtask of…" ------------------------------------------------------------------------
 
     [Fact]

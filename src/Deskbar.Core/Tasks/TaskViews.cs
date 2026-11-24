@@ -213,6 +213,29 @@ public static class TaskViews
     static SessionState Gone(TaskSession session, Func<TaskSession, bool> transcriptExists) =>
         transcriptExists(session) ? SessionState.Ended : SessionState.Expired;
 
+    // --- subtasks under their parent in the List (follow-up to the subtasks spec) --------------------------------------
+
+    /// <summary>
+    /// The List's groups with every subtask moved to right after its parent (SubtaskOrder), into the parent's group, when
+    /// both are shown and the parent is in a quadrant. A subtask waiting on Petre stays pinned, and nothing moves into the
+    /// Waiting on you or Closed groups. A group the move empties is left out. <c>Moved</c> is the subtasks drawn under
+    /// their parent, whose line then needs no parent's name. The Matrix keeps each task in its own quadrant's cell.
+    /// </summary>
+    public static (IReadOnlyList<TaskGroup> Groups, IReadOnlySet<Guid> Moved) UnderParents(IReadOnlyList<TaskGroup> groups)
+    {
+        var flat = groups.SelectMany(g => g.Tasks.Select(t => (Task: t, g.Kind))).ToArray();
+        var kindOf = flat.ToDictionary(x => x.Task.Id, x => x.Kind);
+        bool InQuadrant(TaskGroupKind kind) => kind is not (TaskGroupKind.WaitingOnYou or TaskGroupKind.Closed);
+        bool Movable((TaskItem Task, TaskGroupKind Kind) x) =>
+            InQuadrant(x.Kind) && x.Task.ParentId.Map(p => kindOf.TryGetValue(p, out var k) && InQuadrant(k)).GetValueOrDefault(false);
+        var moved = SubtaskOrder.Nested(flat, x => x.Task.Id, x => x.Task.ParentId, Movable);
+        var ordered = SubtaskOrder.UnderParents(flat, x => x.Task.Id, x => x.Task.ParentId, Movable);
+        // A moved subtask belongs to its parent's group; every other task to its own.
+        var placed = ordered.Select(x => (x.Task, Kind: moved.Contains(x.Task.Id) ? kindOf[x.Task.ParentId.Value] : x.Kind)).ToArray();
+        return (groups.Select(g => new TaskGroup(g.Kind, placed.Where(x => x.Kind == g.Kind).Select(x => x.Task).ToArray()))
+            .Where(g => g.Tasks.Count > 0).ToArray(), moved);
+    }
+
     // --- subtasks on a line (docs/superpowers/specs/2026-11-24-subtasks-design.md, Petre's pick A) ----------------------
 
     // How much of a parent's title the breadcrumb keeps, so the subtask's own title keeps most of the line.
