@@ -277,7 +277,7 @@ public sealed class TasksBoard : IDisposable
     /// <summary>
     /// `tasks-window show`, and a line's single click on the bar (through ShowTask). A panel already open comes forward
     /// with its view as it was. A hidden one opens at the default view (open tasks, every workspace, goal and assignee,
-    /// no thread open; the workspace filter stays on "Current workspace" when that was picked) and docks at the width saved for it, and the saved state says it is open.
+    /// no thread open; the "Current workspace" checkbox stays ticked when it was) and docks at the width saved for it, and the saved state says it is open.
     /// </summary>
     //
     // THE WINDOW NEVER ACTIVATES ITSELF (fix round 1, Critical 1, kept for the panel). It is shown without activation and
@@ -322,7 +322,7 @@ public sealed class TasksBoard : IDisposable
     void OpenFresh()
     {
         filter = TaskFilter.Open;
-        // "Current workspace" is the one filter a fresh open keeps (AppState.TasksPanel.CurrentWorkspace, task ed1a01fc).
+        // The "Current workspace" checkbox is the one filter a fresh open keeps (AppState.TasksPanel.CurrentWorkspace, task ed1a01fc).
         where = PanelState.CurrentWorkspace ? TaskWorkspaceFilter.Current : TaskWorkspaceFilter.All;
         goalFilter = TaskGoalFilter.All;
         assigneeFilter = TaskAssigneeFilter.All;
@@ -436,8 +436,9 @@ public sealed class TasksBoard : IDisposable
     }
 
     /// <summary>
-    /// The toolbar's workspace filter: all, one workspace, none, or "Current workspace", which follows the workspace in
-    /// front and is remembered across opens (AppState.TasksPanel.CurrentWorkspace; see OpenFresh).
+    /// The toolbar's workspace filter: all, one workspace or none from its menu, or Current from the "Current workspace"
+    /// checkbox, which follows the workspace in front and is remembered across opens (AppState.TasksPanel.CurrentWorkspace;
+    /// see OpenFresh).
     /// </summary>
     public void FilterWorkspace(TaskWorkspaceFilter shown)
     {
@@ -757,7 +758,7 @@ public sealed class TasksBoard : IDisposable
         // before the panel docks) it is the saved width; the first dock's pulse then redraws if the clamp moved it.
         var width = dockedWidth.GetValueOrDefault(PanelState.Width);
         var matrixAllowed = TasksPanelLayout.MatrixAllowed(width);
-        // The view carries the CHOICE (where), not the resolved filter, so the menu can tick "Current workspace".
+        // The view carries the CHOICE (where), not the resolved filter, so the toolbar can tick its "Current workspace" checkbox.
         return new TasksView(filters, WorkspaceFilterLabel(shown), where, places, groups, EmptyText(), addTarget)
         {
             // The setting is Petre's and the width never changes it: a panel too narrow for the Matrix shows the List and
@@ -910,12 +911,10 @@ public sealed class TasksBoard : IDisposable
     string AssigneeFilterLabel() =>
         assigneeFilter.Kind.Match(kind => kind == AssigneeKind.Me ? "Assigned: me" : "Assigned: Claude", () => "Assigned: all");
 
-    // "Workspace: all", "Workspace: Sparrow", or under "Current workspace" the workspace in front with "(current)" after
-    // it, so the label says both which tasks show and that they will change with the next switch.
+    // "Workspace: all" or "Workspace: Sparrow". Under the "Current workspace" checkbox it names the workspace in front, so
+    // the label says which tasks show now; the ticked box beside it says they will change with the next switch.
     string WorkspaceFilterLabel(TaskWorkspaceFilter shown) =>
-        shown.Any ? "Workspace: all"
-        : where.FollowsCurrent ? $"Workspace: {PlaceOf(shown.Workspace).Name} (current)"
-        : $"Workspace: {PlaceOf(shown.Workspace).Name}";
+        shown.Any ? "Workspace: all" : $"Workspace: {PlaceOf(shown.Workspace).Name}";
 
     static string FilterName(TaskFilter shown) => shown switch
     {

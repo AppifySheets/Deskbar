@@ -225,11 +225,11 @@ public class TasksBoardTests
         t.Controller.FilterWorkspace(TaskWorkspaceFilter.Current);
         Assert.Equal([here], t.Window.Keys);
         Assert.Contains("Open 1", t.Window.FilterLabels);
-        Assert.Equal("Workspace: GEPHA (current)", t.Window.WorkspaceFilterLabel);
+        Assert.Equal("Workspace: GEPHA", t.Window.WorkspaceFilterLabel);
 
         SwitchTo(t, t.Sparrow);
         Assert.Equal([there], t.Window.Keys);
-        Assert.Equal("Workspace: Sparrow (current)", t.Window.WorkspaceFilterLabel);
+        Assert.Equal("Workspace: Sparrow", t.Window.WorkspaceFilterLabel);
 
         t.Controller.FilterWorkspace(TaskWorkspaceFilter.All);
         Assert.Equal([nowhere, there, here], t.Window.Keys);
@@ -251,7 +251,7 @@ public class TasksBoardTests
         t.Controller.Hide();
         t.Controller.Show();
         Assert.Equal([here], t.Window.Keys);
-        Assert.Equal("Workspace: GEPHA (current)", t.Window.WorkspaceFilterLabel);
+        Assert.Equal("Workspace: GEPHA", t.Window.WorkspaceFilterLabel);
 
         t.Controller.FilterWorkspace(TaskWorkspaceFilter.On(t.Sparrow));
         Assert.False(t.Harness.Manager.State.TasksPanel!.CurrentWorkspace);
@@ -2398,28 +2398,37 @@ public class TasksBoardTests
         Assert.Equal("Workspace: Sparrow", t.Window.WorkspaceFilterLabel);
     });
 
-    // "Current workspace" sits after "All workspaces" in the same menu, and once picked it is the outlined choice: no
-    // workspace chip is, not even the one in front, since picking that would pin the filter and stop it following.
+    // "Current workspace" is a checkbox beside the workspace filter (Petre: "let's just do a checkbox, it would be easier
+    // to tick/untick"). A click ticks it and the list follows the workspace in front; a second click unticks it and every
+    // workspace shows. Picking a workspace from the menu beside it unticks it, and the menu has no entry of its own for it.
     [Fact]
-    public void The_workspace_filter_menu_offers_the_current_workspace() => StaThread.Run(() =>
+    public void The_current_workspace_checkbox_ticks_and_unticks() => StaThread.Run(() =>
     {
         using var t = Build();
-        t.Tasks.AddNote("here", t.Gepha);
+        var here = t.Tasks.AddNote("here", t.Gepha).Value.Id;
+        var there = t.Tasks.AddNote("there", t.Sparrow).Value.Id;
         SwitchTo(t, t.Gepha);
         t.Controller.Show();
+        Assert.False(t.Window.CurrentWorkspaceOn);
 
+        Click(ButtonNamed(t.Window, "Current workspace"));
+        Assert.True(t.Window.CurrentWorkspaceOn);
+        Assert.Equal([here], t.Window.Keys);
+        Assert.Equal("checked", AutomationProperties.GetItemStatus(ButtonNamed(t.Window, "Current workspace")));
+
+        Click(ButtonNamed(t.Window, "Current workspace"));
+        Assert.False(t.Window.CurrentWorkspaceOn);
+        Assert.Equal([there, here], t.Window.Keys);
+        Assert.Equal("Workspace: all", t.Window.WorkspaceFilterLabel);
+
+        Click(ButtonNamed(t.Window, "Current workspace"));
         Click(ButtonNamed(t.Window, "Workspace filter"));
         var menu = Assert.IsAssignableFrom<ContextMenu>(t.Window.OpenedMenu);
-        Click(WorkspaceChipMenu.Chips(menu).Single(c => AutomationProperties.GetName(c) == "Current workspace"));
-        Assert.Equal("Workspace: GEPHA (current)", t.Window.WorkspaceFilterLabel);
-
-        Click(ButtonNamed(t.Window, "Workspace filter"));
-        var again = Assert.IsAssignableFrom<ContextMenu>(t.Window.OpenedMenu);
-        var outlined = WorkspaceChipMenu.Chips(again)
-            .Where(c => AutomationProperties.GetItemStatus(c) == WorkspaceChipMenu.CurrentStatus)
-            .Select(AutomationProperties.GetName).ToArray();
-        Assert.Equal(["Current workspace"], outlined);
-        again.IsOpen = false;
+        Assert.DoesNotContain(WorkspaceChipMenu.Chips(menu), c => AutomationProperties.GetName(c) == "Current workspace");
+        Assert.DoesNotContain(WorkspaceChipMenu.Chips(menu), c => AutomationProperties.GetItemStatus(c) == WorkspaceChipMenu.CurrentStatus);
+        Click(WorkspaceChipMenu.Chips(menu).Single(c => AutomationProperties.GetName(c) == "Sparrow"));
+        Assert.False(t.Window.CurrentWorkspaceOn);
+        Assert.Equal([there], t.Window.Keys);
     });
 
     // The screencast shoot on v2.5.189: the toolbar's dropdowns did not open by mouse, keyboard or UI Automation. UIA's

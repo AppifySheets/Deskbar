@@ -286,10 +286,11 @@ written for the floating window and now describe the panel; 64a to 64n cover wha
     status. Click "Closed": only closed tasks show, the latest closed first, each with "Reopen"; click "Reopen" on
     one and it goes back to the open view. "Workspace: all" lists every workspace as its coloured chip, grouped;
     pick one, then "none", then "All workspaces".
-    57a. Pick "Current workspace" under "Workspace: all": the label reads "Workspace: <name> (current)" and only that
-    workspace's tasks show. Switch to another named desktop: the list and the label follow it with no new pick.
-    Switch to a desktop with no name: only tasks on no workspace show. Close the panel and open it, then quit and
-    start Deskbar: "Current workspace" is still picked. Pick "All workspaces" and reopen: it starts at all again.
+    57a. Tick the "Current workspace" checkbox beside "Workspace: all": the box shows a blue tick, the label names the
+    workspace in front and only its tasks show. Switch to another named desktop: the list and the label follow it with
+    no new click. Switch to a desktop with no name: only tasks on no workspace show. Close the panel and open it, then
+    quit and start Deskbar: the box is still ticked. Untick it: every workspace shows. Tick it again, then pick a
+    workspace in the "Workspace" menu: the box unticks.
 58. Click into another app: the panel stays open. Close it with the x in its toolbar, then click "+N more": it
     comes back with the width you left it at. Quit and start Deskbar again: the width is kept (see 64e for the
     open state). `TasksWindow` in state.json is ignored.
