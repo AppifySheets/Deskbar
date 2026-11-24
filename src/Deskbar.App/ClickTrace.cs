@@ -1,4 +1,5 @@
 using System.IO;
+using System.Reflection;
 
 namespace Deskbar.App;
 
@@ -176,8 +177,21 @@ static class ClickTrace
     // Named once, because Announce reports which of the two switches turned tracing on.
     const string EnvironmentSwitch = "DESKBAR_TRACE";
 
-    static readonly bool Enabled =
-        Environment.GetEnvironmentVariable(EnvironmentSwitch) == "1" || Exists(MarkerPath) || Exists(OldMarkerPath);
+    static readonly bool Enabled = SwitchedOn(
+        Assembly.GetEntryAssembly()?.GetName().Name,
+        Environment.GetEnvironmentVariable(EnvironmentSwitch) == "1", Exists(MarkerPath), Exists(OldMarkerPath));
+
+    // Only Deskbar itself traces, decided by the entry assembly exactly as StartupRegistration.IsTheApp decides who may
+    // write the Run value. A test host references this assembly and resolves the marker through AppPaths too, and
+    // without DESKBAR_APPDATA that is the real profile: on a machine with trace.on in place, every run of
+    // Deskbar.Windows.Tests (scripts/test-hidden.ps1 included, a hidden desktop hides windows, not files) appended the
+    // tests' own bar, strip and click lines to the real %TEMP%\deskbar-trace.log, interleaved with the running
+    // Deskbar's, so a log read afterwards described windows that never existed. Measured 2026-11-24: ClickTrace.On was
+    // true inside testhost with %APPDATA%\Deskbar\trace.on present. The environment variable is refused there as well,
+    // since a shell that set DESKBAR_TRACE for the app passes it to `dotnet test` too, and the log is the same file.
+    // The `ctl` client is the same exe, so it keeps tracing as before.
+    internal static bool SwitchedOn(string? entryAssembly, bool environment, bool marker, bool oldMarker) =>
+        StartupRegistration.IsTheApp(entryAssembly) && (environment || marker || oldMarker);
 
     // Internal so the debug dump can attach the log's tail (DebugDump).
     internal static readonly string LogPath = Path.Combine(Path.GetTempPath(), "deskbar-trace.log");
