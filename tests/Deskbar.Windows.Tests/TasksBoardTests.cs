@@ -3518,6 +3518,117 @@ public class TasksBoardTests
         Assert.Single(t.Window.PendingImages(id));
     });
 
+    // --- pictures in the add box (task 5cc9f1d4: "paste an image into a new task ... as i can in comments") -------------
+
+    // + Add, Ctrl+V a screenshot, type a title, Enter: one new task, the words its title and the picture its description,
+    // saved as a file under the new task's own id. The box closes with nothing left waiting in it.
+    [Fact]
+    public void A_picture_pasted_into_the_add_box_becomes_the_new_tasks_description() => StaThread.Run(() =>
+    {
+        var root = ScratchRoot();
+        try
+        {
+            using var t = Build(stateDir: root);
+            t.Controller.Show();
+            Click(ButtonNamed(t.Window, "Add"));
+
+            Assert.True(t.Window.PasteIntoAdd(BitmapData()));
+            Assert.Single(RemoveButtons(t.Window));
+            Assert.True(t.Window.TypeNote("Bar looks wrong", Key.Enter));
+
+            var task = Assert.Single(t.Tasks.Board.Tasks);
+            Assert.Equal("Bar looks wrong", task.Title);
+            var parts = TaskImages.Split(task.Description);
+            Assert.Equal("", parts.Text);
+            var picture = Assert.Single(parts.Images);
+            Assert.StartsWith($"task-images/{task.Id}/", picture);
+            Assert.True(File.Exists(TaskImages.Resolve(picture, root).Value));
+            Assert.False(t.Window.AddBoxShown);
+            Assert.Empty(t.Window.AddBoxImages);
+        }
+        finally { Directory.Delete(root, true); }
+    });
+
+    // Petre: "also let me add just the image without a title too". Enter with only pictures adds a task called "Picture".
+    [Fact]
+    public void A_picture_alone_adds_a_task_called_picture() => StaThread.Run(() =>
+    {
+        var root = ScratchRoot();
+        try
+        {
+            using var t = Build(stateDir: root);
+            t.Controller.Show();
+            Click(ButtonNamed(t.Window, "Add"));
+
+            t.Window.PasteIntoAdd(BitmapData());
+            Assert.True(t.Window.TypeNote("", Key.Enter));
+
+            var task = Assert.Single(t.Tasks.Board.Tasks);
+            Assert.Equal("Picture", task.Title);
+            Assert.Single(TaskImages.Split(task.Description).Images);
+        }
+        finally { Directory.Delete(root, true); }
+    });
+
+    // Without pictures nothing changes: Enter on an empty box adds nothing and a plain note has no description.
+    [Fact]
+    public void The_add_box_without_pictures_adds_as_before() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        t.Controller.Show();
+        Click(ButtonNamed(t.Window, "Add"));
+
+        Assert.False(t.Window.TypeNote("", Key.Enter));
+        Assert.Empty(t.Tasks.Board.Tasks);
+        Assert.False(t.Window.PasteIntoAdd(new DataObject(DataFormats.UnicodeText, "just words")));
+        Assert.True(t.Window.TypeNote("Call the bank", Key.Enter));
+        Assert.Equal("", Assert.Single(t.Tasks.Board.Tasks).Description);
+    });
+
+    // Esc closes the box and the waiting pictures go with it: the next + Add starts empty, and no file was written.
+    [Fact]
+    public void Esc_drops_the_add_boxs_pictures() => StaThread.Run(() =>
+    {
+        var root = ScratchRoot();
+        try
+        {
+            using var t = Build(stateDir: root);
+            t.Controller.Show();
+            Click(ButtonNamed(t.Window, "Add"));
+            t.Window.PasteIntoAdd(BitmapData());
+
+            Assert.True(t.Window.Press(Key.Escape, ModifierKeys.None));
+            Click(ButtonNamed(t.Window, "Add"));
+
+            Assert.Empty(t.Window.AddBoxImages);
+            Assert.Empty(RemoveButtons(t.Window));
+            Assert.Empty(Directory.EnumerateFiles(root, "*", SearchOption.AllDirectories));
+        }
+        finally { Directory.Delete(root, true); }
+    });
+
+    // "Add subtask…" takes pictures too: the subtask gets them as its description, under its own id.
+    [Fact]
+    public void A_subtask_takes_pasted_pictures() => StaThread.Run(() =>
+    {
+        var root = ScratchRoot();
+        try
+        {
+            using var t = Build(stateDir: root);
+            var parent = t.Tasks.AddNote("Ship the release", t.Gepha).Value;
+            t.Controller.Show();
+            t.Window.BeginSubtaskAdd(parent.Id);
+
+            t.Window.PasteIntoAdd(BitmapData());
+            Assert.True(t.Window.TypeNote("Fix the dialog", Key.Enter));
+
+            var child = t.Tasks.Board.Tasks.Single(x => x.Title == "Fix the dialog");
+            Assert.Equal(Maybe.From(parent.Id), child.ParentId);
+            Assert.StartsWith($"task-images/{child.Id}/", Assert.Single(TaskImages.Split(child.Description).Images));
+        }
+        finally { Directory.Delete(root, true); }
+    });
+
     // The editor shows the description's words in its box and its pictures under it; a pasted one joins them, Enter saves
     // words and every picture, and Esc saves nothing and writes no file.
     [Fact]

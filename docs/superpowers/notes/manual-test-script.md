@@ -842,6 +842,13 @@ TI9. Delete the task (Delete for good): its task-images folder is gone. Close an
 TI10. In a Claude session on the task, `deskbar.cmd task list`: the comment's `markdown` carries the
      picture's full path, and the session can Read it without a permission prompt;
      ~/.claude/settings.json has one `Read(//c/.../Deskbar/task-images/**)` rule under permissions.allow.
+TI11. In the tasks panel, + Add, then Win+Shift+S a region and Ctrl+V in the add box: a thumbnail with an
+     x waits under the box. Type a title, Enter: the new task has that title, its open line shows the
+     picture under the description, and task-images\<new task id>\ holds one PNG.
+TI12. + Add, Ctrl+V a picture, Enter with nothing typed: a task called "Picture" whose closed line says
+     "image". Paste two first: "Pictures".
+TI13. + Add, Ctrl+V a picture, Esc, then + Add again: the box is empty and no file was written.
+     "Add subtask…" on a line, Ctrl+V, Enter: the subtask carries the picture.
 
 ## Comments wake their session
 

@@ -59,6 +59,25 @@ public sealed class TaskService(ITaskStore store, Func<DateTimeOffset> now, Func
     public Result<TaskItem> AddNote(string title, Maybe<Guid> workspace, Quadrant quadrant = Quadrant.IV, Maybe<Guid> parent = default) =>
         Board.AddNote(title, workspace, now(), makeId(), quadrant, parent).Tap(r => Commit(r.Board)).Map(r => r.Task);
 
+    /// <summary>
+    /// A note made with its description: the tasks panel's add box with pictures pasted into it. <paramref name="describe"/>
+    /// gets the new task's id, because the pictures are filed under it (task-images\&lt;task id&gt;\), and answers the
+    /// description, or why the pictures could not be written. The note and its description are ONE save and one pulse, so
+    /// nothing (the panel, the bar, a session's `task list`) ever sees the task without its pictures. A failed
+    /// <paramref name="describe"/> adds nothing; cleaning up whatever it wrote is its own job (TaskImageFiles.Save is all or
+    /// nothing).
+    /// </summary>
+    public Result<TaskItem> AddNote(string title, Maybe<Guid> workspace, Quadrant quadrant, Maybe<Guid> parent, Func<Guid, Result<string>> describe)
+    {
+        var at = now();
+        return Board.AddNote(title, workspace, at, makeId(), quadrant, parent)
+            .Bind(added => describe(added.Task.Id)
+                .Bind(description => added.Board.Describe(added.Task.Id, description, at))
+                .Map(board => (Board: board, Task: board.Tasks.Single(t => t.Id == added.Task.Id))))
+            .Tap(r => Commit(r.Board))
+            .Map(r => r.Task);
+    }
+
     /// <summary>A session splits its work (`task subtask`, TaskBoard.AddSubtask).</summary>
     public Result<TaskItem> AddSubtask(string sessionId, string title) =>
         Board.AddSubtask(sessionId, title, now(), makeId()).Tap(r => Commit(r.Board)).Map(r => r.Task);

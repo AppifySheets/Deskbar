@@ -185,6 +185,63 @@ public partial class TasksWindow
         return (TaskImages.Join(text, [.. editorKept, .. saved.Value]), saved.Value);
     }
 
+    // --- the add box ---------------------------------------------------------------------------------------------------
+    //
+    // A NEW TASK WITH PICTURES (task 5cc9f1d4, Petre: "add ability to paste an image into a new task ... as i can in
+    // comments; also let me add just the image without a title too"). Ctrl+V or a drop on the add box takes pictures the
+    // way a comment box does: pending, as thumbnails under the box, each with its x. Enter adds the task with the typed
+    // words as its title and the pictures as its DESCRIPTION, the task's own "what this is", which is where a new task's
+    // screenshot belongs and what a session started on it reads first (the briefing). With no words, the title is
+    // "Picture" (TaskImages.TitleFor). The files are filed under the new task's id, which only exists once the board makes
+    // the task, so the add hands TaskService a `describe` that writes them for that id, and the task and its description
+    // are one save (TaskService.AddNote). Esc, or the box closing, drops the pending pictures; nothing was written yet.
+
+    readonly List<TaskImageFiles.Pending> addImages = [];
+
+    /// <summary>For the tests: the pictures waiting in the add box.</summary>
+    internal IReadOnlyList<TaskImageFiles.Pending> AddBoxImages => addImages;
+
+    /// <summary>A paste or drop on the add box: true when it held pictures, which wait under the box; false for text alone.</summary>
+    internal bool PasteIntoAdd(IDataObject data) => Took(TaskImageFiles.FromData(data), taken =>
+    {
+        addImages.AddRange(taken);
+        RefreshAddPictures();
+    });
+
+    // Hooked up once, by the constructor: the add box is built by the XAML and lives as long as the window.
+    void TakeAddPictures()
+    {
+        AddBox.PreviewKeyDown += (_, e) =>
+        {
+            if (IsPaste(e)) e.Handled = ClipboardData() is { HasValue: true } data && PasteIntoAdd(data.Value);
+        };
+        AcceptDrops(AddBox, PasteIntoAdd);
+    }
+
+    void RefreshAddPictures() =>
+        Fill(AddPictures, addImages.Select(p => p.Thumbnail).ToArray(), i =>
+        {
+            addImages.RemoveAt(i);
+            RefreshAddPictures();
+        });
+
+    // The box closed (Enter added the task, or Esc): the pictures go with it.
+    void ClearAddPictures()
+    {
+        addImages.Clear();
+        RefreshAddPictures();
+    }
+
+    // What the add hands TaskService.AddNote: none without pictures (a plain note, as before), else the writer of the
+    // new task's description, the pending pictures saved under its id and nothing else in it (the words are the title).
+    // A copy of the list, so a paste landing mid-add cannot change what is written.
+    Func<Guid, Result<string>>? AddDescription()
+    {
+        if (addImages.Count == 0) return null;
+        var pictures = addImages.ToArray();
+        return id => TaskImageFiles.Save(StateDir, id, pictures, Now()).Map(saved => TaskImages.Join("", saved));
+    }
+
     // --- shared --------------------------------------------------------------------------------------------------------
 
     // Pictures written for a post or an edit that was then refused: deleted again, so a refusal leaves nothing behind. A

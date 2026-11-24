@@ -377,6 +377,43 @@ public sealed class TaskServiceTests
         Assert.Equal(0, heard);
     }
 
+    // A note added with its description (the tasks panel's add box with pictures pasted into it): the description is
+    // made from the new task's own id, because the pictures are filed under it, and the note and its description are one
+    // save and one pulse, so nothing ever sees the task without them.
+    [Fact]
+    public void A_note_with_a_description_is_one_save()
+    {
+        var s = NewService();
+        var pulses = 0;
+        using var sub = s.Changed.Subscribe(_ => pulses++);
+        var describedFor = Guid.Empty;
+
+        var note = s.AddNote("Picture", ws, Quadrant.IV, Maybe<Guid>.None, id =>
+        {
+            describedFor = id;
+            return Result.Success($"![image](task-images/{id}/1.png)");
+        }).Value;
+
+        Assert.Equal(note.Id, describedFor);
+        Assert.Equal($"![image](task-images/{note.Id}/1.png)", note.Description);
+        Assert.Equal(note.Description, s.Board.Tasks.Single().Description);
+        Assert.Equal(1, store.Saves);
+        Assert.Equal(1, pulses);
+    }
+
+    // The pictures could not be written: no task, no save, and the reason comes back for the problem line.
+    [Fact]
+    public void A_description_that_fails_adds_nothing()
+    {
+        var s = NewService();
+
+        var added = s.AddNote("Picture", ws, Quadrant.IV, Maybe<Guid>.None, _ => Result.Failure<string>("disk full"));
+
+        Assert.Equal("disk full", added.Error);
+        Assert.Empty(s.Board.Tasks);
+        Assert.Equal(0, store.Saves);
+    }
+
     sealed class FakeTaskStore : ITaskStore
     {
         public TaskBoard Stored { get; set; } = TaskBoard.Empty;

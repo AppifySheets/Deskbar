@@ -101,4 +101,14 @@ public class TaskImagesTests
     [InlineData("task-images/t/1 2.png")]
     public void Resolve_refuses_anything_else(string relative) =>
         Assert.True(TaskImages.Resolve(relative, @"C:\S").HasNoValue);
+
+    // A new task made of pictures alone (the tasks panel's add box, Petre: "let me add just the image without a title
+    // too"): it needs a title all the same, so it gets one that says what it is. Words typed with the pictures win.
+    [Theory]
+    [InlineData("", 1, "Picture")]
+    [InlineData("   ", 2, "Pictures")]
+    [InlineData("Bar looks wrong", 1, "Bar looks wrong")]
+    [InlineData("", 0, "")]
+    public void TitleFor_names_a_task_of_pictures_alone(string text, int pictures, string title) =>
+        Assert.Equal(title, TaskImages.TitleFor(text, pictures));
 }

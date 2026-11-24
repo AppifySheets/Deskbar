@@ -57,6 +57,15 @@ public static class TaskImages
             : body + "\n\n" + string.Join("\n", lines);
     }
 
+    /// <summary>
+    /// The title of a new task made in the tasks panel's add box: the words typed, or, when only pictures were pasted
+    /// (Petre: "let me add just the image without a title too"), "Picture" or "Pictures", because a task always needs a
+    /// title (the bar, the briefing and `task list` all lead with it) and that one says what the task holds. Rename it
+    /// later like any other. Nothing typed and nothing pasted stays empty, which the board refuses as before.
+    /// </summary>
+    public static string TitleFor(string text, int pictures) =>
+        !string.IsNullOrWhiteSpace(text) || pictures == 0 ? text ?? "" : pictures == 1 ? "Picture" : "Pictures";
+
     /// <summary>Whether a relative path is one of Deskbar's own task images (see the header for why so narrow).</summary>
     public static bool IsOurs(string relative) =>
         OurPath.IsMatch(relative ?? "") && relative!.Split('/').All(segment => segment is not ("." or ".."));

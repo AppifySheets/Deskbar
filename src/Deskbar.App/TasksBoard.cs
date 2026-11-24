@@ -196,7 +196,7 @@ public sealed class TasksBoard : IDisposable
             MoveTo: (id, workspace) => MoveTo(id, workspace),
             Delete: id => Delete(id),
             Comment: (id, markdown) => Comment(id, markdown).IsSuccess,
-            AddNote: (title, workspace, quadrant) => AddNote(title, workspace, quadrant).IsSuccess,
+            AddNote: (title, workspace, quadrant, describe) => AddNote(title, workspace, quadrant, describe: describe).IsSuccess,
             SetFlag: (id, flag, on) => SetFlag(id, flag, on),
             Place: (id, quadrant, place) => Place(id, quadrant, place),
             ShowMatrix: on => Report(manager.SetTasksMatrix(on)),
@@ -215,7 +215,7 @@ public sealed class TasksBoard : IDisposable
             OpenSession = openSession is null ? null : (id, session) => OpenSession(id, session),
             SubtaskParent = id => tasks.Board.SubtaskParentFor(id)
                 .Match(p => new SubtaskParentView(p.Id, p.Title, p.WorkspaceId), () => (SubtaskParentView?)null),
-            AddSubtask = (title, workspace, quadrant, parent) => AddNote(title, workspace, quadrant, parent).IsSuccess,
+            AddSubtask = (title, workspace, quadrant, parent, describe) => AddNote(title, workspace, quadrant, parent, describe).IsSuccess,
             ShowTask = ShowTask,
             ParentChoices = id => TaskViews.ParentChoices(tasks.Board, id),
             SetParent = (id, parent) => Report(tasks.SetParent(id, parent)).IsSuccess,
@@ -641,10 +641,15 @@ public sealed class TasksBoard : IDisposable
 
     /// <summary>
     /// One of Petre's notes, in the backlog, where the add box's chip says, with the flags its toggles say (Ruling 37):
-    /// it lands at the top of that quadrant.
+    /// it lands at the top of that quadrant. <paramref name="describe"/>, when the add box holds pasted pictures, writes them
+    /// under the new task's id and answers its description (TaskService.AddNote); a failure there adds nothing and shows
+    /// on the problem line like any other refusal.
     /// </summary>
-    public Result AddNote(string title, Maybe<Guid> workspace, Quadrant quadrant = Quadrant.IV, Maybe<Guid> parent = default) =>
-        Report(tasks.AddNote(title, workspace, quadrant, parent).Bind(_ => Result.Success()));
+    public Result AddNote(string title, Maybe<Guid> workspace, Quadrant quadrant = Quadrant.IV, Maybe<Guid> parent = default,
+        Func<Guid, Result<string>>? describe = null) =>
+        Report((describe is null
+            ? tasks.AddNote(title, workspace, quadrant, parent)
+            : tasks.AddNote(title, workspace, quadrant, parent, describe)).Bind(_ => Result.Success()));
 
     /// <summary>A comment from Petre (no session), shown as "you". Its thread stays open to show it.</summary>
     public Result Comment(Guid id, string markdown)
@@ -1080,7 +1085,9 @@ internal sealed record TasksWindowActions(
     Action<Guid, Maybe<Guid>> MoveTo,
     Action<Guid> Delete,
     Func<Guid, string, bool> Comment,
-    Func<string, Maybe<Guid>, Quadrant, bool> AddNote,
+    // The add box's note: title, workspace, flags, and the writer of its description when pictures were pasted (none
+    // for a plain note); whether it worked.
+    Func<string, Maybe<Guid>, Quadrant, Func<Guid, Result<string>>?, bool> AddNote,
     Action<Guid, TaskFlag, bool> SetFlag,
     Action<Guid, Quadrant, TaskPlace> Place,
     Action<bool> ShowMatrix,
@@ -1108,8 +1115,8 @@ internal sealed record TasksWindowActions(
     /// </summary>
     public Func<Guid, SubtaskParentView?>? SubtaskParent { get; init; }
 
-    /// <summary>Adds a subtask under the parent (the last argument), as AddNote adds a note; whether it worked.</summary>
-    public Func<string, Maybe<Guid>, Quadrant, Guid, bool>? AddSubtask { get; init; }
+    /// <summary>Adds a subtask under the parent (the fourth argument), as AddNote adds a note, pictures included; whether it worked.</summary>
+    public Func<string, Maybe<Guid>, Quadrant, Guid, Func<Guid, Result<string>>?, bool>? AddSubtask { get; init; }
 
     /// <summary>Shows one task: picked, its thread open, scrolled into view (TasksBoard.ShowTask). A subtask in a thread uses it.</summary>
     public Action<Guid>? ShowTask { get; init; }

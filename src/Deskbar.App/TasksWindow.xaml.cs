@@ -168,6 +168,8 @@ public partial class TasksWindow : Window
         AddHandler(MouseLeftButtonUpEvent, new MouseButtonEventHandler((_, _) => Flush()), handledEventsToo: true);
         AddBox.TextChanged += (_, _) => AddPlaceholder.Visibility = AddBox.Text.Length == 0 ? Visibility.Visible : Visibility.Collapsed;
         AddBox.PreviewKeyDown += (_, e) => e.Handled = PressInAdd(e.Key) != KeyOutcome.Ignored;
+        // Ctrl+V and drops of pictures on the add box (TasksWindow.Images.cs, "the add box").
+        TakeAddPictures();
         // The search box: every keystroke goes to the controller at once, which narrows and redraws (no debounce, see
         // TasksBoard.Search for why). The box is never written by a redraw, only read, so typing keeps its text, caret
         // and keyboard through every redraw ("the search box" below).
@@ -2072,6 +2074,7 @@ public partial class TasksWindow : Window
         addChosen = null;
         addParent = null;
         ResetAddFlags();
+        ClearAddPictures();
         AddRow.Visibility = Visibility.Collapsed;
     }
 
@@ -2153,9 +2156,13 @@ public partial class TasksWindow : Window
     {
         if (key is not (Key.Enter or Key.Return)) return KeyOutcome.Ignored;
         var target = addChosen ?? latest?.AddTarget;
+        // Pasted pictures (TasksWindow.Images.cs, "the add box"): they become the description, and with no words typed the
+        // task is called "Picture".
+        var title = TaskImages.TitleFor(AddBox.Text, AddBoxImages.Count);
+        var describe = AddDescription();
         var added = addParent is { } parent
-            ? Actions?.AddSubtask is { } addSubtask && target is not null && addSubtask(AddBox.Text, target.Workspace, AddQuadrant, parent.Id)
-            : Actions is not null && target is not null && Actions.AddNote(AddBox.Text, target.Workspace, AddQuadrant);
+            ? Actions?.AddSubtask is { } addSubtask && target is not null && addSubtask(title, target.Workspace, AddQuadrant, parent.Id, describe)
+            : Actions is not null && target is not null && Actions.AddNote(title, target.Workspace, AddQuadrant, describe);
         if (!added) return KeyOutcome.NewLine;
         HideAdd();
         return KeyOutcome.Posted;

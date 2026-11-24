@@ -128,9 +128,12 @@
                     <WrapPanel x:Name="Filters" Margin="0,6,0,-4"/>
                 </StackPanel>
             </Border>
-            <!-- The add box, shown by "+ Add" and hidden again by Enter or Esc. -->
+            <!-- The add box, shown by "+ Add" and hidden again by Enter or Esc. Pictures pasted or dropped on it wait as
+                 thumbnails in AddPictures, under the box, and become the new task's description (TasksWindow.Images.cs,
+                 "the add box"). -->
             <Border x:Name="AddRow" DockPanel.Dock="Top" Visibility="Collapsed" Padding="10,6,10,6"
                     BorderBrush="#FF33353C" BorderThickness="0,0,0,1">
+              <StackPanel>
                 <DockPanel>
                     <StackPanel x:Name="AddEnd" DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center"/>
                     <Border CornerRadius="4" Background="#FF15161A" BorderBrush="#FF4F8CFF" BorderThickness="1" Padding="6,3">
@@ -142,6 +145,8 @@
                         </Grid>
                     </Border>
                 </DockPanel>
+                <WrapPanel x:Name="AddPictures" Margin="0,4,0,0" Visibility="Collapsed"/>
+              </StackPanel>
             </Border>
             <!-- Why the last action failed, until the next one works (TasksWindow.ShowProblem). -->
             <TextBlock x:Name="ProblemText" DockPanel.Dock="Top" Foreground="#FFFFA726" FontSize="12" TextWrapping="Wrap"
