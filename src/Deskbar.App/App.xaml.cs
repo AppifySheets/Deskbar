@@ -1713,6 +1713,9 @@ public partial class App : Application
                 Confirm = question => MessageBox.Show(question, "Deskbar", MessageBoxButton.YesNo, MessageBoxImage.Question) == MessageBoxResult.Yes,
                 PickFolder = PickClaudeFolder,
                 OfferTrustTerminal = message => MessageBox.Show(message, "Deskbar", MessageBoxButton.YesNo, MessageBoxImage.Warning) == MessageBoxResult.Yes,
+                // Task 3641561d: a start that found no claude.exe offers to install Claude Code in a terminal.
+                OfferInstall = message => MessageBox.Show(message, "Deskbar", MessageBoxButton.YesNo, MessageBoxImage.Question) == MessageBoxResult.Yes,
+                ClaudeInstalled = () => Deskbar.Windows.Claude.ClaudeLocator.Find().HasValue,
                 Tell = message => MessageBox.Show(message, "Deskbar", MessageBoxButton.OK, MessageBoxImage.Information),
                 // A double-click that brings back a task the keeper gave up on clears the give-up's resume count.
                 Forget = claudeSessions.Forget,

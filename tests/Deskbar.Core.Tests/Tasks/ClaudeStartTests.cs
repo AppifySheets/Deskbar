@@ -240,6 +240,62 @@ public class ClaudeStartTests
         Assert.False(launch.Title.HasValue);
     }
 
+    // Task 3641561d, "install claude code when start claude on this doesn't have claude installed": the install window
+    // is a new Windows Terminal window in the folder running Windows PowerShell on an encoded script, so neither wt (which
+    // splits commands at ';') nor the cmd hop of ProgramStarter re-reads a character of it, and -NoExit keeps the window
+    // open on whatever the installer said.
+    [Fact]
+    public void The_install_window_runs_the_encoded_install_script_in_the_folder()
+    {
+        var launch = ClaudeStart.InstallWindow(@"C:\repos\Deskbar\");
+
+        Assert.Equal("wt.exe", launch.Program);
+        Assert.Equal(
+            ["-w", "new", "-d", @"C:\repos\Deskbar", "powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-NoExit",
+                "-EncodedCommand", ClaudeStart.Encoded(ClaudeStart.InstallScript)],
+            launch.Arguments);
+        Assert.Equal(@"C:\repos\Deskbar", launch.WorkingDirectory);
+    }
+
+    // Without Windows Terminal (task abfe1db8) the same PowerShell runs in a console of its own, with no title, so it is
+    // expected by PowerShell's process name.
+    [Fact]
+    public void The_install_console_runs_the_same_powershell_without_a_title()
+    {
+        var launch = ClaudeStart.InstallConsole(@"C:\repos\Deskbar\");
+
+        Assert.Equal("powershell.exe", launch.Program);
+        Assert.Equal(ClaudeStart.InstallWindow(@"C:\repos\Deskbar").Arguments.Skip(5), launch.Arguments);
+        Assert.Equal(@"C:\repos\Deskbar", launch.WorkingDirectory);
+        Assert.False(launch.Title.HasValue);
+    }
+
+    // -EncodedCommand is base64 of the script's UTF-16LE bytes (PowerShell's own rule), and its alphabet has no ';', '&',
+    // '|' or quote for wt or cmd to read.
+    [Fact]
+    public void The_encoded_script_is_base64_of_utf16()
+    {
+        var encoded = ClaudeStart.Encoded(ClaudeStart.InstallScript);
+
+        Assert.Equal(ClaudeStart.InstallScript, System.Text.Encoding.Unicode.GetString(Convert.FromBase64String(encoded)));
+        Assert.Matches("^[A-Za-z0-9+/=]+$", encoded);
+    }
+
+    // The script fetches Claude Code's official installer into a file and runs THAT (an `exit` in a script run through
+    // `irm | iex` would close the window before anyone could read why, measured), then runs the installed claude.exe so
+    // the sign-in and the folder's trust prompt happen in the same window.
+    [Fact]
+    public void The_install_script_runs_the_official_installer_from_a_file_then_claude()
+    {
+        var script = ClaudeStart.InstallScript;
+
+        Assert.Contains(ClaudeStart.InstallerUrl, script);
+        Assert.Contains("-OutFile", script);
+        Assert.DoesNotContain("iex", script, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains(@"'.local\bin\claude.exe'", script);
+        Assert.True(script.IndexOf(ClaudeStart.InstallerUrl, StringComparison.Ordinal) < script.IndexOf("& $claude", StringComparison.Ordinal));
+    }
+
     // CreateProcess gets one command line: the program always quoted (its folder can hold spaces), plain arguments as
     // they are, and an argument with a space or a quote quoted by the C runtime's rules.
     [Fact]

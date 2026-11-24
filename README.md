@@ -620,8 +620,11 @@ Where Windows Terminal is not installed, as on Windows Server 2022, these window
 windows running `claude.exe`, with the same title, so they are found again the same way. This needs the Claude
 Code CLI's `claude.exe`, which Deskbar finds on the PATH (as the
 registry has it now, so an install made while Deskbar runs counts) or in the native installer's
-`%USERPROFILE%\.local\bin`. An npm install alone is not enough, since it has no `claude.exe`. A start or a window
-that fails says so in a message box as well as in the thread.
+`%USERPROFILE%\.local\bin`. An npm install alone is not enough, since it has no `claude.exe`. When "Start Claude on
+this" finds no `claude.exe`, Deskbar offers to install Claude Code: Yes opens a terminal in the chosen folder that runs
+Claude Code's official installer (`https://claude.ai/install.ps1`) and then `claude`, so you sign in and trust the
+folder there, and "Start Claude on this" works after that. A start or a window that fails for any other reason says so
+in a message box as well as in the thread.
 
 The first time Deskbar changes `settings.json` it keeps the original as `settings.json.deskbar-backup`,
 and it leaves a file with comments in it alone.

@@ -51,6 +51,14 @@ namespace Deskbar.App;
 // folder offers a plain terminal running `claude` there, so Petre answers the trust prompt himself: Deskbar never
 // accepts trust for him.
 //
+// A START WITHOUT CLAUDE CODE (task 3641561d). When the start failed because no claude.exe can be found (the seam
+// ClaudeInstalled, asked once the failure is in), Petre is asked whether to install it, with the folder he chose named.
+// "Yes" opens a terminal there running Claude Code's official installer and then claude itself (ClaudeStart.InstallWindow,
+// InstallConsole), where he signs in and trusts the folder; after that, "Start Claude on this" works. Nothing is retried on
+// its own: a session cannot start before he has signed in, and a retry would only fail again with a second message. "No"
+// leaves the reason, with the way to install by hand, in the task's thread. The question is asked whichever way the start
+// came (a menu, the thread's button, the pipe's `task start`), as the trust question is.
+//
 // THREADS. Everything here runs on the UI thread (`scheduler` in the app); the answers of `claude` arrive back on it.
 public sealed class ClaudeTaskActions : IDisposable
 {
@@ -62,6 +70,11 @@ public sealed class ClaudeTaskActions : IDisposable
 
     /// <summary>What an untrusted folder's failure adds to Claude's own message, as a Yes/No question.</summary>
     public const string TrustQuestion = "Open a terminal there so you can trust it?";
+
+    /// <summary>The question after a start found no Claude Code (see the header), below the folder it would start in.</summary>
+    public const string InstallQuestion =
+        "Install it now? A terminal opens there, runs Claude Code's official installer and then starts Claude so you can "
+        + "sign in and trust the folder. After that, choose Start Claude on this again.";
 
     /// <summary>Why nothing starts while the feature is off.</summary>
     public const string FeatureOff =
@@ -236,8 +249,13 @@ public sealed class ClaudeTaskActions : IDisposable
             ? Launch(task, new LaunchTarget(terminal, TerminalProcess), seams.Launch)
             // The console's ProgramLaunch is only what StartIn names the expectation by (claude.exe's file name); the
             // start itself is the console's, with its title and environment.
-            : Launch(task, new LaunchTarget(new ProgramLaunch(console.Program, console.Arguments, console.WorkingDirectory), ConsoleProcess),
+            : Launch(task, new LaunchTarget(new ProgramLaunch(console.Program, console.Arguments, console.WorkingDirectory), ConsoleProcessOf(console)),
                 _ => seams.OpenConsole(console));
+
+    // The process a console window shows as: its own program's (a classic console window reports its client as its owner),
+    // so claude for the attach and trust consoles, whether claude.exe came by its full path or by name, and powershell for
+    // the install console.
+    static string ConsoleProcessOf(ConsoleLaunch console) => System.IO.Path.GetFileNameWithoutExtension(console.Program);
 
     // Expected on its workspace (the one in front for a free task) through StartIn, so it lands there like any program
     // `deskbar.cmd start` starts. With no workspace at all (an unnamed desktop in front) it is started where Petre is.
@@ -325,12 +343,18 @@ public sealed class ClaudeTaskActions : IDisposable
         return Result.Success();
     }
 
-    // Claude's words in the thread; an untrusted folder (measured: "Workspace not trusted. Run `claude` in <folder> once
+    // No Claude Code at all comes first (see the header): the install question instead of the failure. Otherwise Claude's
+    // words in the thread; an untrusted folder (measured: "Workspace not trusted. Run `claude` in <folder> once
     // and accept the trust prompt, then retry.") also offers the terminal in which Petre can trust it. Any other failure
     // (`claude` missing from the PATH, say) is also told to him at once (final review, item 12): Start answered
     // "under way" a moment ago, and a failure that only reaches the thread looks like nothing happened.
     void StartFailed(Guid taskId, string folder, string error)
     {
+        if (!seams.ClaudeInstalled())
+        {
+            OfferInstall(taskId, folder, error);
+            return;
+        }
         Say(taskId, $"Deskbar could not start a Claude session in {folder}:\n\n{error}");
         if (!error.Contains("not trusted", StringComparison.OrdinalIgnoreCase))
         {
@@ -341,6 +365,19 @@ public sealed class ClaudeTaskActions : IDisposable
         var claude = seams.Claude();
         Current(taskId).Tap(task => Launch(task, ClaudeStart.TrustWindow(folder, claude), ClaudeStart.TrustConsole(folder, claude))
             .TapError(e => SayAndTell(taskId, $"Deskbar could not open a terminal in {folder}:\n\n{e}")));
+    }
+
+    // Claude Code is not installed: asked first, and on "Yes" the install window opens in the folder on the task's
+    // workspace, like the trust window. "No" keeps the reason in the thread, since he chose not to act on it now.
+    void OfferInstall(Guid taskId, string folder, string error)
+    {
+        if (!seams.OfferInstall($"Claude Code is not installed on this computer, so Deskbar could not start a session in {folder}.\n\n{InstallQuestion}"))
+        {
+            Say(taskId, $"Deskbar could not start a Claude session in {folder}:\n\n{error}");
+            return;
+        }
+        Current(taskId).Tap(task => Launch(task, ClaudeStart.InstallWindow(folder), ClaudeStart.InstallConsole(folder))
+            .TapError(e => SayAndTell(taskId, $"Deskbar could not open a terminal to install Claude Code in {folder}:\n\n{e}")));
     }
 
     // --- the thread -------------------------------------------------------------------------------------------------
@@ -399,6 +436,18 @@ public sealed record ClaudeTaskSeams(
 
     /// <summary>The untrusted folder's message with its Yes/No question; yes opens the terminal.</summary>
     public Func<string, bool> OfferTrustTerminal { get; init; } = _ => false;
+
+    /// <summary>
+    /// The question after a start found no Claude Code (ClaudeTaskActions.InstallQuestion under the reason); yes opens the
+    /// install window. No by default.
+    /// </summary>
+    public Func<string, bool> OfferInstall { get; init; } = _ => false;
+
+    /// <summary>
+    /// Whether claude.exe can be found (ClaudeLocator.Find in the app, asked fresh each time); yes by default, so a failed
+    /// start is reported as before unless the app says Claude Code is missing.
+    /// </summary>
+    public Func<bool> ClaudeInstalled { get; init; } = () => true;
 
     /// <summary>A refusal or a failure said to Petre at once (the feature is off, `claude` or `wt` missing).</summary>
     public Action<string> Tell { get; init; } = _ => { };

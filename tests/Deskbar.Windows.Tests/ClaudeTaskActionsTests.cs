@@ -49,6 +49,9 @@ public class ClaudeTaskActionsTests
         public Func<string, Result<string>> StartAnswer { get; set; } = _ => Result.Success(SessionId);
         public bool Confirms { get; set; }
         public bool TrustsTerminal { get; set; }
+        // Whether claude.exe can be found (ClaudeLocator), and the answer to the install question when it cannot.
+        public bool Installed { get; set; } = true;
+        public bool Installs { get; set; }
         public Func<TaskSession, bool> Transcript { get; set; } = _ => true;
         public Maybe<nint> Editor { get; set; } = Maybe<nint>.None;
         public IReadOnlyList<string> EditorNames { get; set; } = [];
@@ -91,6 +94,12 @@ public class ClaudeTaskActionsTests
                     Asked.Add(message);
                     return TrustsTerminal;
                 },
+                OfferInstall = message =>
+                {
+                    Asked.Add(message);
+                    return Installs;
+                },
+                ClaudeInstalled = () => Installed,
                 Tell = Told.Add,
                 Forget = Forgotten.Add,
                 HasWindowsTerminal = () => HasTerminal,
@@ -368,6 +377,83 @@ public class ClaudeTaskActionsTests
         Assert.Equal(Folder, console.WorkingDirectory);
         Assert.False(console.Title.HasValue);
         Assert.Empty(rig.Told);
+    }
+
+    // Task 3641561d: "Start Claude on this" on a machine without Claude Code. Instead of only the not-found message, Petre
+    // is asked whether to install it, and "Yes" opens a terminal in the chosen folder running the official installer and
+    // then claude, expected on the task's workspace like every other window Deskbar opens for a task. The question is the
+    // whole answer, so nothing else is told and nothing is said in the thread.
+    [Fact]
+    public void Without_claude_a_start_offers_to_install_it_in_a_terminal()
+    {
+        using var rig = new Rig { Installed = false, Installs = true };
+        var task = rig.ClaudeTask();
+        rig.Listed();
+        rig.StartAnswer = _ => Result.Failure<string>("Claude Code is not installed where Deskbar can find it.");
+
+        Assert.True(rig.Actions.Start(task, Folder).IsSuccess);
+        rig.Settle();
+
+        var asked = Assert.Single(rig.Asked);
+        Assert.Contains(Folder, asked);
+        Assert.EndsWith(ClaudeTaskActions.InstallQuestion, asked, StringComparison.Ordinal);
+        Assert.Equal(ClaudeStart.InstallWindow(Folder), Assert.Single(rig.Launches), LaunchComparer.Instance);
+        Assert.True(rig.Harness.Manager.AwaitsAny("WindowsTerminal"));
+        Assert.Empty(rig.Told);
+        Assert.Empty(rig.TaskOf(task.Id).Comments);
+    }
+
+    // Without Windows Terminal the installer runs in a console of PowerShell's own, expected by that process's name.
+    [Fact]
+    public void Without_claude_or_windows_terminal_the_install_runs_in_a_console()
+    {
+        using var rig = new Rig { Installed = false, Installs = true, HasTerminal = false };
+        var task = rig.ClaudeTask();
+        rig.Listed();
+        rig.StartAnswer = _ => Result.Failure<string>("Claude Code is not installed where Deskbar can find it.");
+
+        rig.Actions.Start(task, Folder);
+        rig.Settle();
+
+        Assert.Empty(rig.Launches);
+        Assert.Equal("powershell.exe", Assert.Single(rig.Consoles).Program);
+        Assert.True(rig.Harness.Manager.AwaitsAny("powershell"));
+    }
+
+    // "No" installs nothing; the reason, with the way to install by hand, stays in the task's thread.
+    [Fact]
+    public void Without_claude_declining_the_install_leaves_the_reason_in_the_thread()
+    {
+        using var rig = new Rig { Installed = false, Installs = false };
+        var task = rig.ClaudeTask();
+        rig.Listed();
+        rig.StartAnswer = _ => Result.Failure<string>("Claude Code is not installed where Deskbar can find it.");
+
+        rig.Actions.Start(task, Folder);
+        rig.Settle();
+
+        Assert.Single(rig.Asked);
+        Assert.Empty(rig.Launches);
+        Assert.Empty(rig.Consoles);
+        Assert.Contains(rig.TaskOf(task.Id).Comments, c => c.Markdown.Contains("not installed"));
+        Assert.Empty(rig.Told);
+    }
+
+    // A failure while claude IS installed is not an install question, whatever it says.
+    [Fact]
+    public void With_claude_installed_a_failure_is_told_not_offered_an_install()
+    {
+        using var rig = new Rig { Installs = true };
+        var task = rig.ClaudeTask();
+        rig.Listed();
+        rig.StartAnswer = _ => Result.Failure<string>("claude exited with code 1.");
+
+        rig.Actions.Start(task, Folder);
+        rig.Settle();
+
+        Assert.Empty(rig.Asked);
+        Assert.Empty(rig.Launches);
+        Assert.Single(rig.Told);
     }
 
     // With the feature off, nothing starts and Petre is told why.

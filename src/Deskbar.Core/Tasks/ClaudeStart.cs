@@ -123,6 +123,77 @@ public static class ClaudeStart
     public static ConsoleLaunch TrustConsole(string folder, string claude = "claude") =>
         new(claude, [], Bare(folder), Maybe<string>.None);
 
+    // INSTALLING CLAUDE CODE (task 3641561d, "install claude code when start claude on this doesn't have claude installed").
+    // On a machine with no claude.exe, "Start Claude on this" used to end at ClaudeLocator.NotFound: a message box telling
+    // Petre (or a colleague) to open PowerShell and paste the installer's one-liner. Deskbar now offers to do that for him
+    // in a window he can watch: Windows PowerShell runs Claude Code's official installer, then the claude.exe it installed,
+    // in the task's folder, so the sign-in and the folder's trust prompt are answered in the same window (Deskbar never
+    // answers either for him, as with TrustWindow). Once he has signed in, "Start Claude on this" works.
+    //
+    // Why the script is shaped as it is (measured on Petre's machine, 2026-11-24):
+    //   * The installer is saved to a file and run with `&`, not piped into `iex` as its own docs show. It ends its failures
+    //     with `exit 1`, and an `exit` inside `iex` or a script block closes the whole PowerShell, so the window would
+    //     vanish with the reason in it. An `exit` in a script FILE ends only that file.
+    //   * It goes as -EncodedCommand (base64 of UTF-16LE): wt splits its command line into commands at every ';' and
+    //     ProgramStarter's start goes through cmd, which reads & | < >. Base64 has none of those.
+    //   * -ExecutionPolicy Bypass for this one process, because the file is a script and Windows' default policy for
+    //     Windows PowerShell refuses scripts. -NoExit keeps the window, and what the installer said, after it finishes.
+    //   * Windows PowerShell (powershell.exe), not pwsh: it is on every Windows, Server 2022 included.
+    //   * The installer's `claude install` puts claude.exe in %USERPROFILE%\.local\bin, the folder ClaudeLocator always
+    //     searches, so the next start finds it without a restart even though that folder may not be on the PATH yet.
+
+    /// <summary>Claude Code's official installer for Windows (its docs' <c>irm https://claude.ai/install.ps1 | iex</c>).</summary>
+    public const string InstallerUrl = "https://claude.ai/install.ps1";
+
+    /// <summary>
+    /// The PowerShell the install window runs: the official installer, saved to a file and run from it, then the installed
+    /// claude.exe in the window's folder so Petre signs in and trusts the folder; a clear line when the install failed.
+    /// </summary>
+    public static readonly string InstallScript = string.Join("\n",
+        "$ErrorActionPreference = 'Stop'",
+        $"Write-Host 'Deskbar is installing Claude Code with its official installer, {InstallerUrl}' -ForegroundColor Cyan",
+        "$installer = Join-Path $env:TEMP 'deskbar-claude-install.ps1'",
+        "try {",
+        $"  Invoke-RestMethod -Uri '{InstallerUrl}' -OutFile $installer",
+        "  & $installer",
+        "} catch {",
+        "  Write-Host $_ -ForegroundColor Red",
+        "} finally {",
+        "  Remove-Item $installer -ErrorAction SilentlyContinue",
+        "}",
+        @"$claude = Join-Path $env:USERPROFILE '.local\bin\claude.exe'",
+        "if (Test-Path $claude) {",
+        "  Write-Host 'Claude Code is installed. Sign in and trust this folder below, then go back to the task in Deskbar and choose Start Claude on this again.' -ForegroundColor Green",
+        "  & $claude",
+        "} else {",
+        "  Write-Host 'Claude Code was not installed. What the installer said is above.' -ForegroundColor Red",
+        "}");
+
+    /// <summary>A script as PowerShell's -EncodedCommand takes it: base64 of its UTF-16LE bytes.</summary>
+    public static string Encoded(string script) => Convert.ToBase64String(System.Text.Encoding.Unicode.GetBytes(script));
+
+    // Windows PowerShell's arguments for the install, the same in a Windows Terminal window and in a console.
+    static IReadOnlyList<string> InstallArguments =>
+        ["-NoProfile", "-ExecutionPolicy", "Bypass", "-NoExit", "-EncodedCommand", Encoded(InstallScript)];
+
+    /// <summary>The program the install runs in, by the name its window's process has (PowerShell's console is its own).</summary>
+    public const string InstallShell = "powershell.exe";
+
+    /// <summary>
+    /// The window that installs Claude Code: a NEW Windows Terminal window in the folder, with the default profile's look,
+    /// running <see cref="InstallScript"/> in Windows PowerShell. wt passes everything after the program to it, dashes
+    /// included (its docs: <c>wt new-tab PowerShell -c Start-Service</c>).
+    /// </summary>
+    public static ProgramLaunch InstallWindow(string folder) =>
+        new("wt.exe", ["-w", "new", "-d", Bare(folder), InstallShell, .. InstallArguments], Bare(folder));
+
+    /// <summary>
+    /// The install window for a machine without Windows Terminal: the same PowerShell in a console of its own, which
+    /// PowerShell titles itself.
+    /// </summary>
+    public static ConsoleLaunch InstallConsole(string folder) =>
+        new(InstallShell, InstallArguments, Bare(folder), Maybe<string>.None);
+
     /// <summary>
     /// Whether Windows Terminal's <c>wt.exe</c> can be started: on the PATH (Deskbar's own, then the user's and the
     /// machine's, as ClaudeLocator searches), or as the execution alias Windows Terminal's package puts in

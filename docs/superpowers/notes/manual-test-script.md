@@ -516,8 +516,12 @@ throwaway folder Claude Code trusts, and tracing on for the `claude actions:` an
 98. Start Claude on a note in a folder Claude Code has never trusted: the thread gets Claude's "Workspace not trusted"
     message, and a box asks "Open a terminal there so you can trust it?". Yes opens a plain Windows Terminal window
     running `claude` in that folder; accept the trust prompt there, then "Start Claude on this" again works. With
-    `claude.exe` renamed away as in 89, "Start Claude on this" shows a message box with the reason as well as writing
-    it in the thread. `$ts task start <id>` on a closed task is refused at once with "The task is closed. Reopen it to
+    `claude.exe` renamed away as in 89 (and nothing in `%USERPROFILE%\.local\bin`), "Start Claude on this" asks
+    "Claude Code is not installed on this computer ... Install it now?". No writes the reason in the thread and opens
+    nothing. Yes opens a Windows Terminal window (a PowerShell console without Windows Terminal) in the chosen folder:
+    it says it is installing Claude Code, runs the official installer, then starts `claude` for the sign-in and the
+    trust prompt; the window stays open afterwards. Once signed in, "Start Claude on this" starts the session. Best
+    run on a machine or in Windows Sandbox that never had Claude Code, since the installer replaces the real one. `$ts task start <id>` on a closed task is refused at once with "The task is closed. Reopen it to
     start Claude on it."
     On a machine without Windows Terminal (Windows Server 2022, or a test machine where `wt.exe` is not on the PATH and
     not in `%LOCALAPPDATA%\Microsoft\WindowsApps`), the same Yes opens a plain console window running `claude`, and a
