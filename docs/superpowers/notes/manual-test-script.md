@@ -534,7 +534,9 @@ throwaway folder Claude Code trusts, and tracing on for the `claude actions:` an
     lists it; nothing resumes it. Double-click the task: the session comes back under the SAME id and its window
     opens, and it keeps running while that window is open. Close the window: within a minute and a quarter it is
     stopped again. Reopen the task (In progress): it is resumed at the next poll and is not stopped. A task waiting
-    on you, with its session idle, is never stopped.
+    on you, with its session idle, is never stopped. Do it once with a session that joined from the repo and then
+    entered a git worktree: once stopped, its row in the thread reads "ended" with an Open button, never "expired",
+    and Open brings it back under the same id.
 103. Take a give-up from 88 and set the task's status (to In progress, say; a keeper's question has no answer box): the
     next poll tries the resume again instead of staying silent.
 104. Esc, then close: in a background session's terminal window, ask for a long reply and press Esc halfway through it,

@@ -25,6 +25,23 @@ public class ClaudeTranscriptTests
             ClaudeTranscript.PathOf(@"C:\h", @"E:\repos\TaskSpaces\.claude\worktrees\probe-bg", "x"));
     }
 
+    // A session that joined from the repo and then entered a worktree writes its transcript under the worktree's
+    // project folder (measured 2026-11-24), so after the joined folder's own path every project folder is a candidate.
+    [Fact]
+    public void The_joined_folder_comes_first_then_every_other_project_folder()
+    {
+        var candidates = ClaudeTranscript.Candidates(@"C:\h", @"E:\repos\TaskSpaces", "s1",
+            [@"C:\h\projects\E--repos-TaskSpaces--claude-worktrees-fix", @"C:\h\projects\E--repos-Other"]).ToList();
+        Assert.Equal(
+            [@"C:\h\projects\E--repos-TaskSpaces\s1.jsonl", @"C:\h\projects\E--repos-TaskSpaces--claude-worktrees-fix\s1.jsonl",
+             @"C:\h\projects\E--repos-Other\s1.jsonl"],
+            candidates);
+    }
+
+    [Fact]
+    public void The_joined_folder_is_not_tried_twice() =>
+        Assert.Single(ClaudeTranscript.Candidates(@"C:\h", @"E:\repos\TaskSpaces", "s1", [@"C:\h\projects\e--repos-taskspaces"]));
+
     [Fact] public void A_turn_ending_in_an_assistant_end_turn_is_finished() => Assert.False(ClaudeTranscript.WasCutOff([Prompt, ToolUse, ToolResult, EndTurn, Duration, Cost]));
     [Fact] public void A_tool_use_without_its_result_is_cut_off() => Assert.True(ClaudeTranscript.WasCutOff([Prompt, ToolUse, Cost]));
     [Fact] public void A_tool_result_with_no_reply_after_it_is_cut_off() => Assert.True(ClaudeTranscript.WasCutOff([Prompt, ToolUse, ToolResult]));

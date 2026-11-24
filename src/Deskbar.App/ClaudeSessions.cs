@@ -687,7 +687,39 @@ public sealed class ClaudeSessions : IDisposable
 
     // --- transcripts ------------------------------------------------------------------------------------------------
 
-    bool TranscriptExists(TaskSession session) => File.Exists(ClaudeTranscript.PathOf(claudeHome, session.Folder, session.Id));
+    // Where a session's transcript is: under the folder it joined from, or, for a session that went on into a git
+    // worktree, under that worktree's project folder (ClaudeTranscript.Candidates has the measurement). Used by the
+    // keeper (expired means give up), by the thread's session list (expired means no Open, through the App's
+    // TranscriptExists seam) and by CutOff, so all three find the same file.
+    //
+    // A found path is remembered per session, so the search over every project folder runs once per session rather than
+    // on every poll. A miss is NOT remembered (CLAUDE.md, "never cache a lookup failure that can succeed later"): a
+    // session that has just started has no file yet. A remembered path that has since gone is looked for afresh.
+    // Concurrent, because CutOff runs off the UI thread when a resume is issued.
+    readonly System.Collections.Concurrent.ConcurrentDictionary<string, string> transcriptFound = new();
+
+    public Maybe<string> TranscriptOf(TaskSession session) =>
+        transcriptFound.TryGetValue(session.Id, out var known) && File.Exists(known)
+            ? known
+            : ClaudeTranscript.Candidates(claudeHome, session.Folder, session.Id, ProjectFolders())
+                .TryFirst(File.Exists)
+                .Tap(path => transcriptFound[session.Id] = path);
+
+    public bool TranscriptExists(TaskSession session) => TranscriptOf(session).HasValue;
+
+    // The folders under <claudeHome>\projects, or none when it cannot be listed (no Claude Code yet, or no access): then
+    // only the joined folder's own path is tried, which is how this behaved before.
+    IEnumerable<string> ProjectFolders()
+    {
+        try
+        {
+            return Directory.GetDirectories(Path.Combine(claudeHome, "projects"));
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+        {
+            return [];
+        }
+    }
 
     // Shared for reading and writing, since nothing promises Claude Code has let go of the file. An unreadable file is
     // "not cut off": the session is resumed without the continue message rather than not at all.
@@ -695,7 +727,8 @@ public sealed class ClaudeSessions : IDisposable
     {
         try
         {
-            using var stream = new FileStream(ClaudeTranscript.PathOf(claudeHome, session.Folder, session.Id),
+            if (TranscriptOf(session).GetValueOrDefault() is not { } path) return false;
+            using var stream = new FileStream(path,
                 FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
             using var reader = new StreamReader(stream);
             return ClaudeTranscript.WasCutOff(reader.ReadToEnd().Split('\n'));

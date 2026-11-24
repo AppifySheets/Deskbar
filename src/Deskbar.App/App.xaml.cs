@@ -1669,7 +1669,9 @@ public partial class App : Application
                 EditorWindow: SessionWindowOf,
                 BringForward: window => manager.JumpTo(window, claudeActivator),
                 // "Expired" (the spec, "Ended sessions and transcript retention"): Claude Code deleted the transcript.
-                TranscriptExists: session => File.Exists(Core.Tasks.ClaudeTranscript.PathOf(claudeHome, session.Folder, session.Id)),
+                // ClaudeSessions looks for it the way the keeper does, worktree project folders included, so the
+                // thread and the keeper cannot disagree about whether a session can be resumed.
+                TranscriptExists: claudeSessions.TranscriptExists,
                 // The folders the VS Code windows on a workspace show (the one in front for a free task), by name, as
                 // their titles carry them (EditorFolder.Of); ClaudeStart.EditorRepos makes them full paths.
                 EditorFolderNames: workspace => EditorFolderNamesOn(workspace.Or(manager.CurrentWorkspaceId)))

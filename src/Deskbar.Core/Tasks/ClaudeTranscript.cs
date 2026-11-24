@@ -19,6 +19,26 @@ public static class ClaudeTranscript
     public static string PathOf(string claudeHome, string folder, string sessionId) =>
         Path.Combine(claudeHome, "projects", Encode(folder), sessionId + ".jsonl");
 
+    // Every place the transcript can be, most likely first: PathOf for the folder the session joined from, then the same
+    // file name in each of Claude Code's other project folders (`projectFolders`, the full paths of the folders under
+    // <claudeHome>\projects, as the caller lists them). The caller takes the first that exists.
+    //
+    // Why PathOf alone is not enough (task 87f899ad, 2026-11-24): Claude Code files the transcript under the folder the
+    // session is working in, and a session that enters a git worktree after joining its task keeps writing there, so
+    // the transcript of a session that joined from E:\repos\TaskSpaces lives under
+    // E--repos-TaskSpaces--claude-worktrees-<name>. Measured on Petre's machine: 8 of 37 task sessions had their
+    // transcript only in another project folder, and the thread showed them "expired" (no Open) while
+    // `claude --bg --resume <id>`, run from the joined folder, woke one of them fine and put it back in its worktree.
+    // The keeper read the same miss as "transcript gone" and gave up on the task.
+    public static IEnumerable<string> Candidates(string claudeHome, string folder, string sessionId, IEnumerable<string> projectFolders)
+    {
+        var first = PathOf(claudeHome, folder, sessionId);
+        return projectFolders
+            .Select(project => Path.Combine(project, sessionId + ".jsonl"))
+            .Where(path => !string.Equals(path, first, StringComparison.OrdinalIgnoreCase))
+            .Prepend(first);
+    }
+
     static string Encode(string folder) =>
         new(folder.Select(c => c is >= 'a' and <= 'z' or >= 'A' and <= 'Z' or >= '0' and <= '9' ? c : '-').ToArray());
 

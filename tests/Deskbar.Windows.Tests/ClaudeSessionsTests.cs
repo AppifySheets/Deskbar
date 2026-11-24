@@ -390,6 +390,26 @@ public class ClaudeSessionsTests
             && c.Markdown == $"Resumed by Deskbar at {doneAt}.");
     }
 
+    // Task 87f899ad (2026-11-24): a session that joined from the repo and then entered a worktree has its transcript
+    // under the worktree's project folder, not the joined folder's. The keeper still finds it, resumes the session (in
+    // the joined folder, from which `claude --bg --resume` found such a session when measured), reads its cut-off turn
+    // from that file, and the thread's list calls it ended, not expired.
+    [Fact]
+    public void A_transcript_filed_under_a_worktree_still_counts()
+    {
+        using var rig = new Rig();
+        var moved = rig.Dead("Went into a worktree", folder: @"E:\repos\Work", transcript: false);
+        rig.WriteTranscript(moved.SessionId, @"E:\repos\Work\.claude\worktrees\fix", cutOff: true);
+        rig.Begin();
+
+        rig.RunTo(Settle + Seconds(10));
+
+        var resume = Assert.Single(rig.Cli.Resumes);
+        Assert.Equal(["--bg", "--resume", moved.SessionId, ContinueText], resume.Arguments);
+        Assert.Equal(@"E:\repos\Work", resume.Folder);
+        Assert.True(rig.Sessions!.TranscriptExists(rig.Task(moved.TaskId).Sessions.Single()));
+    }
+
     // Global Constraints: `claude --bg --resume` on a listed session starts a COPY. A listed session is never resumed,
     // even when the board had it ended, and a queued resume whose session turns up in the list before its turn is dropped.
     [Fact]
