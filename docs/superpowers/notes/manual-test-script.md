@@ -823,6 +823,22 @@ TI10. In a Claude session on the task, `deskbar.cmd task list`: the comment's `m
      picture's full path, and the session can Read it without a permission prompt;
      ~/.claude/settings.json has one `Read(//c/.../Deskbar/task-images/**)` rule under permissions.allow.
 
+## Comments wake their session
+
+(docs/superpowers/plans/2026-11-24-comment-wakes-session.md.) ~/.claude/settings.json's Stop holds a
+claude-wait-hook.cmd entry with "asyncRewake": true and "timeout": 2592000 while sessions keep their tasks.
+
+CW1. An idle background session's task: paste a screenshot into a comment and press Enter. Within a few
+     seconds the session takes a turn, reads the picture and answers about it.
+CW2. Post two comments quickly on an idle session's task: it wakes once with both, in order.
+CW3. A Done task whose session Deskbar stopped: comment "is it shipped?". The session is resumed with the
+     comment (a "Resumed by Deskbar" line in the thread) and the task stays Done.
+CW4. Comment while the session is busy with a long command: the comment arrives at its next step.
+CW5. A VS Code session idle on its task: comment. Note whether it wakes; if not, it should get the
+     comment with your next message to it. Record the result here.
+CW6. A comment on one of your plain notes (no session): nothing happens and no Deskbar line appears.
+CW7. Restart Deskbar while a session sits idle, then comment: it still wakes.
+
 ## Results (2026-08-01)
 
 Status: **pending human execution.** An agent cannot observe the desktop, Task View,
