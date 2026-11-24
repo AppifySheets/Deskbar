@@ -803,4 +803,40 @@ public class TaskBoardTests
 
         Assert.True(Get(joined, id1).Sessions.Single().Ended.HasValue);
     }
+
+    // Task e671709b: a window a hidden session opens goes to its task's workspace, and the session's process names it
+    // only by its short id (the pty host's pipe name), so the board answers to the first eight characters.
+    [Fact]
+    public void A_sessions_workspace_is_found_by_its_short_id()
+    {
+        var board = Claudes(TaskBoard.Empty, id1, ws, session: "84bee58f-32b0-4349-acfb-59997bb6ba67");
+
+        Assert.Equal(ws, board.WorkspaceOfSession("84bee58f").Value);
+        Assert.Equal(ws, board.WorkspaceOfSession("84BEE58F").Value);
+        Assert.True(board.WorkspaceOfSession("12345678").HasNoValue);
+        Assert.True(board.WorkspaceOfSession("").HasNoValue);
+    }
+
+    // A free task has nowhere to send a window, and a closed task is no longer the session's work: both leave the
+    // window where it opened.
+    [Fact]
+    public void A_free_or_closed_task_gives_a_session_no_workspace()
+    {
+        var free = Claudes(TaskBoard.Empty, id1, Free, session: "aaaa1111-0000");
+        var closed = Claudes(TaskBoard.Empty, id1, ws, session: "bbbb2222-0000").Close(id1, clock).Value;
+
+        Assert.True(free.WorkspaceOfSession("aaaa1111").HasNoValue);
+        Assert.True(closed.WorkspaceOfSession("bbbb2222").HasNoValue);
+    }
+
+    // A session that moved to another task opens windows for that one: the live entry wins over the ended one.
+    [Fact]
+    public void The_task_a_session_is_live_on_wins()
+    {
+        var first = Claudes(TaskBoard.Empty, id1, ws, session: "cccc3333-0000");
+        Later();
+        var moved = Note(first, id2, other).Join(id2, Session("cccc3333-0000"), clock).Value;
+
+        Assert.Equal(other, moved.WorkspaceOfSession("cccc3333").Value);
+    }
 }

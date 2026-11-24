@@ -20,6 +20,8 @@ Folders get their own memory. Several windows of one editor are a single app as 
 
 A window opened by another app joins that app's workspace. Click a link in your editor and the browser window it opens lands beside the editor rather than wherever you are standing. Deskbar follows the process chain to whoever really started it, and where that app has windows in several workspaces, the one you were last in wins. Explorer and the shell never count as the launcher, so things started from the taskbar are unaffected. This is an inference about one window: it moves the window and teaches the roster nothing.
 
+A window a background Claude session opens goes to its task's workspace. A session started with `claude --bg`, as "Start Claude on this" and the resume of a task's session do, has no window of its own anywhere up its process chain, so there is no app for the window to join. Deskbar recognises the session from the chain instead, looks up the task it works on, and moves the window to that task's workspace with the attention dot, because it arrives out of sight. A free task, a session on no task, or a task on the workspace in front leaves the window where it opened. Like the rule above, it only covers a program the session has just started: a browser that was already running opens its window from its own process, so for that a session uses `deskbar.cmd open` or `start`.
+
 When several windows of one app are already open, a new one is left where you opened it. Four browser windows on one profile are one identity, so "put it back" has no single answer.
 
 A few more cases:

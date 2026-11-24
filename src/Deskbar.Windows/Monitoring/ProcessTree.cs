@@ -87,6 +87,11 @@ public sealed class ProcessTree : IProcessTree
             DateTimeOffset.FromFileTime(facts.Created));
     }
 
+    // Out of the process's own memory, as ProcessCommandLine reads it for every new window, so 0.1ms rather than
+    // WMI's 656ms (see there). Asked only for claude processes on the way up from a new window.
+    public Maybe<string> CommandLineOf(int processId) =>
+        processId > 0 && ProcessCommandLine.TryRead((uint)processId) is { } line ? line : Maybe<string>.None;
+
     readonly record struct Snapshot(string Name, int ParentProcessId, long Created);
 
     static Snapshot? Read(int processId)

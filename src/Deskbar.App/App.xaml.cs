@@ -1397,7 +1397,11 @@ public partial class App : Application
             // None for a window whose icon has not arrived yet, which the builder falls back for.
             artworkOf: w => IconCache.ArtworkKeyOf(w.Handle, w.ProcessPath, w.Title) is { } key
                 ? key
-                : Maybe<string>.None);
+                : Maybe<string>.None,
+            // Task e671709b: a window a hidden Claude session opens goes to its task's workspace. The board is built
+            // below, after the manager, so this reads the field when a window appears; before then nothing is placed
+            // by session, which only covers the first moment of startup.
+            sessionWorkspace: shortId => tasks is { } board ? board.Board.WorkspaceOfSession(shortId) : Maybe<Guid>.None);
 
         // Time tracking (#53). Its own file beside state.json, because this is the one thing the
         // app stores that grows without bound -- one row per workspace per day, forever -- and

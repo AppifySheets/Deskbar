@@ -19,7 +19,7 @@ To go there, click the workspace's row on the bar, or hold `Win+Ctrl` and tap `T
 
 Quick find (`Win+Alt+Space`) searches every VS Code editor tab on every workspace, and an open Claude Code session is one of them, because each session is a tab named after the session. Type a few letters of its name and press Enter.
 
-Links and windows a session opens land in that session's workspace, not on the one you are looking at. Deskbar's skill tells every Claude Code session on the machine to open links with `open`, start programs with `start` and move the windows it opens with `move --no-follow`. Apart from the skill, a window opened by another app joins that app's workspace, so a link you click in the session's editor opens its browser window beside the editor.
+Links and windows a session opens land in that session's workspace, not on the one you are looking at. Deskbar's skill tells every Claude Code session on the machine to open links with `open`, start programs with `start` and move the windows it opens with `move --no-follow`. Apart from the skill, a window opened by another app joins that app's workspace, so a link you click in the session's editor opens its browser window beside the editor. A background session has no editor or terminal window of its own, so a program it starts, such as the browser a browser-automation tool opens or an app it builds and runs, goes to the workspace of the session's task instead.
 
 Seven VS Code windows all named `VSC` tell you nothing. **Name *app* windows by folder** on a VS Code icon's menu names each window after the folder, project or session it holds instead, and follows the window when it opens something else.
 

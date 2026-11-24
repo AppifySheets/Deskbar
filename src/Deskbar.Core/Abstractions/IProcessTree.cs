@@ -16,4 +16,9 @@ public interface IProcessTree
 {
     // None for a process that has gone, or one this app is not allowed to open.
     Maybe<ProcessFacts> Of(int processId);
+
+    // The process's command line, or None when it cannot be read (gone, elevated, protected). Asked only for a
+    // process named claude, to find a hidden Claude session's pty host (LaunchedBy.BackgroundSession). None by
+    // default, which turns that tier off: a tree that cannot read command lines places nothing by session.
+    Maybe<string> CommandLineOf(int processId) => Maybe<string>.None;
 }

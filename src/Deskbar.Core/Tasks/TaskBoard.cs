@@ -624,6 +624,25 @@ public sealed record TaskBoard(IReadOnlyList<TaskItem> Tasks)
             .TryFirst();
 
     /// <summary>
+    /// The workspace of the open task a session works on, found by the session's SHORT id (its first eight characters):
+    /// a hidden session's process names only that (LaunchedBy.BackgroundSession), and a window it opens goes to this
+    /// workspace (task e671709b). Live entries first, then the latest joined, as <see cref="TaskOf"/> and
+    /// <see cref="LastTaskOf"/> pick; an ended entry still counts, because a running process is better evidence than a
+    /// missed hook. None for a free task, a closed one, or a session on no task: the window then stays where it opened.
+    /// </summary>
+    public Maybe<Guid> WorkspaceOfSession(string shortId) =>
+        shortId.Length == 0
+            ? Maybe<Guid>.None
+            : Tasks.Where(t => t.IsOpen)
+                .SelectMany(t => t.Sessions.Where(s => s.Id.StartsWith(shortId, StringComparison.OrdinalIgnoreCase))
+                    .Select(s => (Task: t, s.IsLive, s.Joined)))
+                .OrderByDescending(x => x.IsLive)
+                .ThenByDescending(x => x.Joined)
+                .Select(x => x.Task.WorkspaceId)
+                .TryFirst()
+                .Bind(workspace => workspace);
+
+    /// <summary>
     /// The closed task a session is still live on: Petre closed the task under it (closing ends no session). Its next
     /// prompt is told so, and that new work needs a new task, until it joins or creates one; that ends its live entries
     /// on open tasks only, so this keeps answering, and TaskOf answers first once the session has an open task.

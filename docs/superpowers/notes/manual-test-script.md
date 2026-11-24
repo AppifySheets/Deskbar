@@ -864,6 +864,18 @@ CW5. A VS Code session idle on its task: comment. Note whether it wakes; if not,
 CW6. A comment on one of your plain notes (no session): nothing happens and no Deskbar line appears.
 CW7. Restart Deskbar while a session sits idle, then comment: it still wakes.
 
+## Windows a hidden session opens
+
+(Deskbar task e671709b.) A `claude --bg` session's windows go to its task's workspace. Tracing on, the log shows
+`launched-by <process>(<pid>) launcher=session <short id> workspace=<name> moved=<bool>` for each.
+
+HS1. Start Claude on a task in workspace A, then switch to workspace B. Ask the session to open a page with its
+     browser-automation tool (Playwright). The browser window lands in A with the attention dot, and B is untouched.
+HS2. Same, with the task's workspace in front: the window opens there and has no dot.
+HS3. A session on a free task (no workspace): its window stays where it opened.
+HS4. A browser already running: ask the session to run `start https://example.com`. The window or tab stays with
+     the browser, as before (the session should use `deskbar.cmd open` for this).
+
 ## Results (2026-08-01)
 
 Status: **pending human execution.** An agent cannot observe the desktop, Task View,

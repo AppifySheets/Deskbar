@@ -101,4 +101,62 @@ public static class LaunchedBy
 
         return Maybe<int>.None;
     }
+
+    // A HIDDEN CLAUDE SESSION as the launcher (Deskbar task e671709b, Petre: "when a hidden claude task opens a
+    // browser or anything, it should stay in the correct workspace").
+    //
+    // Launcher above finds nothing for these, and the measured chain shows why. A `claude --bg` session is run by
+    // Claude Code's daemon, which was started through WMI so that it outlives whoever started it:
+    //
+    //   chrome ← node ← cmd ← claude --session-id <id> ← claude --bg-pty-host ...-pty-<short id> ← claude daemon
+    //     ← WmiPrvSE ← svchost
+    //
+    // Not one of those owns a window, so the new window used to stay on the desktop in front, which is whichever
+    // one Petre happened to be working on, not the one the session's task belongs to.
+    //
+    // The pty host is the one link every background session has in the same form: the session process below it
+    // reads `--session-id <id>` for a new session, `--resume <id>` or `--resume <path to the .jsonl>` for a resumed
+    // one, while the pty host always names the session's short id (the first eight characters, the same id
+    // `claude --bg` prints and `claude attach` takes) at the end of its pipe name. Measured 2026-11-25, Claude Code
+    // 2.1.330, on all ten background sessions then running. A foreground session (VS Code's, or `claude` typed in a
+    // terminal) has no pty host, so this never answers for one, and Launcher finds its editor or terminal anyway.
+    //
+    // Only processes named claude have their command line read, so the walk costs one memory read per claude hop
+    // and nothing for the plumbing around it. It stops where Launcher stops: the shell, a system host, a gone
+    // parent, MaxHops.
+    public static Maybe<string> BackgroundSession(int processId, Func<int, Maybe<ProcessFacts>> lookup, Func<int, Maybe<string>> commandLineOf)
+    {
+        var seen = new HashSet<int> { processId };
+        var at = lookup(processId);
+
+        for (var hop = 0; hop < MaxHops; hop++)
+        {
+            if (at.GetValueOrDefault() is not { } facts) return Maybe<string>.None;
+
+            var parent = facts.ParentProcessId;
+            // The same loop guard as Launcher's, for the same reason.
+            if (parent <= 0 || !seen.Add(parent)) return Maybe<string>.None;
+
+            at = lookup(parent);
+            if (at.GetValueOrDefault() is not { } up) return Maybe<string>.None;
+            if (NotLaunchers.Contains(up.Name)) return Maybe<string>.None;
+
+            var session = up.Name.Equals("claude", StringComparison.OrdinalIgnoreCase)
+                ? commandLineOf(parent).Bind(PtyHostSession)
+                : Maybe<string>.None;
+            if (session.HasValue) return session;
+        }
+
+        return Maybe<string>.None;
+    }
+
+    // `claude.exe --bg-pty-host \\.\pipe\cc-daemon-37b43e613ddb8ec4-pty-84bee58f 200 50 -- claude.exe ...` -> "84bee58f".
+    // Lower case, as `claude --bg` prints it and as session ids are written everywhere else.
+    public static Maybe<string> PtyHostSession(string commandLine) =>
+        PtyHost.Match(commandLine) is { Success: true } match
+            ? match.Groups["id"].Value.ToLowerInvariant()
+            : Maybe<string>.None;
+
+    static readonly System.Text.RegularExpressions.Regex PtyHost =
+        new(@"--bg-pty-host\s+\S*-pty-(?<id>[0-9a-fA-F]{8})\b", System.Text.RegularExpressions.RegexOptions.CultureInvariant);
 }

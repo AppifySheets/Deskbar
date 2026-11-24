@@ -63,7 +63,11 @@ public sealed class WorkspaceManager(
     // What each window is DRAWN with (#105), for the ordinal colour band's grouping. Optional and last,
     // as everything here is; null leaves the band grouping on its exe-path fallback. The app passes
     // IconCache.ArtworkKeyOf, which is a read of its icon cache and nothing more.
-    Func<WindowInfo, Maybe<string>>? artworkOf = null)
+    Func<WindowInfo, Maybe<string>>? artworkOf = null,
+    // The workspace of a hidden Claude session's task, by the session's short id (task e671709b): where a window the
+    // session opens belongs. Optional and last, as everything here is; null means no window is ever placed by the
+    // session that opened it. The app passes the task board's TaskBoard.WorkspaceOfSession. See LaunchedByWorkspace.
+    Func<string, Maybe<Guid>>? sessionWorkspace = null)
 {
     readonly Func<DateTimeOffset> now = clock ?? (() => DateTimeOffset.Now);
     readonly int ownProcess = ownProcessId ?? Environment.ProcessId;
@@ -3801,6 +3805,12 @@ public sealed class WorkspaceManager(
         }
 
         var launcher = LaunchedBy.Launcher(window.ProcessId, processes.Of, OwnsTrackedWindow);
+        // No app with a window started it, but a hidden Claude session may have: see HiddenSessionWorkspace.
+        var session = launcher.HasNoValue && sessionWorkspace is not null
+            ? LaunchedBy.BackgroundSession(window.ProcessId, processes.Of, processes.CommandLineOf)
+            : Maybe<string>.None;
+        if (session.HasValue) return HiddenSessionWorkspace(window, session.Value, current);
+
         var workspace = launcher.Bind(WorkspaceOfLauncher);
         var decision = workspace
             .Where(id => Workspace(id).GetValueOrDefault()?.DesktopId != current)
@@ -3812,6 +3822,42 @@ public sealed class WorkspaceManager(
                       $"launcher={launcher.Map(id => id.ToString()).GetValueOrDefault("none")} " +
                       $"workspace={workspace.Map(id => Workspace(id).GetValueOrDefault()?.Name ?? id.ToString()).GetValueOrDefault("none")} " +
                       $"moved={decision.HasValue}");
+
+        return decision;
+    }
+
+    // OPENED BY A HIDDEN CLAUDE SESSION (task e671709b, Petre: "when a hidden claude task opens a browser or anything,
+    // it should stay in the correct workspace"). Asked only when the walk above found no app that owns a window, which
+    // is always the case below a `claude --bg` session: its chain runs up through Claude Code's daemon to WMI, and not
+    // one of them has a window (LaunchedBy.BackgroundSession has the measured chain). The session's pty host names the
+    // session, the task board names the session's task, and the task names its workspace.
+    //
+    // The rest is the launched-by tier's, on purpose: the once-per-window guard and the started-for-its-window check
+    // above have already run (a browser the session started an hour ago is Petre's browser by now, and a window it
+    // opens is not the session's doing), the window is not moved when the task's workspace is the one in front, and no
+    // roster entry is written, because one session opening a browser says nothing about where the browser lives.
+    //
+    // A window that arrives on a workspace you are not looking at wears the attention dot, as a `deskbar.cmd start`
+    // window does (see StartedFor): Petre asked for that mark when "claude starts a process in the collapsed deskbar".
+    //
+    // What this cannot see: a program that is already running and hands the request to itself (`start <url>` with the
+    // browser open, `code <folder>`, `explorer <folder>`). Its window belongs to the old process, whose parent is not
+    // the session. A session that wants one of those in its workspace says so with `deskbar.cmd start`.
+    //
+    // None when the window stays: the task's workspace is the one in front, or the session is on no task with a
+    // workspace. Memory and the rules then have their say, as they do whenever launched-by declines.
+    Maybe<Decision> HiddenSessionWorkspace(WindowInfo window, string session, Guid current)
+    {
+        // A task whose workspace was deleted keeps a dangling id until the board prunes it, so the workspace must exist.
+        var workspace = sessionWorkspace!(session).Where(id => Workspace(id).IsSuccess);
+        var decision = workspace
+            .Where(id => Workspace(id).GetValueOrDefault()?.DesktopId != current)
+            .Map(id => new Decision(Placement.In(id), Roster: false));
+        if (decision.HasValue) wantsAttention.Add(window.Handle);
+
+        trace?.Invoke($"launched-by {window.ProcessName}({window.ProcessId}) launcher=session {session} " +
+                      $"workspace={workspace.Map(NameOf).GetValueOrDefault("none")} moved={decision.HasValue}" +
+                      (decision.HasValue ? ", marked for attention" : ""));
 
         return decision;
     }

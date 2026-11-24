@@ -245,6 +245,12 @@ public sealed class FakeProcessTree : IProcessTree
 
     public Maybe<ProcessFacts> Of(int processId) =>
         Processes.TryGetValue(processId, out var facts) ? facts : Maybe<ProcessFacts>.None;
+
+    // Command lines by pid, for the hidden-session tier; a pid not here reads as unreadable.
+    public Dictionary<int, string> CommandLines { get; } = [];
+
+    public Maybe<string> CommandLineOf(int processId) =>
+        CommandLines.TryGetValue(processId, out var line) ? line : Maybe<string>.None;
 }
 
 // Monitor numbers, minimised state and z-order, as the OS would report them. Tests set Facts
