@@ -346,6 +346,37 @@ public sealed class TaskServiceTests
         Assert.Equal("![image](task-images/t/1.png)", NewService().ExpandImages("![image](task-images/t/1.png)"));
     }
 
+    // A comment wakes its session (plan 2026-11-24-comment-wakes-session, Task 2): only Petre's own new comments are
+    // announced. A session's comment, Deskbar's own line, an edit and a comment marked not to wake are not.
+    [Fact]
+    public void Only_his_own_new_comments_are_announced()
+    {
+        var s = NewService();
+        var note = s.AddNote("Paste images", ws).Value;
+        var heard = new List<(Guid Task, string Markdown)>();
+        using var _ = s.Commented.Subscribe(c => heard.Add((c.TaskId, c.Comment.Markdown)));
+
+        s.Comment(note.Id, Maybe<string>.None, "his");
+        s.Comment(note.Id, "s1", "a session's");
+        s.Note(note.Id, "Deskbar's line");
+        s.Comment(note.Id, Maybe<string>.None, "his, by a session", wakes: false);
+        s.EditComment(s.Board.Tasks.Single().Comments[0].Id, "his, edited");
+
+        Assert.Equal([(note.Id, "his")], heard);
+    }
+
+    [Fact]
+    public void A_refused_comment_is_not_announced()
+    {
+        var s = NewService();
+        var heard = 0;
+        using var _ = s.Commented.Subscribe(_ => heard++);
+
+        Assert.True(s.Comment(Guid.NewGuid(), Maybe<string>.None, "to no task").IsFailure);
+
+        Assert.Equal(0, heard);
+    }
+
     sealed class FakeTaskStore : ITaskStore
     {
         public TaskBoard Stored { get; set; } = TaskBoard.Empty;

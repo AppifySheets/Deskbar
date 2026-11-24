@@ -106,6 +106,9 @@ public sealed partial class RemoteControl
             ["move", var id, var workspace] => ResolveWorkspace(workspace, null)
                 .Match(w => TaskChange(service, id, t => service.MoveTo(t.Id, w)), ControlReply.Fail),
             ["comment", var id, var markdown] => TaskChange(service, id, t => service.Comment(t.Id, Maybe<string>.None, markdown)),
+            // The same command from inside a Claude session (ControlArguments.WithCaller): stored as usual, wakes no one.
+            ["comment", var id, var markdown, ControlArguments.FromClaude] =>
+                TaskChange(service, id, t => service.Comment(t.Id, Maybe<string>.None, markdown, wakes: false)),
             ["delete", var id] => TaskDelete(service, id),
             ["flag", var id, var flag, var state] => ParseFlag(flag, state)
                 .Match(f => TaskChange(service, id, t => service.SetFlag(t.Id, f.Flag, f.On)), ControlReply.Fail),

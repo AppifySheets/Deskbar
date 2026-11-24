@@ -49,7 +49,7 @@ static class ControlCommandLine
         // `claude-hook` gets its stdin as --json, and a task text form its stdin in place of `-` (WithInput); nothing
         // else changes.
         var forwarded = ControlArguments.WithInput(
-            ControlArguments.WithCallerFolder(args.Skip(1).ToList(), Environment.CurrentDirectory),
+            ControlArguments.WithCallerFolder(ControlArguments.WithCaller(args.Skip(1).ToList(), Environment.GetEnvironmentVariable("CLAUDECODE")), Environment.CurrentDirectory),
             ControlConsole.ReadStandardInput);
         var reply = ControlArguments.HookReply(forwarded,
             Task.Run(() => ControlClient.RunAsync(ClientPipeName, forwarded)).GetAwaiter().GetResult());
