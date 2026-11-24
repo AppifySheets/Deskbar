@@ -2356,6 +2356,15 @@ public partial class FloatingBar : Window
             RebuildCore();
             Phase("finish");
         }
+        // WINDOWS REFUSED A WINDOW mid-rebuild (task c1e6c1ae; RefusedWindow has the incident). Caught HERE and not only
+        // by the app's dispatcher handler, because a rebuild often runs inside an Rx subscription (the manager's
+        // StateChanged, the 01:54 crash), and an exception leaving an Rx observer ends that subscription for good even
+        // if the dispatcher handler then lets the app live: the bar would never hear of a change again. The rows may be
+        // half replaced; the next pulse rebuilds them whole. Only a refusal the app can live through, as everywhere.
+        catch (Exception refused) when (Deskbar.Windows.Diagnostics.RefusedWindow.Survivable(refused))
+        {
+            ClickTrace.Write($"rebuild: Windows refused a window, the next pulse tries again ({refused.Message})");
+        }
         finally
         {
             rebuilding = false;
