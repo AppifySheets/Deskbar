@@ -135,7 +135,7 @@ public static class ControlArguments
     // arguments alone. So any of them that does not name a folder gets the client's, which is the folder of the shell
     // that ran deskbar.cmd. Every other command goes through untouched. For `claude-hook`, the hook scripts pass
     // CLAUDE_PROJECT_DIR as --from when Claude Code set it; otherwise the folder the hook was started in is the session's.
-    static readonly string[] AboutTheCaller = ["open", "attention", "task", ClaudeHookVerb];
+    static readonly string[] AboutTheCaller = ["open", "attention", "task", ClaudeHookVerb, ClaudeWaitVerb];
 
     public static IReadOnlyList<string> WithCallerFolder(IReadOnlyList<string> args, string callerFolder) =>
         args.Count > 0 && AboutTheCaller.Contains(args[0], StringComparer.OrdinalIgnoreCase) && !args.Contains("--from")
@@ -166,8 +166,15 @@ public static class ControlArguments
 
     public const string ClaudeHookVerb = "claude-hook";
 
+    // A comment wakes its session (plan 2026-11-24-comment-wakes-session, Task 3): `claude-wait` is the waiting Stop hook's
+    // one call, registering its waiter. It is a hook like claude-hook in every way the client cares about (its JSON on
+    // stdin, silent when Deskbar is not running), so IsClaudeHook covers both. A verb of its own rather than an option of
+    // claude-hook: an older Deskbar refuses an unknown verb (the script then exits 0), whereas it would skip an unknown
+    // option and treat the call as a second Stop, blinking the workspace again.
+    public const string ClaudeWaitVerb = "claude-wait";
+
     public static bool IsClaudeHook(IReadOnlyList<string> args) =>
-        args.Count > 0 && args[0].Equals(ClaudeHookVerb, StringComparison.OrdinalIgnoreCase);
+        args.Count > 0 && (args[0].Equals(ClaudeHookVerb, StringComparison.OrdinalIgnoreCase) || args[0].Equals(ClaudeWaitVerb, StringComparison.OrdinalIgnoreCase));
 
     // An explicit --json (a person trying the verb by hand) is left as it is.
     public static IReadOnlyList<string> WithHookInput(IReadOnlyList<string> args, Func<string> readInput) =>

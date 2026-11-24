@@ -49,6 +49,11 @@ public static class ControlUsage
                 + "      with no background work, to run task ask when the next move is the user's (once per turn).\n"
                 + "      Prints only what the session should read, and exits 0\n"
                 + "      even when Deskbar is not running; JSON that is not a hook's exits 1"),
+            new("claude-wait", "[--entry <value>] [--attended <value>] [--job <value>] [--from <folder>]",
+                "what claude-wait-hook.cmd runs once after each of a session's turns, with the hook's JSON on stdin:\n"
+                + "      registers the session's comment waiter and prints the inbox file it watches, its gen file and\n"
+                + "      its generation, one per line, so a comment you post on the session's task wakes it. Prints\n"
+                + "      nothing for a headless session or with the task events off"),
         ]),
         new("Tasks", [
             new("task", "list [--closed]",

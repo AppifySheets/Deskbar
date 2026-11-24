@@ -56,6 +56,21 @@ public sealed partial class RemoteControl
             .Bind(request => ClaudeHookEvent.Parse(request.Json!, request.Entrypoint, request.Attended, request.Job).Map(hook => (request, hook)))
             .Match(found => Answer(found.hook, found.request.From), ControlReply.Fail);
 
+    // CLAUDE-WAIT: a session's comment waiter registering (plan docs/superpowers/plans/2026-11-24-comment-wakes-session.md,
+    // Task 3). The waiting Stop hook (claude-wait-hook.cmd, ClaudeSkill) calls this once, its hook JSON on stdin like any
+    // hook, and reads three lines back: the inbox file it watches, the gen file it checks, and its own generation
+    // (CommentInbox). Nothing at all for a headless run (nobody would read a comment there), with the task events off, or
+    // without an inbox: the script then exits 0 and the session simply has no waiter this turn.
+    ControlReply ClaudeWait(IReadOnlyList<string> rest) =>
+        ControlArguments.ParseClaudeHook(rest)
+            .Bind(request => ClaudeHookEvent.Parse(request.Json!, request.Entrypoint, request.Attended, request.Job))
+            .Match(hook => inbox is { } box && !hook.Headless && manager.State.ClaudeTasksInEffect
+                    ? box.Register(hook.SessionId).Match(
+                        waiter => Said($"{waiter.InboxPath}\n{waiter.GenPath}\n{waiter.Generation}\n"),
+                        _ => Quiet)
+                    : Quiet,
+                ControlReply.Fail);
+
     ControlReply Answer(ClaudeHookEvent hook, string? from) => hook.Event switch
     {
         // The reply of `attention` is JSON for a person running it by hand; a hook's session must not read it.
@@ -177,10 +192,13 @@ public sealed partial class RemoteControl
     //     and the list is the truth: it ends the session when it really goes (TaskBoard.Reconcile). Ending it here only
     //     made the board flicker "ended" after every turn until the next poll revived it, so it is skipped.
     //   * anything else: the session is marked ended; its task stays open.
-    static ControlReply Ended(TaskService service, ClaudeHookEvent hook)
+    ControlReply Ended(TaskService service, ClaudeHookEvent hook)
     {
         if (hook.Reason.Map(r => r == "clear").GetValueOrDefault(false)) service.SessionCleared(hook.SessionId);
         else if (!hook.Background) service.SessionEnded(hook.SessionId);
+        // A comment wakes its session: an ended session's inbox and gen file go with it (its waiter, if any, then finds
+        // no gen file of its number and exits). A comment for it later resumes it instead (CommentWake).
+        inbox?.Forget(hook.SessionId);
         return Quiet;
     }
 

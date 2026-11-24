@@ -85,7 +85,8 @@ public sealed partial class RemoteControl(WorkspaceManager manager, Func<bool, R
     Func<bool, Result>? setTasksWindow = null,
     Func<string, string>? longPath = null,
     GoalService? goals = null,
-    TaskSessionCommands? taskSessions = null)
+    TaskSessionCommands? taskSessions = null,
+    CommentInbox? inbox = null)
 {
     // `longPath` turns an 8.3 short path into its long form (GetLongPathNameW, LongPath on the Windows side), for
     // FolderPath. Left null, a path is taken as it is, which is all a test that names long paths needs.
@@ -119,6 +120,8 @@ public sealed partial class RemoteControl(WorkspaceManager manager, Func<bool, R
         ("attention", ["--from", var folder]) => Attention(folder),
         // Claude Code's hooks (RemoteControl.ClaudeHook.cs): the hook's JSON and the session's folder.
         (ControlArguments.ClaudeHookVerb, _) => ClaudeHook(rest),
+        // A session's comment waiter registering (RemoteControl.ClaudeHook.cs, ClaudeWait).
+        (ControlArguments.ClaudeWaitVerb, _) => ClaudeWait(rest),
         ("task", _) => Task(rest),
         ("tasks-window", [var state]) => TasksWindow(state),
         ("goal", _) => Goal(rest),
