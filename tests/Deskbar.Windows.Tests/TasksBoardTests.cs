@@ -1,3 +1,4 @@
+using System.IO;
 using System.Windows;
 using System.Windows.Automation;
 using System.Windows.Controls;
@@ -90,7 +91,8 @@ public class TasksBoardTests
         Func<DateTimeOffset>? now = null, TaskSelection? selection = null, Func<bool>? activates = null,
         Func<TaskItem, IReadOnlyList<SessionView>>? sessionsOf = null, Action<Guid>? startClaude = null,
         Func<TaskItem, string, Result>? openSession = null, IObservable<System.Reactive.Unit>? sessionsChanged = null,
-        string edge = "right", double width = Wide, Func<TaskItem, int>? workingOf = null, double? screenDips = null)
+        string edge = "right", double width = Wide, Func<TaskItem, int>? workingOf = null, double? screenDips = null,
+        string? stateDir = null, Action<string>? openImage = null)
     {
         var harness = Harness.Build();
         var minutes = 0;
@@ -103,6 +105,8 @@ public class TasksBoardTests
         {
             ThemeMode = ThemeMode.System,
             Quiet = true, ClickClock = clickClock ?? (() => ClickStart.AddSeconds(seconds++)), Now = now ?? (() => Start.AddHours(1)),
+            // Images in tasks: a scratch state folder, and a click on a picture recorded instead of opening a viewer.
+            StateDir = stateDir ?? Path.GetTempPath(), OpenImage = openImage ?? (_ => { }),
         };
 #pragma warning restore WPF0001
         // A panel wide enough for everything (Wide, below): the full line and the Matrix switch both need it. The slim line
@@ -3296,5 +3300,105 @@ public class TasksBoardTests
         menu = t.Window.OpenMenuFor(id);
         Assert.Contains("Reopen", MenuWords(menu));
         menu.IsOpen = false;
+    });
+
+    // --- images in tasks (docs/superpowers/specs/2026-11-24-task-images-design.md) ---------------------------------------
+
+    static string ScratchRoot() => Directory.CreateTempSubdirectory("deskbar-board-images-").FullName;
+
+    static System.Windows.Media.Imaging.BitmapSource Picture(int width = 40, int height = 30)
+    {
+        var pixels = Enumerable.Repeat((byte)0x80, width * height * 4).ToArray();
+        var bitmap = System.Windows.Media.Imaging.BitmapSource.Create(width, height, 96, 96, System.Windows.Media.PixelFormats.Bgra32, null, pixels, width * 4);
+        bitmap.Freeze();
+        return bitmap;
+    }
+
+    // One picture saved for the task in the scratch state folder; the relative path its markdown line points at.
+    static string Pictured(string root, Guid task) =>
+        TaskImageFiles.Save(root, task, [TaskImageFiles.FromBitmap(Picture()).Value], Start).Value.Single();
+
+    static IEnumerable<string> RunTexts(object scope) => Inside(scope).OfType<System.Windows.Documents.Run>().Select(r => r.Text);
+
+    static Button? PictureOf(object scope) => Inside(scope).OfType<Button>().FirstOrDefault(b => Equals(b.Tag, TaskImageRow.ImageTag));
+
+    // A comment's picture shows as a thumbnail after its text, outside the clipped body (so "Show more" folds the text and
+    // never cuts a picture), and its markdown line is not shown as text; a click opens the file itself.
+    [Fact]
+    public void A_comments_picture_shows_as_a_thumbnail_that_opens_the_file() => StaThread.Run(() =>
+    {
+        var root = ScratchRoot();
+        var opened = new List<string>();
+        try
+        {
+            using var t = Build(stateDir: root, openImage: opened.Add);
+            var id = t.Tasks.AddNote("Bar looks wrong", t.Gepha).Value.Id;
+            var picture = Pictured(root, id);
+            t.Tasks.Comment(id, Maybe<string>.None, TaskImages.Join("Look", [picture]));
+            t.Controller.Show();
+            t.Controller.ToggleThread(id);
+
+            Assert.DoesNotContain(RunTexts(t.Window), text => text.Contains("task-images"));
+            Assert.Contains(RunTexts(t.Window), text => text == "Look");
+            var thumbnail = PictureOf(t.Window);
+            Assert.NotNull(thumbnail);
+            Click(thumbnail!);
+            Assert.Equal([TaskImages.Resolve(picture, root).Value], opened);
+        }
+        finally { Directory.Delete(root, true); }
+    });
+
+    // A picture whose file is gone shows its path as dim text: never an exception, never an empty gap.
+    [Fact]
+    public void A_missing_picture_shows_its_path() => StaThread.Run(() =>
+    {
+        var root = ScratchRoot();
+        try
+        {
+            using var t = Build(stateDir: root);
+            var id = t.Tasks.AddNote("Gone", t.Gepha).Value.Id;
+            var relative = TaskImages.RelativeFor(id, Start, 0, jpeg: false);
+            t.Tasks.Comment(id, Maybe<string>.None, TaskImages.Join("", [relative]));
+            t.Controller.Show();
+            t.Controller.ToggleThread(id);
+
+            Assert.Null(PictureOf(t.Window));
+            Assert.Contains(Inside(t.Window).OfType<TextBlock>(), b => Equals(b.Tag, TaskImageRow.MissingTag) && b.Text == relative);
+        }
+        finally { Directory.Delete(root, true); }
+    });
+
+    // A session's comment naming a file outside task-images is text, never a thumbnail (safety: a click must never open
+    // something elsewhere).
+    [Fact]
+    public void A_picture_outside_task_images_stays_text() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        var id = t.Tasks.AddNote("Crafted", t.Gepha).Value.Id;
+        t.Tasks.Comment(id, "s1", "![x](task-images/../state.json)");
+        t.Controller.Show();
+        t.Controller.ToggleThread(id);
+
+        Assert.Null(PictureOf(t.Window));
+        Assert.Contains(RunTexts(t.Window), text => text.Contains("state.json"));
+    });
+
+    // The description's pictures show under it, once the line is open, as a comment's do.
+    [Fact]
+    public void A_descriptions_picture_shows_under_it() => StaThread.Run(() =>
+    {
+        var root = ScratchRoot();
+        try
+        {
+            using var t = Build(stateDir: root);
+            var id = t.Tasks.AddNote("Brief", t.Gepha).Value.Id;
+            t.Tasks.Describe(id, TaskImages.Join("The plan", [Pictured(root, id)]));
+            t.Controller.Show();
+            t.Controller.ToggleThread(id);
+
+            Assert.Equal("The plan", DescriptionBlockOf(t.Window, id)!.Text);
+            Assert.NotNull(PictureOf(LineOf(t.Window, id)));
+        }
+        finally { Directory.Delete(root, true); }
     });
 }

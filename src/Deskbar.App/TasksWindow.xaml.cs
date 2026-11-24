@@ -225,6 +225,27 @@ public partial class TasksWindow : Window
     // ClickClock is a seam for the tests, which put a click right after a redraw or half a second later.
     internal Func<DateTime> ClickClock { get; init; } = () => DateTime.UtcNow;
 
+    // IMAGES IN TASKS (docs/superpowers/specs/2026-11-24-task-images-design.md). StateDir is the folder pasted pictures are
+    // saved under (task-images\<task id>\) and read from; OpenImage is what a click on a thumbnail does with the picture's
+    // absolute path: the default image viewer, through the shell. Both are seams so the tests use a scratch folder and
+    // record the click instead of opening a viewer.
+    internal string StateDir { get; init; } = AppPaths.NewStateDir;
+
+    internal Action<string> OpenImage { get; init; } = OpenInViewer;
+
+    // A refusal (no viewer registered for PNG) is traced, never thrown: a click in the panel must not take the app down.
+    static void OpenInViewer(string path)
+    {
+        try
+        {
+            System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(path) { UseShellExecute = true })?.Dispose();
+        }
+        catch (Exception e) when (e is System.ComponentModel.Win32Exception or InvalidOperationException)
+        {
+            ClickTrace.Write($"tasks window: could not open {path}: {e.Message}");
+        }
+    }
+
     static readonly TimeSpan RepaintGrace = TimeSpan.FromMilliseconds(500);
     string linesPlaces = "";
     int pressClicks;
@@ -1059,7 +1080,15 @@ public partial class TasksWindow : Window
             // after i go to details"). A closed line shows the description's first line, plain and dim, cut to one line,
             // so a line with a description still says so and stays one line tall; a click on the line opens it, and then
             // the whole description shows, rendered, above the thread.
-            if (row.Description.Length > 0) panel.Children.Add(row.Expanded ? DescriptionBlock(row) : DescriptionPreview(row));
+            // Images in tasks: an open line shows the description's text, then its pictures as a row of thumbnails
+            // (TaskImageRow), and no block at all for a description that is only pictures.
+            if (row.Description.Length > 0 && !row.Expanded) panel.Children.Add(DescriptionPreview(row));
+            if (row.Description.Length > 0 && row.Expanded)
+            {
+                var parts = TaskImages.Split(row.Description);
+                if (parts.Text.Length > 0) panel.Children.Add(DescriptionBlock(row));
+                if (TaskImageRow.Of(StateDir, parts.Images, OpenImage) is { } pictures) panel.Children.Add(pictures);
+            }
         }
         if (row.Detail.Length > 0)
             panel.Children.Add(new TextBlock
@@ -1078,7 +1107,8 @@ public partial class TasksWindow : Window
     // the line (selecting it) and a link in it is not clickable here; the full text is a click away in Edit.
     RichTextBox DescriptionBlock(TaskRowView row)
     {
-        var document = MarkdownBlocks.Render(row.Description);
+        // The text alone: its pictures are the row under it (TaskImageRow), never a path shown as text.
+        var document = MarkdownBlocks.Render(TaskImages.Split(row.Description).Text);
         document.FontSize = 11;
         document.Foreground = DimInk;
         return new RichTextBox
@@ -1340,7 +1370,10 @@ public partial class TasksWindow : Window
         settle.Margin = new Thickness(4, 0, 0, 0);
         if (!editing) header.Children.Add(settle);
         if (editing) return new StackPanel { Margin = new Thickness(0, 0, 0, 8), Children = { header, CommentEditorBox(comment) } };
-        var document = MarkdownBlocks.Render(comment.Markdown);
+        // Images in tasks: the body renders the comment's text alone; its pictures are a row of their own after it
+        // (TaskImageRow), outside the clipped box, so folding to three lines cuts text, never a picture.
+        var split = TaskImages.Split(comment.Markdown);
+        var document = MarkdownBlocks.Render(split.Text);
         document.FontSize = 11.5;
         document.Foreground = Ink;
         var body = new RichTextBox
@@ -1363,13 +1396,15 @@ public partial class TasksWindow : Window
         // judged by the character count at first (the width is not known while the thread is built), and by the laid-out
         // height once it has been (review of the batch): a paragraph that fits three lines at the window's width loses its
         // button, and one that wraps to more gains it.
-        var isLong = IsLong(comment.Markdown);
+        var isLong = IsLong(split.Text);
         var full = longOpen.Contains(comment.Id);
         if (!full)
         {
             body.MaxHeight = ThreeLines;
             body.ClipToBounds = true;
         }
+        // A comment of pictures alone has no text box to show.
+        if (split.Text.Trim().Length == 0) body.Visibility = Visibility.Collapsed;
         var parts = new StackPanel { Margin = new Thickness(0, 0, 0, 8), Opacity = comment.Settled ? 0.55 : 1, Children = { header, body } };
         var more = Small(new TextBlock { Text = full ? "Show less" : "Show more", Foreground = HeaderInk, FontSize = 10.5 },
             full ? "Show less" : "Show more", () =>
@@ -1380,10 +1415,11 @@ public partial class TasksWindow : Window
         // Collapsed means it takes no room and is not in the tree for a reader, but it is there for the layout to switch on.
         more.Visibility = full || isLong ? Visibility.Visible : Visibility.Collapsed;
         parts.Children.Add(more);
+        if (TaskImageRow.Of(StateDir, split.Images, OpenImage) is { } pictures) parts.Children.Add(pictures);
         if (!full)
             body.LayoutUpdated += (_, _) =>
             {
-                if (body.ActualWidth <= 0) return;
+                if (body.ActualWidth <= 0 || body.Visibility != Visibility.Visible) return;
                 var wanted = body.ExtentHeight > ThreeLines + 0.5 ? Visibility.Visible : Visibility.Collapsed;
                 if (more.Visibility != wanted) more.Visibility = wanted;
             };
