@@ -44,11 +44,31 @@ public sealed record TaskBoard(IReadOnlyList<TaskItem> Tasks)
     /// One of Petre's notes: Backlog, no sessions. Every add is a new task, even with a title seen before. It takes the
     /// flags of <paramref name="quadrant"/> (Ruling 37: the add box's important and urgent toggles, or `task add
     /// --important --urgent`) and lands at the top of that quadrant; no flags, quadrant IV, is the default.
+    ///
+    /// With a <paramref name="parent"/> (subtasks spec) the note is that task's subtask: the parent must exist and must not
+    /// be a subtask itself (one level), and a note given no workspace takes the parent's. A workspace given wins, so the
+    /// add box's workspace chip and `task add --workspace` still decide; their callers set it to the parent's first.
     /// </summary>
     public Result<(TaskBoard Board, TaskItem Task)> AddNote(string title, Maybe<Guid> workspace, DateTimeOffset now, Guid newId,
-        Quadrant quadrant = Quadrant.IV) =>
-        CleanTitle(title).Map(clean => WithAppended(
-            WithFlags(NewTask(newId, clean, workspace, TaskStatus.Backlog, [], now), quadrant) with { Rank = TopRank(quadrant, newId) }));
+        Quadrant quadrant = Quadrant.IV, Maybe<Guid> parent = default) =>
+        // The lambda's parameter is typed: Result<Maybe<T>> has a second Map that maps inside the Maybe.
+        CleanTitle(title).Bind(clean => ParentFor(parent).Map((Maybe<TaskItem> up) => WithAppended(
+            WithFlags(NewTask(newId, clean, workspace.Or(up.Bind(p => p.WorkspaceId)), TaskStatus.Backlog, [], now), quadrant)
+                with { Rank = TopRank(quadrant, newId), ParentId = up.Map(p => p.Id) })));
+
+    /// <summary>
+    /// A session splits its work (`task subtask`): a Backlog subtask assigned to Claude, so the next session on the
+    /// workspace is offered it. Its parent is the session's own task, or, when that is already a subtask, that task's
+    /// parent, so the new one is a SIBLING (one level is the limit, and splitting your own piece is exactly when this is
+    /// wanted). It takes the parent's workspace. The session does not join it and its own task is untouched. A session
+    /// with no open task is refused.
+    /// </summary>
+    public Result<(TaskBoard Board, TaskItem Task)> AddSubtask(string sessionId, string title, DateTimeOffset now, Guid newId) =>
+        TaskOf(sessionId).ToResult($"Session {sessionId} has no open task")
+            .Bind(own => AddNote(title, Maybe<Guid>.None, now, newId, Quadrant.IV, own.ParentId.Or(own.Id)))
+            .Map(added => (added.Task with { Assignee = Assignee.Claude }) is var claudes
+                ? (added.Board.Replaced(claudes), claudes)
+                : added);
 
     /// <summary>
     /// A task a session makes for its own work: In progress, with that session on it. The session leaves whatever
@@ -374,9 +394,14 @@ public sealed record TaskBoard(IReadOnlyList<TaskItem> Tasks)
             ? Replaced(task with { Assignee = Assignee.Claude, HandedBack = Maybe<DateTimeOffset>.None, UpdatedAt = now })
             : this;
 
-    public Result<TaskBoard> Delete(Guid id) =>
+    /// <summary>
+    /// Deletes a task for good. Its subtasks stay and become plain tasks (their parent link goes, stamped), as
+    /// DetachGoal frees a deleted goal's tasks, so no link is left naming nothing.
+    /// </summary>
+    public Result<TaskBoard> Delete(Guid id, DateTimeOffset now) =>
         Tasks.Any(t => t.Id == id)
-            ? new TaskBoard(Tasks.Where(t => t.Id != id).ToArray())
+            ? new TaskBoard(Tasks.Where(t => t.Id != id)
+                .Select(t => t.ParentId == id ? t with { ParentId = Maybe<Guid>.None, UpdatedAt = now } : t).ToArray())
             : Result.Failure<TaskBoard>(NoTask(id.ToString()));
 
     /// <summary>
@@ -492,6 +517,58 @@ public sealed record TaskBoard(IReadOnlyList<TaskItem> Tasks)
             ? t with { WorkspaceId = Maybe<Guid>.None, UpdatedAt = now }
             : t).ToArray());
 
+    // --- subtasks (docs/superpowers/specs/2026-11-24-subtasks-design.md) ---------------------------------
+    //
+    // One level: a family is a parent and its subtasks. A subtask cannot be a parent and a parent cannot become a
+    // subtask, so the briefing and the breadcrumb never grow with depth. A closed parent is allowed (its context is still
+    // worth reading). The link never moves a line: Pile and Group do not read it.
+
+    /// <summary>
+    /// Makes <paramref name="id"/> a subtask of <paramref name="parent"/>, or (none) a plain task again. Refused: an
+    /// unknown task or parent, the task itself, a parent that is a subtask, and a task that has subtasks of its own. The
+    /// parent it already has, or clearing one it does not have, returns this same board. Only the link and UpdatedAt
+    /// change, so the line keeps its place. Any task, closed ones too, as SetGoal does.
+    /// </summary>
+    public Result<TaskBoard> SetParent(Guid id, Maybe<Guid> parent, DateTimeOffset now) =>
+        Lookup(id).Bind(task =>
+            task.ParentId == parent ? Result.Success(this)
+            : parent.HasValue && parent.Value == id ? Result.Failure<TaskBoard>("A task cannot be its own subtask")
+            : parent.HasValue && Tasks.Any(t => t.ParentId == id)
+                ? Result.Failure<TaskBoard>($"Task {Short(id)} has subtasks of its own, so it cannot become one")
+            : ParentFor(parent).Map((Maybe<TaskItem> _) => Replaced(task with { ParentId = parent, UpdatedAt = now, Adopted = false })));
+
+    /// <summary>
+    /// The task with its parent, siblings and subtasks (<see cref="TaskFamily"/>), or none for an unknown task and for
+    /// a task with neither a parent that exists nor subtasks, so a caller prints nothing for a lone task.
+    /// </summary>
+    public Maybe<TaskFamily> Family(Guid id) =>
+        Tasks.TryFirst(t => t.Id == id).Bind(task =>
+            ParentOf(task) is var up && ChildrenOf(task.Id) is var children && (up.HasValue || children.Count > 0)
+                ? Maybe.From(new TaskFamily(task, up,
+                    up.Map(p => (IReadOnlyList<TaskItem>)ChildrenOf(p.Id).Where(t => t.Id != id).ToArray())
+                        .GetValueOrDefault(Array.Empty<TaskItem>()),
+                    children))
+                : Maybe<TaskFamily>.None);
+
+    // The parent a task names, when it is still on the board.
+    Maybe<TaskItem> ParentOf(TaskItem task) => task.ParentId.Bind(p => Tasks.TryFirst(t => t.Id == p));
+
+    // A task's subtasks: open ones in the pile's order, then closed ones latest closed first (closing stamps UpdatedAt),
+    // the same orders `task list` and `task list --closed` print them in.
+    IReadOnlyList<TaskItem> ChildrenOf(Guid id) =>
+        Pile().Where(t => t.ParentId == id)
+            .Concat(Tasks.Where(t => t.ParentId == id && !t.IsOpen).OrderByDescending(t => t.UpdatedAt))
+            .ToArray();
+
+    // The parent a new subtask or a SetParent names, checked: it exists and is not itself a subtask. None is fine.
+    Result<Maybe<TaskItem>> ParentFor(Maybe<Guid> parent) =>
+        parent.HasNoValue ? Result.Success(Maybe<TaskItem>.None)
+        : Lookup(parent.Value).Bind(p => p.ParentId.HasValue
+            ? Result.Failure<Maybe<TaskItem>>($"Subtasks go one level deep: {Short(p.Id)} is already a subtask")
+            : Result.Success(Maybe.From(p)));
+
+    static string Short(Guid id) => id.ToString()[..8];
+
     // --- reading -----------------------------------------------------------------------------------
 
     /// <summary>
@@ -533,11 +610,15 @@ public sealed record TaskBoard(IReadOnlyList<TaskItem> Tasks)
     /// tasks on that workspace that are assigned to Claude (Ruling 57; "Assign to Me" withdraws the offer, as the review asked: the
     /// assignee alone decides), plus the open Claude tasks on no workspace that are still Claude's. A note of Petre's that stays his
     /// is not offered, and neither are his notes on no workspace (errands; spec, "What a session is offered").
+    ///
+    /// A free subtask that is Claude's is offered too when its parent has had sessions (subtasks spec, after the builder
+    /// check): a session that split a task on no workspace (`task subtask`) made it, and without this no session would
+    /// ever be offered it.
     /// </summary>
     public IReadOnlyList<TaskItem> Offered(Maybe<Guid> workspace) =>
         Pile().Where(t => t.WorkspaceId.HasValue
             ? workspace.HasValue && t.WorkspaceId.Value == workspace.Value && t.Assignee.IsClaude
-            : t.IsClaudes && t.Assignee.IsClaude).ToArray();
+            : t.Assignee.IsClaude && (t.IsClaudes || ParentOf(t).Map(p => p.IsClaudes).GetValueOrDefault(false))).ToArray();
 
     /// <summary>
     /// The open tasks in the order the bar shows them (Ruling 25): Waiting on you first, the latest ask on top (by

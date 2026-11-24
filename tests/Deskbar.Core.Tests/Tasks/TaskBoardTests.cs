@@ -469,8 +469,8 @@ public class TaskBoardTests
     {
         var board = Note(TaskBoard.Empty, id1, ws);
 
-        Assert.Empty(board.Delete(id1).Value.Tasks);
-        Assert.True(board.Delete(id2).IsFailure);
+        Assert.Empty(board.Delete(id1, clock).Value.Tasks);
+        Assert.True(board.Delete(id2, clock).IsFailure);
     }
 
     [Fact]
