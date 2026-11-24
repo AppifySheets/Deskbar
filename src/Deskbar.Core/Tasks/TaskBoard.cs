@@ -557,8 +557,14 @@ public sealed record TaskBoard(IReadOnlyList<TaskItem> Tasks)
     public Maybe<TaskItem> SubtaskParentFor(Guid lineId) =>
         Tasks.TryFirst(t => t.Id == lineId).Map(t => ParentOf(t).GetValueOrDefault(t));
 
-    // The parent a task names, when it is still on the board.
-    Maybe<TaskItem> ParentOf(TaskItem task) => task.ParentId.Bind(p => Tasks.TryFirst(t => t.Id == p));
+    /// <summary>The parent a task names, when it is still on the board: what a subtask's line names in front of its title.</summary>
+    public Maybe<TaskItem> ParentOf(TaskItem task) => task.ParentId.Bind(p => Tasks.TryFirst(t => t.Id == p));
+
+    /// <summary>
+    /// How many OPEN subtasks a task has, the count its line shows ("· 2 subtasks", Petre's pick A). Closed ones are
+    /// history and do not count (subtasks spec, "Calls Claude made").
+    /// </summary>
+    public int OpenSubtaskCount(Guid id) => Tasks.Count(t => t.ParentId == id && t.IsOpen);
 
     // A task's subtasks: open ones in the pile's order, then closed ones latest closed first (closing stamps UpdatedAt),
     // the same orders `task list` and `task list --closed` print them in.

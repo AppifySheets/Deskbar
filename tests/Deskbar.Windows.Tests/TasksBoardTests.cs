@@ -3664,6 +3664,37 @@ public class TasksBoardTests
         Assert.True(t.Tasks.Board.Tasks.Single(x => x.Title == "Loose").ParentId.HasNoValue);
     });
 
+    // Petre's pick A in the panel: a full line names the parent in front of a subtask's title, a slim one only "↳", and a
+    // parent's title is followed by its open subtasks' count. A rename of the parent redraws its subtasks' lines.
+    // A title's runs joined: what it reads, whether it was set as Text (one run) or built from runs.
+    static string RunsOf(TextBlock title) => string.Concat(title.Inlines.OfType<System.Windows.Documents.Run>().Select(r => r.Text));
+
+    [Fact]
+    public void A_full_line_names_the_parent_and_a_parent_counts_its_subtasks() => StaThread.Run(() =>
+    {
+        using var t = Build(width: TasksPanelLayout.SlimBelow);
+        var parent = t.Tasks.AddNote("Ship the release", t.Gepha).Value;
+        var child = t.Tasks.AddNote("Write the notes", t.Gepha, parent: parent.Id).Value;
+        t.Controller.Show();
+
+        Assert.Equal("↳ Ship the release › Write the notes", RunsOf(TitleOf(t.Window, child.Id)));
+        Assert.Equal("Ship the release · 1 subtask", RunsOf(TitleOf(t.Window, parent.Id)));
+
+        t.Tasks.Rename(parent.Id, "Release 2.6");
+        Assert.Equal("↳ Release 2.6 › Write the notes", RunsOf(TitleOf(t.Window, child.Id)));
+    });
+
+    [Fact]
+    public void A_slim_line_shows_only_the_arrow() => StaThread.Run(() =>
+    {
+        using var t = Build(width: TasksPanelLayout.DefaultWidth);
+        var parent = t.Tasks.AddNote("Ship the release", t.Gepha).Value;
+        var child = t.Tasks.AddNote("Write the notes", t.Gepha, parent: parent.Id).Value;
+        t.Controller.Show();
+
+        Assert.Equal("↳ Write the notes", RunsOf(TitleOf(t.Window, child.Id)));
+    });
+
     [Fact]
     public void Add_subtask_on_a_subtask_adds_a_sibling_in_the_window() => StaThread.Run(() =>
     {
