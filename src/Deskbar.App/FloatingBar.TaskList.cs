@@ -37,7 +37,8 @@ namespace Deskbar.App;
 //                   starts typing as a click in the box does. Enter
 //                   adds a Backlog note through TaskService.AddNote and Esc clears the box; either way the keyboard
 //                   goes back to the window Petre was typing in. Clicking away leaves the text where it is.
-//   the lines       the first lines of the pile, three on a floating bar and as many as fit on a docked one (Waiting
+//   the lines       every line of the pile, in a viewer as tall as three lines on a floating bar and as many as fit
+//                   on a docked one; the rest scroll under the wheel (THE LIST SCROLLS, below CapTaskLines) (Waiting
 //                   on you, then Covey's quadrants I to IV, each in Petre's own order, dragged up and down; TaskBoard.Pile,
 //                   THE FLAGS below, FloatingBar.TaskDrag.cs). A
 //                   Claude line (a task with a session) has an orange edge and tint (the edge is the mark: Ruling 42,
@@ -56,7 +57,8 @@ namespace Deskbar.App;
 //                   quadrant it lands in. The groups (the Waiting on you block, then each quadrant) are told apart by a
 //                   little space above a group's first line, and nothing names them: the bar stays compact (the
 //                   window's List view has the captions).
-//   "+N more"       a small line under the last line when more open tasks are out of sight. When some of the hidden
+//   "+N more"       a small line under the last line when more open tasks are out of sight, scrolled above the view or
+//                   still below it, recounted as the list scrolls. When some of the hidden
 //                   ones wait on Petre it says so in the asking orange ("+2 waiting"), so no ask is out of sight
 //                   without a sign (spec, "The bar's order"). It toggles the docked tasks panel (ToggleTasksPanel,
 //                   set by the App; TasksBoard.Toggle) and looks on while the panel is shown (TasksPanelShown), and
@@ -154,8 +156,10 @@ public partial class FloatingBar
     // The selected line's fill (lighter than the hover's #1FFFFFFF) and its edge (TaskPickedEdge, the text box's blue).
     static readonly Brush TaskSelectedFill = Frozen(0x38, 0xFF, 0xFF, 0xFF);
 
-    // The highlight as the selection stands, on the lines on show, in place.
-    void PaintTaskSelection() =>
+    // The highlight as the selection stands, on the lines drawn, in place; then the selected line scrolled into sight
+    // when the list had it out of view (BringSelectedIntoSight).
+    void PaintTaskSelection()
+    {
         (taskLinesPanel?.Children.OfType<Button>() ?? []).Where(b => b.Tag is TaskLine).ToList().ForEach(button =>
         {
             if (button.Content is not Border frame) return;
@@ -164,6 +168,8 @@ public partial class FloatingBar
             frame.Background = selected ? TaskSelectedFill : Brushes.Transparent;
             ShowQuietFlags(button, selected || button.IsMouseOver);
         });
+        BringSelectedIntoSight();
+    }
 
     // For the tests: whether a line on show is drawn as selected.
     internal bool TaskLineSelected(Guid id) =>
@@ -316,6 +322,10 @@ public partial class FloatingBar
     internal Maybe<Guid> TaskAddTarget => taskAddTarget;
     internal string TaskAddPlaceholder => taskAddPlaceholder?.Text ?? "";
     internal IReadOnlyList<TaskLine> TaskListLines => shownTaskLines;
+    // The lines in sight in the viewer right now, the rest being scrolled above or below it (THE LIST SCROLLS).
+    internal IReadOnlyList<TaskLine> TaskLinesInSight => LinesInSight();
+    // The viewer, for the tests that scroll it.
+    internal ScrollViewer? TaskLinesScroller => taskLinesScroller;
 
     // Three lines, the number the spec gives ("the three most recent tasks"): always on a floating bar, and the least
     // on a docked one.
@@ -418,7 +428,9 @@ public partial class FloatingBar
         var available = (ActualHeight - top) / unit - RootPadding - BarContent.Margin.Bottom;
         var others = BarContent.Children.OfType<UIElement>().Where(child => child != rowsArea).Sum(child => child.DesiredSize.Height);
         var rowsNeed = rowsArea.Children.OfType<UIElement>().Sum(child => child.DesiredSize.Height) + rowsArea.Margin.Top + rowsArea.Margin.Bottom;
-        var linesNow = taskLinesPanel.Children.OfType<FrameworkElement>().Sum(line => line.DesiredSize.Height);
+        // What the lines take of the footer is the viewer's height, not the lines' own: every line is drawn now and the
+        // viewer shows only the ones that fit (THE LIST SCROLLS), so the lines' sum would count the scrolled ones too.
+        var linesNow = taskLinesScroller?.DesiredSize.Height ?? 0;
         return available - others - rowsNeed + linesNow;
     }
 
@@ -735,8 +747,9 @@ public partial class FloatingBar
 
         taskLinesPanel = new StackPanel();
         WireTaskDrag(taskLinesPanel);
-        // The lines scroll inside this once the expanded list is capped (CapTaskLines). The bar draws no scroll bar of
-        // its own anywhere, so none here either: the wheel scrolls it. Folded to three, it has no ceiling at all.
+        // Every line is drawn in here and the viewer is only as tall as the lines that fit (CapTaskLines), so the rest
+        // scroll (THE LIST SCROLLS). The bar draws no scroll bar of its own anywhere, so none here either: the wheel
+        // scrolls it, and "+N more" says how much is out of sight.
         taskLinesScroller = new ScrollViewer
         {
             Tag = "task-lines",
@@ -745,6 +758,16 @@ public partial class FloatingBar
             HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
             Focusable = false,
         };
+        // A scroll, or the view or the list changing size, changes which lines are out of sight: "+N more" is recounted.
+        // Only the count and its words change, never a line, so nothing moves under the pointer.
+        taskLinesScroller.ScrollChanged += (_, e) =>
+        {
+            if (ReferenceEquals(e.OriginalSource, taskLinesScroller)) PaintTaskMore(openTaskLines);
+        };
+        // The lines' heights follow the width they are laid out at (a title can wrap to two lines, Ruling 41), and the
+        // first paint measures them before any width is known: once laid out, the viewer's height is taken again from
+        // the lines as they really are.
+        taskLinesPanel.SizeChanged += (_, _) => RecapTaskLinesFromLayout();
         var host = new TakesNoWidth(VisibleWidthOf) { Child = new StackPanel { Children = { taskProblemHost, addRow, taskLinesScroller } } };
         TaskListLine.Child = host;
         // A RIGHT-CLICK IN THE LIST NEVER OPENS THE BAR'S MENU (Petre's screenshot: right-clicking a task line opened New
@@ -939,7 +962,10 @@ public partial class FloatingBar
         if (shape == lastTaskListShape) return;
         lastTaskListShape = shape;
 
-        shownTaskLines = taskListExpanded ? all : all.Take(slots).ToArray();
+        // Every line is drawn; the viewer shows `slots` of them (or eight expanded in place) and the rest scroll.
+        shownTaskLines = all;
+        openTaskLines = open;
+        taskLinesCap = taskListExpanded ? ExpandedSlots : slots;
         taskLinesPanel.Children.Clear();
         taskAges.Clear();
         // The minute's tick of the ages starts with the first lines drawn and lives as long as the bar.
@@ -963,6 +989,29 @@ public partial class FloatingBar
         }
         CapTaskLines();
         PaintTaskMore(open);
+        QueueTaskMoreRecount();
+    }
+
+    // The open lines of the last paint, for "+N more" recounted on a scroll (ScrollChanged), between paints.
+    IReadOnlyList<TaskLine> openTaskLines = [];
+
+    // How many lines the viewer is as tall as: the slots (three floating, the free height's worth docked), or eight
+    // while the list is expanded in place.
+    int taskLinesCap = TaskListSlots;
+    bool taskMoreRecountQueued;
+
+    // The lines just drawn have no layout yet, so the paint counts "+N more" as if the view were at its top; a list
+    // scrolled down and repainted (a status line changed) keeps its place, the same extent and offset, and then raises
+    // no ScrollChanged to correct the count. So the count is taken again once the layout has run.
+    void QueueTaskMoreRecount()
+    {
+        if (taskMoreRecountQueued) return;
+        taskMoreRecountQueued = true;
+        Dispatcher.BeginInvoke(DispatcherPriority.Loaded, () =>
+        {
+            taskMoreRecountQueued = false;
+            PaintTaskMore(openTaskLines);
+        });
     }
 
     // The open lines with every closed line still in its undo window put back where it was, in the order they were
@@ -982,20 +1031,98 @@ public partial class FloatingBar
             return lines;
         });
 
-    // The expanded list's ceiling: the height of its first eight lines, so the ninth and later scroll inside the viewer. Measured from the lines just built, at their own
-    // height, since a line's height follows the text size. Folded, there is no ceiling and the viewer is at its top.
+    // THE LIST SCROLLS (Petre, with a screenshot of his docked bar ending in "+16 more": "when there are more tasks than
+    // can fit in the bar, it should let me scroll"). Every line of the pile is drawn into the viewer, and the viewer's
+    // ceiling is the height of its first taskLinesCap lines: three on a floating bar, as many as the free height takes
+    // on a docked one (the fit pass above decides that count, so the rows keep their priority as before), eight while
+    // expanded in place. The lines past it scroll under the wheel, and "+N more" counts the lines out of sight as the
+    // view moves (PaintTaskMore over LinesInSight). Before this the lines past the count were simply not drawn and the
+    // only way to them was the tasks panel.
+    //
+    // The ceiling is set here, at the paint, from the lines just built and measured at the width the list has now, so
+    // the very layout that follows already has it (an undock lays out three lines from the start, review I-1); once the
+    // lines are laid out, RecapTaskLinesFromLayout takes it again from their real heights. A list that fits has no
+    // ceiling and sits at its top.
     void CapTaskLines()
     {
         if (taskLinesScroller is null || taskLinesPanel is null) return;
-        if (!taskListExpanded || shownTaskLines.Count <= ExpandedSlots)
+        if (shownTaskLines.Count <= taskLinesCap)
         {
             taskLinesScroller.MaxHeight = double.PositiveInfinity;
             taskLinesScroller.ScrollToTop();
             return;
         }
-        var counted = taskLinesPanel.Children.OfType<UIElement>().Take(ExpandedSlots).ToList();
-        counted.ForEach(row => row.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity)));
+        var width = taskLinesPanel.ActualWidth > 0 ? taskLinesPanel.ActualWidth : double.PositiveInfinity;
+        var counted = taskLinesPanel.Children.OfType<FrameworkElement>().Take(taskLinesCap).ToList();
+        counted.ForEach(row => row.Measure(new Size(width, double.PositiveInfinity)));
         taskLinesScroller.MaxHeight = counted.Sum(row => row.DesiredSize.Height);
+    }
+
+    // The ceiling again from the lines as laid out (see CapTaskLines), when it differs by more than layout rounding.
+    // The lines' heights do not depend on the ceiling (the scroll bar is hidden and takes no width), so this settles
+    // after one more layout.
+    void RecapTaskLinesFromLayout()
+    {
+        if (taskLinesScroller is null || taskLinesPanel is null || double.IsPositiveInfinity(taskLinesScroller.MaxHeight)) return;
+        var counted = taskLinesPanel.Children.OfType<FrameworkElement>().Take(taskLinesCap).ToList();
+        if (counted.Any(row => row.ActualHeight <= 0)) return;
+        var ceiling = counted.Sum(row => row.ActualHeight + row.Margin.Top + row.Margin.Bottom);
+        if (Math.Abs(ceiling - taskLinesScroller.MaxHeight) > 0.5) taskLinesScroller.MaxHeight = ceiling;
+    }
+
+    // The lines in sight: every line while nothing scrolls; before the lines are laid out, the first taskLinesCap (the
+    // view at its top); else each line at least half inside the view.
+    IReadOnlyList<TaskLine> LinesInSight()
+    {
+        if (taskLinesScroller is null || taskLinesPanel is null) return [];
+        var buttons = taskLinesPanel.Children.OfType<Button>().Where(b => b.Tag is TaskLine).ToList();
+        if (double.IsPositiveInfinity(taskLinesScroller.MaxHeight)) return buttons.Select(b => (TaskLine)b.Tag).ToArray();
+        if (taskLinesScroller.ViewportHeight <= 0 || buttons.Any(b => b.ActualHeight <= 0 || !b.IsDescendantOf(taskLinesPanel)))
+            return buttons.Take(taskLinesCap).Select(b => (TaskLine)b.Tag).ToArray();
+        var top = taskLinesScroller.VerticalOffset;
+        var bottom = top + taskLinesScroller.ViewportHeight;
+        return buttons.Where(b =>
+        {
+            var y = b.TranslatePoint(new Point(0, 0), taskLinesPanel).Y;
+            return Math.Min(y + b.ActualHeight, bottom) - Math.Max(y, top) >= b.ActualHeight / 2;
+        }).Select(b => (TaskLine)b.Tag).ToArray();
+    }
+
+    // THE SELECTED LINE IS BROUGHT INTO SIGHT when the selection changes and its line is scrolled away (a Claude terminal
+    // brought to the front selects its task, #477, and that line may sit below the view). Only when it is out of sight,
+    // so a click on a line in view never scrolls anything. The scroll moves the lines, so the click guard distrusts a
+    // click for its half second, as it does after a repaint (TaskClickIgnored).
+    void BringSelectedIntoSight()
+    {
+        if (selection.Current.HasValue) ScrollTaskLineIntoView(selection.Current.Value);
+    }
+
+    /// <summary>
+    /// Scrolls the viewer so the task's line is in sight, by the least distance (to the view's top edge when the line
+    /// is above it, to its bottom edge when below). Nothing when the line is in sight already, when it is not drawn
+    /// (the bar does not list the task), or under a press, a drag, a menu or an edit (TaskListMustWait: the lines must
+    /// not slide under any of them). A line drawn by a paint that has not been laid out yet (a note just added, then
+    /// selected) is scrolled to once the layout has run.
+    /// </summary>
+    internal void ScrollTaskLineIntoView(Guid id)
+    {
+        if (taskLinesScroller is null || taskLinesPanel is null || TaskListMustWait) return;
+        var button = taskLinesPanel.Children.OfType<Button>().FirstOrDefault(b => b.Tag is TaskLine line && line.Id == id);
+        if (button is null) return;
+        if (button.ActualHeight <= 0 || taskLinesScroller.ViewportHeight <= 0)
+        {
+            Dispatcher.BeginInvoke(DispatcherPriority.Loaded, () =>
+            {
+                if (button.ActualHeight > 0 && taskLinesScroller.ViewportHeight > 0) ScrollTaskLineIntoView(id);
+            });
+            return;
+        }
+        if (LinesInSight().Any(l => l.Id == id)) return;
+        var y = button.TranslatePoint(new Point(0, 0), taskLinesPanel).Y;
+        var offset = y < taskLinesScroller.VerticalOffset ? y : y + button.ActualHeight - taskLinesScroller.ViewportHeight;
+        taskLinesScroller.ScrollToVerticalOffset(Math.Max(0, offset));
+        // The scroll moves the lines under the pointer, so the click guard distrusts a click for its half second.
+        taskLinesChangedAt = TaskClickClock();
     }
 
     // Everything a line shows, as text, so two paints can be compared without drawing anything.
@@ -1012,7 +1139,8 @@ public partial class FloatingBar
     void PaintTaskMore(IReadOnlyList<TaskLine> open)
     {
         if (taskMoreButton is null || taskMoreLabel is null) return;
-        var onShow = shownTaskLines.Select(l => l.Id).ToHashSet();
+        // Out of sight now means scrolled above the view or still below it (THE LIST SCROLLS).
+        var onShow = LinesInSight().Select(l => l.Id).ToHashSet();
         var hidden = open.Where(l => !onShow.Contains(l.Id)).ToArray();
         var waiting = hidden.Count(l => l.Status == TaskStatus.WaitingOnYou);
         taskMoreButton.Visibility = hidden.Length > 0 || taskListExpanded || ToggleTasksPanel is not null ? Visibility.Visible : Visibility.Collapsed;

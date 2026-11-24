@@ -445,7 +445,8 @@ The bottom of the bar carries a short task list, for the things you want to reme
 Type a note into the box at its top and press Enter, and it lands on the workspace you are on (or on
 none, or another one, by the chip under the box). Tick a note to close it, with six seconds to undo.
 Two small toggles on each line mark a task important or urgent, which sorts the list into Covey's four
-quadrants, and a line drags up or down to reorder it. "+N more" (or "All tasks") opens the tasks panel,
+quadrants, and a line drags up or down to reorder it. When there are more tasks than fit, the list
+scrolls with the mouse wheel. "+N more" (or "All tasks") opens the tasks panel,
 with every task, its comments, and a Matrix view of the four quadrants side by side.
 The panel is a full-height strip docked just inside the bar, on every virtual desktop, and it pushes
 maximized windows aside as the bar does. Click the same button, or the x in the panel's toolbar, to close
