@@ -215,27 +215,35 @@ public static class SessionBriefing
     // FREE TEXT GOES ON STDIN (review of PR B, I-1): deskbar.cmd hands its command line to cmd, which runs whatever
     // follows a quote it misreads, so a title, status line, question or comment with quotes or & | < > in it is not safe
     // there. Each text form takes `-` and reads its text from stdin (ControlArguments.WithTextInput).
+    //
+    // A PULL REQUEST READY TO MERGE IS AN ASK (task 06c2538b, Petre: "why didn't you set the task as waiting on me?").
+    // The example below used to be a COMMENT saying "PR 512 is ready: merge it when CI is green", `task ask` was "when you
+    // need a decision", and `task done` was "on a clear finish". Sessions read a merge as an action rather than a decision,
+    // commented and marked the task done, and Done sits below the waiting block, so the merge waited where Petre does not
+    // look. The Stop hook's ParkedNudge cannot catch it either: it skips a task already Done and a session still watching
+    // CI (background work). So the example is now the ask itself, ask covers every next move of the user's, done is for
+    // when nothing waits on the user, and the merge's own follow-up (answered, then done) is spelt out.
     static IEnumerable<string> Commands(string sessionId) =>
     [
         "Free text (a title, a status line, a question, a comment) always goes on stdin: put - in its place and give the text as a heredoc, for example",
-        $"  {Shim} task comment - --session {sessionId} <<'EOF'",
-        "  PR 512 is ready: merge it when CI is green",
+        $"  {Shim} task ask - --session {sessionId} <<'EOF'",
+        "  Merge PR 512: CI is green",
         "  EOF",
         "Never put free text with quotes or & | < > on the command line.",
         "While you work on it:",
         $"  {Shim} task status-line - --session {sessionId}   (keep it current, one short line)",
-        $"  {Shim} task ask - --session {sessionId}   (when you need a decision from the user; the task waits on them)",
+        $"  {Shim} task ask - --session {sessionId}   (when the next move is the user's (a pull request to merge, something to try live, a decision): what they must do in the first words; the task waits on them and moves to the top. Once they have done it (the pull request is merged), run {Shim} task answered --session {sessionId}, then task done)",
         $"  {Shim} task answered --session {sessionId}   (when the user's reply settles your question, or you settle it yourself; run it straight away; it also settles, that is folds away, your comments written since you asked)",
         $"  {Shim} task comment-settle <comment-id> --session {sessionId}   (settle one of your own comments that no longer matters)",
         "A message from the user never resolves your question by itself: you do, with task answered. Never leave a question open once it is resolved.",
-        $"  {Shim} task comment - --session {sessionId}   (rare: only what the user must act on or know, in one or two short lines)",
-        $"  {Shim} task done --session {sessionId}   (on a clear finish; only the user closes a task)",
+        $"  {Shim} task comment - --session {sessionId}   (rare: only what the user must know, in one or two short lines; what they must do is task ask)",
+        $"  {Shim} task done --session {sessionId}   (when the work is finished and nothing waits on the user, so not while a pull request of yours waits to be merged; only the user closes a task)",
         $"  {Shim} task later - --session {sessionId}   (the title of a follow-up note on your workspace)",
         // Subtasks spec: a session splitting its work makes a subtask, which the next session picks up with this one's
         // context (its join reply names this session and its transcript). `task family` is not listed here: the join
         // reply, the start briefing and a subtask's prompt line carry it where it matters.
         $"  {Shim} task subtask - --session {sessionId}   (split off a piece of your work as a subtask; the session that takes it up is briefed on your task and this session)",
-        "Keep the task lean: say what needs the user, and nothing else. The title is a few words naming the work. The status line is one short phrase, under about 60 characters, saying where it stands. Comments are rare: a comment is for the user and only for what needs their attention or a result they must know (a PR to merge, a decision made for them, a blocker), in one or two short lines, with no progress logs, measurements, spike notes or findings dumps (those belong in the PR, the repo's notes or the session itself). When the user must act, say exactly what the user must do in the first words, or use task ask if it is a decision.",
+        "Keep the task lean: say what needs the user, and nothing else. The title is a few words naming the work. The status line is one short phrase, under about 60 characters, saying where it stands. Comments are rare: a comment is for the user and only for what needs their attention or a result they must know (a decision made for them, a blocker, what a release shipped), in one or two short lines, with no progress logs, measurements, spike notes or findings dumps (those belong in the PR, the repo's notes or the session itself). When the user must act or decide, say exactly what the user must do in the first words, through task ask, never a comment: a comment does not move the task to the top.",
         "Never close or delete a task, and leave the user's own notes alone unless they ask.",
     ];
 
