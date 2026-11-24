@@ -49,14 +49,16 @@ public sealed record TaskBoard(IReadOnlyList<TaskItem> Tasks)
     /// be a subtask itself (one level). The note goes on the workspace it is GIVEN, none included (final review, finding
     /// 4: "none" picked on the add box's chip, or `--workspace none`, means none). The callers fill in the parent's
     /// workspace where nothing was chosen: the add boxes set their chip to it, `task add --parent` without --workspace
-    /// looks it up, and AddSubtask passes it.
+    /// looks it up, and AddSubtask passes it. A CLOSED parent is reopened (<see cref="WithParentReopened"/>): the new
+    /// note is open work under it.
     /// </summary>
     public Result<(TaskBoard Board, TaskItem Task)> AddNote(string title, Maybe<Guid> workspace, DateTimeOffset now, Guid newId,
         Quadrant quadrant = Quadrant.IV, Maybe<Guid> parent = default) =>
         // The lambda's parameter is typed: Result<Maybe<T>> has a second Map that maps inside the Maybe.
         CleanTitle(title).Bind(clean => ParentFor(parent).Map((Maybe<TaskItem> up) => WithAppended(
             WithFlags(NewTask(newId, clean, workspace, TaskStatus.Backlog, [], now), quadrant)
-                with { Rank = TopRank(quadrant, newId), ParentId = up.Map(p => p.Id) })));
+                with { Rank = TopRank(quadrant, newId), ParentId = up.Map(p => p.Id) })))
+            .Bind(added => added.Board.WithParentReopened(added.Task.Id, now).Map(board => (board, added.Task)));
 
     /// <summary>
     /// A session splits its work (`task subtask`): a Backlog subtask assigned to Claude, so the next session on the
@@ -292,26 +294,31 @@ public sealed record TaskBoard(IReadOnlyList<TaskItem> Tasks)
 
     /// <summary>
     /// A closed task comes back: In progress while a session is live on it, else Backlog, at the top of its quadrant
-    /// (Ruling 25: it left the list, so it comes back the way a new task arrives).
+    /// (Ruling 25: it left the list, so it comes back the way a new task arrives). A subtask brings its closed parent
+    /// back with it (<see cref="WithParentReopened"/>).
     /// </summary>
     public Result<TaskBoard> Reopen(Guid id, DateTimeOffset now) =>
         Tasks.FirstOrDefault(t => t.Id == id) is { IsOpen: true }
             ? Result.Failure<TaskBoard>(TaskIsNotClosed)
-            // The assignee is derived from what the task is now (Ruling 57 review): a session still live on it is Claude's work in
-            // progress, otherwise it is back in the backlog and his.
-            : Change(id, t => OnTopIfClosed(t) with
-            {
-                Status = t.HasLiveSession ? TaskStatus.InProgress : TaskStatus.Backlog,
-                Assignee = Assignee.DerivedFor(t.HasLiveSession, t.HasLiveSession ? TaskStatus.InProgress : TaskStatus.Backlog),
-                UpdatedAt = now,
-            });
+            : Change(id, t => Reopened(t, now)).Bind(board => board.WithParentReopened(id, now));
+
+    // What a reopening makes of a closed task, shared by Reopen and by a parent coming back with its subtask. The
+    // assignee is derived from what the task is now (Ruling 57 review): a session still live on it is Claude's work in
+    // progress, otherwise it is back in the backlog and his.
+    TaskItem Reopened(TaskItem t, DateTimeOffset now) => OnTopIfClosed(t) with
+    {
+        Status = t.HasLiveSession ? TaskStatus.InProgress : TaskStatus.Backlog,
+        Assignee = Assignee.DerivedFor(t.HasLiveSession, t.HasLiveSession ? TaskStatus.InProgress : TaskStatus.Backlog),
+        UpdatedAt = now,
+    };
 
     /// <summary>
     /// Undo on a line just closed (the bar's and the window's six seconds). UNDO MEANS EXACTLY UNDO (Ruling 31): the
     /// task comes back with the status it had before the close, <paramref name="was"/>, whatever it was (a note set to
     /// In progress by hand stays In progress), and a task that waited on Petre gets its <paramref name="question"/> back
     /// and goes back into the pinned block. Neither Raised nor the rank moves, so the line is exactly where it was: it
-    /// never left the screen. A task that is not closed is refused, and so is Closed as the status to come back to.
+    /// never left the screen. A task that is not closed is refused, and so is Closed as the status to come back to. A
+    /// subtask whose parent was closed in those six seconds brings the parent back (<see cref="WithParentReopened"/>).
     /// </summary>
     public Result<TaskBoard> UndoClose(Guid id, TaskStatus was, Maybe<string> question, DateTimeOffset now) =>
         Tasks.FirstOrDefault(t => t.Id == id) is { IsOpen: true } ? Result.Failure<TaskBoard>(TaskIsNotClosed)
@@ -321,13 +328,14 @@ public sealed record TaskBoard(IReadOnlyList<TaskItem> Tasks)
             Status = was,
             Question = was == TaskStatus.WaitingOnYou ? question : Maybe<string>.None,
             UpdatedAt = now,
-        });
+        }).Bind(board => board.WithParentReopened(id, now));
 
     /// <summary>
     /// Any status but Closed, by hand, from any status (a closed task set to Done is reopened as Done, at the top of
     /// its quadrant as <see cref="Reopen"/> brings it). Closed goes through <see cref="Close"/>, the one way to close.
     /// Leaving Waiting on you drops the question; setting it by hand does not move <see cref="TaskItem.Raised"/>, since
-    /// no session asked anything. Becoming Done by hand stamps it, as <see cref="MarkDone"/> does.
+    /// no session asked anything. Becoming Done by hand stamps it, as <see cref="MarkDone"/> does. A closed subtask
+    /// set to a status is open again, so its closed parent comes back too (<see cref="WithParentReopened"/>).
     /// </summary>
     public Result<TaskBoard> SetStatus(Guid id, TaskStatus status, DateTimeOffset now) =>
         status == TaskStatus.Closed
@@ -346,7 +354,7 @@ public sealed record TaskBoard(IReadOnlyList<TaskItem> Tasks)
                 WaitingSince = status == TaskStatus.WaitingOnYou && t.Status != TaskStatus.WaitingOnYou ? now : t.WaitingSince,
                 Adopted = false,
                 UpdatedAt = now,
-            });
+            }).Bind(board => board.WithParentReopened(id, now));
 
     // --- the flags and the order (Task 12; TaskOrder.cs) -------------------------------------------
 
@@ -596,14 +604,16 @@ public sealed record TaskBoard(IReadOnlyList<TaskItem> Tasks)
     // --- subtasks (docs/superpowers/specs/2026-11-24-subtasks-design.md) ---------------------------------
     //
     // One level: a family is a parent and its subtasks. A subtask cannot be a parent and a parent cannot become a
-    // subtask, so the briefing and the breadcrumb never grow with depth. A closed parent is allowed (its context is still
-    // worth reading). The link never moves a line: Pile and Group do not read it.
+    // subtask, so the briefing and the breadcrumb never grow with depth. A closed parent is allowed for CLOSED subtasks
+    // (its context is still worth reading), but never above an open one: see WithParentReopened. The link never moves a
+    // line: Pile and Group do not read it.
 
     /// <summary>
     /// Makes <paramref name="id"/> a subtask of <paramref name="parent"/>, or (none) a plain task again. Refused: an
     /// unknown task or parent, the task itself, a parent that is a subtask, and a task that has subtasks of its own. The
     /// parent it already has, or clearing one it does not have, returns this same board. Only the link and UpdatedAt
-    /// change, so the line keeps its place. Any task, closed ones too, as SetGoal does.
+    /// change, so the line keeps its place. Any task, closed ones too, as SetGoal does. An OPEN task put under a closed
+    /// parent reopens that parent (<see cref="WithParentReopened"/>).
     /// </summary>
     public Result<TaskBoard> SetParent(Guid id, Maybe<Guid> parent, DateTimeOffset now) =>
         Lookup(id).Bind(task =>
@@ -611,7 +621,27 @@ public sealed record TaskBoard(IReadOnlyList<TaskItem> Tasks)
             : parent.HasValue && parent.Value == id ? Result.Failure<TaskBoard>("A task cannot be its own subtask")
             : parent.HasValue && Tasks.Any(t => t.ParentId == id)
                 ? Result.Failure<TaskBoard>($"Task {Short(id)} has subtasks of its own, so it cannot become one")
-            : ParentFor(parent).Map((Maybe<TaskItem> _) => Replaced(task with { ParentId = parent, UpdatedAt = now, Adopted = false })));
+            : ParentFor(parent).Map((Maybe<TaskItem> _) => Replaced(task with { ParentId = parent, UpdatedAt = now, Adopted = false }))
+                .Bind(board => board.WithParentReopened(id, now)));
+
+    // THE PARENT COMES BACK WITH ITS WORK (task f47b18df, 2026-11-25, Petre: "reopen parent"). Closing a parent is
+    // refused while a subtask is open (Close, task 842e1ba4), because the parent stands for the whole piece of work.
+    // The same rule read the other way: an open subtask never sits under a closed parent. So whenever a change leaves
+    // the task <paramref name="id"/> OPEN under a CLOSED parent, the parent is reopened in the same step, exactly as
+    // Reopen brings a task back (In progress while a session is live on it, else Backlog, on top of its quadrant). The
+    // other answer, refusing the change, was weighed and not taken: reopening a subtask is the clearer signal that the
+    // work is not over, and a refusal would make Petre reopen the parent by hand first.
+    // The changes that can land an open subtask there all call this: AddNote with a parent (and so AddSubtask),
+    // SetParent, Reopen, UndoClose and SetStatus on a closed subtask. Anything else (a closed subtask, a plain task, a
+    // parent already open) returns this same board. A board from before the rule that already holds an open subtask
+    // under a closed parent is left as it is until one of those changes touches that subtask.
+    Result<TaskBoard> WithParentReopened(Guid id, DateTimeOffset now) =>
+        Tasks.TryFirst(t => t.Id == id)
+            .Where(t => t.IsOpen)
+            .Bind(ParentOf)
+            .Where(up => !up.IsOpen)
+            .Map(up => Change(up.Id, t => Reopened(t, now)))
+            .GetValueOrDefault(Result.Success(this));
 
     /// <summary>
     /// The task with its parent, siblings and subtasks (<see cref="TaskFamily"/>), or none for an unknown task and for

@@ -101,13 +101,97 @@ public class TaskSubtaskTests
         Assert.True(Get(board, child).ParentId.HasNoValue);
     }
 
-    [Fact]
-    public void A_closed_parent_is_allowed()
-    {
-        var board = Note(Note(TaskBoard.Empty, parent, ws), child, ws);
-        board = board.Close(parent, clock).Value;
+    // --- an open subtask under a closed parent reopens the parent (task f47b18df, Petre: "reopen parent") ---------
 
-        Assert.Equal(Maybe.From(parent), Get(board.SetParent(child, parent, clock).Value, child).ParentId);
+    [Fact]
+    public void An_open_task_put_under_a_closed_parent_reopens_it()
+    {
+        var board = Note(Note(TaskBoard.Empty, parent, ws), child, ws).Close(parent, clock).Value;
+        Later();
+
+        var after = board.SetParent(child, parent, clock).Value;
+
+        Assert.Equal(Maybe.From(parent), Get(after, child).ParentId);
+        Assert.Equal(TaskStatus.Backlog, Get(after, parent).Status);
+        Assert.Equal(clock, Get(after, parent).UpdatedAt);
+    }
+
+    [Fact]
+    public void A_closed_task_put_under_a_closed_parent_leaves_it_closed()
+    {
+        var board = Note(Note(TaskBoard.Empty, parent, ws), child, ws).Close(child, clock).Value.Close(parent, clock).Value;
+
+        var after = board.SetParent(child, parent, clock).Value;
+
+        Assert.Equal(Maybe.From(parent), Get(after, child).ParentId);
+        Assert.Equal(TaskStatus.Closed, Get(after, parent).Status);
+    }
+
+    [Fact]
+    public void A_parent_with_a_live_session_comes_back_in_progress()
+    {
+        var board = TaskBoard.Empty.Create("Parent", ws, Session("s1"), clock, parent).Value.Item1;
+        board = Note(board, child, ws).SetParent(child, parent, clock).Value
+            .Close(child, clock).Value.Close(parent, clock, stoppingClaude: true).Value;
+
+        var after = board.Reopen(child, clock).Value;
+
+        Assert.Equal(TaskStatus.InProgress, Get(after, parent).Status);
+        Assert.True(Get(after, parent).Assignee.IsClaude);
+    }
+
+    // The closed family the next tests reopen a subtask of: parent, child and sibling, all three closed.
+    TaskBoard ClosedFamily() =>
+        Family().Close(child, clock).Value.Close(sibling, clock).Value.Close(parent, clock).Value;
+
+    [Fact]
+    public void Reopening_a_subtask_reopens_its_closed_parent()
+    {
+        var after = ClosedFamily().Reopen(child, clock).Value;
+
+        Assert.True(Get(after, child).IsOpen);
+        Assert.True(Get(after, parent).IsOpen);
+        // Only the parent comes back with it: the other subtask stays closed.
+        Assert.False(Get(after, sibling).IsOpen);
+    }
+
+    [Fact]
+    public void Setting_a_closed_subtasks_status_reopens_its_parent() =>
+        Assert.True(Get(ClosedFamily().SetStatus(child, TaskStatus.InProgress, clock).Value, parent).IsOpen);
+
+    [Fact]
+    public void Undoing_a_subtasks_close_reopens_its_parent() =>
+        Assert.True(Get(ClosedFamily().UndoClose(child, TaskStatus.Backlog, Maybe<string>.None, clock).Value, parent).IsOpen);
+
+    [Fact]
+    public void A_note_added_under_a_closed_parent_reopens_it()
+    {
+        var (after, task) = ClosedFamily().AddNote("More", ws, clock, fresh, Quadrant.IV, parent).Value;
+
+        Assert.Equal(Maybe.From(parent), task.ParentId);
+        Assert.True(Get(after, parent).IsOpen);
+    }
+
+    [Fact]
+    public void The_reopened_parent_goes_to_the_top_of_its_quadrant()
+    {
+        var board = ClosedFamily();
+        Later();
+
+        var after = board.Reopen(child, clock).Value;
+
+        // The lowest rank is the top (TaskBoard.TopRank). The parent is reopened after its subtask, so it lands just above it.
+        Assert.True(Get(after, parent).Rank < Get(after, child).Rank);
+        Assert.True(Get(after, child).Rank < Get(after, loner).Rank);
+    }
+
+    [Fact]
+    public void Reopening_a_plain_task_touches_no_other()
+    {
+        var board = Note(TaskBoard.Empty, loner, ws).Close(loner, clock).Value;
+        board = Note(board, parent, ws).Close(parent, clock).Value;
+
+        Assert.False(Get(board.Reopen(loner, clock).Value, parent).IsOpen);
     }
 
     // --- AddNote with a parent -------------------------------------------------------------------
@@ -243,9 +327,10 @@ public class TaskSubtaskTests
     public void Closing_a_closed_parent_still_says_it_is_closed()
     {
         // A board from before the rule can hold a closed parent with an open subtask; closing it again is refused for
-        // being closed, not for the subtask.
+        // being closed, not for the subtask. SetParent would reopen the parent now (task f47b18df), so the old board is
+        // built by hand.
         var board = Note(Note(TaskBoard.Empty, parent, ws), child, ws).Close(parent, clock).Value;
-        board = board.SetParent(child, parent, clock).Value;
+        board = new TaskBoard(board.Tasks.Select(t => t.Id == child ? t with { ParentId = parent } : t).ToArray());
 
         Assert.Equal("The task is closed.", board.Close(parent, clock).Error);
     }
