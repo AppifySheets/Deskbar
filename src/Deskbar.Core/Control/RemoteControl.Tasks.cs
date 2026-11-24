@@ -193,7 +193,7 @@ public sealed partial class RemoteControl
     // --- the JSON shape of a task ------------------------------------------------------------------
 
     // One task as `list` prints it and every other verb answers with it. `claudes` is whether a session has worked on
-    // it, `sessions` who did (live or ended), `comments` the thread's length (the thread itself is the window's).
+    // it, `sessions` who did (live or ended), `comments` the thread's length, `thread` the comments themselves.
     // `important`, `urgent`, `quadrant` and `order` are Task 12's (see the header). Describe reads the order off the
     // live board, so every verb's reply says where the task is now.
     object Describe(TaskItem task) => new
@@ -213,15 +213,27 @@ public sealed partial class RemoteControl
         // Ruling 57: who the task is on, "me" or "claude" (a colleague, later, by id).
         assignee = task.Assignee.Id,
         // Ruling 58: his description (markdown, "" for none), and the thread's comment ids with who wrote each, which
-        // `comment-edit` takes. The comments' text is the window's, as before.
-        description = task.Description,
-        thread = task.Comments.Select(c => new { id = c.Id, by = c.BySession ? "claude" : c.ByDeskbar ? "deskbar" : "you", at = c.At, settled = c.Settled.HasValue ? (DateTimeOffset?)c.Settled.Value : null }).ToArray(),
+        // `comment-edit` takes, "deskbar" for Deskbar's own lines. Images in tasks (docs/superpowers/specs/2026-11-24-task-images-design.md): each comment's
+        // text is listed too, so a Claude session can read Petre's comments, which no hook used to pass on; and in both,
+        // every pasted image's path is made absolute (TaskService.ExpandImages), ready for a session's Read tool.
+        description = Expanded(task.Description),
+        thread = task.Comments.Select(c => new
+        {
+            id = c.Id,
+            by = c.BySession ? "claude" : c.ByDeskbar ? "deskbar" : "you",
+            at = c.At,
+            settled = c.Settled.HasValue ? (DateTimeOffset?)c.Settled.Value : null,
+            markdown = Expanded(c.Markdown),
+        }).ToArray(),
         quadrant = task.Quadrant.Numeral(),
         order = tasks is { } service && task.IsOpen ? service.Board.PositionOf(task.Id).Map(n => (int?)n).GetValueOrDefault() : null,
         // The goal it counts toward (goals plan, Task 5), as {id, title}, or null: no link, no goal service, or a link
         // to a goal that no longer exists (which reads as no goal everywhere).
         goal = goals?.GoalOf(task).Map(g => (object?)new { id = g.Id, title = g.Title }).GetValueOrDefault(),
     };
+
+    // Markdown as a session reads it: image paths absolute, through the task service (as stored without one).
+    string Expanded(string markdown) => tasks is { } service ? service.ExpandImages(markdown) : markdown;
 
     string? WorkspaceNameOf(Maybe<Guid> id) =>
         id.Bind(w => manager.State.Workspaces.TryFirst(x => x.Id == w)).Map(w => w.Name).GetValueOrDefault();

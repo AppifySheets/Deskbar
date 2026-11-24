@@ -278,6 +278,9 @@ public class TaskViewsTests
     [InlineData("\n\n  __bold__ and *italic*", "bold and italic")]
     [InlineData("snake_case_name stays", "snake_case_name stays")]
     [InlineData("", "")]
+    // Images in tasks: an image line is never the first line shown, and a description of images alone reads "image".
+    [InlineData("![image](task-images/t/1.png)\nFix it", "Fix it")]
+    [InlineData("![image](task-images/t/1.png)", "image")]
     public void The_first_line_of_markdown_is_plain_text(string markdown, string expected) =>
         Assert.Equal(expected, TaskViews.PlainFirstLine(markdown));
 }

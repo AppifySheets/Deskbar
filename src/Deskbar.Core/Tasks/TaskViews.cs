@@ -161,10 +161,14 @@ public static class TaskViews
     /// The first non-blank line of a markdown text as plain text, for the bar's one-line description: leading list, quote
     /// and heading markers go, a link keeps its words, and emphasis and code markers (**, __, *, _, `) are dropped. An
     /// underscore inside a word (snake_case) is not emphasis and stays. Not a markdown parser, just enough for a line.
+    /// A pasted image's line (TaskImages) is never the line shown, so a path never reaches the bar; text that is only
+    /// images reads "image".
     /// </summary>
     public static string PlainFirstLine(string markdown)
     {
-        var line = (markdown ?? "").Split('\n').Select(l => l.Trim()).FirstOrDefault(l => l.Length > 0) ?? "";
+        var parts = TaskImages.Split(markdown ?? "");
+        if (parts.Text.Trim().Length == 0 && parts.Images.Count > 0) return "image";
+        var line = parts.Text.Split('\n').Select(l => l.Trim()).FirstOrDefault(l => l.Length > 0) ?? "";
         line = System.Text.RegularExpressions.Regex.Replace(line, @"^(#{1,6}\s+|[-*+]\s+|>\s*|\d+[.)]\s+)", "");
         line = System.Text.RegularExpressions.Regex.Replace(line, @"\[([^\]]*)\]\([^)]*\)", "$1");
         line = System.Text.RegularExpressions.Regex.Replace(line, @"(\*\*|__)(.+?)\1", "$2");

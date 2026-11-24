@@ -181,4 +181,31 @@ public sealed class SessionBriefingTests
         Assert.Contains($"task comment-settle <comment-id> --session {Sid}", text);
         Assert.True(text.Length < 10_000, $"{text.Length} characters");
     }
+
+    // Images in tasks (docs/superpowers/specs/2026-11-24-task-images-design.md): a description is cut at 200 characters,
+    // but its image paths follow the cut whole and absolute, since a cut path is useless to a session's Read tool.
+    static string Absolute(string markdown) => markdown.Replace("task-images/t/1.png", @"C:\S\task-images\t\1.png");
+
+    [Fact]
+    public void Description_images_follow_the_cut_whole()
+    {
+        var own = Task("Tasks board") with { Description = new string('a', 300) + "\n\n![image](task-images/t/1.png)" };
+
+        var text = SessionBriefing.Prompt(Sid, own, Maybe<TaskItem>.None, Absolute);
+
+        Assert.Contains(new string('a', 197) + "...", text);
+        Assert.Contains(@"images in the description: C:\S\task-images\t\1.png; read them with your Read tool", text);
+        Assert.DoesNotContain("![image]", text);
+    }
+
+    [Fact]
+    public void A_description_of_images_only_quotes_no_text()
+    {
+        var own = Task("Tasks board") with { Description = "![image](task-images/t/1.png)" };
+
+        var text = SessionBriefing.Start(Start(), own, [], Absolute);
+
+        Assert.DoesNotContain("the user's description", text);
+        Assert.Contains(@"images in the description: C:\S\task-images\t\1.png; read them with your Read tool", text);
+    }
 }

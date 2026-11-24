@@ -40,9 +40,13 @@ public static class SessionBriefing
     /// What a session reads when it starts, resumes, clears or compacts: its own task when it has one, otherwise the
     /// tasks it is offered and how to join one or create its own.
     /// </summary>
-    public static string Start(ClaudeHookEvent e, Maybe<TaskItem> own, IReadOnlyList<TaskItem> offered) =>
+    /// <remarks>
+    /// <paramref name="expand"/> makes image paths absolute (TaskService.ExpandImages); the own task's description images
+    /// are listed whole with it (Detail). Left null they are listed as stored.
+    /// </remarks>
+    public static string Start(ClaudeHookEvent e, Maybe<TaskItem> own, IReadOnlyList<TaskItem> offered, Func<string, string>? expand = null) =>
         string.Join("\n", Intro(e.SessionId)
-            .Concat(own.HasValue ? [$"Your task is {Describe(own.Value)}. Keep working on it."] : Choice(e.SessionId, offered))
+            .Concat(own.HasValue ? [$"Your task is {Describe(own.Value, expand ?? Same)}. Keep working on it."] : Choice(e.SessionId, offered))
             .Append("")
             .Concat(Commands(e.SessionId))) + "\n";
 
@@ -50,7 +54,7 @@ public static class SessionBriefing
     /// The one line a session reads with each prompt: its task, or that the user closed it and new work needs a new
     /// task, or that it has none yet.
     /// </summary>
-    public static string Prompt(string sessionId, Maybe<TaskItem> own, Maybe<TaskItem> closed) =>
+    public static string Prompt(string sessionId, Maybe<TaskItem> own, Maybe<TaskItem> closed, Func<string, string>? expand = null) =>
         // Ruling 49: a prompt never settles a question (a /loop or scheduled check-in is not the user answering), so while
         // the task waits the reminder keeps it open and tells the session how to resolve it.
         own is { HasValue: true, Value: { Status: TaskStatus.WaitingOnYou } waiting }
@@ -58,12 +62,14 @@ public static class SessionBriefing
         // A prompt leaves a Done task Done (RemoteControl.Prompted): a question about finished work must not reopen it.
         // When the message is more work on it, the session reopens it itself; Join moves Done back to In progress.
         : own is { HasValue: true, Value: { Status: TaskStatus.Done } done }
-            ? $"Deskbar: your task is {Describe(done)}. If this message gives you more work on it, run {Shim} task join {done.Id.ToString()[..8]} --session {sessionId} to put it back in progress; if it only asks about the finished work, leave it done.\n"
+            ? $"Deskbar: your task is {Describe(done, expand ?? Same)}. If this message gives you more work on it, run {Shim} task join {done.Id.ToString()[..8]} --session {sessionId} to put it back in progress; if it only asks about the finished work, leave it done.\n"
         : own.HasValue
-            ? $"Deskbar: your task is {Describe(own.Value)}. Keep its status line current: {Shim} task status-line - --session {sessionId}, the line on stdin (a heredoc).\n"
+            ? $"Deskbar: your task is {Describe(own.Value, expand ?? Same)}. Keep its status line current: {Shim} task status-line - --session {sessionId}, the line on stdin (a heredoc).\n"
         : closed.HasValue
             ? $"Deskbar: the user closed your task \"{Cut(closed.Value.Title)}\". Work on this prompt needs a new task: {Shim} task new - --session {sessionId}, the title on stdin (a heredoc).\n"
         : $"Deskbar: this session has no task yet. Once you know what you are working on, run {Shim} task join <id> --session {sessionId} with an id from {Shim} task list, or {Shim} task new - --session {sessionId} with the title on stdin (a heredoc).\n";
+
+    static string Same(string markdown) => markdown;
 
     static IEnumerable<string> Intro(string sessionId) =>
     [
@@ -108,17 +114,32 @@ public static class SessionBriefing
         "Never close or delete a task, and leave the user's own notes alone unless they ask.",
     ];
 
-    // A task as one line: id prefix, title, status, and the status line or question when there is one.
-    static string Describe(TaskItem t) =>
-        $"{t.Id.ToString()[..8]} \"{Cut(t.Title)}\" ({StatusText(t.Status)}{Detail(t)}{(t.WorkspaceId.HasValue ? "" : ", on no workspace")})";
+    // A task as one line: id prefix, title, status, and the status line or question when there is one. `expand` is given
+    // only for the session's OWN task (see Images): an offered task's pictures are not the session's business yet, and
+    // twenty offered tasks' paths would only lengthen what every new session pays for.
+    static string Describe(TaskItem t, Func<string, string>? expand = null) =>
+        $"{t.Id.ToString()[..8]} \"{Cut(t.Title)}\" ({StatusText(t.Status)}{Detail(t, expand)}{(t.WorkspaceId.HasValue ? "" : ", on no workspace")})";
 
     // Petre's own description (Ruling 58) follows, longer than a title is cut: for a note he handed to Claude it is the
-    // brief. Still bounded, since twenty tasks may be listed; `task list` has the whole text.
-    static string Detail(TaskItem t) =>
+    // brief. Still bounded, since twenty tasks may be listed; `task list` has the whole text. Its image lines never go into
+    // the cut text (a path cut in half is useless); Images lists them whole after it.
+    static string Detail(TaskItem t, Func<string, string>? expand) =>
         (t.Status == TaskStatus.WaitingOnYou && t.Question.HasValue ? $", asked: \"{Cut(t.Question.Value)}\""
         : t.StatusLine.Length > 0 ? $", status line: \"{Cut(t.StatusLine)}\""
         : "")
-        + (t.Description.Length > 0 ? $", the user's description: \"{Cut(t.Description, DescriptionLength)}\"" : "");
+        + (TaskImages.Split(t.Description).Text is { Length: > 0 } text ? $", the user's description: \"{Cut(text, DescriptionLength)}\"" : "")
+        + (expand is null ? "" : Images(t.Description, expand));
+
+    // Images in tasks (docs/superpowers/specs/2026-11-24-task-images-design.md): the description's pictures, each path made
+    // absolute by `expand` (TaskService.ExpandImages) and given whole, with what to do with them.
+    static string Images(string description, Func<string, string> expand) =>
+        TaskImages.Split(description).Images is { Count: > 0 } images
+            ? $", images in the description: {string.Join(", ", images.Select(path => AbsolutePath(expand(TaskImages.Join("", [path])))))}; read them with your Read tool"
+            : "";
+
+    // The path out of one expanded image line, `![image](<C:\...>)` or (no state folder) `![image](task-images/...)`.
+    static string AbsolutePath(string imageLine) =>
+        imageLine[(imageLine.IndexOf("](", StringComparison.Ordinal) + 2)..^1].Trim('<', '>');
 
     static string StatusText(TaskStatus status) => status switch
     {

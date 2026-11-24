@@ -1399,9 +1399,10 @@ public partial class App : Application
         timeTracker = new TimeTracker(new JsonTimeStore(stateDir), new InputActivity(), () => DateTime.Now);
 
         // The tasks board (docs/superpowers/specs/2026-11-22-tasks-board-design.md), in tasks.json beside state.json.
-        // A failed load is traced and leaves the board empty, never fatal.
+        // A failed load is traced and leaves the board empty, never fatal. The state folder is also where pasted images
+        // live (task-images\<task id>\; docs/superpowers/specs/2026-11-24-task-images-design.md).
         tasks = new Core.Tasks.TaskService(new Core.Tasks.JsonTaskStore(stateDir, ClickTrace.On ? ClickTrace.Write : null), () => DateTimeOffset.UtcNow,
-            trace: ClickTrace.On ? ClickTrace.Write : null);
+            trace: ClickTrace.On ? ClickTrace.Write : null, filesRoot: stateDir);
         tasks.Load().TapError(err => ClickTrace.Write($"tasks.json not loaded: {err}"));
 
         // The goals (goals spec, "Calls made": a file of their own, goals.json, so an older build that drops what it

@@ -12,7 +12,13 @@ namespace Deskbar.Core.Tasks;
 //
 // Everything runs on the UI thread (the bar, the window and the control pipe all dispatch there), so there is no
 // locking.
-public sealed class TaskService(ITaskStore store, Func<DateTimeOffset> now, Func<Guid>? newId = null, Action<string>? trace = null)
+//
+// `filesRoot` is the state folder (beside tasks.json), where task-images\<task id>\ holds the pictures pasted into a
+// task (docs/superpowers/specs/2026-11-24-task-images-design.md). It is what ExpandImages makes paths absolute against,
+// for whatever a Claude session reads, and what Delete clears a task's pictures from. Null (tests, mostly) leaves image
+// paths as stored and deletes no files.
+public sealed class TaskService(ITaskStore store, Func<DateTimeOffset> now, Func<Guid>? newId = null, Action<string>? trace = null,
+    string? filesRoot = null)
 {
     readonly Func<Guid> makeId = newId ?? Guid.NewGuid;
     readonly Subject<Unit> changed = new();
@@ -93,7 +99,25 @@ public sealed class TaskService(ITaskStore store, Func<DateTimeOffset> now, Func
 
     public Result MoveTo(Guid id, Maybe<Guid> workspace) => Apply(Board.MoveTo(id, workspace, now()));
 
-    public Result Delete(Guid id) => Apply(Board.Delete(id));
+    // A deleted task takes its pictures with it (closing keeps them: a closed task can be reopened). The board's delete
+    // comes first, so a refused delete removes no files; a folder that cannot be removed (a viewer holding a file open)
+    // is traced and left, and the delete still stands, because a stray folder is harmless and a task that will not
+    // delete is not.
+    public Result Delete(Guid id) => Apply(Board.Delete(id)).Tap(() => DeleteImages(id));
+
+    void DeleteImages(Guid id)
+    {
+        if (filesRoot is null) return;
+        var folder = Path.Combine(filesRoot, TaskImages.Folder, id.ToString());
+        Result.Try(() => { if (Directory.Exists(folder)) Directory.Delete(folder, recursive: true); }, e => e.Message)
+            .TapError(e => trace?.Invoke($"tasks: the images of deleted task {id} were not removed: {e}"));
+    }
+
+    /// <summary>
+    /// The markdown with every image path of ours made absolute under the state folder, for a Claude session's Read
+    /// tool (TaskImages.Expand); as stored when there is no state folder.
+    /// </summary>
+    public string ExpandImages(string markdown) => filesRoot is null ? markdown : TaskImages.Expand(markdown, filesRoot);
 
     /// <summary>Undo on a line just closed: back exactly as it was, status, question and place (TaskBoard.UndoClose).</summary>
     public Result UndoClose(Guid id, TaskStatus was, Maybe<string> question) => Apply(Board.UndoClose(id, was, question, now()));

@@ -301,6 +301,51 @@ public sealed class TaskServiceTests
         Assert.Contains(traced, line => line.Contains("taken back"));
     }
 
+    // Images in tasks (docs/superpowers/specs/2026-11-24-task-images-design.md): deleting a task deletes its image folder,
+    // task-images\<id> under the state folder, so a deleted task leaves no pictures behind. Closing keeps them.
+    [Fact]
+    public void Delete_removes_the_tasks_image_folder()
+    {
+        var root = Directory.CreateTempSubdirectory("deskbar-images-").FullName;
+        try
+        {
+            var s = new TaskService(store, () => clock, filesRoot: root);
+            var note = s.AddNote("Screenshot", ws).Value;
+            var folder = Path.Combine(root, TaskImages.Folder, note.Id.ToString());
+            Directory.CreateDirectory(folder);
+            File.WriteAllBytes(Path.Combine(folder, "a.png"), [1, 2, 3]);
+
+            Assert.True(s.Delete(note.Id).IsSuccess);
+
+            Assert.False(Directory.Exists(folder));
+        }
+        finally { Directory.Delete(root, true); }
+    }
+
+    [Fact]
+    public void Delete_without_an_image_folder_succeeds()
+    {
+        var root = Directory.CreateTempSubdirectory("deskbar-images-").FullName;
+        try
+        {
+            var s = new TaskService(store, () => clock, filesRoot: root);
+            var note = s.AddNote("No pictures", ws).Value;
+
+            Assert.True(s.Delete(note.Id).IsSuccess);
+        }
+        finally { Directory.Delete(root, true); }
+    }
+
+    [Fact]
+    public void ExpandImages_makes_image_paths_absolute_under_the_files_root()
+    {
+        var s = new TaskService(store, () => clock, filesRoot: @"C:\S");
+
+        Assert.Equal(@"![image](<C:\S\task-images\t\1.png>)", s.ExpandImages("![image](task-images/t/1.png)"));
+        // With no files root (a test, or a service built before the state folder is known) the markdown is as stored.
+        Assert.Equal("![image](task-images/t/1.png)", NewService().ExpandImages("![image](task-images/t/1.png)"));
+    }
+
     sealed class FakeTaskStore : ITaskStore
     {
         public TaskBoard Stored { get; set; } = TaskBoard.Empty;

@@ -143,7 +143,8 @@ public sealed partial class RemoteControl
             service.JoinAfterClear(hook.SessionId, folder, stored => FolderPath.Same(stored, folder, LongPath));
         var own = service.Board.TaskOf(hook.SessionId);
         var offered = own.HasValue ? [] : service.Board.Offered(CallerOf(folder).Workspace is { } w ? w.Id : Maybe<Guid>.None);
-        return SessionBriefing.Start(hook, own, offered);
+        // The own task's description images are listed with absolute paths (images in tasks, TaskService.ExpandImages).
+        return SessionBriefing.Start(hook, own, offered, service.ExpandImages);
     }
 
     // UserPromptSubmit (Ruling 49): a prompt NO LONGER settles a question. A task Waiting on the user stays waiting, and
@@ -162,7 +163,7 @@ public sealed partial class RemoteControl
     string Prompted(TaskService service, string sessionId)
     {
         var own = service.Board.TaskOf(sessionId);
-        return SessionBriefing.Prompt(sessionId, own, own.HasValue ? Maybe<TaskItem>.None : service.Board.ClosedTaskOf(sessionId));
+        return SessionBriefing.Prompt(sessionId, own, own.HasValue ? Maybe<TaskItem>.None : service.Board.ClosedTaskOf(sessionId), service.ExpandImages);
     }
 
     // SessionEnd. Three cases:

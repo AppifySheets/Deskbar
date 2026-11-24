@@ -25,7 +25,7 @@ public class RemoteControlTaskTests
 
     public RemoteControlTaskTests()
     {
-        tasks = new TaskService(new MemoryTaskStore(), () => clock);
+        tasks = new TaskService(new MemoryTaskStore(), () => clock, filesRoot: @"C:\S");
         goals = new GoalService(new FakeGoalStore(), tasks, () => clock, () => DateOnly.FromDateTime(clock.UtcDateTime));
     }
 
@@ -195,6 +195,23 @@ public class RemoteControlTaskTests
         Assert.Equal("The **landlord** wants it", Only.Description);
         Assert.Equal("The **landlord** wants it", Json(reply).GetProperty("description").GetString());
         Assert.Equal("The **landlord** wants it", Json(Run(manager, "task", "list"))[0].GetProperty("description").GetString());
+    }
+
+    // Images in tasks (docs/superpowers/specs/2026-11-24-task-images-design.md): `task list` carries each comment's text, so
+    // a session can read Petre's comments, with every image line's path made absolute for its Read tool; the description
+    // the same way.
+    [Fact]
+    public void Task_list_thread_carries_each_comments_markdown_with_absolute_image_paths()
+    {
+        var manager = Started();
+        var id = Prefix(Added(manager));
+        Run(manager, "task", "comment", id, "Look\n\n![image](task-images/t/1.png)");
+        Run(manager, "task", "describe", id, "Brief\n![image](task-images/t/2.png)");
+
+        var task = Json(Run(manager, "task", "list"))[0];
+
+        Assert.Equal("Look\n\n![image](<C:\\S\\task-images\\t\\1.png>)", task.GetProperty("thread")[0].GetProperty("markdown").GetString());
+        Assert.Equal("Brief\n![image](<C:\\S\\task-images\\t\\2.png>)", task.GetProperty("description").GetString());
     }
 
     [Fact]
