@@ -550,6 +550,13 @@ public sealed record TaskBoard(IReadOnlyList<TaskItem> Tasks)
                     children))
                 : Maybe<TaskFamily>.None);
 
+    /// <summary>
+    /// The task "Add subtask…" on a line puts the new task under: the line's own task, or its parent when the line is a
+    /// subtask, so the new one is a sibling (one level, as `task subtask` does). None for an unknown line.
+    /// </summary>
+    public Maybe<TaskItem> SubtaskParentFor(Guid lineId) =>
+        Tasks.TryFirst(t => t.Id == lineId).Map(t => ParentOf(t).GetValueOrDefault(t));
+
     // The parent a task names, when it is still on the board.
     Maybe<TaskItem> ParentOf(TaskItem task) => task.ParentId.Bind(p => Tasks.TryFirst(t => t.Id == p));
 

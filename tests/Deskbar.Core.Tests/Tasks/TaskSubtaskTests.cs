@@ -173,6 +173,20 @@ public class TaskSubtaskTests
     public void A_session_with_no_task_cannot_make_a_subtask() =>
         Assert.True(Family().AddSubtask("nobody", "Piece", clock, fresh).IsFailure);
 
+    // --- "Add subtask…" on a line ----------------------------------------------------------------
+
+    [Fact]
+    public void Add_subtask_on_a_top_line_is_under_that_line() =>
+        Assert.Equal(parent, Family().SubtaskParentFor(parent).Value.Id);
+
+    [Fact]
+    public void Add_subtask_on_a_subtask_line_is_under_its_parent() =>
+        Assert.Equal(parent, Family().SubtaskParentFor(child).Value.Id);
+
+    [Fact]
+    public void Add_subtask_on_an_unknown_line_is_none() =>
+        Assert.True(Family().SubtaskParentFor(fresh).HasNoValue);
+
     // --- Delete ----------------------------------------------------------------------------------
 
     [Fact]

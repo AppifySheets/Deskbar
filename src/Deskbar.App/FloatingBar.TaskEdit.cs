@@ -77,6 +77,10 @@ public partial class FloatingBar
             {
                 if (start(id) is { } pick) HoldFadeWhileOpen(pick);
             }, System.Windows.Threading.DispatcherPriority.Input)));
+        // Subtasks (spec "Making subtasks", Petre's pick A): after "Start Claude on this", the add box with this line's task
+        // as the parent, a sibling on a subtask's line. Run once this menu has closed, so the box can take the keyboard.
+        menu.Items.Add(TaskMenuItem(AddSubtaskText, () => Dispatcher.BeginInvoke(() => BeginSubtaskAdd(id),
+            System.Windows.Threading.DispatcherPriority.Input)));
         menu.Items.Add(new Separator());
         menu.Items.Add(TaskMenuItem("Important", () => taskService?.SetFlag(id, TaskFlag.Important, !line.Important), line.Important));
         menu.Items.Add(TaskMenuItem("Urgent", () => taskService?.SetFlag(id, TaskFlag.Urgent, !line.Urgent), line.Urgent));
@@ -90,6 +94,8 @@ public partial class FloatingBar
         menu.IsOpen = true;
         return menu;
     }
+
+    internal const string AddSubtaskText = "Add subtask…";
 
     // A TextBlock header, so an underscore in a word is not read as an access key.
     static MenuItem TaskMenuItem(string text, Action click, bool? isChecked = null)
