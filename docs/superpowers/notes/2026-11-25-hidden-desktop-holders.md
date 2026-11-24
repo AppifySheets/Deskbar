@@ -57,9 +57,10 @@ the whole session shares rather than one desktop's heap. That part is not settle
 Build on the visible desktop, where the compiler server and MSBuild nodes belong. Run only `dotnet test
 --no-build` on the hidden one, with node reuse off (`-nodeReuse:false` or `MSBUILDDISABLENODEREUSE=1` for that
 process) so the result does not depend on who launched the script. A job object with kill-on-close catches
-anything that still slips through. The session on task 87ae7ca5 is rewriting the script along these lines (build
-first, `--no-build` on the hidden desktop, a capped heap and the job object); turning node reuse off was suggested
-to it but was not in its draft when this note was written.
+anything that still slips through. PR #502 (task 87ae7ca5) does this: it builds first, runs `dotnet test
+--no-build` on a per-run `DeskbarTests-<pid>` desktop with an 8 MB heap, sets `MSBUILDDISABLENODEREUSE=1` for the
+hidden run only, and puts it in a kill-on-close job. It measured that the suite fails with a 1 MB heap and passes
+with 2 MB, and that the hidden run's nodes are `/nodeReuse:false` even when the caller does not set the variable.
 
 ## Other things seen
 
