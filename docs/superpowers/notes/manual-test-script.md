@@ -761,6 +761,32 @@ RW6. A faded row asking for you (a session needs you) still pulses orange.
 RW7. Leave the bar alone for an hour with a workspace near 15 minutes old: its row fades in visible
      steps without any click being lost while you use the bar.
 
+## Pictures in tasks
+
+Pasting and dropping pictures into a task's comments and description
+(docs/superpowers/specs/2026-11-24-task-images-design.md, PR 1).
+
+TI1. Win+Shift+S a region, open a task's comments in the tasks panel, click the comment box, Ctrl+V: a
+     small thumbnail with an x waits under the box. Type a line, press Enter: the comment shows the line
+     and the picture as a thumbnail under it; %APPDATA%\Deskbar\task-images\<task id>\ holds one PNG.
+TI2. Copy two PNG files in Explorer and Ctrl+V in the box, or drop them on it: two thumbnails wait.
+     Click one x: one is left. Enter with no text: a comment of the picture alone.
+TI3. Copy plain text and Ctrl+V in the box: the text is pasted as before, no thumbnail.
+TI4. Paste a picture, then let a session change its status line before posting: the picture is still
+     waiting after the redraw.
+TI5. Click a thumbnail in the thread: it opens full size in the default image viewer.
+TI6. A comment with long text and a picture: folded to three lines, the picture still shows in full
+     under "Show more".
+TI7. Edit a task (F2): paste a picture into the description box, Enter. The open line shows the
+     description's text, then the picture. Edit again: the description box holds only the text and the
+     picture waits under it with its x; Esc, then check no new file was written.
+TI8. A description that is only a picture: the closed line, and the bar, say "image".
+TI9. Delete the task (Delete for good): its task-images folder is gone. Close another task with a
+     picture: its folder stays.
+TI10. In a Claude session on the task, `deskbar.cmd task list`: the comment's `markdown` carries the
+     picture's full path, and the session can Read it without a permission prompt;
+     ~/.claude/settings.json has one `Read(//c/.../Deskbar/task-images/**)` rule under permissions.allow.
+
 ## Results (2026-08-01)
 
 Status: **pending human execution.** An agent cannot observe the desktop, Task View,

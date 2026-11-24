@@ -153,7 +153,7 @@ public partial class TasksWindow
     void RefreshEditorRow()
     {
         if (editorRow is null) return;
-        var kept = editorKept.Select(relative => TaskImageFiles.Thumbnail(StateDir, relative, 96).GetValueOrDefault((ImageSource?)null)).ToArray();
+        var kept = editorKept.Select(relative => TaskImageFiles.Thumbnail(StateDir, relative, 96) is { HasValue: true } shown ? shown.Value : null).ToArray();
         Fill(editorRow, [.. kept, .. editorNew.Select(p => p.Thumbnail)], i =>
         {
             if (i < editorKept.Count) editorKept.RemoveAt(i);
