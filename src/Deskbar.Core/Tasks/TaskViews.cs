@@ -277,6 +277,22 @@ public static class TaskViews
     public static string SubtaskCountText(int count) =>
         count switch { 0 => "", 1 => "1\u00A0subtask", _ => $"{count}\u00A0subtasks" };
 
+    /// <summary>
+    /// Why a parent will not close (TaskBoard.Close refuses it while any of its subtasks is open, task 842e1ba4): what
+    /// the refusal says, on the window's problem line, in the bar's message and from `task close`.
+    /// </summary>
+    public static string CloseSubtasksFirst(int open) =>
+        open == 1 ? "Close its open subtask first" : $"Close its {open} open subtasks first";
+
+    /// <summary>
+    /// The tooltip on a line's tick box, the bar's and the window's alike: what ticking it off does, or, on a parent with
+    /// open subtasks, why it will not (the same words the refusal uses), so the reason shows before the click.
+    /// </summary>
+    public static string TickTip(bool claudes, int openSubtasks) =>
+        openSubtasks > 0 ? CloseSubtasksFirst(openSubtasks)
+        : claudes ? "Tick off: closes Claude's task"
+        : "Tick off: closes the note";
+
     /// <summary>What goes between a title and its subtask count: " ·" and a no-break space, so the dot stays with the count.</summary>
     public const string SubtaskCountSeparator = " ·\u00A0";
 

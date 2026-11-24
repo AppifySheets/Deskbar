@@ -197,6 +197,62 @@ public class TaskSubtaskTests
         Assert.Equal(0, board.OpenSubtaskCount(loner));
     }
 
+    // --- closing a parent (task 842e1ba4: "closing a parent task shouldn't be possible if not all children are also
+    // closed") -------------------------------------------------------------------------------------
+
+    [Fact]
+    public void A_parent_with_open_subtasks_cannot_be_closed()
+    {
+        var board = Family();
+
+        var refused = board.Close(parent, clock);
+
+        Assert.Equal("Close its 2 open subtasks first", refused.Error);
+        Assert.True(Get(board, parent).IsOpen);
+    }
+
+    [Fact]
+    public void The_refusal_counts_the_one_subtask_still_open()
+    {
+        var board = Family().Close(sibling, clock).Value;
+        Assert.Equal("Close its open subtask first", board.Close(parent, clock).Error);
+    }
+
+    [Fact]
+    public void A_parent_closes_once_every_subtask_is_closed()
+    {
+        var board = Family().Close(child, clock).Value.Close(sibling, clock).Value;
+        Later();
+
+        var closed = Get(board.Close(parent, clock).Value, parent);
+
+        Assert.Equal(TaskStatus.Closed, closed.Status);
+        Assert.Equal(clock, closed.UpdatedAt);
+    }
+
+    [Fact]
+    public void A_subtask_closes_while_its_parent_is_open() =>
+        Assert.Equal(TaskStatus.Closed, Get(Family().Close(child, clock).Value, child).Status);
+
+    [Fact]
+    public void Closing_a_closed_parent_still_says_it_is_closed()
+    {
+        // A board from before the rule can hold a closed parent with an open subtask; closing it again is refused for
+        // being closed, not for the subtask.
+        var board = Note(Note(TaskBoard.Empty, parent, ws), child, ws).Close(parent, clock).Value;
+        board = board.SetParent(child, parent, clock).Value;
+
+        Assert.Equal("The task is closed.", board.Close(parent, clock).Error);
+    }
+
+    [Theory]
+    [InlineData(false, 0, "Tick off: closes the note")]
+    [InlineData(true, 0, "Tick off: closes Claude's task")]
+    [InlineData(true, 1, "Close its open subtask first")]
+    [InlineData(false, 3, "Close its 3 open subtasks first")]
+    public void The_tick_says_why_it_will_not_close_a_parent(bool claudes, int open, string tip) =>
+        Assert.Equal(tip, TaskViews.TickTip(claudes, open));
+
     [Fact]
     public void A_subtasks_parent_title_is_read_from_the_board()
     {

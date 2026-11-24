@@ -257,9 +257,18 @@ public sealed record TaskBoard(IReadOnlyList<TaskItem> Tasks)
 
     // --- what Petre does ---------------------------------------------------------------------------
 
-    /// <summary>Petre closes the task: it leaves the lists. Closing a closed task is refused.</summary>
+    /// <summary>
+    /// Petre closes the task: it leaves the lists. Closing a closed task is refused, and so is closing a parent while any
+    /// of its subtasks is still open (task 842e1ba4, Petre: "closing a parent task shouldn't be possible if not all
+    /// children are also closed"): the parent stands for the whole piece of work, so it cannot be ticked off while part
+    /// of that work is still open. The refusal says how many are left (<see cref="TaskViews.CloseSubtasksFirst"/>), and
+    /// every way to close (the bar's tick and menu, the window's, `task close`) comes through here, so none can skip it.
+    /// </summary>
     public Result<TaskBoard> Close(Guid id, DateTimeOffset now) =>
-        ChangeOpen(id, t => t with { Status = TaskStatus.Closed, Question = Maybe<string>.None, UpdatedAt = now });
+        // Only an OPEN task is checked for open subtasks, so closing a closed task still says it is closed.
+        Tasks.FirstOrDefault(t => t.Id == id) is { IsOpen: true } && OpenSubtaskCount(id) is var open and > 0
+            ? Result.Failure<TaskBoard>(TaskViews.CloseSubtasksFirst(open))
+            : ChangeOpen(id, t => t with { Status = TaskStatus.Closed, Question = Maybe<string>.None, UpdatedAt = now });
 
     /// <summary>
     /// A closed task comes back: In progress while a session is live on it, else Backlog, at the top of its quadrant
