@@ -28,6 +28,42 @@ internal static class TaskDropTarget
     {
         /// <summary>Whether a drop on this line's middle makes the dragged task its subtask (see the header).</summary>
         public bool TakesChild { get; init; }
+
+        /// <summary>
+        /// The bottom of the block this line heads (itself and the subtasks drawn under it), or null for just the line. A
+        /// task dropped after a parent lands below its whole block, so the drop line is drawn there (review of the
+        /// drag-to-nest branch, finding 2).
+        /// </summary>
+        public double? BlockBottom { get; init; }
+    }
+
+    /// <summary>A line as it is drawn, in order: its target and whether it is a subtask drawn under its parent.</summary>
+    internal sealed record Drawn(Placed Placed, bool Nested);
+
+    /// <summary>
+    /// The lines that can be aimed at, from the lines as drawn: every line but the nested ones (their rank is not where
+    /// they are drawn; review of #467, finding 2), each with the bottom of the block it heads.
+    /// </summary>
+    internal static IReadOnlyList<Placed> Anchors(IReadOnlyList<Drawn> drawn) =>
+        drawn.Select((d, i) => (d, i)).Where(x => !x.d.Nested)
+            .Select(x => x.d.Placed with
+            {
+                BlockBottom = drawn.Skip(x.i + 1).TakeWhile(n => n.Nested).Select(n => (double?)n.Placed.Bounds.Bottom).LastOrDefault(),
+            })
+            .ToArray();
+
+    /// <summary>
+    /// Whether <paramref name="at"/> is inside the block of the nested line <paramref name="dragged"/> (its parent's line to
+    /// the last subtask under it). A drop there changes nothing, so a wiggle of a subtask never frees it (review of the
+    /// drag-to-nest branch, finding 1). False when the dragged line is not nested.
+    /// </summary>
+    internal static bool InOwnBlock(IReadOnlyList<Drawn> drawn, Guid dragged, Point at)
+    {
+        var index = drawn.Select((d, i) => (d, i)).FirstOrDefault(x => x.d.Placed.Id == dragged);
+        if (index.d is not { Nested: true }) return false;
+        var start = drawn.Take(index.i).Select((d, i) => (d, i)).LastOrDefault(x => !x.d.Nested).i;
+        var end = start + 1 + drawn.Skip(start + 1).TakeWhile(d => d.Nested).Count() - 1;
+        return at.Y >= drawn[start].Placed.Bounds.Top && at.Y <= drawn[end].Placed.Bounds.Bottom;
     }
 
     /// <summary>An area that stands for a whole quadrant (an empty Matrix cell): a drop in it goes to that quadrant's top.</summary>
@@ -56,7 +92,7 @@ internal static class TaskDropTarget
             return new Drop(nearest.Quadrant, TaskPlace.Top, nearest.Bounds.Top) { Into = nearest.Id, IntoBounds = nearest.Bounds };
         return at.Y < nearest.Bounds.Top + nearest.Bounds.Height / 2
             ? new Drop(nearest.Quadrant, TaskPlace.Before(nearest.Id), nearest.Bounds.Top)
-            : new Drop(nearest.Quadrant, TaskPlace.After(nearest.Id), nearest.Bounds.Bottom);
+            : new Drop(nearest.Quadrant, TaskPlace.After(nearest.Id), nearest.BlockBottom ?? nearest.Bounds.Bottom);
     }
 
     // Where the top of `quadrant` is among the lines on show, so the drop line is drawn where the task will land (review
@@ -70,9 +106,13 @@ internal static class TaskDropTarget
             : lines.Max(p => p.Bounds.Bottom);
     }
 
-    // The middle half of a line: below its top quarter and above its bottom quarter.
-    static bool InMiddle(Rect bounds, double y) =>
-        y >= bounds.Top + bounds.Height / 4 && y <= bounds.Bottom - bounds.Height / 4;
+    // The middle of a line: below its top quarter and above its bottom quarter, each edge at least 5 DIP (a bar line is
+    // about 18 DIP, where a quarter is a 4 DIP target; review of the drag-to-nest branch, minor 4) and at most a third.
+    static bool InMiddle(Rect bounds, double y)
+    {
+        var edge = Math.Min(Math.Max(bounds.Height / 4, 5), bounds.Height / 3);
+        return y >= bounds.Top + edge && y <= bounds.Bottom - edge;
+    }
 
     // How far a y is from a box, vertically: 0 inside it.
     static double Distance(Rect bounds, double y) =>

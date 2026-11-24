@@ -150,7 +150,7 @@ public partial class FloatingBar
         var drop = taskDropShown;
         EndTaskDrag();
         if (!drag.Started) return;
-        if (ClickTrace.On) ClickTrace.Write($"task drop {drop?.Quadrant} {drop?.Place}");
+        if (ClickTrace.On) ClickTrace.Write($"task drop {drop?.Quadrant} {drop?.Place} into={drop?.Into}");
         taskDropQueued = true;
         Dispatcher.BeginInvoke(new Action(() =>
         {
@@ -207,19 +207,20 @@ public partial class FloatingBar
         // The lines the dragged task could go under (drag to nest): open tasks that are not subtasks; none while the
         // dragged task has subtasks of its own (TaskBoard.ParentCandidates).
         var parents = taskService.Board.ParentCandidates(dragged).Select(t => t.Id).ToHashSet();
-        var placed = taskLinesPanel.Children.OfType<Button>()
-            // A subtask drawn under its parent is no drop target (review of #467, finding 2): its rank is not where it is
-            // drawn, so "before" or "after" it would land the task somewhere else, and its own flags could be taken on.
-            .Where(b => b.Tag is TaskLine { Closing: false, ShownIn: null } && b.IsVisible)
+        // The lines as drawn; nested ones are not aimed at (TaskDropTarget.Anchors), but they make the blocks.
+        var drawn = taskLinesPanel.Children.OfType<Button>()
+            .Where(b => b.Tag is TaskLine { Closing: false } && b.IsVisible)
             .Select(b => (TaskLine)b.Tag is var line
-                ? new TaskDropTarget.Placed(line.Id, line.Quadrant, line.Status == TaskStatus.WaitingOnYou,
+                ? new TaskDropTarget.Drawn(new TaskDropTarget.Placed(line.Id, line.Quadrant, line.Status == TaskStatus.WaitingOnYou,
                     new Rect(b.TranslatePoint(new Point(0, 0), taskLinesPanel), b.RenderSize))
-                    { TakesChild = parents.Contains(line.Id) && line.Status != TaskStatus.WaitingOnYou }
+                    { TakesChild = parents.Contains(line.Id) && line.Status != TaskStatus.WaitingOnYou }, line.ShownIn is not null)
                 : null)
-            .OfType<TaskDropTarget.Placed>()
+            .OfType<TaskDropTarget.Drawn>()
             .ToList();
+        // A nested subtask released inside its own parent's block stays where it is.
+        if (TaskDropTarget.InOwnBlock(drawn, dragged, inList)) return null;
         var own = taskService.Board.Tasks.FirstOrDefault(t => t.Id == dragged)?.Quadrant ?? Quadrant.IV;
-        return TaskDropTarget.At(placed, [], own, inList) is { } drop
+        return TaskDropTarget.At(TaskDropTarget.Anchors(drawn), [], own, inList) is { } drop
             ? new TaskDropPreview(drop.Quadrant, drop.Place, drop.LineY) { Into = drop.Into, IntoBounds = drop.IntoBounds }
             : null;
     }
@@ -230,10 +231,14 @@ public partial class FloatingBar
         if (taskDropShown is not { } drop || taskLinesPanel is null) return;
         // Drag to nest: the line the task would go under is outlined, instead of a line between two.
         if (drop.Into is not null)
-            dc.DrawRoundedRectangle(null, new Pen(InsertMarkerBrush, 1.5), drop.IntoBounds, 4, 4);
+            // Inside the line's box, so the stroke neither spills onto the next line nor is clipped at the top.
+            dc.DrawRoundedRectangle(null, new Pen(InsertMarkerBrush, 1.5), Inside(drop.IntoBounds), 4, 4);
         else
             dc.DrawRoundedRectangle(InsertMarkerBrush, null, new Rect(0, drop.LineY - 1, taskLinesPanel.ActualWidth, 2), 1, 1);
     }
+
+    // A box shrunk by half a 1.5 DIP stroke on every side.
+    internal static Rect Inside(Rect box) => box.Width > 1.5 && box.Height > 1.5 ? Rect.Inflate(box, -0.75, -0.75) : box;
 
     Button? LineButtonOf(Guid id) =>
         taskLinesPanel?.Children.OfType<Button>().FirstOrDefault(b => b.Tag is TaskLine line && line.Id == id);

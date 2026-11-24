@@ -1860,7 +1860,7 @@ public partial class TasksWindow : Window
             if (Actions?.SubtaskParent is not null)
                 menu.Items.Add(Item(FloatingBar.AddSubtaskText, () => Dispatcher.BeginInvoke(() => BeginSubtaskAdd(id), System.Windows.Threading.DispatcherPriority.Input)));
             if (Actions?.ParentChoices is { } choicesOf && Actions.SetParent is { } setParent)
-                menu.Items.Add(SubtaskOfItem(id, choicesOf(id), setParent));
+                menu.Items.Add(SubtaskOfItem(id, choicesOf(id), (task, parent) => setParent(task, parent)));
             menu.Items.Add(new Separator());
         }
 
