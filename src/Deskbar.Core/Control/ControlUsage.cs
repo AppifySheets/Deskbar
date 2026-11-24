@@ -57,7 +57,7 @@ public static class ControlUsage
                 + "      count), updatedAt, important, urgent, quadrant (I to IV) and order (its place in the quadrant,\n"
                 + "      from 1; null while it waits on you);\n"
                 + "      --closed lists the closed ones instead, the latest closed first, to find one to reopen"),
-            new("task", "add <title>|- [--workspace <name>|none] [--important] [--urgent]",
+            new("task", "add <title>|- [--workspace <name>|none] [--important] [--urgent] [--parent <id>]",
                 "add a note to the backlog; without --workspace it goes on the workspace of the VS Code window\n"
                 + "      whose folder holds --from (the caller's own folder if not given); - reads the title from stdin;\n"
                 + "      --important and --urgent set its flags, and it goes to the top of the quadrant they give"),
@@ -104,6 +104,12 @@ public static class ControlUsage
             new("task", "later <title>|- --session <session>",
                 "a backlog note on the caller's workspace, a follow-up for later. In every form that takes text, -\n"
                 + "      reads the text from stdin (a heredoc in Git Bash): free text never goes on the command line"),
+            new("task", "subtask <title>|- --session <session>",
+                "a Claude session splits its work: a backlog subtask of its own task, assigned to Claude so the next\n"
+                + "      session is offered it; when its own task is already a subtask, a sibling under the same parent"),
+            new("task", "family --session <session>",
+                "the parent, the siblings and their sessions (with transcript files) of the session's own task, as the\n"
+                + "      task join reply gives them; read it again when the siblings may have moved on"),
             new("task", "comment-settle <comment-id> --session <session>",
                 "settle one of the session's own comments: it stays but folds away in the tasks window. task answered\n"
                 + "      settles the session's comments written since its question was asked; another session's is refused"),
@@ -119,6 +125,12 @@ public static class ControlUsage
                 + "      markdown from stdin. A Claude task's status line is the session's and stays as it is"),
             new("task", "comment-edit <comment-id> <markdown>|-",
                 "rewrite one of your own comments (ids are in task list's thread); a comment a session wrote is refused"),
+            new("task", "parent <id> <parent-id>|none",
+                "make a task a subtask of another, or a plain task again (none). One level: a subtask cannot have\n"
+                + "      subtasks, and a task with subtasks cannot become one"),
+            new("task", "family <id>",
+                "what a Claude session on the task reads about its family: the parent, the siblings or its subtasks, and\n"
+                + "      their sessions with transcript files; plain text"),
             new("task", "goal <id> <goal-id>|none",
                 "count a task toward an open goal of any period, as the tasks window's \"...\" menu \"Goal\" does, or toward none"),
         ]),

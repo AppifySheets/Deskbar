@@ -1578,7 +1578,12 @@ public partial class App : Application
                 Go: GoToTask,
                 Folders: task => claudeActions?.Folders(task) ?? [],
                 Start: (task, folder) => claudeActions?.Start(task, folder) ?? Result.Failure(ClaudeActionsNotReady),
-                OpenSession: (task, session) => claudeActions?.OpenSession(task, session) ?? Result.Failure(ClaudeActionsNotReady)));
+                OpenSession: (task, session) => claudeActions?.OpenSession(task, session) ?? Result.Failure(ClaudeActionsNotReady))
+            {
+                // Subtasks: the family text a session reads names each session's transcript file, found the way the
+                // keeper finds it (worktree project folders included). Read when a command arrives, like the actions.
+                Transcript = session => claudeSessions?.TranscriptOf(session) ?? Maybe<string>.None,
+            });
         controlServer = new ControlPipeServer(ControlCommandLine.PipeName,
             args => Dispatcher.InvokeAsync(() =>
             {

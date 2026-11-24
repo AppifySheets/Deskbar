@@ -672,7 +672,7 @@ public class RemoteControlTaskTests
     [Fact]
     public void Task_is_in_the_help() =>
         Assert.Equal(
-            ["list [--closed]", "add <title>|- [--workspace <name>|none] [--important] [--urgent]", "close <id>", "reopen <id>",
+            ["list [--closed]", "add <title>|- [--workspace <name>|none] [--important] [--urgent] [--parent <id>]", "close <id>", "reopen <id>",
              "status <id> <backlog|in-progress|waiting|done>", "rename <id> <title>", "move <id> <workspace>|none",
              "comment <id> <markdown>|-", "delete <id>", "flag <id> important|urgent on|off", "order <id> top|end|<n>",
              // Task 9: going to a task, starting Claude on it and opening one of its sessions.
@@ -680,8 +680,14 @@ public class RemoteControlTaskTests
              // A Claude session's own forms (plan Task 8, RemoteControl.ClaudeHook.cs); `-` reads the text from stdin.
              "join <id> --session <session>", "new <title>|- --session <session>", "status-line <text>|- --session <session>",
              "ask <question>|- --session <session>", "answered --session <session>", "done --session <session>", "comment <markdown>|- --session <session>",
-             "later <title>|- --session <session>", "comment-settle <comment-id> --session <session>",
-             "assign <id> me|claude", "describe <id> <markdown>|-", "comment-edit <comment-id> <markdown>|-", "goal <id> <goal-id>|none"],
+             "later <title>|- --session <session>",
+             // Subtasks: a session splits its work and reads its family.
+             "subtask <title>|- --session <session>", "family --session <session>",
+             "comment-settle <comment-id> --session <session>",
+             "assign <id> me|claude", "describe <id> <markdown>|-", "comment-edit <comment-id> <markdown>|-",
+             // Subtasks: put a task under another, and read a task's family.
+             "parent <id> <parent-id>|none", "family <id>",
+             "goal <id> <goal-id>|none"],
             ControlUsage.All.Where(c => c.Verb == "task").Select(c => c.Arguments));
 
     // --- Task 9: go, start, open-session ---------------------------------------------------------------------------
