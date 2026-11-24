@@ -732,7 +732,9 @@ public partial class TasksWindow : Window
             pressClicks = e.ClickCount;
             DragPress(row.Id, DragMouse.Position(e, DragSurface));
         };
-        dragLines[row.Id] = (row.Quadrant, row.Status == TaskStatus.WaitingOnYou && !row.Closing, row.Closing || row.Status == TaskStatus.Closed);
+        // A subtask drawn under its parent is fixed: not dragged and no drop target (review of #467, findings 2 and 3), as
+        // on the bar.
+        dragLines[row.Id] = (row.Quadrant, row.Status == TaskStatus.WaitingOnYou && !row.Closing, row.Closing || row.Status == TaskStatus.Closed || row.Nested);
         // A right-click anywhere on the line opens its menu at the pointer, Edit first (Ruling 44, OpenMenuFor).
         line.PreviewMouseRightButtonUp += (_, e) =>
         {
@@ -1349,8 +1351,6 @@ public partial class TasksWindow : Window
     /// <summary>The words of the menu item and the thread's button (Task 9).</summary>
     internal const string StartClaudeText = "Start Claude on this";
 
-    // One session of the thread (Task 9, the spec's "Task history"): its short id, when it joined and where it stands,
-    // and Open, which does what going to that session does. An expired one has nothing left to open, so no button.
     // One subtask in its parent's thread: "↳ title · status · status line", dim when it is done or closed. The whole line
     // is a button that shows the subtask (TasksBoard.ShowTask).
     UIElement SubtaskEntry(SubtaskView sub)
@@ -1369,6 +1369,8 @@ public partial class TasksWindow : Window
         return entry;
     }
 
+    // One session of the thread (Task 9, the spec's "Task history"): its short id, when it joined and where it stands,
+    // and Open, which does what going to that session does. An expired one has nothing left to open, so no button.
     UIElement SessionLine(Guid taskId, SessionView session)
     {
         var shortId = session.Id[..Math.Min(8, session.Id.Length)];

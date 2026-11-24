@@ -22,26 +22,37 @@ public static class SubtaskOrder
 {
     /// <summary>
     /// <paramref name="items"/> with every movable subtask moved to just after its parent (when the parent is in the list),
-    /// siblings in their original order; everything else as it was. Ids must be unique.
+    /// siblings in their original order; everything else as it was. A duplicate id (a hand-edited tasks.json; review of
+    /// #467, finding 5) neither throws nor draws children twice: the first line with an id stands for it, and the
+    /// children follow that one only.
     /// </summary>
     public static IReadOnlyList<T> UnderParents<T>(IReadOnlyList<T> items, Func<T, Guid> id, Func<T, Maybe<Guid>> parent, Func<T, bool> movable)
     {
-        var byId = items.ToDictionary(id);
-        // Wants to move: movable, names a parent other than itself, and that parent is in the list.
-        bool Candidate(T t) =>
-            movable(t) && parent(t) is { HasValue: true } p && p.Value != id(t) && byId.ContainsKey(p.Value);
-        // Moves: a candidate whose parent stays put, so the parent is emitted at the top level and takes it along.
-        bool Moves(T t) => Candidate(t) && !Candidate(byId[parent(t).Value]);
+        var first = FirstOf(items, id);
+        bool Moves(T t) => MovesUnder(t, first, id, parent, movable);
         var children = items.Where(Moves).ToLookup(t => parent(t).Value);
-        return items.Where(t => !Moves(t)).SelectMany(t => children[id(t)].Prepend(t)).ToArray();
+        return items.Select((t, i) => (Item: t, Index: i))
+            .Where(x => !Moves(x.Item))
+            .SelectMany(x => first[id(x.Item)].Index == x.Index ? children[id(x.Item)].Prepend(x.Item) : [x.Item])
+            .ToArray();
     }
 
     /// <summary>Whether a line is drawn nested under its parent in <paramref name="items"/> (UnderParents moved it).</summary>
     public static IReadOnlySet<Guid> Nested<T>(IReadOnlyList<T> items, Func<T, Guid> id, Func<T, Maybe<Guid>> parent, Func<T, bool> movable)
     {
-        var byId = items.ToDictionary(id);
-        bool Candidate(T t) =>
-            movable(t) && parent(t) is { HasValue: true } p && p.Value != id(t) && byId.ContainsKey(p.Value);
-        return items.Where(t => Candidate(t) && !Candidate(byId[parent(t).Value])).Select(id).ToHashSet();
+        var first = FirstOf(items, id);
+        return items.Where(t => MovesUnder(t, first, id, parent, movable)).Select(id).ToHashSet();
+    }
+
+    // The first line with each id, and where it is.
+    static IReadOnlyDictionary<Guid, (T Item, int Index)> FirstOf<T>(IReadOnlyList<T> items, Func<T, Guid> id) =>
+        items.Select((t, i) => (Item: t, Index: i)).GroupBy(x => id(x.Item)).ToDictionary(g => g.Key, g => g.First());
+
+    // Wants to move: movable, names a parent other than itself, and that parent is in the list. Moves: a candidate whose
+    // parent stays put, so the parent is emitted at the top level and takes it along.
+    static bool MovesUnder<T>(T t, IReadOnlyDictionary<Guid, (T Item, int Index)> first, Func<T, Guid> id, Func<T, Maybe<Guid>> parent, Func<T, bool> movable)
+    {
+        bool Candidate(T x) => movable(x) && parent(x) is { HasValue: true } p && p.Value != id(x) && first.ContainsKey(p.Value);
+        return Candidate(t) && !Candidate(first[parent(t).Value].Item);
     }
 }

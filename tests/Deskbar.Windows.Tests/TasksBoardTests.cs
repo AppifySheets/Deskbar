@@ -3763,6 +3763,21 @@ public class TasksBoardTests
         Assert.Equal("↳ Write the notes", RunsOf(TitleOf(t.Window, child.Id)));
     });
 
+    // Review of #467, findings 2 and 3: in the panel too a subtask drawn under its parent arms no drag.
+    [Fact]
+    public void A_nested_subtask_does_not_drag_in_the_panel() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        var parent = t.Tasks.AddNote("Ship the release", t.Gepha).Value;
+        var child = t.Tasks.AddNote("Write the notes", t.Gepha, parent: parent.Id).Value;
+        t.Controller.Show();
+
+        t.Window.DragPress(child.Id, new Point(5, 5));
+        t.Window.DragMove(new Point(5, 60));
+
+        Assert.False(t.Window.Dragging);
+    });
+
     // Follow-up: the panel's menu has "Subtask of" too, the bar's twin.
     [Fact]
     public void The_panel_menu_puts_a_task_under_another() => StaThread.Run(() =>

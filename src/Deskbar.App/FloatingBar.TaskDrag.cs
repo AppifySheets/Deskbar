@@ -103,6 +103,9 @@ public partial class FloatingBar
         taskDrag = null;
         if (taskService?.Board.Tasks.FirstOrDefault(t => t.Id == id) is not { IsOpen: true } task || task.Status == TaskStatus.WaitingOnYou) return;
         if (LineButtonOf(id) is not { } line || ((TaskLine)line.Tag).Closing) return;
+        // A subtask drawn under its parent is not dragged (review of #467, finding 3): it is drawn back under its parent
+        // wherever it lands, so a drop could only rewrite its flags.
+        if (((TaskLine)line.Tag).ShownIn is not null) return;
         taskDrag = new TaskDragState(id, inList, Started: false, line);
         if (ClickTrace.On) ClickTrace.Write($"task press {task.Title}");
     }
@@ -188,7 +191,9 @@ public partial class FloatingBar
     {
         if (taskLinesPanel is null || taskService is null) return null;
         var placed = taskLinesPanel.Children.OfType<Button>()
-            .Where(b => b.Tag is TaskLine { Closing: false } && b.IsVisible)
+            // A subtask drawn under its parent is no drop target (review of #467, finding 2): its rank is not where it is
+            // drawn, so "before" or "after" it would land the task somewhere else, and its own flags could be taken on.
+            .Where(b => b.Tag is TaskLine { Closing: false, ShownIn: null } && b.IsVisible)
             .Select(b => (TaskLine)b.Tag is var line
                 ? new TaskDropTarget.Placed(line.Id, line.Quadrant, line.Status == TaskStatus.WaitingOnYou,
                     new Rect(b.TranslatePoint(new Point(0, 0), taskLinesPanel), b.RenderSize))

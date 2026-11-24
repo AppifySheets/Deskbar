@@ -581,9 +581,13 @@ public partial class FloatingBar
     internal static IReadOnlyList<TaskLine> UnderParents(IReadOnlyList<TaskLine> lines)
     {
         Maybe<Guid> ParentOf(TaskLine l) => l.ParentId is { } p ? p : Maybe<Guid>.None;
-        bool Movable(TaskLine l) => l.Status != TaskStatus.WaitingOnYou;
+        // GroupBy: a duplicate id from a hand-edited file must not throw here (review of #467, finding 5).
+        var groupOf = lines.GroupBy(l => l.Id).ToDictionary(g => g.Key, g => g.First().GroupKey);
+        // Neither a subtask waiting on Petre nor one whose parent waits on him moves: nothing goes into the pinned block
+        // but questions (review of #467, finding 1; the panel's TaskViews.UnderParents has the same rule).
+        bool Movable(TaskLine l) =>
+            l.Status != TaskStatus.WaitingOnYou && !(l.ParentId is { } p && groupOf.TryGetValue(p, out var g) && g == "waiting");
         var nested = SubtaskOrder.Nested(lines, l => l.Id, ParentOf, Movable);
-        var groupOf = lines.ToDictionary(l => l.Id, l => l.GroupKey);
         return SubtaskOrder.UnderParents(lines, l => l.Id, ParentOf, Movable)
             .Select(l => nested.Contains(l.Id) ? l with { ShownIn = groupOf[l.ParentId!.Value] } : l)
             .ToArray();
@@ -916,14 +920,17 @@ public partial class FloatingBar
         if (SizeToContent == SizeToContent.Manual || taskListSlots != TaskListSlots) QueueTaskListFit();
 
         // RULING 48: the bar lists a Claude task only while it needs Petre (NeedsYou). The window shows everything.
-        var open = UnderParents(Lines(taskService.Board, WorkspaceName, id => workspaceAccents.GetValueOrDefault(id), SessionWindow, GoalTitle)
-            .Where(NeedsYou).ToArray());
+        // The bar's lines in the pile's order; UnderParents draws subtasks under their parent. WithPendingCloses does it
+        // again with the lines in their undo window among them (review of #467, finding 4).
+        var flat = Lines(taskService.Board, WorkspaceName, id => workspaceAccents.GetValueOrDefault(id), SessionWindow, GoalTitle)
+            .Where(NeedsYou).ToArray();
+        var open = UnderParents(flat);
         // A closed line whose task is open again (reopened from the pipe, say) is not pending any more: the task is back
         // in the pile under its own line.
         pendingCloses.Where(p => open.Any(l => l.Id == p.Line.Id)).ToList().ForEach(p => ForgetPendingClose(p, repaint: false));
         var slots = TaskSlotsNow;
         if (open.Count <= slots) taskListExpanded = false;
-        var all = WithGroupStarts(WithPendingCloses(open, pendingCloses));
+        var all = WithGroupStarts(WithPendingCloses(flat, pendingCloses));
         allTaskLines = all;
         var problem = taskService.LoadProblem;
         var shape = string.Join("\n", all.Select(ShapeOf).Prepend(
@@ -960,10 +967,17 @@ public partial class FloatingBar
     // The open lines with every closed line still in its undo window put back where it was, in the order they were
     // closed at, so no line moves up under the pointer while one lingers (Ruling 10). Each index is the line's place
     // among the lines on show when it was closed, the earlier lines (pending ones included) already in front of it.
-    static IReadOnlyList<TaskLine> WithPendingCloses(IReadOnlyList<TaskLine> open, IReadOnlyList<PendingClose> pending) =>
-        pending.OrderBy(p => p.Index).Aggregate(open.ToList(), (lines, p) =>
+    //
+    // SUBTASKS (review of #467, finding 4): the lines are nested with the closing ones among them, so a parent ticked off
+    // keeps its subtasks under its struck-through line instead of letting them fall back to their own places, which would
+    // move lines under the pointer. Each closing line then goes back to its place together with the subtasks drawn
+    // under it, as one block.
+    static IReadOnlyList<TaskLine> WithPendingCloses(IReadOnlyList<TaskLine> flat, IReadOnlyList<PendingClose> pending) =>
+        pending.OrderBy(p => p.Index).Aggregate(UnderParents(flat.Concat(pending.Select(p => p.Line)).ToArray()).ToList(), (lines, p) =>
         {
-            lines.Insert(Math.Min(p.Index, lines.Count), p.Line);
+            var block = lines.Where(l => l.Id == p.Line.Id || (l.ShownIn is not null && l.ParentId == p.Line.Id)).ToList();
+            lines.RemoveAll(block.Contains);
+            lines.InsertRange(Math.Min(p.Index, lines.Count), block);
             return lines;
         });
 

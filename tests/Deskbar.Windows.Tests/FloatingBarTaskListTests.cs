@@ -3078,6 +3078,55 @@ public class FloatingBarTaskListTests
         Assert.False(item.IsEnabled);
     });
 
+    // Review of #467, finding 1: a subtask of a parent that waits on Petre is not pulled into the pinned block.
+    [Fact]
+    public void A_subtask_of_a_waiting_parent_stays_out_of_the_pinned_block() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        var parent = t.Tasks.AddNote("Ship the release", t.Gepha).Value;
+        var child = t.Tasks.AddNote("Write the notes", t.Gepha, parent: parent.Id).Value;
+        t.Tasks.SetStatus(parent.Id, TaskStatus.WaitingOnYou);
+        t.Bar.UpdateLayout();
+
+        var line = (TaskLine)t.Lines[IndexOf(t, child.Id)].Tag;
+        Assert.Null(line.ShownIn);
+        Assert.NotEqual("waiting", line.GroupKey);
+    });
+
+    // Review of #467, finding 4 (Ruling 10): ticking a parent off keeps its subtasks right under its struck-through line
+    // for the undo window, so no line moves under the pointer.
+    [Fact]
+    public void Closing_a_parent_keeps_its_subtasks_under_it_during_undo() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        var parent = t.Tasks.AddNote("Ship the release", t.Gepha).Value;
+        t.Tasks.AddNote("Unrelated", t.Gepha);
+        var child = t.Tasks.AddNote("Write the notes", t.Gepha, parent: parent.Id).Value;
+        t.Bar.UpdateLayout();
+        var before = t.Lines.Select(l => ((TaskLine)l.Tag).Id).ToArray();
+
+        Click(ButtonNamed(t.Lines[IndexOf(t, parent.Id)], "Tick off"));
+        t.Bar.UpdateLayout();
+
+        Assert.Equal(before, t.Lines.Select(l => ((TaskLine)l.Tag).Id).ToArray());
+        Assert.Equal(IndexOf(t, parent.Id) + 1, IndexOf(t, child.Id));
+    });
+
+    // Review of #467, findings 2 and 3: a subtask drawn under its parent is not dragged (a drop could only rewrite its
+    // flags, since it is drawn back under its parent), and it is no drop target (its rank is not where it is drawn).
+    [Fact]
+    public void A_nested_subtask_does_not_arm_a_drag() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        var parent = t.Tasks.AddNote("Ship the release", t.Gepha).Value;
+        var child = t.Tasks.AddNote("Write the notes", t.Gepha, parent: parent.Id).Value;
+        t.Bar.UpdateLayout();
+
+        t.Bar.TaskDragPress(child.Id, new Point(5, 5));
+
+        Assert.False(t.Bar.TaskDragInFlight);
+    });
+
     [Fact]
     public void Add_subtask_on_a_subtask_adds_a_sibling() => StaThread.Run(() =>
     {

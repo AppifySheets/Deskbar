@@ -224,7 +224,8 @@ public static class TaskViews
     public static (IReadOnlyList<TaskGroup> Groups, IReadOnlySet<Guid> Moved) UnderParents(IReadOnlyList<TaskGroup> groups)
     {
         var flat = groups.SelectMany(g => g.Tasks.Select(t => (Task: t, g.Kind))).ToArray();
-        var kindOf = flat.ToDictionary(x => x.Task.Id, x => x.Kind);
+        // GroupBy: a duplicate id (a hand-edited file) must not throw here (review of #467, finding 5).
+        var kindOf = flat.GroupBy(x => x.Task.Id).ToDictionary(g => g.Key, g => g.First().Kind);
         bool InQuadrant(TaskGroupKind kind) => kind is not (TaskGroupKind.WaitingOnYou or TaskGroupKind.Closed);
         bool Movable((TaskItem Task, TaskGroupKind Kind) x) =>
             InQuadrant(x.Kind) && x.Task.ParentId.Map(p => kindOf.TryGetValue(p, out var k) && InQuadrant(k)).GetValueOrDefault(false);

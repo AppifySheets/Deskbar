@@ -70,6 +70,19 @@ public class SubtaskOrderTests
         Assert.Equal(["Self", "One"], Titles(Nest([self, Task("One")])));
     }
 
+    // Review of #467, finding 5: a hand-edited file with a duplicate id must not crash a paint, nor draw children twice.
+    [Fact]
+    public void Duplicate_ids_neither_throw_nor_double_children()
+    {
+        var parent = Task("Parent");
+        var child = Task("Child", parent.Id);
+
+        var nested = Nest([parent, child, parent with { Title = "Copy" }]);
+
+        Assert.Equal(["Parent", "Child", "Copy"], Titles(nested));
+        Assert.Contains(child.Id, SubtaskOrder.Nested([parent, child, parent], t => t.Id, t => t.ParentId, _ => true));
+    }
+
     [Fact]
     public void Nothing_is_lost_or_doubled()
     {
