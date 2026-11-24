@@ -71,11 +71,13 @@ static class ClaudeSkill
 
     // `on` is "Teach Claude Code about Deskbar" (AppState.ClaudeSkill); `tasks` is whether sessions keep their tasks
     // (AppState.ClaudeTasks), which adds three hook entries and only counts while `on` does (ClaudeHooks).
-    public static void Sync(bool on, bool tasks) =>
-        Sync(on, tasks, Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), AppPaths.NewStateDir);
+    // `waiter` is whether this machine's Claude Code honours asyncRewake (ClaudeVersion.SupportsAsyncRewake): the comment
+    // waiter's Stop entry is written only then, since a build without it would hold its sessions after every turn.
+    public static void Sync(bool on, bool tasks, bool waiter) =>
+        Sync(on, tasks, Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), AppPaths.NewStateDir, waiter);
 
     // `home` and `deskbarFolder` (where deskbar.cmd lives) are parameters so a test can point them at scratch folders.
-    internal static void Sync(bool on, bool tasks, string home, string deskbarFolder)
+    internal static void Sync(bool on, bool tasks, string home, string deskbarFolder, bool waiter = true)
     {
         try
         {
@@ -92,7 +94,7 @@ static class ClaudeSkill
                 // The hooks first: the skill tells a session whether they ask for the user, so it must know.
                 // An entry written by an older Deskbar (`cmd.exe /c ...`) still names the script, so Sync sees it as
                 // Deskbar's own, finds its command differs, and replaces it with this one.
-                var hooksInstalled = InstallHooks(scripts, settings, tasks, ClaudeHooks.ImagesRule(deskbarFolder));
+                var hooksInstalled = InstallHooks(scripts, settings, tasks, ClaudeHooks.ImagesRule(deskbarFolder), waiter);
                 Write(folder, file, hooksInstalled, tasks);
             }
             else
@@ -121,20 +123,18 @@ static class ClaudeSkill
     // stop the skill from being written, so it is traced and counts as "not installed".
     // The task script is there exactly while its entries are: written before they are added, taken away once they
     // are removed (and not while a file Sync left alone may still hold them), so no entry points at a missing file.
-    static bool InstallHooks(HookScripts scripts, string settings, bool tasks, string imagesRule)
+    static bool InstallHooks(HookScripts scripts, string settings, bool tasks, string imagesRule, bool waiter)
     {
         try
         {
             WriteHookScript(scripts.Ask);
             if (tasks) WriteHookScript(scripts.Task);
-            if (tasks) WriteScript(scripts.Wait, WaitScript());
+            if (tasks && waiter) WriteScript(scripts.Wait, WaitScript());
+            // Without the waiter (an older Claude Code) its entry is not wanted, so Sync takes out one written before.
             var installed = ClaudeHooks.Sync(true, tasks, settings, HookCommand(scripts.Ask), HookCommand(scripts.Task), imagesRule,
-                HookCommand(scripts.Wait));
-            if (!tasks && installed)
-            {
-                RemoveTaskScript(scripts.Task);
-                RemoveTaskScript(scripts.Wait);
-            }
+                waiter ? HookCommand(scripts.Wait) : null);
+            if (!tasks && installed) RemoveTaskScript(scripts.Task);
+            if (!(tasks && waiter) && installed) RemoveTaskScript(scripts.Wait);
             return installed;
         }
         catch (Exception e) when (IsSettingsOrDiskProblem(e))
@@ -197,30 +197,48 @@ static class ClaudeSkill
     // becomes a new message to the session (measured 2026-11-24: in under 2 seconds). What it does:
     //
     //   1. Asks Deskbar ONCE, `deskbar.cmd claude-wait` with the hook's JSON on stdin (passed through, as for the other
-    //      scripts), and reads three lines from a temporary file: the session's inbox, its gen file, and this waiter's
-    //      generation (CommentInbox). No answer (Deskbar not running, a headless session, the task events off) ends it.
-    //      It never asks Deskbar again, so a Deskbar restarted while it waits (every release restarts it) does not
-    //      disturb it, and it never holds the control pipe, which serves one client at a time.
-    //   2. Every 2 seconds: if the gen file is gone (the session ended) or holds another number (a later turn started a
+    //      scripts), and reads its one-line answer, "<session id> <generation>" (CommentInbox), with `for /f`, which
+    //      takes the client's LF line endings as well as CRLF (`set /p` does not: the final review's C1, measured). No
+    //      answer (Deskbar not running, a headless session, the task events off) ends it. It never asks Deskbar again, so
+    //      a Deskbar restarted while it waits (every release restarts it) does not disturb it, and it never holds the
+    //      control pipe, which serves one client at a time.
+    //   2. Builds the session's two paths ITSELF, in claude-inbox beside the shim (%~dp0, the state folder, where
+    //      CommentInbox keeps them): a path read back through a file would reach cmd garbled when the profile has a letter
+    //      outside ASCII (I2, measured), and cmd fills in %~dp0 in whatever letters it has. The answer is ASCII only.
+    //   3. The answer goes through a folder of its own, claude-inbox\wait-<n>-<n>, taken with `mkdir` (atomic: only one
+    //      waiter can create it) and retried with the next random numbers if another waiter has it. %RANDOM% is seeded by
+    //      the second, so waiters started together draw the same numbers and once shared one file (I1, measured).
+    //   4. Every 2 seconds: if the gen file is gone (the session ended) or holds another number (a later turn started a
     //      newer waiter), it exits 0 and leaves the inbox to the newer one. If the inbox file is there, it claims it by
     //      renaming it to <inbox>.<generation> (a rename only one waiter can win), types it to stderr, deletes it and
     //      exits 2: the session wakes with the comment.
     //
-    // The sleep is `ping -n 3 127.0.0.1`: cmd's own `timeout` refuses a redirected stdin, which a hook always has.
-    // Measured: twenty such waiters used under one second of CPU in thirty seconds. Pure ASCII and no absolute path, for
-    // the reason WriteHookScript gives (%~dp0 finds the shim).
-    internal static string WaitScript() => string.Join("\r\n",
+    // The hook's variables are passed inside quotes on the one command line, as WriteHookScript does, so an & in one of
+    // them is text, not a second command (M1). The sleep is `ping -n 3 127.0.0.1`: cmd's own `timeout` refuses a
+    // redirected stdin, which a hook always has. Measured: twenty such waiters used under one second of CPU in thirty
+    // seconds. Pure ASCII and no absolute path, for the reason WriteHookScript gives.
+    internal static string WaitScript()
+    {
+        var call = $"call \"%~dp0{ControlCommandLine.ShimName}\" claude-wait --entry \"%CLAUDE_CODE_ENTRYPOINT%\" --attended \"%CLAUDE_CODE_SESSION_ATTENDED%\" --job \"%CLAUDE_JOB_DIR%\"";
+        return string.Join("\r\n",
         "@rem Written by Deskbar for Claude Code's hooks: after each turn, waits for your comment on the session's task and wakes the session with it. Do not edit.",
         "@setlocal EnableExtensions DisableDelayedExpansion",
-        "@set \"answer=%TEMP%\\deskbar-wait-%RANDOM%%RANDOM%.txt\"",
-        "@set \"hook=claude-wait --entry \"%CLAUDE_CODE_ENTRYPOINT%\" --attended \"%CLAUDE_CODE_SESSION_ATTENDED%\" --job \"%CLAUDE_JOB_DIR%\"\"",
-        $"@if defined CLAUDE_PROJECT_DIR (call \"%~dp0{ControlCommandLine.ShimName}\" %hook% --from \"%CLAUDE_PROJECT_DIR%\" > \"%answer%\" 2>nul) else (call \"%~dp0{ControlCommandLine.ShimName}\" %hook% > \"%answer%\" 2>nul)",
-        "@set \"inbox=\"",
-        "@set \"gen=\"",
+        "@set \"box=%~dp0claude-inbox\"",
+        "@if not exist \"%box%\" mkdir \"%box%\" >nul 2>&1",
+        "@set /a tries=0",
+        ":pick",
+        "@set /a tries+=1",
+        "@if %tries% gtr 50 exit /b 0",
+        "@set \"answer=%box%\\wait-%RANDOM%-%RANDOM%\"",
+        "@mkdir \"%answer%\" >nul 2>&1 || goto pick",
+        $"@if defined CLAUDE_PROJECT_DIR ({call} --from \"%CLAUDE_PROJECT_DIR%\" > \"%answer%\\reply.txt\" 2>nul) else ({call} > \"%answer%\\reply.txt\" 2>nul)",
+        "@set \"sid=\"",
         "@set \"mine=\"",
-        "@if exist \"%answer%\" (< \"%answer%\" (set /p inbox= & set /p gen= & set /p mine=)) 2>nul",
-        "@del \"%answer%\" >nul 2>&1",
+        "@for /f \"usebackq tokens=1,2\" %%a in (\"%answer%\\reply.txt\") do @(set \"sid=%%a\" & set \"mine=%%b\")",
+        "@rd /s /q \"%answer%\" >nul 2>&1",
         "@if not defined mine exit /b 0",
+        "@set \"inbox=%box%\\%sid%.md\"",
+        "@set \"gen=%box%\\%sid%.gen\"",
         ":wait",
         "@if not exist \"%gen%\" exit /b 0",
         "@set \"now=\"",
@@ -230,6 +248,7 @@ static class ClaudeSkill
         "@ping -n 3 127.0.0.1 >nul",
         "@goto wait",
         "");
+    }
 
     // Writes a script Deskbar owns, only when its text changed.
     static void WriteScript(string path, string text)

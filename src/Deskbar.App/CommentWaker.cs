@@ -48,7 +48,14 @@ sealed class CommentWaker : IDisposable
         // Only while sessions keep their tasks (AppState.ClaudeTasksInEffect): otherwise there is no waiter and no list.
         subscription = tasks.Commented
             .Where(_ => enabled())
-            .Select(commented => live.Take(1).SelectMany(listed => Observable.FromAsync(() => Deliver(commented.TaskId, commented.Comment, listed))))
+            .Select(commented => live.Take(1).SelectMany(listed => Observable.FromAsync(() => Deliver(commented.TaskId, commented.Comment, listed)))
+                // One delivery that throws must not end the waker for the rest of the run (final review, I5): it is traced,
+                // and the comments after it still go.
+                .Catch((Exception e) =>
+                {
+                    trace?.Invoke($"comment waker: a comment on {commented.TaskId} was not delivered: {e.Message}");
+                    return Observable.Empty<System.Reactive.Unit>();
+                }))
             .Concat()
             .Subscribe(_ => { }, error => trace?.Invoke($"comment waker: stopped by {error.Message}"));
     }
@@ -80,7 +87,10 @@ sealed class CommentWaker : IDisposable
     // where the session's next waiter finds it.
     async Task Resumed(Guid taskId, TaskSession session, string message)
     {
-        var result = await resumeWith(taskId, session, message);
+        // A resume whose call threw is a resume that did not happen: the comment goes to the inbox like any other refusal.
+        Result result;
+        try { result = await resumeWith(taskId, session, message); }
+        catch (Exception e) { result = Result.Failure(e.Message); }
         trace?.Invoke($"comment waker: {session.Id} {(result.IsSuccess ? "resumed with the comment" : $"not resumed ({result.Error}), the comment waits in its inbox")}");
         if (result.IsFailure) Into(taskId, session.Id, message);
     }

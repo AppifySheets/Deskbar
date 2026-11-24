@@ -459,6 +459,22 @@ public sealed class ClaudeSkillTests : IDisposable
         Assert.Contains("claude-wait", File.ReadAllText(Path.Combine(Deskbar, "claude-wait-hook.cmd")));
     }
 
+    // Final review, I6: with a Claude Code not known to honour asyncRewake, no waiter is written (it would hold the session
+    // after every turn), and one written before goes.
+    [Fact]
+    public void An_older_claude_code_gets_no_waiter()
+    {
+        Directory.CreateDirectory(Path.Combine(home, ".claude"));
+        File.WriteAllText(Settings, WithABell);
+        ClaudeSkill.Sync(true, true, home, Deskbar);
+
+        ClaudeSkill.Sync(true, true, home, Deskbar, waiter: false);
+
+        Assert.Null(WaitHook(File.ReadAllText(Settings)));
+        Assert.Equal(2, Commands(File.ReadAllText(Settings), "Stop").Length);
+        Assert.False(File.Exists(Path.Combine(Deskbar, "claude-wait-hook.cmd")));
+    }
+
     [Fact]
     public void Without_the_task_events_the_waiter_and_its_script_go()
     {

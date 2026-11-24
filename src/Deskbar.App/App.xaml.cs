@@ -1624,11 +1624,24 @@ public partial class App : Application
         // setting now and whenever the state changes, so Manage's checkbox and `claude-skill on|off` take effect at once.
         // The task setting rides along (`claude-tasks on|off`, Manage's box under it): it adds or removes the three
         // task hooks, and only counts while the skill is on (ClaudeHooks).
-        ClaudeSkill.Sync(manager.State.ClaudeSkill, manager.State.ClaudeTasks);
-        manager.StateChanged
-            .Select(_ => (manager.State.ClaudeSkill, manager.State.ClaudeTasks))
-            .DistinctUntilChanged()
-            .Subscribe(settings => ClaudeSkill.Sync(settings.ClaudeSkill, settings.ClaudeTasks));
+        //
+        // The comment waiter's Stop entry (a comment wakes its session) is written only for a Claude Code known to honour
+        // asyncRewake (ClaudeVersion; a build without it would hold its sessions after every turn), so `claude --version`
+        // is read first, off the UI thread, and the skill is synced once it answers (a second or so after the start;
+        // no answer, or no Claude Code, means no waiter).
+        Observable.FromAsync(() => new Deskbar.Windows.Claude.ClaudeCli().Run(["--version"], null, TimeSpan.FromSeconds(15)))
+            .Select(read => read.Map(Core.Tasks.ClaudeVersion.SupportsAsyncRewake).GetValueOrDefault(false))
+            .Catch((Exception _) => Observable.Return(false))
+            .ObserveOn(new System.Reactive.Concurrency.SynchronizationContextScheduler(new System.Windows.Threading.DispatcherSynchronizationContext(Dispatcher)))
+            .Subscribe(waiter =>
+            {
+                ClickTrace.Write($"claude skill: the comment waiter is {(waiter ? "on" : "off (Claude Code too old, or not found)")}");
+                ClaudeSkill.Sync(manager.State.ClaudeSkill, manager.State.ClaudeTasks, waiter);
+                manager.StateChanged
+                    .Select(_ => (manager.State.ClaudeSkill, manager.State.ClaudeTasks))
+                    .DistinctUntilChanged()
+                    .Subscribe(settings => ClaudeSkill.Sync(settings.ClaudeSkill, settings.ClaudeTasks, waiter));
+            });
 
         // ...and the Windows Terminal profile "Deskbar Claude" (TerminalFragment), which the windows on background sessions
         // open with: the spec ("The setting") installs it while sessions keep tasks and removes it when they stop, and

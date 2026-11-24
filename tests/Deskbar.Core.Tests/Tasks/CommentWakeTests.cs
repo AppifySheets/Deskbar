@@ -46,6 +46,18 @@ public sealed class CommentWakeTests
         Assert.Equal(new WakePlan.StopThenResume(session, "aaaaaaaa"), plan);
     }
 
+    // Final review, I3: a lapsed background session that is busy is never stopped (that would kill the turn it is in);
+    // its comment waits in the inbox, where the waiter its turn's Stop starts finds it at once.
+    [Fact]
+    public void A_busy_lapsed_background_session_gets_the_comment_in_its_inbox()
+    {
+        var busy = Listed("aaaaaaaa-1") with { Busy = true };
+
+        var plan = CommentWake.Plan(Task(TaskStatus.InProgress, Session("aaaaaaaa-1", 0)), [busy], Everyone, _ => true);
+
+        Assert.Equal(new WakePlan.Inbox("aaaaaaaa-1"), plan);
+    }
+
     // A terminal or VS Code session cannot be restarted from outside, so the comment waits in its inbox for its next turn.
     [Fact]
     public void A_lapsed_interactive_session_gets_the_comment_in_its_inbox()

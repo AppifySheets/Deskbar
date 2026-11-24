@@ -738,6 +738,26 @@ public class ClaudeSessionsTests
         Assert.Equal(@"E:\repos\Work", resume.Folder);
     }
 
+    // Final review, I4: the comment went with the resume once `claude --bg --resume` succeeded. The daemon listing it late
+    // is no failure here, or the caller would put the comment in its inbox too and the session would read it twice.
+    [Fact]
+    public async Task Resuming_with_a_comment_counts_once_the_resume_ran()
+    {
+        using var rig = new Rig();
+        Assert.True(rig.Manager.SetClaudeResume(false).IsSuccess);
+        var (taskId, _) = rig.Dead("Slow to list");
+        rig.Cli.ListedAfter = Seconds(60);
+        rig.Begin();
+        rig.RunTo(Seconds(1));
+
+        var woken = rig.Sessions!.ResumeWith(taskId, rig.Task(taskId).Sessions.Single(), "hello");
+        rig.Run(Seconds(30));
+
+        Assert.True(woken.IsCompleted);
+        Assert.True((await woken).IsSuccess);
+        Assert.DoesNotContain(rig.Task(taskId).Comments, c => c.Markdown.Contains("no window was opened"));
+    }
+
     [Fact]
     public async Task Resuming_with_a_comment_a_running_session_resumes_nothing()
     {
