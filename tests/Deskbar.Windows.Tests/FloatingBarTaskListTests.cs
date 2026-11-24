@@ -3001,4 +3001,58 @@ public class FloatingBarTaskListTests
 
         Assert.Equal(Maybe.From(parent.Id), t.Tasks.Board.Tasks.Single(x => x.Title == "Sibling").ParentId);
     });
+
+    // THE BOX IS THE BAR'S DARK FIELD UNDER EITHER THEME AND IN EVERY STATE (task "White looks bad", 2026-11-24).
+    // Petre's screenshot showed the new-task box white, his light-grey text on it barely readable, with a clear button
+    // inside: the box ran WPF's Fluent TextBox template, which paints its own fill per state from the theme and ignores
+    // the Background the bar sets. Rendered off-screen under both themes, before typing and then typed into with the
+    // keyboard in it, the box's empty middle must be the bar's field colour (TaskFieldFill, #15161A), and the template
+    // must hold no button of its own.
+    [Theory]
+    [InlineData("Light")]
+    [InlineData("Dark")]
+    public void The_add_box_stays_dark_under_either_theme_and_focused(string theme) => StaThread.Run(() =>
+    {
+        using var t = Build();
+#pragma warning disable WPF0001 // ThemeMode is experimental; set here to try the box under both of the system's themes
+        t.Bar.ThemeMode = theme == "Light" ? ThemeMode.Light : ThemeMode.Dark;
+#pragma warning restore WPF0001
+        t.Bar.UpdateLayout();
+
+        // One look before typing, one with text in it and the keyboard in it (Fluent's focused state, and its clear
+        // button, which shows only once there is text).
+        var looks = new[] { false, true }.Select(typed =>
+        {
+            if (typed)
+            {
+                ClickBox(t);
+                t.Box.Text = "Call";
+                t.Box.Focus();
+            }
+            t.Bar.UpdateLayout();
+            var box = t.Box;
+            var width = (int)Math.Ceiling(box.ActualWidth);
+            var height = (int)Math.Ceiling(box.ActualHeight);
+            var bitmap = new System.Windows.Media.Imaging.RenderTargetBitmap(width, height, 96, 96, PixelFormats.Pbgra32);
+            bitmap.Render(box);
+            // The middle of the box, well right of "Call" and left of where Fluent puts its clear button.
+            var pixel = new byte[4];
+            bitmap.CopyPixels(new Int32Rect(width / 2, height / 2, 1, 1), pixel, 4, 0);
+            var buttons = Descendants(box).OfType<System.Windows.Controls.Primitives.ButtonBase>().Count();
+            return (typed, focused: box.IsKeyboardFocused || box.IsFocused, r: pixel[2], g: pixel[1], b: pixel[0], buttons);
+        }).ToList();
+
+        var report = string.Join("; ", looks.Select(l => $"typed={l.typed} focused={l.focused} rgb=({l.r},{l.g},{l.b}) buttons={l.buttons}"));
+        Assert.All(looks, l =>
+        {
+            Assert.True(Math.Abs(l.r - 0x15) <= 6 && Math.Abs(l.g - 0x16) <= 6 && Math.Abs(l.b - 0x1A) <= 6, report);
+            Assert.True(l.buttons == 0, report);
+        });
+    });
+
+    // Every element under a node in the visual tree, the template's parts included (the logical tree has none of them).
+    static IEnumerable<DependencyObject> Descendants(DependencyObject node) =>
+        Enumerable.Range(0, VisualTreeHelper.GetChildrenCount(node))
+            .Select(i => VisualTreeHelper.GetChild(node, i))
+            .SelectMany(child => new[] { child }.Concat(Descendants(child)));
 }

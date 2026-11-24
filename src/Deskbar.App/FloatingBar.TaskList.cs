@@ -632,6 +632,8 @@ public partial class FloatingBar
         taskAddBox = new TextBox
         {
             Tag = "task-add-box",
+            // The bar's own template, never the theme's (TaskAddBoxTemplate says why: Fluent turned it white).
+            Template = TaskAddBoxTemplate,
             Background = TaskFieldFill,
             Foreground = TaskInk,
             CaretBrush = TaskInk,
@@ -1855,6 +1857,28 @@ public partial class FloatingBar
         taskAddParentLabel.Text = parent.Map(p => $"↳ {FirstLine(p.Title)}").GetValueOrDefault("");
         taskAddParentLabel.MaxWidth = 2 * ChipTextCeiling;
     }
+
+    // THE NEW-TASK BOX'S TEMPLATE (task "White looks bad", 2026-11-24). Left to the app's theme (ThemeMode="System",
+    // App.xaml), the box ran WPF's Fluent TextBox template, which paints its own fill for each state from the theme's
+    // resources and ignores the Background set here: under the light resources a focused box went pure white, with the
+    // bar's light-grey ink on it barely readable (Petre's screenshot), and under either theme it drew a clear button of
+    // its own inside the box. Measured off-screen in The_add_box_stays_dark_under_either_theme_and_focused: focused,
+    // (255,255,255) under Light and (21,21,21) under Dark, one button each. So the box draws only what the bar sets:
+    // its field fill, its blue edge, its padding, and the text host WPF needs by name (PART_ContentHost). Nothing in it
+    // follows the theme, so it is the same dark field on any machine. The tasks window's BareTextBox (TasksWindow.xaml)
+    // is the same fix for its own boxes.
+    static readonly ControlTemplate TaskAddBoxTemplate = Sealed((ControlTemplate)XamlReader.Parse(
+        """
+        <ControlTemplate TargetType="TextBox" xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+          <Border Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}"
+                  BorderThickness="{TemplateBinding BorderThickness}" CornerRadius="3"
+                  Padding="{TemplateBinding Padding}" SnapsToDevicePixels="True">
+            <ScrollViewer x:Name="PART_ContentHost" Focusable="False" VerticalAlignment="Center"
+                          HorizontalScrollBarVisibility="Hidden" VerticalScrollBarVisibility="Hidden" />
+          </Border>
+        </ControlTemplate>
+        """));
 
     // A line's template: the strip buttons' hover, with the content stretched across the line so the text has the
     // width to trim against (BareStretchButton's reason, with a hover added).
