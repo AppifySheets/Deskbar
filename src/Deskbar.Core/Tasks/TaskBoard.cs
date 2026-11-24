@@ -562,6 +562,18 @@ public sealed record TaskBoard(IReadOnlyList<TaskItem> Tasks)
     public Maybe<TaskItem> SubtaskParentFor(Guid lineId) =>
         Tasks.TryFirst(t => t.Id == lineId).Map(t => ParentOf(t).GetValueOrDefault(t));
 
+    /// <summary>
+    /// The tasks "Subtask of…" offers as a parent for <paramref name="id"/>: open tasks that are not subtasks, not the task
+    /// itself, those on its own workspace first, each part in the pile's order. Empty for a task that has subtasks of its
+    /// own (one level) and for an unknown task.
+    /// </summary>
+    public IReadOnlyList<TaskItem> ParentCandidates(Guid id) =>
+        Tasks.TryFirst(t => t.Id == id) is { HasValue: true } own && !Tasks.Any(t => t.ParentId == id)
+            ? Pile().Where(t => t.Id != id && t.ParentId.HasNoValue)
+                .OrderBy(t => !t.WorkspaceId.Equals(own.Value.WorkspaceId))
+                .ToArray()
+            : [];
+
     /// <summary>The parent a task names, when it is still on the board: what a subtask's line names in front of its title.</summary>
     public Maybe<TaskItem> ParentOf(TaskItem task) => task.ParentId.Bind(p => Tasks.TryFirst(t => t.Id == p));
 

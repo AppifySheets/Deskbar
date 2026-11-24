@@ -228,8 +228,13 @@ public static class TaskViews
         : $"↳ {(parentTitle.Length <= BreadcrumbTitle ? parentTitle : parentTitle[..BreadcrumbTitle].TrimEnd() + "…")} › ";
 
     /// <summary>A parent's count of open subtasks in words, "" for none: what follows its title after a " · ".</summary>
+    // A no-break space between the number and the word (follow-up: Petre's screenshot had "· 2" end one line and
+    // "subtasks" start the next), so the count never splits.
     public static string SubtaskCountText(int count) =>
-        count switch { 0 => "", 1 => "1 subtask", _ => $"{count} subtasks" };
+        count switch { 0 => "", 1 => "1 subtask", _ => $"{count} subtasks" };
+
+    /// <summary>What goes between a title and its subtask count: " ·" and a no-break space, so the dot stays with the count.</summary>
+    public const string SubtaskCountSeparator = " · ";
 
     /// <summary>The words of each status, as the spec spells them.</summary>
     public static string StatusName(TaskStatus status) => status switch
