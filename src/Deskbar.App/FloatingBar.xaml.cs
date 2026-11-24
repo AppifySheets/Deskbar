@@ -509,6 +509,9 @@ public partial class FloatingBar : Window
         // Not while the user is dragging the bar: DragMove's native loop owns the window's
         // position, and a SetWindowPos arriving mid-drag fights it.
         if (!IsVisible || moving) return;
+        // Nor while one of Deskbar's own menus is open: an open menu has no owner window, so climbing back on top would
+        // cover it wherever the bar overlaps it (OwnMenus has the measurement).
+        if (OwnMenus.AnyOpen) return;
         // Nor while a full-screen app is up and the bar is docked: the shell has told it to step out of
         // the way (see OnFullScreenApp), and climbing back on top every second would undo that.
         if (fullScreenAppOpen) return;

@@ -1803,6 +1803,9 @@ public partial class App : Application
             windowRings = new WindowRings(
                 ignore: hwnd => monitor.Ignore(hwnd),
                 pinToAllDesktops: hwnd => desktops!.Pin(new WindowHandle(hwnd)));
+            // Counting Deskbar's open menus from before the first one can open, so the bar, the strips and the tasks panel
+            // never climb over one (OwnMenus).
+            OwnMenus.Start();
             floatingBar = new FloatingBar(manager)
             {
                 // The pinned workspaces' buttons on Windows' taskbar (TaskbarJumps.cs): pinned to every desktop
