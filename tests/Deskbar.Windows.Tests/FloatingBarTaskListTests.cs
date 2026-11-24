@@ -97,7 +97,7 @@ public class FloatingBarTaskListTests
         List<nint>? handedBack = null, bool editorAlive = true, Func<DateTime>? clickClock = null, Func<nint>? front = null,
         Func<nint, bool>? onCurrentDesktop = null, Func<DateTimeOffset>? taskNow = null, Action<Guid>? openTask = null,
         Func<TaskItem, Maybe<string>>? goalTitle = null, IObservable<System.Reactive.Unit>? goalChanges = null,
-        Func<Guid, ContextMenu?>? startClaude = null, IObservable<bool>? panelShown = null)
+        Func<Guid, ContextMenu?>? startClaude = null, IObservable<bool>? panelShown = null, string? stateDir = null)
     {
         var harness = Harness.Build();
         var minutes = 0;
@@ -133,6 +133,8 @@ public class FloatingBarTaskListTests
             GoalTitle = goalTitle ?? (_ => Maybe<string>.None),
             GoalChanges = goalChanges,
             StartClaude = startClaude,
+            // Pictures pasted into the add box are written here, never into the real profile.
+            TaskStateDir = stateDir ?? Path.GetTempPath(),
         };
         bar.ShowBar();
         bar.UpdateLayout();
@@ -3097,4 +3099,107 @@ public class FloatingBarTaskListTests
         Enumerable.Range(0, VisualTreeHelper.GetChildrenCount(node))
             .Select(i => VisualTreeHelper.GetChild(node, i))
             .SelectMany(child => new[] { child }.Concat(Descendants(child)));
+
+    // --- pictures in the add box (task 5cc9f1d4, Petre at the bar's "Add to Deskbar..." box: "can i paste an image here?") ---
+
+    static DataObject BitmapData()
+    {
+        var pixels = Enumerable.Repeat((byte)0x80, 40 * 30 * 4).ToArray();
+        var bitmap = System.Windows.Media.Imaging.BitmapSource.Create(40, 30, 96, 96, PixelFormats.Bgra32, null, pixels, 40 * 4);
+        bitmap.Freeze();
+        return new DataObject(DataFormats.Bitmap, bitmap);
+    }
+
+    static string ScratchRoot() => Directory.CreateTempSubdirectory("deskbar-bar-images-").FullName;
+
+    static IEnumerable<Button> RemovePictureButtons(ListBar t) =>
+        Inside(t.List).OfType<Button>().Where(b => Equals(b.Tag, FloatingBar.TaskPictureRemoveTag));
+
+    // A click in the box, Ctrl+V a screenshot, a title, Enter: one task, its title the words and its description the
+    // picture, written under the new task's id. The box is empty again, pictures included.
+    [Fact]
+    public void A_picture_pasted_into_the_bars_add_box_becomes_the_description() => StaThread.Run(() =>
+    {
+        var root = ScratchRoot();
+        try
+        {
+            using var t = Build(stateDir: root);
+            ClickBox(t);
+
+            Assert.True(t.Bar.PasteIntoTaskAdd(BitmapData()));
+            Assert.Single(RemovePictureButtons(t));
+            t.Box.Text = "Bar looks wrong";
+            Press(t.Bar, t.Box, Key.Enter);
+
+            var task = Assert.Single(t.Tasks.Board.Tasks);
+            Assert.Equal("Bar looks wrong", task.Title);
+            var picture = Assert.Single(TaskImages.Split(task.Description).Images);
+            Assert.StartsWith($"task-images/{task.Id}/", picture);
+            Assert.True(File.Exists(TaskImages.Resolve(picture, root).Value));
+            Assert.Empty(t.Bar.TaskAddImages);
+            Assert.Empty(RemovePictureButtons(t));
+        }
+        finally { Directory.Delete(root, true); }
+    });
+
+    // "also let me add just the image without a title too": Enter with only a picture adds a task called "Picture".
+    [Fact]
+    public void A_picture_alone_in_the_bars_add_box_adds_a_task_called_picture() => StaThread.Run(() =>
+    {
+        var root = ScratchRoot();
+        try
+        {
+            using var t = Build(stateDir: root);
+            ClickBox(t);
+            t.Bar.PasteIntoTaskAdd(BitmapData());
+            Press(t.Bar, t.Box, Key.Enter);
+
+            var task = Assert.Single(t.Tasks.Board.Tasks);
+            Assert.Equal("Picture", task.Title);
+            Assert.Single(TaskImages.Split(task.Description).Images);
+        }
+        finally { Directory.Delete(root, true); }
+    });
+
+    // Text alone on the clipboard is the box's own paste; the x takes a picture out; Esc drops the rest and writes nothing.
+    [Fact]
+    public void The_bars_add_box_drops_pictures_on_x_and_esc() => StaThread.Run(() =>
+    {
+        var root = ScratchRoot();
+        try
+        {
+            using var t = Build(stateDir: root);
+            ClickBox(t);
+
+            Assert.False(t.Bar.PasteIntoTaskAdd(new DataObject(DataFormats.UnicodeText, "just words")));
+            t.Bar.PasteIntoTaskAdd(BitmapData());
+            t.Bar.PasteIntoTaskAdd(BitmapData());
+            Click(RemovePictureButtons(t).First());
+            Assert.Single(t.Bar.TaskAddImages);
+
+            Press(t.Bar, t.Box, Key.Escape);
+
+            Assert.Empty(t.Bar.TaskAddImages);
+            Assert.Empty(t.Tasks.Board.Tasks);
+            Assert.Empty(Directory.EnumerateFiles(root, "*", SearchOption.AllDirectories));
+        }
+        finally { Directory.Delete(root, true); }
+    });
+
+    // A drop on an idle box takes the keyboard as a click would, so Enter right after it adds the task.
+    [Fact]
+    public void A_picture_dropped_on_the_idle_box_starts_typing() => StaThread.Run(() =>
+    {
+        var root = ScratchRoot();
+        try
+        {
+            using var t = Build(stateDir: root);
+            Assert.False(t.Bar.TaskListAdding);
+
+            t.Bar.PasteIntoTaskAdd(BitmapData());
+
+            Assert.True(t.Bar.TaskListAdding);
+        }
+        finally { Directory.Delete(root, true); }
+    });
 }

@@ -2,7 +2,6 @@ using System.IO;
 using System.Windows;
 using System.Windows.Automation;
 using System.Windows.Controls;
-using System.Windows.Input;
 using System.Windows.Media;
 using CSharpFunctionalExtensions;
 using Deskbar.Core.Tasks;
@@ -44,7 +43,7 @@ public partial class TasksWindow
     /// A paste or drop on a task's comment box: true when it held pictures, which are added to the box's pending ones;
     /// false when it held none (text alone), so the box pastes it as usual.
     /// </summary>
-    internal bool PasteImages(Guid id, IDataObject data) => Took(TaskImageFiles.FromData(data), taken =>
+    internal bool PasteImages(Guid id, IDataObject data) => PicturePaste.Took(TaskImageFiles.FromData(data), taken =>
     {
         if (!pendingImages.TryGetValue(id, out var list)) pendingImages[id] = list = [];
         list.AddRange(taken);
@@ -52,7 +51,7 @@ public partial class TasksWindow
     });
 
     /// <summary>A paste or drop on the description editor: the same, into the editor's new pictures.</summary>
-    internal bool PasteIntoDescription(IDataObject data) => Took(TaskImageFiles.FromData(data), taken =>
+    internal bool PasteIntoDescription(IDataObject data) => PicturePaste.Took(TaskImageFiles.FromData(data), taken =>
     {
         editorNew.AddRange(taken);
         RefreshEditorRow();
@@ -60,17 +59,6 @@ public partial class TasksWindow
 
     /// <summary>For the tests: Esc in the editor, which closes it and keeps nothing.</summary>
     internal void CancelEditor() => EndRename();
-
-    // The pictures read from a paste: the ones that could be read go to `take`; one that could not is traced, not shown as
-    // an error, since the rest of the paste still counts. True whenever the paste held pictures at all.
-    static bool Took(IReadOnlyList<Result<TaskImageFiles.Pending>> read, Action<IReadOnlyList<TaskImageFiles.Pending>> take)
-    {
-        if (read.Count == 0) return false;
-        read.Where(r => r.IsFailure).ToList().ForEach(r => ClickTrace.Write($"tasks window: a picture was not taken: {r.Error}"));
-        var good = read.Where(r => r.IsSuccess).Select(r => r.Value).ToArray();
-        if (good.Length > 0) take(good);
-        return true;
-    }
 
     // --- the comment box -----------------------------------------------------------------------------------------------
 
@@ -97,11 +85,7 @@ public partial class TasksWindow
     // Ctrl+V and drops on a comment box (see the header). Hooked up by CommentBox.
     void TakePictures(TextBox box, Guid id)
     {
-        box.PreviewKeyDown += (_, e) =>
-        {
-            if (IsPaste(e)) e.Handled = ClipboardData() is { HasValue: true } data && PasteImages(id, data.Value);
-        };
-        AcceptDrops(box, data => PasteImages(id, data));
+        PicturePaste.Take(box, data => PasteImages(id, data));
     }
 
     // Posting: the pending pictures are written first, then the comment goes with their lines after the text. A refusal
@@ -164,11 +148,7 @@ public partial class TasksWindow
 
     void TakeEditorPictures(TextBox box)
     {
-        box.PreviewKeyDown += (_, e) =>
-        {
-            if (IsPaste(e)) e.Handled = ClipboardData() is { HasValue: true } data && PasteIntoDescription(data.Value);
-        };
-        AcceptDrops(box, PasteIntoDescription);
+        PicturePaste.Take(box, PasteIntoDescription);
     }
 
     // Saving the editor: the new pictures are written, and the description is its text then every kept and new picture.
@@ -202,21 +182,14 @@ public partial class TasksWindow
     internal IReadOnlyList<TaskImageFiles.Pending> AddBoxImages => addImages;
 
     /// <summary>A paste or drop on the add box: true when it held pictures, which wait under the box; false for text alone.</summary>
-    internal bool PasteIntoAdd(IDataObject data) => Took(TaskImageFiles.FromData(data), taken =>
+    internal bool PasteIntoAdd(IDataObject data) => PicturePaste.Took(TaskImageFiles.FromData(data), taken =>
     {
         addImages.AddRange(taken);
         RefreshAddPictures();
     });
 
     // Hooked up once, by the constructor: the add box is built by the XAML and lives as long as the window.
-    void TakeAddPictures()
-    {
-        AddBox.PreviewKeyDown += (_, e) =>
-        {
-            if (IsPaste(e)) e.Handled = ClipboardData() is { HasValue: true } data && PasteIntoAdd(data.Value);
-        };
-        AcceptDrops(AddBox, PasteIntoAdd);
-    }
+    void TakeAddPictures() => PicturePaste.Take(AddBox, PasteIntoAdd);
 
     void RefreshAddPictures() =>
         Fill(AddPictures, addImages.Select(p => p.Thumbnail).ToArray(), i =>
@@ -249,30 +222,6 @@ public partial class TasksWindow
     void ForgetWritten(IReadOnlyList<string> written) =>
         written.Select(relative => TaskImages.Resolve(relative, StateDir)).Where(path => path.HasValue).ToList()
             .ForEach(path => Result.Try(() => File.Delete(path.Value)));
-
-    static bool IsPaste(KeyEventArgs e) =>
-        e.Key == Key.V && Keyboard.Modifiers == ModifierKeys.Control || e.Key == Key.Insert && Keyboard.Modifiers == ModifierKeys.Shift;
-
-    // The clipboard is shared with every other program and throws while one of them holds it open.
-    static Maybe<IDataObject> ClipboardData() =>
-        Result.Try(Clipboard.GetDataObject).Map(Maybe.From).GetValueOrDefault(Maybe<IDataObject>.None);
-
-    // A drop of pictures on a box takes them; anything else (text) is left to the box. Preview events, because a text box
-    // handles drops itself and would refuse files.
-    static void AcceptDrops(TextBox box, Func<IDataObject, bool> take)
-    {
-        box.AllowDrop = true;
-        box.PreviewDragOver += (_, e) =>
-        {
-            if (!TaskImageFiles.HoldsPictures(e.Data)) return;
-            e.Effects = DragDropEffects.Copy;
-            e.Handled = true;
-        };
-        box.PreviewDrop += (_, e) =>
-        {
-            if (TaskImageFiles.HoldsPictures(e.Data)) e.Handled = take(e.Data);
-        };
-    }
 
     // A row of thumbnails, each with an x calling `remove` with its place. A picture that cannot be shown (a kept one whose
     // file is gone) is a small dim box, still with its x, so it can be taken out.

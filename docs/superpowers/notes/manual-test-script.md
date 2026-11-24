@@ -847,6 +847,12 @@ TI12. + Add, Ctrl+V a picture, Enter with nothing typed: a task called "Picture"
      "image". Paste two first: "Pictures".
 TI13. + Add, Ctrl+V a picture, Esc, then + Add again: the box is empty and no file was written.
      "Add subtask…" on a line, Ctrl+V, Enter: the subtask carries the picture.
+TI14. The bar's own box ("Add to Deskbar…"): click it, Win+Shift+S a region, Ctrl+V. A small thumbnail
+     with an x waits between the box and the "on" chip; on a docked bar the task lines below make room.
+     Enter with nothing typed: a task called "Picture" with the picture as its description. Again with
+     a title: the task has that title. Paste two, click one x, Esc: the box and the row are empty.
+TI15. Drop a PNG from Explorer on the bar's idle box: the thumbnail appears and the box has the
+     keyboard; Enter adds the task.
 
 ## Comments wake their session
 
