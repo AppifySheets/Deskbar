@@ -14,8 +14,9 @@ namespace Deskbar.App;
 //
 //   * Windows' own border (DWMWA_BORDER_COLOR, Windows 11). The 1 px line Windows already draws round every window,
 //     in our colour. Windows moves it with the window, so it never lags a drag, and it costs one call. Set on another
-//     process's window the way the tiler sets rounded corners (TileSurface.RoundCorners). On Windows 10, or on a
-//     window Windows refuses (an elevated one), the call fails and nothing is drawn: ignored, and traced.
+//     process's window the way the tiler sets rounded corners (TileSurface.RoundCorners). On a window Windows refuses
+//     (an elevated one), the call fails and nothing is drawn: ignored, and traced. Where Windows cannot colour a
+//     border at all (before Windows 11, see BorderColourWorks), every ring is a frame instead.
 //   * A RingFrame, for a maximized or full-screen window: Windows draws no border on those (RingFrame's header). The
 //     once-a-second check is what follows such a window when it is restored, maximized or moved, and keeps the frame
 //     directly above it in z-order.
@@ -58,13 +59,27 @@ sealed class WindowRings : IDisposable
         // nothing at all while no ring is shown (the timer runs only then).
         recheck = new DispatcherTimer(DispatcherPriority.Background) { Interval = TimeSpan.FromSeconds(1) };
         recheck.Tick += (_, _) => Apply();
+        // One pass a moment after each Show, for a window that resets its own border as it is activated (Windows
+        // Terminal does, see Put): Show follows the focus change at once, and the reset lands just after it. A quarter
+        // of a second covers the reset without the ring visibly blinking off; the 1 s recheck stays the backstop.
+        settle = new DispatcherTimer(DispatcherPriority.Background) { Interval = TimeSpan.FromMilliseconds(250) };
+        settle.Tick += (_, _) =>
+        {
+            settle.Stop();
+            if (!disposed) Apply();
+        };
     }
+
+    readonly DispatcherTimer settle;
 
     public void Show(IReadOnlyList<FocusRings.Ring> rings)
     {
         if (disposed) return;
         wanted = rings;
         Apply();
+        // Restarted on every Show, so a burst of rebuilds settles once, after the last.
+        settle.Stop();
+        settle.Start();
     }
 
     void Apply()
@@ -93,7 +108,14 @@ sealed class WindowRings : IDisposable
         // an ordinary window (VisibleFrame) as round the screen on a maximized one (FullFrame). A trail window is one
         // you are not working in, so it rarely moves while ringed: the second the recheck takes to follow a move,
         // the reason a solid ring stays on Windows' border, hardly ever shows here.
-        if ((full ?? (solid ? null : VisibleFrame(window))) is { } rect)
+        //
+        // AND EVERY RING IS A FRAME WHERE WINDOWS CANNOT COLOUR ITS BORDER (bordersWork, before Windows 11). Reported
+        // from a Server 2022 terminal server (build 20348): "it draws dotted and dashed lines, but active window only has
+        // a ring if it's fullscreened". Its debug dump showed the focused window marked on the bar and no frame round it,
+        // because the solid ring went to DWMWA_BORDER_COLOR, which that build ignores; the trail and a maximized window
+        // were frames and showed. There the frame follows a dragged window on the recheck, up to a second late, which is
+        // the price of having a ring at all.
+        if ((full ?? (solid && bordersWork ? null : VisibleFrame(window))) is { } rect)
         {
             // Windows' border is not the ring here, so it is put back first if it was ours.
             if (had is { Frame: null }) Border(window, null);
@@ -102,7 +124,9 @@ sealed class WindowRings : IDisposable
             // Thinner than the border Windows draws on a normal window, which Deskbar can colour but not thin. Two for
             // the trail, Windows' own border at Petre's 225%: a one-pixel dot is a speck, and the dashes must still read
             // on a window edge without outshouting the focused window's solid ring.
-            frame.Place(rect, colour, window, pixels: solid ? 1 : TrailPixels, line, rounded: full is null);
+            // Rounded only where Windows rounds the window's corners, which came with the same Windows 11 as the border
+            // colour: before it, windows are square and a rounded frame would leave their corners bare.
+            frame.Place(rect, colour, window, pixels: solid ? 1 : TrailPixels, line, rounded: full is null && bordersWork);
             shown[window] = (colour, line, frame);
             if (had?.Frame is null || had?.Colour != colour || had?.Line != line)
                 Trace($"ring 0x{window:X}: frame {colour} {line} {rect.Left},{rect.Top},{rect.Right},{rect.Bottom}");
@@ -118,12 +142,27 @@ sealed class WindowRings : IDisposable
         }
 
         if (had?.Frame is { } old) Release(old);
-        if (had is not { Frame: null } || had?.Colour != colour) Border(window, colour);
+        // EVERY TIME, not only when the colour changes: another program can put its own border colour back over ours.
+        // Petre, after "Open" on a task focused its Windows Terminal window: "it doesn't give the ring to the active
+        // window". The trace had the border set (no refusal) the moment focus arrived, and nothing after. Windows
+        // Terminal resets its frame on every activation (AppHost::_updateTheme in microsoft/terminal: a frame brush that
+        // changes with focus, and DWMWA_COLOR_DEFAULT where the theme sets no frame colour), a moment after we set
+        // ours. So the recheck sets it again each second, and a settle pass shortly after each Show (see settle) cuts the
+        // wait after a focus change. One DwmSetWindowAttribute per ringed window per pass; traced only on a change.
+        Border(window, colour, quiet: had is { Frame: null } && had?.Colour == colour);
         shown[window] = (colour, line, null);
     }
 
     // See Put: thick enough for a dot to be a dot.
     const int TrailPixels = 2;
+
+    // Whether Windows draws a window's border in a colour asked for (DWMWA_BORDER_COLOR). Windows 11 first did, at build
+    // 22000; Windows 10 and Server 2022 (build 20348, where it was reported) accept the call or refuse it and draw
+    // nothing either way, so a returned code cannot be trusted to say it worked. Hence the build, which is exact:
+    // Environment.OSVersion reports the real one on .NET 5 and later (the debug dump's header reads it too).
+    internal static bool BorderColourWorks(int build) => build >= 22000;
+
+    static readonly bool bordersWork = BorderColourWorks(Environment.OSVersion.Version.Build);
 
     void Clear(nint window)
     {
@@ -222,12 +261,13 @@ sealed class WindowRings : IDisposable
     static bool Same(NativeMethods.RECT a, NativeMethods.RECT b) =>
         a.Left == b.Left && a.Top == b.Top && a.Right == b.Right && a.Bottom == b.Bottom;
 
-    // Windows' own border in `colour` (#RRGGBB), or back to Windows' default with null.
-    static void Border(nint window, string? colour)
+    // Windows' own border in `colour` (#RRGGBB), or back to Windows' default with null. `quiet` for the re-assertion of
+    // a colour already set (see Put), so the trace keeps to changes.
+    static void Border(nint window, string? colour, bool quiet = false)
     {
         var value = colour is null ? DWMWA_COLOR_DEFAULT : ColorRef(colour);
         var result = NativeMethods.DwmSetWindowAttribute(window, DWMWA_BORDER_COLOR, ref value, sizeof(int));
-        Trace($"ring 0x{window:X}: border {colour ?? "default"}{(result == 0 ? "" : $" refused 0x{result:X8}")}");
+        if (!quiet) Trace($"ring 0x{window:X}: border {colour ?? "default"}{(result == 0 ? "" : $" refused 0x{result:X8}")}");
     }
 
     const uint DWMWA_BORDER_COLOR = 34;
@@ -253,6 +293,7 @@ sealed class WindowRings : IDisposable
         if (disposed) return;
         disposed = true;
         recheck.Stop();
+        settle.Stop();
         shown.Keys.ToList().ForEach(Clear);
         idle.ToList().ForEach(f => f.Close());
         idle.Clear();
