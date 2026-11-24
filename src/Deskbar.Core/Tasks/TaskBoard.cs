@@ -46,14 +46,16 @@ public sealed record TaskBoard(IReadOnlyList<TaskItem> Tasks)
     /// --important --urgent`) and lands at the top of that quadrant; no flags, quadrant IV, is the default.
     ///
     /// With a <paramref name="parent"/> (subtasks spec) the note is that task's subtask: the parent must exist and must not
-    /// be a subtask itself (one level), and a note given no workspace takes the parent's. A workspace given wins, so the
-    /// add box's workspace chip and `task add --workspace` still decide; their callers set it to the parent's first.
+    /// be a subtask itself (one level). The note goes on the workspace it is GIVEN, none included (final review, finding
+    /// 4: "none" picked on the add box's chip, or `--workspace none`, means none). The callers fill in the parent's
+    /// workspace where nothing was chosen: the add boxes set their chip to it, `task add --parent` without --workspace
+    /// looks it up, and AddSubtask passes it.
     /// </summary>
     public Result<(TaskBoard Board, TaskItem Task)> AddNote(string title, Maybe<Guid> workspace, DateTimeOffset now, Guid newId,
         Quadrant quadrant = Quadrant.IV, Maybe<Guid> parent = default) =>
         // The lambda's parameter is typed: Result<Maybe<T>> has a second Map that maps inside the Maybe.
         CleanTitle(title).Bind(clean => ParentFor(parent).Map((Maybe<TaskItem> up) => WithAppended(
-            WithFlags(NewTask(newId, clean, workspace.Or(up.Bind(p => p.WorkspaceId)), TaskStatus.Backlog, [], now), quadrant)
+            WithFlags(NewTask(newId, clean, workspace, TaskStatus.Backlog, [], now), quadrant)
                 with { Rank = TopRank(quadrant, newId), ParentId = up.Map(p => p.Id) })));
 
     /// <summary>
@@ -65,7 +67,10 @@ public sealed record TaskBoard(IReadOnlyList<TaskItem> Tasks)
     /// </summary>
     public Result<(TaskBoard Board, TaskItem Task)> AddSubtask(string sessionId, string title, DateTimeOffset now, Guid newId) =>
         TaskOf(sessionId).ToResult($"Session {sessionId} has no open task")
-            .Bind(own => AddNote(title, Maybe<Guid>.None, now, newId, Quadrant.IV, own.ParentId.Or(own.Id)))
+            // The parent as "Add subtask…" finds it (resolved on the board, so a link naming nothing is no parent), and
+            // the new task goes on that parent's workspace.
+            .Map(own => SubtaskParentFor(own.Id).GetValueOrDefault(own))
+            .Bind(up => AddNote(title, up.WorkspaceId, now, newId, Quadrant.IV, up.Id))
             .Map(added => (added.Task with { Assignee = Assignee.Claude }) is var claudes
                 ? (added.Board.Replaced(claudes), claudes)
                 : added);
@@ -775,7 +780,9 @@ public sealed record TaskBoard(IReadOnlyList<TaskItem> Tasks)
     /// </summary>
     TaskBoard WithoutSessionElsewhere(string sessionId, Guid except, DateTimeOffset now) =>
         new(Tasks
-            .Where(t => !(t.Id != except && t.IsOpen && LiveOn(t, sessionId) && OnlyAdoptedFor(t, sessionId)))
+            // Final review, finding 1: an adopted task that has subtasks stays. A subtask is something added to it, and
+            // dropping the parent would leave its subtasks naming nothing and lose the context they are briefed from.
+            .Where(t => !(t.Id != except && t.IsOpen && LiveOn(t, sessionId) && OnlyAdoptedFor(t, sessionId) && !Tasks.Any(c => c.ParentId == t.Id)))
             .Select(t => t.Id != except && t.IsOpen && LiveOn(t, sessionId)
                 ? t with
                 {

@@ -60,7 +60,7 @@ public class RemoteControlSubtaskTests
     (TaskItem Parent, TaskItem Child) Family(WorkspaceManager manager)
     {
         var parent = tasks.Create("Parent work", IdOf(manager, "iam.ge"), tasks.NewSession("p1", Repo)).Value;
-        var child = tasks.AddNote("Child work", Maybe<Guid>.None, parent: parent.Id).Value;
+        var child = tasks.AddNote("Child work", parent.WorkspaceId, parent: parent.Id).Value;
         return (parent, child);
     }
 
@@ -88,6 +88,18 @@ public class RemoteControlSubtaskTests
         var reply = Run(manager, "task", "add", "Child", "--parent", parent.Id.ToString(), "--workspace", "Deskbar");
 
         Assert.Equal("Deskbar", Json(reply).GetProperty("workspace").GetString());
+    }
+
+    // Final review, finding 4: --workspace none keeps a subtask off every workspace.
+    [Fact]
+    public void Add_with_a_parent_and_workspace_none_is_on_none()
+    {
+        var manager = Started();
+        var parent = tasks.AddNote("Parent", IdOf(manager, "iam.ge")).Value;
+
+        var reply = Run(manager, "task", "add", "Child", "--parent", parent.Id.ToString(), "--workspace", "none");
+
+        Assert.Equal(JsonValueKind.Null, Json(reply).GetProperty("workspace").ValueKind);
     }
 
     [Fact]

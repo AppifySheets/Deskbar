@@ -113,13 +113,12 @@ public class TaskSubtaskTests
     // --- AddNote with a parent -------------------------------------------------------------------
 
     [Fact]
-    public void A_note_with_a_parent_and_no_workspace_takes_the_parents()
+    public void A_note_with_a_parent_is_its_subtask()
     {
         var board = Note(TaskBoard.Empty, parent, ws);
-        var (_, task) = board.AddNote("Child", Free, clock, child, Quadrant.IV, parent).Value;
+        var (_, task) = board.AddNote("Child", ws, clock, child, Quadrant.IV, parent).Value;
 
         Assert.Equal(Maybe.From(parent), task.ParentId);
-        Assert.Equal(Maybe.From(ws), task.WorkspaceId);
     }
 
     [Fact]
@@ -221,6 +220,32 @@ public class TaskSubtaskTests
         Assert.Equal("", TaskViews.Breadcrumb(null, full: true));
         // A long parent title is cut, so the subtask's own title keeps the line.
         Assert.Equal("↳ Subtasks support on de… › ", TaskViews.Breadcrumb("Subtasks support on deskbar", full: true));
+    }
+
+    // Final review, finding 1: an adopted task is dropped when its only session moves on (Ruling 11), but not once it has
+    // subtasks: a subtask is something added to it, and dropping it would leave the subtasks naming nothing.
+    [Fact]
+    public void An_adopted_parent_with_subtasks_survives_its_session_moving_on()
+    {
+        var board = TaskBoard.Empty.Create("Adopted", ws, Session("s1"), clock, parent).Value.Item1;
+        board = new TaskBoard(board.Tasks.Select(t => t with { Adopted = true }).ToArray());
+        board = board.AddSubtask("s1", "Piece", clock, child).Value.Item1;
+
+        board = board.Create("Elsewhere", ws, Session("s1"), clock, fresh).Value.Item1;
+
+        Assert.Contains(board.Tasks, t => t.Id == parent);
+        Assert.Equal(parent, board.Family(child).Value.Parent.Value.Id);
+    }
+
+    // Final review, finding 4: "none" chosen for a subtask means none. The board takes the workspace it is given; the
+    // callers (the add boxes, `task add --parent` without --workspace, a session's `task subtask`) fill in the parent's.
+    [Fact]
+    public void A_subtask_given_no_workspace_stays_on_none()
+    {
+        var board = Note(TaskBoard.Empty, parent, ws);
+        var (_, task) = board.AddNote("Child", Free, clock, child, Quadrant.IV, parent).Value;
+
+        Assert.True(task.WorkspaceId.HasNoValue);
     }
 
     // --- Delete ----------------------------------------------------------------------------------

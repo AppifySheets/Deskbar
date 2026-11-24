@@ -2889,6 +2889,29 @@ public class FloatingBarTaskListTests
         Assert.Equal("A subtask: Enter adds it, Esc drops the parent", Placeholder(t).Text);
     });
 
+    // Final review, finding 2: an empty subtask box keeps the parent's workspace through a click away and a desktop
+    // switch; only a plain note box follows the workspace in front.
+    [Fact]
+    public void An_empty_subtask_box_keeps_the_parents_workspace_after_clicking_away() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        var other = t.Harness.Manager.State.Workspaces.First(w => w.Id != t.Gepha).Id;
+        var parent = t.Tasks.AddNote("Ship the release", other).Value;
+        t.Bar.BeginSubtaskAdd(parent.Id);
+
+        typeof(Window).GetMethod("OnDeactivated", BindingFlags.NonPublic | BindingFlags.Instance)!.Invoke(t.Bar, [EventArgs.Empty]);
+        t.Bar.RequestRebuild();
+        t.Bar.UpdateLayout();
+        ClickBox(t);
+
+        Assert.Equal(other, t.Bar.TaskAddTarget.Value);
+        t.Box.Text = "Write the notes";
+        Press(t.Bar, t.Box, Key.Enter);
+        var child = t.Tasks.Board.Tasks.Single(x => x.Title == "Write the notes");
+        Assert.Equal(Maybe.From(parent.Id), child.ParentId);
+        Assert.Equal(other, child.WorkspaceId.Value);
+    });
+
     [Fact]
     public void Enter_adds_the_subtask_under_its_parent() => StaThread.Run(() =>
     {
