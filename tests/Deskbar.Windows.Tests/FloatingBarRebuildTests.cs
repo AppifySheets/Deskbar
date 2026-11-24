@@ -179,6 +179,27 @@ public class FloatingBarRebuildTests
         Assert.True(header.IsDescendantOf(bar.Bar));
     });
 
+    // The same task, second round: keeping the old rows was not enough on Petre's bar. Placing a ring's frame resizes a
+    // layered WPF window on this thread, and WPF answers that by rendering every window of the thread on the spot
+    // (HwndTarget.OnResize, MediaContext.Resize), so the bar was drawn half way through its rebuild and the frame came out
+    // without its rows. The rings are drawn once the rebuild is over (FloatingBar.FocusRing.cs).
+    [Fact]
+    public void The_focus_rings_are_drawn_after_a_rebuild_never_inside_it() => StaThread.Run(() =>
+    {
+        var harness = Harness.Build();
+        using var bar = harness.ShowBar();
+        var drawnWhileRebuilding = new List<bool>();
+        bar.Bar.RingsDrawn = drawnWhileRebuilding.Add;
+
+        harness.Monitor.Pump.OnNext(new WindowEvent(WindowEventKind.Activated, harness.Second));
+        // The rebuild ran inline; the rings wait for the dispatcher.
+        Assert.Empty(drawnWhileRebuilding);
+        bar.Bar.Dispatcher.Invoke(() => { }, System.Windows.Threading.DispatcherPriority.ApplicationIdle);
+
+        // Drawn, once, and with no rebuild running.
+        Assert.Equal([false], drawnWhileRebuilding);
+    });
+
     [Fact]
     public void The_next_rebuild_that_works_redraws_after_a_failed_one() => StaThread.Run(() =>
     {

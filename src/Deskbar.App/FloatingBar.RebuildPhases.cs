@@ -1,3 +1,5 @@
+using System.Windows;
+
 namespace Deskbar.App;
 
 // WHERE A SLOW REBUILD SPENT ITS TIME. Petre: "check if remote desktop manager taking a while to come up made the
@@ -48,8 +50,24 @@ public partial class FloatingBar
     {
         if (phaseClock is null) return;
         framesMidRebuild++;
-        if (framesMidRebuild == 1)
-            ClickTrace.Write($"rebuild: a frame was drawn mid-rebuild, after phase {(phases.Count == 0 ? "(none)" : phases[^1].Name)}");
+        if (framesMidRebuild > 1) return;
+        ClickTrace.Write($"rebuild: a frame was drawn mid-rebuild, after phase {(phases.Count == 0 ? "(none)" : phases[^1].Name)}");
+        // ...and what that frame was laid out as. Rendering comes before the frame's layout pass, so the geometry is read
+        // after it, on the LayoutUpdated that follows, once. The rings were moved out of the rebuild for the blank frame
+        // this line was added to find (FloatingBar.FocusRing.cs); if a frame is still drawn mid-way, this says whether the
+        // rows, the veil behind them and the footer were where they belong in it.
+        LayoutUpdated += DumpMidRebuildGeometry;
+    }
+
+    void DumpMidRebuildGeometry(object? sender, EventArgs e)
+    {
+        LayoutUpdated -= DumpMidRebuildGeometry;
+        var area = Rows.Parent as FrameworkElement;
+        var footerTop = ShellFooter.IsVisible && ShellFooter.IsDescendantOf(Root) ? ShellFooter.TranslatePoint(new Point(0, 0), Root).Y : double.NaN;
+        ClickTrace.Write($"rebuild: that frame's layout: rows={Rows.Children.Count} visible={Rows.IsVisible} rows {Rows.ActualHeight:F0} high, " +
+                         $"area {area?.ActualHeight:F0} high, header in tree={BarHeader.IsDescendantOf(Root)}, " +
+                         $"top surface {TopSurface.Height:F0}, rows surface at {RowsSurface.Margin.Top:F0} {RowsSurface.Height:F0} high, " +
+                         $"foot surface at {FootSurface.Margin.Top:F0}, footer at {footerTop:F0} {ShellFooter.ActualHeight:F0} high, bar {ActualHeight:F0} high");
     }
 
     // Runs `make` and adds what it took to the named cost, summed over the rebuild. Only while a rebuild is being

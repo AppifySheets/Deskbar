@@ -32,16 +32,38 @@ public partial class FloatingBar
     // Called by both rebuilds, the full one and the strips-only one of a minimized bar (FillStripsAlone), so the rings
     // follow focus whether the bar is showing or not. With the setting off, every focus ring is taken away, and only a
     // blinking window's border is drawn.
+    //
+    // DRAWN AFTER THE REBUILD, NEVER INSIDE IT (task c1640d1f, Petre: "selecting a window flashes the entire bar so that
+    // everything blinks"). A ring's frame is a layered WPF window on this thread, and placing it resizes it. WPF answers a
+    // layered window's resize by rendering EVERY window of the thread on the spot (HwndTarget.OnResize calls
+    // MediaContext.Resize, which runs the whole render pass, then CompleteRender; read in dotnet/wpf). Drawn from inside a
+    // rebuild, that painted the bar half way through it: the trace put a "frame was drawn mid-rebuild" line between the
+    // ring's border and frame lines on every switch, and a screen probe caught the bar's rows and their veil missing
+    // for the 140 to 170 ms the rest of the rebuild took. So the rebuild only notes the overview, and the rings are drawn
+    // once it is over, from the dispatcher at Loaded priority: after the new rows have been laid out and rendered. A
+    // burst of rebuilds draws once, from the newest overview.
     void ShowFocusRings(Overview overview)
     {
         ringOverview = overview;
-        RunAskingBeat();
-        DrawRings();
+        if (ringsQueued) return;
+        ringsQueued = true;
+        Dispatcher.BeginInvoke(DispatcherPriority.Loaded, () =>
+        {
+            ringsQueued = false;
+            RunAskingBeat();
+            DrawRings();
+        });
     }
+
+    bool ringsQueued;
+
+    // A seam for the tests and nothing else: told, each time the rings are drawn, whether a rebuild was running then.
+    internal Action<bool>? RingsDrawn { get; set; }
 
     void DrawRings()
     {
         if (ringOverview is not { } overview) return;
+        RingsDrawn?.Invoke(rebuilding);
         var on = manager.State.FocusRing;
         var rings = on ? FocusRings.Of(overview, w => RingColourOf(overview, w)) : [];
         Rings?.Show(FocusRings.WithAsking(rings, overview, manager.BlinkingWindows, askingLit, on ? FocusRings.DimWhite : null));
