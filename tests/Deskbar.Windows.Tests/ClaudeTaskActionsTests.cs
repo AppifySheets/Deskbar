@@ -223,6 +223,56 @@ public class ClaudeTaskActionsTests
         Assert.True(ClaudeTaskActions.HasWindow(rig.Harness.Manager, task));
     }
 
+    // Task 4846fde1 (Petre: "active claude terminal window should highlight the current task in deskbar"): the window
+    // Deskbar opened on a task's session names that task, found by the same title Attach finds it by, whether Windows
+    // Terminal's or the console window where there is none. Any other window names no task.
+    [Fact]
+    public void A_session_window_names_its_task()
+    {
+        using var rig = new Rig();
+        var task = rig.ClaudeTask();
+        rig.ClaudeTask("Another task", "11111111-2222-3333-4444-555555555555");
+        var window = rig.TerminalWindow("Fix the bar · Claude");
+
+        Assert.Equal(task.Id, rig.Actions.TaskOfWindow(window.Handle).GetValueOrDefault());
+
+        var plain = new WindowInfo(new WindowHandle(0x7272), 72, "WindowsTerminal", @"C:\Program Files\WindowsApps\WindowsTerminal.exe", "Fix the bar", null);
+        rig.Harness.Desktops.Placements[plain.Handle] = rig.SparrowDesktop;
+        rig.Harness.Monitor.Pump.OnNext(new WindowEvent(WindowEventKind.Appeared, plain));
+        Assert.True(rig.Actions.TaskOfWindow(plain.Handle).HasNoValue);
+        Assert.True(rig.Actions.TaskOfWindow(new WindowHandle(0x9999)).HasNoValue);
+
+        using var console = new Rig { HasTerminal = false };
+        var onConsole = console.ClaudeTask();
+        var claudeWindow = new WindowInfo(new WindowHandle(0x7171), 71, "claude", @"C:\Users\me\.local\bin\claude.exe", "Fix the bar · Claude", null);
+        console.Harness.Desktops.Placements[claudeWindow.Handle] = console.SparrowDesktop;
+        console.Harness.Monitor.Pump.OnNext(new WindowEvent(WindowEventKind.Appeared, claudeWindow));
+        Assert.Equal(onConsole.Id, console.Actions.TaskOfWindow(claudeWindow.Handle).GetValueOrDefault());
+    }
+
+    // A closed task's window names nothing (a closed task is never selected, TaskSelection.KeepOnly). Two open tasks
+    // whose titles give the same window title: the one with a session, and with both or neither, no answer rather than
+    // a guess that would highlight the wrong line.
+    [Fact]
+    public void A_session_window_names_no_task_when_the_title_is_ambiguous_or_closed()
+    {
+        using var rig = new Rig();
+        var first = rig.ClaudeTask();
+        var window = rig.TerminalWindow("Fix the bar · Claude");
+
+        var note = rig.Tasks.AddNote("Fix the bar", rig.Sparrow).Value;
+        Assert.Equal(first.Id, rig.Actions.TaskOfWindow(window.Handle).GetValueOrDefault());
+
+        var second = rig.ClaudeTask(session: "11111111-2222-3333-4444-555555555555");
+        Assert.True(rig.Actions.TaskOfWindow(window.Handle).HasNoValue);
+
+        Assert.True(rig.Tasks.Close(first.Id).IsSuccess);
+        Assert.Equal(second.Id, rig.Actions.TaskOfWindow(window.Handle).GetValueOrDefault());
+
+        Assert.True(rig.Tasks.Close(second.Id).IsSuccess);
+        Assert.Equal(note.Id, rig.Actions.TaskOfWindow(window.Handle).GetValueOrDefault());
+    }
+
     // Spec: an ended session is resumed in its folder, then a window opens on it. ClaudeSessions.ResumeNow does the
     // resume under the keeper's guards; the window opens with the short id the list gives once it shows the session.
     // A session whose transcript is gone is expired: nothing is resumed and nothing opens.

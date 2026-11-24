@@ -2013,6 +2013,14 @@ public partial class App : Application
             // on Start while the Start menu is up closes it rather than opening it again (FloatingBar.Shell.cs).
             monitor.ForegroundChanged.Subscribe(floatingBar.NoteForeground);
 
+            // The task of the Claude window in front is the selected one (task 4846fde1, Petre: "active claude terminal
+            // window should highlight the current task in deskbar"). Bringing forward a terminal Deskbar opened on a
+            // task's session selects that task, so its line is lit on the bar and in the tasks panel just as a click on
+            // it would light it (TaskSelection). Any other window leaves the selection alone: switching to a browser
+            // does not take away the task he was looking at. ClaudeTaskActions.TaskOfWindow says which task, if any.
+            monitor.ForegroundChanged.Subscribe(hwnd =>
+                claudeActions?.TaskOfWindow(new WindowHandle(hwnd)).Tap(floatingBar.Selection.Select));
+
             // A window dragged by its own title bar, for dropping it on a workspace row (Petre: "can i drag
             // and drop the current window, with its header, to the workspace?"). The start and end of the
             // drag, handed to the bar for the same reason as above: the monitor is this root's to hand out.
