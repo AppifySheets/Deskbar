@@ -45,7 +45,7 @@ public sealed class ClaudeSkillTests : IDisposable
         ClaudeSkill.Sync(true, true, home, Deskbar);
 
         var json = File.ReadAllText(Settings);
-        Assert.Equal(2, Commands(json, "Stop").Length);
+        Assert.Equal(3, Commands(json, "Stop").Length);
         Assert.Contains(@"cmd.exe /c C:\bell.bat", Commands(json, "Stop"));
         Assert.Single(Commands(json, "Notification"));
         Assert.Contains("claude-hook.cmd", Commands(json, "Notification")[0]);
@@ -107,7 +107,9 @@ public sealed class ClaudeSkillTests : IDisposable
         ClaudeSkill.Sync(true, true, home, Deskbar);
 
         var json = File.ReadAllText(Settings);
-        Assert.Equal([@"cmd.exe /c C:\bell.bat", ClaudeSkill.HookCommand(Path.Combine(Deskbar, "claude-hook.cmd"))],
+        // With the task events on, Stop also holds the comment waiter after the ask entry.
+        Assert.Equal([@"cmd.exe /c C:\bell.bat", ClaudeSkill.HookCommand(Path.Combine(Deskbar, "claude-hook.cmd")),
+                ClaudeSkill.HookCommand(Path.Combine(Deskbar, "claude-wait-hook.cmd"))],
             Commands(json, "Stop"));
     }
 
@@ -431,6 +433,58 @@ public sealed class ClaudeSkillTests : IDisposable
         File.WriteAllText(script, "@echo mine");
         ClaudeSkill.Sync(true, false, home, Deskbar);
         Assert.Equal("@echo mine", File.ReadAllText(script));
+    }
+
+    // --- the comment waiter (a comment wakes its session; plan 2026-11-24-comment-wakes-session, Task 4) -------------
+
+    static System.Text.Json.Nodes.JsonNode? WaitHook(string json) =>
+        System.Text.Json.Nodes.JsonNode.Parse(json)!["hooks"]?["Stop"]?.AsArray()
+            .Select(e => e!["hooks"]![0]!).FirstOrDefault(h => h["command"]!.GetValue<string>().Contains("claude-wait-hook.cmd"));
+
+    // While sessions keep their tasks, Stop holds the user's own hooks, Deskbar's ask entry, and the waiter: asyncRewake,
+    // so Claude Code wakes the session when it exits 2, and a month's timeout, so it outlives a long idle.
+    [Fact]
+    public void The_waiter_joins_stop_while_sessions_keep_tasks()
+    {
+        Directory.CreateDirectory(Path.Combine(home, ".claude"));
+        File.WriteAllText(Settings, WithABell);
+
+        ClaudeSkill.Sync(true, true, home, Deskbar);
+
+        var wait = WaitHook(File.ReadAllText(Settings));
+        Assert.NotNull(wait);
+        Assert.True(wait!["asyncRewake"]!.GetValue<bool>());
+        Assert.Equal(2592000, wait["timeout"]!.GetValue<long>());
+        Assert.True(File.Exists(Path.Combine(Deskbar, "claude-wait-hook.cmd")));
+        Assert.Contains("claude-wait", File.ReadAllText(Path.Combine(Deskbar, "claude-wait-hook.cmd")));
+    }
+
+    [Fact]
+    public void Without_the_task_events_the_waiter_and_its_script_go()
+    {
+        Directory.CreateDirectory(Path.Combine(home, ".claude"));
+        File.WriteAllText(Settings, WithABell);
+        ClaudeSkill.Sync(true, true, home, Deskbar);
+
+        ClaudeSkill.Sync(true, false, home, Deskbar);
+
+        var json = File.ReadAllText(Settings);
+        Assert.Null(WaitHook(json));
+        Assert.Equal(2, Commands(json, "Stop").Length);
+        Assert.False(File.Exists(Path.Combine(Deskbar, "claude-wait-hook.cmd")));
+    }
+
+    [Fact]
+    public void An_older_waiter_entry_is_replaced()
+    {
+        Directory.CreateDirectory(Path.Combine(home, ".claude"));
+        File.WriteAllText(Settings, """{"hooks":{"Stop":[{"hooks":[{"type":"command","command":"\"C:/old/Deskbar/claude-wait-hook.cmd\""}]}]}}""");
+
+        ClaudeSkill.Sync(true, true, home, Deskbar);
+
+        var commands = Commands(File.ReadAllText(Settings), "Stop");
+        Assert.Equal(2, commands.Length);
+        Assert.DoesNotContain(commands, c => c.Contains("C:/old/"));
     }
 
     // --- the Read rule for pasted images (images in tasks) -------------------------------------------------------------
