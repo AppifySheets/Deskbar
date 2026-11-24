@@ -446,9 +446,10 @@ Type a note into the box at its top and press Enter, and it lands on the workspa
 none, or another one, by the chip under the box). The new note is selected and glows blue for a moment,
 so you can see where it landed; the tasks panel's own add box does the same. Tick a note to close it,
 with six seconds to undo.
-Two small toggles on each line mark a task important or urgent, which sorts the list into Covey's four
-quadrants, and a line drags up or down to reorder it. When there are more tasks than fit, the list
-scrolls with the mouse wheel. "+N more" (or "All tasks") opens the tasks panel,
+An important task's title is bold and an urgent one's italic, which sorts the list into Covey's four
+quadrants; set them from a line's right-click menu or the toggles in the tasks panel, and drag a line up
+or down to reorder it. When there are more tasks than fit, the list scrolls with the mouse wheel.
+"+N more" (or "All tasks") opens the tasks panel,
 with every task, its comments, and a Matrix view of the four quadrants side by side.
 The panel is a full-height strip docked just inside the bar, on every virtual desktop, and it pushes
 maximized windows aside as the bar does. Click the same button, or the x in the panel's toolbar, to close

@@ -258,17 +258,19 @@ The task list at the bottom of the bar (spec `docs/superpowers/specs/2026-11-22-
     the same task is highlighted there and scrolled into view. Click another line in the panel: the bar's
     highlight follows. Close the highlighted task: no line is highlighted any more.
 
-55b2. Each line says how old its task is, dim, just before its chip ("now", "16m", "2h3m", "3d3h"); after a minute the
-    text moves on without the line redrawing. Point at it: "Added 2 hours 3 minutes ago" and the date.
+55b2. A bar line shows no age and no flag sign: the title, then the chip. Point at the line: its tooltip has
+    "Created" and the date. Open the tasks panel at its usual slim width: every line shows its age ("now", "16m",
+    "2h3m", "3d3h") just before the chip, whole; after a minute it moves on without the line redrawing. Point at an
+    age: "Added 2 hours 3 minutes ago" and the date.
 
-55c. Point at a note's line: two dim toggles appear over the end of its title, an exclamation mark and a clock. Click the
-    exclamation mark: it turns red and stays, and the line moves above the plain ones. Click the clock on another
-    line: amber, and that line moves above the plain ones but below the important one. Set both on a third: it goes
-    to the very top of the open lines. A task set to waiting stays above all of them, showing its flags. A little
-    space separates each group, and nothing names the groups on the bar.
+55c. Point at a note's line on the bar: nothing appears over its title. Right-click it and pick Important: its title
+    turns bold and the line moves above the plain ones; right-click again and Important is ticked. Pick Urgent on
+    another line: italic, and that line moves above the plain ones but below the important one. Set both on a third:
+    bold italic, at the very top of the open lines. A task set to waiting stays above all of them, its title still
+    bold or italic. A little space separates each group, and nothing names the groups on the bar.
 55d. Drag a plain line down past another and let go on that line's lower half: it lands under it. A press and
     release without moving still goes to the task. Drag a plain line onto an important one: it becomes important
-    (its exclamation mark turns red). Try to drag a waiting line: nothing moves. Drop a line on a waiting line: it
+    (its title turns bold). Try to drag a waiting line: nothing moves. Drop a line on a waiting line: it
     lands under the waiting block. While dragging, add a task from the pipe: the list does not change until you
     let go. `$ts task list` shows `important`, `urgent`, `quadrant` and `order` matching what you see, and
     `$ts task order <id> 2` and `$ts task flag <id> urgent on` move lines as a drag and a click do.

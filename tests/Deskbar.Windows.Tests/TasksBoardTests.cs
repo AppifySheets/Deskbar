@@ -3239,8 +3239,9 @@ public class TasksBoardTests
     static IReadOnlyList<string> MenuWords(ContextMenu menu) =>
         menu.Items.OfType<MenuItem>().Select(i => i.Header is TextBlock text ? text.Text : $"{i.Header}").ToArray();
 
-    // Below 692 DIP a line is slim: no session words, no age, no assignee and no Reopen button on it; its sessions are
-    // squares only, and the age and assignee move into its tooltip.
+    // Below 692 DIP a line is slim: no session words, no assignee and no Reopen button on it; its sessions are squares
+    // only, and the assignee moves into its tooltip with the age. The age itself stays on the slim line since it left the
+    // bar (Petre, 2026-11-24: "move the time from here to the proper tasks window"), whole, never trimmed.
     [Fact]
     public void A_panel_narrower_than_692_draws_slim_lines() => StaThread.Run(() =>
     {
@@ -3253,14 +3254,43 @@ public class TasksBoardTests
 
         var line = LineOf(t.Window, id);
         Assert.DoesNotContain(Inside(line).OfType<TextBlock>(), b => b.Text.Contains("session", StringComparison.Ordinal));
-        Assert.DoesNotContain(Inside(line).OfType<TextBlock>(), b => Equals(b.Tag, "task-age") || Equals(b.Tag, "task-assignee"));
-        Assert.Equal("", t.Window.AgeText(id));
+        Assert.DoesNotContain(Inside(line).OfType<TextBlock>(), b => Equals(b.Tag, "task-assignee"));
+        var task0 = t.Tasks.Board.Tasks.Single(x => x.Id == id);
+        Assert.Equal(TaskAge.Format(Start.AddHours(1) - task0.Created), t.Window.AgeText(id));
+        t.Window.UpdateLayout();
+        var age = Inside(line).OfType<TextBlock>().Single(b => Equals(b.Tag, "task-age"));
+        Assert.True(age.IsVisible, "the slim line shows its age");
+        Assert.True(age.ActualWidth >= age.DesiredSize.Width - age.Margin.Left - age.Margin.Right - 0.5, $"'{age.Text}' is trimmed to {age.ActualWidth}");
         Assert.Equal(["session-live", "session-ended"], SquaresOf(line));
         var task = t.Tasks.Board.Tasks.Single(x => x.Id == id);
         Assert.Contains($"{TaskAge.Format(Start.AddHours(1) - task.Created)} · {task.Assignee.Name}", TipOf(line));
 
         t.Controller.Filter(TaskFilter.Closed);
         Assert.False(HasButton(LineOf(t.Window, closed), "Reopen"));
+    });
+
+    // The widest age TaskAge writes ("27d23h") fits the slim line's age column whole at the panel's narrowest width, and
+    // the age's tooltip says it in words with the date, as the bar's did, so it is not misread as a timer (Ruling 46).
+    [Fact]
+    public void The_slim_lines_age_fits_at_its_widest_and_says_it_in_words() => StaThread.Run(() =>
+    {
+        var now = Start.AddDays(27).AddHours(23).AddMinutes(30);
+        using var t = Build(width: TasksPanelLayout.MinWidth, now: () => now);
+        var id = t.Tasks.AddNote("an old note with a title long enough to need trimming in a narrow panel", t.Gepha).Value.Id;
+        t.Controller.Show();
+        t.Window.UpdateLayout();
+
+        var age = Inside(LineOf(t.Window, id)).OfType<TextBlock>().Single(b => Equals(b.Tag, "task-age"));
+        Assert.Equal("27d23h", age.Text);
+        Assert.True(age.ActualWidth >= age.DesiredSize.Width - age.Margin.Left - age.Margin.Right - 0.5, $"'{age.Text}' is trimmed to {age.ActualWidth}");
+        Assert.StartsWith("Added 27 days 23 hours ago\n", (string)age.ToolTip);
+        Assert.Contains($"{Start.ToLocalTime():dddd d MMMM yyyy}", (string)age.ToolTip);
+
+        // A minute later the tick rewrites the text and the words in place.
+        now = Start.AddDays(28);
+        t.Window.RefreshAges();
+        Assert.Equal("4w", age.Text);
+        Assert.StartsWith("Added 4 weeks ago\n", (string)age.ToolTip);
     });
 
     // From 692 DIP the line is today's, and the switch between the two happens when the grip's drag ends (ResizePanel),
