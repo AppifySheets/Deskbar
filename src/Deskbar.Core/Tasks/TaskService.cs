@@ -163,7 +163,7 @@ public sealed class TaskService(ITaskStore store, Func<DateTimeOffset> now, Func
             .Tap(() =>
             {
                 if (sessionId.HasValue || !wakes) return;
-                Board.Tasks.SelectMany(t => t.Comments).TryFirst(c => c.Id == commentId).Execute(comment => commented.OnNext((id, comment)));
+                Board.Tasks.SelectMany(t => t.Comments).TryFirst(c => c.Id == commentId).Tap(comment => commented.OnNext((id, comment)));
             });
     }
 
