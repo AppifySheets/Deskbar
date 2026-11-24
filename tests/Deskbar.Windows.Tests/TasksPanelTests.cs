@@ -639,6 +639,33 @@ public class TasksPanelTests
     static bool Above(nint upper, nint lower) =>
         NativeMethods.GetWindow(upper, GwHwndNext) is var next && next != 0 && (next == lower || Above(next, lower));
 
+    // Petre's screenshot of 2026-11-24: a line's menu half under the panel. A ContextMenu's popup has no owner window, so
+    // the 1 s re-assertion put the panel over it (OwnMenus has the measurement). While a menu is open the panel stays where
+    // it is, and once it has closed the panel climbs back on top.
+    [Fact]
+    public void An_open_menu_stays_above_the_panel_and_the_panel_climbs_back_once_it_closes() => StaThread.Run(() =>
+    {
+        OwnMenus.Start();
+        var rig = new Rig().Open();
+        var menu = new System.Windows.Controls.ContextMenu { PlacementTarget = rig.Window };
+        menu.Items.Add(new System.Windows.Controls.MenuItem { Header = "Edit" });
+        menu.IsOpen = true;
+        rig.Pump();
+        var menuHwnd = ((HwndSource)PresentationSource.FromVisual(menu)!).Handle;
+        var panelHwnd = new WindowInteropHelper(rig.Window).Handle;
+        Assert.True(OwnMenus.AnyOpen);
+
+        rig.Panel.ReclaimTopmost();
+        Assert.True(Above(menuHwnd, panelHwnd));
+
+        menu.IsOpen = false;
+        rig.Pump();
+        Assert.False(OwnMenus.AnyOpen);
+        rig.Panel.ReclaimTopmost();
+        Assert.True(IsTopmost(rig.Window));
+        rig.Close();
+    });
+
     // The trace (CLAUDE.md, "Instrumentation"): one line per dock with its reason, and the geometry line (the granted
     // rectangle and the bar's edge) only when it changes. Nothing at all with tracing off.
     [Fact]

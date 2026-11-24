@@ -282,6 +282,8 @@ internal sealed class TasksPanel : IDisposable
     internal void ReclaimTopmost()
     {
         if (!window.IsVisible) return;
+        // Not over one of Deskbar's own menus: an open menu has no owner window, so this would cover it (OwnMenus).
+        if (OwnMenus.AnyOpen) return;
         var hwnd = new WindowInteropHelper(window).Handle;
         if (hwnd == 0) return;
         if (fullScreenFound)

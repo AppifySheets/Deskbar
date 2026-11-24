@@ -388,6 +388,8 @@ public sealed class ScreenStrip : Window
     public void ReclaimTopmost()
     {
         if (!IsVisible || fullScreenOpen) return;
+        // Not over one of Deskbar's own menus, which has no owner window to keep it above the strip (OwnMenus).
+        if (OwnMenus.AnyOpen) return;
         var hwnd = new WindowInteropHelper(this).Handle;
         if (hwnd == 0) return;
         NativeMethods.SetWindowPos(hwnd, NativeMethods.HWND_TOPMOST, 0, 0, 0, 0,
