@@ -144,6 +144,16 @@ public sealed record TaskItem(
     public Maybe<Guid> GoalId { get; init; }
 
     /// <summary>
+    /// The task this one is a subtask of, or none (subtasks spec, docs/superpowers/specs/2026-11-24-subtasks-design.md).
+    /// One level only: TaskBoard.SetParent refuses a parent that is itself a subtask and a task that has subtasks, so a
+    /// family is a parent and its children. Why it exists: a session joining a subtask is briefed on the parent, the
+    /// siblings and their sessions (SessionBriefing.Family), so Petre can add one with only a title. An init property
+    /// like GoalId, stored as an optional `parentId`; a link naming a task that no longer exists reads as no parent
+    /// (TaskBoard.Family), and nothing prunes it on load, for the same reason GoalId is not pruned.
+    /// </summary>
+    public Maybe<Guid> ParentId { get; init; }
+
+    /// <summary>
     /// Who the task is on (Ruling 57, Assignee.cs). An init property like the flags: a task made by Petre is his, which
     /// is the default; TaskBoard sets Claude where a session makes or takes a task, and JsonTaskStore derives it for a
     /// task saved before the field existed.
