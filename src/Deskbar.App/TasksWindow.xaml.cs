@@ -76,6 +76,11 @@ public partial class TasksWindow : Window
     static readonly Brush HeaderInk = Frozen(0xFF, 0x8B, 0x8F, 0x99);
     static readonly Brush Orange = Frozen(0xFF, FloatingBar.AskingOrange.R, FloatingBar.AskingOrange.G, FloatingBar.AskingOrange.B);
     static readonly Brush AskTint = Frozen(0xFF, 0x3A, 0x2C, 0x1C);
+    // A task line's tile (TasksWindow.Line): a shade lighter than the panel (#1E1F24), so each task is its own block.
+    static readonly Brush TileFill = Frozen(0xFF, 0x24, 0x26, 0x2C);
+    // The space between two tiles, and between a tile and the panel's sides, in DIP.
+    const double TileGap = 3;
+    const double TileInset = 6;
     static readonly Brush BadgeInk = Frozen(0xFF, 0x1E, 0x1F, 0x24);
     static readonly Brush ButtonFill = Frozen(0xFF, 0x2A, 0x2C, 0x33);
     static readonly Brush PickedEdge = Frozen(0xFF, 0x4F, 0x8C, 0xFF);
@@ -677,21 +682,30 @@ public partial class TasksWindow : Window
             : new UIElement[] { comments, more }.Concat(flags?.Children.OfType<UIElement>() ?? []).ToArray();
         Quieten(quiet, loud: false);
 
-        // The selection's frame (ruling 21, as on the bar): 2 DIP on the left, clear unless this is the task Petre
-        // picked, then the text box's blue over a fill lighter than hover. Always there, so a pick moves nothing; a
-        // change of selection repaints it in place (PaintSelection), not the lines.
+        // EVERY LINE IS A TILE (Petre's pick, option E of the task-separation mockup, 2026-11-25; the task was "better task
+        // separation with lines or something", from a screenshot where two-line Claude tasks with status lines ran into
+        // each other). Three layers, outermost first:
+        //   the Button   the tile: its Background is the tile's fill (TileFill, or AskTint while the task waits on Petre),
+        //                its template rounds the corners and washes it lighter under the pointer (LineButton in the XAML),
+        //                and its Margin leaves TileGap between one tile and the next;
+        //   the frame    the selection (ruling 21, as on the bar): 2 DIP on the left, clear unless this is the task Petre
+        //                picked, then the text box's blue over a translucent fill that lightens the tile. Always there, so
+        //                a pick moves nothing; a change of selection repaints it in place (PaintFrame), not the lines;
+        //   the edge     the 3 DIP orange edge of a task Claude works on, now one rounded piece per tile, so a run of
+        //                Claude tasks no longer reads as one long stripe.
+        // The waiting tint moved from the edge to the tile, so it fills the whole tile, rounded corners included.
         var edge = new Border
         {
             BorderThickness = new Thickness(3, 0, 0, 0),
             BorderBrush = row.Claudes ? Orange : Brushes.Transparent,
-            Background = row.Status == TaskStatus.WaitingOnYou && !row.Closing ? AskTint : Brushes.Transparent,
-            // RULING 64 (Petre: "same here, make more compact", after the bar's line gap went from 8 to 3 DIP): 1.5 DIP above and
-            // below the text (was 5), so lines part by 3 DIP as on the bar and a one-line task is its title and 3 DIP. 4 DIP
-            // before the tick, not 7: the tick column and the orange edge keep their size, the slack goes.
-            Padding = new Thickness(4, 1.5, 8, 1.5),
+            CornerRadius = new CornerRadius(3, 0, 0, 3),
+            // RULING 64 (Petre: "same here, make more compact", after the bar's line gap went from 8 to 3 DIP) set 1.5 DIP above
+            // and below the text. A tile needs a little air inside its fill or the text touches its edges, so 3 DIP now,
+            // with the 3 DIP between tiles (TileGap) doing the separating. 4 DIP before the tick, as before.
+            Padding = new Thickness(4, 3, 8, 3),
             Child = grid,
         };
-        var frame = new Border { BorderThickness = new Thickness(2, 0, 0, 0), Child = edge };
+        var frame = new Border { BorderThickness = new Thickness(2, 0, 0, 0), CornerRadius = new CornerRadius(4), Child = edge };
         selectionFrames[row.Id] = (frame, quiet);
         PaintFrame(row.Id);
         var line = new Button
@@ -699,7 +713,11 @@ public partial class TasksWindow : Window
             Tag = row.Id,
             Content = frame,
             Template = (ControlTemplate)FindResource("LineButton"),
-            Background = Brushes.Transparent,
+            // The tile's fill: the waiting tint while the task waits on Petre, else the plain tile.
+            Background = row.Status == TaskStatus.WaitingOnYou && !row.Closing ? AskTint : TileFill,
+            // The gap above each tile, and an inset from the panel's sides so the rounded corners show. A Matrix line
+            // (compact) sits in a cell that already has its own inset, so it keeps the full width of the cell.
+            Margin = new Thickness(compactLines ? 0 : TileInset, TileGap, compactLines ? 0 : TileInset, 0),
             HorizontalContentAlignment = HorizontalAlignment.Stretch,
             // EXPLICIT: the app runs under ThemeMode="System" (App.xaml), whose Fluent Button style sets HorizontalAlignment to
             // Left. A line left to the default shrank to its own content, so every line had its own width and the columns
@@ -1302,7 +1320,8 @@ public partial class TasksWindow : Window
             BorderThickness = new Thickness(1),
             CornerRadius = new CornerRadius(6),
             Padding = new Thickness(8),
-            Margin = new Thickness(43, 0, 10, 6),
+            // 3 DIP above (TileGap), so the thread stands apart from its task's tile as the tiles do from each other.
+            Margin = new Thickness(43, TileGap, 10, 6),
             Child = panel,
         };
     }

@@ -3088,8 +3088,11 @@ public class TasksBoardTests
     // RULING 64 (Petre: "same here, make more compact", of the window's List after the bar's line gap went from 8 to 3
     // DIP): a line is as tall as its text and a few DIP, not 30. The small buttons (tick, flags, comments, "...") used
     // to be taller than the title and set the line's height, so the line is measured, not just the text: a one-line task
-    // is at most its title's height + 6, a two-line task at most its two text lines + 6, in the List and in the Matrix
-    // (which shares the line), and the tick still hit-tests at its size.
+    // is at most its title's height + 9, a two-line task at most its two text lines + 9, in the List and in the Matrix
+    // (which shares the line), and the tick still hit-tests at its size. The bound was + 6 until each line became a tile
+    // (option E of the task-separation mockup, 2026-11-25): a tile has 3 DIP of its own fill above and below the text
+    // (was 1.5), so the bound grew by those 3 DIP and no more. Measured then: one-line 22.3 for a 15.96 title, two-line
+    // 36.59 for 30.59 of text.
     [Fact]
     public void A_line_is_as_tall_as_its_text_and_a_few_dip() => StaThread.Run(() =>
     {
@@ -3109,8 +3112,8 @@ public class TasksBoardTests
             var twoTexts = ((FrameworkElement)TitleOf(t.Window, two).Parent).ActualHeight;
             var twoLine = LineOf(t.Window, two).ActualHeight;
             Console.WriteLine($"MEASURED {view}: one-line {oneLine} (title {oneTitle}), two-line {twoLine} (texts {twoTexts})");
-            Assert.True(oneLine <= oneTitle + 6, $"{view}: a one-line task is {oneLine} high, its title {oneTitle}");
-            Assert.True(twoLine <= twoTexts + 6, $"{view}: a two-line task is {twoLine} high, its texts {twoTexts}");
+            Assert.True(oneLine <= oneTitle + 9, $"{view}: a one-line task is {oneLine} high, its title {oneTitle}");
+            Assert.True(twoLine <= twoTexts + 9, $"{view}: a two-line task is {twoLine} high, its texts {twoTexts}");
         }
         Check("list");
         // The tick box keeps a click target of its own size or more.
