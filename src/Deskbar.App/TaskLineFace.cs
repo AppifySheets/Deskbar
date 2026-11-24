@@ -21,6 +21,9 @@ namespace Deskbar.App;
 //   Overlay  the quiet controls (the flags that are off), laid over the right end of the title instead of beside it,
 //            drawn on top. They show while the line is hovered or selected, over the title's tail, and take no room of
 //            their own, so the title never moves when they come and go.
+// Since 2026-11-24 the bar hands it no Right parts and no Overlay (FloatingBar.TaskLineButton: the flags show in the
+// title's weight and slant, and the age moved to the tasks panel); both slots stay for any later use, and the tests still
+// pin how they would be laid out.
 // Every part but the title is measured at its own width; the title is measured at the room left, and is arranged at all
 // of it. Each part sits in the line's first row (FirstRow), so a title that wraps to a second line leaves them beside its
 // first line.

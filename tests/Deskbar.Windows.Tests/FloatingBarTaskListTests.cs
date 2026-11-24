@@ -140,8 +140,6 @@ public class FloatingBarTaskListTests
             TaskClickClock = clickClock ?? (() => ClickStart.AddSeconds(seconds++)),
             TaskUndoTimer = timers.Start,
             TaskNow = taskNow ?? (() => Start.AddHours(1)),
-            // The minute's tick of the ages is driven by the tests (RefreshTaskAges), never by a real timer.
-            TaskAgeTimer = (_, _) => System.Reactive.Disposables.Disposable.Empty,
             GoalTitle = goalTitle ?? (_ => Maybe<string>.None),
             GoalChanges = goalChanges,
             StartClaude = startClaude,
@@ -1128,7 +1126,11 @@ public class FloatingBarTaskListTests
         t.Bar.UpdateLayout();
 
         Assert.DoesNotContain(t.Lines, l => ((TaskLine)l.Tag).Id == asked.Id);
-        Assert.Equal("+4 more, 1 waiting", t.Bar.TaskListMoreText);
+        // Seven open tasks less the lines in view. Counted rather than written out: how many fit depends on whether the
+        // waiting line's "Asks · Merge it?" wraps, which follows the chip's width (2026-11-25: with the age gone from the
+        // line its chip no longer shrinks to a dot, and the line wraps onto two).
+        Assert.InRange(t.Lines.Count, 3, 4);
+        Assert.Equal($"+{7 - t.Lines.Count} more, 1 waiting", t.Bar.TaskListMoreText);
     });
 
     // A line selected from elsewhere (a Claude terminal brought to the front selects its task, #477) that sits out of
@@ -1583,39 +1585,25 @@ public class FloatingBarTaskListTests
         Assert.DoesNotContain(Inside(undo).OfType<TextBlock>(), b => b.Text == "Undo");
     });
 
-    // Ruling 46 (reverses 43; Petre: "bring back the times on tasks.."). Each line says its age just before its chip,
-    // dim, in the compact form; a minute passing rewrites that text and nothing else (the line is the same element).
-    // The age has its own tooltip in words ("Added 2 hours 3 minutes ago", then the date), since Petre "misread them for
-    // what they were"; the line's tooltip keeps the created date.
+    // NO AGE ON THE BAR (reverses Ruling 46; Petre, 2026-11-24, of the bar's "26m": "move the time from here to the proper
+    // tasks window"). A line has no age text; its tooltip still says when the task was created. The tasks panel has the
+    // age (TasksBoardTests.The_slim_lines_age_fits_at_its_widest_and_says_it_in_words).
     [Fact]
-    public void A_line_says_its_age_and_a_minute_rewrites_only_that() => StaThread.Run(() =>
+    public void A_line_has_no_age_and_its_tooltip_keeps_the_created_date() => StaThread.Run(() =>
     {
-        var now = Start.AddHours(2).AddMinutes(3);
-        using var t = Build(taskNow: () => now);
+        using var t = Build(taskNow: () => Start.AddHours(2).AddMinutes(3));
         t.Tasks.AddNote("note", t.Gepha);
+
         var line = t.Lines.Single();
-        TextBlock Age() => Inside(t.Lines.Single()).OfType<TextBlock>().Single(b => Equals(b.Tag, "task-age"));
-        Assert.Equal("2h3m", Age().Text);
-        Assert.Equal(TaskListFor_DimInk(), ((SolidColorBrush)Age().Foreground).Color);
-        var tip = (string)Age().ToolTip;
-        Assert.StartsWith("Added 2 hours 3 minutes ago\n", tip);
-        Assert.Contains($"{Start.ToLocalTime():dddd d MMMM yyyy}", tip);
+        Assert.DoesNotContain(Inside(line).OfType<TextBlock>(), b => Equals(b.Tag, "task-age"));
+        Assert.DoesNotContain(Inside(line).OfType<TextBlock>(), b => b.Text is "2h3m" or "1h");
         Assert.Contains($"Created {Start.ToLocalTime():dddd d MMMM yyyy}", (string)line.ToolTip);
-
-        now = now.AddMinutes(1);
-        t.Bar.RefreshTaskAges();
-
-        Assert.Equal("2h4m", Age().Text);
-        Assert.StartsWith("Added 2 hours 4 minutes ago\n", (string)Age().ToolTip);
-        Assert.Same(line, t.Lines.Single());
     });
 
-    static Color TaskListFor_DimInk() => Color.FromRgb(0xA9, 0xAD, 0xB8);
-
-    // The age sits on the first row, right before the chip, after the flags; and it is counted in the title's share, so
-    // at the default docked width the title still keeps its room and the chip still gives way to a dot when it must.
+    // With nothing between the title and the chip, the title runs up to the chip and keeps its share of the line at the
+    // default docked width, and the chip still gives way to a dot when it must.
     [Fact]
-    public void The_age_sits_right_before_the_chip_and_the_title_keeps_its_share() => StaThread.Run(() =>
+    public void The_title_runs_up_to_the_chip_and_keeps_its_share() => StaThread.Run(() =>
     {
         using var t = Build();
         t.Tasks.AddNote("Make the hero video for the home page", t.Gepha);
@@ -1624,12 +1612,10 @@ public class FloatingBarTaskListTests
         t.Bar.UpdateLayout();
 
         var line = t.Lines.Single();
-        var age = Inside(line).OfType<TextBlock>().Single(b => Equals(b.Tag, "task-age"));
         var end = Inside(line).OfType<FrameworkElement>().Single(b => (Equals(b.Tag, "task-workspace") || Equals(b.Tag, "task-workspace-dot")) && b.IsVisible);
         var title = Inside(line).OfType<TextBlock>().Single(b => Equals(b.Tag, "task-text"));
         Rect In(FrameworkElement e) => e.TransformToAncestor(line).TransformBounds(new Rect(e.RenderSize));
-        Assert.True(In(age).Right <= In(end).Left + 6, $"age {In(age)} then chip {In(end)}");
-        Assert.True(In(title).Right <= In(age).Left + 0.5, $"title {In(title)} then age {In(age)}");
+        Assert.True(In(title).Right <= In(end).Left + 6, $"title {In(title)} then chip {In(end)}");
         Assert.True(title.ActualWidth >= TaskLineFace.TitleShare * line.ActualWidth * 0.5, $"title has {title.ActualWidth} of {line.ActualWidth}");
     });
 
@@ -1791,15 +1777,23 @@ public class FloatingBarTaskListTests
 
     // --- Task 12: the two flags and Covey's quadrants on the bar (Rulings 25 and 28) ----------------------------------
 
-    static Button Toggle(Button line, string name) => ButtonNamed(line, name);
+    // A line's title run, which says its flags (Ruling 59): bold for important, italic for urgent.
+    static System.Windows.Documents.Run TitleRunOf(Button line) =>
+        Inside(line).OfType<TextBlock>().Single(b => Equals(b.Tag, "task-text")).Inlines.OfType<System.Windows.Documents.Run>()
+            .First(r => r.Text == ((TaskLine)line.Tag).Title);
 
-    static TextBlock GlyphOf(Button toggle) => Inside(toggle).OfType<TextBlock>().Single();
+    static bool LooksImportant(Button line) => TitleRunOf(line).FontWeight == FontWeights.Bold;
+    static bool LooksUrgent(Button line) => TitleRunOf(line).FontStyle == FontStyles.Italic;
 
-    // The toggle is on when it says so to automation and its glyph wears the flag's colour at full strength; off it is
-    // quiet (invisible until hover or selection, still clickable) and dim.
-    static bool IsOn(Button toggle) =>
-        AutomationProperties.GetItemStatus(toggle) == "on" && toggle.Opacity >= 1
-        && GlyphOf(toggle).Foreground is SolidColorBrush { Color: var c } && c != ((SolidColorBrush)FloatingBar.TaskFlagOffInk).Color;
+    // No flag sign of any kind on a line (Petre, 2026-11-24: "no need for extra signs"): no Important or Urgent button,
+    // no glyph tagged as a flag, and no quiet overlay over the title's end.
+    static void HasNoFlagSigns(Button line)
+    {
+        Assert.False(HasButtonNamed(line, "Important"));
+        Assert.False(HasButtonNamed(line, "Urgent"));
+        Assert.DoesNotContain(Inside(line).OfType<FrameworkElement>(),
+            e => e.Tag is "task-flag-on" or "task-flag-off" or "task-quiet-flags");
+    }
 
     static string TitleOf(Button line) => ((TaskLine)line.Tag).Title;
 
@@ -1825,50 +1819,43 @@ public class FloatingBarTaskListTests
         Settle(t);
 
         Assert.Equal(["waiting", "both", "important", "urgent", "neither"], t.Lines.Select(TitleOf));
-        // A waiting task shows its flags though it sits in the pinned block.
-        Assert.True(IsOn(Toggle(t.Lines[0], "Important")));
-        Assert.False(IsOn(Toggle(t.Lines[0], "Urgent")));
+        // A waiting task shows its flags though it sits in the pinned block: in its title, and with no sign.
+        Assert.True(LooksImportant(t.Lines[0]));
+        Assert.False(LooksUrgent(t.Lines[0]));
+        Assert.True(LooksImportant(t.Lines[1]) && LooksUrgent(t.Lines[1]));
+        t.Lines.ToList().ForEach(HasNoFlagSigns);
     });
 
-    // Each line has the two toggles, with their tooltips; on, each is drawn in its colour, off it is quiet until the
-    // line is hovered or selected. A click sets the flag and the task goes to the top of its new quadrant.
+    // No toggles on the line, hovered, selected or not (Petre, 2026-11-24: "important is bold; urgent is italic; no need
+    // for extra signs"). The line's right-click menu sets a flag, its item ticked while the flag is on, and the task goes
+    // to the top of its new quadrant with its title bold.
     [Fact]
-    public void A_toggle_sets_its_flag_and_the_line_moves_to_its_quadrant() => StaThread.Run(() =>
+    public void A_line_has_no_flag_toggles_and_its_menu_sets_the_flags() => StaThread.Run(() =>
     {
         using var t = Build();
         var first = t.Tasks.AddNote("first", t.Gepha).Value.Id;
         t.Tasks.AddNote("second", t.Gepha);
         Assert.Equal(["second", "first"], t.Lines.Select(TitleOf));
-        var important = Toggle(t.Lines[1], "Important");
-        Assert.Equal("Important", important.ToolTip);
-        Assert.Equal("Urgent", Toggle(t.Lines[1], "Urgent").ToolTip);
-        Assert.False(IsOn(important));
-        Assert.Equal(0, important.Opacity);
+        t.Bar.Selection.Select(first);
+        t.Lines.ToList().ForEach(HasNoFlagSigns);
 
-        Click(important);
+        MenuItem Item(ContextMenu menu, string name) => menu.Items.OfType<MenuItem>().Single(i => ((TextBlock)i.Header).Text == name);
+        var menu = t.Bar.OpenTaskLineMenu(first)!;
+        Assert.False(Item(menu, "Important").IsChecked);
+        Item(menu, "Important").RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
+        // An open menu holds the list's paint back (TaskListMustWait). In the app the rebuild that follows the menu's close
+        // paints the list; here the paint is asked for once the menu is shut.
+        menu.IsOpen = false;
+        t.Bar.PaintTaskList();
 
         Assert.True(t.Tasks.Board.Tasks.Single(x => x.Id == first).Important);
         Assert.Equal(["first", "second"], t.Lines.Select(TitleOf));
-        Assert.True(IsOn(Toggle(t.Lines[0], "Important")));
-        Assert.False(IsOn(Toggle(t.Lines[0], "Urgent")));
+        Assert.True(LooksImportant(t.Lines[0]));
+        HasNoFlagSigns(t.Lines[0]);
 
-        // Clicked again, off: back to quadrant IV, on top of it.
-        Click(Toggle(t.Lines[0], "Important"));
-        Assert.False(t.Tasks.Board.Tasks.Single(x => x.Id == first).Important);
-        Assert.Equal(["first", "second"], t.Lines.Select(TitleOf));
-    });
-
-    [Fact]
-    public void The_quiet_toggles_show_on_the_selected_line() => StaThread.Run(() =>
-    {
-        using var t = Build();
-        var id = t.Tasks.AddNote("a note", t.Gepha).Value.Id;
-        Assert.Equal(0, Toggle(t.Lines[0], "Urgent").Opacity);
-
-        t.Bar.Selection.Select(id);
-
-        Assert.True(Toggle(t.Lines[0], "Urgent").Opacity > 0);
-        Assert.False(IsOn(Toggle(t.Lines[0], "Urgent")));
+        var again = t.Bar.OpenTaskLineMenu(first)!;
+        Assert.True(Item(again, "Important").IsChecked);
+        again.IsOpen = false;
     });
 
     // The groups are told apart by a little space above the first line of each, and no caption: the bar stays compact.
@@ -2511,17 +2498,6 @@ public class FloatingBarTaskListTests
         Assert.NotNull(t.Bar.TaskEditor);
         Assert.Equal("mine", t.Tasks.Board.Tasks.Single(x => x.Id == id).Title);
         t.Bar.CancelTaskEdit();
-    });
-
-    // M-1: the off flags are invisible until the line is pointed at, and while invisible they take no clicks.
-    [Fact]
-    public void The_hidden_flag_toggles_are_not_hit_testable() => StaThread.Run(() =>
-    {
-        using var t = Build();
-        t.Tasks.AddNote("mine", t.Gepha);
-        var toggles = Inside(t.Lines.Single()).OfType<Button>().Where(b => Equals(b.Tag, "task-flag-off") && b.Opacity == 0).ToList();
-        Assert.NotEmpty(toggles);
-        Assert.All(toggles, toggle => Assert.False(toggle.IsHitTestVisible));
     });
 
     // Petre's screenshot: a right-click on a task line opened the bar's own menu (New workspace, Window list, Arrange,

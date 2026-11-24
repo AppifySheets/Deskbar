@@ -664,7 +664,7 @@ public partial class TasksWindow : Window
         var grid = new Grid();
         (compactLines ? CompactColumns : slimLines ? SlimColumns(slimSquaresWidth) : LineColumns).ToList()
             .ForEach(width => grid.ColumnDefinitions.Add(new ColumnDefinition { Width = width }));
-        // Only the full line has the session words, the assignee, the age and the Reopen button.
+        // Only the full line has the session words, the assignee and the Reopen button. The age is on the slim line too.
         var full = !compactLines && !slimLines;
         Cell(grid, 0, LeftOf(row));
         Cell(grid, 1, TextOf(row));
@@ -677,12 +677,15 @@ public partial class TasksWindow : Window
         // Done tick still shows) and none on a slim one (the tick still shows, and the status is named in its tooltip,
         // SlimTip), and none on a line in its undo window (it is closed).
         Cell(grid, 3, full && !row.Closing ? TaskStatusMarks.Chip(row.Status) : null);
-        // A slim line has the sessions as squares alone, and no assignee, age or Reopen (Task 8): those are in its tooltip
+        // A slim line has the sessions as squares alone, and no assignee or Reopen (Task 8): those are in its tooltip
         // and its "⋯" menu (SlimTip, OpenMenuFor).
         Cell(grid, 4, compactLines ? null : slimLines ? SquaresOf(row) : SessionsOf(row));
         // Who the task is on (Ruling 57): "Me" or "Claude", dim; none in a Matrix line (no column there).
         Cell(grid, 5, full ? AssigneeOf(row) : null);
-        Cell(grid, 6, full ? AgeOf(row) : null);
+        // THE AGE ON EVERY LIST LINE, THE SLIM ONE INCLUDED (Petre, 2026-11-24, of the bar's "26m": "move the time from
+        // here to the proper tasks window"). The bar's lines lost theirs that day, so the panel at its usual slim width
+        // must show it, not only its tooltip. None in a Matrix line (no column there).
+        Cell(grid, 6, compactLines ? null : AgeOf(row));
         Cell(grid, 7, Chip(row.Place));
         var comments = CommentsButton(row);
         Cell(grid, 8, comments);
@@ -816,8 +819,9 @@ public partial class TasksWindow : Window
     // pick, "slim line when narrow"; plan 2026-11-23-tasks-panel, Task 8). The full line's fixed columns come to 542 DIP
     // (470 before the 72 DIP status chip column), more than the panel's default 460, so below TasksPanelLayout.SlimBelow
     // (692 DIP; the view's Slim) a line is slim: tick, title (a Done task's green tick still in front of it), the two
-    // toggles, the sessions as squares alone (no words), the workspace chip, the comment count and "⋯". The status chip,
-    // the assignee and the age move into the line's tooltip (SlimTip, "Done · 5h · Claude"); Close and Reopen were already in "⋯"
+    // toggles, the sessions as squares alone (no words), the age (since 2026-11-24, when it left the bar), the workspace
+    // chip, the comment count and "⋯". The status chip and the assignee move into the line's tooltip, with the age again
+    // (SlimTip, "Done · 5h · Claude"); Close and Reopen were already in "⋯"
     // (OpenMenuFor), so the Reopen button goes without anything becoming unreachable. Same column indexes as the full
     // line, the dropped ones zero wide and left empty. The switch happens only when the width changes at the grip's drag
     // end, never during a drag (TasksBoard.ResizePanel), and then every line redraws once.
@@ -825,7 +829,11 @@ public partial class TasksWindow : Window
     GridLength slimSquaresWidth = new(0);
 
     static IReadOnlyList<GridLength> SlimColumns(GridLength squares) =>
-        [new(22), new(1, GridUnitType.Star), new(38), new(0), squares, new(0), new(0), new(88), new(40), new(0), new(24)];
+        [new(22), new(1, GridUnitType.Star), new(38), new(0), squares, new(0), new(SlimAgeColumn), new(88), new(40), new(0), new(24)];
+
+    // The slim line's age column (2026-11-24, the age moved off the bar): "27d23h", the widest TaskAge.Format writes, at
+    // the age's 10.5 size is about 34 DIP, plus the 6 DIP left margin AgeOf gives it, so the text never trims.
+    const double SlimAgeColumn = 42;
 
     // A slim line's squares: 8 DIP each, 3 DIP apart. The column fits the line with the most squares and no more than
     // SlimSquares of them (47 DIP, inside the plan's 48), with 3 DIP to spare before the chip; zero on a board of notes.
@@ -956,26 +964,37 @@ public partial class TasksWindow : Window
     {
         if (MustWait) return;
         var now = Now();
-        ages.Values.ToList().ForEach(age => age.Text.Text = TaskAge.Format(now - age.Created));
+        ages.Values.ToList().ForEach(age =>
+        {
+            age.Text.Text = TaskAge.Format(now - age.Created);
+            age.Text.ToolTip = AgeTip(now, age.Created);
+        });
         // A slim line's age is in its tooltip (Task 8).
         slimTips.Values.ToList().ForEach(tip => WriteSlimTip(tip, now));
     }
 
     internal string AgeText(Guid id) => ages.TryGetValue(id, out var age) ? age.Text.Text : "";
 
+    // The age's tooltip: "Added 2 hours 3 minutes ago", then the date and time, so the compact "2h3m" cannot be taken for
+    // a timer or a due time. The bar's age had this tooltip (Ruling 46: Petre "misread them for what they were"); it came
+    // here with the age on 2026-11-24.
+    internal static string AgeTip(DateTimeOffset now, DateTimeOffset created) =>
+        $"{TaskAge.Words(now - created)}\n{created.ToLocalTime():dddd d MMMM yyyy, HH:mm}";
+
     TextBlock AgeOf(TaskRowView row)
     {
+        var now = Now();
         var text = new TextBlock
         {
             Tag = "task-age",
-            Text = TaskAge.Format(Now() - row.Created),
+            Text = TaskAge.Format(now - row.Created),
             FontSize = 10.5,
             Foreground = HeaderInk,
             HorizontalAlignment = HorizontalAlignment.Left,
             VerticalAlignment = VerticalAlignment.Center,
             TextTrimming = TextTrimming.CharacterEllipsis,
             Margin = new Thickness(6, 0, 0, 0),
-            ToolTip = row.Created.ToLocalTime().ToString("dddd d MMMM yyyy, HH:mm"),
+            ToolTip = AgeTip(now, row.Created),
         };
         ages[row.Id] = (text, row.Created);
         return text;

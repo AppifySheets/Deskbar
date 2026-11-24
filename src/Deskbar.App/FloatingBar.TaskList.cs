@@ -50,11 +50,12 @@ namespace Deskbar.App;
 //                   with its workspace's chip in that row's own colour, or "none".
 //                   A line just closed stays in its place for six seconds, struck through, with "Undo" where its
 //                   tick box was (Petre: "when i click on done, there should be undo"; Ruling 10).
-//   the flags       (Task 12, Rulings 25 and 28.) Two small toggles on every open line, important (an exclamation
-//                   mark) and urgent (a clock), which name the task's Covey quadrant. Off they are quiet: invisible,
-//                   still there to click, shown dimly while the line is hovered or selected. On they are drawn in
-//                   their colour. A click sets the flag through TaskService.SetFlag and the task goes to the top of the
-//                   quadrant it lands in. The groups (the Waiting on you block, then each quadrant) are told apart by a
+//   the flags       (Task 12, Rulings 25, 28 and 59.) Important and urgent name the task's Covey quadrant, and on the
+//                   bar they show in the title alone: bold for important, italic for urgent. No sign and no toggle
+//                   on the line (Petre, 2026-11-24: "important is bold; urgent is italic; no need for extra signs";
+//                   the exclamation mark and the clock, and the quiet toggles over the title's end, were taken off).
+//                   The line's right-click menu sets them (FloatingBar.TaskEdit.cs), as the tasks panel's toggles do,
+//                   and the task goes to the top of the quadrant it lands in. The groups (the Waiting on you block, then each quadrant) are told apart by a
 //                   little space above a group's first line, and nothing names them: the bar stays compact (the
 //                   window's List view has the captions).
 //   "+N more"       a small line under the last line when more open tasks are out of sight, scrolled above the view or
@@ -166,7 +167,6 @@ public partial class FloatingBar
             var selected = selection.IsSelected(((TaskLine)button.Tag).Id);
             frame.BorderBrush = selected ? TaskPickedEdge : Brushes.Transparent;
             frame.Background = selected ? TaskSelectedFill : Brushes.Transparent;
-            ShowQuietFlags(button, selected || button.IsMouseOver);
         });
         BringSelectedIntoSight();
     }
@@ -228,68 +228,11 @@ public partial class FloatingBar
     // or half a second later, without waiting.
     internal Func<DateTime> TaskClickClock { get; init; } = () => DateTime.UtcNow;
 
-    // THE AGE ON EACH LINE, BACK (Ruling 46, which reverses Ruling 43; Petre: "bring back the times on tasks.."; the
-    // first version was Ruling 26, f911e1f took it away). A dim text on the line's first row, right before the
-    // workspace chip, TaskAge's compact form ("now", "16m", "7h55m", "3d3h"). It is one of the line's RIGHT parts
-    // (RightOf), so TaskLineFace counts its width in the fixed part the title yields to, and the chip-to-dot rule (the
-    // title keeps 55%) counts it too. Once a minute only those texts are rewritten (RefreshTaskAges), never the lines: a
-    // repaint would change the list's shape and could slide a line under the pointer (#48). Not while a paint would wait
-    // either (TaskListMustWait: a press, a drag, a menu). TaskNow is the clock they are told against; TaskAgeTimer
-    // starts the minute's tick. Both are seams for the tests.
-    //
-    // Petre "misread them for what they were" (a timer or a due time), so the age has a tooltip of its own in words,
-    // "Added 2 hours 3 minutes ago" and the date (TaskAge.Words); the line's own tooltip keeps the created date too.
+    // NO AGE ON THE BAR'S LINES (reverses Ruling 46; Petre, 2026-11-24, of the bar's "26m": "move the
+    // time from here to the proper tasks window"). The age lives in the tasks panel now, on its slim lines too
+    // (TasksWindow.Line, column 6), and the bar's line keeps the created date in its tooltip (TipOf). TaskNow stays: it
+    // is the clock the bar's pasted pictures are named against (FloatingBar.TaskPictures.cs), and a seam for the tests.
     internal Func<DateTimeOffset> TaskNow { get; init; } = () => DateTimeOffset.UtcNow;
-    internal Func<TimeSpan, Action, IDisposable> TaskAgeTimer { get; init; } = RepeatingTimer;
-
-    static readonly TimeSpan AgeTick = TimeSpan.FromMinutes(1);
-
-    // The age texts on show, by task, with when each task appeared.
-    readonly Dictionary<Guid, (TextBlock Text, DateTimeOffset Created)> taskAges = [];
-    IDisposable? taskAgeTick;
-
-    /// <summary>Rewrites every age on show for the time now; nothing else on the lines changes.</summary>
-    internal void RefreshTaskAges()
-    {
-        if (TaskListMustWait) return;
-        var now = TaskNow();
-        taskAges.Values.ToList().ForEach(age =>
-        {
-            age.Text.Text = TaskAge.Format(now - age.Created);
-            age.Text.ToolTip = AgeTip(now, age.Created);
-        });
-    }
-
-    // "Added 2 hours 3 minutes ago", then the date and time, so the compact text cannot be taken for a timer.
-    static string AgeTip(DateTimeOffset now, DateTimeOffset created) =>
-        $"{TaskAge.Words(now - created)}\n{created.ToLocalTime():dddd d MMMM yyyy, HH:mm}";
-
-    // A dispatcher timer that runs `then` every `every` until disposed.
-    static IDisposable RepeatingTimer(TimeSpan every, Action then)
-    {
-        var timer = new DispatcherTimer { Interval = every };
-        timer.Tick += (_, _) => then();
-        timer.Start();
-        return Disposable.Create(timer.Stop);
-    }
-
-    // The age text of a line: dim, never pushing the chip (TaskLineFace gives it its own width).
-    TextBlock AgeOf(TaskLine line)
-    {
-        var now = TaskNow();
-        var text = new TextBlock
-        {
-            Tag = "task-age",
-            Text = TaskAge.Format(now - line.Created),
-            FontSize = Text(7.5),
-            Foreground = TaskDimInk,
-            VerticalAlignment = VerticalAlignment.Center,
-            Margin = new Thickness(4, 0, 0, 0),
-            ToolTip = AgeTip(now, line.Created),
-        };
-        taskAges[line.Id] = (text, line.Created);
-        return text;
-    }
 
     // How a closed line's six seconds are timed: run `then` once after `after`, unless the returned handle is disposed
     // first (Undo, or the bar closing). A dispatcher timer in the app, so `then` runs on the UI thread; a seam so the
@@ -480,10 +423,10 @@ public partial class FloatingBar
     static readonly Brush TaskPickedEdge = Frozen(0xFF, 0x4F, 0x8C, 0xFF);
 
     // The flags' colours (Task 12): important a soft red, urgent an amber, both clear of the asking orange that means
-    // Claude's or waiting; off, the dim ink. Internal for the tests.
+    // Claude's or waiting. Only the add box's two toggles wear them now (AddFlagToggle): a line shows its flags in its
+    // title's weight and slant.
     static readonly Brush TaskImportantInk = Frozen(0xFF, 0xFF, 0x6B, 0x6B);
     static readonly Brush TaskUrgentInk = Frozen(0xFF, 0xFF, 0xD5, 0x4F);
-    internal static readonly Brush TaskFlagOffInk = Frozen(0xFF, 0xA9, 0xAD, 0xB8);
 
     // The persistent parts, built once in BuildTaskList.
     Border? taskProblemHost;
@@ -793,7 +736,6 @@ public partial class FloatingBar
         {
             taskChanges?.Dispose();
             goalChanges?.Dispose();
-            taskAgeTick?.Dispose();
             selectionChanges?.Dispose();
             // Every closed line's timer goes with the bar; the tasks are closed already, nothing is left to do.
             pendingCloses.ForEach(pending => pending.Timer.Dispose());
@@ -967,9 +909,6 @@ public partial class FloatingBar
         openTaskLines = open;
         taskLinesCap = taskListExpanded ? ExpandedSlots : slots;
         taskLinesPanel.Children.Clear();
-        taskAges.Clear();
-        // The minute's tick of the ages starts with the first lines drawn and lives as long as the bar.
-        taskAgeTick ??= TaskAgeTimer(AgeTick, RefreshTaskAges);
         if (taskProblemHost is not null)
         {
             taskProblemHost.Child = problem.HasValue ? LoadProblemRow(problem.Value) : null;
@@ -1203,11 +1142,17 @@ public partial class FloatingBar
     // One task's line: a button the width of the list, so a click anywhere on it goes to the task.
     Button TaskLineButton(TaskLine line)
     {
-        // Laid out by TaskLineFace (see its header): the title takes every DIP the shown parts leave, the flags that are
-        // off lie over the title's end instead of beside it, and the chip turns into a dot when the title would keep
-        // less than its share of the line.
-        var face = new TaskLineFace(LeftOf(line).ToList(), TitleOrEditor(line), RightOf(line).ToList(), WorkspaceChipButton(line),
-            WorkspaceDot(line), QuietFlags(line));
+        // Laid out by TaskLineFace (see its header): the title takes every DIP the tick box and the chip leave, and the
+        // chip turns into a dot when the title would keep less than its share of the line.
+        //
+        // NOTHING RIGHT OF THE TITLE, AND NO OVERLAY (Petre, 2026-11-24: "important is bold; urgent is italic; no need
+        // for extra signs, move the time from here to the proper tasks window"). The flag glyphs that were on, the quiet
+        // toggles laid over the title's end, and the age are all gone from the bar's line: the title's weight and slant
+        // already say the flags (Ruling 59, TextOf), the line's right-click menu still sets them (Important, Urgent:
+        // FloatingBar.TaskEdit.cs), and the tasks panel has both the toggles and the age. TaskLineFace keeps its right
+        // parts and overlay slots for any later use; the bar hands it none.
+        var face = new TaskLineFace(LeftOf(line).ToList(), TitleOrEditor(line), [], WorkspaceChipButton(line),
+            WorkspaceDot(line), null);
         // A closed line in its undo window is dimmed, all but its Undo, which is the one thing on it to press.
         if (line.Closing)
             face.Children.OfType<UIElement>().Where(part => part is not Button).ToList().ForEach(part => part.Opacity = 0.45);
@@ -1255,10 +1200,6 @@ public partial class FloatingBar
             ToolTip = line.Closing ? "Closed. Undo brings it back." : TipOf(line),
         };
         AutomationProperties.SetName(button, line.Title);
-        // The quiet toggles show while the pointer is on the line, and stay while it is selected.
-        ShowQuietFlags(button, selected);
-        button.MouseEnter += (_, _) => ShowQuietFlags(button, true);
-        button.MouseLeave += (_, _) => ShowQuietFlags(button, selection.IsSelected(line.Id));
         // The click guard, as on the tick and the close button (TaskClickIgnored); and the press that may become a drag
         // of the line (FloatingBar.TaskDrag.cs), armed only, so a press released in place stays this Click.
         button.PreviewMouseLeftButtonDown += (_, e) =>
@@ -1329,35 +1270,6 @@ public partial class FloatingBar
             }, () => CloseWithUndo(line), TaskViews.TickTip(line.Claudes, line.SubtaskCount), ignoredWhen: TaskClickIgnored),
         }.OfType<UIElement>();
 
-    // Right of the text, left to right, between the title and the chip (TaskLineFace): the flags that are ON (a flag that is off is a quiet
-    // control laid over the title's end instead, QuietFlags), then the age (Ruling 46), right before the chip. No close
-    // button: every line, a Done Claude task's included, closes from its tick box (LeftOf).
-    IEnumerable<UIElement> RightOf(TaskLine line) =>
-        new UIElement?[]
-        {
-            line.Closing || !line.Important ? null : FlagToggle(line, TaskFlag.Important),
-            line.Closing || !line.Urgent ? null : FlagToggle(line, TaskFlag.Urgent),
-            AgeOf(line),
-        }.OfType<UIElement>();
-
-    // THE FLAGS THAT ARE OFF, as a quiet overlay (2026-11-23, the squeezed titles): laid over the right end of the title
-    // (TaskLineFace) on a fill of the bar's dark, shown while the line is hovered or selected (ShowQuietFlags), clear
-    // and see-through otherwise. They used to be laid out beside the title, invisible but taking its room. None on a
-    // line in its undo window, nor when both flags are on.
-    Border? QuietFlags(TaskLine line)
-    {
-        if (line.Closing || (line.Important && line.Urgent)) return null;
-        var toggles = new StackPanel { Orientation = Orientation.Horizontal };
-        new[] { (Flag: TaskFlag.Important, On: line.Important), (Flag: TaskFlag.Urgent, On: line.Urgent) }
-            .Where(f => !f.On).ToList().ForEach(f => toggles.Children.Add(FlagToggle(line, f.Flag)));
-        return new Border { Tag = QuietFlagsTag, CornerRadius = new CornerRadius(3), Padding = new Thickness(2, 0, 0, 0), Child = toggles };
-    }
-
-    const string QuietFlagsTag = "task-quiet-flags";
-
-    // Behind the quiet flags while they show, so they read over the title's tail.
-    static readonly Brush QuietFlagsFill = Frozen(0xF2, 0x26, 0x28, 0x2E);
-
     // The workspace as a dot in its colour, for a line too narrow for the chip (TaskLineFace): its name in the tooltip,
     // and the chip's click (the move menu) on a line that is not closing.
     UIElement WorkspaceDot(TaskLine line)
@@ -1380,60 +1292,8 @@ public partial class FloatingBar
         return button;
     }
 
-    // THE TWO TOGGLES (Task 12; see the header). Glyphs by code point in the icon font (IconFont: Segoe Fluent Icons,
-    // Segoe MDL2 Assets on Windows 10, both checked to carry them): U+E8C9 "Important", an exclamation mark, and
-    // U+E823 "Recent", a clock face, for urgent. Same size on or off, so a toggle never moves anything; off, the
-    // button is transparent (Opacity 0, still hit-testable) until the line is hovered or selected (ShowQuietFlags).
-    // Its automation status says "on" or "off", its tooltip names the flag. A closed line in its undo window has none.
-    Button FlagToggle(TaskLine line, TaskFlag flag)
-    {
-        var on = flag == TaskFlag.Important ? line.Important : line.Urgent;
-        var name = flag == TaskFlag.Important ? "Important" : "Urgent";
-        var glyph = new TextBlock
-        {
-            Text = flag == TaskFlag.Important ? "\uE8C9" : "\uE823",
-            FontFamily = IconFont,
-            FontSize = Text(8.5),
-            Foreground = on ? (flag == TaskFlag.Important ? TaskImportantInk : TaskUrgentInk) : TaskFlagOffInk,
-            VerticalAlignment = VerticalAlignment.Center,
-            Margin = new Thickness(2, 0, 2, 0),
-        };
-        var button = TaskButton(name, glyph,
-            () => taskService?.SetFlag(line.Id, flag, !on).TapError(err => ClickTrace.Write($"task list: flag not set: {err}")),
-            name, ignoredWhen: TaskClickIgnored);
-        button.Tag = on ? FlagOnTag : FlagOffTag;
-        AutomationProperties.SetItemStatus(button, on ? "on" : "off");
-        if (!on) button.Opacity = 0;
-        return button;
-    }
-
-    const string FlagOnTag = "task-flag-on";
-    const string FlagOffTag = "task-flag-off";
-
     // The space above a group's first line, in DIP: enough to see a break, little enough to keep the bar compact.
     const double GroupGap = 6;
-
-    // How strongly an off toggle shows while its line is hovered or selected.
-    const double QuietFlagOpacity = 0.55;
-
-    // Shows or hides a line's off toggles; the on ones are always at full strength.
-    static void ShowQuietFlags(Button line, bool show)
-    {
-        // Hidden toggles are not pressable either (review, Minor 1): an invisible one over the title's tail took clicks.
-        LogicalDescendants(line).OfType<Button>().Where(b => Equals(b.Tag, FlagOffTag)).ToList()
-            .ForEach(toggle =>
-            {
-                toggle.Opacity = show ? QuietFlagOpacity : 0;
-                toggle.IsHitTestVisible = show;
-            });
-        // Their fill only while they show: otherwise the title's tail under them reads through.
-        LogicalDescendants(line).OfType<Border>().Where(b => Equals(b.Tag, QuietFlagsTag)).ToList()
-            .ForEach(overlay => overlay.Background = show ? QuietFlagsFill : Brushes.Transparent);
-    }
-
-    // Every element under `node` in the logical tree, itself included.
-    static IEnumerable<DependencyObject> LogicalDescendants(DependencyObject node) =>
-        LogicalTreeHelper.GetChildren(node).OfType<DependencyObject>().SelectMany(LogicalDescendants).Prepend(node);
 
     // Undo on a line just closed: a sign, not a word (Petre: "undo sign instead of text"), the plain half-circle back arrow
     // U+21B6 (Ruling 51; the Segoe Fluent glyph E7A7 it replaced reads as a hook), in the plain bright ink, about the tick
@@ -1466,7 +1326,7 @@ public partial class FloatingBar
     // lines, when needed"). The text wraps onto a second line when it does not fit, and an ellipsis ends the second when
     // even two are not enough; a short one stays one line. The line height is fixed (BlockLineHeight), so two lines are
     // exactly 2 x TaskTextLineHeight and MaxHeight cuts at the second line's foot. The parts beside the text (the tick,
-    // the icon, the flags, the chip) stay in the first line's row (TaskLineFace.FirstRow). The tooltip keeps the whole
+    // the chip) stay in the first line's row (TaskLineFace.FirstRow). The tooltip keeps the whole
     // text.
     TextBlock TextOf(TaskLine line)
     {
@@ -1600,7 +1460,7 @@ public partial class FloatingBar
             line.Detail,
             line.Quadrant == Quadrant.IV ? "" : $"{line.Quadrant.Numeral()}: {line.Quadrant.Words()}",
             line.WorkspaceName is { } name ? $"On {name}" : "On no workspace",
-            // When it was made (the age on the line has its own tooltip, Ruling 46).
+            // When it was made: the bar's line shows no age since 2026-11-24 (the tasks panel does), so this is where it is.
             line.Created == default ? "" : $"Created {line.Created.ToLocalTime():dddd d MMMM yyyy, HH:mm}",
             line.GoalTitle is { } goal ? $"Goal: {goal}" : "",
             line.ParentTitle is { } parent ? $"Subtask of {parent}" : "",
@@ -2174,14 +2034,14 @@ public partial class FloatingBar
 internal sealed record TaskLine(Guid Id, string Title, string Detail, TaskStatus Status, bool Claudes, string? WorkspaceName, Brush? Colour,
     Maybe<nint> Window, bool Closing = false)
 {
-    /// <summary>When the task appeared, for the age the line shows (TaskAge). Not part of the line's shape: the age is
-    /// rewritten in place once a minute, never by a repaint.</summary>
+    /// <summary>When the task appeared, for the line's tooltip ("Created ..."). Not part of the line's shape: it never
+    /// changes once the task exists.</summary>
     public DateTimeOffset Created { get; init; }
 
     /// <summary>Who the task is on (Ruling 57). The bar lists only the lines assigned to Petre (NeedsYou).</summary>
     public Assignee Assignee { get; init; } = Assignee.Me;
 
-    /// <summary>The task's two flags (Task 12), drawn as the line's toggles.</summary>
+    /// <summary>The task's two flags (Task 12), drawn in the title: bold for important, italic for urgent (Ruling 59).</summary>
     public bool Important { get; init; }
 
     public bool Urgent { get; init; }
