@@ -660,7 +660,7 @@ public partial class FloatingBar
             BorderBrush = TaskPickedEdge,
             BorderThickness = new Thickness(1),
             Padding = new Thickness(4, 2, 4, 2),
-            ToolTip = "Enter adds the task, Esc clears the box",
+            ToolTip = "Enter adds the task, Esc clears the box. Ctrl+V or a drop adds a picture",
         };
         AutomationProperties.SetName(taskAddBox, "New task");
         taskAddBox.PreviewKeyDown += OnTaskAddKey;
@@ -728,7 +728,8 @@ public partial class FloatingBar
             Children = { taskAddChips, taskMoreButton },
         };
         Grid.SetColumn(taskMoreButton, 1);
-        var addRow = new StackPanel { Margin = new Thickness(0, 0, 0, 3), Children = { box, chipRow } };
+        // The pictures pasted or dropped on the box wait between it and the chips (FloatingBar.TaskPictures.cs).
+        var addRow = new StackPanel { Margin = new Thickness(0, 0, 0, 3), Children = { box, TaskAddPicturesRow(taskAddBox), chipRow } };
         addRow.SizeChanged += (_, _) => ApplyMoreText();
         taskAddChips.SizeChanged += (_, _) => ApplyMoreText();
 
@@ -1645,6 +1646,8 @@ public partial class FloatingBar
             taskAddFlags = (false, false);
             // A subtask's parent is for that one add (subtasks spec): the next note is a plain one again.
             taskAddParent = Maybe<Guid>.None;
+            // The pasted pictures go with the text (FloatingBar.TaskPictures.cs).
+            ClearTaskAddPictures();
             PaintAddFlags();
             PaintTaskChips();
             GiveTaskKeyboardBack();
@@ -1714,11 +1717,16 @@ public partial class FloatingBar
     }
 
     // Enter: a Backlog note where the chips say. A title of nothing is refused by the board and the box keeps the
-    // keyboard.
+    // keyboard. Pasted pictures become the new task's description, and with nothing typed the task is called "Picture"
+    // (FloatingBar.TaskPictures.cs).
     void CommitTaskNote()
     {
         if (taskService is null || taskAddBox is null) return;
-        taskService.AddNote(taskAddBox.Text, taskAddTarget, QuadrantOf.Flags(taskAddFlags.Important, taskAddFlags.Urgent), taskAddParent)
+        var title = TaskImages.TitleFor(taskAddBox.Text, taskAddImages.Count);
+        var quadrant = QuadrantOf.Flags(taskAddFlags.Important, taskAddFlags.Urgent);
+        (TaskAddDescription() is { } describe
+                ? taskService.AddNote(title, taskAddTarget, quadrant, taskAddParent, describe)
+                : taskService.AddNote(title, taskAddTarget, quadrant, taskAddParent))
             .Tap(_ => EndTyping(clear: true))
             .TapError(err => ClickTrace.Write($"task list: note not added: {err}"));
     }
