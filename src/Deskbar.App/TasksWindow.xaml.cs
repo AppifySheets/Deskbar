@@ -211,6 +211,8 @@ public partial class TasksWindow : Window
     // The "Claude working" chip's words ("Claude working 2") and whether it is on (Task 7).
     internal string ClaudeWorkingLabel { get; private set; } = "";
     internal bool ClaudeWorkingOn { get; private set; }
+    // Whether the "Current workspace" checkbox is ticked, as last drawn (task ed1a01fc), for the tests.
+    internal bool CurrentWorkspaceOn { get; private set; }
     internal bool AddBoxShown => AddRow.Visibility == Visibility.Visible;
     internal string? Problem => ProblemText.Visibility == Visibility.Visible ? ProblemText.Text : null;
     internal bool ThreadShown(Guid id) => authors.ContainsKey(id);
@@ -569,6 +571,22 @@ public partial class TasksWindow : Window
         // The menu opens from Flat's own press, never from a Click handler added afterwards: Flat's handler marks the
         // click handled, and WPF does not call a later += handler on a handled event, so such a menu never opened
         // (2026-11-23, "dropdown doesn't work"; TasksBoardTests.The_add_rows_workspace_chip_opens_its_menu_and_a_pick_lands).
+        // "Current workspace", a checkbox beside the workspace filter (task ed1a01fc; Petre, after the first cut put it in
+        // the filter's menu: "let's just do a checkbox, it would be easier to tick/untick"). Ticked, the list follows the
+        // workspace in front (TaskWorkspaceFilter.Current); unticked, it shows every workspace. Picking a workspace in the
+        // menu beside it unticks it, since the filter then names a workspace of its own. It is drawn as a toolbar chip with
+        // the icon font's box, not a WPF CheckBox: the toolbar is always the dark page, and under ThemeMode="System" a
+        // light Windows theme would draw a stock CheckBox in light colours (the workspace menu's lesson, ruling g).
+        var following = view.Where.FollowsCurrent;
+        var current = Flat(CheckContent(following, "Current workspace"), "Current workspace",
+            () => Actions?.FilterWorkspace(following ? TaskWorkspaceFilter.All : TaskWorkspaceFilter.Current), new Thickness(6, 2, 8, 2));
+        current.BorderBrush = following ? PickedEdge : Brushes.Transparent;
+        current.Margin = new Thickness(0, 0, 6, ChipRowGap);
+        current.ToolTip = "Only the tasks of the workspace you are on, following you when you switch desktops";
+        // A screen reader hears it as a checkbox's state, the same word the tests read.
+        AutomationProperties.SetItemStatus(current, following ? "checked" : "unchecked");
+        Filters.Children.Add(current);
+        CurrentWorkspaceOn = following;
         Button? workspace = null;
         workspace = Flat(new TextBlock { Text = $"{view.WorkspaceFilterLabel} ▾", Foreground = Ink, FontSize = 11 }, "Workspace filter",
             () => OpenMenu(WorkspaceFilterMenu(view, workspace!)), new Thickness(8, 2, 8, 2));
@@ -1934,18 +1952,14 @@ public partial class TasksWindow : Window
         return menu;
     }
 
-    // "Workspace: all ▾": "All workspaces" and "Current workspace" first, then the compact workspace menu, the filter in
-    // force outlined. With every workspace shown, or the one in front followed (task ed1a01fc), no workspace chip is: an
-    // id no workspace has stands for "none of these". "Current workspace" is outlined instead, even though the workspace
-    // it stands for right now is in the menu too, because picking that chip would pin the filter to it and stop following.
+    // "Workspace: all ▾": "All workspaces" first, then the compact workspace menu, the filter in force outlined. With
+    // every workspace shown, or the one in front followed (the "Current workspace" checkbox beside it, task ed1a01fc), no
+    // chip is: an id no workspace has stands for "none of these". Under the checkbox the workspace in front is in the menu
+    // too, but outlining it would say the filter is pinned to it, and picking it does pin it (and unticks the box).
     ContextMenu WorkspaceFilterMenu(TasksView view, Button anchor) =>
         WorkspaceChipMenu.Build(view.Places, view.Where.Any || view.Where.FollowsCurrent ? Maybe.From(Guid.Empty) : view.Where.Workspace,
             workspace => Actions?.FilterWorkspace(TaskWorkspaceFilter.On(workspace)), anchor,
-            extra:
-            [
-                new WorkspaceChipMenu.Extra("All workspaces", view.Where.Any, () => Actions?.FilterWorkspace(TaskWorkspaceFilter.All)),
-                new WorkspaceChipMenu.Extra("Current workspace", view.Where.FollowsCurrent, () => Actions?.FilterWorkspace(TaskWorkspaceFilter.Current)),
-            ]);
+            extra: [new WorkspaceChipMenu.Extra("All workspaces", view.Where.Any, () => Actions?.FilterWorkspace(TaskWorkspaceFilter.All))]);
 
     // --- goals (goals plan, Task 6) -------------------------------------------------------------------------------------
 
@@ -2232,6 +2246,21 @@ public partial class TasksWindow : Window
     internal void ClearSearch() => SearchBox.Text = "";
 
     // --- small parts -------------------------------------------------------------------------------------------------
+
+    // A checkbox's look inside a flat chip: the icon font's empty box (U+E739 "Checkbox") or ticked box (U+E73A
+    // "CheckboxComposite"), both in Segoe Fluent Icons and Segoe MDL2 Assets, then the words. Ticked, the box is the
+    // picked chips' blue.
+    static UIElement CheckContent(bool on, string text)
+    {
+        var line = new StackPanel { Orientation = Orientation.Horizontal };
+        line.Children.Add(new TextBlock
+        {
+            Text = on ? "" : "", FontFamily = IconFont, FontSize = 12, Foreground = on ? PickedEdge : DimInk,
+            VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 5, 0),
+        });
+        line.Children.Add(new TextBlock { Text = text, Foreground = Ink, FontSize = 11, VerticalAlignment = VerticalAlignment.Center });
+        return line;
+    }
 
     // A flat button with a name for automation and the tests. Unfocusable, so a click never takes the keyboard from a
     // box Petre is typing in. `ignoredWhen` is the click guard it takes (ClickIgnored on a line's buttons,
