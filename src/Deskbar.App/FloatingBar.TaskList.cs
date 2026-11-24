@@ -670,7 +670,7 @@ public partial class FloatingBar
         {
             Tag = "task-add-chips",
             Margin = new Thickness(0, 3, 0, 0),
-            Children = { taskAddOn, taskAddChip.Button, taskAddImportant.Button, taskAddUrgent.Button },
+            Children = { taskAddOn, taskAddChip.Button, ParentChipButton(), taskAddImportant.Button, taskAddUrgent.Button },
         };
         PaintAddFlags();
         // RULING 50 (Petre: "move all tasks to the top to save vertical space, next to workspace selection"). "All tasks" /
@@ -1592,6 +1592,8 @@ public partial class FloatingBar
             taskAddTarget = taskAddHere;
             // The toggles are off again after an add (and after Esc): each note says its own flags (Ruling 37).
             taskAddFlags = (false, false);
+            // A subtask's parent is for that one add (subtasks spec): the next note is a plain one again.
+            taskAddParent = Maybe<Guid>.None;
             PaintAddFlags();
             PaintTaskChips();
             GiveTaskKeyboardBack();
@@ -1653,7 +1655,9 @@ public partial class FloatingBar
         else if (e.Key == Key.Escape)
         {
             e.Handled = true;
-            EndTyping(clear: true);
+            // Subtasks: the first Esc only drops the parent, as the placeholder says, so the text becomes a plain note.
+            if (taskAddParent.HasValue) DropTaskAddParent();
+            else EndTyping(clear: true);
         }
     }
 
@@ -1662,7 +1666,7 @@ public partial class FloatingBar
     void CommitTaskNote()
     {
         if (taskService is null || taskAddBox is null) return;
-        taskService.AddNote(taskAddBox.Text, taskAddTarget, QuadrantOf.Flags(taskAddFlags.Important, taskAddFlags.Urgent))
+        taskService.AddNote(taskAddBox.Text, taskAddTarget, QuadrantOf.Flags(taskAddFlags.Important, taskAddFlags.Urgent), taskAddParent)
             .Tap(_ => EndTyping(clear: true))
             .TapError(err => ClickTrace.Write($"task list: note not added: {err}"));
     }
@@ -1754,6 +1758,7 @@ public partial class FloatingBar
         taskAddChip.Label.Foreground = TaskInk;
         taskAddChip.Face.Background = fill;
         taskAddChip.Face.BorderBrush = fill;
+        PaintParentChip();
         PaintPlaceholder();
     }
 
@@ -1761,7 +1766,78 @@ public partial class FloatingBar
     // still promise "Add to Deskbar…".
     void PaintPlaceholder()
     {
-        if (taskAddPlaceholder is not null) taskAddPlaceholder.Text = PlaceholderFor(taskAddTarget.Bind(WorkspaceName));
+        if (taskAddPlaceholder is not null)
+            taskAddPlaceholder.Text = taskAddParent.HasValue ? SubtaskPlaceholder : PlaceholderFor(taskAddTarget.Bind(WorkspaceName));
+    }
+
+    // --- adding a subtask (docs/superpowers/specs/2026-11-24-subtasks-design.md, "Making subtasks", Petre's pick A) ---
+    //
+    // "Add subtask…" on a line's menu opens this same box with the parent as a chip ("↳ <parent title> ×") after the
+    // workspace chip. The workspace chip moves to the parent's workspace (still changeable), so a subtask added from
+    // another desktop lands with its parent. Enter adds it under the parent; Esc or the chip's press drops the parent and
+    // leaves the text as a plain note; after an add or a clearing Esc the box is a plain note box again (EndTyping).
+
+    internal const string SubtaskPlaceholder = "A subtask: Enter adds it, Esc drops the parent";
+
+    // The task the next add goes under, or none for a plain note.
+    Maybe<Guid> taskAddParent = Maybe<Guid>.None;
+    Button? taskAddParentChip;
+    TextBlock? taskAddParentLabel;
+
+    /// <summary>
+    /// "Add subtask…" on the line <paramref name="lineId"/>: the box takes the keyboard with that line's task as the
+    /// parent, or the task's own parent when the line is a subtask (one level, so the new one is a sibling;
+    /// TaskBoard.SubtaskParentFor). Internal for the tests.
+    /// </summary>
+    internal void BeginSubtaskAdd(Guid lineId)
+    {
+        if (taskService is null || taskAddBox is null) return;
+        var parent = taskService.Board.SubtaskParentFor(lineId);
+        if (parent.HasNoValue) return;
+        if (!taskTyping) BeginTyping();
+        taskAddParent = parent.Value.Id;
+        taskAddTarget = parent.Value.WorkspaceId;
+        PaintTaskChips();
+        taskAddBox.Focus();
+    }
+
+    void DropTaskAddParent()
+    {
+        taskAddParent = Maybe<Guid>.None;
+        PaintTaskChips();
+        taskAddBox?.Focus();
+    }
+
+    // The parent chip: the workspace chip's look with a tan "↳" title and a "×", collapsed while there is no parent.
+    // Its own tag, so it is never taken for the workspace chip.
+    Button ParentChipButton()
+    {
+        taskAddParentLabel = new TextBlock { Foreground = TaskTitleInk, VerticalAlignment = VerticalAlignment.Center, TextTrimming = TextTrimming.CharacterEllipsis };
+        var cross = new TextBlock { Text = "×", Foreground = TaskDimInk, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(5, 0, 0, 0) };
+        var face = new Border
+        {
+            Tag = "task-add-parent",
+            Background = TaskButtonFill,
+            BorderBrush = Brushes.Transparent,
+            BorderThickness = new Thickness(1),
+            CornerRadius = new CornerRadius(8),
+            Padding = new Thickness(7, 0, 7, 1),
+            Child = new StackPanel { Orientation = Orientation.Horizontal, Children = { taskAddParentLabel, cross } },
+        };
+        taskAddParentChip = TaskButton("Subtask of", face, DropTaskAddParent, "A subtask of this task; press to add a plain note instead");
+        taskAddParentChip.Margin = new Thickness(0, 1, 4, 1);
+        taskAddParentChip.Visibility = Visibility.Collapsed;
+        return taskAddParentChip;
+    }
+
+    // The parent chip as the box stands: the parent's title, cut as a chip's name is, or collapsed for none.
+    void PaintParentChip()
+    {
+        if (taskAddParentChip is null || taskAddParentLabel is null) return;
+        var parent = taskAddParent.Bind(id => taskService?.Board.Tasks.TryFirst(t => t.Id == id) ?? Maybe<TaskItem>.None);
+        taskAddParentChip.Visibility = parent.HasValue ? Visibility.Visible : Visibility.Collapsed;
+        taskAddParentLabel.Text = parent.Map(p => $"↳ {FirstLine(p.Title)}").GetValueOrDefault("");
+        taskAddParentLabel.MaxWidth = 2 * ChipTextCeiling;
     }
 
     // A line's template: the strip buttons' hover, with the content stretched across the line so the text has the

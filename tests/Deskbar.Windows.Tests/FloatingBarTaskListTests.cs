@@ -2844,4 +2844,107 @@ public class FloatingBarTaskListTests
         Assert.DoesNotContain(plainMenu.Items.OfType<MenuItem>(), i => i.Header is TextBlock { Text: "Start Claude on this" });
         plainMenu.IsOpen = false;
     });
+
+    // --- subtasks (docs/superpowers/specs/2026-11-24-subtasks-design.md, "Making subtasks", Petre's pick A) ----------
+
+    // The parent chip in the add box, found by its tag; collapsed while the box adds a plain note.
+    static Button ParentChip(ListBar t) =>
+        Inside(t.Chips).OfType<Button>().Single(b => b.Content is Border { Tag: "task-add-parent" });
+
+    static TextBlock Placeholder(ListBar t) =>
+        Inside(t.List).OfType<TextBlock>().Single(b => Equals(b.Tag, "task-add-placeholder"));
+
+    [Fact]
+    public void A_lines_menu_offers_add_subtask_after_start_claude() => StaThread.Run(() =>
+    {
+        string[] Firsts(ListBar bar, Guid id)
+        {
+            var menu = bar.Bar.OpenTaskLineMenu(id)!;
+            var texts = menu.Items.OfType<MenuItem>().Select(i => ((TextBlock)i.Header).Text).Take(3).ToArray();
+            menu.IsOpen = false;
+            return texts;
+        }
+
+        using var claude = Build(startClaude: _ => null);
+        Assert.Equal(["Edit", "Start Claude on this", "Add subtask…"], Firsts(claude, claude.Tasks.AddNote("Parent", claude.Gepha).Value.Id));
+
+        // Without Claude, right after Edit.
+        using var plain = Build();
+        Assert.Equal(["Edit", "Add subtask…"], Firsts(plain, plain.Tasks.AddNote("Parent", plain.Gepha).Value.Id).Take(2));
+    });
+
+    [Fact]
+    public void Add_subtask_shows_the_parent_chip_on_the_parents_workspace() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        var other = t.Harness.Manager.State.Workspaces.First(w => w.Id != t.Gepha).Id;
+        var parent = t.Tasks.AddNote("Ship the release", other).Value;
+
+        t.Bar.BeginSubtaskAdd(parent.Id);
+
+        Assert.True(t.Bar.TaskListAdding);
+        Assert.Equal(Visibility.Visible, ParentChip(t).Visibility);
+        Assert.Contains("Ship the release", string.Concat(Inside(ParentChip(t)).OfType<TextBlock>().Select(b => b.Text)));
+        Assert.Equal(other, t.Bar.TaskAddTarget.Value);
+        Assert.Equal("A subtask: Enter adds it, Esc drops the parent", Placeholder(t).Text);
+    });
+
+    [Fact]
+    public void Enter_adds_the_subtask_under_its_parent() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        var parent = t.Tasks.AddNote("Parent", t.Gepha).Value;
+
+        t.Bar.BeginSubtaskAdd(parent.Id);
+        t.Box.Text = "Child";
+        Press(t.Bar, t.Box, Key.Enter);
+
+        Assert.Equal(Maybe.From(parent.Id), t.Tasks.Board.Tasks.Single(x => x.Title == "Child").ParentId);
+        // The box is a plain note box again.
+        Assert.Equal(Visibility.Collapsed, ParentChip(t).Visibility);
+    });
+
+    [Fact]
+    public void Esc_drops_the_parent_and_keeps_the_text() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        var parent = t.Tasks.AddNote("Parent", t.Gepha).Value;
+        t.Bar.BeginSubtaskAdd(parent.Id);
+        t.Box.Text = "Loose note";
+
+        Press(t.Bar, t.Box, Key.Escape);
+
+        Assert.True(t.Bar.TaskListAdding);
+        Assert.Equal("Loose note", t.Box.Text);
+        Assert.Equal(Visibility.Collapsed, ParentChip(t).Visibility);
+        Press(t.Bar, t.Box, Key.Enter);
+        Assert.True(t.Tasks.Board.Tasks.Single(x => x.Title == "Loose note").ParentId.HasNoValue);
+    });
+
+    [Fact]
+    public void The_parent_chips_press_drops_the_parent() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        var parent = t.Tasks.AddNote("Parent", t.Gepha).Value;
+        t.Bar.BeginSubtaskAdd(parent.Id);
+
+        Click(ParentChip(t));
+
+        Assert.Equal(Visibility.Collapsed, ParentChip(t).Visibility);
+        Assert.True(t.Bar.TaskListAdding);
+    });
+
+    [Fact]
+    public void Add_subtask_on_a_subtask_adds_a_sibling() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        var parent = t.Tasks.AddNote("Parent", t.Gepha).Value;
+        var child = t.Tasks.AddNote("Child", t.Gepha, parent: parent.Id).Value;
+
+        t.Bar.BeginSubtaskAdd(child.Id);
+        t.Box.Text = "Sibling";
+        Press(t.Bar, t.Box, Key.Enter);
+
+        Assert.Equal(Maybe.From(parent.Id), t.Tasks.Board.Tasks.Single(x => x.Title == "Sibling").ParentId);
+    });
 }

@@ -153,6 +153,14 @@ current against proposed before writing the drawing code.
 Each task's JSON gains `parent` (id or null) and `subtasks` (ids). `ControlUsage` gains `task family`, `task parent`,
 `task subtask` and `--parent` on `task add`.
 
+### Petre's pick on the look (2026-11-24)
+
+Option A of the mockup (https://claude.ai/artifact/Srgn1B2ysrFy8Kopsettk4): on the tasks panel's full line a subtask
+reads "↳ <parent title, cut> › <title>", on its slim line and on the bar "↳ <title>"; a parent's line reads
+"<title> · N subtasks" before its status line. The arrow, the parent's name and the count are in the faint ink, below
+the title and the status line. The add box shows the parent as a chip "↳ <parent title> ×" next to the workspace chip,
+with the placeholder "A subtask: Enter adds it, Esc drops the parent".
+
 ## Calls Claude made (for Petre to check)
 
 - One level only, as goals have. A deeper tree makes the breadcrumb and the briefing grow with depth.
