@@ -213,6 +213,9 @@ public sealed class TasksBoard : IDisposable
         {
             StartClaude = startClaude,
             OpenSession = openSession is null ? null : (id, session) => OpenSession(id, session),
+            SubtaskParent = id => tasks.Board.SubtaskParentFor(id).Map(p => new SubtaskParentView(p.Id, p.Title, p.WorkspaceId))
+                .GetValueOrDefault((SubtaskParentView?)null),
+            AddSubtask = (title, workspace, quadrant, parent) => AddNote(title, workspace, quadrant, parent).IsSuccess,
         };
 
         subscriptions = new CompositeDisposable(
@@ -636,8 +639,8 @@ public sealed class TasksBoard : IDisposable
     /// One of Petre's notes, in the backlog, where the add box's chip says, with the flags its toggles say (Ruling 37):
     /// it lands at the top of that quadrant.
     /// </summary>
-    public Result AddNote(string title, Maybe<Guid> workspace, Quadrant quadrant = Quadrant.IV) =>
-        Report(tasks.AddNote(title, workspace, quadrant).Bind(_ => Result.Success()));
+    public Result AddNote(string title, Maybe<Guid> workspace, Quadrant quadrant = Quadrant.IV, Maybe<Guid> parent = default) =>
+        Report(tasks.AddNote(title, workspace, quadrant, parent).Bind(_ => Result.Success()));
 
     /// <summary>A comment from Petre (no session), shown as "you". Its thread stays open to show it.</summary>
     public Result Comment(Guid id, string markdown)
@@ -1067,4 +1070,17 @@ internal sealed record TasksWindowActions(
 
     /// <summary>A session's Open in the thread (Task 9): the task's id and the session's. None, no Open buttons.</summary>
     public Action<Guid, string>? OpenSession { get; init; }
+
+    /// <summary>
+    /// "Add subtask…" on a line (subtasks spec, Petre's pick A): the task a subtask added from that line goes under, the
+    /// line's own or its parent for a subtask's line (TaskBoard.SubtaskParentFor), or null for an unknown line. None, the
+    /// menu has no "Add subtask…".
+    /// </summary>
+    public Func<Guid, SubtaskParentView?>? SubtaskParent { get; init; }
+
+    /// <summary>Adds a subtask under the parent (the last argument), as AddNote adds a note; whether it worked.</summary>
+    public Func<string, Maybe<Guid>, Quadrant, Guid, bool>? AddSubtask { get; init; }
 }
+
+/// <summary>The parent "Add subtask…" puts a new task under: its id, its title for the chip and its workspace.</summary>
+internal sealed record SubtaskParentView(Guid Id, string Title, Maybe<Guid> Workspace);

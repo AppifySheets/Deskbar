@@ -3614,4 +3614,67 @@ public class TasksBoardTests
         }
         finally { Directory.Delete(root, true); }
     });
+
+    // --- subtasks (docs/superpowers/specs/2026-11-24-subtasks-design.md, "Making subtasks", Petre's pick A) ----------
+
+    [Fact]
+    public void The_menu_offers_add_subtask_after_start_claude() => StaThread.Run(() =>
+    {
+        using var t = Build(startClaude: _ => { });
+        var id = t.Tasks.AddNote("Parent", t.Gepha).Value.Id;
+        t.Controller.Show();
+
+        var menu = t.Window.OpenMenuFor(id);
+        Assert.Equal(["Edit", "Start Claude on this", "Add subtask…"], MenuWords(menu).Take(3));
+        menu.IsOpen = false;
+    });
+
+    [Fact]
+    public void Add_subtask_opens_the_box_with_the_parent_on_its_workspace() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        var parent = t.Tasks.AddNote("Ship the release", t.Sparrow).Value;
+        t.Controller.Show();
+
+        t.Window.BeginSubtaskAdd(parent.Id);
+
+        Assert.True(t.Window.AddBoxShown);
+        Assert.Equal("A subtask: Enter adds it, Esc drops the parent", t.Window.AddPlaceholderText);
+        Assert.Contains("Ship the release", TextOf(ButtonNamed(t.Window, "Subtask of")));
+        Assert.True(t.Window.TypeNote("Write the notes", Key.Enter));
+        var child = t.Tasks.Board.Tasks.Single(x => x.Title == "Write the notes");
+        Assert.Equal(Maybe.From(parent.Id), child.ParentId);
+        Assert.Equal(t.Sparrow, child.WorkspaceId.Value);
+        Assert.False(t.Window.AddBoxShown);
+    });
+
+    [Fact]
+    public void Esc_in_a_subtask_box_drops_the_parent_first() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        var parent = t.Tasks.AddNote("Parent", t.Gepha).Value;
+        t.Controller.Show();
+        t.Window.BeginSubtaskAdd(parent.Id);
+
+        Assert.True(t.Window.Press(Key.Escape, ModifierKeys.None));
+
+        Assert.True(t.Window.AddBoxShown);
+        Assert.Equal("A note: Enter adds it, Esc closes the box", t.Window.AddPlaceholderText);
+        Assert.True(t.Window.TypeNote("Loose", Key.Enter));
+        Assert.True(t.Tasks.Board.Tasks.Single(x => x.Title == "Loose").ParentId.HasNoValue);
+    });
+
+    [Fact]
+    public void Add_subtask_on_a_subtask_adds_a_sibling_in_the_window() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        var parent = t.Tasks.AddNote("Parent", t.Gepha).Value;
+        var child = t.Tasks.AddNote("Child", t.Gepha, parent: parent.Id).Value;
+        t.Controller.Show();
+
+        t.Window.BeginSubtaskAdd(child.Id);
+        Assert.True(t.Window.TypeNote("Sibling", Key.Enter));
+
+        Assert.Equal(Maybe.From(parent.Id), t.Tasks.Board.Tasks.Single(x => x.Title == "Sibling").ParentId);
+    });
 }
