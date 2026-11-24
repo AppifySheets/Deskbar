@@ -59,8 +59,26 @@ public sealed class SessionBriefingTests
     {
         var text = SessionBriefing.Start(Start(), Maybe<TaskItem>.None, []);
 
-        Assert.Contains($"task comment - --session {Sid} <<'EOF'", text);
+        Assert.Contains($"task ask - --session {Sid} <<'EOF'", text);
         Assert.Contains("Never put free text with quotes or & | < > on the command line", text);
+    }
+
+    // Task 06c2538b ("why didn't you set the task as waiting on me?"): sessions with a pull request ready to merge left a
+    // comment and marked the task done, because the briefing's own example was a comment saying "merge it" and it kept
+    // `task ask` for decisions. Done sits below the waiting block, so the merge waited unseen. The briefing now sends every
+    // next move of the user's (a pull request to merge among them) through `task ask`, keeps `task done` for when nothing
+    // waits on the user, and says what to do once the pull request is merged.
+    [Fact]
+    public void A_ready_pull_request_waits_on_the_user_through_ask_not_a_comment_and_done()
+    {
+        var text = SessionBriefing.Start(Start(), Task("Tasks board"), []);
+
+        Assert.Contains("Merge PR 512: CI is green", text);
+        Assert.Contains("when the next move is the user's (a pull request to merge, something to try live, a decision)", text);
+        Assert.Contains("not while a pull request of yours waits to be merged", text);
+        Assert.Contains($"task answered --session {Sid}, then task done", text);
+        Assert.DoesNotContain("PR 512 is ready", text);
+        Assert.DoesNotContain("(a PR to merge", text);
     }
 
     // Fifty offered tasks with long titles, long status lines and long questions (review of PR B, M-7): each is cut at

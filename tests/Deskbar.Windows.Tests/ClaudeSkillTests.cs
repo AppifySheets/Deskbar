@@ -765,6 +765,11 @@ public sealed class ClaudeSkillTests : IDisposable
         // Ruling 49: the session resolves its own question.
         Assert.Contains("task answered --session", on);
         Assert.Contains("Never close", on);
+        // Task 06c2538b: a pull request ready to merge waits on the user through `task ask`, never a comment and done.
+        Assert.Contains("Merge PR 512: CI is green", on);
+        Assert.Contains("A pull request ready to merge is an ask, never a comment and `task done`", on);
+        Assert.Contains("not while a pull request of yours waits to be merged", on);
+        Assert.DoesNotContain("PR 512 is ready", on);
         Assert.DoesNotContain("—", on);
         // Review of PR B, I-1: free text on stdin, never on the command line. M-6: the description says to load the
         // skill for the task too.
