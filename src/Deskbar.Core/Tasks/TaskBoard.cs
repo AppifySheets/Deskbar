@@ -563,9 +563,9 @@ public sealed record TaskBoard(IReadOnlyList<TaskItem> Tasks)
         Tasks.TryFirst(t => t.Id == lineId).Map(t => ParentOf(t).GetValueOrDefault(t));
 
     /// <summary>
-    /// The tasks "Subtask of…" offers as a parent for <paramref name="id"/>: open tasks that are not subtasks, not the task
-    /// itself, those on its own workspace first, each part in the pile's order. Empty for a task that has subtasks of its
-    /// own (one level) and for an unknown task.
+    /// The tasks a drag can drop <paramref name="id"/> into as their subtask (drag to nest): open tasks that are not
+    /// subtasks, not the task itself, those on its own workspace first, each part in the pile's order. Empty for a task
+    /// that has subtasks of its own (one level) and for an unknown task.
     /// </summary>
     public IReadOnlyList<TaskItem> ParentCandidates(Guid id) =>
         Tasks.TryFirst(t => t.Id == id) is { HasValue: true } own && !Tasks.Any(t => t.ParentId == id)

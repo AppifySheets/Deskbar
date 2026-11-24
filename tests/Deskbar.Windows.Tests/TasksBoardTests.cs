@@ -3797,24 +3797,6 @@ public class TasksBoardTests
         Assert.True(t.Tasks.Board.Tasks.Single(x => x.Id == child).ParentId.HasNoValue);
     });
 
-    // Follow-up: the panel's menu has "Subtask of" too, the bar's twin.
-    [Fact]
-    public void The_panel_menu_puts_a_task_under_another() => StaThread.Run(() =>
-    {
-        using var t = Build();
-        var parent = t.Tasks.AddNote("Ship the release", t.Gepha).Value;
-        var loose = t.Tasks.AddNote("Write the notes", t.Gepha).Value;
-        t.Controller.Show();
-
-        var menu = t.Window.OpenMenuFor(loose.Id);
-        var item = menu.Items.OfType<MenuItem>().Single(i => i.Header is TextBlock { Text: "Subtask of" });
-        var choice = item.Items.OfType<MenuItem>().Single(i => i.Header is TextBlock { Text: "Ship the release" });
-        choice.RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
-        menu.IsOpen = false;
-
-        Assert.Equal(Maybe.From(parent.Id), t.Tasks.Board.Tasks.Single(x => x.Id == loose.Id).ParentId);
-    });
-
     [Fact]
     public void Add_subtask_on_a_subtask_adds_a_sibling_in_the_window() => StaThread.Run(() =>
     {

@@ -237,26 +237,6 @@ public static class TaskViews
             .Where(g => g.Tasks.Count > 0).ToArray(), moved);
     }
 
-    // --- "Subtask of" on a line's menu (follow-up; Petre: "can i move a task to make it a subtask ... or other means?") ---
-
-    const int ParentChoiceCount = 15;
-    const int ParentChoiceTitle = 50;
-
-    /// <summary>
-    /// What a line's "Subtask of" menu offers, on the bar and in the tasks panel alike: <c>Blocked</c> for a task with
-    /// subtasks of its own (one level), the parent it has now (ticked; "None" is offered only then), and up to fifteen
-    /// candidates (TaskBoard.ParentCandidates: its workspace first), titles cut to fifty characters.
-    /// </summary>
-    public static ParentChoices ParentChoices(TaskBoard board, Guid id) =>
-        new(board.Tasks.Any(t => t.ParentId == id),
-            board.Tasks.TryFirst(t => t.Id == id).Bind(t => board.ParentOf(t)).Map(p => p.Id),
-            board.ParentCandidates(id).Take(ParentChoiceCount)
-                .Select(t => (t.Id, Title: CutTitle(t.Title.Split('\n')[0].TrimEnd('\r'))))
-                .ToArray());
-
-    static string CutTitle(string title) =>
-        title.Length <= ParentChoiceTitle ? title : title[..(ParentChoiceTitle - 1)].TrimEnd() + "…";
-
     // --- subtasks on a line (docs/superpowers/specs/2026-11-24-subtasks-design.md, Petre's pick A) ----------------------
 
     // How much of a parent's title the breadcrumb keeps, so the subtask's own title keeps most of the line.

@@ -604,9 +604,7 @@ S10. Subtasks under their parent. Add two subtasks to a note in quadrant IV and 
 S11. Open the parent in the tasks panel: its thread lists both subtasks with their status and status line; click one
     and it is selected, opened and scrolled into view. **Add subtask** in the thread opens the add box with the parent
     chip.
-S12. Right-click a plain note: **Subtask of** lists the open tasks it could go under, its workspace's first; pick one
-    and the note moves under it. Right-click it again: **None** is first and the parent is ticked; None frees it. On
-    the parent itself **Subtask of** is greyed out and its tooltip says why. The same in the tasks panel's "..." menu.
+S12. (Removed with the **Subtask of** menu item: dragging onto a line's middle does it now, S13.)
 S13. Drag to nest. On the bar, drag a note slowly down over another note: over the line's top and bottom quarters the
     drop line shows between lines, over its middle the line is outlined. Release over the middle: the note becomes its
     subtask and is drawn under it. Drag a note over a subtask's line, a task waiting on you, or drag a task that has
