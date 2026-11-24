@@ -57,7 +57,15 @@ static class ClaudeHooks
     // `on` is "Teach Claude Code about Deskbar"; `tasks` adds the task events, and only counts while `on` does, so the
     // teaching turned off takes every entry of Deskbar's. `askCommand` runs claude-hook.cmd, `taskCommand`
     // claude-task-hook.cmd (the header says why two).
-    internal static bool Sync(bool on, bool tasks, string settingsPath, string askCommand, string taskCommand)
+    //
+    // `imagesRule` (ImagesRule) is the one PERMISSION entry Deskbar keeps beside its hooks, in permissions.allow, on the
+    // same terms as the task events (docs/superpowers/specs/2026-11-24-task-images-design.md, "Can a session read the
+    // file?"). Pictures Petre pastes into a task live in %APPDATA%\Deskbar\task-images, outside every session's folder,
+    // and a session in default permission mode stops at a prompt before reading one (measured 2026-11-24; auto mode reads
+    // it). A woken session stuck at a prompt defeats the point, so Petre agreed (2026-11-24) to a Read rule for that one
+    // folder and nothing else. It is recognised as Deskbar's by its shape (Read(// ... /Deskbar/task-images/**)), so a
+    // rule for an older state folder is replaced and the user's own rules, task-images ones included, are never touched.
+    internal static bool Sync(bool on, bool tasks, string settingsPath, string askCommand, string taskCommand, string? imagesRule = null)
     {
         JsonObject root;
         string? original = null;
@@ -86,7 +94,9 @@ static class ClaudeHooks
             return false;
         }
 
-        var (changed, complete) = Apply(root, Wanted(on, tasks, askCommand, taskCommand));
+        var (hooksChanged, hooksComplete) = Apply(root, Wanted(on, tasks, askCommand, taskCommand));
+        var (ruleChanged, ruleComplete) = imagesRule is null ? (false, true) : ApplyRule(root, on && tasks, imagesRule);
+        var (changed, complete) = (hooksChanged || ruleChanged, hooksComplete && ruleComplete);
         if (!changed) return complete;
 
         if (original is not null)
@@ -152,6 +162,63 @@ static class ClaudeHooks
         if (changed && hooks is { Count: 0 }) root.Remove("hooks");
         return (changed, complete);
     }
+
+    /// <summary>
+    /// The Read rule for a state folder's task-images, in Claude Code's absolute-path form: "//", the drive letter in lower
+    /// case, forward slashes, then "/task-images/**". C:\Users\p\AppData\Roaming\Deskbar gives
+    /// Read(//c/Users/p/AppData/Roaming/Deskbar/task-images/**), the form measured to work on 2026-11-24.
+    /// </summary>
+    internal static string ImagesRule(string stateDir)
+    {
+        var full = Path.GetFullPath(stateDir).TrimEnd('\\', '/');
+        var posix = char.ToLowerInvariant(full[0]) + full[2..].Replace('\\', '/');
+        return $"Read(//{posix}/{Core.Tasks.TaskImages.Folder}/**)";
+    }
+
+    // The images rule in permissions.allow: added once when wanted, any other rule of Deskbar's shape taken out, and an
+    // allow list or permissions object left empty by taking ours out removed with it. A "permissions" that is not an
+    // object, or an "allow" that is not an array, is the user's and is left alone (complete false), as for hooks.
+    static (bool Changed, bool Complete) ApplyRule(JsonObject root, bool wanted, string rule)
+    {
+        if (root["permissions"] is { } odd && odd is not JsonObject)
+        {
+            ClickTrace.Write("claude hooks: \"permissions\" left alone, it is not an object");
+            return (false, false);
+        }
+        var permissions = root["permissions"] as JsonObject;
+        if (permissions?["allow"] is { } oddAllow && oddAllow is not JsonArray)
+        {
+            ClickTrace.Write("claude hooks: \"permissions.allow\" left alone, it is not an array");
+            return (false, false);
+        }
+
+        var allow = permissions?["allow"] as JsonArray;
+        var ours = allow?.Where(IsOurRule).ToList() ?? [];
+        if (wanted && ours.Count == 1 && RuleOf(ours[0]) == rule) return (false, true);
+
+        ours.ForEach(r => allow!.Remove(r));
+        if (wanted)
+        {
+            if (permissions is null) root["permissions"] = permissions = [];
+            if (allow is null) permissions["allow"] = allow = [];
+            allow.Add(rule);
+        }
+        else if (ours.Count > 0 && allow is { Count: 0 })
+        {
+            permissions!.Remove("allow");
+            if (permissions.Count == 0) root.Remove("permissions");
+        }
+        return (wanted || ours.Count > 0, true);
+    }
+
+    // Deskbar's images rule, by its shape: Read(// ... /Deskbar/task-images/**). The user's own rules never have that
+    // exact ending unless they name Deskbar's own folder, which is the one Deskbar manages.
+    static bool IsOurRule(JsonNode? node) =>
+        RuleOf(node) is { } rule
+        && rule.StartsWith("Read(//", StringComparison.Ordinal)
+        && rule.EndsWith($"/Deskbar/{Core.Tasks.TaskImages.Folder}/**)", StringComparison.OrdinalIgnoreCase);
+
+    static string? RuleOf(JsonNode? node) => node is JsonValue value && value.TryGetValue<string>(out var rule) ? rule : null;
 
     // Deskbar's entries: a command naming either of its scripts, in Deskbar's folder.
     static bool IsOurs(JsonNode? entry) =>

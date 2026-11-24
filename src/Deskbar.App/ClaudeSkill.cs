@@ -85,14 +85,14 @@ static class ClaudeSkill
                 // The hooks first: the skill tells a session whether they ask for the user, so it must know.
                 // An entry written by an older Deskbar (`cmd.exe /c ...`) still names the script, so Sync sees it as
                 // Deskbar's own, finds its command differs, and replaces it with this one.
-                var hooksInstalled = InstallHooks(scripts, settings, tasks);
+                var hooksInstalled = InstallHooks(scripts, settings, tasks, ClaudeHooks.ImagesRule(deskbarFolder));
                 Write(folder, file, hooksInstalled, tasks);
             }
             else
             {
                 Remove(folder, file);
                 // The script goes only once no entry points at it (a settings file left alone keeps its entries).
-                if (ClaudeHooks.Sync(false, tasks, settings, HookCommand(scripts.Ask), HookCommand(scripts.Task)))
+                if (ClaudeHooks.Sync(false, tasks, settings, HookCommand(scripts.Ask), HookCommand(scripts.Task), ClaudeHooks.ImagesRule(deskbarFolder)))
                     RemoveTaskScript(scripts.Task);
             }
         }
@@ -110,13 +110,13 @@ static class ClaudeSkill
     // stop the skill from being written, so it is traced and counts as "not installed".
     // The task script is there exactly while its entries are: written before they are added, taken away once they
     // are removed (and not while a file Sync left alone may still hold them), so no entry points at a missing file.
-    static bool InstallHooks(HookScripts scripts, string settings, bool tasks)
+    static bool InstallHooks(HookScripts scripts, string settings, bool tasks, string imagesRule)
     {
         try
         {
             WriteHookScript(scripts.Ask);
             if (tasks) WriteHookScript(scripts.Task);
-            var installed = ClaudeHooks.Sync(true, tasks, settings, HookCommand(scripts.Ask), HookCommand(scripts.Task));
+            var installed = ClaudeHooks.Sync(true, tasks, settings, HookCommand(scripts.Ask), HookCommand(scripts.Task), imagesRule);
             if (!tasks && installed) RemoveTaskScript(scripts.Task);
             return installed;
         }

@@ -433,6 +433,91 @@ public sealed class ClaudeSkillTests : IDisposable
         Assert.Equal("@echo mine", File.ReadAllText(script));
     }
 
+    // --- the Read rule for pasted images (images in tasks) -------------------------------------------------------------
+    //
+    // docs/superpowers/specs/2026-11-24-task-images-design.md, "Can a session read the file?": a session in default
+    // permission mode stops at a prompt before reading %APPDATA%\Deskbar\task-images (measured 2026-11-24), so while the
+    // task events are on Deskbar keeps ONE allow rule for that folder in permissions.allow (Petre agreed the same day).
+
+    const string Ask = "\"C:/x/Deskbar/claude-hook.cmd\"";
+    const string TaskScript = "\"C:/x/Deskbar/claude-task-hook.cmd\"";
+    const string Rule = "Read(//c/Users/petre/AppData/Roaming/Deskbar/task-images/**)";
+
+    static string[] Allowed(string json) =>
+        System.Text.Json.Nodes.JsonNode.Parse(json)!["permissions"]?["allow"]?.AsArray().Select(a => a!.GetValue<string>()).ToArray() ?? [];
+
+    [Fact]
+    public void ImagesRule_is_the_folder_in_claude_codes_absolute_path_form() =>
+        Assert.Equal(Rule, ClaudeHooks.ImagesRule(@"C:\Users\petre\AppData\Roaming\Deskbar"));
+
+    [Fact]
+    public void The_images_rule_is_added_beside_the_users_own_permissions()
+    {
+        Settled("""{"permissions":{"allow":["Bash(git status)"],"deny":["Read(.env)"]}}""");
+
+        Assert.True(ClaudeHooks.Sync(true, true, Settings, Ask, TaskScript, Rule));
+
+        var json = File.ReadAllText(Settings);
+        Assert.Equal(["Bash(git status)", Rule], Allowed(json));
+        Assert.Equal("""["Read(.env)"]""", System.Text.Json.Nodes.JsonNode.Parse(json)!["permissions"]!["deny"]!.ToJsonString());
+    }
+
+    [Fact]
+    public void The_images_rule_is_written_once()
+    {
+        Settled("{}");
+        ClaudeHooks.Sync(true, true, Settings, Ask, TaskScript, Rule);
+        var written = File.ReadAllText(Settings);
+        var at = File.GetLastWriteTimeUtc(Settings);
+
+        Assert.True(ClaudeHooks.Sync(true, true, Settings, Ask, TaskScript, Rule));
+
+        Assert.Equal(written, File.ReadAllText(Settings));
+        Assert.Equal(at, File.GetLastWriteTimeUtc(Settings));
+        Assert.Single(Allowed(written));
+    }
+
+    [Fact]
+    public void Without_the_task_events_the_images_rule_goes_and_the_users_stay()
+    {
+        Settled($$$"""{"permissions":{"allow":["Bash(git status)","{{{Rule}}}"]}}""");
+
+        Assert.True(ClaudeHooks.Sync(true, false, Settings, Ask, TaskScript, Rule));
+
+        Assert.Equal(["Bash(git status)"], Allowed(File.ReadAllText(Settings)));
+    }
+
+    [Fact]
+    public void Taking_the_only_rule_out_takes_the_empty_permissions_it_made()
+    {
+        Settled("{}");
+        ClaudeHooks.Sync(true, true, Settings, Ask, TaskScript, Rule);
+
+        ClaudeHooks.Sync(false, true, Settings, Ask, TaskScript, Rule);
+
+        Assert.Null(System.Text.Json.Nodes.JsonNode.Parse(File.ReadAllText(Settings))!["permissions"]);
+    }
+
+    [Fact]
+    public void An_images_rule_for_another_folder_is_replaced()
+    {
+        Settled("""{"permissions":{"allow":["Read(//d/Old/Deskbar/task-images/**)","Read(//d/Mine/task-images/**)"]}}""");
+
+        ClaudeHooks.Sync(true, true, Settings, Ask, TaskScript, Rule);
+
+        Assert.Equal(["Read(//d/Mine/task-images/**)", Rule], Allowed(File.ReadAllText(Settings)));
+    }
+
+    [Fact]
+    public void A_permissions_value_that_is_not_an_object_is_left_alone()
+    {
+        Settled("""{"permissions":"mine"}""");
+
+        Assert.False(ClaudeHooks.Sync(true, true, Settings, Ask, TaskScript, Rule));
+
+        Assert.Equal("mine", System.Text.Json.Nodes.JsonNode.Parse(File.ReadAllText(Settings))!["permissions"]!.GetValue<string>());
+    }
+
     // Review of Task 7, M-3: a "hooks" that is not an object, or an event that is not an array, is the user's and is
     // left as it is (Claude Code would not run it either), not replaced; the other events are still kept in step, and
     // Sync says the file is not as asked.
