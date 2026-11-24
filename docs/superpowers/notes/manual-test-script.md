@@ -902,6 +902,21 @@ AT2. Alt+Tab to the second task's terminal: the highlight moves to the second ta
 AT3. Switch to a browser or VS Code: the highlight stays on the second task.
 AT4. Click a different task's line on the bar, then the first terminal again: the highlight follows the terminal.
 
+## A new task is highlighted
+
+(Task ee75f046; mockup https://claude.ai/artifact/8r8fRpLoTqvrgpjELDgEd9, Petre's pick A and "yes" to the panel.)
+
+NH1. Select some task on the bar. Type a note in the bar's box and press Enter: its line starts in a blue glow
+     that fades in about two seconds into the selected look (blue edge, lighter fill) and stays selected. The task
+     selected before is not any more.
+NH2. Same on a floating bar with several flagged tasks, so the note (top of quadrant IV) lands below the three
+     lines on show: the list scrolls to it (the bar's task scrolling, task ea017420), glowing.
+NH3. With the tasks panel open, add from the bar: the panel shows the new task selected too.
+NH4. In the panel, type "rent" in the search, then + Add, type "Call the bank", Enter: the search clears, the panel
+     scrolls to the new line, which glows and stays selected; the bar shows it selected too.
+NH5. Turn off Windows' "Animation effects" (Settings, Accessibility, Visual effects) and add a note: it is selected
+     with no glow.
+
 ## Results (2026-08-01)
 
 Status: **pending human execution.** An agent cannot observe the desktop, Task View,

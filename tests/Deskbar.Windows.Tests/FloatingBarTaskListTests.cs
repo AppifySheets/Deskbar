@@ -425,6 +425,41 @@ public class FloatingBarTaskListTests
         Assert.Equal("", box().Text);
     });
 
+    // Task ee75f046 (Petre: "adding a new task in the bar should highlight it when added", option A of the mockup): the
+    // note just added becomes the selected task, taking the selection from the one picked before, and its line glows
+    // (only while Windows' animations are on; TaskGlow). A note refused for an empty title selects nothing.
+    [Fact]
+    public void A_note_just_added_is_selected_and_glows() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        var earlier = t.Tasks.AddNote("Pay the hosting invoice", t.Gepha).Value.Id;
+        t.Bar.Selection.Select(earlier);
+        Assert.True(t.Bar.TaskLineSelected(earlier));
+        Assert.False(t.Bar.TaskLineGlowing(earlier));
+
+        ClickBox(t);
+        t.Box.Text = "Call the accountant";
+        Press(t.Bar, t.Box, Key.Enter);
+
+        var added = t.Tasks.Board.Tasks.Single(x => x.Title == "Call the accountant").Id;
+        Assert.True(t.Bar.Selection.IsSelected(added));
+        Assert.True(t.Bar.TaskLineSelected(added));
+        Assert.False(t.Bar.TaskLineSelected(earlier));
+        Assert.Equal(SystemParameters.ClientAreaAnimation, t.Bar.TaskLineGlowing(added));
+
+        // Picking another line ends the glow: the selection's paint puts the plain fills back.
+        t.Bar.Selection.Select(earlier);
+        Assert.False(t.Bar.TaskLineGlowing(added));
+        Assert.True(t.Bar.TaskLineSelected(earlier));
+
+        // An empty title is refused: nothing is added and the selection stays where it was.
+        ClickBox(t);
+        t.Box.Text = "   ";
+        Press(t.Bar, t.Box, Key.Enter);
+        Assert.Equal(2, t.Tasks.Board.Tasks.Count);
+        Assert.True(t.Bar.Selection.IsSelected(earlier));
+    });
+
     [Fact]
     // RULING 54 (Petre: "clicking a task should open that task; double clicking takes me to the workspace and window").
     // A single click on a line opens the task in the tasks window and goes nowhere; a double-click goes: to the

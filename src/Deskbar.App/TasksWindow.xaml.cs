@@ -1010,6 +1010,18 @@ public partial class TasksWindow : Window
         UpdateLayout();
     }
 
+    /// <summary>
+    /// The glow of a task just added from the panel's add box (TaskGlow), on its line when that line is on show and is the
+    /// selected one. The next paint of the selection (PaintFrame) puts the plain selected fill back.
+    /// </summary>
+    internal void Glow(Guid id)
+    {
+        if (Picked(id) && selectionFrames.TryGetValue(id, out var parts)) parts.Frame.Background = TaskGlow.Fading(SelectedFill);
+    }
+
+    // For the tests: whether a line on show is glowing.
+    internal bool IsGlowing(Guid id) => selectionFrames.TryGetValue(id, out var parts) && TaskGlow.IsGlow(parts.Frame.Background);
+
     // For the tests.
     internal bool IsSelected(Guid id) =>
         selectionFrames.TryGetValue(id, out var parts) && parts.Frame.BorderBrush is SolidColorBrush { Color.A: > 0 };

@@ -395,6 +395,30 @@ public class TasksBoardTests
         Assert.False(t.Window.AddBoxShown);
     });
 
+    // Task ee75f046, option 3 of the mockup: the panel's add box highlights what it adds as the bar's does. The new task
+    // is picked (in both views, one selection), its line glows while Windows' animations are on (TaskGlow), and a
+    // search that would hide it is cleared so the line is there to see.
+    [Fact]
+    public void A_note_added_in_the_panel_is_selected_and_glows() => StaThread.Run(() =>
+    {
+        var selection = new TaskSelection();
+        using var t = Build(selection: selection);
+        var earlier = t.Tasks.AddNote("Pay rent", t.Gepha).Value.Id;
+        t.Controller.Show();
+        t.Controller.Pick(earlier);
+        t.Controller.Search("rent");
+
+        Click(ButtonNamed(t.Window, "Add"));
+        Assert.True(t.Window.TypeNote("Call the bank", Key.Enter));
+
+        var added = t.Tasks.Board.Tasks.Single(x => x.Title == "Call the bank").Id;
+        Assert.True(selection.IsSelected(added));
+        Assert.Contains(added, t.Window.Keys);
+        Assert.True(t.Window.IsSelected(added));
+        Assert.False(t.Window.IsSelected(earlier));
+        Assert.Equal(SystemParameters.ClientAreaAnimation, t.Window.IsGlowing(added));
+    });
+
     [Fact]
     public void The_window_opens_on_the_board_not_a_form() => StaThread.Run(() =>
     {

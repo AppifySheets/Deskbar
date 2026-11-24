@@ -655,7 +655,20 @@ public sealed class TasksBoard : IDisposable
         Func<Guid, Result<string>>? describe = null) =>
         Report((describe is null
             ? tasks.AddNote(title, workspace, quadrant, parent)
-            : tasks.AddNote(title, workspace, quadrant, parent, describe)).Bind(_ => Result.Success()));
+            : tasks.AddNote(title, workspace, quadrant, parent, describe)).Tap(task => ShowAdded(task.Id)).Bind(_ => Result.Success()));
+
+    // THE TASK JUST ADDED IS HIGHLIGHTED, as the bar's add box does it (task ee75f046, Petre's "yes" to option 3 of the
+    // mockup; TaskGlow has the rest). The add's pulse has already redrawn the panel (tasks.Changed runs Refresh inline).
+    // The new task is picked in both views, a search or the Claude working chip that would hide it is cleared
+    // (RevealPastSearch, as for a task clicked on the bar), its line glows and the panel scrolls to it.
+    void ShowAdded(Guid id)
+    {
+        selection.Select(id);
+        RevealPastSearch(id);
+        Refresh();
+        window.Glow(id);
+        window.ScrollToSelected();
+    }
 
     /// <summary>A comment from Petre (no session), shown as "you". Its thread stays open to show it.</summary>
     public Result Comment(Guid id, string markdown)

@@ -1846,7 +1846,7 @@ public partial class FloatingBar
 
     // Enter: a Backlog note where the chips say. A title of nothing is refused by the board and the box keeps the
     // keyboard. Pasted pictures become the new task's description, and with nothing typed the task is called "Picture"
-    // (FloatingBar.TaskPictures.cs).
+    // (FloatingBar.TaskPictures.cs). The note added is then highlighted (ShowAddedTask).
     void CommitTaskNote()
     {
         if (taskService is null || taskAddBox is null) return;
@@ -1855,9 +1855,38 @@ public partial class FloatingBar
         (TaskAddDescription() is { } describe
                 ? taskService.AddNote(title, taskAddTarget, quadrant, taskAddParent, describe)
                 : taskService.AddNote(title, taskAddTarget, quadrant, taskAddParent))
-            .Tap(_ => EndTyping(clear: true))
+            .Tap(task =>
+            {
+                EndTyping(clear: true);
+                ShowAddedTask(task.Id);
+            })
             .TapError(err => ClickTrace.Write($"task list: note not added: {err}"));
     }
+
+    // THE NOTE JUST ADDED IS HIGHLIGHTED (task ee75f046; TaskGlow has the mockup and Petre's pick). A note lands at the top
+    // of its quadrant, often below the lines on show, and before this nothing said where it went. It becomes the
+    // selected task, in the bar and in the tasks panel alike (the one TaskSelection), and its line glows. The add's own
+    // pulse has already drawn the line by now (TaskService.Changed runs PaintTaskList inline), so the selection's paint
+    // finds it. Selecting is also what brings the line into sight when it lands out of view: a change of selection
+    // scrolls the list to the selected line (the bar's task scrolling, task ea017420). The glow goes on after the
+    // selection's paint, which would otherwise put the plain selected fill back over it.
+    void ShowAddedTask(Guid id)
+    {
+        selection.Select(id);
+        GlowTaskLine(id);
+    }
+
+    // The glow on the selected line `id`, when it is on show (TaskGlow.Fading).
+    void GlowTaskLine(Guid id) =>
+        (taskLinesPanel?.Children.OfType<Button>() ?? [])
+            .Where(b => b.Tag is TaskLine line && line.Id == id && selection.IsSelected(id))
+            .Select(b => b.Content).OfType<Border>().ToList()
+            .ForEach(frame => frame.Background = TaskGlow.Fading(TaskSelectedFill));
+
+    // For the tests: whether a line on show is glowing.
+    internal bool TaskLineGlowing(Guid id) =>
+        (taskLinesPanel?.Children.OfType<Button>() ?? []).Any(b => b.Tag is TaskLine line && line.Id == id
+            && b.Content is Border frame && TaskGlow.IsGlow(frame.Background));
 
     // A chip, or a workspace picked from "other…"'s menu. The chips are always shown, so a chip can be the first thing
     // pressed, on an idle box or on the way back to text left in it (EndTyping keeps the text). That press must
