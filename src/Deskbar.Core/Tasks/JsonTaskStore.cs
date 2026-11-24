@@ -32,6 +32,10 @@ namespace Deskbar.Core.Tasks;
 // risk is why the goals themselves are in a file of their own, goals.json (spec, "Calls made in writing this up"): an
 // older build put back by the updater never touches it, so at worst the links go and the goals stay.
 //
+// THE PARENT (subtasks, docs/superpowers/specs/2026-11-24-subtasks-design.md). `parentId` is an optional field of version
+// 2, a Guid or null, the task this one is a subtask of. A missing one is no parent. An older version 2 build ignores it
+// and drops it on its next save, which costs the links and never a task, as with `goalId`.
+//
 // THE ASSIGNEE (Ruling 57). `assignee` is an optional object of version 2 too, `{"kind":"me|claude|colleague","id":..,"name":..}`,
 // so no version bump. A missing or unreadable one is DERIVED on load (Assignee.DerivedFor): a task with sessions that is
 // in progress or in the backlog goes to Claude, everything else to Petre. An older build ignores the field and drops it
@@ -108,7 +112,9 @@ public sealed class JsonTaskStore(string baseDirectory, Action<string>? trace = 
         bool? Adopted = null,
         // TaskItem.HandedBack (stalled tasks, spec 2026-11-23-stalled-claude-tasks-design.md): optional, read tolerantly
         // like WaitingSince, so a wrong-typed value reads as not handed back. Still version 2.
-        [property: JsonConverter(typeof(TolerantTimeConverter))] DateTimeOffset? HandedBack = null);
+        [property: JsonConverter(typeof(TolerantTimeConverter))] DateTimeOffset? HandedBack = null,
+        // TaskItem.ParentId (subtasks spec, 2026-11-24-subtasks-design.md): the parent task's id or null. Still version 2.
+        Guid? ParentId = null);
 
     // The assignee (Ruling 57): kind by name ("me", "claude", "colleague"), plus the id and name a colleague needs.
     sealed record AssigneeDto(string? Kind, string? Id, string? Name);
@@ -201,7 +207,8 @@ public sealed class JsonTaskStore(string baseDirectory, Action<string>? trace = 
             t.Description.Length > 0 ? t.Description : null,
             t.WaitingSince.HasValue ? t.WaitingSince.Value.ToUniversalTime() : null,
             t.Adopted,
-            t.HandedBack.HasValue ? t.HandedBack.Value.ToUniversalTime() : null);
+            t.HandedBack.HasValue ? t.HandedBack.Value.ToUniversalTime() : null,
+            t.ParentId.HasValue ? t.ParentId.Value : null);
 
     static TaskItem FromDto(TaskDto d) =>
         new(d.Id, d.Title ?? "",
@@ -229,6 +236,7 @@ public sealed class JsonTaskStore(string baseDirectory, Action<string>? trace = 
                 .GetValueOrDefault(Assignee.DerivedFor((d.Sessions ?? []).Count > 0, d.Status)),
             Adopted = d.Adopted ?? false,
             HandedBack = d.HandedBack is { } handed ? handed.ToUniversalTime() : Maybe<DateTimeOffset>.None,
+            ParentId = d.ParentId is { } parent ? parent : Maybe<Guid>.None,
         };
 
     // The rank a task saved before ranks existed gets, so the tasks keep the order the bar showed them in then:

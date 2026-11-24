@@ -311,6 +311,53 @@ public sealed class JsonTaskStoreTests : IDisposable
         Assert.Contains("\"goalId\": null", text);
     }
 
+    // Subtasks (docs/superpowers/specs/2026-11-24-subtasks-design.md, "The link"): the parent task is an optional
+    // `parentId` on the task, still version 2, as `goalId` is.
+    [Fact]
+    public void The_parent_round_trips()
+    {
+        var store = new JsonTaskStore(dir);
+        var board = Sample();
+        var parent = board.Tasks[0].Id;
+        board = new TaskBoard(board.Tasks.Select((t, i) => i == 1 ? t with { ParentId = parent } : t).ToArray());
+
+        Assert.True(store.Save(board).IsSuccess);
+        var loaded = store.Load().Value;
+
+        Assert.Equal(board.Tasks.Select(t => t.ParentId), loaded.Tasks.Select(t => t.ParentId));
+        var text = File.ReadAllText(TasksPath);
+        Assert.Contains($"\"parentId\": \"{parent}\"", text);
+        Assert.Contains("\"parentId\": null", text);
+    }
+
+    // A file written before subtasks has no parentId: every task reads as having no parent.
+    [Fact]
+    public void A_file_without_parent_ids_reads_as_no_parent()
+    {
+        Directory.CreateDirectory(dir);
+        File.WriteAllText(TasksPath, Version2(status: "\"Backlog\""));
+
+        var loaded = new JsonTaskStore(dir).Load();
+
+        Assert.True(loaded.IsSuccess, loaded.IsFailure ? loaded.Error : "");
+        Assert.True(loaded.Value.Tasks.Single().ParentId.HasNoValue);
+    }
+
+    // A hand-edited file whose parentId names no task still loads, the link kept as written: nothing prunes on load
+    // (the same reasoning as GoalId), and TaskBoard.Family reads a missing parent as none.
+    [Fact]
+    public void A_parent_id_naming_no_task_loads_and_is_kept()
+    {
+        Directory.CreateDirectory(dir);
+        var missing = "dddddddd-0000-0000-0000-000000000001";
+        File.WriteAllText(TasksPath, Version2(status: "\"Backlog\"").Replace("\"workspaceId\": null,", $"\"workspaceId\": null, \"parentId\": \"{missing}\","));
+
+        var loaded = new JsonTaskStore(dir).Load();
+
+        Assert.True(loaded.IsSuccess, loaded.IsFailure ? loaded.Error : "");
+        Assert.Equal(Maybe.From(Guid.Parse(missing)), loaded.Value.Tasks.Single().ParentId);
+    }
+
     // A file written before goals has no goalId at all: every task reads as belonging to no goal.
     [Fact]
     public void A_file_without_goal_ids_reads_as_no_goal()
