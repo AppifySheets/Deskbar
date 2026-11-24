@@ -213,8 +213,8 @@ public sealed class TasksBoard : IDisposable
         {
             StartClaude = startClaude,
             OpenSession = openSession is null ? null : (id, session) => OpenSession(id, session),
-            SubtaskParent = id => tasks.Board.SubtaskParentFor(id).Map(p => new SubtaskParentView(p.Id, p.Title, p.WorkspaceId))
-                .GetValueOrDefault((SubtaskParentView?)null),
+            SubtaskParent = id => tasks.Board.SubtaskParentFor(id)
+                .Match(p => new SubtaskParentView(p.Id, p.Title, p.WorkspaceId), () => (SubtaskParentView?)null),
             AddSubtask = (title, workspace, quadrant, parent) => AddNote(title, workspace, quadrant, parent).IsSuccess,
         };
 
