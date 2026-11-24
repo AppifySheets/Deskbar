@@ -328,12 +328,12 @@ public sealed partial class RemoteControl
         if (failure is not null) return ControlReply.Fail(failure);
 
         // With --parent and no --workspace the note goes where its parent is, not to the caller's workspace (subtasks
-        // spec, after the builder check): a subtask belongs with its parent. TaskBoard.AddNote takes the parent's
-        // workspace when given none.
-        var parent = o.Parent is { } p ? service.Board.Find(p).Map(t => Maybe.From(t.Id)) : Result.Success(Maybe<Guid>.None);
+        // spec, after the builder check): a subtask belongs with its parent. `--workspace none` still means none (final
+        // review, finding 4), so the parent's workspace is looked up here rather than defaulted by the board.
+        var parent = o.Parent is { } p ? service.Board.Find(p).Map(Maybe.From) : Result.Success(Maybe<TaskItem>.None);
         return parent
-            .Bind(up => (up.HasValue && o.Workspace is null ? Result.Success(Maybe<Guid>.None) : ResolveWorkspace(o.Workspace, from))
-                .Bind(workspace => service.AddNote(o.Title!, workspace, QuadrantOf.Flags(o.Important, o.Urgent), up)))
+            .Bind(up => (up.HasValue && o.Workspace is null ? Result.Success(up.Value.WorkspaceId) : ResolveWorkspace(o.Workspace, from))
+                .Bind(workspace => service.AddNote(o.Title!, workspace, QuadrantOf.Flags(o.Important, o.Urgent), up.Map(t => t.Id))))
             .Match(task => Success(Describe(task)), ControlReply.Fail);
     }
 

@@ -1583,7 +1583,8 @@ public partial class FloatingBar
             ? front
             : languageTarget != 0 && OnCurrentDesktop(languageTarget) ? languageTarget : 0;
         taskAddHere = manager.CurrentWorkspaceId;
-        if (taskAddBox.Text.Length == 0) taskAddTarget = taskAddHere;
+        // A subtask box keeps its parent's workspace, empty or not (final review, finding 2): the subtask lands with its parent.
+        if (taskAddBox.Text.Length == 0 && taskAddParent.HasNoValue) taskAddTarget = taskAddHere;
         taskTyping = true;
         PaintTaskChips();
         PaintAddRow();
@@ -1643,7 +1644,8 @@ public partial class FloatingBar
         PaintPlaceholder();
         if (taskTyping) return;
         taskAddHere = current;
-        if (taskAddBox.Text.Length == 0) taskAddTarget = current;
+        // As in BeginTyping: an empty subtask box keeps its parent's workspace (final review, finding 2).
+        if (taskAddBox.Text.Length == 0 && taskAddParent.HasNoValue) taskAddTarget = current;
         PaintTaskChips();
     }
 

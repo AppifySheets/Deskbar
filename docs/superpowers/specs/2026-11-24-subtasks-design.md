@@ -67,8 +67,10 @@ Claude worked on, most of that context is not in any field Deskbar keeps. It is 
 - `TaskBoard.SetParent(id, Maybe<Guid> parent, now)`. Refused: a parent that does not exist, the task itself, a parent
   that is itself a subtask, and a task that has subtasks of its own (one level). Setting the parent it already has
   returns this same board. A closed parent is allowed: its context is still worth reading.
-- `TaskBoard.AddNote` and `Create` take an optional parent. A subtask added with a parent takes the parent's workspace
-  when none is given, and lands at the top of its quadrant as any new note does.
+- `TaskBoard.AddNote` takes an optional parent. A subtask lands at the top of its quadrant as any new note does, on the
+  workspace it is given, none included. Where nothing was chosen, the caller gives it the parent's workspace (the add
+  boxes' chip, `task add --parent` without `--workspace`, a session's `task subtask`), so "none" picked by hand still
+  means none (final review, finding 4).
 - Deleting a parent frees its subtasks (their `ParentId` goes to none, stamped), as `DetachGoal` does for goals.
   Closing a parent changes nothing about its subtasks.
 - `TaskBoard.Family(id)`: the parent (if any), the siblings (the parent's other subtasks, open ones first in pile order,
