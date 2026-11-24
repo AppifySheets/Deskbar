@@ -103,7 +103,9 @@ public sealed class TaskService(ITaskStore store, Func<DateTimeOffset> now, Func
 
     public Result MarkDone(Guid id) => Apply(Board.MarkDone(id, now()));
 
-    public Result Close(Guid id) => Apply(Board.Close(id, now()));
+    // `stoppingClaude`: past the refusal for a task Claude is still working on (TaskBoard.Close, task 37cd7081), for
+    // "Stop Claude and close", which stops the sessions right after.
+    public Result Close(Guid id, bool stoppingClaude = false) => Apply(Board.Close(id, now(), stoppingClaude));
 
     public Result Reopen(Guid id) => Apply(Board.Reopen(id, now()));
 

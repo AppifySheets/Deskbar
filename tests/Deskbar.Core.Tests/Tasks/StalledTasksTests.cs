@@ -159,7 +159,7 @@ public sealed class StalledTasksTests
     public void The_clock_forgets_tasks_it_no_longer_watches()
     {
         var busy = StalledTasks.Step(Claudes(TaskBoard.Empty, id1), S1Works, S1Works, NoneBusy, At(1));
-        var closed = busy.Board.Close(id1, At(2)).Value;
+        var closed = busy.Board.Close(id1, At(2), stoppingClaude: true).Value;
 
         var step = StalledTasks.Step(closed, Nobody, Nobody, busy.LastBusy, At(3));
 

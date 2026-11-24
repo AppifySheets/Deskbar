@@ -309,6 +309,14 @@ public class FloatingBarTaskListTests
 
         Click(ButtonNamed(line, "Tick off"));
 
+        // Task 37cd7081: its session is still live (it is waiting on Petre), so the tick offers to stop Claude first.
+        Assert.Equal(TaskStatus.WaitingOnYou, t.Tasks.Board.Tasks.Single().Status);
+        var stop = Assert.IsAssignableFrom<ContextMenu>(t.Bar.StopClaudeMenu);
+        var item = stop.Items.OfType<MenuItem>().Single(i => i.Header is TextBlock { Text: TaskViews.StopClaudeAndClose });
+        item.RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
+        stop.IsOpen = false;
+        PumpBar(t);
+
         Assert.Equal(TaskStatus.Closed, t.Tasks.Board.Tasks.Single().Status);
         var closing = t.Lines.Single();
         Assert.True(Closing(closing));

@@ -376,7 +376,7 @@ public class TaskOrderTests
         board = board.Ask(id1, "Merge?", clock).Value;
         var raised = Get(board, id1).Raised;
         Later();
-        board = board.Close(id1, clock).Value;
+        board = board.Close(id1, clock, stoppingClaude: true).Value;
         Later();
 
         board = board.UndoClose(id1, TaskStatus.WaitingOnYou, Maybe.From("Merge?"), clock).Value;

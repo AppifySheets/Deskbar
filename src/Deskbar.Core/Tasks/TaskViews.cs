@@ -298,11 +298,23 @@ public static class TaskViews
         open == 1 ? "Close its open subtask first" : $"Close its {open} open subtasks first";
 
     /// <summary>
+    /// Why a task Claude is still working on will not close (TaskBoard.Close, task 37cd7081): the bar's message, the
+    /// window's problem line and `task close` say it, each with its own way past it (the ticks' "Stop Claude and close"
+    /// menu, `--stop-claude` on the pipe).
+    /// </summary>
+    public const string ClaudeStillWorkingRefusal = "Claude is still working on this task. Wait until it is Done, or stop Claude and close it";
+
+    /// <summary>The one item of the menu a tick opens on such a task (FloatingBar.TaskList and TasksWindow).</summary>
+    public const string StopClaudeAndClose = "Stop Claude and close";
+
+    /// <summary>
     /// The tooltip on a line's tick box, the bar's and the window's alike: what ticking it off does, or, on a parent with
     /// open subtasks, why it will not (the same words the refusal uses), so the reason shows before the click.
     /// </summary>
-    public static string TickTip(bool claudes, int openSubtasks) =>
+    // `working` (task 37cd7081): Claude is still at it (TaskBoard.ClaudeStillWorking), so the tick offers to stop it first.
+    public static string TickTip(bool claudes, int openSubtasks, bool working = false) =>
         openSubtasks > 0 ? CloseSubtasksFirst(openSubtasks)
+        : working ? "Claude is still working on this: tick to stop Claude and close"
         : claudes ? "Tick off: closes Claude's task"
         : "Tick off: closes the note";
 

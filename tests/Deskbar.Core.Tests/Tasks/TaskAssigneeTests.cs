@@ -201,7 +201,7 @@ public sealed class TaskAssigneeTests : IDisposable
     public void Reopening_derives_the_assignee_from_what_the_task_is_now()
     {
         // A session still live on it: in progress, Claude's.
-        var live = Claudes(TaskBoard.Empty, id1).Close(id1, clock).Value;
+        var live = Claudes(TaskBoard.Empty, id1).Close(id1, clock, stoppingClaude: true).Value;
         Assert.Equal(Assignee.Me, Assignee.DerivedFor(false, TaskStatus.Backlog)); // the rule's two ends
         Assert.Equal(Assignee.Claude, Get(live.Reopen(id1, clock).Value, id1).Assignee);
 
@@ -339,7 +339,7 @@ public sealed class TaskAssigneeTests : IDisposable
         {
             "ask" => handed.Ask(id1, "OK?", clock).Value,
             "done" => handed.MarkDone(id1, clock).Value,
-            "close" => handed.Close(id1, clock).Value,
+            "close" => handed.Close(id1, clock, stoppingClaude: true).Value,
             "join" => handed.Join(id1, Session("s2"), clock).Value,
             _ => handed.SetStatus(id1, TaskStatus.Backlog, clock).Value,
         };

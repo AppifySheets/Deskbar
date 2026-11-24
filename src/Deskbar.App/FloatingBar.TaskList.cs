@@ -1269,7 +1269,7 @@ public partial class FloatingBar
                 Background = Brushes.Transparent,
                 Margin = new Thickness(1, 0, 1, 0),
             // A parent with open subtasks will not close (task 842e1ba4): the tip names why before the click.
-            }, () => CloseWithUndo(line), TaskViews.TickTip(line.Claudes, line.SubtaskCount), ignoredWhen: TaskClickIgnored),
+            }, () => CloseWithUndo(line), TaskViews.TickTip(line.Claudes, line.SubtaskCount, ClaudeStillWorking(line.Id)), ignoredWhen: TaskClickIgnored),
         }.OfType<UIElement>();
 
     // The workspace as a dot in its colour, for a line too narrow for the chip (TaskLineFace): its name in the tooltip,
@@ -1533,9 +1533,20 @@ public partial class FloatingBar
     // task was closed meanwhile, or it is a parent whose subtasks are not all closed yet (task 842e1ba4), which
     // without the message would look like a tick that does nothing. Several lines can be pending at once, each with
     // its own timer.
-    void CloseWithUndo(TaskLine line)
+    //
+    // CLAUDE STILL AT IT (task 37cd7081). A task Claude is still working on (open, not Done, a live session) does not close
+    // on a tick: closing ends no session, and the session would be left running with nowhere to report. The tick, and
+    // the line menu's Close, open the stop menu instead (OpenStopClaudeMenu), whose one item closes with `stopClaude`:
+    // through StopClaudeAndClose (the App's ClaudeTaskActions.StopAndClose, which closes and then stops the sessions),
+    // with the same undo window as any close.
+    void CloseWithUndo(TaskLine line, bool stopClaude = false)
     {
         if (taskService is null) return;
+        if (!stopClaude && ClaudeStillWorking(line.Id))
+        {
+            OpenStopClaudeMenu(line);
+            return;
+        }
         var index = shownTaskLines.ToList().FindIndex(l => l.Id == line.Id);
         var pending = new PendingClose(line with { Closing = true }, Math.Max(index, 0), line.Status, Disposable.Empty)
         {
@@ -1544,7 +1555,42 @@ public partial class FloatingBar
         };
         pending = pending with { Timer = TaskUndoTimer(UndoWindow, () => ForgetPendingClose(pendingCloses.FirstOrDefault(p => p.Line.Id == line.Id), repaint: true)) };
         pendingCloses.Add(pending);
-        Report(taskService.Close(line.Id).TapError(_ => ForgetPendingClose(pending, repaint: true)));
+        var closed = !stopClaude ? taskService.Close(line.Id)
+            : StopClaudeAndClose is { } stop ? stop(line.Id)
+            // No App behind the bar (the tests): the close alone, nothing to stop.
+            : taskService.Close(line.Id, stoppingClaude: true);
+        Report(closed.TapError(_ => ForgetPendingClose(pending, repaint: true)));
+    }
+
+    // Whether ticking the line off would leave Claude working on its task (TaskBoard.ClaudeStillWorking).
+    bool ClaudeStillWorking(Guid id) =>
+        taskService?.Board.Tasks.FirstOrDefault(t => t.Id == id) is { } task && TaskBoard.ClaudeStillWorking(task);
+
+    /// <summary>
+    /// "Stop Claude and close" for a task Claude is still working on (task 37cd7081): the App's
+    /// ClaudeTaskActions.StopAndClose, which closes the task past the refusal and stops its background sessions. Unset (the
+    /// tests), the menu's item closes the task the same way and stops nothing.
+    /// </summary>
+    internal Func<Guid, Result>? StopClaudeAndClose { get; init; }
+
+    /// <summary>For the tests: the last stop menu a tick opened.</summary>
+    internal ContextMenu? StopClaudeMenu { get; private set; }
+
+    /// <summary>
+    /// The menu a tick opens on a task Claude is still working on, at the pointer: a line saying so, which takes no click,
+    /// and "Stop Claude and close". Held open the way the bar's menus are (HoldFadeWhileOpen). Internal, for the tests.
+    /// </summary>
+    internal ContextMenu OpenStopClaudeMenu(TaskLine line)
+    {
+        var menu = new ContextMenu { Placement = PlacementMode.MousePoint };
+        menu.Items.Add(new MenuItem { Header = new TextBlock { Text = "Claude is still working on this task." }, IsEnabled = false });
+        // Run once this menu has closed, so the line's undo paint is not held back by the menu still being open.
+        menu.Items.Add(TaskMenuItem(TaskViews.StopClaudeAndClose, () => Dispatcher.BeginInvoke(() => CloseWithUndo(line, stopClaude: true),
+            System.Windows.Threading.DispatcherPriority.Input)));
+        HoldFadeWhileOpen(menu);
+        StopClaudeMenu = menu;
+        menu.IsOpen = true;
+        return menu;
     }
 
     // The undo window is over (or Undo was pressed, or the task came back another way): the line leaves.

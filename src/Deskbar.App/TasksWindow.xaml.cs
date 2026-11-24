@@ -528,11 +528,11 @@ public partial class TasksWindow : Window
             // working changes the squares' halos and nothing else, and must still redraw the line. Not in a Matrix cell's:
             // a compact line draws no sessions, so it would only rebuild the Matrix for nothing (review minor 2).
             string.Join('\u0002', view.Cells.Select(c => $"{c.Header}:" + string.Join('\u0003', c.Rows.Select(r =>
-                $"{r.Id}|{r.Title}|{r.Detail}|{r.Description}|{r.Status}|{r.Claudes}|{r.Assignee.Id}|{PlaceSignature(r.Place)}|{r.CommentCount}|{r.Expanded}|{r.Closing}|{r.Important}|{r.Urgent}|{r.ParentTitle}|{r.SubtaskCount}|" +
+                $"{r.Id}|{r.Title}|{r.Detail}|{r.Description}|{r.Status}|{r.Claudes}|{r.Assignee.Id}|{PlaceSignature(r.Place)}|{r.CommentCount}|{r.Expanded}|{r.Closing}|{r.Important}|{r.Urgent}|{r.ParentTitle}|{r.SubtaskCount}|{r.ClaudeWorking}|" +
                 string.Join('\u0004', r.Comments.Select(c => $"{c.Id}{c.Author}{c.When}{c.Markdown}{c.Settled}")))))),
             string.Join('\u0002', view.Groups.Select(g => $"{g.Header}:" + string.Join('\u0003', g.Rows.Select(r =>
                 $"{r.Id}|{r.Title}|{r.Detail}|{r.Description}|{r.Status}|{r.Claudes}|{r.Assignee.Id}|{r.Sessions}|{r.SessionCount}|{r.LiveCount}|{PlaceSignature(r.Place)}|{r.CommentCount}|" +
-                $"{r.Expanded}|{r.Closing}|{r.Important}|{r.Urgent}|{r.WorkingCount}|{r.ParentTitle}|{r.SubtaskCount}|{r.Nested}|" +
+                $"{r.Expanded}|{r.Closing}|{r.Important}|{r.Urgent}|{r.WorkingCount}|{r.ParentTitle}|{r.SubtaskCount}|{r.ClaudeWorking}|{r.Nested}|" +
                 string.Join('\u0004', r.Subtasks.Select(c => $"{c.Id}{c.Title}{c.Status}{c.StatusLine}")) + "|" + string.Join('\u0004', r.SessionList.Select(s => $"{s.Id}{s.Joined}{s.State}")) + "|" +
                 string.Join('\u0004', r.Comments.Select(c => $"{c.Id}{c.Author}{c.When}{c.Markdown}{c.Settled}")))))));
 
@@ -1165,7 +1165,7 @@ public partial class TasksWindow : Window
                         CornerRadius = new CornerRadius(3),
                     // A parent with open subtasks is refused by the board (task 842e1ba4); the tip says so before the
                     // click, and the click's refusal shows on the problem line (TasksBoard.Close reports it).
-                    }, "Close", () => Actions?.Close(row.Id), TaskViews.TickTip(row.Claudes, row.SubtaskCount));
+                    }, "Close", () => Actions?.Close(row.Id), TaskViews.TickTip(row.Claudes, row.SubtaskCount, row.ClaudeWorking));
 
     // The title over its detail; on a line being renamed, the box that renames it.
     UIElement TextOf(TaskRowView row)
@@ -2158,6 +2158,22 @@ public partial class TasksWindow : Window
 
     // For the tests: the menu open now, if any.
     internal ContextMenu? OpenedMenu => openMenu;
+
+    /// <summary>
+    /// The menu a tick (or the More menu's Close) opens on a task Claude is still working on (task 37cd7081), at the
+    /// pointer: a line saying so, which takes no click, and "Stop Claude and close" (TasksWindowActions.StopClaudeAndClose).
+    /// Opened by TasksBoard.Close; internal, and answering the menu, for the tests.
+    /// </summary>
+    internal ContextMenu OpenStopClaudeMenu(Guid id)
+    {
+        var menu = new ContextMenu { Placement = PlacementMode.MousePoint };
+        menu.Items.Add(new MenuItem { Header = new TextBlock { Text = "Claude is still working on this task." }, IsEnabled = false });
+        // Run once this menu has closed, so the redraw the close causes is not held back by it (MustWait).
+        menu.Items.Add(Item(TaskViews.StopClaudeAndClose, () => Dispatcher.BeginInvoke(() => Actions?.StopClaudeAndClose?.Invoke(id),
+            System.Windows.Threading.DispatcherPriority.Input)));
+        OpenMenu(menu);
+        return menu;
+    }
 
     // Every menu of the window opens here, so a redraw waits for it (MustWait) and runs when it closes.
     void OpenMenu(ContextMenu menu)

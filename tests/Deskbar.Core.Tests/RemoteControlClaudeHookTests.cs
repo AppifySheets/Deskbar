@@ -718,7 +718,7 @@ public class RemoteControlClaudeHookTests
         var manager = Started();
         Editor(manager, 0x10, "TaskSpaces", "Deskbar");
         Said(manager, "s1", Repo, "new", "Tasks board");
-        Assert.True(tasks.Close(Titled("Tasks board").Id).IsSuccess);
+        Assert.True(tasks.Close(Titled("Tasks board").Id, stoppingClaude: true).IsSuccess);
 
         var line = Hooked(manager, "UserPromptSubmit");
 

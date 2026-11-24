@@ -1604,6 +1604,8 @@ public partial class App : Application
                 Start: (task, folder) => claudeActions?.Start(task, folder) ?? Result.Failure(ClaudeActionsNotReady),
                 OpenSession: (task, session) => claudeActions?.OpenSession(task, session) ?? Result.Failure(ClaudeActionsNotReady))
             {
+                // `task close --stop-claude` (task 37cd7081), the twin of the ticks' "Stop Claude and close".
+                StopAndClose = task => claudeActions?.StopAndClose(task) ?? Result.Failure(ClaudeActionsNotReady),
                 // Subtasks: the family text a session reads names each session's transcript file, found the way the
                 // keeper finds it (worktree project folders included). Read when a command arrives, like the actions.
                 Transcript = session => claudeSessions?.TranscriptOf(session) ?? Maybe<string>.None,
@@ -1737,6 +1739,8 @@ public partial class App : Application
                 Tell = message => MessageBox.Show(message, "Deskbar", MessageBoxButton.OK, MessageBoxImage.Information),
                 // A double-click that brings back a task the keeper gave up on clears the give-up's resume count.
                 Forget = claudeSessions.Forget,
+                // "Stop Claude and close" (task 37cd7081): the same `claude stop` the comment wake uses.
+                Stop = claudeSessions.StopNow,
                 // claude.exe's full path for the terminal windows, looked up at each launch like ClaudeCli's own calls
                 // (task dbe25323); the bare name when it is nowhere, and wt then says so in its own window.
                 Claude = () => Deskbar.Windows.Claude.ClaudeLocator.Find().GetValueOrDefault("claude"),
@@ -1949,6 +1953,10 @@ public partial class App : Application
                 SessionWindow = SessionWindowOf,
                 // A line menu's "Start Claude on this" (Task 9): ClaudeTaskActions.Offer, which may open a pick list.
                 StartClaude = id => claudeActions?.Offer(id),
+                // A tick on a task Claude is still working on (task 37cd7081): ClaudeTaskActions.StopAndClose, which closes
+                // it and then stops its background sessions.
+                StopClaudeAndClose = id => tasks!.Board.Tasks.TryFirst(t => t.Id == id).ToResult($"No task with id {id}")
+                    .Bind(task => claudeActions?.StopAndClose(task) ?? Result.Failure(ClaudeActionsNotReady)),
                 // Whether a window is on the desktop in front, for the task list's keyboard hand-back, which must never
                 // switch desktops: a window pinned to every desktop is, one on the current desktop is, and any failure
                 // to ask counts as no, so a doubt keeps the keyboard where it is rather than moving Petre.
@@ -2262,6 +2270,8 @@ public partial class App : Application
                 // line menu and in the thread, and a redraw whenever `claude agents --json` gives a new list.
                 sessionsOf: task => claudeActions?.SessionsOf(task) ?? [],
                 startClaude: id => claudeActions?.Offer(id),
+                // A tick on a task Claude is still working on (task 37cd7081): closed, then its sessions stopped.
+                stopClaudeAndClose: task => claudeActions?.StopAndClose(task) ?? Result.Failure(ClaudeActionsNotReady),
                 openSession: (task, session) => claudeActions?.OpenSession(task, session) ?? Result.Failure(ClaudeActionsNotReady),
                 sessionsChanged: claudeActions?.Changed,
                 // How many of a task's live sessions Claude is busy in, by the same latest list (tasks panel plan,

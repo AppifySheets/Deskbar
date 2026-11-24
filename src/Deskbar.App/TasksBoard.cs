@@ -112,6 +112,8 @@ public sealed class TasksBoard : IDisposable
     readonly Func<TaskItem, IReadOnlyList<SessionView>> sessionsOf;
     readonly Func<TaskItem, string, Result>? openSession;
     readonly Func<TaskItem, int> workingOf;
+    // "Stop Claude and close" (task 37cd7081): the App's ClaudeTaskActions.StopAndClose. None (the tests): the close alone.
+    readonly Func<TaskItem, Result>? stopClaudeAndClose;
     readonly IDisposable subscriptions;
 
     // The lines closed in this window and still in their undo window: the status each had, and its timer.
@@ -163,9 +165,10 @@ public sealed class TasksBoard : IDisposable
         Func<DateTimeOffset>? now = null, TaskSelection? selection = null, GoalService? goals = null,
         Func<TaskItem, IReadOnlyList<SessionView>>? sessionsOf = null, Action<Guid>? startClaude = null,
         Func<TaskItem, string, Result>? openSession = null, IObservable<System.Reactive.Unit>? sessionsChanged = null,
-        Func<TaskItem, int>? workingOf = null)
+        Func<TaskItem, int>? workingOf = null, Func<TaskItem, Result>? stopClaudeAndClose = null)
     {
         this.workingOf = workingOf ?? (_ => 0);
+        this.stopClaudeAndClose = stopClaudeAndClose;
         this.goals = goals;
         this.sessionsOf = sessionsOf ?? (task => TaskViews.SessionList(task, Maybe<IReadOnlyCollection<ClaudeAgent>>.None, _ => true));
         this.openSession = openSession;
@@ -212,6 +215,7 @@ public sealed class TasksBoard : IDisposable
             FilterClaudeWorking: FilterClaudeWorking)
         {
             StartClaude = startClaude,
+            StopClaudeAndClose = id => Close(id, stopClaude: true),
             OpenSession = openSession is null ? null : (id, session) => OpenSession(id, session),
             SubtaskParent = id => tasks.Board.SubtaskParentFor(id)
                 .Match(p => new SubtaskParentView(p.Id, p.Title, p.WorkspaceId), () => (SubtaskParentView?)null),
@@ -570,17 +574,29 @@ public sealed class TasksBoard : IDisposable
         return Report(openSession(task.Value, sessionId));
     }
 
-    /// <summary>Closes the task at once, keeping its line in place with Undo for the undo window (see the header).</summary>
-    public Result Close(Guid id)
+    /// <summary>
+    /// Closes the task at once, keeping its line in place with Undo for the undo window (see the header). A task Claude is
+    /// still working on (task 37cd7081, TaskBoard.ClaudeStillWorking) is not closed: the window opens its stop menu, whose
+    /// "Stop Claude and close" comes back here with <paramref name="stopClaude"/>, through the App's StopAndClose.
+    /// </summary>
+    public Result Close(Guid id, bool stopClaude = false)
     {
         if (tasks.Board.Tasks.FirstOrDefault(t => t.Id == id) is not { IsOpen: true } task) return Report(tasks.Close(id));
+        if (!stopClaude && TaskBoard.ClaudeStillWorking(task))
+        {
+            window.OpenStopClaudeMenu(id);
+            return Result.Success();
+        }
         // Pending before Close pulses Changed, so the redraw that pulse causes already draws the line struck through.
         pendingCloses[id] = new PendingClose(task.Status, undoTimer(UndoWindow, () => Forget(id)))
         {
             Question = task.Question,
             Selected = selection.IsSelected(id),
         };
-        return Report(tasks.Close(id).TapError(_ => Forget(id)));
+        var closed = !stopClaude ? tasks.Close(id)
+            : stopClaudeAndClose is { } stop ? stop(task)
+            : tasks.Close(id, stoppingClaude: true);
+        return Report(closed.TapError(_ => Forget(id)));
     }
 
     /// <summary>
@@ -885,6 +901,8 @@ public sealed class TasksBoard : IDisposable
         // Subtasks (Petre's pick A): the parent's title in front of a subtask's, and a parent's open subtasks' count.
         ParentTitle = tasks.Board.ParentOf(task).Map(p => (string?)FloatingBar.FirstLine(p.Title)).GetValueOrDefault(),
         SubtaskCount = tasks.Board.OpenSubtaskCount(task.Id),
+        // Claude still at it (task 37cd7081): the tick's tip says it will offer to stop Claude.
+        ClaudeWorking = TaskBoard.ClaudeStillWorking(task),
         // An open thread lists the task's subtasks (follow-up: an open parent showed none of them).
         Subtasks = expanded.Contains(task.Id)
             ? tasks.Board.Family(task.Id).Map(f => f.Subtasks.Select(c => new SubtaskView(c.Id, FloatingBar.FirstLine(c.Title), c.Status, c.StatusLine)).ToArray())
@@ -1038,6 +1056,9 @@ internal sealed record TaskRowView(Guid Id, string Title, string Detail, TaskSta
     /// <summary>How many open subtasks the task has, drawn after its title ("· 2 subtasks"); 0 for none.</summary>
     public int SubtaskCount { get; init; }
 
+    /// <summary>Whether Claude is still working on the task (TaskBoard.ClaudeStillWorking): its tick offers to stop it.</summary>
+    public bool ClaudeWorking { get; init; }
+
     /// <summary>Drawn right under its parent (TaskViews.UnderParents), so the arrow needs no parent's name.</summary>
     public bool Nested { get; init; }
 
@@ -1153,6 +1174,9 @@ internal sealed record TasksWindowActions(
 {
     /// <summary>"Start Claude on this" (Task 9): the line menu's item and the thread's button. None, neither shows.</summary>
     public Action<Guid>? StartClaude { get; init; }
+
+    /// <summary>The stop menu's "Stop Claude and close" (task 37cd7081): TasksBoard.Close with stopClaude.</summary>
+    public Func<Guid, Result>? StopClaudeAndClose { get; init; }
 
     /// <summary>A session's Open in the thread (Task 9): the task's id and the session's. None, no Open buttons.</summary>
     public Action<Guid, string>? OpenSession { get; init; }

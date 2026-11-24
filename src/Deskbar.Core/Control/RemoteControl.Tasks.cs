@@ -11,7 +11,7 @@ namespace Deskbar.Core.Control;
 //
 //   task list [--closed]
 //   task add <title>|- [--workspace <name>|none] [--important] [--urgent]
-//   task close <id>
+//   task close <id> [--stop-claude]
 //   task reopen <id>
 //   task status <id> <backlog|in-progress|waiting|done>
 //   task rename <id> <title>
@@ -100,7 +100,11 @@ public sealed partial class RemoteControl
             ["list", "--closed"] => Success(service.Board.Tasks.Where(t => t.Status == TaskStatus.Closed)
                 .OrderByDescending(t => t.UpdatedAt).Select(Listed).ToArray()),
             ["add", .. var more] => TaskAdd(service, more, from),
-            ["close", var id] => TaskChange(service, id, t => service.Close(t.Id)),
+            // A task Claude is still working on refuses a plain close (task 37cd7081, TaskBoard.Close), and the refusal
+            // names the flag; `--stop-claude` is the menus' "Stop Claude and close", through the app (ClaudeTaskActions).
+            ["close", var id] => TaskChange(service, id, t => service.Close(t.Id)
+                .MapError(e => e == TaskViews.ClaudeStillWorkingRefusal ? $"{e} (task close {id} --stop-claude)" : e)),
+            ["close", var id, "--stop-claude"] => WithSessions(c => TaskChange(service, id, c.StopAndClose)),
             ["reopen", var id] => TaskChange(service, id, t => service.Reopen(t.Id)),
             ["status", var id, var status] => ParseStatus(status)
                 .Match(s => TaskChange(service, id, t => service.SetStatus(t.Id, s)), ControlReply.Fail),
@@ -447,4 +451,11 @@ public sealed record TaskSessionCommands(
     /// compiles; the default finds none, and the family text then lists sessions without a transcript.
     /// </summary>
     public Func<TaskSession, Maybe<string>> Transcript { get; init; } = _ => Maybe<string>.None;
+
+    /// <summary>
+    /// `task close <id> --stop-claude` (task 37cd7081): closes a task Claude is still working on and stops its background
+    /// sessions, as the ticks' "Stop Claude and close" does (ClaudeTaskActions.StopAndClose). An init property for the same
+    /// reason as Transcript; the default refuses, so a copy without it never closes under a running session.
+    /// </summary>
+    public Func<TaskItem, Result> StopAndClose { get; init; } = _ => Result.Failure("Claude sessions cannot be stopped in this copy of Deskbar");
 }

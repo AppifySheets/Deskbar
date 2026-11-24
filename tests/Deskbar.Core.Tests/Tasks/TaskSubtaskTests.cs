@@ -230,6 +230,11 @@ public class TaskSubtaskTests
         Assert.Equal(clock, closed.UpdatedAt);
     }
 
+    // "Stop Claude and close" (task 37cd7081) gets past a live session only, never past open subtasks.
+    [Fact]
+    public void Stopping_claude_never_closes_a_parent_with_open_subtasks() =>
+        Assert.Equal(TaskViews.CloseSubtasksFirst(2), Family().Close(parent, clock, stoppingClaude: true).Error);
+
     [Fact]
     public void A_subtask_closes_while_its_parent_is_open() =>
         Assert.Equal(TaskStatus.Closed, Get(Family().Close(child, clock).Value, child).Status);
