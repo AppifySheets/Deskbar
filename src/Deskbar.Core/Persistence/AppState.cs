@@ -796,6 +796,13 @@ public sealed record TasksWindowState(int Left, int Top, int Width, int Height, 
 // against the screen it docks to when it is shown, never here).
 public sealed record TasksPanelState(bool Open, double Width)
 {
+    // Whether the workspace filter is on "Current workspace" (TaskWorkspaceFilter.Current, task ed1a01fc): the one filter
+    // kept across opens and restarts, because it is a way of working rather than a look at the moment, and the panel
+    // reopens at every start. Every other filter still starts over on a fresh open. An init property, so a file written
+    // before it loads as false, and no migration.
+    public bool CurrentWorkspace { get; init; }
+
+
     // What an absent AppState.TasksPanel means: closed, at the default width. Callers use this, not their own copy.
     public static readonly TasksPanelState Default = new(false, Tasks.TasksPanelLayout.DefaultWidth);
 }

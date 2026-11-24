@@ -382,7 +382,8 @@ public sealed class JsonPersistenceStoreTests : IDisposable
         var pulses = 0;
         using var pulse = manager.StateChanged.Subscribe(_ => pulses++);
 
-        var panel = new TasksPanelState(Open: true, Width: 512.5);
+        // CurrentWorkspace (task ed1a01fc) is an init property, so it is checked to make the round trip too.
+        var panel = new TasksPanelState(Open: true, Width: 512.5) { CurrentWorkspace = true };
         Assert.True(manager.SaveTasksPanel(panel).IsSuccess);
         Assert.Equal(panel, store.Load().Value.TasksPanel);
         Assert.Equal(1, pulses);
@@ -405,6 +406,7 @@ public sealed class JsonPersistenceStoreTests : IDisposable
         var panel = loaded.Value.TasksPanel ?? TasksPanelState.Default;
         Assert.False(panel.Open);
         Assert.Equal(460, panel.Width);
+        Assert.False(panel.CurrentWorkspace);
     }
 
     [Fact]

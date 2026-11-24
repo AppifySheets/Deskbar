@@ -25,13 +25,33 @@ public enum TaskFilter { Open, WaitingOnYou, Done, InProgress, Backlog, Closed }
 
 /// <summary>
 /// The window's workspace filter: every task (<see cref="All"/>), or only the tasks on one workspace, or only the tasks
-/// on none (<see cref="On"/> with no workspace).
+/// on none (<see cref="On"/> with no workspace), or only the tasks on whichever workspace is in front
+/// (<see cref="Current"/>).
 /// </summary>
+//
+// CURRENT WORKSPACE (task ed1a01fc, 2026-11-25, Petre: "when i change workspace, it should only show me current
+// workspace tasks, when selected"). Current is a choice that FOLLOWS: it names no workspace of its own, and whoever
+// draws the window turns it into the workspace in front at that moment with Resolved, every time it draws. So a switch
+// of desktop narrows the list to the new workspace without anyone picking it again. On a desktop with no name the
+// workspace in front is none, and Current then shows the tasks on no workspace, the same as picking "none". Admits on an
+// unresolved Current would read it as that "none" filter too; callers resolve it first.
 public sealed record TaskWorkspaceFilter(bool Any, Maybe<Guid> Workspace)
 {
     public static readonly TaskWorkspaceFilter All = new(true, Maybe<Guid>.None);
 
+    /// <summary>The tasks on whichever workspace is in front, resolved again at every draw (see the comment above).</summary>
+    public static readonly TaskWorkspaceFilter Current = new(false, Maybe<Guid>.None) { FollowsCurrent = true };
+
+    /// <summary>Whether this is <see cref="Current"/>: a filter that follows the workspace in front.</summary>
+    public bool FollowsCurrent { get; private init; }
+
     public static TaskWorkspaceFilter On(Maybe<Guid> workspace) => new(false, workspace);
+
+    /// <summary>
+    /// The filter as it applies now: <see cref="Current"/> becomes the filter on <paramref name="current"/>, the workspace
+    /// in front (none on a desktop with no name); every other filter is itself.
+    /// </summary>
+    public TaskWorkspaceFilter Resolved(Maybe<Guid> current) => FollowsCurrent ? On(current) : this;
 
     public bool Admits(TaskItem task) =>
         Any || (Workspace.HasValue

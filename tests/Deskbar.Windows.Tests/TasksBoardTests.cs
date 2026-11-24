@@ -209,6 +209,66 @@ public class TasksBoardTests
         Assert.Equal([asking, nowhere, there, here], t.Window.Keys);
     });
 
+    // Task ed1a01fc, Petre: "when i change workspace, it should only show me current workspace tasks, when selected".
+    // "Current workspace" follows the desktop in front: a switch narrows the list, the chips' counts and the label to
+    // the new workspace without another pick, and a desktop with no name shows the tasks on no workspace.
+    [Fact]
+    public void The_current_workspace_filter_follows_a_workspace_switch() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        var here = t.Tasks.AddNote("here", t.Gepha).Value.Id;
+        var there = t.Tasks.AddNote("there", t.Sparrow).Value.Id;
+        var nowhere = t.Tasks.AddNote("nowhere", Maybe<Guid>.None).Value.Id;
+        SwitchTo(t, t.Gepha);
+        t.Controller.Show();
+
+        t.Controller.FilterWorkspace(TaskWorkspaceFilter.Current);
+        Assert.Equal([here], t.Window.Keys);
+        Assert.Contains("Open 1", t.Window.FilterLabels);
+        Assert.Equal("Workspace: GEPHA (current)", t.Window.WorkspaceFilterLabel);
+
+        SwitchTo(t, t.Sparrow);
+        Assert.Equal([there], t.Window.Keys);
+        Assert.Equal("Workspace: Sparrow (current)", t.Window.WorkspaceFilterLabel);
+
+        t.Controller.FilterWorkspace(TaskWorkspaceFilter.All);
+        Assert.Equal([nowhere, there, here], t.Window.Keys);
+    });
+
+    // The one filter a fresh open keeps (AppState.TasksPanel.CurrentWorkspace): it is how Petre works, and the panel
+    // reopens at every start. Picking any other workspace filter forgets it.
+    [Fact]
+    public void The_current_workspace_filter_survives_a_fresh_open_until_another_is_picked() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        var here = t.Tasks.AddNote("here", t.Gepha).Value.Id;
+        t.Tasks.AddNote("there", t.Sparrow);
+        SwitchTo(t, t.Gepha);
+        t.Controller.Show();
+        t.Controller.FilterWorkspace(TaskWorkspaceFilter.Current);
+        Assert.True(t.Harness.Manager.State.TasksPanel!.CurrentWorkspace);
+
+        t.Controller.Hide();
+        t.Controller.Show();
+        Assert.Equal([here], t.Window.Keys);
+        Assert.Equal("Workspace: GEPHA (current)", t.Window.WorkspaceFilterLabel);
+
+        t.Controller.FilterWorkspace(TaskWorkspaceFilter.On(t.Sparrow));
+        Assert.False(t.Harness.Manager.State.TasksPanel!.CurrentWorkspace);
+        t.Controller.Hide();
+        t.Controller.Show();
+        Assert.Equal("Workspace: all", t.Window.WorkspaceFilterLabel);
+    });
+
+    // A desktop switch as the tests drive one: the fake desktops say the workspace's desktop is in front, and pulse.
+    static void SwitchTo(Board t, Guid workspace)
+    {
+        var desktop = t.Harness.Manager.State.Workspaces.Single(w => w.Id == workspace).DesktopId!.Value;
+        t.Harness.Desktops.CurrentId = desktop;
+        ((System.Reactive.Subjects.Subject<Guid>)t.Harness.Desktops.CurrentChanged).OnNext(desktop);
+        Assert.Equal(workspace, t.Harness.Manager.CurrentWorkspaceId.Value);
+    }
+
     [Fact]
     public void A_line_expands_to_its_thread() => StaThread.Run(() =>
     {
@@ -2312,6 +2372,30 @@ public class TasksBoardTests
         Assert.True(menu.IsOpen);
         Click(WorkspaceChipMenu.Chips(menu).Single(c => AutomationProperties.GetName(c) == "Sparrow"));
         Assert.Equal("Workspace: Sparrow", t.Window.WorkspaceFilterLabel);
+    });
+
+    // "Current workspace" sits after "All workspaces" in the same menu, and once picked it is the outlined choice: no
+    // workspace chip is, not even the one in front, since picking that would pin the filter and stop it following.
+    [Fact]
+    public void The_workspace_filter_menu_offers_the_current_workspace() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        t.Tasks.AddNote("here", t.Gepha);
+        SwitchTo(t, t.Gepha);
+        t.Controller.Show();
+
+        Click(ButtonNamed(t.Window, "Workspace filter"));
+        var menu = Assert.IsAssignableFrom<ContextMenu>(t.Window.OpenedMenu);
+        Click(WorkspaceChipMenu.Chips(menu).Single(c => AutomationProperties.GetName(c) == "Current workspace"));
+        Assert.Equal("Workspace: GEPHA (current)", t.Window.WorkspaceFilterLabel);
+
+        Click(ButtonNamed(t.Window, "Workspace filter"));
+        var again = Assert.IsAssignableFrom<ContextMenu>(t.Window.OpenedMenu);
+        var outlined = WorkspaceChipMenu.Chips(again)
+            .Where(c => AutomationProperties.GetItemStatus(c) == WorkspaceChipMenu.CurrentStatus)
+            .Select(AutomationProperties.GetName).ToArray();
+        Assert.Equal(["Current workspace"], outlined);
+        again.IsOpen = false;
     });
 
     // The screencast shoot on v2.5.189: the toolbar's dropdowns did not open by mouse, keyboard or UI Automation. UIA's
