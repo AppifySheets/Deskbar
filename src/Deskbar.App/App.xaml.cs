@@ -81,6 +81,12 @@ public partial class App : Application
     // "Start Claude on this", the thread's session list and the pipe's `task go|start|open-session`. Built right after
     // claudeSessions, whose list and starts it uses; disposed with it.
     ClaudeTaskActions? claudeActions;
+
+    // A comment wakes its session (plan docs/superpowers/plans/2026-11-24-comment-wakes-session.md): the per-session inbox
+    // files under the state folder, which `claude-wait` registers waiters on, and the waker that delivers Petre's comments.
+    readonly Core.Tasks.CommentInbox commentInbox = new(Path.Combine(AppPaths.NewStateDir, Core.Tasks.CommentInbox.FolderName), () => DateTimeOffset.UtcNow);
+    CommentWaker? commentWaker;
+
     // Tiling (docs/superpowers/specs/2026-11-08-tiling-design.md): the Tiler decides, the surface does the
     // Win32. Both live for the process, both are null in compatibility mode (there are no desktops to tile),
     // and ExitApp disposes the Tiler and then the surface, so the LOCATIONCHANGE hook goes with them.
@@ -1583,7 +1589,10 @@ public partial class App : Application
                 // Subtasks: the family text a session reads names each session's transcript file, found the way the
                 // keeper finds it (worktree project folders included). Read when a command arrives, like the actions.
                 Transcript = session => claudeSessions?.TranscriptOf(session) ?? Maybe<string>.None,
-            });
+            },
+            // `claude-wait`, the comment waiter registering, and SessionEnd forgetting a session's inbox (a comment wakes
+            // its session).
+            inbox: commentInbox);
         controlServer = new ControlPipeServer(ControlCommandLine.PipeName,
             args => Dispatcher.InvokeAsync(() =>
             {
@@ -1661,6 +1670,12 @@ public partial class App : Application
             trace: ClickTrace.On ? ClickTrace.Write : null,
             // A finished task's session is stopped only while no window of Deskbar's is attached to it (task 87f899ad).
             windowOpen: task => ClaudeTaskActions.HasWindow(manager, task));
+
+        // Petre's comment on a task reaches its Claude session, waking it if idle (CommentWaker; plan
+        // docs/superpowers/plans/2026-11-24-comment-wakes-session.md). It reads the sessions' list ClaudeSessions keeps,
+        // and resumes or stops through it, so its resumes share the keeper's guards against starting a copy.
+        commentWaker = new CommentWaker(tasks!, () => manager.State.ClaudeTasksInEffect, claudeSessions.Live, claudeSessions.TranscriptExists, commentInbox,
+            claudeSessions.ResumeWith, claudeSessions.StopNow, ClickTrace.On ? ClickTrace.Write : null);
 
         // ...and what a click on a task does with those sessions (ClaudeTaskActions, Task 9): the double-click's session
         // window, "Start Claude on this", the thread's list and Open, the pipe's three verbs. Its answers land on this
@@ -2380,6 +2395,7 @@ public partial class App : Application
             TaskbarFlashingSwitch.Sync(false);
             // No more `claude` polls or resumes once the session is ending; running Claude sessions are not touched.
             claudeActions?.Dispose();
+            commentWaker?.Dispose();
             claudeSessions?.Dispose();
             // The tasks panel, before WPF's Shutdown closes its window (which follows this event when nothing cancels
             // it): saved open if it was, so it opens again at the next sign-in, and its strip given back. Without
@@ -2780,6 +2796,7 @@ public partial class App : Application
         TaskbarFlashingSwitch.Sync(false);
         // No more `claude` polls or resumes once the app is going; running Claude sessions are not touched.
         claudeActions?.Dispose();
+        commentWaker?.Dispose();
         claudeSessions?.Dispose();
         monitor?.Dispose();
         hotkeys?.Dispose(); // unregisters RegisterHotKey chords before the process exits
