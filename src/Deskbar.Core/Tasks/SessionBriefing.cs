@@ -26,6 +26,15 @@ public static class SessionBriefing
     const int DescriptionLength = 200;
     const string Shim = "deskbar.cmd";
 
+    // The family block's bounds (subtasks spec, "What a session reads"): at most this many siblings or subtasks, this
+    // many sessions per task and this many of the parent's comments, and the whole block cut at FamilyLength with a
+    // pointer at `task family`. Twenty subtasks of five sessions each with 300-character titles stay under it (test), so
+    // a SessionStart briefing that carries it stays far under Claude Code's 10,000 characters for a hook's context.
+    const int FamilyLength = 4000;
+    const int FamilyList = 10;
+    const int SessionsShown = 3;
+    const int CommentsShown = 3;
+
     /// <summary>
     /// What the Stop hook tells a session whose turn ended with its task still In progress and Claude's (stalled tasks,
     /// spec docs/superpowers/specs/2026-11-23-stalled-claude-tasks-design.md, part 3; RemoteControl.ClaudeHook). Sessions
@@ -43,10 +52,14 @@ public static class SessionBriefing
     /// <remarks>
     /// <paramref name="expand"/> makes image paths absolute (TaskService.ExpandImages); the own task's description images
     /// are listed whole with it (Detail). Left null they are listed as stored.
+    /// <paramref name="family"/> is the <see cref="Family"/> block of the session's own task, "" when it has no parent
+    /// and no subtasks; it follows the line naming the task (subtasks spec).
     /// </remarks>
-    public static string Start(ClaudeHookEvent e, Maybe<TaskItem> own, IReadOnlyList<TaskItem> offered, Func<string, string>? expand = null) =>
+    public static string Start(ClaudeHookEvent e, Maybe<TaskItem> own, IReadOnlyList<TaskItem> offered, Func<string, string>? expand = null,
+        string family = "") =>
         string.Join("\n", Intro(e.SessionId)
             .Concat(own.HasValue ? [$"Your task is {Describe(own.Value, expand ?? Same)}. Keep working on it."] : Choice(e.SessionId, offered))
+            .Concat(family.Length > 0 ? [family] : Array.Empty<string>())
             .Append("")
             .Concat(Commands(e.SessionId))) + "\n";
 
@@ -64,12 +77,106 @@ public static class SessionBriefing
         : own is { HasValue: true, Value: { Status: TaskStatus.Done } done }
             ? $"Deskbar: your task is {Describe(done, expand ?? Same)}. If this message gives you more work on it, run {Shim} task join {done.Id.ToString()[..8]} --session {sessionId} to put it back in progress; if it only asks about the finished work, leave it done.\n"
         : own.HasValue
-            ? $"Deskbar: your task is {Describe(own.Value, expand ?? Same)}. Keep its status line current: {Shim} task status-line - --session {sessionId}, the line on stdin (a heredoc).\n"
+            ? $"Deskbar: your task is {Describe(own.Value, expand ?? Same)}. Keep its status line current: {Shim} task status-line - --session {sessionId}, the line on stdin (a heredoc).{SubtaskHint(own.Value, sessionId)}\n"
         : closed.HasValue
             ? $"Deskbar: the user closed your task \"{Cut(closed.Value.Title)}\". Work on this prompt needs a new task: {Shim} task new - --session {sessionId}, the title on stdin (a heredoc).\n"
         : $"Deskbar: this session has no task yet. Once you know what you are working on, run {Shim} task join <id> --session {sessionId} with an id from {Shim} task list, or {Shim} task new - --session {sessionId} with the title on stdin (a heredoc).\n";
 
     static string Same(string markdown) => markdown;
+
+    // A subtask's prompt line reminds a long-running session that the family exists and how to read it again (subtasks
+    // spec: siblings move on after the session started). Still one line.
+    static string SubtaskHint(TaskItem task, string sessionId) =>
+        task.ParentId.HasValue
+            ? $" It is a subtask of {task.ParentId.Value.ToString()[..8]}: {Shim} task family --session {sessionId} shows the tasks around it."
+            : "";
+
+    // --- the family block (subtasks spec, docs/superpowers/specs/2026-11-24-subtasks-design.md) ----------------------
+
+    /// <summary>
+    /// What a session on a subtask, or on a parent, reads about the tasks around its own: for a subtask, the parent (its
+    /// line, the user's description, its last unsettled comments and its sessions with their transcripts) and the
+    /// siblings; for a parent, its subtasks. Each session is listed with its folder and, when <paramref name="transcript"/>
+    /// finds one, its transcript file, which the session is told to read: that conversation is where a task's context
+    /// really is, and reading it is what spares Petre explaining it. Printed by the `task join` reply, the SessionStart
+    /// briefing and `task family`. Bounded (see FamilyLength); no trailing newline.
+    /// </summary>
+    public static string Family(TaskFamily family, Func<TaskSession, Maybe<string>> transcript)
+    {
+        var more = $"{Shim} task family {family.Task.Id.ToString()[..8]}";
+        var lines = family.Parent.HasValue
+            ? SubtaskLines(family.Parent.Value, family.Siblings, AnyLive(family), transcript, more)
+            : ParentLines(family.Subtasks, AnyLive(family), transcript, more);
+        return Bounded(lines.ToArray(), more);
+    }
+
+    const string Messaging = "A live session on this machine can be reached with Claude Code's own session messaging (ListAgents, SendMessage).";
+
+    static IEnumerable<string> SubtaskLines(TaskItem parent, IReadOnlyList<TaskItem> siblings, bool anyLive,
+        Func<TaskSession, Maybe<string>> transcript, string more) =>
+    [
+        $"This task is a subtask of {Brief(parent)}.",
+        .. parent.Description.Length > 0 ? [$"The user's description of the parent: \"{Cut(parent.Description, DescriptionLength)}\""] : Array.Empty<string>(),
+        .. RecentComments(parent),
+        .. parent.Sessions.Count > 0 ? ["Sessions on the parent:", .. SessionLines(parent, "  ", transcript)] : Array.Empty<string>(),
+        "Before you start, read the end of the parent session's transcript to learn what was done and decided, and look at the siblings below so you do not redo or collide with their work.",
+        .. anyLive ? [Messaging] : Array.Empty<string>(),
+        .. siblings.Count > 0 ? ["Its other subtasks:", .. Listed(siblings, transcript, more)] : Array.Empty<string>(),
+    ];
+
+    static IEnumerable<string> ParentLines(IReadOnlyList<TaskItem> subtasks, bool anyLive, Func<TaskSession, Maybe<string>> transcript, string more) =>
+    [
+        "Before you start, look at its subtasks below so you do not redo or collide with their work.",
+        .. anyLive ? [Messaging] : Array.Empty<string>(),
+        "This task has subtasks:",
+        .. Listed(subtasks, transcript, more),
+    ];
+
+    // Siblings or subtasks: each one's line, the user's description and its sessions, at most FamilyList of them.
+    static IEnumerable<string> Listed(IReadOnlyList<TaskItem> tasks, Func<TaskSession, Maybe<string>> transcript, string more) =>
+        tasks.Take(FamilyList)
+            .SelectMany(t => new[] { $"  {Brief(t)}" }
+                .Concat(t.Description.Length > 0 ? [$"    the user's description: \"{Cut(t.Description, DescriptionLength)}\""] : Array.Empty<string>())
+                .Concat(SessionLines(t, "    ", transcript)))
+            .Concat(tasks.Count > FamilyList ? [$"  and {tasks.Count - FamilyList} more: {more}"] : Array.Empty<string>());
+
+    // The parent's last unsettled comments, oldest of them first, each cut: what the user or a session last said on it.
+    static IEnumerable<string> RecentComments(TaskItem parent) =>
+        parent.Comments.Where(c => c.Settled.HasNoValue).OrderBy(c => c.At).TakeLast(CommentsShown).ToArray() is { Length: > 0 } recent
+            ? recent.Select(c => $"  {(c.SessionId.HasValue ? "a session" : "the user")}: \"{Cut(c.Markdown, DescriptionLength)}\"").Prepend("Recent comments on the parent:")
+            : [];
+
+    // At most SessionsShown sessions, live ones first, then the latest joined: the ones worth reading.
+    static IEnumerable<string> SessionLines(TaskItem task, string indent, Func<TaskSession, Maybe<string>> transcript) =>
+        task.Sessions.OrderByDescending(s => s.IsLive).ThenByDescending(s => s.Joined).Take(SessionsShown)
+            .Select(s => $"{indent}{Prefix(s.Id)} ({(s.IsLive ? "live" : "ended")}, folder {s.Folder})"
+                + transcript(s).Map(path => $", transcript {path}").GetValueOrDefault(""));
+
+    // Whether any session around the task (not the task's own, which is the reader) is live, so messaging is worth naming.
+    static bool AnyLive(TaskFamily family) =>
+        family.Parent.ToList().Concat(family.Siblings).Concat(family.Subtasks).Any(t => t.HasLiveSession);
+
+    // Whole lines up to FamilyLength, then the pointer at `task family` for the rest.
+    static string Bounded(IReadOnlyList<string> lines, string more)
+    {
+        var text = string.Join("\n", lines);
+        if (text.Length <= FamilyLength) return text;
+        var tail = $"The rest: {more}";
+        var kept = lines
+            .Select((line, i) => (Line: line, End: lines.Take(i + 1).Sum(l => l.Length + 1)))
+            .TakeWhile(x => x.End + tail.Length <= FamilyLength)
+            .Select(x => x.Line);
+        return string.Join("\n", kept.Append(tail));
+    }
+
+    // A task as one line without the user's description, which the family block gives a line of its own.
+    static string Brief(TaskItem t) =>
+        $"{t.Id.ToString()[..8]} \"{Cut(t.Title)}\" ({StatusText(t.Status)}"
+        + (t.Status == TaskStatus.WaitingOnYou && t.Question.HasValue ? $", asked: \"{Cut(t.Question.Value)}\""
+            : t.StatusLine.Length > 0 ? $", status line: \"{Cut(t.StatusLine)}\"" : "")
+        + ")";
+
+    static string Prefix(string id) => id.Length > 8 ? id[..8] : id;
 
     static IEnumerable<string> Intro(string sessionId) =>
     [
