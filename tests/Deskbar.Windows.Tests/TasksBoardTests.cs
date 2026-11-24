@@ -3771,7 +3771,10 @@ public class TasksBoardTests
         using var t = Build();
         var a = t.Tasks.AddNote("a", t.Gepha).Value.Id;
         var b = t.Tasks.AddNote("b", t.Gepha).Value.Id;
+        // A held button the drag reads (no real mouse on a CI runner), and laid-out lines to aim at, as the other drags.
+        t.Window.DragMouse = ArrangeMouse.Held;
         t.Controller.Show();
+        t.Window.UpdateLayout();
 
         WindowDrag(t, a, InLine(t, b, 0.5));
 
@@ -3785,7 +3788,9 @@ public class TasksBoardTests
         var other = t.Tasks.AddNote("other", t.Gepha).Value.Id;
         var parent = t.Tasks.AddNote("parent", t.Gepha).Value.Id;
         var child = t.Tasks.AddNote("child", t.Gepha, parent: parent).Value.Id;
+        t.Window.DragMouse = ArrangeMouse.Held;
         t.Controller.Show();
+        t.Window.UpdateLayout();
 
         WindowDrag(t, child, InLine(t, other, 0.9));
 
