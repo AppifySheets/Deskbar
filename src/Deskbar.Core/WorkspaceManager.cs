@@ -208,6 +208,14 @@ public sealed class WorkspaceManager(
     public IObservable<WindowHandle> WindowMoved => windowMoved.AsObservable();
     public IReadOnlyList<WindowInfo> KnownWindows => knownWindows.Values.ToList();
 
+    // For the debug dump only (DebugDump's "Active window" section): the window the focus marker on the bar is drawn
+    // from, and what the monitor reports as the foreground window right now. The two can disagree, and on a machine
+    // nobody here can probe (Server 2022 over RDP: "active window only has a ring if it's fullscreened") which of
+    // them is wrong is the whole question. Foreground() reports None for a window the monitor does not track, so a
+    // None here next to a real foreground hwnd in the dump means the focused window is one Deskbar never learned.
+    public Maybe<WindowHandle> ActiveWindow => activeWindow;
+    public Maybe<WindowHandle> TrackedForeground => monitor.Foreground();
+
     // The title a window had before this app shortened it, or None when it was never renamed.
     //
     // For the remote control (Control/RemoteControl): an agent asking to move "the window on the

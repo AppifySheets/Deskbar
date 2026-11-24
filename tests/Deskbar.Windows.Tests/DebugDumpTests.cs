@@ -33,6 +33,15 @@ public class DebugDumpTests(ITestOutputHelper output)
         Assert.Contains("strip held by work area    n/a (not docked on an edge)", dump);
         // The bar's own line in the window list, marked, and topmost as it always is.
         Assert.Contains("<<< THE BAR", dump);
+        // The active-window chain (DescribeActiveWindow): the raw foreground, the monitor's and the manager's view,
+        // and the bar's icons with their markers. The stub monitor tracks nothing, so the manager has marked nothing
+        // and the bar has no icon to report: the section must still say so in words rather than leave a gap.
+        Assert.Contains("== Active window", dump);
+        Assert.Contains("foreground (raw)", dump);
+        Assert.Contains("monitor's Foreground()     None (not a tracked window)", dump);
+        Assert.Contains("manager's active window    None (nothing marked)", dump);
+        Assert.Contains("render tier", dump);
+        Assert.Contains("no icon is drawn as focused", dump);
         Assert.DoesNotContain("this section failed", dump);
         bar.Close();
     });

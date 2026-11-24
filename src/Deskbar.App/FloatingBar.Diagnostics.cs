@@ -1,4 +1,7 @@
 using System.Text;
+using CSharpFunctionalExtensions;
+using System.Windows;
+using System.Windows.Media;
 using System.Windows.Interop;
 using Deskbar.Windows.Monitoring;
 
@@ -29,6 +32,33 @@ public partial class FloatingBar
 
     // The bar's window handle, for the dump to find the bar in the z-order. Zero before the window exists.
     internal nint DumpHandle => new WindowInteropHelper(this).Handle;
+
+    // The bar's half of the dump's "Active window" section (DebugDump.DescribeActiveWindow says what it is for): how
+    // WPF renders here, and every icon that carries a focus marker or belongs to the window the manager has marked,
+    // with what was actually painted on it. Read from iconRings, which RebuildCore refills on every rebuild, so this
+    // is the bar as it stands, not as it was built the first time.
+    internal string DescribeMarkersForDump()
+    {
+        var text = new StringBuilder();
+        void Line(string name, object? value) => text.AppendLine($"  {name,-26} {value}");
+
+        // Tier 0 is software rendering for the whole process; RenderMode says the same for the bar's own window.
+        // Both, because a remote session can be either and the marker's glow is an effect.
+        var source = PresentationSource.FromVisual(this) as HwndSource;
+        Line("render tier", $"{RenderCapability.Tier >> 16}  (0 = software)  bar render mode {source?.CompositionTarget?.RenderMode.ToString() ?? "?"}");
+
+        var active = manager.ActiveWindow;
+        var marked = iconRings
+            .Where(i => i.IsActive || active.Map(h => h == i.Handle).GetValueOrDefault(false))
+            .ToList();
+        Line("icons on the bar", $"{iconRings.Count}, {iconRings.Count(i => i.IsActive)} drawn as focused, current row {currentRow?.ToString()[..8] ?? "none"}");
+        if (marked.Count == 0) text.AppendLine("  no icon is drawn as focused, and none belongs to the manager's active window");
+        marked.ForEach(i => text.AppendLine(
+            $"  icon 0x{i.Handle.Value:X} row {i.RowKey?.ToString()[..8] ?? "(no workspace)"}  focused={i.IsActive} landing={i.WillActivate}"
+            + $"  border {i.Button.BorderBrush} {i.Button.BorderThickness}  fill {i.Button.Background}  glow {GetMarkerGlow(i.Button):0.##}"
+            + $"  bar {GetMarkerBar(i.Button)?.ToString() ?? "none"}  visible={i.Button.IsVisible} size {i.Button.ActualWidth:0.#}x{i.Button.ActualHeight:0.#}"));
+        return text.ToString();
+    }
 
     // Plain lines, one fact each, in the order someone reading the dump asks about them.
     internal string DescribeForDump()

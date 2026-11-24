@@ -74,6 +74,7 @@ static class DebugDump
             string.Concat((strips?.Describe() ?? ["none (compatibility mode)"]).Select(line => $"  {line}\n")));
         Section(text, "Visible top-level windows, top of the z-order first", () => DescribeZOrder(screens, bar?.DumpHandle ?? 0));
         Section(text, "Workspaces", () => DescribeWorkspaces(manager));
+        Section(text, "Active window (what the focus marker on the bar is drawn from)", () => DescribeActiveWindow(bar, manager));
         Section(text, $"Trace log, last {TraceLines} lines ({ClickTrace.LogPath})", TraceTail);
         return text.ToString();
     }
@@ -272,6 +273,51 @@ static class DebugDump
         $"  {manager.State.Workspaces.Count} workspaces, {manager.KnownWindows.Count()} windows known\n"
         + string.Concat(manager.State.Workspaces.Select(w =>
             $"  {(manager.CurrentWorkspaceId == w.Id ? "*" : " ")} {w.Name}  desktop {w.DesktopId?.ToString() ?? "none"}\n"));
+
+    // Written for the second report from a Server 2022 terminal server: "it draws dotted and dashed lines, but active
+    // window only has a ring if it's fullscreened". The trail rings on the rows were there, so the bar was drawing;
+    // the focus marker on the focused window's icon was not, except while that window was maximized. Nobody here can
+    // probe that machine, and three different faults give that one screenshot:
+    //
+    //   1. the focused hwnd is not a window Deskbar tracks (the monitor's Foreground() reports None for it, and the
+    //      manager keeps whatever it marked before), for example because Windows hands focus to an owned or wrapper
+    //      window rather than the one with the taskbar button;
+    //   2. the manager does know the right window, but the bar drew no icon for that handle, or drew it somewhere the
+    //      marker is not painted;
+    //   3. the icon carries the marker and WPF does not render it (the marker is a 1px border, a blurred glow and a
+    //      3px bar; a session that renders in software is the obvious suspect).
+    //
+    // So this section puts each link of that chain on its own line: the raw foreground hwnd with its root owner,
+    // whether Deskbar tracks either, what the manager has marked, and what the bar painted (DescribeMarkersForDump).
+    // Read top to bottom, the first line that disagrees with the one above it names the fault.
+    static string DescribeActiveWindow(FloatingBar? bar, WorkspaceManager manager)
+    {
+        var text = new StringBuilder();
+        void Line(string name, object? value) => text.AppendLine($"  {name,-26} {value}");
+
+        // Known by handle value, the same key the monitor's own lookup uses.
+        var known = manager.KnownWindows.Select(w => w.Handle.Value).ToHashSet();
+        string Describe(nint hwnd) =>
+            hwnd == 0
+                ? "none"
+                : $"0x{hwnd:X}  {(known.Contains(hwnd) ? "tracked" : "NOT TRACKED")}"
+                  + $"{(NativeMethods.IsZoomed(hwnd) ? "  maximized" : "")}{(NativeMethods.IsIconic(hwnd) ? "  minimized" : "")}"
+                  + $"  class \"{ClassOf(hwnd)}\"  \"{TitleOf(hwnd)}\"";
+
+        var foreground = NativeMethods.GetForegroundWindow();
+        Line("foreground (raw)", Describe(foreground));
+        // The window that owns the foreground one, walking owners up to the top. Equal to the foreground window for an
+        // ordinary main window; different for a dialog, a popup, or a frame some shells put round an app.
+        var rootOwner = foreground == 0 ? 0 : NativeMethods.GetAncestor(foreground, GA_ROOTOWNER);
+        Line("its root owner", rootOwner == foreground ? "the same window" : Describe(rootOwner));
+        Line("monitor's Foreground()", manager.TrackedForeground.Map(h => $"0x{h.Value:X}").GetValueOrDefault("None (not a tracked window)"));
+        Line("manager's active window", manager.ActiveWindow.Map(h => Describe(h.Value)).GetValueOrDefault("None (nothing marked)"));
+        text.Append(bar?.DescribeMarkersForDump() ?? "  no bar (compatibility mode)\n");
+        return text.ToString();
+    }
+
+    // GetAncestor's flag for "the root window, then its owners, to the top" (winuser.h).
+    const uint GA_ROOTOWNER = 3;
 
     const int TraceLines = 200;
 
