@@ -460,6 +460,30 @@ public class FloatingBarTaskListTests
         Assert.True(t.Bar.Selection.IsSelected(earlier));
     });
 
+    // Petre: "it shouldn't land out of sight ... it should take me to that task". A plain note lands at the top of
+    // quadrant IV, here under five important ones and so below the three lines in sight; the list scrolls to it (the
+    // selection's scroll, THE LIST SCROLLS) and it is in sight, selected and glowing.
+    [Fact]
+    public void A_note_added_below_the_lines_in_sight_is_scrolled_to() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        Enumerable.Range(1, 5).ToList().ForEach(i => t.Tasks.AddNote($"Important {i}", t.Gepha, Quadrant.II));
+        t.Bar.UpdateLayout();
+        Assert.Equal(0, t.Bar.TaskLinesScroller!.VerticalOffset, 1);
+
+        ClickBox(t);
+        t.Box.Text = "Call the accountant";
+        Press(t.Bar, t.Box, Key.Enter);
+        t.Bar.UpdateLayout();
+        PumpBar(t);
+        t.Bar.UpdateLayout();
+
+        var added = t.Tasks.Board.Tasks.Single(x => x.Title == "Call the accountant").Id;
+        Assert.Contains(t.Lines, l => ((TaskLine)l.Tag).Id == added);
+        Assert.True(t.Bar.TaskLineSelected(added));
+        Assert.Equal(SystemParameters.ClientAreaAnimation, t.Bar.TaskLineGlowing(added));
+    });
+
     [Fact]
     // RULING 54 (Petre: "clicking a task should open that task; double clicking takes me to the workspace and window").
     // A single click on a line opens the task in the tasks window and goes nowhere; a double-click goes: to the
