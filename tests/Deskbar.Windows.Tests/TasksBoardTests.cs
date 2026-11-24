@@ -2,6 +2,7 @@ using System.IO;
 using System.Windows;
 using System.Windows.Automation;
 using System.Windows.Controls;
+using System.Windows.Documents;
 using System.Windows.Input;
 using CSharpFunctionalExtensions;
 using Deskbar.App;
@@ -2807,6 +2808,30 @@ public class TasksBoardTests
 
         t.Controller.ToggleThread(id);
         Assert.Equal(TextTrimming.CharacterEllipsis, Detail().TextTrimming);
+    });
+
+    // Task 08cdb052 ("when asking for action, prs should have links, or artifacts; make that clickable"): a question's
+    // markdown link and a bare address are links in the line's detail, on a closed line and an open one, and the text
+    // reads as the words, never the markdown written out. Only web addresses become links.
+    [Fact]
+    public void A_questions_links_are_clickable_in_the_line() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        var id = t.Tasks.Create("Snooze", t.Gepha, Session("s1")).Value.Id;
+        t.Tasks.Ask(id, "Merge [Deskbar #490](https://github.com/AppifySheets/Deskbar/pull/490), see https://claude.ai/code/artifact/abc. Not [this](file:///C:/x.exe).");
+        t.Controller.Show();
+
+        TextBlock Detail() => Inside(LineOf(t.Window, id)).OfType<TextBlock>().Single(b => Equals(b.Tag, TasksWindow.DetailTag));
+        Hyperlink[] Links() => Detail().Inlines.OfType<Hyperlink>().ToArray();
+
+        Assert.Equal(
+            ["https://github.com/AppifySheets/Deskbar/pull/490", "https://claude.ai/code/artifact/abc"],
+            Links().Select(l => l.NavigateUri.AbsoluteUri));
+        Assert.Equal("Merge Deskbar #490, see https://claude.ai/code/artifact/abc. Not [this](file:///C:/x.exe).",
+            new TextRange(Detail().ContentStart, Detail().ContentEnd).Text);
+
+        t.Controller.ToggleThread(id);
+        Assert.Equal(2, Links().Length);
     });
 
     [Fact]

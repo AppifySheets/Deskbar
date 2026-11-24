@@ -512,7 +512,7 @@ public partial class FloatingBar
         board.Pile().Where(t => !t.IsSnoozed).Select(t => new TaskLine(
             t.Id,
             t.Title,
-            DetailOf(t, withDescription: true),
+            DetailOf(t, withDescription: true, plain: true),
             t.Status,
             t.IsClaudes,
             t.WorkspaceId.Bind(workspaceName).Match(name => (string?)name, () => null),
@@ -561,14 +561,21 @@ public partial class FloatingBar
     // live session" after that (spec, "A task whose sessions have all ended stays open and says 'no live session'"). The
     // tasks window's lines say the same but draw the whole description as a block of their own, so they leave it out here
     // (TasksBoard.Row).
-    internal static string DetailOf(TaskItem task, bool withDescription = false) =>
+    //
+    // `plain` (the bar, task 08cdb052): a session's question or status line may carry markdown, above all the link to the
+    // pull request it asks to have merged. The tasks window keeps it, and draws the link as one to click
+    // (TasksWindow.DetailText); the bar's line is a single click target that picks its task, so there it is the link's
+    // words alone (TaskViews.PlainInline), never "[Deskbar #490](https://github.com/...)" written out.
+    internal static string DetailOf(TaskItem task, bool withDescription = false, bool plain = false) =>
         string.Join(TaskDetailSeparator, new[]
         {
-            task.Status == TaskStatus.WaitingOnYou && task.Question.HasValue ? task.Question.Value
-                : task.StatusLine.Length > 0 ? task.StatusLine
+            task.Status == TaskStatus.WaitingOnYou && task.Question.HasValue ? Shown(task.Question.Value, plain)
+                : task.StatusLine.Length > 0 ? Shown(task.StatusLine, plain)
                 : withDescription ? TaskViews.PlainFirstLine(task.Description) : "",
             task.IsClaudes && !task.HasLiveSession ? NoLiveSession : "",
         }.Where(part => part.Length > 0));
+
+    static string Shown(string text, bool plain) => plain ? TaskViews.PlainInline(text) : text;
 
     // The line under the list: how many open tasks are out of sight, naming how many of them wait on Petre; "Less" at
     // the end of the list expanded in place; "All tasks" when nothing is hidden and the button opens the window.

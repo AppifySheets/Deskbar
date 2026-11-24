@@ -203,10 +203,22 @@ public static class TaskViews
         if (parts.Text.Trim().Length == 0 && parts.Images.Count > 0) return "image";
         var line = parts.Text.Split('\n').Select(l => l.Trim()).FirstOrDefault(l => l.Length > 0) ?? "";
         line = System.Text.RegularExpressions.Regex.Replace(line, @"^(#{1,6}\s+|[-*+]\s+|>\s*|\d+[.)]\s+)", "");
-        line = System.Text.RegularExpressions.Regex.Replace(line, @"\[([^\]]*)\]\([^)]*\)", "$1");
+        return PlainInline(line).Trim();
+    }
+
+    /// <summary>
+    /// A line of markdown with its inline markers taken out: a link keeps its words, and emphasis and code markers
+    /// (**, __, *, _, `) are dropped. The bar shows a session's question and status line through this (task 08cdb052):
+    /// a session writes the pull request it asks to have merged as a link, "[Deskbar #490](https://...)", which the tasks
+    /// panel draws as a link to click, and the bar, whose line is one click target picking the task, as "Deskbar #490".
+    /// Line breaks and the text around the markers are kept as they are.
+    /// </summary>
+    public static string PlainInline(string markdown)
+    {
+        var line = System.Text.RegularExpressions.Regex.Replace(markdown ?? "", @"\[([^\]\n]*)\]\([^)\n]*\)", "$1");
         line = System.Text.RegularExpressions.Regex.Replace(line, @"(\*\*|__)(.+?)\1", "$2");
         line = System.Text.RegularExpressions.Regex.Replace(line, @"(?<![\w])([*_])(.+?)\1(?![\w])", "$2");
-        return line.Replace("`", "").Trim();
+        return line.Replace("`", "");
     }
 
     /// <summary>
