@@ -1743,7 +1743,37 @@ public partial class FloatingBar
     {
         var back = taskReturnTo;
         taskReturnTo = 0;
-        if (back != 0 && !IsOwnWindow(back) && WindowAlive(back) && OnCurrentDesktop(back)) HandForegroundTo(back);
+        if (back == 0 || IsOwnWindow(back) || !WindowAlive(back) || !OnCurrentDesktop(back)) return;
+        keyboardHandedBack = (back, TaskClickClock());
+        HandForegroundTo(back);
+    }
+
+    // THE KEYBOARD GOING BACK IS NOT A PICK (task ee75f046). The App selects the task of a Claude terminal that comes to
+    // the front (task 4846fde1). After an add, the window the keyboard goes back to is very often that terminal: Petre
+    // types a note in the bar while talking to a session, presses Enter, and the terminal's foreground event arrived a
+    // quarter of a second after the note was selected and selected the terminal's task instead. Measured on his bar with
+    // the add's trace: "highlighted b6cefb60 ... selection=b6cefb60", then "settled ... selection=ee75f046" 230 ms
+    // later, his session's own task. Live: "it kind of highlights it and then immediately loses focus". The bar moved
+    // that window to the front, not Petre, so its foreground event must not pick a task.
+    //
+    // The bar notes the window and when it handed the keyboard back; the App asks KeyboardHandedBackTo once for each
+    // foreground change before selecting a terminal's task. The note is spent by the first foreground event for that
+    // window, and it lapses after HandBackWindow even if none comes (the window was already in front), so a terminal
+    // Petre brings forward himself later still selects its task.
+    (nint Window, DateTime At) keyboardHandedBack;
+
+    static readonly TimeSpan HandBackWindow = TimeSpan.FromSeconds(2);
+
+    /// <summary>
+    /// Whether <paramref name="hwnd"/> coming to the front is the bar handing the keyboard back after its add box
+    /// (see above), in which case it picks no task. Answers yes once per hand-back, within <see cref="HandBackWindow"/>.
+    /// </summary>
+    internal bool KeyboardHandedBackTo(nint hwnd)
+    {
+        var (window, at) = keyboardHandedBack;
+        if (hwnd == 0 || window != hwnd) return false;
+        keyboardHandedBack = default;
+        return TaskClickClock() - at < HandBackWindow;
     }
 
     void OnTaskAddKey(object sender, KeyEventArgs e)

@@ -937,8 +937,11 @@ NH2. Same on a floating bar with several flagged tasks, so the note (top of quad
 NH3. With the tasks panel open, add from the bar: the panel shows the new task selected too.
 NH4. In the panel, type "rent" in the search, then + Add, type "Call the bank", Enter: the search clears, the panel
      scrolls to the new line, which glows and stays selected; the bar shows it selected too.
-NH5. Turn off Windows' "Animation effects" (Settings, Accessibility, Visual effects) and add a note: it is selected
-     with no glow.
+NH5. Turn off Windows' "Animation effects" (Settings, Accessibility, Visual effects) and add a note: the line holds
+     the glow's blue, still, for about two seconds, then turns to the selected look in one step.
+NH6. With a Claude session's terminal in front, click the bar's box, type a note, Enter: the keyboard goes back to the
+     terminal and the new note stays selected; the terminal's own task does not take the selection back. Then click
+     another window and the terminal again: now its task is selected, as before.
 
 ## Snoozing a task
 

@@ -2049,7 +2049,11 @@ public partial class App : Application
             // tasks panel, while open, only here (TasksBoard.Reveal), as little as it takes, so a line already in view
             // stays put. Not on the panel's own clicks: a clicked line is in view, and sliding the list under the
             // pointer is how clicks get lost (#48).
-            monitor.ForegroundChanged.Subscribe(hwnd =>
+            //
+            // Not when the window is in front because the bar handed the keyboard back to it after an add (task ee75f046,
+            // FloatingBar.KeyboardHandedBackTo): the note just added is the selected task then, and the terminal Petre
+            // was typing in must not take the selection straight back from it.
+            monitor.ForegroundChanged.Where(hwnd => !floatingBar.KeyboardHandedBackTo(hwnd)).Subscribe(hwnd =>
                 claudeActions?.TaskOfWindow(new WindowHandle(hwnd)).Tap(id =>
                 {
                     floatingBar.Selection.Select(id);
