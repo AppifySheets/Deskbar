@@ -41,7 +41,9 @@ object.
   test). Do not trust this number to the digit; run the suite. On Petre's machine the routine
   command, and the default, is `pwsh scripts/test-hidden.ps1`: it runs
   `dotnet test Deskbar.sln --filter "Category!=Integration&Category!=Screen"` on a hidden Win32
-  desktop, so the test windows never reach his screen. Never run `Deskbar.Windows.Tests` on his
+  desktop, so the test windows never reach his screen. It builds on the visible desktop first and
+  gives each run its own desktop with an 8 MB heap inside a job object; an uncapped one took
+  40 MB of the session's desktop heap and starved his session on 2026-11-25. Never run `Deskbar.Windows.Tests` on his
   own desktop: his Deskbar tiles every test window, rearranging his windows for the length of
   the run and failing the tiling tests at random (measured 2026-11-22). `StaThread.Run` refuses
   to open a window there while a Deskbar runs. `Category=Screen` (four tests that read real
