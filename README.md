@@ -60,8 +60,9 @@ there**, so you arrive typing rather than hunting. Workspaces survive reboots.
 
 ## Install
 
-**Requirements:** Windows 11 (build 22000 or newer) on x64. Nothing else: the download bundles
-the .NET runtime. Started on Windows 10, it says it needs Windows 11 and exits.
+**Requirements:** Windows 11 (build 22000 or newer) on x64. The download from GitHub also runs
+on Windows Server 2022 (build 20348), for example a terminal server. Nothing else: the download
+bundles the .NET runtime. Started on Windows 10, it says it needs Windows 11 and exits.
 
 <a href="https://apps.microsoft.com/detail/9PJX26NGFPNF"><img src="https://get.microsoft.com/images/en-us%20dark.svg" width="200" alt="Get it from Microsoft Store" /></a>
 
