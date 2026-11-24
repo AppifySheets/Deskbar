@@ -1735,8 +1735,29 @@ public partial class FloatingBar
     // selection's paint, which would otherwise put the plain selected fill back over it.
     void ShowAddedTask(Guid id)
     {
+        TraceAddedTask(id, "added");
         selection.Select(id);
         GlowTaskLine(id);
+        TraceAddedTask(id, "highlighted");
+        // Once everything the add queued has run (the docked bar's fit pass, the scroll's retry, layout), the same
+        // again: what Petre is left looking at.
+        if (ClickTrace.On) Dispatcher.BeginInvoke(DispatcherPriority.ContextIdle, () => TraceAddedTask(id, "settled"));
+    }
+
+    // THE ADDED NOTE'S TRACE. Petre, live on v2.5.412, adding from the bar: "doesn't work, test tasks were not
+    // highlighted", while the panel's add box highlighted its task; the bar's tests, floating and docked, pass. One line
+    // per step of ShowAddedTask says which part failed on his bar: whether the note's line is drawn at all, drawn as
+    // selected, glowing and in sight, what the selection holds, and the gates that can put a paint off (a rebuild in
+    // progress, TaskListMustWait). Only while tracing is on (ClickTrace).
+    void TraceAddedTask(Guid id, string step)
+    {
+        if (!ClickTrace.On) return;
+        var drawn = (taskLinesPanel?.Children.OfType<Button>() ?? []).Any(b => b.Tag is TaskLine line && line.Id == id);
+        var current = selection.Current.Match(c => c.ToString()[..8], () => "none");
+        ClickTrace.Write($"task list: {step} {id.ToString()[..8]} drawn={drawn} selected={TaskLineSelected(id)} " +
+                         $"glowing={TaskLineGlowing(id)} inSight={LinesInSight().Any(l => l.Id == id)} selection={current} " +
+                         $"rebuilding={rebuilding} mustWait={TaskListMustWait} lines={taskLinesPanel?.Children.Count ?? 0} " +
+                         $"offset={taskLinesScroller?.VerticalOffset ?? -1:0} viewport={taskLinesScroller?.ViewportHeight ?? -1:0}");
     }
 
     // The glow on the selected line `id`, when it is on show (TaskGlow.Fading).
