@@ -19,8 +19,8 @@ static class ReportImages
     /// <summary>A screenshot ready to send: its bytes, whether they are a JPEG, and a small picture for the window.</summary>
     public sealed record Shot(byte[] Bytes, bool Jpeg, ImageSource Thumbnail);
 
-    static readonly byte[] PngMagic = [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A];
-    static readonly byte[] JpegMagic = [0xFF, 0xD8, 0xFF];
+    internal static readonly byte[] PngMagic = [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A];
+    internal static readonly byte[] JpegMagic = [0xFF, 0xD8, 0xFF];
 
     // The thumbnail's width in pixels: the window shows them at 92 DIP, so twice that stays sharp at 200%.
     const int ThumbnailWidth = 184;
@@ -43,9 +43,9 @@ static class ReportImages
     public static bool LooksLikeImage(string path) =>
         Path.GetExtension(path).ToLowerInvariant() is ".png" or ".jpg" or ".jpeg" or ".bmp" or ".gif" or ".tif" or ".tiff" or ".webp";
 
-    static bool StartsWith(byte[] bytes, byte[] magic) => bytes.Length >= magic.Length && bytes.AsSpan(0, magic.Length).SequenceEqual(magic);
+    internal static bool StartsWith(byte[] bytes, byte[] magic) => bytes.Length >= magic.Length && bytes.AsSpan(0, magic.Length).SequenceEqual(magic);
 
-    static BitmapSource Decode(byte[] bytes)
+    internal static BitmapSource Decode(byte[] bytes)
     {
         using var stream = new MemoryStream(bytes);
         var frame = BitmapDecoder.Create(stream, BitmapCreateOptions.PreservePixelFormat, BitmapCacheOption.OnLoad).Frames[0];
@@ -68,10 +68,10 @@ static class ReportImages
                 (Bytes: Encode(new JpegBitmapEncoder { QualityLevel = 60 }, Scaled(image, 1.0 / 512)), Jpeg: true));
     }
 
-    static BitmapSource Scaled(BitmapSource image, double factor) =>
+    internal static BitmapSource Scaled(BitmapSource image, double factor) =>
         factor >= 1 ? image : new TransformedBitmap(image, new ScaleTransform(factor, factor));
 
-    static byte[] Encode(BitmapEncoder encoder, BitmapSource image)
+    internal static byte[] Encode(BitmapEncoder encoder, BitmapSource image)
     {
         // JPEG has no alpha channel, so the picture is converted to plain 24-bit colour first and any alpha is
         // dropped. Screenshots are opaque, so in practice nothing is lost. PNG keeps the alpha.
@@ -82,7 +82,7 @@ static class ReportImages
         return stream.ToArray();
     }
 
-    static ImageSource Thumbnail(byte[] bytes)
+    internal static ImageSource Thumbnail(byte[] bytes)
     {
         var thumbnail = new BitmapImage();
         thumbnail.BeginInit();
