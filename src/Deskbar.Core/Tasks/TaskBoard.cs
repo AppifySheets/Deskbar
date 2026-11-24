@@ -408,6 +408,48 @@ public sealed record TaskBoard(IReadOnlyList<TaskItem> Tasks)
             ? Replaced(task with { Assignee = Assignee.Claude, HandedBack = Maybe<DateTimeOffset>.None, UpdatedAt = now })
             : this;
 
+    // --- snoozing (task 6da8d7eb; TaskItem.SnoozedUntil, TaskSnooze.cs) -----------------------------------------------
+
+    /// <summary>
+    /// Petre snoozes a task until <paramref name="until"/>: it leaves the bar and the tasks panel's usual views until then.
+    /// Nothing else about it changes (status, flags, rank, sessions), so it comes back exactly where it was. Snoozing again
+    /// moves the time; the same time returns this same board. Refused: a closed task (it is out of view already), a task
+    /// waiting on Petre (a question is never hidden; it stays pinned on top until answered, as Place refuses to move it),
+    /// and a time that is not after <paramref name="now"/>. An edit only Petre makes, so it clears the adopted mark
+    /// (Ruling 11b).
+    /// </summary>
+    public Result<TaskBoard> Snooze(Guid id, DateTimeOffset until, DateTimeOffset now) =>
+        until <= now ? Result.Failure<TaskBoard>("A snooze has to end later than now")
+        : Lookup(id).Bind(task =>
+            !task.IsOpen ? Result.Failure<TaskBoard>(TaskIsClosed)
+            : task.Status == TaskStatus.WaitingOnYou ? Result.Failure<TaskBoard>("A task waiting on you stays in view until it is answered")
+            : task.SnoozedUntil.HasValue && task.SnoozedUntil.Value == until ? this
+            : Result.Success(Replaced(task with { SnoozedUntil = until, UpdatedAt = now, Adopted = false })));
+
+    /// <summary>Petre wakes a snoozed task early ("Wake now"). A task that is not snoozed returns this same board.</summary>
+    public Result<TaskBoard> Wake(Guid id, DateTimeOffset now) =>
+        Lookup(id).Map(task => task.IsSnoozed ? Replaced(task with { SnoozedUntil = Maybe<DateTimeOffset>.None, UpdatedAt = now }) : this);
+
+    /// <summary>
+    /// Every snooze whose time has come ends: the app's timer calls this, so a task comes back on its own. Nothing due
+    /// returns this same board, so the caller saves nothing.
+    /// </summary>
+    public TaskBoard WakeDue(DateTimeOffset now) =>
+        Tasks.Any(t => Due(t, now))
+            ? new TaskBoard(Tasks.Select(t => Due(t, now) ? t with { SnoozedUntil = Maybe<DateTimeOffset>.None, UpdatedAt = now } : t).ToArray())
+            : this;
+
+    static bool Due(TaskItem task, DateTimeOffset now) => task.SnoozedUntil.HasValue && task.SnoozedUntil.Value <= now;
+
+    // A SNOOZE ENDS WHEN SOMETHING HAPPENS THAT PETRE SHOULD SEE: the task's status changed (a session joined his note, a
+    // question was answered, he set it by hand, it was closed) or it was raised (a session asked, or it became Done).
+    // Hiding a task "for a while" must never hide a question waiting on him. A status line, a comment, a flag or a drag
+    // leaves the snooze alone. Applied by Change and Replaced, the two ways a task is rewritten, so no rule can forget it.
+    static TaskItem Woken(TaskItem was, TaskItem now) =>
+        now.IsSnoozed && (now.Status != was.Status || now.Raised != was.Raised)
+            ? now with { SnoozedUntil = Maybe<DateTimeOffset>.None }
+            : now;
+
     /// <summary>
     /// Deletes a task for good. Its subtasks stay and become plain tasks (their parent link goes, stamped), as
     /// DetachGoal frees a deleted goal's tasks, so no link is left naming nothing.
@@ -837,11 +879,11 @@ public sealed record TaskBoard(IReadOnlyList<TaskItem> Tasks)
 
     (TaskBoard Board, TaskItem Task) WithAppended(TaskItem task) => (new TaskBoard(Tasks.Append(task).ToArray()), task);
 
-    TaskBoard Replaced(TaskItem updated) => new(Tasks.Select(t => t.Id == updated.Id ? updated : t).ToArray());
+    TaskBoard Replaced(TaskItem updated) => new(Tasks.Select(t => t.Id == updated.Id ? Woken(t, updated) : t).ToArray());
 
     Result<TaskBoard> Change(Guid id, Func<TaskItem, TaskItem> change) =>
         Tasks.Any(t => t.Id == id)
-            ? new TaskBoard(Tasks.Select(t => t.Id == id ? Unmarked(t, change(t)) : t).ToArray())
+            ? new TaskBoard(Tasks.Select(t => t.Id == id ? Woken(t, Unmarked(t, change(t))) : t).ToArray())
             : Result.Failure<TaskBoard>(NoTask(id.ToString()));
 
     // The handed-back mark (StalledTasks) means "Deskbar gave this to Petre because it went quiet". Once anything else

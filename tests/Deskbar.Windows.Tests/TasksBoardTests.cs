@@ -110,7 +110,7 @@ public class TasksBoardTests
         };
 #pragma warning restore WPF0001
         // A panel wide enough for everything (Wide, below): the full line and the Matrix switch both need it. The slim line
-        // below 692 DIP and the switch's 780 are Task 8's, with their own tests passing a `width`.
+        // below 710 DIP and the switch's 780 are Task 8's, with their own tests passing a `width`.
         Assert.True(harness.Manager.SaveTasksPanel(new Deskbar.Core.Persistence.TasksPanelState(false, width)).IsSuccess);
         var panel = new TasksPanelRig(window).Docked(edge, screenDips);
         var controller = new TasksBoard(window, panel.Panel, tasks, harness.Manager, goTo ?? (t =>
@@ -1336,7 +1336,7 @@ public class TasksBoardTests
         Assert.True(t.Window.IsSelected(oldest));
     });
 
-    // Review I-3: at the narrowest width the full line is drawn at (TasksPanelLayout.SlimBelow, 692 DIP, the floating
+    // Review I-3: at the narrowest width the full line is drawn at (TasksPanelLayout.SlimBelow, 710 DIP, the floating
     // window's old minimum; narrower, Task 8 draws the slim line), with enough lines for the scroll bar, every column
     // stays inside the list's viewport and the title keeps a usable width.
     [Fact]
@@ -1516,6 +1516,67 @@ public class TasksBoardTests
         Assert.Equal([a, b], t.Window.Keys);
         Assert.True(ToggleOn(ButtonNamed(LineOf(t.Window, a), "Important")));
         Assert.Equal(["II  Important, not urgent", "IV  Not urgent, not important"], t.Window.Headers);
+    });
+
+    // Task 6da8d7eb: the snooze moon sits with the two toggles, quiet until hovered. Its menu offers the four lengths; a
+    // snoozed line leaves the List for the "Snoozed" chip, where its moon is lit and its menu wakes it.
+    [Fact]
+    public void The_snooze_moon_hides_a_line_until_it_is_woken() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        var a = t.Tasks.AddNote("a", t.Gepha).Value.Id;
+        var b = t.Tasks.AddNote("b", t.Gepha).Value.Id;
+        t.Controller.Show();
+        var moon = ButtonNamed(LineOf(t.Window, a), "Snooze");
+        Assert.False(ToggleOn(moon));
+        Assert.DoesNotContain(t.Window.FilterLabels, label => label.StartsWith("Snoozed", StringComparison.Ordinal));
+
+        static string Words(MenuItem item) => item.Header is TextBlock text ? text.Text : $"{item.Header}";
+        var menu = t.Window.OpenSnoozeMenu(a, moon);
+        var lengths = menu.Items.OfType<MenuItem>().ToArray();
+        Assert.Equal(["1 hour", "3 hours"], lengths.Take(2).Select(Words));
+        Assert.StartsWith("Tomorrow, ", Words(lengths[2]));
+        Assert.StartsWith("Monday, ", Words(lengths[3]));
+        lengths[0].RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
+        // The redraw waits for the menu to close (a rebuild under an open menu), as when Petre's click closes it.
+        menu.IsOpen = false;
+        t.Window.Dispatcher.Invoke(() => { }, System.Windows.Threading.DispatcherPriority.Background);
+
+        Assert.True(t.Tasks.Board.Tasks.Single(x => x.Id == a).IsSnoozed);
+        Assert.Equal([b], t.Window.Keys);
+        Assert.Contains("Snoozed 1", t.Window.FilterLabels);
+
+        t.Controller.Filter(TaskFilter.Snoozed);
+        Assert.Equal([a], t.Window.Keys);
+        var lit = ButtonNamed(LineOf(t.Window, a), "Snooze");
+        Assert.True(ToggleOn(lit));
+        // The filter's redraw just made this moon: lay it out first, as the screen has before anyone can press it, or its
+        // menu's popup never opens and so never reports closing (measured: the held redraw then never came).
+        t.Window.UpdateLayout();
+        var again = t.Window.OpenSnoozeMenu(a, lit);
+        var wake = again.Items.OfType<MenuItem>().First();
+        Assert.Equal("Wake now", Words(wake));
+        wake.RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
+        again.IsOpen = false;
+        t.Window.Dispatcher.Invoke(() => { }, System.Windows.Threading.DispatcherPriority.Background);
+
+        Assert.False(t.Tasks.Board.Tasks.Single(x => x.Id == a).IsSnoozed);
+        Assert.Empty(t.Window.Keys);
+        Assert.Contains("Snoozed 0", t.Window.FilterLabels);
+        t.Controller.Filter(TaskFilter.Open);
+        Assert.Equal([b, a], t.Window.Keys);
+    });
+
+    // A question is never snoozed: a line waiting on Petre has no moon.
+    [Fact]
+    public void A_line_waiting_on_you_has_no_snooze_moon() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        var id = t.Tasks.Create("asks", t.Gepha, Session("s1")).Value.Id;
+        Assert.True(t.Tasks.Ask(id, "merge?").IsSuccess);
+        t.Controller.Show();
+
+        Assert.DoesNotContain(Inside(LineOf(t.Window, id)).OfType<Button>(), button => AutomationProperties.GetName(button) == "Snooze");
     });
 
     // A point inside a window line, `share` of the way down it, in the drag's own coordinates (the window's rows).
@@ -3248,11 +3309,11 @@ public class TasksBoardTests
     static IReadOnlyList<string> MenuWords(ContextMenu menu) =>
         menu.Items.OfType<MenuItem>().Select(i => i.Header is TextBlock text ? text.Text : $"{i.Header}").ToArray();
 
-    // Below 692 DIP a line is slim: no session words, no assignee and no Reopen button on it; its sessions are squares
+    // Below 710 DIP a line is slim: no session words, no assignee and no Reopen button on it; its sessions are squares
     // only, and the assignee moves into its tooltip with the age. The age itself stays on the slim line since it left the
     // bar (Petre, 2026-11-24: "move the time from here to the proper tasks window"), whole, never trimmed.
     [Fact]
-    public void A_panel_narrower_than_692_draws_slim_lines() => StaThread.Run(() =>
+    public void A_panel_narrower_than_710_draws_slim_lines() => StaThread.Run(() =>
     {
         using var t = Build(width: TasksPanelLayout.SlimBelow - 1);
         var id = t.Tasks.Create("work", t.Gepha, Session("s1")).Value.Id;
@@ -3302,10 +3363,10 @@ public class TasksBoardTests
         Assert.StartsWith("Added 4 weeks ago\n", (string)age.ToolTip);
     });
 
-    // From 692 DIP the line is today's, and the switch between the two happens when the grip's drag ends (ResizePanel),
+    // From 710 DIP the line is today's, and the switch between the two happens when the grip's drag ends (ResizePanel),
     // redrawing every line once.
     [Fact]
-    public void A_panel_692_or_wider_draws_todays_lines() => StaThread.Run(() =>
+    public void A_panel_710_or_wider_draws_todays_lines() => StaThread.Run(() =>
     {
         using var t = Build(width: TasksPanelLayout.SlimBelow);
         var id = t.Tasks.Create("work", t.Gepha, Session("s1")).Value.Id;
@@ -3409,7 +3470,7 @@ public class TasksBoardTests
     // which is the saved width clamped to half the screen it docks on, not the saved width itself. A saved 700 on a
     // screen whose half is 546 DIP is a 546 DIP panel, and its lines are slim.
     [Fact]
-    public void A_panel_clamped_below_692_by_its_screen_draws_slim_lines() => StaThread.Run(() =>
+    public void A_panel_clamped_below_710_by_its_screen_draws_slim_lines() => StaThread.Run(() =>
     {
         using var t = Build(width: 700, screenDips: 1092);
         var id = t.Tasks.Create("work", t.Gepha, Session("s1")).Value.Id;
@@ -3442,7 +3503,9 @@ public class TasksBoardTests
     [Fact]
     public void A_redock_on_a_wider_screen_brings_the_full_lines_back() => StaThread.Run(() =>
     {
-        using var t = Build(width: 700, screenDips: 1092);
+        // 750: above the full line's floor (TasksPanelLayout.SlimBelow, 710 since the snooze moon) and over half the
+        // 1092 DIP screen, so it docks slim there and full on the wider screen.
+        using var t = Build(width: 750, screenDips: 1092);
         var id = t.Tasks.Create("work", t.Gepha, Session("s1")).Value.Id;
         t.Controller.Show();
         Assert.DoesNotContain(Inside(LineOf(t.Window, id)).OfType<TextBlock>(), b => b.Text == "1 session");

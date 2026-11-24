@@ -138,6 +138,12 @@ public static class ControlUsage
                 + "      their sessions with transcript files; plain text"),
             new("task", "goal <id> <goal-id>|none",
                 "count a task toward an open goal of any period, as the tasks window's \"...\" menu \"Goal\" does, or toward none"),
+            new("task", "snooze <id> 1h|3h|tomorrow|monday|<n>m|<n>h|<n>d",
+                "hide a task from the bar and the tasks panel for a while, as a line's snooze button does: an hour, three\n"
+                + "      hours, until 09:00 tomorrow or next Monday, or any length in minutes, hours or days. It comes back by\n"
+                + "      itself, or sooner when a session asks or finishes or its status changes; task list shows snoozedUntil"),
+            new("task", "wake <id>",
+                "bring a snoozed task back now, as \"Wake now\" does"),
         ]),
         new("Goals", [
             new("goal", "list [--week [<date>] | --month [<date>] | --all]",

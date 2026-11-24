@@ -51,7 +51,7 @@ namespace Deskbar.App;
 //   Claude working   a chip with the status chips, "Claude working N", orange-edged (Orange) on or off, filled with
 //                    AskTint while on (the approved mockup; never the blue selected edge). N is what it would show
 //                    under every other filter (TasksView.ClaudeWorkingCount).
-//   The width        (tasks panel plan, Task 8; spec "Lines at panel width" and "The Matrix") below 692 DIP the lines are
+//   The width        (tasks panel plan, Task 8; spec "Lines at panel width" and "The Matrix") below 710 DIP the lines are
 //                    slim (the view's Slim: squares for sessions, no status chip, assignee, age or Reopen; "Lines at panel width"
 //                    below Line), and the List / Matrix switch shows only from 780 (MatrixAllowed, PaintViewSwitch in
 //                    TasksWindow.Matrix.cs). Both come with the view, made again at the grip's drag end, never during it.
@@ -809,27 +809,34 @@ public partial class TasksWindow : Window
     // comments, action (close or Reopen), "…". Fixed widths, shared by every line, so each column sits at the same x on
     // every line. The sessions column is wide enough for "2 sessions, 1 live" (116 DIP, so the words never spill into the
     // age column; it is empty on a note), the age is left-aligned in its own so its x never follows the text length, and this
-    // line is drawn only from 692 DIP (TasksPanelLayout.SlimBelow: the old floating window's minimum, 620 until the status
-    // chip column took 72; narrower, the slim line below), so the title keeps a usable width even with the list's scroll
-    // bar showing (review I-3). The panel itself goes down to 360 DIP.
+    // line is drawn only from 710 DIP (TasksPanelLayout.SlimBelow: the old floating window's minimum, 620 until the status
+    // chip column took 72, 692 until the snooze moon took 18; narrower, the slim line below), so the title keeps a usable
+    // width even with the list's scroll bar showing (review I-3). The panel itself goes down to 360 DIP.
+    //
+    // The toggles' column is 56 DIP since the snooze moon joined the two flags (task 6da8d7eb): three 16 DIP glyph buttons
+    // and a little air, the same on the slim line.
     static readonly IReadOnlyList<GridLength> LineColumns =
-        [new(22), new(1, GridUnitType.Star), new(38), new(72), new(116), new(46), new(44), new(88), new(40), new(52), new(24)];
+        [new(22), new(1, GridUnitType.Star), new(FlagsColumn), new(72), new(116), new(46), new(44), new(88), new(40), new(52), new(24)];
 
     // LINES AT PANEL WIDTH (spec docs/superpowers/specs/2026-11-23-tasks-panel-design.md, "Lines at panel width"; Petre's
-    // pick, "slim line when narrow"; plan 2026-11-23-tasks-panel, Task 8). The full line's fixed columns come to 542 DIP
-    // (470 before the 72 DIP status chip column), more than the panel's default 460, so below TasksPanelLayout.SlimBelow
-    // (692 DIP; the view's Slim) a line is slim: tick, title (a Done task's green tick still in front of it), the two
-    // toggles, the sessions as squares alone (no words), the age (since 2026-11-24, when it left the bar), the workspace
-    // chip, the comment count and "⋯". The status chip and the assignee move into the line's tooltip, with the age again
-    // (SlimTip, "Done · 5h · Claude"); Close and Reopen were already in "⋯"
+    // pick, "slim line when narrow"; plan 2026-11-23-tasks-panel, Task 8). The full line's fixed columns come to 560 DIP
+    // (542 before the snooze moon widened the toggles by 18, 470 before the 72 DIP status chip column), more than the
+    // panel's default 460, so below TasksPanelLayout.SlimBelow (710 DIP; the view's Slim) a line is slim: tick, title (a
+    // Done task's green tick still in front of it), the toggles and the snooze moon, the sessions as squares alone (no
+    // words), the age (since 2026-11-24, when it left the bar), the workspace chip, the comment count and "⋯". The status
+    // chip and the assignee move into the line's tooltip, with the age again (SlimTip, "Done · 5h · Claude"); Close and
+    // Reopen were already in "⋯"
     // (OpenMenuFor), so the Reopen button goes without anything becoming unreachable. Same column indexes as the full
     // line, the dropped ones zero wide and left empty. The switch happens only when the width changes at the grip's drag
     // end, never during a drag (TasksBoard.ResizePanel), and then every line redraws once.
     bool slimLines;
     GridLength slimSquaresWidth = new(0);
 
+    // The toggles' column on a full and a slim line: important, urgent and the snooze moon (see LineColumns).
+    const double FlagsColumn = 56;
+
     static IReadOnlyList<GridLength> SlimColumns(GridLength squares) =>
-        [new(22), new(1, GridUnitType.Star), new(38), new(0), squares, new(0), new(SlimAgeColumn), new(88), new(40), new(0), new(24)];
+        [new(22), new(1, GridUnitType.Star), new(FlagsColumn), new(0), squares, new(0), new(SlimAgeColumn), new(88), new(40), new(0), new(24)];
 
     // The slim line's age column (2026-11-24, the age moved off the bar): "27d23h", the widest TaskAge.Format writes, at
     // the age's 10.5 size is about 34 DIP, plus the 6 DIP left margin AgeOf gives it, so the text never trims.
@@ -944,7 +951,65 @@ public partial class TasksWindow : Window
                 AutomationProperties.SetItemStatus(toggle, flag.Item4 ? "on" : "off");
                 panel.Children.Add(toggle);
             });
+        if (SnoozeButton(row) is { } snooze) panel.Children.Add(snooze);
         return panel;
+    }
+
+    // THE SNOOZE BUTTON (task 6da8d7eb, Petre: "task should have a snooze button, which will hide it from view for a while";
+    // and on the task, "only in the large tasks view", so the bar's lines have none). Third after the two toggles and
+    // quiet like an off toggle: invisible until the line is hovered or selected. Segoe's "QuietHours" moon, U+E708, in
+    // both icon fonts (checked). A press opens the lengths (SnoozeMenu); on a snoozed line, which only the Snoozed filter
+    // shows, the moon is lit and the menu offers "Wake now" first. None on a task waiting on Petre (TaskBoard.Snooze
+    // refuses it: a question never hides), and none in a Matrix line, whose flags column has room for two glyphs only;
+    // "Snooze" in the line's "⋯" menu reaches it there.
+    Button? SnoozeButton(TaskRowView row)
+    {
+        if (Actions?.Snooze is null || compactLines || row.Status == TaskStatus.WaitingOnYou) return null;
+        var snoozed = row.SnoozedUntil is not null;
+        Button? button = null;
+        button = Small(new TextBlock { Text = "", FontFamily = IconFont, FontSize = 12, Foreground = snoozed ? SnoozeInk : DimInk },
+            "Snooze", () => OpenSnoozeMenu(row.Id, button), snoozed ? "Snoozed: wake it, or snooze it for longer" : "Snooze: hide it for a while");
+        button.Padding = new Thickness(2, 0, 2, 1);
+        button.Tag = snoozed ? FlagOnTag : FlagOffTag;
+        AutomationProperties.SetItemStatus(button, snoozed ? "on" : "off");
+        return button;
+    }
+
+    static readonly Brush SnoozeInk = Frozen(0xFF, 0x9F, 0xA8, 0xFF);
+
+    /// <summary>
+    /// The snooze lengths under <paramref name="anchor"/> (the moon), or at the pointer: "Wake now" first on a snoozed task,
+    /// then TaskSnooze's four, each with the time it ends where that is a clock time. Internal, answering the menu, for the tests.
+    /// </summary>
+    internal ContextMenu OpenSnoozeMenu(Guid id, UIElement? anchor)
+    {
+        var menu = anchor is null
+            ? new ContextMenu { Placement = PlacementMode.MousePoint }
+            : new ContextMenu { PlacementTarget = anchor, Placement = PlacementMode.Bottom };
+        SnoozeItems(id).ForEach(item => menu.Items.Add(item));
+        OpenMenu(menu);
+        return menu;
+    }
+
+    // The items both the moon's menu and the "⋯" menu's "Snooze" submenu list. Labels are worked out now, on the local
+    // clock, so "Tomorrow, Thu 09:00" names the right day.
+    List<object> SnoozeItems(Guid id)
+    {
+        var row = latest?.Groups.SelectMany(g => g.Rows).FirstOrDefault(r => r.Id == id);
+        var now = Now().ToLocalTime();
+        var items = new List<object>();
+        if (row?.SnoozedUntil is { } until)
+        {
+            items.Add(Item("Wake now", () => Actions?.Wake?.Invoke(id)));
+            // When it comes back, as a dim line that does nothing.
+            var when = Item($"Snoozed {TaskSnooze.UntilText(until.ToLocalTime(), now)}");
+            when.IsEnabled = false;
+            items.Add(when);
+            items.Add(new Separator());
+        }
+        TaskSnooze.Choices.ToList().ForEach(choice =>
+            items.Add(Item(TaskSnooze.Label(choice, now, TimeZoneInfo.Local.GetUtcOffset), () => Actions?.Snooze?.Invoke(id, choice))));
+        return items;
     }
 
     const string FlagOnTag = "task-flag-on";
@@ -1945,6 +2010,14 @@ public partial class TasksWindow : Window
         menu.Items.Add(row.Status == TaskStatus.Closed && !row.Closing
             ? Item("Reopen", () => Actions?.Reopen(id))
             : Item("Close", () => Actions?.Close(id)));
+        // Snooze (task 6da8d7eb): the moon's lengths as a submenu, for every open line but one waiting on Petre, so a
+        // Matrix line, which has no moon, reaches it too.
+        if (Actions?.Snooze is not null && row.Status is not (TaskStatus.Closed or TaskStatus.WaitingOnYou) && !row.Closing)
+        {
+            var snooze = Item(row.SnoozedUntil is null ? "Snooze" : "Snoozed");
+            SnoozeItems(id).ForEach(item => snooze.Items.Add(item));
+            menu.Items.Add(snooze);
+        }
         // The task list's one workspace menu (WorkspaceChipMenu), the move the bar's line chip makes. Its own menu,
         // opened under the line's "⋯" once this one has closed: the compact chip menu is a context menu of its own, not
         // a submenu.

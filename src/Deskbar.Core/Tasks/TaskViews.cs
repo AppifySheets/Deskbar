@@ -19,9 +19,13 @@ namespace Deskbar.Core.Tasks;
 
 /// <summary>
 /// The window's status filters. <see cref="Open"/> is the default view: every task but the closed ones, grouped.
-/// The other five show one status alone.
+/// The other five show one status alone. <see cref="Snoozed"/> shows the snoozed tasks, which no other filter shows.
 /// </summary>
-public enum TaskFilter { Open, WaitingOnYou, Done, InProgress, Backlog, Closed }
+//
+// SNOOZED (task 6da8d7eb): a snoozed task is out of view, so every filter leaves it out (the pinned Waiting on you block,
+// the quadrants, the Matrix and every chip's count) except its own, which lists the open snoozed tasks in one group, the
+// first to come back on top. Appended last, so no earlier value moves.
+public enum TaskFilter { Open, WaitingOnYou, Done, InProgress, Backlog, Closed, Snoozed }
 
 /// <summary>
 /// The window's workspace filter: every task (<see cref="All"/>), or only the tasks on one workspace, or only the tasks
@@ -74,9 +78,9 @@ public sealed record TaskAssigneeFilter(Maybe<AssigneeKind> Kind)
 
 /// <summary>
 /// Which group of the window a task is drawn in: the pinned Waiting on you block, one of Covey's quadrants (named as
-/// the book numbers them), or the closed tasks.
+/// the book numbers them), the closed tasks, or the snoozed ones (the Snoozed filter's one group).
 /// </summary>
-public enum TaskGroupKind { WaitingOnYou, I, II, III, IV, Closed }
+public enum TaskGroupKind { WaitingOnYou, I, II, III, IV, Closed, Snoozed }
 
 /// <summary>One group of the window: which group, and its tasks in the order they are drawn.</summary>
 public sealed record TaskGroup(TaskGroupKind Kind, IReadOnlyList<TaskItem> Tasks);
@@ -118,6 +122,8 @@ public static class TaskViews
             TaskFilter.Closed => [new TaskGroup(TaskGroupKind.Closed,
                 board.Tasks.Where(t => t.Status == TaskStatus.Closed && where.Admits(t)).OrderByDescending(t => t.UpdatedAt).ToArray())],
             TaskFilter.WaitingOnYou => [Waiting(board, where)],
+            TaskFilter.Snoozed => [new TaskGroup(TaskGroupKind.Snoozed,
+                board.Tasks.Where(t => t.IsOpen && t.IsSnoozed && where.Admits(t)).OrderBy(t => t.SnoozedUntil.Value).ThenBy(t => t.Id).ToArray())],
             TaskFilter.Open => QuadrantGroups(board, where, _ => true).Prepend(Waiting(board, where)),
             _ => QuadrantGroups(board, where, t => StatusesOf(filter).Contains(t.Status)),
         })
@@ -128,16 +134,17 @@ public static class TaskViews
     /// The Matrix (Ruling 28): Covey's four cells, I to IV, always all four. Each lists its quadrant's open tasks in
     /// their order, the ones waiting on Petre first, on top of their own quadrant's cell (pinned, as everywhere,
     /// the latest ask first), each drawn orange as everywhere. The status filter narrows every cell as it narrows the
-    /// List; the closed tasks have no quadrant order, so under "Closed" every cell is empty.
+    /// List; the closed tasks have no quadrant order, so under "Closed" every cell is empty, and a snoozed task is out of
+    /// view, so under "Snoozed" too (the List shows them) and under every other filter it is left out.
     /// </summary>
     public static IReadOnlyList<TaskCell> Matrix(TaskBoard board, TaskFilter filter, TaskWorkspaceFilter workspaceFilter, TaskAssigneeFilter? who = null) =>
         Matrix(board, filter, new Admit(workspaceFilter, who ?? TaskAssigneeFilter.All));
 
     static IReadOnlyList<TaskCell> Matrix(TaskBoard board, TaskFilter filter, Admit where) =>
-        Quadrants.Select(q => new TaskCell(q.Quadrant, filter == TaskFilter.Closed ? []
+        Quadrants.Select(q => new TaskCell(q.Quadrant, filter is TaskFilter.Closed or TaskFilter.Snoozed ? []
             : board.Tasks.Where(t => t.Status == TaskStatus.WaitingOnYou && t.Quadrant == q.Quadrant).OrderByDescending(t => t.Raised)
                 .Concat(board.Group(q.Quadrant))
-                .Where(t => where.Admits(t) && StatusesOf(filter).Contains(t.Status))
+                .Where(t => where.Admits(t) && StatusesOf(filter).Contains(t.Status) && !t.IsSnoozed)
                 .ToArray()))
             .ToArray();
 
@@ -155,18 +162,24 @@ public static class TaskViews
     public static string GroupName(TaskGroupKind kind) =>
         QuadrantOf(kind).Match(
             q => $"{q.Numeral()}  {q.Words()}",
-            () => kind == TaskGroupKind.WaitingOnYou ? StatusName(TaskStatus.WaitingOnYou) : StatusName(TaskStatus.Closed));
+            () => kind switch
+            {
+                TaskGroupKind.WaitingOnYou => StatusName(TaskStatus.WaitingOnYou),
+                TaskGroupKind.Snoozed => "Snoozed",
+                _ => StatusName(TaskStatus.Closed),
+            });
 
     static TaskGroup Waiting(TaskBoard board, Admit where) =>
-        new(TaskGroupKind.WaitingOnYou, board.Tasks.Where(t => t.Status == TaskStatus.WaitingOnYou && where.Admits(t))
+        new(TaskGroupKind.WaitingOnYou, board.Tasks.Where(t => t.Status == TaskStatus.WaitingOnYou && !t.IsSnoozed && where.Admits(t))
             .OrderByDescending(t => t.Raised).ToArray());
 
     static IEnumerable<TaskGroup> QuadrantGroups(TaskBoard board, Admit where, Func<TaskItem, bool> shows) =>
-        Quadrants.Select(q => new TaskGroup(q.Kind, board.Group(q.Quadrant).Where(t => where.Admits(t) && shows(t)).ToArray()));
+        Quadrants.Select(q => new TaskGroup(q.Kind, board.Group(q.Quadrant).Where(t => where.Admits(t) && !t.IsSnoozed && shows(t)).ToArray()));
 
-    /// <summary>How many tasks a filter shows, for its chip.</summary>
+    /// <summary>How many tasks a filter shows, for its chip: a snoozed task counts under Snoozed and nowhere else.</summary>
     public static int Count(TaskBoard board, TaskFilter filter, TaskWorkspaceFilter where, TaskAssigneeFilter? who = null) =>
-        board.Tasks.Count(t => StatusesOf(filter).Contains(t.Status) && where.Admits(t) && (who ?? TaskAssigneeFilter.All).Admits(t));
+        board.Tasks.Count(t => StatusesOf(filter).Contains(t.Status) && (filter == TaskFilter.Snoozed) == t.IsSnoozed
+            && where.Admits(t) && (who ?? TaskAssigneeFilter.All).Admits(t));
 
     /// <summary>
     /// The session a click on a Claude task goes to (spec, "Going to a session": the one waiting on Petre, else the
@@ -309,7 +322,7 @@ public static class TaskViews
 
     static IReadOnlyList<TaskStatus> StatusesOf(TaskFilter filter) => filter switch
     {
-        TaskFilter.Open => [TaskStatus.WaitingOnYou, TaskStatus.Done, TaskStatus.InProgress, TaskStatus.Backlog],
+        TaskFilter.Open or TaskFilter.Snoozed => [TaskStatus.WaitingOnYou, TaskStatus.Done, TaskStatus.InProgress, TaskStatus.Backlog],
         TaskFilter.WaitingOnYou => [TaskStatus.WaitingOnYou],
         TaskFilter.Done => [TaskStatus.Done],
         TaskFilter.InProgress => [TaskStatus.InProgress],

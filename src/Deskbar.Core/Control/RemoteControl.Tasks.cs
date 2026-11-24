@@ -24,6 +24,8 @@ namespace Deskbar.Core.Control;
 //   task describe <id> <markdown>|-          (Ruling 58: his own description under the title)
 //   task comment-edit <comment-id> <markdown>|-   (his own comment only; a session's is refused)
 //   task goal <id> <goal-id>|none     (the goals planner; needs the goal service, RemoteControl.Goals.cs)
+//   task snooze <id> 1h|3h|tomorrow|monday|<n>m|<n>h|<n>d   (task 6da8d7eb: the tasks panel's snooze menu, TaskSnooze)
+//   task wake <id>                    (its "Wake now")
 //   task go <id>
 //   task start <id> [--folder <path>]
 //   task open-session <id> <session>
@@ -119,6 +121,11 @@ public sealed partial class RemoteControl
             ["assign", var id, var who] => ParseAssignee(who)
                 .Match(a => TaskChange(service, id, t => service.Assign(t.Id, a)), ControlReply.Fail),
             ["goal", var id, var goal] => TaskGoal(service, id, goal),
+            // Snoozing (task 6da8d7eb): the length is read first, so a wrong one changes nothing. "tomorrow" and "monday"
+            // are 09:00 on this machine's clock, as in the panel's menu (TaskSnooze).
+            ["snooze", var id, var length] => TaskSnooze.Parse(length, service.Now.ToLocalTime(), TimeZoneInfo.Local.GetUtcOffset)
+                .Match(until => TaskChange(service, id, t => service.Snooze(t.Id, until)), ControlReply.Fail),
+            ["wake", var id] => TaskChange(service, id, t => service.Wake(t.Id)),
             // Subtasks (docs/superpowers/specs/2026-11-24-subtasks-design.md): put a task under another or free it, and read
             // the family text a session on it would read.
             ["parent", var id, var parent] => TaskParent(service, id, parent),
@@ -257,6 +264,9 @@ public sealed partial class RemoteControl
         // task's own subtasks, open and closed.
         parent = tasks?.Board.Family(task.Id).Bind(f => f.Parent).Map(p => (object?)new { id = p.Id, title = p.Title }).GetValueOrDefault(),
         subtasks = tasks?.Board.Tasks.Where(t => t.ParentId == task.Id).Select(t => t.Id).ToArray() ?? [],
+        // Snoozing (task 6da8d7eb): when a snoozed task comes back, or null while it is awake. `list` keeps listing a
+        // snoozed task, so a session still sees the work; only the bar and the tasks panel hide it.
+        snoozedUntil = task.SnoozedUntil.HasValue ? (DateTimeOffset?)task.SnoozedUntil.Value : null,
     };
 
     // Markdown as a session reads it: image paths absolute, through the task service (as stored without one).

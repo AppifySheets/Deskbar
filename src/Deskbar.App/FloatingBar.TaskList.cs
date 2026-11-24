@@ -507,7 +507,9 @@ public partial class FloatingBar
     /// </summary>
     internal static IReadOnlyList<TaskLine> Lines(TaskBoard board, Func<Guid, Maybe<string>> workspaceName,
         Func<Guid, Brush?> colour, Func<string, Maybe<nint>> sessionWindow, Func<TaskItem, Maybe<string>>? goalTitle = null) =>
-        board.Pile().Select(t => new TaskLine(
+        // A snoozed task is off the bar until it comes back (task 6da8d7eb, TaskItem.SnoozedUntil); the tasks panel's
+        // "Snoozed" filter is where it can be found meanwhile.
+        board.Pile().Where(t => !t.IsSnoozed).Select(t => new TaskLine(
             t.Id,
             t.Title,
             DetailOf(t, withDescription: true),

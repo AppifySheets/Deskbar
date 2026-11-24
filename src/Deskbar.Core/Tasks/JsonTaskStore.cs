@@ -114,7 +114,10 @@ public sealed class JsonTaskStore(string baseDirectory, Action<string>? trace = 
         // like WaitingSince, so a wrong-typed value reads as not handed back. Still version 2.
         [property: JsonConverter(typeof(TolerantTimeConverter))] DateTimeOffset? HandedBack = null,
         // TaskItem.ParentId (subtasks spec, 2026-11-24-subtasks-design.md): the parent task's id or null. Still version 2.
-        Guid? ParentId = null);
+        Guid? ParentId = null,
+        // TaskItem.SnoozedUntil (task 6da8d7eb, snoozing): when a snoozed task comes back, or null. Read tolerantly like
+        // HandedBack, so a wrong-typed value reads as awake rather than failing the whole file. Still version 2.
+        [property: JsonConverter(typeof(TolerantTimeConverter))] DateTimeOffset? SnoozedUntil = null);
 
     // The assignee (Ruling 57): kind by name ("me", "claude", "colleague"), plus the id and name a colleague needs.
     sealed record AssigneeDto(string? Kind, string? Id, string? Name);
@@ -208,7 +211,8 @@ public sealed class JsonTaskStore(string baseDirectory, Action<string>? trace = 
             t.WaitingSince.HasValue ? t.WaitingSince.Value.ToUniversalTime() : null,
             t.Adopted,
             t.HandedBack.HasValue ? t.HandedBack.Value.ToUniversalTime() : null,
-            t.ParentId.HasValue ? t.ParentId.Value : null);
+            t.ParentId.HasValue ? t.ParentId.Value : null,
+            t.SnoozedUntil.HasValue ? t.SnoozedUntil.Value.ToUniversalTime() : null);
 
     static TaskItem FromDto(TaskDto d) =>
         new(d.Id, d.Title ?? "",
@@ -237,6 +241,7 @@ public sealed class JsonTaskStore(string baseDirectory, Action<string>? trace = 
             Adopted = d.Adopted ?? false,
             HandedBack = d.HandedBack is { } handed ? handed.ToUniversalTime() : Maybe<DateTimeOffset>.None,
             ParentId = d.ParentId is { } parent ? parent : Maybe<Guid>.None,
+            SnoozedUntil = d.SnoozedUntil is { } snoozed ? snoozed.ToUniversalTime() : Maybe<DateTimeOffset>.None,
         };
 
     // The rank a task saved before ranks existed gets, so the tasks keep the order the bar showed them in then:

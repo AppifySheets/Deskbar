@@ -130,6 +130,20 @@ public sealed class TaskService(ITaskStore store, Func<DateTimeOffset> now, Func
     // delete is not. The board frees the task's subtasks (subtasks spec), stamped now.
     public Result Delete(Guid id) => Apply(Board.Delete(id, now())).Tap(() => DeleteImages(id));
 
+    // Snoozing (task 6da8d7eb, TaskBoard.Snooze): the same time again, or waking a task that is awake, saves nothing.
+    public Result Snooze(Guid id, DateTimeOffset until) => ApplyIfChanged(Board.Snooze(id, until, now()));
+
+    public Result Wake(Guid id) => ApplyIfChanged(Board.Wake(id, now()));
+
+    /// <summary>
+    /// Ends every snooze whose time has come (TaskBoard.WakeDue). The app calls it on a timer; nearly always nothing is
+    /// due, and then it saves and pulses nothing.
+    /// </summary>
+    public void WakeDue() => CommitIfChanged(Board.WakeDue(now()));
+
+    /// <summary>The clock this service stamps changes with, for a caller that works out a snooze's end from it.</summary>
+    public DateTimeOffset Now => now();
+
     /// <summary>Makes a task a subtask of another, or (none) a plain task again (TaskBoard.SetParent).</summary>
     public Result SetParent(Guid id, Maybe<Guid> parent) => ApplyIfChanged(Board.SetParent(id, parent, now()));
 

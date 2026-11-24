@@ -925,6 +925,22 @@ NH4. In the panel, type "rent" in the search, then + Add, type "Call the bank", 
 NH5. Turn off Windows' "Animation effects" (Settings, Accessibility, Visual effects) and add a note: it is selected
      with no glow.
 
+## Snoozing a task
+
+(Task 6da8d7eb.) The tasks panel open, full-width lines.
+
+SZ1. Hover a note's line: a moon shows after the two toggles. Press it: 1 hour, 3 hours, "Tomorrow, <day> 09:00",
+     "Monday, <date> 09:00". Pick 1 hour: the line leaves the panel and the bar, and a "Snoozed 1" chip appears.
+SZ2. Press "Snoozed 1": the line is there with "Snoozed until <time>" under its title and a lit moon. Its moon (or "⋯",
+     "Snoozed") offers "Wake now" first; pick it: the line goes back to its place in its quadrant, and the chip goes
+     once the filter is changed.
+SZ3. `deskbar.cmd task snooze <id> 1m`, wait a minute: the line comes back on its own within 30 seconds of the time.
+SZ4. Snooze a Claude task, then have its session run `task ask`: the task comes back at once, waiting on you, and its
+     line has no moon while it waits.
+SZ5. Snooze a task for 3 hours and restart Deskbar: it is still snoozed. Snooze one for 1 minute, quit Deskbar for two,
+     start it: it is back.
+SZ6. A Matrix line has no moon; "⋯", "Snooze" reaches the same lengths.
+
 ## Results (2026-08-01)
 
 Status: **pending human execution.** An agent cannot observe the desktop, Task View,

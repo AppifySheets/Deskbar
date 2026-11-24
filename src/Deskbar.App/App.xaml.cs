@@ -129,6 +129,9 @@ public partial class App : Application
     IDisposable? quietTaskbarWatch;
     static readonly TimeSpan QuietTaskbarPoll = TimeSpan.FromSeconds(5);
 
+    // How often snoozed tasks are checked for having come due (task 6da8d7eb; see where tasks are loaded).
+    static readonly TimeSpan SnoozeSweep = TimeSpan.FromSeconds(30);
+
     // Held so the timer cannot be collected, and so the tray menu can be rebuilt with it.
     System.Windows.Threading.DispatcherTimer? updateTimer;
     ReleaseInfo? availableUpdate;
@@ -1418,6 +1421,13 @@ public partial class App : Application
         tasks = new Core.Tasks.TaskService(new Core.Tasks.JsonTaskStore(stateDir, ClickTrace.On ? ClickTrace.Write : null), () => DateTimeOffset.UtcNow,
             trace: ClickTrace.On ? ClickTrace.Write : null, filesRoot: stateDir);
         tasks.Load().TapError(err => ClickTrace.Write($"tasks.json not loaded: {err}"));
+        // SNOOZED TASKS COME BACK BY THEMSELVES (task 6da8d7eb, TaskBoard.WakeDue): once now, for a snooze that ran out
+        // while Deskbar was not running, then every SnoozeSweep on the UI thread, where every task change runs. A snooze
+        // ends up to that much late, which nobody snoozing for an hour notices; a sweep that finds nothing due saves and
+        // redraws nothing. Lives as long as the app, like the other sweeps here.
+        tasks.WakeDue();
+        Observable.Interval(SnoozeSweep).ObserveOn(new System.Windows.Threading.DispatcherSynchronizationContext(Dispatcher))
+            .Subscribe(_ => tasks?.WakeDue());
 
         // The goals (goals spec, "Calls made": a file of their own, goals.json, so an older build that drops what it
         // does not know never touches them). Two clocks: the UTC instant for UpdatedAt, and the LOCAL date, which alone

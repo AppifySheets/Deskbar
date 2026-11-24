@@ -456,7 +456,7 @@ maximized windows aside as the bar does. Click the same button, or the x in the 
 it. Drag its inner edge to change the width (460 to start, 360 at the least, half the screen at the most);
 Deskbar remembers the width and whether the panel was open. A search box (Ctrl+F, Esc clears it) finds
 tasks by every word you type, in titles, status lines and questions. The "Claude working" chip shows only the
-tasks whose Claude session is working right now. Below 692 DIP wide the lines go slim, and the List and
+tasks whose Claude session is working right now. Below 710 DIP wide the lines go slim, and the List and
 Matrix switch appears from 780 DIP. A full-screen app makes the panel step back until you leave it.
 A script can add and change tasks with `deskbar.cmd task`, and every Claude Code session keeps a task of
 its own here: it joins the task its work continues or creates one, keeps a short status line on it, asks
@@ -472,6 +472,14 @@ drawn right under its parent, starting with "↳", and a parent's line counts it
 the tasks panel lists them. Drag a task onto the middle of another to put it
 under that task; drag a subtask out of its parent's block to make it a plain task again. A parent closes last: while
 any of its subtasks is open its tick will not close it, and its tooltip says how many are left.
+
+A task you cannot do anything about yet can be snoozed. In the tasks panel, the moon beside a line's two toggles
+(or "Snooze" on its menu) hides it for 1 hour, 3 hours, until 09:00 tomorrow or until 09:00 next Monday. A snoozed
+task leaves the bar and the panel's lists and waits under the panel's "Snoozed" chip, which says when each one
+comes back. It comes back by itself when the time is up, or sooner if its Claude session asks you something,
+finishes, or its status changes, and "Wake now" brings it back at once. A task waiting on you cannot be snoozed. A
+script does the same with `deskbar.cmd task snooze <id> 2h` (or `tomorrow`, `monday`, `45m`, `3d`) and
+`task wake <id>`.
 
 The tasks screencast shows the old floating window and needs filming again for the panel.
 

@@ -200,12 +200,12 @@ internal sealed class TasksPanel : IDisposable
     // THE WIDTH THE PANEL ACTUALLY DOCKS AT, in DIPs of the screen it docks on (tasks panel plan, Task 8 fix round 1). The
     // width asked for (Show, SetWidth) is the user's and is kept whole; each dock clamps it to half of THAT screen
     // (TasksPanelLayout.Clamp), so after a move to a smaller screen, a resolution or a scale change the panel is drawn
-    // narrower than the saved width. The lines (slim below 692) and the Matrix switch (from 780) must follow what is
+    // narrower than the saved width. The lines (slim below 710) and the Matrix switch (from 780) must follow what is
     // drawn, so the board reads this rather than the saved width. Every dock and re-dock sets it: a notice from the bar
     // (another screen, a display change), a width from the grip, the shell's re-ask, the guard. None before the first
     // dock, and the board then falls back to the saved width. A late subscriber gets the current value at once; after
     // that only a change is said, so a re-dock at the same width redraws nothing. It is the clamped width, not the shell's
-    // granted rectangle over the scale, which rounds to whole pixels and could put 692 at 691.7, a slim line.
+    // granted rectangle over the scale, which rounds to whole pixels and could put 710 at 709.7, a slim line.
     public IObservable<Maybe<double>> DockedWidth => dockedWidth.DistinctUntilChanged();
 
     // Opens the panel `widthDips` wide. Docks at once when the bar's strip stands; otherwise remembers it, and the bar's

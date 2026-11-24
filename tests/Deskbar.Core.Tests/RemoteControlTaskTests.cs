@@ -593,6 +593,28 @@ public class RemoteControlTaskTests
         Assert.Equal(["Still open"], Json(Run(manager, "task", "list")).EnumerateArray().Select(e => e.GetProperty("title").GetString()));
     }
 
+    // Task 6da8d7eb: the snooze button's twin. `task snooze` hides a task until then and `list` says when it comes back;
+    // `task wake` brings it back; a length the pipe cannot read changes nothing.
+    [Fact]
+    public void Snooze_and_wake_hide_a_task_and_bring_it_back()
+    {
+        var manager = Started();
+        var id = Prefix(Added(manager));
+
+        var snoozed = Run(manager, "task", "snooze", id, "2h");
+        Assert.Equal(ControlReply.Ok, snoozed.ExitCode);
+        Assert.Equal(clock.AddHours(2), Only.SnoozedUntil.Value);
+        Assert.Equal(clock.AddHours(2), Json(snoozed).GetProperty("snoozedUntil").GetDateTimeOffset());
+
+        var before = tasks.Board;
+        AssertRefusedAndUnchanged(Run(manager, "task", "snooze", id, "a while"), before);
+
+        var woken = Run(manager, "task", "wake", id);
+        Assert.Equal(ControlReply.Ok, woken.ExitCode);
+        Assert.False(Only.IsSnoozed);
+        Assert.Equal(JsonValueKind.Null, Json(woken).GetProperty("snoozedUntil").ValueKind);
+    }
+
     // Task 12: the toggles' twin. `on` and `off` set a flag; the task moves to the top of the quadrant it lands in.
     [Fact]
     public void Flag_sets_and_clears_important_and_urgent()
@@ -715,7 +737,9 @@ public class RemoteControlTaskTests
              "assign <id> me|claude", "describe <id> <markdown>|-", "comment-edit <comment-id> <markdown>|-",
              // Subtasks: put a task under another, and read a task's family.
              "parent <id> <parent-id>|none", "family <id>",
-             "goal <id> <goal-id>|none"],
+             "goal <id> <goal-id>|none",
+             // Task 6da8d7eb: the snooze button's twins.
+             "snooze <id> 1h|3h|tomorrow|monday|<n>m|<n>h|<n>d", "wake <id>"],
             ControlUsage.All.Where(c => c.Verb == "task").Select(c => c.Arguments));
 
     // --- Task 9: go, start, open-session ---------------------------------------------------------------------------

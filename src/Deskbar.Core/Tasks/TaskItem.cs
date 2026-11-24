@@ -192,6 +192,20 @@ public sealed record TaskItem(
     /// </summary>
     public bool Adopted { get; init; }
 
+    /// <summary>
+    /// When a snoozed task comes back, or none (task 6da8d7eb, 2026-11-25, Petre: "task should have a snooze button, which
+    /// will hide it from view for a while"; TaskSnooze.cs holds the lengths). While set, the task is off the bar and off
+    /// every view of the tasks panel but its "Snoozed" filter; it stays open, keeps its status, its flags and its place
+    /// in its quadrant, and a session can still work on it. It comes back when the time is up (TaskBoard.WakeDue, which
+    /// the app runs on a timer), when Petre wakes it (TaskBoard.Wake), or as soon as something happens that he should
+    /// see: its status changes or it is raised (a session asks or marks it done), TaskBoard.Woken. An init property like
+    /// the flags, stored as an optional `snoozedUntil`; absent in a file means awake.
+    /// </summary>
+    public Maybe<DateTimeOffset> SnoozedUntil { get; init; }
+
+    /// <summary>Whether the task is snoozed (<see cref="SnoozedUntil"/>): hidden from the bar and the panel's usual views.</summary>
+    public bool IsSnoozed => SnoozedUntil.HasValue;
+
     /// <summary>Covey's quadrant the two flags name (TaskOrder.cs).</summary>
     public Quadrant Quadrant => QuadrantOf.Flags(Important, Urgent);
 

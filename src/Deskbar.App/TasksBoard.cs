@@ -85,7 +85,7 @@ namespace Deskbar.App;
 // apply), so it too says how many it would show. Neither is saved: both start over on a fresh open, with the rest.
 //
 // THE PANEL'S WIDTH (spec "Lines at panel width" and "The Matrix"; plan 2026-11-23-tasks-panel, Task 8). The view says
-// whether lines are slim (below 692 DIP) and whether the Matrix is allowed (from 780), both from the width the panel
+// whether lines are slim (below 710 DIP) and whether the Matrix is allowed (from 780), both from the width the panel
 // docked at (TasksPanel.DockedWidth; View has why that one), and shows the Matrix only when the setting asks for it AND
 // it is allowed. That width changes only when the panel docks (the grip's drag end, another screen, a scale change),
 // whose pulse makes the view again, so every line redraws once then and never during a drag.
@@ -96,7 +96,7 @@ public sealed class TasksBoard : IDisposable
 
     // The chips' order, the open view's group order with Open first and Closed last.
     static readonly IReadOnlyList<TaskFilter> FilterOrder =
-        [TaskFilter.Open, TaskFilter.WaitingOnYou, TaskFilter.Done, TaskFilter.InProgress, TaskFilter.Backlog, TaskFilter.Closed];
+        [TaskFilter.Open, TaskFilter.WaitingOnYou, TaskFilter.Done, TaskFilter.InProgress, TaskFilter.Backlog, TaskFilter.Closed, TaskFilter.Snoozed];
 
     readonly TasksWindow window;
     readonly TasksPanel panel;
@@ -219,6 +219,8 @@ public sealed class TasksBoard : IDisposable
             ShowTask = ShowTask,
             SetParent = (id, parent) => Report(tasks.SetParent(id, parent)).IsSuccess,
             NestTargets = id => tasks.Board.ParentCandidates(id).Select(t => t.Id).ToHashSet(),
+            Snooze = (id, choice) => Snooze(id, choice),
+            Wake = id => Wake(id),
         };
 
         subscriptions = new CompositeDisposable(
@@ -237,7 +239,7 @@ public sealed class TasksBoard : IDisposable
             // says the current one at once, then each change).
             panel.Edge.Subscribe(window.SetInnerEdge),
             // The width the panel docked at (Task 8 fix round 1): a dock at a new width, on another screen, at another
-            // scale or from the grip, may cross 692 or 780, so the view is made again (View reads it). The window's
+            // scale or from the grip, may cross 710 or 780, so the view is made again (View reads it). The window's
             // signature holds only the two flags, so a new width that crosses neither draws nothing.
             panel.DockedWidth.Subscribe(width =>
             {
@@ -341,7 +343,7 @@ public sealed class TasksBoard : IDisposable
 
     // The grip's drag end (TasksWindowActions.ResizePanel): the width saved, then the panel re-docked at it in place. The
     // width goes in unclamped; TasksPanel clamps it against the screen it docks on.
-    // The new width may cross one of the lines' thresholds (slim below 692, the Matrix from 780; Task 8), so every line
+    // The new width may cross one of the lines' thresholds (slim below 710, the Matrix from 780; Task 8), so every line
     // redraws once, here at the drag's end and never during it. The re-dock's DockedWidth pulse does that (see the
     // constructor); the Refresh after it draws nothing then (the signature is the same), and covers a panel not docked
     // yet, whose view still reads the saved width. A drag that crosses neither threshold draws nothing.
@@ -630,6 +632,14 @@ public sealed class TasksBoard : IDisposable
     /// <summary>A toggle on a line: the flag on or off; the task goes to the top of the quadrant it lands in.</summary>
     public Result SetFlag(Guid id, TaskFlag flag, bool on) => Report(tasks.SetFlag(id, flag, on));
 
+    // SNOOZE (task 6da8d7eb; TaskSnooze.cs has the four lengths): the line's snooze button and its "⋯" menu. The end is
+    // worked out on the LOCAL clock, so "Tomorrow" and "Monday" mean 09:00 where Petre is; the service stores it as an
+    // instant. A refusal (a task waiting on him, a closed one) shows on the problem line like any other.
+    public Result Snooze(Guid id, SnoozeChoice choice) =>
+        Report(tasks.Snooze(id, TaskSnooze.Until(choice, now().ToLocalTime(), TimeZoneInfo.Local.GetUtcOffset)));
+
+    public Result Wake(Guid id) => Report(tasks.Wake(id));
+
     /// <summary>A drop: the task goes to that place in that quadrant, taking its flags (TaskBoard.Place).</summary>
     public Result Place(Guid id, Quadrant quadrant, TaskPlace place) => Report(tasks.Place(id, quadrant, place));
 
@@ -738,6 +748,9 @@ public sealed class TasksBoard : IDisposable
             .Select(g => new TaskGroupView(g.Kind, TaskViews.GroupName(g.Kind), g.Tasks.Select(t => Row(t) with { Nested = nested.Contains(t.Id) }).ToArray()))
             .ToArray();
         var filters = FilterOrder.Select(f => (Filter: f, Count: TaskViews.Count(board, f, shown, assigneeFilter)))
+            // The Snoozed chip (task 6da8d7eb) shows only while something is snoozed, or while it is the filter in force (so
+            // the last snooze running out does not pull the chip from under the view it is showing).
+            .Where(x => x.Filter != TaskFilter.Snoozed || x.Count > 0 || filter == TaskFilter.Snoozed)
             .Select(x => new TaskFilterChip(x.Filter, $"{FilterName(x.Filter)} {x.Count}", x.Filter == filter,
                 x.Filter == TaskFilter.WaitingOnYou && x.Count > 0))
             .ToArray();
@@ -750,7 +763,7 @@ public sealed class TasksBoard : IDisposable
             .Select(c => new TaskCellView(c.Quadrant, TaskViews.GroupName(TaskViews.KindOf(c.Quadrant)), c.Tasks.Select(Row).ToArray()))
             .ToArray();
         var (menuGoals, filterGoals) = showsGoals ? GoalChoices(goalBoard) : NoGoalChoices;
-        // THE PANEL'S WIDTH DECIDES TWO THINGS (Task 8; spec "Lines at panel width", "The Matrix"): slim lines below 692
+        // THE PANEL'S WIDTH DECIDES TWO THINGS (Task 8; spec "Lines at panel width", "The Matrix"): slim lines below 710
         // DIP, and the List / Matrix switch only from 780. It is the width the panel DOCKED at (TasksPanel.DockedWidth,
         // fix round 1), which is the saved width clamped to half the screen it docks on: after a move to a smaller
         // screen or a scale change the panel is narrower than the saved width, and the lines must follow what is drawn
@@ -842,7 +855,10 @@ public sealed class TasksBoard : IDisposable
     TaskRowView Row(TaskItem task) => new(
         task.Id,
         task.Title,
-        FloatingBar.DetailOf(task),
+        // A snoozed line (only the Snoozed filter shows one) says when it comes back, ahead of its usual detail.
+        task.SnoozedUntil.Match(
+            until => string.Join(" · ", new[] { $"Snoozed {TaskSnooze.UntilText(until.ToLocalTime(), now().ToLocalTime())}", FloatingBar.DetailOf(task) }.Where(part => part.Length > 0)),
+            () => FloatingBar.DetailOf(task)),
         task.Status,
         task.IsClaudes,
         SessionsText(task),
@@ -859,6 +875,7 @@ public sealed class TasksBoard : IDisposable
         Description = task.Description,
         Important = task.Important,
         Urgent = task.Urgent,
+        SnoozedUntil = task.SnoozedUntil.Map(until => (DateTimeOffset?)until).GetValueOrDefault(),
         // Null for no goal and for a link to a goal that no longer exists, which reads as no goal everywhere.
         Goal = goals?.GoalOf(task).Map(ChoiceOf).GetValueOrDefault(),
         // Only an open thread shows them, and an ended one's state looks on disk for its transcript (see the header).
@@ -923,6 +940,7 @@ public sealed class TasksBoard : IDisposable
         TaskFilter.Done => TaskViews.StatusName(TaskStatus.Done),
         TaskFilter.InProgress => TaskViews.StatusName(TaskStatus.InProgress),
         TaskFilter.Backlog => TaskViews.StatusName(TaskStatus.Backlog),
+        TaskFilter.Snoozed => "Snoozed",
         _ => TaskViews.StatusName(TaskStatus.Closed),
     };
 
@@ -933,6 +951,7 @@ public sealed class TasksBoard : IDisposable
         TaskFilter.Done => "Nothing done and waiting to be closed.",
         TaskFilter.InProgress => "Nothing in progress.",
         TaskFilter.Backlog => "Nothing in the backlog.",
+        TaskFilter.Snoozed => "Nothing snoozed. Every task is back in view.",
         _ => "Nothing closed.",
     };
 
@@ -985,6 +1004,9 @@ internal sealed record TaskRowView(Guid Id, string Title, string Detail, TaskSta
     public bool Important { get; init; }
 
     public bool Urgent { get; init; }
+
+    /// <summary>When a snoozed task comes back (task 6da8d7eb), or null while it is awake: the snooze button's lit state.</summary>
+    public DateTimeOffset? SnoozedUntil { get; init; }
 
     public Quadrant Quadrant => QuadrantOf.Flags(Important, Urgent);
 
@@ -1156,6 +1178,12 @@ internal sealed record TasksWindowActions(
     /// one, not the menu's first fifteen). None, a drag only reorders.
     /// </summary>
     public Func<Guid, IReadOnlySet<Guid>>? NestTargets { get; init; }
+
+    /// <summary>Snoozes a task for one of the menu's lengths (task 6da8d7eb). None, no snooze button and no menu item.</summary>
+    public Action<Guid, SnoozeChoice>? Snooze { get; init; }
+
+    /// <summary>"Wake now" on a snoozed task.</summary>
+    public Action<Guid>? Wake { get; init; }
 }
 
 /// <summary>A subtask as its parent's open thread lists it: id, title (first line), status and status line.</summary>
