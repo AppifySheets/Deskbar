@@ -1664,6 +1664,34 @@ public class FloatingBarTaskListTests
         t.Bar.Height = height;
     }
 
+    // Petre, live on v2.5.412: "doesn't work, test tasks were not highlighted", adding from the bar of his docked bar (the
+    // panel's add worked). On a docked bar the add's paint queues the fit pass (QueueTaskListFit), and the dispatcher
+    // runs it as it would live, before the test looks: the new note must still end in sight, selected and glowing.
+    [Fact]
+    public void A_note_added_on_a_docked_bar_is_scrolled_to_and_glows() => StaThread.Run(() =>
+    {
+        using var t = Build(openWindow: () => { });
+        Enumerable.Range(1, 30).ToList().ForEach(i => t.Tasks.AddNote($"Important {i}", t.Gepha, Quadrant.II));
+        Dock(t, 600);
+        Settle(t);
+        Assert.Equal(0, t.Bar.TaskLinesScroller!.VerticalOffset, 1);
+
+        ClickBox(t);
+        t.Box.Text = "Call the accountant";
+        Press(t.Bar, t.Box, Key.Enter);
+        // Everything the dispatcher has queued runs, as it would live: the fit pass and any retry, then layout.
+        PumpBar(t);
+        t.Bar.UpdateLayout();
+        PumpBar(t);
+        t.Bar.UpdateLayout();
+
+        var added = t.Tasks.Board.Tasks.Single(x => x.Title == "Call the accountant").Id;
+        Assert.True(t.Bar.Selection.IsSelected(added));
+        Assert.True(t.Bar.TaskLineSelected(added), "the new line is drawn as selected");
+        Assert.Contains(t.Lines, l => ((TaskLine)l.Tag).Id == added);
+        Assert.Equal(SystemParameters.ClientAreaAnimation, t.Bar.TaskLineGlowing(added));
+    });
+
     [Fact]
     public void A_docked_bar_fills_its_free_height_with_lines() => StaThread.Run(() =>
     {
