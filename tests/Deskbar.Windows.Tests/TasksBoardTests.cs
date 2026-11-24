@@ -3383,6 +3383,187 @@ public class TasksBoardTests
         Assert.Contains(RunTexts(t.Window), text => text.Contains("state.json"));
     });
 
+    // --- pasting and dropping pictures (Ctrl+V and a drop take the same path: TaskImageFiles.FromData) -----------------
+
+    static DataObject BitmapData() => new(DataFormats.Bitmap, Picture());
+
+    static IEnumerable<Button> RemoveButtons(object scope) =>
+        Inside(scope).OfType<Button>().Where(b => Equals(b.Tag, TasksWindow.RemovePictureTag));
+
+    // Win+Shift+S, then Ctrl+V in the comment box, then words and Enter: one comment holding the words and the picture,
+    // saved as a file under the state folder.
+    [Fact]
+    public void A_pasted_picture_posts_with_the_text() => StaThread.Run(() =>
+    {
+        var root = ScratchRoot();
+        try
+        {
+            using var t = Build(stateDir: root);
+            var id = t.Tasks.AddNote("Bar looks wrong", t.Gepha).Value.Id;
+            t.Controller.Show();
+            t.Controller.ToggleThread(id);
+
+            Assert.True(t.Window.PasteImages(id, BitmapData()));
+            Assert.Single(t.Window.PendingImages(id));
+            Assert.True(t.Window.TypeComment(id, "See this", Key.Enter));
+
+            var markdown = t.Tasks.Board.Tasks.Single(x => x.Id == id).Comments.Single().Markdown;
+            var parts = TaskImages.Split(markdown);
+            Assert.Equal("See this", parts.Text);
+            Assert.True(File.Exists(TaskImages.Resolve(Assert.Single(parts.Images), root).Value));
+            Assert.Empty(t.Window.PendingImages(id));
+        }
+        finally { Directory.Delete(root, true); }
+    });
+
+    [Fact]
+    public void A_picture_alone_posts() => StaThread.Run(() =>
+    {
+        var root = ScratchRoot();
+        try
+        {
+            using var t = Build(stateDir: root);
+            var id = t.Tasks.AddNote("Just a screenshot", t.Gepha).Value.Id;
+            t.Controller.Show();
+            t.Controller.ToggleThread(id);
+
+            t.Window.PasteImages(id, BitmapData());
+            Assert.True(t.Window.TypeComment(id, "", Key.Enter));
+
+            var parts = TaskImages.Split(t.Tasks.Board.Tasks.Single(x => x.Id == id).Comments.Single().Markdown);
+            Assert.Equal("", parts.Text);
+            Assert.Single(parts.Images);
+        }
+        finally { Directory.Delete(root, true); }
+    });
+
+    // Enter with neither words nor pictures posts nothing, as before.
+    [Fact]
+    public void Enter_with_nothing_posts_nothing() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        var id = t.Tasks.AddNote("Empty", t.Gepha).Value.Id;
+        t.Controller.Show();
+        t.Controller.ToggleThread(id);
+
+        Assert.False(t.Window.TypeComment(id, "", Key.Enter));
+        Assert.Empty(t.Tasks.Board.Tasks.Single(x => x.Id == id).Comments);
+    });
+
+    // Ctrl+V with only words on the clipboard is the text box's own paste: nothing is taken as a picture.
+    [Fact]
+    public void A_text_only_clipboard_is_left_to_the_box() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        var id = t.Tasks.AddNote("Words", t.Gepha).Value.Id;
+        t.Controller.Show();
+        t.Controller.ToggleThread(id);
+
+        Assert.False(t.Window.PasteImages(id, new DataObject(DataFormats.UnicodeText, "just words")));
+        Assert.Empty(t.Window.PendingImages(id));
+    });
+
+    // A session changing something mid-draft redraws the panel; a pending picture stays, as the typed text does.
+    [Fact]
+    public void Pending_pictures_survive_a_redraw() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        var id = t.Tasks.AddNote("Draft", t.Gepha).Value.Id;
+        var other = t.Tasks.AddNote("Elsewhere", t.Gepha).Value.Id;
+        t.Controller.Show();
+        t.Controller.ToggleThread(id);
+        t.Window.PasteImages(id, BitmapData());
+
+        t.Tasks.Rename(other, "Elsewhere, renamed");
+
+        Assert.Single(t.Window.PendingImages(id));
+        Assert.Single(RemoveButtons(t.Window));
+    });
+
+    [Fact]
+    public void The_cross_drops_a_pending_picture() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        var id = t.Tasks.AddNote("Draft", t.Gepha).Value.Id;
+        t.Controller.Show();
+        t.Controller.ToggleThread(id);
+        t.Window.PasteImages(id, BitmapData());
+        t.Window.PasteImages(id, BitmapData());
+
+        Click(RemoveButtons(t.Window).First());
+
+        Assert.Single(t.Window.PendingImages(id));
+    });
+
+    // The editor shows the description's words in its box and its pictures under it; a pasted one joins them, Enter saves
+    // words and every picture, and Esc saves nothing and writes no file.
+    [Fact]
+    public void The_description_editor_keeps_its_pictures_and_adds_pasted_ones() => StaThread.Run(() =>
+    {
+        var root = ScratchRoot();
+        try
+        {
+            using var t = Build(stateDir: root);
+            var id = t.Tasks.AddNote("Brief", t.Gepha).Value.Id;
+            var old = Pictured(root, id);
+            t.Tasks.Describe(id, TaskImages.Join("The plan", [old]));
+            t.Controller.Show();
+            t.Window.BeginRename(id);
+
+            Assert.Equal("The plan", t.Window.DescriptionEditor!.Text);
+            Assert.Single(RemoveButtons(t.Window));
+            Assert.True(t.Window.PasteIntoDescription(BitmapData()));
+            t.Window.SaveEditor();
+
+            var parts = TaskImages.Split(t.Tasks.Board.Tasks.Single(x => x.Id == id).Description);
+            Assert.Equal("The plan", parts.Text);
+            Assert.Equal(2, parts.Images.Count);
+            Assert.Equal(old, parts.Images[0]);
+            Assert.All(parts.Images, image => Assert.True(File.Exists(TaskImages.Resolve(image, root).Value)));
+        }
+        finally { Directory.Delete(root, true); }
+    });
+
+    [Fact]
+    public void Cancelling_the_editor_writes_no_picture() => StaThread.Run(() =>
+    {
+        var root = ScratchRoot();
+        try
+        {
+            using var t = Build(stateDir: root);
+            var id = t.Tasks.AddNote("Brief", t.Gepha).Value.Id;
+            t.Controller.Show();
+            t.Window.BeginRename(id);
+            t.Window.PasteIntoDescription(BitmapData());
+
+            t.Window.CancelEditor();
+
+            Assert.Equal("", t.Tasks.Board.Tasks.Single(x => x.Id == id).Description);
+            Assert.False(Directory.Exists(Path.Combine(root, TaskImages.Folder)));
+        }
+        finally { Directory.Delete(root, true); }
+    });
+
+    [Fact]
+    public void Removing_a_kept_picture_in_the_editor_drops_its_line() => StaThread.Run(() =>
+    {
+        var root = ScratchRoot();
+        try
+        {
+            using var t = Build(stateDir: root);
+            var id = t.Tasks.AddNote("Brief", t.Gepha).Value.Id;
+            t.Tasks.Describe(id, TaskImages.Join("The plan", [Pictured(root, id)]));
+            t.Controller.Show();
+            t.Window.BeginRename(id);
+
+            Click(RemoveButtons(t.Window).Single());
+            t.Window.SaveEditor();
+
+            Assert.Equal("The plan", t.Tasks.Board.Tasks.Single(x => x.Id == id).Description);
+        }
+        finally { Directory.Delete(root, true); }
+    });
+
     // The description's pictures show under it, once the line is open, as a comment's do.
     [Fact]
     public void A_descriptions_picture_shows_under_it() => StaThread.Run(() =>

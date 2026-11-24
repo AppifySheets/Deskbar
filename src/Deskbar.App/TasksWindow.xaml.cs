@@ -295,6 +295,7 @@ public partial class TasksWindow : Window
         renaming = null;
         renameBox = null;
         descriptionBox = null;
+        EndEditorPictures();
         editingComment = null;
         commentEditor = null;
         // The search starts over with every other filter (TasksBoard.OpenFresh has already reset its own). Emptied
@@ -340,6 +341,7 @@ public partial class TasksWindow : Window
         renaming = null;
         renameBox = null;
         descriptionBox = null;
+        EndEditorPictures();
         editingComment = null;
         commentEditor = null;
     }
@@ -1037,6 +1039,7 @@ public partial class TasksWindow : Window
             descriptionBox = DescriptionBox(row);
             panel.Children.Add(renameBox);
             panel.Children.Add(descriptionBox);
+            panel.Children.Add(EditorRow());
         }
         else
         {
@@ -1514,7 +1517,7 @@ public partial class TasksWindow : Window
     // "Comment" button sits at the end of that line. Nothing here has a width of its own to clip at the window's
     // minimum width: the hint trims, the box wraps.
     internal const string CommentPlaceholder = "Add a comment…";
-    internal const string CommentHint = "Markdown works. Enter adds, Shift+Enter starts a new line.";
+    internal const string CommentHint = "Markdown works. Paste or drop images. Enter adds, Shift+Enter starts a new line.";
 
     UIElement CommentBox(Guid id)
     {
@@ -1562,6 +1565,8 @@ public partial class TasksWindow : Window
             placeholder.Visibility = box.Text.Length == 0 ? Visibility.Visible : Visibility.Collapsed;
         };
         box.PreviewKeyDown += (_, e) => e.Handled = PressInComment(id, e.Key, Keyboard.Modifiers) != KeyOutcome.Ignored;
+        // Ctrl+V and drops of pictures (TasksWindow.Images.cs). After the handler above, which sets Handled for every key.
+        TakePictures(box, id);
         box.GotKeyboardFocus += (_, _) => hint.Visibility = Visibility.Visible;
         // The keyboard leaving the box hides the hint, and frees a redraw that waited for it.
         box.LostKeyboardFocus += (_, _) =>
@@ -1587,6 +1592,8 @@ public partial class TasksWindow : Window
                     Padding = new Thickness(6, 3, 6, 3),
                     Child = new Grid { Children = { box, placeholder } },
                 },
+                // The pictures waiting to go with the comment, each with its x (TasksWindow.Images.cs).
+                PendingRow(id),
                 new DockPanel { Margin = new Thickness(0, 3, 0, 0), Children = { post, hint } },
             },
         };
@@ -1606,17 +1613,25 @@ public partial class TasksWindow : Window
         return KeyOutcome.NewLine;
     }
 
-    // Posts the box's text as Petre's comment. The box is emptied first, so the redraw the new comment causes is not
-    // held back by text that is already posted; a refusal puts the text back.
+    // Posts the box's text as Petre's comment, with its pending pictures written and their lines after the text (images
+    // in tasks: a comment of pictures alone is fine, one of neither is nothing). The box is emptied first, so the redraw the
+    // new comment causes is not held back by text that is already posted; a refusal puts the text back, keeps the
+    // pictures pending and deletes the files just written.
     bool Post(Guid id)
     {
         var text = CommentDraft(id);
-        if (string.IsNullOrWhiteSpace(text) || Actions is null) return false;
+        if (string.IsNullOrWhiteSpace(text) && PendingImages(id).Count == 0 || Actions is null) return false;
+        if (CommentWithPictures(id, text.Trim().Length == 0 ? "" : text) is not { } comment) return false;
         drafts.Remove(id);
         if (commentBoxes.TryGetValue(id, out var box)) box.Text = "";
-        if (Actions.Comment(id, text)) return true;
+        if (Actions.Comment(id, comment.Markdown))
+        {
+            Posted(id);
+            return true;
+        }
         drafts[id] = text;
         if (commentBoxes.TryGetValue(id, out var still)) still.Text = text;
+        ForgetWritten(comment.Written);
         return false;
     }
 
@@ -1651,13 +1666,16 @@ public partial class TasksWindow : Window
         return box;
     }
 
-    // The description's box: the same look, taller, empty for a task with none.
+    // The description's box: the same look, taller, empty for a task with none. Images in tasks: it holds the text alone;
+    // the description's pictures are the row under it (EditorRow), so a path is never edited by hand, and Ctrl+V or a drop
+    // of a picture adds one there (TasksWindow.Images.cs).
     TextBox DescriptionBox(TaskRowView row)
     {
-        var box = EditorBox(row, row.Description, "Task description");
+        var box = EditorBox(row, TaskImages.Split(row.Description).Text, "Task description");
         box.MinHeight = 38;
         box.Margin = new Thickness(0, 3, 0, 0);
-        box.ToolTip = "A description, in markdown. Enter saves, Shift+Enter starts a new line.";
+        box.ToolTip = "A description, in markdown. Paste or drop images. Enter saves, Shift+Enter starts a new line.";
+        TakeEditorPictures(box);
         return box;
     }
 
@@ -1700,14 +1718,20 @@ public partial class TasksWindow : Window
     internal void BeginRename(Guid id)
     {
         renaming = id;
+        // Images in tasks: the description's pictures are the editor's kept ones, and nothing is pasted yet.
+        StartEditorPictures(latest?.Groups.SelectMany(g => g.Rows).FirstOrDefault(r => r.Id == id)?.Description ?? "");
         if (latest is not null) Draw(latest);
     }
 
     // Enter in the editor: saved through Edit, and the editor closes once it is taken (a refused title, an empty one,
-    // keeps it open with the problem line saying why; the description is not touched then).
+    // keeps it open with the problem line saying why; the description is not touched then). Images in tasks: the pictures
+    // pasted into the description are written first and their lines joined after its text with the kept ones; pictures
+    // that cannot be written keep the editor open, and a refused edit deletes them again.
     void SaveEdit(Guid id, string title, string description)
     {
-        if (Actions?.Edit(id, title, description) != false) EndRename();
+        if (DescriptionWithPictures(id, description) is not { } withPictures) return;
+        if (Actions?.Edit(id, title, withPictures.Description) != false) EndRename();
+        else ForgetWritten(withPictures.Written);
     }
 
     // F2: the selected line's title, when the line is on show, open and nothing is being edited already.
@@ -1745,6 +1769,7 @@ public partial class TasksWindow : Window
         renaming = null;
         renameBox = null;
         descriptionBox = null;
+        EndEditorPictures();
         if (latest is not null) Present(latest);
     }
 
