@@ -1049,7 +1049,9 @@ public partial class TasksWindow : Window
                         BorderBrush = TickEdge,
                         BorderThickness = new Thickness(1),
                         CornerRadius = new CornerRadius(3),
-                    }, "Close", () => Actions?.Close(row.Id), row.Claudes ? "Tick off: closes Claude's task" : "Tick off: closes the note");
+                    // A parent with open subtasks is refused by the board (task 842e1ba4); the tip says so before the
+                    // click, and the click's refusal shows on the problem line (TasksBoard.Close reports it).
+                    }, "Close", () => Actions?.Close(row.Id), TaskViews.TickTip(row.Claudes, row.SubtaskCount));
 
     // The title over its detail; on a line being renamed, the box that renames it.
     UIElement TextOf(TaskRowView row)

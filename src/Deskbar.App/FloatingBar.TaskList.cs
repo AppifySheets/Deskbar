@@ -1325,7 +1325,8 @@ public partial class FloatingBar
                 CornerRadius = new CornerRadius(3),
                 Background = Brushes.Transparent,
                 Margin = new Thickness(1, 0, 1, 0),
-            }, () => CloseWithUndo(line), line.Claudes ? "Tick off: closes Claude's task" : "Tick off: closes the note", ignoredWhen: TaskClickIgnored),
+            // A parent with open subtasks will not close (task 842e1ba4): the tip names why before the click.
+            }, () => CloseWithUndo(line), TaskViews.TickTip(line.Claudes, line.SubtaskCount), ignoredWhen: TaskClickIgnored),
         }.OfType<UIElement>();
 
     // Right of the text, left to right, between the title and the chip (TaskLineFace): the flags that are ON (a flag that is off is a quiet
@@ -1666,8 +1667,10 @@ public partial class FloatingBar
     // through Close, so the store is the truth whatever happens next; its line stays in its place for six seconds,
     // struck through, with "Undo" where the tick or the close button was, and then leaves and the list settles.
     // The line is pending before Close pulses Changed, so the repaint that pulse causes already draws it struck
-    // through rather than dropping it for a moment. A refused Close (the task was closed meanwhile) leaves nothing
-    // pending. Several lines can be pending at once, each with its own timer.
+    // through rather than dropping it for a moment. A refused Close leaves nothing pending and says why (Report): the
+    // task was closed meanwhile, or it is a parent whose subtasks are not all closed yet (task 842e1ba4), which
+    // without the message would look like a tick that does nothing. Several lines can be pending at once, each with
+    // its own timer.
     void CloseWithUndo(TaskLine line)
     {
         if (taskService is null) return;
@@ -1679,7 +1682,7 @@ public partial class FloatingBar
         };
         pending = pending with { Timer = TaskUndoTimer(UndoWindow, () => ForgetPendingClose(pendingCloses.FirstOrDefault(p => p.Line.Id == line.Id), repaint: true)) };
         pendingCloses.Add(pending);
-        taskService.Close(line.Id).TapError(_ => ForgetPendingClose(pending, repaint: true));
+        Report(taskService.Close(line.Id).TapError(_ => ForgetPendingClose(pending, repaint: true)));
     }
 
     // The undo window is over (or Undo was pressed, or the task came back another way): the line leaves.
