@@ -1286,7 +1286,11 @@ public partial class TasksWindow : Window
             TextTrimming = row.Expanded ? TextTrimming.None : TextTrimming.CharacterEllipsis,
             TextWrapping = row.Expanded ? TextWrapping.Wrap : TextWrapping.NoWrap,
         };
-        MarkdownBlocks.InlinesOf(row.Detail).ToList().ForEach(text.Inlines.Add);
+        // Plain text stays the Text it always was: a TextBlock filled with inlines reports an empty Text (measured: the
+        // window tests reading a status line through it saw ""), so inlines are used only when there is markdown to draw.
+        var inlines = MarkdownBlocks.InlinesOf(row.Detail);
+        if (inlines.All(inline => inline is Run { Tag: null } run && run.Text.Length > 0)) text.Text = row.Detail;
+        else inlines.ToList().ForEach(text.Inlines.Add);
         return text;
     }
 
