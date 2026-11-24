@@ -277,7 +277,7 @@ public sealed class TasksBoard : IDisposable
     /// <summary>
     /// `tasks-window show`, and a line's single click on the bar (through ShowTask). A panel already open comes forward
     /// with its view as it was. A hidden one opens at the default view (open tasks, every workspace, goal and assignee,
-    /// no thread open) and docks at the width saved for it, and the saved state says it is open.
+    /// no thread open; the workspace filter stays on "Current workspace" when that was picked) and docks at the width saved for it, and the saved state says it is open.
     /// </summary>
     //
     // THE WINDOW NEVER ACTIVATES ITSELF (fix round 1, Critical 1, kept for the panel). It is shown without activation and
@@ -322,7 +322,8 @@ public sealed class TasksBoard : IDisposable
     void OpenFresh()
     {
         filter = TaskFilter.Open;
-        where = TaskWorkspaceFilter.All;
+        // "Current workspace" is the one filter a fresh open keeps (AppState.TasksPanel.CurrentWorkspace, task ed1a01fc).
+        where = PanelState.CurrentWorkspace ? TaskWorkspaceFilter.Current : TaskWorkspaceFilter.All;
         goalFilter = TaskGoalFilter.All;
         assigneeFilter = TaskAssigneeFilter.All;
         // The window empties its search box in its own Open (TasksWindow.Open), so the box and this agree.
@@ -434,9 +435,15 @@ public sealed class TasksBoard : IDisposable
         Refresh();
     }
 
+    /// <summary>
+    /// The toolbar's workspace filter: all, one workspace, none, or "Current workspace", which follows the workspace in
+    /// front and is remembered across opens (AppState.TasksPanel.CurrentWorkspace; see OpenFresh).
+    /// </summary>
     public void FilterWorkspace(TaskWorkspaceFilter shown)
     {
         where = shown;
+        // A no-op write when the choice keeps it as it was (SaveTasksPanel compares).
+        _ = manager.SaveTasksPanel(PanelState with { CurrentWorkspace = shown.FollowsCurrent });
         Refresh();
     }
 
@@ -705,23 +712,27 @@ public sealed class TasksBoard : IDisposable
         // under every other filter, whether it is on or off.
         var searched = search.Narrow(goalFilter.Narrow(WithPendingCloses(tasks.Board), goalBoard));
         var board = ClaudeWorking.Narrow(searched, claudeWorking);
-        var claudeWorkingCount = TaskViews.Count(ClaudeWorking.Narrow(searched, true), filter, where, assigneeFilter);
+        // The workspace filter as it applies now: "Current workspace" becomes the workspace in front (task ed1a01fc, see
+        // TaskWorkspaceFilter.Current), so the groups, the Matrix, every chip's count and the add box all follow a
+        // desktop switch, which redraws through ShownStateKey (it holds CurrentWorkspaceId).
+        var shown = where.Resolved(manager.CurrentWorkspaceId);
+        var claudeWorkingCount = TaskViews.Count(ClaudeWorking.Narrow(searched, true), filter, shown, assigneeFilter);
         // Follow-up to the subtasks spec: a subtask is drawn right under its parent, in the parent's group (TaskViews.UnderParents);
         // such a line is Nested, so it shows the arrow without the parent's name.
-        var (listed, nested) = TaskViews.UnderParents(TaskViews.Grouped(board, filter, where, assigneeFilter));
+        var (listed, nested) = TaskViews.UnderParents(TaskViews.Grouped(board, filter, shown, assigneeFilter));
         var groups = listed
             .Select(g => new TaskGroupView(g.Kind, TaskViews.GroupName(g.Kind), g.Tasks.Select(t => Row(t) with { Nested = nested.Contains(t.Id) }).ToArray()))
             .ToArray();
-        var filters = FilterOrder.Select(f => (Filter: f, Count: TaskViews.Count(board, f, where, assigneeFilter)))
+        var filters = FilterOrder.Select(f => (Filter: f, Count: TaskViews.Count(board, f, shown, assigneeFilter)))
             .Select(x => new TaskFilterChip(x.Filter, $"{FilterName(x.Filter)} {x.Count}", x.Filter == filter,
                 x.Filter == TaskFilter.WaitingOnYou && x.Count > 0))
             .ToArray();
         // Every workspace menu of the window (move, the workspace filter, the add box's chip) is the task list's one
         // workspace menu: chips in their colours, in the bar's order, grouped as on the bar, none first.
         var places = WorkspaceChipMenu.Entries(manager.State, withNone: true);
-        var addTarget = where.Any ? PlaceOf(manager.CurrentWorkspaceId) : PlaceOf(where.Workspace);
+        var addTarget = shown.Any ? PlaceOf(manager.CurrentWorkspaceId) : PlaceOf(shown.Workspace);
         // The Matrix's four cells (Ruling 28), drawn instead of the groups while the switch says so (AppState.TasksMatrix).
-        var cells = TaskViews.Matrix(board, filter, where, assigneeFilter)
+        var cells = TaskViews.Matrix(board, filter, shown, assigneeFilter)
             .Select(c => new TaskCellView(c.Quadrant, TaskViews.GroupName(TaskViews.KindOf(c.Quadrant)), c.Tasks.Select(Row).ToArray()))
             .ToArray();
         var (menuGoals, filterGoals) = showsGoals ? GoalChoices(goalBoard) : NoGoalChoices;
@@ -733,7 +744,8 @@ public sealed class TasksBoard : IDisposable
         // before the panel docks) it is the saved width; the first dock's pulse then redraws if the clamp moved it.
         var width = dockedWidth.GetValueOrDefault(PanelState.Width);
         var matrixAllowed = TasksPanelLayout.MatrixAllowed(width);
-        return new TasksView(filters, WorkspaceFilterLabel(), where, places, groups, EmptyText(), addTarget)
+        // The view carries the CHOICE (where), not the resolved filter, so the menu can tick "Current workspace".
+        return new TasksView(filters, WorkspaceFilterLabel(shown), where, places, groups, EmptyText(), addTarget)
         {
             // The setting is Petre's and the width never changes it: a panel too narrow for the Matrix shows the List and
             // leaves AppState.TasksMatrix as it is, so widening it again brings the Matrix back.
@@ -885,8 +897,12 @@ public sealed class TasksBoard : IDisposable
     string AssigneeFilterLabel() =>
         assigneeFilter.Kind.Match(kind => kind == AssigneeKind.Me ? "Assigned: me" : "Assigned: Claude", () => "Assigned: all");
 
-    string WorkspaceFilterLabel() =>
-        where.Any ? "Workspace: all" : $"Workspace: {PlaceOf(where.Workspace).Name}";
+    // "Workspace: all", "Workspace: Sparrow", or under "Current workspace" the workspace in front with "(current)" after
+    // it, so the label says both which tasks show and that they will change with the next switch.
+    string WorkspaceFilterLabel(TaskWorkspaceFilter shown) =>
+        shown.Any ? "Workspace: all"
+        : where.FollowsCurrent ? $"Workspace: {PlaceOf(shown.Workspace).Name} (current)"
+        : $"Workspace: {PlaceOf(shown.Workspace).Name}";
 
     static string FilterName(TaskFilter shown) => shown switch
     {

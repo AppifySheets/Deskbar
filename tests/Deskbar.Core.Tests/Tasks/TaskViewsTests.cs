@@ -47,6 +47,25 @@ public class TaskViewsTests
     IReadOnlyList<string> Shown(TaskFilter filter, TaskWorkspaceFilter where) =>
         TaskViews.Grouped(board, filter, where).Select(g => $"{g.Kind}: {string.Join(", ", g.Tasks.Select(t => t.Title))}").ToList();
 
+    // "Current workspace" (task ed1a01fc) names no workspace of its own: it resolves to the workspace in front each time,
+    // to none on a desktop with no name, and every other filter resolves to itself.
+    [Fact]
+    public void The_current_workspace_filter_resolves_to_the_workspace_in_front()
+    {
+        Note("here", ws);
+        Note("there", other);
+        Note("nowhere", Free);
+
+        Assert.Equal(["IV: here"], Shown(TaskFilter.Open, TaskWorkspaceFilter.Current.Resolved(ws)));
+        Assert.Equal(["IV: there"], Shown(TaskFilter.Open, TaskWorkspaceFilter.Current.Resolved(other)));
+        Assert.Equal(["IV: nowhere"], Shown(TaskFilter.Open, TaskWorkspaceFilter.Current.Resolved(Free)));
+        Assert.Equal(TaskWorkspaceFilter.On(other), TaskWorkspaceFilter.On(other).Resolved(ws));
+        Assert.Equal(TaskWorkspaceFilter.All, TaskWorkspaceFilter.All.Resolved(ws));
+        Assert.True(TaskWorkspaceFilter.Current.FollowsCurrent);
+        Assert.False(TaskWorkspaceFilter.Current.Resolved(ws).FollowsCurrent);
+        Assert.NotEqual(TaskWorkspaceFilter.On(Free), TaskWorkspaceFilter.Current);
+    }
+
     [Fact]
     public void The_open_view_is_waiting_then_the_quadrants_done_keeping_its_place()
     {

@@ -1915,12 +1915,18 @@ public partial class TasksWindow : Window
         return menu;
     }
 
-    // "Workspace: all ▾": "All workspaces" first, then the compact workspace menu, the filter in force outlined. With
-    // every workspace shown, no workspace chip is: an id no workspace has stands for "none of these".
+    // "Workspace: all ▾": "All workspaces" and "Current workspace" first, then the compact workspace menu, the filter in
+    // force outlined. With every workspace shown, or the one in front followed (task ed1a01fc), no workspace chip is: an
+    // id no workspace has stands for "none of these". "Current workspace" is outlined instead, even though the workspace
+    // it stands for right now is in the menu too, because picking that chip would pin the filter to it and stop following.
     ContextMenu WorkspaceFilterMenu(TasksView view, Button anchor) =>
-        WorkspaceChipMenu.Build(view.Places, view.Where.Any ? Maybe.From(Guid.Empty) : view.Where.Workspace,
+        WorkspaceChipMenu.Build(view.Places, view.Where.Any || view.Where.FollowsCurrent ? Maybe.From(Guid.Empty) : view.Where.Workspace,
             workspace => Actions?.FilterWorkspace(TaskWorkspaceFilter.On(workspace)), anchor,
-            extra: [new WorkspaceChipMenu.Extra("All workspaces", view.Where.Any, () => Actions?.FilterWorkspace(TaskWorkspaceFilter.All))]);
+            extra:
+            [
+                new WorkspaceChipMenu.Extra("All workspaces", view.Where.Any, () => Actions?.FilterWorkspace(TaskWorkspaceFilter.All)),
+                new WorkspaceChipMenu.Extra("Current workspace", view.Where.FollowsCurrent, () => Actions?.FilterWorkspace(TaskWorkspaceFilter.Current)),
+            ]);
 
     // --- goals (goals plan, Task 6) -------------------------------------------------------------------------------------
 
