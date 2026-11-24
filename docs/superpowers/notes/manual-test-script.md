@@ -592,6 +592,17 @@ S8. In a session on a task, ask it to split off a piece with `task subtask`: a n
     subtask, `task subtask` makes a sibling, not a grandchild.
 S9. Resume a session on a subtask (the history list): its start briefing carries the family again. Its prompt
     reminder mentions "It is a subtask of <id>" and `task family`.
+S10. Subtasks under their parent. Add two subtasks to a note in quadrant IV and mark one of them important: on the
+    bar and in the tasks panel both are drawn right under the parent, "↳ <title>" with no parent's name, and no group
+    caption or gap opens between them. "· 2 subtasks" never breaks across two lines, at any panel width. Filter the
+    panel to a workspace the parent is not on (put one subtask on another workspace first): that subtask shows in its
+    own place with "↳ <parent> › <title>". Ask something from a session on a subtask: it moves up to Waiting on you.
+S11. Open the parent in the tasks panel: its thread lists both subtasks with their status and status line; click one
+    and it is selected, opened and scrolled into view. **Add subtask** in the thread opens the add box with the parent
+    chip.
+S12. Right-click a plain note: **Subtask of** lists the open tasks it could go under, its workspace's first; pick one
+    and the note moves under it. Right-click it again: **None** is first and the parent is ticked; None frees it. On
+    the parent itself **Subtask of** is greyed out and its tooltip says why. The same in the tasks panel's "..." menu.
 
 ## Goals
 

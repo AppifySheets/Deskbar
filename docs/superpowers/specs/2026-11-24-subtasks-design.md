@@ -163,6 +163,22 @@ reads "↳ <parent title, cut> › <title>", on its slim line and on the bar "�
 the title and the status line. The add box shows the parent as a chip "↳ <parent title> ×" next to the workspace chip,
 with the placeholder "A subtask: Enter adds it, Esc drops the parent".
 
+### Follow-up after the first release (2026-11-24)
+
+Petre tried it: "i tried adding test1, where did it go?" The subtask had landed at the top of quadrant IV, four lines
+above its parent, with only "↳" to say whose it was; and an opened parent said "2 subtasks" without listing them. He
+also asked whether a task can be moved under another. So, superseding "Lines keep their place" and the anti-goal
+"Moving lines" for drawing only (ranks, flags and `task list` are unchanged):
+
+- A subtask is drawn right under its parent, in the parent's group, on the bar and in the tasks panel's List
+  (SubtaskOrder, TaskViews.UnderParents). Exceptions: a subtask waiting on Petre stays in the pinned block, nothing
+  moves into Waiting on you or Closed, the Matrix keeps each task in its own cell, and a subtask whose parent is not in
+  the shown list keeps its own place (and names its parent).
+- An opened parent's thread lists its subtasks, each a button that shows it, then **Add subtask**.
+- **Subtask of** on a line's menu (bar and panel) puts an existing task under another, or frees it with None. A menu,
+  not a drag: a drag already reorders lines, and dropping on a line versus between two is a few pixels apart.
+- The count "· N subtasks" is joined with no-break spaces, so it never splits across lines.
+
 ## Calls Claude made (for Petre to check)
 
 - One level only, as goals have. A deeper tree makes the breadcrumb and the briefing grow with depth.

@@ -463,8 +463,9 @@ on this" on a note's menu to hand it to a new Claude session.
 A task can have subtasks, one level deep. Pick "Add subtask…" on a task's menu and type a title: that is all
 the brief it needs. A Claude session that takes up a subtask is told about its parent and the other subtasks,
 with their status lines, your descriptions and comments, and every Claude session on them with the file its
-conversation is kept in, so it reads what the earlier work found instead of you explaining it again. A subtask's
-line starts with "↳" (in the tasks panel, with the parent's name), and a parent's line counts its open subtasks.
+conversation is kept in, so it reads what the earlier work found instead of you explaining it again. A subtask is
+drawn right under its parent, starting with "↳", and a parent's line counts its open subtasks; opening a parent in
+the tasks panel lists them. "Subtask of" on a task's menu puts an existing task under another.
 
 The tasks screencast shows the old floating window and needs filming again for the panel.
 
