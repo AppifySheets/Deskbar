@@ -248,7 +248,9 @@ The task list at the bottom of the bar (spec `docs/superpowers/specs/2026-11-22-
     and the click does not switch workspaces. Pick another: the line's chip changes, and `$ts task list` agrees. Add
     a note with a title longer than the bar on a narrow bar: the title ends in an ellipsis and the chip is whole.
 55a. Dock the bar to a screen edge with twenty or so open tasks: the list fills the empty height between the last
-    workspace row and the footer, at least three lines, "+N more" counting the rest. Add workspaces or shorten the
+    workspace row and the footer, at least three lines, "+N more" counting the rest. Scroll the list with the wheel:
+    the lines past the last one come up, the bar keeps its height and the workspace rows stay put, and "+N more"
+    counts the lines out of sight above and below as you go. Add workspaces or shorten the
     screen: the list gives up lines, never below three. Float the bar again: three lines, and the bar lands where
     it floated before, not clamped against the docked height. With notes above Claude lines (orange edge, no icon,
     the title starting at the same x as a note's), at the smallest text size, the docked list settles on one count and the bar stays responsive.
@@ -569,6 +571,11 @@ throwaway folder Claude Code trusts, and tracing on for the `claude actions:` an
 107. Double-click a task the keeper gave up on (a give-up from 88 after trusting the folder again, or one that hit "3
     resumes in 10 minutes"): its session is resumed and its window opens, and the task goes back to In progress
     with no question. The next stop of that session is resumed again two minutes later, not given up on at once.
+108. The bar's list scrolls. On a floating bar with ten open tasks, three lines show and "+7 more". Turn the wheel
+    over the list: it scrolls through all ten, the bar's height does not change, and "+7 more" keeps counting the
+    lines out of sight. With a task waiting on you at the top, scroll down past it: the count turns orange and reads
+    "+N more, 1 waiting". Scroll back up. Then bring a Claude terminal whose task line is scrolled out of sight to
+    the front: the list scrolls just far enough to show that line, selected.
 
 ## Subtasks
 

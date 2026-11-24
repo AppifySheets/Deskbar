@@ -45,8 +45,20 @@ public class FloatingBarTaskListTests
 
         public FrameworkElement List => (FrameworkElement)Bar.FindName("TaskListLine")!;
 
-        // The task lines on show, in order: the buttons that carry a TaskLine.
-        public IReadOnlyList<Button> Lines => Inside(List).OfType<Button>().Where(b => b.Tag is TaskLine).ToList();
+        // The task lines in sight, in order: the buttons that carry a TaskLine and that the viewer shows. Every line is
+        // drawn and the ones past the viewer's height scroll (the bar's THE LIST SCROLLS), so a line drawn but scrolled
+        // away is not "on show".
+        public IReadOnlyList<Button> Lines
+        {
+            get
+            {
+                var inSight = Bar.TaskLinesInSight.Select(l => l.Id).ToHashSet();
+                return Drawn.Where(b => inSight.Contains(((TaskLine)b.Tag).Id)).ToList();
+            }
+        }
+
+        // Every task line drawn, in sight or scrolled away.
+        public IReadOnlyList<Button> Drawn => Inside(List).OfType<Button>().Where(b => b.Tag is TaskLine).ToList();
 
         public void Dispose() => Bar.Close();
     }
@@ -992,20 +1004,92 @@ public class FloatingBarTaskListTests
         using var t = Build();
         Enumerable.Range(1, 12).ToList().ForEach(i => t.Tasks.AddNote($"Note {i}", Maybe<Guid>.None));
         var viewer = Inside(t.List).OfType<ScrollViewer>().Single(v => Equals(v.Tag, "task-lines"));
-        Assert.True(double.IsPositiveInfinity(viewer.MaxHeight));
+        // Folded, the viewer has a ceiling too now: three lines, the rest scroll (THE LIST SCROLLS).
+        Assert.False(double.IsPositiveInfinity(viewer.MaxHeight));
 
         Click(ButtonNamed(t.List, "More tasks"));
         t.Bar.UpdateLayout();
 
-        Assert.Equal(12, t.Lines.Count);
-        var eight = t.Lines.Take(8).Sum(l => l.ActualHeight + l.Margin.Top + l.Margin.Bottom);
+        Assert.Equal(12, t.Drawn.Count);
+        Assert.Equal(8, t.Lines.Count);
+        var eight = t.Drawn.Take(8).Sum(l => l.ActualHeight + l.Margin.Top + l.Margin.Bottom);
         Assert.Equal(eight, viewer.ViewportHeight, 1);
         Assert.True(viewer.ExtentHeight > viewer.ViewportHeight + 1, $"the rest scrolls: extent {viewer.ExtentHeight}, viewport {viewer.ViewportHeight}");
 
+        // Folded again, the viewer is three lines tall and the other nine still scroll (THE LIST SCROLLS).
         Click(ButtonNamed(t.List, "More tasks"));
         t.Bar.UpdateLayout();
         Assert.Equal(3, t.Lines.Count);
-        Assert.True(double.IsPositiveInfinity(viewer.MaxHeight));
+        var three = t.Drawn.Take(3).Sum(l => l.ActualHeight + l.Margin.Top + l.Margin.Bottom);
+        Assert.Equal(three, viewer.ViewportHeight, 1);
+    });
+
+    // THE LIST SCROLLS (Petre: "when there are more tasks than can fit in the bar, it should let me scroll"). Every line
+    // is drawn, the viewer is as tall as the lines that fit, and "+N more" counts what is out of sight as the view moves:
+    // scrolled to the end, the lines above are the ones out of sight.
+    [Fact]
+    public void The_lines_past_the_viewer_scroll_and_more_counts_what_is_out_of_sight() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        Enumerable.Range(1, 10).ToList().ForEach(i => t.Tasks.AddNote($"Note {i}", Maybe<Guid>.None));
+        t.Bar.UpdateLayout();
+        var viewer = t.Bar.TaskLinesScroller!;
+
+        Assert.Equal(10, t.Drawn.Count);
+        Assert.Equal(["Note 10", "Note 9", "Note 8"], t.Lines.Select(l => ((TaskLine)l.Tag).Title));
+        Assert.Equal("+7 more", t.Bar.TaskListMoreText);
+
+        viewer.ScrollToEnd();
+        t.Bar.UpdateLayout();
+
+        Assert.Equal(["Note 3", "Note 2", "Note 1"], t.Lines.Select(l => ((TaskLine)l.Tag).Title));
+        Assert.Equal("+7 more", t.Bar.TaskListMoreText);
+
+        // A repaint that changes a line's words keeps the place in the list.
+        var offset = viewer.VerticalOffset;
+        Assert.True(t.Tasks.Rename(t.Tasks.Board.Pile().Single(x => x.Title == "Note 2").Id, "Note two").IsSuccess);
+        t.Bar.UpdateLayout();
+        Assert.Equal(offset, viewer.VerticalOffset, 1);
+        Assert.Contains("Note two", t.Lines.Select(l => ((TaskLine)l.Tag).Title));
+    });
+
+    // A task waiting on Petre scrolled above the view still says so, in "+N waiting": no ask is out of sight without a
+    // sign (spec, "The bar's order").
+    [Fact]
+    public void A_waiting_task_scrolled_above_the_view_is_counted_as_waiting() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        Enumerable.Range(1, 6).ToList().ForEach(i => t.Tasks.AddNote($"Note {i}", Maybe<Guid>.None));
+        var asked = t.Tasks.Create("Asks", t.Gepha, Session("s1")).Value;
+        Assert.True(t.Tasks.Ask(asked.Id, "Merge it?").IsSuccess);
+        t.Bar.UpdateLayout();
+        Assert.Equal("Asks", ((TaskLine)t.Lines[0].Tag).Title);
+
+        t.Bar.TaskLinesScroller!.ScrollToEnd();
+        t.Bar.UpdateLayout();
+
+        Assert.DoesNotContain(t.Lines, l => ((TaskLine)l.Tag).Id == asked.Id);
+        Assert.Equal("+4 more, 1 waiting", t.Bar.TaskListMoreText);
+    });
+
+    // A line selected from elsewhere (a Claude terminal brought to the front selects its task, #477) that sits out of
+    // sight is scrolled into view; a line already in view moves nothing.
+    [Fact]
+    public void A_line_selected_out_of_sight_is_scrolled_into_view() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        Enumerable.Range(1, 10).ToList().ForEach(i => t.Tasks.AddNote($"Note {i}", Maybe<Guid>.None));
+        t.Bar.UpdateLayout();
+        var viewer = t.Bar.TaskLinesScroller!;
+
+        t.Bar.Selection.Select(t.Tasks.Board.Pile().Single(x => x.Title == "Note 9").Id);
+        t.Bar.UpdateLayout();
+        Assert.Equal(0, viewer.VerticalOffset, 1);
+
+        var far = t.Tasks.Board.Pile().Single(x => x.Title == "Note 1").Id;
+        t.Bar.Selection.Select(far);
+        t.Bar.UpdateLayout();
+        Assert.Contains(t.Lines, l => ((TaskLine)l.Tag).Id == far);
     });
 
     // PR A FIX WAVE, Minor 7: a long workspace name is trimmed in a line's chip and in the add box's chips, so it cannot
