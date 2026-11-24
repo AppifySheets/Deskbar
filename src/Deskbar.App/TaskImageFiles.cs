@@ -55,12 +55,37 @@ static class TaskImageFiles
     /// The pictures in a paste or a drop: image files first (a copy in Explorer is a file list), else one bitmap (a
     /// screenshot), else none, so text alone is left to the text box. Files that do not look like pictures are skipped.
     /// </summary>
+    /// <remarks>
+    /// Two guards, both from the branch's final review. Every read of a clipboard or drag data object goes back to OLE and
+    /// can throw (an RDP clipboard, an owner that fails delayed rendering); a throw here, on the UI thread, would restart
+    /// the app, so a data object that cannot be read holds no pictures. And an Office clipboard (copied Excel or
+    /// LibreOffice cells, which come with CSV or RTF beside a picture of themselves) is text: pasting cells into a comment
+    /// means their words. A screenshot or a browser's "Copy image" has neither format, so it stays a picture.
+    /// </remarks>
     public static IReadOnlyList<Result<Pending>> FromData(IDataObject data) =>
-        data.GetDataPresent(DataFormats.FileDrop) && data.GetData(DataFormats.FileDrop) is string[] files
-            ? files.Where(ReportImages.LooksLikeImage).Select(FromFile).ToArray()
-            : data.GetDataPresent(DataFormats.Bitmap) && data.GetData(DataFormats.Bitmap) is BitmapSource bitmap
-                ? [FromBitmap(bitmap)]
-                : [];
+        Result.Try(() => Files(data) is { } files
+                ? files.Where(ReportImages.LooksLikeImage).Select(FromFile).ToArray()
+                : !IsOfficeText(data) && data.GetDataPresent(DataFormats.Bitmap) && data.GetData(DataFormats.Bitmap) is BitmapSource bitmap
+                    ? [FromBitmap(bitmap)]
+                    : Array.Empty<Result<Pending>>())
+            .TapError(e => ClickTrace.Write($"tasks window: a paste or drop could not be read: {e}"))
+            .GetValueOrDefault([]);
+
+    /// <summary>
+    /// Whether a paste or drop would bring pictures, without reading them: for a drag's cursor. False for a data object
+    /// that cannot be read, and for an Office clipboard (see <see cref="FromData"/>).
+    /// </summary>
+    public static bool HoldsPictures(IDataObject data) =>
+        Result.Try(() => Files(data) is { } files
+                ? files.Any(ReportImages.LooksLikeImage)
+                : !IsOfficeText(data) && data.GetDataPresent(DataFormats.Bitmap))
+            .GetValueOrDefault(false);
+
+    static string[]? Files(IDataObject data) =>
+        data.GetDataPresent(DataFormats.FileDrop) ? data.GetData(DataFormats.FileDrop) as string[] : null;
+
+    static bool IsOfficeText(IDataObject data) =>
+        data.GetDataPresent(DataFormats.CommaSeparatedValue) || data.GetDataPresent(DataFormats.Rtf);
 
     /// <summary>
     /// Writes the pictures for a task, named by <paramref name="at"/> and their place in the list, and returns their

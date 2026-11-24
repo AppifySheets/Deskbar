@@ -109,6 +109,48 @@ public sealed class TaskImageFilesTests : IDisposable
     public void Thumbnail_of_a_path_that_is_not_ours_is_none() => StaThread.Run(() =>
         Assert.True(TaskImageFiles.Thumbnail(root, "task-images/../state.json", 64).HasNoValue));
 
+    // Final review, Important 1: the clipboard's data object goes back to OLE on every read, and an RDP clipboard or an
+    // owner that fails delayed rendering throws there. An unhandled throw on the UI thread restarts the app, so a paste
+    // that cannot be read is no pictures, and a drag that cannot be read holds none.
+    sealed class BrokenData : IDataObject
+    {
+        static Exception Broken() => new System.Runtime.InteropServices.COMException("CLIPBRD_E_BAD_DATA", unchecked((int)0x800401D3));
+        public object GetData(string format) => throw Broken();
+        public object GetData(Type format) => throw Broken();
+        public object GetData(string format, bool autoConvert) => throw Broken();
+        public bool GetDataPresent(string format) => throw Broken();
+        public bool GetDataPresent(Type format) => throw Broken();
+        public bool GetDataPresent(string format, bool autoConvert) => throw Broken();
+        public string[] GetFormats() => throw Broken();
+        public string[] GetFormats(bool autoConvert) => throw Broken();
+        public void SetData(object data) => throw Broken();
+        public void SetData(string format, object data) => throw Broken();
+        public void SetData(Type format, object data) => throw Broken();
+        public void SetData(string format, object data, bool autoConvert) => throw Broken();
+    }
+
+    [Fact]
+    public void FromData_of_a_clipboard_that_throws_is_no_pictures() => StaThread.Run(() =>
+    {
+        Assert.Empty(TaskImageFiles.FromData(new BrokenData()));
+        Assert.False(TaskImageFiles.HoldsPictures(new BrokenData()));
+    });
+
+    // Final review, Important 4: Excel and LibreOffice put a picture of copied cells on the clipboard beside the cells as
+    // text. Pasting cells into a comment means the text, so an Office clipboard (CSV or RTF beside the picture) is left
+    // to the text box; a screenshot has no such format and stays a picture.
+    [Fact]
+    public void Copied_cells_are_text_not_a_picture() => StaThread.Run(() =>
+    {
+        var cells = new DataObject();
+        cells.SetData(DataFormats.Bitmap, Picture());
+        cells.SetData(DataFormats.UnicodeText, "a\tb");
+        cells.SetData(DataFormats.CommaSeparatedValue, "a,b");
+
+        Assert.Empty(TaskImageFiles.FromData(cells));
+        Assert.False(TaskImageFiles.HoldsPictures(cells));
+    });
+
     [Fact]
     public void FromData_takes_image_files_then_a_bitmap_and_ignores_text() => StaThread.Run(() =>
     {

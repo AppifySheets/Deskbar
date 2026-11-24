@@ -1711,9 +1711,13 @@ public partial class TasksWindow : Window
         return box;
     }
 
-    // Whether the keyboard is moving to one of the editor's own boxes (title and description).
+    // Whether the keyboard is moving to one of the editor's own boxes (title and description), or out of the window
+    // altogether. Leaving the window says "to nowhere" (null): that is Win+Shift+S for a screenshot, or a press on a file in
+    // Explorer to drag it in, and both are on the way to putting a picture in the description (images in tasks; the final
+    // review of that branch), so the editor stays open for it. A click on anything else in the panel still cancels, and Esc
+    // does. While it stays open the panel's redraws wait, as they do for any open editor (MustWait).
     bool EditorKeepsFocus(IInputElement? next) =>
-        next is not null && (ReferenceEquals(next, renameBox) || ReferenceEquals(next, descriptionBox));
+        next is null || ReferenceEquals(next, renameBox) || ReferenceEquals(next, descriptionBox);
 
     internal void BeginRename(Guid id)
     {

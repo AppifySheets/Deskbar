@@ -3524,6 +3524,38 @@ public class TasksBoardTests
         finally { Directory.Delete(root, true); }
     });
 
+    // Final review, Important 2: taking a screenshot (Win+Shift+S) or pressing on a file in Explorer to drag it takes the
+    // keyboard out of the window, and the focus change says "to nowhere" (NewFocus null). That is not a click away, so the
+    // editor stays open and the picture can still arrive; a click on another element of the panel still cancels.
+    static void LoseFocus(TextBox box, IInputElement? to) =>
+        box.RaiseEvent(new KeyboardFocusChangedEventArgs(Keyboard.PrimaryDevice, 0, box, to) { RoutedEvent = Keyboard.LostKeyboardFocusEvent });
+
+    [Fact]
+    public void Leaving_the_window_keeps_the_editor_open() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        var id = t.Tasks.AddNote("Brief", t.Gepha).Value.Id;
+        t.Controller.Show();
+        t.Window.BeginRename(id);
+
+        LoseFocus(t.Window.DescriptionEditor!, null);
+
+        Assert.NotNull(t.Window.DescriptionEditor);
+    });
+
+    [Fact]
+    public void A_click_elsewhere_in_the_panel_still_cancels_the_editor() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        var id = t.Tasks.AddNote("Brief", t.Gepha).Value.Id;
+        t.Controller.Show();
+        t.Window.BeginRename(id);
+
+        LoseFocus(t.Window.DescriptionEditor!, t.Window.SearchBox);
+
+        Assert.Null(t.Window.DescriptionEditor);
+    });
+
     [Fact]
     public void Cancelling_the_editor_writes_no_picture() => StaThread.Run(() =>
     {

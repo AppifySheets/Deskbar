@@ -207,20 +207,15 @@ public partial class TasksWindow
         box.AllowDrop = true;
         box.PreviewDragOver += (_, e) =>
         {
-            if (!HoldsPictures(e.Data)) return;
+            if (!TaskImageFiles.HoldsPictures(e.Data)) return;
             e.Effects = DragDropEffects.Copy;
             e.Handled = true;
         };
         box.PreviewDrop += (_, e) =>
         {
-            if (HoldsPictures(e.Data)) e.Handled = take(e.Data);
+            if (TaskImageFiles.HoldsPictures(e.Data)) e.Handled = take(e.Data);
         };
     }
-
-    // Cheap, for the drag's cursor: whether a drop would bring pictures, without reading any.
-    static bool HoldsPictures(IDataObject data) =>
-        data.GetDataPresent(DataFormats.FileDrop) && data.GetData(DataFormats.FileDrop) is string[] files && files.Any(ReportImages.LooksLikeImage)
-        || data.GetDataPresent(DataFormats.Bitmap);
 
     // A row of thumbnails, each with an x calling `remove` with its place. A picture that cannot be shown (a kept one whose
     // file is gone) is a small dim box, still with its x, so it can be taken out.

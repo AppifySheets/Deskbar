@@ -214,6 +214,22 @@ public class RemoteControlTaskTests
         Assert.Equal("Brief\n![image](<C:\\S\\task-images\\t\\2.png>)", task.GetProperty("description").GetString());
     }
 
+    // Final review, Important 3: a session runs `task status-line` every turn, and every verb answers with the task; the
+    // thread's text is for `task list` only, or each status line would print the whole thread back to the session.
+    [Fact]
+    public void A_verbs_reply_carries_the_thread_without_its_text()
+    {
+        var manager = Started();
+        var id = Prefix(Added(manager));
+        Run(manager, "task", "comment", id, "a long comment");
+
+        var reply = Json(Run(manager, "task", "flag", id, "urgent", "on"));
+
+        var entry = reply.GetProperty("thread")[0];
+        Assert.False(entry.TryGetProperty("markdown", out _));
+        Assert.Equal("you", entry.GetProperty("by").GetString());
+    }
+
     [Fact]
     public void Comment_edit_changes_his_comment_and_refuses_claudes()
     {

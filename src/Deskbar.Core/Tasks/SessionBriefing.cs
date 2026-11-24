@@ -131,10 +131,12 @@ public static class SessionBriefing
         + (expand is null ? "" : Images(t.Description, expand));
 
     // Images in tasks (docs/superpowers/specs/2026-11-24-task-images-design.md): the description's pictures, each path made
-    // absolute by `expand` (TaskService.ExpandImages) and given whole, with what to do with them.
+    // absolute by `expand` (TaskService.ExpandImages) and given whole, with what to do with them. "Any you have not looked
+    // at yet", not "read them": this line comes with every prompt, and a picture read again each turn costs a thousand or
+    // two tokens every time (final review of the images branch).
     static string Images(string description, Func<string, string> expand) =>
         TaskImages.Split(description).Images is { Count: > 0 } images
-            ? $", images in the description: {string.Join(", ", images.Select(path => AbsolutePath(expand(TaskImages.Join("", [path])))))}; read them with your Read tool"
+            ? $", images in the description: {string.Join(", ", images.Select(path => AbsolutePath(expand(TaskImages.Join("", [path])))))}; read any you have not looked at yet with your Read tool"
             : "";
 
     // The path out of one expanded image line, `![image](<C:\...>)` or (no state folder) `![image](task-images/...)`.

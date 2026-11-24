@@ -194,7 +194,7 @@ public sealed class SessionBriefingTests
         var text = SessionBriefing.Prompt(Sid, own, Maybe<TaskItem>.None, Absolute);
 
         Assert.Contains(new string('a', 197) + "...", text);
-        Assert.Contains(@"images in the description: C:\S\task-images\t\1.png; read them with your Read tool", text);
+        Assert.Contains(@"images in the description: C:\S\task-images\t\1.png; read any you have not looked at yet with your Read tool", text);
         Assert.DoesNotContain("![image]", text);
     }
 
@@ -206,6 +206,6 @@ public sealed class SessionBriefingTests
         var text = SessionBriefing.Start(Start(), own, [], Absolute);
 
         Assert.DoesNotContain("the user's description", text);
-        Assert.Contains(@"images in the description: C:\S\task-images\t\1.png; read them with your Read tool", text);
+        Assert.Contains(@"images in the description: C:\S\task-images\t\1.png; read any you have not looked at yet with your Read tool", text);
     }
 }

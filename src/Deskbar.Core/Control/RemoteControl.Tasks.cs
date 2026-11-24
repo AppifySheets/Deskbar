@@ -92,11 +92,11 @@ public sealed partial class RemoteControl
             // A session's form typed without its --session: it cannot know whose task is meant.
             ["done"] or ["answered"] or ["join", _] or ["new", _] or ["status-line", _] or ["ask", _] or ["later", _] =>
                 ControlReply.Fail($"task {args[0]} is a session's form and needs --session <id>"),
-            ["list"] => Success(service.Board.Pile().Select(Describe).ToArray()),
+            ["list"] => Success(service.Board.Pile().Select(Listed).ToArray()),
             // The closed tasks, which every other view leaves out, so one closed by mistake can be found and reopened.
             // The latest closed first: closing stamps UpdatedAt, and nothing but Petre's own edits moves it after that.
             ["list", "--closed"] => Success(service.Board.Tasks.Where(t => t.Status == TaskStatus.Closed)
-                .OrderByDescending(t => t.UpdatedAt).Select(Describe).ToArray()),
+                .OrderByDescending(t => t.UpdatedAt).Select(Listed).ToArray()),
             ["add", .. var more] => TaskAdd(service, more, from),
             ["close", var id] => TaskChange(service, id, t => service.Close(t.Id)),
             ["reopen", var id] => TaskChange(service, id, t => service.Reopen(t.Id)),
@@ -196,7 +196,15 @@ public sealed partial class RemoteControl
     // it, `sessions` who did (live or ended), `comments` the thread's length, `thread` the comments themselves.
     // `important`, `urgent`, `quadrant` and `order` are Task 12's (see the header). Describe reads the order off the
     // live board, so every verb's reply says where the task is now.
-    object Describe(TaskItem task) => new
+    //
+    // `withText` is on for `list` only: each thread entry then carries the comment's text (below). Every other verb answers
+    // with the thread's ids alone, because a session runs `task status-line` every turn and would otherwise read the
+    // whole thread back each time (final review of the images branch: one live thread was 12.6k characters).
+    object Describe(TaskItem task) => Describe(task, withText: false);
+
+    object Listed(TaskItem task) => Describe(task, withText: true);
+
+    object Describe(TaskItem task, bool withText) => new
     {
         id = task.Id,
         title = task.Title,
@@ -217,14 +225,22 @@ public sealed partial class RemoteControl
         // text is listed too, so a Claude session can read Petre's comments, which no hook used to pass on; and in both,
         // every pasted image's path is made absolute (TaskService.ExpandImages), ready for a session's Read tool.
         description = Expanded(task.Description),
-        thread = task.Comments.Select(c => new
-        {
-            id = c.Id,
-            by = c.BySession ? "claude" : c.ByDeskbar ? "deskbar" : "you",
-            at = c.At,
-            settled = c.Settled.HasValue ? (DateTimeOffset?)c.Settled.Value : null,
-            markdown = Expanded(c.Markdown),
-        }).ToArray(),
+        thread = task.Comments.Select(c => withText
+            ? (object)new
+            {
+                id = c.Id,
+                by = c.BySession ? "claude" : c.ByDeskbar ? "deskbar" : "you",
+                at = c.At,
+                settled = c.Settled.HasValue ? (DateTimeOffset?)c.Settled.Value : null,
+                markdown = Expanded(c.Markdown),
+            }
+            : new
+            {
+                id = c.Id,
+                by = c.BySession ? "claude" : c.ByDeskbar ? "deskbar" : "you",
+                at = c.At,
+                settled = c.Settled.HasValue ? (DateTimeOffset?)c.Settled.Value : null,
+            }).ToArray(),
         quadrant = task.Quadrant.Numeral(),
         order = tasks is { } service && task.IsOpen ? service.Board.PositionOf(task.Id).Map(n => (int?)n).GetValueOrDefault() : null,
         // The goal it counts toward (goals plan, Task 5), as {id, title}, or null: no link, no goal service, or a link
