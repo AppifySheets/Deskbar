@@ -44,7 +44,8 @@ public sealed class TaskServiceTests
             () => s.SetFlag(note.Id, TaskFlag.Urgent, true),
             () => s.SetFlag(note.Id, TaskFlag.Important, true),
             () => s.Place(claudes.Id, Quadrant.I, TaskPlace.Before(note.Id)),
-            () => s.Close(note.Id),
+            // s2 joined the note above and is still live on it, so this is "Stop Claude and close" (task 37cd7081).
+            () => s.Close(note.Id, stoppingClaude: true),
             () => s.UndoClose(note.Id, TaskStatus.Backlog, Maybe<string>.None),
             () => { s.SessionEnded("s2"); return Result.Success(); },
             () => { s.Prune(new HashSet<Guid>()); return Result.Success(); },
@@ -175,7 +176,7 @@ public sealed class TaskServiceTests
         Assert.Equal(0, pulses);
         Assert.True(s.SetStatusLine(task.Id, "merged").IsSuccess);
         Assert.Equal(saves + 1, store.Saves);
-        Assert.True(s.Close(task.Id).IsSuccess);
+        Assert.True(s.Close(task.Id, stoppingClaude: true).IsSuccess);
         Assert.True(s.SetStatusLine(task.Id, "merged").IsFailure);
     }
 

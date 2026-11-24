@@ -634,6 +634,14 @@ S14. A parent closes last. Give a note two subtasks. Hover its tick, on the bar 
     with no Undo. Tick it in the panel, and pick Close on its menu: the problem line says it and nothing moves.
     `$ts task close <parent>` is refused with the same words. Close one subtask: the tooltip and the refusal say "Close
     its open subtask first". Close the other: the parent's tick closes it as before, with Undo.
+S15. Claude still at it (task 37cd7081). Start Claude on a task and, while it works, hover its tick in the tasks panel:
+    the tooltip says "Claude is still working on this: tick to stop Claude and close". Tick it: the task stays open and
+    a menu at the pointer says "Claude is still working on this task." with "Stop Claude and close". Press Esc: nothing
+    changed. Tick again and pick it: the line closes with Undo, `claude agents` no longer lists the session, and the
+    thread says "Claude stopped by Deskbar at HH:mm". Double-click the closed task (Closed chip): the session resumes.
+    `$ts task close <id>` on a working task is refused and names `--stop-claude`; with it, the task closes and the
+    session stops. A Done task and a plain note still close at once on their tick. On a task whose session runs in
+    VS Code, Stop Claude and close closes the task, the window stays open, and the thread says so.
 
 ## Goals
 

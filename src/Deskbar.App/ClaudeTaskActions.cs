@@ -59,6 +59,15 @@ namespace Deskbar.App;
 // leaves the reason, with the way to install by hand, in the task's thread. The question is asked whichever way the start
 // came (a menu, the thread's button, the pipe's `task start`), as the trust question is.
 //
+// STOP CLAUDE AND CLOSE (task 37cd7081, StopAndClose). A task Claude is still working on (open, not Done, a live
+// session) refuses a plain close (TaskBoard.Close): closing ends no session, and a session left running on a closed task
+// has nowhere to report. The ticks, the menus' Close and `task close --stop-claude` offer this instead: the task is
+// closed first, past the refusal, so the keeper never resumes it, and then each of its sessions the latest list shows
+// running in the background gets `claude stop`, which keeps the conversation (measured 2026-11-23: double-click the task
+// to resume it). The thread says what happened to each. A VS Code or terminal session cannot be stopped from outside
+// (`claude stop` knows only background ones): its window stays open, and its next prompt tells it the task was closed.
+// With no list (the feature off, or `claude` unreadable) nothing is stopped and the thread says so.
+//
 // THREADS. Everything here runs on the UI thread (`scheduler` in the app); the answers of `claude` arrive back on it.
 public sealed class ClaudeTaskActions : IDisposable
 {
@@ -127,7 +136,7 @@ public sealed class ClaudeTaskActions : IDisposable
     public IObservable<Unit> Changed => changed.AsObservable();
 
     /// <summary>The pipe's three verbs (RemoteControl.Tasks.cs), answered by the methods the clicks use.</summary>
-    public TaskSessionCommands Commands => new(Go, Folders, Start, OpenSession);
+    public TaskSessionCommands Commands => new(Go, Folders, Start, OpenSession) { StopAndClose = StopAndClose };
 
     // The latest list while the feature is on; none while it is off, whatever was read before it was turned off.
     Maybe<IReadOnlyCollection<ClaudeAgent>> Latest =>
@@ -296,6 +305,43 @@ public sealed class ClaudeTaskActions : IDisposable
     /// </summary>
     public IReadOnlyList<string> Folders(TaskItem task) =>
         ClaudeStart.Folders(task, tasks.Board, ClaudeStart.EditorRepos(seams.EditorFolderNames(task.WorkspaceId), tasks.Board));
+
+    /// <summary>
+    /// "Stop Claude and close" (see the header): closes the task past the live-session refusal, then stops each of its
+    /// running background sessions. The close is the answer; each stop lands in the task's thread later.
+    /// </summary>
+    public Result StopAndClose(TaskItem task)
+    {
+        // Read before the close: the live entries are what was running when Petre chose to stop it.
+        var live = task.Sessions.Where(s => s.IsLive).Select(s => s.Id).ToHashSet();
+        var listed = Latest.Map(list => list.Where(agent => live.Contains(agent.SessionId)).ToList());
+        return tasks.Close(task.Id, stoppingClaude: true).Tap(() => listed.Match(
+            agents =>
+            {
+                agents.Where(agent => agent.Background).ToList().ForEach(agent => StopAfterClose(task.Id, agent));
+                if (agents.Any(agent => !agent.Background))
+                    Note(task.Id, "Claude's window is still open: a VS Code or terminal session cannot be stopped from Deskbar. Its next message tells it the task is closed.");
+            },
+            () => Note(task.Id, "Claude's sessions were not stopped: Deskbar cannot read Claude Code's list of sessions right now.")));
+    }
+
+    // `claude stop <short id>` off the UI thread (ClaudeSessions.StopNow), its answer back on it, said in the thread.
+    void StopAfterClose(Guid taskId, ClaudeAgent agent)
+    {
+        var shortId = agent.ShortId.GetValueOrDefault(agent.SessionId[..Math.Min(8, agent.SessionId.Length)]);
+        var at = scheduler.Now;
+        trace?.Invoke($"claude sessions: stopping {agent.SessionId}, its task {taskId} was closed with Stop Claude and close");
+        Observable.FromAsync(() => seams.Stop(shortId))
+            .ObserveOn(scheduler)
+            .Subscribe(
+                stopped => Note(taskId, stopped.IsSuccess
+                    ? $"Claude stopped by Deskbar at {at.ToLocalTime():HH:mm}, when the task was closed. Double-click the task to resume it."
+                    : $"Claude could not be stopped: {stopped.Error}"),
+                error => Note(taskId, $"Claude could not be stopped: {error.Message}"));
+    }
+
+    void Note(Guid taskId, string markdown) =>
+        tasks.Note(taskId, markdown).TapError(e => trace?.Invoke($"claude sessions: no comment on {taskId}: {e}"));
 
     /// <summary>Whether a session of the task is running (listed; the hooks' word while there is no list).</summary>
     public bool HasRunningSession(TaskItem task) =>
@@ -472,6 +518,12 @@ public sealed record ClaudeTaskSeams(
     /// start is reported as before unless the app says Claude Code is missing.
     /// </summary>
     public Func<bool> ClaudeInstalled { get; init; } = () => true;
+
+    /// <summary>
+    /// `claude stop <short id>` (ClaudeSessions.StopNow), for "Stop Claude and close" (task 37cd7081). Refused by default,
+    /// so a test that does not hand one in stops nothing.
+    /// </summary>
+    public Func<string, Task<Result>> Stop { get; init; } = _ => Task.FromResult(Result.Failure("No way to stop a session"));
 
     /// <summary>A refusal or a failure said to Petre at once (the feature is off, `claude` or `wt` missing).</summary>
     public Action<string> Tell { get; init; } = _ => { };

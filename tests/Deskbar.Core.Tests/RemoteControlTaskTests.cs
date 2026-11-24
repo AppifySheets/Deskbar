@@ -722,7 +722,7 @@ public class RemoteControlTaskTests
     [Fact]
     public void Task_is_in_the_help() =>
         Assert.Equal(
-            ["list [--closed]", "add <title>|- [--workspace <name>|none] [--important] [--urgent] [--parent <id>]", "close <id>", "reopen <id>",
+            ["list [--closed]", "add <title>|- [--workspace <name>|none] [--important] [--urgent] [--parent <id>]", "close <id> [--stop-claude]", "reopen <id>",
              "status <id> <backlog|in-progress|waiting|done>", "rename <id> <title>", "move <id> <workspace>|none",
              "comment <id> <markdown>|-", "delete <id>", "flag <id> important|urgent on|off", "order <id> top|end|<n>",
              // Task 9: going to a task, starting Claude on it and opening one of its sessions.
@@ -751,11 +751,18 @@ public class RemoteControlTaskTests
 
         public IReadOnlyList<string> Folders { get; set; } = [];
 
+        // `task close --stop-claude` (task 37cd7081): the app closes past the refusal and stops the sessions; the fake
+        // closes the same way and records the stop.
+        public TaskService? Tasks { get; init; }
+
         public TaskSessionCommands Commands => new(
             Go: t => Done($"go:{t.Title}"),
             Folders: _ => Folders,
             Start: (t, folder) => Done($"start:{t.Title}:{folder}"),
-            OpenSession: (t, session) => Done($"open:{t.Title}:{session}"));
+            OpenSession: (t, session) => Done($"open:{t.Title}:{session}"))
+        {
+            StopAndClose = t => (Tasks?.Close(t.Id, stoppingClaude: true) ?? Result.Success()).Bind(() => Done($"stop-and-close:{t.Title}")),
+        };
 
         Result Done(string call)
         {
@@ -766,6 +773,28 @@ public class RemoteControlTaskTests
 
     ControlReply RunWith(WorkspaceManager manager, FakeSessionCommands commands, params string[] args) =>
         new RemoteControl(manager, tasks: tasks, goals: goals, taskSessions: commands.Commands).Execute(args);
+
+    // Task 37cd7081: a plain `task close` on a task Claude is still working on is refused, leaves it open and names the
+    // flag; `--stop-claude` closes it through the app, which stops its sessions.
+    [Fact]
+    public void Task_close_refuses_while_claude_works_and_stop_claude_closes()
+    {
+        var manager = Started();
+        var commands = new FakeSessionCommands { Tasks = tasks };
+        var id = tasks.Create("Fix the bar", Maybe<Guid>.None,
+            new TaskSession("884c127f-9633-40eb-bed7-593800bca40f", @"C:\repos\Deskbar", clock, Maybe<DateTimeOffset>.None)).Value.Id;
+        var prefix = id.ToString()[..6];
+
+        var before = tasks.Board;
+        var refused = RunWith(manager, commands, "task", "close", prefix);
+        AssertRefusedAndUnchanged(refused, before);
+        Assert.Equal($"{TaskViews.ClaudeStillWorkingRefusal} (task close {prefix} --stop-claude)", refused.Output.Trim());
+
+        var closed = RunWith(manager, commands, "task", "close", prefix, "--stop-claude");
+        Ok(closed);
+        Assert.Equal("closed", Json(closed).GetProperty("status").GetString());
+        Assert.Equal(["stop-and-close:Fix the bar"], commands.Calls);
+    }
 
     // The three pipe twins of the double-click, "Start Claude on this" and the thread's Open (spec, "Where the clicks
     // are"): each is in ControlUsage, each reaches the App's command with the task found by its id prefix, and each

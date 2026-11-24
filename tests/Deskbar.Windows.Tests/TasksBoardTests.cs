@@ -2149,7 +2149,38 @@ public class TasksBoardTests
         close.RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
         menu.IsOpen = false;
 
+        // Task 37cd7081: Claude is still at it, so Close offers to stop it rather than closing under it.
+        Assert.Equal(TaskStatus.InProgress, t.Tasks.Board.Tasks.Single().Status);
+        var stop = Assert.IsAssignableFrom<ContextMenu>(t.Window.OpenedMenu);
+        Assert.Contains(stop.Items.OfType<MenuItem>(), i => i.Header is TextBlock { Text: "Claude is still working on this task." } && !i.IsEnabled);
+        var item = stop.Items.OfType<MenuItem>().Single(i => i.Header is TextBlock { Text: TaskViews.StopClaudeAndClose });
+        item.RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
+        stop.IsOpen = false;
+        t.Window.Dispatcher.Invoke(() => { }, System.Windows.Threading.DispatcherPriority.Background);
+
         Assert.Equal(TaskStatus.Closed, t.Tasks.Board.Tasks.Single().Status);
+    });
+
+    // Task 37cd7081: the tick on a task Claude is still working on says it will offer to stop Claude, and opens the same
+    // menu; a note's tick still closes at once.
+    [Fact]
+    public void The_tick_on_a_task_claude_works_on_offers_to_stop_it() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        var working = t.Tasks.Create("Still going", t.Gepha, Session("s1")).Value.Id;
+        t.Controller.Show();
+
+        Assert.True(t.Controller.Close(working).IsSuccess);
+        Assert.Equal(TaskStatus.InProgress, t.Tasks.Board.Tasks.Single().Status);
+        var stop = Assert.IsAssignableFrom<ContextMenu>(t.Window.OpenedMenu);
+        Assert.Contains(stop.Items.OfType<MenuItem>(), i => i.Header is TextBlock { Text: TaskViews.StopClaudeAndClose });
+        stop.IsOpen = false;
+
+        Assert.True(t.Controller.Close(working, stopClaude: true).IsSuccess);
+        Assert.Equal(TaskStatus.Closed, t.Tasks.Board.Tasks.Single().Status);
+        // The undo window holds as for any close.
+        Assert.True(t.Controller.Undo(working).IsSuccess);
+        Assert.Equal(TaskStatus.InProgress, t.Tasks.Board.Tasks.Single().Status);
     });
 
     // Ruling 42 (Petre: "don't say claude; mark with claude at the beginning with the" orange edge): a Claude line has
@@ -2575,7 +2606,8 @@ public class TasksBoardTests
         t.Controller.Show();
         selection.Select(id);
 
-        Assert.True(t.Controller.Close(id).IsSuccess);
+        // Its session is still live, so the close is "Stop Claude and close" (task 37cd7081).
+        Assert.True(t.Controller.Close(id, stopClaude: true).IsSuccess);
         Assert.True(t.Controller.Undo(id).IsSuccess);
 
         var task = t.Tasks.Board.Tasks.Single(x => x.Id == id);

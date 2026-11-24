@@ -264,11 +264,31 @@ public sealed record TaskBoard(IReadOnlyList<TaskItem> Tasks)
     /// of that work is still open. The refusal says how many are left (<see cref="TaskViews.CloseSubtasksFirst"/>), and
     /// every way to close (the bar's tick and menu, the window's, `task close`) comes through here, so none can skip it.
     /// </summary>
-    public Result<TaskBoard> Close(Guid id, DateTimeOffset now) =>
+    //
+    // CLAUDE STILL AT IT (task 37cd7081, 2026-11-25, Petre: "let's prohibit closing tasks that aren't yet done", then,
+    // offered the choice, "live session, but offer stop"). Closing ends no session, so a task closed under a session
+    // still working left that session running with nowhere to report: every one of its task commands is refused on a
+    // closed task, and a PR it had in flight could finish or stall with no word on the task. So an open task that is
+    // not Done and has a live session (<see cref="ClaudeStillWorking"/>) refuses too, with
+    // <see cref="TaskViews.ClaudeStillWorkingRefusal"/>. Only that: Petre's own notes, and tasks whose sessions have
+    // all ended, close as before, and a Done task closes whatever its session is doing (the keeper stops it once idle).
+    // <paramref name="stoppingClaude"/> is the way past it, for "Stop Claude and close" (ClaudeTaskActions.StopAndClose
+    // closes with it and then stops the sessions, and `task close --stop-claude`). It never skips the subtask rule.
+    public Result<TaskBoard> Close(Guid id, DateTimeOffset now, bool stoppingClaude = false) =>
         // Only an OPEN task is checked for open subtasks, so closing a closed task still says it is closed.
         Tasks.FirstOrDefault(t => t.Id == id) is { IsOpen: true } && OpenSubtaskCount(id) is var open and > 0
             ? Result.Failure<TaskBoard>(TaskViews.CloseSubtasksFirst(open))
-            : ChangeOpen(id, t => t with { Status = TaskStatus.Closed, Question = Maybe<string>.None, UpdatedAt = now });
+            // ClaudeStillWorking is false for a closed task, so closing a closed task still says it is closed.
+            : !stoppingClaude && Tasks.FirstOrDefault(t => t.Id == id) is { } task && ClaudeStillWorking(task)
+                ? Result.Failure<TaskBoard>(TaskViews.ClaudeStillWorkingRefusal)
+                : ChangeOpen(id, t => t with { Status = TaskStatus.Closed, Question = Maybe<string>.None, UpdatedAt = now });
+
+    /// <summary>
+    /// Whether closing the task would leave Claude working on it (see <see cref="Close"/>): it is open, not Done, and a
+    /// session is live on it. The bar's and the window's ticks ask this first and offer "Stop Claude and close" instead.
+    /// </summary>
+    public static bool ClaudeStillWorking(TaskItem task) =>
+        task.IsOpen && task.Status != TaskStatus.Done && task.HasLiveSession;
 
     /// <summary>
     /// A closed task comes back: In progress while a session is live on it, else Backlog, at the top of its quadrant

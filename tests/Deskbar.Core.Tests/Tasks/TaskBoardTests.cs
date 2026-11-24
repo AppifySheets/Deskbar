@@ -165,7 +165,7 @@ public class TaskBoardTests
 
         Assert.False(Get(rejoined, id1).HasLiveSession);
         Assert.True(Get(rejoined, id2).HasLiveSession);
-        Assert.Equal("The task is closed.", rejoined.Close(id2, clock).Value.Rejoin(id2, Session("s1"), clock).Error);
+        Assert.Equal("The task is closed.", rejoined.Close(id2, clock, stoppingClaude: true).Value.Rejoin(id2, Session("s1"), clock).Error);
     }
 
     [Fact]
@@ -210,7 +210,7 @@ public class TaskBoardTests
     [Fact]
     public void Answering_never_touches_a_closed_task_or_another_sessions_task()
     {
-        var board = Claudes(TaskBoard.Empty, id1, ws, "s1").Ask(id1, "Merge?", clock).Value.Close(id1, clock).Value;
+        var board = Claudes(TaskBoard.Empty, id1, ws, "s1").Ask(id1, "Merge?", clock).Value.Close(id1, clock, stoppingClaude: true).Value;
         board = Claudes(board, id2, ws, "s2").Ask(id2, "Deploy?", clock).Value;
         Later();
 
@@ -261,12 +261,43 @@ public class TaskBoardTests
     [Fact]
     public void A_closed_task_refuses_the_sessions_changes_and_a_second_close()
     {
-        var closed = Claudes(TaskBoard.Empty, id1, ws).Close(id1, clock).Value;
+        var closed = Claudes(TaskBoard.Empty, id1, ws).Close(id1, clock, stoppingClaude: true).Value;
 
         Assert.Equal("The task is closed.", closed.MarkDone(id1, clock).Error);
         Assert.Equal("The task is closed.", closed.Ask(id1, "Why?", clock).Error);
         Assert.Equal("The task is closed.", closed.SetStatusLine(id1, "CI", clock).Error);
         Assert.Equal("The task is closed.", closed.Close(id1, clock).Error);
+    }
+
+    // Task 37cd7081, Petre: "let's prohibit closing tasks that aren't yet done", narrowed to a live session with an offer
+    // to stop it. A task Claude is still working on (open, not Done, a live session) refuses to close in every status
+    // short of Done; stopping Claude is the way past it. Done closes whatever its session does, and so do a note and a
+    // task whose session has ended.
+    [Fact]
+    public void A_task_claude_is_still_working_on_closes_only_by_stopping_claude()
+    {
+        var working = Claudes(TaskBoard.Empty, id1, ws);
+        Assert.True(TaskBoard.ClaudeStillWorking(Get(working, id1)));
+        Assert.Equal(TaskViews.ClaudeStillWorkingRefusal, working.Close(id1, clock).Error);
+
+        var asking = working.Ask(id1, "Merge?", clock).Value;
+        Assert.Equal(TaskViews.ClaudeStillWorkingRefusal, asking.Close(id1, clock).Error);
+        var backlog = working.SetStatus(id1, TaskStatus.Backlog, clock).Value;
+        Assert.Equal(TaskViews.ClaudeStillWorkingRefusal, backlog.Close(id1, clock).Error);
+
+        var stopped = working.Close(id1, clock, stoppingClaude: true).Value;
+        Assert.Equal(TaskStatus.Closed, Get(stopped, id1).Status);
+        Assert.False(TaskBoard.ClaudeStillWorking(Get(stopped, id1)));
+        // Stopping Claude never skips the other refusals: a closed task still says it is closed.
+        Assert.Equal("The task is closed.", stopped.Close(id1, clock, stoppingClaude: true).Error);
+
+        var done = working.MarkDone(id1, clock).Value;
+        Assert.False(TaskBoard.ClaudeStillWorking(Get(done, id1)));
+        Assert.True(done.Close(id1, clock).IsSuccess);
+
+        var ended = working.SessionEnded("s1", clock);
+        Assert.True(ended.Close(id1, clock).IsSuccess);
+        Assert.True(Note(TaskBoard.Empty, id2, ws).Close(id2, clock).IsSuccess);
     }
 
     [Fact]
@@ -298,7 +329,7 @@ public class TaskBoardTests
 
         Assert.Equal("Use close to close a task", board.SetStatus(id1, TaskStatus.Closed, clock).Error);
 
-        var closed = board.Close(id1, clock).Value;
+        var closed = board.Close(id1, clock, stoppingClaude: true).Value;
         Assert.Equal(TaskStatus.Done, Get(closed.SetStatus(id1, TaskStatus.Done, clock).Value, id1).Status);
     }
 
@@ -408,7 +439,7 @@ public class TaskBoardTests
         board = Claudes(board, id2, other, "s2", "on other");
         board = Note(board, id3, Free, "errand");
         board = Claudes(board, id4, Free, "s4", "free claude task");
-        board = Claudes(board, id5, ws, "s5", "closed on ws").Close(id5, clock).Value;
+        board = Claudes(board, id5, ws, "s5", "closed on ws").Close(id5, clock, stoppingClaude: true).Value;
 
         Assert.Equal(new[] { id1, id4 }.Order(), board.Offered(ws).Select(t => t.Id).Order());
         Assert.Equal([id4], board.Offered(Free).Select(t => t.Id));
@@ -421,7 +452,7 @@ public class TaskBoardTests
 
         Assert.Equal(id1, board.TaskOf("s1").Value.Id);
         Assert.True(board.TaskOf("s9").HasNoValue);
-        Assert.True(board.Close(id1, clock).Value.TaskOf("s1").HasNoValue);
+        Assert.True(board.Close(id1, clock, stoppingClaude: true).Value.TaskOf("s1").HasNoValue);
         Assert.True(board.SessionEnded("s1", clock).TaskOf("s1").HasNoValue);
     }
 
@@ -683,7 +714,7 @@ public class TaskBoardTests
     public void A_session_that_already_has_a_task_is_not_adopted_again()
     {
         var open = Claudes(TaskBoard.Empty, id1, ws, "s1");
-        var closed = open.Close(id1, clock).Value;
+        var closed = open.Close(id1, clock, stoppingClaude: true).Value;
 
         Assert.True(open.AdoptSession(Agent("s1"), ws, clock, id2).IsFailure);
         Assert.True(closed.AdoptSession(Agent("s1"), ws, clock, id2).IsFailure);
@@ -823,7 +854,7 @@ public class TaskBoardTests
     public void A_free_or_closed_task_gives_a_session_no_workspace()
     {
         var free = Claudes(TaskBoard.Empty, id1, Free, session: "aaaa1111-0000");
-        var closed = Claudes(TaskBoard.Empty, id1, ws, session: "bbbb2222-0000").Close(id1, clock).Value;
+        var closed = Claudes(TaskBoard.Empty, id1, ws, session: "bbbb2222-0000").Close(id1, clock, stoppingClaude: true).Value;
 
         Assert.True(free.WorkspaceOfSession("aaaa1111").HasNoValue);
         Assert.True(closed.WorkspaceOfSession("bbbb2222").HasNoValue);

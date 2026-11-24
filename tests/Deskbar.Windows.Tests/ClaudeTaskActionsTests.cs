@@ -43,6 +43,9 @@ public class ClaudeTaskActionsTests
         public List<string> Asked { get; } = [];
         public List<string> Told { get; } = [];
         public List<string> Forgotten { get; } = [];
+        // `claude stop <short id>` calls, for "Stop Claude and close" (task 37cd7081), and what each answers.
+        public List<string> Stopped { get; } = [];
+        public Func<string, Result> StopAnswer { get; set; } = _ => Result.Success();
         public Func<ProgramLaunch, Result<int?>> LaunchAnswer { get; set; } = _ => Result.Success<int?>(4321);
 
         public Func<TaskSession, Result<ClaudeAgent>> ResumeAnswer { get; set; } = s => Agent(s.Id, background: true);
@@ -102,6 +105,11 @@ public class ClaudeTaskActionsTests
                 ClaudeInstalled = () => Installed,
                 Tell = Told.Add,
                 Forget = Forgotten.Add,
+                Stop = shortId =>
+                {
+                    Stopped.Add(shortId);
+                    return System.Threading.Tasks.Task.FromResult(StopAnswer(shortId));
+                },
                 HasWindowsTerminal = () => HasTerminal,
                 OpenConsole = console =>
                 {
@@ -266,10 +274,10 @@ public class ClaudeTaskActionsTests
         var second = rig.ClaudeTask(session: "11111111-2222-3333-4444-555555555555");
         Assert.True(rig.Actions.TaskOfWindow(window.Handle).HasNoValue);
 
-        Assert.True(rig.Tasks.Close(first.Id).IsSuccess);
+        Assert.True(rig.Tasks.Close(first.Id, stoppingClaude: true).IsSuccess);
         Assert.Equal(second.Id, rig.Actions.TaskOfWindow(window.Handle).GetValueOrDefault());
 
-        Assert.True(rig.Tasks.Close(second.Id).IsSuccess);
+        Assert.True(rig.Tasks.Close(second.Id, stoppingClaude: true).IsSuccess);
         Assert.Equal(note.Id, rig.Actions.TaskOfWindow(window.Handle).GetValueOrDefault());
     }
 
@@ -605,6 +613,43 @@ public class ClaudeTaskActionsTests
         Assert.Contains(rig.TaskOf(task.Id).Comments, c => c.Markdown.Contains("Could not start wt"));
     }
 
+    // Task 37cd7081: "Stop Claude and close" closes the task past the live-session refusal, then stops each of its running
+    // background sessions by short id and says so in the thread. A VS Code or terminal session is not stopped (`claude
+    // stop` cannot), and the thread says its window stays open.
+    [Fact]
+    public void Stop_and_close_closes_then_stops_the_background_sessions() => StaThread.Run(() =>
+    {
+        using var rig = new Rig();
+        var task = rig.ClaudeTask();
+        var other = "22222222-3333-4444-5555-666666666666";
+        Assert.True(rig.Tasks.Join(task.Id, new TaskSession(other, Folder, DateTimeOffset.UnixEpoch, Maybe<DateTimeOffset>.None)).IsSuccess);
+        rig.Listed(Agent(SessionId, background: true, busy: true), Agent(other, background: false));
+        Assert.Equal(TaskViews.ClaudeStillWorkingRefusal, rig.Tasks.Close(task.Id).Error);
+
+        Assert.True(rig.Actions.StopAndClose(rig.TaskOf(task.Id)).IsSuccess);
+        rig.Settle();
+
+        Assert.Equal(TaskStatus.Closed, rig.TaskOf(task.Id).Status);
+        Assert.Equal([SessionId[..8]], rig.Stopped);
+        Assert.Contains(rig.TaskOf(task.Id).Comments, c => c.Markdown.StartsWith("Claude stopped by Deskbar"));
+        Assert.Contains(rig.TaskOf(task.Id).Comments, c => c.Markdown.StartsWith("Claude's window is still open"));
+    });
+
+    // A stop that fails leaves the task closed and says why in the thread.
+    [Fact]
+    public void A_failed_stop_is_said_in_the_thread() => StaThread.Run(() =>
+    {
+        using var rig = new Rig { StopAnswer = _ => Result.Failure("no such session") };
+        var task = rig.ClaudeTask();
+        rig.Listed(Agent(SessionId, background: true));
+
+        Assert.True(rig.Actions.StopAndClose(rig.TaskOf(task.Id)).IsSuccess);
+        rig.Settle();
+
+        Assert.Equal(TaskStatus.Closed, rig.TaskOf(task.Id).Status);
+        Assert.Contains(rig.TaskOf(task.Id).Comments, c => c.Markdown == "Claude could not be stopped: no such session");
+    });
+
     // Item 12: a closed task is refused up front, from the menu and from `task start` alike, before any question.
     [Fact]
     public void Starting_on_a_closed_task_is_refused_up_front() => StaThread.Run(() =>
@@ -612,7 +657,7 @@ public class ClaudeTaskActionsTests
         using var rig = new Rig { Confirms = true };
         var task = rig.ClaudeTask();
         rig.Listed(Agent(SessionId, background: true));
-        Assert.True(rig.Tasks.Close(task.Id).IsSuccess);
+        Assert.True(rig.Tasks.Close(task.Id, stoppingClaude: true).IsSuccess);
 
         Assert.Null(rig.Actions.Offer(task.Id));
         var started = rig.Actions.Start(task, Folder);
