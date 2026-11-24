@@ -2545,6 +2545,29 @@ public class TasksBoardTests
         Assert.Null(DescriptionBlockOf(t.Window, id));
     });
 
+    // Petre, 2026-11-24, of a question cut at "Add an "O…" with the thread open: "where's the question?". A closed line
+    // cuts the question to one line; an open line shows it all, wrapped, and closing it cuts it again.
+    [Fact]
+    public void An_open_line_shows_the_whole_question() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        var id = t.Tasks.Create("Tasks redesign", t.Gepha, Session("s1")).Value.Id;
+        t.Tasks.Ask(id, "Open already resumes an ended session. Add an \"Open Claude session\" item to the menu, or leave it?");
+        t.Controller.Show();
+
+        TextBlock Detail() => Inside(LineOf(t.Window, id)).OfType<TextBlock>().Single(b => Equals(b.Tag, TasksWindow.DetailTag));
+        Assert.Equal(TextTrimming.CharacterEllipsis, Detail().TextTrimming);
+        Assert.Equal(TextWrapping.NoWrap, Detail().TextWrapping);
+
+        t.Controller.ToggleThread(id);
+        Assert.Equal(TextTrimming.None, Detail().TextTrimming);
+        Assert.Equal(TextWrapping.Wrap, Detail().TextWrapping);
+        Assert.StartsWith("Open already resumes", Detail().Text);
+
+        t.Controller.ToggleThread(id);
+        Assert.Equal(TextTrimming.CharacterEllipsis, Detail().TextTrimming);
+    });
+
     [Fact]
     public void A_claude_tasks_status_line_and_his_description_both_show() => StaThread.Run(() =>
     {

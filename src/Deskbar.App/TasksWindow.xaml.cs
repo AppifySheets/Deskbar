@@ -1107,14 +1107,19 @@ public partial class TasksWindow : Window
                 if (TaskImageRow.Of(StateDir, parts.Images, OpenImage) is { } pictures) panel.Children.Add(pictures);
             }
         }
+        // THE DETAIL: the question while the task waits on Petre, else its status line. Cut to one line on a closed line,
+        // IN FULL ON AN OPEN ONE, as the description is: a session's question was readable nowhere in full (Petre,
+        // 2026-11-24, of a question cut at "Add an "O…" with its thread open: "where's the question?"). Tagged for tests.
         if (row.Detail.Length > 0)
             panel.Children.Add(new TextBlock
             {
+                Tag = DetailTag,
                 Text = row.Detail,
                 FontSize = 11,
                 Foreground = row.Status == TaskStatus.WaitingOnYou ? Orange : DimInk,
                 FontWeight = row.Status == TaskStatus.WaitingOnYou ? FontWeights.SemiBold : FontWeights.Normal,
-                TextTrimming = TextTrimming.CharacterEllipsis,
+                TextTrimming = row.Expanded ? TextTrimming.None : TextTrimming.CharacterEllipsis,
+                TextWrapping = row.Expanded ? TextWrapping.Wrap : TextWrapping.NoWrap,
             });
         return panel;
     }
@@ -1146,6 +1151,9 @@ public partial class TasksWindow : Window
     }
 
     const string DescriptionTag = "task-description";
+
+    // The line's detail (question or status line), so a test can find it and read how it is cut.
+    internal const string DetailTag = "task-detail";
 
     // THE DESCRIPTION'S PREVIEW on a closed line: its first line without markdown markers (TaskViews.PlainFirstLine, the
     // same text the bar shows for it), dim like the description, one line ending in an ellipsis. A TextBlock takes no
