@@ -1014,4 +1014,57 @@ public class RemoteControlClaudeHookTests
         Assert.True(ControlArguments.ParseClaudeHook(["--newer", "x"]).IsFailure);
         Assert.Equal("{}", ControlArguments.ParseClaudeHook(["--newer", "--json", "{}"]).Value.Json);
     }
+
+    // --- claude-wait: a session's comment waiter registers (plan 2026-11-24-comment-wakes-session, Task 3) ------------
+
+    string InboxFolder { get; } = Path.Combine(Path.GetTempPath(), "deskbar-wait-" + Guid.NewGuid().ToString("N"));
+
+    ControlReply Waited(WorkspaceManager manager, string session, string attended = "1") =>
+        new RemoteControl(manager, tasks: tasks, longPath: LongPath, inbox: new CommentInbox(InboxFolder, () => DateTimeOffset.UtcNow))
+            .Execute(["claude-wait", "--entry", "claude-vscode", "--attended", attended, "--from", Repo, "--json", HookOf("Stop", session, null)]);
+
+    // The waiter script reads three lines: the inbox it watches, the gen file it checks, and its own generation.
+    [Fact]
+    public void Claude_wait_answers_the_inbox_the_gen_file_and_a_generation()
+    {
+        try
+        {
+            var lines = Waited(Started(), "s1").Output.Split('\n', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
+
+            Assert.Equal(3, lines.Length);
+            Assert.Equal(Path.Combine(InboxFolder, "s1.md"), lines[0]);
+            Assert.Equal(Path.Combine(InboxFolder, "s1.gen"), lines[1]);
+            Assert.Equal(File.ReadAllText(lines[1]).Trim(), lines[2]);
+        }
+        finally { if (Directory.Exists(InboxFolder)) Directory.Delete(InboxFolder, true); }
+    }
+
+    // A headless run (`claude -p`, the SDK) gets no waiter: nobody would read a comment there.
+    [Fact]
+    public void Claude_wait_answers_nothing_for_a_headless_session() =>
+        Assert.Equal("", Waited(Started(), "s1", attended: "0").Output);
+
+    // A session that ends leaves no inbox or gen file behind.
+    [Fact]
+    public void A_session_end_forgets_its_inbox()
+    {
+        try
+        {
+            var manager = Started();
+            var lines = Waited(manager, "s1").Output.Split('\n', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
+            File.WriteAllText(lines[0], "unread");
+
+            new RemoteControl(manager, tasks: tasks, longPath: LongPath, inbox: new CommentInbox(InboxFolder, () => DateTimeOffset.UtcNow))
+                .Execute(["claude-hook", "--entry", "claude-vscode", "--attended", "1", "--from", Repo, "--json", HookOf("SessionEnd", "s1", null)]);
+
+            Assert.False(File.Exists(lines[0]));
+            Assert.False(File.Exists(lines[1]));
+        }
+        finally { if (Directory.Exists(InboxFolder)) Directory.Delete(InboxFolder, true); }
+    }
+
+    // The client hands claude-wait its stdin and stays silent when Deskbar is not running, as for claude-hook.
+    [Fact]
+    public void Claude_wait_reads_stdin_like_a_hook() =>
+        Assert.Equal(["claude-wait", "--json", "{}"], ControlArguments.WithInput(["claude-wait"], () => "{}"));
 }
