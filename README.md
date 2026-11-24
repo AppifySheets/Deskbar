@@ -868,8 +868,10 @@ pwsh scripts/test-hidden.ps1
 
 The window tests open hundreds of real windows, and a running Deskbar treats them like any
 others: in a tiled workspace it tiles each one and rearranges your windows around it. The script
-runs `dotnet test` on a separate Win32 desktop that Deskbar cannot see and that never reaches your
-screen. The four `Category=Screen` tests read real pixels, windows or monitors, which a hidden
+builds on your desktop, then runs `dotnet test --no-build` on a separate Win32 desktop that
+Deskbar cannot see and that never reaches your screen. Each run gets a desktop of its own with a
+small 8 MB heap, and nothing started on it outlives the run, so test runs, even several at once,
+cannot use up the memory your own desktop needs to create windows. The four `Category=Screen` tests read real pixels, windows or monitors, which a hidden
 desktop does not have, so the script leaves them out; CI runs them. Run on your own desktop
 beside a live Deskbar, the window tests refuse to start and say so.
 
