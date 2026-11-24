@@ -233,6 +233,30 @@ public sealed class ClaudeTaskActions : IDisposable
         return manager.KnownWindows.Any(w => Titled(manager, w, title));
     }
 
+    /// <summary>
+    /// The task a window is on, when it is a window Deskbar opened on a task's session: the open task whose
+    /// <see cref="ClaudeStart.AttachTitle"/> the window carries, by the same rule Attach finds it by. The App selects
+    /// that task whenever the window comes to the front (task 4846fde1, Petre: "active claude terminal window should
+    /// highlight the current task in deskbar"), so the line of the session he is typing into is the one lit on the bar
+    /// and in the tasks panel.
+    /// </summary>
+    /// <remarks>
+    /// Only open tasks count, since a closed one is never selected (TaskSelection.KeepOnly). The title is cut to
+    /// ClaudeStart.MaxTitle, so two tasks can give the same window title; then the one with a session is meant (the
+    /// window is on a session), and with both or neither having one there is no answer, never a guess that lights the
+    /// wrong line. A VS Code window is never an answer: one folder holds the sessions of many tasks.
+    /// </remarks>
+    public Maybe<Guid> TaskOfWindow(WindowHandle window) =>
+        manager.KnownWindows.TryFirst(w => w.Handle == window)
+            .Bind(info => OnlyOne(tasks.Board.Tasks.Where(t => t.IsOpen && Titled(manager, info, ClaudeStart.AttachTitle(t.Title))).ToList()))
+            .Map(task => task.Id);
+
+    // The one task a window's title names: the only one, else the only one of them with a session, else none.
+    static Maybe<TaskItem> OnlyOne(IReadOnlyList<TaskItem> named) =>
+        named is [var only] ? only
+            : named.Where(t => t.Sessions.Any()).ToList() is [var withSession] ? withSession
+            : Maybe<TaskItem>.None;
+
     // A Windows Terminal window with this title, or the console window Deskbar opens where there is no Windows Terminal
     // (claude.exe's own), as it reads now or read before a rename rule shortened it.
     static bool Titled(WorkspaceManager manager, WindowInfo window, string title) =>

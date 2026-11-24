@@ -876,6 +876,15 @@ HS3. A session on a free task (no workspace): its window stays where it opened.
 HS4. A browser already running: ask the session to run `start https://example.com`. The window or tab stays with
      the browser, as before (the session should use `deskbar.cmd open` for this).
 
+## The terminal in front selects its task
+
+(Task 4846fde1.) Two Claude tasks with their session terminals open ("<title> · Claude").
+
+AT1. Click the first task's terminal: its line is highlighted on the bar and in the tasks panel.
+AT2. Alt+Tab to the second task's terminal: the highlight moves to the second task's line.
+AT3. Switch to a browser or VS Code: the highlight stays on the second task.
+AT4. Click a different task's line on the bar, then the first terminal again: the highlight follows the terminal.
+
 ## Results (2026-08-01)
 
 Status: **pending human execution.** An agent cannot observe the desktop, Task View,

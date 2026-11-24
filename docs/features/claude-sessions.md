@@ -54,6 +54,8 @@ Double-click a task's line, on the bar or in the tasks window, and you go to its
 
 Closing the terminal window only detaches it. The session keeps running, and the next double-click opens a new window on it.
 
+Switching to a session's terminal window works the other way round too: its task becomes the selected one, highlighted on the bar and in the tasks panel as if you had clicked it, so you can see which task the terminal in front belongs to. It stays selected when you move on to another window. A VS Code window does not select anything, since one folder can hold the sessions of many tasks.
+
 The window uses a Windows Terminal profile of Deskbar's own, "Deskbar Claude": VS Code's Dark Modern colours, JetBrains Mono (Cascadia Mono where that is not installed), Claude's orange bar cursor and no scrollbar. Deskbar installs it while **Claude Code sessions keep their tasks in the task list** is ticked and removes it when you untick that box or **Teach Claude Code about Deskbar** above it.
 
 This needs the Claude Code CLI on the PATH (the native install puts `claude.exe` in `%USERPROFILE%\.local\bin`) and Windows Terminal. Without them the items are hidden or say why they cannot work: a start or a window that fails tells you in a message box as well as in the task's thread. When Claude Code is not installed at all, "Start Claude on this" asks whether to install it. Yes opens a terminal in the folder you chose that runs Claude Code's official installer and then starts `claude` there, so you can sign in and trust the folder; choose "Start Claude on this" again once you have. No leaves the reason, with the manual install line, in the task's thread. Claude is not started on a closed task.
