@@ -2605,12 +2605,14 @@ public class TasksBoardTests
         var id = t.Tasks.Create("Tasks redesign", t.Gepha, Session("s1")).Value.Id;
         t.Tasks.Comment(id, "s1", "Claude's finding");
         t.Tasks.Comment(id, Maybe<string>.None, "my thought");
+        // Deskbar's own line (a resume) is Deskbar's, not his: no Edit, and it says so (Petre's screenshot, 2026-11-24).
+        t.Tasks.Note(id, "Resumed by Deskbar at 10:05.");
         t.Controller.Show();
         t.Controller.ToggleThread(id);
 
         var edits = Inside(t.Window).OfType<Button>().Where(b => AutomationProperties.GetName(b) == "Edit comment").ToList();
         Assert.Single(edits);
-        Assert.Equal(["Claude", "you"], t.Window.CommentAuthors(id));
+        Assert.Equal(["Claude", "you", "Deskbar"], t.Window.CommentAuthors(id));
     });
 
     [Fact]

@@ -384,9 +384,9 @@ public class ClaudeSessionsTests
 
         var cutAt = byId[cut.SessionId].At.ToLocalTime().ToString("HH:mm");
         var doneAt = byId[done.SessionId].At.ToLocalTime().ToString("HH:mm");
-        Assert.Contains(rig.Task(cut.TaskId).Comments, c => c.SessionId.HasNoValue
+        Assert.Contains(rig.Task(cut.TaskId).Comments, c => c.ByDeskbar
             && c.Markdown == $"Resumed by Deskbar at {cutAt}, its last turn was cut off, so it was told to continue.");
-        Assert.Contains(rig.Task(done.TaskId).Comments, c => c.SessionId.HasNoValue
+        Assert.Contains(rig.Task(done.TaskId).Comments, c => c.ByDeskbar
             && c.Markdown == $"Resumed by Deskbar at {doneAt}.");
     }
 

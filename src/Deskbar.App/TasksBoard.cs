@@ -842,10 +842,13 @@ public sealed class TasksBoard : IDisposable
     {
         var at = comment.At.ToLocalTime();
         var today = now().ToLocalTime().Date == at.Date;
-        return new TaskCommentView(comment.Id, comment.SessionId.HasValue ? "Claude" : "you", comment.SessionId.HasValue,
+        // Three authors: a session ("Claude"), Deskbar itself (its resume, stop and failure lines) and Petre ("you").
+        // Only his own can be edited, so Deskbar's line no longer offers him an Edit as if he had written it.
+        return new TaskCommentView(comment.Id, comment.BySession ? "Claude" : comment.ByDeskbar ? "Deskbar" : "you", comment.BySession,
             today ? at.ToString("HH:mm") : at.ToString("d MMM HH:mm"), comment.Markdown)
         {
             Settled = comment.Settled.HasValue,
+            Editable = comment.SessionId.HasNoValue,
         };
     }
 
@@ -905,6 +908,9 @@ internal sealed record TaskCommentView(Guid Id, string Author, bool ByClaude, st
 {
     /// <summary>Settled (Ruling 62): kept, but folded away behind the thread's "N settled comments" line.</summary>
     public bool Settled { get; init; }
+
+    /// <summary>Petre's own comment, the only kind with an Edit button (Ruling 58); not a session's, not Deskbar's.</summary>
+    public bool Editable { get; init; }
 }
 
 /// <summary>

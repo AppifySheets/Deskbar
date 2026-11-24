@@ -115,6 +115,9 @@ public sealed class TaskService(ITaskStore store, Func<DateTimeOffset> now, Func
     /// <summary>A goal was deleted: its tasks are freed. Saves only when some task named it.</summary>
     public void DetachGoal(Guid goalId) => CommitIfChanged(Board.DetachGoal(goalId, now()));
 
+    /// <summary>A line Deskbar itself writes into the thread (a resume, a stop, a failure), shown as "Deskbar".</summary>
+    public Result Note(Guid id, string markdown) => Comment(id, TaskComment.DeskbarAuthor, markdown);
+
     public Result Comment(Guid id, Maybe<string> sessionId, string markdown) =>
         Apply(Board.Comment(id, sessionId, markdown, now(), makeId()));
 

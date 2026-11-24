@@ -1326,8 +1326,8 @@ public partial class TasksWindow : Window
         header.Children.Add(new TextBlock { Text = $" · {comment.When}", FontSize = 11, Foreground = HeaderInk });
         // RULING 58 ("i should only be able to edit my own comments, not claude's"): his own comments, and only those, have
         // an Edit button beside the time; the board refuses a session's comment too (TaskBoard.EditComment).
-        var editing = editingComment == comment.Id && !comment.ByClaude;
-        if (!comment.ByClaude && !editing)
+        var editing = editingComment == comment.Id && comment.Editable;
+        if (comment.Editable && !editing)
         {
             var edit = Small("Edit", "Edit comment", () => BeginEditComment(comment.Id), "Edit your comment");
             edit.Margin = new Thickness(8, 0, 0, 0);
@@ -1436,14 +1436,14 @@ public partial class TasksWindow : Window
     }
 
     /// <summary>
-    /// Opens one of his comments for editing in its open thread. A session's comment, or one not on show, opens nothing
-    /// (the board would refuse it anyway). Internal for the tests; the "Edit" beside a comment's time calls it.
+    /// Opens one of his comments for editing in its open thread. A session's or Deskbar's comment, or one not on show,
+    /// opens nothing (the board would refuse it anyway). Internal for the tests; the "Edit" beside a comment's time calls it.
     /// </summary>
     internal void BeginEditComment(Guid commentId)
     {
         var shown = (latest?.Groups.SelectMany(g => g.Rows) ?? []).Concat(latest?.Cells.SelectMany(c => c.Rows) ?? [])
             .SelectMany(r => r.Comments).FirstOrDefault(c => c.Id == commentId);
-        if (shown is null || shown.ByClaude) return;
+        if (shown is null || !shown.Editable) return;
         editingComment = commentId;
         if (latest is not null) Draw(latest);
     }

@@ -670,7 +670,7 @@ public sealed class ClaudeSessions : IDisposable
     }
 
     void Say(Guid taskId, string markdown) =>
-        tasks.Comment(taskId, Maybe<string>.None, markdown)
+        tasks.Note(taskId, markdown)
             .TapError(e => trace?.Invoke($"claude sessions: no comment on {taskId}: {e}"));
 
     static string Clock(DateTimeOffset at) => at.ToLocalTime().ToString("HH:mm");

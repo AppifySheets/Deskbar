@@ -507,4 +507,29 @@ public sealed class JsonTaskStoreTests : IDisposable
         Assert.True(saved.IsFailure);
         Assert.Contains("tasks.json", saved.Error);
     }
+    // Deskbar's own thread lines have an author of their own (TaskComment.DeskbarAuthor), kept through a save. A file saved
+    // before that has them with no author, Petre's, and the load gives the ones only Deskbar writes back to Deskbar.
+    [Fact]
+    public void Deskbar_lines_keep_their_author_and_old_ones_are_given_back_to_deskbar()
+    {
+        var store = new JsonTaskStore(dir);
+        var task = new TaskItem(Guid.NewGuid(), "t", Maybe<Guid>.None, TaskStatus.Done, "", Maybe<string>.None, T0, T0, T0, [],
+        [
+            new TaskComment(Guid.NewGuid(), TaskComment.DeskbarAuthor, T0, "Stopped by Deskbar at 09:20, since the task is finished."),
+            new TaskComment(Guid.NewGuid(), Maybe<string>.None, T0, "Resumed by Deskbar at 10:05."),
+            new TaskComment(Guid.NewGuid(), Maybe<string>.None, T0, "Deskbar could not resume this session at 10:06:\n\nno"),
+            new TaskComment(Guid.NewGuid(), Maybe<string>.None, T0, "Session 1234 was resumed, but Claude Code did not list it within 12 seconds, so no window was opened on it."),
+            new TaskComment(Guid.NewGuid(), Maybe<string>.None, T0, "I think Deskbar could do better here"),
+            new TaskComment(Guid.NewGuid(), "s1", T0, "Resumed by Deskbar at 10:07."),
+        ]);
+
+        Assert.True(store.Save(new TaskBoard([task])).IsSuccess);
+        var comments = store.Load().Value.Tasks.Single().Comments;
+
+        Assert.Equal([true, true, true, true, false, false], comments.Select(c => c.ByDeskbar));
+        // Petre's own words stay his, and a session's line stays the session's whatever it says.
+        Assert.True(comments[4].SessionId.HasNoValue);
+        Assert.Equal("s1", comments[5].SessionId.Value);
+        Assert.Equal([false, false, false, false, false, true], comments.Select(c => c.BySession));
+    }
 }

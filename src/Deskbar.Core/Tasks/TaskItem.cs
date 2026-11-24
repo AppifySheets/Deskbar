@@ -46,10 +46,47 @@ public sealed record TaskSession(string Id, string Folder, DateTimeOffset Joined
 
 /// <summary>
 /// One comment in a task's thread, as markdown. <see cref="SessionId"/> names the Claude session that wrote it;
-/// none means Petre wrote it.
+/// none means Petre wrote it, and <see cref="DeskbarAuthor"/> means Deskbar itself did (a resume, a stop, a failure).
 /// </summary>
 public sealed record TaskComment(Guid Id, Maybe<string> SessionId, DateTimeOffset At, string Markdown)
 {
+    /// <summary>
+    /// The author id of Deskbar's own thread lines ("Resumed by Deskbar at 10:05."). They used to be written with no
+    /// author, which is Petre's, so the thread showed them as "you" with an Edit button (Petre's screenshot,
+    /// 2026-11-24). A reserved value in the session id's place keeps the file format as it is: an old Deskbar reads
+    /// such a line as a session's, which is closer to the truth than Petre's. Not a session id Claude Code can make:
+    /// those are GUIDs.
+    /// </summary>
+    public const string DeskbarAuthor = "deskbar";
+
+    /// <summary>Deskbar wrote it: no Edit (it is not Petre's), and no session can settle or own it.</summary>
+    public bool ByDeskbar => SessionId.HasValue && SessionId.Value == DeskbarAuthor;
+
+    /// <summary>A Claude session wrote it.</summary>
+    public bool BySession => SessionId.HasValue && !ByDeskbar;
+
+    // The openings of every line Deskbar has written into a thread (ClaudeSessions and ClaudeTaskActions). A file
+    // saved before DeskbarAuthor existed has these with no author; Attributed gives them back to Deskbar on load.
+    static readonly IReadOnlyList<string> DeskbarOpenings =
+    [
+        "Resumed by Deskbar at ",
+        "Stopped by Deskbar at ",
+        "Deskbar could not ",
+        "Claude Code's list of sessions could not be read",
+    ];
+
+    /// <summary>
+    /// This comment, with a line Deskbar wrote before <see cref="DeskbarAuthor"/> existed given back to Deskbar: no
+    /// author, and it opens the way only Deskbar's lines open (or is the "was resumed, but Claude Code did not list it"
+    /// line). Anything else comes back as it is.
+    /// </summary>
+    public TaskComment Attributed() =>
+        SessionId.HasNoValue
+        && (DeskbarOpenings.Any(opening => Markdown.StartsWith(opening, StringComparison.Ordinal))
+            || (Markdown.StartsWith("Session ", StringComparison.Ordinal) && Markdown.Contains("was resumed, but Claude Code did not list it", StringComparison.Ordinal)))
+            ? this with { SessionId = DeskbarAuthor }
+            : this;
+
     /// <summary>
     /// When the comment was settled (Ruling 62), or none. A settled comment is kept, never deleted, and the tasks window
     /// folds it away behind one line. An init property like the task's flags: a comment saved before it existed is not

@@ -340,7 +340,7 @@ public sealed class ClaudeTaskActions : IDisposable
     Maybe<TaskItem> Current(Guid id) => tasks.Board.Tasks.TryFirst(t => t.Id == id);
 
     void Say(Guid taskId, string markdown) =>
-        tasks.Comment(taskId, Maybe<string>.None, markdown)
+        tasks.Note(taskId, markdown)
             .TapError(e => trace?.Invoke($"claude actions: no comment on {taskId}: {e}"));
 
     void SayAndTell(Guid taskId, string markdown)

@@ -214,7 +214,9 @@ public sealed class JsonTaskStore(string baseDirectory, Action<string>? trace = 
                 ReplacedAt = s.ReplacedAt is { } replaced ? replaced.ToUniversalTime() : Maybe<DateTimeOffset>.None,
             }).ToArray(),
             (d.Comments ?? []).Select(c => new TaskComment(c.Id, Maybe.From(c.SessionId), c.At.ToUniversalTime(), c.Markdown ?? "")
-            { Settled = c.Settled is { } settled ? settled.ToUniversalTime() : Maybe<DateTimeOffset>.None }).ToArray())
+            { Settled = c.Settled is { } settled ? settled.ToUniversalTime() : Maybe<DateTimeOffset>.None }
+            // Deskbar's own lines saved before they had an author of their own (TaskComment.DeskbarAuthor).
+            .Attributed()).ToArray())
         {
             Important = d.Important ?? false,
             Urgent = d.Urgent ?? false,
