@@ -175,6 +175,20 @@ public class ClaudeStartTests
         Assert.Equal(@"C:\repos\Deskbar", launch.WorkingDirectory);
     }
 
+    // Task dbe25323: on a machine whose PATH does not lead to claude, the windows run the claude.exe Deskbar found, as
+    // one argument however many spaces its folder has (ArgumentList quotes it for wt).
+    const string FoundClaude = @"C:\Users\some one\.local\bin\claude.exe";
+
+    [Fact]
+    public void The_attach_window_runs_the_claude_it_is_given() =>
+        Assert.Equal(
+            ["-w", "new", "--title", "T", "-p", "Deskbar Claude", "-d", @"C:\repos\Deskbar", FoundClaude, "attach", "ab12cd34"],
+            ClaudeStart.AttachWindow("ab12cd34", @"C:\repos\Deskbar", "T", FoundClaude).Arguments);
+
+    [Fact]
+    public void The_trust_window_runs_the_claude_it_is_given() =>
+        Assert.Equal(["-w", "new", "-d", @"C:\repos\Deskbar", FoundClaude], ClaudeStart.TrustWindow(@"C:\repos\Deskbar", FoundClaude).Arguments);
+
     // The folders of a workspace's VS Code windows are only names (EditorFolder.Of reads them from the titles); the spec
     // resolves them to full paths through the sessions' folders. A name no session's repo ends in cannot be started in
     // and is left out; the repo of a worktree session counts, so "Deskbar" finds C:\repos\Deskbar.

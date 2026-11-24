@@ -1682,6 +1682,9 @@ public partial class App : Application
                 Tell = message => MessageBox.Show(message, "Deskbar", MessageBoxButton.OK, MessageBoxImage.Information),
                 // A double-click that brings back a task the keeper gave up on clears the give-up's resume count.
                 Forget = claudeSessions.Forget,
+                // claude.exe's full path for the terminal windows, looked up at each launch like ClaudeCli's own calls
+                // (task dbe25323); the bare name when it is nowhere, and wt then says so in its own window.
+                Claude = () => Deskbar.Windows.Claude.ClaudeLocator.Find().GetValueOrDefault("claude"),
             },
             new System.Reactive.Concurrency.SynchronizationContextScheduler(new System.Windows.Threading.DispatcherSynchronizationContext(Dispatcher)),
             trace: ClickTrace.On ? ClickTrace.Write : null);

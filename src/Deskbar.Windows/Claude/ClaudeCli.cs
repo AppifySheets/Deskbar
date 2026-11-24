@@ -26,15 +26,29 @@ namespace Deskbar.Windows.Claude;
 // in the app this list is a second line of defence; it is kept because ClaudeCli is also used without the app (its
 // tests, a probe) and the per-child block is the one place that cannot be undone by something setting a variable
 // on the process later.
-public sealed class ClaudeCli(string executable = "claude") : IClaudeCli
+//
+// The program: with no executable given (the app's case) each call looks claude.exe up through ClaudeLocator, so a
+// claude that Deskbar's own PATH does not reach (installed after Deskbar started, or only in the native installer's
+// folder) is still found, and a claude that is nowhere fails with the locator's install hint instead of Windows' bare
+// "The system cannot find the file specified" (task dbe25323). A given executable is run as it is; the tests pass
+// cmd.exe.
+public sealed class ClaudeCli(string? executable = null) : IClaudeCli
 {
     static readonly IReadOnlyList<string> StrippedVariables =
         ["CLAUDECODE", "CLAUDE_CODE_ENTRYPOINT", "CLAUDE_CODE_SESSION_ATTENDED", "CLAUDE_JOB_DIR", "CLAUDE_CODE_CHILD_SESSION",
             "ELECTRON_RUN_AS_NODE"];
 
-    public async Task<Result<string>> Run(IReadOnlyList<string> arguments, string? workingDirectory, TimeSpan timeout)
+    // The name failures carry: the given program, or "claude" for the located one, whose full path adds nothing.
+    string Name => executable ?? "claude";
+
+    public Task<Result<string>> Run(IReadOnlyList<string> arguments, string? workingDirectory, TimeSpan timeout) =>
+        (executable is not null ? Maybe.From(executable) : ClaudeLocator.Find()) is { HasValue: true } program
+            ? RunProgram(program.Value, arguments, workingDirectory, timeout)
+            : Task.FromResult(Result.Failure<string>(ClaudeLocator.NotFound));
+
+    async Task<Result<string>> RunProgram(string program, IReadOnlyList<string> arguments, string? workingDirectory, TimeSpan timeout)
     {
-        var info = new ProcessStartInfo(executable)
+        var info = new ProcessStartInfo(program)
         {
             UseShellExecute = false,
             RedirectStandardOutput = true,
@@ -54,7 +68,7 @@ public sealed class ClaudeCli(string executable = "claude") : IClaudeCli
         try
         {
             using var process = Process.Start(info);
-            if (process is null) return Result.Failure<string>($"Could not start {executable}.");
+            if (process is null) return Result.Failure<string>($"Could not start {Name}.");
 
             // No input is ever sent: closing stdin now means a program that waits for some gets end-of-file.
             process.StandardInput.Close();
@@ -84,9 +98,9 @@ public sealed class ClaudeCli(string executable = "claude") : IClaudeCli
                 }
                 catch (Exception e) when (e is AggregateException or InvalidOperationException or System.ComponentModel.Win32Exception)
                 {
-                    return Result.Failure<string>($"{executable} timed out after {timeout.TotalSeconds:0.#} s and could not be ended: {e.Message}");
+                    return Result.Failure<string>($"{Name} timed out after {timeout.TotalSeconds:0.#} s and could not be ended: {e.Message}");
                 }
-                return Result.Failure<string>($"{executable} timed out after {timeout.TotalSeconds:0.#} s and was ended.");
+                return Result.Failure<string>($"{Name} timed out after {timeout.TotalSeconds:0.#} s and was ended.");
             }
 
             // The program is gone; give the pipes a moment to deliver their last bytes, then stop waiting.
@@ -109,7 +123,7 @@ public sealed class ClaudeCli(string executable = "claude") : IClaudeCli
         catch (Exception e) when (e is System.ComponentModel.Win32Exception or InvalidOperationException or IOException)
         {
             // A missing program, a folder that does not exist, access denied: expected situations, so a value.
-            return Result.Failure<string>($"Could not run {executable}: {e.Message}");
+            return Result.Failure<string>($"Could not run {Name}: {e.Message}");
         }
     }
 
@@ -139,6 +153,6 @@ public sealed class ClaudeCli(string executable = "claude") : IClaudeCli
 
     // The exit code, then whichever of stdout and stderr have something to say.
     string FailureText(int exitCode, string output, string errors) =>
-        string.Join("\n", new[] { $"{executable} exited with code {exitCode}.", output, errors }
+        string.Join("\n", new[] { $"{Name} exited with code {exitCode}.", output, errors }
             .Where(part => part.Length > 0));
 }

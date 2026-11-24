@@ -609,8 +609,10 @@ The window opens in Deskbar's own "Deskbar Claude" Windows Terminal profile (Dar
 colours and bold text as Claude draws them, installed while the tasks box is ticked and removed when either
 Claude box is unticked), and closing it leaves the
 session running. On the bar the window carries Claude's icon, read from `claude.exe`, instead of the terminal's.
-This needs the Claude Code CLI on the PATH and Windows Terminal; a start or a window that
-fails says so in a message box as well as in the thread.
+This needs Windows Terminal and the Claude Code CLI's `claude.exe`, which Deskbar finds on the PATH (as the
+registry has it now, so an install made while Deskbar runs counts) or in the native installer's
+`%USERPROFILE%\.local\bin`. An npm install alone is not enough, since it has no `claude.exe`. A start or a window
+that fails says so in a message box as well as in the thread.
 
 The first time Deskbar changes `settings.json` it keeps the original as `settings.json.deskbar-backup`,
 and it leaves a file with comments in it alone.

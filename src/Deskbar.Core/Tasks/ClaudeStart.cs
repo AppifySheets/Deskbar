@@ -67,16 +67,21 @@ public static class ClaudeStart
     // The folder goes WITHOUT a trailing separator (Task 9): wt reads its own command line, and a folder that ends in a
     // backslash arrives as `"C:\repos\x\"`, whose last backslash escapes the closing quote. A drive's root keeps its
     // own ("C:\"), since "C:" alone means the drive's current folder.
-    public static ProgramLaunch AttachWindow(string shortId, string folder, string title) =>
-        new("wt.exe", ["-w", "new", "--title", title, "-p", "Deskbar Claude", "-d", Bare(folder), "claude", "attach", shortId], Bare(folder));
+    //
+    // <paramref name="claude"/> is the program the terminal runs: the full path of claude.exe when Deskbar found one
+    // (ClaudeLocator), so the window works on a machine whose PATH does not lead to it (task dbe25323), and the bare
+    // name otherwise, which leaves the finding to Windows Terminal as before.
+    public static ProgramLaunch AttachWindow(string shortId, string folder, string title, string claude = "claude") =>
+        new("wt.exe", ["-w", "new", "--title", title, "-p", "Deskbar Claude", "-d", Bare(folder), claude, "attach", shortId], Bare(folder));
 
     /// <summary>
     /// The window Deskbar opens when a folder was never trusted: a NEW Windows Terminal window running plain `claude`
     /// there, with Windows Terminal's default profile, so Petre answers Claude's trust prompt himself (the spec: Deskbar
-    /// never accepts trust for him). Once he has, "Start Claude on this" works in that folder.
+    /// never accepts trust for him). Once he has, "Start Claude on this" works in that folder. <paramref name="claude"/>
+    /// as in <see cref="AttachWindow"/>.
     /// </summary>
-    public static ProgramLaunch TrustWindow(string folder) =>
-        new("wt.exe", ["-w", "new", "-d", Bare(folder), "claude"], Bare(folder));
+    public static ProgramLaunch TrustWindow(string folder, string claude = "claude") =>
+        new("wt.exe", ["-w", "new", "-d", Bare(folder), claude], Bare(folder));
 
     // The longest title the window is given; the rest of a long title is in the task.
     const int MaxTitle = 80;

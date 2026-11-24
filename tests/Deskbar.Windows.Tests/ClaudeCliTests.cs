@@ -1,3 +1,5 @@
+using System.IO;
+using CSharpFunctionalExtensions;
 using Deskbar.Windows.Claude;
 
 namespace Deskbar.Windows.Tests;
@@ -94,4 +96,14 @@ public class ClaudeCliTests
 
         Assert.True(result.IsFailure);
     }
+
+    // Task dbe25323: what the locator answers is a claude.exe that exists, or nothing; never a bare name for Windows to
+    // fail on. A CI runner has no Claude Code, a dev machine does, so both answers are allowed.
+    [Fact]
+    public void The_located_claude_is_an_existing_exe_or_nothing() =>
+        ClaudeLocator.Find().Tap(path =>
+        {
+            Assert.True(File.Exists(path), path);
+            Assert.Equal("claude.exe", Path.GetFileName(path), ignoreCase: true);
+        });
 }

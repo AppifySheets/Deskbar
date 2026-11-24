@@ -199,7 +199,7 @@ public sealed class ClaudeTaskActions : IDisposable
         var shortId = agent.ShortId.GetValueOrDefault(agent.SessionId[..Math.Min(8, agent.SessionId.Length)]);
         // A launch that fails (wt missing from the PATH, say) is said in the thread AND to Petre at once (final review,
         // item 12): he clicked and no window came, and the thread is not where he is looking.
-        Launch(task, ClaudeStart.AttachWindow(shortId, agent.Folder, title))
+        Launch(task, ClaudeStart.AttachWindow(shortId, agent.Folder, title, seams.Claude()))
             .Tap(() => attaching = attaching.SetItem(agent.SessionId, scheduler.Now))
             .TapError(e => SayAndTell(task.Id, $"Deskbar could not open a window on session {shortId}:\n\n{e}"));
     }
@@ -320,7 +320,7 @@ public sealed class ClaudeTaskActions : IDisposable
             return;
         }
         if (!seams.OfferTrustTerminal($"{error}\n\n{TrustQuestion}")) return;
-        Current(taskId).Tap(task => Launch(task, ClaudeStart.TrustWindow(folder))
+        Current(taskId).Tap(task => Launch(task, ClaudeStart.TrustWindow(folder, seams.Claude()))
             .TapError(e => SayAndTell(taskId, $"Deskbar could not open a terminal in {folder}:\n\n{e}")));
     }
 
@@ -389,4 +389,10 @@ public sealed record ClaudeTaskSeams(
     /// on; nothing by default.
     /// </summary>
     public Action<string> Forget { get; init; } = _ => { };
+
+    /// <summary>
+    /// The `claude` a terminal window runs (attach, trust): the app gives claude.exe's full path when ClaudeLocator finds
+    /// it, so the window works where the PATH does not lead to claude (task dbe25323); the bare name by default.
+    /// </summary>
+    public Func<string> Claude { get; init; } = () => "claude";
 }

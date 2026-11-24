@@ -177,11 +177,9 @@ public static class IconCache
     {
         if (claudeExe is not null) return claudeExe;
         if (DateTime.UtcNow - claudeExeMissedAt < ClaudeExeRetry) return null;
-        claudeExe = ClaudeStart.ExecutableIn(
-                Environment.GetEnvironmentVariable("PATH"),
-                Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
-                System.IO.File.Exists)
-            .GetValueOrDefault();
+        // The same lookup the sessions use (Deskbar's PATH, then the registry's, then the native installer's folder), so
+        // the icon and the program cannot disagree about which claude.exe is meant.
+        claudeExe = Deskbar.Windows.Claude.ClaudeLocator.Find().GetValueOrDefault();
         if (claudeExe is null) claudeExeMissedAt = DateTime.UtcNow;
         return claudeExe;
     }
