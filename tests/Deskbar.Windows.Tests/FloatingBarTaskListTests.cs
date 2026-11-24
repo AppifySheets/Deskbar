@@ -3030,6 +3030,54 @@ public class FloatingBarTaskListTests
         Assert.Equal("Ship the release ·\u00A01\u00A0subtask", TextOf(t.Lines.Single(l => ((TaskLine)l.Tag).Id == parent.Id)));
     });
 
+    // Follow-up: "Subtask of" on a line's menu puts an existing task under another (Petre: "can i move a task to make it
+    // a subtask ... or other means?"), and None makes it a plain task again. A task with subtasks of its own cannot be one.
+    static MenuItem SubtaskOfItem(ContextMenu menu) =>
+        menu.Items.OfType<MenuItem>().Single(i => i.Header is TextBlock { Text: "Subtask of" });
+
+    static IReadOnlyList<string> Words(MenuItem item) =>
+        item.Items.OfType<MenuItem>().Select(i => ((TextBlock)i.Header).Text).ToArray();
+
+    [Fact]
+    public void Subtask_of_puts_a_task_under_another_and_none_frees_it() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        var parent = t.Tasks.AddNote("Ship the release", t.Gepha).Value;
+        var loose = t.Tasks.AddNote("Write the notes", t.Gepha).Value;
+
+        var menu = t.Bar.OpenTaskLineMenu(loose.Id)!;
+        var texts = menu.Items.OfType<MenuItem>().Select(i => ((TextBlock)i.Header).Text).ToList();
+        Assert.Equal(texts.IndexOf("Add subtask…") + 1, texts.IndexOf("Subtask of"));
+        var item = SubtaskOfItem(menu);
+        Assert.Equal(["Ship the release"], Words(item));
+        item.Items.OfType<MenuItem>().Single().RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
+        menu.IsOpen = false;
+        Assert.Equal(Maybe.From(parent.Id), t.Tasks.Board.Tasks.Single(x => x.Id == loose.Id).ParentId);
+
+        menu = t.Bar.OpenTaskLineMenu(loose.Id)!;
+        item = SubtaskOfItem(menu);
+        Assert.Equal(["None", "Ship the release"], Words(item));
+        Assert.True(item.Items.OfType<MenuItem>().Last().IsChecked);
+        item.Items.OfType<MenuItem>().First().RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
+        menu.IsOpen = false;
+        Assert.True(t.Tasks.Board.Tasks.Single(x => x.Id == loose.Id).ParentId.HasNoValue);
+    });
+
+    [Fact]
+    public void A_parent_cannot_be_put_under_another_task() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        var parent = t.Tasks.AddNote("Ship the release", t.Gepha).Value;
+        t.Tasks.AddNote("Write the notes", t.Gepha, parent: parent.Id);
+        t.Tasks.AddNote("Other", t.Gepha);
+
+        var menu = t.Bar.OpenTaskLineMenu(parent.Id)!;
+        var item = SubtaskOfItem(menu);
+        menu.IsOpen = false;
+
+        Assert.False(item.IsEnabled);
+    });
+
     [Fact]
     public void Add_subtask_on_a_subtask_adds_a_sibling() => StaThread.Run(() =>
     {

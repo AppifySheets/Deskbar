@@ -1850,6 +1850,8 @@ public partial class TasksWindow : Window
             // once this menu has closed so the box can take the keyboard.
             if (Actions?.SubtaskParent is not null)
                 menu.Items.Add(Item(FloatingBar.AddSubtaskText, () => Dispatcher.BeginInvoke(() => BeginSubtaskAdd(id), System.Windows.Threading.DispatcherPriority.Input)));
+            if (Actions?.ParentChoices is { } choicesOf && Actions.SetParent is { } setParent)
+                menu.Items.Add(SubtaskOfItem(id, choicesOf(id), setParent));
             menu.Items.Add(new Separator());
         }
 
@@ -2020,6 +2022,28 @@ public partial class TasksWindow : Window
     {
         var item = new MenuItem { Header = new TextBlock { Text = text } };
         if (click is not null) item.Click += (_, _) => click();
+        return item;
+    }
+
+    // "Subtask of", the bar's twin (FloatingBar.SubtaskOfItem): the tasks this one could go under, its workspace first,
+    // the current parent ticked and "None" first while it has one; greyed out, saying why, on a task with subtasks.
+    static MenuItem SubtaskOfItem(Guid id, ParentChoices choices, Action<Guid, Maybe<Guid>> setParent)
+    {
+        var item = Item(FloatingBar.SubtaskOfText);
+        if (choices.Blocked || (choices.Candidates.Count == 0 && choices.Current.HasNoValue))
+        {
+            item.IsEnabled = false;
+            item.ToolTip = choices.Blocked ? FloatingBar.SubtaskOfBlocked : "There is no task to put it under";
+            ToolTipService.SetShowOnDisabled(item, true);
+            return item;
+        }
+        if (choices.Current.HasValue) item.Items.Add(Item("None", () => setParent(id, Maybe<Guid>.None)));
+        choices.Candidates.ToList().ForEach(c =>
+        {
+            var choice = Item(c.Title, () => setParent(id, c.Id));
+            choice.IsChecked = choices.Current == c.Id;
+            item.Items.Add(choice);
+        });
         return item;
     }
 

@@ -145,6 +145,26 @@ public class SubtaskOrderTests
     }
 
     [Fact]
+    public void The_menus_choices_name_the_current_parent_and_cut_long_titles()
+    {
+        var parent = Task(new string('p', 80));
+        var child = Task("Child", parent.Id);
+        var choices = TaskViews.ParentChoices(new TaskBoard([parent, child, Task("Other")]), child.Id);
+
+        Assert.False(choices.Blocked);
+        Assert.Equal(Maybe.From(parent.Id), choices.Current);
+        Assert.Equal(2, choices.Candidates.Count);
+        Assert.All(choices.Candidates, c => Assert.True(c.Title.Length <= 50));
+    }
+
+    [Fact]
+    public void A_parents_menu_choice_is_blocked()
+    {
+        var parent = Task("Parent");
+        Assert.True(TaskViews.ParentChoices(new TaskBoard([parent, Task("Child", parent.Id)]), parent.Id).Blocked);
+    }
+
+    [Fact]
     public void The_count_stays_on_one_line() =>
         Assert.DoesNotContain(' ', TaskViews.SubtaskCountText(2));
 }

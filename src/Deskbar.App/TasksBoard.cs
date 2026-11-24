@@ -217,6 +217,8 @@ public sealed class TasksBoard : IDisposable
                 .Match(p => new SubtaskParentView(p.Id, p.Title, p.WorkspaceId), () => (SubtaskParentView?)null),
             AddSubtask = (title, workspace, quadrant, parent) => AddNote(title, workspace, quadrant, parent).IsSuccess,
             ShowTask = ShowTask,
+            ParentChoices = id => TaskViews.ParentChoices(tasks.Board, id),
+            SetParent = (id, parent) => Report(tasks.SetParent(id, parent)),
         };
 
         subscriptions = new CompositeDisposable(
@@ -1110,6 +1112,12 @@ internal sealed record TasksWindowActions(
 
     /// <summary>Shows one task: picked, its thread open, scrolled into view (TasksBoard.ShowTask). A subtask in a thread uses it.</summary>
     public Action<Guid>? ShowTask { get; init; }
+
+    /// <summary>What a line's "Subtask of" menu offers (TaskViews.ParentChoices). None, the menu has no "Subtask of".</summary>
+    public Func<Guid, ParentChoices>? ParentChoices { get; init; }
+
+    /// <summary>Puts a task under another, or (none) makes it a plain task again (TaskService.SetParent).</summary>
+    public Action<Guid, Maybe<Guid>>? SetParent { get; init; }
 }
 
 /// <summary>A subtask as its parent's open thread lists it: id, title (first line), status and status line.</summary>
