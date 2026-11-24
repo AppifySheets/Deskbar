@@ -81,7 +81,6 @@ public partial class FloatingBar
         // as the parent, a sibling on a subtask's line. Run once this menu has closed, so the box can take the keyboard.
         menu.Items.Add(TaskMenuItem(AddSubtaskText, () => Dispatcher.BeginInvoke(() => BeginSubtaskAdd(id),
             System.Windows.Threading.DispatcherPriority.Input)));
-        menu.Items.Add(SubtaskOfItem(id));
         menu.Items.Add(new Separator());
         menu.Items.Add(TaskMenuItem("Important", () => taskService?.SetFlag(id, TaskFlag.Important, !line.Important), line.Important));
         menu.Items.Add(TaskMenuItem("Urgent", () => taskService?.SetFlag(id, TaskFlag.Urgent, !line.Urgent), line.Urgent));
@@ -97,32 +96,6 @@ public partial class FloatingBar
     }
 
     internal const string AddSubtaskText = "Add subtask…";
-
-    internal const string SubtaskOfText = "Subtask of";
-
-    internal const string SubtaskOfBlocked = "It has subtasks of its own, and subtasks go one level deep";
-
-    // "SUBTASK OF" (follow-up to the subtasks spec; Petre: "can i move a task to make it a subtask ... or other means?"). A
-    // menu rather than a drag: a drag already reorders lines, and "drop on a line" against "drop between two" is a few
-    // pixels apart. Its submenu lists the tasks this one could go under (TaskViews.ParentChoices: its workspace first),
-    // the current parent ticked, and "None" first while it has one. Greyed out, saying why, on a task with subtasks.
-    MenuItem SubtaskOfItem(Guid id)
-    {
-        var item = new MenuItem { Header = new TextBlock { Text = SubtaskOfText } };
-        if (taskService is not { } service) return item;
-        var choices = TaskViews.ParentChoices(service.Board, id);
-        if (choices.Blocked || (choices.Candidates.Count == 0 && choices.Current.HasNoValue))
-        {
-            item.IsEnabled = false;
-            item.ToolTip = choices.Blocked ? SubtaskOfBlocked : "There is no task to put it under";
-            ToolTipService.SetShowOnDisabled(item, true);
-            return item;
-        }
-        if (choices.Current.HasValue) item.Items.Add(TaskMenuItem("None", () => taskService?.SetParent(id, Maybe<Guid>.None)));
-        choices.Candidates.ToList().ForEach(c =>
-            item.Items.Add(TaskMenuItem(c.Title, () => taskService?.SetParent(id, c.Id), choices.Current == c.Id)));
-        return item;
-    }
 
     // A TextBlock header, so an underscore in a word is not read as an access key.
     static MenuItem TaskMenuItem(string text, Action click, bool? isChecked = null)

@@ -7,7 +7,7 @@ namespace Deskbar.Core.Tests.Tasks;
 
 // Subtasks under their parent (follow-up to docs/superpowers/specs/2026-11-24-subtasks-design.md; Petre's screenshot of
 // "↳ test1" four lines above its parent): the one ordering rule the bar and the tasks panel share, the parents
-// "Subtask of…" offers, and the count that never breaks across lines.
+// a drag can nest under, and the count that never breaks across lines.
 public class SubtaskOrderTests
 {
     static readonly DateTimeOffset At = new(2026, 11, 24, 12, 0, 0, TimeSpan.Zero);
@@ -133,7 +133,7 @@ public class SubtaskOrderTests
         Assert.Equal([TaskGroupKind.IV], TaskViews.UnderParents(groups).Groups.Select(g => g.Kind));
     }
 
-    // --- "Subtask of…" ------------------------------------------------------------------------
+    // --- the tasks a drag can nest under --------------------------------------------------------
 
     [Fact]
     public void The_parents_offered_are_open_top_tasks_same_workspace_first()
@@ -155,26 +155,6 @@ public class SubtaskOrderTests
         var board = new TaskBoard([parent, Task("Child", parent.Id), Task("Other")]);
 
         Assert.Empty(board.ParentCandidates(parent.Id));
-    }
-
-    [Fact]
-    public void The_menus_choices_name_the_current_parent_and_cut_long_titles()
-    {
-        var parent = Task(new string('p', 80));
-        var child = Task("Child", parent.Id);
-        var choices = TaskViews.ParentChoices(new TaskBoard([parent, child, Task("Other")]), child.Id);
-
-        Assert.False(choices.Blocked);
-        Assert.Equal(Maybe.From(parent.Id), choices.Current);
-        Assert.Equal(2, choices.Candidates.Count);
-        Assert.All(choices.Candidates, c => Assert.True(c.Title.Length <= 50));
-    }
-
-    [Fact]
-    public void A_parents_menu_choice_is_blocked()
-    {
-        var parent = Task("Parent");
-        Assert.True(TaskViews.ParentChoices(new TaskBoard([parent, Task("Child", parent.Id)]), parent.Id).Blocked);
     }
 
     [Fact]

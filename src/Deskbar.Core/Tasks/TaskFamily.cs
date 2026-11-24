@@ -10,9 +10,3 @@ namespace Deskbar.Core.Tasks;
 /// text a session reads. One level deep, so a task has a parent or subtasks, and Siblings is empty for a parent.
 /// </summary>
 public sealed record TaskFamily(TaskItem Task, Maybe<TaskItem> Parent, IReadOnlyList<TaskItem> Siblings, IReadOnlyList<TaskItem> Subtasks);
-
-/// <summary>
-/// What a line's "Subtask of" menu offers (TaskViews.ParentChoices): whether the task may not be put under another (it has
-/// subtasks of its own), the parent it has now, and the tasks it could go under.
-/// </summary>
-public sealed record ParentChoices(bool Blocked, Maybe<Guid> Current, IReadOnlyList<(Guid Id, string Title)> Candidates);

@@ -217,7 +217,6 @@ public sealed class TasksBoard : IDisposable
                 .Match(p => new SubtaskParentView(p.Id, p.Title, p.WorkspaceId), () => (SubtaskParentView?)null),
             AddSubtask = (title, workspace, quadrant, parent, describe) => AddNote(title, workspace, quadrant, parent, describe).IsSuccess,
             ShowTask = ShowTask,
-            ParentChoices = id => TaskViews.ParentChoices(tasks.Board, id),
             SetParent = (id, parent) => Report(tasks.SetParent(id, parent)).IsSuccess,
             NestTargets = id => tasks.Board.ParentCandidates(id).Select(t => t.Id).ToHashSet(),
         };
@@ -1120,9 +1119,6 @@ internal sealed record TasksWindowActions(
 
     /// <summary>Shows one task: picked, its thread open, scrolled into view (TasksBoard.ShowTask). A subtask in a thread uses it.</summary>
     public Action<Guid>? ShowTask { get; init; }
-
-    /// <summary>What a line's "Subtask of" menu offers (TaskViews.ParentChoices). None, the menu has no "Subtask of".</summary>
-    public Func<Guid, ParentChoices>? ParentChoices { get; init; }
 
     /// <summary>Puts a task under another, or (none) makes it a plain task again (TaskService.SetParent); whether it worked.</summary>
     public Func<Guid, Maybe<Guid>, bool>? SetParent { get; init; }

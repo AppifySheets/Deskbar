@@ -185,6 +185,10 @@ outlined), its top and bottom quarters reorder as before (TaskDropTarget). A sub
 dragged again, and a drop anywhere but another line's middle frees it, then places it. Nested lines stay no drop
 anchors (review of #467). The Matrix does not nest: a drag between its cells already means "change the quadrant".
 
+With drag to nest shipped, Petre asked to remove the menu's "move into" (2026-11-24): the **Subtask of** item is gone
+from the bar's and the panel's menus. Dragging onto a line's middle puts a task under another, dragging it out frees
+it, and `task parent` stays for scripts.
+
 ## Calls Claude made (for Petre to check)
 
 - One level only, as goals have. A deeper tree makes the breadcrumb and the briefing grow with depth.
