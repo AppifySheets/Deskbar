@@ -1599,16 +1599,30 @@ public class TasksBoardTests
         Assert.Equal([b, a], t.Window.Keys);
     });
 
-    // A question is never snoozed: a line waiting on Petre has no moon.
+    // Petre, 2026-11-25: "i may snooze something that's waiting". A line waiting on him has the moon too; snoozed, it
+    // leaves the Waiting on you block and the chip's count, and its "⋯" menu offers Snooze as well.
     [Fact]
-    public void A_line_waiting_on_you_has_no_snooze_moon() => StaThread.Run(() =>
+    public void A_line_waiting_on_you_can_be_snoozed() => StaThread.Run(() =>
     {
         using var t = Build();
         var id = t.Tasks.Create("asks", t.Gepha, Session("s1")).Value.Id;
         Assert.True(t.Tasks.Ask(id, "merge?").IsSuccess);
         t.Controller.Show();
+        Assert.Contains("WAITING ON YOU", t.Window.Headers.Select(h => h.ToUpperInvariant()));
 
-        Assert.DoesNotContain(Inside(LineOf(t.Window, id)).OfType<Button>(), button => AutomationProperties.GetName(button) == "Snooze");
+        // ButtonNamed fails the test when the line has no moon.
+        _ = ButtonNamed(LineOf(t.Window, id), "Snooze");
+        var more = t.Window.OpenMenuFor(id);
+        Assert.Contains(more.Items.OfType<MenuItem>(), i => i.Header is TextBlock { Text: "Snooze" });
+        more.IsOpen = false;
+        t.Window.Dispatcher.Invoke(() => { }, System.Windows.Threading.DispatcherPriority.Background);
+
+        Assert.True(t.Controller.Snooze(id, SnoozeChoice.Hour).IsSuccess);
+
+        Assert.Empty(t.Window.Keys);
+        Assert.Contains("Waiting on you 0", t.Window.FilterLabels);
+        Assert.Contains("Snoozed 1", t.Window.FilterLabels);
+        Assert.Equal(TaskStatus.WaitingOnYou, t.Tasks.Board.Tasks.Single(x => x.Id == id).Status);
     });
 
     // A point inside a window line, `share` of the way down it, in the drag's own coordinates (the window's rows).

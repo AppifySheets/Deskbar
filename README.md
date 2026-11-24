@@ -478,8 +478,9 @@ A task you cannot do anything about yet can be snoozed. In the tasks panel, the 
 (or "Snooze" on its menu) hides it for 1 hour, 3 hours, until 09:00 tomorrow or until 09:00 next Monday. A snoozed
 task leaves the bar and the panel's lists and waits under the panel's "Snoozed" chip, which says when each one
 comes back. It comes back by itself when the time is up, or sooner if its Claude session asks you something,
-finishes, or its status changes, and "Wake now" brings it back at once. A task waiting on you cannot be snoozed. A
-script does the same with `deskbar.cmd task snooze <id> 2h` (or `tomorrow`, `monday`, `45m`, `3d`) and
+finishes, or its status changes, and "Wake now" brings it back at once. A task waiting on you can be snoozed too:
+it leaves "Waiting on you" and comes back still waiting, with its question, unless the session asks something new
+first, which brings it back at once. A script does the same with `deskbar.cmd task snooze <id> 2h` (or `tomorrow`, `monday`, `45m`, `3d`) and
 `task wake <id>`.
 
 The tasks screencast shows the old floating window and needs filming again for the panel.
