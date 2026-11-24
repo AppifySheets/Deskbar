@@ -2034,8 +2034,18 @@ public partial class App : Application
             // task's session selects that task, so its line is lit on the bar and in the tasks panel just as a click on
             // it would light it (TaskSelection). Any other window leaves the selection alone: switching to a browser
             // does not take away the task he was looking at. ClaudeTaskActions.TaskOfWindow says which task, if any.
+            //
+            // The line is then scrolled into view (Petre: "when highlighting in the main bar, it should scroll to the task
+            // as well"). The bar does it by itself on any change of selection (FloatingBar.BringSelectedIntoSight); the
+            // tasks panel, while open, only here (TasksBoard.Reveal), as little as it takes, so a line already in view
+            // stays put. Not on the panel's own clicks: a clicked line is in view, and sliding the list under the
+            // pointer is how clicks get lost (#48).
             monitor.ForegroundChanged.Subscribe(hwnd =>
-                claudeActions?.TaskOfWindow(new WindowHandle(hwnd)).Tap(floatingBar.Selection.Select));
+                claudeActions?.TaskOfWindow(new WindowHandle(hwnd)).Tap(id =>
+                {
+                    floatingBar.Selection.Select(id);
+                    tasksBoard?.Reveal();
+                }));
 
             // A window dragged by its own title bar, for dropping it on a workspace row (Petre: "can i drag
             // and drop the current window, with its header, to the workspace?"). The start and end of the

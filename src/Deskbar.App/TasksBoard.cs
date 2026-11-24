@@ -512,6 +512,16 @@ public sealed class TasksBoard : IDisposable
     /// The bar's single click on a task line (Ruling 54): the panel comes forward (opening when it was hidden) on that
     /// task, picked, scrolled into view and expanded to its thread. It goes nowhere.
     /// </summary>
+    /// <summary>
+    /// The selected task's line scrolled into view while the panel is open (TasksWindow.RevealSelected); closed, nothing
+    /// happens and the panel is not opened. For a selection made from outside the panel (task 4846fde1: a Claude task's
+    /// terminal brought to the front).
+    /// </summary>
+    public void Reveal()
+    {
+        if (IsOpen) window.RevealSelected();
+    }
+
     public void ShowTask(Guid id)
     {
         selection.Select(id);

@@ -1124,6 +1124,18 @@ public partial class TasksWindow : Window
     // For the tests: whether a line on show is glowing.
     internal bool IsGlowing(Guid id) => selectionFrames.TryGetValue(id, out var parts) && TaskGlow.IsGlow(parts.Frame.Background);
 
+    /// <summary>
+    /// Brings the selected task's line into view as little as it takes, unlike ScrollToSelected's third of the way down:
+    /// for a selection that comes while the panel is open (a Claude task's terminal brought to the front, task 4846fde1),
+    /// a line already in view stays exactly where it is. In the Matrix the line's own cell scrolls. A line the filters
+    /// or the search hide is not drawn, so nothing moves.
+    /// </summary>
+    internal void RevealSelected()
+    {
+        if (selectedId.HasNoValue || !selectionFrames.TryGetValue(selectedId.Value, out var parts)) return;
+        parts.Frame.BringIntoView();
+    }
+
     // For the tests.
     internal bool IsSelected(Guid id) =>
         selectionFrames.TryGetValue(id, out var parts) && parts.Frame.BorderBrush is SolidColorBrush { Color.A: > 0 };
