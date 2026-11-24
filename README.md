@@ -460,6 +460,12 @@ you through it (the task waits on you, in orange, with the question) and marks i
 finished: a done task gets a green tick, and every line in the tasks panel shows its status (a slim line in its tooltip). Only you close a task. Double-click a Claude task to go to its session, and pick "Start Claude
 on this" on a note's menu to hand it to a new Claude session.
 
+A task can have subtasks, one level deep. Pick "Add subtask…" on a task's menu and type a title: that is all
+the brief it needs. A Claude session that takes up a subtask is told about its parent and the other subtasks,
+with their status lines, your descriptions and comments, and every Claude session on them with the file its
+conversation is kept in, so it reads what the earlier work found instead of you explaining it again. A subtask's
+line starts with "↳" (in the tasks panel, with the parent's name), and a parent's line counts its open subtasks.
+
 The tasks screencast shows the old floating window and needs filming again for the panel.
 
 More in [Tasks](docs/features/tasks.md).
