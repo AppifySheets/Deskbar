@@ -65,7 +65,14 @@ static class ClaudeHooks
     // it). A woken session stuck at a prompt defeats the point, so Petre agreed (2026-11-24) to a Read rule for that one
     // folder and nothing else. It is recognised as Deskbar's by its shape (Read(// ... /Deskbar/task-images/**)), so a
     // rule for an older state folder is replaced and the user's own rules, task-images ones included, are never touched.
-    internal static bool Sync(bool on, bool tasks, string settingsPath, string askCommand, string taskCommand, string? imagesRule = null)
+    //
+    // `waitCommand` runs claude-wait-hook.cmd: a SECOND entry of Deskbar's on Stop, beside the ask entry, on the same terms
+    // as the task events (a comment wakes its session; plan docs/superpowers/plans/2026-11-24-comment-wakes-session.md,
+    // Task 4). It carries `"asyncRewake": true`, so Claude Code lets it run on after the turn and wakes the session when
+    // it exits 2, and `"timeout"` a month (CommentInbox.WaiterTimeout, measured accepted), so the waiter outlives an idle
+    // session's long silences. Null leaves it out (the tests that predate it).
+    internal static bool Sync(bool on, bool tasks, string settingsPath, string askCommand, string taskCommand, string? imagesRule = null,
+        string? waitCommand = null)
     {
         JsonObject root;
         string? original = null;
@@ -94,7 +101,7 @@ static class ClaudeHooks
             return false;
         }
 
-        var (hooksChanged, hooksComplete) = Apply(root, Wanted(on, tasks, askCommand, taskCommand));
+        var (hooksChanged, hooksComplete) = Apply(root, Wanted(on, tasks, askCommand, taskCommand, waitCommand));
         var (ruleChanged, ruleComplete) = imagesRule is null ? (false, true) : ApplyRule(root, on && tasks, imagesRule);
         var (changed, complete) = (hooksChanged || ruleChanged, hooksComplete && ruleComplete);
         if (!changed) return complete;
@@ -111,19 +118,39 @@ static class ClaudeHooks
         return complete;
     }
 
-    // Each event of Deskbar's, whether its entry should be there, and the command it runs.
-    static IReadOnlyList<(string Name, bool On, string Command)> Wanted(bool on, bool tasks, string askCommand, string taskCommand) =>
-        [.. AskEvents.Select(name => (name, on, askCommand)), .. TaskEvents.Select(name => (name, on && tasks, taskCommand))];
+    // Every event Deskbar may hold an entry on, and the entries it should hold there now, in order (none: take ours out).
+    // Stop holds two while the task events are on: the ask entry, then the comment waiter (see Sync).
+    static IReadOnlyList<(string Name, IReadOnlyList<JsonObject> Entries)> Wanted(bool on, bool tasks, string askCommand, string taskCommand, string? waitCommand) =>
+    [
+        ("Notification", on ? [Entry(askCommand)] : []),
+        ("Stop", on ? [Entry(askCommand), .. tasks && waitCommand is not null ? [WaitEntry(waitCommand)] : Array.Empty<JsonObject>()] : []),
+        .. TaskEvents.Select(name => (name, (IReadOnlyList<JsonObject>)(on && tasks ? [Entry(taskCommand)] : []))),
+    ];
+
+    static JsonObject Entry(string command) =>
+        new() { ["hooks"] = new JsonArray(new JsonObject { ["type"] = "command", ["command"] = command }) };
+
+    static JsonObject WaitEntry(string command) =>
+        new()
+        {
+            ["hooks"] = new JsonArray(new JsonObject
+            {
+                ["type"] = "command",
+                ["command"] = command,
+                ["asyncRewake"] = true,
+                ["timeout"] = (long)Core.Tasks.CommentInbox.WaiterTimeout.TotalSeconds,
+            }),
+        };
 
     // The change itself, on the parsed file: whether anything changed, and whether every event could be kept in step
     // (false when an event's value is not an array and was left alone).
-    static (bool Changed, bool Complete) Apply(JsonObject root, IReadOnlyList<(string Name, bool On, string Command)> wanted)
+    static (bool Changed, bool Complete) Apply(JsonObject root, IReadOnlyList<(string Name, IReadOnlyList<JsonObject> Entries)> wanted)
     {
         var changed = false;
         var complete = true;
         var hooks = root["hooks"] as JsonObject;
 
-        foreach (var (name, on, command) in wanted)
+        foreach (var (name, want) in wanted)
         {
             if (hooks?[name] is { } value && value is not JsonArray)
             {
@@ -134,23 +161,21 @@ static class ClaudeHooks
 
             var entries = hooks?[name] as JsonArray;
             var ours = entries?.Where(e => IsOurs(e)).ToList() ?? [];
-            var current = ours.Count == 1 && CommandOf(ours[0]) == command;
 
-            if (on && current) continue;
+            // Exactly what is wanted already, in order: nothing to write.
+            if (ours.Count == want.Count && ours.Zip(want).All(pair => JsonNode.DeepEquals(pair.First, pair.Second))) continue;
 
-            // Anything of ours that is not exactly the current entry goes: a stale path from an older Deskbar, a task
-            // event still on claude-hook.cmd from before Ruling 35, or a duplicate.
+            // Anything of ours that is not exactly what is wanted goes: a stale path from an older Deskbar, a task event
+            // still on claude-hook.cmd from before Ruling 35, an older waiter entry, or a duplicate. Then the wanted ones
+            // go in, after the user's own.
             ours.ForEach(e => entries!.Remove(e));
             changed |= ours.Count > 0;
 
-            if (on)
+            if (want.Count > 0)
             {
                 if (hooks is null) root["hooks"] = hooks = [];
                 if (entries is null) hooks[name] = entries = [];
-                entries.Add(new JsonObject
-                {
-                    ["hooks"] = new JsonArray(new JsonObject { ["type"] = "command", ["command"] = command }),
-                });
+                want.ToList().ForEach(entries.Add);
                 changed = true;
             }
             // An event left empty by taking ours out goes too; one the user left empty is theirs and stays.
@@ -224,7 +249,8 @@ static class ClaudeHooks
     static bool IsOurs(JsonNode? entry) =>
         CommandOf(entry) is { } command
         && (command.Contains(ClaudeSkill.HookScriptName, StringComparison.OrdinalIgnoreCase)
-            || command.Contains(ClaudeSkill.TaskHookScriptName, StringComparison.OrdinalIgnoreCase))
+            || command.Contains(ClaudeSkill.TaskHookScriptName, StringComparison.OrdinalIgnoreCase)
+            || command.Contains(ClaudeSkill.WaitHookScriptName, StringComparison.OrdinalIgnoreCase))
         && command.Contains("Deskbar", StringComparison.OrdinalIgnoreCase);
 
     // The command of an entry that holds exactly one command hook, which is the shape Deskbar writes; anything else is
