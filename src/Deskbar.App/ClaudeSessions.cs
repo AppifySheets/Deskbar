@@ -291,8 +291,38 @@ public sealed class ClaudeSessions : IDisposable
             .DefaultIfEmpty(Result.Failure<ClaudeAgent>("Deskbar closed before the session was resumed."))
             .ToTask();
 
-    // Runs on `scheduler` (inside ResumeNow's SelectMany), so it may touch the state.
-    IObservable<Result<ClaudeAgent>> WakeNow(Guid taskId, TaskSession session)
+    /// <summary>
+    /// A comment wakes its session (plan docs/superpowers/plans/2026-11-24-comment-wakes-session.md, Task 5): resumes a
+    /// session that does not run, with <paramref name="message"/> (Petre's comment, SessionBriefing.Commented) as the
+    /// message it wakes to, from its own folder. A session the fresh list shows, or one being resumed already or a moment
+    /// ago, is NOT resumed (a copy would start, or the message would be lost to the resume in flight): that is a failure,
+    /// and the caller (CommentWaker) puts the comment in its inbox instead. Called on the UI thread.
+    /// </summary>
+    public Task<Result> ResumeWith(Guid taskId, TaskSession session, string message) =>
+        OffThread(() => cli.Run(AgentsArguments, null, ReadTimeout))
+            .SelectMany(read => read.Bind(ClaudeAgents.Parse).Match(
+                list => list.Any(agent => agent.SessionId == session.Id) || Waking(session.Id) || AnsweredWithinGrace(session.Id)
+                    ? Observable.Return(Result.Failure("The session is running or being resumed already."))
+                    : WakeNow(taskId, session, message).Select(woken => woken.IsSuccess ? Result.Success() : Result.Failure(woken.Error)),
+                error => Observable.Return(Result.Failure($"Claude Code's list of sessions could not be read: {error}"))))
+            .TakeUntil(stopping)
+            .DefaultIfEmpty(Result.Failure("Deskbar closed before the session was resumed."))
+            .ToTask();
+
+    /// <summary>
+    /// `claude stop <short id>` now, for a background session whose comment waiter lapsed (CommentWake.StopThenResume):
+    /// the stop returns once the process is gone (measured 2026-11-23), so a resume right after it does not start a copy.
+    /// </summary>
+    public Task<Result> StopNow(string shortId) =>
+        OffThread(() => cli.Run(["stop", shortId], null, LaunchTimeout))
+            .Select(stopped => stopped.IsSuccess ? Result.Success() : Result.Failure(stopped.Error))
+            .TakeUntil(stopping)
+            .DefaultIfEmpty(Result.Failure("Deskbar closed before the session was stopped."))
+            .ToTask();
+
+    // Runs on `scheduler` (inside ResumeNow's SelectMany), so it may touch the state. `message`, when given, is what the
+    // session wakes to instead of the usual (a comment, ResumeWith).
+    IObservable<Result<ClaudeAgent>> WakeNow(Guid taskId, TaskSession session, string? message = null)
     {
         // Already being woken, or woken a moment ago and not listed yet: a second resume would start a copy.
         if (Waking(session.Id) || AnsweredWithinGrace(session.Id))
@@ -307,7 +337,7 @@ public sealed class ClaudeSessions : IDisposable
             {
                 // Read here, on `background`, for the reason given in Heard.
                 var cutOff = CutOff(session);
-                return (CutOff: cutOff, Result: await cli.Run(ResumeArguments(session.Id, cutOff), session.Folder, LaunchTimeout));
+                return (CutOff: cutOff, Result: await cli.Run(message is null ? ResumeArguments(session.Id, cutOff) : ["--bg", "--resume", session.Id, message], session.Folder, LaunchTimeout));
             })
             // A fault the CLI did not turn into a Result is a failure like any other (Ruling 13), not a dispatcher crash.
             .Catch((Exception e) => Observable.Return((CutOff: false, Result: Result.Failure<string>(e.Message))))

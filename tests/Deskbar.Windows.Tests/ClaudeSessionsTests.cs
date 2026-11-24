@@ -716,6 +716,58 @@ public class ClaudeSessionsTests
         Assert.Single(rig.Cli.Resumes);
     }
 
+    // A comment wakes its session (plan 2026-11-24-comment-wakes-session, Task 5): a session that does not run is resumed
+    // WITH the comment as its message, in its own folder. One the list still shows is not resumed (a copy would start):
+    // the call fails and the caller delivers to its inbox instead.
+    [Fact]
+    public async Task Resuming_with_a_comment_hands_the_session_the_comment()
+    {
+        using var rig = new Rig();
+        Assert.True(rig.Manager.SetClaudeResume(false).IsSuccess);
+        var (taskId, sessionId) = rig.Dead("Dead one");
+        rig.Begin();
+        rig.RunTo(Seconds(1));
+        var session = rig.Task(taskId).Sessions.Single();
+
+        var woken = rig.Sessions!.ResumeWith(taskId, session, "Deskbar: the user commented");
+        rig.Run(Seconds(10));
+
+        Assert.True((await woken).IsSuccess);
+        var resume = Assert.Single(rig.Cli.Resumes);
+        Assert.Equal(["--bg", "--resume", sessionId, "Deskbar: the user commented"], resume.Arguments);
+        Assert.Equal(@"E:\repos\Work", resume.Folder);
+    }
+
+    [Fact]
+    public async Task Resuming_with_a_comment_a_running_session_resumes_nothing()
+    {
+        using var rig = new Rig();
+        var (taskId, sessionId) = rig.Dead("Running one");
+        rig.Cli.Listed.Add(new Row(sessionId, @"E:\repos\Work", "Running one"));
+        rig.Begin();
+        rig.RunTo(Seconds(1));
+
+        var woken = rig.Sessions!.ResumeWith(taskId, rig.Task(taskId).Sessions.Single(), "hello");
+        rig.Run(Seconds(1));
+
+        Assert.True((await woken).IsFailure);
+        Assert.Empty(rig.Cli.Resumes);
+    }
+
+    [Fact]
+    public async Task Stopping_now_runs_claude_stop_with_the_short_id()
+    {
+        using var rig = new Rig();
+        rig.Begin();
+
+        var stopped = rig.Sessions!.StopNow("aaaaaaaa");
+        rig.Run(Seconds(1));
+
+        Assert.True(stopped.IsCompleted);
+        Assert.Equal(["stop", "aaaaaaaa"], Assert.Single(rig.Cli.Stops).Arguments);
+        await stopped;
+    }
+
     // A list that cannot be read is "cannot tell" (Global Constraints): a click resumes nothing on it. A resume that
     // fails says so in the task's thread with Claude's words, as the keeper's own failed resume does.
     [Fact]
