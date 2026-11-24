@@ -1208,8 +1208,26 @@ public partial class FloatingBar : Window
     // these two commands on its right, in one Grid so the pair can never end up in different rows.
     UIElement TakeBarCommands()
     {
+        // A Panel when it hangs where the XAML declared it; a Decorator, the pinned row's header slot, once a rebuild
+        // has placed it (SwapInRows).
         if (BarHeader.Parent is Panel parent) parent.Children.Remove(BarHeader);
+        if (BarHeader.Parent is Decorator slot) slot.Child = null;
         return BarHeader;
+    }
+
+    // The end of a rebuild (task c1640d1f): the new rows and the titled list replace the old ones, and the header moves
+    // from the old pinned row into the new one's slot, all in one step with nothing in between that could pump a
+    // message, so a frame shows either the old bar or the new one and never a bar without rows. The see-through band
+    // starts under the new pinned row from here on (FloatingBar.Surface.cs); until here it kept to the old one, which
+    // was still on show.
+    void SwapInRows(IReadOnlyList<UIElement> rows, IReadOnlyList<UIElement> list, Border headerSlot)
+    {
+        Rows.Children.Clear();
+        CurrentList.Children.Clear();
+        headerSlot.Child = TakeBarCommands();
+        rows.ToList().ForEach(row => Rows.Children.Add(row));
+        list.ToList().ForEach(item => CurrentList.Children.Add(item));
+        pinnedRowBox = builtPinnedRowBox;
     }
 
     // Starting up into the minimized state, which is NOT MinimizeToTaskbar with the hiding left out.
@@ -2208,6 +2226,11 @@ public partial class FloatingBar : Window
     bool rebuilding;
     bool rebuildRequested;
 
+    // A seam for the tests and nothing else (task c1640d1f): run inside RebuildCore at the last point before the new
+    // rows replace the old ones, where a message pumped by a COM call could last have let WPF draw a frame. A test
+    // looks at the bar from here to see what such a frame would have shown (FloatingBarRebuildTests).
+    internal Action? WhileRebuilding { get; set; }
+
     void Rebuild()
     {
         // A pulse that arrives mid-rebuild is remembered, not executed: letting it run now
@@ -2482,8 +2505,17 @@ public partial class FloatingBar : Window
         // takes one: a skipped rebuild moves nothing, so there is nothing to glide.
         var before = TakeLayoutSnapshot();
         Dispatcher.BeginInvoke(System.Windows.Threading.DispatcherPriority.Loaded, () => GlideIfExpansionChanged(before));
-        Rows.Children.Clear();
-        CurrentList.Children.Clear(); // the titled list below the rows, rebuilt with them
+        // THE OLD ROWS STAY ON SHOW UNTIL THE NEW ONES ARE BUILT (task c1640d1f, Petre: "selecting a window flashes the
+        // entire bar so that everything blinks"). Rows and CurrentList used to be cleared right here, and the build
+        // below reaches other processes before it adds anything back: the focus rings (a ring's frame is a window,
+        // pinned to every desktop through the virtual-desktop COM API), the sound and tab activity, the taskbar pins,
+        // the strips. A COM call on this STA thread pumps messages, and one of them can be WPF's own render, which then
+        // drew the bar with no rows, no header and no pinned apps. Measured with a screen probe on his docked bar: about
+        // 140 ms of bare frost on a switch to another window, then the rows again. So the panels are swapped in one
+        // step at the end (see SwapInRows), and the header with them (see headerSlot).
+        //
+        // The bookkeeping below is still forgotten here, at the top: it only paints the rows, and the rows it points at
+        // are the ones being replaced. A frame drawn mid-build shows the old rows with their paint as it stands.
         headerDropTargets.Clear();    // re-registered by every row as it is built (see GroupRow)
         ForgetArrangeTargets();       // ...and so are the rows an arrange drag picks up and aims at (FloatingBar.ArrangeDrag.cs)
         ForgetAgingIcons();           // the aging overlays belong to the rows about to be replaced
@@ -2625,6 +2657,9 @@ public partial class FloatingBar : Window
             Brush? currentTint = null;
             Brush? currentAccent = null;
 
+            // Where the header goes in the new pinned row, filled at the swap (see SwapInRows).
+            var headerSlot = new Border();
+
             groupRows.Add(GroupRow(visualLabel: "", groupLabel: "Pinned", isCurrent: false, switchTo: null,
                     groupKey: DraggedWindow.PinnedGroupKey,
                     // The screen is honoured here now, and it has to be: with #108 the pinned row draws
@@ -2638,8 +2673,10 @@ public partial class FloatingBar : Window
                     // #109: shorter than a workspace row, since it holds a window or two.
                     pinned: true,
                     // The bar's own two buttons, which is what this cell holds instead of the pin
-                    // glyph. Taken rather than built: see TakeBarCommands.
-                    captionContent: TakeBarCommands()));
+                    // glyph. Taken rather than built: see TakeBarCommands. Not taken yet, though: the
+                    // cell gets an empty slot, and the header moves into it only at the swap, so until
+                    // then it stays in the old pinned row, on show (see SwapInRows).
+                    captionContent: headerSlot));
 
             // Fix round 6 (Petre, screenshot showing ONE "Sparrow" row: "it does follow
             // across every workspace, but not showw all workspace tabs"). The original
@@ -2906,11 +2943,7 @@ public partial class FloatingBar : Window
                             desktop.Windows,
                             titledList: true)
                         : null;
-            if (list is not null)
-            {
-                CurrentList.Children.Add(Separator());
-                CurrentList.Children.Add(list);
-            }
+            // Added at the swap below, with the rows, not here: FillStrips and FillTaskbarJumps still come first.
 
             // Every screen's strip gets that screen's tabs, when the list is on the screens; nothing otherwise
             // (FloatingBar.Strips.cs). Here, inside this rebuild's guard, never in a rebuild of its own.
@@ -2927,10 +2960,13 @@ public partial class FloatingBar : Window
             // the strips are: a relayout changes nothing they show.
             if (fresh) FillTaskbarJumps(overview, jumpsNow.Value.Jumps);
 
-            groupRows
-                .SelectMany((row, i) => i == 0 ? new[] { row } : new[] { Separator(), row })
-                .ToList()
-                .ForEach(el => Rows.Children.Add(el));
+            WhileRebuilding?.Invoke();
+
+            // THE SWAP: nothing from here to its end reaches another process, so no frame can be drawn half way.
+            SwapInRows(
+                groupRows.SelectMany((row, i) => i == 0 ? new[] { row } : new[] { Separator(), row }).ToList(),
+                list is null ? [] : [Separator(), list],
+                headerSlot);
 
             // Re-assert the switch candidate onto the rows that have just been built. Without
             // this, any window event arriving while the chord is held would rebuild the bar and
@@ -4993,7 +5029,8 @@ public partial class FloatingBar : Window
         if (rowKey is { } key) rowRings[key] = ring;
 
         // The pinned row's box is where the see-through band starts (FloatingBar.Surface.cs).
-        if (pinned) pinnedRowBox = box;
+        // Kept aside until the new rows are swapped in (SwapInRows): the old pinned row is the one on show until then.
+        if (pinned) builtPinnedRowBox = box;
         return box;
     }
 

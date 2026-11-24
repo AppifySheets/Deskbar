@@ -27,6 +27,29 @@ public partial class FloatingBar
         phases.Clear();
         costs.Clear();
         phaseClock = ClickTrace.On ? System.Diagnostics.Stopwatch.StartNew() : null;
+        framesMidRebuild = 0;
+        if (phaseClock is not null) System.Windows.Media.CompositionTarget.Rendering += NoteFrameMidRebuild;
+    }
+
+    // A FRAME DRAWN WHILE A REBUILD IS STILL RUNNING (task c1640d1f). Petre: "selecting a window flashes the entire bar
+    // so that everything blinks". A screen probe caught the bar with no rows for about 140 ms on a window switch, and
+    // the reasoning was that a COM call inside the rebuild pumps messages, WPF's render among them, so a frame is drawn
+    // half way. This is the measurement for that: WPF raises Rendering on this thread just before it draws, so a
+    // Rendering inside a rebuild IS such a frame, and the line names the phase it fell in (the one after the last
+    // phase closed). Since the fix the old rows are still on show at that moment (SwapInRows), so a line here is now
+    // harmless; it stays so the next blink that looks like this one can be told apart from it in one line.
+    // Written once per rebuild with the count, and only with tracing on, like the phases. One caveat when reading it:
+    // a Rendering handler asks WPF for a frame on every tick while it is attached, so with tracing on a pump inside
+    // the rebuild always has a frame to draw. The line therefore says "this rebuild pumped WPF's queue at this
+    // phase", which is the fact in question; it does not prove the frame would have been drawn with tracing off.
+    int framesMidRebuild;
+
+    void NoteFrameMidRebuild(object? sender, EventArgs e)
+    {
+        if (phaseClock is null) return;
+        framesMidRebuild++;
+        if (framesMidRebuild == 1)
+            ClickTrace.Write($"rebuild: a frame was drawn mid-rebuild, after phase {(phases.Count == 0 ? "(none)" : phases[^1].Name)}");
     }
 
     // Runs `make` and adds what it took to the named cost, summed over the rebuild. Only while a rebuild is being
@@ -42,7 +65,15 @@ public partial class FloatingBar
 
     void Cost(string name, Action run) => Cost(name, () => { run(); return 0; });
 
-    void StopPhases() => phaseClock = null;
+    void StopPhases()
+    {
+        if (phaseClock is not null)
+        {
+            System.Windows.Media.CompositionTarget.Rendering -= NoteFrameMidRebuild;
+            if (framesMidRebuild > 1) ClickTrace.Write($"rebuild: {framesMidRebuild} frames were drawn mid-rebuild in all");
+        }
+        phaseClock = null;
+    }
 
     // Closes the phase that has been running since the last mark, under this name.
     void Phase(string name)
