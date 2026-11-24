@@ -36,14 +36,22 @@
                 </Trigger>
             </ControlTemplate.Triggers>
         </ControlTemplate>
-        <!-- A line: the mockup's hover, with the content stretched across so the title has the width to trim against. -->
+        <!-- A line, drawn as a tile (Petre's pick, option E of the task-separation mockup, 2026-11-25: "better task
+             separation with lines or something"). The Button's Background is the tile's own fill, set per line in
+             TasksWindow.Line (TileFill, or AskTint while the task waits on him), and the corners are rounded. The hover
+             is a faint white wash laid UNDER the content rather than a fill swapped in, so it lightens whichever fill
+             the tile has (plain or waiting) and the selection's translucent fill on top still reads through. The content
+             is stretched across so the title has the width to trim against. -->
         <ControlTemplate x:Key="LineButton" TargetType="Button">
-            <Border x:Name="Chrome" Background="{TemplateBinding Background}">
-                <ContentPresenter HorizontalAlignment="Stretch" VerticalAlignment="Center"/>
+            <Border x:Name="Chrome" Background="{TemplateBinding Background}" CornerRadius="4">
+                <Grid>
+                    <Border x:Name="Hover" Background="#14FFFFFF" CornerRadius="4" Visibility="Hidden" IsHitTestVisible="False"/>
+                    <ContentPresenter HorizontalAlignment="Stretch" VerticalAlignment="Center"/>
+                </Grid>
             </Border>
             <ControlTemplate.Triggers>
                 <Trigger Property="IsMouseOver" Value="True">
-                    <Setter TargetName="Chrome" Property="Background" Value="#FF25272E"/>
+                    <Setter TargetName="Hover" Property="Visibility" Value="Visible"/>
                 </Trigger>
             </ControlTemplate.Triggers>
         </ControlTemplate>
