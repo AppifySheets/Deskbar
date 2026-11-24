@@ -91,7 +91,10 @@ already in the description show there too (parsed from its markdown), with the x
 itself shows the text without the image lines, so Petre never edits a path by hand. Enter saves the text plus the
 image lines.
 
-**Rendering.** `MarkdownBlocks` learns one more construct: a line that is only `![alt](task-images/...)`, which
+**Rendering.** (As built: the pictures are a row of thumbnails of their own, `TaskImageRow`, after a comment's text and
+its "Show more", and `MarkdownBlocks` renders the text alone. A comment folds to three lines by clipping its text box,
+and a picture inside that box would be cut in half. The rules below for what counts and how a thumbnail looks still
+hold.) The original plan: `MarkdownBlocks` learns one more construct: a line that is only `![alt](task-images/...)`, which
 resolves to a file inside `<app data>\task-images\` with a picture extension (`..` segments refused). It becomes a thumbnail, at most
 the column's width and 160 DIP high, aspect kept, with a thin border; a click opens the file with the default image
 viewer (shell open). The image is decoded off the UI thread at thumbnail size (`DecodePixelWidth`) and cached by path;
