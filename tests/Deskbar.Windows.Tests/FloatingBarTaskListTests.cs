@@ -2985,7 +2985,49 @@ public class FloatingBarTaskListTests
 
         var line = t.Lines.Single(l => ((TaskLine)l.Tag).Id == parent.Id);
 
-        Assert.Equal("Ship the release · 1 subtask", TextOf(line));
+        Assert.Equal("Ship the release ·\u00A01\u00A0subtask", TextOf(line));
+    });
+
+    // Follow-up (Petre's screenshot of "↳ test1" four lines above its parent): a subtask is drawn right under its parent,
+    // in the parent's group, whatever its own flags; and a change only the parent's line shows (its count, its title in
+    // a subtask's tooltip) repaints the bar.
+    static int IndexOf(ListBar t, Guid id) => t.Lines.Select((l, i) => (((TaskLine)l.Tag).Id, i)).First(x => x.Id == id).i;
+
+    [Fact]
+    public void A_subtask_is_drawn_right_under_its_parent() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        var parent = t.Tasks.AddNote("Ship the release", t.Gepha).Value;
+        t.Tasks.AddNote("Unrelated", t.Gepha);
+        var child = t.Tasks.AddNote("Write the notes", t.Gepha, parent: parent.Id).Value;
+        t.Bar.UpdateLayout();
+
+        Assert.Equal(IndexOf(t, parent.Id) + 1, IndexOf(t, child.Id));
+    });
+
+    [Fact]
+    public void An_important_subtask_stays_under_a_plain_parent_with_no_group_break() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        var parent = t.Tasks.AddNote("Ship the release", t.Gepha).Value;
+        var child = t.Tasks.AddNote("Write the notes", t.Gepha, Quadrant.II, parent.Id).Value;
+        t.Bar.UpdateLayout();
+
+        Assert.Equal(IndexOf(t, parent.Id) + 1, IndexOf(t, child.Id));
+        Assert.False(((TaskLine)t.Lines[IndexOf(t, child.Id)].Tag).StartsGroup);
+    });
+
+    [Fact]
+    public void A_parents_count_repaints_when_a_subtask_off_the_bar_is_added() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        var parent = t.Tasks.AddNote("Ship the release", t.Gepha).Value;
+        t.Bar.UpdateLayout();
+        var child = t.Tasks.AddNote("Claude's piece", t.Gepha, parent: parent.Id).Value;
+        t.Tasks.Assign(child.Id, Assignee.Claude);
+        t.Bar.UpdateLayout();
+
+        Assert.Equal("Ship the release ·\u00A01\u00A0subtask", TextOf(t.Lines.Single(l => ((TaskLine)l.Tag).Id == parent.Id)));
     });
 
     [Fact]

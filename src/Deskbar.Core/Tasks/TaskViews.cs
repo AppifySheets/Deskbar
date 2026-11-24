@@ -231,10 +231,10 @@ public static class TaskViews
     // A no-break space between the number and the word (follow-up: Petre's screenshot had "· 2" end one line and
     // "subtasks" start the next), so the count never splits.
     public static string SubtaskCountText(int count) =>
-        count switch { 0 => "", 1 => "1 subtask", _ => $"{count} subtasks" };
+        count switch { 0 => "", 1 => "1\u00A0subtask", _ => $"{count}\u00A0subtasks" };
 
     /// <summary>What goes between a title and its subtask count: " ·" and a no-break space, so the dot stays with the count.</summary>
-    public const string SubtaskCountSeparator = " · ";
+    public const string SubtaskCountSeparator = " ·\u00A0";
 
     /// <summary>The words of each status, as the spec spells them.</summary>
     public static string StatusName(TaskStatus status) => status switch

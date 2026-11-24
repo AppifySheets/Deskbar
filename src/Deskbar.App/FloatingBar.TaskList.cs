@@ -570,8 +570,24 @@ public partial class FloatingBar
             GoalTitle = (goalTitle?.Invoke(t) ?? Maybe<string>.None).Match(title => (string?)title, () => null),
             // Subtasks (Petre's pick A): the parent's title for the arrow's tooltip, and a parent's open subtasks' count.
             ParentTitle = board.ParentOf(t).Map(p => (string?)FirstLine(p.Title)).GetValueOrDefault(),
+            ParentId = board.ParentOf(t).Map(p => (Guid?)p.Id).GetValueOrDefault(),
             SubtaskCount = board.OpenSubtaskCount(t.Id),
         }).ToArray();
+
+    // SUBTASKS UNDER THEIR PARENT (follow-up to the subtasks spec; Petre's screenshot of "↳ test1" four lines above its
+    // parent). After the bar's own filter, so a parent that is not on the bar (Claude's) leaves its subtasks where they
+    // were. A subtask waiting on Petre stays in the pinned block. A moved line is drawn in its parent's group (ShownIn),
+    // so an important subtask under a plain parent starts no group of its own.
+    internal static IReadOnlyList<TaskLine> UnderParents(IReadOnlyList<TaskLine> lines)
+    {
+        Maybe<Guid> ParentOf(TaskLine l) => l.ParentId is { } p ? p : Maybe<Guid>.None;
+        bool Movable(TaskLine l) => l.Status != TaskStatus.WaitingOnYou;
+        var nested = SubtaskOrder.Nested(lines, l => l.Id, ParentOf, Movable);
+        var groupOf = lines.ToDictionary(l => l.Id, l => l.GroupKey);
+        return SubtaskOrder.UnderParents(lines, l => l.Id, ParentOf, Movable)
+            .Select(l => nested.Contains(l.Id) ? l with { ShownIn = groupOf[l.ParentId!.Value] } : l)
+            .ToArray();
+    }
 
     // Marks the first line of each group after the first (TaskLine.StartsGroup), over the lines as they are drawn, the
     // closed ones in their undo window included, so the space sits where the eye sees a group begin.
@@ -900,12 +916,13 @@ public partial class FloatingBar
         if (SizeToContent == SizeToContent.Manual || taskListSlots != TaskListSlots) QueueTaskListFit();
 
         // RULING 48: the bar lists a Claude task only while it needs Petre (NeedsYou). The window shows everything.
-        var open = Lines(taskService.Board, WorkspaceName, id => workspaceAccents.GetValueOrDefault(id), SessionWindow, GoalTitle).Where(NeedsYou).ToArray();
+        var open = UnderParents(Lines(taskService.Board, WorkspaceName, id => workspaceAccents.GetValueOrDefault(id), SessionWindow, GoalTitle)
+            .Where(NeedsYou).ToArray());
         // A closed line whose task is open again (reopened from the pipe, say) is not pending any more: the task is back
         // in the pile under its own line.
         pendingCloses.Where(p => open.Any(l => l.Id == p.Line.Id)).ToList().ForEach(p => ForgetPendingClose(p, repaint: false));
         var slots = TaskSlotsNow;
-        if (open.Length <= slots) taskListExpanded = false;
+        if (open.Count <= slots) taskListExpanded = false;
         var all = WithGroupStarts(WithPendingCloses(open, pendingCloses));
         allTaskLines = all;
         var problem = taskService.LoadProblem;
@@ -970,7 +987,10 @@ public partial class FloatingBar
     static string ShapeOf(TaskLine line) =>
         $"{line.Id}|{line.Status}|{line.Title}|{line.Detail}|{line.Claudes}|{line.WorkspaceName}|" +
         $"{(line.Colour as SolidColorBrush)?.Color}|{line.Window.Match(w => w.ToString(), () => "")}|{line.Closing}|" +
-        $"{line.Important}|{line.Urgent}|{line.StartsGroup}|{line.GoalTitle}|{line.Assignee.Id}";
+        $"{line.Important}|{line.Urgent}|{line.StartsGroup}|{line.GoalTitle}|{line.Assignee.Id}|" +
+        // Subtasks: the parent's title (the arrow's tooltip), the count, and where the line is drawn. A count can change
+        // with no line of the bar changing (a subtask assigned to Claude is not on the bar), so it must be in the shape.
+        $"{line.ParentTitle}|{line.SubtaskCount}|{line.ShownIn}";
 
     // "+N more" counts the open tasks out of sight; a closed line in its undo window is not an open task, so it is
     // neither counted nor allowed to hide one from the count.
@@ -1345,7 +1365,7 @@ public partial class FloatingBar
             FontStyle = line.Urgent ? FontStyles.Italic : FontStyles.Normal,
         });
         if (line.SubtaskCount > 0)
-            text.Inlines.Add(new Run(TaskDetailSeparator + TaskViews.SubtaskCountText(line.SubtaskCount)) { Foreground = TaskFaintInk });
+            text.Inlines.Add(new Run(TaskViews.SubtaskCountSeparator + TaskViews.SubtaskCountText(line.SubtaskCount)) { Foreground = TaskFaintInk });
         if (line.Detail.Length == 0) return text;
         text.Inlines.Add(new Run(TaskDetailSeparator) { Foreground = line.Claudes ? TaskTitleInk : TaskDimInk });
         text.Inlines.Add(new Run(line.Detail) { Foreground = detailInk });
@@ -1990,7 +2010,16 @@ internal sealed record TaskLine(Guid Id, string Title, string Detail, TaskStatus
     /// Which group the line is in: the pinned Waiting on you block, or its quadrant. Lines of one group sit together
     /// (TaskBoard.Pile), so a change of key between neighbours is where a group starts.
     /// </summary>
-    public string GroupKey => Status == TaskStatus.WaitingOnYou ? "waiting" : Quadrant.Numeral();
+    public string GroupKey => ShownIn ?? (Status == TaskStatus.WaitingOnYou ? "waiting" : Quadrant.Numeral());
+
+    /// <summary>
+    /// The group a subtask drawn under its parent belongs to (its parent's GroupKey), or null for a line in its own place
+    /// (FloatingBar.UnderParents).
+    /// </summary>
+    public string? ShownIn { get; init; }
+
+    /// <summary>The parent task's id when this is a subtask whose parent is on the board, or null.</summary>
+    public Guid? ParentId { get; init; }
 
     /// <summary>Whether this line is the first of its group, below another group (FloatingBar.WithGroupStarts).</summary>
     public bool StartsGroup { get; init; }

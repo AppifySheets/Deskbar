@@ -207,8 +207,8 @@ public class TaskSubtaskTests
 
     [Theory]
     [InlineData(0, "")]
-    [InlineData(1, "1 subtask")]
-    [InlineData(3, "3 subtasks")]
+    [InlineData(1, "1\u00A0subtask")]
+    [InlineData(3, "3\u00A0subtasks")]
     public void The_count_reads_in_words(int count, string words) =>
         Assert.Equal(words, TaskViews.SubtaskCountText(count));
 
