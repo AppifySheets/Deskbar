@@ -142,6 +142,18 @@ public static class ControlArguments
             ? [.. args, "--from", callerFolder]
             : args;
 
+    // A THIRD, small one (a comment wakes its session; docs/superpowers/plans/2026-11-24-comment-wakes-session.md):
+    // `task comment <id> ...` run from inside a Claude Code session is marked --from-claude, so Deskbar stores it as
+    // usual but does not wake the task's session with it; only Petre's own comments wake. The client knows because Claude
+    // Code sets CLAUDECODE in its sessions' shells (`claudeCode`, read by the caller). A session's own form, with
+    // --session, already says who wrote it.
+    public const string FromClaude = "--from-claude";
+
+    public static IReadOnlyList<string> WithCaller(IReadOnlyList<string> args, string? claudeCode) =>
+        !string.IsNullOrEmpty(claudeCode) && args is ["task", "comment", _, _] && !args.Contains("--session")
+            ? [.. args, FromClaude]
+            : args;
+
     // --- stdin: the second thing the client adds ---------------------------------------------------
     //
     // Claude Code hands a hook its JSON on STDIN, and the pipe carries arguments only, so the client reads its stdin and

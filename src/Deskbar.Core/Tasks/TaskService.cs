@@ -22,6 +22,7 @@ public sealed class TaskService(ITaskStore store, Func<DateTimeOffset> now, Func
 {
     readonly Func<Guid> makeId = newId ?? Guid.NewGuid;
     readonly Subject<Unit> changed = new();
+    readonly Subject<(Guid TaskId, TaskComment Comment)> commented = new();
 
     public TaskBoard Board { get; private set; } = TaskBoard.Empty;
 
@@ -150,8 +151,24 @@ public sealed class TaskService(ITaskStore store, Func<DateTimeOffset> now, Func
     /// <summary>A line Deskbar itself writes into the thread (a resume, a stop, a failure), shown as "Deskbar".</summary>
     public Result Note(Guid id, string markdown) => Comment(id, TaskComment.DeskbarAuthor, markdown);
 
-    public Result Comment(Guid id, Maybe<string> sessionId, string markdown) =>
-        Apply(Board.Comment(id, sessionId, markdown, now(), makeId()));
+    // A COMMENT WAKES ITS SESSION (docs/superpowers/plans/2026-11-24-comment-wakes-session.md): Petre's own new comment
+    // (no session) is announced on Commented once it is saved, and the app's CommentWaker hands it to the task's Claude
+    // session. `wakes` false is his form of the command run from inside a Claude session (`task comment <id>` there carries
+    // --from-claude): stored as his, announced to no one, so one session cannot wake another. A session's comment and
+    // Deskbar's own lines (Note) are never announced.
+    public Result Comment(Guid id, Maybe<string> sessionId, string markdown, bool wakes = true)
+    {
+        var commentId = makeId();
+        return Apply(Board.Comment(id, sessionId, markdown, now(), commentId))
+            .Tap(() =>
+            {
+                if (sessionId.HasValue || !wakes) return;
+                Board.Tasks.SelectMany(t => t.Comments).TryFirst(c => c.Id == commentId).Execute(comment => commented.OnNext((id, comment)));
+            });
+    }
+
+    /// <summary>Petre's own new comments, each with its task's id, after they are saved (see Comment).</summary>
+    public IObservable<(Guid TaskId, TaskComment Comment)> Commented => commented;
 
     /// <summary>
     /// Petre sent a session a message. These two run on every prompt and every session end, nearly always with

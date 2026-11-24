@@ -230,6 +230,34 @@ public class RemoteControlTaskTests
         Assert.Equal("you", entry.GetProperty("by").GetString());
     }
 
+    // A comment wakes its session (docs/superpowers/plans/2026-11-24-comment-wakes-session.md, Task 2): Petre's own
+    // `task comment <id>` is announced for waking; the same command run inside a Claude session (the client sees CLAUDECODE
+    // and adds --from-claude) is stored the same but announced to no one, so one session cannot wake another.
+    [Fact]
+    public void His_task_comment_is_announced_and_a_sessions_by_id_is_not()
+    {
+        var manager = Started();
+        var id = Prefix(Added(manager));
+        var heard = new List<string>();
+        using var _ = tasks.Commented.Subscribe(c => heard.Add(c.Comment.Markdown));
+
+        Assert.Equal(ControlReply.Ok, Run(manager, "task", "comment", id, "from Petre").ExitCode);
+        Assert.Equal(ControlReply.Ok, Run(manager, "task", "comment", id, "from a session", "--from-claude").ExitCode);
+
+        Assert.Equal(["from Petre"], heard);
+        Assert.Equal(["from Petre", "from a session"], Only.Comments.Select(c => c.Markdown));
+    }
+
+    [Fact]
+    public void WithCaller_marks_a_comment_run_inside_a_claude_session()
+    {
+        Assert.Equal(["task", "comment", "3f2a", "-", "--from-claude"], ControlArguments.WithCaller(["task", "comment", "3f2a", "-"], "1"));
+        Assert.Equal(["task", "comment", "3f2a", "-"], ControlArguments.WithCaller(["task", "comment", "3f2a", "-"], null));
+        Assert.Equal(["task", "rename", "3f2a", "x"], ControlArguments.WithCaller(["task", "rename", "3f2a", "x"], "1"));
+        // A session's own form says who it is already.
+        Assert.Equal(["task", "comment", "-", "--session", "s1"], ControlArguments.WithCaller(["task", "comment", "-", "--session", "s1"], "1"));
+    }
+
     [Fact]
     public void Comment_edit_changes_his_comment_and_refuses_claudes()
     {

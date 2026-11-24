@@ -35,7 +35,7 @@ public static class ControlConsole
         TextReader? stdin = null)
     {
         var forwarded = ControlArguments.WithInput(
-            ControlArguments.WithCallerFolder(args, callerFolder ?? Environment.CurrentDirectory),
+            ControlArguments.WithCallerFolder(ControlArguments.WithCaller(args, Environment.GetEnvironmentVariable("CLAUDECODE")), callerFolder ?? Environment.CurrentDirectory),
             () => stdin?.ReadToEnd() ?? ReadStandardInput());
         // Waited for synchronously on a pool thread: a console Main has no sync context to deadlock,
         // but the Task.Run keeps that true if a caller ever has one.
