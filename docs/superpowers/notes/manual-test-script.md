@@ -909,6 +909,8 @@ AT1. Click the first task's terminal: its line is highlighted on the bar and in 
 AT2. Alt+Tab to the second task's terminal: the highlight moves to the second task's line.
 AT3. Switch to a browser or VS Code: the highlight stays on the second task.
 AT4. Click a different task's line on the bar, then the first terminal again: the highlight follows the terminal.
+AT5. With the tasks panel open and scrolled to the top, bring forward the terminal of a task further down: the
+     panel scrolls just far enough to show its line. Bring the same terminal forward again: nothing moves.
 
 ## A new task is highlighted
 

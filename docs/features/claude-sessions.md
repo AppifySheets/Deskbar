@@ -54,7 +54,7 @@ Double-click a task's line, on the bar or in the tasks window, and you go to its
 
 Closing the terminal window only detaches it. The session keeps running, and the next double-click opens a new window on it.
 
-Switching to a session's terminal window works the other way round too: its task becomes the selected one, highlighted on the bar and in the tasks panel as if you had clicked it, so you can see which task the terminal in front belongs to. It stays selected when you move on to another window. A VS Code window does not select anything, since one folder can hold the sessions of many tasks.
+Switching to a session's terminal window works the other way round too: its task becomes the selected one, highlighted on the bar and in the tasks panel as if you had clicked it, so you can see which task the terminal in front belongs to. If its line is scrolled out of sight, on the bar or in the open tasks panel, the list scrolls just far enough to show it. It stays selected when you move on to another window. A VS Code window does not select anything, since one folder can hold the sessions of many tasks.
 
 The window uses a Windows Terminal profile of Deskbar's own, "Deskbar Claude": VS Code's Dark Modern colours, JetBrains Mono (Cascadia Mono where that is not installed), Claude's orange bar cursor and no scrollbar. Deskbar installs it while **Claude Code sessions keep their tasks in the task list** is ticked and removes it when you untick that box or **Teach Claude Code about Deskbar** above it.
 

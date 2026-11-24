@@ -1336,6 +1336,37 @@ public class TasksBoardTests
         Assert.True(t.Window.IsSelected(oldest));
     });
 
+    // Task 4846fde1: a selection made while the panel is open (a Claude task's terminal brought to the front) scrolls its
+    // line into view through Reveal; selecting alone does not, and a line already in view stays put. Closed, Reveal
+    // neither opens the panel nor fails.
+    [Fact]
+    public void Revealing_the_selected_task_scrolls_the_open_panel_to_it() => StaThread.Run(() =>
+    {
+        var selection = new TaskSelection();
+        using var t = Build(selection: selection);
+        var oldest = t.Tasks.AddNote("the oldest", t.Gepha).Value.Id;
+        Enumerable.Range(1, 40).ToList().ForEach(i => t.Tasks.AddNote($"note {i}", t.Gepha));
+
+        t.Controller.Reveal();
+        Assert.False(t.Controller.IsOpen);
+
+        t.Controller.Show();
+        Assert.Equal(0, t.Window.ScrollOffset, 1);
+
+        selection.Select(oldest);
+        t.Window.UpdateLayout();
+        Assert.Equal(0, t.Window.ScrollOffset, 1);
+
+        t.Controller.Reveal();
+        t.Window.UpdateLayout();
+        Assert.True(t.Window.ScrollOffset > 0, $"offset {t.Window.ScrollOffset}");
+
+        var offset = t.Window.ScrollOffset;
+        t.Controller.Reveal();
+        t.Window.UpdateLayout();
+        Assert.Equal(offset, t.Window.ScrollOffset, 1);
+    });
+
     // Review I-3: at the narrowest width the full line is drawn at (TasksPanelLayout.SlimBelow, 710 DIP, the floating
     // window's old minimum; narrower, Task 8 draws the slim line), with enough lines for the scroll bar, every column
     // stays inside the list's viewport and the title keeps a usable width.
