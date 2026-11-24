@@ -1803,6 +1803,10 @@ public partial class TasksWindow : Window
             // has closed: it may ask a question or open a pick list of folders at the pointer.
             if (Actions?.StartClaude is { } start)
                 menu.Items.Add(Item(StartClaudeText, () => Dispatcher.BeginInvoke(() => start(id), System.Windows.Threading.DispatcherPriority.Input)));
+            // Subtasks (Petre's pick A): the add box with this line's task as the parent (a sibling on a subtask's line),
+            // once this menu has closed so the box can take the keyboard.
+            if (Actions?.SubtaskParent is not null)
+                menu.Items.Add(Item(FloatingBar.AddSubtaskText, () => Dispatcher.BeginInvoke(() => BeginSubtaskAdd(id), System.Windows.Threading.DispatcherPriority.Input)));
             menu.Items.Add(new Separator());
         }
 
@@ -1990,8 +1994,42 @@ public partial class TasksWindow : Window
     {
         AddBox.Text = "";
         addChosen = null;
+        addParent = null;
         ResetAddFlags();
         AddRow.Visibility = Visibility.Collapsed;
+    }
+
+    // --- adding a subtask (docs/superpowers/specs/2026-11-24-subtasks-design.md, "Making subtasks", Petre's pick A) ---
+    //
+    // "Add subtask…" opens the add box with the parent as a chip ("↳ <parent title> ×") before the workspace chip, and the
+    // workspace chip set to the parent's workspace (still changeable), so the subtask lands with its parent. Enter adds it
+    // under the parent; Esc or the chip's press drops the parent and leaves the text as a plain note.
+
+    const string NotePlaceholder = "A note: Enter adds it, Esc closes the box";
+
+    // The parent the box adds under, or null for a plain note.
+    SubtaskParentView? addParent;
+
+    internal string AddPlaceholderText => AddPlaceholder.Text;
+
+    /// <summary>"Add subtask…" on the line <paramref name="lineId"/>. Internal for the tests.</summary>
+    internal void BeginSubtaskAdd(Guid lineId)
+    {
+        if (Actions?.SubtaskParent?.Invoke(lineId) is not { } parent) return;
+        ShowAdd();
+        addParent = parent;
+        addChosen = (latest?.Places ?? []).Where(p => !p.IsGroup && p.Workspace.Equals(parent.Workspace))
+            .Select(p => new TaskPlaceChoice(p.Workspace, p.Name, p.Colour))
+            .FirstOrDefault();
+        PaintAddPlace();
+        AddBox.Focus();
+    }
+
+    void DropAddParent()
+    {
+        addParent = null;
+        PaintAddPlace();
+        AddBox.Focus();
     }
 
     // The chip saying where the note goes: the one picked from its menu, else the view's (the filtered workspace, or
@@ -1999,8 +2037,18 @@ public partial class TasksWindow : Window
     void PaintAddPlace()
     {
         AddEnd.Children.Clear();
-        // The important and urgent toggles first (Ruling 37, TasksWindow.AddFlags.cs), then the workspace chip.
+        AddPlaceholder.Text = addParent is null ? NotePlaceholder : FloatingBar.SubtaskPlaceholder;
+        // The important and urgent toggles first (Ruling 37, TasksWindow.AddFlags.cs), then the parent chip when adding a
+        // subtask, then the workspace chip.
         AddFlagToggles().ToList().ForEach(toggle => AddEnd.Children.Add(toggle));
+        if (addParent is { } parent)
+        {
+            var label = new TextBlock { Text = $"↳ {FloatingBar.FirstLine(parent.Title)} ×", Foreground = ClaudeInk, FontSize = 11, MaxWidth = 220, TextTrimming = TextTrimming.CharacterEllipsis };
+            var parentChip = Flat(label, "Subtask of", DropAddParent, new Thickness(8, 2, 8, 2));
+            parentChip.ToolTip = "A subtask of this task; press to add a plain note instead";
+            parentChip.Margin = new Thickness(8, 0, 0, 0);
+            AddEnd.Children.Add(parentChip);
+        }
         var target = addChosen ?? latest?.AddTarget;
         if (target is null) return;
         // DROPDOWN THAT DID NOT OPEN (2026-11-23, Petre: "dropdown doesn't work"). The menu used to open from a second
@@ -2029,7 +2077,10 @@ public partial class TasksWindow : Window
     {
         if (key is not (Key.Enter or Key.Return)) return KeyOutcome.Ignored;
         var target = addChosen ?? latest?.AddTarget;
-        if (Actions is null || target is null || !Actions.AddNote(AddBox.Text, target.Workspace, AddQuadrant)) return KeyOutcome.NewLine;
+        var added = addParent is { } parent
+            ? Actions?.AddSubtask is { } addSubtask && target is not null && addSubtask(AddBox.Text, target.Workspace, AddQuadrant, parent.Id)
+            : Actions is not null && target is not null && Actions.AddNote(AddBox.Text, target.Workspace, AddQuadrant);
+        if (!added) return KeyOutcome.NewLine;
         HideAdd();
         return KeyOutcome.Posted;
     }
@@ -2070,6 +2121,8 @@ public partial class TasksWindow : Window
         if (SearchBox.IsKeyboardFocusWithin) EndSearch();
         else if (renaming is not null) EndRename();
         else if (editingComment is not null) EndCommentEdit();
+        // Subtasks: in a subtask box the first Esc drops the parent (the placeholder says so); the next closes the box.
+        else if (AddBoxShown && addParent is not null) DropAddParent();
         else if (AddBoxShown) HideAdd();
         // RULING 63: Esc folds the selected line's open thread, the last thing it undoes.
         // Not while a comment box has the keyboard: there Esc belongs to the box (review, M5).
