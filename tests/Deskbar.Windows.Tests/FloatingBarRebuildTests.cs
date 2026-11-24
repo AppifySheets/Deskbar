@@ -139,6 +139,46 @@ public class FloatingBarRebuildTests
         Assert.NotNull(header.Parent);
     });
 
+    // Task c1640d1f, Petre: "selecting a window flashes the entire bar so that everything blinks". Measured with a
+    // screen probe on his docked bar: on a switch to another window, every row, the header and the pinned apps went
+    // missing for about 140 ms (three captured frames), the task list and the footer stayed, then the rows came back.
+    //
+    // The cause is the gap inside a rebuild. It used to clear the old rows at its top and add the new ones at its
+    // end, and in between it reaches other processes: the focus rings (a ring's frame is a window pinned to every
+    // desktop through the virtual-desktop COM API), the sound and tab activity, the taskbar pins, the strips. A COM
+    // call on this STA thread pumps messages, and a pumped message can be WPF's own render, which then draws the bar
+    // with no rows in it. Now nothing on show is taken down until the new rows are built: the swap is one step at the
+    // end, the header included.
+    //
+    // WhileRebuilding stands in for that pump: it runs at the last point before the swap, where a real pump could
+    // last have drawn a frame, and looks at what the bar would have shown.
+    [Fact]
+    public void A_frame_drawn_during_a_rebuild_still_shows_the_old_rows_and_the_header() => StaThread.Run(() =>
+    {
+        var harness = Harness.Build();
+        using var bar = harness.ShowBar();
+        var header = (Grid)bar.Bar.FindName("BarHeader")!;
+        var before = bar.Rows.Children.Cast<UIElement>().ToList();
+        Assert.NotEmpty(before);
+        Assert.True(header.IsDescendantOf(bar.Bar)); // precondition: the header is on show, in the pinned row
+
+        List<UIElement>? seen = null;
+        var headerOnShow = false;
+        bar.Bar.WhileRebuilding = () =>
+        {
+            seen = bar.Rows.Children.Cast<UIElement>().ToList();
+            headerOnShow = header.IsDescendantOf(bar.Bar);
+        };
+        harness.Monitor.Pump.OnNext(new WindowEvent(WindowEventKind.Activated, harness.Second));
+
+        // The rebuild reached the point, and a frame drawn there would have shown the old rows and the header.
+        Assert.Equal(before, seen);
+        Assert.True(headerOnShow);
+        // ...and the rebuild then really swapped them for new ones, header included.
+        Assert.NotEqual(before, bar.Rows.Children.Cast<UIElement>().ToList());
+        Assert.True(header.IsDescendantOf(bar.Bar));
+    });
+
     [Fact]
     public void The_next_rebuild_that_works_redraws_after_a_failed_one() => StaThread.Run(() =>
     {

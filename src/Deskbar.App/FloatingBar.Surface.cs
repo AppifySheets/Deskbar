@@ -34,8 +34,11 @@ namespace Deskbar.App;
 // The setting (AppState.SeeThrough, on by default): off, the rows band is as flat as the rest, frost or not.
 public partial class FloatingBar
 {
-    // The pinned row's box, set by GroupRow each rebuild: the see-through band starts under it.
+    // The pinned row's box on show: the see-through band starts under it. GroupRow puts each rebuild's new one in
+    // builtPinnedRowBox, and SwapInRows makes it this one when the new rows replace the old (task c1640d1f), so a frame
+    // drawn while a rebuild is under way still lays the band under the row that is actually drawn.
     FrameworkElement? pinnedRowBox;
+    FrameworkElement? builtPinnedRowBox;
 
     // How far the layers bleed past the content, the Root's own Padding.
     const double SurfaceBleed = 4;
