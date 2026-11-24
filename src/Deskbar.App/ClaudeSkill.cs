@@ -295,7 +295,8 @@ static class ClaudeSkill
     // the SessionStart briefing names (SessionBriefing). Only while sessions keep tasks AND the hooks are installed: the
     // hooks are what hand a session its id (`--session`), and without them it could not run one of these commands.
     // A pull request ready to merge is a `task ask`, not a comment and done (task 06c2538b; the reasoning is above
-    // SessionBriefing.Commands, which says the same in fewer words).
+    // SessionBriefing.Commands, which says the same in fewer words). Once it is merged the task is done, with what to try
+    // in its status line, never a second ask to test it (task b326761d; reasoning in SessionBriefing.Commands too).
     const string YourTask = """
         ## Your task
 
@@ -323,8 +324,8 @@ static class ClaudeSkill
           you do not need to join it again.
         - Keep the status line current: `deskbar.cmd task status-line - --session <id>`, one short line on stdin
           ("waiting for CI on #398"), changed when what you are doing changes.
-        - Ask through the task. When the next move is the user's (a pull request to merge, something to try live, a
-          decision), run `deskbar.cmd task ask - --session <id>` with what they must do in the first words on stdin
+        - Ask through the task. When the next move is the user's (a pull request to merge, something to try live
+          before it merges, a decision), run `deskbar.cmd task ask - --session <id>` with what they must do in the first words on stdin
           ("Merge PR 512: CI is green"): the task waits on the user, moves to the top of their list, and your workspace
           blinks. A pull request ready to merge is an ask, never a comment and `task done`: done sits below the waiting
           tasks, so the merge would wait where the user does not look. A reply finishing is not an ask; do not ask for
@@ -342,8 +343,10 @@ static class ClaudeSkill
           the first words, through `task ask`, never a comment: a comment does not move the task to the top.
         - Mark it done with `deskbar.cmd task done --session <id>` when the work is finished and nothing waits on the
           user: not while a pull request of yours waits to be merged. Once the user has merged it, run
-          `deskbar.cmd task answered --session <id>`, then `task done`. Never close or delete a task: only
-          the user closes one. A message from the user leaves a done task done; when it gives you more work on it,
+          `deskbar.cmd task answered --session <id>`, then `task done`. A merged pull request means the task is done:
+          do not ask the user to test it. Put what to try in the status line ("merged; try dragging a row onto a
+          group") and mark it done; the user closes the task once they have tried it and it works. Never close or
+          delete a task: only the user closes one. A message from the user leaves a done task done; when it gives you more work on it,
           run `deskbar.cmd task join <task id> --session <id>` to put it back in progress. A follow-up for later is
           `deskbar.cmd task later - --session <id>`, its title on stdin, a note on your workspace.
         - Subtasks. A task can have subtasks, one level deep. When you join one, the join reply's `family` names the

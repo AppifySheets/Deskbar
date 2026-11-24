@@ -41,9 +41,12 @@ public static class SessionBriefing
     /// often stop with a status line like "ready to merge" and never ask, so the task stays off the bar. This asks once
     /// per turn and leaves an out, so a turn that really is not waiting on the user ends with nothing more said.
     /// </summary>
+    // Task b326761d: a turn that ends In progress after the user merged the pull request is finished work, not a hand-off,
+    // so the nudge names `task done` for that case instead of letting "something to try" read as an ask to test it.
     public const string ParkedNudge =
-        $"If the next move is the user's (a pull request to merge, something to try, a decision), run {Shim} task ask with " +
-        "what they must do, the text on stdin. If it is not, stop without saying anything.";
+        $"If the next move is the user's (a pull request to merge, something to try before it merges, a decision), run {Shim} task ask with " +
+        $"what they must do, the text on stdin. If your pull request is merged, the task is done: run {Shim} task done with what to try in the status line. " +
+        "Otherwise stop without saying anything.";
 
     /// <summary>
     /// What a session reads when Petre's comment wakes it (CommentWake; its waiting Stop hook or a resume hands it this).
@@ -232,7 +235,13 @@ public static class SessionBriefing
         "Never put free text with quotes or & | < > on the command line.",
         "While you work on it:",
         $"  {Shim} task status-line - --session {sessionId}   (keep it current, one short line)",
-        $"  {Shim} task ask - --session {sessionId}   (when the next move is the user's (a pull request to merge, something to try live, a decision): what they must do in the first words; the task waits on them and moves to the top. Once they have done it (the pull request is merged), run {Shim} task answered --session {sessionId}, then task done)",
+        $"  {Shim} task ask - --session {sessionId}   (when the next move is the user's (a pull request to merge, something to try live before it merges, a decision): what they must do in the first words; the task waits on them and moves to the top. Once they have done it (the pull request is merged), run {Shim} task answered --session {sessionId}, then task done)",
+        // A MERGED PULL REQUEST IS DONE (task b326761d, Petre: "when a pr is merged and a session is waiting for me to
+        // check it, it should say the task is done and i will only close it if i test it and it works"). Sessions read
+        // "something to try live" as a reason to ask again after the merge, so the task sat in Waiting on you with "Try
+        // it live" when the work was finished. Done already means "waiting for the user to close it", and closing is
+        // where Petre's own test happens, so the try-it-live step goes into the status line of a Done task, not an ask.
+        "Once your pull request is merged, the task is done: do not ask the user to test it. Mark it done and put what to try in the status line; the user closes the task once they have tried it and it works.",
         $"  {Shim} task answered --session {sessionId}   (when the user's reply settles your question, or you settle it yourself; run it straight away; it also settles, that is folds away, your comments written since you asked)",
         $"  {Shim} task comment-settle <comment-id> --session {sessionId}   (settle one of your own comments that no longer matters)",
         "A message from the user never resolves your question by itself: you do, with task answered. Never leave a question open once it is resolved.",
