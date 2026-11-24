@@ -417,7 +417,7 @@ public class TasksBoardTests
         Assert.Contains(added, t.Window.Keys);
         Assert.True(t.Window.IsSelected(added));
         Assert.False(t.Window.IsSelected(earlier));
-        Assert.Equal(SystemParameters.ClientAreaAnimation, t.Window.IsGlowing(added));
+        Assert.True(t.Window.IsGlowing(added), "the new line glows, animations on or off");
     });
 
     [Fact]

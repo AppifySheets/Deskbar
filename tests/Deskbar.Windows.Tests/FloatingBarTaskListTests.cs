@@ -465,7 +465,7 @@ public class FloatingBarTaskListTests
         Assert.True(t.Bar.Selection.IsSelected(added));
         Assert.True(t.Bar.TaskLineSelected(added));
         Assert.False(t.Bar.TaskLineSelected(earlier));
-        Assert.Equal(SystemParameters.ClientAreaAnimation, t.Bar.TaskLineGlowing(added));
+        Assert.True(t.Bar.TaskLineGlowing(added), "the new line glows, animations on or off");
 
         // Picking another line ends the glow: the selection's paint puts the plain fills back.
         t.Bar.Selection.Select(earlier);
@@ -478,6 +478,71 @@ public class FloatingBarTaskListTests
         Press(t.Bar, t.Box, Key.Enter);
         Assert.Equal(2, t.Tasks.Board.Tasks.Count);
         Assert.True(t.Bar.Selection.IsSelected(earlier));
+    });
+
+    // Live on v2.5.417 (Petre: "it kind of highlights it and then immediately loses focus"; the add's trace showed the
+    // selection back on his terminal's task 230 ms after the note was selected). After Enter the bar hands the keyboard
+    // back to the window he was typing in, and the App selects the task of a Claude terminal that comes to the front.
+    // That foreground change is the bar's doing, so KeyboardHandedBackTo excuses it: once, for that window, and only
+    // within two seconds. A window the bar did not hand the keyboard to is never excused.
+    [Fact]
+    public void The_keyboard_going_back_after_an_add_is_excused_once() => StaThread.Run(() =>
+    {
+        var now = ClickStart;
+        var handedBack = new List<nint>();
+        using var t = Build(handedBack: handedBack, clickClock: () => now);
+        const nint other = 0x6262;
+
+        ClickBox(t);
+        t.Box.Text = "Call the accountant";
+        Press(t.Bar, t.Box, Key.Enter);
+
+        Assert.Equal([Editor], handedBack);
+        Assert.False(t.Bar.KeyboardHandedBackTo(other));
+        now = now.AddMilliseconds(230);
+        Assert.True(t.Bar.KeyboardHandedBackTo(Editor));
+        // Spent: the next time the editor comes to the front, it is Petre bringing it.
+        Assert.False(t.Bar.KeyboardHandedBackTo(Editor));
+
+        // A hand-back whose foreground event never comes (the window was in front already) lapses after two seconds.
+        ClickBox(t);
+        t.Box.Text = "Pay rent";
+        Press(t.Bar, t.Box, Key.Enter);
+        now = now.AddSeconds(3);
+        Assert.False(t.Bar.KeyboardHandedBackTo(Editor));
+    });
+
+    // With Windows' animations off (Petre's machine), the glow is still there: the glow's blue held, then the selected
+    // fill in one step. Either way the brush ends at the selected colour.
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void The_glow_ends_as_the_selected_fill_with_or_without_animations(bool animate) => StaThread.Run(() =>
+    {
+        var selectedColour = Color.FromArgb(0x38, 0xFF, 0xFF, 0xFF);
+        var selected = new SolidColorBrush(selectedColour);
+        selected.Freeze();
+
+        // The brush a line gets is a glow (unfrozen, animated) whichever way it runs.
+        var glow = TaskGlow.Fading(selected, animate);
+        Assert.True(TaskGlow.IsGlow(glow));
+        Assert.True(glow.HasAnimatedProperties);
+
+        // Its colour at the start, halfway and at the end, read off the timeline as WPF would evaluate it.
+        var timeline = TaskGlow.Timeline(selectedColour, animate);
+        var clock = timeline.CreateClock();
+        Color At(TimeSpan when)
+        {
+            clock.Controller!.SeekAlignedToLastTick(when, System.Windows.Media.Animation.TimeSeekOrigin.BeginTime);
+            return (Color)timeline.GetCurrentValue(Colors.Transparent, Colors.Transparent, clock);
+        }
+
+        Assert.Equal(TaskGlow.StartColor, At(TimeSpan.Zero));
+        var halfway = At(TaskGlow.Length / 2);
+        // Faded: somewhere between the two. Off: still the glow's blue, no motion.
+        if (animate) Assert.True(halfway != TaskGlow.StartColor && halfway != selectedColour, $"halfway {halfway}");
+        else Assert.Equal(TaskGlow.StartColor, halfway);
+        Assert.Equal(selectedColour, At(TaskGlow.Length));
     });
 
     // Petre: "it shouldn't land out of sight ... it should take me to that task". A plain note lands at the top of
@@ -501,7 +566,7 @@ public class FloatingBarTaskListTests
         var added = t.Tasks.Board.Tasks.Single(x => x.Title == "Call the accountant").Id;
         Assert.Contains(t.Lines, l => ((TaskLine)l.Tag).Id == added);
         Assert.True(t.Bar.TaskLineSelected(added));
-        Assert.Equal(SystemParameters.ClientAreaAnimation, t.Bar.TaskLineGlowing(added));
+        Assert.True(t.Bar.TaskLineGlowing(added), "the new line glows, animations on or off");
     });
 
     [Fact]
@@ -1711,7 +1776,7 @@ public class FloatingBarTaskListTests
         Assert.True(t.Bar.Selection.IsSelected(added));
         Assert.True(t.Bar.TaskLineSelected(added), "the new line is drawn as selected");
         Assert.Contains(t.Lines, l => ((TaskLine)l.Tag).Id == added);
-        Assert.Equal(SystemParameters.ClientAreaAnimation, t.Bar.TaskLineGlowing(added));
+        Assert.True(t.Bar.TaskLineGlowing(added), "the new line glows, animations on or off");
     });
 
     [Fact]
