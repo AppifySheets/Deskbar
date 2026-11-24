@@ -3763,19 +3763,33 @@ public class TasksBoardTests
         Assert.Equal("↳ Write the notes", RunsOf(TitleOf(t.Window, child.Id)));
     });
 
-    // Review of #467, findings 2 and 3: in the panel too a subtask drawn under its parent arms no drag.
+    // Drag to nest in the panel's List, the bar's twin: the middle of a line makes a subtask, the edges reorder, and a
+    // nested subtask dragged out is a plain task again.
     [Fact]
-    public void A_nested_subtask_does_not_drag_in_the_panel() => StaThread.Run(() =>
+    public void In_the_panel_dropping_on_the_middle_of_a_line_makes_a_subtask() => StaThread.Run(() =>
     {
         using var t = Build();
-        var parent = t.Tasks.AddNote("Ship the release", t.Gepha).Value;
-        var child = t.Tasks.AddNote("Write the notes", t.Gepha, parent: parent.Id).Value;
+        var a = t.Tasks.AddNote("a", t.Gepha).Value.Id;
+        var b = t.Tasks.AddNote("b", t.Gepha).Value.Id;
         t.Controller.Show();
 
-        t.Window.DragPress(child.Id, new Point(5, 5));
-        t.Window.DragMove(new Point(5, 60));
+        WindowDrag(t, a, InLine(t, b, 0.5));
 
-        Assert.False(t.Window.Dragging);
+        Assert.Equal(Maybe.From(b), t.Tasks.Board.Tasks.Single(x => x.Id == a).ParentId);
+    });
+
+    [Fact]
+    public void In_the_panel_a_nested_subtask_dragged_out_is_freed() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        var other = t.Tasks.AddNote("other", t.Gepha).Value.Id;
+        var parent = t.Tasks.AddNote("parent", t.Gepha).Value.Id;
+        var child = t.Tasks.AddNote("child", t.Gepha, parent: parent).Value.Id;
+        t.Controller.Show();
+
+        WindowDrag(t, child, InLine(t, other, 0.9));
+
+        Assert.True(t.Tasks.Board.Tasks.Single(x => x.Id == child).ParentId.HasNoValue);
     });
 
     // Follow-up: the panel's menu has "Subtask of" too, the bar's twin.

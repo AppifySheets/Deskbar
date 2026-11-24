@@ -607,6 +607,11 @@ S11. Open the parent in the tasks panel: its thread lists both subtasks with the
 S12. Right-click a plain note: **Subtask of** lists the open tasks it could go under, its workspace's first; pick one
     and the note moves under it. Right-click it again: **None** is first and the parent is ticked; None frees it. On
     the parent itself **Subtask of** is greyed out and its tooltip says why. The same in the tasks panel's "..." menu.
+S13. Drag to nest. On the bar, drag a note slowly down over another note: over the line's top and bottom quarters the
+    drop line shows between lines, over its middle the line is outlined. Release over the middle: the note becomes its
+    subtask and is drawn under it. Drag a note over a subtask's line, a task waiting on you, or drag a task that has
+    subtasks: no outline, only the drop line. Drag the subtask out and drop it between two other lines: it is a plain
+    task again, where you dropped it. The same in the tasks panel's List; in the Matrix there is no outline.
 
 ## Goals
 

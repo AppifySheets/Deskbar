@@ -13,16 +13,35 @@ namespace Deskbar.App;
 // quadrant in the Matrix. It never takes the quadrant of whatever line happens to sit under the block (review of
 // 4fc4441..a1acd60, item 4: a plain task dragged to the top quietly became important and urgent). A caption of an empty place (the window's Matrix cell with no line) is given as an
 // `Empty` area: a drop inside it goes to the top of that quadrant.
+//
+// DRAG TO NEST (Petre: "can i put a task as a subtask by drag and dropping it?" ... "build it"; follow-up to
+// docs/superpowers/specs/2026-11-24-subtasks-design.md). A line that can take the dragged task as its subtask
+// (Placed.TakesChild, which the caller works out from TaskBoard.ParentCandidates) is split in three bands: over its
+// middle half the drop makes the dragged task its subtask (Drop.Into), over its top or bottom quarter the drop reorders
+// as above. The bands are the way file trees and Todoist tell "into" from "beside", and they keep a reorder a reorder
+// on every line that cannot take a child (a subtask, a task waiting on Petre, the dragged task itself, any line while a
+// task with subtasks of its own is dragged).
 internal static class TaskDropTarget
 {
     /// <summary>A line on show: its task, its quadrant, whether it waits on Petre, and its box in the drag's coordinates.</summary>
-    internal sealed record Placed(Guid Id, Quadrant Quadrant, bool Waiting, Rect Bounds);
+    internal sealed record Placed(Guid Id, Quadrant Quadrant, bool Waiting, Rect Bounds)
+    {
+        /// <summary>Whether a drop on this line's middle makes the dragged task its subtask (see the header).</summary>
+        public bool TakesChild { get; init; }
+    }
 
     /// <summary>An area that stands for a whole quadrant (an empty Matrix cell): a drop in it goes to that quadrant's top.</summary>
     internal sealed record Area(Quadrant Quadrant, Rect Bounds);
 
     /// <summary>What a release would do, and where its line is drawn (a y in the drag's coordinates).</summary>
-    internal sealed record Drop(Quadrant Quadrant, TaskPlace Place, double LineY);
+    internal sealed record Drop(Quadrant Quadrant, TaskPlace Place, double LineY)
+    {
+        /// <summary>The task the dragged one becomes a subtask of, instead of being placed; null for a reorder.</summary>
+        public Guid? Into { get; init; }
+
+        /// <summary>The box of the line <see cref="Into"/> names, outlined while the drag hovers it.</summary>
+        public Rect IntoBounds { get; init; }
+    }
 
     /// <summary>The drop for a pointer at <paramref name="at"/>, or none when no line or area can answer.</summary>
     internal static Drop? At(IReadOnlyList<Placed> lines, IReadOnlyList<Area> areas, Quadrant pinnedTo, Point at)
@@ -33,6 +52,8 @@ internal static class TaskDropTarget
 
         var nearest = lines.OrderBy(p => Distance(p.Bounds, at.Y)).First();
         if (nearest.Waiting) return new Drop(pinnedTo, TaskPlace.Top, TopOf(lines, pinnedTo));
+        if (nearest.TakesChild && InMiddle(nearest.Bounds, at.Y))
+            return new Drop(nearest.Quadrant, TaskPlace.Top, nearest.Bounds.Top) { Into = nearest.Id, IntoBounds = nearest.Bounds };
         return at.Y < nearest.Bounds.Top + nearest.Bounds.Height / 2
             ? new Drop(nearest.Quadrant, TaskPlace.Before(nearest.Id), nearest.Bounds.Top)
             : new Drop(nearest.Quadrant, TaskPlace.After(nearest.Id), nearest.Bounds.Bottom);
@@ -48,6 +69,10 @@ internal static class TaskDropTarget
             : open.Count > 0 ? open[^1].Bounds.Bottom
             : lines.Max(p => p.Bounds.Bottom);
     }
+
+    // The middle half of a line: below its top quarter and above its bottom quarter.
+    static bool InMiddle(Rect bounds, double y) =>
+        y >= bounds.Top + bounds.Height / 4 && y <= bounds.Bottom - bounds.Height / 4;
 
     // How far a y is from a box, vertically: 0 inside it.
     static double Distance(Rect bounds, double y) =>

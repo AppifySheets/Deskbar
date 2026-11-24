@@ -219,6 +219,7 @@ public sealed class TasksBoard : IDisposable
             ShowTask = ShowTask,
             ParentChoices = id => TaskViews.ParentChoices(tasks.Board, id),
             SetParent = (id, parent) => Report(tasks.SetParent(id, parent)),
+            NestTargets = id => tasks.Board.ParentCandidates(id).Select(t => t.Id).ToHashSet(),
         };
 
         subscriptions = new CompositeDisposable(
@@ -1118,6 +1119,12 @@ internal sealed record TasksWindowActions(
 
     /// <summary>Puts a task under another, or (none) makes it a plain task again (TaskService.SetParent).</summary>
     public Action<Guid, Maybe<Guid>>? SetParent { get; init; }
+
+    /// <summary>
+    /// Drag to nest: the tasks a dragged task could be dropped into as their subtask (TaskBoard.ParentCandidates, every
+    /// one, not the menu's first fifteen). None, a drag only reorders.
+    /// </summary>
+    public Func<Guid, IReadOnlySet<Guid>>? NestTargets { get; init; }
 }
 
 /// <summary>A subtask as its parent's open thread lists it: id, title (first line), status and status line.</summary>

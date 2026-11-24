@@ -26,7 +26,9 @@ public partial class TasksWindow
 
     // Every line drawn: its quadrant, whether it waits on Petre (pinned), and whether it cannot move at all (closed, or
     // in its undo window). Filled as the lines are drawn (Line), cleared with them.
-    readonly Dictionary<Guid, (Quadrant Quadrant, bool Waiting, bool Fixed)> dragLines = [];
+    // Nested: a subtask drawn under its parent (TaskViews.UnderParents). It is dragged (out of its parent's block, to
+    // free it), but it is no drop target: its rank is not where it is drawn (review of #467, finding 2).
+    readonly Dictionary<Guid, (Quadrant Quadrant, bool Waiting, bool Fixed, bool Nested)> dragLines = [];
 
     DragState? drag;
     TaskDropTarget.Drop? dropShown;
@@ -124,7 +126,7 @@ public partial class TasksWindow
         {
             try
             {
-                if (drop is not null) Actions?.Place(current.Id, drop.Quadrant, drop.Place);
+                if (drop is not null) Dropped(current.Id, drop);
             }
             finally
             {
@@ -132,6 +134,19 @@ public partial class TasksWindow
                 Flush();
             }
         }));
+    }
+
+    // What a drop does (drag to nest, TaskDropTarget's header), as on the bar: on a line's middle the task becomes its
+    // subtask; a nested subtask dropped anywhere else is freed first, then placed; everything else is placed as before.
+    void Dropped(Guid id, TaskDropTarget.Drop drop)
+    {
+        if (drop.Into is { } parent)
+        {
+            Actions?.SetParent?.Invoke(id, parent);
+            return;
+        }
+        if (dragLines.TryGetValue(id, out var line) && line.Nested) Actions?.SetParent?.Invoke(id, CSharpFunctionalExtensions.Maybe<Guid>.None);
+        Actions?.Place(id, drop.Quadrant, drop.Place);
     }
 
     void CancelDrag()
@@ -162,7 +177,10 @@ public partial class TasksWindow
         if (!matrixShown)
         {
             dropSpan = new Rect(0, 0, Rows.ActualWidth, Rows.ActualHeight);
-            return TaskDropTarget.At(Placed(LineButtons()), [], own, at);
+            // Drag to nest, in the List only: the Matrix's drag between cells already means "change its quadrant".
+            var parents = Actions?.NestTargets?.Invoke(dragged) ?? new HashSet<Guid>();
+            return TaskDropTarget.At(Placed(LineButtons())
+                .Select(p => p with { TakesChild = !p.Waiting && parents.Contains(p.Id) }).ToList(), [], own, at);
         }
         if (cells.Count == 0) return null;
         var (quadrant, box) = cells
@@ -180,7 +198,7 @@ public partial class TasksWindow
     // The lines that can be aimed at, with their boxes in the drag's coordinates.
     IReadOnlyList<TaskDropTarget.Placed> Placed(IEnumerable<Button> buttons) =>
         buttons
-            .Where(b => b.Tag is Guid id && dragLines.TryGetValue(id, out var line) && !line.Fixed && b.IsVisible)
+            .Where(b => b.Tag is Guid id && dragLines.TryGetValue(id, out var line) && !line.Fixed && !line.Nested && b.IsVisible)
             .Select(b => new TaskDropTarget.Placed((Guid)b.Tag, dragLines[(Guid)b.Tag].Quadrant, dragLines[(Guid)b.Tag].Waiting,
                 new Rect(b.TranslatePoint(new Point(0, 0), DragSurface), b.RenderSize)))
             .ToList();
@@ -188,7 +206,11 @@ public partial class TasksWindow
     void PaintDrop(DrawingContext dc)
     {
         if (dropShown is not { } drop) return;
-        dc.DrawRoundedRectangle(DropInk, null, new Rect(dropSpan.Left, drop.LineY - 1, dropSpan.Width, 2), 1, 1);
+        // Drag to nest: the line the task would go under is outlined, instead of a line between two.
+        if (drop.Into is not null)
+            dc.DrawRoundedRectangle(null, new Pen(DropInk, 1.5), drop.IntoBounds, 4, 4);
+        else
+            dc.DrawRoundedRectangle(DropInk, null, new Rect(dropSpan.Left, drop.LineY - 1, dropSpan.Width, 2), 1, 1);
     }
 
     static readonly Brush DropInk = Frozen(0xE6, 0xFF, 0xFF, 0xFF);

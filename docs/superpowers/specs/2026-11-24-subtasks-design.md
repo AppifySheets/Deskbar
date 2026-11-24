@@ -179,6 +179,12 @@ also asked whether a task can be moved under another. So, superseding "Lines kee
   not a drag: a drag already reorders lines, and dropping on a line versus between two is a few pixels apart.
 - The count "· N subtasks" is joined with no-break spaces, so it never splits across lines.
 
+Then Petre asked again ("can i put a task as a subtask by drag and dropping it?") and, offered three bands per line,
+said "build it". So a line that can take the dragged task as its subtask is split: its middle half nests (the line is
+outlined), its top and bottom quarters reorder as before (TaskDropTarget). A subtask drawn under its parent can be
+dragged again, and a drop anywhere but another line's middle frees it, then places it. Nested lines stay no drop
+anchors (review of #467). The Matrix does not nest: a drag between its cells already means "change the quadrant".
+
 ## Calls Claude made (for Petre to check)
 
 - One level only, as goals have. A deeper tree makes the breadcrumb and the briefing grow with depth.

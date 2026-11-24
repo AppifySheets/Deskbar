@@ -3112,19 +3112,64 @@ public class FloatingBarTaskListTests
         Assert.Equal(IndexOf(t, parent.Id) + 1, IndexOf(t, child.Id));
     });
 
-    // Review of #467, findings 2 and 3: a subtask drawn under its parent is not dragged (a drop could only rewrite its
-    // flags, since it is drawn back under its parent), and it is no drop target (its rank is not where it is drawn).
-    [Fact]
-    public void A_nested_subtask_does_not_arm_a_drag() => StaThread.Run(() =>
+    // DRAG TO NEST (Petre: "can i put a task as a subtask by drag and dropping it?" ... "build it"). The middle half of a
+    // line makes the dragged task its subtask; the top and bottom quarters reorder as before. A task with subtasks, a
+    // subtask and a line waiting on Petre take no child. A subtask drawn under its parent, dragged out, becomes a plain
+    // task again.
+    static ListBar NestBar()
     {
-        using var t = Build();
-        var parent = t.Tasks.AddNote("Ship the release", t.Gepha).Value;
-        var child = t.Tasks.AddNote("Write the notes", t.Gepha, parent: parent.Id).Value;
-        t.Bar.UpdateLayout();
+        var t = DragBar(3);
+        return t;
+    }
 
-        t.Bar.TaskDragPress(child.Id, new Point(5, 5));
+    static Button LineTitled(ListBar t, string title) => t.Lines.Single(l => ((TaskLine)l.Tag).Title == title);
 
-        Assert.False(t.Bar.TaskDragInFlight);
+    static TaskItem TaskTitled(ListBar t, string title) => t.Tasks.Board.Tasks.Single(x => x.Title == title);
+
+    [Fact]
+    public void Dropping_a_task_on_the_middle_of_another_makes_it_a_subtask() => StaThread.Run(() =>
+    {
+        using var t = NestBar();
+
+        Drag(t, LineTitled(t, "n1"), In(t, LineTitled(t, "n3"), 0.5));
+
+        Assert.Equal(Maybe.From(TaskTitled(t, "n3").Id), TaskTitled(t, "n1").ParentId);
+    });
+
+    [Fact]
+    public void Dropping_on_the_edge_of_a_line_still_reorders() => StaThread.Run(() =>
+    {
+        using var t = NestBar();
+
+        Drag(t, LineTitled(t, "n1"), In(t, LineTitled(t, "n3"), 0.1));
+
+        Assert.True(TaskTitled(t, "n1").ParentId.HasNoValue);
+        Assert.Equal(["n1", "n3", "n2"], t.Tasks.Board.Pile().Select(x => x.Title));
+    });
+
+    [Fact]
+    public void A_task_with_subtasks_is_not_nested_by_a_drag() => StaThread.Run(() =>
+    {
+        using var t = NestBar();
+        t.Tasks.AddNote("child", t.Gepha, parent: TaskTitled(t, "n1").Id);
+        Settle(t);
+
+        Drag(t, LineTitled(t, "n1"), In(t, LineTitled(t, "n3"), 0.5));
+
+        Assert.True(TaskTitled(t, "n1").ParentId.HasNoValue);
+    });
+
+    [Fact]
+    public void Dragging_a_nested_subtask_out_frees_it() => StaThread.Run(() =>
+    {
+        using var t = NestBar();
+        t.Tasks.SetParent(TaskTitled(t, "n1").Id, TaskTitled(t, "n3").Id);
+        Settle(t);
+        Assert.Equal(IndexOf(t, TaskTitled(t, "n3").Id) + 1, IndexOf(t, TaskTitled(t, "n1").Id));
+
+        Drag(t, LineTitled(t, "n1"), In(t, LineTitled(t, "n2"), 0.9));
+
+        Assert.True(TaskTitled(t, "n1").ParentId.HasNoValue);
     });
 
     [Fact]
