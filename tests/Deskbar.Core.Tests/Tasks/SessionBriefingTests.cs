@@ -74,11 +74,27 @@ public sealed class SessionBriefingTests
         var text = SessionBriefing.Start(Start(), Task("Tasks board"), []);
 
         Assert.Contains("Merge PR 512: CI is green", text);
-        Assert.Contains("when the next move is the user's (a pull request to merge, something to try live, a decision)", text);
+        Assert.Contains("when the next move is the user's (a pull request to merge, something to try live before it merges, a decision)", text);
         Assert.Contains("not while a pull request of yours waits to be merged", text);
         Assert.Contains($"task answered --session {Sid}, then task done", text);
         Assert.DoesNotContain("PR 512 is ready", text);
         Assert.DoesNotContain("(a PR to merge", text);
+    }
+
+    // Task b326761d (Petre: "when a pr is merged and a session is waiting for me to check it, it should say the task is
+    // done and i will only close it if i test it and it works"): sessions read "something to try live" as a reason to ask
+    // again once the pull request was merged, so finished work sat in Waiting on you. The briefing and the Stop hook's
+    // nudge now say a merged pull request is done, with what to try in the status line, and closing is the user's test.
+    [Fact]
+    public void A_merged_pull_request_is_done_with_what_to_try_in_the_status_line_not_an_ask_to_test()
+    {
+        var text = SessionBriefing.Start(Start(), Task("Tasks board"), []);
+
+        Assert.Contains("Once your pull request is merged, the task is done: do not ask the user to test it.", text);
+        Assert.Contains("put what to try in the status line", text);
+        Assert.Contains("the user closes the task once they have tried it and it works", text);
+        Assert.Contains("If your pull request is merged, the task is done", SessionBriefing.ParkedNudge);
+        Assert.Contains("task done with what to try in the status line", SessionBriefing.ParkedNudge);
     }
 
     // Fifty offered tasks with long titles, long status lines and long questions (review of PR B, M-7): each is cut at
