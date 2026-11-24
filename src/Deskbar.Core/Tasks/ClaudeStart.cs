@@ -38,22 +38,33 @@ public static class ClaudeStart
     /// <summary>
     /// Where to start the session, the likeliest first. A task that has had sessions starts at the REPO of its latest
     /// one (a new session starts at the repo, not in an old worktree, because worktrees are deleted after the merge).
-    /// A task with none offers the repos of every session of every task on its workspace (a free task matches only
-    /// free tasks), the most recently used first, then the folders the workspace's editors have open.
+    /// A task with none offers, after its parent's latest repo when it is a subtask (ParentRepo), the repos of every
+    /// session of every task on its workspace (a free task matches only free tasks), the most recently used first, then
+    /// the folders the workspace's editors have open.
     /// </summary>
     public static IReadOnlyList<string> Folders(TaskItem task, TaskBoard board, IEnumerable<string> editorFolders) =>
         task.Sessions.Where(s => s.Folder != "").OrderByDescending(s => s.Joined).FirstOrDefault() is { } latest
             ? [RepoOf(latest.Folder)]
-            : board.Tasks
-                .Where(other => other.WorkspaceId.Equals(task.WorkspaceId))
-                .SelectMany(other => other.Sessions)
-                .Where(s => s.Folder != "")
-                .OrderByDescending(s => s.Joined)
-                .Select(s => RepoOf(s.Folder))
+            : ParentRepo(task, board)
+                .Concat(board.Tasks
+                    .Where(other => other.WorkspaceId.Equals(task.WorkspaceId))
+                    .SelectMany(other => other.Sessions)
+                    .Where(s => s.Folder != "")
+                    .OrderByDescending(s => s.Joined)
+                    .Select(s => RepoOf(s.Folder)))
                 .Concat(editorFolders.Where(f => f != ""))
                 // The first spelling of a folder wins, so the one used most recently is the one shown.
                 .DistinctBy(f => f.TrimEnd('\\', '/'), StringComparer.OrdinalIgnoreCase)
                 .ToList();
+
+    // A subtask with no session of its own most likely continues in its parent's repo (subtasks spec,
+    // docs/superpowers/specs/2026-11-24-subtasks-design.md, "Making subtasks"), so that repo, from the parent's latest
+    // session, leads the list. Nothing for a plain task, or a parent with no sessions or no longer on the board.
+    static IEnumerable<string> ParentRepo(TaskItem task, TaskBoard board) =>
+        task.ParentId.Bind(p => board.Tasks.TryFirst(t => t.Id == p))
+            .Bind(parent => parent.Sessions.Where(s => s.Folder != "").OrderByDescending(s => s.Joined).TryFirst())
+            .Map(s => new[] { RepoOf(s.Folder) })
+            .GetValueOrDefault([]);
 
     /// <summary>The repo a worktree folder belongs to: the part before <c>\.claude\worktrees\</c>; any other folder as it is.</summary>
     public static string RepoOf(string folder) =>

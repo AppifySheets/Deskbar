@@ -105,6 +105,32 @@ public class ClaudeStartTests
         Assert.Equal([@"C:\repos\Two\", @"c:\repos\one", @"C:\repos\Editor"], folders);
     }
 
+    // Subtasks spec: a subtask with no session of its own offers its parent's latest session's repo first, since the
+    // work most likely continues there; the workspace's folders follow as before.
+    [Fact]
+    public void A_subtask_without_sessions_offers_its_parents_repo_first()
+    {
+        var parent = Task(Guid.NewGuid(), "P", Maybe<Guid>.From(ws), "",
+            Session("p1", @"C:\repos\Parent\.claude\worktrees\topic", 1), Session("p0", @"C:\repos\Older", 0));
+        var task = Task(taskId, "T", Maybe<Guid>.From(ws)) with { ParentId = parent.Id };
+        var other = Task(Guid.NewGuid(), "O", Maybe<Guid>.From(ws), "", Session("o", @"C:\repos\Other", 9));
+
+        var folders = ClaudeStart.Folders(task, Board(task, parent, other), [@"C:\repos\Editor"]);
+
+        Assert.Equal(@"C:\repos\Parent", folders[0]);
+        Assert.Contains(@"C:\repos\Other", folders);
+        Assert.Contains(@"C:\repos\Editor", folders);
+    }
+
+    [Fact]
+    public void A_subtask_with_its_own_session_starts_in_its_own_repo()
+    {
+        var parent = Task(Guid.NewGuid(), "P", Maybe<Guid>.From(ws), "", Session("p1", @"C:\repos\Parent", 1));
+        var task = Task(taskId, "T", Maybe<Guid>.From(ws), "", Session("t1", @"C:\repos\Own", 2)) with { ParentId = parent.Id };
+
+        Assert.Equal([@"C:\repos\Own"], ClaudeStart.Folders(task, Board(task, parent), []));
+    }
+
     [Fact]
     public void A_free_task_matches_only_other_free_tasks()
     {
