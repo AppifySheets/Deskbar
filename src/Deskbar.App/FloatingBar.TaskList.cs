@@ -455,6 +455,9 @@ public partial class FloatingBar
     static readonly Brush TaskClaudeTint = Frozen(0x26, 0xFF, 0xA7, 0x26);
     static readonly Brush TaskInk = Frozen(0xFF, 0xE6, 0xE6, 0xE6);
     static readonly Brush TaskDimInk = Frozen(0xFF, 0xA9, 0xAD, 0xB8);
+    // The subtask arrow and a parent's count (Petre's pick A): fainter than the dim ink, so the title and the status line
+    // stay the news on a line. The tasks panel's caption grey.
+    static readonly Brush TaskFaintInk = Frozen(0xFF, 0x8B, 0x8F, 0x99);
     static readonly Brush TaskTitleInk = Frozen(0xFF, 0xD9, 0xB9, 0x8A);
     static readonly Brush TaskBadgeInk = Frozen(0xFF, 0x1E, 0x1F, 0x24);
     static readonly Brush TaskButtonFill = Frozen(0xFF, 0x2A, 0x2C, 0x33);
@@ -565,6 +568,9 @@ public partial class FloatingBar
             Urgent = t.Urgent,
             // The goal it counts toward, for the tooltip only (see GoalTitle).
             GoalTitle = (goalTitle?.Invoke(t) ?? Maybe<string>.None).Match(title => (string?)title, () => null),
+            // Subtasks (Petre's pick A): the parent's title for the arrow's tooltip, and a parent's open subtasks' count.
+            ParentTitle = board.ParentOf(t).Map(p => (string?)FirstLine(p.Title)).GetValueOrDefault(),
+            SubtaskCount = board.OpenSubtaskCount(t.Id),
         }).ToArray();
 
     // Marks the first line of each group after the first (TaskLine.StartsGroup), over the lines as they are drawn, the
@@ -1325,6 +1331,10 @@ public partial class FloatingBar
             tick.Margin = new Thickness(0, 0, 4, 0);
             text.Inlines.Add(new InlineUIContainer(tick) { BaselineAlignment = BaselineAlignment.Center });
         }
+        // SUBTASKS (Petre's pick A): a subtask's line starts with "↳" alone, since the bar has no room for the parent's
+        // name (the tooltip has it); a parent's title is followed by its open subtasks' count. Both in the faint ink.
+        if (line.ParentTitle is not null)
+            text.Inlines.Add(new Run(TaskViews.Breadcrumb(line.ParentTitle, full: false)) { Foreground = TaskFaintInk });
         // RULING 59: important is bold and urgent is italic, in the title only (not the detail after it).
         text.Inlines.Add(new Run(FirstLine(line.Title))
         {
@@ -1332,6 +1342,8 @@ public partial class FloatingBar
             FontWeight = line.Important ? FontWeights.Bold : FontWeights.Normal,
             FontStyle = line.Urgent ? FontStyles.Italic : FontStyles.Normal,
         });
+        if (line.SubtaskCount > 0)
+            text.Inlines.Add(new Run(TaskDetailSeparator + TaskViews.SubtaskCountText(line.SubtaskCount)) { Foreground = TaskFaintInk });
         if (line.Detail.Length == 0) return text;
         text.Inlines.Add(new Run(TaskDetailSeparator) { Foreground = line.Claudes ? TaskTitleInk : TaskDimInk });
         text.Inlines.Add(new Run(line.Detail) { Foreground = detailInk });
@@ -1425,6 +1437,8 @@ public partial class FloatingBar
             // When it was made (the age on the line has its own tooltip, Ruling 46).
             line.Created == default ? "" : $"Created {line.Created.ToLocalTime():dddd d MMMM yyyy, HH:mm}",
             line.GoalTitle is { } goal ? $"Goal: {goal}" : "",
+            line.ParentTitle is { } parent ? $"Subtask of {parent}" : "",
+            line.SubtaskCount > 0 ? $"Has {TaskViews.SubtaskCountText(line.SubtaskCount)}" : "",
         }.Where(part => part.Length > 0));
 
     // The failed-load line: the words, the store's reason as the tooltip, and a ✕ that dismisses it.
@@ -1960,4 +1974,13 @@ internal sealed record TaskLine(Guid Id, string Title, string Detail, TaskStatus
     /// the line; part of the line's shape so a rename repaints it, not of the places key, so it moves nothing.
     /// </summary>
     public string? GoalTitle { get; init; }
+
+    /// <summary>
+    /// Subtasks (Petre's pick A): the parent's title when the task is a subtask, or null. The line shows "↳" and the
+    /// tooltip names the parent. Part of the line's shape, so renaming the parent repaints its subtasks.
+    /// </summary>
+    public string? ParentTitle { get; init; }
+
+    /// <summary>How many open subtasks the task has, shown after its title ("· 2 subtasks"); 0 for none.</summary>
+    public int SubtaskCount { get; init; }
 }

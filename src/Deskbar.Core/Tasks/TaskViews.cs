@@ -213,6 +213,24 @@ public static class TaskViews
     static SessionState Gone(TaskSession session, Func<TaskSession, bool> transcriptExists) =>
         transcriptExists(session) ? SessionState.Ended : SessionState.Expired;
 
+    // --- subtasks on a line (docs/superpowers/specs/2026-11-24-subtasks-design.md, Petre's pick A) ----------------------
+
+    // How much of a parent's title the breadcrumb keeps, so the subtask's own title keeps most of the line.
+    const int BreadcrumbTitle = 22;
+
+    /// <summary>
+    /// What goes in front of a subtask's title: "↳ &lt;parent title, cut&gt; › " on a full line (the tasks panel's), "↳ "
+    /// alone where there is no room for it (the bar, and the panel's slim line); "" for a task with no parent.
+    /// </summary>
+    public static string Breadcrumb(string? parentTitle, bool full) =>
+        parentTitle is null ? ""
+        : !full ? "↳ "
+        : $"↳ {(parentTitle.Length <= BreadcrumbTitle ? parentTitle : parentTitle[..BreadcrumbTitle].TrimEnd() + "…")} › ";
+
+    /// <summary>A parent's count of open subtasks in words, "" for none: what follows its title after a " · ".</summary>
+    public static string SubtaskCountText(int count) =>
+        count switch { 0 => "", 1 => "1 subtask", _ => $"{count} subtasks" };
+
     /// <summary>The words of each status, as the spec spells them.</summary>
     public static string StatusName(TaskStatus status) => status switch
     {

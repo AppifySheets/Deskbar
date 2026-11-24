@@ -2934,6 +2934,37 @@ public class FloatingBarTaskListTests
         Assert.True(t.Bar.TaskListAdding);
     });
 
+    // Petre's pick A on the bar: a subtask's line starts with "↳" (no room for the parent's name; the tooltip has it),
+    // and a parent's line says how many open subtasks it has after its title.
+    [Fact]
+    public void A_subtask_line_shows_the_arrow_and_its_tip_names_the_parent() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        var parent = t.Tasks.AddNote("Ship the release", t.Gepha).Value;
+        var child = t.Tasks.AddNote("Write the notes", t.Gepha, parent: parent.Id).Value;
+        t.Bar.UpdateLayout();
+
+        var line = t.Lines.Single(l => ((TaskLine)l.Tag).Id == child.Id);
+
+        Assert.Equal("↳ Write the notes", TextOf(line));
+        Assert.Contains("Subtask of Ship the release", (string)line.ToolTip);
+    });
+
+    [Fact]
+    public void A_parent_line_counts_its_open_subtasks() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        var parent = t.Tasks.AddNote("Ship the release", t.Gepha).Value;
+        t.Tasks.AddNote("Write the notes", t.Gepha, parent: parent.Id);
+        var done = t.Tasks.AddNote("Tag it", t.Gepha, parent: parent.Id).Value;
+        t.Tasks.Close(done.Id);
+        t.Bar.UpdateLayout();
+
+        var line = t.Lines.Single(l => ((TaskLine)l.Tag).Id == parent.Id);
+
+        Assert.Equal("Ship the release · 1 subtask", TextOf(line));
+    });
+
     [Fact]
     public void Add_subtask_on_a_subtask_adds_a_sibling() => StaThread.Run(() =>
     {

@@ -519,11 +519,11 @@ public partial class TasksWindow : Window
             // working changes the squares' halos and nothing else, and must still redraw the line. Not in a Matrix cell's:
             // a compact line draws no sessions, so it would only rebuild the Matrix for nothing (review minor 2).
             string.Join('\u0002', view.Cells.Select(c => $"{c.Header}:" + string.Join('\u0003', c.Rows.Select(r =>
-                $"{r.Id}|{r.Title}|{r.Detail}|{r.Description}|{r.Status}|{r.Claudes}|{r.Assignee.Id}|{PlaceSignature(r.Place)}|{r.CommentCount}|{r.Expanded}|{r.Closing}|{r.Important}|{r.Urgent}|" +
+                $"{r.Id}|{r.Title}|{r.Detail}|{r.Description}|{r.Status}|{r.Claudes}|{r.Assignee.Id}|{PlaceSignature(r.Place)}|{r.CommentCount}|{r.Expanded}|{r.Closing}|{r.Important}|{r.Urgent}|{r.ParentTitle}|{r.SubtaskCount}|" +
                 string.Join('\u0004', r.Comments.Select(c => $"{c.Id}{c.Author}{c.When}{c.Markdown}{c.Settled}")))))),
             string.Join('\u0002', view.Groups.Select(g => $"{g.Header}:" + string.Join('\u0003', g.Rows.Select(r =>
                 $"{r.Id}|{r.Title}|{r.Detail}|{r.Description}|{r.Status}|{r.Claudes}|{r.Assignee.Id}|{r.Sessions}|{r.SessionCount}|{r.LiveCount}|{PlaceSignature(r.Place)}|{r.CommentCount}|" +
-                $"{r.Expanded}|{r.Closing}|{r.Important}|{r.Urgent}|{r.WorkingCount}|" + string.Join('\u0004', r.SessionList.Select(s => $"{s.Id}{s.Joined}{s.State}")) + "|" +
+                $"{r.Expanded}|{r.Closing}|{r.Important}|{r.Urgent}|{r.WorkingCount}|{r.ParentTitle}|{r.SubtaskCount}|" + string.Join('\u0004', r.SessionList.Select(s => $"{s.Id}{s.Joined}{s.State}")) + "|" +
                 string.Join('\u0004', r.Comments.Select(c => $"{c.Id}{c.Author}{c.When}{c.Markdown}{c.Settled}")))))));
 
     static string PlaceSignature(TaskPlaceChoice place) => $"{place.Workspace}{place.Name}{(place.Colour as SolidColorBrush)?.Color}";
@@ -1061,6 +1061,20 @@ public partial class TasksWindow : Window
                 TextWrapping = TextWrapping.Wrap,
                 TextDecorations = row.Closing ? TextDecorations.Strikethrough : null,
             };
+            // SUBTASKS (Petre's pick A): the parent's name in front of a subtask's title on a full line, "↳" alone on a slim
+            // one, and a parent's open subtasks' count after its title, both in the caption grey so the title stays the
+            // news. Runs in the title's own block, so they wrap with it. The bold and slant are the title's alone.
+            if (row.ParentTitle is not null || row.SubtaskCount > 0)
+            {
+                title.Inlines.Clear();
+                if (row.ParentTitle is not null)
+                    title.Inlines.Add(new Run(TaskViews.Breadcrumb(row.ParentTitle, full: !slimLines && !compactLines))
+                        { Foreground = HeaderInk, FontWeight = FontWeights.Normal, FontStyle = FontStyles.Normal });
+                title.Inlines.Add(new Run(row.Title));
+                if (row.SubtaskCount > 0)
+                    title.Inlines.Add(new Run($" · {TaskViews.SubtaskCountText(row.SubtaskCount)}")
+                        { Foreground = HeaderInk, FontWeight = FontWeights.Normal, FontStyle = FontStyles.Normal });
+            }
             // A DONE TASK'S TICK in front of its title, the bar's own (TaskStatusMarks.DoneTick; Petre, 2026-11-23, "build
             // both"). Docked left of the title so the title still wraps in what is left; at the first line's height (top).
             // Not on a line in its undo window, which is closed.

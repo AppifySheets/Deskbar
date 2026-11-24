@@ -187,6 +187,42 @@ public class TaskSubtaskTests
     public void Add_subtask_on_an_unknown_line_is_none() =>
         Assert.True(Family().SubtaskParentFor(fresh).HasNoValue);
 
+    // --- what a line shows (Petre's pick A) -------------------------------------------------------
+
+    [Fact]
+    public void A_parents_count_is_its_open_subtasks_only()
+    {
+        var board = Family();
+        Assert.Equal(2, board.OpenSubtaskCount(parent));
+        Assert.Equal(1, board.Close(sibling, clock).Value.OpenSubtaskCount(parent));
+        Assert.Equal(0, board.OpenSubtaskCount(loner));
+    }
+
+    [Fact]
+    public void A_subtasks_parent_title_is_read_from_the_board()
+    {
+        var board = Family();
+        Assert.Equal("Parent", board.ParentOf(Get(board, child)).Value.Title);
+        Assert.True(board.ParentOf(Get(board, loner)).HasNoValue);
+    }
+
+    [Theory]
+    [InlineData(0, "")]
+    [InlineData(1, "1 subtask")]
+    [InlineData(3, "3 subtasks")]
+    public void The_count_reads_in_words(int count, string words) =>
+        Assert.Equal(words, TaskViews.SubtaskCountText(count));
+
+    [Fact]
+    public void The_arrow_names_the_parent_on_a_full_line_and_not_on_a_slim_one()
+    {
+        Assert.Equal("↳ Parent › ", TaskViews.Breadcrumb("Parent", full: true));
+        Assert.Equal("↳ ", TaskViews.Breadcrumb("Parent", full: false));
+        Assert.Equal("", TaskViews.Breadcrumb(null, full: true));
+        // A long parent title is cut, so the subtask's own title keeps the line.
+        Assert.Equal("↳ Subtasks support on de… › ", TaskViews.Breadcrumb("Subtasks support on deskbar", full: true));
+    }
+
     // --- Delete ----------------------------------------------------------------------------------
 
     [Fact]

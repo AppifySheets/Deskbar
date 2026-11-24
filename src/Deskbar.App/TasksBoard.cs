@@ -828,6 +828,9 @@ public sealed class TasksBoard : IDisposable
         SessionList = expanded.Contains(task.Id) ? sessionsOf(task) : [],
         // Of its live sessions, how many Claude is busy in now (Task 8): their squares wear a halo.
         WorkingCount = workingOf(task),
+        // Subtasks (Petre's pick A): the parent's title in front of a subtask's, and a parent's open subtasks' count.
+        ParentTitle = tasks.Board.ParentOf(task).Map(p => (string?)FloatingBar.FirstLine(p.Title)).GetValueOrDefault(),
+        SubtaskCount = tasks.Board.OpenSubtaskCount(task.Id),
     };
 
     // The mockup's sessions column: how many, and whether any is still live. Empty for a note.
@@ -959,6 +962,15 @@ internal sealed record TaskRowView(Guid Id, string Title, string Detail, TaskSta
     /// live squares on the line wear a halo. From the board's `workingOf`, 0 with none or before the first agents list.
     /// </summary>
     public int WorkingCount { get; init; }
+
+    /// <summary>
+    /// Subtasks (Petre's pick A): the parent's title when the task is a subtask, or null; drawn before the title ("↳ Parent
+    /// › ", "↳ " on a slim line). In the redraw signature, so renaming the parent redraws its subtasks.
+    /// </summary>
+    public string? ParentTitle { get; init; }
+
+    /// <summary>How many open subtasks the task has, drawn after its title ("· 2 subtasks"); 0 for none.</summary>
+    public int SubtaskCount { get; init; }
 }
 
 /// <summary>
