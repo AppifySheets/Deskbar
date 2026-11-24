@@ -562,6 +562,37 @@ throwaway folder Claude Code trusts, and tracing on for the `claude actions:` an
     resumes in 10 minutes"): its session is resumed and its window opens, and the task goes back to In progress
     with no question. The next stop of that session is resumed again two minutes later, not given up on at once.
 
+## Subtasks
+
+Spec `docs/superpowers/specs/2026-11-24-subtasks-design.md`; the look is Petre's pick A. `$ts` is
+`%APPDATA%\Deskbar\deskbar.cmd`.
+
+S1. Right-click a note on the bar: **Add subtask…** comes after Edit (after **Start Claude on this** when Claude is
+    set up). Pick it: the add box takes the keyboard with a chip "↳ <the note>" after the workspace chip, the
+    workspace chip shows the note's workspace (pick a note on another workspace to see it move), and the box says
+    "A subtask: Enter adds it, Esc drops the parent". Type a title and press Enter: a new line "↳ <title>" appears,
+    its tooltip says "Subtask of <the note>", and the note's line now ends "· 1 subtask". No line moved.
+S2. Pick **Add subtask…** again, type something, press Esc once: the chip goes, the text stays and the placeholder is
+    back to the plain one; Enter adds a plain note. Again, but click the chip instead of Esc: the same.
+S3. **Add subtask…** on the subtask's own line adds a sibling: the note now says "· 2 subtasks".
+S4. In the tasks panel at full width (692 DIP or more) the subtask reads "↳ <parent, cut> › <title>"; drag the panel
+    narrower: the slim line reads "↳ <title>". In the Matrix too it is "↳" alone. Rename the parent in the panel: its
+    subtasks' lines follow. The panel's "..." menu has **Add subtask…** with the same chip in its add box.
+S5. Close one subtask: the parent's count drops by one. Delete the parent: the subtasks stay, as plain lines.
+S6. `$ts task parent <note> <another note>` is refused when the note has subtasks ("has subtasks of its own"), and
+    `$ts task parent <x> <a subtask>` is refused ("Subtasks go one level deep"). `$ts task add "Child" --parent <id>`
+    with no `--workspace` lands on the parent's workspace. `$ts task family <subtask>` prints the family text;
+    `$ts task family <a lone note>` says it has none. `$ts task list` shows `parent` and `subtasks`.
+S7. On a task a Claude session has worked on, add a subtask with only a title and pick **Start Claude on this** on it:
+    the folder offered first is the parent session's repo. Ask the new session what Deskbar told it when it joined:
+    it names the parent, its status line, the parent session and its transcript file, and it has read the end of
+    that transcript before starting (ask it what the parent session decided).
+S8. In a session on a task, ask it to split off a piece with `task subtask`: a new Claude-assigned backlog subtask
+    appears under its task. Start a second session on the workspace: it is offered that subtask. In a session on a
+    subtask, `task subtask` makes a sibling, not a grandchild.
+S9. Resume a session on a subtask (the history list): its start briefing carries the family again. Its prompt
+    reminder mentions "It is a subtask of <id>" and `task family`.
+
 ## Goals
 
 Weekly and monthly goals, pull request 1: the pipe, the task's link, the tasks panel's menu and filter, the bar's
