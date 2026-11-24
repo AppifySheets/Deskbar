@@ -302,4 +302,16 @@ public class TaskViewsTests
     [InlineData("![image](task-images/t/1.png)", "image")]
     public void The_first_line_of_markdown_is_plain_text(string markdown, string expected) =>
         Assert.Equal(expected, TaskViews.PlainFirstLine(markdown));
+
+    // Task 08cdb052: the bar shows a question's link as its words, keeps a bare address and every line, and leaves a
+    // question without markdown exactly as it was written.
+    [Theory]
+    [InlineData("Merge [Deskbar #490](https://github.com/AppifySheets/Deskbar/pull/490): CI is green", "Merge Deskbar #490: CI is green")]
+    [InlineData("Open https://claude.ai/code/artifact/abc to check", "Open https://claude.ai/code/artifact/abc to check")]
+    [InlineData("Merge **[PR 1](https://x.test/1)** and\n[PR 2](https://x.test/2)", "Merge PR 1 and\nPR 2")]
+    [InlineData("Try `deskbar.cmd help`, then say", "Try deskbar.cmd help, then say")]
+    [InlineData("Add an \"Open\" item, or leave it? (yes/no)", "Add an \"Open\" item, or leave it? (yes/no)")]
+    [InlineData("", "")]
+    public void Inline_markdown_is_plain_text(string markdown, string expected) =>
+        Assert.Equal(expected, TaskViews.PlainInline(markdown));
 }

@@ -1260,18 +1260,34 @@ public partial class TasksWindow : Window
         // THE DETAIL: the question while the task waits on Petre, else its status line. Cut to one line on a closed line,
         // IN FULL ON AN OPEN ONE, as the description is: a session's question was readable nowhere in full (Petre,
         // 2026-11-24, of a question cut at "Add an "O…" with its thread open: "where's the question?"). Tagged for tests.
-        if (row.Detail.Length > 0)
-            panel.Children.Add(new TextBlock
-            {
-                Tag = DetailTag,
-                Text = row.Detail,
-                FontSize = 11,
-                Foreground = row.Status == TaskStatus.WaitingOnYou ? Orange : DimInk,
-                FontWeight = row.Status == TaskStatus.WaitingOnYou ? FontWeights.SemiBold : FontWeights.Normal,
-                TextTrimming = row.Expanded ? TextTrimming.None : TextTrimming.CharacterEllipsis,
-                TextWrapping = row.Expanded ? TextWrapping.Wrap : TextWrapping.NoWrap,
-            });
+        if (row.Detail.Length > 0) panel.Children.Add(DetailText(row));
         return panel;
+    }
+
+    // THE DETAIL'S TEXT, its links clickable (task 08cdb052, Petre: "when asking for action, prs should have links, or
+    // artifacts; make that clickable"). A session asking for a merge names the pull request as a markdown link,
+    // "Merge [Deskbar #490](https://github.com/...): CI is green", or writes the address bare, and both are drawn as a
+    // link in the comments' link blue (MarkdownBlocks.InlinesOf), on a closed line as on an open one, since the closed
+    // line is where the question is first seen. The rest of the inline markdown (bold, code) reads as it does in a
+    // comment, and a line break stays a line break, as it was with the plain text.
+    //
+    // A press on a link is the link's: a Hyperlink takes the mouse on its press and marks it handled, so the line under
+    // it (a Button) never presses and does not pick the task, and the click opens the address in the default browser.
+    // A press anywhere else on the text still falls through to the line as before. Only web addresses become links (the
+    // MarkdownBlocks header): a session's text never runs a program from a click.
+    TextBlock DetailText(TaskRowView row)
+    {
+        var text = new TextBlock
+        {
+            Tag = DetailTag,
+            FontSize = 11,
+            Foreground = row.Status == TaskStatus.WaitingOnYou ? Orange : DimInk,
+            FontWeight = row.Status == TaskStatus.WaitingOnYou ? FontWeights.SemiBold : FontWeights.Normal,
+            TextTrimming = row.Expanded ? TextTrimming.None : TextTrimming.CharacterEllipsis,
+            TextWrapping = row.Expanded ? TextWrapping.Wrap : TextWrapping.NoWrap,
+        };
+        MarkdownBlocks.InlinesOf(row.Detail).ToList().ForEach(text.Inlines.Add);
+        return text;
     }
 
     // THE DESCRIPTION UNDER A TITLE (Ruling 58): Petre's markdown, rendered as a comment's is (MarkdownBlocks), dim, a

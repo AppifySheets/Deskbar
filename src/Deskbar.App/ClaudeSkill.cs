@@ -296,7 +296,8 @@ static class ClaudeSkill
     // hooks are what hand a session its id (`--session`), and without them it could not run one of these commands.
     // A pull request ready to merge is a `task ask`, not a comment and done (task 06c2538b; the reasoning is above
     // SessionBriefing.Commands, which says the same in fewer words). Once it is merged the task is done, with what to try
-    // in its status line, never a second ask to test it (task b326761d; reasoning in SessionBriefing.Commands too).
+    // in its status line, never a second ask to test it (task b326761d; reasoning in SessionBriefing.Commands too). The
+    // ask names what to open as a link the tasks panel can click (task 08cdb052; reasoning above SessionBriefing.Commands).
     const string YourTask = """
         ## Your task
 
@@ -309,7 +310,7 @@ static class ClaudeSkill
         the text as a heredoc in Git Bash,
 
             "$APPDATA/Deskbar/deskbar.cmd" task ask - --session <id> <<'EOF'
-            Merge PR 512: CI is green
+            Merge [PR 512](https://github.com/owner/repo/pull/512): CI is green
             EOF
 
         or pipe it in from PowerShell (`'waiting for CI' | & "$env:APPDATA\Deskbar\deskbar.cmd" task status-line - --session <id>`).
@@ -326,8 +327,11 @@ static class ClaudeSkill
           ("waiting for CI on #398"), changed when what you are doing changes.
         - Ask through the task. When the next move is the user's (a pull request to merge, something to try live
           before it merges, a decision), run `deskbar.cmd task ask - --session <id>` with what they must do in the first words on stdin
-          ("Merge PR 512: CI is green"): the task waits on the user, moves to the top of their list, and your workspace
-          blinks. A pull request ready to merge is an ask, never a comment and `task done`: done sits below the waiting
+          ("Merge [PR 512](https://github.com/owner/repo/pull/512): CI is green"): the task waits on the user, moves to
+          the top of their list, and your workspace blinks. Give whatever they must open (the pull request, a published
+          page or artifact, a release) as a markdown link `[text](https://...)` or a bare address: the tasks panel
+          makes it clickable, and the bar shows the link's words.
+          A pull request ready to merge is an ask, never a comment and `task done`: done sits below the waiting
           tasks, so the merge would wait where the user does not look. A reply finishing is not an ask; do not ask for
           routine progress.
         - Resolve it yourself. A message from the user does not settle your question: you do. When their reply settles

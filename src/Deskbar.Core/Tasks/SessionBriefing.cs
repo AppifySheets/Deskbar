@@ -45,7 +45,7 @@ public static class SessionBriefing
     // so the nudge names `task done` for that case instead of letting "something to try" read as an ask to test it.
     public const string ParkedNudge =
         $"If the next move is the user's (a pull request to merge, something to try before it merges, a decision), run {Shim} task ask with " +
-        $"what they must do, the text on stdin. If your pull request is merged, the task is done: run {Shim} task done with what to try in the status line. " +
+        $"what they must do, the text on stdin, and the pull request or page as a markdown link to click. If your pull request is merged, the task is done: run {Shim} task done with what to try in the status line. " +
         "Otherwise stop without saying anything.";
 
     /// <summary>
@@ -226,16 +226,23 @@ public static class SessionBriefing
     // look. The Stop hook's ParkedNudge cannot catch it either: it skips a task already Done and a session still watching
     // CI (background work). So the example is now the ask itself, ask covers every next move of the user's, done is for
     // when nothing waits on the user, and the merge's own follow-up (answered, then done) is spelt out.
+    //
+    // THE ASK CARRIES ITS LINK (task 08cdb052, Petre: "when asking for action, prs should have links, or artifacts; make
+    // that clickable"). The example used to be "Merge PR 512: CI is green", and sessions copied it: the tasks panel
+    // showed "Merge Deskbar PR 490 (snooze)" with nothing to click, so the merge started with a hunt for the pull
+    // request. The tasks panel draws a markdown link or a bare web address in a question as a link to click
+    // (TasksWindow.DetailText), and the bar shows the link's words alone, so the example is now a link and the ask's
+    // rule says to give one for the pull request, published page or anything else the user must open.
     static IEnumerable<string> Commands(string sessionId) =>
     [
         "Free text (a title, a status line, a question, a comment) always goes on stdin: put - in its place and give the text as a heredoc, for example",
         $"  {Shim} task ask - --session {sessionId} <<'EOF'",
-        "  Merge PR 512: CI is green",
+        "  Merge [PR 512](https://github.com/owner/repo/pull/512): CI is green",
         "  EOF",
         "Never put free text with quotes or & | < > on the command line.",
         "While you work on it:",
         $"  {Shim} task status-line - --session {sessionId}   (keep it current, one short line)",
-        $"  {Shim} task ask - --session {sessionId}   (when the next move is the user's (a pull request to merge, something to try live before it merges, a decision): what they must do in the first words; the task waits on them and moves to the top. Once they have done it (the pull request is merged), run {Shim} task answered --session {sessionId}, then task done)",
+        $"  {Shim} task ask - --session {sessionId}   (when the next move is the user's (a pull request to merge, something to try live before it merges, a decision): what they must do in the first words, with whatever they must open (the pull request, a published page) as a markdown link [text](https://...), which the tasks panel makes clickable; the task waits on them and moves to the top. Once they have done it (the pull request is merged), run {Shim} task answered --session {sessionId}, then task done)",
         // A MERGED PULL REQUEST IS DONE (task b326761d, Petre: "when a pr is merged and a session is waiting for me to
         // check it, it should say the task is done and i will only close it if i test it and it works"). Sessions read
         // "something to try live" as a reason to ask again after the merge, so the task sat in Waiting on you with "Try

@@ -257,6 +257,20 @@ public class FloatingBarTaskListTests
         Assert.DoesNotContain("waiting for CI", TextOf(claude));
     });
 
+    // Task 08cdb052: a session asks for a merge with the pull request as a markdown link. The bar's line is one click
+    // target, so it shows the link's words, never the markdown written out; the tasks panel is where it is clicked.
+    [Fact]
+    public void A_questions_link_shows_as_its_words_on_the_bar() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        var task = t.Tasks.Create("Snooze", t.Gepha, Session("s1")).Value;
+        t.Tasks.Ask(task.Id, "Merge [Deskbar #490](https://github.com/AppifySheets/Deskbar/pull/490): CI is green");
+
+        var line = t.Lines.Single(l => ((TaskLine)l.Tag).Id == task.Id);
+        Assert.Contains("Merge Deskbar #490: CI is green", TextOf(line));
+        Assert.DoesNotContain("https://", TextOf(line));
+    });
+
     // The VS Code icon of the session's window comes from the App's lookup by folder; no window, no icon.
     [Fact]
     public void A_claude_line_carries_its_session_window() => StaThread.Run(() =>

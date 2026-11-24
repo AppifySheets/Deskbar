@@ -956,6 +956,19 @@ SZ5. Snooze a task for 3 hours and restart Deskbar: it is still snoozed. Snooze 
      start it: it is back.
 SZ6. A Matrix line has no moon; "⋯", "Snooze" reaches the same lengths.
 
+## Links in a question
+
+(Task 08cdb052.) The tasks panel open. From a Claude session with a task, run `task ask` with this on stdin:
+`Merge [Deskbar #1](https://github.com/AppifySheets/Deskbar/pull/1), see https://deskbar.app`.
+
+QL1. The closed line's question reads "Merge Deskbar #1, see https://deskbar.app", with both links in blue.
+QL2. Click "Deskbar #1": the pull request opens in your browser, and the line is neither picked nor opened. Click the
+     question's other words: the line is picked and opens, as before.
+QL3. The bar's line for the task reads "Merge Deskbar #1, see https://deskbar.app" with no markdown, and a click on it
+     picks the task as before.
+QL4. Start a new Claude session and ask it to ask you to merge a pull request: its question names the pull request as
+     a link you can click.
+
 ## Results (2026-08-01)
 
 Status: **pending human execution.** An agent cannot observe the desktop, Task View,

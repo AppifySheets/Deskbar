@@ -77,6 +77,17 @@ internal static class MarkdownBlocks
         return document;
     }
 
+    /// <summary>
+    /// One text's inline markdown alone (bold, italic, code, links, bare web addresses) as inlines for a TextBlock, with
+    /// no block reading: a list marker or a heading's hashes stay the text they are, and a line break stays inside its
+    /// run, so a TextBlock shows it exactly as it showed the plain text. For a task line's question and status line in
+    /// the tasks window (task 08cdb052: "when asking for action, prs should have links, or artifacts; make that
+    /// clickable"), where a session names the pull request to merge as [Deskbar #490](https://...) and the link has to
+    /// be one click away. Links are web addresses only, as in a comment (see the header).
+    /// </summary>
+    public static IReadOnlyList<Inline> InlinesOf(string text, Action<Uri>? open = null) =>
+        Inlines(text ?? "", open ?? OpenInBrowser).ToArray();
+
     // --- blocks --------------------------------------------------------------------------------------------------
 
     // The lines as blocks, read top to bottom. Each step takes one block's lines off the front and passes the rest on,

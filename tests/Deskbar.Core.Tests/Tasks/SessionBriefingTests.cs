@@ -73,7 +73,7 @@ public sealed class SessionBriefingTests
     {
         var text = SessionBriefing.Start(Start(), Task("Tasks board"), []);
 
-        Assert.Contains("Merge PR 512: CI is green", text);
+        Assert.Contains("Merge [PR 512](https://github.com/owner/repo/pull/512): CI is green", text);
         Assert.Contains("when the next move is the user's (a pull request to merge, something to try live before it merges, a decision)", text);
         Assert.Contains("not while a pull request of yours waits to be merged", text);
         Assert.Contains($"task answered --session {Sid}, then task done", text);
@@ -95,6 +95,19 @@ public sealed class SessionBriefingTests
         Assert.Contains("the user closes the task once they have tried it and it works", text);
         Assert.Contains("If your pull request is merged, the task is done", SessionBriefing.ParkedNudge);
         Assert.Contains("task done with what to try in the status line", SessionBriefing.ParkedNudge);
+    }
+
+    // Task 08cdb052 ("when asking for action, prs should have links, or artifacts; make that clickable"): an ask copied
+    // from the old example named "PR 490" with nothing to click. The briefing's ask now gives what to open as a link, and
+    // the Stop hook's nudge says so too.
+    [Fact]
+    public void An_ask_gives_what_the_user_must_open_as_a_link()
+    {
+        var text = SessionBriefing.Start(Start(), Task("Tasks board"), []);
+
+        Assert.Contains("as a markdown link [text](https://...), which the tasks panel makes clickable", text);
+        Assert.DoesNotContain("Merge PR 512:", text);
+        Assert.Contains("markdown link", SessionBriefing.ParkedNudge);
     }
 
     // Fifty offered tasks with long titles, long status lines and long questions (review of PR B, M-7): each is cut at
