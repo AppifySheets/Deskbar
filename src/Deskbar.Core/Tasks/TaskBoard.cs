@@ -433,16 +433,19 @@ public sealed record TaskBoard(IReadOnlyList<TaskItem> Tasks)
     /// <summary>
     /// Petre snoozes a task until <paramref name="until"/>: it leaves the bar and the tasks panel's usual views until then.
     /// Nothing else about it changes (status, flags, rank, sessions), so it comes back exactly where it was. Snoozing again
-    /// moves the time; the same time returns this same board. Refused: a closed task (it is out of view already), a task
-    /// waiting on Petre (a question is never hidden; it stays pinned on top until answered, as Place refuses to move it),
-    /// and a time that is not after <paramref name="now"/>. An edit only Petre makes, so it clears the adopted mark
-    /// (Ruling 11b).
+    /// moves the time; the same time returns this same board. Refused: a closed task (it is out of view already) and a
+    /// time that is not after <paramref name="now"/>. An edit only Petre makes, so it clears the adopted mark (Ruling 11b).
+    ///
+    /// A TASK WAITING ON PETRE CAN BE SNOOZED (Petre, 2026-11-25: "snooze should also be available on waiting on me; i may
+    /// snooze something that's waiting"; the first build refused it). He has seen the question and decided it can wait:
+    /// it leaves the pinned Waiting on you block, its chip's count and the bar, and keeps its status and its question, so
+    /// it comes back still waiting, in the block at the place its ask gives it (its Raised is untouched). The session asking again, or the
+    /// question being answered, wakes it at once (Woken), so a NEW question is never hidden.
     /// </summary>
     public Result<TaskBoard> Snooze(Guid id, DateTimeOffset until, DateTimeOffset now) =>
         until <= now ? Result.Failure<TaskBoard>("A snooze has to end later than now")
         : Lookup(id).Bind(task =>
             !task.IsOpen ? Result.Failure<TaskBoard>(TaskIsClosed)
-            : task.Status == TaskStatus.WaitingOnYou ? Result.Failure<TaskBoard>("A task waiting on you stays in view until it is answered")
             : task.SnoozedUntil.HasValue && task.SnoozedUntil.Value == until ? this
             : Result.Success(Replaced(task with { SnoozedUntil = until, UpdatedAt = now, Adopted = false })));
 
@@ -463,7 +466,8 @@ public sealed record TaskBoard(IReadOnlyList<TaskItem> Tasks)
 
     // A SNOOZE ENDS WHEN SOMETHING HAPPENS THAT PETRE SHOULD SEE: the task's status changed (a session joined his note, a
     // question was answered, he set it by hand, it was closed) or it was raised (a session asked, or it became Done).
-    // Hiding a task "for a while" must never hide a question waiting on him. A status line, a comment, a flag or a drag
+    // A snooze hides what Petre has already seen and put off, never something new: a fresh question or a finish comes
+    // back at once, even on a task he snoozed while it waited. A status line, a comment, a flag or a drag
     // leaves the snooze alone. Applied by Change and Replaced, the two ways a task is rewritten, so no rule can forget it.
     static TaskItem Woken(TaskItem was, TaskItem now) =>
         now.IsSnoozed && (now.Status != was.Status || now.Raised != was.Raised)

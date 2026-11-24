@@ -81,17 +81,52 @@ public sealed class TaskSnoozeTests : IDisposable
     }
 
     [Fact]
-    public void Snooze_refuses_a_closed_task_a_task_waiting_on_you_and_a_time_already_past()
+    public void Snooze_refuses_a_closed_task_and_a_time_already_past()
     {
         var closed = Note("closed");
         board = board.Close(closed, clock).Value;
-        var asked = Claudes("asked", "s1");
-        board = board.Ask(asked, "merge?", clock).Value;
         var note = Note("note");
 
         Assert.True(board.Snooze(closed, clock.AddHours(1), clock).IsFailure);
-        Assert.True(board.Snooze(asked, clock.AddHours(1), clock).IsFailure);
         Assert.True(board.Snooze(note, clock, clock).IsFailure);
+    }
+
+    // Petre, 2026-11-25: "i may snooze something that's waiting". It leaves the pinned block and its chip's count, keeps
+    // its status and question, and comes back still waiting.
+    [Fact]
+    public void A_task_waiting_on_you_can_be_snoozed_and_comes_back_still_waiting()
+    {
+        var asked = Claudes("asked", "s1");
+        board = board.Ask(asked, "merge?", clock).Value;
+        Snooze(asked, TimeSpan.FromHours(1));
+
+        Assert.Empty(Shown(TaskFilter.Open));
+        Assert.Equal(0, TaskViews.Count(board, TaskFilter.WaitingOnYou, TaskWorkspaceFilter.All));
+        Assert.Equal(["Snoozed: asked"], Shown(TaskFilter.Snoozed));
+        Assert.Equal(TaskStatus.WaitingOnYou, Get(asked).Status);
+        Assert.Equal("merge?", Get(asked).Question.Value);
+
+        board = board.WakeDue(clock.AddHours(1));
+        Assert.Equal(["WaitingOnYou: asked"], Shown(TaskFilter.Open));
+    }
+
+    // What wakes a snoozed waiting task: the session asking again (a NEW question) or the question being answered.
+    [Fact]
+    public void A_new_ask_or_an_answer_wakes_a_snoozed_waiting_task()
+    {
+        var asksAgain = Claudes("asks again", "s1");
+        var answered = Claudes("answered", "s2");
+        board = board.Ask(asksAgain, "merge?", clock).Value;
+        board = board.Ask(answered, "merge?", clock).Value;
+        clock = clock.AddMinutes(1);
+        Snooze(asksAgain, TimeSpan.FromDays(1));
+        Snooze(answered, TimeSpan.FromDays(1));
+
+        board = board.Ask(asksAgain, "and this?", clock).Value;
+        board = board.Answered("s2", clock);
+
+        Assert.False(Get(asksAgain).IsSnoozed);
+        Assert.False(Get(answered).IsSnoozed);
     }
 
     [Fact]

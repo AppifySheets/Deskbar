@@ -959,12 +959,12 @@ public partial class TasksWindow : Window
     // and on the task, "only in the large tasks view", so the bar's lines have none). Third after the two toggles and
     // quiet like an off toggle: invisible until the line is hovered or selected. Segoe's "QuietHours" moon, U+E708, in
     // both icon fonts (checked). A press opens the lengths (SnoozeMenu); on a snoozed line, which only the Snoozed filter
-    // shows, the moon is lit and the menu offers "Wake now" first. None on a task waiting on Petre (TaskBoard.Snooze
-    // refuses it: a question never hides), and none in a Matrix line, whose flags column has room for two glyphs only;
-    // "Snooze" in the line's "⋯" menu reaches it there.
+    // shows, the moon is lit and the menu offers "Wake now" first. A line waiting on Petre has one too (Petre, 2026-11-25:
+    // "i may snooze something that's waiting"; TaskBoard.Snooze says what happens then). None in a Matrix line, whose
+    // flags column has room for two glyphs only; "Snooze" in the line's "⋯" menu reaches it there.
     Button? SnoozeButton(TaskRowView row)
     {
-        if (Actions?.Snooze is null || compactLines || row.Status == TaskStatus.WaitingOnYou) return null;
+        if (Actions?.Snooze is null || compactLines) return null;
         var snoozed = row.SnoozedUntil is not null;
         Button? button = null;
         button = Small(new TextBlock { Text = "", FontFamily = IconFont, FontSize = 12, Foreground = snoozed ? SnoozeInk : DimInk },
@@ -2022,9 +2022,9 @@ public partial class TasksWindow : Window
         menu.Items.Add(row.Status == TaskStatus.Closed && !row.Closing
             ? Item("Reopen", () => Actions?.Reopen(id))
             : Item("Close", () => Actions?.Close(id)));
-        // Snooze (task 6da8d7eb): the moon's lengths as a submenu, for every open line but one waiting on Petre, so a
-        // Matrix line, which has no moon, reaches it too.
-        if (Actions?.Snooze is not null && row.Status is not (TaskStatus.Closed or TaskStatus.WaitingOnYou) && !row.Closing)
+        // Snooze (task 6da8d7eb): the moon's lengths as a submenu, for every open line, waiting ones included, so a Matrix
+        // line, which has no moon, reaches it too.
+        if (Actions?.Snooze is not null && row.Status != TaskStatus.Closed && !row.Closing)
         {
             var snooze = Item(row.SnoozedUntil is null ? "Snooze" : "Snoozed");
             SnoozeItems(id).ForEach(item => snooze.Items.Add(item));

@@ -950,8 +950,10 @@ SZ2. Press "Snoozed 1": the line is there with "Snoozed until <time>" under its 
      "Snoozed") offers "Wake now" first; pick it: the line goes back to its place in its quadrant, and the chip goes
      once the filter is changed.
 SZ3. `deskbar.cmd task snooze <id> 1m`, wait a minute: the line comes back on its own within 30 seconds of the time.
-SZ4. Snooze a Claude task, then have its session run `task ask`: the task comes back at once, waiting on you, and its
-     line has no moon while it waits.
+SZ4. Snooze a Claude task, then have its session run `task ask`: the task comes back at once, waiting on you.
+SZ4a. Snooze that waiting task with its moon: it leaves "Waiting on you" (the chip's count drops) and the bar. Wake it:
+     it is back in "Waiting on you" with its question. Snooze it again and have the session ask once more: it comes
+     back at once with the new question.
 SZ5. Snooze a task for 3 hours and restart Deskbar: it is still snoozed. Snooze one for 1 minute, quit Deskbar for two,
      start it: it is back.
 SZ6. A Matrix line has no moon; "⋯", "Snooze" reaches the same lengths.
