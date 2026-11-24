@@ -54,8 +54,13 @@ public sealed class TaskService(ITaskStore store, Func<DateTimeOffset> now, Func
     // One wrapper per TaskBoard change, with the clock and a new id supplied here. A refused change saves nothing.
 
     // `quadrant`: the flags the note is made with (Ruling 37), none by default.
-    public Result<TaskItem> AddNote(string title, Maybe<Guid> workspace, Quadrant quadrant = Quadrant.IV) =>
-        Board.AddNote(title, workspace, now(), makeId(), quadrant).Tap(r => Commit(r.Board)).Map(r => r.Task);
+    // `parent`: the task the note is a subtask of (subtasks spec), none for a plain note.
+    public Result<TaskItem> AddNote(string title, Maybe<Guid> workspace, Quadrant quadrant = Quadrant.IV, Maybe<Guid> parent = default) =>
+        Board.AddNote(title, workspace, now(), makeId(), quadrant, parent).Tap(r => Commit(r.Board)).Map(r => r.Task);
+
+    /// <summary>A session splits its work (`task subtask`, TaskBoard.AddSubtask).</summary>
+    public Result<TaskItem> AddSubtask(string sessionId, string title) =>
+        Board.AddSubtask(sessionId, title, now(), makeId()).Tap(r => Commit(r.Board)).Map(r => r.Task);
 
     public Result<TaskItem> Create(string title, Maybe<Guid> workspace, TaskSession session) =>
         Board.Create(title, workspace, session, now(), makeId()).Tap(r => Commit(r.Board)).Map(r => r.Task);
@@ -102,8 +107,11 @@ public sealed class TaskService(ITaskStore store, Func<DateTimeOffset> now, Func
     // A deleted task takes its pictures with it (closing keeps them: a closed task can be reopened). The board's delete
     // comes first, so a refused delete removes no files; a folder that cannot be removed (a viewer holding a file open)
     // is traced and left, and the delete still stands, because a stray folder is harmless and a task that will not
-    // delete is not.
-    public Result Delete(Guid id) => Apply(Board.Delete(id)).Tap(() => DeleteImages(id));
+    // delete is not. The board frees the task's subtasks (subtasks spec), stamped now.
+    public Result Delete(Guid id) => Apply(Board.Delete(id, now())).Tap(() => DeleteImages(id));
+
+    /// <summary>Makes a task a subtask of another, or (none) a plain task again (TaskBoard.SetParent).</summary>
+    public Result SetParent(Guid id, Maybe<Guid> parent) => ApplyIfChanged(Board.SetParent(id, parent, now()));
 
     void DeleteImages(Guid id)
     {
