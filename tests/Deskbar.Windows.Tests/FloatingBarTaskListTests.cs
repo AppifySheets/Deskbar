@@ -3159,6 +3159,44 @@ public class FloatingBarTaskListTests
         Assert.True(TaskTitled(t, "n1").ParentId.HasNoValue);
     });
 
+    // Review of the drag-to-nest branch, finding 1: a small wiggle of a nested subtask, released inside its parent's
+    // block, does nothing (it used to free it, landing after the parent).
+    [Fact]
+    public void A_wiggle_of_a_nested_subtask_keeps_it_under_its_parent() => StaThread.Run(() =>
+    {
+        using var t = NestBar();
+        t.Tasks.SetParent(TaskTitled(t, "n1").Id, TaskTitled(t, "n3").Id);
+        Settle(t);
+
+        Drag(t, LineTitled(t, "n1"), In(t, LineTitled(t, "n1"), 0.8));
+
+        Assert.Equal(Maybe.From(TaskTitled(t, "n3").Id), TaskTitled(t, "n1").ParentId);
+    });
+
+    // Finding 2: a subtask dragged out lands where the drop line was, below the other block's last line.
+    [Fact]
+    public void A_freed_subtask_lands_where_the_drop_line_was() => StaThread.Run(() =>
+    {
+        using var t = DragBar(4);
+        var n3 = TaskTitled(t, "n3").Id;
+        t.Tasks.SetParent(TaskTitled(t, "n2").Id, n3);
+        t.Tasks.SetParent(TaskTitled(t, "n1").Id, n3);
+        Settle(t);
+        Assert.Equal(["n4", "n3", "n2", "n1"], t.Lines.Select(TitleOf));
+
+        Drag(t, LineTitled(t, "n1"), In(t, LineTitled(t, "n4"), 0.9));
+        Settle(t);
+
+        Assert.True(TaskTitled(t, "n1").ParentId.HasNoValue);
+        Assert.Equal(["n4", "n1", "n3", "n2"], t.Lines.Select(TitleOf));
+    });
+
+    [Fact]
+    public void After_a_parent_the_drop_line_is_under_its_whole_block() =>
+        Assert.Equal(60, TaskDropTarget.At(
+            [new TaskDropTarget.Placed(Guid.NewGuid(), Quadrant.IV, false, new Rect(0, 0, 100, 20)) { BlockBottom = 60 }],
+            [], Quadrant.IV, new Point(10, 19))!.LineY);
+
     [Fact]
     public void Dragging_a_nested_subtask_out_frees_it() => StaThread.Run(() =>
     {

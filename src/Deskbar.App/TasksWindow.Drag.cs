@@ -145,7 +145,10 @@ public partial class TasksWindow
             Actions?.SetParent?.Invoke(id, parent);
             return;
         }
-        if (dragLines.TryGetValue(id, out var line) && line.Nested) Actions?.SetParent?.Invoke(id, CSharpFunctionalExtensions.Maybe<Guid>.None);
+        // Freed first; a freeing that failed places nothing (it would only rewrite the flags of a task drawn back under
+        // its parent; review of the drag-to-nest branch, minor 3).
+        if (dragLines.TryGetValue(id, out var line) && line.Nested
+            && Actions?.SetParent?.Invoke(id, CSharpFunctionalExtensions.Maybe<Guid>.None) != true) return;
         Actions?.Place(id, drop.Quadrant, drop.Place);
     }
 
@@ -179,8 +182,15 @@ public partial class TasksWindow
             dropSpan = new Rect(0, 0, Rows.ActualWidth, Rows.ActualHeight);
             // Drag to nest, in the List only: the Matrix's drag between cells already means "change its quadrant".
             var parents = Actions?.NestTargets?.Invoke(dragged) ?? new HashSet<Guid>();
-            return TaskDropTarget.At(Placed(LineButtons())
-                .Select(p => p with { TakesChild = !p.Waiting && parents.Contains(p.Id) }).ToList(), [], own, at);
+            var drawn = LineButtons()
+                .Where(b => b.Tag is Guid id && dragLines.TryGetValue(id, out var line) && !line.Fixed && b.IsVisible)
+                .Select(b => (Id: (Guid)b.Tag, Line: dragLines[(Guid)b.Tag], Button: b))
+                .Select(x => new TaskDropTarget.Drawn(new TaskDropTarget.Placed(x.Id, x.Line.Quadrant, x.Line.Waiting,
+                    new Rect(x.Button.TranslatePoint(new Point(0, 0), DragSurface), x.Button.RenderSize))
+                    { TakesChild = !x.Line.Waiting && parents.Contains(x.Id) }, x.Line.Nested))
+                .ToList();
+            // A nested subtask released inside its own parent's block stays where it is (as on the bar).
+            return TaskDropTarget.InOwnBlock(drawn, dragged, at) ? null : TaskDropTarget.At(TaskDropTarget.Anchors(drawn), [], own, at);
         }
         if (cells.Count == 0) return null;
         var (quadrant, box) = cells
@@ -208,7 +218,7 @@ public partial class TasksWindow
         if (dropShown is not { } drop) return;
         // Drag to nest: the line the task would go under is outlined, instead of a line between two.
         if (drop.Into is not null)
-            dc.DrawRoundedRectangle(null, new Pen(DropInk, 1.5), drop.IntoBounds, 4, 4);
+            dc.DrawRoundedRectangle(null, new Pen(DropInk, 1.5), FloatingBar.Inside(drop.IntoBounds), 4, 4);
         else
             dc.DrawRoundedRectangle(DropInk, null, new Rect(dropSpan.Left, drop.LineY - 1, dropSpan.Width, 2), 1, 1);
     }

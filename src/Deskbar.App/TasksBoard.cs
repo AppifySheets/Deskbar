@@ -218,7 +218,7 @@ public sealed class TasksBoard : IDisposable
             AddSubtask = (title, workspace, quadrant, parent) => AddNote(title, workspace, quadrant, parent).IsSuccess,
             ShowTask = ShowTask,
             ParentChoices = id => TaskViews.ParentChoices(tasks.Board, id),
-            SetParent = (id, parent) => Report(tasks.SetParent(id, parent)),
+            SetParent = (id, parent) => Report(tasks.SetParent(id, parent)).IsSuccess,
             NestTargets = id => tasks.Board.ParentCandidates(id).Select(t => t.Id).ToHashSet(),
         };
 
@@ -1117,8 +1117,8 @@ internal sealed record TasksWindowActions(
     /// <summary>What a line's "Subtask of" menu offers (TaskViews.ParentChoices). None, the menu has no "Subtask of".</summary>
     public Func<Guid, ParentChoices>? ParentChoices { get; init; }
 
-    /// <summary>Puts a task under another, or (none) makes it a plain task again (TaskService.SetParent).</summary>
-    public Action<Guid, Maybe<Guid>>? SetParent { get; init; }
+    /// <summary>Puts a task under another, or (none) makes it a plain task again (TaskService.SetParent); whether it worked.</summary>
+    public Func<Guid, Maybe<Guid>, bool>? SetParent { get; init; }
 
     /// <summary>
     /// Drag to nest: the tasks a dragged task could be dropped into as their subtask (TaskBoard.ParentCandidates, every
