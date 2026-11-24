@@ -159,6 +159,7 @@ Each task's JSON gains `parent` (id or null) and `subtasks` (ids). `ControlUsage
 - Lines keep their order; no nesting under the parent on the bar.
 - A subtask inherits the parent's workspace when none is given; flags are not inherited (a new note's default).
 - A closed parent stays a valid parent and its context is still briefed.
+- A parent's "· N subtasks" counts its open subtasks only; closed ones are history.
 - Session messaging between siblings is mentioned to the session, not relied on: whether a session id is the name
   ListAgents and SendMessage take is unmeasured.
 
