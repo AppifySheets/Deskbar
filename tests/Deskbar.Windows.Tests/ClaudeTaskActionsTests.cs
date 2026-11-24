@@ -34,6 +34,9 @@ public class ClaudeTaskActionsTests
         public ReplaySubject<IReadOnlyCollection<ClaudeAgent>> Live { get; } = new(1);
 
         public List<ProgramLaunch> Launches { get; } = [];
+        public List<ConsoleLaunch> Consoles { get; } = [];
+        // Whether wt.exe is installed; no on Windows Server 2022 (task abfe1db8).
+        public bool HasTerminal { get; set; } = true;
         public List<WindowHandle> BroughtForward { get; } = [];
         public List<(Guid Task, string Session)> Resumes { get; } = [];
         public List<(string Title, string Folder)> Starts { get; } = [];
@@ -90,6 +93,12 @@ public class ClaudeTaskActionsTests
                 },
                 Tell = Told.Add,
                 Forget = Forgotten.Add,
+                HasWindowsTerminal = () => HasTerminal,
+                OpenConsole = console =>
+                {
+                    Consoles.Add(console);
+                    return Result.Success<int?>(5432);
+                },
             }, Clock);
 
         public Guid Gepha => Harness.Manager.State.Workspaces.Single(w => w.Name == "GEPHA").Id;
@@ -162,6 +171,47 @@ public class ClaudeTaskActionsTests
 
         Assert.Single(rig.Launches);
         Assert.Equal([window.Handle], rig.BroughtForward);
+    }
+
+    // Task abfe1db8: Windows Server 2022 has no Windows Terminal, and "Could not start wt.exe" left every click without a
+    // window. Without wt.exe the window is a console of claude.exe's own, titled as the terminal's would be, expected on
+    // the task's workspace by claude's process name (a classic console window reports its client as its owner).
+    [Fact]
+    public void Without_windows_terminal_the_attach_window_is_a_console_on_its_workspace()
+    {
+        using var rig = new Rig { HasTerminal = false };
+        var task = rig.ClaudeTask();
+        rig.Listed(Agent(SessionId, background: true));
+
+        Assert.True(rig.Actions.Go(task).IsSuccess);
+
+        Assert.Empty(rig.Launches);
+        var console = Assert.Single(rig.Consoles);
+        Assert.Equal(["attach", "884c127f"], console.Arguments);
+        Assert.Equal(Folder, console.WorkingDirectory);
+        Assert.Equal("Fix the bar · Claude", console.Title.GetValueOrDefault());
+        Assert.True(rig.Harness.Manager.AwaitsAny("claude"));
+        Assert.False(rig.Harness.Manager.AwaitsAny("WindowsTerminal"));
+    }
+
+    // The console window is found again by its title like the terminal's, so a second click brings it forward instead of
+    // a second attach taking the session from it; and the task counts as having a window while it is open.
+    [Fact]
+    public void Without_windows_terminal_going_again_brings_the_console_forward()
+    {
+        using var rig = new Rig { HasTerminal = false };
+        var task = rig.ClaudeTask();
+        rig.Listed(Agent(SessionId, background: true));
+        rig.Actions.Go(task);
+
+        var window = new WindowInfo(new WindowHandle(0x7171), 71, "claude", @"C:\Users\me\.local\bin\claude.exe", "Fix the bar · Claude", null);
+        rig.Harness.Desktops.Placements[window.Handle] = rig.SparrowDesktop;
+        rig.Harness.Monitor.Pump.OnNext(new WindowEvent(WindowEventKind.Appeared, window));
+        rig.Actions.Go(task);
+
+        Assert.Single(rig.Consoles);
+        Assert.Equal([window.Handle], rig.BroughtForward);
+        Assert.True(ClaudeTaskActions.HasWindow(rig.Harness.Manager, task));
     }
 
     // Spec: an ended session is resumed in its folder, then a window opens on it. ClaudeSessions.ResumeNow does the
@@ -296,6 +346,28 @@ public class ClaudeTaskActionsTests
         Assert.Contains(rig.Asked, a => a.EndsWith(ClaudeTaskActions.TrustQuestion, StringComparison.Ordinal));
         Assert.Equal(ClaudeStart.TrustWindow(Folder), Assert.Single(rig.Launches), LaunchComparer.Instance);
         Assert.Single(rig.Starts);
+    }
+
+    // Task abfe1db8, the case in the report: on a terminal server without Windows Terminal, "Yes" to the trust question
+    // opened nothing ("Could not start wt.exe"). It opens a console running plain claude in the folder instead.
+    [Fact]
+    public void Without_windows_terminal_the_trust_window_is_a_console()
+    {
+        using var rig = new Rig { TrustsTerminal = true, HasTerminal = false };
+        var task = rig.ClaudeTask();
+        rig.Listed();
+        rig.StartAnswer = folder => Result.Failure<string>($"Workspace not trusted. Run `claude` in {folder} once and accept the trust prompt, then retry.");
+
+        rig.Actions.Start(task, Folder);
+        rig.Settle();
+
+        Assert.Empty(rig.Launches);
+        var console = Assert.Single(rig.Consoles);
+        Assert.Equal("claude", console.Program);
+        Assert.Empty(console.Arguments);
+        Assert.Equal(Folder, console.WorkingDirectory);
+        Assert.False(console.Title.HasValue);
+        Assert.Empty(rig.Told);
     }
 
     // With the feature off, nothing starts and Petre is told why.

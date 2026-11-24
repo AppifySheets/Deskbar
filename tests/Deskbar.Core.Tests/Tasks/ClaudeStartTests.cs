@@ -189,6 +189,61 @@ public class ClaudeStartTests
     public void The_trust_window_runs_the_claude_it_is_given() =>
         Assert.Equal(["-w", "new", "-d", @"C:\repos\Deskbar", FoundClaude], ClaudeStart.TrustWindow(@"C:\repos\Deskbar", FoundClaude).Arguments);
 
+    // Task abfe1db8 (Windows Server 2022 has no Windows Terminal): the window on a session is then a console of
+    // claude.exe's own, on `attach <short id>` in the folder (without its trailing separator), titled as the terminal's.
+    [Fact]
+    public void The_attach_console_runs_claude_attach_in_the_folder_with_the_title()
+    {
+        var launch = ClaudeStart.AttachConsole("ab12cd34", @"C:\repos\Deskbar\", "Fix the bar · Claude", FoundClaude);
+
+        Assert.Equal(FoundClaude, launch.Program);
+        Assert.Equal(["attach", "ab12cd34"], launch.Arguments);
+        Assert.Equal(@"C:\repos\Deskbar", launch.WorkingDirectory);
+        Assert.Equal("Fix the bar · Claude", launch.Title.GetValueOrDefault());
+    }
+
+    // The trust console runs plain claude and leaves the title to it, as the default profile does in Windows Terminal.
+    [Fact]
+    public void The_trust_console_runs_plain_claude_without_a_title()
+    {
+        var launch = ClaudeStart.TrustConsole(@"C:\repos\Deskbar\");
+
+        Assert.Equal("claude", launch.Program);
+        Assert.Empty(launch.Arguments);
+        Assert.Equal(@"C:\repos\Deskbar", launch.WorkingDirectory);
+        Assert.False(launch.Title.HasValue);
+    }
+
+    // CreateProcess gets one command line: the program always quoted (its folder can hold spaces), plain arguments as
+    // they are, and an argument with a space or a quote quoted by the C runtime's rules.
+    [Fact]
+    public void The_console_command_line_quotes_the_program() =>
+        Assert.Equal($"\"{FoundClaude}\" attach ab12cd34", ClaudeStart.CommandLine(ClaudeStart.AttachConsole("ab12cd34", @"C:\x", "T", FoundClaude)));
+
+    [Theory]
+    [InlineData("a b", "\"a b\"")]
+    [InlineData("", "\"\"")]
+    [InlineData("say \"hi\"", "\"say \\\"hi\\\"\"")]
+    [InlineData(@"C:\a b\", "\"C:\\a b\\\\\"")]
+    [InlineData(@"x\""y", "\"x\\\\\\\"y\"")]
+    public void A_console_argument_with_spaces_or_quotes_is_quoted(string argument, string written) =>
+        Assert.Equal("\"p\" " + written, ClaudeStart.CommandLine(new ConsoleLaunch("p", [argument], @"C:\", Maybe<string>.None)));
+
+    // Windows Terminal is there when wt.exe is in a PATH folder, or as the execution alias its package puts in
+    // %LOCALAPPDATA%\Microsoft\WindowsApps; Server 2022 has neither.
+    [Fact]
+    public void Windows_terminal_is_found_on_the_path() =>
+        Assert.True(ClaudeStart.HasWindowsTerminal(@"C:\Windows; ""D:\tools\wt"" ", @"C:\Users\me\AppData\Local", f => f == @"D:\tools\wt\wt.exe"));
+
+    [Fact]
+    public void Windows_terminal_is_found_as_the_execution_alias_off_the_path() =>
+        Assert.True(ClaudeStart.HasWindowsTerminal(@"C:\Windows", @"C:\Users\me\AppData\Local",
+            f => f == @"C:\Users\me\AppData\Local\Microsoft\WindowsApps\wt.exe"));
+
+    [Fact]
+    public void Without_wt_exe_anywhere_there_is_no_windows_terminal() =>
+        Assert.False(ClaudeStart.HasWindowsTerminal(@"C:\Windows;C:\Windows\System32", @"C:\Users\me\AppData\Local", f => !f.EndsWith("wt.exe")));
+
     // The folders of a workspace's VS Code windows are only names (EditorFolder.Of reads them from the titles); the spec
     // resolves them to full paths through the sessions' folders. A name no session's repo ends in cannot be started in
     // and is left out; the repo of a worktree session counts, so "Deskbar" finds C:\repos\Deskbar.

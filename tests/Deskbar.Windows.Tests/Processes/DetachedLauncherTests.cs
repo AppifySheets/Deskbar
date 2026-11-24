@@ -64,6 +64,43 @@ public sealed class DetachedLauncherTests : IDisposable
         }
     }
 
+    // StartConsole (task abfe1db8, the window on a Claude session without Windows Terminal), run for real: the program
+    // gets the added variable AND keeps the inherited environment (SystemRoot stands for it), starts in the folder given,
+    // and the answer is its pid. wscript again, so no console window opens on the machine the suite runs on: a GUI
+    // program ignores CREATE_NEW_CONSOLE. The title cannot be seen without a console; StartupInfo carries it.
+    [Fact]
+    public void Start_console_passes_the_added_variable_the_inherited_environment_and_the_folder()
+    {
+        var reader = Path.Combine(Path.GetTempPath(), $"deskbar-console-{Guid.NewGuid():N}.js");
+        File.WriteAllText(reader,
+            "var sh = new ActiveXObject(\"WScript.Shell\"); var env = sh.Environment(\"PROCESS\");"
+            + " var f = new ActiveXObject(\"Scripting.FileSystemObject\").CreateTextFile(WScript.Arguments(0));"
+            + " f.Write(env(\"DESKBAR_CONSOLE_PROBE\") + \"|\" + env(\"SystemRoot\") + \"|\" + sh.CurrentDirectory); f.Close();");
+        var folder = Path.GetTempPath().TrimEnd('\\');
+        try
+        {
+            var result = DetachedLauncher.StartConsole($"\"wscript.exe\" //B //E:JScript \"{reader}\" \"{marker}\"", folder, "Probe · Claude",
+                new Dictionary<string, string> { ["DESKBAR_CONSOLE_PROBE"] = "1" });
+
+            Assert.True(result.IsSuccess, result.IsFailure ? result.Error : "");
+            Assert.NotNull(result.Value);
+            AssertMarkerAppears(marker, result.Value);
+            // The script may still be writing when the file first exists.
+            Assert.True(SpinWait.SpinUntil(() => TryRead(marker).Length > 0, MarkerBound));
+            Assert.Equal($"1|{Environment.GetEnvironmentVariable("SystemRoot")}|{folder}", TryRead(marker), ignoreCase: true);
+        }
+        finally
+        {
+            try { File.Delete(reader); } catch (IOException) { }
+        }
+    }
+
+    static string TryRead(string path)
+    {
+        try { return File.ReadAllText(path); }
+        catch (IOException) { return ""; }
+    }
+
     // A program that is not there: the unpackaged path fails the way Process.Start does, with its message.
     [Fact]
     public void Unpackaged_start_of_a_missing_program_is_a_failure()

@@ -71,6 +71,10 @@ public sealed class ClaudeTaskActions : IDisposable
     // expected by this name, not by wt's.
     const string TerminalProcess = "WindowsTerminal";
 
+    // Without Windows Terminal (task abfe1db8) the window is a classic console started on claude.exe, and such a window
+    // reports its client, claude.exe, as its owner (measured, see ClaudeStart.AttachConsole).
+    const string ConsoleProcess = "claude";
+
     // How long a window launched on a session counts as on its way: wt takes a second or two to show it (measured),
     // and an attach issued meanwhile would take the session from the window that is still opening.
     static readonly TimeSpan AttachPending = TimeSpan.FromSeconds(10);
@@ -199,7 +203,8 @@ public sealed class ClaudeTaskActions : IDisposable
         var shortId = agent.ShortId.GetValueOrDefault(agent.SessionId[..Math.Min(8, agent.SessionId.Length)]);
         // A launch that fails (wt missing from the PATH, say) is said in the thread AND to Petre at once (final review,
         // item 12): he clicked and no window came, and the thread is not where he is looking.
-        Launch(task, ClaudeStart.AttachWindow(shortId, agent.Folder, title, seams.Claude()))
+        var claude = seams.Claude();
+        Launch(task, ClaudeStart.AttachWindow(shortId, agent.Folder, title, claude), ClaudeStart.AttachConsole(shortId, agent.Folder, title, claude))
             .Tap(() => attaching = attaching.SetItem(agent.SessionId, scheduler.Now))
             .TapError(e => SayAndTell(task.Id, $"Deskbar could not open a window on session {shortId}:\n\n{e}"));
     }
@@ -215,18 +220,31 @@ public sealed class ClaudeTaskActions : IDisposable
         return manager.KnownWindows.Any(w => Titled(manager, w, title));
     }
 
-    // A Windows Terminal window with this title, as it reads now or read before a rename rule shortened it.
+    // A Windows Terminal window with this title, or the console window Deskbar opens where there is no Windows Terminal
+    // (claude.exe's own), as it reads now or read before a rename rule shortened it.
     static bool Titled(WorkspaceManager manager, WindowInfo window, string title) =>
-        window.ProcessName.Equals(TerminalProcess, StringComparison.OrdinalIgnoreCase)
+        (window.ProcessName.Equals(TerminalProcess, StringComparison.OrdinalIgnoreCase)
+            || window.ProcessName.Equals(ConsoleProcess, StringComparison.OrdinalIgnoreCase))
         && (window.Title == title || manager.OriginalTitle(window.Handle).Map(t => t == title).GetValueOrDefault(false));
 
-    // A terminal window started for the task: expected on its workspace (the one in front for a free task) through
-    // StartIn, so it lands there like any program `deskbar.cmd start` starts. With no workspace at all (an unnamed
-    // desktop in front) it is started where Petre is.
-    Result Launch(TaskItem task, ProgramLaunch launch) =>
+    // A terminal window started for the task: Windows Terminal's when wt.exe is installed, else a console window on
+    // claude.exe (task abfe1db8: Windows Server 2022 has no Windows Terminal, and every window here failed with "Could not
+    // start wt.exe"). Asked at each launch, like claude.exe's own lookup, so installing Windows Terminal while Deskbar
+    // runs takes effect at the next click.
+    Result Launch(TaskItem task, ProgramLaunch terminal, ConsoleLaunch console) =>
+        seams.HasWindowsTerminal()
+            ? Launch(task, new LaunchTarget(terminal, TerminalProcess), seams.Launch)
+            // The console's ProgramLaunch is only what StartIn names the expectation by (claude.exe's file name); the
+            // start itself is the console's, with its title and environment.
+            : Launch(task, new LaunchTarget(new ProgramLaunch(console.Program, console.Arguments, console.WorkingDirectory), ConsoleProcess),
+                _ => seams.OpenConsole(console));
+
+    // Expected on its workspace (the one in front for a free task) through StartIn, so it lands there like any program
+    // `deskbar.cmd start` starts. With no workspace at all (an unnamed desktop in front) it is started where Petre is.
+    Result Launch(TaskItem task, LaunchTarget target, Func<ProgramLaunch, Result<int?>> starter) =>
         task.WorkspaceId.Or(manager.CurrentWorkspaceId) is { HasValue: true } workspace
-            ? manager.StartIn(workspace.Value, new LaunchTarget(launch, TerminalProcess), seams.Launch).Bind(_ => Result.Success())
-            : seams.Launch(launch).Bind(_ => Result.Success());
+            ? manager.StartIn(workspace.Value, target, starter).Bind(_ => Result.Success())
+            : starter(target.Launch).Bind(_ => Result.Success());
 
     // --- starting ---------------------------------------------------------------------------------------------------
 
@@ -320,7 +338,8 @@ public sealed class ClaudeTaskActions : IDisposable
             return;
         }
         if (!seams.OfferTrustTerminal($"{error}\n\n{TrustQuestion}")) return;
-        Current(taskId).Tap(task => Launch(task, ClaudeStart.TrustWindow(folder, seams.Claude()))
+        var claude = seams.Claude();
+        Current(taskId).Tap(task => Launch(task, ClaudeStart.TrustWindow(folder, claude), ClaudeStart.TrustConsole(folder, claude))
             .TapError(e => SayAndTell(taskId, $"Deskbar could not open a terminal in {folder}:\n\n{e}")));
     }
 
@@ -395,4 +414,17 @@ public sealed record ClaudeTaskSeams(
     /// it, so the window works where the PATH does not lead to claude (task dbe25323); the bare name by default.
     /// </summary>
     public Func<string> Claude { get; init; } = () => "claude";
+
+    /// <summary>
+    /// Whether Windows Terminal is installed (ClaudeStart.HasWindowsTerminal): the windows on sessions open in it when it
+    /// is, and in a console window of their own (OpenConsole) when it is not (task abfe1db8, Windows Server 2022). Yes by
+    /// default.
+    /// </summary>
+    public Func<bool> HasWindowsTerminal { get; init; } = () => true;
+
+    /// <summary>
+    /// Starts a console window on claude.exe (DetachedLauncher.StartConsole) for a machine without Windows Terminal; the
+    /// answer is the new process's id. Refused by default.
+    /// </summary>
+    public Func<ConsoleLaunch, Result<int?>> OpenConsole { get; init; } = _ => Result.Failure<int?>("No console launcher");
 }

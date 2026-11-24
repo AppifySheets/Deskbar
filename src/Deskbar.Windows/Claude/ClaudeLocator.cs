@@ -34,6 +34,17 @@ public static class ClaudeLocator
             File.Exists);
 
     /// <summary>
+    /// Whether Windows Terminal's wt.exe can be started (ClaudeStart.HasWindowsTerminal), searched over the same three
+    /// PATHs and asked fresh on every launch for the same reason: Windows Server 2022 has none (task abfe1db8), and one
+    /// installed while Deskbar runs should be used from the next click on.
+    /// </summary>
+    public static bool HasWindowsTerminal() =>
+        ClaudeStart.HasWindowsTerminal(
+            SearchPath(),
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+            File.Exists);
+
+    /// <summary>
     /// What a failed lookup says, in the thread and to the user at once: where Deskbar looked and how to install
     /// Claude Code so it is found.
     /// </summary>
