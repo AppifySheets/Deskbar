@@ -1011,6 +1011,32 @@ DW3. In the tasks panel, the done task is under the "Waiting on you" caption. Th
 DW4. Try to drag the done line: it does not move, and nothing drops above it.
 DW5. Set the done task back to In progress: it goes back to the place it had in its quadrant.
 
+## A task in its own window
+
+(Task dca4ebeb.) The tasks panel open, a task with a long description (a few headings, a list, a link, a picture) and
+more than three comments, one of them yours.
+
+TW1. Right-click its line in the panel: "Open in window" is second, after Edit. Pick it: a window titled after the task
+     opens on this desktop and comes to the front, with the whole description rendered, its picture, and every comment
+     (none folded behind "N earlier comments", none cut to three lines). The question or status line shows in full.
+TW2. Pick "Open in window" again, from the bar's right-click menu of the same task: the same window comes forward, no
+     second one. Open the task's thread in the panel: "Open in window" is the first button in it.
+TW3. Leave the window on this desktop, switch to another desktop and run `deskbar.cmd task open <id>`: the window moves to
+     the desktop you are on and comes to the front, without taking you back.
+TW4. Press F2 (or Edit): the title and the description become boxes. Change both, paste a screenshot into the
+     description, look at Preview, press Ctrl+S. The window and the panel's line both show the new title, description
+     and picture. Edit again and press Esc: nothing changes.
+TW5. Type a comment over two lines (Enter makes a new line) and press Ctrl+Enter: it posts as you, the box empties, and
+     the comment shows in the window and in the panel's thread. While you type, have a session post a comment: your
+     words stay in the box.
+TW6. Narrow the window below about 1100 pixels: sessions, subtasks and details move under the thread. Widen it: they
+     return to the right-hand column.
+TW7. Move and resize the window, close it, open another task's window: it opens where the first one was, at its size.
+     Restart Deskbar and open one again: same place. Maximize one, close it, open another: it opens maximized.
+TW8. With one task window open, open a second task: the second opens a little down and to the right of the first.
+TW9. A subtask in the side column opens in a window of its own. "Delete for good" from the window's "⋯" menu closes
+     the window with the task.
+
 ## Results (2026-08-01)
 
 Status: **pending human execution.** An agent cannot observe the desktop, Task View,

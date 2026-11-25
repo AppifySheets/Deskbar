@@ -85,6 +85,10 @@ public static class ControlUsage
             new("task", "go <id>",
                 "go to a task as a double-click on its line does: its workspace, then its Claude session's window (a\n"
                 + "      background session's terminal is brought forward or opened, an ended one is resumed first)"),
+            // Task dca4ebeb: the twin of the line menus' "Open in window" (TasksBoard.OpenWindow in the app).
+            new("task", "open <id>",
+                "open a task in a window of its own: the whole description, every comment, sessions and subtasks,\n"
+                + "      editable; a task already open in one brings that window forward, onto the desktop in front"),
             new("task", "start <id> [--folder <path>]",
                 "start a background Claude session on the task, with the task as its first message, and open a window\n"
                 + "      on it; without --folder it starts where exactly one folder is known and otherwise names them"),

@@ -70,6 +70,17 @@ Each line shows the task's title, then its question or status line under it, the
 - **+ Add** opens a box for a note. Beside it are the important and urgent toggles, then the chip saying which workspace it goes on, which you can change. Enter adds the note at the top of the quadrant the toggles give; Esc closes the box. In the List the toggles start off and are off again after each note. In the Matrix they follow the active cell, which has a blue edge: the cell you last clicked in, or the one holding the task you selected, and quadrant II until then. Click in a cell and the toggles take its flags; flip a toggle and the active cell moves to match. A note added there lands at the top of the active cell.
 - The add box takes pictures as a comment box does: Ctrl+V a screenshot or drop image files on it, and each waits under the box with its **x**. Enter adds the task with what you typed as its title and the pictures as its description. A task can be pictures alone: with nothing typed it is called "Picture" ("Pictures" for more than one), and you can rename it later. Esc closes the box and drops the waiting pictures. The add box at the top of the bar's task list takes pictures the same way.
 
+## A task in its own window
+
+The panel is narrow on purpose, which makes a long task hard to read and harder to write. **Open in window**, second on a task's menu in the panel and on the bar (after **Edit**), and the first button in its open thread, opens the task in an ordinary window: a title bar, resizable and maximizable, on the taskbar and in Alt+Tab. Double-click still goes to the task's workspace, as before.
+
+- The header has the title, the status (with **Undo** while a close can still be undone), the workspace, who it is assigned to, the **Important** and **Urgent** toggles and its age, then the question or status line in full, with its links clickable. **Edit** and **⋯** are on the right; **⋯** has the status, close or reopen, **Assign to**, **Move to…**, **Go to its workspace**, **Show in the tasks panel** and **Delete**.
+- The description is rendered at full width with its pictures. Under it is the whole thread: every comment, none folded behind "N earlier comments" and none cut to three lines. Settled comments still fold behind their own line. The box at the end posts a comment as you with **Ctrl+Enter**; a plain Enter is a new line, and pictures paste or drop in as they do in the panel. What you type stays in the box while the task changes around it.
+- On a window at least 1100 DIP wide, a column on the right holds the Claude sessions (each with **Open**), **Start Claude on this**, the subtasks (each opens in a window of its own) and the details: quadrant, workspace, assignee, goal, parent, when it was added and its id, which you can select and copy. A narrower window puts the column under the thread.
+- **Edit**, F2 or Ctrl+E turns the title and description into large boxes, with **Markdown** and **Preview** tabs. Pictures paste or drop into the description as in the panel's editor. **Ctrl+S** or **Ctrl+Enter** saves both and **Esc** keeps nothing. Your own comments have **Edit** in place (Ctrl+Enter saves, Esc keeps it).
+- Each task has one window: asking again brings it to the front. It always comes to the desktop you are on, moved there if you left it on another. Every task window opens where you last moved, resized or closed one, maximized if that one was, and a second one open at the same time opens a little down and to the right. Deleting the task closes its window, and the windows close with Deskbar.
+- `deskbar.cmd task open <id>` does the same from a script.
+
 ## Subtasks
 
 A task can have subtasks, one level deep: a subtask cannot have subtasks of its own.
@@ -128,6 +139,7 @@ The full set:
 - `task assign <id> me|claude`, the **Assign to** menu's twin; `task list` gives each task's `assignee`, `me` or `claude`
 - `task comment-settle <comment-id> --session <id>`, a session settling one of its own comments (another's is refused); `task list`'s `thread` shows each comment's `settled` time, or null
 - `task describe <id> <markdown>|-`, the description Edit sets (empty clears it), and `task comment-edit <comment-id> <markdown>|-`, which rewrites one of your own comments and refuses a session's; `task list` gives each task's `description` and its `thread`, each comment's id, `you` or `claude` for who wrote it, and its `markdown`, the comment's text; in both, a pasted picture's line carries its full path, ready for a session to read
+- `task open <id>`, the menus' **Open in window**: the task in a window of its own, or its window brought forward onto the desktop you are on
 - `task goal <id> <goal-id>|none`, the **Goal** menu's twin; `task list` gives each task's `goal` (see [Goals](goals.md))
 - `task add <title> --parent <id>` adds a subtask; without `--workspace` it goes on the parent's workspace
 - `task parent <id> <parent-id>|none` puts a task under another, or makes it a plain task again; a second level is refused

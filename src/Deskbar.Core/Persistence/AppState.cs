@@ -509,6 +509,13 @@ public sealed record AppState(
     // read it as TasksPanelState.Default (closed, default width) via `State.TasksPanel ?? TasksPanelState.Default`.
     public TasksPanelState? TasksPanel { get; init; }
 
+    // Where a task window (the app's TaskDetailWindow, task dca4ebeb: "a separate view that will open a task in,
+    // especially for longer tasks") was last left. ONE place shared by every task window (Petre: "remember size and
+    // position"): the next task opened lands where the last one was closed or moved to. Null until a task window is first
+    // closed or moved, which is every state.json written before this key; the window then opens at a default size,
+    // centred on the screen in front. See TaskWindowState for the coordinates.
+    public TaskWindowState? TaskWindow { get; init; }
+
     // Whether the tasks window shows its Matrix (Covey's 2 by 2) rather than its List (Task 12, Ruling 28: "a List /
     // Matrix switch in the toolbar (remembered)"). False, the List, in every state.json written before this key.
     public bool TasksMatrix { get; init; }
@@ -794,6 +801,13 @@ public sealed record TasksWindowState(int Left, int Top, int Width, int Height, 
 
 // The docked tasks panel (AppState.TasksPanel): open or not, and its width in DIPs (clamped by TasksPanelLayout.Clamp
 // against the screen it docks to when it is shown, never here).
+// Where a task window sits (AppState.TaskWindow): WINDOWPLACEMENT's rcNormalPosition in device pixels (Left, Top,
+// Right, Bottom, workspace coordinates, the ones SetWindowPlacement takes back), and whether it was maximized (the
+// rectangle is then the one it restores to). Read and written only through Get/SetWindowPlacement, never mixed with
+// screen coordinates, so the workspace-versus-screen offset (NativeMethods.WINDOWPLACEMENT) cancels out; and
+// SetWindowPlacement itself pulls a rectangle no screen holds any more back onto one.
+public sealed record TaskWindowState(int Left, int Top, int Right, int Bottom, bool Maximized);
+
 public sealed record TasksPanelState(bool Open, double Width)
 {
     // Whether the workspace filter is on "Current workspace" (TaskWorkspaceFilter.Current, task ed1a01fc): the one filter

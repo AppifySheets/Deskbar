@@ -49,6 +49,9 @@ public partial class FloatingBar
     /// </summary>
     internal Func<Guid, ContextMenu?>? StartClaude { get; init; }
 
+    /// <summary>"Open in window" (task dca4ebeb): the App's TasksBoard.OpenWindow. Unset, the item is not shown.</summary>
+    internal Action<Guid>? OpenTaskWindow { get; init; }
+
     // The title, or on the line being edited, the editor in its place.
     UIElement TitleOrEditor(TaskLine line) => editingTask == line.Id && !line.Closing ? TaskEditBox(line) : TextOf(line);
 
@@ -70,6 +73,11 @@ public partial class FloatingBar
         if (taskService is null || line is null || line.Closing) return null;
         var menu = new ContextMenu { Placement = PlacementMode.MousePoint };
         menu.Items.Add(TaskMenuItem("Edit", () => BeginTaskEdit(id)));
+        // OPEN IN WINDOW (task dca4ebeb): the task in a window of its own (the App's TasksBoard.OpenWindow), right after
+        // Edit as in the panel's menu. Run once this menu has closed, so the new window is not activated under it.
+        if (OpenTaskWindow is { } openWindow)
+            menu.Items.Add(TaskMenuItem(TasksWindow.OpenInWindowText, () => Dispatcher.BeginInvoke(() => openWindow(id),
+                System.Windows.Threading.DispatcherPriority.Input)));
         // OPEN CLAUDE (task 7f61af2e; Petre: "make it possible to open claude without opening the task first"). A line's
         // single click opens the task in the tasks panel (Ruling 54), so the double-click that reaches the session opened
         // the panel on its first press, and the panel's strip moved every window on the screen on the way. This item is

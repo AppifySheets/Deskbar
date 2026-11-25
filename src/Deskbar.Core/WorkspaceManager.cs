@@ -4427,6 +4427,13 @@ public sealed class WorkspaceManager(
             ? Result.Success()
             : Result.Success().Tap(() => Persist(State with { TasksPanel = state }));
 
+    // Where the task windows open (AppState.TaskWindow, one place shared by all of them): saved when one is moved, resized
+    // or closed. A no-op when unchanged, so a window closed where it already was writes nothing.
+    public Result SaveTaskWindow(TaskWindowState state) =>
+        State.TaskWindow == state
+            ? Result.Success()
+            : Result.Success().Tap(() => Persist(State with { TaskWindow = state }));
+
     // OBSOLETE (a comment, not [Obsolete], because warnaserror): the floating window it served is gone and Task 6
     // stops calling it; kept only so old files load. Where the tasks window was left (AppState.TasksWindow). A no-op
     // when unchanged, so a window closed where it already was writes nothing.

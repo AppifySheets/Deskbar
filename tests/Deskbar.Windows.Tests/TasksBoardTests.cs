@@ -3438,8 +3438,9 @@ public class TasksBoardTests
 
         var menu = t.Window.OpenMenuFor(id, atPointer: true);
         var items = menu.Items.OfType<MenuItem>().ToList();
-        Assert.Equal(["Edit", "Open Claude", "Start Claude on this"], items.Take(3).Select(i => ((TextBlock)i.Header).Text));
-        items[1].RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
+        // "Open in window" (task dca4ebeb) comes first after Edit, then Open Claude.
+        Assert.Equal(["Edit", "Open in window", "Open Claude", "Start Claude on this"], items.Take(4).Select(i => ((TextBlock)i.Header).Text));
+        items[2].RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
         menu.IsOpen = false;
         // Run once the menu has closed (an Input-priority dispatch): a lower priority runs after it.
         t.Window.Dispatcher.Invoke(() => { }, System.Windows.Threading.DispatcherPriority.ApplicationIdle);
@@ -3503,8 +3504,9 @@ public class TasksBoardTests
 
         var menu = t.Window.OpenMenuFor(id);
         var items = menu.Items.OfType<MenuItem>().ToList();
-        Assert.Equal(["Edit", "Start Claude on this"], items.Take(2).Select(i => ((TextBlock)i.Header).Text));
-        items[1].RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
+        // "Open in window" (task dca4ebeb) sits between them, right after Edit.
+        Assert.Equal(["Edit", "Open in window", "Start Claude on this"], items.Take(3).Select(i => ((TextBlock)i.Header).Text));
+        items[2].RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
         menu.IsOpen = false;
         // Run once the menu has closed (an Input-priority dispatch): a lower priority runs after it.
         t.Window.Dispatcher.Invoke(() => { }, System.Windows.Threading.DispatcherPriority.ApplicationIdle);
@@ -4244,7 +4246,7 @@ public class TasksBoardTests
         t.Controller.Show();
 
         var menu = t.Window.OpenMenuFor(id);
-        Assert.Equal(["Edit", "Start Claude on this", "Add subtask…"], MenuWords(menu).Take(3));
+        Assert.Equal(["Edit", "Open in window", "Start Claude on this", "Add subtask…"], MenuWords(menu).Take(4));
         menu.IsOpen = false;
     });
 

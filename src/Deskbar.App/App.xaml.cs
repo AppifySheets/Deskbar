@@ -994,6 +994,23 @@ public partial class App : Application
     // Whether a window is on the desktop in front: a window pinned to every desktop is, one on the current desktop is,
     // and any failure to ask counts as no, so a doubt never moves Petre. Shared by the task list's keyboard hand-back
     // and the tasks window's arrival, both of which must never switch desktops.
+    // A task window to the desktop in front, then on top and active (TasksBoard.BringTaskWindowForward). A move that fails
+    // is traced and the window is left where it is, not activated: activating it on another desktop would switch there.
+    void BringTaskWindowHere(nint hwnd)
+    {
+        var window = new WindowHandle(hwnd);
+        if (desktops is { } service && !OnDesktopInFront(hwnd))
+        {
+            var moved = service.CurrentDesktop().Bind(front => service.MoveWindow(window, front));
+            ClickTrace.Write($"task window 0x{hwnd:X}: moved to the desktop in front: {(moved.IsSuccess ? "ok" : moved.Error)}");
+            if (moved.IsFailure) return;
+        }
+        TasksBoard.RaiseToTop(hwnd);
+        taskWindowActivator.Activate(window);
+    }
+
+    readonly WindowActivator taskWindowActivator = new();
+
     bool OnDesktopInFront(nint hwnd) =>
         desktops!.IsPinned(new WindowHandle(hwnd)).Match(pinned => pinned, _ => false)
         || desktops.DesktopOf(new WindowHandle(hwnd)).Bind(on => desktops.CurrentDesktop().Map(front => front == on)).Match(same => same, _ => false);
@@ -1653,6 +1670,9 @@ public partial class App : Application
                 : Result.Failure("The tasks panel is not available in this mode."),
             // A caller's folder in its long form (FolderPath): a Claude session can report an 8.3 short path.
             longPath: LongPath.Of,
+            // `task open <id>` (task dca4ebeb), the twin of the line menus' "Open in window" (TasksBoard.OpenWindow). Read
+            // when the command arrives: the board is built later, with quick find, and is missing in compatibility mode.
+            openTaskWindow: task => tasksBoard?.OpenWindow(task.Id) ?? Result.Failure(RemoteControl.TaskWindowUnavailable),
             // `goal ...` and `task goal`, the planner's pipe twins (RemoteControl.Goals.cs).
             goals: goals,
             // `task go|start|open-session` (Task 9), the twins of a line's double-click, "Start Claude on this" and the
@@ -2013,6 +2033,9 @@ public partial class App : Application
                 TasksPanelShown = tasksPanelShown,
                 // A line's single click (Ruling 54): the panel on that task, picked and expanded. A double-click goes.
                 OpenTaskInWindow = id => tasksBoard?.ShowTask(id),
+                // A line menu's "Open in window" (task dca4ebeb): the task in a window of its own (TasksBoard.OpenWindow).
+                // Read through the field: the board is built later, with quick find.
+                OpenTaskWindow = id => tasksBoard?.OpenWindow(id),
                 // A Claude line's icon: the VS Code window whose title names the session's folder, by the rule the
                 // control pipe's `open` and `attention` use to find a caller's window (RemoteControl.CallerOf,
                 // EditorFolder.Best), each window offering its current title and the one it had before a rename. Two
@@ -2394,7 +2417,14 @@ public partial class App : Application
                     // ("now it's behind somewhere", see TasksBoard.Arrive).
                     raise: () => TasksBoard.RaiseToTop(hwnd),
                     activate: () => tasksActivator.Activate(new WindowHandle(hwnd)),
-                    trace: ClickTrace.Write));
+                    trace: ClickTrace.Write))
+            {
+                // A task window (task dca4ebeb) comes to Petre on the desktop in front (his pick): one left open on another
+                // desktop is moved here first, since activating it there would take Windows to that desktop; then it is
+                // raised and activated through the activator, as the panel is (a `task open` typed in a terminal carries
+                // no foreground right). Each window is an ordinary window, not pinned, so it stays where Petre puts it.
+                BringTaskWindowForward = BringTaskWindowHere,
+            };
 
             // A panel left open at the last exit (AppState.TasksPanel, saved open by TasksBoard.Shutdown) opens again,
             // without being brought forward. The bar has shown by now, but the panel answers its strip notice on the

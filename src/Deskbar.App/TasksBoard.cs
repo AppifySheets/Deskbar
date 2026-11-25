@@ -130,6 +130,27 @@ public sealed class TasksBoard : IDisposable
     // Set by Shutdown, which runs once (see there).
     bool shutDown;
 
+    // The actions handed to the panel, handed to every task window as well: a click in either is the same method here.
+    readonly TasksWindowActions actions;
+
+    // THE TASK WINDOWS (task dca4ebeb, "a separate view that will open a task in, especially for longer tasks"), one per
+    // task, by task id. A task already open in one is brought forward rather than opened twice. Each window says when it
+    // closes (Leaving), and leaves this map then. See OpenWindow.
+    readonly Dictionary<Guid, TaskDetailWindow> taskWindows = [];
+
+    /// <summary>
+    /// Makes a task window. The tests hand one of their own; the app's is a plain TaskDetailWindow, whose pictures and
+    /// links behave as the panel's do.
+    /// </summary>
+    internal Func<TaskDetailWindow> NewTaskWindow { get; init; } = () => new TaskDetailWindow();
+
+    /// <summary>
+    /// Brings a task window to Petre by its handle: the App moves it onto the desktop in front when it is on another one,
+    /// then raises and activates it through an activator (a `deskbar.cmd task open` typed in a terminal carries no right
+    /// to the foreground). None (the tests): the window activates itself where it is.
+    /// </summary>
+    internal Action<nint>? BringTaskWindowForward { get; init; }
+
     // What Undo gives back (Ruling 31): the status, the question of a task that waited on Petre, and the selection.
     sealed record PendingClose(TaskStatus Was, IDisposable Timer)
     {
@@ -184,7 +205,7 @@ public sealed class TasksBoard : IDisposable
         // The task Petre picked (ruling 21), the bar's own object in the App, so a pick in either view shows in both.
         this.selection = selection ?? new TaskSelection();
 
-        window.Actions = new TasksWindowActions(
+        window.Actions = actions = new TasksWindowActions(
             Go: id => Go(id),
             Pick: id => Pick(id),
             ToggleThread: ToggleThread,
@@ -226,6 +247,8 @@ public sealed class TasksBoard : IDisposable
             Snooze = (id, choice) => Snooze(id, choice),
             Wake = id => Wake(id),
             ShowSubtasks = ShowSubtasks,
+            // "Open in window" (task dca4ebeb): the task in a window of its own (OpenWindow).
+            OpenWindow = id => OpenWindow(id),
         };
 
         subscriptions = new CompositeDisposable(
@@ -445,7 +468,69 @@ public sealed class TasksBoard : IDisposable
     internal void Refresh()
     {
         if (window.IsOpen) window.Present(View());
+        RefreshTaskWindows();
     }
+
+    // --- task windows (task dca4ebeb) ---------------------------------------------------------------------------------
+    //
+    // WHAT THEY ARE. A task in a window of its own: an ordinary, resizable window with a title bar, on the taskbar and in
+    // Alt+Tab, showing the whole description, the question or status line in full, every comment (none cut short), the
+    // sessions and the subtasks, and editing the title and description in a large box. The panel is 360 DIP and more,
+    // which is too narrow to read or write a long brief in; this is where a long task is read (mockup approved
+    // 2026-11-25, docs/superpowers/specs/2026-11-25-task-window-design.md).
+    //
+    // WHERE THEY OPEN. On the desktop in front (Petre's pick): a new window simply shows there; one already open on
+    // another desktop is moved here before it is brought forward (BringTaskWindowForward), since activating it where it
+    // is would take Windows to that desktop. One place, shared by every task window, is remembered across restarts
+    // (AppState.TaskWindow, "remember size and position"); a second window opened while one is up is cascaded a little
+    // so it does not sit exactly over the first.
+    //
+    // HOW THEY STAY CURRENT. Every redraw of the board (a task changed, a session list arrived, a workspace renamed)
+    // redraws each open task window from the board as it is, whether or not the panel is open, and the window skips a
+    // redraw that would draw the same thing. A task that is deleted closes its window. A refusal shows on the panel's
+    // problem line and on each task window's.
+
+    /// <summary>
+    /// "Open in window" on a line's menu (the panel's and the bar's), the thread's button and `task open <id>`: the task
+    /// in a window of its own, or its window brought forward when it already has one. Fails for an unknown task.
+    /// </summary>
+    public Result OpenWindow(Guid id)
+    {
+        if (shutDown) return Result.Failure("Deskbar is closing");
+        var task = tasks.Board.Tasks.TryFirst(t => t.Id == id);
+        if (task.HasNoValue) return Report(Result.Failure($"No task with id {id}"));
+        if (!taskWindows.TryGetValue(id, out var shown))
+        {
+            shown = NewTaskWindow();
+            shown.Actions = actions;
+            // Each move, resize or close saves the one shared place (a no-op when unchanged); a close also lets go of it.
+            shown.PlaceChanged = place => _ = manager.SaveTaskWindow(place);
+            shown.Leaving = () => taskWindows.Remove(id);
+            shown.Present(DetailOf(task.Value));
+            shown.Open(manager.State.TaskWindow, cascade: taskWindows.Count);
+            taskWindows[id] = shown;
+        }
+        if (BringTaskWindowForward is { } bring) bring(shown.EnsureHandle());
+        else shown.ActivateHere();
+        return Result.Success();
+    }
+
+    /// <summary>Whether the task has a window open (for the tests and the bar's menu).</summary>
+    internal bool HasWindow(Guid id) => taskWindows.ContainsKey(id);
+
+    /// <summary>For the tests: the task's open window, if any.</summary>
+    internal TaskDetailWindow? WindowOf(Guid id) => taskWindows.GetValueOrDefault(id);
+
+    // Each open task window drawn again from the board; one whose task is gone (deleted) closes.
+    void RefreshTaskWindows() =>
+        taskWindows.ToList().ForEach(pair => tasks.Board.Tasks.TryFirst(t => t.Id == pair.Key).Match(
+            task => pair.Value.Present(DetailOf(task)),
+            () => pair.Value.CloseForGood()));
+
+    // What a task window draws: the task's line with its thread open (comments, sessions, subtasks), the workspaces for
+    // its "Move to…" menu, and the clock its times are told against.
+    TaskDetailView DetailOf(TaskItem task) =>
+        new(RowOf(task, open: true), WorkspaceChipMenu.Entries(manager.State, withNone: true), now());
 
     public void Filter(TaskFilter shown)
     {
@@ -764,6 +849,10 @@ public sealed class TasksBoard : IDisposable
         shutDown = true;
         Remember(open: panel.IsShown);
         Dispose();
+        // The task windows close with the app (their place is already saved, on every move and close); they are not
+        // reopened at the next start.
+        taskWindows.Values.ToList().ForEach(w => w.CloseForGood());
+        taskWindows.Clear();
         panel.Shutdown();
         window.CloseForGood();
     }
@@ -908,7 +997,11 @@ public sealed class TasksBoard : IDisposable
         Refresh();
     }
 
-    TaskRowView Row(TaskItem task) => new(
+    TaskRowView Row(TaskItem task) => RowOf(task, expanded.Contains(task.Id));
+
+    // A line as drawn, its thread (comments, sessions, subtasks) filled in only when `open`: a line whose thread is
+    // expanded in the panel, or always for a task window (OpenWindow), which shows the whole task.
+    TaskRowView RowOf(TaskItem task, bool open) => new(
         task.Id,
         task.Title,
         // A snoozed line (only the Snoozed filter shows one) says when it comes back, ahead of its usual detail.
@@ -922,9 +1015,9 @@ public sealed class TasksBoard : IDisposable
         task.Sessions.Count(s => s.IsLive),
         PlaceOf(task.WorkspaceId),
         task.Comments.Count,
-        expanded.Contains(task.Id),
+        open,
         pendingCloses.ContainsKey(task.Id),
-        expanded.Contains(task.Id) ? task.Comments.Select(CommentView).ToArray() : [])
+        open ? task.Comments.Select(CommentView).ToArray() : [])
     {
         Created = task.Created,
         Assignee = task.Assignee,
@@ -935,7 +1028,7 @@ public sealed class TasksBoard : IDisposable
         // Null for no goal and for a link to a goal that no longer exists, which reads as no goal everywhere.
         Goal = goals?.GoalOf(task).Map(ChoiceOf).GetValueOrDefault(),
         // Only an open thread shows them, and an ended one's state looks on disk for its transcript (see the header).
-        SessionList = expanded.Contains(task.Id) ? sessionsOf(task) : [],
+        SessionList = open ? sessionsOf(task) : [],
         // Of its live sessions, how many Claude is busy in now (Task 8): their squares wear a halo.
         WorkingCount = workingOf(task),
         // Subtasks (Petre's pick A): the parent's title in front of a subtask's, and a parent's open subtasks' count.
@@ -944,7 +1037,7 @@ public sealed class TasksBoard : IDisposable
         // Claude still at it (task 37cd7081): the tick's tip says it will offer to stop Claude.
         ClaudeWorking = TaskBoard.ClaudeStillWorking(task),
         // An open thread lists the task's subtasks (follow-up: an open parent showed none of them).
-        Subtasks = expanded.Contains(task.Id)
+        Subtasks = open
             ? tasks.Board.Family(task.Id).Map(f => f.Subtasks.Select(c => new SubtaskView(c.Id, FloatingBar.FirstLine(c.Title), c.Status, c.StatusLine)).ToArray())
                 .GetValueOrDefault([])
             : [],
@@ -1017,6 +1110,7 @@ public sealed class TasksBoard : IDisposable
     Result Report(Result result)
     {
         window.ShowProblem(result.IsFailure ? result.Error : null);
+        taskWindows.Values.ToList().ForEach(w => w.ShowProblem(result.IsFailure ? result.Error : null));
         return result;
     }
 }
@@ -1254,7 +1348,19 @@ internal sealed record TasksWindowActions(
 
     /// <summary>The "Subtasks" checkbox (task 173ef268): true draws subtasks under their parent, false folds them. None, no checkbox.</summary>
     public Action<bool>? ShowSubtasks { get; init; }
+
+    /// <summary>
+    /// "Open in window" (task dca4ebeb): the task in a window of its own (TasksBoard.OpenWindow). None, the item and the
+    /// thread's button do not show.
+    /// </summary>
+    public Action<Guid>? OpenWindow { get; init; }
 }
+
+/// <summary>
+/// What a task window draws (task dca4ebeb): the task's line with its thread open, the workspaces for its "Move to…"
+/// menu (WorkspaceChipMenu's entries) and the time "now" is, for the task's age.
+/// </summary>
+internal sealed record TaskDetailView(TaskRowView Row, IReadOnlyList<WorkspaceChipMenu.Entry> Places, DateTimeOffset Now);
 
 /// <summary>A subtask as its parent's open thread lists it: id, title (first line), status and status line.</summary>
 internal sealed record SubtaskView(Guid Id, string Title, TaskStatus Status, string StatusLine);
