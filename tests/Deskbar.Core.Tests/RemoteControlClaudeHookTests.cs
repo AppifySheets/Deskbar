@@ -785,7 +785,50 @@ public class RemoteControlClaudeHookTests
         Assert.True(Titled("Store listing").HasLiveSession);
     }
 
-    // Review focus 5: a session in a folder no VS Code window shows makes a task on no workspace, still Claude's.
+    // Task f905b1a7: "tasks added to the deskbar by claude sessions should be given proper workspaces, not none". With no
+    // VS Code window on its folder (Petre's sessions run in terminal windows), a session's new task goes where the
+    // latest task worked on in its repo went, and a worktree of the repo counts as the repo.
+    [Fact]
+    public void A_session_without_a_vs_code_window_makes_its_task_where_its_repos_latest_task_went()
+    {
+        var manager = Started();
+        tasks.Create("Store listing", IdOf(manager, "Deskbar"), tasks.NewSession("old", Repo));
+
+        var reply = Said(manager, "s1", Repo + @"\.claude\worktrees\task-workspace", "new", "Tasks board");
+
+        Assert.Equal(ControlReply.Ok, reply.ExitCode);
+        Assert.Equal(IdOf(manager, "Deskbar"), Titled("Tasks board").WorkspaceId.Value);
+    }
+
+    // A session's follow-up note goes where the session's own task is, when no VS Code window says otherwise: the note
+    // belongs with the work it follows up, even in a folder the board has never seen.
+    [Fact]
+    public void A_note_for_later_goes_on_the_sessions_own_tasks_workspace()
+    {
+        var manager = Started();
+        var note = tasks.AddNote("Fix the strip", IdOf(manager, "iam.ge")).Value;
+        Said(manager, "s1", @"C:\scratch\probe", "join", note.Id.ToString());
+
+        Assert.Equal(ControlReply.Ok, Said(manager, "s1", @"C:\scratch\probe", "later", "Rename the guard").ExitCode);
+
+        Assert.Equal(IdOf(manager, "iam.ge"), Titled("Rename the guard").WorkspaceId.Value);
+    }
+
+    // The VS Code window still comes first: the repo's history only fills in when no window answers.
+    [Fact]
+    public void The_vs_code_window_still_beats_the_repos_history()
+    {
+        var manager = Started();
+        tasks.Create("Store listing", IdOf(manager, "iam.ge"), tasks.NewSession("old", Repo));
+        Editor(manager, 0x10, "TaskSpaces", "Deskbar");
+
+        Said(manager, "s1", Repo, "new", "Tasks board");
+
+        Assert.Equal(IdOf(manager, "Deskbar"), Titled("Tasks board").WorkspaceId.Value);
+    }
+
+    // Review focus 5: a session in a folder no VS Code window shows, and no task of the board was worked on, makes a
+    // task on no workspace, still Claude's.
     [Fact]
     public void A_session_outside_any_vs_code_window_makes_a_free_task()
     {

@@ -152,6 +152,21 @@ public class RemoteControlTaskTests
         Assert.Contains("--workspace", reply.Output);
     }
 
+    // Task f905b1a7: with no VS Code window on the caller's folder, a note goes where the latest task worked on in the
+    // caller's repo went, rather than being refused. Petre runs sessions in terminal windows, so often there is no
+    // VS Code window at all, and a session's `task add` used to end up on `--workspace none`.
+    [Fact]
+    public void Add_without_a_vs_code_window_goes_where_the_repos_latest_task_went()
+    {
+        var manager = Started();
+        tasks.Create("Tasks board", WorkspaceId(manager, "Deskbar"), tasks.NewSession("s1", @"C:\repos\TaskSpaces"));
+
+        var reply = Run(manager, "task", "add", "Flaky test", "--from", @"C:\repos\TaskSpaces\.claude\worktrees\flaky");
+
+        Assert.Equal(ControlReply.Ok, reply.ExitCode);
+        Assert.Equal(WorkspaceId(manager, "Deskbar"), tasks.Board.Tasks.Single(t => t.Title == "Flaky test").WorkspaceId.Value);
+    }
+
     // Ruling 57: `task assign <id> me|claude` and `assignee` in the JSON.
     [Fact]
     public void Assign_hands_a_task_to_claude_or_back_and_list_says_who_has_it()

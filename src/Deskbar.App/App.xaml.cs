@@ -1773,17 +1773,20 @@ public partial class App : Application
         //
         // An adopted session lands on the workspace of the VS Code window showing its folder, by the rule `task new`
         // uses (RemoteControl.CallerOf): the editors whose title names the folder, and only when they all live in ONE
-        // workspace; several workspaces, or none, leave the task free.
+        // workspace. Several workspaces, or no such window, fall back on the workspace of the latest task worked on in
+        // the session's repo (RepoWorkspace.Latest, task f905b1a7), as `task new` does; only when that is none too is
+        // the task left free.
         var claudeHome = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".claude");
         claudeSessions = new ClaudeSessions(tasks!, manager, new Deskbar.Windows.Claude.ClaudeCli(),
             new System.Reactive.Concurrency.SynchronizationContextScheduler(new System.Windows.Threading.DispatcherSynchronizationContext(Dispatcher)),
-            folder => EditorFolder.Best(folder, manager.KnownWindows
+            folder => (EditorFolder.Best(folder, manager.KnownWindows
                     .Where(EditorFolder.IsEditor)
                     .Select(w => (w.Handle, Titles: manager.OriginalTitle(w.Handle).Map(t => (IEnumerable<string>)[w.Title, t]).GetValueOrDefault([w.Title]))))
                 .Select(handle => manager.WorkspaceOf(handle))
                 .ToList() is { Count: > 0 } places && places.All(p => p.HasValue) && places.Select(p => p.Value.Id).Distinct().Count() == 1
                     ? places[0].Value.Id
-                    : Maybe<Guid>.None,
+                    : Maybe<Guid>.None)
+                .Or(() => Core.Tasks.RepoWorkspace.Latest(tasks!.Board, folder, id => manager.State.Workspaces.Any(w => w.Id == id))),
             claudeHome,
             trace: ClickTrace.On ? ClickTrace.Write : null,
             // A Done task's session is stopped only while no window of Deskbar's is attached to it (task 87f899ad); a

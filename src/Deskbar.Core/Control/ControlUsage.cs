@@ -69,7 +69,8 @@ public static class ControlUsage
                 + "      comes from before status changes were logged"),
             new("task", "add <title>|- [--workspace <name>|none] [--important] [--urgent] [--parent <id>]",
                 "add a note to the backlog; without --workspace it goes on the workspace of the VS Code window\n"
-                + "      whose folder holds --from (the caller's own folder if not given); - reads the title from stdin;\n"
+                + "      whose folder holds --from (the caller's own folder if not given), else on the workspace of the\n"
+                + "      latest task worked on in that folder's repo; - reads the title from stdin;\n"
                 + "      --important and --urgent set its flags, and it goes to the top of the quadrant they give"),
             new("task", "close <id> [--stop-claude]", "close a task: it leaves the bar and the window's open tasks; one Claude is still working on needs --stop-claude, which stops its background sessions"),
             new("task", "reopen <id>", "reopen a closed task: in progress while a session is live on it, else backlog"),
