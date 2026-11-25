@@ -421,7 +421,10 @@ public sealed partial class RemoteControl
     // `task answered`: only a WAITING task is touched (Answered would also resume a Done one, which is not a question).
     void Resolve(TaskService service, TaskItem task, string session)
     {
-        if (task.Status != TaskStatus.WaitingOnYou) return;
+        // A question Deskbar SET ASIDE (task 8bd18246: In progress, QuestionSetAside) is settled by `task answered` too, as
+        // TaskBoard.Answered allows. Leaving it out made the session's `task answered` a no-op on it, so the Stop hook
+        // asked about the same question at the end of every turn after the reply (SetAside, SessionBriefing.SetAsideNudge).
+        if (task.Status != TaskStatus.WaitingOnYou && !(task.Status == TaskStatus.InProgress && task.QuestionSetAside.HasValue)) return;
         service.Answered(session);
         task.WorkspaceId.Tap(w => manager.ClearAttention(w));
     }
