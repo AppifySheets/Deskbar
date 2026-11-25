@@ -96,6 +96,10 @@ public sealed partial class RemoteControl
         // and never finishes a task: close, delete and the done/closed statuses are refused before anything is looked up.
         var byManager = ManagerSession.IsManager(Folder(from), taskSessions?.ManagerFolder ?? "", LongPath);
         if (byManager && FinishesATask(args)) return ControlReply.Fail(ManagerSession.Refusal);
+        // The manager has no task of its own, so every session form (--session) is refused from its folder: `done` would
+        // finish a task, and join, ask, answered, comment --session and the rest would answer another session's question
+        // or speak as that session. Its own ids come from `task show`, so it can name any session.
+        if (byManager && session is not null) return ControlReply.Fail(args is ["done"] ? ManagerSession.Refusal : ManagerSession.JoinRefusal);
         if (session is not null)
             return string.IsNullOrWhiteSpace(session)
                 ? ControlReply.Fail("--session needs the session's id")
@@ -132,6 +136,10 @@ public sealed partial class RemoteControl
             ["rename", var id, var title] => TaskChange(service, id, t => service.Rename(t.Id, title)),
             ["move", var id, var workspace] => ResolveWorkspace(service, workspace, null)
                 .Match(w => TaskChange(service, id, t => service.MoveTo(t.Id, w)), ControlReply.Fail),
+            // The manager's comment is its own with or without the --from-claude marker (the client adds it only when it sees
+            // CLAUDECODE), never stored as the user's.
+            ["comment", var id, var markdown] when byManager =>
+                TaskChange(service, id, t => service.Comment(t.Id, TaskComment.ManagerAuthor, markdown)),
             ["comment", var id, var markdown] => TaskChange(service, id, t => service.Comment(t.Id, Maybe<string>.None, markdown)),
             // The same command from inside a Claude session (ControlArguments.WithCaller): stored as usual, wakes no one.
             // From the manager's folder it is the manager's own comment, stored under its author and woken on, even though
@@ -229,7 +237,6 @@ public sealed partial class RemoteControl
 
     static string StatusName(TaskStatus status) => StatusNames.First(n => n.Status == status).Name;
 
-    // The four names `status` takes; closed and anything else are refused before the task is looked up.
     // The forms that finish a task, which the manager may not run. `status ... closed` is refused by ParseStatus for
     // everyone; for the manager it gets the manager's refusal too, so the answer is the same however it is spelled.
     static bool FinishesATask(string[] args) => args switch
@@ -239,6 +246,7 @@ public sealed partial class RemoteControl
         _ => false,
     };
 
+    // The four names `status` takes; closed and anything else are refused before the task is looked up.
     static Result<TaskStatus> ParseStatus(string name) =>
         name.Trim().ToLowerInvariant() switch
         {

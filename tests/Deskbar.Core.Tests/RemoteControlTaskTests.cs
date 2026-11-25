@@ -266,11 +266,56 @@ public class RemoteControlTaskTests
     // The manager session (docs/superpowers/specs/2026-11-25-manager-session-design.md) is told by --from its own folder.
     const string ManagerDir = @"C:\State\manager";
 
-    ControlReply RunAsManager(WorkspaceManager manager, params string[] args) =>
+    // A control that knows the manager's folder, called from `from` (the manager's own by default).
+    ControlReply RunFrom(WorkspaceManager manager, string managerFolder, string from, params string[] args) =>
         new RemoteControl(manager, tasks: tasks, goals: goals, taskSessions: new TaskSessionCommands(_ => Result.Success(), _ => [], (_, _) => Result.Success(), (_, _) => Result.Success())
         {
-            ManagerFolder = ManagerDir,
-        }).Execute([.. args, "--from", ManagerDir]);
+            ManagerFolder = managerFolder,
+        }).Execute([.. args, "--from", from]);
+
+    ControlReply RunAsManager(WorkspaceManager manager, params string[] args) => RunFrom(manager, ManagerDir, ManagerDir, args);
+
+    [Fact]
+    public void Manager_comment_without_the_claude_marker_is_still_the_managers()
+    {
+        var manager = Started();
+        var id = Prefix(Added(manager));
+
+        Assert.Equal(ControlReply.Ok, RunAsManager(manager, "task", "comment", id, "hello").ExitCode);
+
+        Assert.True(Only.Comments.Single().ByManager);
+    }
+
+    [Fact]
+    public void Manager_may_not_finish_a_task_through_a_session_form()
+    {
+        var manager = Started();
+        var id = Prefix(Added(manager));
+        var before = tasks.Board;
+
+        var reply = RunAsManager(manager, "task", "done", "--session", "s1");
+
+        AssertRefusedAndUnchanged(reply, before);
+        Assert.Equal(ManagerSession.Refusal, reply.Output.Trim());
+    }
+
+    [Theory]
+    [InlineData("join")]
+    [InlineData("ask")]
+    [InlineData("answered")]
+    [InlineData("comment")]
+    public void Manager_may_use_no_other_session_form(string form)
+    {
+        var manager = Started();
+        var id = Prefix(Added(manager));
+        var before = tasks.Board;
+        string[] args = form is "join" ? ["task", "join", id, "--session", "s1"] : form is "comment" ? ["task", "comment", "x", "--session", "s1"] : ["task", form, "--session", "s1"];
+
+        var reply = RunAsManager(manager, args);
+
+        AssertRefusedAndUnchanged(reply, before);
+        Assert.Equal(ManagerSession.JoinRefusal, reply.Output.Trim());
+    }
 
     [Fact]
     public void Manager_comment_is_stored_as_the_managers_and_wakes()
@@ -296,7 +341,7 @@ public class RemoteControlTaskTests
         var heard = new List<string>();
         using var _ = tasks.Commented.Subscribe(c => heard.Add(c.Comment.Markdown));
 
-        Assert.Equal(ControlReply.Ok, Run(manager, "task", "comment", id, "from a session", "--from-claude", "--from", @"C:\repos\other").ExitCode);
+        Assert.Equal(ControlReply.Ok, RunFrom(manager, ManagerDir, @"C:\repos\other", "task", "comment", id, "from a session", "--from-claude").ExitCode);
 
         Assert.Empty(heard);
         Assert.Equal("you", Json(Run(manager, "task", "show", id)).GetProperty("thread")[0].GetProperty("by").GetString());
@@ -346,7 +391,7 @@ public class RemoteControlTaskTests
         var manager = Started();
         var id = Prefix(Added(manager));
 
-        Assert.Equal(ControlReply.Ok, Run(manager, "task", "close", id, "--from", @"C:\repos\other").ExitCode);
+        Assert.Equal(ControlReply.Ok, RunFrom(manager, ManagerDir, @"C:\repos\other", "task", "close", id).ExitCode);
         Assert.Equal(TaskStatus.Closed, Only.Status);
     }
 
@@ -356,7 +401,7 @@ public class RemoteControlTaskTests
         var manager = Started();
         var id = Prefix(Added(manager));
 
-        Assert.Equal(ControlReply.Ok, Run(manager, "task", "close", id, "--from", @"C:\State\manager").ExitCode);
+        Assert.Equal(ControlReply.Ok, RunFrom(manager, "", ManagerDir, "task", "close", id).ExitCode);
     }
 
     [Fact]
