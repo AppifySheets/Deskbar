@@ -1814,7 +1814,8 @@ public partial class TasksWindow : Window
         // unfolds the rest (settled comments, folded above, do not count toward the three).
         if (settledCount > 0) panel.Children.Add(SettledFold(row.Id, settledCount, unfolded));
         if (earlier > 0) panel.Children.Add(EarlierFold(row.Id, earlier, open));
-        shown.ToList().ForEach(comment => panel.Children.Add(CommentOf(comment)));
+        // A hairline between comments (task aa42794f, ThreadHairline), 8 DIP each side: CommentOf's bottom margin.
+        ThreadHairline.Separated(shown.Select(CommentOf), 8).ToList().ForEach(comment => panel.Children.Add(comment));
         panel.Children.Add(CommentBox(row.Id));
         authors[row.Id] = shown.Select(c => c.Author).ToArray();
         shownComments[row.Id] = shown.Select(c => c.Id).ToArray();

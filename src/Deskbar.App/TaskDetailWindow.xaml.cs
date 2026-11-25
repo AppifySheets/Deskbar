@@ -443,7 +443,9 @@ public partial class TaskDetailWindow : Window
             fold.Margin = new Thickness(0, 0, 0, 10);
             ThreadHost.Children.Add(fold);
         }
-        row.Comments.Where(c => settledOpen || !c.Settled).ToList().ForEach(c => ThreadHost.Children.Add(CommentOf(c)));
+        // A hairline between comments (task aa42794f, ThreadHairline), 14 DIP each side: CommentOf's bottom margin.
+        ThreadHairline.Separated(row.Comments.Where(c => settledOpen || !c.Settled).Select(CommentOf), 14).ToList()
+            .ForEach(comment => ThreadHost.Children.Add(comment));
     }
 
     UIElement CommentOf(TaskCommentView comment)
