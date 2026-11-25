@@ -519,7 +519,7 @@ throwaway folder Claude Code trusts, and tracing on for the `claude actions:` an
     "Start Claude on this". The tasks panel's "⋯" menu has it in the same place, and an open thread has a
     "Start Claude on this" button above the comments. A closed task has neither. A task that already has a session
     has "Open Claude" in that place on both menus and no "Start Claude on this" there (task b6f068b1: one Claude item
-    per menu); its open thread still has the button.
+    per menu); its open thread has the button only while none of its sessions is running.
 91. Pick "Start Claude on this" on a note whose workspace knows exactly one folder: no question, no list. Within a few
     seconds a Windows Terminal window titled "<the note's title> · Claude" opens on the note's workspace, in the Deskbar
     Claude look, attached to a session that is already working on the note (its first message names the task). The
@@ -535,8 +535,10 @@ throwaway folder Claude Code trusts, and tracing on for the `claude actions:` an
 92. On a note whose workspace knows two folders (tasks with sessions in two repos, or a VS Code window on a second
     repo that some session also used): a short list of the folders opens at the pointer, ending with
     "Choose a folder…". "Choose a folder…" opens Windows' folder picker; cancelling it starts nothing.
-93. The thread's "Start Claude on this" button on a task whose session is still running asks "This task already has
-    a Claude session running. Start another one?". No starts nothing.
+93. Open the thread of a task whose session is still running (task 9b6275bc): the session's line reads working or
+    idle and has Open, and there is no "Start Claude on this" button under it. "Open in window" shows the same: no
+    button in the Sessions column and no "Start Claude on this" on the "⋯" menu. Stop the session (`claude stop`):
+    after the next poll the line reads ended and the button is back in both places.
 94. Close the terminal window from 91 (its X). `claude agents` still lists the session, and the task still shows it.
     Double-click the task's line: you go to its workspace and a new terminal window attaches to the same session.
     Double-click again while it is open: that same window comes to the front, and no second window opens (a second

@@ -657,10 +657,11 @@ workspace, and a background session's Windows Terminal window comes to the front
 the front instead. "Open Claude", right after Edit on a Claude task's menu, does the same without the first
 click, which would open the task in the tasks panel, and so does the Open Claude button on a Claude
 task's line in the tasks panel. "Start Claude on this", in the same place on the menu of a task no session
-has worked on and as a button in every open task's thread, starts a background session with the task as its
+has worked on and as a button in an open task's thread, starts a background session with the task as its
 first message, in the task's folder or one you pick, and opens a window on it. A menu has one of the two,
-never both: a task Claude already has gets "Open Claude", and its thread's button starts another session,
-asking first when one is still running. A folder Claude Code was
+never both: a task Claude already has gets "Open Claude". While one of its sessions is running, the thread
+shows that session with Open and no start button; once every session has ended, the button is back and
+starts a fresh one. A folder Claude Code was
 never told to trust puts Claude's message in the thread and offers a terminal there so you can accept the
 trust prompt yourself. A task's thread lists its sessions, newest first, as working, idle, ended or expired,
 each but the expired ones with Open. `deskbar.cmd task go|start|open-session` do the same from a script.

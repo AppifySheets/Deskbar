@@ -499,7 +499,9 @@ public partial class TaskDetailWindow : Window
         if (row.SessionList.Count == 0)
             side.Children.Add(new TextBlock { Text = "No Claude session yet.", Foreground = HeaderInk, FontSize = 11.5, Margin = new Thickness(0, 0, 0, 6) });
         row.SessionList.ToList().ForEach(session => side.Children.Add(SessionLine(row.Id, session)));
-        if (Actions?.StartClaude is { } start && row.Status != TaskStatus.Closed && !row.Closing)
+        // Not while a session of the task is running (task 9b6275bc, TaskRowView.HasOpenSession): Open on its line is the
+        // way in. The "⋯" menu's item follows the same rule.
+        if (Actions?.StartClaude is { } start && row.Status != TaskStatus.Closed && !row.Closing && !row.HasOpenSession)
         {
             var button = Flat(TasksWindow.StartClaudeText, TasksWindow.StartClaudeText, () => start(row.Id),
                 tip: "Start a background Claude session on this task, with the task as its first message");
@@ -670,7 +672,7 @@ public partial class TaskDetailWindow : Window
         if (open)
         {
             menu.Items.Add(Item("Edit", BeginEdit));
-            if (actions.StartClaude is { } start) menu.Items.Add(Item(TasksWindow.StartClaudeText, () => Later(() => start(row.Id))));
+            if (actions.StartClaude is { } start && !row.HasOpenSession) menu.Items.Add(Item(TasksWindow.StartClaudeText, () => Later(() => start(row.Id))));
             menu.Items.Add(new Separator());
         }
         var status = Item("Status");
