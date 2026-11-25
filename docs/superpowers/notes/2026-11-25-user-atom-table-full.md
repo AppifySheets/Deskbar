@@ -19,7 +19,7 @@ itself, which could not start nine times between 13:11 and 13:21.
 - It can be repaired without signing out: a slot goes back to the list of the processor that releases it, so slots
   taken on a processor with plenty and released on one with none make that one work again.
 
-What was done: `tests/Deskbar.Windows.Tests/StaThread.cs` shuts each test's dispatcher down, so a run no longer
+What was done: `tests/Deskbar.Windows.Tests/StaThread.cs` unregisters each test's classes, so a run no longer
 hoards names; Deskbar balances the slots before its first window, every 30 seconds and after any refused window
 (`src/Deskbar.Windows/Recovery/ClassNameSlots.cs`); `scripts/user-atoms.ps1` measures per processor and repairs
 with `-Repair`, and `scripts/test-hidden.ps1` runs it first.
@@ -38,7 +38,8 @@ All on Petre's machine (i9-14900K, 32 logical processors, Windows 10.0.26100), s
 | Kernel pool tag `AtmA` (one allocation per atom, all atom tables of the machine) | 1,646 live. So the 9,681 are not in use by anyone. |
 | A child registers 20 classes, makes a window of each (top-level, message-only, or none) and exits without cleaning up | All 20 slots free again every time, on whichever processor ran the exit. |
 | Names held by a test host over one run of `Deskbar.Windows.Tests`, 1,609 tests, before the fix | Rose steadily to 4,014 and fell to 0 when the host exited. |
-| The same run after the fix (1,620 tests, all passed), sampled every quarter second | At most 9. |
+| The same run with the classes unregistered after each test's thread has ended, sampled every quarter second | At most 9, and all tests pass in 1 min 35 s. |
+| The same with the first fix (drain the dispatcher to idle on the test's thread, then shut it down), on the hidden desktop | 176 tests took 5 min 29 s: the queue often never idles there and tests sit out the 5 s bound. |
 | The same run before the fix on the broken session, not pinned | 866 of 1,609 failed once the host had taken 1,164 names. |
 | Repair: every processor under 64 topped up to 128 | 20 processors short, 2,368 slots moved in 66 ms, all 32 able to register again. |
 

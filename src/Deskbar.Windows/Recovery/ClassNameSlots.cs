@@ -34,9 +34,10 @@ namespace Deskbar.Windows.Recovery;
 // list PER PROCESSOR. Taking one looks at the calling processor's list first and goes on to the next processor's only
 // when a list is EMPTY; giving one back puts it on top of the list of the processor that gives it back; and only when
 // every list is empty does the table grow by a page. So:
-//   1. Once, the table really fills: 16,320 names in use at the same moment. (That day: two sessions ran the window
-//      tests at once, and a test host kept every class of every test until it exited. Fixed with this in
-//      tests/Deskbar.Windows.Tests/StaThread.cs.)
+//   1. Once, the table really fills: 16,320 names in use at the same moment. (That day it was the window tests: a
+//      test host kept every class of every test until it exited, 4,014 names for one run, measured, so four runs at
+//      once fill the table, and several sessions run them. StaThread.Run in the tests gives them back since task
+//      4888c75e.)
 //   2. Windows grows the handle table past index 0x4000. An entry up there can never be a name: the kernel takes it,
 //      sees the index, refuses with "not enough memory" and puts it straight back on top of the caller's list.
 //   3. Those 255 entries stay in the lists for the rest of the session. A processor with one of them on top of its list
@@ -238,8 +239,8 @@ public static class ClassNameSlots
         readonly nint instance = GetModuleHandleW(0);
 
         // user32's own DefWindowProc as the classes' window procedure: no window is ever made of them, and a native
-        // address needs no delegate kept alive.
-        readonly nint windowProc = NativeLibrary.GetExport(NativeLibrary.Load("user32.dll"), "DefWindowProcW");
+        // address needs no delegate kept alive. Looked up once for the process, since a machine is made per balance.
+        static readonly nint WindowProc = NativeLibrary.GetExport(NativeLibrary.Load("user32.dll"), "DefWindowProcW");
 
         readonly string tag = Guid.NewGuid().ToString("N");
         int serial;
@@ -274,7 +275,7 @@ public static class ClassNameSlots
             var windowClass = new WNDCLASSEXW
             {
                 cbSize = Marshal.SizeOf<WNDCLASSEXW>(),
-                lpfnWndProc = windowProc,
+                lpfnWndProc = WindowProc,
                 hInstance = instance,
                 lpszClassName = $"Deskbar.ClassNameSlot[{tag};{serial++}]",
             };

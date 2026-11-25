@@ -1,8 +1,5 @@
 using System.Diagnostics;
 using System.Runtime.ExceptionServices;
-using System.Windows;
-using System.Windows.Interop;
-using System.Windows.Threading;
 using Deskbar.Core.Control;
 
 namespace Deskbar.Windows.Tests;
@@ -27,6 +24,13 @@ static class StaThread
     {
         RefuseBesideALiveDeskbar();
 
+        // Every twentieth test, see that every processor still has window class names to give (ClassNameSlots, task
+        // c5e9b17f). A test takes its names on the processor its thread runs on and they come back on another, so on
+        // a session whose table has filled once a run drains processors as it goes: measured, six tests of one class
+        // refused in one burst, in a run started right after a repair. Nothing is moved on a healthy machine, where
+        // the look costs under twenty milliseconds.
+        if (Interlocked.Increment(ref runs) % 20 == 1) Deskbar.Windows.Recovery.ClassNameSlots.Balance();
+
         ExceptionDispatchInfo? failure = null;
 
         var thread = new Thread(() =>
@@ -39,64 +43,70 @@ static class StaThread
             {
                 failure = ExceptionDispatchInfo.Capture(ex);
             }
-            finally
-            {
-                try
-                {
-                    GiveWindowClassesBack();
-                }
-                catch (Exception ex)
-                {
-                    // A window's own handler throwing while it is torn down is still a test failure, but never one
-                    // that hides the test's own.
-                    failure ??= ExceptionDispatchInfo.Capture(ex);
-                }
-            }
-        });
+        })
+        {
+            // A name nothing else has, because WPF writes the thread's name into the name of every window class it
+            // registers on it, and that is how the classes are found again (GiveWindowClassesBack).
+            Name = $"sta{Environment.ProcessId}.{Interlocked.Increment(ref threads)}",
+        };
         thread.SetApartmentState(ApartmentState.STA);
         thread.Start();
         thread.Join();
 
+        GiveWindowClassesBack(thread.Name);
+
         failure?.Throw();
     }
 
-    // GIVE THE TEST'S WINDOW CLASSES BACK BEFORE ITS THREAD ENDS. Every WPF Dispatcher and every HwndWrapper (one
+    static int threads;
+    static int runs;
+
+    // GIVE THE TEST'S WINDOW CLASSES BACK ONCE ITS THREAD HAS ENDED. Every WPF Dispatcher and every HwndWrapper (one
     // behind each Window, Popup and menu) registers a window class with a unique name, and each name holds one of the
-    // 16,384 slots of the session's USER atom table, which every program on every desktop of the session shares
+    // 16,320 slots of the session's USER atom table, which every program on every desktop of the session shares
     // (docs/superpowers/notes/2026-11-25-user-atom-table-full.md). With the threads simply ending, every test kept its
-    // classes until testhost exited, so the 1,500-odd window tests needed well over 1,500 free slots by the end of a
-    // run. On 2026-11-25, with about 1,700 left in a session that leaks them, a run failed 510 of 770 with "Not enough
-    // memory resources" from Dispatcher..ctor, which read like the hidden desktop's heap and was not (Deskbar task
-    // 4888c75e).
+    // classes until testhost exited: 4,014 names by the end of one run, measured (task c5e9b17f). On 2026-11-25 a run
+    // failed 510 of 770 with "Not enough memory resources" from Dispatcher..ctor, which read like the hidden desktop's
+    // heap and was not (Deskbar task 4888c75e).
     //
-    // Three steps, in this order, each measured by StaThreadTests:
-    //   1. Dispose every presentation source still open on this thread: the windows a test never closed. Shutdown
-    //      alone destroys them too, but too late, see 2.
-    //   2. Let the queue run. WPF does not unregister a class when its window is destroyed; it posts the
-    //      UnregisterClass to the Dispatcher. Posted during shutdown, that operation is dropped and the class stays
-    //      registered (measured: the left-open window's class survived a bare InvokeShutdown).
-    //   3. Shut the Dispatcher down, which disposes its own message-only window and unregisters that class at once.
-    // A test that never touched WPF has no Dispatcher, and there is nothing to do.
-    static void GiveWindowClassesBack()
+    // It was not a leak in the session either, as this comment first said. Four such runs at once fill the table,
+    // and a table that has filled even once refuses names on some processors for the rest of the session
+    // (src/Deskbar.Windows/Recovery/ClassNameSlots.cs has what was measured). So this is not tidiness: the hoarding
+    // was what broke the session.
+    //
+    // HOW: from outside, after the thread is gone. WPF writes the thread's name into each class name
+    // (HwndWrapper[app;thread;{guid}]), Run gives every thread a name of its own, and here every name in the table is
+    // read (one pass is 2.5 ms, measured) and the ones carrying this thread's name are unregistered. Windows has
+    // destroyed a dead thread's windows by then, which a class needs before it can go. A run of all 1,620 tests holds
+    // 9 names at its peak and takes what it took before, 1 min 39 s.
+    //
+    // The first version did it on the thread, before it ended: dispose the open windows, let the Dispatcher's queue
+    // run down to ApplicationIdle (WPF only POSTS a class's unregistration, and a shutdown drops the queue), then
+    // shut the Dispatcher down. It gave the classes back, but on the hidden desktop test-hidden.ps1 uses the queue
+    // often never reaches idle, so tests sat out the five second bound: 176 tests took 5 min 29 s (task c5e9b17f).
+    // It also ran whatever else a test had left queued, after the test. Nothing of the test's runs here.
+    static void GiveWindowClassesBack(string threadName)
     {
-        var dispatcher = Dispatcher.FromThread(Thread.CurrentThread);
-        if (dispatcher is null || dispatcher.HasShutdownStarted)
-            return;
-
-        // A copy first: disposing a source takes it out of the list being walked.
-        PresentationSource.CurrentSources
-            .Cast<PresentationSource>()
-            .Where(source => source.Dispatcher == dispatcher && !source.IsDisposed)
-            .OfType<HwndSource>()
+        var mine = $";{threadName};";
+        var name = new char[256];
+        var instance = GetModuleHandleW(0);
+        Enumerable.Range(0xC000, 0x4000)
+            .Where(atom => new string(name, 0, GetClipboardFormatNameW((uint)atom, name, name.Length)) is var text
+                && text.StartsWith("HwndWrapper[", StringComparison.Ordinal) && text.Contains(mine, StringComparison.Ordinal))
             .ToList()
-            .ForEach(source => source.Dispose());
-
-        // Invoke from the Dispatcher's own thread at a low priority runs everything queued above it first, the
-        // posted UnregisterClass calls among them, and returns once the queue has come down to this one. Bounded, so
-        // a queue that never goes idle (something re-posting itself above this priority) costs a slot, not a hang.
-        dispatcher.Invoke(() => { }, DispatcherPriority.ApplicationIdle, CancellationToken.None, TimeSpan.FromSeconds(5));
-        dispatcher.InvokeShutdown();
+            .ForEach(atom => UnregisterClassW(atom, instance));
     }
+
+    // Answers with the name of any entry in the session's table of class names, class names included, and 0 for a
+    // slot that is free.
+    [System.Runtime.InteropServices.DllImport("user32.dll", CharSet = System.Runtime.InteropServices.CharSet.Unicode)]
+    static extern int GetClipboardFormatNameW(uint format, [System.Runtime.InteropServices.Out] char[] name, int max);
+
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    static extern bool UnregisterClassW(nint classAtom, nint instance);
+
+    [System.Runtime.InteropServices.DllImport("kernel32.dll")]
+    static extern nint GetModuleHandleW(nint name);
 
     // NO REAL WINDOWS BESIDE A RUNNING DESKBAR IN THE SAME SESSION. These tests create real top-level windows,
     // and a Deskbar running on the same desktop treats them as anyone's windows: in a tiled workspace it tiles

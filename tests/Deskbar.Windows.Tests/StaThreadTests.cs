@@ -7,16 +7,18 @@ namespace Deskbar.Windows.Tests;
 
 // WPF registers a window class with a unique name ("HwndWrapper[testhost;;{guid}]") for every Dispatcher's own
 // message-only window and for every HwndWrapper behind a Window. Each of those names takes a slot in the session's
-// USER atom table, which has 16,384 slots shared by every program and every desktop in the session
+// USER atom table, which has 16,320 slots shared by every program and every desktop in the session
 // (docs/superpowers/notes/2026-11-25-user-atom-table-full.md). A slot comes back when the class is unregistered,
 // and WPF unregisters it when the wrapper is disposed, which for the Dispatcher's own window is only at Dispatcher
 // shutdown.
 //
 // StaThread.Run used to let each test's thread simply end, so no Dispatcher was ever shut down and every test kept
-// its classes until testhost exited: a run of 1,500 window tests needed well over 1,500 free slots at its end. On
-// 2026-11-25 the session had about 1,700 left (something on the visible desktop leaks them), and a run of
-// Deskbar.Windows.Tests failed 510 of 770 with "Not enough memory resources" from Dispatcher..ctor before it
-// crashed. That looked like the hidden desktop's heap being too small, and it was not (Deskbar task 4888c75e).
+// its classes until testhost exited: 4,014 names by the end of one run, measured later (task c5e9b17f). On
+// 2026-11-25 a run of Deskbar.Windows.Tests failed 510 of 770 with "Not enough memory resources" from
+// Dispatcher..ctor before it crashed. That looked like the hidden desktop's heap being too small, and it was not
+// (Deskbar task 4888c75e). Nothing in the session was leaking them either, as this comment first said: four such
+// runs at once fill the table, and a table that has filled once refuses names on some processors until sign-out
+// (src/Deskbar.Windows/Recovery/ClassNameSlots.cs).
 public class StaThreadTests
 {
     [Fact]
