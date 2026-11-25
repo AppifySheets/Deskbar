@@ -2176,6 +2176,9 @@ public sealed class WorkspaceManager(
             ? Result.Success()
             : Result.Success().Tap(() => Persist(State with { ProReminderSince = today }));
 
+    // Remember the manager session just started, replacing yesterday's (AppState.Manager).
+    public void SetManagerSession(Tasks.ManagerRecord record) => Persist(State with { Manager = record });
+
     // "Not now" on the reminder line: quiet for the rest of the given day (AppState.ProReminderDismissedOn).
     public Result DismissProReminder(DateOnly today) =>
         State.ProReminderDismissedOn == today

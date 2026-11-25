@@ -480,6 +480,12 @@ public sealed record AppState(
     public DateOnly? ProReminderSince { get; init; }
     public DateOnly? ProReminderDismissedOn { get; init; }
 
+    // The manager session Deskbar last started (Deskbar.Core.Tasks.ManagerSession): its full session id and the local
+    // day it was started on, so a click or `task manager` after a restart attaches to or resumes today's manager
+    // instead of starting a second one. Null until the first start; a state.json without the key loads null, so no
+    // migration. The record is a positional record with a DateOnly, which System.Text.Json reads and writes as is.
+    public Tasks.ManagerRecord? Manager { get; init; }
+
     // The space left between tiled windows and around the grid's edge, in pixels at 100% scaling (the tiler
     // scales it by each monitor's DPI). Read as written: SetTileGap keeps it within 0..64, and a state.json
     // without the key loads the default, so no migration.
