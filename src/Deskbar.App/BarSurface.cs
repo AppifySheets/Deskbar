@@ -51,7 +51,8 @@ public static class BarSurface
 
     // The veil easing in from the side that faces the desktop: FrostVeilEdgeOpacity at that edge, FrostVeil's half at
     // `ease` of the width in, and half from there on. Petre: "make edges less pronounced"; a uniform veil drew a dark
-    // line down the screen where the bar began. One frozen brush per side, made once: the ease is a constant.
+    // line down the screen where the bar began. The ease is a fixed few DIP (FrostEdge), so its share changes only
+    // when the bar's width or scale does: one frozen brush per side, remade only then.
     public static Brush FrostVeilFrom(bool fromLeft, double ease) =>
         (fromLeft ? easedFromLeft : easedFromRight) is { } made && made.Ease == ease
             ? made.Brush

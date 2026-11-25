@@ -60,7 +60,7 @@ public partial class FloatingBar
         var frosted = manager.State.SeeThrough && frostSource is not null;
         // Over a frost the veil eases in from the inner edge with the frost itself (BarSurface.FrostVeilFrom).
         RowsSurface.Background = !manager.State.SeeThrough ? BarSurface.Solid
-            : frostSource is { } source && frosted ? BarSurface.FrostVeilFrom(source.FromLeft, FrostEase)
+            : frostSource is { } source && frosted ? BarSurface.FrostVeilFrom(source.FromLeft, source.Ease)
             : BarSurface.SeeThrough;
         FrostSurface.Visibility = frosted ? Visibility.Visible : Visibility.Collapsed;
     }
