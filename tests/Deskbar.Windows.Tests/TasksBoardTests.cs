@@ -3076,10 +3076,11 @@ public class TasksBoardTests
         Assert.Null(DescriptionBlockOf(t.Window, id));
     });
 
-    // Petre, 2026-11-24, of a question cut at "Add an "O…" with the thread open: "where's the question?". A closed line
-    // cuts the question to one line; an open line shows it all, wrapped, and closing it cuts it again.
+    // Petre, 2026-11-24, of a question cut at "Add an "O…" with the thread open: "where's the question?", and task
+    // 735abbf5, his third report, of every closed line in Waiting on you ending its question in "…". A question shows in
+    // full, wrapped, on a closed line and an open one alike, and closing the line again does not cut it.
     [Fact]
-    public void An_open_line_shows_the_whole_question() => StaThread.Run(() =>
+    public void A_question_shows_in_full_open_or_closed() => StaThread.Run(() =>
     {
         using var t = Build();
         var id = t.Tasks.Create("Tasks redesign", t.Gepha, Session("s1")).Value.Id;
@@ -3087,16 +3088,48 @@ public class TasksBoardTests
         t.Controller.Show();
 
         TextBlock Detail() => Inside(LineOf(t.Window, id)).OfType<TextBlock>().Single(b => Equals(b.Tag, TasksWindow.DetailTag));
-        Assert.Equal(TextTrimming.CharacterEllipsis, Detail().TextTrimming);
-        Assert.Equal(TextWrapping.NoWrap, Detail().TextWrapping);
+        void Whole(string state)
+        {
+            Assert.True(Detail().TextTrimming == TextTrimming.None, $"{state}: the question is cut");
+            Assert.True(Detail().TextWrapping == TextWrapping.Wrap, $"{state}: the question does not wrap");
+            Assert.StartsWith("Open already resumes", Detail().Text);
+        }
 
+        Whole("closed");
+        t.Controller.ToggleThread(id);
+        Whole("open");
+        t.Controller.ToggleThread(id);
+        Whole("closed again");
+    });
+
+    // The other half of the rule above: a status line is news, not a request, so a closed line still cuts it to one
+    // line and an open line shows it all. That holds on a task set to "Waiting on you" by hand too, which has no
+    // question, so its detail is its status line (the review's case: the rule keys on a question asked, not the status).
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void A_status_line_is_cut_on_a_closed_line_and_whole_on_an_open_one(bool waitingByHand) => StaThread.Run(() =>
+    {
+        using var t = Build();
+        var id = t.Tasks.Create("Tasks redesign", t.Gepha, Session("s1")).Value.Id;
+        t.Tasks.SetStatusLine(id, "Rebased onto main after the stats merge, CI running the window tests on the hidden desktop");
+        if (waitingByHand) t.Tasks.SetStatus(id, TaskStatus.WaitingOnYou);
+        t.Controller.Show();
+
+        TextBlock Detail() => Inside(LineOf(t.Window, id)).OfType<TextBlock>().Single(b => Equals(b.Tag, TasksWindow.DetailTag));
+        void Cut(string state)
+        {
+            Assert.True(Detail().TextTrimming == TextTrimming.CharacterEllipsis, $"{state}: the status line is not cut");
+            Assert.True(Detail().TextWrapping == TextWrapping.NoWrap, $"{state}: the status line wraps");
+            Assert.StartsWith("Rebased onto main", Detail().Text);
+        }
+
+        Cut("closed");
         t.Controller.ToggleThread(id);
         Assert.Equal(TextTrimming.None, Detail().TextTrimming);
         Assert.Equal(TextWrapping.Wrap, Detail().TextWrapping);
-        Assert.StartsWith("Open already resumes", Detail().Text);
-
         t.Controller.ToggleThread(id);
-        Assert.Equal(TextTrimming.CharacterEllipsis, Detail().TextTrimming);
+        Cut("closed again");
     });
 
     // Task d560f3eb ("misaligned text"): a waiting task's question stood in the title's column, a few letters wide, in a

@@ -1192,6 +1192,9 @@ public sealed class TasksBoard : IDisposable
         Created = task.Created,
         Assignee = task.Assignee,
         Description = task.Description,
+        // The same test DetailOf uses to put the question in Detail: waiting on Petre with a question asked. A task set
+        // to "Waiting on you" by hand has none, and its detail is then a status line.
+        AsksQuestion = task.Status == TaskStatus.WaitingOnYou && task.Question.HasValue,
         Important = task.Important,
         Urgent = task.Urgent,
         SnoozedUntil = task.SnoozedUntil.Map(until => (DateTimeOffset?)until).GetValueOrDefault(),
@@ -1343,6 +1346,12 @@ internal sealed record TaskRowView(Guid Id, string Title, string Detail, TaskSta
 
     /// <summary>Petre's own markdown under the title (Ruling 58), "" for none.</summary>
     public string Description { get; init; } = "";
+
+    /// <summary>
+    /// Whether <see cref="TaskRowView.Detail"/> is a question waiting on Petre rather than a status line (task 735abbf5):
+    /// the panel shows a question in full on every line, a status line only on an open one.
+    /// </summary>
+    public bool AsksQuestion { get; init; }
 
     /// <summary>The task's two flags (Task 12), drawn as the line's toggles.</summary>
     public bool Important { get; init; }

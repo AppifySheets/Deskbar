@@ -472,8 +472,8 @@ line, or under it when there is no room. The List and
 Matrix switch appears from 780 DIP. A full-screen app makes the panel step back until you leave it.
 A script can add and change tasks with `deskbar.cmd task`, and every Claude Code session keeps a task of
 its own here: it joins the task its work continues or creates one, keeps a short status line on it, asks
-you through it (the task waits on you, in orange, with the question, and the pull request or page it wants you to
-open is a link you click right there in the tasks panel; a question it puts to you in Claude Code's own
+you through it (the task waits on you, in orange, with the whole question on its line in the tasks panel, never cut
+short, and the pull request or page it wants you to open is a link you click right there; a question it puts to you in Claude Code's own
 multiple-choice dialog waits on you the same way, until you answer it in the terminal) and marks it done when it has
 finished: a done task gets a green tick, and every line in the tasks panel shows its status (a slim line in its tooltip). Only you close a task. Double-click a Claude task to go to its session, and pick "Start Claude
 on this" on a note's menu to hand it to a new Claude session.

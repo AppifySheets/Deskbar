@@ -1037,6 +1037,9 @@ QL3. The bar's line for the task reads "Merge Deskbar #1, see https://deskbar.ap
      picks the task as before.
 QL4. Start a new Claude session and ask it to ask you to merge a pull request: its question names the pull request as
      a link you can click.
+QL5. Task 735abbf5. Ask a long question on two tasks (two or three lines of text in the panel), open neither: both
+     questions read to their last word, wrapped, with no "…", and stay so after opening and closing one. A Claude
+     task with a long status line and no question still shows it on one line ending in "…" until you open it.
 
 ## A merge settles its question
 

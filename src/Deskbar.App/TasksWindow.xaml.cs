@@ -1466,9 +1466,9 @@ public partial class TasksWindow : Window
                 if (TaskImageRow.Of(StateDir, parts.Images, OpenImage) is { } pictures) below.Children.Add(pictures);
             }
         }
-        // THE DETAIL: the question while the task waits on Petre, else its status line. Cut to one line on a closed line,
-        // IN FULL ON AN OPEN ONE, as the description is: a session's question was readable nowhere in full (Petre,
-        // 2026-11-24, of a question cut at "Add an "O…" with its thread open: "where's the question?"). Tagged for tests.
+        // THE DETAIL: the question while the task waits on Petre, else its status line. A STATUS LINE is cut to one line
+        // on a closed line and shown in full on an open one, as the description is. A QUESTION is shown in full on every
+        // line, open or closed (DetailWraps). Tagged for tests.
         if (row.Detail.Length > 0) below.Children.Add(DetailText(row));
         return (panel, below.Children.Count > 0 ? below : null);
     }
@@ -1484,6 +1484,15 @@ public partial class TasksWindow : Window
     // it (a Button) never presses and does not pick the task, and the click opens the address in the default browser.
     // A press anywhere else on the text still falls through to the line as before. Web addresses and local files become
     // links (the MarkdownBlocks header): a session's text never runs a program from a click, a file link included.
+    // WHETHER THE DETAIL WRAPS IN FULL. An open line always does. A closed line does when the detail is a question
+    // waiting on Petre (task 735abbf5, his third report: "i've reported this 3 times"). The first fix (2026-11-24, "where's
+    // the question?") showed the question in full only on an open line, so in the Waiting on you block every question but
+    // the selected one still ended in "…" mid-sentence, the pull request to merge or the key to set cut off. A question is
+    // the one line he has to act on, so it is never cut. A status line is news, not a request, and stays one line until
+    // the line is opened, which keeps the list compact. AsksQuestion, not the status alone: a task set to "Waiting on you"
+    // by hand has no question, and its detail is then a status line, cut like any other.
+    static bool DetailWraps(TaskRowView row) => row.Expanded || row.AsksQuestion;
+
     TextBlock DetailText(TaskRowView row)
     {
         var text = new TextBlock
@@ -1492,8 +1501,8 @@ public partial class TasksWindow : Window
             FontSize = 11,
             Foreground = row.Status == TaskStatus.WaitingOnYou ? Orange : DimInk,
             FontWeight = row.Status == TaskStatus.WaitingOnYou ? FontWeights.SemiBold : FontWeights.Normal,
-            TextTrimming = row.Expanded ? TextTrimming.None : TextTrimming.CharacterEllipsis,
-            TextWrapping = row.Expanded ? TextWrapping.Wrap : TextWrapping.NoWrap,
+            TextTrimming = DetailWraps(row) ? TextTrimming.None : TextTrimming.CharacterEllipsis,
+            TextWrapping = DetailWraps(row) ? TextWrapping.Wrap : TextWrapping.NoWrap,
         };
         // Plain text stays the Text it always was: a TextBlock filled with inlines reports an empty Text (measured: the
         // window tests reading a status line through it saw ""), so inlines are used only when there is markdown to draw.
