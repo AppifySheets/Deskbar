@@ -460,7 +460,11 @@ it. Drag its inner edge to change the width (460 to start, 360 at the least, hal
 Deskbar remembers the width and whether the panel was open. A search box (Ctrl+F; Esc or its x clears it) finds
 tasks by every word you type, in titles, status lines and questions. Tasks Claude is working on sit in their
 own "Claude working" group right under "Waiting on you". The "Claude working" chip shows only the tasks with
-a live Claude session and stays on across restarts, as "Current workspace" does. Below 710 DIP wide the lines go slim: the title takes the whole line and the line's buttons sit at the end of its last
+a live Claude session and stays on across restarts, as "Current workspace" does. The List is a grid: a header names the columns (Task,
+Status, Sessions, Who, Age, Workspace), and dragging the line between two headers makes a column wider or
+narrower, the title taking whatever is left; double-click that line to put the column back. Deskbar
+remembers the widths. The buttons (the toggles, comments, Open Claude and the menu) sit together at the right
+end of each line. Below 710 DIP wide the lines go slim, without the header: the title takes the whole line and the line's buttons sit at the end of its last
 line, or under it when there is no room. The List and
 Matrix switch appears from 780 DIP. A full-screen app makes the panel step back until you leave it.
 A script can add and change tasks with `deskbar.cmd task`, and every Claude Code session keeps a task of

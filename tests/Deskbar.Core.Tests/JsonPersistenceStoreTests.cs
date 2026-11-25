@@ -383,8 +383,11 @@ public sealed class JsonPersistenceStoreTests : IDisposable
         using var pulse = manager.StateChanged.Subscribe(_ => pulses++);
 
         // CurrentWorkspace (task ed1a01fc) is an init property, so it is checked to make the round trip too.
-        // HideSubtasks (task 173ef268) likewise.
-        var panel = new TasksPanelState(Open: true, Width: 512.5) { CurrentWorkspace = true, HideSubtasks = true };
+        // HideSubtasks (task 173ef268) likewise, and the resizable columns' widths (task 3df2d28f).
+        var panel = new TasksPanelState(Open: true, Width: 512.5)
+        {
+            CurrentWorkspace = true, HideSubtasks = true, Columns = Deskbar.Core.Tasks.TaskColumnWidths.Default with { Sessions = 101.5 },
+        };
         Assert.True(manager.SaveTasksPanel(panel).IsSuccess);
         Assert.Equal(panel, store.Load().Value.TasksPanel);
         Assert.Equal(1, pulses);
@@ -408,6 +411,9 @@ public sealed class JsonPersistenceStoreTests : IDisposable
         Assert.False(panel.Open);
         Assert.Equal(460, panel.Width);
         Assert.False(panel.CurrentWorkspace);
+        // No columns saved: the lines use the defaults (task 3df2d28f).
+        Assert.Null(panel.Columns);
+        Assert.Equal(Deskbar.Core.Tasks.TaskColumnWidths.Default, panel.ColumnWidths);
         // An older file shows subtasks, as every build before the checkbox did.
         Assert.False(panel.HideSubtasks);
     }

@@ -4933,4 +4933,76 @@ public class TasksBoardTests
         t.Window.PickStatsDay(today);
         Assert.Single(t.Window.StatsLinks);
     });
+
+    // --- the resizable columns (task 3df2d28f, TasksWindow.Columns.cs) ---------------------------------------------------
+
+    // A full line's grid: the one inside the line with the line's columns.
+    static Grid GridOf(Button line) => Inside(line).OfType<Grid>().First(g => g.ColumnDefinitions.Count > 4);
+
+    // The header heads full lines only: shown over the List at full width, hidden over slim lines and the Matrix.
+    [Fact]
+    public void The_column_header_shows_over_full_lines_only() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        t.Tasks.Create("work", t.Gepha, Session("s1"));
+        t.Controller.Show();
+        Assert.True(t.Window.ColumnHeaderShown);
+
+        t.Window.Actions!.ResizePanel(TasksPanelLayout.SlimBelow - 1);
+        Assert.False(t.Window.ColumnHeaderShown);
+
+        t.Window.Actions!.ResizePanel(TasksPanelLayout.MatrixFrom);
+        Assert.True(t.Window.ColumnHeaderShown);
+        Assert.True(t.Harness.Manager.SetTasksMatrix(true).IsSuccess);
+        t.Controller.Refresh();
+        Assert.False(t.Window.ColumnHeaderShown);
+
+        // Nor over the Stats view (task 521d2b07), which has no lines.
+        Assert.True(t.Harness.Manager.SetTasksMatrix(false).IsSuccess);
+        t.Controller.Refresh();
+        Assert.True(t.Window.ColumnHeaderShown);
+        t.Controller.ShowStats();
+        Assert.False(t.Window.ColumnHeaderShown);
+    });
+
+    // A resize widens the column on every full line at once and is saved with the panel, so the next draw keeps it.
+    [Fact]
+    public void A_resized_column_follows_on_every_line_and_is_saved() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        var one = t.Tasks.Create("one", t.Gepha, Session("s1")).Value.Id;
+        var two = t.Tasks.AddNote("two", t.Gepha).Value.Id;
+        t.Controller.Show();
+
+        t.Window.ResizeColumn(TaskColumn.Sessions, 130);
+
+        Assert.Equal(130, t.Window.ColumnWidth(TaskColumn.Sessions));
+        Assert.Equal(130, t.Harness.Manager.State.TasksPanel!.ColumnWidths.Sessions);
+        new[] { one, two }.ToList().ForEach(id => Assert.Contains(GridOf(LineOf(t.Window, id)).ColumnDefinitions, c => c.Width.Value == 130));
+        t.Tasks.AddNote("three", t.Gepha);
+        Assert.Equal(130, t.Window.ColumnWidth(TaskColumn.Sessions));
+    });
+
+    // The buttons sit together at the right end of a full line: the flag toggles after the workspace chip, then the
+    // comments and "⋯", with nothing between them but their own columns.
+    [Fact]
+    public void The_buttons_sit_together_after_the_workspace_chip() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        var id = t.Tasks.AddNote("Dishwasher tablets", t.Gepha).Value.Id;
+        t.Controller.Show();
+        t.Window.UpdateLayout();
+
+        var line = LineOf(t.Window, id);
+        var flags = Grid.GetColumn((UIElement)LogicalTreeHelper.GetParent(ButtonNamed(line, "Important")));
+        var comments = Grid.GetColumn(ButtonNamed(line, "Comments"));
+        var more = Grid.GetColumn(ButtonNamed(line, "More"));
+        var chip = Grid.GetColumn(Inside(line).OfType<Border>().First(b => b.Child is TextBlock { Text: "GEPHA" }));
+        Assert.True(chip < flags && flags < comments && comments < more, $"chip {chip}, flags {flags}, comments {comments}, more {more}");
+        // A note with no comments, on a board with no Claude task and nothing closed: the comments column is the glyph's
+        // and the action column is gone.
+        var grid = GridOf(line);
+        Assert.Equal(20, grid.ColumnDefinitions[comments].Width.Value);
+        Assert.Equal(0, grid.ColumnDefinitions[comments + 1].Width.Value);
+    });
 }

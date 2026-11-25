@@ -97,7 +97,9 @@ internal static class TaskStatusMarks
                 HorizontalAlignment = HorizontalAlignment.Left,
                 VerticalAlignment = VerticalAlignment.Center,
                 IsHitTestVisible = false,
-                Child = new TextBlock { Text = ChipText(status), FontSize = 10, Foreground = colours.Ink },
+                // Trimmed rather than cut at the chip's edge when its column is narrower than the word (the tasks panel's
+                // resizable status column, task 3df2d28f); the line's tooltip names the status in full.
+                Child = new TextBlock { Text = ChipText(status), FontSize = 10, Foreground = colours.Ink, TextTrimming = TextTrimming.CharacterEllipsis },
             }
             : null;
 }
