@@ -711,6 +711,13 @@ S16a. A snoozed parent's subtasks (task 4c01747c). With the Subtasks box unticke
     panel's search box: it shows while the word is there. Filter the panel to another workspace than the parent's with
     a subtask there: that subtask still shows. Tick the box: both plain subtasks are back. Wake the parent: with the box
     unticked again, the plain ones fold under it as in S16.
+
+S16b. A Claude parent's subtask on the bar (task 4c01747c). Give a task assigned to Claude a subtask assigned to you.
+    With the Subtasks box unticked the bar shows no "↳" line for it, though the parent has no line on the bar; the
+    panel still lists the parent with "· 1 subtask". Set a second subtask of it to Waiting on you: that one shows on the
+    bar. Pick "Add subtask…" on its line and add one: the new line shows on the bar and glows; click another line and it
+    folds away. Tick the box: the plain subtask's line is back on the bar.
+
 S17. A subtask's way to its parent (task 54b39c4c). Give a note three subtasks. In the tasks panel open the last
     subtask's thread: it starts with "↑ Subtask of <the note>". Click it: the note is picked, its thread opens and the
     list scrolls to it. Right-click a subtask's line in the panel: **Open parent** follows **Add subtask…** and does the

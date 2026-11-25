@@ -417,16 +417,36 @@ public static class TaskViews
     /// subtask of a snoozed task folds as well): the ones the "Subtasks" checkbox unticked folds though the parent is on
     /// no list. Only a snoozed ancestor <paramref name="counts"/> admits holds its family, so a subtask never folds into
     /// a parent the view would not list even awake: the panel passes its workspace and assignee filters (the Snoozed chip
-    /// then lists that parent), the bar its own rule (a task assigned to Petre). A broken chain (a parent id with no
-    /// task, a loop) ends the walk, so it neither hangs nor throws.
+    /// then lists that parent). The bar goes further, see <see cref="UnderOpenParent"/>.
     /// </summary>
-    public static IReadOnlySet<Guid> UnderSnoozedParent(TaskBoard board, Func<TaskItem, bool> counts)
+    public static IReadOnlySet<Guid> UnderSnoozedParent(TaskBoard board, Func<TaskItem, bool> counts) =>
+        UnderAncestor(board, up => up.IsOpen && up.IsSnoozed && counts(up));
+
+    /// <summary>
+    /// The ids of the open subtasks whose own parent is open: the bar's fold with the
+    /// "Subtasks" box unticked (task 4c01747c, Petre's second screenshot: "↳ test" stayed on the bar under a parent
+    /// assigned to Claude, which the bar never lists). The bar is the short view, so there a subtask folds whether or
+    /// not its parent has a line of its own; the tasks panel lists every parent and keeps its own rule.
+    /// </summary>
+    /// Only the direct parent is asked: a grandchild's parent is itself a subtask, open or not, and one under a closed
+    /// parent keeps its line (TaskBoard.Close refuses that state, but a hand-edited file can hold it).
+    public static IReadOnlySet<Guid> UnderOpenParent(TaskBoard board)
+    {
+        var open = board.Tasks.Where(t => t.IsOpen).Select(t => t.Id).ToHashSet();
+        return board.Tasks
+            .Where(t => t.IsOpen && t.ParentId is { HasValue: true } p && p.Value != t.Id && open.Contains(p.Value))
+            .Select(t => t.Id).ToHashSet();
+    }
+
+    // The open tasks with an ancestor `holds` answers yes for. A broken chain (a parent id with no task, a loop) ends the
+    // walk, so it neither hangs nor throws.
+    static IReadOnlySet<Guid> UnderAncestor(TaskBoard board, Func<TaskItem, bool> holds)
     {
         var byId = board.Tasks.GroupBy(t => t.Id).ToDictionary(g => g.Key, g => g.First());
         // Walks up from `at`, one step per task on the board at most, so a loop in the parent ids ends.
         bool Held(Maybe<Guid> at, int left) =>
             left > 0 && at.HasValue && byId.TryGetValue(at.Value, out var up)
-            && ((up.IsOpen && up.IsSnoozed && counts(up)) || Held(up.ParentId, left - 1));
+            && (holds(up) || Held(up.ParentId, left - 1));
         return board.Tasks.Where(t => t.IsOpen && Held(t.ParentId, byId.Count)).Select(t => t.Id).ToHashSet();
     }
 
