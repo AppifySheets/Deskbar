@@ -34,7 +34,8 @@ namespace Deskbar.Core.Control;
 //                        headless session's asks blink as before (no ruling changes that).
 //   SessionStart         the briefing (SessionBriefing.Start). A session that already has a task (a resumed one keeps its
 //                        id; a compacted one never ended) is named its task, live on it again; any other is offered the
-//                        tasks of its workspace (TaskBoard.Offered) and told how to join one or create its own.
+//                        tasks of its workspace (TaskBoard.Offered; the workspace found as `task new` finds it,
+//                        SessionWorkspace) and told how to join one or create its own.
 //   UserPromptSubmit     the user's next message changes no status. A task waiting on the user stays waiting (Ruling 49):
 //                        the session resolves it with `task answered`. A Done task stays Done (2026-11-23): the session
 //                        runs `task join <id>` if the message gives it more work. Then one line reminding the session of
@@ -173,7 +174,11 @@ public sealed partial class RemoteControl
         if (service.Board.LastTaskOf(hook.SessionId).HasNoValue && hook.Source.Map(s => s == "clear").GetValueOrDefault(false) && folder is not null)
             service.JoinAfterClear(hook.SessionId, folder, stored => FolderPath.Same(stored, folder, LongPath));
         var own = service.Board.TaskOf(hook.SessionId);
-        var offered = own.HasValue ? [] : service.Board.Offered(CallerOf(folder).Workspace is { } w ? w.Id : Maybe<Guid>.None);
+        // The workspace whose tasks are offered is found the way `task new` finds one (SessionWorkspace): the VS Code
+        // window showing the folder, else the workspace of the latest task worked on in the session's repo. The window
+        // alone left a session started in a terminal (no VS Code window on its folder) offered only the free Claude
+        // tasks (task d8c152cf). No session is passed: a session offered a choice has no own task to ask.
+        var offered = own.HasValue ? [] : service.Board.Offered(SessionWorkspace(service, folder, Maybe<string>.None));
         // A session coming back to a subtask (or a parent) reads its family again: siblings moved on while it was away.
         var family = own.Bind(t => FamilyOf(service, t)).GetValueOrDefault("");
         // The own task's description images are listed with absolute paths (images in tasks, TaskService.ExpandImages).

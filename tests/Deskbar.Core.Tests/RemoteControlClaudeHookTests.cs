@@ -433,6 +433,24 @@ public class RemoteControlClaudeHookTests
         Assert.Contains("task join <id> --session s1", briefing);
     }
 
+    // Task d8c152cf: a session started outside VS Code (Petre's run in the terminal windows Deskbar opens) was offered
+    // only the free Claude tasks, because the offer list asked the VS Code window alone for the workspace. It now falls
+    // back the way `task new` does (task f905b1a7): the workspace of the latest task worked on in the session's repo, a
+    // worktree counting as its repo.
+    [Fact]
+    public void A_session_without_a_vs_code_window_is_offered_its_repos_workspaces_tasks()
+    {
+        var manager = Started();
+        tasks.Create("Store listing", IdOf(manager, "Deskbar"), tasks.NewSession("old", Repo));
+        tasks.Assign(tasks.AddNote("Fix the strip", IdOf(manager, "Deskbar")).Value.Id, Assignee.Claude);
+        tasks.Assign(tasks.AddNote("Portal accounts", IdOf(manager, "iam.ge")).Value.Id, Assignee.Claude);
+
+        var briefing = Hooked(manager, "SessionStart", source: "startup", from: Repo + @"\.claude\worktrees\strip");
+
+        Assert.Contains("Fix the strip", briefing);
+        Assert.DoesNotContain("Portal accounts", briefing);
+    }
+
     // Ruling 62: `task answered` settles the session's comments since its ask; `task comment-settle <comment-id>` settles
     // one of its own and refuses another session's; `task list` shows the settled time in the thread.
     [Fact]
