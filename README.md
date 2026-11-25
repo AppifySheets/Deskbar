@@ -515,6 +515,13 @@ panel, closed tasks included. "Finished" means Done or closed. Stats counts ever
 filters say. A script gets the same numbers as JSON with `deskbar.cmd task stats` (`--days 30` for a
 longer stretch), and `deskbar.cmd tasks-window stats` opens the panel on Stats.
 
+The Manager button on the bar opens one background Claude session a day, on the Fable model, that looks after the
+whole board. It reads `deskbar.cmd task overview`, which prints one line per open task, and acts only through
+`deskbar.cmd task` commands: it can comment on a task, which wakes an idle session, and it can pass your words to a
+task that is waiting on you. It cannot close, delete or finish a task, and only what you say after "The user says:"
+counts as you. Click again to bring its window forward; the next day a click ends yesterday's and starts a new one.
+`deskbar.cmd task show <id>` prints one task in full and `deskbar.cmd task manager` does what the button does.
+
 The tasks screencast shows the old floating window and needs filming again for the panel.
 
 More in [Tasks](docs/features/tasks.md).

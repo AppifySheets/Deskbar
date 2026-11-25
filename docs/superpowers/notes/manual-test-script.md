@@ -1119,6 +1119,23 @@ TC5. Double-click the hairline before Sessions: the column goes back to its usua
 TC6. Narrow the panel under 710 DIP: the lines go slim and the header goes. Switch to the Matrix (780 DIP or more):
      no header there either.
 
+## The manager session
+
+(Task bbf9a6ed.) The bar showing, `$ts` as above, a few open tasks and one Claude task waiting on you.
+
+MG1. Click the bar's Manager button. The first time, Claude Code may show its folder trust prompt in the new window:
+     accept it. A second click, once the session is up, starts the manager; ask it "what is on the board?" and it
+     answers from `task overview`.
+MG2. Click Manager again while its window is open: the same window comes forward, and no second session starts.
+MG3. Close the manager's window and click again: it attaches to the same session (same conversation), not a new one.
+MG4. Next day, or after editing the stored day in the state file to yesterday, click: yesterday's session is stopped
+     (its terminal window has closed, claude stop closes it) and a NEW window opens on today's manager.
+MG5. Ask the manager to pass "The user says: yes" to a waiting task. That task's session wakes and settles its question.
+MG6. Ask the manager to close a task: it says it cannot, and the task stays open.
+MG7. With nothing stored, have a manager session already running in the manager folder (for example a start that was
+     listed late). The next click attaches to it and never starts a second one.
+MG8. From any terminal, `$ts task overview` prints one line per open task.
+
 ## Results (2026-08-01)
 
 Status: **pending human execution.** An agent cannot observe the desktop, Task View,
