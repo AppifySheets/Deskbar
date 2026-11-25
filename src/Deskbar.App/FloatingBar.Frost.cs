@@ -124,7 +124,13 @@ public partial class FloatingBar
         // sharp picture: the left of a bar docked on the right of its screen.
         var blur = FrostBlur.Clamp(manager.State.FrostBlur);
         var fromLeft = dockedEdge == "right";
-        var made = await Task.Run(() => MakeFrost(bar, screen, blur, fromLeft, previous));
+        // How much of the bar's width that edge eases over: a fixed few DIP (FrostEdge), so it is turned into a share
+        // here, from the window's width in screen pixels and its screen's own scale. The monitor's DPI, not
+        // VisualTreeHelper.GetDpi(this), which can lag a move between screens (see the GetDpiForMonitor note in
+        // FloatingBar.xaml.cs).
+        NativeMethods.GetDpiForMonitor(monitor, NativeMethods.MDT_EFFECTIVE_DPI, out var dpi, out _);
+        var ease = FrostEdge.ShareOf(bar.Right - bar.Left, dpi / 96.0);
+        var made = await Task.Run(() => MakeFrost(bar, screen, blur, fromLeft, ease, previous));
         if (generation != frostGeneration) return;
 
         made.Match(
@@ -132,9 +138,12 @@ public partial class FloatingBar
             reason => ShowFrost(null, reason));
     }
 
-    // What the frost is cut from: when every field matches the frost on screen, there is nothing to redo.
+    // What the frost is cut from: when every field matches the frost on screen, there is nothing to redo. Ease is the
+    // share of the bar's width its inner edge eases over (FrostEdge.ShareOf); the band's veil reads it from here, so
+    // the veil and the picture always share one ramp.
     internal sealed record FrostSource(
-        string Path, DateTime Written, WallpaperFit Fit, WallpaperCrop.Rect Bar, WallpaperCrop.Rect Screen, double Blur, bool FromLeft);
+        string Path, DateTime Written, WallpaperFit Fit, WallpaperCrop.Rect Bar, WallpaperCrop.Rect Screen, double Blur, bool FromLeft,
+        double Ease);
 
     // A finished frost: its source, and its pixels (Bgra32, Width x Height).
     internal sealed record FrostImage(FrostSource Source, byte[] Pixels, int Width, int Height);
@@ -142,12 +151,12 @@ public partial class FloatingBar
     // Runs on a pool thread. Success(null) means nothing changed and the frost on screen stands; a failure is the
     // reason there is no frost, for the trace.
     internal static Result<FrostImage?> MakeFrost(
-        WallpaperCrop.Rect bar, WallpaperCrop.Rect screen, double blur, bool fromLeft, FrostSource? previous)
+        WallpaperCrop.Rect bar, WallpaperCrop.Rect screen, double blur, bool fromLeft, double ease, FrostSource? previous)
     {
         if (DesktopWallpaper.On(screen) is not { HasValue: true } found)
             return Result.Failure<FrostImage?>("Windows reports no picture file for the bar's screen");
         var wallpaper = found.Value;
-        var source = new FrostSource(wallpaper.Path, File.GetLastWriteTimeUtc(wallpaper.Path), wallpaper.Fit, bar, screen, blur, fromLeft);
+        var source = new FrostSource(wallpaper.Path, File.GetLastWriteTimeUtc(wallpaper.Path), wallpaper.Fit, bar, screen, blur, fromLeft, ease);
         if (source == previous) return Result.Success<FrostImage?>(null);
 
         try
@@ -165,12 +174,6 @@ public partial class FloatingBar
             return Result.Failure<FrostImage?>($"the picture would not load ({e.GetType().Name}: {e.Message})");
         }
     }
-
-    // How far in from the bar's inner edge the frost takes to reach full strength, as a share of the bar's width
-    // (Frost.Ease). The veil eases over the same share (BarSurface.FrostVeilFrom), so picture and veil arrive
-    // together. A fifth, about 40 DIP of a 210 DIP bar. It shipped at 35% after Petre asked for the edge to be "less
-    // pronounced"; seen on his bar: "easing-in is too much; little less width for the easing".
-    internal const double FrostEase = 0.2;
 
     static FrostImage? Frosted(BitmapSource picture, WallpaperCrop.Area area, WallpaperCrop.Rect bar, FrostSource source)
     {
@@ -195,7 +198,7 @@ public partial class FloatingBar
         // Blurred to the slider's strength with the colour lifted, then eased out of the untouched picture across the
         // side that faces the desktop, so the bar's edge is not a hard line down the screen.
         var frosted = Frost.Apply(pixels, w, h, radius: FrostBlur.RadiusAt(source.Blur), saturation: 1.6);
-        return new FrostImage(source, Frost.Ease(pixels, frosted, w, h, FrostEase, source.FromLeft), w, h);
+        return new FrostImage(source, Frost.Ease(pixels, frosted, w, h, source.Ease, source.FromLeft), w, h);
     }
 
     // Puts a frost on the bar, or takes it off (null) with the reason why.
@@ -223,7 +226,7 @@ public partial class FloatingBar
         FrostSurface.Background = brush;
         PaintBand();
         if (ClickTrace.On)
-            ClickTrace.Write($"frost: {Path.GetFileName(frost.Source.Path)} laid as {frost.Source.Fit}, blur {frost.Source.Blur} px easing from the {(frost.Source.FromLeft ? "left" : "right")}, bar {frost.Source.Bar.Left},{frost.Source.Bar.Top} to "
+            ClickTrace.Write($"frost: {Path.GetFileName(frost.Source.Path)} laid as {frost.Source.Fit}, blur {frost.Source.Blur} px easing from the {(frost.Source.FromLeft ? "left" : "right")} over {frost.Source.Ease:P1} of its width, bar {frost.Source.Bar.Left},{frost.Source.Bar.Top} to "
                 + $"{frost.Source.Bar.Right},{frost.Source.Bar.Bottom} on screen {frost.Source.Screen.Left},{frost.Source.Screen.Top} to "
                 + $"{frost.Source.Screen.Right},{frost.Source.Screen.Bottom}, frost {frost.Width}x{frost.Height}");
     }
