@@ -116,7 +116,7 @@ The full set:
 - `task add <title>|- [--workspace <name>|none] [--important] [--urgent]`, with `-` reading the title from stdin; the flags put the note at the top of the quadrant they give
 - `task close <id>` and `task reopen <id>`. A task Claude is still working on refuses a plain `task close` and says so; `task close <id> --stop-claude` closes it and stops its background sessions, as **Stop Claude and close** does.
 - `task status <id> <backlog|in-progress|waiting|done>`
-- `task rename <id> <title>`
+- `task rename <id> <title>|-`, with `-` reading the title from stdin
 - `task move <id> <workspace>|none`
 - `task comment <id> <markdown>`
 - `task delete <id>`

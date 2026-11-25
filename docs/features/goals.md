@@ -69,9 +69,9 @@ Ids are a goal's full id or a unique prefix of four or more characters. A date i
 The full set:
 
 - `goal list [--week [<date>] | --month [<date>] | --all]`
-- `goal add <title> [--week [<date>] | --month [<date>]]`
+- `goal add <title>|- [--week [<date>] | --month [<date>]]`, with `-` reading the title from stdin
 - `goal done <id>`, `goal drop <id>` and `goal reopen <id>`
-- `goal rename <id> <title>`
+- `goal rename <id> <title>|-`, with `-` reading the title from stdin
 - `goal delete <id>`, which answers with the goal as it was
 - `goal carry <id> [--week [<date>] | --month [<date>]]`
 - `goal parent <id> <monthly-id>|none`

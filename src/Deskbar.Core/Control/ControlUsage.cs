@@ -70,7 +70,7 @@ public static class ControlUsage
             new("task", "reopen <id>", "reopen a closed task: in progress while a session is live on it, else backlog"),
             new("task", "status <id> <backlog|in-progress|waiting|done>",
                 "set a task's status by hand (waiting is waiting on you); close closes"),
-            new("task", "rename <id> <title>", "rename a task"),
+            new("task", "rename <id> <title>|-", "rename a task; - reads the title from stdin"),
             new("task", "move <id> <workspace>|none", "move a task to a workspace, or to none"),
             new("task", "comment <id> <markdown>|-", "add a comment to a task's thread, as you; - reads the markdown from stdin"),
             new("task", "delete <id>", "delete a task; the reply is the task as it was"),
@@ -151,13 +151,13 @@ public static class ControlUsage
                 + "      status (open, done or dropped), order, parent, progress (\"3 of 5 done\") with tasksDone, tasks,\n"
                 + "      weeksDone and weeks (null on a weekly goal), and taskIds; --week or --month with a yyyy-MM-dd date\n"
                 + "      lists the period holding it, bare the current one; --all every goal, the oldest period first"),
-            new("goal", "add <title> [--week [<date>] | --month [<date>]]",
+            new("goal", "add <title>|- [--week [<date>] | --month [<date>]]",
                 "add a goal at the end of a period: this week without an option, the current month with a bare\n"
-                + "      --month, the week or month holding a yyyy-MM-dd date otherwise"),
+                + "      --month, the week or month holding a yyyy-MM-dd date otherwise; - reads the title from stdin"),
             new("goal", "done <id>", "mark a goal done (your call: finishing its tasks never does)"),
             new("goal", "drop <id>", "drop a goal that did not happen; it stays in its period, as dropped"),
             new("goal", "reopen <id>", "open a done or dropped goal again"),
-            new("goal", "rename <id> <title>", "rename a goal"),
+            new("goal", "rename <id> <title>|-", "rename a goal; - reads the title from stdin"),
             new("goal", "delete <id>",
                 "delete a goal made by mistake; its tasks and weekly goals are freed; the reply is the goal as it was"),
             new("goal", "carry <id> [--week [<date>] | --month [<date>]]",
