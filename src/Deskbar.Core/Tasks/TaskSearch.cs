@@ -16,6 +16,12 @@ namespace Deskbar.Core.Tasks;
 // in, closed and snoozed included, past every other filter (status, workspace, goal, assignee, Claude working). A
 // filter that hid the very task asked for by id would make the box look broken. When no task's id starts with the text
 // it is an ordinary word search again, so "decade" or "beef" still find titles.
+//
+// SEARCH BY PULL REQUEST (task e7aa49b1, Petre: "add it to the task so that i can search by pr id in tasks"). Text that
+// names a pull request ("523", "#523", "PR 523", "Deskbar #523" or its URL; TaskPullRequests.Query) finds every task that
+// has it (TaskPullRequests.Of: the ones its sessions opened, and the ones its texts link) the same way an id does: as a
+// lookup, in every section and past every filter. Digits can be both an id prefix and a pull request number ("1234"),
+// and then Found holds the tasks of either. When no task has it, it is an ordinary word search again.
 public sealed record TaskSearch(string Text)
 {
     public static readonly TaskSearch None = new("");
@@ -38,6 +44,7 @@ public sealed record TaskSearch(string Text)
     /// </summary>
     public bool Admits(TaskItem task) =>
         MatchesId(task)
+        || MatchesPullRequest(task)
         || words.All(word => new[] { task.Title, task.StatusLine, task.Question.GetValueOrDefault("") }
             .Any(field => field.Contains(word, StringComparison.OrdinalIgnoreCase)));
 
@@ -65,15 +72,22 @@ public sealed record TaskSearch(string Text)
     public bool MatchesId(TaskItem task) =>
         IdPrefix.Map(prefix => task.Id.ToString("N").StartsWith(prefix, StringComparison.Ordinal)).GetValueOrDefault(false);
 
+    /// <summary>The pull request the text names, if it names one (see "Search by pull request" above).</summary>
+    public Maybe<PullRequestQuery> PullRequest => TaskPullRequests.Query(Text);
+
+    /// <summary>Whether the text names a pull request this task has (see "Search by pull request" above).</summary>
+    public bool MatchesPullRequest(TaskItem task) => PullRequest.Map(q => q.Matches(task)).GetValueOrDefault(false);
+
     /// <summary>
-    /// The tasks whose id starts with the text, as their own board, when there is at least one: the panel shows them in
-    /// every section and past every other filter (see "Search by id" above). None when the text is no id prefix or no
-    /// task's id starts with it, and the search is then an ordinary word search.
+    /// The tasks whose id starts with the text, or that have the pull request it names, as their own board, when there
+    /// is at least one: the panel shows them in every section and past every other filter (see "Search by id" and
+    /// "Search by pull request" above). None when the text is neither or no task matches, and the search is then an
+    /// ordinary word search.
     /// </summary>
     public Maybe<TaskBoard> Found(TaskBoard board)
     {
-        if (IdPrefix.HasNoValue) return Maybe<TaskBoard>.None;
-        var found = board.Tasks.Where(MatchesId).ToArray();
+        if (IdPrefix.HasNoValue && PullRequest.HasNoValue) return Maybe<TaskBoard>.None;
+        var found = board.Tasks.Where(t => MatchesId(t) || MatchesPullRequest(t)).ToArray();
         return found.Length > 0 ? Maybe<TaskBoard>.From(new TaskBoard(found)) : Maybe<TaskBoard>.None;
     }
 }

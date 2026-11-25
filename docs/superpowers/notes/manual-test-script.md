@@ -345,6 +345,10 @@ written for the floating window and now describe the panel; 64a to 64n cover wha
     task (its title and its status line): the task stays; a word that matches nothing hides it. Esc clears the
     box. Type again: a × shows at the box's right end (none while it is empty); click it: the box is empty, every
     task is back, the × is gone and the keyboard is still in the box. Close and reopen the panel: the search is empty.
+64q. Search by pull request (task e7aa49b1). Have a Claude session on a task open a pull request with `gh pr create`.
+    Open the task in its window: "Pull requests" lists it, and clicking it opens it in the browser. Close the task,
+    then type the pull request's number in the panel's search box, then `#` and the number, then its link: each
+    time the closed task shows, and only it. A task whose thread links a pull request is found by that number too.
 64j. Claude working. With one task that has a live Claude session, one with an ended session and one note, click
     the "Claude working N" chip: only the live one stays, N is 1, and its session square glows while Claude is
     working. Close and reopen the panel, then restart Deskbar: the chip is still on (task 93fa0b9b). Click the chip

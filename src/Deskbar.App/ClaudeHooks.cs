@@ -6,8 +6,8 @@ using System.Text.Json.Nodes;
 namespace Deskbar.App;
 
 // Deskbar's entries in Claude Code's ~/.claude/settings.json (see ClaudeSkill for why they exist): two that ask for the
-// user (Notification, Stop) while "Teach Claude Code about Deskbar" is on, and three more (SessionStart,
-// UserPromptSubmit, SessionEnd) while Claude Code sessions also keep their tasks (AppState.ClaudeTasksInEffect; design
+// user (Notification, Stop) while "Teach Claude Code about Deskbar" is on, and four more (SessionStart,
+// UserPromptSubmit, SessionEnd, and PostToolUse for `gh pr create` only, see PullRequestTools) while Claude Code sessions also keep their tasks (AppState.ClaudeTasksInEffect; design
 // docs/superpowers/specs/2026-11-22-tasks-board-design.md, "Who gets it"). Each runs a script that hands the event's
 // JSON to `claude-hook`; the event's name is in the JSON.
 //
@@ -125,7 +125,30 @@ static class ClaudeHooks
         ("Notification", on ? [Entry(askCommand)] : []),
         ("Stop", on ? [Entry(askCommand), .. tasks && waitCommand is not null ? [WaitEntry(waitCommand)] : Array.Empty<JsonObject>()] : []),
         .. TaskEvents.Select(name => (name, (IReadOnlyList<JsonObject>)(on && tasks ? [Entry(taskCommand)] : []))),
+        ("PostToolUse", on && tasks ? PullRequestTools.Select(tool => ToolEntry(tool, taskCommand)).ToArray() : []),
     ];
+
+    // A PULL REQUEST GOES ON ITS TASK (task e7aa49b1, Core's TaskPullRequests). One PostToolUse entry per shell tool,
+    // on the same terms and the same script as the task events, each with Claude Code's `if` filter so it runs only for a
+    // command that opens a pull request, never for the hundreds of other commands a session runs: every hook run is a
+    // process and a turn on Deskbar's one-client-at-a-time control pipe. Measured 2026-11-25 on Claude Code 2.1.332 with
+    // a headless probe: `echo hi` (Bash) and `Write-Output hi` (PowerShell) did not run the hook, `cd . && gh pr create
+    // --help` (Bash, the second half of a compound command) and `gh pr create --help` (PowerShell) did, and both
+    // tool_response objects carried stdout. Claude Code runs the hook anyway when it cannot split a command, so the
+    // handler checks the command again (TaskPullRequests.Created).
+    static readonly string[] PullRequestTools = ["Bash", "PowerShell"];
+
+    static JsonObject ToolEntry(string tool, string command) =>
+        new()
+        {
+            ["matcher"] = tool,
+            ["hooks"] = new JsonArray(new JsonObject
+            {
+                ["type"] = "command",
+                ["command"] = command,
+                ["if"] = $"{tool}(gh pr create*)",
+            }),
+        };
 
     static JsonObject Entry(string command) =>
         new() { ["hooks"] = new JsonArray(new JsonObject { ["type"] = "command", ["command"] = command }) };

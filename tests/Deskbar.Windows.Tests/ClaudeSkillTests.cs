@@ -362,6 +362,28 @@ public sealed class ClaudeSkillTests : IDisposable
         Assert.All(TaskEvents, e => Assert.Single(Ours(File.ReadAllText(Settings), e)));
     }
 
+    // A PULL REQUEST GOES ON ITS TASK (task e7aa49b1): with the task events come two PostToolUse entries, one per shell
+    // tool, each filtered by Claude Code's `if` to `gh pr create`, on the task script; with the setting off both go, and a
+    // second sync writes nothing new.
+    [Fact]
+    public void The_pull_request_hooks_come_and_go_with_the_task_events()
+    {
+        Settled(WithABellAndAStartHook);
+
+        ClaudeSkill.Sync(true, true, home, Deskbar);
+        var on = System.Text.Json.Nodes.JsonNode.Parse(File.ReadAllText(Settings))!["hooks"]!["PostToolUse"]!.AsArray();
+        Assert.Equal(["Bash", "PowerShell"], on.Select(e => (string)e!["matcher"]!));
+        Assert.Equal(["Bash(gh pr create*)", "PowerShell(gh pr create*)"], on.Select(e => (string)e!["hooks"]![0]!["if"]!));
+        Assert.All(on, e => Assert.Contains("claude-task-hook.cmd", (string)e!["hooks"]![0]!["command"]!));
+
+        var before = File.ReadAllText(Settings);
+        ClaudeSkill.Sync(true, true, home, Deskbar);
+        Assert.Equal(before, File.ReadAllText(Settings));
+
+        ClaudeSkill.Sync(true, false, home, Deskbar);
+        Assert.Null(System.Text.Json.Nodes.JsonNode.Parse(File.ReadAllText(Settings))!["hooks"]!["PostToolUse"]);
+    }
+
     // "Teach Claude Code about Deskbar" off takes every entry of Deskbar's, the task ones included, whatever the task
     // setting says: both write into the same file, and the task hooks without the skill would run for nothing.
     [Fact]

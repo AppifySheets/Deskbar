@@ -278,6 +278,8 @@ public partial class TaskDetailWindow : Window
             r.Description, r.Important, r.Urgent, r.SnoozedUntil?.ToString("O") ?? "", r.Goal?.Title ?? "", r.ParentTitle ?? "",
             // The parent's id too (task 54b39c4c): the Parent button opens it, so a move to a namesake parent redraws.
             r.ParentId?.ToString() ?? "",
+            // The pull requests section (task e7aa49b1): a new one redraws.
+            string.Join('\u001e', r.PullRequests.Select(p => p.Key)),
             r.ClaudeWorking, r.WorkingCount,
             string.Join('\u001e', r.Comments.Select(c => $"{c.Id}|{c.Author}|{c.When}|{c.Settled}|{c.Editable}|{c.Markdown}")),
             string.Join('\u001e', r.SessionList.Select(s => $"{s.Id}|{s.State}|{s.Joined:O}")),
@@ -522,6 +524,17 @@ public partial class TaskDetailWindow : Window
         {
             side.Children.Add(Section("Subtasks"));
             row.Subtasks.ToList().ForEach(sub => side.Children.Add(SubtaskEntry(sub)));
+            side.Children.Add(new Border { Height = 12 });
+        }
+
+        // THE TASK'S PULL REQUESTS (task e7aa49b1): the ones its sessions opened, each a link that opens it in the browser,
+        // so the task found by a pull request's number in the search shows the pull request itself too. Drawn as one
+        // markdown line per pull request, through the same renderer the thread uses, so the link looks and opens as the
+        // thread's links do.
+        if (row.PullRequests.Count > 0)
+        {
+            side.Children.Add(Section("Pull requests"));
+            row.PullRequests.ToList().ForEach(p => side.Children.Add(Rendered($"[{p.Label}]({p.Url})", 12.5)));
             side.Children.Add(new Border { Height = 12 });
         }
 

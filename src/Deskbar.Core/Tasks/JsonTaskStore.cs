@@ -124,7 +124,13 @@ public sealed class JsonTaskStore(string baseDirectory, Action<string>? trace = 
         // TaskItem.StatusLog (task 521d2b07, the task stats): every status change since logging began. Left out of the
         // file while empty, so a task nobody moved stays as short as it was; a file without it reads as no history.
         // Still version 2.
-        [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] IReadOnlyList<StatusChangeDto>? StatusLog = null);
+        [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] IReadOnlyList<StatusChangeDto>? StatusLog = null,
+        // TaskItem.PullRequests (task e7aa49b1): the pull requests the task's sessions opened, as their URLs. Left out of
+        // the file while empty, like StatusLog. Read tolerantly: anything but an array of strings reads as none, and an
+        // entry that is not a GitHub pull request link is skipped (FromDto). Still version 2; an older build ignores the
+        // field and drops it on its next save, which costs the links and never a task.
+        [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull), JsonConverter(typeof(TolerantStringListConverter))]
+        IReadOnlyList<string>? PullRequests = null);
 
     // One status change (TaskItem.StatusLog). Both statuses go through the tolerant converter, like the task's own.
     sealed record StatusChangeDto(DateTimeOffset At, TaskStatus From, TaskStatus To);
@@ -224,7 +230,8 @@ public sealed class JsonTaskStore(string baseDirectory, Action<string>? trace = 
             t.ParentId.HasValue ? t.ParentId.Value : null,
             t.SnoozedUntil.HasValue ? t.SnoozedUntil.Value.ToUniversalTime() : null,
             t.Pin,
-            t.StatusLog.Count > 0 ? t.StatusLog.Select(c => new StatusChangeDto(c.At.ToUniversalTime(), c.From, c.To)).ToArray() : null);
+            t.StatusLog.Count > 0 ? t.StatusLog.Select(c => new StatusChangeDto(c.At.ToUniversalTime(), c.From, c.To)).ToArray() : null,
+            t.PullRequests.Count > 0 ? t.PullRequests.Select(p => p.Url).ToArray() : null);
 
     static TaskItem FromDto(TaskDto d) =>
         new(d.Id, d.Title ?? "",
@@ -256,6 +263,9 @@ public sealed class JsonTaskStore(string baseDirectory, Action<string>? trace = 
             SnoozedUntil = d.SnoozedUntil is { } snoozed ? snoozed.ToUniversalTime() : Maybe<DateTimeOffset>.None,
             Pin = d.Pin ?? FallbackPin(d.Raised ?? d.Created),
             StatusLog = (d.StatusLog ?? []).Where(c => c is not null).Select(c => new StatusChange(c.At.ToUniversalTime(), c.From, c.To)).ToArray(),
+            // Each stored URL read back as a link; a hand-edited entry that is no pull request link is dropped, and two
+            // spellings of one pull request are one.
+            PullRequests = (d.PullRequests ?? []).SelectMany(AskedPullRequests.In).DistinctBy(p => p.Key).ToArray(),
         };
 
     // A pin for a task saved before pins existed: the later raised, the higher (smaller is higher), so the pinned block
@@ -331,6 +341,34 @@ public sealed class JsonTaskStore(string baseDirectory, Action<string>? trace = 
         }
 
         public override void Write(Utf8JsonWriter writer, string? value, JsonSerializerOptions options) => writer.WriteStringValue(value);
+    }
+
+    // An array's string entries (task e7aa49b1, `pullRequests`); anything that is not an array reads as absent, and an
+    // entry that is not a string is skipped, so one odd value never fails the whole file.
+    sealed class TolerantStringListConverter : JsonConverter<IReadOnlyList<string>?>
+    {
+        public override IReadOnlyList<string>? Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
+        {
+            if (reader.TokenType != JsonTokenType.StartArray)
+            {
+                reader.Skip();
+                return null;
+            }
+            var items = new List<string>();
+            while (reader.Read() && reader.TokenType != JsonTokenType.EndArray)
+            {
+                if (reader.TokenType == JsonTokenType.String) items.Add(reader.GetString()!);
+                else reader.Skip();
+            }
+            return items;
+        }
+
+        public override void Write(Utf8JsonWriter writer, IReadOnlyList<string>? value, JsonSerializerOptions options)
+        {
+            writer.WriteStartArray();
+            (value ?? []).ToList().ForEach(writer.WriteStringValue);
+            writer.WriteEndArray();
+        }
     }
 
     // A time written as a string that parses, or absent.

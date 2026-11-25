@@ -147,6 +147,18 @@ public sealed record TaskBoard(IReadOnlyList<TaskItem> Tasks)
             ? this
             : ChangeOpen(id, t => t with { StatusLine = line, UpdatedAt = now });
 
+    /// <summary>
+    /// A pull request a session opened for this task (task e7aa49b1, TaskItem.PullRequests): appended once, so the same
+    /// link again (any spelling of it, PullRequestLink.Key) returns this same board and saves nothing. Only the list and
+    /// UpdatedAt change: the line keeps its place and status, and Raised does not move, since opening a pull request asks
+    /// nothing of Petre (the session's ask does that). A closed task takes it too, as a comment does: a session can still
+    /// open a pull request for work Petre closed, and the search must find it.
+    /// </summary>
+    public Result<TaskBoard> AddPullRequest(Guid id, PullRequestLink link, DateTimeOffset now) =>
+        Lookup(id).Map(task => task.PullRequests.Any(p => p.Key == link.Key)
+            ? this
+            : Replaced(task with { PullRequests = [.. task.PullRequests, link], UpdatedAt = now }));
+
     /// <summary>A session needs a decision: the task waits on Petre, shows the question and moves to the top.</summary>
     public Result<TaskBoard> Ask(Guid id, string question, DateTimeOffset now) =>
         CleanText(question, "An ask needs a question").Bind(q =>

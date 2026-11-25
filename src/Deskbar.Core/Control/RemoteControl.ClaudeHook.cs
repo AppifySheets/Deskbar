@@ -40,6 +40,9 @@ namespace Deskbar.Core.Control;
 //                        runs `task join <id>` if the message gives it more work. Then one line reminding the session of
 //                        its task, its open question, that it is done, or that the user closed it (SessionBriefing.Prompt).
 //   SessionEnd           the session is marked ended; its task stays open ("no live session"). Nothing to read.
+//   PostToolUse          only for a Bash or PowerShell command matching `gh pr create*` (the entries' `if` filter,
+//                        ClaudeHooks): the pull request it opened goes on the session's own task (task e7aa49b1,
+//                        TaskPullRequests). Nothing to read.
 //
 // The three task events do nothing at all, and print nothing, for a HEADLESS session (`claude -p`, SDK runs, scheduled
 // agents; ClaudeHookEvent's rule), when sessions do not keep tasks (AppState.ClaudeTasksInEffect: a hook entry left
@@ -95,8 +98,23 @@ public sealed partial class RemoteControl
         "SessionStart" => Said(SessionStarted(Attended(service, hook), hook, folder)),
         "UserPromptSubmit" => Said(Prompted(Attended(service, hook), hook.SessionId)),
         "SessionEnd" => Ended(service, hook),
+        "PostToolUse" => PullRequestsOpened(service, hook),
         _ => Quiet,
     };
+
+    // PostToolUse (task e7aa49b1): the pull requests a `gh pr create` printed go on the session's own open task, or on the
+    // task it was last on when that is closed (a session can open a pull request after Petre closed its task, and the
+    // search must still find it there). A session with no task at all, or a command that is no `gh pr create`
+    // (TaskPullRequests.Created checks again, since the hook's filter is best effort), changes nothing. Silent either way:
+    // the session needs to hear nothing, and a hook's output would only clutter its transcript.
+    static ControlReply PullRequestsOpened(TaskService service, ClaudeHookEvent hook)
+    {
+        var links = TaskPullRequests.Created(hook.ToolCommand, hook.ToolOutput);
+        if (links.Count > 0)
+            service.Board.TaskOf(hook.SessionId).Or(() => service.Board.LastTaskOf(hook.SessionId))
+                .Tap(task => links.ToList().ForEach(link => service.AddPullRequest(task.Id, link)));
+        return Quiet;
+    }
 
     static TaskService Attended(TaskService service, ClaudeHookEvent hook)
     {
@@ -235,6 +253,8 @@ public sealed partial class RemoteControl
     //   task later <title> --session <sid>      a Backlog note on the caller's workspace, a follow-up for later
     //   task subtask <title> --session <sid>    a Backlog subtask of the session's own task (a sibling when that is a subtask)
     //   task family --session <sid>             the family text of the session's own task (subtasks spec)
+//   task pr <url> --session <sid>           a pull request the session opened some other way than `gh pr create`, on its
+//                                           own task (task e7aa49b1; the hook records `gh pr create` by itself)
     //
     // Everything but join, new and later acts on the session's OWN task (TaskBoard.TaskOf), which is the spec's rule that
     // a session only settles tasks it is working on: there is no id to point at someone else's. A session with no open
@@ -273,6 +293,11 @@ public sealed partial class RemoteControl
             ["comment-settle", var comment] => Changed(service.Board.FindComment(comment)
                 .Bind(c => service.SettleComment(c.Id, true, session).Map(() => service.Board.Tasks.First(t => t.Comments.Any(x => x.Id == c.Id))))),
             ["later", var title] => Changed(service.AddNote(title, Here())),
+            // A pull request by its URL (task e7aa49b1). Anything that is not one GitHub pull request link is refused
+            // before the task is touched.
+            ["pr", var url] => AskedPullRequests.In(url) is [var link]
+                ? Changed(Own().Bind(t => service.AddPullRequest(t.Id, link).Map(() => t)))
+                : ControlReply.Fail($"'{url}' is not a GitHub pull request link (https://github.com/<owner>/<repo>/pull/<n>)"),
             _ => ControlReply.Fail($"Wrong arguments for a session's task form.\n{TaskUsage()}"),
         };
     }

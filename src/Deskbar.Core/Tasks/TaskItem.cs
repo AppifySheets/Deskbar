@@ -252,6 +252,17 @@ public sealed record TaskItem(
     /// </summary>
     public IReadOnlyList<StatusChange> StatusLog { get; init; } = [];
 
+    /// <summary>
+    /// The GitHub pull requests a session working on this task opened, oldest first, each once (task e7aa49b1, Petre:
+    /// "when a session creates a pr, add it to the task so that i can search by pr id in tasks"). Added by the session's
+    /// PostToolUse hook when a `gh pr create` prints the new pull request's link (TaskPullRequests.Created), or by the
+    /// session itself with `task pr &lt;url&gt; --session &lt;id&gt;`, through TaskBoard.AddPullRequest. What it is for: the
+    /// tasks panel's search finds the task by the pull request's number (TaskSearch), in every section, closed included,
+    /// and the task window lists them as links. An init property like the flags, stored as an optional `pullRequests`
+    /// list of URLs; absent in a file means none.
+    /// </summary>
+    public IReadOnlyList<PullRequestLink> PullRequests { get; init; } = [];
+
     /// <summary>Covey's quadrant the two flags name (TaskOrder.cs).</summary>
     public Quadrant Quadrant => QuadrantOf.Flags(Important, Urgent);
 

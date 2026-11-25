@@ -101,6 +101,9 @@ public sealed class TaskService(ITaskStore store, Func<DateTimeOffset> now, Func
 
     public Result Ask(Guid id, string question) => Apply(Board.Ask(id, question, now()));
 
+    // A pull request the task's session opened (task e7aa49b1); one it already lists saves and pulses nothing.
+    public Result AddPullRequest(Guid id, PullRequestLink link) => ApplyIfChanged(Board.AddPullRequest(id, link, now()));
+
     public Result MarkDone(Guid id) => Apply(Board.MarkDone(id, now()));
 
     // `stoppingClaude`: past the refusal for a task Claude is still working on (TaskBoard.Close, task 37cd7081), for

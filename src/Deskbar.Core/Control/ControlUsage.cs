@@ -122,6 +122,9 @@ public static class ControlUsage
             new("task", "subtask <title>|- --session <session>",
                 "a Claude session splits its work: a backlog subtask of its own task, assigned to Claude so the next\n"
                 + "      session is offered it; when its own task is already a subtask, a sibling under the same parent"),
+            new("task", "pr <url> --session <session>",
+                "a pull request the session opened, on its own task, so the tasks panel's search finds the task by its\n"
+                + "      number. A `gh pr create` is recorded by itself; this is for one opened another way"),
             new("task", "family --session <session>",
                 "the parent, the siblings and their sessions (with transcript files) of the session's own task, as the\n"
                 + "      task join reply gives them; read it again when the siblings may have moved on"),
@@ -155,6 +158,7 @@ public static class ControlUsage
                 + "      itself, or sooner when a session asks or finishes or its status changes; task list shows snoozedUntil"),
             new("task", "wake <id>",
                 "bring a snoozed task back now, as \"Wake now\" does"),
+            new("task", "pr <id> <url>", "put a GitHub pull request on a task, so the tasks panel's search finds the task by its number"),
         ]),
         new("Goals", [
             new("goal", "list [--week [<date>] | --month [<date>] | --all]",

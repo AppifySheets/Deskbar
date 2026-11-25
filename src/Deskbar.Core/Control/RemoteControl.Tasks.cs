@@ -21,6 +21,7 @@ namespace Deskbar.Core.Control;
 //   task flag <id> important|urgent on|off
 //   task order <id> top|end|<n>
 //   task assign <id> me|claude
+//   task pr <id> <url>                       (task e7aa49b1: a pull request on the task, found by its number in search)
 //   task describe <id> <markdown>|-          (Ruling 58: his own description under the title)
 //   task comment-edit <comment-id> <markdown>|-   (his own comment only; a session's is refused)
 //   task goal <id> <goal-id>|none     (the goals planner; needs the goal service, RemoteControl.Goals.cs)
@@ -95,7 +96,7 @@ public sealed partial class RemoteControl
         return args switch
         {
             // A session's form typed without its --session: it cannot know whose task is meant.
-            ["done"] or ["answered"] or ["join", _] or ["new", _] or ["status-line", _] or ["ask", _] or ["later", _] or ["subtask", _] =>
+            ["done"] or ["answered"] or ["join", _] or ["new", _] or ["status-line", _] or ["ask", _] or ["later", _] or ["subtask", _] or ["pr", _] =>
                 ControlReply.Fail($"task {args[0]} is a session's form and needs --session <id>"),
             ["list"] => Success(service.Board.Pile().Select(Listed).ToArray()),
             // The closed tasks, which every other view leaves out, so one closed by mistake can be found and reopened.
@@ -129,6 +130,10 @@ public sealed partial class RemoteControl
                 .Match(f => TaskChange(service, id, t => service.SetFlag(t.Id, f.Flag, f.On)), ControlReply.Fail),
             ["order", var id, var place] => ParsePlace(place)
                 .Match(p => TaskChange(service, id, t => service.Place(t.Id, t.Quadrant, p)), ControlReply.Fail),
+            // A pull request on a task by hand (task e7aa49b1, TaskPullRequests): the link is read before the task is looked up.
+            ["pr", var id, var url] => AskedPullRequests.In(url) is [var link]
+                ? TaskChange(service, id, t => service.AddPullRequest(t.Id, link))
+                : ControlReply.Fail($"'{url}' is not a GitHub pull request link (https://github.com/<owner>/<repo>/pull/<n>)"),
             ["describe", var id, var markdown] => TaskChange(service, id, t => service.Describe(t.Id, markdown)),
             ["comment-edit", var comment, var markdown] => TaskCommentEdit(service, comment, markdown),
             ["assign", var id, var who] => ParseAssignee(who)
@@ -310,6 +315,8 @@ public sealed partial class RemoteControl
         // Snoozing (task 6da8d7eb): when a snoozed task comes back, or null while it is awake. `list` keeps listing a
         // snoozed task, so a session still sees the work; only the bar and the tasks panel hide it.
         snoozedUntil = task.SnoozedUntil.HasValue ? (DateTimeOffset?)task.SnoozedUntil.Value : null,
+        // The pull requests its sessions opened (task e7aa49b1), as URLs, oldest first.
+        pullRequests = task.PullRequests.Select(p => p.Url).ToArray(),
     };
 
     // Markdown as a session reads it: image paths absolute, through the task service (as stored without one).

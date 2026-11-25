@@ -73,6 +73,19 @@ public sealed record ClaudeHookEvent(string Event, string SessionId, string Fold
     /// </summary>
     public bool BackgroundWork { get; init; }
 
+    /// <summary>
+    /// A PostToolUse hook's tool_input.command: the shell command the session ran (Bash or PowerShell), or none. Read so
+    /// Deskbar can tell a `gh pr create` (task e7aa49b1, TaskPullRequests.Created).
+    /// </summary>
+    public Maybe<string> ToolCommand { get; init; }
+
+    /// <summary>
+    /// A PostToolUse hook's tool_response as text: every string inside it, one per line (Bash's is an object with stdout
+    /// and stderr; a failed call's is the error text itself, and PowerShell's shape is not documented, so every string
+    /// counts). "" when there is none. Where `gh pr create` prints the new pull request's link.
+    /// </summary>
+    public string ToolOutput { get; init; } = "";
+
     public static Result<ClaudeHookEvent> Parse(string json, string? entrypoint, string? attended, string? job = null)
     {
         try
@@ -93,6 +106,10 @@ public sealed record ClaudeHookEvent(string Event, string SessionId, string Fold
                 Background = OwnJob(job, session.Value),
                 StopHookActive = root.TryGetProperty("stop_hook_active", out var active) && active.ValueKind == JsonValueKind.True,
                 BackgroundWork = NonEmptyArray(root, "background_tasks") || NonEmptyArray(root, "session_crons"),
+                ToolCommand = root.TryGetProperty("tool_input", out var input) && input.ValueKind == JsonValueKind.Object
+                    ? Text(input, "command")
+                    : Maybe<string>.None,
+                ToolOutput = root.TryGetProperty("tool_response", out var response) ? string.Join("\n", Strings(response)) : "",
             };
         }
         catch (JsonException e)
@@ -100,6 +117,15 @@ public sealed record ClaudeHookEvent(string Event, string SessionId, string Fold
             return Result.Failure<ClaudeHookEvent>($"the hook's JSON does not parse: {e.Message}");
         }
     }
+
+    // Every string value inside an element, depth first: a string is itself, an object or array is its members'.
+    static IEnumerable<string> Strings(JsonElement element) => element.ValueKind switch
+    {
+        JsonValueKind.String => [element.GetString() ?? ""],
+        JsonValueKind.Object => element.EnumerateObject().SelectMany(p => Strings(p.Value)),
+        JsonValueKind.Array => element.EnumerateArray().SelectMany(Strings),
+        _ => [],
+    };
 
     // A non-empty string field, or nothing: a number or an empty string where a name belongs is as good as missing.
     static bool NonEmptyArray(JsonElement root, string name) =>

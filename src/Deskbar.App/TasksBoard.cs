@@ -1171,6 +1171,7 @@ public sealed class TasksBoard : IDisposable
         Important = task.Important,
         Urgent = task.Urgent,
         SnoozedUntil = task.SnoozedUntil.Map(until => (DateTimeOffset?)until).GetValueOrDefault(),
+        PullRequests = task.PullRequests,
         // Null for no goal and for a link to a goal that no longer exists, which reads as no goal everywhere.
         Goal = goals?.GoalOf(task).Map(ChoiceOf).GetValueOrDefault(),
         // Only an open thread shows them, and an ended one's state looks on disk for its transcript (see the header).
@@ -1308,6 +1309,12 @@ internal sealed record TaskRowView(Guid Id, string Title, string Detail, TaskSta
 
     /// <summary>When a snoozed task comes back (task 6da8d7eb), or null while it is awake: the snooze button's lit state.</summary>
     public DateTimeOffset? SnoozedUntil { get; init; }
+
+    /// <summary>
+    /// The pull requests the task's sessions opened (task e7aa49b1, TaskItem.PullRequests), oldest first: the task window's
+    /// "Pull requests" section, one link each.
+    /// </summary>
+    public IReadOnlyList<PullRequestLink> PullRequests { get; init; } = [];
 
     public Quadrant Quadrant => QuadrantOf.Flags(Important, Urgent);
 

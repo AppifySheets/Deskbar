@@ -795,14 +795,19 @@ public class RemoteControlTaskTests
              "ask <question>|- --session <session>", "answered --session <session>", "done --session <session>", "comment <markdown>|- --session <session>",
              "later <title>|- --session <session>",
              // Subtasks: a session splits its work and reads its family.
-             "subtask <title>|- --session <session>", "family --session <session>",
+             "subtask <title>|- --session <session>",
+             // Task e7aa49b1: a pull request the session opened another way than gh pr create.
+             "pr <url> --session <session>",
+             "family --session <session>",
              "comment-settle <comment-id> --session <session>",
              "assign <id> me|claude", "describe <id> <markdown>|-", "comment-edit <comment-id> <markdown>|-",
              // Subtasks: put a task under another, and read a task's family.
              "parent <id> <parent-id>|none", "family <id>",
              "goal <id> <goal-id>|none",
              // Task 6da8d7eb: the snooze button's twins.
-             "snooze <id> 1h|3h|tomorrow|monday|<n>m|<n>h|<n>d", "wake <id>"],
+             "snooze <id> 1h|3h|tomorrow|monday|<n>m|<n>h|<n>d", "wake <id>",
+             // Task e7aa49b1: a pull request on a task by hand.
+             "pr <id> <url>"],
             ControlUsage.All.Where(c => c.Verb == "task").Select(c => c.Arguments));
 
     // --- Task 9: go, start, open-session ---------------------------------------------------------------------------

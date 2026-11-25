@@ -458,7 +458,10 @@ it opens or grows is moved out from under it, keeping its size where there is ro
 there is not. Click the same button, or the x in the panel's toolbar, to close
 it. Drag its inner edge to change the width (460 to start, 360 at the least, half the screen at the most);
 Deskbar remembers the width and whether the panel was open. A search box (Ctrl+F; Esc or its x clears it) finds
-tasks by every word you type, in titles, status lines and questions. Tasks Claude is working on sit in their
+tasks by every word you type, in titles, status lines and questions. Type a task's id, or a pull request's
+number (`523`, `#523`, `PR 523`, `Deskbar #523` or its link), and it finds that task in every section, closed
+ones included. A Claude session's `gh pr create` puts the new pull request on its task by itself, and the task
+window lists them under "Pull requests". Tasks Claude is working on sit in their
 own "Claude working" group right under "Waiting on you". The "Claude working" chip shows only the tasks with
 a live Claude session and stays on across restarts, as "Current workspace" does. The List is a grid: a header names the columns (Task,
 Status, Sessions, Who, Age, Workspace), and dragging the line between two headers makes a column wider or
