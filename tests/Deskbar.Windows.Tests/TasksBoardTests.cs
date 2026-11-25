@@ -3853,16 +3853,20 @@ public class TasksBoardTests
         Rect Bounds(FrameworkElement part, UIElement to) =>
             new(part.TranslatePoint(new Point(0, 0), to), new Size(part.ActualWidth, part.ActualHeight));
 
-        // The short title: one row. At the default width the strip sits on it, to its right; at the narrowest the strip
-        // alone (about 290 DIP) leaves no room for even a word beside it, so it has a row of its own under the title.
+        // The short title: one row. At the default width the strip sits on it, to its right. At the narrowest it sits
+        // beside the word when it fits there and in a row of its own under it when it does not: since the buttons were
+        // grouped and narrowed (task 3df2d28f) the strip is about 236 DIP, where it was about 290, so at 360 a one-word
+        // title now keeps its single row. Either way the strip never covers the word.
         var s = Parts(shortOne);
         var sTitle = Bounds(s.Title, s.Line);
         var sStrip = Bounds(s.Strip, s.Line);
         Assert.True(s.Title.ActualHeight < 20, $"at {width} the short title is {s.Title.ActualHeight} DIP tall");
         if (width >= TasksPanelLayout.DefaultWidth)
             Assert.InRange(sStrip.Top + sStrip.Height / 2, sTitle.Top, sTitle.Bottom);
-        else
-            Assert.True(sStrip.Top >= sTitle.Bottom - 0.5, $"at {width} the strip {sStrip} under the title {sTitle}");
+        var sEnd = s.Title.ContentEnd.GetCharacterRect(LogicalDirection.Backward);
+        var sEndAt = s.Title.TranslatePoint(new Point(sEnd.Right, sEnd.Top), s.Line);
+        Assert.True(sEndAt.X < sStrip.Left || sStrip.Top >= sTitle.Bottom - 0.5,
+            $"at {width} the strip {sStrip} covers the short title ending at {sEndAt}");
 
         // The long title: nearly the line's whole width (the tick's 22 DIP and the margins aside), several rows.
         var l = Parts(longOne);
