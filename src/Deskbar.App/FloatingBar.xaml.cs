@@ -512,14 +512,14 @@ public partial class FloatingBar : Window
         // Nor while one of Deskbar's own menus is open: an open menu has no owner window, so climbing back on top would
         // cover it wherever the bar overlaps it (OwnMenus has the measurement).
         if (OwnMenus.AnyOpen) return;
-        // Nor while a full-screen app is up and the bar is docked: the shell has told it to step out of
-        // the way (see OnFullScreenApp), and climbing back on top every second would undo that.
-        if (fullScreenAppOpen) return;
         var hwnd = new WindowInteropHelper(this).Handle;
         if (hwnd == nint.Zero) return;
         // A full-screen window on the bar's own screen takes the bar out of the way. True when the bar has
         // stepped aside, so it does not climb back on top.
         if (StepAsideIfCovered(hwnd)) return;
+        // Nor while a full-screen app is up and the bar is docked: the shell has told it to step out of
+        // the way (see OnFullScreenApp), and climbing back on top every second would undo that.
+        if (fullScreenAppOpen) return;
         // The tray's hidden-icons flyout, open over the bar: the bar goes just behind it (StepBelowOverflow).
         // 0 is Windows saying there is no foreground window for a moment, not an answer to act on.
         if (front != 0) overflowInFront = IsTrayOverflow(front) ? front : 0;
@@ -545,8 +545,9 @@ public partial class FloatingBar : Window
     //
     // On by default. #295 first shipped it as an opt-in box in Manage, off by default, and Petre, looking at
     // the floating bar over a full-screen video in Edge: "can we always hide it?", then "it's hidden in docked
-    // mode". Docked, the shell's own full-screen notice already moves the bar out of the band
-    // (OnFullScreenApp), and that is left exactly as it is; this gives the floating bar the same behaviour.
+    // mode". Docked, the shell's own full-screen notice moves the bar out of the band (OnFullScreenApp);
+    // this gives the floating bar the same behaviour, and since task b488e2e9 the docked bar asks this too
+    // (see StepAsideIfCovered).
     // Then "i may want to have that as an option", "in the rightclick": the bar's right-click menu flips it
     // (AppState.FloatingBarOverFullScreen, in AddBarItems), with `full-screen step|top` as its remote twin.
     //
@@ -575,9 +576,14 @@ public partial class FloatingBar : Window
     // should. True when the bar has stepped aside, so ReclaimTopmost does not climb back on top.
     bool StepAsideIfCovered(nint hwnd)
     {
-        // Docked, Windows is not asked at all: the shell's own full-screen notice already moves the bar
-        // out of the band, and that is left as it is. Nor when the user keeps the floating bar on top.
-        var covered = !Docked && !manager.State.FloatingBarOverFullScreen
+        // Not when the user keeps the floating bar on top. Docked, always: the bar is an app bar then, like a
+        // screen strip, and the shell's full-screen notice alone was not enough for either. A screen strip sat
+        // over a full-screen Remote Desktop window (task b488e2e9, ScreenStrip.StepBelowCover has the story):
+        // the notice was never traced while it was up, and even when it comes, leaving the topmost band puts
+        // the bar ABOVE an ordinary full-screen window (Remote Desktop, a browser in F11), not behind it. The
+        // docked bar answered the notice the same way, so it is asked here too, and the notice still keeps
+        // it out of the band (ReclaimTopmost) while nothing on its own screen covers it.
+        var covered = (Docked || !manager.State.FloatingBarOverFullScreen)
             ? TopLevelWindows.CoveringWindow(hwnd) ?? nint.Zero
             : nint.Zero;
 
@@ -1135,6 +1141,9 @@ public partial class FloatingBar : Window
         fullScreenAppOpen = open;
         var hwnd = new WindowInteropHelper(this).Handle;
         if (hwnd == nint.Zero) return;
+        // Behind the window covering the bar's screen when there is one: HWND_NOTOPMOST alone puts the bar
+        // above an ordinary full-screen window (see StepAsideIfCovered).
+        if (StepAsideIfCovered(hwnd)) return;
         NativeMethods.SetWindowPos(hwnd, open ? HWND_NOTOPMOST : NativeMethods.HWND_TOPMOST, 0, 0, 0, 0,
             NativeMethods.SWP_NOMOVE | NativeMethods.SWP_NOSIZE | NativeMethods.SWP_NOACTIVATE);
     }

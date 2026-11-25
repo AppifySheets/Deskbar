@@ -78,8 +78,33 @@ public static class TopLevelWindows
         if (monitor == nint.Zero) return null;
         var info = new NativeMethods.MONITORINFO { cbSize = Marshal.SizeOf<NativeMethods.MONITORINFO>() };
         if (!NativeMethods.GetMonitorInfo(monitor, ref info)) return null;
-        var screen = new FullScreenCover.Rect(info.rcMonitor.Left, info.rcMonitor.Top, info.rcMonitor.Right, info.rcMonitor.Bottom);
+        return CoveringOn(monitor, new FullScreenCover.Rect(info.rcMonitor.Left, info.rcMonitor.Top, info.rcMonitor.Right, info.rcMonitor.Bottom));
+    }
 
+    // The same question for a screen named by its RECTANGLE (physical pixels), the way a screen strip knows its screen.
+    // A strip must never ask Windows which screen its own window is on: while a waking screen drops out for a moment,
+    // the nearest-screen answer is ANOTHER screen (ScreenStrip's header, FloatingBar.DockGuard.cs). So the screen is
+    // found from the rectangle's centre with "no monitor" as the fallback and then compared, and when Windows has no
+    // screen with exactly this rectangle right now the answer is null: nothing is known to cover it.
+    public static nint? CoveringScreen(int left, int top, int right, int bottom)
+    {
+        var monitor = NativeMethods.MonitorFromPoint(
+            new NativeMethods.POINT { X = left + (right - left) / 2, Y = top + (bottom - top) / 2 }, MonitorDefaultToNull);
+        if (monitor == nint.Zero) return null;
+        var info = new NativeMethods.MONITORINFO { cbSize = Marshal.SizeOf<NativeMethods.MONITORINFO>() };
+        if (!NativeMethods.GetMonitorInfo(monitor, ref info)
+            || (info.rcMonitor.Left, info.rcMonitor.Top, info.rcMonitor.Right, info.rcMonitor.Bottom) != (left, top, right, bottom))
+            return null;
+        return CoveringOn(monitor, new FullScreenCover.Rect(left, top, right, bottom));
+    }
+
+    // MonitorFromPoint's "no monitor" flag: an empty answer instead of the nearest screen.
+    const uint MonitorDefaultToNull = 0;
+
+    // The windows on `monitor`, top first, handed to FullScreenCover, which decides whether the first of them covers
+    // `screen` (that monitor's rectangle).
+    static nint? CoveringOn(nint monitor, FullScreenCover.Rect screen)
+    {
         var candidates = new List<FullScreenCover.Candidate>();
         foreach (var hwnd in Enumerate())
         {

@@ -291,9 +291,13 @@ internal sealed class TasksPanel : IDisposable
         if (OwnMenus.AnyOpen) return;
         var hwnd = new WindowInteropHelper(window).Handle;
         if (hwnd == 0) return;
+        // Behind a window covering the panel's screen, whether the panel found it as it came back, the shell said so,
+        // or neither. Task b488e2e9: a screen strip sat over a full-screen Remote Desktop window with no full-screen
+        // notice ever traced while it was up (ScreenStrip.StepBelowCover), and the panel answered the shell the same
+        // way, so it looks on every tick now too, as the floating bar does.
+        if (StepBehindCovering(hwnd, CoveringWindow(hwnd))) return;
         if (fullScreenFound)
         {
-            if (StepBehindCovering(hwnd, CoveringWindow(hwnd))) return;
             fullScreenFound = false;
             fullScreenOpen = false;
             Say(() => "tasks panel: the full-screen window it found has gone, back on top");
@@ -380,7 +384,9 @@ internal sealed class TasksPanel : IDisposable
         // The shell's word replaces whatever the panel found by looking (see fullScreenFound).
         fullScreenFound = false;
         var hwnd = new WindowInteropHelper(window).Handle;
-        if (hwnd == 0) return;
+        // Directly behind the covering window when one is on the panel's screen: HWND_NOTOPMOST alone puts the panel at
+        // the top of the ordinary band, ABOVE an ordinary full-screen window (Remote Desktop, a browser in F11).
+        if (hwnd == 0 || StepBehindCovering(hwnd, CoveringWindow(hwnd))) return;
         NativeMethods.SetWindowPos(hwnd, fullScreen ? HwndNoTopmost : BehindTheBar(), 0, 0, 0, 0,
             NativeMethods.SWP_NOMOVE | NativeMethods.SWP_NOSIZE | NativeMethods.SWP_NOACTIVATE);
     }
