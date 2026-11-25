@@ -3,13 +3,13 @@
 # WHEN THIS RUNS
 #   - On a merge to main that changes something under src/ (the paths filter below), so a merge
 #     of docs, tests or workflows starts no runner at all. Petre: "release on merge so". The
-#     version is not in a file: Nerdbank.GitVersioning computes it from version.json (the
-#     major.minor line) and the git height, so a pull request never bumps anything (see
-#     CLAUDE.md).
+#     version is not in a file a pull request edits: each release is numbered one above the
+#     previous release of version.json's major.minor (2.5.429, then 2.5.430), by the build job,
+#     in the runner's own copy of version.json (scripts/ReleaseVersion.psm1). A pull request
+#     never bumps anything (see CLAUDE.md).
 #   - Manually, via the Actions tab or `gh workflow run Release` (workflow_dispatch), from main.
-#     It builds the version the checked-out commit computes, refuses a ref that is not main (its
-#     version carries a -g<hash> suffix) and a version that already has a release, and always
-#     stops at a draft. The draft is where signing happens: scripts/sign-release.ps1, on Petre's
+#     It numbers the build the same way, refuses a ref that is not main (its version carries a
+#     -g<hash> suffix) and a commit that already has a release, and always stops at a draft. The draft is where signing happens: scripts/sign-release.ps1, on Petre's
 #     machine, downloads the draft's executable, signs it, uploads it back and publishes.
 #   - When a Release is PUBLISHED (including publishing a draft). Only the `guard` job runs:
 #     it re-verifies the signature of every attached executable and turns the release back
@@ -43,10 +43,10 @@
 # are serialised, and each one checks again that no newer release already contains its commit.
 #
 # FULL HISTORY. Every checkout that computes the version or reads the range uses fetch-depth: 0,
-# because the patch number is the count of commits since version.json changed and the range
-# starts at the previous release's tag. A shallow clone makes the build fail ("Shallow clone lacks
-# the objects required to calculate version height"), on purpose: a wrong version would be worse
-# than no build.
+# because Nerdbank.GitVersioning still walks the history (it fails on a shallow clone even with the
+# release number written in, "Shallow clone lacks the objects required to calculate version height"),
+# the release number reads the v* tags, and the range starts at the previous release's tag. The
+# failure is wanted: a wrong version would be worse than no build.
 #
 # THE STORE PACKAGE. The build job also packs the Microsoft Store .msix of the same commit
 # (scripts/pack-store.ps1) and keeps it as a workflow artifact, never a release asset; the
@@ -173,7 +173,7 @@ jobs:
       - name: Check out the repository
         uses: actions/checkout@v7
         with:
-          # The version is the commit count since version.json changed: full history.
+          # Nerdbank walks the history and the release number reads the tags: full history.
           fetch-depth: 0
 
       - name: Install the .NET SDK
@@ -186,13 +186,40 @@ jobs:
       - name: Restore dependencies
         run: dotnet restore Deskbar.sln
 
+      - name: Number this release, one above the last
+        # Petre asked for every release to be one more than the one before (task 32690a7e): the
+        # git height jumped by every commit a pull request landed, by every merge that did not
+        # release and by every build a newer merge cancelled (2.5.412, 413, 414, 417, 419...).
+        # scripts/ReleaseVersion.psm1 carries the reasoning. In short: the number is the highest
+        # existing release of version.json's major.minor plus one (drafts count, they hold their
+        # number), and it is written into THIS RUNNER'S version.json as a three-part version,
+        # which Nerdbank.GitVersioning then uses as the version of the exe, the Store package and
+        # the tag. Nothing is committed; the repository's version.json keeps the major.minor line.
+        #
+        # First it waits for any other run whose build succeeded and whose publish has not
+        # finished, because that run's release is not there yet and both would pick one number.
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RUN_ID: ${{ github.run_id }}
+          REPO: ${{ github.repository }}
+        run: |
+          Import-Module ./scripts/ReleaseVersion.psm1
+          Wait-ReleasePublish -Repository $env:REPO -RunId $env:RUN_ID
+          $majorMinor = Get-ReleaseMajorMinor -Path version.json
+          $tags = Get-ReleaseTags -Repository $env:REPO
+          $next = Get-NextReleaseVersion -MajorMinor $majorMinor -Tags $tags
+          Set-ReleaseVersionFile -Path version.json -Version $next
+          "This release is $next ($($tags.Count) existing tag names looked at)."
+
       - name: Ask MSBuild for the version
         id: version
         shell: pwsh
         run: |
           # GetBuildVersion is Nerdbank.GitVersioning's target; -getProperty prints just the
-          # value. On main it is "2.4.7". On any other ref it is "2.4.7-g<hash>" (version.json
-          # makes only refs/heads/main a public release), which is refused below: a tag and the
+          # value. With the number written into version.json above, on main it is that number,
+          # "2.5.430". On any other ref it is "2.5.430-g<hash>" (version.json makes only
+          # refs/heads/main a public release), which is refused below: a tag and the
           # asset names need the plain three numbers. If a runner ever misbehaves on this query,
           # the nbgv command line is the fallback: `dotnet tool install -g nbgv --version 3.10.94`,
           # then `nbgv get-version -v Version`.
@@ -211,27 +238,37 @@ jobs:
           "version=$version" >> $env:GITHUB_OUTPUT
           "Building version $version"
 
-      - name: Refuse a version that already has a release, on a manual run
-        # Before the build rather than at `publish`, so a manual run for a version that is already
-        # out fails in seconds, not after the whole build. A merge needs no such check: `plan`
-        # already stood down for a commit inside a release, and `publish` checks again.
+      - name: Refuse a commit that already has a release, on a manual run
+        # Before the build rather than at `publish`, so a manual run that has nothing to do fails
+        # in seconds, not after the whole build. Since releases are numbered one above the last,
+        # a manual run never computes a number that exists already; what it can still do is
+        # release the same commit a second time under the next number. So this refuses a commit
+        # that a release already targets: a published one (its tag points at the commit) or a
+        # draft (its target is the commit, its tag is not made until it is published). A merge
+        # needs no such check: `plan` already stood down for a commit inside a release, and
+        # `publish` checks again.
         if: github.event_name != 'push'
         shell: pwsh
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          TAG: v${{ steps.version.outputs.version }}
+          REPO: ${{ github.repository }}
+          SHA: ${{ github.sha }}
         run: |
-          gh release view $env:TAG --json tagName 2>$null | Out-Null
-          if ($LASTEXITCODE -eq 0) {
-            "::error::A release (draft or published) tagged $env:TAG already exists. Delete it first; a manual run builds the version this commit computes."
+          $published = @(git tag --points-at $env:SHA --list 'v*')
+          if ($LASTEXITCODE -ne 0) { "::error::Could not read the tags on $env:SHA."; exit 1 }
+          $drafts = @(gh api --paginate "repos/$env:REPO/releases?per_page=100" --jq ".[] | select(.draft and .target_commitish == `"$env:SHA`") | .tag_name")
+          if ($LASTEXITCODE -ne 0) { "::error::Could not list the releases."; exit 1 }
+          $existing = @($published + $drafts | Where-Object { $_ })
+          if ($existing.Count -gt 0) {
+            "::error::$env:SHA already has a release ($($existing -join ', ')). Delete it first to build this commit again."
             exit 1
           }
-          "No release tagged $env:TAG yet."
+          "No release targets $env:SHA yet."
           # The exit is not decoration. GitHub's pwsh wrapper ends every step with
-          # `exit $LASTEXITCODE`, and here the last native command is the `gh release view` above,
-          # which exits 1 exactly when there is NO release: the outcome this step wants. Without
-          # this line the step printed "No release tagged v2.4.15 yet." and then failed, so every
-          # manual run stopped here (run 42465891436, 2026-11-08).
+          # `exit $LASTEXITCODE`, so a native command that exits non-zero for an outcome this step
+          # wants would fail it; an earlier version of this step printed "No release tagged
+          # v2.4.15 yet." and then failed, so every manual run stopped here (run 42465891436,
+          # 2026-11-08).
           exit 0
 
       - name: Build
@@ -436,12 +473,23 @@ jobs:
 
           # GitHub happily keeps two DRAFTS with the same tag name, and sign-release.ps1 would then
           # pick one of them, so a version that already has a release (draft or published) is
-          # never created again. On a merge that is a re-run with nothing to do; a manual run
-          # asked for this build specifically, so it fails.
-          gh release view $tag --json tagName 2>$null | Out-Null
+          # never created again. Two cases:
+          #   - the release is for THIS commit: a re-run of this job after it had already made the
+          #     release. On a merge there is nothing to do; a manual run asked for this build
+          #     specifically, so it fails.
+          #   - the release is for ANOTHER commit: two runs numbered their releases at the same
+          #     moment (the build waits for other runs to publish first, see
+          #     scripts/ReleaseVersion.psm1, so this is a manual run and a merge racing). This
+          #     exe carries a number that is taken and must not ship. Fail, so the run is visible
+          #     and re-run: a re-run builds again and takes the next number.
+          $existing = gh release view $tag --json targetCommitish --jq .targetCommitish 2>$null
           if ($LASTEXITCODE -eq 0) {
+            if ($existing -ne $env:SHA) {
+              "::error::$tag already belongs to $existing, not $env:SHA: two runs took the same number. Re-run this workflow; its build takes the next number."
+              exit 1
+            }
             if ($env:EVENT -ne 'push') {
-              "::error::A release (draft or published) tagged $tag already exists. Delete it first; a manual run builds the version this commit computes."
+              "::error::A release (draft or published) tagged $tag already exists for $env:SHA. Delete it first to build this commit again."
               exit 1
             }
             "::notice::$tag already has a release. Nothing to do."
