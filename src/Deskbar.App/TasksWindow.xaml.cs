@@ -424,6 +424,8 @@ public partial class TasksWindow : Window
         drawing = true;
         // The link picker (TasksWindow.Links.cs) is rebuilt with the rows; whether its box had the keyboard is noted first.
         ForgetLinkBox();
+        // ...and the subtask box in a thread (TasksWindow.SubtaskAdd.cs), the same way.
+        ForgetSubtaskBox();
         try
         {
             DrawRows(view);
@@ -445,6 +447,7 @@ public partial class TasksWindow : Window
         renameBox?.Focus();
         commentEditor?.Focus();
         RefocusLink();
+        RefocusSubtaskBox();
         // A view that arrived during the draw is drawn now.
         Flush();
     }
@@ -571,7 +574,7 @@ public partial class TasksWindow : Window
             $"{view.ManagerAsks?.Question}{view.ManagerAsks?.AskedAt}",
             string.Join('|', view.Places.Select(p => $"{p.IsGroup}{p.Workspace}{p.Name}{(p.Colour as SolidColorBrush)?.Color}")),
             view.EmptyText,
-            $"{renaming}{editingComment}{linking}{string.Join(",", settledOpen.Order())}|{string.Join(",", earlierOpen.Order())}|{string.Join(",", longOpen.Order())}",
+            $"{renaming}{editingComment}{linking}{subtaskUnder}{string.Join(",", settledOpen.Order())}|{string.Join(",", earlierOpen.Order())}|{string.Join(",", longOpen.Order())}",
             // The two width flags (Task 8): which line is drawn and whether the view switch shows. Not the width itself, so
             // a grip drag that crosses neither threshold redraws nothing.
             $"{view.Matrix}{view.MatrixAllowed}{view.Slim}",
@@ -1721,7 +1724,9 @@ public partial class TasksWindow : Window
         !row.Expanded ? ""
         : string.Join(',', row.SessionList.Select(s => s.Id)) + "/" + string.Join(',', row.Subtasks.Select(c => c.Id)) + "/"
           // Task links: the link lines and an open picker sit above the comments, so each moves them.
-          + string.Join(',', row.Links.Select(l => $"{l.Kind}{l.Id}")) + (linking is { } l && l.Task == row.Id ? $"picker{l.Duplicate}" : "") + "/"
+          + string.Join(',', row.Links.Select(l => $"{l.Kind}{l.Id}")) + (linking is { } l && l.Task == row.Id ? $"picker{l.Duplicate}" : "")
+          // The subtask box (task 0eb943d8) stands where "Add subtask" was, and is taller than it.
+          + (subtaskUnder == row.Id ? "subtask-box" : "") + "/"
           + string.Join(',', ThreadComments(row).Shown.Select(c => $"{c.Id}{(longOpen.Contains(c.Id) ? "+" : "")}"))
           + $"{settledOpen.Contains(row.Id)}{earlierOpen.Contains(row.Id)}";
 
@@ -1759,13 +1764,18 @@ public partial class TasksWindow : Window
         }
         // SUBTASKS IN THE THREAD (follow-up: Petre's screenshot of an open parent that said "2 subtasks" and showed none).
         // Each is a button that shows that subtask (picked, its thread open, scrolled to); then "Add subtask", the twin of
-        // the menu's "Add subtask…".
+        // the menu's "Add subtask…". Pressed, the button turns into a box in its own place (task 0eb943d8,
+        // TasksWindow.SubtaskAdd.cs), and the box stays there until Enter adds the subtask or Esc closes it.
         row.Subtasks.ToList().ForEach(sub => panel.Children.Add(SubtaskEntry(sub)));
         if (Actions?.SubtaskParent is not null && row.Status != TaskStatus.Closed && !row.Closing)
         {
-            var add = Small("Add subtask", "Add subtask", () => BeginSubtaskAdd(row.Id), "Add a subtask under this task");
-            add.Margin = new Thickness(0, 0, 0, 8);
-            panel.Children.Add(add);
+            if (subtaskUnder == row.Id) panel.Children.Add(SubtaskBox(row.Id));
+            else
+            {
+                var add = Small("Add subtask", "Add subtask", () => BeginSubtaskAdd(row.Id), "Add a subtask under this task");
+                add.Margin = new Thickness(0, 0, 0, 8);
+                panel.Children.Add(add);
+            }
         }
         // TASK LINKS (docs/superpowers/specs/2026-11-25-task-links-design.md): what the task duplicates, its duplicates and
         // its related tasks, each a button that shows that task, then the link picker while "Duplicate of…" or "Related
@@ -2319,8 +2329,9 @@ public partial class TasksWindow : Window
     {
         if (renaming is not null || selectedId.HasNoValue) return false;
         var id = selectedId.Value;
-        // Not from a box being typed in (the add box, the search box): F2 there is the box's.
-        if (!Keys.Contains(id) || closing.GetValueOrDefault(id) || AddBoxShown && AddBox.IsKeyboardFocusWithin || SearchBox.IsKeyboardFocusWithin) return false;
+        // Not from a box being typed in (the add box, the search box, the subtask box in a thread): F2 there is the box's.
+        if (!Keys.Contains(id) || closing.GetValueOrDefault(id) || AddBoxShown && AddBox.IsKeyboardFocusWithin || SearchBox.IsKeyboardFocusWithin
+            || subtaskBox?.IsKeyboardFocusWithin == true) return false;
         BeginRename(id);
         return true;
     }
@@ -2627,44 +2638,20 @@ public partial class TasksWindow : Window
     {
         AddBox.Text = "";
         addChosen = null;
-        addParent = null;
         ResetAddFlags();
         ClearAddPictures();
         AddRow.Visibility = Visibility.Collapsed;
     }
 
-    // --- adding a subtask (docs/superpowers/specs/2026-11-24-subtasks-design.md, "Making subtasks", Petre's pick A) ---
+    // --- the add box's place and chips --------------------------------------------------------------------------------
     //
-    // "Add subtask…" opens the add box with the parent as a chip ("↳ <parent title> ×") before the workspace chip, and the
-    // workspace chip set to the parent's workspace (still changeable), so the subtask lands with its parent. Enter adds it
-    // under the parent; Esc or the chip's press drops the parent and leaves the text as a plain note.
+    // A subtask is no longer added here: "Add subtask" opens a box in the task's own thread (TasksWindow.SubtaskAdd.cs,
+    // task 0eb943d8, Petre: "a new textbox appears at the top of the bar; make it right there, at the add subtask
+    // button"). The add box at the top adds plain notes only.
 
     const string NotePlaceholder = "A note: Enter adds it, Esc closes the box";
 
-    // The parent the box adds under, or null for a plain note.
-    SubtaskParentView? addParent;
-
     internal string AddPlaceholderText => AddPlaceholder.Text;
-
-    /// <summary>"Add subtask…" on the line <paramref name="lineId"/>. Internal for the tests.</summary>
-    internal void BeginSubtaskAdd(Guid lineId)
-    {
-        if (Actions?.SubtaskParent?.Invoke(lineId) is not { } parent) return;
-        ShowAdd();
-        addParent = parent;
-        addChosen = (latest?.Places ?? []).Where(p => !p.IsGroup && p.Workspace.Equals(parent.Workspace))
-            .Select(p => new TaskPlaceChoice(p.Workspace, p.Name, p.Colour))
-            .FirstOrDefault();
-        PaintAddPlace();
-        AddBox.Focus();
-    }
-
-    void DropAddParent()
-    {
-        addParent = null;
-        PaintAddPlace();
-        AddBox.Focus();
-    }
 
     // The toggles and chips, then where they go: beside the box or under it (FitAddEnd).
     void PaintAddPlace()
@@ -2707,18 +2694,9 @@ public partial class TasksWindow : Window
     void PaintAddChips()
     {
         AddEnd.Children.Clear();
-        AddPlaceholder.Text = addParent is null ? NotePlaceholder : FloatingBar.SubtaskPlaceholder;
-        // The important and urgent toggles first (Ruling 37, TasksWindow.AddFlags.cs), then the parent chip when adding a
-        // subtask, then the workspace chip.
+        AddPlaceholder.Text = NotePlaceholder;
+        // The important and urgent toggles first (Ruling 37, TasksWindow.AddFlags.cs), then the workspace chip.
         AddFlagToggles().ToList().ForEach(toggle => AddEnd.Children.Add(toggle));
-        if (addParent is { } parent)
-        {
-            var label = new TextBlock { Text = $"↳ {FloatingBar.FirstLine(parent.Title)} ×", Foreground = ClaudeInk, FontSize = 11, MaxWidth = 220, TextTrimming = TextTrimming.CharacterEllipsis };
-            var parentChip = Flat(label, "Subtask of", DropAddParent, new Thickness(8, 2, 8, 2));
-            parentChip.ToolTip = "A subtask of this task; press to add a plain note instead";
-            parentChip.Margin = new Thickness(8, 0, 0, 0);
-            AddEnd.Children.Add(parentChip);
-        }
         var target = addChosen ?? latest?.AddTarget;
         if (target is null) return;
         // DROPDOWN THAT DID NOT OPEN (2026-11-23, Petre: "dropdown doesn't work"). The menu used to open from a second
@@ -2753,9 +2731,7 @@ public partial class TasksWindow : Window
         // the task is called "Picture".
         var (title, body) = TaskNote.Split(AddBox.Text, AddBoxImages.Count);
         var describe = AddDescription(body);
-        var added = addParent is { } parent
-            ? Actions?.AddSubtask is { } addSubtask && target is not null && addSubtask(title, target.Workspace, AddQuadrant, parent.Id, describe)
-            : Actions is not null && target is not null && Actions.AddNote(title, target.Workspace, AddQuadrant, describe);
+        var added = Actions is not null && target is not null && Actions.AddNote(title, target.Workspace, AddQuadrant, describe);
         if (!added) return KeyOutcome.NewLine;
         HideAdd();
         return KeyOutcome.Posted;
@@ -2797,8 +2773,9 @@ public partial class TasksWindow : Window
         if (SearchBox.IsKeyboardFocusWithin) EndSearch();
         else if (renaming is not null) EndRename();
         else if (editingComment is not null) EndCommentEdit();
-        // Subtasks: in a subtask box the first Esc drops the parent (the placeholder says so); the next closes the box.
-        else if (AddBoxShown && addParent is not null) DropAddParent();
+        // The subtask box in a thread (TasksWindow.SubtaskAdd.cs) closes first: before the add box, and before the thread
+        // it sits in, which the next Esc folds.
+        else if (subtaskUnder is not null) EndSubtaskAdd();
         else if (AddBoxShown) HideAdd();
         // RULING 63: Esc folds the selected line's open thread, the last thing it undoes.
         // Not while a comment box has the keyboard: there Esc belongs to the box (review, M5).

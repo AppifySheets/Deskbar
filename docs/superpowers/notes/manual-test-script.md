@@ -641,7 +641,8 @@ S2. Pick **Add subtask…** again, type something, press Esc once: the chip goes
 S3. **Add subtask…** on the subtask's own line adds a sibling: the note now says "· 2 subtasks".
 S4. In the tasks panel at full width (692 DIP or more) the subtask reads "↳ <parent, cut> › <title>"; drag the panel
     narrower: the slim line reads "↳ <title>". In the Matrix too it is "↳" alone. Rename the parent in the panel: its
-    subtasks' lines follow. The panel's "..." menu has **Add subtask…** with the same chip in its add box.
+    subtasks' lines follow. The panel's "..." menu has **Add subtask…**: it opens the task's thread with a box where
+    **Add subtask** was (S11a), not the add box at the top.
 S5. Close one subtask: the parent's count drops by one. Delete the parent: the subtasks stay, as plain lines.
 S6. `$ts task parent <note> <another note>` is refused when the note has subtasks ("has subtasks of its own"), and
     `$ts task parent <x> <a subtask>` is refused ("Subtasks go one level deep"). `$ts task add "Child" --parent <id>`
@@ -664,8 +665,14 @@ S10. Subtasks under their parent. Add two subtasks to a note in quadrant IV and 
 S11. Open the parent in the tasks panel: with Subtasks ticked its thread lists neither subtask, since both have a line
     right under it (task 0eb943d8). Untick Subtasks: the thread lists both with their status and status line; click
     one and it is selected, opened and scrolled into view, and it leaves the parent's thread, so it shows once. Pick
-    another task: it folds back into the thread. **Add subtask** in the thread opens the add box with the parent
-    chip.
+    another task: it folds back into the thread.
+S11a. Adding a subtask in place (task 0eb943d8). Open a note's thread and press **Add subtask**: a box takes its place,
+    in the thread, with the keyboard; the add box at the top stays shut. Type a title, Shift+Enter, a second line, Enter:
+    the note's thread closes and the new subtask, right under the note, is picked, glows and has its thread open; its
+    description is the second line. Again, then Esc: the box goes and **Add subtask** is back, the thread still open;
+    Esc again folds the thread. Open the box, fold the thread with a click on the line, open it again: the button, not
+    the box. Ctrl+V a picture into the box, Enter: the subtask carries it. On a subtask's line, **Add subtask…** adds a
+    sibling the same way, in the subtask's thread.
 S12. (Removed with the **Subtask of** menu item: dragging onto a line's middle does it now, S13.)
 S13. Drag to nest. On the bar, drag a note slowly down over another note: over the line's top and bottom quarters the
     drop line shows between lines, over its middle the line is outlined. Release over the middle: the note becomes its
@@ -945,7 +952,7 @@ TI11. In the tasks panel, + Add, then Win+Shift+S a region and Ctrl+V in the add
 TI12. + Add, Ctrl+V a picture, Enter with nothing typed: a task called "Picture" whose closed line says
      "image". Paste two first: "Pictures".
 TI13. + Add, Ctrl+V a picture, Esc, then + Add again: the box is empty and no file was written.
-     "Add subtask…" on a line, Ctrl+V, Enter: the subtask carries the picture.
+     "Add subtask…" on a line, Ctrl+V into the box in its thread, Enter: the subtask carries the picture.
 TI14. The bar's own box ("Add to Deskbar…"): click it, Win+Shift+S a region, Ctrl+V. A small thumbnail
      with an x waits between the box and the "on" chip; on a docked bar the task lines below make room.
      Enter with nothing typed: a task called "Picture" with the picture as its description. Again with
