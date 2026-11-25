@@ -100,6 +100,43 @@ public class IconCacheClaudeWindowTests
         window.Close();
     }));
 
+    // Task f171bca6, Petre picked "violet icon": the manager's window is drawn with Claude's icon in the manager's violet,
+    // a picture of its own (so it is its own family in the ordinal band too), and every task session keeps the plain one.
+    [Fact]
+    public void The_manager_window_gets_its_own_violet_icon() => StaThread.Run(() => WithClaudeAt(StandIn, () =>
+    {
+        var (first, task) = OffScreenWindow();
+        var (second, managerWindow) = OffScreenWindow();
+
+        var taskIcon = IconCache.For(task, Terminal, "fix the bar · Claude");
+        var managerIcon = IconCache.For(managerWindow, Terminal, "Deskbar manager · Claude");
+
+        Assert.NotNull(managerIcon);
+        Assert.NotSame(taskIcon, managerIcon);
+        Assert.Same(managerIcon, IconCache.For(managerWindow, Terminal, "Deskbar manager · Claude"));
+        Assert.NotEqual(IconCache.ArtworkKeyOf(task, Terminal, "fix the bar · Claude"),
+            IconCache.ArtworkKeyOf(managerWindow, Terminal, "Deskbar manager · Claude"));
+        first.Close();
+        second.Close();
+    }));
+
+    // The recolouring itself: Claude's orange mark (E7724B, measured at the icon's centre) turns violet with its lightness
+    // and saturation kept, the near-black disc a near-black violet, grey stays grey, and alpha is untouched.
+    [Fact]
+    public void Recolouring_sets_each_pixel_to_the_manager_violet_hue()
+    {
+        // BGRA: Claude's orange, its dark disc, a mid grey, and a half-transparent orange.
+        byte[] pixels = [0x4B, 0x72, 0xE7, 0xFF, 0x05, 0x0B, 0x12, 0xFF, 0x80, 0x80, 0x80, 0xFF, 0x4B, 0x72, 0xE7, 0x80];
+        var source = BitmapSource.Create(4, 1, 96, 96, PixelFormats.Bgra32, null, pixels, 16);
+
+        var violet = new byte[16];
+        IconCache.InManagerViolet(source).CopyPixels(violet, 16, 0);
+
+        // Blue takes the brightest channel, green the dimmest, red 40/115 of the way between: #B48CFF's own proportions.
+        Assert.Equal([0xE7, 0x4B, 0x81, 0xFF, 0x12, 0x05, 0x0A, 0xFF, 0x80, 0x80, 0x80, 0xFF], violet[..12]);
+        Assert.Equal(0x80, violet[15]);
+    }
+
     // The title alone is not enough: another app's window with such a title is drawn as that app.
     [Fact]
     public void Another_app_titled_like_a_session_keeps_its_own_icon() => StaThread.Run(() => WithClaudeAt(StandIn, () =>

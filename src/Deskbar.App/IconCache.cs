@@ -135,8 +135,53 @@ public static class IconCache
     // From the installed exe rather than a copy in this repo: the mark is Anthropic's, and the exe is what the person
     // running these sessions already has. Measured on Petre's machine: %USERPROFILE%\.local\bin\claude.exe carries the
     // orange mark, 32x32.
+    //
+    // The manager's window gets the same mark in violet (task f171bca6, ManagerIcon), so it is told apart from the task
+    // sessions at a glance on the bar and in quick find.
     static ImageSource? ClaudeIconFor(string? processPath, string? title) =>
-        ClaudeStart.IsSessionWindow(processPath, title) && ClaudeExecutable() is { } exe ? ClaudeIcon(exe) : null;
+        ClaudeStart.IsSessionWindow(processPath, title) && ClaudeExecutable() is { } exe
+            ? ManagerSession.IsWindow(processPath, title) ? ManagerIcon(exe) : ClaudeIcon(exe)
+            : null;
+
+    // THE MANAGER'S ICON: Claude's own icon with every pixel's hue set to the manager line's violet (ManagerLook.Stripe,
+    // #B48CFF), its lightness and saturation kept. Petre picked "violet icon" for "manager terminal window should have
+    // a special icon". Measured on Petre's machine: claude.exe's 32x32 icon is an orange mark (E7724B at its centre) on
+    // a near-black brown disc (120B05), so the mark turns violet and the disc a near-black violet, and the shape and
+    // shading stay Claude's. Derived from the installed exe at run time for the reason ClaudeIcon gives (the mark is
+    // Anthropic's; no copy of it lives in this repo). One bitmap per exe, kept with its misses as claudeIcons keeps them.
+    static readonly Dictionary<string, ImageSource?> managerIcons = new(StringComparer.OrdinalIgnoreCase);
+
+    static ImageSource? ManagerIcon(string exe)
+    {
+        if (managerIcons.TryGetValue(exe, out var hit)) return hit;
+        var source = ClaudeIcon(exe) is BitmapSource claude ? InManagerViolet(claude) : null;
+        managerIcons[exe] = source;
+        return source;
+    }
+
+    // Sets every pixel's hue to the violet's, keeping its lightness and saturation (HSL). For a hue between blue and
+    // magenta (240 to 300 degrees), HSL works out to this: the brightest channel stays as blue, the dimmest as green,
+    // and red sits the violet's own fraction of the way from the dimmest to the brightest. #B48CFF has red 40 of the
+    // 115 from green to blue. The sums are linear in the channels, so a premultiplied pixel comes out premultiplied.
+    internal static BitmapSource InManagerViolet(BitmapSource source)
+    {
+        const double redShare = (0xB4 - 0x8C) / (double)(0xFF - 0x8C);
+        var bgra = new FormatConvertedBitmap(source, PixelFormats.Bgra32, null, 0);
+        var stride = bgra.PixelWidth * 4;
+        var pixels = new byte[stride * bgra.PixelHeight];
+        bgra.CopyPixels(pixels, stride, 0);
+        Enumerable.Range(0, pixels.Length / 4).Select(i => i * 4).ToList().ForEach(at =>
+        {
+            var high = Math.Max(pixels[at], Math.Max(pixels[at + 1], pixels[at + 2]));
+            var low = Math.Min(pixels[at], Math.Min(pixels[at + 1], pixels[at + 2]));
+            pixels[at] = high;                                                     // blue
+            pixels[at + 1] = low;                                                  // green
+            pixels[at + 2] = (byte)Math.Round(low + redShare * (high - low));      // red
+        });
+        var violet = BitmapSource.Create(bgra.PixelWidth, bgra.PixelHeight, source.DpiX, source.DpiY, PixelFormats.Bgra32, null, pixels, stride);
+        violet.Freeze();
+        return violet;
+    }
 
     // Where claude.exe is, or null. A seam for the tests, like Shell above: a CI runner has no Claude Code installed, so
     // a test points this at an exe it knows carries an icon.

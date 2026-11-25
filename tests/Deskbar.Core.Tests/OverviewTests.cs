@@ -194,4 +194,21 @@ public class OverviewTests
     // Nothing they asserted is now untested: MRU-order walking replaces cycling and is covered
     // by WorkspaceMruTests, and Switch(workspaceId) -- the one switching path left besides
     // SwitchToDesktop -- is exercised throughout this file and CurrentDesktopPulseTests.
+
+    // Task f171bca6: the manager's window is pinned without placement memory (its identity is every terminal window's), and
+    // the pin is said on WindowMoved, so the tiler takes it off a board it joined as it appeared (review finding).
+    [Fact]
+    public void Pinning_without_memory_pins_tells_window_moved_and_remembers_nothing()
+    {
+        var (manager, _) = Started();
+        var terminal = Appear(App(0x20, name: "WindowsTerminal", path: @"C:\wt\WindowsTerminal.exe", title: "Deskbar manager · Claude"));
+        var moved = new List<WindowHandle>();
+        using var watch = manager.WindowMoved.Subscribe(moved.Add);
+
+        Assert.True(manager.PinWithoutMemory(terminal).IsSuccess);
+
+        Assert.Contains(terminal, desktops.PinnedWindows);
+        Assert.Equal([terminal], moved);
+        Assert.Empty(manager.State.PinnedApps);
+    }
 }

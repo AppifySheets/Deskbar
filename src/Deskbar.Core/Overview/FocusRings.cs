@@ -112,6 +112,19 @@ public static class FocusRings
         return focusedRing.Concat(trail).Concat(elsewhere).ToList();
     }
 
+    // THE MANAGER'S RING (task f171bca6, Petre picked "violet ring": "manager terminal window should have a special icon
+    // and ring and everything"). The manager's window is pinned to every desktop, so Of gives it the white a pinned window
+    // gets; this swaps that for the manager line's violet (ManagerLook.Stripe in the app, #B48CFF), so the window you talk
+    // to the manager in reads as the manager's on the screen as it does on the bar. Only the Focused ring: Of gives a
+    // pinned window no Elsewhere ring (it looks for the other screen's front window among the desktop's own rows), and a
+    // trail ring keeps the focused window's colour, since a dashed violet would claim the window in front is the manager.
+    public const string Manager = "#B48CFF";
+
+    // Run on Of's rings before WithAsking, so a blink on the manager's window still flips to orange. `isManager` says
+    // which window is the manager's (ManagerSession.IsWindow on the window's process and title).
+    public static IReadOnlyList<Ring> WithManager(IReadOnlyList<Ring> rings, Func<WindowHandle, bool> isManager) =>
+        rings.Select(r => r.Kind == Kind.Focused && isManager(r.Window) ? r with { Colour = Manager } : r).ToList();
+
     // The attention orange, the bar's AttentionDot and the asking row's blink, so the screen and the bar say "this one
     // wants you" in one colour.
     public const string Asking = "#FFA726";

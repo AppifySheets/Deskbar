@@ -210,4 +210,16 @@ public class FocusRingsTests
 
         Assert.Equal([(1, FocusRings.Line.Dashed, Indigo), (2, FocusRings.Line.Dotted, Indigo)], Trail(overview));
     }
+
+    // Task f171bca6, Petre picked "violet ring": the manager's window is pinned, so Of rings it white; WithManager makes
+    // that the manager's violet while it has focus. Every other ring is left as it was, the other screen's included.
+    [Fact]
+    public void The_focused_manager_window_is_ringed_violet()
+    {
+        var overview = new Overview.Overview([Row(9, monitor: 1, front: true, active: true)],
+            [Workspace(true, Row(3, monitor: 2, front: true))], []);
+
+        Assert.Equal([(9, FocusRings.Kind.Focused, FocusRings.Manager), (3, FocusRings.Kind.Elsewhere, FocusRings.DimWhite)],
+            FocusRings.WithManager(FocusRings.Of(overview, _ => Indigo), w => w.Value == 9).Select(r => ((int)r.Window.Value, r.Kind, r.Colour)).ToList());
+    }
 }

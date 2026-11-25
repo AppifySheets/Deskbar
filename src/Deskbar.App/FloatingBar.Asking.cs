@@ -2,6 +2,7 @@ using System.Windows;
 using System.Windows.Media;
 using System.Windows.Media.Animation;
 using Deskbar.Core.Overview;
+using Deskbar.Core.Tasks;
 
 namespace Deskbar.App;
 
@@ -47,7 +48,16 @@ public partial class FloatingBar
 
     // Whether a window's icon glows: its session asked for you, or its taskbar button flashed and you have not looked
     // at it since. Both clear when you activate the window.
-    internal static bool Glows(WindowRow row) => row.Asks || row.WantsAttention;
+    //
+    // And the manager's window while the manager has a question open for you (task f171bca6, Petre picked "glow when it
+    // asks"): the manager line on the bar and in the panel is the question, and its window's icon glows with it, as an
+    // asking task's session does. Unlike a task's ask, activating the window does not clear it: the question is
+    // answered by replying to it, which clears the line (ManagerQuestion.AfterPrompt), and the glow with it.
+    internal bool Glows(WindowRow row) =>
+        row.Asks || row.WantsAttention || (ManagerAsks?.Invoke() is not null && IsManagerWindow(row));
+
+    // Whether a row is the manager's window (ManagerSession.IsWindow: the one rule the icon, ring, glow and pin share).
+    internal static bool IsManagerWindow(WindowRow row) => ManagerSession.IsWindow(row.Window.ProcessPath, row.Window.Title);
 
     // Called with each fresh overview: start the two animations when the first row asks or icon glows, stop them when
     // the last one stops. Stopping leaves both brushes at their base values, which nothing draws with by then.

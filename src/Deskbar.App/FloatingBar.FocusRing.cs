@@ -65,7 +65,11 @@ public partial class FloatingBar
         if (ringOverview is not { } overview) return;
         RingsDrawn?.Invoke(rebuilding);
         var on = manager.State.FocusRing;
-        var rings = on ? FocusRings.Of(overview, w => RingColourOf(overview, w)) : [];
+        // The manager's window in violet rather than the white of a pinned window (task f171bca6, FocusRings.WithManager).
+        var managers = overview.Pinned.Concat(overview.Workspaces.SelectMany(w => w.Running))
+            .Concat(overview.OtherDesktops.SelectMany(d => d.Windows))
+            .Where(IsManagerWindow).Select(r => r.Window.Handle).ToHashSet();
+        var rings = on ? FocusRings.WithManager(FocusRings.Of(overview, w => RingColourOf(overview, w)), managers.Contains) : [];
         Rings?.Show(FocusRings.WithAsking(rings, overview, manager.BlinkingWindows, askingLit, on ? FocusRings.DimWhite : null));
     }
 

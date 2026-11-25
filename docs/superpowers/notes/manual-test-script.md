@@ -1206,6 +1206,18 @@ MQ5. Have it ask twice in a row: only the second question shows.
 MQ6. Open the panel's Stats view: no manager line over it. Back to the list: the line is there again.
 MQ7. The next day, click Manager: the new manager starts without yesterday's question, and the line is gone.
 
+The manager's window set apart (task f171bca6):
+
+MP1. Click Manager with no manager window open: the new window opens and within a moment sits in the bar's pinned
+     row. Switch workspace: the window is still on screen.
+MP2. With a manager window already open from an older build, restart Deskbar: the window gets pinned without a click.
+MP3. On the bar and in quick find, the manager's icon is Claude's mark in violet; a task session's window keeps the
+     plain orange one.
+MP4. Click into the manager's window: its ring is violet, not white. Click into another window: that one's ring is
+     its workspace colour again.
+MP5. Have the manager ask you something (as MQ1): its window's icon on the bar glows orange until you answer in it,
+     and clicking into the window alone does not stop the glow.
+
 ## Results (2026-08-01)
 
 Status: **pending human execution.** An agent cannot observe the desktop, Task View,

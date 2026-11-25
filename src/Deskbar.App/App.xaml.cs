@@ -1026,6 +1026,57 @@ public partial class App : Application
 
     readonly WindowActivator taskWindowActivator = new();
 
+    // THE MANAGER'S WINDOW ON EVERY DESKTOP (task f171bca6, Petre: "manager terminal window ... should be pinned to the
+    // deskbar, like tasks", then "on every desktop" from the choices offered). The manager has no workspace of its own,
+    // and its window used to stay on whichever one was in front when it opened; pinned, it is wherever he is, and the bar
+    // draws it in the pinned row, the place the tasks panel's own window also lives.
+    //
+    // Pinned through WorkspaceManager.PinWithoutMemory, never PinWindow, which would also remember the pin by identity,
+    // and Windows Terminal's identity is every terminal window's; PinWithoutMemory also tells the tiler, which may have
+    // made the window a tile on the workspace it appeared on. The window is the one ManagerSession.IsWindow
+    // names (by its title), seen when it appears, when it is retitled (wt can show the window before the title is set)
+    // and when it is activated, so a window pinned too early to work ("Element not found" before it is shown, see
+    // PinFloatingBar) or unpinned since is pinned again; plus one pass now over the windows already open, for a manager
+    // window opened before this copy started. At background priority, after the event's other subscribers: the start's
+    // expectation (WorkspaceManager.StartIn) moves a new window onto the workspace in front as it appears, and a move
+    // after the pin would undo it.
+    void PinManagerWindows(IWindowMonitor monitor)
+    {
+        void Later(WindowHandle window) =>
+            Dispatcher.InvokeAsync(() => PinManagerWindow(window), System.Windows.Threading.DispatcherPriority.Background);
+
+        monitor.Events
+            .Where(e => e.Kind is WindowEventKind.Appeared or WindowEventKind.TitleChanged or WindowEventKind.Activated
+                        && Core.Tasks.ManagerSession.IsWindow(e.Window.ProcessPath, e.Window.Title))
+            .Subscribe(e => Later(e.Window.Handle));
+        manager!.KnownWindows
+            .Where(w => Core.Tasks.ManagerSession.IsWindow(w.ProcessPath, w.Title))
+            .Select(w => w.Handle).ToList()
+            .ForEach(Later);
+    }
+
+    // Pins one manager window when it is not pinned yet. A pin state that cannot be read (a window not shown yet) or a pin
+    // that fails is tried again two seconds later, up to five times, besides the window's next event: he is typing in
+    // the window, so its next activation may come only after he has switched desktops and left it behind (review
+    // finding). A window gone meanwhile fails each try quietly and is then let go.
+    const int ManagerPinTries = 5;
+
+    void PinManagerWindow(WindowHandle window, int triesLeft = ManagerPinTries)
+    {
+        var done = desktops!.IsPinned(window).Bind(pinned => pinned
+            ? Result.Success()
+            : manager!.PinWithoutMemory(window).Tap(() => ClickTrace.Write($"manager window 0x{window.Value:X}: pinned to every desktop")));
+        if (done.IsSuccess || triesLeft <= 1) return;
+        ClickTrace.Write($"manager window 0x{window.Value:X}: not pinned yet ({done.Error}), trying again");
+        var again = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromSeconds(2) };
+        again.Tick += (_, _) =>
+        {
+            again.Stop();
+            PinManagerWindow(window, triesLeft - 1);
+        };
+        again.Start();
+    }
+
     bool OnDesktopInFront(nint hwnd) =>
         desktops!.IsPinned(new WindowHandle(hwnd)).Match(pinned => pinned, _ => false)
         || desktops.DesktopOf(new WindowHandle(hwnd)).Bind(on => desktops.CurrentDesktop().Map(front => front == on)).Match(same => same, _ => false);
@@ -1611,6 +1662,8 @@ public partial class App : Application
             // Worth a line in the debugger, not a dialog interrupting Petre at startup.
             attentionMonitor.Start().TapError(err =>
                 System.Diagnostics.Debug.WriteLine($"Deskbar: notification badges unavailable: {err}"));
+
+            PinManagerWindows(monitor);
         }
 
         // Both branches above have returned already if state.json was written by a newer major version
