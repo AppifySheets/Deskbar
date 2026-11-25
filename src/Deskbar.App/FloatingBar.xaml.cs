@@ -528,6 +528,9 @@ public partial class FloatingBar : Window
         // whatever was just clicked -- including the taskbar the user was reaching for.
         NativeMethods.SetWindowPos(hwnd, NativeMethods.HWND_TOPMOST, 0, 0, 0, 0,
             NativeMethods.SWP_NOMOVE | NativeMethods.SWP_NOSIZE | NativeMethods.SWP_NOACTIVATE);
+        // Then any of Deskbar's own tooltips back over the bar: a tooltip's popup has no owner window, so the climb just
+        // covered it wherever the bar overlaps it (task d4695a97, OwnToolTips).
+        OwnToolTips.Lift();
     }
 
     // --- stepping aside for a full-screen window ------------------------------------------------------

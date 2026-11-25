@@ -15,7 +15,9 @@ namespace Deskbar.App;
 //
 // Only menus are counted, not every popup: a tooltip or a popup that stays open for a long time would otherwise stop the
 // bar re-asserting itself, and the taskbar would climb over it (CLAUDE.md, "Topmost is a shared band"). A menu is open
-// for seconds and always closes, and ContextMenu raises Closed every time it does, so the count cannot stick.
+// for seconds and always closes, and ContextMenu raises Closed every time it does, so the count cannot stick. Tooltips
+// have the same missing owner and are handled the other way round: the climb goes ahead and lifts them back above
+// itself straight after (OwnToolTips, task d4695a97).
 //
 // Per thread, because the class handlers run on the thread that owns the menu, and so does each window's re-assertion:
 // in the app that is the one UI thread, and in the tests each test's own STA thread, so a menu one test opens does not

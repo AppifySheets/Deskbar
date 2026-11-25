@@ -1966,6 +1966,8 @@ public partial class App : Application
             // Counting Deskbar's open menus from before the first one can open, so the bar, the strips and the tasks panel
             // never climb over one (OwnMenus).
             OwnMenus.Start();
+            // And its open tooltips, so each of those climbs lifts them back above itself straight after (OwnToolTips).
+            OwnToolTips.Start();
             floatingBar = new FloatingBar(manager)
             {
                 // The pinned workspaces' buttons on Windows' taskbar (TaskbarJumps.cs): pinned to every desktop
