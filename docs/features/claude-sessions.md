@@ -53,7 +53,7 @@ Double-click a task's line, on the bar or in the tasks window, and you go to its
 - A session that has ended is resumed first, then its window opens.
 - A note with no session just takes you to its workspace. A double-click never starts a session.
 
-The first click of that double-click opens the task in the tasks panel. To go to the session without that, right-click a Claude task's line and pick **Open Claude**, right after Edit, on the bar and in the tasks window: it does what the double-click does, and the task stays as it was.
+The first click of that double-click opens the task in the tasks panel. To go to the session without that, right-click a Claude task's line and pick **Open Claude**, right after Edit, on the bar and in the tasks window: it does what the double-click does, and the task stays as it was. In the tasks panel a Claude task's line also has an **Open Claude** button, the small open-in-window icon next to its comments, that does the same in one click.
 
 Closing the terminal window only detaches it. The session keeps running, and the next double-click opens a new window on it.
 

@@ -3392,6 +3392,46 @@ public class TasksBoardTests
         noteMenu.IsOpen = false;
     });
 
+    // Task 7f61af2e (Petre: "add a button on the task in the tasklist for it too"): a Claude task's line, full and slim,
+    // has an Open Claude button that goes where the double-click goes, without the line's own click (the task is not
+    // expanded). A note has none, a closed Claude task has none (its line has Reopen there), and on a slim board of notes
+    // the button's column takes no width.
+    [Theory]
+    [InlineData(Wide)]
+    [InlineData(TasksPanelLayout.SlimBelow - 1)]
+    public void A_claude_line_has_an_Open_Claude_button(double width) => StaThread.Run(() =>
+    {
+        using var t = Build(width: width);
+        var id = t.Tasks.Create("Tasks redesign", t.Gepha, Session("s1")).Value.Id;
+        var note = t.Tasks.AddNote("Dishwasher tablets", t.Gepha).Value.Id;
+        var closed = t.Tasks.Create("Shipped", t.Gepha, Session("s2")).Value.Id;
+        t.Tasks.MarkDone(closed);
+        Assert.True(t.Tasks.Close(closed).IsSuccess);
+        t.Controller.Show();
+        t.Window.UpdateLayout();
+
+        Click(ButtonNamed(LineOf(t.Window, id), "Open Claude"));
+        Assert.Equal([id], t.WentTo);
+        Assert.False(t.Window.ThreadShown(id));
+        Assert.Equal("Open Claude: go to its session without opening the task", ButtonNamed(LineOf(t.Window, id), "Open Claude").ToolTip);
+        Assert.DoesNotContain(Inside(LineOf(t.Window, note)).OfType<Button>(), b => AutomationProperties.GetName(b) == "Open Claude");
+
+        t.Controller.Filter(TaskFilter.Closed);
+        Assert.DoesNotContain(Inside(LineOf(t.Window, closed)).OfType<Button>(), b => AutomationProperties.GetName(b) == "Open Claude");
+    });
+
+    [Fact]
+    public void A_slim_board_of_notes_gives_the_Open_Claude_column_no_width() => StaThread.Run(() =>
+    {
+        using var t = Build(width: TasksPanelLayout.SlimBelow - 1);
+        var note = t.Tasks.AddNote("Dishwasher tablets", t.Gepha).Value.Id;
+        t.Controller.Show();
+        t.Window.UpdateLayout();
+
+        var grid = Inside(LineOf(t.Window, note)).OfType<Grid>().First(g => g.ColumnDefinitions.Count > 4);
+        Assert.Equal(0, grid.ColumnDefinitions[9].Width.Value);
+    });
+
     // Spec, "Where the clicks are": "Start Claude on this" on the line's menu right after Edit, and as a button in the
     // task's thread. Both reach the App's ClaudeTaskActions.Offer through `startClaude`, the menu's once the menu closed.
     [Fact]
