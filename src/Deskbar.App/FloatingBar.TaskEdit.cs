@@ -12,9 +12,9 @@ namespace Deskbar.App;
 // A TASK LINE'S RIGHT-CLICK MENU AND ITS IN-PLACE EDITOR ON THE BAR (Ruling 44; Petre: "task rightclick should let me
 // edit it first, first option"). Design: docs/superpowers/specs/2026-11-22-tasks-board-design.md, "The bar".
 //
-// Right-clicking a task line opens its menu, Edit first: Edit, "Open Claude" on a Claude task (task 7f61af2e, the
-// double-click's go without the click that opens the task), "Start Claude on this" (Task 9, when the App wires it),
-// then the line's other actions (the two flags, Move to workspace…, Close). Held open the way the bar's other menus are (HoldFadeWhileOpen): the bar neither fades nor
+// Right-clicking a task line opens its menu, Edit first: Edit, then ONE Claude item (task b6f068b1), "Open Claude" on a
+// Claude task (task 7f61af2e, the double-click's go without the click that opens the task) or "Start Claude on this" on a
+// task no session has joined (Task 9, when the App wires it), then the line's other actions (the two flags, Move to workspace…, Close). Held open the way the bar's other menus are (HoldFadeWhileOpen): the bar neither fades nor
 // repaints under it.
 //
 // Edit opens an editor in the line itself, over the title: a box with the whole title (a title may hold line breaks;
@@ -70,7 +70,7 @@ public partial class FloatingBar
         };
 
     /// <summary>
-    /// A line's menu, Edit first, then "Start Claude on this" when wired, its flags, Move to workspace… and Close. Internal, and answering the menu, for
+    /// A line's menu, Edit first, then its one Claude item (Open Claude, or "Start Claude on this" when wired), its flags, Move to workspace… and Close. Internal, and answering the menu, for
     /// the tests. Nothing for a line in its undo window, whose task is closed.
     /// </summary>
     internal ContextMenu? OpenTaskLineMenu(Guid id)
@@ -98,7 +98,12 @@ public partial class FloatingBar
         // Task 9: handing the task to Claude, right after Edit (the spec, "Where the clicks are"). Run once this menu has
         // closed, as "Move to workspace…" is: it may ask first, and may open a pick list of folders at the pointer, which
         // holds the bar still the way the bar's own menus do.
-        if (StartClaude is { } start)
+        // ONE CLAUDE ITEM PER MENU (task b6f068b1; Petre, with a screenshot of both: "open claude and start claude , no
+        // need for both"). A task that has a session gets Open Claude above and not this one: Open goes to the session
+        // and resumes it when it has ended, which is what he wants from a task Claude already has. A second session on
+        // such a task is still one click away, on the "Start Claude on this" button in the task's thread, and
+        // `deskbar task start` starts one too.
+        else if (StartClaude is { } start)
             menu.Items.Add(TaskMenuItem(TasksWindow.StartClaudeText, () => Dispatcher.BeginInvoke(() =>
             {
                 if (start(id) is { } pick) HoldFadeWhileOpen(pick);

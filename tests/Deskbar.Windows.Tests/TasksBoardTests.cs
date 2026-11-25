@@ -3642,6 +3642,9 @@ public class TasksBoardTests
     // Task 7f61af2e (Petre: "make it possible to open claude without opening the task first"): a Claude task's menu has
     // "Open Claude" right after Edit, going where the double-click goes (goTo) once the menu has closed, without picking
     // the task or opening its thread. A note's menu has no such item.
+    // Task b6f068b1 (Petre: "open claude and start claude , no need for both"): the menu has ONE Claude item, so a Claude
+    // task's has no "Start Claude on this" (its thread keeps the button, for a second session) and a note's has no
+    // "Open Claude".
     [Fact]
     public void Open_Claude_on_the_window_menu_goes_without_opening_the_thread() => StaThread.Run(() =>
     {
@@ -3652,8 +3655,8 @@ public class TasksBoardTests
 
         var menu = t.Window.OpenMenuFor(id, atPointer: true);
         var items = menu.Items.OfType<MenuItem>().ToList();
-        // "Open in window" (task dca4ebeb) comes first after Edit, then Open Claude.
-        Assert.Equal(["Edit", "Open in window", "Open Claude", "Start Claude on this"], items.Take(4).Select(i => ((TextBlock)i.Header).Text));
+        // "Open in window" (task dca4ebeb) comes first after Edit, then Open Claude, and no "Start Claude on this".
+        Assert.Equal(["Edit", "Open in window", "Open Claude", "Add subtask…"], items.Take(4).Select(i => ((TextBlock)i.Header).Text));
         items[2].RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
         menu.IsOpen = false;
         // Run once the menu has closed (an Input-priority dispatch): a lower priority runs after it.
@@ -3663,7 +3666,12 @@ public class TasksBoardTests
 
         var noteMenu = t.Window.OpenMenuFor(note);
         Assert.DoesNotContain(noteMenu.Items.OfType<MenuItem>(), i => i.Header is TextBlock { Text: "Open Claude" });
+        Assert.Contains(noteMenu.Items.OfType<MenuItem>(), i => i.Header is TextBlock { Text: "Start Claude on this" });
         noteMenu.IsOpen = false;
+
+        // The thread of the Claude task still has the button that starts another session.
+        t.Controller.ToggleThread(id);
+        Assert.Contains(Inside(t.Window).OfType<Button>(), b => AutomationProperties.GetName(b) == "Start Claude on this");
     });
 
     // Task 7f61af2e (Petre: "add a button on the task in the tasklist for it too"): a Claude task's line, full and slim,

@@ -2271,7 +2271,11 @@ public partial class TasksWindow : Window
                 menu.Items.Add(Item(OpenClaudeText, () => Dispatcher.BeginInvoke(() => Actions?.Go(id), System.Windows.Threading.DispatcherPriority.Input)));
             // Task 9: handing the task to Claude, right after Edit (the spec, "Where the clicks are"). Run once this menu
             // has closed: it may ask a question or open a pick list of folders at the pointer.
-            if (Actions?.StartClaude is { } start)
+            // ONE CLAUDE ITEM PER MENU (task b6f068b1; Petre: "open claude and start claude , no need for both"): only on
+            // a task no session has joined. A Claude task has Open Claude above, which resumes an ended session, and its
+            // thread keeps the "Start Claude on this" button for a second session (the bar's menu follows the same rule,
+            // FloatingBar.OpenTaskLineMenu).
+            else if (Actions?.StartClaude is { } start)
                 menu.Items.Add(Item(StartClaudeText, () => Dispatcher.BeginInvoke(() => start(id), System.Windows.Threading.DispatcherPriority.Input)));
             // Subtasks (Petre's pick A): the add box with this line's task as the parent (a sibling on a subtask's line),
             // once this menu has closed so the box can take the keyboard.
