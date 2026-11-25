@@ -664,6 +664,45 @@ public class RemoteControlTaskTests
         Assert.Equal(JsonValueKind.Null, Json(woken).GetProperty("snoozedUntil").ValueKind);
     }
 
+    // The manager session's cheap look (TaskOverview): the reply is text, not JSON, one line per open task.
+    [Fact]
+    public void Overview_prints_the_text()
+    {
+        var manager = Started();
+        var id = Prefix(Added(manager, "Overview me"));
+
+        var reply = Run(manager, "task", "overview");
+
+        Assert.Equal(ControlReply.Ok, reply.ExitCode);
+        Assert.StartsWith(id, reply.Output);
+        Assert.Contains("Deskbar: Overview me", reply.Output);
+    }
+
+    // `show` answers what `list` prints for the one task, thread text included.
+    [Fact]
+    public void Show_prints_one_task_as_list_describes_it()
+    {
+        var manager = Started();
+        var id = Prefix(Added(manager, "Show me"));
+        Run(manager, "task", "comment", id, "a word in the thread");
+
+        var listed = Json(Run(manager, "task", "list")).EnumerateArray().Single();
+        var shown = Json(Run(manager, "task", "show", id));
+
+        Assert.Equal(listed.GetProperty("id").GetString(), shown.GetProperty("id").GetString());
+        Assert.Equal(listed.GetProperty("title").GetString(), shown.GetProperty("title").GetString());
+        Assert.Equal("a word in the thread", shown.GetProperty("thread")[0].GetProperty("markdown").GetString());
+    }
+
+    [Fact]
+    public void Show_unknown_id_fails()
+    {
+        var manager = Started();
+        var before = tasks.Board;
+
+        AssertRefusedAndUnchanged(Run(manager, "task", "show", "ffffffff"), before);
+    }
+
     // Task 12: the toggles' twin. `on` and `off` set a flag; the task moves to the top of the quadrant it lands in.
     [Fact]
     public void Flag_sets_and_clears_important_and_urgent()
@@ -784,6 +823,7 @@ public class RemoteControlTaskTests
             ["list [--closed]",
              // Task 521d2b07: the Stats view's numbers.
              "stats [--days <n>]",
+             "overview", "show <id>",
              "add <title>|- [--workspace <name>|none] [--important] [--urgent] [--parent <id>]", "close <id> [--stop-claude]", "reopen <id>",
              "status <id> <backlog|in-progress|waiting|done>", "rename <id> <title>|-", "move <id> <workspace>|none",
              "comment <id> <markdown>|-", "delete <id>", "flag <id> important|urgent on|off", "order <id> top|end|<n>",

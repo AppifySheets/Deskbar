@@ -10,6 +10,8 @@ namespace Deskbar.Core.Control;
 // the pipe commands, and `task list` stays JSON).
 //
 //   task list [--closed]
+//   task overview                     (one line per open task, for the manager session: TaskOverview)
+//   task show <id>                    (one task as `list` prints it, thread text included)
 //   task add <title>|- [--workspace <name>|none] [--important] [--urgent]
 //   task close <id> [--stop-claude]
 //   task reopen <id>
@@ -109,6 +111,10 @@ public sealed partial class RemoteControl
             ["stats", "--days", var days] => int.TryParse(days, out var count) && count is >= 1 and <= 366
                 ? TaskStatsReply(service, count)
                 : ControlReply.Fail("task stats --days takes a whole number of days from 1 to 366"),
+            // The manager session's cheap look at the board (TaskOverview): one line per open task, where `list` is JSON
+            // with every thread. `show` is the other half: one task as `list` prints it, thread text included.
+            ["overview"] => Said(TaskOverview.Text(service.Board, service.Now, id => WorkspaceNameOf(id) ?? "", Busy)),
+            ["show", var id] => service.Board.Find(id).Match(t => Success(Listed(t)), ControlReply.Fail),
             ["add", .. var more] => TaskAdd(service, more, from),
             // A task Claude is still working on refuses a plain close (task 37cd7081, TaskBoard.Close), and the refusal
             // names the flag; `--stop-claude` is the menus' "Stop Claude and close", through the app (ClaudeTaskActions).
@@ -334,6 +340,10 @@ public sealed partial class RemoteControl
     Maybe<string> FamilyOf(TaskService service, TaskItem task) =>
         service.Board.Family(task.Id).Map(f => SessionBriefing.Family(f, Transcript));
 
+    // Whether a session is busy, from the latest `claude agents` list the app handed in; none without one.
+    Maybe<bool> Busy(string sessionId) =>
+        taskSessions is { } commands ? commands.Busy(sessionId) : Maybe<bool>.None;
+
     Maybe<string> Transcript(TaskSession session) =>
         taskSessions is { } commands ? commands.Transcript(session) : Maybe<string>.None;
 
@@ -510,6 +520,13 @@ public sealed record TaskSessionCommands(
     /// compiles; the default finds none, and the family text then lists sessions without a transcript.
     /// </summary>
     public Func<TaskSession, Maybe<string>> Transcript { get; init; } = _ => Maybe<string>.None;
+
+    /// <summary>
+    /// A session's busy flag from the latest `claude agents` list, for `task overview` to tell working from idle (the
+    /// manager session design). None when the session is not in the list. An init property for the same reason as
+    /// Transcript; the default knows nothing, so every live session reads as idle.
+    /// </summary>
+    public Func<string, Maybe<bool>> Busy { get; init; } = _ => Maybe<bool>.None;
 
     /// <summary>
     /// `task close <id> --stop-claude` (task 37cd7081): closes a task Claude is still working on and stops its background

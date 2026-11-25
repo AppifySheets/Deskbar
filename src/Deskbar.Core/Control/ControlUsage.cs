@@ -67,6 +67,9 @@ public static class ControlUsage
                 + "      to finish, and per local day (14 by default, today last) the open count at its end and the\n"
                 + "      tasks added and finished (id, title, status); estimated is true while any finish time counted\n"
                 + "      comes from before status changes were logged"),
+            new("task", "overview", "one line per open task, for a quick look: id, status, flags, workspace, title, status line,\n"
+                + "      question and whether a Claude is working, idle or done; subtasks indented, snoozed ones counted"),
+            new("task", "show <id>", "one task in full, its thread included (the JSON of list, for one task)"),
             new("task", "add <title>|- [--workspace <name>|none] [--important] [--urgent] [--parent <id>]",
                 "add a note to the backlog; without --workspace it goes on the workspace of the VS Code window\n"
                 + "      whose folder holds --from (the caller's own folder if not given), else on the workspace of the\n"
