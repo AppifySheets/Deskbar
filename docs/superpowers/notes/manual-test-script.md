@@ -664,12 +664,15 @@ S10. Subtasks under their parent. Add two subtasks to a note in quadrant IV and 
     own place with "↳ <parent> › <title>". Ask something from a session on a subtask: it moves up to Waiting on you.
 S11. Open the parent in the tasks panel: with Subtasks ticked its thread lists neither subtask, since both have a line
     right under it (task 0eb943d8). Untick Subtasks: the thread lists both with their status and status line; click
-    one and it is selected, opened and scrolled into view, and it leaves the parent's thread, so it shows once. Pick
-    another task: it folds back into the thread.
+    one and it opens right there, its own thread (sessions, comments, its comment box) under its entry inside the
+    parent's thread, with no line of its own and no second "Subtask of" or **Add subtask**; click it again and it
+    folds. Comment on it there: the comment shows in place. A closed subtask in the thread opens the same way, without
+    the filter changing.
 S11a. Adding a subtask in place (task 0eb943d8). Open a note's thread and press **Add subtask**: a box takes its place,
     in the thread, with the keyboard; the add box at the top stays shut. Type a title, Shift+Enter, a second line, Enter:
     the note's thread closes and the new subtask, right under the note, is picked, glows and has its thread open; its
-    description is the second line. Again, then Esc: the box goes and **Add subtask** is back, the thread still open;
+    description is the second line. Untick Subtasks and add another from the note's thread: the note's thread stays
+    open and the new subtask opens inside it, under its entry, nothing picked. Again, then Esc: the box goes and **Add subtask** is back, the thread still open;
     Esc again folds the thread. Open the box, fold the thread with a click on the line, open it again: the button, not
     the box. Ctrl+V a picture into the box, Enter: the subtask carries it. On a subtask's line, **Add subtask…** adds a
     sibling the same way, in the subtask's thread.

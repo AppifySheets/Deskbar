@@ -585,14 +585,26 @@ public partial class TasksWindow : Window
             // a compact line draws no sessions, so it would only rebuild the Matrix for nothing (review minor 2).
             string.Join('\u0002', view.Cells.Select(c => $"{c.Header}:" + string.Join('\u0003', c.Rows.Select(r =>
                 $"{r.Id}|{r.Title}|{r.Detail}|{r.Description}|{r.Status}|{r.Claudes}|{r.Assignee.Id}|{PlaceSignature(r.Place)}|{r.CommentCount}|{r.Expanded}|{r.Closing}|{r.Important}|{r.Urgent}|{r.ParentTitle}|{r.ParentId}|{r.SubtaskCount}|{r.ClaudeWorking}|" +
+                SubtasksSignature(r) + "|" +
                 string.Join('\u0004', r.Comments.Select(c => $"{c.Id}{c.Author}{c.When}{c.Markdown}{c.Settled}")))))),
-            string.Join('\u0002', view.Groups.Select(g => $"{g.Header}:" + string.Join('\u0003', g.Rows.Select(r =>
-                $"{r.Id}|{r.Title}|{r.Detail}|{r.Description}|{r.Status}|{r.Claudes}|{r.Assignee.Id}|{r.Sessions}|{r.SessionCount}|{r.LiveCount}|{PlaceSignature(r.Place)}|{r.CommentCount}|" +
-                $"{r.Expanded}|{r.Closing}|{r.Important}|{r.Urgent}|{r.WorkingCount}|{r.ParentTitle}|{r.ParentId}|{r.SubtaskCount}|{r.ClaudeWorking}|{r.Nested}|" +
-                string.Join('\u0004', r.Subtasks.Select(c => $"{c.Id}{c.Title}{c.Status}{c.StatusLine}")) + "|" + string.Join('\u0004', r.SessionList.Select(s => $"{s.Id}{s.Joined}{s.State}")) + "|" +
-                // Task links: the thread's link lines, and the status words of a closed duplicate.
-                string.Join('\u0004', r.Links.Select(l => $"{l.Kind}{l.Id}{l.Title}{l.Status}")) + $"|{r.DuplicateOfTitle}|" +
-                string.Join('\u0004', r.Comments.Select(c => $"{c.Id}{c.Author}{c.When}{c.Markdown}{c.Settled}")))))));
+            string.Join('\u0002', view.Groups.Select(g => $"{g.Header}:" + string.Join('\u0003', g.Rows.Select(ListRowSignature)))));
+
+    // One List row as the signature reads it. A subtask open in place in its parent's thread (task 0eb943d8) carries its
+    // own row, read the same way inside braces, so a comment or a session on it redraws the parent's thread.
+    static string ListRowSignature(TaskRowView r) =>
+        $"{r.Id}|{r.Title}|{r.Detail}|{r.Description}|{r.Status}|{r.Claudes}|{r.Assignee.Id}|{r.Sessions}|{r.SessionCount}|{r.LiveCount}|{PlaceSignature(r.Place)}|{r.CommentCount}|" +
+        $"{r.Expanded}|{r.Closing}|{r.Important}|{r.Urgent}|{r.WorkingCount}|{r.ParentTitle}|{r.ParentId}|{r.SubtaskCount}|{r.ClaudeWorking}|{r.Nested}|" +
+        SubtasksSignature(r) + "|" +
+        string.Join('\u0004', r.SessionList.Select(s => $"{s.Id}{s.Joined}{s.State}")) + "|" +
+        // Task links: the thread's link lines, and the status words of a closed duplicate.
+        string.Join('\u0004', r.Links.Select(l => $"{l.Kind}{l.Id}{l.Title}{l.Status}")) + $"|{r.DuplicateOfTitle}|" +
+        string.Join('\u0004', r.Comments.Select(c => $"{c.Id}{c.Author}{c.When}{c.Markdown}{c.Settled}"));
+
+    // A row's subtask entries, and the whole row of each one open in place (task 0eb943d8). The Matrix's cells read it too:
+    // a subtask folded there is in no cell, so opening it in its parent's thread changed nothing the cells' signature
+    // read, and the draw never came (review).
+    static string SubtasksSignature(TaskRowView r) =>
+        string.Join('\u0004', r.Subtasks.Select(c => $"{c.Id}{c.Title}{c.Status}{c.StatusLine}{c.HasLine}" + (c.Row is { } open ? "{" + ListRowSignature(open) + "}" : "")));
 
     static string PlaceSignature(TaskPlaceChoice place) => $"{place.Workspace}{place.Name}{(place.Colour as SolidColorBrush)?.Color}";
 
@@ -1722,7 +1734,9 @@ public partial class TasksWindow : Window
     // comments and moves every one below), the comments it shows and which of them are opened in full.
     string ThreadLayoutKey(TaskRowView row) =>
         !row.Expanded ? ""
-        : string.Join(',', row.SessionList.Select(s => s.Id)) + "/" + string.Join(',', row.Subtasks.Select(c => c.Id)) + "/"
+        : string.Join(',', row.SessionList.Select(s => s.Id)) + "/"
+          // A subtask open in place (task 0eb943d8) puts its whole thread inside this one.
+          + string.Join(',', row.Subtasks.Select(c => $"{c.Id}" + (c.Row is { } open ? "[" + ThreadLayoutKey(open) + "]" : ""))) + "/"
           // Task links: the link lines and an open picker sit above the comments, so each moves them.
           + string.Join(',', row.Links.Select(l => $"{l.Kind}{l.Id}")) + (linking is { } l && l.Task == row.Id ? $"picker{l.Duplicate}" : "")
           // The subtask box (task 0eb943d8) stands where "Add subtask" was, and is taller than it.
@@ -1734,14 +1748,19 @@ public partial class TasksWindow : Window
     // author and time over its markdown, then a box for Petre's next one. RULING 62: the settled comments are folded away
     // behind one dim line above the comments, "N settled comments", which unfolds them in place (and reads "Hide N
     // settled comments" while they show). They are kept, so the history stays.
-    UIElement Thread(TaskRowView row)
+    //
+    // IN PLACE (task 0eb943d8, Petre: "let subtasks stay where they are, expand their current place"): a subtask listed in
+    // its parent's open thread opens there, its own thread drawn right under its entry (`inParent`), indented in a frame
+    // of its own. That thread leaves out "Subtask of" (the parent is the thread around it) and "Add subtask" (the
+    // parent's own is a few lines below and adds the same sibling).
+    UIElement Thread(TaskRowView row, bool inParent = false)
     {
         var panel = new StackPanel();
         // A SUBTASK'S PARENT FIRST (task 54b39c4c; Petre: "subtask should show its parent and have a way to open the parent
         // easily"). A nested line shows only "↳", trusting the parent to be right above, but with a few siblings and an
         // open thread the parent is off the top of the list. So an open subtask names its parent at the head of its
         // thread, and the name is a button that opens the parent (TasksBoard.OpenParent).
-        if (row.ParentId is { } parentId && row.ParentTitle is { } parentTitle && Actions?.OpenParent is { } openParent)
+        if (!inParent && row.ParentId is { } parentId && row.ParentTitle is { } parentTitle && Actions?.OpenParent is { } openParent)
             panel.Children.Add(ParentEntry(parentId, parentTitle, openParent));
         // "Open in window" (task dca4ebeb) at the top of an open thread: the thread is where a long task stops fitting.
         if (Actions?.OpenWindow is { } openWindow)
@@ -1763,11 +1782,15 @@ public partial class TasksWindow : Window
             panel.Children.Add(button);
         }
         // SUBTASKS IN THE THREAD (follow-up: Petre's screenshot of an open parent that said "2 subtasks" and showed none).
-        // Each is a button that shows that subtask (picked, its thread open, scrolled to); then "Add subtask", the twin of
-        // the menu's "Add subtask…". Pressed, the button turns into a box in its own place (task 0eb943d8,
-        // TasksWindow.SubtaskAdd.cs), and the box stays there until Enter adds the subtask or Esc closes it.
-        row.Subtasks.ToList().ForEach(sub => panel.Children.Add(SubtaskEntry(sub)));
-        if (Actions?.SubtaskParent is not null && row.Status != TaskStatus.Closed && !row.Closing)
+        // Each is a button that opens or folds that subtask's own thread right under it, in place (task 0eb943d8); then
+        // "Add subtask", the twin of the menu's "Add subtask…". Pressed, the button turns into a box in its own place
+        // (TasksWindow.SubtaskAdd.cs), and the box stays there until Enter adds the subtask or Esc closes it.
+        row.Subtasks.ToList().ForEach(sub =>
+        {
+            panel.Children.Add(SubtaskEntry(sub));
+            if (sub.Row is { } open) panel.Children.Add(Thread(open, inParent: true));
+        });
+        if (!inParent && Actions?.SubtaskParent is not null && row.Status != TaskStatus.Closed && !row.Closing)
         {
             if (subtaskUnder == row.Id) panel.Children.Add(SubtaskBox(row.Id));
             else
@@ -1802,8 +1825,9 @@ public partial class TasksWindow : Window
             BorderThickness = new Thickness(1),
             CornerRadius = new CornerRadius(6),
             Padding = new Thickness(8),
-            // 3 DIP above (TileGap), so the thread stands apart from its task's tile as the tiles do from each other.
-            Margin = new Thickness(43, TileGap, 10, 6),
+            // 3 DIP above (TileGap), so the thread stands apart from its task's tile as the tiles do from each other. A
+            // subtask's thread in place sits under its entry, indented a little inside the parent's frame.
+            Margin = inParent ? new Thickness(12, 0, 0, 8) : new Thickness(43, TileGap, 10, 6),
             Child = panel,
         };
     }
@@ -1884,8 +1908,10 @@ public partial class TasksWindow : Window
     }
 
     // One subtask in its parent's thread: "↳ title · status · status line", dim when it is done or closed. The whole line
-    // is a button that shows the subtask (TasksBoard.ShowTaskPastFilters): picked, drawn even with "Subtasks" unticked
-    // (the selected task never folds, task b0526e18), its thread open and scrolled to.
+    // is a button that opens the subtask's own thread right under it, in place, and folds it again (task 0eb943d8,
+    // Petre: "let subtasks stay where they are, expand their current place"). It used to pick the subtask and show it
+    // (TasksBoard.ShowTaskPastFilters), which unfolded it onto a line of its own below the parent's whole thread, two
+    // threads open one above the other. The selection is left alone, since picking the subtask is what unfolds it.
     UIElement SubtaskEntry(SubtaskView sub)
     {
         var text = new TextBlock { FontSize = 11, TextTrimming = TextTrimming.CharacterEllipsis, VerticalAlignment = VerticalAlignment.Center };
@@ -1894,11 +1920,18 @@ public partial class TasksWindow : Window
         text.Inlines.Add(new Run(sub.Title) { Foreground = finished ? HeaderInk : Ink });
         text.Inlines.Add(new Run($" · {TaskViews.StatusName(sub.Status)}") { Foreground = HeaderInk });
         if (sub.StatusLine.Length > 0) text.Inlines.Add(new Run($" · {sub.StatusLine}") { Foreground = HeaderInk });
-        var entry = Flat(text, $"Subtask {sub.Title}", () => Actions?.ShowTask?.Invoke(sub.Id), new Thickness(4, 1, 4, 1));
+        // A subtask with a line of its own elsewhere in this view (a waiting one in the pinned block, a closed one, any in
+        // the Matrix) opens on that line, as before: shown, picked and scrolled to. Opening it here as well would draw
+        // its thread twice (review of task 0eb943d8).
+        var entry = Flat(text, $"Subtask {sub.Title}", () =>
+        {
+            if (sub.HasLine) Actions?.ShowTask?.Invoke(sub.Id);
+            else Actions?.ToggleThread(sub.Id);
+        }, new Thickness(4, 1, 4, 1));
         entry.Background = Brushes.Transparent;
         entry.HorizontalAlignment = HorizontalAlignment.Left;
         entry.Margin = new Thickness(0, 0, 0, 4);
-        entry.ToolTip = "Show this subtask";
+        entry.ToolTip = sub.HasLine ? "Show this subtask" : sub.Row is null ? "Open this subtask here" : "Fold this subtask";
         return entry;
     }
 

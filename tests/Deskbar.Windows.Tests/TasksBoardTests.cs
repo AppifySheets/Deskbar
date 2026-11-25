@@ -5053,9 +5053,14 @@ public class TasksBoardTests
         var entry = ButtonNamed(t.Window, "Subtask Write the notes");
         Assert.Contains("draft done", string.Concat(Inside(entry).OfType<TextBlock>().Select(RunsOf)));
         Click(entry);
-        Assert.Equal(child.Id, selection.Current.Value);
+        // Task 0eb943d8 ("let subtasks stay where they are, expand their current place"): the subtask opens in the
+        // parent's thread, under its entry, and is not picked, so it stays folded there.
+        Assert.True(t.Window.ThreadShown(child.Id));
+        Assert.NotEqual(Maybe.From(child.Id), selection.Current);
+        Assert.Equal([parent.Id], t.Window.Keys);
 
-        // The parent's thread is still open, and its "Add subtask" opens the box right there (task 0eb943d8).
+        // The parent's thread is still open, and its "Add subtask" (the subtask's own thread in place has none) opens the
+        // box right there.
         Click(ButtonNamed(t.Window, "Add subtask"));
         Assert.NotNull(t.Window.SubtaskBoxShown);
         Assert.False(t.Window.AddBoxShown);
@@ -5109,36 +5114,42 @@ public class TasksBoardTests
 
     // Task b0526e18 (Petre: "i can't interact with the subtask. i should be able to"): with "Subtasks" unticked the
     // subtask is folded into its parent, so the thread's subtask link used to pick a line that was not drawn and nothing
-    // happened. Now the picked subtask is drawn under its parent with its own thread open, and folds again once
-    // another task is picked.
+    // happened. Task 0eb943d8 then found the fix's answer, a line of its own under the parent's whole thread, wrong
+    // ("before clicking, after clicking"; "let subtasks stay where they are, expand their current place"). Now the
+    // subtask opens where it is listed: its own thread, with its comment box, right under its entry in the parent's
+    // thread. A second click folds it. No line of its own, no second "Subtask of" or "Add subtask".
     [Fact]
-    public void A_folded_subtask_opened_from_its_parents_thread_is_drawn() => StaThread.Run(() =>
+    public void A_folded_subtask_opens_in_place_in_its_parents_thread() => StaThread.Run(() =>
     {
         var selection = new TaskSelection();
         using var t = Build(selection: selection);
         var parent = t.Tasks.AddNote("Ship the release", t.Gepha).Value.Id;
         var child = t.Tasks.AddNote("Write the notes", t.Gepha, Quadrant.IV, parent).Value.Id;
+        t.Tasks.Comment(child, Maybe<string>.None, "first draft is in");
         t.Controller.Show();
         Click(ButtonNamed(t.Window, "Subtasks"));
         Assert.Equal([parent], t.Window.Keys);
         t.Controller.ToggleThread(parent);
+        Assert.False(t.Window.ThreadShown(child));
 
         Click(ButtonNamed(t.Window, "Subtask Write the notes"));
 
-        Assert.Equal(child, selection.Current.Value);
-        Assert.Equal([parent, child], t.Window.Keys);
-        // The subtask's own thread is open: it names its parent.
-        Assert.True(HasButtonNamed(t.Window, "Parent Ship the release"));
-        // Task 0eb943d8 (Petre: "it shows up twice"): the subtask moved from the parent's thread to its own line, so
-        // the thread no longer lists it.
-        Assert.False(HasButtonNamed(t.Window, "Subtask Write the notes"));
-
-        // Picked away, it folds back into the parent's thread. Pick toggles the parent's thread, open since the start, so
-        // it is opened again to read it.
-        t.Controller.Pick(parent);
         Assert.Equal([parent], t.Window.Keys);
-        t.Controller.ToggleThread(parent);
+        Assert.True(t.Window.ThreadShown(parent));
+        Assert.True(t.Window.ThreadShown(child));
+        Assert.Single(t.Window.ShownComments(child));
+        Assert.NotNull(t.Window.CommentBoxOf(child));
         Assert.True(HasButtonNamed(t.Window, "Subtask Write the notes"));
+        Assert.False(HasButtonNamed(t.Window, "Parent Ship the release"));
+        Assert.Single(Inside(t.Window).OfType<Button>(), b => AutomationProperties.GetName(b) == "Add subtask");
+
+        // A comment on it while it is open redraws it in place.
+        t.Tasks.Comment(child, Maybe<string>.None, "second pass done");
+        Assert.Equal(2, t.Window.ShownComments(child).Count);
+
+        Click(ButtonNamed(t.Window, "Subtask Write the notes"));
+        Assert.False(t.Window.ThreadShown(child));
+        Assert.True(t.Window.ThreadShown(parent));
     });
 
     // Task 0eb943d8 (Petre: "it shows up twice", "clicking the one above takes me to the one below"): with "Subtasks"
@@ -5160,10 +5171,10 @@ public class TasksBoardTests
         Assert.True(HasButtonNamed(t.Window, "Subtask Tag the build"));
     });
 
-    // A closed subtask is listed in its parent's thread too, and the Open filter hides it: the link lets it past the
-    // filter, as "Subtask of" does for a parent (TasksBoard.ShowTaskPastFilters), so its line shows with its thread open.
+    // A closed subtask is listed in its parent's thread too, and the Open filter hides it (task b0526e18: the link did
+    // nothing). It opens in place like any other (task 0eb943d8), so the filter stays as it is.
     [Fact]
-    public void A_closed_subtask_opened_from_its_parents_thread_is_let_past_the_filter() => StaThread.Run(() =>
+    public void A_closed_subtask_opens_in_place_under_the_open_filter() => StaThread.Run(() =>
     {
         using var t = Build();
         var parent = t.Tasks.AddNote("Ship the release", t.Gepha).Value.Id;
@@ -5175,8 +5186,56 @@ public class TasksBoardTests
 
         Click(ButtonNamed(t.Window, "Subtask Write the notes"));
 
-        Assert.Contains(child, t.Window.Keys);
-        Assert.True(HasButtonNamed(t.Window, "Parent Ship the release"));
+        Assert.DoesNotContain(child, t.Window.Keys);
+        Assert.True(t.Window.ThreadShown(child));
+    });
+
+    // Review of task 0eb943d8: a subtask that waits on you keeps a line of its own in the pinned block, and its parent's
+    // thread still lists it. Its entry goes to that line (picked, its thread open there) rather than opening it in place
+    // too, which drew the same thread twice and left its comment box half-wired.
+    [Fact]
+    public void A_subtask_with_a_line_of_its_own_is_shown_there_not_in_place() => StaThread.Run(() =>
+    {
+        var selection = new TaskSelection();
+        using var t = Build(selection: selection);
+        var parent = t.Tasks.AddNote("Ship the release", t.Gepha).Value.Id;
+        var asking = t.Tasks.Create("Write the notes", t.Gepha, Session("s1")).Value.Id;
+        t.Tasks.SetParent(asking, Maybe.From(parent));
+        t.Tasks.Ask(asking, "Which store?");
+        t.Controller.Show();
+        Click(ButtonNamed(t.Window, "Subtasks"));
+        t.Controller.ToggleThread(parent);
+        Assert.Contains(asking, t.Window.Keys);
+
+        Click(ButtonNamed(t.Window, "Subtask Write the notes"));
+
+        Assert.Equal(asking, selection.Current.Value);
+        Assert.True(t.Window.ThreadShown(asking));
+        // One comment box for it, on its own line: none inside the parent's thread.
+        Assert.Single(Inside(t.Window).OfType<TextBox>(), box => AutomationProperties.GetName(box) == "New comment"
+            && ReferenceEquals(box, t.Window.CommentBoxOf(asking)));
+        Assert.Equal(2, Inside(t.Window).OfType<TextBox>().Count(box => AutomationProperties.GetName(box) == "New comment"));
+    });
+
+    // Adding a subtask from the thread with "Subtasks" unticked (task 0eb943d8): the new subtask stays where a folded
+    // subtask lives, in the parent's thread, and opens there; the parent's thread stays open and nothing is picked.
+    [Fact]
+    public void A_subtask_added_with_subtasks_folded_opens_in_the_parents_thread() => StaThread.Run(() =>
+    {
+        var selection = new TaskSelection();
+        using var t = Build(selection: selection);
+        var parent = t.Tasks.AddNote("Ship the release", t.Gepha).Value.Id;
+        t.Controller.Show();
+        Click(ButtonNamed(t.Window, "Subtasks"));
+        t.Window.BeginSubtaskAdd(parent);
+
+        Assert.True(t.Window.TypeSubtask("Write the notes", Key.Enter));
+
+        var child = t.Tasks.Board.Tasks.Single(x => x.Title == "Write the notes").Id;
+        Assert.Equal([parent], t.Window.Keys);
+        Assert.True(t.Window.ThreadShown(parent));
+        Assert.True(t.Window.ThreadShown(child));
+        Assert.NotEqual(Maybe.From(child), selection.Current);
     });
 
     [Fact]
