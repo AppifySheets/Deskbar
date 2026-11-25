@@ -1098,7 +1098,7 @@ public partial class TasksWindow : Window
 
     // THE TWO TOGGLES (Task 12), the bar's (FloatingBar.FlagToggle): important, Segoe Fluent Icons' "Important" U+E8C9,
     // and urgent, its "Recent" clock U+E823 (Segoe MDL2 Assets carries both on Windows 10). On, the glyph wears its
-    // colour; off it is dim and quiet: invisible until the line is hovered or selected, or faint on a slim line, whose
+    // colour; off it is dim and quiet: invisible until the line is hovered or selected, or dimmed on a slim line, whose
     // controls have a row of their own (Quieten); still clickable either way.
     // Automation status "on" or "off", tooltip the flag's name. None on a closed task or a line in its undo window.
     StackPanel? FlagsOf(TaskRowView row)
@@ -1121,7 +1121,7 @@ public partial class TasksWindow : Window
 
     // THE SNOOZE BUTTON (task 6da8d7eb, Petre: "task should have a snooze button, which will hide it from view for a while";
     // and on the task, "only in the large tasks view", so the bar's lines have none). Third after the two toggles and
-    // quiet like an off toggle: invisible until the line is hovered or selected (faint on a slim line). Segoe's "QuietHours" moon, U+E708, in
+    // quiet like an off toggle: invisible until the line is hovered or selected (dimmed on a slim line). Segoe's "QuietHours" moon, U+E708, in
     // both icon fonts (checked). A press opens the lengths (SnoozeMenu); on a snoozed line, which only the Snoozed filter
     // shows, the moon is lit and the menu offers "Wake now" first. A line waiting on Petre has one too (Petre, 2026-11-25:
     // "i may snooze something that's waiting"; TaskBoard.Snooze says what happens then). None in a Matrix line, whose
@@ -1310,7 +1310,8 @@ public partial class TasksWindow : Window
     // quieter still, and how quiet at rest depends on the line:
     //   - full and Matrix lines: invisible until hover or selection (as on the bar). The toggles sit beside the title
     //     there, and a column of dim glyphs down every line was noise;
-    //   - slim lines: faint but there (OffFlagAtRestOnSlim). A slim line's controls have a row of their own under the
+    //   - slim lines: shown at rest as strongly as the other quiet buttons (OffFlagAtRestOnSlim), full under the pointer
+    //     or on the picked line. A slim line's controls have a row of their own under the
     //     title (ControlsUnderTitle), and the toggles' 48 DIP are kept in it whether they show or not, so hiding them
     //     left a hole between the workspace chip and the comments with nothing to say three buttons were in it.
     //     Petre, on a screenshot of that hole (task f564a7cd): "lots of horizontal space for buttons, still hidden".
@@ -1319,13 +1320,16 @@ public partial class TasksWindow : Window
         (part as FrameworkElement)?.Tag switch
         {
             FlagOnTag => 1,
-            FlagOffTag => loud ? 0.55 : slimLines ? OffFlagAtRestOnSlim : 0,
+            FlagOffTag => slimLines ? (loud ? 1 : OffFlagAtRestOnSlim) : loud ? 0.55 : 0,
             _ => loud ? 1 : 0.5,
         });
 
-    // An off toggle on a slim line nobody points at: clearly below the 0.55 it has under the pointer, so hover still
-    // answers, and below the other quiet buttons' 0.5, since the toggles' glyphs are already drawn in the dim ink.
-    const double OffFlagAtRestOnSlim = 0.3;
+    // An off toggle on a slim line nobody points at: as light on the tile as the comment, Open Claude and "⋯" buttons
+    // beside it, and full strength under the pointer, so hover still answers. The toggles are drawn in the dim ink
+    // (A9ADB8) where those buttons use the bright one (E6E6E6) at 0.5, so 0.75 of the dim ink lands at about the same
+    // lightness, roughly 4:1 against the tile. It was 0.3 (task f564a7cd), about 1.7:1, and Petre read the three as
+    // missing: "snooze and others not showing?" (task ec731be5, option A of the mockup).
+    const double OffFlagAtRestOnSlim = 0.75;
 
     static void Cell(Grid grid, int column, UIElement? part)
     {
