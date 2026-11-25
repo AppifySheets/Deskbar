@@ -270,8 +270,9 @@ The task list at the bottom of the bar (spec `docs/superpowers/specs/2026-11-22-
     bold or italic. A little space separates each group, and nothing names the groups on the bar.
 55d. Drag a plain line down past another and let go on that line's lower half: it lands under it. A press and
     release without moving still goes to the task. Drag a plain line onto an important one: it becomes important
-    (its title turns bold). Try to drag a waiting line: nothing moves. Drop a line on a waiting line: it
-    lands under the waiting block. While dragging, add a task from the pipe: the list does not change until you
+    (its title turns bold). With two waiting lines, drag the lower one above the other: they swap, and
+    stay swapped after a restart. Drag a waiting line down among the plain lines: it goes to the foot of the waiting
+    block. Drop a plain line on a waiting line's top edge: it lands under the waiting block. While dragging, add a task from the pipe: the list does not change until you
     let go. `$ts task list` shows `important`, `urgent`, `quadrant` and `order` matching what you see, and
     `$ts task order <id> 2` and `$ts task flag <id> urgent on` move lines as a drag and a click do.
 
@@ -637,8 +638,10 @@ S11. Open the parent in the tasks panel: its thread lists both subtasks with the
 S12. (Removed with the **Subtask of** menu item: dragging onto a line's middle does it now, S13.)
 S13. Drag to nest. On the bar, drag a note slowly down over another note: over the line's top and bottom quarters the
     drop line shows between lines, over its middle the line is outlined. Release over the middle: the note becomes its
-    subtask and is drawn under it. Drag a note over a subtask's line, a task waiting on you, or drag a task that has
-    subtasks: no outline, only the drop line. Drag the subtask out and drop it between two other lines: it is a plain
+    subtask and is drawn under it. Drag a note over a subtask's line, or drag a task that has subtasks: no outline,
+    only the drop line. Drag a note onto a waiting line's middle: it is outlined, and the note is drawn under it in the
+    waiting block. Drag a waiting line onto a note's middle: it becomes the note's subtask and stays in the waiting
+    block. Drag the subtask out and drop it between two other lines: it is a plain
     task again, where you dropped it. The same in the tasks panel's List; in the Matrix there is no outline.
 S14. A parent closes last. Give a note two subtasks. Hover its tick, on the bar and in the tasks panel: the tooltip
     says "Close its 2 open subtasks first". Tick it on the bar: a message says the same and the line stays as it was,
@@ -1013,7 +1016,9 @@ DW1. Mark a plain note Done from its menu: it moves up into the top block with t
 DW2. Have a session ask something: its task goes above the done one.
 DW3. In the tasks panel, the done task is under the "Waiting on you" caption. The "Done" chip shows it alone, under
      the same caption; the "Waiting on you" chip shows only the question.
-DW4. Try to drag the done line: it does not move, and nothing drops above it.
+DW4. With two done lines, drag the lower one above the other: they swap (task f41d7857). Drag a done line up onto the
+     question: it stops at the top of the done lines, under the question. A plain line dropped on the done line's top
+     edge goes to the top of its quadrant, below the block.
 DW5. Set the done task back to In progress: it goes back to the place it had in its quadrant.
 
 ## A task in its own window

@@ -163,16 +163,43 @@ public class TaskOrderTests
         Assert.Equal([id1, id3, id2], Pile(board));
     }
 
+    // A done task takes its flags and stays pinned; a drag in its own quadrant moves it among the done tasks (task
+    // f41d7857), never above the questions.
     [Fact]
-    public void A_done_task_takes_its_flags_but_no_move()
+    public void A_done_task_takes_its_flags_and_moves_only_among_the_done_tasks()
     {
-        var board = Notes(id1, id2).SetStatus(id1, TaskStatus.Done, clock).Value;
+        var board = Notes(id1, id2, id3, id4);
+        board = board.SetStatus(id1, TaskStatus.Done, clock).Value;
+        Later();
+        board = board.MarkDone(id2, clock).Value;
+        Later();
+        board = board.Ask(id3, "which?", clock).Value;
+        Assert.Equal([id3, id2, id1, id4], Pile(board));
 
-        Assert.Equal("A done task stays on top until it is closed or resumed; its flags still change",
-            board.Place(id1, Quadrant.IV, TaskPlace.Top, clock).Error);
         var flagged = board.SetFlag(id1, TaskFlag.Important, true, clock).Value;
         Assert.True(Get(flagged, id1).Important);
-        Assert.Equal([id1, id2], Pile(flagged));
+        Assert.Equal([id3, id2, id1, id4], Pile(flagged));
+
+        board = board.Place(id1, Quadrant.IV, TaskPlace.Top, clock).Value;
+        Assert.Equal([id3, id1, id2, id4], Pile(board));
+        Assert.Contains("the done tasks on top", board.PlacePinned(id2, TaskPlace.Before(id3), clock).Error);
+        Assert.Contains("the tasks waiting on you", board.PlacePinned(id3, TaskPlace.After(id1), clock).Error);
+    }
+
+    // Becoming Done puts a task on top of the done tasks, wherever the others were dragged; done again keeps its place.
+    [Fact]
+    public void A_task_becoming_done_goes_on_top_of_the_done_tasks()
+    {
+        var board = Notes(id1, id2, id3);
+        board = board.MarkDone(id1, clock).Value;
+        board = board.MarkDone(id2, clock).Value;
+        board = board.PlacePinned(id1, TaskPlace.Top, clock).Value;
+        Assert.Equal([id1, id2], board.PinnedPart(TaskStatus.Done).Select(t => t.Id));
+
+        board = board.SetStatus(id3, TaskStatus.Done, clock).Value;
+        board = board.MarkDone(id1, clock).Value;
+
+        Assert.Equal([id3, id1, id2], board.PinnedPart(TaskStatus.Done).Select(t => t.Id));
     }
 
     [Fact]
@@ -319,17 +346,136 @@ public class TaskOrderTests
         Assert.Equal(Quadrant.III, Get(board, id1).Quadrant);
     }
 
+    // --- the Waiting on you block's own order (task f41d7857: "drag and drop of tasks waiting on me doesn't work ...
+    // it should") ---------------------------------------------------------------------------------------------------
+
+    // Three notes asked about in turn, id1 first: the latest ask is on top, as before pins existed.
+    TaskBoard Asked(params Guid[] ids) =>
+        ids.Aggregate(Notes(ids), (board, id) =>
+        {
+            Later();
+            return board.Ask(id, $"question {id.ToString()[^1]}", clock).Value;
+        });
+
+    static IReadOnlyList<Guid> Block(TaskBoard board) => board.PinnedPart(TaskStatus.WaitingOnYou).Select(t => t.Id).ToArray();
+
     [Fact]
-    public void A_waiting_task_cannot_be_placed_but_its_flags_change()
+    public void A_new_ask_goes_on_top_of_the_waiting_block()
     {
-        var board = Notes(id1, id2);
-        board = board.SetStatus(id1, TaskStatus.WaitingOnYou, clock).Value;
+        var board = Asked(id1, id2, id3);
 
-        var refused = board.Place(id1, Quadrant.IV, TaskPlace.End, clock);
-        Assert.True(refused.IsFailure);
-        Assert.Contains("waiting on you", refused.Error);
+        Assert.Equal([id3, id2, id1], Block(board));
+        Assert.Equal([id3, id2, id1], Pile(board).Take(3));
+    }
 
-        Assert.Equal(Quadrant.II, board.SetFlag(id1, TaskFlag.Important, true, clock).Value.Tasks.Single(t => t.Id == id1).Quadrant);
+    [Fact]
+    public void A_waiting_task_is_dragged_within_the_block_and_keeps_its_flags_and_rank()
+    {
+        var board = Asked(id1, id2, id3);
+        var rank = Get(board, id3).Rank;
+
+        board = board.PlacePinned(id3, TaskPlace.After(id1), clock).Value;
+        Assert.Equal([id2, id1, id3], Block(board));
+        board = board.PlacePinned(id1, TaskPlace.Before(id2), clock).Value;
+        Assert.Equal([id1, id2, id3], Block(board));
+        board = board.PlacePinned(id3, TaskPlace.At(2), clock).Value;
+        Assert.Equal([id1, id3, id2], Block(board));
+
+        Assert.Equal(rank, Get(board, id3).Rank);
+        Assert.Equal(Quadrant.IV, Get(board, id3).Quadrant);
+        Assert.Equal(clock, Get(board, id3).UpdatedAt);
+    }
+
+    [Fact]
+    public void A_drop_where_a_waiting_task_already_is_returns_the_same_board()
+    {
+        var board = Asked(id1, id2);
+
+        Assert.Same(board, board.PlacePinned(id2, TaskPlace.Top, clock).Value);
+        Assert.Same(board, board.PlacePinned(id2, TaskPlace.Before(id1), clock).Value);
+    }
+
+    // `task order` and the bar's drop say the task's own quadrant: for a waiting task that is a place in the block.
+    [Fact]
+    public void Place_in_its_own_quadrant_moves_a_waiting_task_within_the_block()
+    {
+        var board = Asked(id1, id2, id3);
+
+        board = board.Place(id3, Quadrant.IV, TaskPlace.End, clock).Value;
+
+        Assert.Equal([id2, id1, id3], Block(board));
+        Assert.Equal(TaskStatus.WaitingOnYou, Get(board, id3).Status);
+    }
+
+    // The Matrix's drag to another cell: the flags change, as a toggle would change them, and the task stays pinned.
+    [Fact]
+    public void Place_in_another_quadrant_gives_a_waiting_task_its_flags_and_it_stays_pinned()
+    {
+        var board = Asked(id1, id2);
+
+        board = board.Place(id1, Quadrant.II, TaskPlace.Top, clock).Value;
+
+        Assert.Equal(Quadrant.II, Get(board, id1).Quadrant);
+        Assert.Equal(TaskStatus.WaitingOnYou, Get(board, id1).Status);
+        Assert.Equal([id2, id1], Block(board));
+        Assert.Empty(Group(board, Quadrant.II));
+    }
+
+    [Fact]
+    public void An_answered_task_goes_back_to_its_place_in_its_quadrant_wherever_it_was_dragged_in_the_block()
+    {
+        var board = Notes(id1, id2, id3); // IV: id3, id2, id1
+        board = board.Ask(id2, "which?", clock).Value;
+        board = board.Ask(id1, "and this?", clock).Value;
+        board = board.PlacePinned(id2, TaskPlace.Top, clock).Value;
+
+        board = board.SetStatus(id2, TaskStatus.InProgress, clock).Value;
+
+        Assert.Equal([id3, id2], Group(board, Quadrant.IV));
+    }
+
+    [Fact]
+    public void A_task_set_to_waiting_by_hand_joins_the_block_on_top_and_a_waiting_one_keeps_its_place()
+    {
+        var board = Asked(id1, id2, id3);
+        board = board.PlacePinned(id3, TaskPlace.End, clock).Value; // id2, id1, id3
+        board = board.AddNote("new", Free, clock, id4).Value.Board;
+
+        board = board.SetStatus(id4, TaskStatus.WaitingOnYou, clock).Value;
+        Assert.Equal([id4, id2, id1, id3], Block(board));
+
+        board = board.SetStatus(id3, TaskStatus.WaitingOnYou, clock).Value;
+        Assert.Equal([id4, id2, id1, id3], Block(board));
+    }
+
+    [Fact]
+    public void Placing_in_the_waiting_block_refuses_a_task_not_waiting_a_closed_one_and_a_stranger()
+    {
+        var board = Asked(id1, id2);
+        board = board.AddNote("plain", Free, clock, id3).Value.Board;
+
+        Assert.Contains("neither waiting", board.PlacePinned(id3, TaskPlace.Top, clock).Error);
+        Assert.Contains("the tasks waiting on you", board.PlacePinned(id1, TaskPlace.Before(id3), clock).Error);
+        Assert.True(board.PlacePinned(Guid.NewGuid(), TaskPlace.Top, clock).IsFailure);
+    }
+
+    // As with ranks: dragging into one gap over and over halves it until the numbers run out, and then the block is
+    // numbered afresh. The order must survive that.
+    [Fact]
+    public void Many_drops_into_one_gap_of_the_waiting_block_keep_its_order()
+    {
+        var ids = Enumerable.Range(1, 60).Select(n => Guid.Parse($"dddddddd-0000-0000-0000-{n:D12}")).ToArray();
+        var board = Asked(ids); // the block: ids[59] first
+        var expected = Block(board).ToList();
+
+        ids.Skip(2).Take(56).ToList().ForEach(id =>
+        {
+            board = board.PlacePinned(id, TaskPlace.After(ids[0]), clock).Value;
+            expected.Remove(id);
+            expected.Insert(expected.IndexOf(ids[0]) + 1, id);
+        });
+
+        Assert.Equal(expected, Block(board));
     }
 
     [Fact]

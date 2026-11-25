@@ -10,8 +10,9 @@ namespace Deskbar.App;
 // DRAGGING A LINE IN THE TASKS WINDOW (Task 12; progress.md Rulings 24, 25 and 28), the bar's drag
 // (FloatingBar.TaskDrag.cs) with the same rules, and the same answer to "where does it land" (TaskDropTarget): before or
 // after the line under the pointer, in that line's quadrant, so a drop among another quadrant's lines sets its flags.
-// Waiting on you lines (its questions and its Done tasks, TaskStatusPinning) cannot be dragged and nothing drops above them; a closed task, or a line in its undo window, is
-// neither dragged nor a target.
+// Nothing drops above the Waiting on you lines (its questions and its Done tasks, TaskStatusPinning), and they move
+// within their own part of the block (task f41d7857; in the Matrix, onto another cell to take its flags); a closed
+// task, or a line in its undo window, is neither dragged nor a target.
 //
 //   * A THRESHOLD: the press only arms; the system drag distance starts the drag, so a click stays a click.
 //   * MOUSE CAPTURE on the drag surface (DragMouse, the arrange drag's seam, so a test holds the button down); the
@@ -28,7 +29,9 @@ public partial class TasksWindow
     // in its undo window). Filled as the lines are drawn (Line), cleared with them.
     // Nested: a subtask drawn under its parent (TaskViews.UnderParents). It is dragged (out of its parent's block, to
     // free it), but it is no drop target: its rank is not where it is drawn (review of #467, finding 2).
-    readonly Dictionary<Guid, (Quadrant Quadrant, bool Waiting, bool Fixed, bool Nested)> dragLines = [];
+    // Part: which part of the pinned block a pinned line is in, the questions or the Done tasks, since a pinned line is
+    // dragged within its own part (task f41d7857, TaskDropTarget).
+    readonly Dictionary<Guid, (Quadrant Quadrant, bool Waiting, bool Fixed, bool Nested, TaskDropTarget.Part Part)> dragLines = [];
 
     DragState? drag;
     TaskDropTarget.Drop? dropShown;
@@ -81,11 +84,11 @@ public partial class TasksWindow
         };
     });
 
-    /// <summary>A press on a line: arms a drag, unless the line is pinned (waiting) or fixed (closed).</summary>
+    /// <summary>A press on a line: arms a drag, unless the line is fixed (closed). A waiting line arms one too.</summary>
     internal void DragPress(Guid id, Point at)
     {
         drag = null;
-        if (renaming is not null || !dragLines.TryGetValue(id, out var line) || line.Waiting || line.Fixed) return;
+        if (renaming is not null || !dragLines.TryGetValue(id, out var line) || line.Fixed) return;
         drag = new DragState(id, at, Started: false);
     }
 
@@ -187,10 +190,11 @@ public partial class TasksWindow
                 .Select(b => (Id: (Guid)b.Tag, Line: dragLines[(Guid)b.Tag], Button: b))
                 .Select(x => new TaskDropTarget.Drawn(new TaskDropTarget.Placed(x.Id, x.Line.Quadrant, x.Line.Waiting,
                     new Rect(x.Button.TranslatePoint(new Point(0, 0), DragSurface), x.Button.RenderSize))
-                    { TakesChild = !x.Line.Waiting && parents.Contains(x.Id) }, x.Line.Nested))
+                    { TakesChild = parents.Contains(x.Id), Pinned = x.Line.Part }, x.Line.Nested))
                 .ToList();
             // A nested subtask released inside its own parent's block stays where it is (as on the bar).
-            return TaskDropTarget.InOwnBlock(drawn, dragged, at) ? null : TaskDropTarget.At(TaskDropTarget.Anchors(drawn), [], own, at);
+            return TaskDropTarget.InOwnBlock(drawn, dragged, at) ? null
+                : TaskDropTarget.At(TaskDropTarget.Anchors(drawn), [], own, at, mine.Part);
         }
         if (cells.Count == 0) return null;
         var (quadrant, box) = cells
@@ -200,9 +204,12 @@ public partial class TasksWindow
             .First();
         dropSpan = box;
         var lines = Placed(cells[quadrant].Lines.Children.OfType<Button>().Where(b => b.Tag is Guid));
-        var areas = lines.All(l => l.Waiting) ? new[] { new TaskDropTarget.Area(quadrant, box) } : [];
+        // A pinned line moves within its part of its own cell's pinned lines, and anywhere on another cell takes that
+        // cell's flags (it stays pinned on top of it; task f41d7857). Any other line takes a cell with no line that moves
+        // as a whole.
+        var areas = (mine.Waiting ? quadrant != own : lines.All(l => l.Waiting)) ? new[] { new TaskDropTarget.Area(quadrant, box) } : [];
         // A drop on the cell's waiting lines goes to the top of the cell's own quadrant.
-        return TaskDropTarget.At(lines, areas, quadrant, at);
+        return TaskDropTarget.At(lines, areas, quadrant, at, mine.Part);
     }
 
     // The lines that can be aimed at, with their boxes in the drag's coordinates.
@@ -210,7 +217,7 @@ public partial class TasksWindow
         buttons
             .Where(b => b.Tag is Guid id && dragLines.TryGetValue(id, out var line) && !line.Fixed && !line.Nested && b.IsVisible)
             .Select(b => new TaskDropTarget.Placed((Guid)b.Tag, dragLines[(Guid)b.Tag].Quadrant, dragLines[(Guid)b.Tag].Waiting,
-                new Rect(b.TranslatePoint(new Point(0, 0), DragSurface), b.RenderSize)))
+                new Rect(b.TranslatePoint(new Point(0, 0), DragSurface), b.RenderSize)) { Pinned = dragLines[(Guid)b.Tag].Part })
             .ToList();
 
     void PaintDrop(DrawingContext dc)

@@ -440,6 +440,34 @@ public sealed class JsonTaskStoreTests : IDisposable
         Assert.Equal(["t4", "t2", "t5", "t3", "t1"], new JsonTaskStore(dir).Load().Value.Pile().Select(t => t.Title));
     }
 
+    // Task f41d7857: the Waiting on you block's own order is saved as an optional `pin`, still version 2. A file from
+    // before it reads as the latest raised on top, the block's order then, and a new ask still lands above those.
+    [Fact]
+    public void The_waiting_pin_round_trips_and_a_file_without_pins_keeps_the_latest_ask_on_top()
+    {
+        Directory.CreateDirectory(dir);
+        static string Task(int n, int minute) => $$"""
+            { "id": "aaaaaaaa-0000-0000-0000-00000000000{{n}}", "title": "t{{n}}", "status": "WaitingOnYou",
+              "question": "q{{n}}", "created": "2026-11-22T09:00:00+00:00", "updatedAt": "2026-11-22T09:00:00+00:00",
+              "raised": "2026-11-22T09:{{minute:D2}}:00+00:00" }
+            """;
+        File.WriteAllText(TasksPath, $$"""
+            { "version": 2, "tasks": [ {{Task(1, 1)}}, {{Task(2, 3)}}, {{Task(3, 2)}} ] }
+            """);
+
+        var board = new JsonTaskStore(dir).Load().Value;
+        Assert.Equal(["t2", "t3", "t1"], board.PinnedPart(TaskStatus.WaitingOnYou).Select(t => t.Title));
+
+        var at = new DateTimeOffset(2026, 11, 22, 10, 0, 0, TimeSpan.Zero);
+        board = board.PlacePinned(board.Tasks.Single(t => t.Title == "t1").Id, TaskPlace.Top, at).Value;
+        board = board.Ask(board.Tasks.Single(t => t.Title == "t3").Id, "again", at).Value;
+        Assert.Equal(["t3", "t1", "t2"], board.PinnedPart(TaskStatus.WaitingOnYou).Select(t => t.Title));
+
+        Assert.True(new JsonTaskStore(dir).Save(board).IsSuccess);
+        Assert.Contains("\"pin\":", File.ReadAllText(TasksPath));
+        Assert.Equal(["t3", "t1", "t2"], new JsonTaskStore(dir).Load().Value.PinnedPart(TaskStatus.WaitingOnYou).Select(t => t.Title));
+    }
+
     // One version 2 task in local (+04:00) time, with a session and a comment, as a person might edit it.
     static string Version2(string status) => $$"""
         {

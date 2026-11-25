@@ -14,8 +14,9 @@ namespace Deskbar.Core.Tasks;
 //     exception (task 327e3cd0): the session that worked on it may join it again, which reopens it, so resuming a
 //     session to carry on with a closed task does not make a duplicate. Renaming, moving, commenting and setting a
 //     status by hand stay open to Petre.
-//   * The order (Task 12, Rulings 24, 25 and 28; TaskOrder.cs): Waiting on you is pinned on top, latest ask first, by
-//     Raised, and the Done tasks under the questions, latest done first (task eefb986a; TaskStatusPinning). Below them
+//   * The order (Task 12, Rulings 24, 25 and 28; TaskOrder.cs): Waiting on you is pinned on top, and the Done tasks under
+//     the questions (task eefb986a; TaskStatusPinning), each part a new one on top and otherwise in the order Petre
+//     drags it to (Pin, task f41d7857). Below them
 //     come Covey's quadrants I to IV, which the two flags name, each in Petre's manual order, the tasks' Rank. A new
 //     task goes to the top of its quadrant, a Done task keeps its rank while pinned and goes back to that place when it
 //     is resumed, a closed one leaves and a reopened one comes back at the top. Undo on a close is not a reopening: the line never left its place on
@@ -39,8 +40,7 @@ public sealed record TaskBoard(IReadOnlyList<TaskItem> Tasks)
     const string TaskIsClosed = "The task is closed.";
     const string TaskIsNotClosed = "The task is not closed.";
     const string UseClose = "Use close to close a task";
-    const string WaitingStaysOnTop = "A task waiting on you stays on top until it is answered; its flags still change";
-    const string DoneStaysOnTop = "A done task stays on top until it is closed or resumed; its flags still change";
+    const string NotPinned = "The task is neither waiting on you nor done";
 
     // --- making tasks ------------------------------------------------------------------------------
 
@@ -150,7 +150,7 @@ public sealed record TaskBoard(IReadOnlyList<TaskItem> Tasks)
     /// <summary>A session needs a decision: the task waits on Petre, shows the question and moves to the top.</summary>
     public Result<TaskBoard> Ask(Guid id, string question, DateTimeOffset now) =>
         CleanText(question, "An ask needs a question").Bind(q =>
-            ChangeOpen(id, t => t with { Status = TaskStatus.WaitingOnYou, Question = q.Trim(), Raised = now, UpdatedAt = now, Assignee = Assignee.Me, WaitingSince = now }));
+            ChangeOpen(id, t => t with { Status = TaskStatus.WaitingOnYou, Question = q.Trim(), Raised = now, UpdatedAt = now, Assignee = Assignee.Me, WaitingSince = now, Pin = TopPin(TaskStatus.WaitingOnYou, id) }));
 
     /// <summary>
     /// The session's question is settled (`task answered`). Its task, when Waiting on you or Done, goes back to In progress and drops
@@ -398,6 +398,9 @@ public sealed record TaskBoard(IReadOnlyList<TaskItem> Tasks)
                     : t.Assignee,
                 // When it began waiting (Ruling 62 review): what `answered` settles comments since.
                 WaitingSince = status == TaskStatus.WaitingOnYou && t.Status != TaskStatus.WaitingOnYou ? now : t.WaitingSince,
+                // Joining a part of the pinned block (the questions, or the Done tasks) puts it on top of that part, as
+                // an ask or Claude's finish does (task f41d7857); a task already there keeps its place.
+                Pin = status.IsPinned() && t.Status != status ? TopPin(status, id) : t.Pin,
                 Adopted = false,
                 UpdatedAt = now,
             }).Bind(board => board.WithParentReopened(id, now));
@@ -424,15 +427,39 @@ public sealed record TaskBoard(IReadOnlyList<TaskItem> Tasks)
     /// it in another quadrant than its own sets that quadrant's flags. It takes the middle of its new neighbours'
     /// ranks, so only the moved task changes; when the numbers between two neighbours run out (the same gap halved
     /// some fifty times) the quadrant is numbered afresh and every task whose rank changed is stamped. A drop where the
-    /// task already is returns this same board. Refused: a closed task, a task waiting on Petre or Done (pinned on top
-    /// until answered or closed; Ruling 25, task eefb986a), and a place beside a task that is not in that quadrant's order.
+    /// task already is returns this same board. Refused: a closed task, and a place beside a task that is not in that
+    /// quadrant's order.
+    ///
+    /// A task waiting on Petre or Done stays pinned above the quadrants until it is answered or closed (Ruling 25, task
+    /// eefb986a), but it is no longer fixed there (task f41d7857, Petre: "drag and drop of tasks waiting on me doesn't
+    /// work ... it should"). In its own quadrant the place is a place in its part of the pinned block
+    /// (<see cref="PlacePinned"/>), which is what a drag on the bar or in the List and `task order` mean; in another
+    /// quadrant (a drag to another cell of the Matrix) the task takes that quadrant's flags, as a toggle would, and stays
+    /// pinned.
     /// </summary>
     public Result<TaskBoard> Place(Guid id, Quadrant quadrant, TaskPlace place, DateTimeOffset now) =>
         Lookup(id).Bind(task =>
             !task.IsOpen ? Result.Failure<TaskBoard>(TaskIsClosed)
-            : task.Status == TaskStatus.WaitingOnYou ? Result.Failure<TaskBoard>(WaitingStaysOnTop)
-            : task.Status == TaskStatus.Done ? Result.Failure<TaskBoard>(DoneStaysOnTop)
+            : task.Status.IsPinned()
+                ? task.Quadrant == quadrant ? PlacePinned(id, place, now) : ToQuadrant(task, quadrant, now)
             : IndexFor(task, quadrant, place).Map(index => Placed(task, quadrant, index, now)));
+
+    /// <summary>
+    /// A drag within the pinned block (task f41d7857): the task goes to <paramref name="place"/> among the tasks of its
+    /// own part of the block, the questions or the Done tasks (<see cref="PinnedPart"/>), whatever their quadrants. The
+    /// questions stay above the Done tasks (task eefb986a), so neither part is dragged into the other. It takes the
+    /// middle of its new neighbours' pins (<see cref="TaskItem.Pin"/>) as <see cref="Place"/> takes ranks, numbering
+    /// the part afresh when they run out. Its flags and its rank are left alone, so once answered or put back to work
+    /// it goes back to its place in its quadrant. A drop where it already is returns this same board. Refused: a closed
+    /// task, a task that is not pinned, and a place beside a task outside its part.
+    /// </summary>
+    public Result<TaskBoard> PlacePinned(Guid id, TaskPlace place, DateTimeOffset now) =>
+        Lookup(id).Bind(task =>
+            !task.IsOpen ? Result.Failure<TaskBoard>(TaskIsClosed)
+            : !task.Status.IsPinned() ? Result.Failure<TaskBoard>(NotPinned)
+            : IndexIn(PinnedPart(task.Status), task, place,
+                    task.Status == TaskStatus.Done ? "the done tasks on top" : "the tasks waiting on you")
+                .Map(index => Repinned(task, index, now)));
 
     /// <summary>
     /// One quadrant's tasks in their manual order: open, not waiting on Petre and not Done (both are pinned above every
@@ -846,15 +873,24 @@ public sealed record TaskBoard(IReadOnlyList<TaskItem> Tasks)
         Pinned().Concat(Enum.GetValues<Quadrant>().SelectMany(Group)).ToArray();
 
     /// <summary>
-    /// The pinned "Waiting on you" block, in its automatic order (task eefb986a, TaskStatusPinning): the tasks waiting on
-    /// Petre's answer first, the latest ask on top, then the Done tasks waiting for him to close them, the latest done
-    /// on top (both by <see cref="TaskItem.Raised"/>, which an ask and becoming Done stamp). A question goes above a Done
-    /// task because a session is stopped on it, while a Done task only waits for a look and a close.
+    /// The pinned "Waiting on you" block (task eefb986a, TaskStatusPinning): the tasks waiting on Petre's answer first,
+    /// then the Done tasks waiting for him to close them, each part in its own order (<see cref="PinnedPart"/>: a new
+    /// one on top, then where he drags it, task f41d7857). A question goes above a Done task because a session is
+    /// stopped on it, while a Done task only waits for a look and a close.
     /// </summary>
     public IReadOnlyList<TaskItem> Pinned() =>
-        Tasks.Where(t => t.Status == TaskStatus.WaitingOnYou).OrderByDescending(t => t.Raised).ThenBy(t => t.Id)
-            .Concat(Tasks.Where(t => t.Status == TaskStatus.Done).OrderByDescending(t => t.Raised).ThenBy(t => t.Id))
-            .ToArray();
+        PinnedPart(TaskStatus.WaitingOnYou).Concat(PinnedPart(TaskStatus.Done)).ToArray();
+
+    /// <summary>
+    /// One part of the pinned block in its order: the tasks of <paramref name="status"/> (Waiting on you, or Done),
+    /// smallest <see cref="TaskItem.Pin"/> first, then the latest raised first (pins that tie: tasks made in code, a file
+    /// from before pins), then the id, so the order is always the same. Snoozed ones are in it; each surface leaves them
+    /// out as it leaves them out elsewhere. Any other status has no part and gives an empty list.
+    /// </summary>
+    public IReadOnlyList<TaskItem> PinnedPart(TaskStatus status) =>
+        status.IsPinned()
+            ? Tasks.Where(t => t.Status == status).OrderBy(t => t.Pin).ThenByDescending(t => t.Raised).ThenBy(t => t.Id).ToArray()
+            : [];
 
     /// <summary>
     /// A task's 1-based place in its quadrant's order, as `task list` prints it and `task order &lt;n&gt;` takes it;
@@ -897,9 +933,13 @@ public sealed record TaskBoard(IReadOnlyList<TaskItem> Tasks)
             ? sessions.Select(s => s.Id == session.Id ? session : s).ToArray()
             : sessions.Append(session).ToArray();
 
-    /// <summary>Done, with Raised stamped when it was not Done before; an already Done task keeps its stamp.</summary>
-    static TaskItem BecameDone(TaskItem task, DateTimeOffset now) =>
-        task with { Status = TaskStatus.Done, Raised = task.Status == TaskStatus.Done ? task.Raised : now };
+    /// <summary>
+    /// Done, with Raised stamped and on top of the pinned block's Done tasks (task f41d7857) when it was not Done before;
+    /// an already Done task keeps its stamp and its place.
+    /// </summary>
+    TaskItem BecameDone(TaskItem task, DateTimeOffset now) =>
+        task.Status == TaskStatus.Done ? task
+        : task with { Status = TaskStatus.Done, Raised = now, Pin = TopPin(TaskStatus.Done, task.Id) };
 
     Result<TaskItem> Lookup(Guid id) =>
         Tasks.TryFirst(t => t.Id == id).ToResult(NoTask(id.ToString()));
@@ -915,6 +955,14 @@ public sealed record TaskBoard(IReadOnlyList<TaskItem> Tasks)
     double TopRank(Quadrant quadrant, Guid except) =>
         Group(quadrant).Where(t => t.Id != except).Select(t => t.Rank).DefaultIfEmpty(1).Min() - 1;
 
+    /// <summary>
+    /// The pin that puts a task on top of the pinned block's part for <paramref name="status"/> (the questions, or the
+    /// Done tasks): one above the smallest of the other pins there (<paramref name="except"/> is the task joining it), or
+    /// 0 in an empty part.
+    /// </summary>
+    double TopPin(TaskStatus status, Guid except) =>
+        PinnedPart(status).Where(t => t.Id != except).Select(t => t.Pin).DefaultIfEmpty(1).Min() - 1;
+
     /// <summary>A closed task coming back goes to the top of its quadrant (Ruling 25); an open one keeps its place.</summary>
     TaskItem OnTopIfClosed(TaskItem task) => task.IsOpen ? task : task with { Rank = TopRank(task.Quadrant, task.Id) };
 
@@ -922,14 +970,21 @@ public sealed record TaskBoard(IReadOnlyList<TaskItem> Tasks)
     /// Where <paramref name="place"/> puts <paramref name="task"/> among the other tasks of <paramref name="quadrant"/>:
     /// an index into that order with the task itself left out. Placing a task beside itself is its own place.
     /// </summary>
-    Result<int> IndexFor(TaskItem task, Quadrant quadrant, TaskPlace place)
+    Result<int> IndexFor(TaskItem task, Quadrant quadrant, TaskPlace place) =>
+        IndexIn(Group(quadrant), task, place, $"quadrant {quadrant.Numeral()}'s order");
+
+    /// <summary>
+    /// Where <paramref name="place"/> puts <paramref name="task"/> in <paramref name="order"/> (a quadrant's, or the
+    /// Waiting on you block's), named <paramref name="what"/> in a refusal: an index with the task itself left out.
+    /// </summary>
+    static Result<int> IndexIn(IReadOnlyList<TaskItem> order, TaskItem task, TaskPlace place, string what)
     {
-        var others = Group(quadrant).Where(t => t.Id != task.Id).Select(t => t.Id).ToList();
-        var own = Group(quadrant).Select(t => t.Id).ToList().IndexOf(task.Id);
+        var others = order.Where(t => t.Id != task.Id).Select(t => t.Id).ToList();
+        var own = order.Select(t => t.Id).ToList().IndexOf(task.Id);
         Result<int> Beside(Guid neighbour, int after) =>
             neighbour == task.Id && own >= 0 ? own
             : others.IndexOf(neighbour) is var i and >= 0 ? i + after
-            : Result.Failure<int>($"Task {neighbour} is not in quadrant {quadrant.Numeral()}'s order");
+            : Result.Failure<int>($"Task {neighbour} is not in {what}");
         return place switch
         {
             TaskPlace.TopPlace => 0,
@@ -953,25 +1008,50 @@ public sealed record TaskBoard(IReadOnlyList<TaskItem> Tasks)
         var group = Group(quadrant);
         if (task.Quadrant == quadrant && group.Select(t => t.Id).ToList().IndexOf(task.Id) == index) return this;
         var others = group.Where(t => t.Id != task.Id).ToArray();
-        double? above = index > 0 ? others[index - 1].Rank : null;
-        double? below = index < others.Length ? others[index].Rank : null;
-        var rank = (above, below) switch
+        return Reordered(others, index, WithFlags(task, quadrant) with { UpdatedAt = now }, t => t.Rank, (t, rank) => t with { Rank = rank }, now);
+    }
+
+    /// <summary>
+    /// The pinned task at <paramref name="index"/> of its part of the pinned block, by its pin, as <see cref="Placed"/>
+    /// does it by rank (task f41d7857). A task left where it already was returns this same board.
+    /// </summary>
+    TaskBoard Repinned(TaskItem task, int index, DateTimeOffset now)
+    {
+        var block = PinnedPart(task.Status);
+        if (block.Select(t => t.Id).ToList().IndexOf(task.Id) == index) return this;
+        var others = block.Where(t => t.Id != task.Id).ToArray();
+        return Reordered(others, index, task with { UpdatedAt = now }, t => t.Pin, (t, pin) => t with { Pin = pin }, now);
+    }
+
+    /// <summary>
+    /// <paramref name="moved"/> at <paramref name="index"/> among <paramref name="others"/>, an order kept by one number
+    /// on each task (<paramref name="key"/>, written back by <paramref name="with"/>: a quadrant's ranks, the pinned
+    /// block's pins). It takes the middle of its new neighbours' numbers (one past the end neighbour at either end), so
+    /// nothing else changes. When that middle is not strictly between them (doubles run out after some fifty halvings
+    /// of one gap, or two numbers were equal), the order is numbered 0, 1, 2 ... afresh, stamping each task whose
+    /// number moved.
+    /// </summary>
+    TaskBoard Reordered(IReadOnlyList<TaskItem> others, int index, TaskItem moved, Func<TaskItem, double> key,
+        Func<TaskItem, double, TaskItem> with, DateTimeOffset now)
+    {
+        double? above = index > 0 ? key(others[index - 1]) : null;
+        double? below = index < others.Count ? key(others[index]) : null;
+        var middle = (above, below) switch
         {
             ({ } a, { } b) => (a + b) / 2,
             ({ } a, null) => a + 1,
             (null, { } b) => b - 1,
-            _ => task.Rank,
+            _ => key(moved),
         };
-        var moved = WithFlags(task, quadrant) with { UpdatedAt = now };
-        var fits = (above is not { } lo || lo < rank) && (below is not { } hi || rank < hi);
-        if (fits) return Replaced(moved with { Rank = rank });
+        var fits = (above is not { } lo || lo < middle) && (below is not { } hi || middle < hi);
+        if (fits) return Replaced(with(moved, middle));
 
-        var ranks = others.Take(index).Append(moved).Concat(others.Skip(index))
-            .Select((t, i) => (t.Id, Rank: (double)i))
-            .ToDictionary(x => x.Id, x => x.Rank);
+        var numbers = others.Take(index).Append(moved).Concat(others.Skip(index))
+            .Select((t, i) => (t.Id, Number: (double)i))
+            .ToDictionary(x => x.Id, x => x.Number);
         return new TaskBoard(Tasks.Select(t =>
-            t.Id == task.Id ? moved with { Rank = ranks[t.Id] }
-            : ranks.TryGetValue(t.Id, out var renumbered) && renumbered != t.Rank ? t with { Rank = renumbered, UpdatedAt = now }
+            t.Id == moved.Id ? with(moved, numbers[t.Id])
+            : numbers.TryGetValue(t.Id, out var renumbered) && renumbered != key(t) ? with(t, renumbered) with { UpdatedAt = now }
             : t).ToArray());
     }
 

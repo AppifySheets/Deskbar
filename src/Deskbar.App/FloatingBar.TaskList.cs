@@ -533,18 +533,20 @@ public partial class FloatingBar
 
     // SUBTASKS UNDER THEIR PARENT (follow-up to the subtasks spec; Petre's screenshot of "↳ test1" four lines above its
     // parent). After the bar's own filter, so a parent that is not on the bar (Claude's) leaves its subtasks where they
-    // were. A subtask waiting on Petre stays in the pinned block. A moved line is drawn in its parent's group (ShownIn),
-    // so an important subtask under a plain parent starts no group of its own.
+    // were. A moved line is drawn in its parent's group (ShownIn), so an important subtask under a plain parent starts no
+    // group of its own, and a plain subtask of a pinned task (waiting on Petre or Done) is drawn under it in the pinned
+    // block (task f41d7857). A subtask that is itself pinned stays in the pinned block unless its parent is there too:
+    // the panel's rule, TaskViews.NestsUnder, which carries the reasons.
     internal static IReadOnlyList<TaskLine> UnderParents(IReadOnlyList<TaskLine> lines)
     {
         Maybe<Guid> ParentOf(TaskLine l) => l.ParentId is { } p ? p : Maybe<Guid>.None;
         // GroupBy: a duplicate id from a hand-edited file must not throw here (review of #467, finding 5).
         var groupOf = lines.GroupBy(l => l.Id).ToDictionary(g => g.Key, g => g.First().GroupKey);
-        // Neither a pinned subtask (waiting on Petre or Done) nor one whose parent is pinned moves: nothing goes into the
-        // pinned block but its own questions and Done tasks (review of #467, finding 1; the panel's TaskViews.UnderParents
-        // has the same rule; task eefb986a pinned Done).
+        // A pinned subtask (waiting on Petre or Done) moves only under a parent that is pinned too; any other subtask
+        // moves under its parent, into the pinned block when the parent is there (task f41d7857; TaskViews.NestsUnder,
+        // the panel's rule; the bar has no Closed group to keep apart: a line closing in its undo window keeps its group).
         bool Movable(TaskLine l) =>
-            !l.Status.IsPinned() && !(l.ParentId is { } p && groupOf.TryGetValue(p, out var g) && g == "waiting");
+            !l.Status.IsPinned() || (l.ParentId is { } p && groupOf.TryGetValue(p, out var g) && g == "waiting");
         var nested = SubtaskOrder.Nested(lines, l => l.Id, ParentOf, Movable);
         return SubtaskOrder.UnderParents(lines, l => l.Id, ParentOf, Movable)
             .Select(l => nested.Contains(l.Id) ? l with { ShownIn = groupOf[l.ParentId!.Value] } : l)

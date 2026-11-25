@@ -44,8 +44,8 @@ namespace Deskbar.Core.Control;
 // name Covey's quadrant (TaskOrder.cs); a flag that changes the quadrant puts the task on top of its new one, as the
 // toggle does. `order` moves a task within its own quadrant, n counting from 1 and clamped to the quadrant's length
 // (a drag across quadrants is a flag change plus an order, so a script does it in two steps). A task waiting on you
-// or Done is refused by `order`: it is pinned above the quadrants until answered or closed (TaskBoard.Place says so;
-// task eefb986a pinned Done). `list` prints each task's flags, its quadrant ("I" to "IV") and its 1-based `order` in
+// or Done is pinned above the quadrants until answered or closed (task eefb986a pinned Done), so `order` moves it
+// within its part of the pinned block instead, as a drag does (TaskBoard.Place says so; task f41d7857). `list` prints each task's flags, its quadrant ("I" to "IV") and its 1-based `order` in
 // it, null while it is pinned.
 //
 // The timer build's `task timer` and `task add --in` are gone with the timers. The forms a Claude session uses for

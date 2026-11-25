@@ -707,7 +707,7 @@ public class RemoteControlTaskTests
     }
 
     [Fact]
-    public void Order_refuses_a_bad_place_and_a_waiting_task()
+    public void Order_refuses_a_bad_place()
     {
         var manager = Started();
         var id = Prefix(Added(manager));
@@ -716,12 +716,22 @@ public class RemoteControlTaskTests
         AssertRefusedAndUnchanged(Run(manager, "task", "order", id, "sideways"), before);
         AssertRefusedAndUnchanged(Run(manager, "task", "order", id, "0"), before);
         AssertRefusedAndUnchanged(Run(manager, "task", "order", "ffffff", "top"), before);
+    }
 
-        Run(manager, "task", "status", id, "waiting");
-        before = tasks.Board;
-        var waiting = Run(manager, "task", "order", id, "top");
-        AssertRefusedAndUnchanged(waiting, before);
-        Assert.Contains("waiting on you", waiting.Output);
+    // Task f41d7857: a task waiting on Petre is ordered within the Waiting on you block, which stays on top.
+    [Fact]
+    public void Order_moves_a_waiting_task_within_the_waiting_block()
+    {
+        var manager = Started();
+        var first = Prefix(Added(manager, "first"));
+        var second = Prefix(Added(manager, "second"));
+        Run(manager, "task", "status", first, "waiting");
+        Run(manager, "task", "status", second, "waiting");
+        Assert.Equal(["second", "first"], tasks.Board.PinnedPart(Deskbar.Core.Tasks.TaskStatus.WaitingOnYou).Select(t => t.Title));
+
+        Assert.Equal(ControlReply.Ok, Run(manager, "task", "order", second, "end").ExitCode);
+
+        Assert.Equal(["first", "second"], tasks.Board.PinnedPart(Deskbar.Core.Tasks.TaskStatus.WaitingOnYou).Select(t => t.Title));
     }
 
     // `list` says each task's flags, its quadrant and its place in that quadrant (none while it waits on Petre: it is

@@ -1697,9 +1697,10 @@ public class TasksBoardTests
         Assert.Equal([c, b, a], t.Window.Keys);
     });
 
-    // A press that does not travel is a click, and waiting lines cannot be dragged; nothing drops above them.
+    // A press that does not travel is a click. A waiting line is dragged (task f41d7857), but only within its block:
+    // released below it, it stays at the block's foot, here its own place. Nothing drops above the block.
     [Fact]
-    public void A_window_press_in_place_is_a_click_and_waiting_lines_stay_pinned() => StaThread.Run(() =>
+    public void A_window_press_in_place_is_a_click_and_waiting_lines_stay_in_their_block() => StaThread.Run(() =>
     {
         using var t = Build();
         var a = t.Tasks.AddNote("a", t.Gepha).Value.Id;
@@ -1718,9 +1719,11 @@ public class TasksBoardTests
         t.Window.DragRelease();
         var waitingAt = InLine(t, w, 0.5);
         t.Window.DragPress(w, waitingAt);
-        t.Window.DragMove(new Point(waitingAt.X, waitingAt.Y + 30));
-        Assert.False(t.Window.Dragging);
+        t.Window.DragMove(new Point(waitingAt.X, waitingAt.Y + 8));
+        t.Window.DragMove(InLine(t, a, 0.9));
+        Assert.True(t.Window.Dragging);
         t.Window.DragRelease();
+        t.Window.Dispatcher.Invoke(() => { }, System.Windows.Threading.DispatcherPriority.Background);
         Assert.Same(before, t.Tasks.Board);
 
         WindowDrag(t, a, InLine(t, w, 0.2));
@@ -1815,6 +1818,42 @@ public class TasksBoardTests
         Assert.Equal(Quadrant.III, t.Window.CellOf(a));
     });
 
+    // Task f41d7857 in the window: two waiting lines swap in the List; in the Matrix a waiting line dropped on another
+    // cell takes that cell's flags and stays pinned on top of it.
+    [Fact]
+    public void Window_waiting_lines_reorder_in_the_list_and_change_cells_in_the_matrix() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        var a = t.Tasks.AddNote("a", t.Gepha).Value.Id;
+        var w1 = t.Tasks.AddNote("w1", t.Gepha).Value.Id;
+        var w2 = t.Tasks.AddNote("w2", t.Gepha).Value.Id;
+        t.Tasks.SetStatus(w1, TaskStatus.WaitingOnYou);
+        t.Tasks.SetStatus(w2, TaskStatus.WaitingOnYou);
+        t.Window.DragMouse = ArrangeMouse.Held;
+        t.Controller.Show();
+        t.Window.UpdateLayout();
+        Assert.Equal([w2, w1, a], t.Window.Keys);
+
+        WindowDrag(t, w2, InLine(t, w1, 0.9));
+        t.Window.UpdateLayout();
+        Assert.Equal([w1, w2, a], t.Window.Keys);
+
+        // The waiting a's middle takes a subtask in the window too.
+        WindowDrag(t, a, InLine(t, w2, 0.5));
+        t.Window.UpdateLayout();
+        Assert.Equal(CSharpFunctionalExtensions.Maybe.From(w2), t.Tasks.Board.Tasks.Single(x => x.Id == a).ParentId);
+        Assert.Equal([w1, w2, a], t.Window.Keys);
+
+        Assert.True(t.Harness.Manager.SetTasksMatrix(true).IsSuccess);
+        t.Window.UpdateLayout();
+        WindowDragTo(t, w1, t.Window.CellCentre(Quadrant.II));
+        t.Window.UpdateLayout();
+        var moved = t.Tasks.Board.Tasks.Single(x => x.Id == w1);
+        Assert.True(moved.Important && !moved.Urgent);
+        Assert.Equal(TaskStatus.WaitingOnYou, moved.Status);
+        Assert.Equal(Quadrant.II, t.Window.CellOf(w1));
+    });
+
     static void WindowDragTo(Board t, Guid from, Point to)
     {
         var start = InMatrixLine(t, from, 0.5);
@@ -1841,7 +1880,8 @@ public class TasksBoardTests
         t.Window.UpdateLayout();
         Assert.Equal([w, c, b, a], t.Window.Keys);
 
-        WindowDrag(t, a, InLine(t, w, 0.5));
+        // On the waiting line's top edge: its middle would make a its subtask (task f41d7857).
+        WindowDrag(t, a, InLine(t, w, 0.1));
 
         Assert.False(t.Tasks.Board.Tasks.Single(x => x.Id == a).Urgent);
         Assert.Equal([w, c, a, b], t.Tasks.Board.Pile().Select(x => x.Id));
@@ -2027,7 +2067,8 @@ public class TasksBoardTests
         var start = InLine(t, a, 0.5);
         t.Window.DragPress(a, start);
         t.Window.DragMove(new Point(start.X, start.Y - 8));
-        t.Window.DragMove(InLine(t, w, 0.5));
+        // The top edge: the middle of a waiting line now takes the task as its subtask (task f41d7857).
+        t.Window.DragMove(InLine(t, w, 0.1));
 
         Assert.Equal(InLine(t, b, 0).Y, t.Window.DropLineY!.Value, 1);
         t.Window.DragRelease();
