@@ -270,7 +270,8 @@ public sealed partial class RemoteControl
         // tasks (task d8c152cf). No session is passed: a session offered a choice has no own task to ask.
         var offered = own.HasValue ? [] : service.Board.Offered(SessionWorkspace(service, folder, Maybe<string>.None));
         // A session coming back to a subtask (or a parent) reads its family again: siblings moved on while it was away.
-        var family = own.Bind(t => FamilyOf(service, t)).GetValueOrDefault("");
+        // Its linked tasks too (task links spec): what it duplicates and what is related, with their sessions.
+        var family = own.Bind(t => AroundOf(service, t)).GetValueOrDefault("");
         // The own task's description images are listed with absolute paths (images in tasks, TaskService.ExpandImages).
         return SessionBriefing.Start(hook, own, offered, service.ExpandImages, family, reopened);
     }
@@ -336,9 +337,12 @@ public sealed partial class RemoteControl
     //   task comment-settle <id> --session <sid> settle one of the session's own comments (folds away; answered settles them since its ask)
     //   task later <title> --session <sid>      a Backlog note on the caller's workspace, a follow-up for later
     //   task subtask <title> --session <sid>    a Backlog subtask of the session's own task (a sibling when that is a subtask)
-    //   task family --session <sid>             the family text of the session's own task (subtasks spec)
+    //   task family --session <sid>             the family and linked tasks of the session's own task (subtasks spec)
 //   task pr <url> --session <sid>           a pull request the session opened some other way than `gh pr create`, on its
 //                                           own task (task e7aa49b1; the hook records `gh pr create` by itself)
+    //   task duplicate-of <id> --session <sid>  the session's own task closes as a duplicate of <id> (task links spec)
+    //   task relate <id> --session <sid>        links the session's own task to <id> as related
+    //   task unrelate <id> --session <sid>      removes that link
     //
     // Everything but join, new and later acts on the session's OWN task (TaskBoard.TaskOf), which is the spec's rule that
     // a session only settles tasks it is working on: there is no id to point at someone else's. A session with no open
@@ -359,7 +363,18 @@ public sealed partial class RemoteControl
             ["join", var id] => service.Board.Find(id).Bind(t => service.Join(t.Id, service.NewSession(session, folder ?? "")).Map(() => t))
                 .Map(t => service.Board.Tasks.First(x => x.Id == t.Id))
                 .Match(t => Success(WithFamily(service, t)), ControlReply.Fail),
-            ["family"] => Own().Match(t => Said(FamilyOf(service, t).GetValueOrDefault(NoFamily)), ControlReply.Fail),
+            ["family"] => Own().Match(t => Said(AroundOf(service, t).GetValueOrDefault(NoFamily)), ControlReply.Fail),
+            // TASK LINKS (docs/superpowers/specs/2026-11-25-task-links-design.md). Petre, 2026-11-25: a session that finds
+            // its task is work already done or under way elsewhere closes it as a duplicate itself (he reopens it when it
+            // is wrong). It is the one way a session closes a task, and narrow: only its own, only as a duplicate of a
+            // task that exists. Past Claude-still-working (stoppingClaude), since the session asking is the one working.
+            // The reply is the task read back, now closed; the target is looked up first, so a bad id changes nothing.
+            ["duplicate-of", var of] => Changed(Own().Bind(t => service.Board.Find(of)
+                .Bind(o => service.MarkDuplicate(t.Id, o.Id, stoppingClaude: true)).Map(() => t))),
+            ["relate", var other] => Changed(Own().Bind(t => service.Board.Find(other)
+                .Bind(o => service.Relate(t.Id, o.Id)).Map(() => t))),
+            ["unrelate", var other] => Changed(Own().Bind(t => service.Board.Find(other)
+                .Bind(o => service.Unrelate(t.Id, o.Id)).Map(() => t))),
             // A session splits its work: a subtask of its own task, or a sibling when its task is already a subtask.
             ["subtask", var title] => Changed(service.AddSubtask(session, title)),
             ["new", var title] => Changed(service.Create(title, Here(), service.NewSession(session, folder ?? ""))),

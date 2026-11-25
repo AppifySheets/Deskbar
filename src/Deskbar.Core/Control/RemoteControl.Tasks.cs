@@ -29,6 +29,9 @@ namespace Deskbar.Core.Control;
 //   task goal <id> <goal-id>|none     (the goals planner; needs the goal service, RemoteControl.Goals.cs)
 //   task snooze <id> 1h|3h|tomorrow|monday|<n>m|<n>h|<n>d   (task 6da8d7eb: the tasks panel's snooze menu, TaskSnooze)
 //   task wake <id>                    (its "Wake now")
+//   task duplicate <id> <of-id>       (task links: close <id> as a duplicate of <of-id>)
+//   task relate <id> <other-id>       (task links: related, read both ways)
+//   task unrelate <id> <other-id>
 //   task go <id>
 //   task open <id>                    (task dca4ebeb: the task in a window of its own, the menus' "Open in window")
 //   task start <id> [--folder <path>] [--model <model>]
@@ -111,7 +114,8 @@ public sealed partial class RemoteControl
         return args switch
         {
             // A session's form typed without its --session: it cannot know whose task is meant.
-            ["done"] or ["answered"] or ["join", _] or ["new", _] or ["status-line", _] or ["ask", _] or ["later", _] or ["subtask", _] or ["pr", _] =>
+            ["done"] or ["answered"] or ["join", _] or ["new", _] or ["status-line", _] or ["ask", _] or ["later", _] or ["subtask", _] or ["pr", _]
+                or ["duplicate-of", _] or ["relate", _] or ["unrelate", _] =>
                 ControlReply.Fail($"task {args[0]} is a session's form and needs --session <id>"),
             ["list"] => Success(service.Board.Pile().Select(Listed).ToArray()),
             // The closed tasks, which every other view leaves out, so one closed by mistake can be found and reopened.
@@ -174,7 +178,15 @@ public sealed partial class RemoteControl
             // Subtasks (docs/superpowers/specs/2026-11-24-subtasks-design.md): put a task under another or free it, and read
             // the family text a session on it would read.
             ["parent", var id, var parent] => TaskParent(service, id, parent),
-            ["family", var id] => service.Board.Find(id).Match(t => Said(FamilyOf(service, t).GetValueOrDefault(NoFamily)), ControlReply.Fail),
+            ["family", var id] => service.Board.Find(id).Match(t => Said(AroundOf(service, t).GetValueOrDefault(NoFamily)), ControlReply.Fail),
+            // Task links (docs/superpowers/specs/2026-11-25-task-links-design.md): both ids are looked up before anything
+            // changes. `duplicate` closes under close's rules, so Claude still working refuses here too.
+            ["duplicate", var id, var of] => service.Board.Find(of)
+                .Match(o => TaskChange(service, id, t => service.MarkDuplicate(t.Id, o.Id)), ControlReply.Fail),
+            ["relate", var id, var other] => service.Board.Find(other)
+                .Match(o => TaskChange(service, id, t => service.Relate(t.Id, o.Id)), ControlReply.Fail),
+            ["unrelate", var id, var other] => service.Board.Find(other)
+                .Match(o => TaskChange(service, id, t => service.Unrelate(t.Id, o.Id)), ControlReply.Fail),
             ["go", var id] => WithSessions(c => TaskChange(service, id, c.Go)),
             // The task in a window of its own (task dca4ebeb), as "Open in window" on a line's menu does. The task is found
             // first, so an unknown id refuses before any window opens; the reply is the task.
@@ -374,6 +386,12 @@ public sealed partial class RemoteControl
         snoozedUntil = task.SnoozedUntil.HasValue ? (DateTimeOffset?)task.SnoozedUntil.Value : null,
         // The pull requests its sessions opened (task e7aa49b1), as URLs, oldest first.
         pullRequests = task.PullRequests.Select(p => p.Url).ToArray(),
+        // Task links (2026-11-25-task-links-design.md): the original as {id, title} while the task is a closed duplicate
+        // (status stays "closed", so a script reading status is unchanged), the ids of its duplicates, and the ids of the
+        // tasks related to it either way.
+        duplicateOf = tasks?.Board.DuplicateTarget(task).Map(o => (object?)new { id = o.Id, title = o.Title }).GetValueOrDefault(),
+        duplicates = tasks?.Board.DuplicatesOf(task.Id).Select(t => t.Id).ToArray() ?? [],
+        related = tasks?.Board.RelatedOf(task.Id).Select(t => t.Id).ToArray() ?? [],
     };
 
     // Markdown as a session reads it: image paths absolute, through the task service (as stored without one).
@@ -381,7 +399,7 @@ public sealed partial class RemoteControl
 
     // --- subtasks -------------------------------------------------------------------------------------------------
 
-    const string NoFamily = "This task has no parent and no subtasks.";
+    const string NoFamily = "This task has no parent, no subtasks and no linked tasks.";
 
     // The family text a session on this task reads (SessionBriefing.Family), with transcripts found by the app
     // (TaskSessionCommands.Transcript); none for a task with no parent and no subtasks.
@@ -392,6 +410,17 @@ public sealed partial class RemoteControl
     Maybe<bool> Busy(string sessionId) =>
         taskSessions is { } commands ? commands.Busy(sessionId) : Maybe<bool>.None;
 
+    // The linked tasks' text (task links spec, SessionBriefing.Links); none for a task with no links.
+    Maybe<string> LinksOf(TaskService service, TaskItem task) =>
+        service.Board.Links(task.Id).Map(l => SessionBriefing.Links(l, Transcript));
+
+    // Everything around a task a session reads: its family, then its links; none when it has neither. What `task family`
+    // prints and the SessionStart briefing carries.
+    Maybe<string> AroundOf(TaskService service, TaskItem task) =>
+        new[] { FamilyOf(service, task), LinksOf(service, task) }.Where(m => m.HasValue).Select(m => m.Value).ToArray() is { Length: > 0 } parts
+            ? string.Join("\n", parts)
+            : Maybe<string>.None;
+
     Maybe<string> Transcript(TaskSession session) =>
         taskSessions is { } commands ? commands.Transcript(session) : Maybe<string>.None;
 
@@ -401,6 +430,8 @@ public sealed partial class RemoteControl
     {
         var json = System.Text.Json.JsonSerializer.SerializeToNode(Describe(task), Json)!.AsObject();
         json["family"] = FamilyOf(service, task).Map(text => (System.Text.Json.Nodes.JsonNode?)text).GetValueOrDefault();
+        // The linked tasks (task links spec; Petre: "when working on a task, claude should examine what's related to it").
+        json["linked"] = LinksOf(service, task).Map(text => (System.Text.Json.Nodes.JsonNode?)text).GetValueOrDefault();
         return json;
     }
 

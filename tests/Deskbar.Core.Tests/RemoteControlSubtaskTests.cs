@@ -167,7 +167,7 @@ public class RemoteControlSubtaskTests
         var reply = Run(manager, "task", "family", lone.Id.ToString());
 
         Assert.Equal(ControlReply.Ok, reply.ExitCode);
-        Assert.Equal("This task has no parent and no subtasks.", reply.Output.Trim());
+        Assert.Equal("This task has no parent, no subtasks and no linked tasks.", reply.Output.Trim());
     }
 
     [Fact]

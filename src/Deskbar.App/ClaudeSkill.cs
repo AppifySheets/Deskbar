@@ -360,6 +360,12 @@ static class ClaudeSkill
           transcript before you start, and stay clear of what the siblings are doing. `deskbar.cmd task family
           --session <id>` prints it again later. To split off a piece of your own work for another session, run
           `deskbar.cmd task subtask - --session <id>` with its title on stdin.
+        - Related and duplicate tasks. Before you start, look through `deskbar.cmd task list` and `task list --closed`
+          for the same or related work, and read what their sessions did. Link a related task with `deskbar.cmd task
+          relate <task id> --session <id>` (`task unrelate` removes it); the join reply's `linked` and `task family`
+          list the linked tasks with their sessions' transcripts. When your task is the same work as another, done or
+          under way there, run `deskbar.cmd task duplicate-of <task id> --session <id>`: your task closes as its
+          duplicate, the one close a session makes, and you do not redo the work.
         - Leave the user's own notes alone unless they ask you to change one.
         """;
 

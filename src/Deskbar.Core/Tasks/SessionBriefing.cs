@@ -178,6 +178,33 @@ public static class SessionBriefing
         return Bounded(lines.ToArray(), more);
     }
 
+    // --- the linked tasks (task links, docs/superpowers/specs/2026-11-25-task-links-design.md) ---------------------
+    //
+    // Petre, 2026-11-25: "when working on a task, claude should examine what's related to it". The block lists what the
+    // task duplicates, its duplicates and its related tasks the way the family block lists siblings (line, the user's
+    // description, sessions with transcripts), and tells the session to read them before it starts. Bounded like the
+    // family block, with the same pointer at `task family`, which prints both.
+
+    /// <summary>
+    /// What a session reads about the tasks linked to its own: the task it duplicates, the tasks that duplicate it and the
+    /// tasks related to it, each with its sessions and their transcripts. Printed by the `task join` reply (as `linked`),
+    /// the SessionStart briefing and `task family`. Bounded (see FamilyLength); no trailing newline.
+    /// </summary>
+    public static string Links(TaskLinks links, Func<TaskSession, Maybe<string>> transcript)
+    {
+        var more = $"{Shim} task family {links.Task.Id.ToString()[..8]}";
+        var anyLive = links.DuplicateOf.ToList().Concat(links.Duplicates).Concat(links.Related).Any(t => t.HasLiveSession);
+        string[] lines =
+        [
+            "Before you start, read what the tasks linked to this one did (the end of their sessions' transcripts), so you build on that work instead of redoing it.",
+            .. anyLive ? [Messaging] : Array.Empty<string>(),
+            .. links.DuplicateOf.HasValue ? ["This task is closed as a duplicate of:", .. Listed([links.DuplicateOf.Value], transcript, more)] : Array.Empty<string>(),
+            .. links.Duplicates.Count > 0 ? ["Tasks closed as duplicates of this one:", .. Listed(links.Duplicates, transcript, more)] : Array.Empty<string>(),
+            .. links.Related.Count > 0 ? ["Related tasks:", .. Listed(links.Related, transcript, more)] : Array.Empty<string>(),
+        ];
+        return Bounded(lines, more);
+    }
+
     const string Messaging = "A live session on this machine can be reached with Claude Code's own session messaging (ListAgents, SendMessage).";
 
     static IEnumerable<string> SubtaskLines(TaskItem parent, IReadOnlyList<TaskItem> siblings, bool anyLive,
@@ -239,7 +266,7 @@ public static class SessionBriefing
 
     // A task as one line without the user's description, which the family block gives a line of its own.
     static string Brief(TaskItem t) =>
-        $"{t.Id.ToString()[..8]} \"{Cut(t.Title)}\" ({StatusText(t.Status)}"
+        $"{t.Id.ToString()[..8]} \"{Cut(t.Title)}\" ({(t.IsDuplicate ? "closed as a duplicate" : StatusText(t.Status))}"
         + (t.Status == TaskStatus.WaitingOnYou && t.Question.HasValue ? $", asked: \"{Cut(t.Question.Value)}\""
             : t.StatusLine.Length > 0 ? $", status line: \"{Cut(t.StatusLine)}\"" : "")
         + ")";
@@ -332,6 +359,13 @@ public static class SessionBriefing
         // session, so it costs a fraction of the work it checks. It finds faults in the change; it does not rescue
         // a wrong approach, which is why a plan gets the same look before the code is written.
         "Before you open a pull request, have a subagent on the strongest model you can use review the diff for bugs, and fix what it confirms. When the work needed a plan, have that subagent read the plan before you write the code.",
+        // TASK LINKS (docs/superpowers/specs/2026-11-25-task-links-design.md; Petre: "when working on a task, claude should
+        // examine what's related to it"). Task 64cb52ab asked for a button that a merged PR had shipped that morning; the
+        // session only found out because Petre said "see if something like this has already been done". So every session
+        // looks first, links what it finds, and closes its own task as a duplicate rather than redoing finished work.
+        $"Before you start on a task, look through {Shim} task list and {Shim} task list --closed for tasks about the same or related work, and read what their sessions did. Link what you find:",
+        $"  {Shim} task relate <id> --session {sessionId}   (your task and task <id> are related; both show the link and a session on either reads it. task unrelate <id> removes it)",
+        $"  {Shim} task duplicate-of <id> --session {sessionId}   (your task is the same work as task <id>, done or under way there: your task closes as its duplicate, and you do not redo the work)",
         "Keep the task lean: say what needs the user, and nothing else. The title is a few words naming the work. The status line is one short phrase, under about 60 characters, saying where it stands. Comments are rare: a comment is for the user and only for what needs their attention or a result they must know (a decision made for them, a blocker, what a release shipped), in one or two short lines, with no progress logs, measurements, spike notes or findings dumps (those belong in the PR, the repo's notes or the session itself). When the user must act or decide, say exactly what the user must do in the first words, through task ask, never a comment: a comment does not move the task to the top.",
         "Never close or delete a task, and leave the user's own notes alone unless they ask.",
     ];

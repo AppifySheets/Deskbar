@@ -641,10 +641,14 @@ public sealed record TaskBoard(IReadOnlyList<TaskItem> Tasks)
     /// Deletes a task for good. Its subtasks stay and become plain tasks (their parent link goes, stamped), as
     /// DetachGoal frees a deleted goal's tasks, so no link is left naming nothing.
     /// </summary>
+    // Task links (task links spec): every Related list naming it loses it, and a duplicate of it keeps its close but loses
+    // the link, so no link is left naming nothing.
     public Result<TaskBoard> Delete(Guid id, DateTimeOffset now) =>
         Tasks.Any(t => t.Id == id)
             ? new TaskBoard(Tasks.Where(t => t.Id != id)
-                .Select(t => t.ParentId == id ? t with { ParentId = Maybe<Guid>.None, UpdatedAt = now } : t).ToArray())
+                .Select(t => t.ParentId == id ? t with { ParentId = Maybe<Guid>.None, UpdatedAt = now } : t)
+                .Select(t => t.Related.Contains(id) ? t with { Related = t.Related.Where(r => r != id).ToArray(), UpdatedAt = now } : t)
+                .Select(t => t.DuplicateOf == id ? t with { DuplicateOf = Maybe<Guid>.None, UpdatedAt = now } : t).ToArray())
             : Result.Failure<TaskBoard>(NoTask(id.ToString()));
 
     /// <summary>
@@ -858,6 +862,110 @@ public sealed record TaskBoard(IReadOnlyList<TaskItem> Tasks)
             : Result.Success(Maybe.From(p)));
 
     static string Short(Guid id) => id.ToString()[..8];
+
+    // --- task links: duplicate of, related to (docs/superpowers/specs/2026-11-25-task-links-design.md) ------------------
+    //
+    // A duplicate is a kind of close: MarkDuplicate closes through Close's own rules and sets TaskItem.DuplicateOf with it,
+    // and any change that opens the task again drops the link (Unmarked). Related links are stored on the task they were
+    // made from and read both ways (RelatedOf). Neither moves a line: Pile and Group do not read them.
+
+    // How far MarkDuplicate follows a chain of duplicates to the original. A chain only forms when an original is itself
+    // closed as a duplicate later; the bound keeps a loop in a hand-edited file from hanging the board.
+    const int ChainLimit = 16;
+
+    /// <summary>
+    /// Closes <paramref name="id"/> as a duplicate of <paramref name="of"/>. The target is followed to its original when it
+    /// is itself a duplicate, so every duplicate names a task that is not one. Refused: an unknown task or target, the task
+    /// itself (also when the chain leads back to it), and whatever <see cref="Close"/> refuses (open subtasks; Claude still
+    /// working, unless <paramref name="stoppingClaude"/>, which the session's own form passes: it is the one working, and
+    /// it is done). A task already closed as a duplicate of the same original is the same board; a closed task can be
+    /// marked too (it becomes a duplicate, still closed, stamped).
+    /// </summary>
+    public Result<TaskBoard> MarkDuplicate(Guid id, Guid of, DateTimeOffset now, bool stoppingClaude = false) =>
+        Lookup(id).Bind(task => Lookup(of).Bind(target => OriginalOf(target)).Bind(original =>
+            original.Id == id ? Result.Failure<TaskBoard>("A task cannot be a duplicate of itself")
+            : task.DuplicateOf == original.Id && !task.IsOpen ? Result.Success(this)
+            : (task.IsOpen ? Close(id, now, stoppingClaude) : Result.Success(this))
+                .Map(closed => closed.Replaced(closed.Tasks.First(t => t.Id == id) with { DuplicateOf = original.Id, UpdatedAt = now }))));
+
+    // The task a duplicate chain ends at: the target itself when it duplicates nothing that still exists.
+    Result<TaskItem> OriginalOf(TaskItem target) =>
+        Enumerable.Range(0, ChainLimit).Aggregate(Result.Success(target), (found, _) => found.Bind(t =>
+            t.IsDuplicate && Tasks.TryFirst(x => x.Id == t.DuplicateOf.Value) is { HasValue: true } next ? Result.Success(next.Value) : found));
+
+    /// <summary>
+    /// Links two tasks as related. Refused: an unknown task, and a task with itself. A link that exists either way returns
+    /// this same board. Only the link and UpdatedAt change on the task it is made from, so no line moves; closed tasks
+    /// take it too, since they stay readable history.
+    /// </summary>
+    public Result<TaskBoard> Relate(Guid id, Guid other, DateTimeOffset now) =>
+        Lookup(id).Bind(task => Lookup(other).Bind(o =>
+            o.Id == id ? Result.Failure<TaskBoard>("A task cannot be related to itself")
+            : AreRelated(id, other) ? Result.Success(this)
+            : Result.Success(Replaced(task with { Related = task.Related.Append(other).ToArray(), UpdatedAt = now, Adopted = false }))));
+
+    /// <summary>
+    /// Removes the link between two tasks, whichever of them it was made from (both, if a hand-edited file has it twice).
+    /// Two unlinked tasks are the same board; an unknown task is refused.
+    /// </summary>
+    public Result<TaskBoard> Unrelate(Guid id, Guid other, DateTimeOffset now) =>
+        Lookup(id).Bind(_ => Lookup(other)).Map(_ =>
+            !AreRelated(id, other) ? this
+            : new TaskBoard(Tasks.Select(t =>
+                (t.Id == id && t.Related.Contains(other)) || (t.Id == other && t.Related.Contains(id))
+                    ? t with { Related = t.Related.Where(r => r != id && r != other).ToArray(), UpdatedAt = now }
+                    : t).ToArray()));
+
+    bool AreRelated(Guid a, Guid b) =>
+        Tasks.Any(t => (t.Id == a && t.Related.Contains(b)) || (t.Id == b && t.Related.Contains(a)));
+
+    /// <summary>
+    /// The tasks related to <paramref name="id"/>, both ways and each once: open ones in the pile's order, then closed ones
+    /// latest closed first, as subtasks are listed. A link naming a task no longer on the board is skipped.
+    /// </summary>
+    public IReadOnlyList<TaskItem> RelatedOf(Guid id) =>
+        Tasks.TryFirst(t => t.Id == id) is { HasValue: true } own
+            ? Listed(Tasks.Where(t => t.Id != id && (own.Value.Related.Contains(t.Id) || t.Related.Contains(id))))
+            : [];
+
+    /// <summary>The task a duplicate names, when it is still on the board.</summary>
+    public Maybe<TaskItem> DuplicateTarget(TaskItem task) =>
+        task.IsDuplicate ? Tasks.TryFirst(t => t.Id == task.DuplicateOf.Value) : Maybe<TaskItem>.None;
+
+    /// <summary>The closed duplicates of <paramref name="id"/>, latest closed first.</summary>
+    public IReadOnlyList<TaskItem> DuplicatesOf(Guid id) =>
+        Tasks.Where(t => t.IsDuplicate && t.DuplicateOf.Value == id).OrderByDescending(t => t.UpdatedAt).ToArray();
+
+    /// <summary>
+    /// Everything linked to a task (<see cref="TaskLinks"/>), or none for an unknown task and for one with no links, so a
+    /// caller prints nothing for an unlinked task.
+    /// </summary>
+    public Maybe<TaskLinks> Links(Guid id) =>
+        Tasks.TryFirst(t => t.Id == id).Bind(task =>
+            new TaskLinks(task, DuplicateTarget(task), DuplicatesOf(id), RelatedOf(id)) is var links && !links.IsEmpty
+                ? Maybe.From(links)
+                : Maybe<TaskLinks>.None);
+
+    /// <summary>
+    /// The tasks a picker offers for linking <paramref name="id"/> (the panel's "Duplicate of…" and "Related to…"): every
+    /// task but itself whose title holds each of the typed words (any case), open ones first in the pile's order, then
+    /// closed ones latest closed first. <paramref name="duplicate"/> leaves out duplicates (a task is a duplicate of an
+    /// original); otherwise tasks already related are left out. Empty words match everything.
+    /// </summary>
+    public IReadOnlyList<TaskItem> LinkCandidates(Guid id, string typed, bool duplicate) =>
+        (typed ?? "").Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries) is var words
+            ? Listed(Tasks.Where(t => t.Id != id
+                && (duplicate ? !t.IsDuplicate : !AreRelated(id, t.Id))
+                && words.All(w => t.Title.Contains(w, StringComparison.OrdinalIgnoreCase))))
+            : [];
+
+    // Open tasks in the pile's order, then closed ones latest closed first: how linked tasks are listed everywhere.
+    IReadOnlyList<TaskItem> Listed(IEnumerable<TaskItem> tasks) =>
+        tasks.ToArray() is var all
+            ? Pile().Where(p => all.Any(t => t.Id == p.Id))
+                .Concat(all.Where(t => !t.IsOpen).OrderByDescending(t => t.UpdatedAt))
+                .ToArray()
+            : [];
 
     // --- reading -----------------------------------------------------------------------------------
 
@@ -1181,14 +1289,19 @@ public sealed record TaskBoard(IReadOnlyList<TaskItem> Tasks)
     // stretch while the session works after Petre's reply. An ask, done, a status by hand or a close moves the task on, and
     // the old question no longer stands for anything, so it goes.
     static TaskItem Unmarked(TaskItem was, TaskItem now) =>
-        SetAsideKept(now.HandedBack.HasValue && (now.Assignee != was.Assignee || now.Status != was.Status)
+        Unduplicated(SetAsideKept(now.HandedBack.HasValue && (now.Assignee != was.Assignee || now.Status != was.Status)
             ? now with { HandedBack = Maybe<DateTimeOffset>.None }
-            : now);
+            : now));
 
     static TaskItem SetAsideKept(TaskItem task) =>
         task.QuestionSetAside.HasValue && (task.Status != TaskStatus.InProgress || !task.IsOpen)
             ? task with { QuestionSetAside = Maybe<string>.None }
             : task;
+
+    // The duplicate link (task links spec) goes the same way for its own reason: it is a kind of close, so once a change
+    // leaves the task open again (Reopen, UndoClose, a status by hand, a session joining), it was not a duplicate after all.
+    static TaskItem Unduplicated(TaskItem task) =>
+        task.IsOpen && task.DuplicateOf.HasValue ? task with { DuplicateOf = Maybe<Guid>.None } : task;
 
     /// <summary><see cref="Change"/> for the changes a closed task refuses (see the header).</summary>
     Result<TaskBoard> ChangeOpen(Guid id, Func<TaskItem, TaskItem> change) =>
