@@ -169,7 +169,7 @@ Commands from the manager folder (known by the pipe's `--from`) are the manager'
   comment does (the asyncRewake waiter), since passing his answer on is the main reason to write one. Every manager
   comment wakes, its own requests included;
 - what the woken session makes of it (Petre's pick, 2026-11-25, option 1 of two): only Petre's words quoted verbatim
-  count as his. The manager writes them as a quote marked as his ("Petre says:" and his words unchanged), and the
+  count as his. The manager writes them as a quote marked as his ("The user says:" and his words unchanged; the text ships to every user, so it does not name him), and the
   session takes that as his own comment: it can settle its question and go ahead with what he approved. Anything the
   manager writes in its own words is a coordinator's request: the session does what is routine, and whatever needs
   Petre's approval (a merge, anything destructive, a design choice) still goes back to him through `task ask`. The
