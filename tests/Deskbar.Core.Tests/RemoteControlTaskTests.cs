@@ -971,6 +971,8 @@ public class RemoteControlTaskTests
              // Task 9: going to a task, starting Claude on it and opening one of its sessions.
              // Task dca4ebeb: `open` is the menus' "Open in window", between go and start.
              "go <id>", "open <id>", "start <id> [--folder <path>] [--model <model>]", "open-session <id> <session>",
+             // The manager session: the bar's Manager button's twin.
+             "manager",
              // A Claude session's own forms (plan Task 8, RemoteControl.ClaudeHook.cs); `-` reads the text from stdin.
              "join <id> --session <session>", "new <title>|- --session <session>", "status-line <text>|- --session <session>",
              "ask <question>|- --session <session>", "answered --session <session>", "done --session <session>", "comment <markdown>|- --session <session>",
@@ -1043,6 +1045,42 @@ public class RemoteControlTaskTests
         Ok(closed);
         Assert.Equal("closed", Json(closed).GetProperty("status").GetString());
         Assert.Equal(["stop-and-close:Fix the bar"], commands.Calls);
+    }
+
+    // The manager session design ("The button"): `task manager` is the bar button's twin, so both go through the App's
+    // one Manager command. It answers at once, the window coming later; a refusal (the feature off, say) is the reply;
+    // a copy without the command refuses.
+    [Fact]
+    public void Manager_verb_calls_the_manager_command()
+    {
+        var manager = Started();
+        var calls = 0;
+        var answer = Result.Success();
+        var commands = new FakeSessionCommands().Commands with
+        {
+            Manager = () =>
+            {
+                calls++;
+                return answer;
+            },
+        };
+        ControlReply RunManager() => new RemoteControl(manager, tasks: tasks, goals: goals, taskSessions: commands).Execute(["task", "manager"]);
+
+        var opened = RunManager();
+        Ok(opened);
+        Assert.Equal(1, calls);
+        Assert.Equal(true, Json(opened).GetProperty("opening").GetBoolean());
+
+        answer = Result.Failure("Claude sessions are off.");
+        var refused = RunManager();
+        Assert.Equal(ControlReply.Failed, refused.ExitCode);
+        Assert.Equal("Claude sessions are off.", refused.Output.Trim());
+        Assert.Equal(2, calls);
+
+        // A copy whose App never handed a Manager command in, and a copy with no session commands at all.
+        Assert.Equal(ControlReply.Failed, RunWith(manager, new FakeSessionCommands(), "task", "manager").ExitCode);
+        Assert.Contains("The manager is not available", RunWith(manager, new FakeSessionCommands(), "task", "manager").Output);
+        Assert.Equal(ControlReply.Failed, Run(manager, "task", "manager").ExitCode);
     }
 
     // The three pipe twins of the double-click, "Start Claude on this" and the thread's Open (spec, "Where the clicks

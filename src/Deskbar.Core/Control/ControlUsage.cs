@@ -104,6 +104,10 @@ public static class ControlUsage
                 + "      --model names the model for this one session, otherwise it is the one claude-model holds"),
             new("task", "open-session <id> <session>",
                 "open one of the task's sessions (its full id or short id) as its thread's Open button does"),
+            // The manager session (docs/superpowers/specs/2026-11-25-manager-session-design.md, "The button").
+            new("task", "manager",
+                "open today's manager session, a Claude that coordinates your task board, as the bar's Manager button\n"
+                + "      does: its window is brought forward, an ended one is resumed, and a new day starts a new one"),
             // A Claude Code session's own forms (RemoteControl.ClaudeHook.cs). --session is the session's id, which the
             // hooks' briefing hands it; every form but join, new and later acts on that session's own task. `-` in a
             // text's place reads the text from stdin (ControlArguments.WithTextInput): free text on cmd's command line

@@ -805,20 +805,63 @@ public sealed class ClaudeSessions : IDisposable
         launched
             .Bind(output => ClaudeAgents.ShortIdFromStart(output).ToResult($"Claude did not say which session it started: {output}"))
             .Tap(shortId => claims = claims.SetItem(shortId, new StartClaim(task.Id, folder)))
-            .Match(shortId => Find(shortId, FindAttempts), error => Observable.Return(Result.Failure<string>(error)));
+            .Match(shortId => Find(shortId), error => Observable.Return(Result.Failure<string>(error)));
 
-    // Reads the list until it shows the session, a pause between reads, and joins it to its task.
-    IObservable<Result<string>> Find(string shortId, int attemptsLeft) =>
+    // Reads the list until it shows the session, and joins it to its task. Still claimed when it is not found in time,
+    // so the poll joins it when it does appear (and the session's own hook may too).
+    IObservable<Result<string>> Find(string shortId) =>
+        Found(shortId, FindAttempts,
+                $"Claude started session {shortId}, but did not list it within {FindAttempts * FindPause.TotalSeconds:0} seconds. It joins the task when it appears.")
+            .Select(found => found.Bind(agent => JoinStarted(shortId, agent)));
+
+    // Reads the list until it shows the session named by `id` (its short id, or its full id: Matches takes either), a
+    // pause between reads, about ten seconds in all. Shared by a task's start (Find) and the manager's (RunAndFind).
+    IObservable<Result<ClaudeAgent>> Found(string id, int attemptsLeft, string notFound) =>
         OffThread(() => cli.Run(AgentsArguments, null, ReadTimeout))
             .SelectMany(read => read.Bind(ClaudeAgents.Parse)
-                    .Map(list => list.TryFirst(agent => Matches(agent, shortId)))
+                    .Map(list => list.TryFirst(agent => Matches(agent, id)))
                     .GetValueOrDefault(Maybe<ClaudeAgent>.None) is { HasValue: true } found
-                ? Observable.Return(JoinStarted(shortId, found.Value))
+                ? Observable.Return(Result.Success(found.Value))
                 : attemptsLeft > 1
-                    ? Observable.Timer(FindPause, scheduler).SelectMany(_ => Find(shortId, attemptsLeft - 1))
-                    // Still claimed, so the poll joins it when it does appear (and the session's own hook may too).
-                    : Observable.Return(Result.Failure<string>(
-                        $"Claude started session {shortId}, but did not list it within {FindAttempts * FindPause.TotalSeconds:0} seconds. It joins the task when it appears.")));
+                    ? Observable.Timer(FindPause, scheduler).SelectMany(_ => Found(id, attemptsLeft - 1, notFound))
+                    : Observable.Return(Result.Failure<ClaudeAgent>(notFound)));
+
+    /// <summary>
+    /// The manager session's start and resume (ManagerActions; docs/superpowers/specs/2026-11-25-manager-session-design.md):
+    /// runs `claude` with <paramref name="arguments"/> in <paramref name="folder"/> and answers the session as the list
+    /// shows it once it does. A start names its session by the short id `claude --bg` prints; a resume passes the
+    /// <paramref name="sessionId"/> it woke, since what a resume prints is not the start's line. No task is claimed and
+    /// none joined: the manager has no task of its own. A failure carries Claude's own words (an untrusted folder's
+    /// reason, say). Called on the UI thread; the returned task completes there.
+    /// </summary>
+    public Task<Result<ClaudeAgent>> RunAndFind(IReadOnlyList<string> arguments, string folder, string? sessionId = null) =>
+        OffThread(() => cli.Run(arguments, folder, LaunchTimeout))
+            .SelectMany(ran => ran
+                .Bind(output => sessionId is not null
+                    ? Result.Success(sessionId)
+                    : ClaudeAgents.ShortIdFromStart(output).ToResult($"Claude did not say which session it started: {output}"))
+                .Match(id => Found(id, FindAttempts,
+                        $"Claude started session {id}, but did not list it within {FindAttempts * FindPause.TotalSeconds:0} seconds, so no window was opened on it."),
+                    error => Observable.Return(Result.Failure<ClaudeAgent>(error))))
+            // A fault the CLI did not turn into a Result is a failure like any other, never a dispatcher crash.
+            .Catch((Exception e) => Observable.Return(Result.Failure<ClaudeAgent>(e.Message)))
+            .TakeUntil(stopping)
+            .DefaultIfEmpty(Result.Failure<ClaudeAgent>("Deskbar closed before the session was found."))
+            .ToTask();
+
+    /// <summary>
+    /// `claude agents --json` read now, for the manager's click, which must not decide on a list up to a poll old: a
+    /// manager started a moment ago is not in the last poll yet, and resuming it would start a COPY. Also answers while
+    /// the poll is off. A read that fails or cannot be parsed is a failure ("cannot tell"). Called on the UI thread; the
+    /// returned task completes there.
+    /// </summary>
+    public Task<Result<IReadOnlyList<ClaudeAgent>>> ListNow() =>
+        OffThread(() => cli.Run(AgentsArguments, null, ReadTimeout))
+            .Select(read => read.Bind(ClaudeAgents.Parse))
+            .Catch((Exception e) => Observable.Return(Result.Failure<IReadOnlyList<ClaudeAgent>>(e.Message)))
+            .TakeUntil(stopping)
+            .DefaultIfEmpty(Result.Failure<IReadOnlyList<ClaudeAgent>>("Deskbar closed before the sessions were read."))
+            .ToTask();
 
     static bool Matches(ClaudeAgent agent, string shortId) =>
         agent.ShortId.Map(id => id == shortId).GetValueOrDefault(false) || agent.SessionId.StartsWith(shortId, StringComparison.OrdinalIgnoreCase);

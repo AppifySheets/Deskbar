@@ -210,10 +210,20 @@ public sealed class ClaudeTaskActions : IDisposable
         else ToEditor(current.Sessions.TryFirst(s => s.Id == agent.SessionId).Map(s => s.Folder).GetValueOrDefault(agent.Folder), agent.SessionId);
     }
 
-    // The window on a background session: the open one brought forward, else a new one (see the header).
-    void Attach(TaskItem task, ClaudeAgent agent)
+    // The window on a task's background session, titled for the task and opened on its workspace (the one in front for a
+    // free task). A launch that fails (wt missing from the PATH, say) is said in the thread AND to Petre at once (final
+    // review, item 12): he clicked and no window came, and the thread is not where he is looking.
+    void Attach(TaskItem task, ClaudeAgent agent) =>
+        AttachTo(ClaudeStart.AttachTitle(task.Title), task.WorkspaceId, agent, e => SayAndTell(task.Id, e));
+
+    /// <summary>
+    /// The window on a background session (see the header): the open one with <paramref name="title"/> brought forward,
+    /// else a new one attached to the session and expected on <paramref name="workspace"/> (none: the one in front). One
+    /// implementation for a task's session and the manager's (ManagerActions), which has no task and so no thread: a
+    /// launch that fails goes to <paramref name="failed"/>, with the reason.
+    /// </summary>
+    public void AttachTo(string title, Maybe<Guid> workspace, ClaudeAgent agent, Action<string> failed)
     {
-        var title = ClaudeStart.AttachTitle(task.Title);
         if (manager.KnownWindows.FirstOrDefault(w => Titled(manager, w, title)) is { } open)
         {
             seams.BringForward(open.Handle).TapError(e => trace?.Invoke($"claude actions: window on {agent.SessionId} not brought forward: {e}"));
@@ -223,12 +233,10 @@ public sealed class ClaudeTaskActions : IDisposable
 
         // A background session's short id is the first eight characters of its id (measured, also after a resume).
         var shortId = agent.ShortId.GetValueOrDefault(agent.SessionId[..Math.Min(8, agent.SessionId.Length)]);
-        // A launch that fails (wt missing from the PATH, say) is said in the thread AND to Petre at once (final review,
-        // item 12): he clicked and no window came, and the thread is not where he is looking.
         var claude = seams.Claude();
-        Launch(task, ClaudeStart.AttachWindow(shortId, agent.Folder, title, claude), ClaudeStart.AttachConsole(shortId, agent.Folder, title, claude))
+        Launch(workspace, ClaudeStart.AttachWindow(shortId, agent.Folder, title, claude), ClaudeStart.AttachConsole(shortId, agent.Folder, title, claude))
             .Tap(() => attaching = attaching.SetItem(agent.SessionId, scheduler.Now))
-            .TapError(e => SayAndTell(task.Id, $"Deskbar could not open a window on session {shortId}:\n\n{e}"));
+            .TapError(e => failed($"Deskbar could not open a window on session {shortId}:\n\n{e}"));
     }
 
     /// <summary>
@@ -277,12 +285,12 @@ public sealed class ClaudeTaskActions : IDisposable
     // claude.exe (task abfe1db8: Windows Server 2022 has no Windows Terminal, and every window here failed with "Could not
     // start wt.exe"). Asked at each launch, like claude.exe's own lookup, so installing Windows Terminal while Deskbar
     // runs takes effect at the next click.
-    Result Launch(TaskItem task, ProgramLaunch terminal, ConsoleLaunch console) =>
+    Result Launch(Maybe<Guid> workspace, ProgramLaunch terminal, ConsoleLaunch console) =>
         seams.HasWindowsTerminal()
-            ? Launch(task, new LaunchTarget(terminal, TerminalProcess), seams.Launch)
+            ? Launch(workspace, new LaunchTarget(terminal, TerminalProcess), seams.Launch)
             // The console's ProgramLaunch is only what StartIn names the expectation by (claude.exe's file name); the
             // start itself is the console's, with its title and environment.
-            : Launch(task, new LaunchTarget(new ProgramLaunch(console.Program, console.Arguments, console.WorkingDirectory), ConsoleProcessOf(console)),
+            : Launch(workspace, new LaunchTarget(new ProgramLaunch(console.Program, console.Arguments, console.WorkingDirectory), ConsoleProcessOf(console)),
                 _ => seams.OpenConsole(console));
 
     // The process a console window shows as: its own program's (a classic console window reports its client as its owner),
@@ -290,10 +298,11 @@ public sealed class ClaudeTaskActions : IDisposable
     // the install console.
     static string ConsoleProcessOf(ConsoleLaunch console) => System.IO.Path.GetFileNameWithoutExtension(console.Program);
 
-    // Expected on its workspace (the one in front for a free task) through StartIn, so it lands there like any program
-    // `deskbar.cmd start` starts. With no workspace at all (an unnamed desktop in front) it is started where Petre is.
-    Result Launch(TaskItem task, LaunchTarget target, Func<ProgramLaunch, Result<int?>> starter) =>
-        task.WorkspaceId.Or(manager.CurrentWorkspaceId) is { HasValue: true } workspace
+    // Expected on its workspace (the one in front for a free task or the manager) through StartIn, so it lands there like
+    // any program `deskbar.cmd start` starts. With no workspace at all (an unnamed desktop in front) it is started where
+    // Petre is.
+    Result Launch(Maybe<Guid> on, LaunchTarget target, Func<ProgramLaunch, Result<int?>> starter) =>
+        on.Or(manager.CurrentWorkspaceId) is { HasValue: true } workspace
             ? manager.StartIn(workspace.Value, target, starter).Bind(_ => Result.Success())
             : starter(target.Launch).Bind(_ => Result.Success());
 
@@ -433,10 +442,39 @@ public sealed class ClaudeTaskActions : IDisposable
             return;
         }
         if (!seams.OfferTrustTerminal($"{error}\n\n{TrustQuestion}")) return;
-        var claude = seams.Claude();
-        Current(taskId).Tap(task => Launch(task, ClaudeStart.TrustWindow(folder, claude), ClaudeStart.TrustConsole(folder, claude))
-            .TapError(e => SayAndTell(taskId, $"Deskbar could not open a terminal in {folder}:\n\n{e}")));
+        Current(taskId).Tap(task => TrustTerminal(folder, task.WorkspaceId)
+            .TapError(e => SayAndTell(taskId, e)));
     }
+
+    /// <summary>
+    /// The untrusted folder's offer without a task, for the manager session (ManagerActions): Claude's words and
+    /// <see cref="TrustQuestion"/> asked as a message, and on yes a terminal running `claude` in the folder on the
+    /// workspace in front, where Petre answers the trust prompt himself. Nothing is retried: the next click starts it.
+    /// A terminal that does not open is told to him at once, since there is no thread to say it in.
+    /// </summary>
+    public void OfferTrust(string folder, string error)
+    {
+        if (!seams.OfferTrustTerminal($"{error}\n\n{TrustQuestion}")) return;
+        TrustTerminal(folder, Maybe<Guid>.None).TapError(seams.Tell);
+    }
+
+    // The trust terminal itself, on the workspace given (the one in front when none); a failure carries its reason.
+    Result TrustTerminal(string folder, Maybe<Guid> workspace)
+    {
+        var claude = seams.Claude();
+        return Launch(workspace, ClaudeStart.TrustWindow(folder, claude), ClaudeStart.TrustConsole(folder, claude))
+            .MapError(e => $"Deskbar could not open a terminal in {folder}:\n\n{e}");
+    }
+
+    /// <summary>A failure said to Petre at once (seams.Tell: a message box in the app), for the manager's click.</summary>
+    public void Tell(string message) => seams.Tell(message);
+
+    /// <summary>
+    /// Whether the latest list shows the session busy, for `task overview` (TaskSessionCommands.Busy); none when it is not
+    /// listed, and while there is no list (the feature off, or `claude` unreadable).
+    /// </summary>
+    public Maybe<bool> Busy(string sessionId) =>
+        Latest.Bind(list => list.TryFirst(agent => agent.SessionId == sessionId)).Map(agent => agent.Busy);
 
     // Claude Code is not installed: asked first, and on "Yes" the install window opens in the folder on the task's
     // workspace, like the trust window. "No" keeps the reason in the thread, since he chose not to act on it now.
@@ -447,7 +485,7 @@ public sealed class ClaudeTaskActions : IDisposable
             Say(taskId, $"Deskbar could not start a Claude session in {folder}:\n\n{error}");
             return;
         }
-        Current(taskId).Tap(task => Launch(task, ClaudeStart.InstallWindow(folder), ClaudeStart.InstallConsole(folder))
+        Current(taskId).Tap(task => Launch(task.WorkspaceId, ClaudeStart.InstallWindow(folder), ClaudeStart.InstallConsole(folder))
             .TapError(e => SayAndTell(taskId, $"Deskbar could not open a terminal to install Claude Code in {folder}:\n\n{e}")));
     }
 

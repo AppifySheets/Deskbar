@@ -181,6 +181,9 @@ public sealed partial class RemoteControl
             ["start", var id, "--folder", var folder, "--model", var model] => WithSessions(c => TaskStart(service, c, id, Folder(folder) ?? folder, model)),
             ["start", var id, "--model", var model, "--folder", var folder] => WithSessions(c => TaskStart(service, c, id, Folder(folder) ?? folder, model)),
             ["open-session", var id, var sessionId] => WithSessions(c => TaskOpenSession(service, c, id, sessionId)),
+            // The bar's Manager button's twin (manager session design, "The button"): the App's one Manager command,
+            // which answers at once; the window comes once today's manager is attached, started or resumed.
+            ["manager"] => WithSessions(c => Reply(c.Manager(), () => new { opening = true })),
             _ => ControlReply.Fail($"Wrong arguments for task.\n{TaskUsage()}"),
         };
     }
@@ -559,6 +562,13 @@ public sealed record TaskSessionCommands(
     /// property for the same reason as Transcript; "" means no manager, and matches no caller.
     /// </summary>
     public string ManagerFolder { get; init; } = "";
+
+    /// <summary>
+    /// `task manager`, the bar's Manager button's twin (ManagerActions.Open in the app): opens today's manager session,
+    /// attaching to it, resuming it or starting it. Answers at once; a later failure is told in a message. An init
+    /// property for the same reason as Transcript; the default refuses.
+    /// </summary>
+    public Func<Result> Manager { get; init; } = () => Result.Failure("The manager is not available");
 
     /// <summary>
     /// `task close <id> --stop-claude` (task 37cd7081): closes a task Claude is still working on and stops its background

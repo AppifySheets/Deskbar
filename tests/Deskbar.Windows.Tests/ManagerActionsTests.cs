@@ -1,0 +1,361 @@
+using System.IO;
+using System.Reactive.Concurrency;
+using System.Text.Json;
+using CSharpFunctionalExtensions;
+using Deskbar.App;
+using Deskbar.Core;
+using Deskbar.Core.Control;
+using Deskbar.Core.Tasks;
+using Microsoft.Reactive.Testing;
+
+namespace Deskbar.Windows.Tests;
+
+// One click opens the manager (ManagerActions; design docs/superpowers/specs/2026-11-25-manager-session-design.md, "The
+// button" and "Where it runs and what it is told"). Over the shared two-workspace harness (GEPHA in front), a real
+// ClaudeSessions and ClaudeTaskActions, a fake `claude` that answers the way the probes measured, and seams that RECORD
+// the windows instead of opening them: no test starts Claude, wt or a terminal. Everything runs on virtual time.
+public class ManagerActionsTests
+{
+    static readonly DateTimeOffset Origin = new(2026, 11, 25, 9, 0, 0, TimeSpan.Zero);
+    static readonly DateOnly Today = new(2026, 11, 25);
+
+    const string Untrusted = "claude exited with code 1.\nWorkspace not trusted. Run `claude` in the folder once and accept the trust prompt, then retry.";
+
+    sealed class MemoryStore : ITaskStore
+    {
+        public Result<TaskBoard> Load() => TaskBoard.Empty;
+
+        public Result Save(TaskBoard board) => Result.Success();
+    }
+
+    sealed record Call(IReadOnlyList<string> Arguments, string? Folder);
+
+    sealed record Row(string SessionId, string Folder, bool Busy);
+
+    // `claude` as the probes found it: a start prints "backgrounded · <short id> · <name>" and the daemon lists the new
+    // session; a bare resume wakes the session under its own id; a stop takes it off the list.
+    sealed class FakeCli : IClaudeCli
+    {
+        public List<Call> Calls { get; } = [];
+        public List<Row> Listed { get; } = [];
+
+        // The id the next start gets.
+        public string NextId { get; set; } = "5a1e0c2b-1111-4222-8333-944455556666";
+
+        // An override for a start that fails (an untrusted folder).
+        public Func<Result<string>>? Start { get; set; }
+
+        // Sessions the daemon has not listed yet, so a search for one waits out its pauses (a slow start).
+        public HashSet<string> NotListedYet { get; } = [];
+
+        // Every call but the list reads, in order.
+        public IReadOnlyList<Call> Acts => Calls.Where(c => c.Arguments is not ["agents", "--json"]).ToList();
+
+        public Task<Result<string>> Run(IReadOnlyList<string> arguments, string? workingDirectory, TimeSpan timeout)
+        {
+            Calls.Add(new Call(arguments.ToList(), workingDirectory));
+            return Task.FromResult(arguments switch
+            {
+                ["agents", "--json"] => Result.Success(Json()),
+                ["--bg", "--resume", var id] => Woken(id, workingDirectory),
+                ["--bg", "--model", ..] => Start?.Invoke() ?? Started(workingDirectory),
+                ["stop", var shortId] => Stopped(shortId),
+                _ => Result.Failure<string>($"unexpected claude call: {string.Join(" ", arguments)}"),
+            });
+        }
+
+        Result<string> Started(string? folder)
+        {
+            Listed.Add(new Row(NextId, folder ?? "", Busy: false));
+            return Result.Success($"backgrounded · {NextId[..8]} · {ManagerSession.Name}");
+        }
+
+        Result<string> Woken(string id, string? folder)
+        {
+            Listed.Add(new Row(id, folder ?? "", Busy: false));
+            return Result.Success($"note: woke session {id[..8]} with its saved options (-n, --model).");
+        }
+
+        Result<string> Stopped(string shortId)
+        {
+            Listed.RemoveAll(row => row.SessionId.StartsWith(shortId, StringComparison.Ordinal));
+            return Result.Success($"stopped {shortId}");
+        }
+
+        string Json() => JsonSerializer.Serialize(Listed.Where(row => !NotListedYet.Contains(row.SessionId)).Select(row => new
+        {
+            pid = 1,
+            id = row.SessionId[..8],
+            cwd = row.Folder,
+            kind = "background",
+            sessionId = row.SessionId,
+            name = ManagerSession.Name,
+            status = row.Busy ? "busy" : "idle",
+        }));
+    }
+
+    sealed class Rig : IDisposable
+    {
+        public Harness Harness { get; } = Harness.Build();
+        public TestScheduler Clock { get; } = new();
+        public FakeCli Cli { get; } = new();
+        public TaskService Tasks { get; }
+        public string Root { get; } = Path.Combine(Path.GetTempPath(), "deskbar-manager-actions-" + Guid.NewGuid().ToString("N"));
+        public string StateDir => Path.Combine(Root, "state");
+        public string Home => Path.Combine(Root, "home");
+        public string Folder => ManagerSession.FolderIn(StateDir);
+        public string Shim => Path.Combine(StateDir, "deskbar.cmd");
+        public string ShimForward => Shim.Replace('\\', '/');
+        public string BriefingPath => Path.Combine(Folder, ManagerSession.BriefingFile);
+
+        public List<ProgramLaunch> Launches { get; } = [];
+        public List<string> Told { get; } = [];
+        public List<string> Asked { get; } = [];
+        public bool TrustsTerminal { get; set; }
+
+        public ClaudeSessions Sessions { get; }
+        public ClaudeTaskActions Actions { get; }
+        public ManagerActions Manager { get; }
+
+        public Rig()
+        {
+            Clock.AdvanceTo(Origin.UtcTicks);
+            Tasks = new TaskService(new MemoryStore(), () => Clock.Now);
+            Sessions = new ClaudeSessions(Tasks, Harness.Manager, Cli, Clock, _ => Maybe<Guid>.None, Home,
+                background: Scheduler.Immediate, managerFolder: Folder);
+            Actions = new ClaudeTaskActions(Tasks, Harness.Manager, Sessions.Live, new ClaudeTaskSeams(
+                Start: (_, _) => Task.FromResult(Result.Failure<string>("no task starts here")),
+                Resume: (_, _) => Task.FromResult(Result.Failure<ClaudeAgent>("no task resumes here")),
+                Launch: launch =>
+                {
+                    Launches.Add(launch);
+                    return Result.Success<int?>(4321);
+                },
+                EditorWindow: _ => Maybe<nint>.None,
+                BringForward: _ => Result.Success(),
+                TranscriptExists: _ => true,
+                EditorFolderNames: _ => [])
+            {
+                OfferTrustTerminal = message =>
+                {
+                    Asked.Add(message);
+                    return TrustsTerminal;
+                },
+                Tell = Told.Add,
+            }, Clock);
+            Manager = new ManagerActions(Harness.Manager, Sessions, Actions, StateDir, Shim, Clock, () => Today);
+        }
+
+        public Guid Gepha => Harness.Manager.State.Workspaces.Single(w => w.Name == "GEPHA").Id;
+
+        // The answers of `claude` arrive on the scheduler; a second covers every hop, and the list shows a started
+        // session at once, so no search waits out its pause.
+        public void Settle() => Clock.AdvanceBy(TimeSpan.FromSeconds(1).Ticks);
+
+        public void Stored(string sessionId, DateOnly day) => Harness.Manager.SetManagerSession(new ManagerRecord(sessionId, day));
+
+        public void WriteTranscript(string sessionId)
+        {
+            var path = ClaudeTranscript.PathOf(Home, Folder, sessionId);
+            Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+            File.WriteAllLines(path, ["""{"type":"user","message":{"role":"user","content":"start"}}"""]);
+        }
+
+        public void Dispose()
+        {
+            Manager.Dispose();
+            Actions.Dispose();
+            Sessions.Dispose();
+            if (Directory.Exists(Root)) Directory.Delete(Root, recursive: true);
+        }
+    }
+
+    const string Earlier = "0a1d0a1d-aaaa-4bbb-8ccc-dddddddddddd";
+
+    static void AssertAttachedOnTheWorkspaceInFront(Rig rig, string sessionId)
+    {
+        var launch = Assert.Single(rig.Launches);
+        var expected = ClaudeStart.AttachWindow(sessionId[..8], rig.Folder, "Deskbar manager · Claude");
+        Assert.Equal(expected.Program, launch.Program);
+        Assert.Equal(expected.Arguments, launch.Arguments);
+        Assert.Equal(expected.WorkingDirectory, launch.WorkingDirectory);
+        Assert.Equal(rig.Gepha, rig.Harness.Manager.CurrentWorkspaceId.Value);
+        Assert.True(rig.Harness.Manager.AwaitsAny("WindowsTerminal"));
+    }
+
+    // Spec, "Where it runs": nothing stored, so the click starts Fable in the manager's own folder with the measured flags
+    // (the briefing by its path in that folder, the shim by its full path with forward slashes), writes the briefing
+    // there first, stores the new session's full id with today, and opens its window on the workspace in front.
+    [Fact]
+    public void First_click_starts_fable_in_the_manager_folder_and_stores_the_day()
+    {
+        using var rig = new Rig();
+
+        Assert.True(rig.Manager.Open().IsSuccess);
+        rig.Settle();
+
+        var start = Assert.Single(rig.Cli.Acts);
+        Assert.Equal(ManagerSession.StartArguments(rig.BriefingPath, rig.ShimForward), start.Arguments);
+        Assert.Contains("fable", start.Arguments);
+        Assert.Contains($"Bash({rig.ShimForward} task:*)", start.Arguments);
+        Assert.Equal(rig.Folder, start.Folder);
+        Assert.True(Directory.Exists(rig.Folder));
+        Assert.Equal(ManagerSession.Briefing(rig.ShimForward), File.ReadAllText(rig.BriefingPath));
+        Assert.Equal(new ManagerRecord(rig.Cli.NextId, Today), rig.Harness.Manager.State.Manager);
+        AssertAttachedOnTheWorkspaceInFront(rig, rig.Cli.NextId);
+        Assert.Empty(rig.Told);
+    }
+
+    // Design, "The button", 1, and the Deskbar-restarted case: today's manager is listed, so the click opens a window on
+    // it and runs no `claude` but the list read.
+    [Fact]
+    public void Click_on_todays_listed_manager_attaches_without_starting()
+    {
+        using var rig = new Rig();
+        rig.Stored(Earlier, Today);
+        rig.Cli.Listed.Add(new Row(Earlier, rig.Folder, Busy: false));
+
+        Assert.True(rig.Manager.Open().IsSuccess);
+        rig.Settle();
+
+        Assert.Empty(rig.Cli.Acts);
+        AssertAttachedOnTheWorkspaceInFront(rig, Earlier);
+        Assert.Equal(new ManagerRecord(Earlier, Today), rig.Harness.Manager.State.Manager);
+    }
+
+    // Design, "The button", 2: today's manager ended but its transcript is there, so it is woken by a BARE resume under
+    // its full id, in its folder (flags on a resume fork a copy), and attached once listed. The record is unchanged.
+    [Fact]
+    public void Click_on_todays_ended_manager_resumes_it()
+    {
+        using var rig = new Rig();
+        rig.Stored(Earlier, Today);
+        rig.WriteTranscript(Earlier);
+
+        Assert.True(rig.Manager.Open().IsSuccess);
+        rig.Settle();
+
+        var resume = Assert.Single(rig.Cli.Acts);
+        Assert.Equal(ManagerSession.ResumeArguments(Earlier), resume.Arguments);
+        Assert.Equal(rig.Folder, resume.Folder);
+        AssertAttachedOnTheWorkspaceInFront(rig, Earlier);
+        Assert.Equal(new ManagerRecord(Earlier, Today), rig.Harness.Manager.State.Manager);
+    }
+
+    // Design, "The button", 3: yesterday's manager is still listed and idle, so it is stopped (by its short id) BEFORE
+    // today's starts, and today's id and day replace it.
+    [Fact]
+    public void Next_day_click_stops_the_idle_old_manager_then_starts()
+    {
+        using var rig = new Rig();
+        rig.Stored(Earlier, Today.AddDays(-1));
+        rig.Cli.Listed.Add(new Row(Earlier, rig.Folder, Busy: false));
+
+        Assert.True(rig.Manager.Open().IsSuccess);
+        rig.Settle();
+
+        Assert.Equal(2, rig.Cli.Acts.Count);
+        Assert.Equal(["stop", Earlier[..8]], rig.Cli.Acts[0].Arguments);
+        Assert.Equal(ManagerSession.StartArguments(rig.BriefingPath, rig.ShimForward), rig.Cli.Acts[1].Arguments);
+        Assert.Equal(new ManagerRecord(rig.Cli.NextId, Today), rig.Harness.Manager.State.Manager);
+        AssertAttachedOnTheWorkspaceInFront(rig, rig.Cli.NextId);
+    }
+
+    // Design, "Where it runs", the trust prompt: the manager folder is new on every machine, so the first start fails
+    // "Workspace not trusted". The offer a task's start makes is made here too, as a message; yes opens a terminal running
+    // `claude` in the manager folder on the workspace in front. Nothing is stored, and nothing retries on its own.
+    [Fact]
+    public void First_start_untrusted_offers_trust_and_stores_nothing()
+    {
+        using var rig = new Rig { TrustsTerminal = true };
+        rig.Cli.Start = () => Result.Failure<string>(Untrusted);
+
+        Assert.True(rig.Manager.Open().IsSuccess);
+        rig.Settle();
+
+        var asked = Assert.Single(rig.Asked);
+        Assert.Contains("Workspace not trusted", asked);
+        Assert.Contains(ClaudeTaskActions.TrustQuestion, asked);
+        var trust = Assert.Single(rig.Launches);
+        var expected = ClaudeStart.TrustWindow(rig.Folder);
+        Assert.Equal(expected.Program, trust.Program);
+        Assert.Equal(expected.Arguments, trust.Arguments);
+        Assert.Equal(expected.WorkingDirectory, trust.WorkingDirectory);
+        Assert.Null(rig.Harness.Manager.State.Manager);
+        Assert.Empty(rig.Told);
+
+        // Nothing retries: minutes later there is still the one start.
+        rig.Clock.AdvanceBy(TimeSpan.FromMinutes(5).Ticks);
+        Assert.Single(rig.Cli.Acts);
+    }
+
+    // Plan, risk 2: a second click while the first start is still finding its session (the daemon has not listed it
+    // yet, so the search waits between reads) starts nothing more. Once the first has attached, a click goes through
+    // again and finds today's manager listed.
+    [Fact]
+    public void Second_click_while_starting_starts_nothing()
+    {
+        using var rig = new Rig();
+        rig.Cli.NotListedYet.Add(rig.Cli.NextId);
+
+        Assert.True(rig.Manager.Open().IsSuccess);
+        rig.Settle();
+        Assert.Single(rig.Cli.Acts);
+
+        Assert.True(rig.Manager.Open().IsSuccess);
+        rig.Settle();
+        Assert.Single(rig.Cli.Acts);
+        Assert.Empty(rig.Launches);
+
+        // The daemon lists it; the first click's search finds it at its next read and attaches.
+        rig.Cli.NotListedYet.Clear();
+        rig.Clock.AdvanceBy(TimeSpan.FromSeconds(3).Ticks);
+        Assert.Equal(new ManagerRecord(rig.Cli.NextId, Today), rig.Harness.Manager.State.Manager);
+        Assert.Single(rig.Launches);
+
+        Assert.True(rig.Manager.Open().IsSuccess);
+        rig.Settle();
+        Assert.Single(rig.Cli.Acts);
+        Assert.Single(rig.Launches);
+    }
+
+    // Design, "Where it runs": the briefing follows the build. It is written before every start AND every resume, so the
+    // saved --append-system-prompt-file a resume keeps reads the current text.
+    [Fact]
+    public void Briefing_file_is_rewritten_on_every_start_and_resume()
+    {
+        using var rig = new Rig();
+        Directory.CreateDirectory(rig.Folder);
+        File.WriteAllText(rig.BriefingPath, "an older build's briefing");
+
+        rig.Manager.Open();
+        rig.Settle();
+        Assert.Equal(ManagerSession.Briefing(rig.ShimForward), File.ReadAllText(rig.BriefingPath));
+
+        // The session ends; its transcript stays, so the next click resumes it.
+        rig.Cli.Listed.Clear();
+        rig.WriteTranscript(rig.Cli.NextId);
+        File.WriteAllText(rig.BriefingPath, "an older build's briefing");
+
+        rig.Manager.Open();
+        rig.Settle();
+        Assert.Equal(ManagerSession.ResumeArguments(rig.Cli.NextId), rig.Cli.Acts[^1].Arguments);
+        Assert.Equal(ManagerSession.Briefing(rig.ShimForward), File.ReadAllText(rig.BriefingPath));
+    }
+
+    // As "Start Claude on this": while Claude sessions are off, the click is refused with the reason and runs nothing.
+    [Fact]
+    public void Click_while_Claude_sessions_are_off_is_refused()
+    {
+        using var rig = new Rig();
+        Assert.True(rig.Harness.Manager.SetClaudeTasks(false).IsSuccess);
+
+        var refused = rig.Manager.Open();
+        rig.Settle();
+
+        Assert.True(refused.IsFailure);
+        Assert.Equal(ClaudeTaskActions.FeatureOff, refused.Error);
+        Assert.Empty(rig.Cli.Calls.Where(c => c.Arguments is not ["agents", "--json"]));
+        Assert.Null(rig.Harness.Manager.State.Manager);
+    }
+}

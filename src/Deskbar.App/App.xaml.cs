@@ -81,6 +81,9 @@ public partial class App : Application
     // "Start Claude on this", the thread's session list and the pipe's `task go|start|open-session`. Built right after
     // claudeSessions, whose list and starts it uses; disposed with it.
     ClaudeTaskActions? claudeActions;
+    // The manager session's one click (ManagerActions): the bar's Manager button and the pipe's `task manager`. Built
+    // right after claudeActions, whose window it shares; disposed with it.
+    ManagerActions? managerActions;
 
     // A comment wakes its session (plan docs/superpowers/plans/2026-11-24-comment-wakes-session.md): the per-session inbox
     // files under the state folder, which `claude-wait` registers waiters on, and the waker that delivers Petre's comments.
@@ -1688,6 +1691,10 @@ public partial class App : Application
                 StopAndClose = task => claudeActions?.StopAndClose(task) ?? Result.Failure(ClaudeActionsNotReady),
                 // The manager session's folder, so a call from it is refused close, delete and done (manager session design).
                 ManagerFolder = Core.Tasks.ManagerSession.FolderIn(AppPaths.NewStateDir),
+                // `task manager`, the Manager button's twin (ManagerActions.Open), read when the command arrives.
+                Manager = () => managerActions?.Open() ?? Result.Failure(ClaudeActionsNotReady),
+                // `task overview` tells working from idle by the latest list's busy flag (ClaudeTaskActions.Busy).
+                Busy = sessionId => claudeActions?.Busy(sessionId) ?? Maybe<bool>.None,
                 // Subtasks: the family text a session reads names each session's transcript file, found the way the
                 // keeper finds it (worktree project folders included). Read when a command arrives, like the actions.
                 Transcript = session => claudeSessions?.TranscriptOf(session) ?? Maybe<string>.None,
@@ -1853,6 +1860,16 @@ public partial class App : Application
                         ? new Dictionary<string, string> { [Deskbar.Core.Tasks.ClaudeStart.KeepTitleVariable] = "1" }
                         : new Dictionary<string, string>()),
             },
+            new System.Reactive.Concurrency.SynchronizationContextScheduler(new System.Windows.Threading.DispatcherSynchronizationContext(Dispatcher)),
+            trace: ClickTrace.On ? ClickTrace.Write : null);
+
+        // ...and the manager session (ManagerActions; docs/superpowers/specs/2026-11-25-manager-session-design.md): the
+        // Manager button's and `task manager`'s one click, which attaches to today's manager, resumes it or starts it in
+        // <state dir>\manager. It runs through the same ClaudeSessions and opens its window through the same
+        // ClaudeTaskActions as a task's session. The shim it names is the deskbar.cmd written above (the Store copy writes
+        // one too, pointing at its alias), by its full path, which is what the manager's allow rule matches.
+        managerActions = new ManagerActions(manager, claudeSessions, claudeActions, AppPaths.NewStateDir,
+            Path.Combine(AppPaths.NewStateDir, ControlCommandLine.ShimName),
             new System.Reactive.Concurrency.SynchronizationContextScheduler(new System.Windows.Threading.DispatcherSynchronizationContext(Dispatcher)),
             trace: ClickTrace.On ? ClickTrace.Write : null);
 
@@ -2600,6 +2617,7 @@ public partial class App : Application
             quietTaskbarWatch?.Dispose();
             TaskbarFlashingSwitch.Sync(false);
             // No more `claude` polls or resumes once the session is ending; running Claude sessions are not touched.
+            managerActions?.Dispose();
             claudeActions?.Dispose();
             commentWaker?.Dispose();
             pullRequestWatch?.Dispose();
@@ -3008,6 +3026,7 @@ public partial class App : Application
         quietTaskbarWatch?.Dispose();
         TaskbarFlashingSwitch.Sync(false);
         // No more `claude` polls or resumes once the app is going; running Claude sessions are not touched.
+        managerActions?.Dispose();
         claudeActions?.Dispose();
         commentWaker?.Dispose();
         pullRequestWatch?.Dispose();
