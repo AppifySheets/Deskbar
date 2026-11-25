@@ -101,13 +101,18 @@ public sealed class ManagerWakesTests
     // panel, so a question never wakes the manager, however old, and is not carried along with a hand-back either.
     [Fact]
     public void A_question_never_wakes_however_old() =>
-        Assert.IsType<ManagerWake.Nothing>(Plan(Record(), Board(Waiting(id2, At(-600)), Waiting(id1, At(10))), At(600)));
+        // Asked at 09:10, two hours old at 11:10: before 6a87df67 this woke the manager.
+        Assert.IsType<ManagerWake.Nothing>(Plan(Record(), Board(Waiting(id1, At(10))), At(600)));
 
     [Fact]
     public void A_question_is_not_carried_along_with_a_hand_back()
     {
-        var wake = Assert.IsType<ManagerWake.Wake>(Plan(Record(), Board(HandedBack(id1, At(10)), Waiting(id2, At(-600))), At(60)));
+        // Two hours old by minute 60 (the old trigger) and asked after since (the old "new questions" rider).
+        var aged = Waiting(id2, At(-90), "Merge PR 512?");
+        var fresh = Waiting(Guid.Parse("33333333-0000-0000-0000-000000000003"), At(20), "Ship it?");
+        var wake = Assert.IsType<ManagerWake.Wake>(Plan(Record(), Board(HandedBack(id1, At(10)), aged, fresh), At(60)));
         Assert.DoesNotContain("22222222", wake.Message);
+        Assert.DoesNotContain("33333333", wake.Message);
         Assert.DoesNotContain("Merge PR 512?", wake.Message);
     }
 

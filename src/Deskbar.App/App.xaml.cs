@@ -1937,7 +1937,7 @@ public partial class App : Application
         // ClaudeTaskActions as a task's session. The shim it names is the deskbar.cmd written above (the Store copy writes
         // one too, pointing at its alias), by its full path, which is what the manager's allow rule matches.
         // With the board and the comment inbox it also wakes the manager on events (ManagerActions.Tick, on the sessions
-        // poll; docs/superpowers/specs/2026-11-25-manager-event-wakes-design.md): a hand-back or a question two hours old.
+        // poll; docs/superpowers/specs/2026-11-25-manager-event-wakes-design.md): a hand-back (no question wakes, task 6a87df67).
         managerActions = new ManagerActions(manager, claudeSessions, claudeActions, AppPaths.NewStateDir,
             Path.Combine(AppPaths.NewStateDir, ControlCommandLine.ShimName),
             new System.Reactive.Concurrency.SynchronizationContextScheduler(new System.Windows.Threading.DispatcherSynchronizationContext(Dispatcher)),

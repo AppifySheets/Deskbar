@@ -14,7 +14,8 @@ namespace Deskbar.Core.Tasks;
 /// a record saved before them still loads:
 /// <list type="bullet">
 /// <item><paramref name="Since"/>: events are counted from here (the start, then each wake); null until the first tick.</item>
-/// <item><paramref name="Unread"/>: a wake was delivered and the user has not opened the manager since (the button's dot).</item>
+/// <item><paramref name="Unread"/>: a wake reporting a task handed back again was delivered, and the user has not opened
+/// the manager since (the button's dot; task 6a87df67).</item>
 /// <item><paramref name="HandedBack"/>: the tasks already reported as handed back today, so a second one is not nudged.</item>
 /// </list>
 /// And the manager's own question to the user (task 61e4d143, ManagerQuestion), optional for the same reason:

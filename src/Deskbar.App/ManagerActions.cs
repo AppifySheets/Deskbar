@@ -57,12 +57,13 @@ namespace Deskbar.App;
 // of the sessions poll (ClaudeSessions.Live, every 15 seconds), the App wires it.
 //
 //   * ManagerWakes.Plan (Core, pure) decides from the stored record, the board, the list and the time whether to wake the
-//     manager and with what message: a hand-back or a question two hours old, at most once per 30 minutes, only today's
-//     manager and never while it is busy.
+//     manager and with what message: a hand-back only (task 6a87df67 dropped the question wakes), at most once per 30
+//     minutes, only today's manager and never while it is busy.
 //   * The message goes by the roads a comment takes to a task's session (CommentWake.PlanFor): into the manager's inbox
 //     when it runs (its waiter wakes it), a BARE resume with the message when it does not run, stop then resume when its
 //     waiter lapsed. A resume that fails leaves the message in the inbox, where its next waiter finds it.
-//   * The record after the wake is stored (Since moved, Unread set, the day's hand-backs), but only onto the SAME session:
+//   * The record after the wake is stored (Since moved, Unread set when a task was handed back again, the day's
+//     hand-backs when the wake was delivered), but only onto the SAME session:
 //     a click that started a new manager meanwhile is not overwritten.
 //   * A wake and a click share `pending`, because both may resume the manager and two resumes fork a copy (probe notes).
 //     A click during a wake is not dropped: it runs once the wake is done (openAfterWake).
@@ -312,7 +313,9 @@ public sealed class ManagerActions : IDisposable
         inbox!.Deliver(sessionId, message).Tap(() => trace?.Invoke($"manager: not resumed ({why}), the wake waits in its inbox"));
 
     // After a wake: the record stored onto the same session only (a click may have started another meanwhile). A wake
-    // that could not be delivered still moves Since, or every tick would try again; it just sets no dot.
+    // that could not be delivered still moves Since, or every tick would try again; it just sets no dot. Nor does it
+    // count its tasks as nudged (task 6a87df67 review): the manager never saw them, so their next stop is a first one,
+    // nudged again, not an AGAIN that lights the dot.
     void Woken(ManagerRecord record, ManagerRecord after, Result sent)
     {
         pending = waking = false;
@@ -322,7 +325,7 @@ public sealed class ManagerActions : IDisposable
             {
                 Since = after.Since,
                 Unread = current.Unread || (sent.IsSuccess && after.Unread),
-                HandedBack = after.HandedBack,
+                HandedBack = sent.IsSuccess ? after.HandedBack : current.HandedBack,
             });
         if (!openAfterWake) return;
         openAfterWake = false;
