@@ -2824,6 +2824,49 @@ public class TasksBoardTests
         Assert.Equal(TextTrimming.CharacterEllipsis, Detail().TextTrimming);
     });
 
+    // Task d560f3eb ("misaligned text"): a waiting task's question stood in the title's column, a few letters wide, in a
+    // narrow panel. Before the fix, an open line's question was 29 DIP wide and 629 tall at 360 DIP, 129 wide at 460 and
+    // 211 at 542 (measured here). Now it spans the line under the title, from the title's left edge to the line's right
+    // end, at every width and on a closed line as on an open one, while the title keeps its column and the toggles stay
+    // beside the title's first line rather than half way down the question.
+    [Theory]
+    [InlineData(TasksPanelLayout.MinWidth)]
+    [InlineData(TasksPanelLayout.DefaultWidth)]
+    [InlineData(542)]
+    public void A_question_spans_the_line_under_its_title(double width) => StaThread.Run(() =>
+    {
+        using var t = Build(width: width);
+        var id = t.Tasks.Create("დისტრიბუციის ეკრანი", t.Gepha, Session("s1")).Value.Id;
+        t.Tasks.Ask(id, "Approve Playwright for this session: type /mcp in the session and approve playwright, so I can walk the new screen (or open http://localhost:20002, menu დისტრიბუციის ეკრანი, and look yourself).");
+        t.Controller.Show();
+
+        void Check(string state)
+        {
+            t.Window.UpdateLayout();
+            var line = LineOf(t.Window, id);
+            var detail = Inside(line).OfType<TextBlock>().Single(b => Equals(b.Tag, TasksWindow.DetailTag));
+            var title = Inside(line).OfType<TextBlock>().Single(b => Equals(b.Tag, "task-title"));
+            var flags = Inside(line).OfType<Button>().First(b => Equals(b.Tag, "task-flag-off") || Equals(b.Tag, "task-flag-on"));
+            var titleLeft = title.TranslatePoint(new Point(0, 0), line).X;
+            var detailAt = detail.TranslatePoint(new Point(0, 0), line);
+            // From the title's left edge (the same x, within its 2 DIP margin) to past the toggles: wider than the title.
+            Assert.InRange(detailAt.X, titleLeft - 0.5, titleLeft + 0.5);
+            Assert.True(detail.ActualWidth > title.ActualWidth + TasksWindowFlagsColumn,
+                $"{state} at {width}: the question is {detail.ActualWidth} DIP wide, the title {title.ActualWidth}");
+            // Under the title, and the toggles beside the title rather than lower down beside the question.
+            Assert.True(detailAt.Y >= title.TranslatePoint(new Point(0, title.ActualHeight), line).Y - 0.5, $"{state}: the question is under the title");
+            Assert.True(flags.TranslatePoint(new Point(0, 0), line).Y < detailAt.Y, $"{state}: the toggles sit beside the title");
+        }
+
+        Check("closed");
+        t.Controller.ToggleThread(id);
+        Check("open");
+    });
+
+    // The toggles' column of a line (TasksWindow.FlagsColumn): the question, spanning the line, is wider than the title
+    // by at least this much.
+    const double TasksWindowFlagsColumn = 56;
+
     // Task 08cdb052 ("when asking for action, prs should have links, or artifacts; make that clickable"): a question's
     // markdown link and a bare address are links in the line's detail, on a closed line and an open one, and the text
     // reads as the words, never the markdown written out. Only web addresses become links.
@@ -3305,7 +3348,9 @@ public class TasksBoardTests
             t.Window.UpdateLayout();
             var oneTitle = TitleOf(t.Window, one).ActualHeight;
             var oneLine = LineOf(t.Window, one).ActualHeight;
-            var twoTexts = ((FrameworkElement)TitleOf(t.Window, two).Parent).ActualHeight;
+            // The title's row and, since task d560f3eb, the status line in the row under it, across the line.
+            var twoTexts = ((FrameworkElement)TitleOf(t.Window, two).Parent).ActualHeight
+                + Inside(LineOf(t.Window, two)).OfType<TextBlock>().Single(b => Equals(b.Tag, TasksWindow.DetailTag)).ActualHeight;
             var twoLine = LineOf(t.Window, two).ActualHeight;
             Console.WriteLine($"MEASURED {view}: one-line {oneLine} (title {oneTitle}), two-line {twoLine} (texts {twoTexts})");
             Assert.True(oneLine <= oneTitle + 9, $"{view}: a one-line task is {oneLine} high, its title {oneTitle}");

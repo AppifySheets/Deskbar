@@ -667,7 +667,25 @@ public partial class TasksWindow : Window
         // Only the full line has the session words, the assignee and the Reopen button. The age is on the slim line too.
         var full = !compactLines && !slimLines;
         Cell(grid, 0, LeftOf(row));
-        Cell(grid, 1, TextOf(row));
+        // TWO ROWS: THE TITLE WITH EVERY CONTROL BESIDE IT, THEN WHAT IS UNDER THE TITLE ACROSS THE LINE (task d560f3eb,
+        // "misaligned text", Petre's screenshot of a waiting task whose question stood in a column a few letters wide, two
+        // or three letters to a line, with the tick, the toggles and the chip floating half way down it). The question,
+        // the status line and the description used to sit under the title in the title's own column, which is what the
+        // fixed columns leave over: on a slim line 286 DIP of them, so a 360 DIP panel left that column 29 DIP and a
+        // question in it stood 629 DIP tall; 129 DIP at the default 460 (measured, TasksBoardTests
+        // A_question_spans_the_line_under_its_title). Now the first row holds the title and the controls, centred on it as
+        // before, and the second row holds what is under the title, from the title's left edge to the line's right end,
+        // under the toggles, the age and the chip, which have nothing below them. The title itself stays in its column.
+        grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        var text = TextOf(row);
+        Cell(grid, 1, text.Title);
+        if (text.Below is { } below)
+        {
+            Grid.SetRow(below, 1);
+            Grid.SetColumnSpan(below, grid.ColumnDefinitions.Count - 1);
+            Cell(grid, 1, below);
+        }
         var flags = FlagsOf(row);
         Cell(grid, 2, flags);
         // A Matrix line (compact) has no column for the sessions, the age or the close button, so they are not made at
@@ -1179,10 +1197,13 @@ public partial class TasksWindow : Window
                     // click, and the click's refusal shows on the problem line (TasksBoard.Close reports it).
                     }, "Close", () => Actions?.Close(row.Id), TaskViews.TickTip(row.Claudes, row.SubtaskCount, row.ClaudeWorking));
 
-    // The title over its detail; on a line being renamed, the box that renames it.
-    UIElement TextOf(TaskRowView row)
+    // The title (on a line being renamed, the box that renames it), and apart from it what goes under it: the description,
+    // its pictures and the detail (the question or the status line). Line puts the two in rows of their own, so what is
+    // under the title spans the line rather than the title's column (task d560f3eb, see Line).
+    (UIElement Title, UIElement? Below) TextOf(TaskRowView row)
     {
         var panel = new StackPanel { Margin = new Thickness(2, 0, 8, 0), VerticalAlignment = VerticalAlignment.Center };
+        var below = new StackPanel { Margin = new Thickness(2, 0, 4, 0) };
         if (renaming == row.Id)
         {
             renameBox = RenameBox(row);
@@ -1249,19 +1270,19 @@ public partial class TasksWindow : Window
             // the whole description shows, rendered, above the thread.
             // Images in tasks: an open line shows the description's text, then its pictures as a row of thumbnails
             // (TaskImageRow), and no block at all for a description that is only pictures.
-            if (row.Description.Length > 0 && !row.Expanded) panel.Children.Add(DescriptionPreview(row));
+            if (row.Description.Length > 0 && !row.Expanded) below.Children.Add(DescriptionPreview(row));
             if (row.Description.Length > 0 && row.Expanded)
             {
                 var parts = TaskImages.Split(row.Description);
-                if (parts.Text.Length > 0) panel.Children.Add(DescriptionBlock(row));
-                if (TaskImageRow.Of(StateDir, parts.Images, OpenImage) is { } pictures) panel.Children.Add(pictures);
+                if (parts.Text.Length > 0) below.Children.Add(DescriptionBlock(row));
+                if (TaskImageRow.Of(StateDir, parts.Images, OpenImage) is { } pictures) below.Children.Add(pictures);
             }
         }
         // THE DETAIL: the question while the task waits on Petre, else its status line. Cut to one line on a closed line,
         // IN FULL ON AN OPEN ONE, as the description is: a session's question was readable nowhere in full (Petre,
         // 2026-11-24, of a question cut at "Add an "O…" with its thread open: "where's the question?"). Tagged for tests.
-        if (row.Detail.Length > 0) panel.Children.Add(DetailText(row));
-        return panel;
+        if (row.Detail.Length > 0) below.Children.Add(DetailText(row));
+        return (panel, below.Children.Count > 0 ? below : null);
     }
 
     // THE DETAIL'S TEXT, its links clickable (task 08cdb052, Petre: "when asking for action, prs should have links, or
