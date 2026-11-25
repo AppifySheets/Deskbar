@@ -133,6 +133,57 @@ public class SubtaskOrderTests
         Assert.Equal([TaskGroupKind.IV], TaskViews.UnderParents(groups).Groups.Select(g => g.Kind));
     }
 
+    // --- the "Subtasks" checkbox unticked (task 173ef268): subtasks fold into their parent's line --------------
+
+    // The lines drawn under a parent go; the parent, a subtask whose parent is not on the list and one waiting on you stay,
+    // and a group left empty goes with them.
+    [Fact]
+    public void Unticked_the_subtasks_under_a_parent_fold_into_it()
+    {
+        var parent = Task("Parent");
+        var child = Task("Child", parent.Id);
+        var important = Task("Important child", parent.Id) with { Important = true };
+        var orphan = Task("Orphan", Guid.NewGuid());
+        var asking = Task("Asking", parent.Id, TaskStatus.WaitingOnYou);
+        var groups = new[]
+        {
+            new TaskGroup(TaskGroupKind.WaitingOnYou, [asking]),
+            new TaskGroup(TaskGroupKind.II, [important]),
+            new TaskGroup(TaskGroupKind.IV, [parent, child, orphan]),
+        };
+        var (under, nested) = TaskViews.UnderParents(groups);
+
+        var folded = TaskViews.FoldSubtasks(under, nested);
+
+        Assert.Equal([TaskGroupKind.WaitingOnYou, TaskGroupKind.IV], folded.Select(g => g.Kind));
+        Assert.Equal(["Asking"], Titles(folded[0].Tasks));
+        Assert.Equal(["Parent", "Orphan"], Titles(folded[1].Tasks));
+    }
+
+    // The Matrix draws no subtask under its parent, so the rule is said in its own terms: an open subtask whose parent is
+    // in any cell goes, unless it waits on you; all four cells stay, even one left empty.
+    [Fact]
+    public void Unticked_the_matrix_folds_subtasks_whose_parent_is_on_it()
+    {
+        var parent = Task("Parent");
+        var child = Task("Child", parent.Id) with { Important = true, Urgent = true };
+        var asking = Task("Asking", parent.Id, TaskStatus.WaitingOnYou);
+        var orphan = Task("Orphan", Guid.NewGuid());
+        var cells = new[]
+        {
+            new TaskCell(Quadrant.I, [child]),
+            new TaskCell(Quadrant.II, []),
+            new TaskCell(Quadrant.III, []),
+            new TaskCell(Quadrant.IV, [asking, parent, orphan]),
+        };
+
+        var folded = TaskViews.FoldSubtasks(cells);
+
+        Assert.Equal(4, folded.Count);
+        Assert.Empty(folded[0].Tasks);
+        Assert.Equal(["Asking", "Parent", "Orphan"], Titles(folded[3].Tasks));
+    }
+
     // --- the tasks a drag can nest under --------------------------------------------------------
 
     [Fact]

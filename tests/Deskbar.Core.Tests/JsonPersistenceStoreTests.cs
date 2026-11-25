@@ -383,7 +383,8 @@ public sealed class JsonPersistenceStoreTests : IDisposable
         using var pulse = manager.StateChanged.Subscribe(_ => pulses++);
 
         // CurrentWorkspace (task ed1a01fc) is an init property, so it is checked to make the round trip too.
-        var panel = new TasksPanelState(Open: true, Width: 512.5) { CurrentWorkspace = true };
+        // HideSubtasks (task 173ef268) likewise.
+        var panel = new TasksPanelState(Open: true, Width: 512.5) { CurrentWorkspace = true, HideSubtasks = true };
         Assert.True(manager.SaveTasksPanel(panel).IsSuccess);
         Assert.Equal(panel, store.Load().Value.TasksPanel);
         Assert.Equal(1, pulses);
@@ -407,6 +408,8 @@ public sealed class JsonPersistenceStoreTests : IDisposable
         Assert.False(panel.Open);
         Assert.Equal(460, panel.Width);
         Assert.False(panel.CurrentWorkspace);
+        // An older file shows subtasks, as every build before the checkbox did.
+        Assert.False(panel.HideSubtasks);
     }
 
     [Fact]

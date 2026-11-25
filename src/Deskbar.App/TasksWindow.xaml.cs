@@ -213,6 +213,8 @@ public partial class TasksWindow : Window
     internal bool ClaudeWorkingOn { get; private set; }
     // Whether the "Current workspace" checkbox is ticked, as last drawn (task ed1a01fc), for the tests.
     internal bool CurrentWorkspaceOn { get; private set; }
+    // Whether the "Subtasks" checkbox is ticked, as last drawn (task 173ef268), for the tests.
+    internal bool SubtasksOn { get; private set; } = true;
     internal bool AddBoxShown => AddRow.Visibility == Visibility.Visible;
     internal string? Problem => ProblemText.Visibility == Visibility.Visible ? ProblemText.Text : null;
     internal bool ThreadShown(Guid id) => authors.ContainsKey(id);
@@ -521,6 +523,9 @@ public partial class TasksWindow : Window
             // The "Claude working" chip (Task 7): on or off, and its count. NOT the search text: the box is not drawn from
             // the view, and the lines it narrows are below, so a keystroke that changes no line redraws nothing.
             $"{view.ClaudeWorking}{view.ClaudeWorkingCount}",
+            // The "Subtasks" checkbox (task 173ef268): a tick on a list with no subtasks changes no line, and the box must
+            // still redraw ticked.
+            $"{view.ShowsSubtasks}",
             string.Join('|', view.Places.Select(p => $"{p.IsGroup}{p.Workspace}{p.Name}{(p.Colour as SolidColorBrush)?.Color}")),
             view.EmptyText,
             $"{renaming}{editingComment}{string.Join(",", settledOpen.Order())}|{string.Join(",", earlierOpen.Order())}|{string.Join(",", longOpen.Order())}",
@@ -580,6 +585,24 @@ public partial class TasksWindow : Window
         // menu beside it unticks it, since the filter then names a workspace of its own. It is drawn as a toolbar chip with
         // the icon font's box, not a WPF CheckBox: the toolbar is always the dark page, and under ThemeMode="System" a
         // light Windows theme would draw a stock CheckBox in light colours (the workspace menu's lesson, ruling g).
+        // "Subtasks", a checkbox drawn the same way (task 173ef268; Petre's screenshot of a parent with eight subtasks
+        // filling the panel: "checkbox at the top to show nested tasks or not"). Ticked, subtasks are drawn under their
+        // parent as before; unticked, they fold into the parent's line, whose "· 8 subtasks" already says how many there
+        // are, and its thread still lists them. A subtask waiting on you stays (TaskViews.FoldSubtasks). It sits before
+        // "Current workspace" so that one stays next to the workspace menu it belongs with. Remembered across opens.
+        if (Actions?.ShowSubtasks is { } showSubtasks)
+        {
+            var on = view.ShowsSubtasks;
+            var subtasks = Flat(CheckContent(on, "Subtasks"), "Subtasks", () => showSubtasks(!on), new Thickness(6, 2, 8, 2));
+            subtasks.BorderBrush = on ? PickedEdge : Brushes.Transparent;
+            subtasks.Margin = new Thickness(0, 0, 6, ChipRowGap);
+            subtasks.ToolTip = on
+                ? "Subtasks are drawn under their parent. Untick to fold them into the parent's line, which counts them"
+                : "Subtasks are folded into their parent's line, which counts them. Tick to draw them under it";
+            AutomationProperties.SetItemStatus(subtasks, on ? "checked" : "unchecked");
+            Filters.Children.Add(subtasks);
+        }
+        SubtasksOn = view.ShowsSubtasks;
         var following = view.Where.FollowsCurrent;
         var current = Flat(CheckContent(following, "Current workspace"), "Current workspace",
             () => Actions?.FilterWorkspace(following ? TaskWorkspaceFilter.All : TaskWorkspaceFilter.Current), new Thickness(6, 2, 8, 2));

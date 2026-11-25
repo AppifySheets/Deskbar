@@ -802,6 +802,11 @@ public sealed record TasksPanelState(bool Open, double Width)
     // before it loads as false, and no migration.
     public bool CurrentWorkspace { get; init; }
 
+    // Whether the "Subtasks" checkbox is UNticked (task 173ef268): subtasks folded into their parent's line, which still
+    // counts them ("· 8 subtasks"), instead of drawn under it. Kept across opens and restarts for the same reason as
+    // CurrentWorkspace: it is how Petre likes the list, not a look at the moment. Stored as the hiding, so false (an
+    // older file, or a property the serializer leaves out) means today's behaviour, subtasks shown.
+    public bool HideSubtasks { get; init; }
 
     // What an absent AppState.TasksPanel means: closed, at the default width. Callers use this, not their own copy.
     public static readonly TasksPanelState Default = new(false, Tasks.TasksPanelLayout.DefaultWidth);

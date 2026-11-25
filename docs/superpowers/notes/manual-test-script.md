@@ -648,6 +648,12 @@ S15. Claude still at it (task 37cd7081). Start Claude on a task and, while it wo
     `$ts task close <id>` on a working task is refused and names `--stop-claude`; with it, the task closes and the
     session stops. A Done task and a plain note still close at once on their tick. On a task whose session runs in
     VS Code, Stop Claude and close closes the task, the window stays open, and the thread says so.
+S16. The Subtasks checkbox (task 173ef268). Give a note three subtasks and ask a question on one of them with
+    `$ts task ask` from its session (or set it Waiting). In the tasks panel the toolbar's "Subtasks" box is ticked and
+    the subtasks are under the parent. Untick it: the two plain subtasks go, the parent still says "· 3 subtasks", the
+    asking one stays in Waiting on you, and opening the parent lists all three. Filter to another workspace than the
+    parent's with a subtask there: that subtask still shows. Close and reopen the panel, then restart Deskbar: the box
+    is still unticked. Switch to the Matrix: subtasks whose parent is in a cell are gone. Tick it: everything is back.
 
 ## Goals
 
