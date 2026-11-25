@@ -13,8 +13,9 @@ namespace Deskbar.App;
 // subtask").
 //
 // "Add subtask" in an open thread, and "Add subtask…" on a line's menu, used to open the add box at the top of the panel
-// with the parent as a chip, far from where Petre clicked. Now the thread's "Add subtask" button turns into a box in its
-// own place (the menu opens the line's thread first, as "Related to…" does for its picker):
+// with the parent as a chip, far from where Petre clicked. Now the thread's "Add subtask" button opens a box right under
+// the row of buttons it sits in at the thread's top (task 1c17b7d6), and leaves that row while the box is open (the menu
+// opens the line's thread first, as "Related to…" does for its picker):
 //
 //   * Enter adds what is typed as a subtask (TasksBoard.AddSubtaskInThread): the first line is the title, the lines after
 //     it the description (TaskNote.Split, as in the add box); Shift+Enter starts a new line; pictures pasted or dropped on

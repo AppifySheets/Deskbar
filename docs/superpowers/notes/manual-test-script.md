@@ -542,7 +542,8 @@ throwaway folder Claude Code trusts, and tracing on for the `claude actions:` an
     repo that some session also used): a short list of the folders opens at the pointer, ending with
     "Choose a folder…". "Choose a folder…" opens Windows' folder picker; cancelling it starts nothing.
 93. Open the thread of a task whose session is still running (task 9b6275bc): the session's line reads working or
-    idle and has Open, and there is no "Start Claude on this" button under it. "Open in window" shows the same: no
+    idle, "Open Claude" is in the row of buttons at the top of the thread (task 1c17b7d6; the line itself has Open
+    only when the task has a second session to open), and there is no "Start Claude on this" button. "Open in window" shows the same: no
     button in the Sessions column and no "Start Claude on this" on the "⋯" menu. Stop the session (`claude stop`):
     after the next poll the line reads ended and the button is back in both places.
 94. Close the terminal window from 91 (its X). `claude agents` still lists the session, and the task still shows it.
@@ -1228,6 +1229,19 @@ MP4. Click into the manager's window: its ring is violet, not white. Click into 
      its workspace colour again.
 MP5. Have the manager ask you something (as MQ1): its window's icon on the bar glows orange until you answer in it,
      and clicking into the window alone does not stop the glow.
+
+## The thread's buttons
+
+(Task 1c17b7d6.) The tasks panel open.
+
+TB1. Open the thread of a Claude task with one session, still working or idle: it starts with one row of buttons,
+     **Open in window**, **Open Claude** and **Add subtask**. The session's line under it has no Open of its own.
+     **Open Claude** goes to the session, as the line's double-click does. Once that session has ended, **Start Claude
+     on this** joins the row before **Add subtask**, and a click on the row right then does nothing for half a second.
+TB2. Open the thread of a note: the row reads **Open in window**, **Start Claude on this**, **Add subtask**. Press
+     **Add subtask**: the box opens right under the row and the button leaves the row; Esc brings it back.
+TB3. Open the thread of a task with two sessions: each session line that can be opened has its Open again. Narrow
+     the panel to its narrowest: the row wraps onto a second line instead of being cut off.
 
 ## Results (2026-08-01)
 

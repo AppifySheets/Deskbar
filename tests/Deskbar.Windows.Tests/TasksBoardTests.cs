@@ -3982,6 +3982,49 @@ public class TasksBoardTests
         Assert.Contains(Inside(redrawn).OfType<TextBlock>(), b => b.Text.EndsWith("· ended", StringComparison.Ordinal));
     });
 
+    // Task 1c17b7d6 (Petre: "open a window, open claude and add subtasks to be buttons at the top"): an open thread starts
+    // with one row of buttons, Open in window, Open Claude (or Start Claude on this) and Add subtask, in place of three
+    // stacked lines. With one session to open, its line drops its own Open, which would be Open Claude again; with two,
+    // each line keeps its Open. Add subtask's box opens right under the row, and the button leaves the row meanwhile.
+    [Fact]
+    public void An_open_thread_starts_with_its_actions_in_one_row() => StaThread.Run(() =>
+    {
+        using var t = Build(startClaude: _ => { }, openSession: (_, _) => Result.Success());
+        var id = t.Tasks.Create("Tasks redesign", t.Gepha, Session("s1")).Value.Id;
+        var note = t.Tasks.AddNote("Dishwasher tablets", t.Gepha).Value.Id;
+        t.Controller.Show();
+        t.Controller.ToggleThread(id);
+
+        WrapPanel ActionsRow() => Inside(t.Window).OfType<WrapPanel>().Single(p => TasksWindow.ThreadActionsTag.Equals(p.Tag));
+        IEnumerable<string?> Words(WrapPanel row) => row.Children.OfType<Button>().Select(AutomationProperties.GetName);
+        var row = ActionsRow();
+        Assert.Equal(["Open in window", "Open Claude", "Add subtask"], Words(row));
+        Assert.Same(row, ((StackPanel)row.Parent).Children[0]);
+        var line = Inside(t.Window).OfType<DockPanel>().Single(d => "session-line".Equals(d.Tag));
+        Assert.False(HasButtonNamed(line, "Open session s1"));
+        Click(ButtonNamed(row, "Open Claude"));
+        Assert.Equal([id], t.WentTo);
+
+        // A second session: Open Claude goes to one of them only, so each session line has its Open back.
+        Assert.True(t.Tasks.Join(id, Session("s2")).IsSuccess);
+        var lines = Inside(t.Window).OfType<DockPanel>().Where(d => "session-line".Equals(d.Tag)).ToList();
+        Assert.Equal(2, lines.Count);
+        Assert.All(lines, l => Assert.Contains(Inside(l).OfType<Button>(), b => AutomationProperties.GetName(b)!.StartsWith("Open session ", StringComparison.Ordinal)));
+
+        // A note has no session: Start Claude on this stands where Open Claude would. The task's thread is folded first,
+        // so one thread is open.
+        t.Controller.ToggleThread(id);
+        t.Controller.ToggleThread(note);
+        Assert.Equal(["Open in window", "Start Claude on this", "Add subtask"], Words(ActionsRow()));
+
+        // Add subtask: the box opens right under the row, and the row has no Add subtask while it is open.
+        t.Window.BeginSubtaskAdd(note);
+        row = ActionsRow();
+        Assert.Equal(["Open in window", "Start Claude on this"], Words(row));
+        var thread = (StackPanel)row.Parent;
+        Assert.True(Inside(thread.Children[1]).Contains(t.Window.SubtaskBoxShown));
+    });
+
     static bool HasButton(object scope, string name) => Inside(scope).OfType<Button>().Any(b => AutomationProperties.GetName(b) == name);
 
     // --- Tasks panel plan, Task 8: lines at the panel's width, the Matrix from 780, the working halo ------------------

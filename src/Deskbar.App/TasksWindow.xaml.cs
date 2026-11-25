@@ -1741,16 +1741,21 @@ public partial class TasksWindow : Window
     string ThreadLayoutKey(TaskRowView row) =>
         !row.Expanded ? ""
         : string.Join(',', row.SessionList.Select(s => s.Id)) + "/"
+          // Whether a session is running decides whether "Start Claude on this" is in the row of buttons at the thread's
+          // top (task 1c17b7d6), right before "Add subtask": it appearing must start the guard, or a click meant for Add
+          // subtask lands on Start Claude.
+          + (row.HasOpenSession ? "running" : "") + "/"
           // A subtask open in place (task 0eb943d8) puts its whole thread inside this one.
           + string.Join(',', row.Subtasks.Select(c => $"{c.Id}" + (c.Row is { } open ? "[" + ThreadLayoutKey(open) + "]" : ""))) + "/"
           // Task links: the link lines and an open picker sit above the comments, so each moves them.
           + string.Join(',', row.Links.Select(l => $"{l.Kind}{l.Id}")) + (linking is { } l && l.Task == row.Id ? $"picker{l.Duplicate}" : "")
-          // The subtask box (task 0eb943d8) stands where "Add subtask" was, and is taller than it.
+          // The subtask box (task 0eb943d8) opens under the row of buttons, and Add subtask leaves the row meanwhile.
           + (subtaskUnder == row.Id ? "subtask-box" : "") + "/"
           + string.Join(',', ThreadComments(row).Shown.Select(c => $"{c.Id}{(longOpen.Contains(c.Id) ? "+" : "")}"))
           + $"{settledOpen.Contains(row.Id)}{earlierOpen.Contains(row.Id)}";
 
-    // The task's sessions with their Open buttons and "Start Claude on this" (Task 9), then the comments, each with its
+    // The row of buttons (ThreadActions, task 1c17b7d6: Open in window, Open Claude, "Start Claude on this", Add subtask),
+    // the task's sessions with their Open buttons (Task 9), the subtasks and links, then the comments, each with its
     // author and time over its markdown, then a box for Petre's next one. RULING 62: the settled comments are folded away
     // behind one dim line above the comments, "N settled comments", which unfolds them in place (and reads "Hide N
     // settled comments" while they show). They are kept, so the history stays.
@@ -1758,7 +1763,7 @@ public partial class TasksWindow : Window
     // IN PLACE (task 0eb943d8, Petre: "let subtasks stay where they are, expand their current place"): a subtask listed in
     // its parent's open thread opens there, its own thread drawn right under its entry (`inParent`), indented in a frame
     // of its own. That thread leaves out "Subtask of" (the parent is the thread around it) and "Add subtask" (the
-    // parent's own is a few lines below and adds the same sibling).
+    // parent's own is in the row at the top of the parent's thread and adds the same sibling).
     UIElement Thread(TaskRowView row, bool inParent = false)
     {
         var panel = new StackPanel();
@@ -1768,44 +1773,27 @@ public partial class TasksWindow : Window
         // thread, and the name is a button that opens the parent (TasksBoard.OpenParent).
         if (!inParent && row.ParentId is { } parentId && row.ParentTitle is { } parentTitle && Actions?.OpenParent is { } openParent)
             panel.Children.Add(ParentEntry(parentId, parentTitle, openParent));
-        // "Open in window" (task dca4ebeb) at the top of an open thread: the thread is where a long task stops fitting.
-        if (Actions?.OpenWindow is { } openWindow)
-        {
-            var window = Small(OpenInWindowText, OpenInWindowText, () => openWindow(row.Id),
-                "Read and edit the whole task in a window of its own");
-            window.Margin = new Thickness(0, 0, 0, 8);
-            window.HorizontalAlignment = HorizontalAlignment.Left;
-            panel.Children.Add(window);
-        }
-        row.SessionList.ToList().ForEach(session => panel.Children.Add(SessionLine(row.Id, session)));
-        // Not while a session of the task is running (task 9b6275bc, TaskRowView.HasOpenSession): its line above has
-        // Open, and a start button under it read as the thing to press. It is back once every session has ended.
-        if (Actions?.StartClaude is { } start && row.Status != TaskStatus.Closed && !row.Closing && !row.HasOpenSession)
-        {
-            var button = Small(StartClaudeText, StartClaudeText, () => start(row.Id),
-                "Start a background Claude session on this task, with the task as its first message");
-            button.Margin = new Thickness(0, 0, 0, 8);
-            panel.Children.Add(button);
-        }
+        // THE THREAD'S ACTIONS ARE ONE ROW OF BUTTONS AT ITS TOP (task 1c17b7d6; Petre, on a screenshot of an open thread
+        // that stacked "Open in window", the session line's "Open" and "Add subtask" on three lines: "open a window, open
+        // claude and add subtasks to be buttons at the top"). ThreadActions builds the row; the subtask box, when "Add
+        // subtask" was pressed, opens right under it, so it still appears where Petre clicked (task 0eb943d8).
+        var addsSubtask = !inParent && Actions?.SubtaskParent is not null && row.Status != TaskStatus.Closed && !row.Closing;
+        var (actions, hasOpenClaude) = ThreadActions(row, addsSubtask);
+        if (actions.Children.Count > 0) panel.Children.Add(actions);
+        if (addsSubtask && subtaskUnder == row.Id) panel.Children.Add(SubtaskBox(row.Id));
+        // The session lines stay as the record of who worked on the task. With Open Claude in the row above and the task
+        // having ONE session in all, that line's own Open would be the same click twice, so it is left off. With two or
+        // more, each line keeps its Open, since Open Claude goes to one of them only (TaskViews.SessionToGoTo: live first,
+        // then the newest), and that one may be an expired session with nothing to open (review of this change).
+        var onlySession = hasOpenClaude && row.SessionList.Count == 1;
+        row.SessionList.ToList().ForEach(session => panel.Children.Add(SessionLine(row.Id, session, withOpen: !onlySession)));
         // SUBTASKS IN THE THREAD (follow-up: Petre's screenshot of an open parent that said "2 subtasks" and showed none).
-        // Each is a button that opens or folds that subtask's own thread right under it, in place (task 0eb943d8); then
-        // "Add subtask", the twin of the menu's "Add subtask…". Pressed, the button turns into a box in its own place
-        // (TasksWindow.SubtaskAdd.cs), and the box stays there until Enter adds the subtask or Esc closes it.
+        // Each is a button that opens or folds that subtask's own thread right under it, in place (task 0eb943d8).
         row.Subtasks.ToList().ForEach(sub =>
         {
             panel.Children.Add(SubtaskEntry(sub));
             if (sub.Row is { } open) panel.Children.Add(Thread(open, inParent: true));
         });
-        if (!inParent && Actions?.SubtaskParent is not null && row.Status != TaskStatus.Closed && !row.Closing)
-        {
-            if (subtaskUnder == row.Id) panel.Children.Add(SubtaskBox(row.Id));
-            else
-            {
-                var add = Small("Add subtask", "Add subtask", () => BeginSubtaskAdd(row.Id), "Add a subtask under this task");
-                add.Margin = new Thickness(0, 0, 0, 8);
-                panel.Children.Add(add);
-            }
-        }
         // TASK LINKS (docs/superpowers/specs/2026-11-25-task-links-design.md): what the task duplicates, its duplicates and
         // its related tasks, each a button that shows that task, then the link picker while "Duplicate of…" or "Related
         // to…" has it open on this task.
@@ -1838,6 +1826,42 @@ public partial class TasksWindow : Window
             Child = panel,
         };
     }
+
+    // The row of buttons at the top of an open thread (task 1c17b7d6), left to right, each only where it applies:
+    //   Open in window        the task in a window of its own (task dca4ebeb): the thread is where a long task stops fitting;
+    //   Open Claude           a Claude task's session, the line's own Open Claude button and its double-click (Actions.Go,
+    //                         task 7f61af2e), here so the thread has it too; tagged so the session line can leave its Open off;
+    //   Start Claude on this  not while a session of the task is running (task 9b6275bc, TaskRowView.HasOpenSession), since
+    //                         Open Claude is then the thing to press; back once every session has ended, for a fresh one;
+    //   Add subtask           the twin of the menu's "Add subtask…" (task 0eb943d8). While its box is open (Thread puts the
+    //                         box right under this row) the button is left out, so the box is the one place to type.
+    // A WrapPanel, so on a narrow panel the buttons wrap onto a second line instead of clipping. Tagged for the tests.
+    (WrapPanel Row, bool HasOpenClaude) ThreadActions(TaskRowView row, bool addsSubtask)
+    {
+        var buttons = new List<Button>();
+        if (Actions?.OpenWindow is { } openWindow)
+            buttons.Add(Small(OpenInWindowText, OpenInWindowText, () => openWindow(row.Id),
+                "Read and edit the whole task in a window of its own"));
+        var openClaude = Actions is not null && OpensClaude(row);
+        if (openClaude)
+            buttons.Add(Small(OpenClaudeText, OpenClaudeText, () => Actions?.Go(row.Id),
+                "Go to this task's Claude session, resuming it first if it has ended"));
+        if (Actions?.StartClaude is { } start && row.Status != TaskStatus.Closed && !row.Closing && !row.HasOpenSession)
+            buttons.Add(Small(StartClaudeText, StartClaudeText, () => start(row.Id),
+                "Start a background Claude session on this task, with the task as its first message"));
+        if (addsSubtask && subtaskUnder != row.Id)
+            buttons.Add(Small("Add subtask", "Add subtask", () => BeginSubtaskAdd(row.Id), "Add a subtask under this task"));
+        var actions = new WrapPanel { Tag = ThreadActionsTag, Orientation = Orientation.Horizontal, Margin = new Thickness(0, 0, 0, 4) };
+        buttons.ForEach(button =>
+        {
+            button.Margin = new Thickness(0, 0, 6, 4);
+            actions.Children.Add(button);
+        });
+        return (actions, openClaude);
+    }
+
+    /// <summary>Tagged for tests: the row of buttons at the top of an open thread (task 1c17b7d6).</summary>
+    internal const string ThreadActionsTag = "thread-actions";
 
     // "N settled comments" (Ruling 62), dim, a button of its own: unfolds the thread's settled comments, then folds them again.
     UIElement SettledFold(Guid task, int count, bool unfolded)
@@ -1955,12 +1979,13 @@ public partial class TasksWindow : Window
     }
 
     // One session of the thread (Task 9, the spec's "Task history"): its short id, when it joined and where it stands,
-    // and Open, which does what going to that session does. An expired one has nothing left to open, so no button.
-    UIElement SessionLine(Guid taskId, SessionView session)
+    // and Open, which does what going to that session does. An expired one has nothing left to open, so no button. Nor
+    // has a line whose Open would repeat the Open Claude at the thread's top (withOpen false, task 1c17b7d6; see Thread).
+    UIElement SessionLine(Guid taskId, SessionView session, bool withOpen = true)
     {
         var shortId = session.Id[..Math.Min(8, session.Id.Length)];
         var line = new DockPanel { Tag = "session-line", Margin = new Thickness(0, 0, 0, 4), LastChildFill = true };
-        if (session.State != SessionState.Expired && Actions?.OpenSession is { } open)
+        if (withOpen && session.State != SessionState.Expired && Actions?.OpenSession is { } open)
         {
             var button = Small("Open", $"Open session {shortId}", () => open(taskId, session.Id),
                 "Go to this session's window, resuming it first if it has ended");
