@@ -8,8 +8,27 @@ namespace Deskbar.Core.Tasks;
 // flags below were measured in docs/superpowers/notes/2026-11-25-manager-session-probes.md. Nothing here starts a
 // process or touches a disk, so every rule is a test; the Windows side does the starting.
 
-/// <summary>The manager Deskbar last started: its full session id and the local calendar day it was started on.</summary>
-public sealed record ManagerRecord(string SessionId, DateOnly Day);
+/// <summary>
+/// The manager Deskbar last started: its full session id and the local calendar day it was started on. The other three
+/// are step 2's event wakes (ManagerWakes; docs/superpowers/specs/2026-11-25-manager-event-wakes-design.md), optional so
+/// a record saved before them still loads:
+/// <list type="bullet">
+/// <item><paramref name="Since"/>: events are counted from here (the start, then each wake); null until the first tick.</item>
+/// <item><paramref name="Unread"/>: a wake was delivered and the user has not opened the manager since (the button's dot).</item>
+/// <item><paramref name="HandedBack"/>: the tasks already reported as handed back today, so a second one is not nudged.</item>
+/// </list>
+/// </summary>
+public sealed record ManagerRecord(string SessionId, DateOnly Day, DateTimeOffset? Since = null, bool Unread = false,
+    IReadOnlyList<Guid>? HandedBack = null)
+{
+    // A record compares by its list's CONTENTS, not the list's reference, so a record loaded from state.json equals the
+    // one saved, and ManagerWaker can tell a changed record from the same one to skip a needless save.
+    public bool Equals(ManagerRecord? other) =>
+        other is not null && SessionId == other.SessionId && Day == other.Day && Since == other.Since
+        && Unread == other.Unread && (HandedBack ?? []).SequenceEqual(other.HandedBack ?? []);
+
+    public override int GetHashCode() => HashCode.Combine(SessionId, Day, Since, Unread, (HandedBack ?? []).Count);
+}
 
 /// <summary>What a click on the manager button should do.</summary>
 public abstract record ManagerStep
