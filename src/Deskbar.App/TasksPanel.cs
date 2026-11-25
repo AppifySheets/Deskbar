@@ -192,6 +192,12 @@ internal sealed class TasksPanel : IDisposable
     // The user's open or closed (see the top of this file).
     public bool IsShown => wanted;
 
+    // Standing behind a full-screen window right now, because the shell said one is up (StepAside) or because the panel
+    // found one as it showed (ShowOnTop). The board asks before it brings the panel forward (TasksBoard.Arrived): a
+    // `tasks-window show` while a video played used to dock the panel behind the video and then, 40 ms later, raise and
+    // activate it over the video, where it stayed until the next 1 s tick (manual step 64n, measured 2026-11-25).
+    internal bool BehindFullScreen => fullScreenOpen;
+
     public IObservable<bool> Shown => shown.AsObservable();
 
     // THE EDGE THE PANEL DOCKS ON, for its width grip (Task 6, spec "The panel window"): the grip sits on the edge facing
