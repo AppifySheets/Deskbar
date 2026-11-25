@@ -263,7 +263,12 @@ public static class SessionBriefing
         // lands code nobody tested together. A repository's own instructions can say this (the Deskbar repo's CLAUDE.md
         // did), but every task session in every repository reads this briefing, so the rule lives here. "Push it straight
         // away" is part of the rule: a rebase held back locally while the tests wait still shows the user a conflict.
-        "While your pull request is open, keep it on top of its base without being asked: watch the base until the pull request is merged or closed, and as soon as the base moves or the pull request conflicts, rebase it onto the latest base, resolve any conflict, and push it straight away with --force-with-lease, then build, test and watch CI on what you pushed.",
+        // MERGEABLE FIRST, TESTS ON CI (task c121bab5, Petre, while #517 kept conflicting: "if it can't be merged, it should
+        // act quickly to rebase and push"). The first wording said "then build, test and watch CI", and a session spent
+        // minutes on local suites after each push while main moved again. Only a compile, which takes seconds, may come
+        // before the push; the suites are CI's, and come back locally only to reproduce a CI failure. A base move while CI
+        // runs means rebasing again at once, not waiting for the result.
+        "While your pull request is open, keep it on top of its base without being asked: watch the base until the pull request is merged or closed, and as soon as the base moves or the pull request conflicts, rebase it onto the latest base, resolve any conflict, and push it straight away with --force-with-lease. A quick build may come before the push, a test run never does: let CI run the tests on what you pushed, and run them locally only when CI fails. Mergeability comes first, so if the base moves again while CI runs, rebase and push again at once.",
         $"  {Shim} task answered --session {sessionId}   (when the user's reply settles your question, or you settle it yourself; run it straight away; it also settles, that is folds away, your comments written since you asked)",
         $"  {Shim} task comment-settle <comment-id> --session {sessionId}   (settle one of your own comments that no longer matters)",
         "A message from the user never resolves your question by itself: you do, with task answered. Never leave a question open once it is resolved.",
