@@ -237,6 +237,36 @@ public class TasksBoardTests
         Assert.Equal([nowhere, there, here], t.Window.Keys);
     });
 
+    // Task 07d4b83d, Petre: "current workspace takes a long time to refresh the tasks when i change workspace". Windows
+    // raises its desktop change on a thread of its own (an MTA one), and the manager pulses StateChanged from there. The
+    // board used to redraw on that thread: WPF threw ("The calling thread must be STA"), the manager's catch swallowed
+    // it, and DistinctUntilChanged had already taken the new workspace as seen, so the list stayed on the old workspace
+    // until some unrelated change (a task, a session list) redrew it. The switch below is driven from such a thread, and
+    // the list must follow as soon as the dispatcher runs what was queued for it.
+    [Fact]
+    public void The_current_workspace_filter_follows_a_switch_raised_on_another_thread() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        var here = t.Tasks.AddNote("here", t.Gepha).Value.Id;
+        var there = t.Tasks.AddNote("there", t.Sparrow).Value.Id;
+        SwitchTo(t, t.Gepha);
+        t.Controller.Show();
+        t.Controller.FilterWorkspace(TaskWorkspaceFilter.Current);
+        Assert.Equal([here], t.Window.Keys);
+
+        var desktop = t.Harness.Manager.State.Workspaces.Single(w => w.Id == t.Sparrow).DesktopId!.Value;
+        t.Harness.Desktops.CurrentId = desktop;
+        var windows = new Thread(() =>
+            ((System.Reactive.Subjects.Subject<Guid>)t.Harness.Desktops.CurrentChanged).OnNext(desktop));
+        windows.SetApartmentState(ApartmentState.MTA);
+        windows.Start();
+        windows.Join();
+        t.Window.Dispatcher.Invoke(() => { }, System.Windows.Threading.DispatcherPriority.Background);
+
+        Assert.Equal([there], t.Window.Keys);
+        Assert.Equal("Workspace: Sparrow", t.Window.WorkspaceFilterLabel);
+    });
+
     // The one filter a fresh open keeps (AppState.TasksPanel.CurrentWorkspace): it is how Petre works, and the panel
     // reopens at every start. Picking any other workspace filter forgets it.
     [Fact]
