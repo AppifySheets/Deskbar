@@ -62,6 +62,11 @@ public static class ControlUsage
                 + "      comments (a count), updatedAt, important, urgent, quadrant (I to IV) and order (its place in\n"
                 + "      the quadrant, from 1; null while it waits on you or is done);\n"
                 + "      --closed lists the closed ones instead, the latest closed first, to find one to reopen"),
+            new("task", "stats [--days <n>]",
+                "the tasks panel's Stats as JSON: open now, added and finished in the last 7 days, the median hours\n"
+                + "      to finish, and per local day (14 by default, today last) the open count at its end and the\n"
+                + "      tasks added and finished (id, title, status); estimated is true while any finish time counted\n"
+                + "      comes from before status changes were logged"),
             new("task", "add <title>|- [--workspace <name>|none] [--important] [--urgent] [--parent <id>]",
                 "add a note to the backlog; without --workspace it goes on the workspace of the VS Code window\n"
                 + "      whose folder holds --from (the caller's own folder if not given); - reads the title from stdin;\n"
@@ -122,10 +127,11 @@ public static class ControlUsage
             new("task", "comment-settle <comment-id> --session <session>",
                 "settle one of the session's own comments: it stays but folds away in the tasks window. task answered\n"
                 + "      settles the session's comments written since its question was asked; another session's is refused"),
-            new("tasks-window", "show|hide|list|matrix",
+            new("tasks-window", "show|hide|list|matrix|stats",
                 "open the tasks panel beside the bar, as the bar's \"All tasks\" does (every task grouped as on the bar,\n"
                 + "      the closed ones under their filter, each with its comments), or close it; list or matrix switches its view\n"
-                + "      (Covey's 2 by 2: urgent and not urgent across, important and not important down), remembered"),
+                + "      (Covey's 2 by 2: urgent and not urgent across, important and not important down), remembered;\n"
+                + "      stats opens it on its Stats view (added, finished and open tasks per day, each task a link), not remembered"),
             new("task", "assign <id> me|claude",
                 "hand a task to yourself or to Claude, as the tasks window's \"Assign to\" menu does. The bar lists only the tasks\n"
                 + "      assigned to you; a note assigned to Claude is offered to a new session on its workspace"),

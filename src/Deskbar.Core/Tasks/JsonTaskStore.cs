@@ -120,7 +120,14 @@ public sealed class JsonTaskStore(string baseDirectory, Action<string>? trace = 
         [property: JsonConverter(typeof(TolerantTimeConverter))] DateTimeOffset? SnoozedUntil = null,
         // TaskItem.Pin (task f41d7857, the pinned block's own order): null in a file written before it existed,
         // which reads as the latest raised on top (FallbackPin), the block's order until then. Still version 2.
-        double? Pin = null);
+        double? Pin = null,
+        // TaskItem.StatusLog (task 521d2b07, the task stats): every status change since logging began. Left out of the
+        // file while empty, so a task nobody moved stays as short as it was; a file without it reads as no history.
+        // Still version 2.
+        [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] IReadOnlyList<StatusChangeDto>? StatusLog = null);
+
+    // One status change (TaskItem.StatusLog). Both statuses go through the tolerant converter, like the task's own.
+    sealed record StatusChangeDto(DateTimeOffset At, TaskStatus From, TaskStatus To);
 
     // The assignee (Ruling 57): kind by name ("me", "claude", "colleague"), plus the id and name a colleague needs.
     sealed record AssigneeDto(string? Kind, string? Id, string? Name);
@@ -216,7 +223,8 @@ public sealed class JsonTaskStore(string baseDirectory, Action<string>? trace = 
             t.HandedBack.HasValue ? t.HandedBack.Value.ToUniversalTime() : null,
             t.ParentId.HasValue ? t.ParentId.Value : null,
             t.SnoozedUntil.HasValue ? t.SnoozedUntil.Value.ToUniversalTime() : null,
-            t.Pin);
+            t.Pin,
+            t.StatusLog.Count > 0 ? t.StatusLog.Select(c => new StatusChangeDto(c.At.ToUniversalTime(), c.From, c.To)).ToArray() : null);
 
     static TaskItem FromDto(TaskDto d) =>
         new(d.Id, d.Title ?? "",
@@ -247,6 +255,7 @@ public sealed class JsonTaskStore(string baseDirectory, Action<string>? trace = 
             ParentId = d.ParentId is { } parent ? parent : Maybe<Guid>.None,
             SnoozedUntil = d.SnoozedUntil is { } snoozed ? snoozed.ToUniversalTime() : Maybe<DateTimeOffset>.None,
             Pin = d.Pin ?? FallbackPin(d.Raised ?? d.Created),
+            StatusLog = (d.StatusLog ?? []).Where(c => c is not null).Select(c => new StatusChange(c.At.ToUniversalTime(), c.From, c.To)).ToArray(),
         };
 
     // A pin for a task saved before pins existed: the later raised, the higher (smaller is higher), so the pinned block

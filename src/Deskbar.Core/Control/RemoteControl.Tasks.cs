@@ -101,6 +101,12 @@ public sealed partial class RemoteControl
             // The latest closed first: closing stamps UpdatedAt, and nothing but Petre's own edits moves it after that.
             ["list", "--closed"] => Success(service.Board.Tasks.Where(t => t.Status == TaskStatus.Closed)
                 .OrderByDescending(t => t.UpdatedAt).Select(Listed).ToArray()),
+            // The stats view's numbers (task 521d2b07, TaskStats): the burn-up's days with the tasks added and finished on
+            // each, the open count at each day's end, and the headline numbers. Days are this machine's local days.
+            ["stats"] => TaskStatsReply(service, TaskStats.DefaultDays),
+            ["stats", "--days", var days] => int.TryParse(days, out var count) && count is >= 1 and <= 366
+                ? TaskStatsReply(service, count)
+                : ControlReply.Fail("task stats --days takes a whole number of days from 1 to 366"),
             ["add", .. var more] => TaskAdd(service, more, from),
             // A task Claude is still working on refuses a plain close (task 37cd7081, TaskBoard.Close), and the refusal
             // names the flag; `--stop-claude` is the menus' "Stop Claude and close", through the app (ClaudeTaskActions).
@@ -147,6 +153,29 @@ public sealed partial class RemoteControl
         };
     }
 
+    // `task stats [--days <n>]` (TaskStats): what the panel's Stats view draws, as JSON. Each task is its id, title and
+    // status, so a caller can `task show` or `task go` any of them; the median is in hours, rounded to a tenth.
+    static ControlReply TaskStatsReply(TaskService service, int days)
+    {
+        var stats = TaskStats.Of(service.Board, service.Now, TimeZoneInfo.Local, days);
+        object Brief(TaskItem t) => new { id = t.Id, title = t.Title, status = StatusName(t.Status) };
+        return Success(new
+        {
+            openNow = stats.OpenNow,
+            addedLast7Days = stats.AddedThisWeek,
+            finishedLast7Days = stats.FinishedThisWeek,
+            medianHoursToFinish = stats.MedianToFinish.HasValue ? Math.Round(stats.MedianToFinish.Value.TotalHours, 1) : (double?)null,
+            estimated = stats.Estimated,
+            days = stats.Days.Select(d => new
+            {
+                date = d.Date.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture),
+                openAtEnd = d.OpenAtEnd,
+                added = d.Added.Select(Brief).ToArray(),
+                finished = d.Finished.Select(Brief).ToArray(),
+            }).ToArray(),
+        });
+    }
+
     // `tasks-window show|hide`: the tasks panel docked beside the bar, opened as the bar's "All tasks" opens it, or
     // closed. The verb keeps its old name, so scripts written for the floating window still work.
     // `tasks-window list|matrix`: the window's view switch (Task 12, Ruling 28), a remembered setting
@@ -159,6 +188,10 @@ public sealed partial class RemoteControl
         "show" or "hide" when setTasksWindow is null => ControlReply.Fail("This copy of Deskbar has no tasks panel."),
         "show" => Reply(setTasksWindow!(true), () => new { shown = true }),
         "hide" => Reply(setTasksWindow!(false), () => new { shown = false }),
+        // The Stats view (task 521d2b07), opening the panel if it was hidden. Not remembered, unlike list and matrix.
+        "stats" => showTasksStats is null
+            ? ControlReply.Fail("This copy of Deskbar has no tasks panel.")
+            : Reply(showTasksStats(), () => new { shown = true, stats = true }),
         _ => ControlReply.Fail(ControlUsage.LineFor("tasks-window")),
     };
 

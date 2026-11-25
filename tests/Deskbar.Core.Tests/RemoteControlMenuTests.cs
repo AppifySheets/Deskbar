@@ -591,7 +591,20 @@ public class RemoteControlMenuTests
 
         Ok(control.Execute(["tasks-window", "list"]));
         Assert.False(manager.State.TasksMatrix);
-        Assert.Contains(ControlUsage.All, c => c.Verb == "tasks-window" && c.Arguments == "show|hide|list|matrix");
+        Assert.Contains(ControlUsage.All, c => c.Verb == "tasks-window" && c.Arguments == "show|hide|list|matrix|stats");
+    }
+
+    // Task 521d2b07: `tasks-window stats` is the Stats switch's twin, through the app's callback; a copy with no panel refuses.
+    [Fact]
+    public void Tasks_window_stats_opens_the_stats_view()
+    {
+        var asked = 0;
+        var control = new RemoteControl(Started(), showTasksStats: () => { asked++; return Result.Success(); });
+        var reply = control.Execute(["tasks-window", "stats"]);
+        Ok(reply);
+        Assert.Equal(1, asked);
+        Assert.True(Json(reply).GetProperty("stats").GetBoolean());
+        Assert.Equal(ControlReply.Failed, new RemoteControl(Started()).Execute(["tasks-window", "stats"]).ExitCode);
     }
 
     // Whole-PR review, minor 5: a bare `tasks-window` prints its own usage line, not the whole usage.
@@ -601,7 +614,7 @@ public class RemoteControlMenuTests
         var reply = new RemoteControl(Started(), setTasksWindow: _ => Result.Success()).Execute(["tasks-window"]);
 
         Assert.Equal(ControlReply.Failed, reply.ExitCode);
-        Assert.Equal("usage: deskbar.cmd tasks-window show|hide|list|matrix", reply.Output.Trim());
+        Assert.Equal("usage: deskbar.cmd tasks-window show|hide|list|matrix|stats", reply.Output.Trim());
     }
 
     [Fact]

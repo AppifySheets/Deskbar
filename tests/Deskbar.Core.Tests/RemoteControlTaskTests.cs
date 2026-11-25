@@ -766,7 +766,10 @@ public class RemoteControlTaskTests
     [Fact]
     public void Task_is_in_the_help() =>
         Assert.Equal(
-            ["list [--closed]", "add <title>|- [--workspace <name>|none] [--important] [--urgent] [--parent <id>]", "close <id> [--stop-claude]", "reopen <id>",
+            ["list [--closed]",
+             // Task 521d2b07: the Stats view's numbers.
+             "stats [--days <n>]",
+             "add <title>|- [--workspace <name>|none] [--important] [--urgent] [--parent <id>]", "close <id> [--stop-claude]", "reopen <id>",
              "status <id> <backlog|in-progress|waiting|done>", "rename <id> <title>|-", "move <id> <workspace>|none",
              "comment <id> <markdown>|-", "delete <id>", "flag <id> important|urgent on|off", "order <id> top|end|<n>",
              // Task 9: going to a task, starting Claude on it and opening one of its sessions.
@@ -939,5 +942,32 @@ public class RemoteControlTaskTests
         var without = Run(manager, "task", "open", id.ToString());
         Assert.Equal(ControlReply.Failed, without.ExitCode);
         Assert.Contains(RemoteControl.TaskWindowUnavailable, without.Output);
+    }
+
+    // `task stats` (task 521d2b07): the Stats view's numbers as JSON, each day's tasks with their ids so a caller can
+    // follow them; --days narrows the days, and a wrong count is refused.
+    [Fact]
+    public void Task_stats_prints_the_burn_up_with_each_task()
+    {
+        var manager = Started();
+        var id = Guid.Parse(Json(Run(manager, "task", "add", "Soap", "--workspace", "Deskbar")).GetProperty("id").GetString()!);
+        clock = clock.AddHours(2);
+        Ok(Run(manager, "task", "close", id.ToString()));
+
+        var reply = Run(manager, "task", "stats", "--days", "3");
+        Ok(reply);
+        var json = Json(reply);
+        Assert.Equal(3, json.GetProperty("days").GetArrayLength());
+        Assert.Equal(1, json.GetProperty("finishedLast7Days").GetInt32());
+        Assert.Equal(0, json.GetProperty("openNow").GetInt32());
+        Assert.Equal(2.0, json.GetProperty("medianHoursToFinish").GetDouble());
+        Assert.False(json.GetProperty("estimated").GetBoolean());
+        var finished = json.GetProperty("days").EnumerateArray().SelectMany(d => d.GetProperty("finished").EnumerateArray()).Single();
+        Assert.Equal(id.ToString(), finished.GetProperty("id").GetString());
+        Assert.Equal("closed", finished.GetProperty("status").GetString());
+
+        Assert.Equal(14, Json(Run(manager, "task", "stats")).GetProperty("days").GetArrayLength());
+        Assert.Equal(ControlReply.Failed, Run(manager, "task", "stats", "--days", "0").ExitCode);
+        Assert.Equal(ControlReply.Failed, Run(manager, "task", "stats", "--days", "many").ExitCode);
     }
 }

@@ -36,6 +36,20 @@
                 </Trigger>
             </ControlTemplate.Triggers>
         </ControlTemplate>
+        <!-- A task link in the Stats view (task 521d2b07, TasksWindow.Stats.cs): FlatButton with its content stretched
+             across the line, so the status and the title start at the left edge instead of the middle. -->
+        <ControlTemplate x:Key="LinkButton" TargetType="Button">
+            <Border x:Name="Face" Background="{TemplateBinding Background}" CornerRadius="4"
+                    BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="{TemplateBinding BorderThickness}"
+                    Padding="{TemplateBinding Padding}">
+                <ContentPresenter HorizontalAlignment="Stretch" VerticalAlignment="Center"/>
+            </Border>
+            <ControlTemplate.Triggers>
+                <Trigger Property="IsMouseOver" Value="True">
+                    <Setter TargetName="Face" Property="Background" Value="#FF24262C"/>
+                </Trigger>
+            </ControlTemplate.Triggers>
+        </ControlTemplate>
         <!-- A line, drawn as a tile (Petre's pick, option E of the task-separation mockup, 2026-11-25: "better task
              separation with lines or something"). The Button's Background is the tile's own fill, set per line in
              TasksWindow.Line (TileFill, or AskTint while the task waits on him), and the corners are rounded. The hover
@@ -177,6 +191,13 @@
                     <StackPanel x:Name="Rows" Margin="0,0,0,8"/>
                 </ScrollViewer>
                 <Grid x:Name="MatrixGrid" Margin="6,4,8,8" Visibility="Collapsed" Background="Transparent"/>
+                <!-- The Stats view (task 521d2b07, TasksWindow.Stats.cs): the four numbers, the open-tasks line, the added
+                     and finished bars, and the picked day's tasks, each a link to its task. Shown by the toolbar's Stats
+                     switch in place of the List or the Matrix. -->
+                <ScrollViewer x:Name="StatsScroller" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled"
+                              Focusable="False" Visibility="Collapsed">
+                    <StackPanel x:Name="StatsPanel" Margin="12,8,12,12"/>
+                </ScrollViewer>
             </Grid>
         </DockPanel>
     </Border>

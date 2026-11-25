@@ -494,6 +494,15 @@ it leaves "Waiting on you" and comes back still waiting, with its question, unle
 first, which brings it back at once. A script does the same with `deskbar.cmd task snooze <id> 2h` (or `tomorrow`, `monday`, `45m`, `3d`) and
 `task wake <id>`.
 
+The panel's Stats switch, next to List and Matrix, shows how the work is going: how many tasks are open,
+how many were added and finished in the last 7 days, and the median time from added to finished. Under
+the numbers are two charts covering up to two weeks. One shows the tasks still open at the end of each
+day, which is what a burndown would draw. The other shows the tasks added and finished each day. Click a
+day to list what was finished and added on it. Click a task in that list to go straight to it in the
+panel, closed tasks included. "Finished" means Done or closed. Stats counts every task, whatever the
+filters say. A script gets the same numbers as JSON with `deskbar.cmd task stats` (`--days 30` for a
+longer stretch), and `deskbar.cmd tasks-window stats` opens the panel on Stats.
+
 The tasks screencast shows the old floating window and needs filming again for the panel.
 
 More in [Tasks](docs/features/tasks.md).

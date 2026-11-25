@@ -60,6 +60,14 @@ public sealed record TaskSession(string Id, string Folder, DateTimeOffset Joined
 }
 
 /// <summary>
+/// One entry of a task's <see cref="TaskItem.StatusLog"/>: the task went from <see cref="From"/> to <see cref="To"/> at
+/// <see cref="At"/>. Both ends are kept because a log that starts in the middle of a task's life (every task made before
+/// logging began) has to say whether its first entry left an open status or a finished one: Done to Closed means the
+/// task was already finished before the log saw it (TaskStats.FinishedAt).
+/// </summary>
+public sealed record StatusChange(DateTimeOffset At, TaskStatus From, TaskStatus To);
+
+/// <summary>
 /// One comment in a task's thread, as markdown. <see cref="SessionId"/> names the Claude session that wrote it;
 /// none means Petre wrote it, and <see cref="DeskbarAuthor"/> means Deskbar itself did (a resume, a stop, a failure).
 /// </summary>
@@ -233,6 +241,16 @@ public sealed record TaskItem(
 
     /// <summary>Whether the task is snoozed (<see cref="SnoozedUntil"/>): hidden from the bar and the panel's usual views.</summary>
     public bool IsSnoozed => SnoozedUntil.HasValue;
+
+    /// <summary>
+    /// Every status change the task has been through since status logging began, oldest first (task 521d2b07, the task
+    /// stats; spec docs/superpowers/specs/2026-11-25-task-stats-design.md, "Where the history comes from"). Written in
+    /// one place only, TaskService.Commit through TaskStatusLog.Logged, which compares the board before and after each
+    /// change, so no path that moves a status can forget it. What it is for: the stats view's finish times and its
+    /// open-tasks line. An init property like the flags, stored as an optional `statusLog`; a task from before it existed
+    /// has none, and the stats fall back on Raised and UpdatedAt for it (TaskStats.FinishedAt).
+    /// </summary>
+    public IReadOnlyList<StatusChange> StatusLog { get; init; } = [];
 
     /// <summary>Covey's quadrant the two flags name (TaskOrder.cs).</summary>
     public Quadrant Quadrant => QuadrantOf.Flags(Important, Urgent);

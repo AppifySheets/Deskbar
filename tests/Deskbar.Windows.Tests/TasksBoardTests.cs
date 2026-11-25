@@ -4503,4 +4503,113 @@ public class TasksBoardTests
 
         Assert.Equal(Maybe.From(parent.Id), t.Tasks.Board.Tasks.Single(x => x.Title == "Sibling").ParentId);
     });
+
+    // THE STATS VIEW (task 521d2b07; spec docs/superpowers/specs/2026-11-25-task-stats-design.md). The switch shows it in
+    // place of the List, with the search row and the chips hidden; today is the picked day, listing what was finished and
+    // added; List goes back.
+    [Fact]
+    public void The_Stats_switch_shows_the_days_tasks_and_List_goes_back() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        var soap = t.Tasks.AddNote("Soap", t.Gepha).Value.Id;
+        var bread = t.Tasks.AddNote("Bread", t.Gepha).Value.Id;
+        t.Tasks.Close(soap);
+        t.Controller.Show();
+
+        Click(ButtonNamed(t.Window, "Stats"));
+        Assert.True(t.Window.StatsShown);
+        Assert.Equal(Visibility.Visible, t.Window.StatsScroller.Visibility);
+        Assert.Equal(Visibility.Collapsed, t.Window.Scroller.Visibility);
+        Assert.Equal(Visibility.Collapsed, t.Window.SearchRow.Visibility);
+        Assert.Equal(Visibility.Collapsed, t.Window.Filters.Visibility);
+        // Finished first, then added, each latest first: Soap finished; Bread then Soap added.
+        Assert.Equal([soap, bread, soap], t.Window.StatsLinks);
+        Assert.Null(t.Window.StatsDay);
+
+        Click(ButtonNamed(t.Window, "List"));
+        Assert.False(t.Window.StatsShown);
+        Assert.Equal(Visibility.Visible, t.Window.Scroller.Visibility);
+        Assert.Equal(Visibility.Visible, t.Window.SearchRow.Visibility);
+        Assert.Equal([bread], t.Window.Keys);
+    });
+
+    // The link: a closed task's line in Stats leaves Stats for the Closed filter, with the task picked and its thread open.
+    [Fact]
+    public void A_closed_tasks_link_in_Stats_shows_it_under_Closed() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        var soap = t.Tasks.AddNote("Soap", t.Gepha).Value.Id;
+        t.Tasks.AddNote("Bread", t.Gepha);
+        t.Tasks.Close(soap);
+        t.Controller.Show();
+        Click(ButtonNamed(t.Window, "Stats"));
+
+        Click(Inside(t.Window.StatsPanel).OfType<Button>().First(b => b.Tag is Guid id && id == soap));
+
+        Assert.False(t.Window.StatsShown);
+        Assert.Equal([soap], t.Window.Keys);
+        // Not selected: a closed task never stays selected (ruling 21, TaskSelection.KeepOnly); its open thread shows it.
+        Assert.True(t.Window.ThreadShown(soap));
+    });
+
+    // An open task's link lands on the List with the task picked, even from a status filter that would hide it.
+    [Fact]
+    public void An_open_tasks_link_in_Stats_picks_it_past_a_status_filter() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        var bread = t.Tasks.AddNote("Bread", t.Gepha).Value.Id;
+        t.Controller.Show();
+        Click(ButtonNamed(t.Window, "Filter: Closed 0"));
+        Assert.Empty(t.Window.Keys);
+        Click(ButtonNamed(t.Window, "Stats"));
+
+        Click(Inside(t.Window.StatsPanel).OfType<Button>().First(b => b.Tag is Guid id && id == bread));
+
+        Assert.Equal([bread], t.Window.Keys);
+        Assert.True(t.Window.IsSelected(bread));
+        Assert.True(t.Window.ThreadShown(bread));
+    });
+
+    // On a panel too narrow for the Matrix, List still shows while Stats is on, as the way back; Stats always shows.
+    [Fact]
+    public void A_narrow_panel_still_offers_List_from_Stats() => StaThread.Run(() =>
+    {
+        using var t = Build(width: TasksPanelLayout.MatrixFrom - 1);
+        t.Tasks.AddNote("a", t.Gepha);
+        t.Controller.Show();
+        Assert.Equal(Visibility.Collapsed, ButtonNamed(t.Window, "List").Visibility);
+        Assert.Equal(Visibility.Visible, ButtonNamed(t.Window, "Stats").Visibility);
+
+        t.Controller.ShowStats();
+        Assert.Equal(Visibility.Visible, ButtonNamed(t.Window, "List").Visibility);
+        Assert.Equal(Visibility.Collapsed, ButtonNamed(t.Window, "Matrix").Visibility);
+    });
+
+    // A fresh open starts on the List again: Stats is not remembered.
+    [Fact]
+    public void Stats_is_not_remembered_across_opens() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        t.Controller.ShowStats();
+        Assert.True(t.Window.StatsShown);
+        t.Controller.Hide();
+        t.Controller.Show();
+        Assert.False(t.Window.StatsShown);
+    });
+
+    // Picking another day lists that day's tasks; a day with nothing lists nothing.
+    [Fact]
+    public void Picking_a_day_lists_its_tasks() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        t.Tasks.AddNote("Soap", t.Gepha);
+        t.Controller.ShowStats();
+        var today = DateOnly.FromDateTime(TimeZoneInfo.ConvertTime(Start.AddHours(1), TimeZoneInfo.Local).DateTime);
+
+        t.Window.PickStatsDay(today.AddDays(-1));
+        Assert.Equal(today.AddDays(-1), t.Window.StatsDay);
+        Assert.Empty(t.Window.StatsLinks);
+        t.Window.PickStatsDay(today);
+        Assert.Single(t.Window.StatsLinks);
+    });
 }

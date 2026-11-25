@@ -54,20 +54,25 @@ public partial class TasksWindow
     // under the quadrants I to IV, and the switch is hidden. AppState.TasksMatrix is never changed by the width: the
     // controller shows the Matrix only when the setting asks AND the width allows (TasksBoard.View), so a panel narrowed
     // on the Matrix and widened again comes back to it, and one opened narrow opens on the List.
+    //
+    // THE STATS SWITCH (task 521d2b07) sits after them and always shows. While Stats is on show, List shows whatever the
+    // width, as the way back: a narrow panel has no List / Matrix switch otherwise, and List is where it goes.
     void PaintViewSwitch(TasksView view)
     {
+        var stats = view.Stats is not null;
         var shown = view.MatrixAllowed ? Visibility.Visible : Visibility.Collapsed;
         // Outlined like a filter chip, the one on show.
         if (listSwitch is not null)
         {
-            listSwitch.Visibility = shown;
-            listSwitch.BorderBrush = view.Matrix ? Brushes.Transparent : PickedEdge;
+            listSwitch.Visibility = view.MatrixAllowed || stats ? Visibility.Visible : Visibility.Collapsed;
+            listSwitch.BorderBrush = view.Matrix || stats ? Brushes.Transparent : PickedEdge;
         }
         if (matrixSwitch is not null)
         {
             matrixSwitch.Visibility = shown;
-            matrixSwitch.BorderBrush = view.Matrix ? PickedEdge : Brushes.Transparent;
+            matrixSwitch.BorderBrush = view.Matrix && !stats ? PickedEdge : Brushes.Transparent;
         }
+        if (statsSwitch is not null) statsSwitch.BorderBrush = stats ? PickedEdge : Brushes.Transparent;
     }
 
     // For the tests: whether the Matrix is on show, where a quadrant's cell sits (row, column), which cell holds a

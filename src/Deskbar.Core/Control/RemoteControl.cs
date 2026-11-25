@@ -90,7 +90,10 @@ public sealed partial class RemoteControl(WorkspaceManager manager, Func<bool, R
     GoalService? goals = null,
     TaskSessionCommands? taskSessions = null,
     CommentInbox? inbox = null,
-    Func<TaskItem, Result>? openTaskWindow = null)
+    Func<TaskItem, Result>? openTaskWindow = null,
+    // `tasks-window stats` (task 521d2b07): the tasks panel opened on its Stats view, the twin of the toolbar's Stats
+    // switch. The panel is the app's, so the app hands in how; left null, `tasks-window stats` refuses.
+    Func<Result>? showTasksStats = null)
 {
     // `longPath` turns an 8.3 short path into its long form (GetLongPathNameW, LongPath on the Windows side), for
     // FolderPath. Left null, a path is taken as it is, which is all a test that names long paths needs.
