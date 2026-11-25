@@ -22,6 +22,20 @@ namespace Deskbar.Core.Tasks;
 /// </summary>
 public enum TaskStatus { Backlog, InProgress, WaitingOnYou, Done, Closed }
 
+// DONE WAITS ON PETRE TOO (task eefb986a, 2026-11-25, Petre: "tasks marked as done should be in the waiting on me
+// section"). A Done task is finished work that sits until he closes it, so it is his next move just as a question is.
+// Both statuses are pinned above Covey's quadrants, in the one block the bar and the tasks panel caption "Waiting on
+// you": the questions first, the latest ask on top, then the Done tasks, the latest finished on top (TaskBoard.Pinned).
+// A pinned task is out of its quadrant's manual order (TaskBoard.Group) and cannot be dragged, so it keeps its Rank
+// untouched and comes back to the same place in its quadrant when it goes back to In progress.
+
+/// <summary>Which statuses are pinned above the quadrants, in the "Waiting on you" block (see the comment above).</summary>
+public static class TaskStatusPinning
+{
+    /// <summary>Waiting on you and Done: the statuses that wait on Petre and sit in the pinned block on top.</summary>
+    public static bool IsPinned(this TaskStatus status) => status is TaskStatus.WaitingOnYou or TaskStatus.Done;
+}
+
 /// <summary>
 /// A Claude Code session that has worked on a task: its session id, the folder it runs in (how its VS Code window is
 /// found) and when it joined. <see cref="Ended"/> is set when the session ends; the task stays open regardless.

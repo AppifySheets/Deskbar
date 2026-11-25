@@ -540,10 +540,11 @@ public partial class FloatingBar
         Maybe<Guid> ParentOf(TaskLine l) => l.ParentId is { } p ? p : Maybe<Guid>.None;
         // GroupBy: a duplicate id from a hand-edited file must not throw here (review of #467, finding 5).
         var groupOf = lines.GroupBy(l => l.Id).ToDictionary(g => g.Key, g => g.First().GroupKey);
-        // Neither a subtask waiting on Petre nor one whose parent waits on him moves: nothing goes into the pinned block
-        // but questions (review of #467, finding 1; the panel's TaskViews.UnderParents has the same rule).
+        // Neither a pinned subtask (waiting on Petre or Done) nor one whose parent is pinned moves: nothing goes into the
+        // pinned block but its own questions and Done tasks (review of #467, finding 1; the panel's TaskViews.UnderParents
+        // has the same rule; task eefb986a pinned Done).
         bool Movable(TaskLine l) =>
-            l.Status != TaskStatus.WaitingOnYou && !(l.ParentId is { } p && groupOf.TryGetValue(p, out var g) && g == "waiting");
+            !l.Status.IsPinned() && !(l.ParentId is { } p && groupOf.TryGetValue(p, out var g) && g == "waiting");
         var nested = SubtaskOrder.Nested(lines, l => l.Id, ParentOf, Movable);
         return SubtaskOrder.UnderParents(lines, l => l.Id, ParentOf, Movable)
             .Select(l => nested.Contains(l.Id) ? l with { ShownIn = groupOf[l.ParentId!.Value] } : l)
@@ -2155,10 +2156,11 @@ internal sealed record TaskLine(Guid Id, string Title, string Detail, TaskStatus
     public Quadrant Quadrant => QuadrantOf.Flags(Important, Urgent);
 
     /// <summary>
-    /// Which group the line is in: the pinned Waiting on you block, or its quadrant. Lines of one group sit together
-    /// (TaskBoard.Pile), so a change of key between neighbours is where a group starts.
+    /// Which group the line is in: the pinned Waiting on you block (its questions and its Done tasks, TaskBoard.Pinned),
+    /// or its quadrant. Lines of one group sit together (TaskBoard.Pile), so a change of key between neighbours is where a
+    /// group starts.
     /// </summary>
-    public string GroupKey => ShownIn ?? (Status == TaskStatus.WaitingOnYou ? "waiting" : Quadrant.Numeral());
+    public string GroupKey => ShownIn ?? (Status.IsPinned() ? "waiting" : Quadrant.Numeral());
 
     /// <summary>
     /// The group a subtask drawn under its parent belongs to (its parent's GroupKey), or null for a line in its own place

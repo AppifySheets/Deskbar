@@ -10,7 +10,7 @@ namespace Deskbar.App;
 // DRAGGING A LINE IN THE TASKS WINDOW (Task 12; progress.md Rulings 24, 25 and 28), the bar's drag
 // (FloatingBar.TaskDrag.cs) with the same rules, and the same answer to "where does it land" (TaskDropTarget): before or
 // after the line under the pointer, in that line's quadrant, so a drop among another quadrant's lines sets its flags.
-// Waiting on you lines cannot be dragged and nothing drops above them; a closed task, or a line in its undo window, is
+// Waiting on you lines (its questions and its Done tasks, TaskStatusPinning) cannot be dragged and nothing drops above them; a closed task, or a line in its undo window, is
 // neither dragged nor a target.
 //
 //   * A THRESHOLD: the press only arms; the system drag distance starts the drag, so a click stays a click.
@@ -24,7 +24,7 @@ public partial class TasksWindow
 {
     sealed record DragState(Guid Id, Point PressedAt, bool Started);
 
-    // Every line drawn: its quadrant, whether it waits on Petre (pinned), and whether it cannot move at all (closed, or
+    // Every line drawn: its quadrant, whether it is pinned (waiting on Petre or Done), and whether it cannot move at all (closed, or
     // in its undo window). Filled as the lines are drawn (Line), cleared with them.
     // Nested: a subtask drawn under its parent (TaskViews.UnderParents). It is dragged (out of its parent's block, to
     // free it), but it is no drop target: its rank is not where it is drawn (review of #467, finding 2).

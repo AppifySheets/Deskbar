@@ -400,9 +400,11 @@ public class RemoteControlTaskTests
 
         var entries = Json(Run(manager, "task", "list")).EnumerateArray().ToList();
 
-        // Task 12: Done no longer sorts ahead; it keeps its place in its quadrant, where the newer note is on top.
-        Assert.Equal(["Claude's one", "Waiting one", "Backlog one", "Done one"], entries.Select(e => e.GetProperty("title").GetString()));
-        Assert.Equal(["waiting", "waiting", "backlog", "done"], entries.Select(e => e.GetProperty("status").GetString()));
+        // Task eefb986a: Done is pinned under the questions, above the quadrants, and has no order of its own there.
+        Assert.Equal(["Claude's one", "Waiting one", "Done one", "Backlog one"], entries.Select(e => e.GetProperty("title").GetString()));
+        Assert.Equal(["waiting", "waiting", "done", "backlog"], entries.Select(e => e.GetProperty("status").GetString()));
+        Assert.Equal(JsonValueKind.Null, entries[2].GetProperty("order").ValueKind);
+        Assert.Equal(1, entries[3].GetProperty("order").GetInt32());
         var first = entries[0];
         Assert.Equal(claudes.Id.ToString(), first.GetProperty("id").GetString());
         Assert.Equal("Deskbar", first.GetProperty("workspace").GetString());

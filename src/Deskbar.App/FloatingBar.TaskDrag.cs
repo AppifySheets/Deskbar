@@ -103,13 +103,13 @@ public partial class FloatingBar
     }
 
     /// <summary>
-    /// A press on a line: arms a drag of its task. A line waiting on Petre or closed in its undo window arms nothing;
+    /// A press on a line: arms a drag of its task. A pinned line (waiting on Petre or Done) or one closed in its undo window arms nothing;
     /// so does a list with no service. Nothing is drawn and nothing is captured yet.
     /// </summary>
     internal void TaskDragPress(Guid id, Point inList)
     {
         taskDrag = null;
-        if (taskService?.Board.Tasks.FirstOrDefault(t => t.Id == id) is not { IsOpen: true } task || task.Status == TaskStatus.WaitingOnYou) return;
+        if (taskService?.Board.Tasks.FirstOrDefault(t => t.Id == id) is not { IsOpen: true } task || task.Status.IsPinned()) return;
         if (LineButtonOf(id) is not { } line || ((TaskLine)line.Tag).Closing) return;
         taskDrag = new TaskDragState(id, inList, Started: false, line);
         if (ClickTrace.On) ClickTrace.Write($"task press {task.Title}");
@@ -211,9 +211,9 @@ public partial class FloatingBar
         var drawn = taskLinesPanel.Children.OfType<Button>()
             .Where(b => b.Tag is TaskLine { Closing: false } && b.IsVisible)
             .Select(b => (TaskLine)b.Tag is var line
-                ? new TaskDropTarget.Drawn(new TaskDropTarget.Placed(line.Id, line.Quadrant, line.Status == TaskStatus.WaitingOnYou,
+                ? new TaskDropTarget.Drawn(new TaskDropTarget.Placed(line.Id, line.Quadrant, line.Status.IsPinned(),
                     new Rect(b.TranslatePoint(new Point(0, 0), taskLinesPanel), b.RenderSize))
-                    { TakesChild = parents.Contains(line.Id) && line.Status != TaskStatus.WaitingOnYou }, line.ShownIn is not null)
+                    { TakesChild = parents.Contains(line.Id) && !line.Status.IsPinned() }, line.ShownIn is not null)
                 : null)
             .OfType<TaskDropTarget.Drawn>()
             .ToList();

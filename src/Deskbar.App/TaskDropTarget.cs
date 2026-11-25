@@ -8,7 +8,7 @@ namespace Deskbar.App;
 //
 // The pointer is over a line (the nearest one, between lines): over its top half the task goes just BEFORE it, over
 // its bottom half just AFTER it, in that line's quadrant, so a drop among another quadrant's lines takes that
-// quadrant's flags (TaskBoard.Place sets them). Waiting on you is pinned: nothing drops above or among its lines; a
+// quadrant's flags (TaskBoard.Place sets them). Waiting on you, its questions and its Done tasks, is pinned: nothing drops above or among its lines; a
 // drop on one goes to the TOP of `pinnedTo`, the dragged task's own quadrant on the bar and in the List, the cell's
 // quadrant in the Matrix. It never takes the quadrant of whatever line happens to sit under the block (review of
 // 4fc4441..a1acd60, item 4: a plain task dragged to the top quietly became important and urgent). A caption of an empty place (the window's Matrix cell with no line) is given as an
@@ -19,7 +19,7 @@ namespace Deskbar.App;
 // (Placed.TakesChild, which the caller works out from TaskBoard.ParentCandidates) is split in three bands: over its
 // middle half the drop makes the dragged task its subtask (Drop.Into), over its top or bottom quarter the drop reorders
 // as above. The bands are the way file trees and Todoist tell "into" from "beside", and they keep a reorder a reorder
-// on every line that cannot take a child (a subtask, a task waiting on Petre, the dragged task itself, any line while a
+// on every line that cannot take a child (a subtask, a pinned task waiting on Petre or Done, the dragged task itself, any line while a
 // task with subtasks of its own is dragged).
 internal static class TaskDropTarget
 {
