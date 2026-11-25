@@ -3827,20 +3827,21 @@ public class TasksBoardTests
         Assert.False(HasButton(LineOf(t.Window, closed), "Reopen"));
     });
 
-    // Task 65ab598d: a slim line's title spans the whole line and the controls sit on its last line (Petre: "b, but so
-    // that the buttons are on the same line as the text; let's not waste space"). Before, the title had a column of its
-    // own beside about 300 DIP of fixed columns, about 15 DIP at the panel's narrowest, and broke one letter per line.
-    // At the narrowest and the default width: a short title stays one row with the strip beside it; a long one wraps
-    // across nearly the whole line, and the strip sits on or under its last line, never over the text, inside the line.
+    // Task 65ab598d: a slim line's title spans the whole line, where it once had a column of its own beside about 300 DIP
+    // of fixed columns, about 15 DIP at the panel's narrowest, and broke one letter per line. Task 50667e10 (Petre: "give
+    // buttons and status and all its own line and align on the left"): the controls' strip no longer sits on the title's
+    // last line but always on a row of its own under the title, starting at the title's left edge, and a waiting task's
+    // question comes under the strip. At the narrowest and the default width, for a one-word title and a long one.
     [Theory]
     [InlineData(TasksPanelLayout.MinWidth)]
     [InlineData(TasksPanelLayout.DefaultWidth)]
-    public void A_slim_lines_title_spans_the_line_and_the_controls_sit_on_its_last_line(double width) => StaThread.Run(() =>
+    public void A_slim_lines_title_spans_the_line_and_the_controls_have_their_own_row_at_its_left(double width) => StaThread.Run(() =>
     {
         using var t = Build(width: width);
         var shortOne = t.Tasks.Create("Renew", t.Gepha, Session("s1")).Value.Id;
         var longOne = t.Tasks.Create("Tasks panel at its narrowest: the slim line's fixed columns leave the title about 15 DIP, so it wraps one letter per line",
             t.Gepha, Session("s2")).Value.Id;
+        t.Tasks.Ask(shortOne, "Pick how the profile shows lines nobody confirmed");
         t.Controller.Show();
         t.Window.UpdateLayout();
 
@@ -3853,35 +3854,29 @@ public class TasksBoardTests
         Rect Bounds(FrameworkElement part, UIElement to) =>
             new(part.TranslatePoint(new Point(0, 0), to), new Size(part.ActualWidth, part.ActualHeight));
 
-        // The short title: one row. At the default width the strip sits on it, to its right. At the narrowest it sits
-        // beside the word when it fits there and in a row of its own under it when it does not: since the buttons were
-        // grouped and narrowed (task 3df2d28f) the strip is about 236 DIP, where it was about 290, so at 360 a one-word
-        // title now keeps its single row. Either way the strip never covers the word.
         var s = Parts(shortOne);
+        var l = Parts(longOne);
         var sTitle = Bounds(s.Title, s.Line);
         var sStrip = Bounds(s.Strip, s.Line);
-        Assert.True(s.Title.ActualHeight < 20, $"at {width} the short title is {s.Title.ActualHeight} DIP tall");
-        if (width >= TasksPanelLayout.DefaultWidth)
-            Assert.InRange(sStrip.Top + sStrip.Height / 2, sTitle.Top, sTitle.Bottom);
-        var sEnd = s.Title.ContentEnd.GetCharacterRect(LogicalDirection.Backward);
-        var sEndAt = s.Title.TranslatePoint(new Point(sEnd.Right, sEnd.Top), s.Line);
-        Assert.True(sEndAt.X < sStrip.Left || sStrip.Top >= sTitle.Bottom - 0.5,
-            $"at {width} the strip {sStrip} covers the short title ending at {sEndAt}");
-
-        // The long title: nearly the line's whole width (the tick's 22 DIP and the margins aside), several rows.
-        var l = Parts(longOne);
         var lTitle = Bounds(l.Title, l.Line);
         var lStrip = Bounds(l.Strip, l.Line);
+
+        // The titles: the short one a single row, the long one nearly the line's whole width (the tick's 22 DIP and the
+        // margins aside) over several rows.
+        Assert.True(s.Title.ActualHeight < 20, $"at {width} the short title is {s.Title.ActualHeight} DIP tall");
         Assert.True(l.Title.ActualWidth > l.Line.ActualWidth - 60, $"at {width} the title is {l.Title.ActualWidth} DIP wide in a {l.Line.ActualWidth} DIP line");
         Assert.True(l.Title.ActualHeight > 20, "the long title wraps");
-        // The strip at the bottom right: its bottom at the title's bottom or below it (when it has a row of its own),
-        // its right edge inside the line, and it starts right of where the text's last line ends.
-        Assert.True(lStrip.Bottom >= lTitle.Bottom - 0.5 && lStrip.Top >= lTitle.Top + 0.5, $"at {width} the strip {lStrip} beside the title {lTitle}");
+
+        // Each strip under its title, never beside it, starting where the title starts, and inside the line.
+        Assert.True(sStrip.Top >= sTitle.Bottom - 0.5, $"at {width} the strip {sStrip} is not under the short title {sTitle}");
+        Assert.True(lStrip.Top >= lTitle.Bottom - 0.5, $"at {width} the strip {lStrip} is not under the long title {lTitle}");
+        Assert.InRange(sStrip.Left, sTitle.Left - 0.5, sTitle.Left + 4);
+        Assert.InRange(lStrip.Left, lTitle.Left - 0.5, lTitle.Left + 4);
         Assert.True(lStrip.Right <= l.Line.ActualWidth + 0.5, $"at {width} the strip ends at {lStrip.Right} in a {l.Line.ActualWidth} DIP line");
-        var end = l.Title.ContentEnd.GetCharacterRect(LogicalDirection.Backward);
-        var endAt = l.Title.TranslatePoint(new Point(end.Right, end.Top), l.Line);
-        Assert.True(endAt.X < lStrip.Left || endAt.Y + end.Height <= lStrip.Top + 0.5,
-            $"at {width} the text ends at {endAt} under the strip {lStrip}");
+
+        // The waiting task's question comes after the strip.
+        var question = Inside(s.Line).OfType<TextBlock>().First(b => b.Text.Contains("nobody confirmed", StringComparison.Ordinal));
+        Assert.True(Bounds(question, s.Line).Top >= sStrip.Bottom - 0.5, $"at {width} the question is not under the strip {sStrip}");
     });
 
     // The widest age TaskAge writes ("27d23h") fits the slim line's age column whole at the panel's narrowest width, and

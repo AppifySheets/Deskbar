@@ -737,9 +737,10 @@ public partial class TasksWindow : Window
         var full = !compactLines && !slimLines;
         // A full line's grid follows the header's dividers while they are dragged (ApplyColumns).
         if (full) fullGrids.Add(grid);
-        // WHERE THE CONTROLS GO (task 65ab598d): on a full or a Matrix line, the line's own grid, in the columns beside the
-        // title; on a slim line, a strip of their own that sits on the title's last line (SlimControls, below). A part's
-        // column comes from At either way (the List's order, TasksWindow.Columns.cs); the strip starts at FirstControlColumn.
+        // WHERE THE CONTROLS GO (tasks 65ab598d and 50667e10): on a full or a Matrix line, the line's own grid, in the
+        // columns beside the title; on a slim line, a strip of their own on a row of its own under the title, starting at
+        // the title's left edge (SlimControls and ControlsUnderTitle, below). A part's column comes from At either way (the
+        // List's order, TasksWindow.Columns.cs); the strip starts at FirstControlColumn.
         var tucked = slimLines;
         var controls = tucked ? SlimControls(columns) : grid;
         void Control(int column, UIElement? part) => Cell(controls, tucked ? column - FirstControlColumn : column, part);
@@ -756,17 +757,20 @@ public partial class TasksWindow : Window
         // A_question_spans_the_line_under_its_title). Now the first row holds the title and the controls, centred on it as
         // before, and the second row holds what is under the title, from the title's left edge to the line's right end,
         // under the toggles, the age and the chip, which have nothing below them. The title itself stays in its column.
+        // A slim line has a third row between the two: its controls' strip (ControlsUnderTitle), so what is under the
+        // title comes after the strip, the question last.
         grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        if (tucked) grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         var text = TextOf(row);
         Cell(grid, At(Part.Title), text.Title);
         if (text.Below is { } below)
         {
-            Grid.SetRow(below, 1);
+            Grid.SetRow(below, tucked ? 2 : 1);
             Grid.SetColumnSpan(below, grid.ColumnDefinitions.Count - 1);
             Cell(grid, At(Part.Title), below);
         }
-        if (tucked) TuckUnderTitle(grid, text.Title, controls);
+        if (tucked) ControlsUnderTitle(grid, text.Title, controls);
         var flags = FlagsOf(row);
         Control(At(Part.Flags), flags);
         // A Matrix line (compact) has no column for the sessions, the age or the close button, so they are not made at
@@ -928,27 +932,24 @@ public partial class TasksWindow : Window
     bool slimLines;
     GridLength slimSquaresWidth = new(0);
 
-    // THE SLIM LINE'S TITLE HAS THE WHOLE LINE, AND THE CONTROLS SIT ON ITS LAST LINE (task 65ab598d). The slim line's
-    // fixed columns come to about 300 DIP, so with the title in a column of its own beside them a 360 DIP panel left the
-    // title about 15 DIP and it broke one letter per line, and the default 460 left it about 110. Petre, shown a mockup:
-    // "b, but so that the buttons are on the same line as the text; let's not waste space". So on a slim line the title
-    // spans from its column to the line's right end and wraps at that width, and the controls (toggles, squares, age,
-    // workspace chip, comments, Open Claude, "⋯") are one strip at the right end of the title's LAST line, the way a chat
-    // bubble puts its time after the text. A title short enough to leave the strip room beside it looks as it did, one
-    // row; a longer one wraps under the strip and the strip sits beside its last line; and when that last line runs into
-    // the strip's place, the strip drops to a row of its own under the text (TuckUnderTitle). The strip keeps the slim
-    // columns' fixed widths, so each control still sits at the same x on every line.
+    // THE SLIM LINE'S TITLE HAS THE WHOLE LINE, AND THE CONTROLS HAVE A ROW OF THEIR OWN UNDER IT, FROM THE LEFT (tasks
+    // 65ab598d and 50667e10). The slim line's fixed columns come to about 300 DIP, so with the title in a column of its
+    // own beside them a 360 DIP panel left the title about 15 DIP and it broke one letter per line (65ab598d). The title
+    // therefore spans from its column to the line's right end and wraps at that width. Its controls (squares, age,
+    // workspace chip, toggles and moon, comments, Open Claude, "⋯") first sat at the right end of the title's last line,
+    // dropping under it when the text ran into them; Petre, on a screenshot of that (task 50667e10): "give buttons and
+    // status and all its own line and align on the left". So they are now one strip, always on the row under the title,
+    // starting at the title's left edge. The strip keeps the slim columns' fixed widths, so each control still sits at the
+    // same x on every line, and every slim line has the same shape whatever its title's length. What is under the title
+    // (the question, the status line, the description) comes after the strip.
     //
     // The first control column of a line (the toggles'); the tick and the title come before it.
     const int FirstControlColumn = 2;
 
-    // The least room left between the end of the title's last line and the strip.
-    const double TuckGap = 6;
-
-    // The strip of a slim line's controls: the slim columns from the toggles on, at the bottom right of the title's row.
+    // The strip of a slim line's controls: the slim columns from the toggles on, left-aligned in the row under the title.
     static Grid SlimControls(IReadOnlyList<GridLength> columns)
     {
-        var strip = new Grid { Tag = ControlsTag, VerticalAlignment = VerticalAlignment.Bottom, HorizontalAlignment = HorizontalAlignment.Right };
+        var strip = new Grid { Tag = ControlsTag, HorizontalAlignment = HorizontalAlignment.Left, Margin = new Thickness(2, 2, 0, 0) };
         columns.Skip(FirstControlColumn).ToList().ForEach(width => strip.ColumnDefinitions.Add(new ColumnDefinition { Width = width }));
         return strip;
     }
@@ -956,44 +957,19 @@ public partial class TasksWindow : Window
     // Tagged for tests: the strip of a slim line's controls.
     internal const string ControlsTag = "task-controls";
 
-    // Puts the title across the whole slim line and the controls' strip on its last line (see FirstControlColumn above).
-    // Whether the strip fits beside the last line is known only once the title is laid out at its width, so it is
-    // checked after every size change of the title or the strip: the end of the title's text (its content end, in the
-    // line's coordinates) against the strip's left edge. When it does not fit, the title gets a bottom margin as tall as
-    // the strip, which makes the row that much taller and puts the strip, bottom-aligned, under the text. The margin never
-    // changes the title's width, so the check cannot feed back into the wrapping it measures.
-    // While the line is being renamed there is no title block, only the editor, which then gets the whole line and its
-    // own Save and Cancel; the strip stays out of its way until the rename ends and the line is drawn again.
-    void TuckUnderTitle(Grid line, UIElement title, Grid strip)
+    // Puts the title across the whole slim line and the controls' strip in the row under it, at the title's left edge
+    // (row 1 of the line; what is under the title goes to row 2, Line). While the line is being renamed there is no title
+    // block, only the editor, which then gets the whole line and its own Save and Cancel; the strip is collapsed until the
+    // rename ends and the line is drawn again.
+    static void ControlsUnderTitle(Grid line, UIElement title, Grid strip)
     {
-        Grid.SetColumnSpan(title, line.ColumnDefinitions.Count - 1);
-        Grid.SetColumn(strip, FirstControlColumn);
-        Grid.SetColumnSpan(strip, line.ColumnDefinitions.Count - FirstControlColumn);
+        var titleColumn = Grid.GetColumn(title);
+        Grid.SetColumnSpan(title, line.ColumnDefinitions.Count - titleColumn);
+        Grid.SetRow(strip, 1);
+        Grid.SetColumn(strip, titleColumn);
+        Grid.SetColumnSpan(strip, line.ColumnDefinitions.Count - titleColumn);
         line.Children.Add(strip);
-        if (TitleBlockIn(title) is not { } block || title is not FrameworkElement room)
-        {
-            strip.Visibility = Visibility.Collapsed;
-            return;
-        }
-
-        // The strip's width is the sum of its fixed columns, known before any layout, and the strip is right-aligned at the
-        // title's own right end (the title spans to the line's last column, less its right margin). So where the strip
-        // starts is worked out in the title's coordinates rather than read from the strip's arranged position, which can
-        // still be the previous pass's while the title's size changes.
-        var stripWidth = strip.ColumnDefinitions.Sum(column => column.Width.Value);
-        void Fit()
-        {
-            // Not laid out yet (or no longer in a window): nothing to measure, and the next size change checks again.
-            if (PresentationSource.FromVisual(block) is null) return;
-            var end = block.ContentEnd.GetCharacterRect(LogicalDirection.Backward);
-            if (end.IsEmpty) return;
-            var endX = block.TranslatePoint(new Point(end.Right, 0), room).X;
-            var stripX = room.ActualWidth + room.Margin.Right - stripWidth;
-            var bottom = endX + TuckGap <= stripX ? 0 : strip.ActualHeight;
-            if (Math.Abs(room.Margin.Bottom - bottom) > 0.5) room.Margin = room.Margin with { Bottom = bottom };
-        }
-        block.SizeChanged += (_, _) => Fit();
-        strip.SizeChanged += (_, _) => Fit();
+        if (TitleBlockIn(title) is null) strip.Visibility = Visibility.Collapsed;
     }
 
     // The title's own text block inside what TextOf made: the block itself, or inside the Done tick's row.
