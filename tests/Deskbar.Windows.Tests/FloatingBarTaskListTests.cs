@@ -2888,8 +2888,11 @@ public class FloatingBarTaskListTests
         Assert.Equal(Visibility.Collapsed, ButtonNamed(t.List, "Manager").Visibility);
     });
 
-    // The Manager button takes room beside "All tasks": the words still shorten instead of clipping.
+    // The Manager button takes room beside "All tasks": the words still shorten instead of clipping. 140 is the narrowest
+    // width in Petre's geometry trace and 158.4 the default docked width (176 at the 0.9 scale), the two real narrow ones.
     [Theory]
+    [InlineData(140)]
+    [InlineData(158.4)]
     [InlineData(200)]
     [InlineData(230)]
     [InlineData(260)]

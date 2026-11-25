@@ -890,19 +890,25 @@ public class ClaudeSessionsTests
         Assert.Empty(rig.Task(note.Id).Sessions);
     }
     // The manager session lives in its own folder and is started, resumed and stopped only by Petre's click. The keeper
-    // must not take it for a stranger and adopt it as a task after the two minutes.
+    // must not take it for a stranger and adopt it as a task after the two minutes. A positive control runs beside it
+    // (final review, item 8): the same row in another folder, heard from the same way, IS adopted in the same run, so the
+    // test cannot pass because nothing was ever adopted.
     [Fact]
     public void Manager_session_is_never_adopted()
     {
         using var rig = new Rig { ManagerFolder = @"E:\state\manager" };
         var managerId = Guid.NewGuid().ToString();
+        var strangerId = Guid.NewGuid().ToString();
         rig.Cli.Listed.Add(new Row(managerId, @"E:\state\manager", "Deskbar manager"));
+        rig.Cli.Listed.Add(new Row(strangerId, @"E:\repos\elsewhere", "Deskbar manager"));
         rig.Tasks.HeardAttended(managerId);
+        rig.Tasks.HeardAttended(strangerId);
         rig.Begin();
 
         rig.RunTo(Seconds(240));
 
         Assert.DoesNotContain(rig.Tasks.Board.Tasks, t => t.Sessions.Any(s => s.Id == managerId));
+        Assert.Contains(rig.Tasks.Board.Tasks, t => t.Sessions.Any(s => s.Id == strangerId));
     }
 
     // Were the manager's session ever attached to a Done task, the done sweep would stop it; it is Petre's to stop.
