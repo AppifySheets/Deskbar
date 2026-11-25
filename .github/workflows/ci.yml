@@ -23,6 +23,16 @@ on:
 permissions:
   contents: read
 
+# ONE RUN PER PULL REQUEST, THE NEWEST HEAD WINS. A session keeps its open pull request on top of
+# main by rebasing and pushing as soon as main moves (CLAUDE.md, "Mergeability comes before the
+# pipeline"), so a branch can be pushed again while the run on its previous head is still going.
+# That run tests a commit nobody will merge any more, so it is cancelled and only the run on the
+# latest head finishes. Keyed on the pull request number, so different pull requests never cancel
+# each other.
+concurrency:
+  group: ci-pr-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
 jobs:
   build-and-test:
     # MUST be Windows: WPF app targeting net10.0-windows, and the tests construct real windows.

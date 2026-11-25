@@ -1,6 +1,6 @@
 ---
 name: refresh-pr
-description: Bring an open Deskbar pull request back on top of its base, main or the pull request below it in a stack. Rebases the branch, builds Release with warnings as errors, runs the tests, force-pushes with a lease and watches the CI run until it is green. Use when GitHub says a pull request is out of date or conflicts, when its base moved, when asked to refresh or rebase a pull request, or when asked to stack several pull requests so they can be merged one after another.
+description: Bring an open Deskbar pull request back on top of its base, main or the pull request below it in a stack. Rebases the branch, builds Release with warnings as errors, force-pushes with a lease straight away and leaves the tests to CI, watching the run until it is green and rebasing again if the base moves meanwhile. Use when GitHub says a pull request is out of date or conflicts, when its base moved, when asked to refresh or rebase a pull request, or when asked to stack several pull requests so they can be merged one after another.
 argument-hint: [optional-branch-name-or-pr-number]
 allowed-tools: Bash(git *), Bash(gh *), Bash(dotnet *), Read, Grep, Glob, Edit
 ---
@@ -12,6 +12,13 @@ without rewriting it. Main moves several times a day, so a branch that was fine 
 opened falls behind and sometimes conflicts. This skill puts it back. No version number is
 involved: the version comes from git history and a pull request never edits it. CLAUDE.md's rule on keeping open pull
 requests on top of their base says when to run it.
+
+Speed is the point. A pull request that conflicts or sits behind cannot be merged, and every
+minute between the base moving and the push is a minute in which the base can move again. So the
+only thing between the rebase and the push is a Release build (about 20 seconds cold). The test
+suites run on CI; locally they took minutes on
+[Deskbar #517](https://github.com/AppifySheets/Deskbar/pull/517), main moved again inside them,
+and the pull request sat conflicting between pushes. Local tests come back only when CI fails.
 
 ## Input
 
@@ -75,21 +82,21 @@ conflicts is a decision about the change, not a refresh. One exception: a purely
 commit, such as a rename, can be replayed by redoing the mechanical step on the new base, as long
 as the result is checked by hand afterwards.
 
-### 4. Build and test what will be pushed
+### 4. Build what will be pushed, and nothing more
 
-The rebase brought in other people's changes, so the branch is now code nobody has built:
+The rebase brought in other people's changes, so the branch is now code nobody has compiled. A
+build catches a conflict resolved wrongly and a warning the other change introduced, in seconds:
 
 ```bash
 dotnet build Deskbar.sln -c Release -warnaserror
-pwsh scripts/test-hidden.ps1 -Arguments 'Deskbar.sln -c Release --no-build --filter "Category!=Integration&Category!=Screen"'
 ```
 
-The tests run on a hidden Win32 desktop, so none of their windows reach Petre's screen and his
-Deskbar cannot tile them (it did, and it rearranged his windows for the length of every run). The
-four `Category=Screen` tests need the visible desktop and are left to the pull request's CI run.
-Never run `Deskbar.Windows.Tests` on his own desktop: `StaThread.Run` refuses while a Deskbar runs
-there. A running Deskbar started from this worktree's `bin` locks the output; restart it from a
-copy elsewhere first, never leave Petre without his bar.
+Do not run the test suites here. CI runs every one of them on the pushed head, and the push is
+what makes the pull request mergeable again. A build failure is fixed on the branch before the
+push; a pull request that does not compile is no better merged than conflicting.
+
+A running Deskbar started from this worktree's `bin` locks the output; restart it from a copy
+elsewhere first, never leave Petre without his bar.
 
 ### 5. Push to the same branch with a lease
 
@@ -101,18 +108,33 @@ The lease names the head read in step 1, so the push refuses if anyone pushed si
 refuses, fetch, look at what arrived, and tell the user rather than retrying. Never a plain
 `--force`, never main.
 
-### 6. Watch the CI run to the end
+### 6. Watch the CI run, and the base while it runs
 
 ```bash
 gh run list --branch {headRefName} --workflow CI --limit 1 --json databaseId,headSha,status
 gh run watch {id} --exit-status
 ```
 
-Check the run's `headSha` is the head just pushed. If it fails, read the failing step
-(`gh run view {id} --log-failed`), fix it on the branch, push, and watch again. If the base moved
-again meanwhile, go back to step 2.
+Check the run's `headSha` is the head just pushed. Mergeability still outranks the run: if the
+base moves or the pull request conflicts while CI is going (the PR watch in CLAUDE.md says so),
+go back to step 2 at once rather than waiting for the result. CI cancels the run on the replaced
+head by itself (the `concurrency` group in `.github/workflows/ci.yml`).
+
+If the run fails, read the failing step (`gh run view {id} --log-failed`). This is when the local
+tests come back, to reproduce the failure and check the fix:
+
+```bash
+pwsh scripts/test-hidden.ps1 -Arguments 'Deskbar.sln -c Release --no-build --filter "Category!=Integration&Category!=Screen"'
+```
+
+The tests run on a hidden Win32 desktop, so none of their windows reach Petre's screen and his
+Deskbar cannot tile them (it did, and it rearranged his windows for the length of every run). The
+four `Category=Screen` tests need the visible desktop and are left to CI. Never run
+`Deskbar.Windows.Tests` on his own desktop: `StaThread.Run` refuses while a Deskbar runs there.
+Narrow the filter to the failing test where you can. Fix it on the branch, build, push, and watch
+again.
 
 ### 7. Report
 
-The pull request URL, its base, its new head, the test result
-including anything rerun, and the CI run's result. Do not merge it.
+The pull request as a link, its base, its new head, and the CI run's result as a link, with any
+local test run a CI failure called for. Do not merge it.

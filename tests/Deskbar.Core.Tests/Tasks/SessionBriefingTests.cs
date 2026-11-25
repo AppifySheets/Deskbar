@@ -108,6 +108,9 @@ public sealed class SessionBriefingTests
         Assert.Contains("While your pull request is open, keep it on top of its base without being asked", text);
         Assert.Contains("as soon as the base moves or the pull request conflicts, rebase it onto the latest base", text);
         Assert.Contains("push it straight away with --force-with-lease", text);
+        // Task c121bab5: the tests are CI's job after the push, and a base move mid-run means rebasing again at once.
+        Assert.Contains("a test run never does: let CI run the tests on what you pushed", text);
+        Assert.Contains("if the base moves again while CI runs, rebase and push again at once", text);
     }
 
     // Task 08cdb052 ("when asking for action, prs should have links, or artifacts; make that clickable"): an ask copied

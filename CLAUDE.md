@@ -90,6 +90,17 @@ object.
   done
   ```
 
+  **Mergeability comes before the pipeline** (Petre, 2026-11-25, while
+  [Deskbar #517](https://github.com/AppifySheets/Deskbar/pull/517) kept conflicting: "if it can't
+  be merged, it should act quickly to rebase and push"). A base move or a conflict outranks
+  whatever the session is doing, a CI run it is watching included. Rebase, build Release with
+  `-warnaserror` (the only local gate, since it is quick), and push with a lease at once. The full
+  test suites are CI's job: a local run takes minutes, main moved again inside those minutes on
+  [Deskbar #517](https://github.com/AppifySheets/Deskbar/pull/517), and the pull request sat
+  conflicting between pushes. The local suites come back only when CI fails on the pushed head,
+  to reproduce the failure. CI cancels the run on a head a newer push replaced, so pushing again
+  mid-run costs nothing.
+
   A Monitor lasts at most 30 minutes and dies with the session, so re-arm it when it expires, and
   say in the final message that the watch ends when the session does. Pull requests here merge
   with "Rebase and merge", which keeps the commits of a pull request that is already on top of
