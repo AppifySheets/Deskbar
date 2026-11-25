@@ -1046,7 +1046,14 @@ public sealed class TasksBoard : IDisposable
         // The selected task never folds (task b0526e18, Petre: "i can't interact with the subtask. i should be able to"):
         // a subtask shown from its parent's thread is selected, and folded it had no line to open, act on or scroll to.
         // It folds again once another task is picked.
-        var listed = showsSubtasks ? underParents : TaskViews.FoldSubtasks(underParents, nested, selection.Current);
+        // A subtask of a snoozed parent folds as well (task 4c01747c, TaskViews.UnderSnoozedParent), only under a parent
+        // these filters admit, so the Snoozed chip leads to it. Not while words are typed in the search box (the parent
+        // is off the list then too, so a subtask the words found would vanish), and not in the Snoozed view, which lists
+        // snoozed tasks: there a snoozed subtask whose own parent is awake must keep its line.
+        var snoozedFamily = search.IsBlank && filter != TaskFilter.Snoozed
+            ? TaskViews.UnderSnoozedParent(whole, shown, assigneeFilter)
+            : new HashSet<Guid>();
+        var listed = showsSubtasks ? underParents : TaskViews.FoldSubtasks(underParents, nested, selection.Current, snoozedFamily);
         // A SUBTASK SHOWS ONCE (task 0eb943d8, Petre: "it shows up twice", "clicking the one above takes me to the one
         // below"). A parent's open thread lists its subtasks, so one folded away (Subtasks unticked) or hidden by a filter
         // can still be reached. A subtask that has a line of its own right under the parent is already on screen, and
@@ -1075,7 +1082,7 @@ public sealed class TasksBoard : IDisposable
         var addTarget = shown.Any ? PlaceOf(manager.CurrentWorkspaceId) : PlaceOf(shown.Workspace);
         // The Matrix's four cells (Ruling 28), drawn instead of the groups while the switch says so (AppState.TasksMatrix).
         var matrix = TaskViews.Matrix(board, filter, shown, assigneeFilter);
-        var cells = (showsSubtasks ? matrix : TaskViews.FoldSubtasks(matrix, selection.Current))
+        var cells = (showsSubtasks ? matrix : TaskViews.FoldSubtasks(matrix, selection.Current, snoozedFamily))
             .Select(c => new TaskCellView(c.Quadrant, TaskViews.GroupName(TaskViews.KindOf(c.Quadrant)), c.Tasks.Select(Row).ToArray()))
             .ToArray();
         var (menuGoals, filterGoals) = showsGoals ? GoalChoices(goalBoard) : NoGoalChoices;

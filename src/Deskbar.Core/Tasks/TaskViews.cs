@@ -343,7 +343,8 @@ public static class TaskViews
     // Petre's screenshot: a parent with eight subtasks under it filled the panel. Unticked, the checkbox folds subtasks
     // into the parent's line, which already counts them ("· 8 subtasks", SubtaskCountText) and lists them in its thread.
     // Only a subtask whose parent is ON THE LIST folds, so nothing becomes unreachable: a parent filtered out (another
-    // workspace, another status) leaves its subtasks on show. A subtask waiting on Petre never folds either, because a
+    // workspace, another status) leaves its subtasks on show. One exception, a SNOOZED parent (task 4c01747c, see
+    // UnderSnoozedParent below): its subtasks fold though it is off the list. A subtask waiting on Petre never folds, because a
     // question must stay findable, and that is what the pinned block is for.
 
     /// <summary>
@@ -357,8 +358,18 @@ public static class TaskViews
     /// other way) gets a line of its own, with its thread, menu and buttons, until another task is picked.
     /// </para>
     /// </summary>
-    public static IReadOnlyList<TaskGroup> FoldSubtasks(IReadOnlyList<TaskGroup> groups, IReadOnlySet<Guid> nested, Maybe<Guid> keep = default) =>
-        groups.Select(g => g with { Tasks = g.Tasks.Where(t => !nested.Contains(t.Id) || t.Status == TaskStatus.WaitingOnYou || Kept(keep, t)).ToArray() })
+    /// <para>
+    /// <paramref name="snoozedFamily"/> folds too (task 4c01747c, <see cref="UnderSnoozedParent"/>): a subtask whose
+    /// parent is snoozed is not nested, because the parent is off the list, yet it folds with the same two exceptions,
+    /// and never out of the pinned block or the Claude working block (FamilyFolds).
+    /// </para>
+    public static IReadOnlyList<TaskGroup> FoldSubtasks(IReadOnlyList<TaskGroup> groups, IReadOnlySet<Guid> nested, Maybe<Guid> keep = default,
+        IReadOnlySet<Guid>? snoozedFamily = null) =>
+        groups.Select(g => g with
+            {
+                Tasks = g.Tasks.Where(t => !(nested.Contains(t.Id) || FamilyFolds(snoozedFamily, t))
+                    || t.Status == TaskStatus.WaitingOnYou || Kept(keep, t)).ToArray(),
+            })
             .Where(g => g.Tasks.Count > 0)
             .ToArray();
 
@@ -368,12 +379,15 @@ public static class TaskViews
     /// its own quadrant), so the rule is the List's in its own terms: folded where the parent is on screen to count it.
     /// Every cell stays, empty or not (the Matrix is always four).
     /// </summary>
-    public static IReadOnlyList<TaskCell> FoldSubtasks(IReadOnlyList<TaskCell> cells, Maybe<Guid> keep = default)
+    /// A subtask in <paramref name="snoozedFamily"/> (task 4c01747c) folds too, though its parent is in no cell.
+    public static IReadOnlyList<TaskCell> FoldSubtasks(IReadOnlyList<TaskCell> cells, Maybe<Guid> keep = default,
+        IReadOnlySet<Guid>? snoozedFamily = null)
     {
         var shown = cells.SelectMany(c => c.Tasks).Select(t => t.Id).ToHashSet();
         bool Folds(TaskItem t) =>
             t.IsOpen && t.Status != TaskStatus.WaitingOnYou && !Kept(keep, t)
-            && t.ParentId is { HasValue: true } p && p.Value != t.Id && shown.Contains(p.Value);
+            && ((t.ParentId is { HasValue: true } p && p.Value != t.Id && shown.Contains(p.Value))
+                || FamilyFolds(snoozedFamily, t));
         return cells.Select(c => c with { Tasks = c.Tasks.Where(t => !Folds(t)).ToArray() }).ToArray();
     }
 
@@ -388,6 +402,43 @@ public static class TaskViews
 
     // Whether the task is the one the folding keeps on show (the panel's selected task, task b0526e18).
     static bool Kept(Maybe<Guid> keep, TaskItem t) => keep.HasValue && keep.Value == t.Id;
+
+    // THE SNOOZED PARENT (task 4c01747c, Petre with a screenshot: "unselected subtasks still shows subtasks in the main
+    // bar"). He had snoozed the Warehouse parent until the next morning, which takes it off the bar and off the panel's
+    // usual views, and with it off the list the rule above ("only a subtask whose parent is ON THE LIST folds") left all
+    // eight of its subtasks on show, on both, with the box unticked. Snoozing a parent puts its family out of sight, so
+    // with the box unticked its open subtasks fold too, except where the nesting rule would also have kept them (the
+    // pinned block, Claude working; FamilyFolds). Nothing becomes unreachable: only a parent the view's filters admit
+    // holds its family, so the Snoozed chip lists it, its line counts them and its thread links them, and the box ticked
+    // shows them all again. The Snoozed view itself folds none this way (TasksBoard), since it lists snoozed tasks.
+
+    /// <summary>
+    /// The ids of the open subtasks with a snoozed open parent, or a snoozed open ancestor further up (a subtask of a
+    /// subtask of a snoozed task folds as well): the ones the "Subtasks" checkbox unticked folds though the parent is on
+    /// no list. Only a snoozed ancestor <paramref name="counts"/> admits holds its family, so a subtask never folds into
+    /// a parent the view would not list even awake: the panel passes its workspace and assignee filters (the Snoozed chip
+    /// then lists that parent), the bar its own rule (a task assigned to Petre). A broken chain (a parent id with no
+    /// task, a loop) ends the walk, so it neither hangs nor throws.
+    /// </summary>
+    public static IReadOnlySet<Guid> UnderSnoozedParent(TaskBoard board, Func<TaskItem, bool> counts)
+    {
+        var byId = board.Tasks.GroupBy(t => t.Id).ToDictionary(g => g.Key, g => g.First());
+        // Walks up from `at`, one step per task on the board at most, so a loop in the parent ids ends.
+        bool Held(Maybe<Guid> at, int left) =>
+            left > 0 && at.HasValue && byId.TryGetValue(at.Value, out var up)
+            && ((up.IsOpen && up.IsSnoozed && counts(up)) || Held(up.ParentId, left - 1));
+        return board.Tasks.Where(t => t.IsOpen && Held(t.ParentId, byId.Count)).Select(t => t.Id).ToHashSet();
+    }
+
+    /// <summary>The panel's <see cref="UnderSnoozedParent(TaskBoard, Func{TaskItem, bool})"/>: a snoozed ancestor its filters admit.</summary>
+    public static IReadOnlySet<Guid> UnderSnoozedParent(TaskBoard board, TaskWorkspaceFilter workspaceFilter, TaskAssigneeFilter? who = null) =>
+        UnderSnoozedParent(board, new Admit(workspaceFilter, who ?? TaskAssigneeFilter.All).Admits);
+
+    // Whether a task in the snoozed family folds where it is drawn: never a pinned one (a question, or Done work waiting
+    // to be closed) and never one Claude is at work on, the two blocks NestsUnder keeps apart for the same reason, so
+    // the folding takes nothing out of them that the nesting rule would have left.
+    static bool FamilyFolds(IReadOnlySet<Guid>? snoozedFamily, TaskItem t) =>
+        (snoozedFamily?.Contains(t.Id) ?? false) && !t.Status.IsPinned() && !AtWork(t);
 
     // --- subtasks on a line (docs/superpowers/specs/2026-11-24-subtasks-design.md, Petre's pick A) ----------------------
 

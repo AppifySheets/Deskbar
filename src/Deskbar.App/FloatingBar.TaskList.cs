@@ -570,8 +570,13 @@ public partial class FloatingBar
     // and the parent's "· N subtasks" says they are there. The panel's rule, TaskViews.FoldSubtasks: a subtask whose
     // parent is not on the bar (a Claude task the bar leaves out) was never nested, so it stays, and a subtask waiting on
     // Petre stays, because a question must stay findable. Ticked, the lines are as they were.
-    internal static IReadOnlyList<TaskLine> FoldSubtasks(IReadOnlyList<TaskLine> lines, bool shown) =>
-        shown ? lines : lines.Where(l => l.ShownIn is null || l.Status == TaskStatus.WaitingOnYou).ToArray();
+    // A subtask whose parent is snoozed (`snoozedFamily`, TaskViews.UnderSnoozedParent, task 4c01747c) is not nested,
+    // since a snoozed parent is never on the bar, yet it folds too, except a pinned one (a question, or Done work
+    // waiting to be closed), which UnderParents would have left in the pinned lines under a parent that is not.
+    internal static IReadOnlyList<TaskLine> FoldSubtasks(IReadOnlyList<TaskLine> lines, bool shown, IReadOnlySet<Guid>? snoozedFamily = null) =>
+        shown ? lines
+        : lines.Where(l => (l.ShownIn is null && !((snoozedFamily?.Contains(l.Id) ?? false) && !l.Status.IsPinned()))
+            || l.Status == TaskStatus.WaitingOnYou).ToArray();
 
     // Marks the first line of each group after the first (TaskLine.StartsGroup), over the lines as they are drawn, the
     // closed ones in their undo window included, so the space sits where the eye sees a group begin.
@@ -978,13 +983,16 @@ public partial class FloatingBar
         // The tasks panel's "Subtasks" checkbox applies here too (task 173ef268; Petre, with a screenshot of the bar's
         // Warehouse parent and its subtasks under it: "same checkbox"). One setting, saved by the panel, so the bar and
         // the panel never disagree; a state pulse rebuilds the bar, and the rebuild repaints this list.
-        var open = FoldSubtasks(UnderParents(flat), Subtasks);
+        // A subtask of a snoozed parent folds as well (task 4c01747c): the parent is off the bar, so it was never nested.
+        // Only under a parent the bar would list awake (NeedsYou: assigned to Petre), as the nesting rule does.
+        var snoozedFamily = TaskViews.UnderSnoozedParent(taskService.Board, t => t.Assignee.IsMe);
+        var open = FoldSubtasks(UnderParents(flat), Subtasks, snoozedFamily);
         // A closed line whose task is open again (reopened from the pipe, say) is not pending any more: the task is back
         // in the pile under its own line.
         pendingCloses.Where(p => open.Any(l => l.Id == p.Line.Id)).ToList().ForEach(p => ForgetPendingClose(p, repaint: false));
         var slots = TaskSlotsNow;
         if (open.Count <= slots) taskListExpanded = false;
-        var all = WithGroupStarts(FoldSubtasks(WithPendingCloses(flat, pendingCloses), Subtasks));
+        var all = WithGroupStarts(FoldSubtasks(WithPendingCloses(flat, pendingCloses), Subtasks, snoozedFamily));
         allTaskLines = all;
         var problem = taskService.LoadProblem;
         var shape = string.Join("\n", all.Select(ShapeOf).Prepend(

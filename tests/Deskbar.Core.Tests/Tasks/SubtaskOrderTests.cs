@@ -236,6 +236,76 @@ public class SubtaskOrderTests
         Assert.Equal(["Parent", "Kept"], Titles(cells[3].Tasks));
     }
 
+    // Task 4c01747c (Petre: "unselected subtasks still shows subtasks in the main bar"): his Warehouse parent was snoozed,
+    // so it was on no list and its eight subtasks never folded. The family of a snoozed open parent is every open task
+    // under it, a grandchild included; a closed one, one under a parent that is not snoozed, one under a snoozed parent
+    // that is closed, and one whose parent is missing are not in it.
+    [Fact]
+    public void The_family_of_a_snoozed_parent_is_its_open_subtasks_at_any_depth()
+    {
+        var parent = Task("Parent") with { SnoozedUntil = At.AddDays(1) };
+        var child = Task("Child", parent.Id);
+        var grandchild = Task("Grandchild", child.Id);
+        var closedChild = Task("Closed child", parent.Id, TaskStatus.Closed);
+        var awake = Task("Awake");
+        var awakeChild = Task("Awake child", awake.Id);
+        var closedSnoozed = Task("Closed snoozed", status: TaskStatus.Closed) with { SnoozedUntil = At.AddDays(1) };
+        var underClosed = Task("Under closed", closedSnoozed.Id);
+        var orphan = Task("Orphan", Guid.NewGuid());
+
+        var family = TaskViews.UnderSnoozedParent(new TaskBoard([parent, child, grandchild, closedChild, awake, awakeChild, closedSnoozed, underClosed, orphan]), _ => true);
+
+        Assert.Equal(new[] { child.Id, grandchild.Id }.ToHashSet(), family.ToHashSet());
+    }
+
+    // A loop in the parent ids (a hand-edited tasks.json) ends the walk instead of hanging.
+    [Fact]
+    public void A_loop_in_the_parents_ends_the_walk()
+    {
+        var a = Task("A");
+        var b = Task("B", a.Id);
+        var looped = a with { ParentId = b.Id };
+
+        Assert.Empty(TaskViews.UnderSnoozedParent(new TaskBoard([looped, b]), _ => true));
+    }
+
+    // A snoozed parent the view would not list (filtered out by workspace or assignee) holds no family: the Snoozed chip
+    // there would not lead to it, so its subtasks keep their lines.
+    [Fact]
+    public void A_snoozed_parent_the_view_leaves_out_holds_no_family()
+    {
+        var parent = Task("Parent", workspace: other) with { SnoozedUntil = At.AddDays(1) };
+        var child = Task("Child", parent.Id);
+
+        Assert.Empty(TaskViews.UnderSnoozedParent(new TaskBoard([parent, child]), TaskWorkspaceFilter.On(ws)));
+        Assert.Equal([child.Id], TaskViews.UnderSnoozedParent(new TaskBoard([parent, child]), TaskWorkspaceFilter.All).ToArray());
+    }
+
+    // Unticked, a subtask of a snoozed parent folds in the List and the Matrix though its parent is in no group or cell;
+    // one waiting on you and the kept one stay, as they do under a parent on the list, and a Done one stays in the pinned
+    // block (review of task 4c01747c: the nesting rule never takes finished work out of it either).
+    [Fact]
+    public void Unticked_the_subtasks_of_a_snoozed_parent_fold_too()
+    {
+        var parent = Task("Parent") with { SnoozedUntil = At.AddDays(1) };
+        var child = Task("Child", parent.Id);
+        var asking = Task("Asking", parent.Id, TaskStatus.WaitingOnYou);
+        var done = Task("Done", parent.Id, TaskStatus.Done);
+        var kept = Task("Kept", parent.Id);
+        var loose = Task("Other");
+        var family = TaskViews.UnderSnoozedParent(new TaskBoard([parent, child, asking, done, kept, loose]), _ => true);
+        var (under, nested) = TaskViews.UnderParents([new TaskGroup(TaskGroupKind.WaitingOnYou, [asking, done]), new TaskGroup(TaskGroupKind.IV, [child, kept, loose])]);
+
+        var folded = TaskViews.FoldSubtasks(under, nested, kept.Id, family);
+        var cells = TaskViews.FoldSubtasks(
+            [new TaskCell(Quadrant.I, []), new TaskCell(Quadrant.II, []), new TaskCell(Quadrant.III, []), new TaskCell(Quadrant.IV, [asking, done, child, kept, loose])],
+            kept.Id, family);
+
+        Assert.Equal(["Asking", "Done"], Titles(folded[0].Tasks));
+        Assert.Equal(["Kept", "Other"], Titles(folded[1].Tasks));
+        Assert.Equal(["Asking", "Done", "Kept", "Other"], Titles(cells[3].Tasks));
+    }
+
     // --- the tasks a drag can nest under --------------------------------------------------------
 
     [Fact]

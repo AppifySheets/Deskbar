@@ -694,6 +694,13 @@ S16. The Subtasks checkbox (task 173ef268). Give a note three subtasks and ask a
     parent's with a subtask there: that subtask still shows. Close and reopen the panel, then restart Deskbar: the box
     is still unticked. Switch to the Matrix: subtasks whose parent is in a cell are gone. On the bar, the parent's two plain
     subtasks are gone too and the asking one is still there. Tick it: everything is back, in the panel and on the bar.
+
+S16a. A snoozed parent's subtasks (task 4c01747c). With the Subtasks box unticked, snooze the parent from S16. Its two
+    plain subtasks stay gone from the panel (List and Matrix) and from the bar, though the parent is off both; the asking
+    one still shows, and so does a subtask set Done, in Waiting on you. Type a word from a plain subtask's title in the
+    panel's search box: it shows while the word is there. Filter the panel to another workspace than the parent's with
+    a subtask there: that subtask still shows. Tick the box: both plain subtasks are back. Wake the parent: with the box
+    unticked again, the plain ones fold under it as in S16.
 S17. A subtask's way to its parent (task 54b39c4c). Give a note three subtasks. In the tasks panel open the last
     subtask's thread: it starts with "↑ Subtask of <the note>". Click it: the note is picked, its thread opens and the
     list scrolls to it. Right-click a subtask's line in the panel: **Open parent** follows **Add subtask…** and does the
