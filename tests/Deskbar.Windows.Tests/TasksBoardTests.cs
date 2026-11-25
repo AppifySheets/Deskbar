@@ -3935,8 +3935,10 @@ public class TasksBoardTests
 
     // Task f564a7cd ("lots of horizontal space for buttons, still hidden"): a slim line's controls have a row of their
     // own, where the three toggles' room is kept whether they show or not, so an off toggle there is drawn faint at rest
-    // instead of invisible until hover, and brighter under the pointer. On a full line an off toggle is still invisible
-    // until the line is hovered or selected.
+    // instead of invisible until hover, and brighter under the pointer. Task ec731be5 ("snooze and others not showing?"):
+    // faint at 0.3 read as missing, so at rest they are now about as light as the comment button (0.75 of the dim ink)
+    // and full strength under the pointer. On a full line an off toggle is still invisible until the line is hovered or
+    // selected.
     [Fact]
     public void A_slim_lines_off_toggles_show_at_rest_and_a_full_lines_do_not() => StaThread.Run(() =>
     {
@@ -3948,10 +3950,10 @@ public class TasksBoardTests
         slim.Controller.Show();
         var toggles = OffToggles(slim, id);
         Assert.NotEmpty(toggles);
-        Assert.All(toggles, toggle => Assert.InRange(toggle.Opacity, 0.2, 0.5));
+        Assert.All(toggles, toggle => Assert.InRange(toggle.Opacity, 0.7, 0.8));
         var atRest = toggles[0].Opacity;
         LineOf(slim.Window, id).RaiseEvent(new MouseEventArgs(Mouse.PrimaryDevice, 0) { RoutedEvent = Mouse.MouseEnterEvent });
-        Assert.All(toggles, toggle => Assert.True(toggle.Opacity > atRest, "a hovered line's off toggles are brighter"));
+        Assert.All(toggles, toggle => Assert.Equal(1, toggle.Opacity));
         LineOf(slim.Window, id).RaiseEvent(new MouseEventArgs(Mouse.PrimaryDevice, 0) { RoutedEvent = Mouse.MouseLeaveEvent });
         Assert.All(toggles, toggle => Assert.Equal(atRest, toggle.Opacity));
 
