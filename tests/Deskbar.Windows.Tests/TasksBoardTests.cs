@@ -154,7 +154,8 @@ public class TasksBoardTests
         Inside(window).OfType<Button>().Single(b => b.Tag is Guid tag && tag == id);
 
     // Task 12 (Ruling 28): the List view is grouped as the bar, Waiting on you, then Covey's quadrants under captions in
-    // his words; a Done task keeps its place in its quadrant.
+    // his words; a Done task sits in the Waiting on you block under the questions (task eefb986a). Task 93fa0b9b: the task
+    // Claude is at work on sits in the Claude working block between that block and the quadrants.
     [Fact]
     public void The_board_groups_open_tasks_as_the_bar() => StaThread.Run(() =>
     {
@@ -170,7 +171,7 @@ public class TasksBoardTests
 
         t.Controller.Show();
 
-        Assert.Equal(["Waiting on you", "IV  Not urgent, not important"], t.Window.Headers);
+        Assert.Equal(["Waiting on you", "Claude working", "IV  Not urgent, not important"], t.Window.Headers);
         Assert.Equal([asking, done, working, note], t.Window.Keys);
 
         // Closed only under its own filter.
@@ -259,6 +260,55 @@ public class TasksBoardTests
         t.Controller.Hide();
         t.Controller.Show();
         Assert.Equal("Workspace: all", t.Window.WorkspaceFilterLabel);
+    });
+
+    // Task 93fa0b9b: the Claude working chip is kept across opens like the Current workspace checkbox, in
+    // AppState.TasksPanel.ClaudeWorking, and read as a checkbox's state. Showing a task it hides turns it off for good.
+    [Fact]
+    public void The_Claude_working_chip_survives_a_fresh_open_until_it_is_turned_off() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        var note = t.Tasks.AddNote("note", t.Gepha).Value.Id;
+        var live = t.Tasks.Create("DurableFile move guard", t.Gepha, Session("s1")).Value.Id;
+        t.Controller.Show();
+        Assert.Equal("unchecked", AutomationProperties.GetItemStatus(ButtonNamed(t.Window, "Filter: Claude working")));
+
+        Click(ButtonNamed(t.Window, "Filter: Claude working"));
+        Assert.True(t.Harness.Manager.State.TasksPanel!.ClaudeWorking);
+        Assert.Equal("checked", AutomationProperties.GetItemStatus(ButtonNamed(t.Window, "Filter: Claude working")));
+
+        t.Controller.Hide();
+        t.Controller.Show();
+        Assert.True(t.Window.ClaudeWorkingOn);
+        Assert.Equal([live], t.Window.Keys);
+
+        // The note has no live session, so showing it turns the chip off, and the next open starts with it off.
+        t.Controller.ShowTask(note);
+        Assert.False(t.Harness.Manager.State.TasksPanel!.ClaudeWorking);
+        t.Controller.Hide();
+        t.Controller.Show();
+        Assert.False(t.Window.ClaudeWorkingOn);
+        Assert.Equal(2, t.Window.Keys.Count);
+    });
+
+    // Task 93fa0b9b: the line Claude is at work on sits in the Claude working block, after Waiting on you and before the
+    // quadrants, captioned. It drags as a line of its quadrant does (not as a pinned line), since the block keeps quadrant
+    // order and a drop among its lines is a place in that order.
+    [Fact]
+    public void A_task_Claude_works_on_sits_after_waiting_on_you_and_drags_as_its_quadrant() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        var note = t.Tasks.AddNote("note", t.Gepha).Value.Id;
+        var working = t.Tasks.Create("working", t.Gepha, Session("s1")).Value.Id;
+        var asking = t.Tasks.Create("asking", t.Gepha, Session("s2")).Value.Id;
+        t.Tasks.Ask(asking, "Merge it?");
+        t.Controller.Show();
+
+        Assert.Equal([asking, working, note], t.Window.Keys);
+        Assert.Equal(["Waiting on you", "Claude working", "IV  Not urgent, not important"], t.Window.Headers);
+        Assert.False(t.Window.IsPinnedLine(working));
+        Assert.True(t.Window.IsPinnedLine(asking));
+        Assert.False(t.Window.IsPinnedLine(note));
     });
 
     // A desktop switch as the tests drive one: the fake desktops say the workspace's desktop is in front, and pulse.
@@ -714,9 +764,10 @@ public class TasksBoardTests
         Assert.Equal("Claude working 0", t.Window.ClaudeWorkingLabel);
     });
 
-    // A fresh show starts with no search and Claude working off, the box empty, like every other filter.
+    // A fresh show starts with no search, the box empty, like every other filter, but keeps Claude working (task 93fa0b9b:
+    // Petre wants it kept "just like with current workspace").
     [Fact]
-    public void A_fresh_show_clears_the_search_and_Claude_working() => StaThread.Run(() =>
+    public void A_fresh_show_clears_the_search_and_keeps_Claude_working() => StaThread.Run(() =>
     {
         using var t = Build();
         t.Tasks.AddNote("Dishwasher tablets", t.Gepha);
@@ -730,8 +781,8 @@ public class TasksBoardTests
         t.Controller.Show();
 
         Assert.Equal("", t.Window.SearchBox.Text);
-        Assert.False(t.Window.ClaudeWorkingOn);
-        Assert.Equal(2, t.Window.Keys.Count);
+        Assert.True(t.Window.ClaudeWorkingOn);
+        Assert.Equal([live], t.Window.Keys);
         // The box does not take the keyboard on a show: the panel opens on the board.
         Assert.False(t.Window.SearchBox.IsKeyboardFocused);
     });

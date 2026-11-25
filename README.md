@@ -457,8 +457,9 @@ it opens or grows is moved out from under it, keeping its size where there is ro
 there is not. Click the same button, or the x in the panel's toolbar, to close
 it. Drag its inner edge to change the width (460 to start, 360 at the least, half the screen at the most);
 Deskbar remembers the width and whether the panel was open. A search box (Ctrl+F; Esc or its x clears it) finds
-tasks by every word you type, in titles, status lines and questions. The "Claude working" chip shows only the
-tasks whose Claude session is working right now. Below 710 DIP wide the lines go slim, and the List and
+tasks by every word you type, in titles, status lines and questions. Tasks Claude is working on sit in their
+own "Claude working" group right under "Waiting on you". The "Claude working" chip shows only the tasks with
+a live Claude session and stays on across restarts, as "Current workspace" does. Below 710 DIP wide the lines go slim, and the List and
 Matrix switch appears from 780 DIP. A full-screen app makes the panel step back until you leave it.
 A script can add and change tasks with `deskbar.cmd task`, and every Claude Code session keeps a task of
 its own here: it joins the task its work continues or creates one, keeps a short status line on it, asks

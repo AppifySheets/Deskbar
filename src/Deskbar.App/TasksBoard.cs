@@ -82,7 +82,9 @@ namespace Deskbar.App;
 // session) narrow the board right after the goal filter, so, like it, BEFORE the groups, the Matrix's cells and every
 // chip's count are made: what a chip says is always what it would show. The Claude working chip's own count is taken on
 // the board narrowed by every OTHER filter (goal, search, and the status, workspace and assignee filters the chips
-// apply), so it too says how many it would show. Neither is saved: both start over on a fresh open, with the rest.
+// apply), so it too says how many it would show. The search is not saved and starts over on a fresh open. Claude working
+// is KEPT across opens and restarts, as the "Current workspace" checkbox is (task 93fa0b9b, 2026-11-25, Petre: "i also
+// want a filter on claude working on tasks at the top, just like with current workspace"; AppState.TasksPanel.ClaudeWorking).
 //
 // THE PANEL'S WIDTH (spec "Lines at panel width" and "The Matrix"; plan 2026-11-23-tasks-panel, Task 8). The view says
 // whether lines are slim (below 710 DIP) and whether the Matrix is allowed (from 780), both from the width the panel
@@ -364,13 +366,14 @@ public sealed class TasksBoard : IDisposable
     void OpenFresh()
     {
         filter = TaskFilter.Open;
-        // The "Current workspace" checkbox is the one filter a fresh open keeps (AppState.TasksPanel.CurrentWorkspace, task ed1a01fc).
+        // The "Current workspace" checkbox (AppState.TasksPanel.CurrentWorkspace, task ed1a01fc) and the "Claude working"
+        // chip (AppState.TasksPanel.ClaudeWorking, task 93fa0b9b) are the filters a fresh open keeps.
         where = PanelState.CurrentWorkspace ? TaskWorkspaceFilter.Current : TaskWorkspaceFilter.All;
+        claudeWorking = PanelState.ClaudeWorking;
         goalFilter = TaskGoalFilter.All;
         assigneeFilter = TaskAssigneeFilter.All;
         // The window empties its search box in its own Open (TasksWindow.Open), so the box and this agree.
         search = TaskSearch.None;
-        claudeWorking = false;
         statsShown = false;
         expanded.Clear();
         window.ShowProblem(null);
@@ -593,10 +596,13 @@ public sealed class TasksBoard : IDisposable
         Refresh();
     }
 
-    /// <summary>The "Claude working" chip: only the tasks with a live session while on (see the header).</summary>
+    /// <summary>
+    /// The "Claude working" chip: only the tasks with a live session while on, remembered across opens and restarts
+    /// (AppState.TasksPanel.ClaudeWorking, task 93fa0b9b; see the header).
+    /// </summary>
     public void FilterClaudeWorking(bool on)
     {
-        claudeWorking = on;
+        KeepClaudeWorking(on);
         Refresh();
     }
 
@@ -610,6 +616,14 @@ public sealed class TasksBoard : IDisposable
         // A no-op write when it is already so (SaveTasksPanel compares); the redraw below then still runs, harmlessly.
         _ = manager.SaveTasksPanel(PanelState with { HideSubtasks = !on });
         Refresh();
+    }
+
+    // The chip's state and its saved copy move together, so whatever turns it off (the chip, a task it hides being shown)
+    // is what the next open starts with. A no-op write when nothing changes (SaveTasksPanel compares).
+    void KeepClaudeWorking(bool on)
+    {
+        claudeWorking = on;
+        _ = manager.SaveTasksPanel(PanelState with { ClaudeWorking = on });
     }
 
     public void ToggleThread(Guid id)
@@ -709,7 +723,7 @@ public sealed class TasksBoard : IDisposable
             search = TaskSearch.None;
             window.ClearSearch();
         }
-        if (claudeWorking && !task.Value.HasLiveSession) claudeWorking = false;
+        if (claudeWorking && !task.Value.HasLiveSession) KeepClaudeWorking(false);
     }
 
     /// <summary>A line's click (see the header). The window stays open; a refusal shows on its problem line.</summary>

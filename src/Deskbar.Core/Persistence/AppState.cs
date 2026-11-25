@@ -822,6 +822,10 @@ public sealed record TasksPanelState(bool Open, double Width)
     // older file, or a property the serializer leaves out) means today's behaviour, subtasks shown.
     public bool HideSubtasks { get; init; }
 
+    // Whether the "Claude working" chip is on (task 93fa0b9b, 2026-11-25, Petre: "just like with current workspace"):
+    // kept across opens and restarts for the same reason. An init property, so an older file loads as false.
+    public bool ClaudeWorking { get; init; }
+
     // What an absent AppState.TasksPanel means: closed, at the default width. Callers use this, not their own copy.
     public static readonly TasksPanelState Default = new(false, Tasks.TasksPanelLayout.DefaultWidth);
 }

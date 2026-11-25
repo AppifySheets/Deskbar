@@ -33,6 +33,10 @@ public partial class TasksWindow
     // dragged within its own part (task f41d7857, TaskDropTarget).
     readonly Dictionary<Guid, (Quadrant Quadrant, bool Waiting, bool Fixed, bool Nested, TaskDropTarget.Part Part)> dragLines = [];
 
+    // For the tests: whether a drawn line is pinned (waiting on Petre or Done), so it moves only within its part of the
+    // pinned block and no other line drops among it. A line in the Claude working block (task 93fa0b9b) is not.
+    internal bool IsPinnedLine(Guid id) => dragLines.TryGetValue(id, out var line) && line.Waiting;
+
     DragState? drag;
     TaskDropTarget.Drop? dropShown;
     Adorner? dropAdorner;

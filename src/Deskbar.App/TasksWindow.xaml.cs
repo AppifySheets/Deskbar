@@ -596,7 +596,10 @@ public partial class TasksWindow : Window
         working.BorderBrush = Orange;
         working.Background = view.ClaudeWorking ? AskTint : ButtonFill;
         working.Margin = new Thickness(0, 0, 6, ChipRowGap);
-        working.ToolTip = "Only the tasks Claude has a live session on";
+        working.ToolTip = "Only the tasks Claude has a live session on. Kept when the panel opens again";
+        // Read as a checkbox's state by a screen reader and the tests, as "Current workspace" is (task 93fa0b9b: the two
+        // are now kept alike across opens).
+        AutomationProperties.SetItemStatus(working, view.ClaudeWorking ? "checked" : "unchecked");
         Filters.Children.Add(working);
         ClaudeWorkingLabel = $"Claude working {view.ClaudeWorkingCount}";
         ClaudeWorkingOn = view.ClaudeWorking;

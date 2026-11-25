@@ -7,10 +7,18 @@ namespace Deskbar.Core.Tasks;
 // Waiting on you first (the questions, then the Done tasks, each in its own order, TaskBoard.Pinned), then Covey's quadrants I to IV, each in Petre's manual order
 // (TaskBoard.Group), each captioned in Covey's words. Filters by status (Closed among them) and by workspace.
 //
+// CLAUDE WORKING SITS RIGHT AFTER WAITING ON YOU (task 93fa0b9b, 2026-11-25, Petre: "tasks that have a working claude
+// session should sit after waiting on me tasks"). A task Claude is at work on (AtWork: open, not Done, not waiting on
+// Petre, a session live on it, the same test as TaskBoard.ClaudeStillWorking) leaves its quadrant's group for a pinned
+// "Claude working" block between the Waiting on you block (questions, then Done) and quadrant I, in quadrant order and,
+// inside a quadrant, Petre's manual order, so the block keeps his priorities. The Matrix does the same inside each cell:
+// the pinned ones first, then working, then the rest. Live, not busy: `claude agents --json` says busy only while a turn
+// runs, so a busy test would move a line in and out of the block every time Claude paused for a tool or a background wait.
+//
 // A status filter keeps the groups: "In progress" shows the quadrants with only their tasks in progress, in the
 // same order, so a line sits in the same group whatever the filter. The pinned block holds the Done tasks under the
 // questions (task eefb986a, TaskStatusPinning), so "Waiting on you" is that block's questions and "Done" its Done
-// tasks, each still under the block's caption.
+// tasks, each still under the block's caption. The Claude working block is narrowed the same way.
 // Closed tasks have no order of their own (closing takes a task out of it): they are one group, the latest closed
 // first, since closing stamps UpdatedAt, the same order `task list --closed` prints.
 //
@@ -79,10 +87,12 @@ public sealed record TaskAssigneeFilter(Maybe<AssigneeKind> Kind)
 }
 
 /// <summary>
-/// Which group of the window a task is drawn in: the pinned Waiting on you block, one of Covey's quadrants (named as
-/// the book numbers them), the closed tasks, or the snoozed ones (the Snoozed filter's one group).
+/// Which group of the window a task is drawn in: the pinned Waiting on you block, the pinned Claude working block under it
+/// (task 93fa0b9b), one of Covey's quadrants (named as the book numbers them), the closed tasks, or the snoozed ones (the
+/// Snoozed filter's one group).
 /// </summary>
-public enum TaskGroupKind { WaitingOnYou, I, II, III, IV, Closed, Snoozed }
+// ClaudeWorking is appended last so no earlier value moves; the order the groups are drawn in is Grouped's, not the enum's.
+public enum TaskGroupKind { WaitingOnYou, I, II, III, IV, Closed, Snoozed, ClaudeWorking }
 
 /// <summary>One group of the window: which group, and its tasks in the order they are drawn.</summary>
 public sealed record TaskGroup(TaskGroupKind Kind, IReadOnlyList<TaskItem> Tasks);
@@ -125,8 +135,12 @@ public static class TaskViews
                 board.Tasks.Where(t => t.Status == TaskStatus.Closed && where.Admits(t)).OrderByDescending(t => t.UpdatedAt).ToArray())],
             TaskFilter.Snoozed => [new TaskGroup(TaskGroupKind.Snoozed,
                 board.Tasks.Where(t => t.IsOpen && t.IsSnoozed && where.Admits(t)).OrderBy(t => t.SnoozedUntil.Value).ThenBy(t => t.Id).ToArray())],
-            TaskFilter.Open => QuadrantGroups(board, where, _ => true).Prepend(Waiting(board, where, _ => true)),
+            // Waiting on you (questions, then Done), then Claude working (task 93fa0b9b), then the quadrants without the
+            // tasks Claude is at work on. A status filter narrows all three alike; Claude working never holds a question or
+            // a Done task, so under those two filters it is empty and left out.
+            TaskFilter.Open => QuadrantGroups(board, where, _ => true).Prepend(Working(board, where, _ => true)).Prepend(Waiting(board, where, _ => true)),
             _ => QuadrantGroups(board, where, t => StatusesOf(filter).Contains(t.Status))
+                .Prepend(Working(board, where, t => StatusesOf(filter).Contains(t.Status)))
                 .Prepend(Waiting(board, where, t => StatusesOf(filter).Contains(t.Status))),
         })
         .Where(g => g.Tasks.Count > 0)
@@ -135,7 +149,8 @@ public static class TaskViews
     /// <summary>
     /// The Matrix (Ruling 28): Covey's four cells, I to IV, always all four. Each lists its quadrant's open tasks in
     /// their order, the pinned ones first (waiting on Petre, then Done; TaskBoard.Pinned), on top of their own
-    /// quadrant's cell, the questions drawn orange as everywhere. The status filter narrows every cell as it narrows the
+    /// quadrant's cell, the questions drawn orange as everywhere, then the ones Claude is at work on (task 93fa0b9b),
+    /// then the rest. The status filter narrows every cell as it narrows the
     /// List; the closed tasks have no quadrant order, so under "Closed" every cell is empty, and a snoozed task is out of
     /// view, so under "Snoozed" too (the List shows them) and under every other filter it is left out.
     /// </summary>
@@ -145,7 +160,8 @@ public static class TaskViews
     static IReadOnlyList<TaskCell> Matrix(TaskBoard board, TaskFilter filter, Admit where) =>
         Quadrants.Select(q => new TaskCell(q.Quadrant, filter is TaskFilter.Closed or TaskFilter.Snoozed ? []
             : board.Pinned().Where(t => t.Quadrant == q.Quadrant)
-                .Concat(board.Group(q.Quadrant))
+                .Concat(board.Group(q.Quadrant).Where(AtWork))
+                .Concat(board.Group(q.Quadrant).Where(t => !AtWork(t)))
                 .Where(t => where.Admits(t) && StatusesOf(filter).Contains(t.Status) && !t.IsSnoozed)
                 .ToArray()))
             .ToArray();
@@ -168,6 +184,7 @@ public static class TaskViews
             {
                 TaskGroupKind.WaitingOnYou => StatusName(TaskStatus.WaitingOnYou),
                 TaskGroupKind.Snoozed => "Snoozed",
+                TaskGroupKind.ClaudeWorking => "Claude working",
                 _ => StatusName(TaskStatus.Closed),
             });
 
@@ -175,8 +192,22 @@ public static class TaskViews
     static TaskGroup Waiting(TaskBoard board, Admit where, Func<TaskItem, bool> shows) =>
         new(TaskGroupKind.WaitingOnYou, board.Pinned().Where(t => !t.IsSnoozed && where.Admits(t) && shows(t)).ToArray());
 
+    /// <summary>
+    /// Whether Claude is at work on the task (task 93fa0b9b, see the header): it is open, not Done and not waiting on
+    /// Petre, and a session is live on it. Such a task is drawn in the pinned Claude working block, not its quadrant.
+    /// </summary>
+    public static bool AtWork(TaskItem task) =>
+        task.Status != TaskStatus.WaitingOnYou && TaskBoard.ClaudeStillWorking(task);
+
+    // The pinned Claude working block: each quadrant's tasks Claude is at work on, I to IV, each quadrant in its manual
+    // order (TaskBoard.Group), so the block keeps Petre's priorities.
+    static TaskGroup Working(TaskBoard board, Admit where, Func<TaskItem, bool> shows) =>
+        new(TaskGroupKind.ClaudeWorking, Quadrants.SelectMany(q => board.Group(q.Quadrant))
+            .Where(t => AtWork(t) && where.Admits(t) && !t.IsSnoozed && shows(t)).ToArray());
+
+    // A quadrant's group leaves out the tasks Claude is at work on: they are in the Claude working block above.
     static IEnumerable<TaskGroup> QuadrantGroups(TaskBoard board, Admit where, Func<TaskItem, bool> shows) =>
-        Quadrants.Select(q => new TaskGroup(q.Kind, board.Group(q.Quadrant).Where(t => where.Admits(t) && !t.IsSnoozed && shows(t)).ToArray()));
+        Quadrants.Select(q => new TaskGroup(q.Kind, board.Group(q.Quadrant).Where(t => where.Admits(t) && !t.IsSnoozed && !AtWork(t) && shows(t)).ToArray()));
 
     /// <summary>How many tasks a filter shows, for its chip: a snoozed task counts under Snoozed and nowhere else.</summary>
     public static int Count(TaskBoard board, TaskFilter filter, TaskWorkspaceFilter where, TaskAssigneeFilter? who = null) =>
@@ -290,11 +321,12 @@ public static class TaskViews
     /// each-other as subtasks. it should") is drawn under it in the pinned block, as it would be under any parent. Two
     /// exceptions. A pinned subtask stays in the pinned block unless its parent is there too: the block is what makes a
     /// question (or finished work) findable, and drawn under a plain parent it would sink below the quadrants' lines. And
-    /// nothing moves out of or into the Closed group, which is history.
+    /// nothing moves out of or into the Closed group, which is history. The Claude working block (task 93fa0b9b) keeps
+    /// its subtasks the same way: one Claude is at work on stays in the block unless its parent is in the block too.
     /// </summary>
     public static bool NestsUnder(TaskGroupKind own, TaskGroupKind parent) =>
         own != TaskGroupKind.Closed && parent != TaskGroupKind.Closed
-        && (own != TaskGroupKind.WaitingOnYou || parent == TaskGroupKind.WaitingOnYou);
+        && (own is not (TaskGroupKind.WaitingOnYou or TaskGroupKind.ClaudeWorking) || parent == own);
 
     // --- subtasks folded into their parent (task 173ef268, the tasks panel's "Subtasks" checkbox) ----------------------
     //
