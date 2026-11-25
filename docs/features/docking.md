@@ -10,7 +10,7 @@ By default the bar floats wherever you drop it. It can also dock to a screen edg
 
 Both docking modes are off by default. Turn them on from any bar menu, from the box in Manage, or from the command line.
 
-**Dock to screen edge** turns the bar into an app bar on the left or right edge of its screen, full height with square corners. Windows reserves that strip, so maximised windows, Snap and new windows keep clear of it. The bar cannot be moved while docked, because moving the strip would leave the reservation behind, but you can still drag its width. A full-screen app takes the bar out of the topmost band while it runs. Minimising the bar gives the strip back.
+**Dock to screen edge** turns the bar into an app bar on the left or right edge of its screen, full height with square corners. Windows reserves that strip, so maximised windows, Snap and new windows keep clear of it. The bar cannot be moved while docked, because moving the strip would leave the reservation behind, but you can still drag its width. A full-screen window on the bar's screen, such as a video, a game or a maximized Remote Desktop session, has the bar step just behind it while it is in front. Minimising the bar gives the strip back.
 
 The floating bar does the same for a full-screen window, a video or a game, on its own screen: it steps just below the window and comes back when the window leaves full screen, closes or is minimised. Only the bar's own screen counts. A video on the other screen leaves the bar on top, and a bar dragged onto the video's screen goes below it too. To keep the floating bar on top of full-screen windows instead, pick **Stay on top of full-screen windows** in the bar's right-click menu. **Step aside for full-screen windows** turns it back.
 

@@ -374,8 +374,8 @@ or from the command line.
 **Dock to screen edge** turns the bar into an app bar on the left or right edge of its screen,
 full height with square corners. Windows reserves that strip: maximised windows, Snap and new
 windows keep clear of it. The bar cannot be moved while docked (moving the strip would leave the
-reservation behind), but its width can still be dragged. A full-screen app takes the bar out of the
-topmost band while it runs. Minimising the bar gives the strip back.
+reservation behind), but its width can still be dragged. A full-screen window on its screen has the
+bar step just behind it while it is in front. Minimising the bar gives the strip back.
 
 <table align="center">
   <tr>

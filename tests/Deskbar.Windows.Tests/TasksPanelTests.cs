@@ -587,6 +587,40 @@ public class TasksPanelTests
         rig.Close();
     });
 
+    // Task b488e2e9: an ORDINARY full-screen window (Remote Desktop, a browser in F11) on the panel's screen. With the
+    // shell's notice the panel used to leave the topmost band and land at the top of the ordinary one, over that window;
+    // without a notice it stayed topmost over it. Either way it now stands directly behind it, and comes back once the
+    // window has gone. The cover is a real ordinary window, so "behind" is checked in the z-order.
+    [Fact]
+    public void An_ordinary_full_screen_window_has_the_panel_behind_it_with_the_shells_notice_or_without() => StaThread.Run(() =>
+    {
+        var rig = new Rig().Open();
+        var panel = new WindowInteropHelper(rig.Window).Handle;
+        var remote = new Window { WindowStyle = WindowStyle.None, ResizeMode = ResizeMode.NoResize, ShowInTaskbar = false };
+        remote.Show();
+        var cover = new WindowInteropHelper(remote).Handle;
+        rig.Cover = cover;
+
+        // No notice from the shell: the 1 s tick finds the window itself.
+        rig.Panel.ReclaimTopmost();
+        Assert.False(IsTopmost(rig.Window));
+        Assert.True(Above(cover, panel));
+
+        // The window goes, and the panel is back on top.
+        rig.Cover = 0;
+        rig.Panel.ReclaimTopmost();
+        Assert.True(IsTopmost(rig.Window));
+
+        // The shell's notice with the window up: behind it at once, not over it.
+        rig.Cover = cover;
+        rig.Panel.StepAside(fullScreen: true);
+        Assert.False(IsTopmost(rig.Window));
+        Assert.True(Above(cover, panel));
+
+        remote.Close();
+        rig.Close();
+    });
+
     // Task 4836eca2, "Undocked bar sits behind its own tasks' window": a floating bar parked on the edge the panel docks on
     // overlaps it, and the 1 s timer re-asserts the bar first and the panel after it, so the panel landed over the bar on
     // every tick. The panel's place is directly BEHIND the bar instead, still in the topmost band. A bar that is hidden

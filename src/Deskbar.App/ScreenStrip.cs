@@ -103,6 +103,16 @@ public sealed class ScreenStrip : Window
     // says the window closed, and the 1 s re-assert leaves it there.
     bool fullScreenOpen;
 
+    // The window covering this strip's whole screen right now (a full-screen Remote Desktop, a video, a browser in F11),
+    // or 0 when nothing does. In the app it is TopLevelWindows.CoveringScreen for this strip's own screen rectangle:
+    // the windows on that screen, top first, the first of them deciding (FullScreenCover). Faked in the tests, whose
+    // made-up screens are on no real monitor.
+    internal Func<nint> Covering { get; init; }
+
+    // The covering window the strip is standing directly behind, or 0 while it is not. For the trace, which says it
+    // once per change, and for Describe.
+    nint steppedBelow;
+
     // What the last dock asked for and what it got, for Describe.
     AppBar.Rect? asked;
     AppBar.Rect? granted;
@@ -205,6 +215,7 @@ public sealed class ScreenStrip : Window
         // The real implementations of the two seams; a test's object initializer replaces them after this runs.
         DockWith = (edge, rect, thicknessPx) => (appBar ?? throw new InvalidOperationException("The strip has no app bar yet.")).Dock(edge, rect, thicknessPx);
         Scale = ScaleOfScreen;
+        Covering = () => TopLevelWindows.CoveringScreen(Screen.Left, Screen.Top, Screen.Right, Screen.Bottom) ?? 0;
     }
 
     // Fills the strip: the name tag on `colour` (the neutral grey when there is none, an unnamed desktop), then the
@@ -305,6 +316,7 @@ public sealed class ScreenStrip : Window
         appBar?.Remove();
         docked = false;
         fullScreenOpen = false;
+        steppedBelow = 0;
         Hide();
     }
 
@@ -385,13 +397,17 @@ public sealed class ScreenStrip : Window
     // so the strips join the bar's re-assertion on foreground change and on the 1 s timer. Not while a full-screen
     // window is up on this screen, which the shell asked the strip to keep clear of. SWP_NOACTIVATE is the load-bearing
     // flag, as for the bar: without it this would take the focus from whatever was just clicked.
+    //
+    // A window covering the strip's screen comes first: the strip stands directly behind it (StepBelowCover), whatever
+    // the shell has or has not said.
     public void ReclaimTopmost()
     {
-        if (!IsVisible || fullScreenOpen) return;
+        if (!IsVisible) return;
         // Not over one of Deskbar's own menus, which has no owner window to keep it above the strip (OwnMenus).
         if (OwnMenus.AnyOpen) return;
         var hwnd = new WindowInteropHelper(this).Handle;
         if (hwnd == 0) return;
+        if (StepBelowCover(hwnd) || fullScreenOpen) return;
         NativeMethods.SetWindowPos(hwnd, NativeMethods.HWND_TOPMOST, 0, 0, 0, 0,
             NativeMethods.SWP_NOMOVE | NativeMethods.SWP_NOSIZE | NativeMethods.SWP_NOACTIVATE);
     }
@@ -399,13 +415,53 @@ public sealed class ScreenStrip : Window
     // The shell's full-screen notice (AppBar's onFullScreen): out of the topmost band while a full-screen window is up,
     // so the strip does not sit over a video or a game, and back in when it closes. As the docked bar does
     // (FloatingBar.OnFullScreenApp): it steps aside, it is not hidden, moved or undocked, so the work area stays put.
+    // Behind the covering window when there is one on this screen, for the reason StepBelowCover gives.
     public void StepAside(bool fullScreen)
     {
         fullScreenOpen = fullScreen;
         var hwnd = new WindowInteropHelper(this).Handle;
-        if (hwnd == 0) return;
+        if (hwnd == 0 || StepBelowCover(hwnd)) return;
         NativeMethods.SetWindowPos(hwnd, fullScreen ? HwndNoTopmost : NativeMethods.HWND_TOPMOST, 0, 0, 0, 0,
             NativeMethods.SWP_NOMOVE | NativeMethods.SWP_NOSIZE | NativeMethods.SWP_NOACTIVATE);
+    }
+
+    // STANDING BEHIND A FULL-SCREEN WINDOW. Petre, on task b488e2e9 ("Maximized window captions sit under the top
+    // bar"), with a screenshot of a Remote Desktop window maximized on a screen with a strip: the strip lay over the
+    // top 36 px of it, across the caption of the remote app inside. Remote Desktop's maximize button takes it FULL
+    // SCREEN when the session fits the screen, a window with exactly the screen's rectangle that ignores the work area,
+    // so the band the strip reserves does not keep it clear, as it keeps ordinary maximized windows clear.
+    //
+    // Two things kept the strip on top of it. The first is that the shell's full-screen notice alone decided, and on
+    // that machine no step aside was ever traced while the window was up. The strip now looks for itself, on the 1 s
+    // beat and on every foreground change, the way the floating bar does (FloatingBar.StepAsideIfCovered): the first
+    // window in z-order on the strip's screen, if it covers the whole screen (FullScreenCover has the measured rules).
+    // The second would have kept it on top even with the notice: leaving the topmost band (HWND_NOTOPMOST) puts a
+    // window at the TOP of the ordinary band, above every ordinary window, and a full-screen Remote Desktop or a browser
+    // in F11 is an ordinary window. Measured for the floating bar on build 26300 and written there: only putting the
+    // window directly behind the covering one puts it where it belongs. A covering window that is itself topmost (a
+    // video player) needs only the first call.
+    //
+    // True while the strip is behind a covering window, so the caller does not put it back on top.
+    bool StepBelowCover(nint hwnd)
+    {
+        var cover = Covering();
+        if (cover == 0)
+        {
+            if (steppedBelow != 0) Say(() => $"strip on {Screen.Left},{Screen.Top}: back on top, nothing covers its screen");
+            steppedBelow = 0;
+            return false;
+        }
+
+        NativeMethods.SetWindowPos(hwnd, HwndNoTopmost, 0, 0, 0, 0,
+            NativeMethods.SWP_NOMOVE | NativeMethods.SWP_NOSIZE | NativeMethods.SWP_NOACTIVATE);
+        if (!TopLevelWindows.IsTopmost(cover))
+            NativeMethods.SetWindowPos(hwnd, cover, 0, 0, 0, 0,
+                NativeMethods.SWP_NOMOVE | NativeMethods.SWP_NOSIZE | NativeMethods.SWP_NOACTIVATE);
+
+        if (steppedBelow != cover)
+            Say(() => $"strip on {Screen.Left},{Screen.Top}: stepped below {cover:X} class={TopLevelWindows.ClassOf(cover)}, which covers its screen");
+        steppedBelow = cover;
+        return true;
     }
 
     // One line for the debug dump and, later, the trace: the screen, what was asked and granted, the screen's work area
@@ -422,6 +478,7 @@ public sealed class ScreenStrip : Window
         + $"work {(OwnMonitor() is { } own ? DebugDump.Format(own.Work) : "unreadable")}, "
         + $"docked {(docked ? "yes" : "no")}, registered {(appBar?.Registered == true ? "yes" : "no")}, "
         + $"{(fullScreenOpen ? "stepped aside for a full-screen window, " : "")}"
+        + $"{(steppedBelow != 0 ? $"behind {steppedBelow:X}, which covers the screen, " : "")}"
         + $"taken back {repairs} time(s){(repairs > 0 ? $", last {lastRepair.ToLocalTime():HH:mm:ss}" : "")}, refused {refusals} time(s)";
 
     static string Format(AppBar.Rect r) => $"{r.L},{r.T} to {r.R},{r.B} ({r.R - r.L}x{r.B - r.T})";

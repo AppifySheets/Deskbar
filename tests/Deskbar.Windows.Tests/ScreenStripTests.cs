@@ -41,11 +41,13 @@ public class ScreenStripTests
 
     // A strip whose docking is recorded and granted by the test: by default exactly what it asked for, as the shell
     // grants a top bar on a screen with nothing else on its top edge (measured, probe notes section 1).
-    static ScreenStrip Strip(List<Ask>? asked = null, Func<DateTime>? clock = null, Func<AppBar.Rect, int, AppBar.Rect>? grant = null, MonitorBounds? screen = null) =>
+    // Nothing covers the strip's screen unless the test says so (`covering`): the made-up screen is on no real monitor.
+    static ScreenStrip Strip(List<Ask>? asked = null, Func<DateTime>? clock = null, Func<AppBar.Rect, int, AppBar.Rect>? grant = null, MonitorBounds? screen = null, Func<nint>? covering = null) =>
         new(screen ?? Offscreen)
         {
             Scale = () => At150,
             Clock = clock ?? (() => DateTime.UtcNow),
+            Covering = covering ?? (() => 0),
             DockWith = (edge, screen, px) =>
             {
                 asked?.Add(new Ask(edge, screen, px));
@@ -341,6 +343,108 @@ public class ScreenStripTests
 
         strip.StepAside(fullScreen: false);
         Assert.True(IsTopmost(strip));
+
+        strip.Undock();
+        strip.Close();
+    });
+
+    // TASK b488e2e9: a full-screen Remote Desktop window sat under the strip, its top 36 px (the remote app's caption)
+    // hidden. The window covering the strip's screen is an ORDINARY one, and the strip must end up directly behind it in
+    // z-order, not merely out of the topmost band: leaving the band puts a window at the top of the ordinary band, over
+    // it. Real windows, the z-order read back from Windows (GW_HWNDNEXT walks down from a window).
+    const uint GwHwndNext = 2;
+
+    static nint Handle(Window window) => new WindowInteropHelper(window).Handle;
+
+    // Whether `lower` is somewhere below `upper` in z-order.
+    static bool IsBelow(Window lower, Window upper) =>
+        Enumerable.Range(0, 10_000)
+            .Aggregate((At: NativeMethods.GetWindow(Handle(upper), GwHwndNext), Found: false),
+                (walk, _) => walk.Found || walk.At == 0 ? walk : (NativeMethods.GetWindow(walk.At, GwHwndNext), walk.At == Handle(lower)))
+            .Found;
+
+    // A plain window standing in for the full-screen one. Its rectangle does not matter: the strip's Covering seam says
+    // what covers the screen, and FullScreenCover's own tests say which rectangles do.
+    static Window CoverWindow(bool topmost)
+    {
+        var cover = new Window { Width = 200, Height = 100, Left = -29900, Top = -29900, WindowStyle = WindowStyle.None, ShowInTaskbar = false, Topmost = topmost };
+        cover.Show();
+        return cover;
+    }
+
+    [Fact]
+    public void An_ordinary_window_covering_its_screen_has_the_strip_directly_behind_it_and_its_leaving_puts_it_back_on_top() => StaThread.Run(() =>
+    {
+        var cover = CoverWindow(topmost: false);
+        var covering = Handle(cover);
+        var strip = Strip(covering: () => covering);
+        Assert.True(strip.Dock().IsSuccess);
+
+        strip.ReclaimTopmost();
+
+        Assert.False(IsTopmost(strip));
+        Assert.Equal(Handle(strip), NativeMethods.GetWindow(covering, GwHwndNext));
+
+        covering = 0;
+        strip.ReclaimTopmost();
+        Assert.True(IsTopmost(strip));
+        Assert.True(IsBelow(cover, strip));
+
+        strip.Undock();
+        strip.Close();
+        cover.Close();
+    });
+
+    // The shell's full-screen notice with an ordinary full-screen window up: before the fix the strip left the topmost
+    // band and landed at the top of the ordinary one, ABOVE the window it was stepping aside for. Now it is behind it.
+    [Fact]
+    public void The_shells_notice_puts_the_strip_behind_an_ordinary_covering_window_not_over_it() => StaThread.Run(() =>
+    {
+        var cover = CoverWindow(topmost: false);
+        var strip = Strip(covering: () => Handle(cover));
+        Assert.True(strip.Dock().IsSuccess);
+
+        strip.StepAside(fullScreen: true);
+
+        Assert.False(IsTopmost(strip));
+        Assert.True(IsBelow(strip, cover));
+
+        strip.Undock();
+        strip.Close();
+        cover.Close();
+    });
+
+    // A video player in full screen is topmost itself (measured, PotPlayer, TopLevelWindows.IsTopmost): out of the band
+    // is already behind it.
+    [Fact]
+    public void A_topmost_covering_window_has_the_strip_out_of_the_band_and_behind_it() => StaThread.Run(() =>
+    {
+        var cover = CoverWindow(topmost: true);
+        var strip = Strip(covering: () => Handle(cover));
+        Assert.True(strip.Dock().IsSuccess);
+
+        strip.ReclaimTopmost();
+
+        Assert.False(IsTopmost(strip));
+        Assert.True(IsBelow(strip, cover));
+
+        strip.Undock();
+        strip.Close();
+        cover.Close();
+    });
+
+    // While the shell says a full-screen window is up but nothing covers THIS strip's screen (it is on another screen),
+    // the strip keeps out of the topmost band as before: the notice is still obeyed, the covering check only adds to it.
+    [Fact]
+    public void The_shells_notice_without_a_covering_window_still_keeps_the_strip_out_of_the_band() => StaThread.Run(() =>
+    {
+        var strip = Strip();
+        Assert.True(strip.Dock().IsSuccess);
+
+        strip.StepAside(fullScreen: true);
+        strip.ReclaimTopmost();
+
+        Assert.False(IsTopmost(strip));
 
         strip.Undock();
         strip.Close();
