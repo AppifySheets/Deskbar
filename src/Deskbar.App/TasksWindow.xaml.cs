@@ -955,6 +955,9 @@ public partial class TasksWindow : Window
     const int FirstControlColumn = 2;
 
     // The strip of a slim line's controls: the slim columns from the toggles on, left-aligned in the row under the title.
+    // All fixed, so it cannot shrink: at the narrowest panel, with the scroll bar and a line of five sessions, it is 297
+    // DIP in a 303 DIP slot since the button columns grew to their true widths (task 735abbf5, measured by
+    // At_the_narrowest_panel_the_controls_strip_fits_its_line, which fails if it outgrows its line).
     static Grid SlimControls(IReadOnlyList<GridLength> columns)
     {
         var strip = new Grid { Tag = ControlsTag, HorizontalAlignment = HorizontalAlignment.Left, Margin = new Thickness(2, 2, 0, 0) };
@@ -1324,7 +1327,7 @@ public partial class TasksWindow : Window
     //     there, and a column of dim glyphs down every line was noise;
     //   - slim lines: shown at rest as strongly as the other quiet buttons (OffFlagAtRestOnSlim), full under the pointer
     //     or on the picked line. A slim line's controls have a row of their own under the
-    //     title (ControlsUnderTitle), and the toggles' 48 DIP are kept in it whether they show or not, so hiding them
+    //     title (ControlsUnderTitle), and the toggles' 54 DIP are kept in it whether they show or not, so hiding them
     //     left a hole between the workspace chip and the comments with nothing to say three buttons were in it.
     //     Petre, on a screenshot of that hole (task f564a7cd): "lots of horizontal space for buttons, still hidden".
     // Not static: it reads slimLines, the form of the lines on show, which every caller's line belongs to.

@@ -1120,6 +1120,9 @@ NT3. (Tasks f564a7cd, ec731be5.) Without the pointer on a line, its flag toggles
      workspace chip and the comments, about as light as the comment button: clearly readable, no empty hole there.
      Hover the line: they go full strength, never over the title's text. A lit toggle still stands out in its colour. Widen the
      panel past 710 DIP: on the full lines the off toggles are out of sight again until hover.
+NT3b. (Task 735abbf5.) Look closely at the three toggles on a narrow line, and on a full line under the pointer: the
+     "!", the clock and the moon are each whole. The moon is a full crescent, its outer arc on the right included, not a
+     thin hook. The comment bubble and "⋯" beside them are whole too.
 NT3a. (Task f564a7cd.) A task between an hour and a day old reads its whole age on a narrow line, "12h59m", never
      "12h5…".
 NT4. Press F2 on a narrow line: the editor takes the whole line. Press Esc: the buttons come back.

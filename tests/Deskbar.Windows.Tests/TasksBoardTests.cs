@@ -3597,6 +3597,76 @@ public class TasksBoardTests
         Assert.Equal([true, false, true], Shown(t)); // after it, the laid-out height does
     });
 
+    // Task 735abbf5 (Petre's third report of the toggles: "it's the snooze and other buttons, which are partly
+    // invisible"). The toggles' column was 48 DIP for three 18 DIP toggles (the Flat button's 1 DIP border each side was
+    // left out of the sum), so the grid cut 6 DIP off the snooze moon, its whole outer arc. Each button on a line, and
+    // the toggles' row as a whole, must get a slot at least as wide as it asks for, on the slim line, the full line and
+    // the Matrix's, for a Claude task with a comment (the widest set: toggles, snooze, comments with a count, Open
+    // Claude, "⋯"). A part squeezed below its width is clipped by its cell, which is what Petre saw.
+    //
+    // MEASURED AGAINST ActualWidth, NOT DesiredSize: WPF clamps an element's DesiredSize to the space it was offered, so
+    // on the old columns the toggles' row reported wanting 48 in a 48 slot and the check passed on the bug. Arrange
+    // keeps the unclipped width as the element's ActualWidth (54 there) and clips what overflows the slot.
+    [Theory]
+    [InlineData("slim")]
+    [InlineData("full")]
+    [InlineData("matrix")]
+    public void A_line_s_buttons_fit_their_columns(string view) => StaThread.Run(() =>
+    {
+        using var t = Build(width: view == "slim" ? TasksPanelLayout.DefaultWidth : Wide);
+        var id = t.Tasks.Create("Toggles", t.Gepha, Session("s1")).Value.Id;
+        t.Tasks.SetStatusLine(id, "PR green, ready to merge");
+        t.Tasks.Comment(id, "s1", "one");
+        t.Controller.Show();
+        if (view == "matrix") Click(ButtonNamed(t.Window, "Matrix"));
+        t.Window.UpdateLayout();
+
+        var line = LineOf(t.Window, id);
+        // The line's buttons (not the line itself) and the toggles' row, a StackPanel holding them.
+        var parts = Inside(line).OfType<FrameworkElement>()
+            .Where(part => !ReferenceEquals(part, line) && part.IsVisible
+                && (part is Button || part is StackPanel panel && panel.Children.OfType<Button>().Count() > 1))
+            .ToList();
+        Assert.Contains(parts, part => Equals(part.Tag, "task-flag-off"));
+        parts.ForEach(part =>
+        {
+            var slot = System.Windows.Controls.Primitives.LayoutInformation.GetLayoutSlot(part);
+            var name = AutomationProperties.GetName(part) is { Length: > 0 } named ? named : part.GetType().Name;
+            var width = part.ActualWidth + part.Margin.Left + part.Margin.Right;
+            Console.WriteLine($"MEASURED {view}: {name} is {width:0.##} wide, slot {slot.Width:0.##}");
+            Assert.True(slot.Width + 0.5 >= width,
+                $"{view}: {name} is {width:0.##} DIP wide and its slot is {slot.Width:0.##}, so it is cut off");
+        });
+    });
+
+    // The other side of the true widths above (review of task 735abbf5): the slim line's controls' strip grew by 12 DIP,
+    // and its columns are all fixed, so at the narrowest panel, with its scroll bar and a line of five sessions (the
+    // squares' widest column), it must still fit its line, or "⋯" is cut at the line's end instead. Measured: 297 DIP
+    // in a 303 DIP slot, "⋯" ending at 328 of a 342 DIP line.
+    [Fact]
+    public void At_the_narrowest_panel_the_controls_strip_fits_its_line() => StaThread.Run(() =>
+    {
+        using var t = Build(width: TasksPanelLayout.MinWidth);
+        var id = t.Tasks.Create("Busy", t.Gepha, Session("s1")).Value.Id;
+        new[] { "s2", "s3", "s4", "s5" }.ToList().ForEach(s => t.Tasks.Join(id, Session(s)));
+        t.Tasks.Comment(id, "s1", "one");
+        // Enough lines to bring the scroll bar out.
+        Enumerable.Range(0, 40).ToList().ForEach(i => t.Tasks.AddNote($"Note {i}", t.Gepha));
+        t.Controller.Show();
+        t.Window.UpdateLayout();
+
+        var line = LineOf(t.Window, id);
+        var strip = Inside(line).OfType<Grid>().Single(g => Equals(g.Tag, TasksWindow.ControlsTag));
+        var slot = System.Windows.Controls.Primitives.LayoutInformation.GetLayoutSlot(strip);
+        var width = strip.ActualWidth + strip.Margin.Left + strip.Margin.Right;
+        var more = ButtonNamed(line, "More");
+        var moreRight = more.TranslatePoint(new Point(more.ActualWidth, 0), line).X;
+        Console.WriteLine($"MEASURED strip {width:0.##} in a {slot.Width:0.##} slot, More ends at {moreRight:0.##} of {line.ActualWidth:0.##}, "
+            + $"columns {string.Join(" ", strip.ColumnDefinitions.Select(c => c.ActualWidth.ToString("0.##")))}");
+        Assert.True(slot.Width + 0.5 >= width, $"the strip is {width:0.##} DIP wide in a {slot.Width:0.##} DIP slot");
+        Assert.True(moreRight <= line.ActualWidth + 0.5, $"\"⋯\" ends at {moreRight:0.##}, past the line's {line.ActualWidth:0.##}");
+    });
+
     // RULING 64 (Petre: "same here, make more compact", of the window's List after the bar's line gap went from 8 to 3
     // DIP): a line is as tall as its text and a few DIP, not 30. The small buttons (tick, flags, comments, "...") used
     // to be taller than the title and set the line's height, so the line is measured, not just the text: a one-line task
@@ -5170,9 +5240,10 @@ public class TasksBoardTests
         var chip = Grid.GetColumn(Inside(line).OfType<Border>().First(b => b.Child is TextBlock { Text: "GEPHA" }));
         Assert.True(chip < flags && flags < comments && comments < more, $"chip {chip}, flags {flags}, comments {comments}, more {more}");
         // A note with no comments, on a board with no Claude task and nothing closed: the comments column is the glyph's
-        // and the action column is gone.
+        // and the action column is gone. 22: the glyph, 4 DIP of padding each side and the button's 1 DIP border each side
+        // (it was 20, the border left out, task 735abbf5).
         var grid = GridOf(line);
-        Assert.Equal(20, grid.ColumnDefinitions[comments].Width.Value);
+        Assert.Equal(22, grid.ColumnDefinitions[comments].Width.Value);
         Assert.Equal(0, grid.ColumnDefinitions[comments + 1].Width.Value);
     });
 

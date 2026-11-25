@@ -49,15 +49,31 @@ public partial class TasksWindow
         _ => Part.Place,
     });
 
-    // THE BUTTON COLUMNS, each as narrow as what it holds. A small button is its glyph (12 DIP in the icon font) and 4 DIP
-    // of padding each side (Small), so 20; a flag toggle has 2 DIP each side (FlagsOf), so 16, three of them with the
-    // snooze moon. The comments column is the glyph alone, or the glyph and its count (3 DIP apart, about 7 DIP a digit
-    // at 11 DIP), as wide as the widest count on show. The action column is Reopen's width while a closed task is on show
-    // (full lines only), else Open Claude's glyph while a Claude task is, else nothing.
-    const double ButtonColumn = 20;
-    const double FlagsColumn = 48;
+    // THE BUTTON COLUMNS, each as narrow as what it holds. Every small button is a Flat button, which has a 1 DIP border
+    // on each side (Flat's BorderThickness) around its padding and its glyph (12 DIP in the icon font). So a small button
+    // is 12 + 4 + 4 of padding (Small) + 2 of border = 22, and a flag toggle 12 + 2 + 2 of padding (FlagsOf, SnoozeButton)
+    // + 2 of border = 18, three of them with the snooze moon.
+    //
+    // THE BORDER WAS LEFT OUT once (task 735abbf5, Petre's third report of the toggles, after "snooze and others not
+    // showing?" and "lots of horizontal space for buttons, still hidden"). The columns were 16 a toggle and 20 a button,
+    // so the three toggles needed 54 DIP in a 48 DIP column and the grid cut the last 6 off: the right half of the snooze
+    // moon, its outer arc, leaving a hook the eye read as a broken glyph. A small button lost 2 DIP of padding, no ink.
+    // The widths are worked out from the parts now, and a window test (A_line_s_buttons_fit_their_columns) fails if a
+    // button outgrows its column again.
+    //
+    // The comments column is the glyph alone, or the glyph and its count (3 DIP apart, about 7 DIP a digit at 11 DIP),
+    // as wide as the widest count on show. The action column is Reopen's width while a closed task is on show (full
+    // lines only), else Open Claude's glyph while a Claude task is, else nothing.
+    const double ButtonBorder = 1;
+    const double ButtonGlyph = 12;
+    const double ButtonColumn = ButtonGlyph + 2 * 4 + 2 * ButtonBorder;
+    const double ToggleWidth = ButtonGlyph + 2 * 2 + 2 * ButtonBorder;
+    const double FlagsColumn = 3 * ToggleWidth;
+    // A Matrix line has the two flags only (no snooze there, SnoozeButton). It was 34, cutting 2 DIP off the clock.
+    const double CompactFlagsColumn = 2 * ToggleWidth;
     const double ReopenColumn = 46;
-    const double OpenClaudeColumn = 20;
+    // Open Claude is a small button like the others (OpenClaudeButton).
+    const double OpenClaudeColumn = ButtonColumn;
 
     static double CommentsColumnFor(IEnumerable<TaskRowView> rows) =>
         rows.Select(r => r.CommentCount > 0 ? ButtonColumn + 3 + 7 * $"{r.CommentCount}".Length : ButtonColumn).DefaultIfEmpty(ButtonColumn).Max();
