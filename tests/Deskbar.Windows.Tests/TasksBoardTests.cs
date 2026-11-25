@@ -149,6 +149,9 @@ public class TasksBoardTests
     static Button ButtonNamed(object scope, string name) =>
         Inside(scope).OfType<Button>().First(b => AutomationProperties.GetName(b) == name);
 
+    static bool HasButtonNamed(object scope, string name) =>
+        Inside(scope).OfType<Button>().Any(b => AutomationProperties.GetName(b) == name);
+
     // A line of the window: the button that carries its task's id.
     static Button LineOf(TasksWindow window, Guid id) =>
         Inside(window).OfType<Button>().Single(b => b.Tag is Guid tag && tag == id);
@@ -4631,6 +4634,85 @@ public class TasksBoardTests
         Click(ButtonNamed(t.Window, "Add subtask"));
         Assert.True(t.Window.AddBoxShown);
         Assert.Equal(FloatingBar.SubtaskPlaceholder, t.Window.AddPlaceholderText);
+    });
+
+    // Task 54b39c4c (Petre: "subtask should show its parent and have a way to open the parent easily"): an open subtask's
+    // thread starts with "↑ Subtask of <parent>", a button that shows the parent, picked, with its own thread open (its
+    // thread lists the subtask back). A plain task's thread has no such line.
+    [Fact]
+    public void An_open_subtask_names_its_parent_and_opens_it() => StaThread.Run(() =>
+    {
+        var selection = new TaskSelection();
+        using var t = Build(selection: selection);
+        var parent = t.Tasks.AddNote("Ship the release", t.Gepha).Value;
+        var child = t.Tasks.AddNote("Write the notes", t.Gepha, parent: parent.Id).Value;
+        t.Controller.Show();
+        t.Controller.ToggleThread(child.Id);
+
+        var entry = ButtonNamed(t.Window, "Parent Ship the release");
+        Assert.Equal("↑ Subtask of Ship the release", string.Concat(Inside(entry).OfType<TextBlock>().Select(RunsOf)));
+        Click(entry);
+
+        Assert.Equal(parent.Id, selection.Current.Value);
+        Assert.True(HasButtonNamed(t.Window, "Subtask Write the notes"));
+    });
+
+    // The parent is shown past a filter that hides it, as a Stats line's task is (TasksBoard.OpenParent): here the
+    // workspace filter shows only the subtask's workspace, and the parent lives on another.
+    [Fact]
+    public void Opening_the_parent_lets_it_past_the_workspace_filter() => StaThread.Run(() =>
+    {
+        var selection = new TaskSelection();
+        using var t = Build(selection: selection);
+        var parent = t.Tasks.AddNote("Ship the release", t.Sparrow).Value;
+        var child = t.Tasks.AddNote("Write the notes", t.Gepha, parent: parent.Id).Value;
+        t.Controller.Show();
+        t.Controller.FilterWorkspace(TaskWorkspaceFilter.On(t.Gepha));
+        Assert.False(HasButtonNamed(t.Window, "Subtask Write the notes"));
+        t.Controller.ToggleThread(child.Id);
+
+        Click(ButtonNamed(t.Window, "Parent Ship the release"));
+
+        Assert.Equal(parent.Id, selection.Current.Value);
+        // The parent's line is drawn with its thread open: its subtask is listed in it.
+        Assert.True(HasButtonNamed(t.Window, "Subtask Write the notes"));
+    });
+
+    [Fact]
+    public void A_plain_tasks_thread_names_no_parent() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        var id = t.Tasks.AddNote("Ship the release", t.Gepha).Value.Id;
+        t.Controller.Show();
+        t.Controller.ToggleThread(id);
+
+        Assert.DoesNotContain(Inside(t.Window).OfType<Button>(), b => AutomationProperties.GetName(b)?.StartsWith("Parent ") == true);
+    });
+
+    // The panel's line menu: "Open parent" on a subtask's line, right after "Add subtask…"; it shows the parent. None on a
+    // line with no parent.
+    [Fact]
+    public void A_subtasks_menu_in_the_panel_offers_open_parent() => StaThread.Run(() =>
+    {
+        var selection = new TaskSelection();
+        using var t = Build(selection: selection);
+        var parent = t.Tasks.AddNote("Ship the release", t.Gepha).Value.Id;
+        var child = t.Tasks.AddNote("Write the notes", t.Gepha, parent: parent).Value.Id;
+        t.Controller.Show();
+
+        var menu = t.Window.OpenMenuFor(child);
+        var words = MenuWords(menu).ToList();
+        Assert.Equal(words.IndexOf("Add subtask…") + 1, words.IndexOf(TasksWindow.OpenParentText));
+        menu.Items.OfType<MenuItem>().ElementAt(words.IndexOf(TasksWindow.OpenParentText))
+            .RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
+        menu.IsOpen = false;
+        // Run once the menu has closed (an Input-priority dispatch): a lower priority runs after it.
+        t.Window.Dispatcher.Invoke(() => { }, System.Windows.Threading.DispatcherPriority.ApplicationIdle);
+        Assert.Equal(parent, selection.Current.Value);
+
+        var parentMenu = t.Window.OpenMenuFor(parent);
+        Assert.DoesNotContain(TasksWindow.OpenParentText, MenuWords(parentMenu));
+        parentMenu.IsOpen = false;
     });
 
     [Fact]

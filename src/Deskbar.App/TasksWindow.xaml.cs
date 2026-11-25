@@ -560,11 +560,11 @@ public partial class TasksWindow : Window
             // working changes the squares' halos and nothing else, and must still redraw the line. Not in a Matrix cell's:
             // a compact line draws no sessions, so it would only rebuild the Matrix for nothing (review minor 2).
             string.Join('\u0002', view.Cells.Select(c => $"{c.Header}:" + string.Join('\u0003', c.Rows.Select(r =>
-                $"{r.Id}|{r.Title}|{r.Detail}|{r.Description}|{r.Status}|{r.Claudes}|{r.Assignee.Id}|{PlaceSignature(r.Place)}|{r.CommentCount}|{r.Expanded}|{r.Closing}|{r.Important}|{r.Urgent}|{r.ParentTitle}|{r.SubtaskCount}|{r.ClaudeWorking}|" +
+                $"{r.Id}|{r.Title}|{r.Detail}|{r.Description}|{r.Status}|{r.Claudes}|{r.Assignee.Id}|{PlaceSignature(r.Place)}|{r.CommentCount}|{r.Expanded}|{r.Closing}|{r.Important}|{r.Urgent}|{r.ParentTitle}|{r.ParentId}|{r.SubtaskCount}|{r.ClaudeWorking}|" +
                 string.Join('\u0004', r.Comments.Select(c => $"{c.Id}{c.Author}{c.When}{c.Markdown}{c.Settled}")))))),
             string.Join('\u0002', view.Groups.Select(g => $"{g.Header}:" + string.Join('\u0003', g.Rows.Select(r =>
                 $"{r.Id}|{r.Title}|{r.Detail}|{r.Description}|{r.Status}|{r.Claudes}|{r.Assignee.Id}|{r.Sessions}|{r.SessionCount}|{r.LiveCount}|{PlaceSignature(r.Place)}|{r.CommentCount}|" +
-                $"{r.Expanded}|{r.Closing}|{r.Important}|{r.Urgent}|{r.WorkingCount}|{r.ParentTitle}|{r.SubtaskCount}|{r.ClaudeWorking}|{r.Nested}|" +
+                $"{r.Expanded}|{r.Closing}|{r.Important}|{r.Urgent}|{r.WorkingCount}|{r.ParentTitle}|{r.ParentId}|{r.SubtaskCount}|{r.ClaudeWorking}|{r.Nested}|" +
                 string.Join('\u0004', r.Subtasks.Select(c => $"{c.Id}{c.Title}{c.Status}{c.StatusLine}")) + "|" + string.Join('\u0004', r.SessionList.Select(s => $"{s.Id}{s.Joined}{s.State}")) + "|" +
                 string.Join('\u0004', r.Comments.Select(c => $"{c.Id}{c.Author}{c.When}{c.Markdown}{c.Settled}")))))));
 
@@ -1553,6 +1553,12 @@ public partial class TasksWindow : Window
     UIElement Thread(TaskRowView row)
     {
         var panel = new StackPanel();
+        // A SUBTASK'S PARENT FIRST (task 54b39c4c; Petre: "subtask should show its parent and have a way to open the parent
+        // easily"). A nested line shows only "↳", trusting the parent to be right above, but with a few siblings and an
+        // open thread the parent is off the top of the list. So an open subtask names its parent at the head of its
+        // thread, and the name is a button that opens the parent (TasksBoard.OpenParent).
+        if (row.ParentId is { } parentId && row.ParentTitle is { } parentTitle && Actions?.OpenParent is { } openParent)
+            panel.Children.Add(ParentEntry(parentId, parentTitle, openParent));
         // "Open in window" (task dca4ebeb) at the top of an open thread: the thread is where a long task stops fitting.
         if (Actions?.OpenWindow is { } openWindow)
         {
@@ -1657,6 +1663,28 @@ public partial class TasksWindow : Window
     /// (task 7f61af2e): what a double-click on the line does, minus the click that opens it.
     /// </summary>
     internal const string OpenClaudeText = "Open Claude";
+
+    /// <summary>The words in front of the parent's title at the head of a subtask's thread, and the button's name.</summary>
+    internal const string SubtaskOfText = "Subtask of";
+
+    /// <summary>A subtask line's menu item that shows its parent (task 54b39c4c), the panel's and the bar's alike.</summary>
+    internal const string OpenParentText = "Open parent";
+
+    // The head of a subtask's thread (task 54b39c4c): "↑ Subtask of <parent title>", the arrow and the words in the
+    // caption grey, the title in ink so it reads as the thing to press. The whole line is a button that shows the parent
+    // (picked, its thread open, scrolled to), the mirror of a parent's SubtaskEntry below.
+    UIElement ParentEntry(Guid parentId, string parentTitle, Action<Guid> openParent)
+    {
+        var text = new TextBlock { FontSize = 11, TextTrimming = TextTrimming.CharacterEllipsis, VerticalAlignment = VerticalAlignment.Center };
+        text.Inlines.Add(new Run($"↑ {SubtaskOfText} ") { Foreground = HeaderInk });
+        text.Inlines.Add(new Run(parentTitle) { Foreground = Ink });
+        var entry = Flat(text, $"Parent {parentTitle}", () => openParent(parentId), new Thickness(4, 1, 4, 1));
+        entry.Background = Brushes.Transparent;
+        entry.HorizontalAlignment = HorizontalAlignment.Left;
+        entry.Margin = new Thickness(0, 0, 0, 6);
+        entry.ToolTip = "Show the parent task";
+        return entry;
+    }
 
     // One subtask in its parent's thread: "↳ title · status · status line", dim when it is done or closed. The whole line
     // is a button that shows the subtask (TasksBoard.ShowTask).
@@ -2179,8 +2207,13 @@ public partial class TasksWindow : Window
             // once this menu has closed so the box can take the keyboard.
             if (Actions?.SubtaskParent is not null)
                 menu.Items.Add(Item(FloatingBar.AddSubtaskText, () => Dispatcher.BeginInvoke(() => BeginSubtaskAdd(id), System.Windows.Threading.DispatcherPriority.Input)));
-            menu.Items.Add(new Separator());
         }
+        // OPEN PARENT (task 54b39c4c): on a subtask's line, the parent shown, picked and opened, as the thread's "Subtask
+        // of" does, without opening this line's thread first. Right after "Add subtask…", its family neighbour. On a
+        // closed subtask too, since the parent is still worth reaching from it. Run once this menu has closed.
+        if (row.ParentId is { } parentId && Actions?.OpenParent is { } openParent)
+            menu.Items.Add(Item(OpenParentText, () => Dispatcher.BeginInvoke(() => openParent(parentId), System.Windows.Threading.DispatcherPriority.Input)));
+        if (menu.Items.Count > 0) menu.Items.Add(new Separator());
 
         var status = Item("Status");
         SettableStatuses.ToList().ForEach(s =>

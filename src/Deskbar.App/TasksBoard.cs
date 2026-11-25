@@ -265,6 +265,8 @@ public sealed class TasksBoard : IDisposable
             OpenWindow = id => OpenWindow(id),
             ShowStats = ShowStats,
             OpenFromStats = OpenFromStats,
+            // "Subtask of" in a subtask's thread and "Open parent" in its line's menu (task 54b39c4c).
+            OpenParent = OpenParent,
         };
 
         // Taken before the subscriptions below exist, so the first StateChanged pulse is compared with this state
@@ -741,6 +743,21 @@ public sealed class TasksBoard : IDisposable
     public void OpenFromStats(Guid id)
     {
         statsShown = false;
+        ShowTaskPastFilters(id);
+    }
+
+    /// <summary>
+    /// A subtask's way to its parent (task 54b39c4c; Petre: "subtask should show its parent and have a way to open the
+    /// parent easily"): the "Subtask of" link at the top of a subtask's open thread, and "Open parent" in the line's menu
+    /// here and on the bar. The parent is shown the way a Stats line's task is (ShowTaskPastFilters): picked, scrolled
+    /// to, its thread open, and let through any filter that would hide it, since Petre asked for that very task.
+    /// </summary>
+    public void OpenParent(Guid parentId) => ShowTaskPastFilters(parentId);
+
+    // OpenFromStats's and OpenParent's shared half: a filter that would hide the task is let through first (see
+    // OpenFromStats for which and how), then the task is shown (ShowTask).
+    void ShowTaskPastFilters(Guid id)
+    {
         var found = tasks.Board.Tasks.TryFirst(t => t.Id == id);
         if (found.HasValue)
         {
@@ -1151,6 +1168,9 @@ public sealed class TasksBoard : IDisposable
         WorkingCount = workingOf(task),
         // Subtasks (Petre's pick A): the parent's title in front of a subtask's, and a parent's open subtasks' count.
         ParentTitle = tasks.Board.ParentOf(task).Map(p => (string?)FloatingBar.FirstLine(p.Title)).GetValueOrDefault(),
+        // ...and the parent's id, for the subtask's way back to it (task 54b39c4c: "Subtask of" in the thread, "Open
+        // parent" in the line's menu, the task window's Parent section).
+        ParentId = tasks.Board.ParentOf(task).Map(p => (Guid?)p.Id).GetValueOrDefault(),
         SubtaskCount = tasks.Board.OpenSubtaskCount(task.Id),
         // Claude still at it (task 37cd7081): the tick's tip says it will offer to stop Claude.
         ClaudeWorking = TaskBoard.ClaudeStillWorking(task),
@@ -1304,6 +1324,12 @@ internal sealed record TaskRowView(Guid Id, string Title, string Detail, TaskSta
     /// › ", "↳ " on a slim line). In the redraw signature, so renaming the parent redraws its subtasks.
     /// </summary>
     public string? ParentTitle { get; init; }
+
+    /// <summary>
+    /// The parent's id when the task is a subtask, or null (task 54b39c4c): what the thread's "Subtask of" link, the
+    /// menu's "Open parent" and the task window's Parent section open. Null exactly when ParentTitle is.
+    /// </summary>
+    public Guid? ParentId { get; init; }
 
     /// <summary>How many open subtasks the task has, drawn after its title ("· 2 subtasks"); 0 for none.</summary>
     public int SubtaskCount { get; init; }
@@ -1482,6 +1508,12 @@ internal sealed record TasksWindowActions(
 
     /// <summary>A task's line in the Stats view: leave Stats and show that task (TasksBoard.OpenFromStats).</summary>
     public Action<Guid>? OpenFromStats { get; init; }
+
+    /// <summary>
+    /// A subtask's way to its parent, given the parent's id (task 54b39c4c): the "Subtask of" link in its thread and
+    /// "Open parent" in its line's menu (TasksBoard.OpenParent). None, neither shows.
+    /// </summary>
+    public Action<Guid>? OpenParent { get; init; }
 }
 
 /// <summary>

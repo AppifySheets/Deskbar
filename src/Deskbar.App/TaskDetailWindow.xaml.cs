@@ -276,6 +276,8 @@ public partial class TaskDetailWindow : Window
         return string.Join('\u001f',
             r.Id, r.Title, r.Detail, r.Status, r.Claudes, r.Place.Name, r.Place.Colour?.ToString() ?? "", r.Closing, r.Assignee.Id,
             r.Description, r.Important, r.Urgent, r.SnoozedUntil?.ToString("O") ?? "", r.Goal?.Title ?? "", r.ParentTitle ?? "",
+            // The parent's id too (task 54b39c4c): the Parent button opens it, so a move to a namesake parent redraws.
+            r.ParentId?.ToString() ?? "",
             r.ClaudeWorking, r.WorkingCount,
             string.Join('\u001e', r.Comments.Select(c => $"{c.Id}|{c.Author}|{c.When}|{c.Settled}|{c.Editable}|{c.Markdown}")),
             string.Join('\u001e', r.SessionList.Select(s => $"{s.Id}|{s.State}|{s.Joined:O}")),
@@ -505,6 +507,17 @@ public partial class TaskDetailWindow : Window
         }
         else side.Children.Add(new Border { Height = 12 });
 
+        // A SUBTASK'S PARENT (task 54b39c4c; Petre: "subtask should show its parent and have a way to open the parent
+        // easily"): a section of its own above the subtasks, a button that opens the parent in a window of its own, as a
+        // subtask's button below does. It took the place of the plain "Subtask of" pair the Details grid had, which named
+        // the parent and went nowhere.
+        if (row.ParentId is { } parentId && row.ParentTitle is { } parentTitle)
+        {
+            side.Children.Add(Section("Parent"));
+            side.Children.Add(ParentEntry(parentId, parentTitle));
+            side.Children.Add(new Border { Height = 12 });
+        }
+
         if (row.Subtasks.Count > 0)
         {
             side.Children.Add(Section("Subtasks"));
@@ -523,7 +536,6 @@ public partial class TaskDetailWindow : Window
             ("Assigned", row.Assignee.Name),
         };
         if (row.Goal is { } goal) pairs.Add(("Goal", $"{goal.Title} ({goal.Period})"));
-        if (row.ParentTitle is { } parent) pairs.Add(("Subtask of", parent));
         pairs.Add(("Added", row.Created.ToLocalTime().ToString("d MMM yyyy HH:mm")));
         pairs.Add(("Id", row.Id.ToString()[..8]));
         pairs.Select((pair, i) => (pair, i)).ToList().ForEach(x =>
@@ -589,6 +601,21 @@ public partial class TaskDetailWindow : Window
             TextTrimming = TextTrimming.CharacterEllipsis,
         });
         return line;
+    }
+
+    // The parent of a subtask (task 54b39c4c): "↑ <parent title>", a button that opens the parent in a window of its own,
+    // the mirror of SubtaskEntry below. Named "Parent <title>", as the tasks panel's thread link is.
+    UIElement ParentEntry(Guid parentId, string parentTitle)
+    {
+        var text = new TextBlock { TextWrapping = TextWrapping.Wrap, FontSize = 12 };
+        text.Inlines.Add(new Run("↑ ") { Foreground = HeaderInk });
+        text.Inlines.Add(new Run(parentTitle) { Foreground = Ink });
+        var button = Flat(text, $"Parent {parentTitle}", () => Actions?.OpenWindow?.Invoke(parentId), new Thickness(8, 4, 8, 4), tip: "Open the parent task in its own window");
+        button.Background = TileFill;
+        button.HorizontalAlignment = HorizontalAlignment.Stretch;
+        button.HorizontalContentAlignment = HorizontalAlignment.Left;
+        button.Margin = new Thickness(0, 0, 0, 3);
+        return button;
     }
 
     // A subtask: its title and status, a button that opens the subtask in a window of its own.
