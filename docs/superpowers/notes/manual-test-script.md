@@ -1084,7 +1084,11 @@ NT1. Drag the panel to its narrowest (360 DIP). Every title reads across the lin
 NT2. Widen it to the default 460 (task 50667e10): on both tasks, the one-word one too, the buttons sit on a row of their
      own under the title, starting at the title's left edge, each at the same x on every line. A waiting task's question
      comes under that row.
-NT3. Hover a line: the flag toggles and the moon light up just before the comments, never over the title's text.
+NT3. (Task f564a7cd.) Without the pointer on a line, its flag toggles and the moon show faintly between the workspace
+     chip and the comments: no empty hole there. Hover the line: they brighten, never over the title's text. Widen the
+     panel past 710 DIP: on the full lines the off toggles are out of sight again until hover.
+NT3a. (Task f564a7cd.) A task between an hour and a day old reads its whole age on a narrow line, "12h59m", never
+     "12h5…".
 NT4. Press F2 on a narrow line: the editor takes the whole line. Press Esc: the buttons come back.
 
 ## The tasks panel's columns

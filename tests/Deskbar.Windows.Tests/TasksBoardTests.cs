@@ -3903,6 +3903,51 @@ public class TasksBoardTests
         Assert.StartsWith("Added 4 weeks ago\n", (string)age.ToolTip);
     });
 
+    // Task f564a7cd (Petre's screenshot of a slim line reading "12h5…"): the widest age is not "27d23h" but one that ends
+    // in minutes, "23h59m", because "m" is the widest letter the age writes. It fits the slim line's age column whole too.
+    [Fact]
+    public void The_slim_lines_age_in_hours_and_minutes_is_not_cut() => StaThread.Run(() =>
+    {
+        var now = Start.AddHours(23).AddMinutes(59).AddSeconds(30);
+        using var t = Build(width: TasksPanelLayout.MinWidth, now: () => now);
+        var id = t.Tasks.AddNote("a note from yesterday", t.Gepha).Value.Id;
+        t.Controller.Show();
+        t.Window.UpdateLayout();
+
+        var age = Inside(LineOf(t.Window, id)).OfType<TextBlock>().Single(b => Equals(b.Tag, "task-age"));
+        Assert.Equal("23h59m", age.Text);
+        Assert.True(age.ActualWidth >= age.DesiredSize.Width - age.Margin.Left - age.Margin.Right - 0.5, $"'{age.Text}' is trimmed to {age.ActualWidth}");
+    });
+
+    // Task f564a7cd ("lots of horizontal space for buttons, still hidden"): a slim line's controls have a row of their
+    // own, where the three toggles' room is kept whether they show or not, so an off toggle there is drawn faint at rest
+    // instead of invisible until hover, and brighter under the pointer. On a full line an off toggle is still invisible
+    // until the line is hovered or selected.
+    [Fact]
+    public void A_slim_lines_off_toggles_show_at_rest_and_a_full_lines_do_not() => StaThread.Run(() =>
+    {
+        IReadOnlyList<Button> OffToggles(Board board, Guid id) =>
+            Inside(LineOf(board.Window, id)).OfType<Button>().Where(b => Equals(b.Tag, "task-flag-off")).ToArray();
+
+        using var slim = Build(width: TasksPanelLayout.DefaultWidth);
+        var id = slim.Tasks.AddNote("a plain note", slim.Gepha).Value.Id;
+        slim.Controller.Show();
+        var toggles = OffToggles(slim, id);
+        Assert.NotEmpty(toggles);
+        Assert.All(toggles, toggle => Assert.InRange(toggle.Opacity, 0.2, 0.5));
+        var atRest = toggles[0].Opacity;
+        LineOf(slim.Window, id).RaiseEvent(new MouseEventArgs(Mouse.PrimaryDevice, 0) { RoutedEvent = Mouse.MouseEnterEvent });
+        Assert.All(toggles, toggle => Assert.True(toggle.Opacity > atRest, "a hovered line's off toggles are brighter"));
+        LineOf(slim.Window, id).RaiseEvent(new MouseEventArgs(Mouse.PrimaryDevice, 0) { RoutedEvent = Mouse.MouseLeaveEvent });
+        Assert.All(toggles, toggle => Assert.Equal(atRest, toggle.Opacity));
+
+        using var full = Build(width: TasksPanelLayout.SlimBelow);
+        var fullId = full.Tasks.AddNote("a plain note", full.Gepha).Value.Id;
+        full.Controller.Show();
+        Assert.NotEmpty(OffToggles(full, fullId));
+        Assert.All(OffToggles(full, fullId), toggle => Assert.Equal(0, toggle.Opacity));
+    });
+
     // From 710 DIP the line is today's, and the switch between the two happens when the grip's drag ends (ResizePanel),
     // redrawing every line once.
     [Fact]

@@ -998,9 +998,12 @@ public partial class TasksWindow : Window
     // Whether a line has the Open Claude button: a Claude task that is open and not in its undo window.
     static bool OpensClaude(TaskRowView row) => row.Claudes && !row.Closing && row.Status != TaskStatus.Closed;
 
-    // The slim line's age column (2026-11-24, the age moved off the bar): "27d23h", the widest TaskAge.Format writes, at
-    // the age's 10.5 size is about 34 DIP, plus the 6 DIP left margin AgeOf gives it, so the text never trims.
-    const double SlimAgeColumn = 42;
+    // The slim line's age column (2026-11-24, the age moved off the bar), wide enough that the text never trims. The
+    // widest age TaskAge.Format writes is one in hours and minutes, "23h59m": "m" is its widest letter. Measured from
+    // Segoe UI's advance widths at the age's 10.5 size it is 37.6 DIP ("27d23h" is 34.8), plus the 6 DIP left margin
+    // AgeOf gives it, 43.6. The column was 42, sized for "27d23h" alone, so an age such as "12h59m" read "12h5…"
+    // (task f564a7cd, Petre's screenshot); 46 leaves a little over 2 DIP for rounding.
+    const double SlimAgeColumn = 46;
 
     // A slim line's squares: 8 DIP each, 3 DIP apart. The column fits the line with the most squares and no more than
     // SlimSquares of them (47 DIP, inside the plan's 48), with 3 DIP to spare before the chip; zero on a board of notes.
@@ -1095,7 +1098,8 @@ public partial class TasksWindow : Window
 
     // THE TWO TOGGLES (Task 12), the bar's (FloatingBar.FlagToggle): important, Segoe Fluent Icons' "Important" U+E8C9,
     // and urgent, its "Recent" clock U+E823 (Segoe MDL2 Assets carries both on Windows 10). On, the glyph wears its
-    // colour; off it is dim and quiet: invisible until the line is hovered or selected (Quieten), still clickable.
+    // colour; off it is dim and quiet: invisible until the line is hovered or selected, or faint on a slim line, whose
+    // controls have a row of their own (Quieten); still clickable either way.
     // Automation status "on" or "off", tooltip the flag's name. None on a closed task or a line in its undo window.
     StackPanel? FlagsOf(TaskRowView row)
     {
@@ -1117,7 +1121,7 @@ public partial class TasksWindow : Window
 
     // THE SNOOZE BUTTON (task 6da8d7eb, Petre: "task should have a snooze button, which will hide it from view for a while";
     // and on the task, "only in the large tasks view", so the bar's lines have none). Third after the two toggles and
-    // quiet like an off toggle: invisible until the line is hovered or selected. Segoe's "QuietHours" moon, U+E708, in
+    // quiet like an off toggle: invisible until the line is hovered or selected (faint on a slim line). Segoe's "QuietHours" moon, U+E708, in
     // both icon fonts (checked). A press opens the lengths (SnoozeMenu); on a snoozed line, which only the Snoozed filter
     // shows, the moon is lit and the menu offers "Wake now" first. A line waiting on Petre has one too (Petre, 2026-11-25:
     // "i may snooze something that's waiting"; TaskBoard.Snooze says what happens then). None in a Matrix line, whose
@@ -1302,15 +1306,26 @@ public partial class TasksWindow : Window
 
     internal double ScrollOffset => Scroller.VerticalOffset;
 
-    // Quiet parts at half strength until hover or selection; an off flag toggle quieter still, invisible until then
-    // (as on the bar), an on one always at full strength.
-    static void Quieten(IEnumerable<UIElement> parts, bool loud) => parts.ToList().ForEach(part => part.Opacity =
+    // Quiet parts at half strength until hover or selection; an on flag toggle always at full strength; an off one
+    // quieter still, and how quiet at rest depends on the line:
+    //   - full and Matrix lines: invisible until hover or selection (as on the bar). The toggles sit beside the title
+    //     there, and a column of dim glyphs down every line was noise;
+    //   - slim lines: faint but there (OffFlagAtRestOnSlim). A slim line's controls have a row of their own under the
+    //     title (ControlsUnderTitle), and the toggles' 48 DIP are kept in it whether they show or not, so hiding them
+    //     left a hole between the workspace chip and the comments with nothing to say three buttons were in it.
+    //     Petre, on a screenshot of that hole (task f564a7cd): "lots of horizontal space for buttons, still hidden".
+    // Not static: it reads slimLines, the form of the lines on show, which every caller's line belongs to.
+    void Quieten(IEnumerable<UIElement> parts, bool loud) => parts.ToList().ForEach(part => part.Opacity =
         (part as FrameworkElement)?.Tag switch
         {
             FlagOnTag => 1,
-            FlagOffTag => loud ? 0.55 : 0,
+            FlagOffTag => loud ? 0.55 : slimLines ? OffFlagAtRestOnSlim : 0,
             _ => loud ? 1 : 0.5,
         });
+
+    // An off toggle on a slim line nobody points at: clearly below the 0.55 it has under the pointer, so hover still
+    // answers, and below the other quiet buttons' 0.5, since the toggles' glyphs are already drawn in the dim ink.
+    const double OffFlagAtRestOnSlim = 0.3;
 
     static void Cell(Grid grid, int column, UIElement? part)
     {
