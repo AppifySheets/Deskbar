@@ -17,6 +17,16 @@ namespace Deskbar.Windows.Diagnostics;
 // layer's work-area listener. 8 is ERROR_NOT_ENOUGH_MEMORY. The window count was ordinary (about 1,080 windows), so the
 // heap that ran out was the desktop's, shared by every process on it, and not anything this process owns.
 //
+// WHAT IT WAS, found the same day (task c5e9b17f, Recovery/ClassNameSlots.cs): not the desktop heap. When the same
+// exception stopped nine starts between 13:11 and 13:21, the refused call was measured: RegisterClassEx, for want of a
+// window CLASS NAME slot on the processor the thread ran on, while other processors had thousands. The night's eight
+// carried the identical exception from the identical call, and began while several runs of the window tests were
+// going, which is what fills that table, so they were very probably the same; that session ended in a reboot before
+// anything was measured. "The desktop is full" below therefore reads "the session is refusing windows", and the
+// decision is unchanged, because either way the shortage is not this process's own. What changed is that it can now
+// be cured from here: ClassNameSlots moves slots onto the processors that are short, before the first window of every
+// start and whenever a refusal is caught.
+//
 // That distinction is the whole decision, so it is made here and nowhere else:
 //
 //   * The DESKTOP is full (8 or 14). Restarting Deskbar cannot help: the new copy asks the same desktop for windows and
@@ -64,6 +74,9 @@ public static class RefusedWindow
     // system's STATIC class so nothing needs registering, while still coming out of the same desktop heap as every other
     // window here. Raw CreateWindowEx rather than WPF, because it is asked before there is any WPF in the process.
     // A yes for a small window does not promise one for the app's; whoever acts on it still survives a no (RefusedStart).
+    // In particular it says nothing about class names, because it registers none: a start refused a class name passes
+    // this probe at once. That case is seen to by Program.RunApp, which balances the class name slots before its first
+    // window on every start, this successor's included (ClassNameSlots).
     public static bool CanCreateWindow()
     {
         var probe = CreateWindowExW(0, "STATIC", "Deskbar window probe", 0, 0, 0, 0, 0, HwndMessage, 0, 0, 0);

@@ -74,6 +74,10 @@ public partial class App : Application
     // The goals planner (docs/superpowers/specs/2026-11-22-goals-planner-design.md): weekly and monthly goals the tasks
     // count toward, in goals.json beside tasks.json. Built right after `tasks` and handed to the remote control.
     Core.Goals.GoalService? goals;
+    // Window class names kept available on every processor for as long as the app runs (ClassNameSlots.Keep, task
+    // c5e9b17f), and the last line it traced, so the trace gets a line only when the outcome changes.
+    IDisposable? classNameSlots;
+    string? classNameSlotsSaid;
     // Claude Code's live sessions kept in step with the tasks (ClaudeSessions): the `claude agents --json` poll, adoption,
     // the automatic resume and starting a session from a task. Built after the state is loaded; disposed on every way out.
     ClaudeSessions? claudeSessions;
@@ -1395,6 +1399,9 @@ public partial class App : Application
                     refusedSurvived++;
                     if (refusedSurvived is 1 or 10 or 100 or 1000 or 10000)
                         ClickTrace.Write($"survived refused window #{refusedSurvived} ({mine}): {args.Exception.Message}");
+                    // What was refused is most likely a window class name on the processor this thread ran on
+                    // (ClassNameSlots, task c5e9b17f): have the slots balanced now, not at the keeper's next turn.
+                    ClassNameSlots.BalanceSoon();
                     args.Handled = true;
                     return;
                 }
@@ -2620,6 +2627,7 @@ public partial class App : Application
             // The watch goes first, so its poll cannot take hold again behind this.
             quietTaskbarWatch?.Dispose();
             TaskbarFlashingSwitch.Sync(false);
+            classNameSlots?.Dispose();
             // No more `claude` polls or resumes once the session is ending; running Claude sessions are not touched.
             managerActions?.Dispose();
             claudeActions?.Dispose();
@@ -2631,6 +2639,20 @@ public partial class App : Application
             // this, that close reads as the user's Alt+F4 and saves it closed (TasksBoard.Shutdown).
             tasksBoard?.Shutdown();
         };
+
+        // WINDOW CLASS NAMES STAY AVAILABLE ON EVERY PROCESSOR (task c5e9b17f; ClassNameSlots has what was measured).
+        // Program.RunApp balanced the slots once before the first window. They drift again, because a name is taken on
+        // the processor that registers it and returned on the one that releases it, so the same balance runs every
+        // ClassNameSlots.KeepEvery and soon after any refused window, on a thread of its own. It is what keeps the next
+        // tooltip, menu or ring frame from being refused, here and in every other program of the session. Traced only
+        // when the outcome changes: one line on the first look, then silence for as long as nothing is short.
+        classNameSlots = ClassNameSlots.Keep(outcome =>
+        {
+            var line = outcome.IsSuccess ? outcome.Value.ToString() : outcome.Error;
+            if (line == classNameSlotsSaid) return;
+            classNameSlotsSaid = line;
+            ClickTrace.Write($"class names: {line}");
+        });
 
         // The start is over once the dispatcher has nothing left to do: OnStartup queues work (the bar's first build,
         // the strips, the tasks panel) that runs after it returns, and a window refused there is still a failed start.
@@ -3029,6 +3051,7 @@ public partial class App : Application
         // watch goes first, so its poll cannot take hold again behind this.
         quietTaskbarWatch?.Dispose();
         TaskbarFlashingSwitch.Sync(false);
+        classNameSlots?.Dispose();
         // No more `claude` polls or resumes once the app is going; running Claude sessions are not touched.
         managerActions?.Dispose();
         claudeActions?.Dispose();

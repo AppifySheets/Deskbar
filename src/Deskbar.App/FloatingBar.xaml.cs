@@ -2376,6 +2376,9 @@ public partial class FloatingBar : Window
         catch (Exception refused) when (Deskbar.Windows.Diagnostics.RefusedWindow.Survivable(refused))
         {
             ClickTrace.Write($"rebuild: Windows refused a window, the next pulse tries again ({refused.Message})");
+            // Most likely a window class name on the processor this thread ran on: balanced before that next pulse
+            // (ClassNameSlots, task c5e9b17f).
+            Deskbar.Windows.Recovery.ClassNameSlots.BalanceSoon();
         }
         finally
         {

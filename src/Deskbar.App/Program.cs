@@ -21,8 +21,10 @@ namespace Deskbar.App;
 // for a `ctl` that never runs those lines (measured: they were in the client's module list). With the App lines in a
 // method of their own, nothing WPF is loaded until RunApp is first called, which a `ctl` never does.
 //
-// RunApp also catches the one start failure worth living through: Windows refusing a window because the desktop heap is
-// full (RefusedWindow, RefusedStart; task c1e6c1ae). The next copy is started, and waits until windows can be made.
+// RunApp also catches the one start failure worth living through: Windows refusing a window (RefusedWindow,
+// RefusedStart; task c1e6c1ae). The next copy is started, and waits until windows can be made. And before its first
+// window it sees to it that every processor has window class names to give (ClassNameSlots; task c5e9b17f), which is
+// what those refusals turned out to be about.
 static class Program
 {
     [STAThread]
@@ -40,6 +42,16 @@ static class Program
             var room = Windows.Recovery.RefusedStart.WaitForWindows(Windows.Diagnostics.RefusedWindow.CanCreateWindow, System.Threading.Thread.Sleep);
             ClickTrace.Write(room ? "refused window: a probe window was made, starting" : "refused window: still no window after the wait, trying anyway");
         }
+
+        // CLASS NAME SLOTS, BEFORE THE FIRST WINDOW (task c5e9b17f; ClassNameSlots has the measurements). WPF registers
+        // a window class for every window, and on 2026-11-25 nine starts in a row were refused one, because the
+        // processor the UI thread happened to run on had no usable slot left while others had thousands. So every
+        // processor that is short is topped up first, from a thread of its own. Under twenty milliseconds on 32
+        // processors when nothing is short, which is every machine whose table never filled; never fatal, a failure
+        // is traced and the start goes on as it always did.
+        var slots = Windows.Recovery.ClassNameSlots.Balance();
+        if (slots.IsFailure) ClickTrace.Write(slots.Error);
+        else if (!slots.Value.Healthy) ClickTrace.Write($"class names, before the first window: {slots.Value}");
 
         try
         {

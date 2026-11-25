@@ -268,6 +268,9 @@ sealed class WindowRings : IDisposable
         {
             if (!framesRefused) Trace($"ring: Windows refused a frame, no ring until it has room ({refused.Message})");
             framesRefused = true;
+            // Most likely a window class name on the processor this thread ran on: balanced before the next pass asks
+            // again (ClassNameSlots, task c5e9b17f).
+            Deskbar.Windows.Recovery.ClassNameSlots.BalanceSoon();
             // A Window joins Application.Windows when it is constructed, so the half-made one is closed rather than
             // dropped. Closing one that never got a handle may itself complain while Windows is this short; it is
             // going either way.
