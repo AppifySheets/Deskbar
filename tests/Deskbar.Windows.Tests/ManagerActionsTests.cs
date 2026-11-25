@@ -269,6 +269,24 @@ public class ManagerActionsTests
         Assert.True(rig.Harness.Manager.State.Manager!.Unread);
     }
 
+    // Post-merge review of #557: the poll's list can be stale (a click resumed the manager after it was read). A fresh read
+    // still lists the manager, so it is NOT resumed (that would fork a copy): after ResumeChecks reads the wake waits in
+    // its inbox instead, and the record still moves on.
+    [Fact]
+    public void A_stale_list_never_resumes_a_manager_that_is_running()
+    {
+        using var rig = WakeRig();
+        rig.WriteTranscript(Earlier);
+        rig.Cli.Listed.Add(new Row(Earlier, rig.Folder, Busy: false));
+
+        rig.Manager.Tick([]);
+        rig.Clock.AdvanceBy((ManagerActions.ResumePause * (ManagerActions.ResumeChecks + 1)).Ticks);
+
+        Assert.DoesNotContain(rig.Cli.Acts, call => call.Arguments is ["--bg", "--resume", ..]);
+        Assert.StartsWith("Deskbar wake.", File.ReadAllText(Path.Combine(rig.InboxFolder, Earlier + ".md")));
+        Assert.Equal(Origin, rig.Harness.Manager.State.Manager!.Since);
+    }
+
     // A busy manager is not woken: the batch waits, and nothing about the record changes.
     [Fact]
     public void A_busy_manager_is_not_woken()

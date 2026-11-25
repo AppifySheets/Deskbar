@@ -274,15 +274,41 @@ public sealed class ManagerActions : IDisposable
 
     // A bare resume with the message (the one form that keeps the manager's saved options, step 1 probes). The briefing is
     // written again first, as before any resume. A resume that did not happen leaves the message in the inbox instead.
+    //
+    // ONLY ONCE A FRESH LIST SAYS IT IS GONE (post-merge review of #557): resuming a session that is still listed starts a
+    // forked COPY, a second Fable manager nobody recorded. The list Tick was given can be stale (a click may have resumed
+    // the manager after that poll was read), and right after `claude stop` the session stays listed for about a second
+    // (measured, probe notes "dontAsk probes"). So the list is read again here, and while the manager is on it the read
+    // is repeated, ResumeChecks times ResumePause apart; still listed after that, the message waits in the inbox, where
+    // its next turn's waiter finds it.
     IObservable<Result> ResumedWith(string sessionId, string message) =>
-        Observable.Defer(() =>
-            {
-                WriteBriefing().TapError(e => trace?.Invoke($"manager: {e}"));
-                return OnScheduler(() => sessions.RunAndFind([.. ManagerSession.ResumeArguments(sessionId), "--", message], folder, sessionId));
-            })
-            .Select(found => found.IsSuccess
-                ? Result.Success()
-                : inbox!.Deliver(sessionId, message).Tap(() => trace?.Invoke($"manager: not resumed ({found.Error}), the wake waits in its inbox")));
+        Gone(sessionId, ResumeChecks)
+            .SelectMany(gone => gone
+                ? Observable.Defer(() =>
+                    {
+                        WriteBriefing().TapError(e => trace?.Invoke($"manager: {e}"));
+                        return OnScheduler(() => sessions.RunAndFind([.. ManagerSession.ResumeArguments(sessionId), "--", message], folder, sessionId));
+                    })
+                    .Select(found => found.IsSuccess ? Result.Success() : Waits(sessionId, message, found.Error))
+                : Observable.Return(Waits(sessionId, message, "it is still listed as running")));
+
+    /// <summary>How many fresh reads of the list a wake makes, ResumePause apart, before it resumes the manager.</summary>
+    public const int ResumeChecks = 5;
+
+    public static readonly TimeSpan ResumePause = TimeSpan.FromSeconds(1);
+
+    // Whether a fresh `claude agents --json` no longer lists the session, read up to `checks` times. A list that cannot be
+    // read is "cannot tell", which never resumes.
+    IObservable<bool> Gone(string sessionId, int checks) =>
+        OnScheduler(sessions.ListNow).SelectMany(listed =>
+            listed.IsFailure ? Observable.Return(false)
+            : listed.Value.All(agent => agent.SessionId != sessionId) ? Observable.Return(true)
+            : checks > 1 ? Observable.Timer(ResumePause, scheduler).SelectMany(_ => Gone(sessionId, checks - 1))
+            : Observable.Return(false));
+
+    // The wake left in the inbox when it could not be resumed with it.
+    Result Waits(string sessionId, string message, string why) =>
+        inbox!.Deliver(sessionId, message).Tap(() => trace?.Invoke($"manager: not resumed ({why}), the wake waits in its inbox"));
 
     // After a wake: the record stored onto the same session only (a click may have started another meanwhile). A wake
     // that could not be delivered still moves Since, or every tick would try again; it just sets no dot.
