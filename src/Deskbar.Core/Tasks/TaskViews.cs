@@ -377,6 +377,15 @@ public static class TaskViews
         return cells.Select(c => c with { Tasks = c.Tasks.Where(t => !Folds(t)).ToArray() }).ToArray();
     }
 
+    /// <summary>
+    /// The subtasks the List draws on a line of their own right under their parent: those <see cref="UnderParents"/>
+    /// nested (<paramref name="nested"/>) that are still in <paramref name="listed"/> after any folding. A parent's open
+    /// thread leaves these out (task 0eb943d8, Petre: "it shows up twice"), since the line right below already shows
+    /// them; it keeps listing the folded ones and those a filter hides, which have no line to find.
+    /// </summary>
+    public static IReadOnlySet<Guid> DrawnUnderParents(IReadOnlyList<TaskGroup> listed, IReadOnlySet<Guid> nested) =>
+        listed.SelectMany(g => g.Tasks).Select(t => t.Id).Where(nested.Contains).ToHashSet();
+
     // Whether the task is the one the folding keeps on show (the panel's selected task, task b0526e18).
     static bool Kept(Maybe<Guid> keep, TaskItem t) => keep.HasValue && keep.Value == t.Id;
 

@@ -661,8 +661,10 @@ S10. Subtasks under their parent. Add two subtasks to a note in quadrant IV and 
     caption or gap opens between them. "· 2 subtasks" never breaks across two lines, at any panel width. Filter the
     panel to a workspace the parent is not on (put one subtask on another workspace first): that subtask shows in its
     own place with "↳ <parent> › <title>". Ask something from a session on a subtask: it moves up to Waiting on you.
-S11. Open the parent in the tasks panel: its thread lists both subtasks with their status and status line; click one
-    and it is selected, opened and scrolled into view. **Add subtask** in the thread opens the add box with the parent
+S11. Open the parent in the tasks panel: with Subtasks ticked its thread lists neither subtask, since both have a line
+    right under it (task 0eb943d8). Untick Subtasks: the thread lists both with their status and status line; click
+    one and it is selected, opened and scrolled into view, and it leaves the parent's thread, so it shows once. Pick
+    another task: it folds back into the thread. **Add subtask** in the thread opens the add box with the parent
     chip.
 S12. (Removed with the **Subtask of** menu item: dragging onto a line's middle does it now, S13.)
 S13. Drag to nest. On the bar, drag a note slowly down over another note: over the line's top and bottom quarters the

@@ -4858,7 +4858,8 @@ public class TasksBoardTests
     });
 
     // Follow-up (Petre's screenshot of an open parent with no subtasks in it): the open thread lists them, each a button
-    // that shows that subtask, and ends with "Add subtask".
+    // that shows that subtask, and ends with "Add subtask". With "Subtasks" unticked, so the subtask is folded and the
+    // thread is where it is listed (task 0eb943d8: a subtask with a line of its own is not listed again).
     [Fact]
     public void An_open_parent_lists_its_subtasks_and_offers_add_subtask() => StaThread.Run(() =>
     {
@@ -4868,6 +4869,7 @@ public class TasksBoardTests
         var child = t.Tasks.AddNote("Write the notes", t.Gepha, parent: parent.Id).Value;
         t.Tasks.SetStatusLine(child.Id, "draft done");
         t.Controller.Show();
+        Click(ButtonNamed(t.Window, "Subtasks"));
         t.Controller.ToggleThread(parent.Id);
 
         var entry = ButtonNamed(t.Window, "Subtask Write the notes");
@@ -4883,7 +4885,7 @@ public class TasksBoardTests
 
     // Task 54b39c4c (Petre: "subtask should show its parent and have a way to open the parent easily"): an open subtask's
     // thread starts with "↑ Subtask of <parent>", a button that shows the parent, picked, with its own thread open (its
-    // thread lists the subtask back). A plain task's thread has no such line.
+    // thread lists the subtask back, once it has folded away). A plain task's thread has no such line.
     [Fact]
     public void An_open_subtask_names_its_parent_and_opens_it() => StaThread.Run(() =>
     {
@@ -4892,7 +4894,9 @@ public class TasksBoardTests
         var parent = t.Tasks.AddNote("Ship the release", t.Gepha).Value;
         var child = t.Tasks.AddNote("Write the notes", t.Gepha, parent: parent.Id).Value;
         t.Controller.Show();
-        t.Controller.ToggleThread(child.Id);
+        Click(ButtonNamed(t.Window, "Subtasks"));
+        // Picked, the folded subtask is drawn (it never folds while selected) and its thread opens.
+        t.Controller.Pick(child.Id);
 
         var entry = ButtonNamed(t.Window, "Parent Ship the release");
         Assert.Equal("↑ Subtask of Ship the release", string.Concat(Inside(entry).OfType<TextBlock>().Select(RunsOf)));
@@ -4919,8 +4923,10 @@ public class TasksBoardTests
         Click(ButtonNamed(t.Window, "Parent Ship the release"));
 
         Assert.Equal(parent.Id, selection.Current.Value);
-        // The parent's line is drawn with its thread open: its subtask is listed in it.
-        Assert.True(HasButtonNamed(t.Window, "Subtask Write the notes"));
+        // The parent's line is drawn with its thread open, and its subtask right under it; the thread does not list the
+        // subtask a second time (task 0eb943d8).
+        Assert.Equal([parent.Id, child.Id], t.Window.Keys);
+        Assert.False(HasButtonNamed(t.Window, "Subtask Write the notes"));
     });
 
     // Task b0526e18 (Petre: "i can't interact with the subtask. i should be able to"): with "Subtasks" unticked the
@@ -4945,9 +4951,35 @@ public class TasksBoardTests
         Assert.Equal([parent, child], t.Window.Keys);
         // The subtask's own thread is open: it names its parent.
         Assert.True(HasButtonNamed(t.Window, "Parent Ship the release"));
+        // Task 0eb943d8 (Petre: "it shows up twice"): the subtask moved from the parent's thread to its own line, so
+        // the thread no longer lists it.
+        Assert.False(HasButtonNamed(t.Window, "Subtask Write the notes"));
 
+        // Picked away, it folds back into the parent's thread. Pick toggles the parent's thread, open since the start, so
+        // it is opened again to read it.
         t.Controller.Pick(parent);
         Assert.Equal([parent], t.Window.Keys);
+        t.Controller.ToggleThread(parent);
+        Assert.True(HasButtonNamed(t.Window, "Subtask Write the notes"));
+    });
+
+    // Task 0eb943d8 (Petre: "it shows up twice", "clicking the one above takes me to the one below"): with "Subtasks"
+    // ticked every subtask has a line right under its parent, so the parent's open thread lists none of them; one the
+    // filter hides (closed here) has no line, so the thread still lists it.
+    [Fact]
+    public void An_open_parents_thread_leaves_out_subtasks_drawn_under_it() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        var parent = t.Tasks.AddNote("Ship the release", t.Gepha).Value.Id;
+        var drawn = t.Tasks.AddNote("Write the notes", t.Gepha, Quadrant.IV, parent).Value.Id;
+        var closed = t.Tasks.AddNote("Tag the build", t.Gepha, Quadrant.IV, parent).Value.Id;
+        t.Tasks.Close(closed);
+        t.Controller.Show();
+        t.Controller.ToggleThread(parent);
+
+        Assert.Equal([parent, drawn], t.Window.Keys);
+        Assert.False(HasButtonNamed(t.Window, "Subtask Write the notes"));
+        Assert.True(HasButtonNamed(t.Window, "Subtask Tag the build"));
     });
 
     // A closed subtask is listed in its parent's thread too, and the Open filter hides it: the link lets it past the

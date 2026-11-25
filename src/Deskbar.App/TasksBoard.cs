@@ -1047,8 +1047,20 @@ public sealed class TasksBoard : IDisposable
         // a subtask shown from its parent's thread is selected, and folded it had no line to open, act on or scroll to.
         // It folds again once another task is picked.
         var listed = showsSubtasks ? underParents : TaskViews.FoldSubtasks(underParents, nested, selection.Current);
+        // A SUBTASK SHOWS ONCE (task 0eb943d8, Petre: "it shows up twice", "clicking the one above takes me to the one
+        // below"). A parent's open thread lists its subtasks, so one folded away (Subtasks unticked) or hidden by a filter
+        // can still be reached. A subtask that has a line of its own right under the parent is already on screen, and
+        // listed in the thread as well it showed twice, one above the other, the entry only jumping to the line. So the
+        // thread leaves out every subtask drawn under its parent (TaskViews.DrawnUnderParents). Clicking a folded one
+        // in the thread therefore moves it from the thread to a line of its own, and it folds back into the thread
+        // once another task is picked.
+        var drawnUnderParents = TaskViews.DrawnUnderParents(listed, nested);
         var groups = listed
-            .Select(g => new TaskGroupView(g.Kind, TaskViews.GroupName(g.Kind), g.Tasks.Select(t => Row(t) with { Nested = nested.Contains(t.Id) }).ToArray()))
+            .Select(g => new TaskGroupView(g.Kind, TaskViews.GroupName(g.Kind), g.Tasks.Select(Row).Select(row => row with
+            {
+                Nested = nested.Contains(row.Id),
+                Subtasks = row.Subtasks.Where(sub => !drawnUnderParents.Contains(sub.Id)).ToArray(),
+            }).ToArray()))
             .ToArray();
         var filters = FilterOrder.Select(f => (Filter: f, Count: TaskViews.Count(board, f, shown, assigneeFilter)))
             // The Snoozed chip (task 6da8d7eb) shows only while something is snoozed, or while it is the filter in force (so
