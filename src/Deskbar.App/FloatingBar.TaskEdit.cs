@@ -77,7 +77,8 @@ public partial class FloatingBar
     {
         var line = shownTaskLines.FirstOrDefault(l => l.Id == id);
         if (taskService is null || line is null || line.Closing) return null;
-        var menu = new ContextMenu { Placement = PlacementMode.MousePoint };
+        // The bar as its target, for the bar's screen scaling (OwnMenus.AtPointer; task 4b6cc9a9).
+        var menu = OwnMenus.AtPointer(this);
         menu.Items.Add(TaskMenuItem("Edit", () => BeginTaskEdit(id)));
         // OPEN IN WINDOW (task dca4ebeb): the task in a window of its own (the App's TasksBoard.OpenWindow), right after
         // Edit as in the panel's menu. Run once this menu has closed, so the new window is not activated under it.

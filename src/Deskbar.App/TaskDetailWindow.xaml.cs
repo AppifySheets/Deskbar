@@ -663,7 +663,8 @@ public partial class TaskDetailWindow : Window
     /// <summary>The header's "⋯" menu; internal, and answering the menu, for the tests.</summary>
     internal ContextMenu OpenMenu(UIElement? anchor = null)
     {
-        var menu = new ContextMenu { PlacementTarget = anchor, Placement = anchor is null ? PlacementMode.MousePoint : PlacementMode.Bottom };
+        // With no anchor, at the pointer with this window as its target, for its screen's scaling (OwnMenus.AtPointer).
+        var menu = anchor is null ? OwnMenus.AtPointer(this) : new ContextMenu { PlacementTarget = anchor, Placement = PlacementMode.Bottom };
         if (latest?.Row is not { } row || Actions is not { } actions) return menu;
         var open = row.Status != TaskStatus.Closed && !row.Closing;
         if (open)

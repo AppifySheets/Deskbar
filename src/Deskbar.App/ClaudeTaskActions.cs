@@ -374,7 +374,8 @@ public sealed class ClaudeTaskActions : IDisposable
             Told(Start(task, only));
             return null;
         }
-        var menu = new ContextMenu { Placement = PlacementMode.MousePoint };
+        // At the pointer, on the screen of the window under it (OwnMenus.AtPointer says why a bare menu is not enough).
+        var menu = OwnMenus.AtPointer();
         folders.ToList().ForEach(folder => menu.Items.Add(Item(folder, () => Told(Start(task, folder)))));
         if (folders.Count > 0) menu.Items.Add(new Separator());
         menu.Items.Add(Item(ChooseFolderItem, () => seams.PickFolder().Tap(folder => Told(Start(task, folder)))));

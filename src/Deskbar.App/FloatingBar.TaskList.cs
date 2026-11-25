@@ -1625,7 +1625,7 @@ public partial class FloatingBar
     /// </summary>
     internal ContextMenu OpenStopClaudeMenu(TaskLine line)
     {
-        var menu = new ContextMenu { Placement = PlacementMode.MousePoint };
+        var menu = OwnMenus.AtPointer(this); // the bar as its target, for its screen's scaling
         menu.Items.Add(new MenuItem { Header = new TextBlock { Text = "Claude is still working on this task." }, IsEnabled = false });
         // Run once this menu has closed, so the line's undo paint is not held back by the menu still being open.
         menu.Items.Add(TaskMenuItem(TaskViews.StopClaudeAndClose, () => Dispatcher.BeginInvoke(() => CloseWithUndo(line, stopClaude: true),
