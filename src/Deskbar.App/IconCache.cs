@@ -49,8 +49,9 @@ public static class IconCache
     internal static ITaskbarPins Shell { get; set; } = new ShellTaskbarPins();
 
     // Answers from the pool thread, waiting for the bar's next lookup to take them: only these two concurrent
-    // dictionaries are touched off the UI thread.
-    static readonly ConcurrentDictionary<(nint Hwnd, string Path), ImageSource> hostedAnswers = [];
+    // dictionaries are touched off the UI thread. The answer is kept as raw pixels, not as an ImageSource, and the
+    // lookup on the UI thread makes the bitmap (see AskShell for why no WPF object is made on the pool thread).
+    static readonly ConcurrentDictionary<(nint Hwnd, string Path), PinImage> hostedAnswers = [];
     static readonly ConcurrentDictionary<(nint Hwnd, string Path), byte> hostedAsking = [];
 
     // How many times a store app's window is asked for its app id before the ask gives up, 50 ms apart. A new frame
@@ -190,8 +191,10 @@ public static class IconCache
         if (byWindow.TryGetValue(key, out var hit)) return hit;
 
         // A store app's icon that the pool thread has already fetched. Free: no Win32 call, so it is not rate-limited.
-        if (hostedAnswers.TryRemove(key, out var hosted))
+        // The pool thread left raw pixels; the bitmap is made here, on the UI thread.
+        if (hostedAnswers.TryRemove(key, out var pixels))
         {
+            var hosted = ToImageSource(pixels);
             byWindow[key] = hosted;
             probing.Remove(key);
             Trace(window, processPath, hosted, "hosted-app");
@@ -310,8 +313,19 @@ public static class IconCache
         }
     }
 
-    // On a pool thread. Touches nothing of this class's UI-thread caches.
-    static ImageSource? AskShell(ITaskbarPins shell, WindowHandle window)
+    // On a pool thread. Touches nothing of this class's UI-thread caches, and makes NO WPF object: it answers the
+    // shell's raw pixels, and Lookup turns them into a bitmap on the UI thread.
+    //
+    // It used to make the BitmapSource here (frozen, so it could cross threads). Freezing does not help with the
+    // making: a BitmapSource is a Freezable, and a Freezable's constructor reads Dispatcher.CurrentDispatcher, which
+    // on a thread that has none CREATES one, and a Dispatcher creates a hidden message window. So every pool thread
+    // that ever built a store app's icon got a Dispatcher and a window of its own, kept for the thread's life and
+    // paid for from the desktop heap. When that window could not be made, BitmapSource.Create threw, the catch in
+    // AskHostedApp swallowed it, and the icon waited for the next probe a second later. Measured 2026-11-25 on the
+    // hidden test desktop (Deskbar task 00054d43): "Win32Exception (8): Not enough memory resources are available"
+    // from HwndWrapper..ctor <- Dispatcher.get_CurrentDispatcher <- Freezable..ctor <- BitmapSource.Create, in about
+    // half the runs of IconCacheHostedAppTests, which then saw a second app id read or no HostedIconArrived at all.
+    static PinImage? AskShell(ITaskbarPins shell, WindowHandle window)
     {
         string? appId = null;
         for (var attempt = 0; attempt < AppIdTries && appId is null; attempt++)
@@ -320,13 +334,17 @@ public static class IconCache
             appId = shell.AppIdOf(window);
         }
         if (appId is null) return null;
-        ImageSource? found = null;
-        shell.ImageOfApp(appId, 32).Map(ToImageSource).Tap(image => found = image);
-        return found is BitmapSource bitmap && !IsBlank(bitmap) ? found : null;
+        // A loading store app hands over a valid picture with every pixel transparent; that is not an answer yet.
+        return shell.ImageOfApp(appId, 32).Where(image => !IsBlank(image)).GetValueOrDefault();
     }
 
-    // Moved here from FloatingBar.Pins.cs unchanged, so a pool thread can build one without touching FloatingBar
-    // (whose static initialisers would then run there, and WPF objects made on that thread keep its affinity).
+    // IsBlank on the shell's raw pixels, so the pool thread can judge an answer without making a bitmap. The pixels
+    // are premultiplied BGRA, so alpha is the 4th byte of each quad, as in the BitmapSource overload below.
+    internal static bool IsBlank(PinImage image) =>
+        Enumerable.Range(0, image.Pixels.Length / 4).All(i => image.Pixels[i * 4 + 3] == 0);
+
+    // Moved here from FloatingBar.Pins.cs unchanged. Called on the UI thread only: a BitmapSource made on any other
+    // thread gives that thread a Dispatcher and a hidden window (see AskShell).
     internal static ImageSource ToImageSource(PinImage image)
     {
         var source = BitmapSource.Create(image.Width, image.Height, 96, 96, PixelFormats.Pbgra32, null, image.Pixels, image.Width * 4);
