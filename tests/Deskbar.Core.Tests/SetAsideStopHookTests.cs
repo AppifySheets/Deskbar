@@ -111,6 +111,22 @@ public class SetAsideStopHookTests
         Assert.Contains(Question, Json(output).GetProperty("reason").GetString());
     }
 
+    // The nudge tells the session to run `task answered` when the reply settled the question. That has to clear the set-aside
+    // question, or the next Stop asks about it again, and again on every turn after (seen live on 2026-11-25).
+    [Fact]
+    public void Task_answered_settles_a_set_aside_question_and_the_next_stop_leaves_it_alone()
+    {
+        var manager = SetAside();
+
+        Assert.Equal(ControlReply.Ok, Said(manager, "answered").ExitCode);
+
+        var task = tasks.Board.Tasks.Single();
+        Assert.Equal(TaskStatus.InProgress, task.Status);
+        Assert.False(task.QuestionSetAside.HasValue);
+        // The next Stop may still give the ordinary parked nudge (an In progress task of Claude's), never this question again.
+        Assert.DoesNotContain(Question, Hooked(manager, "Stop"));
+    }
+
     [Fact]
     public void Stop_after_the_nudge_does_not_ask_about_the_set_aside_question_again() =>
         Assert.Equal("", Hooked(SetAside(), "Stop", ",\"stop_hook_active\":true"));
