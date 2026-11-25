@@ -3102,8 +3102,8 @@ public class TasksBoardTests
     // Task d560f3eb ("misaligned text"): a waiting task's question stood in the title's column, a few letters wide, in a
     // narrow panel. Before the fix, an open line's question was 29 DIP wide and 629 tall at 360 DIP, 129 wide at 460 and
     // 211 at 542 (measured here). Now it spans the line under the title, from the title's left edge to the line's right
-    // end, at every width and on a closed line as on an open one, while the title keeps its column and the toggles stay
-    // beside the title's first line rather than half way down the question.
+    // end, at every width and on a closed line as on an open one, and the toggles stay with the title rather than half
+    // way down the question (on a slim line, on the title's last line or just under it, task 65ab598d).
     [Theory]
     [InlineData(TasksPanelLayout.MinWidth)]
     [InlineData(TasksPanelLayout.DefaultWidth)]
@@ -3124,11 +3124,13 @@ public class TasksBoardTests
             var flags = Inside(line).OfType<Button>().First(b => Equals(b.Tag, "task-flag-off") || Equals(b.Tag, "task-flag-on"));
             var titleLeft = title.TranslatePoint(new Point(0, 0), line).X;
             var detailAt = detail.TranslatePoint(new Point(0, 0), line);
-            // From the title's left edge (the same x, within its 2 DIP margin) to past the toggles: wider than the title.
+            // From the title's left edge (the same x, within its 2 DIP margin) to near the line's right end. The slim
+            // line's title spans the line too since task 65ab598d, so the question is measured against the line, no
+            // longer against the title: no narrower than the line less the tick column, the margins and the scroll bar.
             Assert.InRange(detailAt.X, titleLeft - 0.5, titleLeft + 0.5);
-            Assert.True(detail.ActualWidth > title.ActualWidth + TasksWindowFlagsColumn,
-                $"{state} at {width}: the question is {detail.ActualWidth} DIP wide, the title {title.ActualWidth}");
-            // Under the title, and the toggles beside the title rather than lower down beside the question.
+            Assert.True(detail.ActualWidth > line.ActualWidth - 60,
+                $"{state} at {width}: the question is {detail.ActualWidth} DIP wide in a {line.ActualWidth} DIP line");
+            // Under the title, and the toggles above the question rather than lower down beside it.
             Assert.True(detailAt.Y >= title.TranslatePoint(new Point(0, title.ActualHeight), line).Y - 0.5, $"{state}: the question is under the title");
             Assert.True(flags.TranslatePoint(new Point(0, 0), line).Y < detailAt.Y, $"{state}: the toggles sit beside the title");
         }
@@ -3137,10 +3139,6 @@ public class TasksBoardTests
         t.Controller.ToggleThread(id);
         Check("open");
     });
-
-    // The toggles' column of a line (TasksWindow.FlagsColumn): the question, spanning the line, is wider than the title
-    // by at least this much.
-    const double TasksWindowFlagsColumn = 56;
 
     // Task 08cdb052 ("when asking for action, prs should have links, or artifacts; make that clickable"): a question's
     // markdown link and a bare address are links in the line's detail, on a closed line and an open one, and the text
@@ -3827,6 +3825,59 @@ public class TasksBoardTests
 
         t.Controller.Filter(TaskFilter.Closed);
         Assert.False(HasButton(LineOf(t.Window, closed), "Reopen"));
+    });
+
+    // Task 65ab598d: a slim line's title spans the whole line and the controls sit on its last line (Petre: "b, but so
+    // that the buttons are on the same line as the text; let's not waste space"). Before, the title had a column of its
+    // own beside about 300 DIP of fixed columns, about 15 DIP at the panel's narrowest, and broke one letter per line.
+    // At the narrowest and the default width: a short title stays one row with the strip beside it; a long one wraps
+    // across nearly the whole line, and the strip sits on or under its last line, never over the text, inside the line.
+    [Theory]
+    [InlineData(TasksPanelLayout.MinWidth)]
+    [InlineData(TasksPanelLayout.DefaultWidth)]
+    public void A_slim_lines_title_spans_the_line_and_the_controls_sit_on_its_last_line(double width) => StaThread.Run(() =>
+    {
+        using var t = Build(width: width);
+        var shortOne = t.Tasks.Create("Renew", t.Gepha, Session("s1")).Value.Id;
+        var longOne = t.Tasks.Create("Tasks panel at its narrowest: the slim line's fixed columns leave the title about 15 DIP, so it wraps one letter per line",
+            t.Gepha, Session("s2")).Value.Id;
+        t.Controller.Show();
+        t.Window.UpdateLayout();
+
+        (TextBlock Title, Grid Strip, Button Line) Parts(Guid id)
+        {
+            var line = LineOf(t.Window, id);
+            return (Inside(line).OfType<TextBlock>().Single(b => Equals(b.Tag, "task-title")),
+                Inside(line).OfType<Grid>().Single(g => Equals(g.Tag, TasksWindow.ControlsTag)), line);
+        }
+        Rect Bounds(FrameworkElement part, UIElement to) =>
+            new(part.TranslatePoint(new Point(0, 0), to), new Size(part.ActualWidth, part.ActualHeight));
+
+        // The short title: one row. At the default width the strip sits on it, to its right; at the narrowest the strip
+        // alone (about 290 DIP) leaves no room for even a word beside it, so it has a row of its own under the title.
+        var s = Parts(shortOne);
+        var sTitle = Bounds(s.Title, s.Line);
+        var sStrip = Bounds(s.Strip, s.Line);
+        Assert.True(s.Title.ActualHeight < 20, $"at {width} the short title is {s.Title.ActualHeight} DIP tall");
+        if (width >= TasksPanelLayout.DefaultWidth)
+            Assert.InRange(sStrip.Top + sStrip.Height / 2, sTitle.Top, sTitle.Bottom);
+        else
+            Assert.True(sStrip.Top >= sTitle.Bottom - 0.5, $"at {width} the strip {sStrip} under the title {sTitle}");
+
+        // The long title: nearly the line's whole width (the tick's 22 DIP and the margins aside), several rows.
+        var l = Parts(longOne);
+        var lTitle = Bounds(l.Title, l.Line);
+        var lStrip = Bounds(l.Strip, l.Line);
+        Assert.True(l.Title.ActualWidth > l.Line.ActualWidth - 60, $"at {width} the title is {l.Title.ActualWidth} DIP wide in a {l.Line.ActualWidth} DIP line");
+        Assert.True(l.Title.ActualHeight > 20, "the long title wraps");
+        // The strip at the bottom right: its bottom at the title's bottom or below it (when it has a row of its own),
+        // its right edge inside the line, and it starts right of where the text's last line ends.
+        Assert.True(lStrip.Bottom >= lTitle.Bottom - 0.5 && lStrip.Top >= lTitle.Top + 0.5, $"at {width} the strip {lStrip} beside the title {lTitle}");
+        Assert.True(lStrip.Right <= l.Line.ActualWidth + 0.5, $"at {width} the strip ends at {lStrip.Right} in a {l.Line.ActualWidth} DIP line");
+        var end = l.Title.ContentEnd.GetCharacterRect(LogicalDirection.Backward);
+        var endAt = l.Title.TranslatePoint(new Point(end.Right, end.Top), l.Line);
+        Assert.True(endAt.X < lStrip.Left || endAt.Y + end.Height <= lStrip.Top + 0.5,
+            $"at {width} the text ends at {endAt} under the strip {lStrip}");
     });
 
     // The widest age TaskAge writes ("27d23h") fits the slim line's age column whole at the panel's narrowest width, and
