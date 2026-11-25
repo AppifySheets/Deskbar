@@ -185,6 +185,12 @@ public partial class FloatingBar
     // with no panel) the button expands the list in place, as before the window existed.
     internal Action? ToggleTasksPanel { get; init; }
 
+    // What the Manager button does: opens today's manager session (ManagerActions.Open, wired by the App, which also says
+    // any failure to the user). The manager is the one Claude session that coordinates the task board (spec
+    // 2026-11-25-manager-session-design). Left null (the bar's own tests, or a copy where it is not wired) the button is
+    // not shown at all, so there is never a button that does nothing.
+    internal Action? OpenManager { get; init; }
+
     // Whether the tasks panel is shown, from the App (TasksPanel.Shown, relayed because the panel is built after the
     // bar). While it says true the "All tasks" button looks on (PaintTaskMoreLook), so the line that opened the panel
     // reads as the one that closes it (spec "Opening and closing": its "on" look is the builder's call; the mockup
@@ -434,6 +440,7 @@ public partial class FloatingBar
     Border? taskProblemHost;
     TextBlock? taskMoreLabel;
     Button? taskMoreButton;
+    Button? taskManagerButton;
     TextBox? taskAddBox;
     TextBlock? taskAddPlaceholder;
     WrapPanel? taskAddChips;
@@ -715,13 +722,30 @@ public partial class FloatingBar
         taskMoreButton.Padding = new Thickness(6, 1, 6, 1);
         taskMoreButton.Margin = new Thickness(4, 4, 0, 0);
         taskMoreButton.Visibility = Visibility.Collapsed;
+        // The Manager button sits after "All tasks" in a third Auto column, styled like it (dim ink, same padding and margin),
+        // and is collapsed when the App wired no OpenManager. It takes the same click guard as "All tasks", since the list
+        // can slide under the pointer too. ApplyMoreText counts its width, so "All tasks" shortens rather than clipping.
+        taskManagerButton = TaskButton("Manager",
+            new TextBlock { Text = "Manager", Foreground = TaskDimInk, VerticalAlignment = VerticalAlignment.Center },
+            () => OpenManager?.Invoke(), "Open the manager: one Claude session that coordinates your tasks", TaskClickIgnored);
+        taskManagerButton.HorizontalAlignment = HorizontalAlignment.Right;
+        taskManagerButton.VerticalAlignment = VerticalAlignment.Top;
+        taskManagerButton.Padding = new Thickness(6, 1, 6, 1);
+        taskManagerButton.Margin = new Thickness(4, 4, 0, 0);
+        taskManagerButton.Visibility = OpenManager is null ? Visibility.Collapsed : Visibility.Visible;
         var chipRow = new Grid
         {
             Tag = "task-add-row",
-            ColumnDefinitions = { new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) }, new ColumnDefinition { Width = GridLength.Auto } },
-            Children = { taskAddChips, taskMoreButton },
+            ColumnDefinitions =
+            {
+                new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) },
+                new ColumnDefinition { Width = GridLength.Auto },
+                new ColumnDefinition { Width = GridLength.Auto },
+            },
+            Children = { taskAddChips, taskMoreButton, taskManagerButton },
         };
         Grid.SetColumn(taskMoreButton, 1);
+        Grid.SetColumn(taskManagerButton, 2);
         // The pictures pasted or dropped on the box wait between it and the chips (FloatingBar.TaskPictures.cs).
         var addRow = new StackPanel { Margin = new Thickness(0, 0, 0, 3), Children = { box, TaskAddPicturesRow(taskAddBox), chipRow } };
         addRow.SizeChanged += (_, _) => ApplyMoreText();
@@ -1124,6 +1148,9 @@ public partial class FloatingBar
         var onShow = LinesInSight().Select(l => l.Id).ToHashSet();
         var hidden = open.Where(l => !onShow.Contains(l.Id)).ToArray();
         var waiting = hidden.Count(l => l.Status == TaskStatus.WaitingOnYou);
+        // The Manager button follows the wiring on every paint: the list is built in the constructor, before the init
+        // property is set, so its visibility cannot be decided at build time.
+        if (taskManagerButton is not null) taskManagerButton.Visibility = OpenManager is null ? Visibility.Collapsed : Visibility.Visible;
         taskMoreButton.Visibility = hidden.Length > 0 || taskListExpanded || ToggleTasksPanel is not null ? Visibility.Visible : Visibility.Collapsed;
         taskMoreFull = MoreText(hidden.Length, waiting, taskListExpanded);
         taskMoreShort = taskListExpanded ? "Less" : hidden.Length == 0 ? "All" : $"+{hidden.Length}";
@@ -1171,7 +1198,10 @@ public partial class FloatingBar
         if (taskMoreLabel is null || taskMoreButton is null) return;
         var row = (taskMoreButton.Parent as FrameworkElement)?.ActualWidth ?? 0;
         var chips = taskAddChips?.Children.OfType<UIElement>().Where(c => c.Visibility != Visibility.Collapsed).Sum(c => c.DesiredSize.Width) ?? 0;
-        var need = FullMoreWidth() + taskMoreButton.Padding.Left + taskMoreButton.Padding.Right + taskMoreButton.Margin.Left;
+        // The Manager button takes its own width off the row too (measured, as the chips are), or "All tasks" would keep the
+        // room the Manager button now fills and clip.
+        var manager = taskManagerButton is { Visibility: Visibility.Visible } m ? m.DesiredSize.Width : 0;
+        var need = FullMoreWidth() + manager + taskMoreButton.Padding.Left + taskMoreButton.Padding.Right + taskMoreButton.Margin.Left;
         taskMoreLabel.Text = row > 0 && chips > 0 && row - chips < need ? taskMoreShort : taskMoreFull;
     }
 

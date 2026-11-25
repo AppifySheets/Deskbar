@@ -2060,6 +2060,10 @@ public partial class App : Application
                 // "+N more" and "All tasks": the tasks panel shown or hidden (TasksBoard.Toggle). The board is built
                 // with quick find below, so it is read through the field.
                 ToggleTasksPanel = () => tasksBoard?.Toggle(),
+                // The Manager button: today's manager session (ManagerActions.Open). A refusal (Claude sessions off, not ready)
+                // is said at once in a message box, as the Start Claude menu says its own; a failure later is told by Open itself.
+                OpenManager = () => (managerActions?.Open() ?? Result.Failure(ClaudeActionsNotReady))
+                    .TapError(error => MessageBox.Show(error, "Deskbar", MessageBoxButton.OK, MessageBoxImage.Information)),
                 // ...and whether the panel is shown, for that line's "on" look: the relay the panel feeds once it exists.
                 TasksPanelShown = tasksPanelShown,
                 // A line's single click (Ruling 54): the panel on that task, picked and expanded. A double-click goes.

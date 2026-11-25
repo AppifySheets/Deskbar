@@ -110,7 +110,7 @@ public class FloatingBarTaskListTests
         Func<nint, bool>? onCurrentDesktop = null, Func<DateTimeOffset>? taskNow = null, Action<Guid>? openTask = null,
         Func<TaskItem, Maybe<string>>? goalTitle = null, IObservable<System.Reactive.Unit>? goalChanges = null,
         Func<Guid, ContextMenu?>? startClaude = null, IObservable<bool>? panelShown = null, string? stateDir = null,
-        Action<Guid>? openParent = null)
+        Action<Guid>? openParent = null, Action? openManager = null)
     {
         var harness = Harness.Build();
         var minutes = 0;
@@ -129,6 +129,7 @@ public class FloatingBarTaskListTests
             Tasks = service,
             GoToTask = goTo ?? (_ => Result.Success()),
             ToggleTasksPanel = openWindow,
+            OpenManager = openManager,
             TasksPanelShown = panelShown,
             // A line's single click opens its task in the window (Ruling 54); a test that hands in a goTo probe sees that click
             // too, which is what the click-guard tests watch for. A double-click goes through goTo itself.
@@ -2859,6 +2860,58 @@ public class FloatingBarTaskListTests
         var bounds = more.TransformToAncestor(t.List).TransformBounds(new Rect(more.RenderSize));
         Assert.True(bounds.Right <= t.List.ActualWidth + 0.5, $"button {bounds} in a list {t.List.ActualWidth} wide");
         Assert.True(more.RenderSize.Width >= more.DesiredSize.Width - more.Margin.Left - more.Margin.Right - 0.5, $"the button is squeezed: {more.RenderSize.Width} of {more.DesiredSize.Width}");
+    });
+
+    // The Manager button (manager session, Task 9): shown when the App wired OpenManager, one click one call, and absent
+    // otherwise, so no button ever does nothing.
+    [Fact]
+    public void Manager_button_shows_when_wired_and_opens_the_manager() => StaThread.Run(() =>
+    {
+        var opened = 0;
+        using var t = Build(openManager: () => opened++);
+        // A paint under the test's click clock, as every click test has: the list was first built on the real clock, which
+        // the click guard would read as "a repaint just now".
+        t.Tasks.AddNote("A note", t.Gepha);
+        var button = ButtonNamed(t.List, "Manager");
+        Assert.Equal(Visibility.Visible, button.Visibility);
+        Assert.Equal("Manager", Inside(button).OfType<TextBlock>().Single().Text);
+        Assert.Equal("Open the manager: one Claude session that coordinates your tasks", (string)button.ToolTip);
+
+        Click(button);
+        Assert.Equal(1, opened);
+    });
+
+    [Fact]
+    public void No_manager_button_without_the_action() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        Assert.Equal(Visibility.Collapsed, ButtonNamed(t.List, "Manager").Visibility);
+    });
+
+    // The Manager button takes room beside "All tasks": the words still shorten instead of clipping.
+    [Theory]
+    [InlineData(200)]
+    [InlineData(230)]
+    [InlineData(260)]
+    [InlineData(300)]
+    public void All_tasks_still_shortens_with_the_manager_button_beside_it(double width) => StaThread.Run(() =>
+    {
+        using var t = Build(openWindow: () => { }, openManager: () => { });
+        Enumerable.Range(1, 5).ToList().ForEach(i => t.Tasks.AddNote($"Note {i}", t.Gepha));
+        Assert.True(t.Harness.Manager.SetBarTextOffset(3.5).IsSuccess);
+        t.Bar.ApplyWidth(width);
+        t.Bar.RequestRebuild();
+        t.Bar.UpdateLayout();
+        t.Bar.UpdateLayout();
+
+        var more = ButtonNamed(t.List, "More tasks");
+        var manager = ButtonNamed(t.List, "Manager");
+        var moreBounds = more.TransformToAncestor(t.List).TransformBounds(new Rect(more.RenderSize));
+        var managerBounds = manager.TransformToAncestor(t.List).TransformBounds(new Rect(manager.RenderSize));
+        Assert.True(managerBounds.Right <= t.List.ActualWidth + 0.5, $"manager {managerBounds} in a list {t.List.ActualWidth} wide at {width}");
+        Assert.True(moreBounds.Right <= managerBounds.Left + 0.5 || moreBounds.Top < managerBounds.Top, "the two buttons overlap");
+        var label = Inside(more).OfType<TextBlock>().Single();
+        Assert.True(label.ActualWidth >= label.DesiredSize.Width - 0.5, $"'{label.Text}' is clipped: {label.ActualWidth} of {label.DesiredSize.Width}");
     });
 
     // RULING 47 (Petre: "i'm not sure on the vscode icon and surely the space between icon and text is huge"). A Claude
