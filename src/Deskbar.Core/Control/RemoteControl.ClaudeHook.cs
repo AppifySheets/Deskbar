@@ -121,11 +121,18 @@ public sealed partial class RemoteControl
     // takes the dialog's questions as its question (DialogQuestion): Waiting on you, Petre's, at the top, and the
     // workspace asks for him as `task ask` makes it do. A session with no task, or a tool_input with no question,
     // changes nothing. Silent either way: whatever a PreToolUse hook prints could be read as a decision on the tool.
+    //
+    // Two tasks are left as they are (review of the branch): one ALREADY waiting on Petre keeps its question, since the
+    // dialog's would replace a `task ask` (say, a pull request to merge, which PullRequestWatch settles by that very
+    // text) and the dialog's answer would then settle it unseen; and a Done task stays Done, since a dialog in a finished
+    // session is not the work resuming, the same reasoning as a prompt not reopening it. The workspace still blinks.
     ControlReply DialogAsked(TaskService service, ClaudeHookEvent hook, string? folder)
     {
         if (hook.ToolName != DialogQuestion.Tool || hook.DialogQuestion.HasNoValue) return Quiet;
         service.Board.TaskOf(hook.SessionId)
-            .Tap(t => service.Ask(t.Id, hook.DialogQuestion.Value).Tap(() => Attention(folder)));
+            .Where(t => t.Status is not (TaskStatus.WaitingOnYou or TaskStatus.Done))
+            .Tap(t => service.Ask(t.Id, hook.DialogQuestion.Value));
+        Attention(folder);
         return Quiet;
     }
 

@@ -103,18 +103,35 @@ public sealed class DialogQuestionTests
         Assert.True(Task().Question.HasNoValue);
     }
 
-    // A question the session asked with `task ask` is the session's to settle: a dialog returning does not touch it.
+    // A question the session asked with `task ask` is the session's to settle: a dialog opened and answered after it
+    // neither replaces nor settles it (review of the branch: it used to replace it, then settle it unseen).
     [Fact]
-    public void The_answer_leaves_another_question_alone()
+    public void The_dialog_leaves_another_question_alone()
     {
         var manager = Started();
         Ran(manager, "task", "new", "Task links", "--session", "s1", "--from", @"C:\repos\TaskSpaces");
         Ran(manager, "task", "ask", "Merge the pull request", "--session", "s1");
 
+        Hooked(manager, "PreToolUse", "s1", DialogQuestion.Tool, Asked);
+        Assert.Equal("Merge the pull request", Task().Question.Value);
         Hooked(manager, "PostToolUse", "s1", DialogQuestion.Tool, Asked);
 
         Assert.Equal(TaskStatus.WaitingOnYou, Task().Status);
         Assert.Equal("Merge the pull request", Task().Question.Value);
+    }
+
+    // A Done task stays Done when its session opens a dialog.
+    [Fact]
+    public void A_done_task_stays_done()
+    {
+        var manager = Started();
+        Ran(manager, "task", "new", "Task links", "--session", "s1", "--from", @"C:\repos\TaskSpaces");
+        Ran(manager, "task", "done", "--session", "s1");
+
+        Hooked(manager, "PreToolUse", "s1", DialogQuestion.Tool, Asked);
+
+        Assert.Equal(TaskStatus.Done, Task().Status);
+        Assert.True(Task().Question.HasNoValue);
     }
 
     // Another tool, another session, or a session with no task: nothing changes.
