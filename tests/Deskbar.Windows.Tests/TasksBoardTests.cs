@@ -3670,10 +3670,11 @@ public class TasksBoardTests
         noteMenu.IsOpen = false;
 
         // Task 9b6275bc (Petre: "do i need start claude on this when there's an open session?"): while the task's session
-        // is running, its thread has the session's Open and no start button under it. Once the session has ended the
-        // button is back, for a fresh one.
+        // is running, its thread lists the session and has no start button under it. Once the session has ended the
+        // button is back, for a fresh one. (The line's Open button needs the openSession seam, which this rig leaves
+        // out, so the line itself is what is looked for.)
         t.Controller.ToggleThread(id);
-        Assert.True(HasButton(t.Window, "Open session s1"));
+        Assert.Contains(Inside(t.Window).OfType<DockPanel>(), d => "session-line".Equals(d.Tag));
         Assert.False(HasButton(t.Window, "Start Claude on this"));
         t.Tasks.SessionEnded("s1");
         Assert.True(HasButton(t.Window, "Start Claude on this"));
