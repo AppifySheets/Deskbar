@@ -367,9 +367,20 @@ public sealed class TasksBoard : IDisposable
     // would only take the foreground from Petre's own.
     // The seam answers whether it activated the window: it does not when the panel is not on the desktop in front (a
     // failed pin, see Arrive), and then the keyboard is left alone too, since focusing the window would activate it.
+    //
+    // NOT OVER A FULL-SCREEN WINDOW (manual step 64n, measured 2026-11-25). While the panel stands behind a video or
+    // another full-screen window on its screen (TasksPanel.BehindFullScreen), raising it would put it over that window
+    // and activating it would take the keyboard from it: the trace read "shown behind the full-screen window" and then,
+    // 40 ms later, "raised and activated". So it stays where the panel put it, unfocused, and comes on top by itself on
+    // the first tick after the full-screen window has gone (TasksPanel.ReclaimTopmost).
     void Arrived()
     {
         if (!window.IsVisible) return;
+        if (panel.BehindFullScreen)
+        {
+            ClickTrace.Write("tasks panel: behind a full-screen window, not brought forward");
+            return;
+        }
         var activated = bringForward is { } seam ? seam(EnsureHandle()) : ActivatedHere();
         if (activated) window.FocusBoard();
     }

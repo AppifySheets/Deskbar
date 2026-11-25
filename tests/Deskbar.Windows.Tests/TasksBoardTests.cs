@@ -1078,6 +1078,35 @@ public class TasksBoardTests
         Assert.NotSame(t.Window.Toolbar, FocusManager.GetFocusedElement(t.Window));
     });
 
+    // MANUAL STEP 64n, measured 2026-11-25: `tasks-window show` while a video played full screen docked the panel behind
+    // the video and then brought it forward over it, raised and activated, until the next 1 s tick. A panel standing
+    // behind a full-screen window is not brought forward and not focused, whether it found the window as it opened or the
+    // shell said so while it was already open; once the window has gone, a show brings it forward as before.
+    [Fact]
+    public void A_panel_behind_a_full_screen_window_is_not_brought_forward() => StaThread.Run(() =>
+    {
+        var forward = new List<nint>();
+        using var t = Build(bringForward: forward.Add);
+
+        // Opened while a video is already full screen: the panel finds it as it shows.
+        t.Panel.Cover = 0x77;
+        t.Controller.Show();
+        Assert.True(t.Window.IsVisible);
+        Assert.Empty(forward);
+        Assert.NotSame(t.Window.Toolbar, FocusManager.GetFocusedElement(t.Window));
+
+        // The video ends; the next tick puts the panel back on top, and a show brings it forward again.
+        t.Panel.Cover = 0;
+        t.Panel.Panel.ReclaimTopmost();
+        t.Controller.Show();
+        Assert.Single(forward);
+
+        // The shell says a full-screen window opened while the panel is open: a show leaves it where it is.
+        t.Panel.Panel.StepAside(fullScreen: true);
+        t.Controller.Show();
+        Assert.Single(forward);
+    });
+
     // THE ROOT OF "IT'S BEHIND SOMEWHERE" (2026-11-23 live check). Opening the window gave the toolbar the keyboard
     // before the seam ran, and a WPF Focus() on an element of an inactive window activates that window (measured on the
     // hidden desktop: active=T right after Focus). So the window was already the foreground window, possibly still on

@@ -35,6 +35,9 @@ internal sealed class TasksPanelRig
     public readonly TasksPanel Panel;
     readonly Window window;
 
+    // The window a test says covers the fake screen full screen, or 0 (TasksPanel.CoveringWindow).
+    public nint Cover;
+
     public TasksPanelRig(Window window)
     {
         this.window = window;
@@ -54,9 +57,9 @@ internal sealed class TasksPanelRig
             // The shell holding the strip: the guard never repairs in a board test.
             WorkAreaOf = screen => new WindowRect(screen.Left + 1000, screen.Top, screen.Right - 1000, screen.Bottom),
             Tracing = () => false,
-            // Nothing covers the made-up screen full screen; asked of the real windows, the answer would depend on the
-            // machine running the suite.
-            CoveringWindow = _ => 0,
+            // Nothing covers the made-up screen full screen unless a test says so (Cover); asked of the real windows, the
+            // answer would depend on the machine running the suite.
+            CoveringWindow = _ => Cover,
         };
     }
 
