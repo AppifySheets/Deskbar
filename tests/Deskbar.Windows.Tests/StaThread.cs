@@ -1,5 +1,7 @@
 using System.Diagnostics;
 using System.Runtime.ExceptionServices;
+using System.Windows;
+using System.Windows.Interop;
 using System.Windows.Threading;
 using Deskbar.Core.Control;
 
@@ -39,23 +41,14 @@ static class StaThread
             }
             finally
             {
-                // Shut down the thread's Dispatcher, if the test made one, so WPF unregisters its window classes now
-                // rather than when testhost exits. Every Dispatcher and every HwndWrapper registers a class with a
-                // unique name, and each name holds one of the 16,384 slots of the session's USER atom table, which
-                // every program on every desktop of the session shares. With the threads simply ending, a run held
-                // one or more slots per test until its end, so the 1,500-odd window tests needed well over 1,500
-                // free slots, and on 2026-11-25, with about 1,700 left in a leaking session, the run failed 510 of
-                // 770 with "Not enough memory resources" from Dispatcher..ctor (Deskbar task 4888c75e, measured
-                // by StaThreadTests). Shutdown also disposes windows a test left open, which is what returns
-                // their classes too.
                 try
                 {
-                    Dispatcher.FromThread(Thread.CurrentThread)?.InvokeShutdown();
+                    GiveWindowClassesBack();
                 }
                 catch (Exception ex)
                 {
-                    // A window's own Closed handler throwing during shutdown is still a test failure, but never
-                    // one that hides the test's own.
+                    // A window's own handler throwing while it is torn down is still a test failure, but never one
+                    // that hides the test's own.
                     failure ??= ExceptionDispatchInfo.Capture(ex);
                 }
             }
@@ -65,6 +58,44 @@ static class StaThread
         thread.Join();
 
         failure?.Throw();
+    }
+
+    // GIVE THE TEST'S WINDOW CLASSES BACK BEFORE ITS THREAD ENDS. Every WPF Dispatcher and every HwndWrapper (one
+    // behind each Window, Popup and menu) registers a window class with a unique name, and each name holds one of the
+    // 16,384 slots of the session's USER atom table, which every program on every desktop of the session shares
+    // (docs/superpowers/notes/2026-11-25-user-atom-table-full.md). With the threads simply ending, every test kept its
+    // classes until testhost exited, so the 1,500-odd window tests needed well over 1,500 free slots by the end of a
+    // run. On 2026-11-25, with about 1,700 left in a session that leaks them, a run failed 510 of 770 with "Not enough
+    // memory resources" from Dispatcher..ctor, which read like the hidden desktop's heap and was not (Deskbar task
+    // 4888c75e).
+    //
+    // Three steps, in this order, each measured by StaThreadTests:
+    //   1. Dispose every presentation source still open on this thread: the windows a test never closed. Shutdown
+    //      alone destroys them too, but too late, see 2.
+    //   2. Let the queue run. WPF does not unregister a class when its window is destroyed; it posts the
+    //      UnregisterClass to the Dispatcher. Posted during shutdown, that operation is dropped and the class stays
+    //      registered (measured: the left-open window's class survived a bare InvokeShutdown).
+    //   3. Shut the Dispatcher down, which disposes its own message-only window and unregisters that class at once.
+    // A test that never touched WPF has no Dispatcher, and there is nothing to do.
+    static void GiveWindowClassesBack()
+    {
+        var dispatcher = Dispatcher.FromThread(Thread.CurrentThread);
+        if (dispatcher is null || dispatcher.HasShutdownStarted)
+            return;
+
+        // A copy first: disposing a source takes it out of the list being walked.
+        PresentationSource.CurrentSources
+            .Cast<PresentationSource>()
+            .Where(source => source.Dispatcher == dispatcher && !source.IsDisposed)
+            .OfType<HwndSource>()
+            .ToList()
+            .ForEach(source => source.Dispose());
+
+        // Invoke from the Dispatcher's own thread at a low priority runs everything queued above it first, the
+        // posted UnregisterClass calls among them, and returns once the queue has come down to this one. Bounded, so
+        // a queue that never goes idle (something re-posting itself above this priority) costs a slot, not a hang.
+        dispatcher.Invoke(() => { }, DispatcherPriority.ApplicationIdle, CancellationToken.None, TimeSpan.FromSeconds(5));
+        dispatcher.InvokeShutdown();
     }
 
     // NO REAL WINDOWS BESIDE A RUNNING DESKBAR IN THE SAME SESSION. These tests create real top-level windows,

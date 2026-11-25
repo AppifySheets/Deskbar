@@ -22,7 +22,7 @@ public class StaThreadTests
     [Fact]
     public void A_test_thread_gives_its_window_classes_back_even_with_a_window_left_open()
     {
-        var classes = new List<(string Name, nint Module)>();
+        var classes = new List<WpfClass>();
 
         StaThread.Run(() =>
         {
@@ -34,22 +34,27 @@ public class StaThreadTests
 
         // Both the Dispatcher's message-only window and the Window's own were found, or the test proves nothing.
         Assert.True(classes.Count >= 2, $"found only {classes.Count} WPF window classes on the test thread");
-        Assert.All(classes, c => Assert.False(IsRegistered(c), $"{c.Name} is still registered after the thread ended"));
+        Assert.All(classes, c => Assert.False(IsRegistered(c), $"{c.Name} ({c.Kind} window) is still registered after the thread ended"));
     }
+
+    // A WPF window class: its name, the module it was registered under (GetClassInfoExW needs both) and the kind
+    // of window it was found behind.
+    record WpfClass(string Name, nint Module, string Kind);
 
     // Every class named "HwndWrapper[...]" behind a window of this thread, top-level or message-only. The filter
     // leaves out system classes such as the thread's IME window, which belong to user32 and stay registered.
-    static IReadOnlyList<(string Name, nint Module)> WpfClassesOfThisThread()
+    static IReadOnlyList<WpfClass> WpfClassesOfThisThread()
     {
         var thread = GetCurrentThreadId();
-        var windows = new List<nint>();
-        EnumThreadWindows(thread, (hwnd, _) => { windows.Add(hwnd); return true; }, 0);
+        var windows = new List<(nint Hwnd, string Kind)>();
+        EnumThreadWindows(thread, (hwnd, _) => { windows.Add((hwnd, "top-level")); return true; }, 0);
         // Message-only windows are not top-level, so EnumThreadWindows misses them: walk HWND_MESSAGE's children.
         for (var child = FindWindowExW(HWND_MESSAGE, 0, null, null); child != 0; child = FindWindowExW(HWND_MESSAGE, child, null, null))
-            if (GetWindowThreadProcessId(child, out _) == thread) windows.Add(child);
+            if (GetWindowThreadProcessId(child, out _) == thread) windows.Add((child, "message-only"));
 
+        // The kind is kept so a failure says which of the thread's windows kept its class.
         return windows
-            .Select(hwnd => (Name: ClassNameOf(hwnd), Module: GetClassLongPtrW(hwnd, GCLP_HMODULE)))
+            .Select(w => new WpfClass(ClassNameOf(w.Hwnd), GetClassLongPtrW(w.Hwnd, GCLP_HMODULE), w.Kind))
             .Where(c => c.Name.StartsWith("HwndWrapper[", StringComparison.Ordinal))
             .Distinct()
             .ToList();
@@ -61,7 +66,7 @@ public class StaThreadTests
         return GetClassNameW(hwnd, name, name.Capacity) > 0 ? name.ToString() : "";
     }
 
-    static bool IsRegistered((string Name, nint Module) c)
+    static bool IsRegistered(WpfClass c)
     {
         var info = new WNDCLASSEXW { cbSize = Marshal.SizeOf<WNDCLASSEXW>() };
         return GetClassInfoExW(c.Module, c.Name, ref info);
@@ -70,7 +75,9 @@ public class StaThreadTests
     const int GCLP_HMODULE = -16;
     static readonly nint HWND_MESSAGE = -3;
 
-    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+    // The two names are pointers, never `string`: GetClassInfoExW writes its own pointers into them, and a string
+    // field makes the marshaler free those on the way back, which corrupted the heap and crashed testhost on CI.
+    [StructLayout(LayoutKind.Sequential)]
     struct WNDCLASSEXW
     {
         public int cbSize;
@@ -78,7 +85,7 @@ public class StaThreadTests
         public nint lpfnWndProc;
         public int cbClsExtra, cbWndExtra;
         public nint hInstance, hIcon, hCursor, hbrBackground;
-        public string? lpszMenuName, lpszClassName;
+        public nint lpszMenuName, lpszClassName;
         public nint hIconSm;
     }
 
