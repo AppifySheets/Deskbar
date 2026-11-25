@@ -162,17 +162,22 @@ page says "Sorry, we couldn't find that page": switch accounts, do not debug the
 
 ## Decisions already made, do not relitigate
 
-- **The version comes from git history, and a PR never touches it** (issue #327, Petre agreed).
-  Nerdbank.GitVersioning builds the version from `version.json` (the `major.minor` line) and the
-  git height, the number of commits since `version.json` last changed, so every commit has one
-  fixed version, on every machine and in CI. This replaced "every PR bumps `VersionPrefix`",
+- **A PR never touches the version, and each release is one more than the last** (issue #327,
+  then task 32690a7e). Nerdbank.GitVersioning builds the version from `version.json`, which in the
+  repository holds only the `major.minor` line, so a local build is `major.minor.<git height>`.
+  A release is numbered by the Release workflow instead: the highest existing release of that
+  `major.minor` plus one (2.5.432, then 2.5.433), written into the runner's own copy of
+  `version.json` and never committed (`scripts/ReleaseVersion.psm1`). The git height jumped by
+  every commit a PR landed and every merge that did not release, which is why Petre asked for
+  this on 2026-11-25. The no-PR-bumps rule replaced "every PR bumps `VersionPrefix`",
   which made each merge conflict with every other open PR and kept "Rebase and merge" out of
   reach. So: do not edit a version file (there is none), and put no version in the PR title.
   Give a PR that changes `src/` a `## Release notes` section written for users: the merge
   releases it, as the Releasing section of `README.md` describes, never a release created by
-  hand. A PR with the `no-release` label, or one that changes nothing under `src/`, gets a
-  version number but no release; its change ships with the next release. A minor bump (2.5.0) is
-  one PR that edits `version.json`. A build from a branch reports `2.4.N+<hash>`; only a build
+  hand. A PR with the `no-release` label, or one that changes nothing under `src/`, gets no
+  release and uses no number; its change ships with the next release. A minor bump (2.6.0) is
+  one PR that edits `version.json`, and its first release is x.y.0. A build from a branch reports
+  `2.5.<height>-g<hash>`, a patch that says nothing about the release numbers; only a build
   from `main` is a public release. Builds need the full git history (a shallow clone fails).
 - **Built on Windows' virtual desktops**, never `ShowWindow(SW_HIDE)`. Hidden windows can be
   orphaned by a crash; a virtual desktop cannot lose one. This is also why the app is
