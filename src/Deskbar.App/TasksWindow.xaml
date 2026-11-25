@@ -168,8 +168,13 @@
                     <StackPanel x:Name="AddEnd" DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center"/>
                     <Border CornerRadius="4" Background="#FF15161A" BorderBrush="#FF4F8CFF" BorderThickness="1" Padding="6,3">
                         <Grid>
+                            <!-- A note of several lines (task 98420dbc, TaskNote): long text wraps and the box grows up to
+                                 six lines, then scrolls; Shift+Enter breaks the line (PressInAdd leaves it to the box,
+                                 AcceptsReturn). The first line is the title and the rest the description. -->
                             <TextBox x:Name="AddBox" FontSize="12" Foreground="#FFE6E6E6" Background="Transparent"
-                                     BorderThickness="0" CaretBrush="White" Padding="0" Template="{StaticResource BareTextBox}"/>
+                                     BorderThickness="0" CaretBrush="White" Padding="0" Template="{StaticResource BareTextBox}"
+                                     TextWrapping="Wrap" AcceptsReturn="True" MaxLines="6"
+                                     ToolTip="Enter adds the task, Shift+Enter starts a new line. The first line is the title, the rest the description"/>
                             <TextBlock x:Name="AddPlaceholder" Text="A note: Enter adds it, Esc closes the box" FontSize="12"
                                        Foreground="#FF8B8F99" IsHitTestVisible="False" Margin="2,0,0,0"/>
                         </Grid>

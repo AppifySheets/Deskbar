@@ -37,6 +37,8 @@ namespace Deskbar.App;
 //                   starts typing as a click in the box does. Enter
 //                   adds a Backlog note through TaskService.AddNote and Esc clears the box; either way the keyboard
 //                   goes back to the window Petre was typing in. Clicking away leaves the text where it is.
+//                   Shift+Enter starts a new line and long text wraps, the box growing up to TaskAddMaxLines; the
+//                   first line is the title and the rest the description (TaskNote, task 98420dbc).
 //   the lines       every line of the pile, in a viewer as tall as three lines on a floating bar and as many as fit
 //                   on a docked one; the rest scroll under the wheel (THE LIST SCROLLS, below CapTaskLines) (Waiting
 //                   on you, then Covey's quadrants I to IV, each in Petre's own order, dragged up and down; TaskBoard.Pile,
@@ -627,7 +629,15 @@ public partial class FloatingBar
             BorderBrush = TaskPickedEdge,
             BorderThickness = new Thickness(1),
             Padding = new Thickness(4, 2, 4, 2),
-            ToolTip = "Enter adds the task, Esc clears the box. Ctrl+V or a drop adds a picture",
+            // A NOTE OF SEVERAL LINES (task 98420dbc, TaskNote has the rest). Long text wraps and the box grows a line at
+            // a time instead of scrolling sideways out of sight; Shift+Enter breaks the line (OnTaskAddKey leaves it to
+            // the box, which takes it because AcceptsReturn is on; that is also what keeps the line breaks of pasted
+            // text, which a single-line box drops). Past TaskAddMaxLines the box stops growing and scrolls inside, so a
+            // long paste cannot push the task lines off the bar.
+            TextWrapping = TextWrapping.Wrap,
+            AcceptsReturn = true,
+            MaxLines = TaskAddMaxLines,
+            ToolTip = "Enter adds the task, Shift+Enter starts a new line, Esc clears the box. The first line is the title, the rest the description. Ctrl+V or a drop adds a picture",
         };
         AutomationProperties.SetName(taskAddBox, "New task");
         taskAddBox.PreviewKeyDown += OnTaskAddKey;
@@ -636,6 +646,12 @@ public partial class FloatingBar
             if (!taskTyping) BeginTyping();
         };
         taskAddBox.TextChanged += (_, _) => PaintAddRow();
+        // The box is in the footer, so a line more or less changes the room the docked bar's task lines have: they are
+        // counted again, as when the pictures row comes or goes (PaintTaskAddPictures).
+        taskAddBox.SizeChanged += (_, e) =>
+        {
+            if (e.HeightChanged) QueueTaskListFit();
+        };
         taskAddPlaceholder = new TextBlock
         {
             Tag = "task-add-placeholder",
@@ -1782,8 +1798,15 @@ public partial class FloatingBar
         return TaskClickClock() - at < HandBackWindow;
     }
 
+    // How many lines the add box grows to before it scrolls inside instead (task 98420dbc): enough for a short paragraph,
+    // few enough that the docked bar keeps room for its task lines.
+    const int TaskAddMaxLines = 6;
+
     void OnTaskAddKey(object sender, KeyEventArgs e)
     {
+        // Shift+Enter is a line break, left to the box (AcceptsReturn); the tasks panel's comment and description boxes
+        // read the two keys the same way.
+        if (e.Key == Key.Enter && Keyboard.Modifiers.HasFlag(ModifierKeys.Shift)) return;
         if (e.Key == Key.Enter)
         {
             e.Handled = true;
@@ -1799,14 +1822,15 @@ public partial class FloatingBar
     }
 
     // Enter: a Backlog note where the chips say. A title of nothing is refused by the board and the box keeps the
-    // keyboard. Pasted pictures become the new task's description, and with nothing typed the task is called "Picture"
+    // keyboard. The first line is the title and any lines after it the description (TaskNote.Split, task 98420dbc).
+    // Pasted pictures go in the description too, after that text, and with nothing typed the task is called "Picture"
     // (FloatingBar.TaskPictures.cs). The note added is then highlighted (ShowAddedTask).
     void CommitTaskNote()
     {
         if (taskService is null || taskAddBox is null) return;
-        var title = TaskImages.TitleFor(taskAddBox.Text, taskAddImages.Count);
+        var (title, body) = TaskNote.Split(taskAddBox.Text, taskAddImages.Count);
         var quadrant = QuadrantOf.Flags(taskAddFlags.Important, taskAddFlags.Urgent);
-        (TaskAddDescription() is { } describe
+        (TaskAddDescription(body) is { } describe
                 ? taskService.AddNote(title, taskAddTarget, quadrant, taskAddParent, describe)
                 : taskService.AddNote(title, taskAddTarget, quadrant, taskAddParent))
             .Tap(task =>
