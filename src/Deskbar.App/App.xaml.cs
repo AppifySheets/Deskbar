@@ -87,6 +87,11 @@ public partial class App : Application
     readonly Core.Tasks.CommentInbox commentInbox = new(Path.Combine(AppPaths.NewStateDir, Core.Tasks.CommentInbox.FolderName), () => DateTimeOffset.UtcNow);
     CommentWaker? commentWaker;
 
+    // A merged pull request settles the question that asked for the merge (PullRequestWatch, task b7f987b4): it looks at
+    // the pull requests linked in waiting questions through `gh` and takes the task off the bar once they are merged or
+    // closed, without waiting for the session's `task answered`. Built beside claudeSessions; disposed with it.
+    Core.Tasks.PullRequestWatch? pullRequestWatch;
+
     // Tiling (docs/superpowers/specs/2026-11-08-tiling-design.md): the Tiler decides, the surface does the
     // Win32. Both live for the process, both are null in compatibility mode (there are no desktops to tile),
     // and ExitApp disposes the Tiler and then the surface, so the LOCATIONCHANGE hook goes with them.
@@ -1763,6 +1768,12 @@ public partial class App : Application
         // Petre's comment on a task reaches its Claude session, waking it if idle (CommentWaker; plan
         // docs/superpowers/plans/2026-11-24-comment-wakes-session.md). It reads the sessions' list ClaudeSessions keeps,
         // and resumes or stops through it, so its resumes share the keeper's guards against starting a copy.
+        // Questions whose pull requests have merged settle themselves (PullRequestWatch): `gh` runs on the thread pool,
+        // the board is read and changed on this thread through the same dispatcher scheduler.
+        pullRequestWatch = new Core.Tasks.PullRequestWatch(tasks!, Deskbar.Windows.Claude.GitHubCli.PullRequest,
+            new System.Reactive.Concurrency.SynchronizationContextScheduler(new System.Windows.Threading.DispatcherSynchronizationContext(Dispatcher)),
+            trace: ClickTrace.On ? ClickTrace.Write : null);
+
         commentWaker = new CommentWaker(tasks!, () => manager.State.ClaudeTasksInEffect, claudeSessions.Live, claudeSessions.TranscriptExists, commentInbox,
             claudeSessions.ResumeWith, claudeSessions.StopNow, ClickTrace.On ? ClickTrace.Write : null);
 
@@ -2526,6 +2537,7 @@ public partial class App : Application
             // No more `claude` polls or resumes once the session is ending; running Claude sessions are not touched.
             claudeActions?.Dispose();
             commentWaker?.Dispose();
+            pullRequestWatch?.Dispose();
             claudeSessions?.Dispose();
             // The tasks panel, before WPF's Shutdown closes its window (which follows this event when nothing cancels
             // it): saved open if it was, so it opens again at the next sign-in, and its strip given back. Without
@@ -2933,6 +2945,7 @@ public partial class App : Application
         // No more `claude` polls or resumes once the app is going; running Claude sessions are not touched.
         claudeActions?.Dispose();
         commentWaker?.Dispose();
+        pullRequestWatch?.Dispose();
         claudeSessions?.Dispose();
         monitor?.Dispose();
         hotkeys?.Dispose(); // unregisters RegisterHotKey chords before the process exits

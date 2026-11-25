@@ -214,6 +214,13 @@ public sealed class TaskService(ITaskStore store, Func<DateTimeOffset> now, Func
 
     public void SessionEnded(string sessionId) => CommitIfChanged(Board.SessionEnded(sessionId, now()));
 
+    /// <summary>
+    /// Deskbar settles a question whose pull requests are merged or closed (PullRequestWatch, task b7f987b4). Saves and
+    /// pulses only when the task still waited on that very question (TaskBoard.SettleQuestion).
+    /// </summary>
+    public void SettleQuestion(Settlement settlement) =>
+        CommitIfChanged(Board.SettleQuestion(settlement.TaskId, settlement.Question, settlement.Note, now(), makeId()));
+
     /// <summary>/clear ended the session (Ruling 19, TaskBoard.SessionCleared). Saves only when it was on a task.</summary>
     public void SessionCleared(string sessionId) => CommitIfChanged(Board.SessionCleared(sessionId, now()));
 

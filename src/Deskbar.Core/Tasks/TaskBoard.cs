@@ -168,6 +168,30 @@ public sealed record TaskBoard(IReadOnlyList<TaskItem> Tasks)
             .GetValueOrDefault(this);
 
     /// <summary>
+    /// Deskbar settles a waiting task's question itself, because the pull requests it links are merged or closed
+    /// (AskedPullRequests, task b7f987b4). What `task answered` does, by the task rather than by a session: the task goes
+    /// back to In progress and to Claude, so it leaves the bar, the question goes, and the comments sessions wrote since
+    /// the ask are settled (Ruling 62; any session's, since nothing records which one asked). Deskbar's own line,
+    /// <paramref name="note"/>, goes into the thread in the same change, saying why.
+    /// <para>
+    /// Only the question that was read is settled: a task no longer waiting, closed, or waiting on a DIFFERENT question
+    /// (the session asked again while GitHub was being asked) returns this same board, so the caller saves nothing.
+    /// </para>
+    /// </summary>
+    public TaskBoard SettleQuestion(Guid id, string question, string note, DateTimeOffset now, Guid noteId) =>
+        Tasks.FirstOrDefault(t => t.Id == id) is { IsOpen: true, Status: TaskStatus.WaitingOnYou, Question: { HasValue: true } asked } task
+        && asked.Value == question
+            ? Replaced(task with
+            {
+                Status = TaskStatus.InProgress, Question = Maybe<string>.None, UpdatedAt = now, Assignee = Assignee.Claude,
+                Comments = task.Comments
+                    .Select(c => c.BySession && c.At >= task.WaitingSince.GetValueOrDefault(task.Raised) && c.Settled.HasNoValue ? c with { Settled = now } : c)
+                    .Append(new TaskComment(noteId, TaskComment.DeskbarAuthor, now, note))
+                    .ToArray(),
+            })
+            : this;
+
+    /// <summary>
     /// The session ended: it is marked ended on every task it is live on, and those tasks keep their status (a task
     /// whose sessions all ended stays open). No live session with that id returns this same board.
     /// </summary>

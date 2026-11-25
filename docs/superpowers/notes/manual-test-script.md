@@ -974,6 +974,19 @@ QL3. The bar's line for the task reads "Merge Deskbar #1, see https://deskbar.ap
 QL4. Start a new Claude session and ask it to ask you to merge a pull request: its question names the pull request as
      a link you can click.
 
+## A merge settles its question
+
+(Task b7f987b4.) The tasks panel open, `gh` signed in. Open a throwaway pull request on a repository of yours, and from a
+Claude session with a task run `task ask` with `Merge [this](<its url>)` on stdin.
+
+PM1. The task waits on you at the top of the bar, as before. Leave it for a minute: it stays.
+PM2. Merge the pull request on GitHub. Within 30 seconds, and before the session runs `task answered`, the task leaves the
+     bar and is in progress in the panel. Its thread ends with "Deskbar settled the question at <time>: [<repo> #<n>](...)
+     was merged." The session's own `task answered` afterwards changes nothing.
+PM3. Ask again, linking a pull request that was merged long ago ("now that [#1](...) is in, A or B?"): it keeps waiting.
+PM4. Ask linking a pull request, then close it without merging: the question settles, and the line says "closed without
+     merging".
+
 ## Results (2026-08-01)
 
 Status: **pending human execution.** An agent cannot observe the desktop, Task View,
