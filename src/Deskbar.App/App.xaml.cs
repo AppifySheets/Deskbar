@@ -2310,7 +2310,13 @@ public partial class App : Application
             // The tray overflow the bar knows is in front, so the panel's 1 s re-assert steps behind the hidden-icons flyout
             // as the bar's does (TasksPanel.ReclaimTopmost). The timer runs the bar's ReclaimTopmost first, which reads the
             // foreground and settles this value, so the panel sees the answer of the same tick.
-            tasksPanel = new TasksPanel(tasksWindow, bar.Strip) { OverflowInFront = () => bar.OverflowInFront };
+            // The bar's handle too: the panel's place in the topmost band is directly behind the bar, so a floating bar
+            // parked on the edge the panel docks on stays over its own panel (TasksPanel.BehindTheBar).
+            tasksPanel = new TasksPanel(tasksWindow, bar.Strip)
+            {
+                OverflowInFront = () => bar.OverflowInFront,
+                BarWindow = () => bar.Hwnd,
+            };
             tasksPanel.Shown.Subscribe(tasksPanelShown);
             // PINNED TO EVERY DESKTOP once, after its first show, like the bar and the detached stats window (see
             // ShowDetachedStats): a window that has never been shown is on no desktop and cannot be pinned. The panel

@@ -90,6 +90,11 @@ internal sealed class TasksPanel : IDisposable
     // hands a window of its own. See ReclaimTopmost.
     internal Func<nint> OverflowInFront { get; init; } = () => 0;
 
+    // The bar's own window handle, or 0. The panel's place in the topmost band is DIRECTLY BEHIND the bar, never over it
+    // (see BehindTheBar). 0 by default, so a panel nobody wires simply takes the top of the band as before; the App passes
+    // the bar's. A test hands a window of its own.
+    internal Func<nint> BarWindow { get; init; } = () => 0;
+
     // The window that covers the panel's screen full screen right now (TopLevelWindows.CoveringWindow, the floating
     // bar's own test, measured on Petre's machine), or 0 for none. Asked only when the panel comes back on screen and,
     // after that, on the 1 s tick while it believes a full-screen window it found that way is still up. See Dock and
@@ -302,9 +307,27 @@ internal sealed class TasksPanel : IDisposable
             Say(() => behind ? $"tasks panel: steps below the tray overflow {overflow:X}" : "tasks panel: back on top of the tray overflow");
         }
         if (behind) return;
-        NativeMethods.SetWindowPos(hwnd, NativeMethods.HWND_TOPMOST, 0, 0, 0, 0,
+        NativeMethods.SetWindowPos(hwnd, BehindTheBar(), 0, 0, 0, 0,
             NativeMethods.SWP_NOMOVE | NativeMethods.SWP_NOSIZE | NativeMethods.SWP_NOACTIVATE);
     }
+
+    // WHERE IN THE TOPMOST BAND THE PANEL GOES: directly behind the bar, so the bar is never under its own panel.
+    //
+    // Docked, the two never overlap (the panel is a strip just inside the bar's), so the order between them shows nowhere.
+    // FLOATING, they do: the panel docks on the edge of the screen nearer the bar (TasksPanelPlacement, "bar floats"),
+    // which is exactly where a bar parked near that edge sits, full height. Both re-assert the top of the band on the
+    // App's 1 s timer, the bar first and the panel after it, so the panel used to land over the bar on every tick, and
+    // the bar sat behind its own tasks' window (task 4836eca2). Taking the place right behind the bar instead of the top
+    // of the band puts the panel above everything the bar is above, and below the bar itself.
+    //
+    // Inserting after a topmost window keeps the panel topmost. Inserting after one that is NOT topmost would take the
+    // panel out of the band, so the bar's place is used only while the bar is on screen and in the band; otherwise (the
+    // bar hidden, minimized, or stepped below a full-screen window on its own screen) the panel takes the top of the band
+    // as it always did.
+    nint BehindTheBar() =>
+        BarWindow() is var bar and not 0 && NativeMethods.IsWindowVisible(bar) && TopLevelWindows.IsTopmost(bar)
+            ? bar
+            : NativeMethods.HWND_TOPMOST;
 
     // Gives the strip back for good: the app exiting, or the window closing. Unsubscribes, so a notice still queued does
     // nothing; calls Undock whatever the state (AppBar.Remove does nothing when nothing is held), so nothing stays
@@ -358,7 +381,7 @@ internal sealed class TasksPanel : IDisposable
         fullScreenFound = false;
         var hwnd = new WindowInteropHelper(window).Handle;
         if (hwnd == 0) return;
-        NativeMethods.SetWindowPos(hwnd, fullScreen ? HwndNoTopmost : NativeMethods.HWND_TOPMOST, 0, 0, 0, 0,
+        NativeMethods.SetWindowPos(hwnd, fullScreen ? HwndNoTopmost : BehindTheBar(), 0, 0, 0, 0,
             NativeMethods.SWP_NOMOVE | NativeMethods.SWP_NOSIZE | NativeMethods.SWP_NOACTIVATE);
     }
 
@@ -451,6 +474,11 @@ internal sealed class TasksPanel : IDisposable
         var covered = CoveringWindow(hwnd);
         window.Topmost = covered == 0;
         window.Show();
+        // Show puts a topmost window at the very top of the band, over a floating bar it overlaps; the panel's place is
+        // right behind the bar (BehindTheBar), so it goes there at once rather than on the next 1 s tick.
+        if (covered == 0)
+            NativeMethods.SetWindowPos(hwnd, BehindTheBar(), 0, 0, 0, 0,
+                NativeMethods.SWP_NOMOVE | NativeMethods.SWP_NOSIZE | NativeMethods.SWP_NOACTIVATE);
         if (!StepBehindCovering(hwnd, covered)) return;
         fullScreenOpen = true;
         fullScreenFound = true;

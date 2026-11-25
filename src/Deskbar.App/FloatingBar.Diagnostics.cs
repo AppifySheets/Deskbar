@@ -30,8 +30,9 @@ public partial class FloatingBar
         ClickTrace.Write($"fullscreen app {(open ? "opened" : "closed")} (shell notice), docked={dockedEdge ?? "no"}");
     }
 
-    // The bar's window handle, for the dump to find the bar in the z-order. Zero before the window exists.
-    internal nint DumpHandle => new WindowInteropHelper(this).Handle;
+    // The bar's window handle, for the dump to find the bar in the z-order and for the tasks panel to sit right behind
+    // it (TasksPanel.BarWindow). Zero before the window exists.
+    internal nint Hwnd => new WindowInteropHelper(this).Handle;
 
     // The bar's half of the dump's "Active window" section (DebugDump.DescribeActiveWindow says what it is for): how
     // WPF renders here, and every icon that carries a focus marker or belongs to the window the manager has marked,
@@ -63,7 +64,7 @@ public partial class FloatingBar
     // Plain lines, one fact each, in the order someone reading the dump asks about them.
     internal string DescribeForDump()
     {
-        var hwnd = DumpHandle;
+        var hwnd = Hwnd;
         var text = new StringBuilder();
         void Line(string name, object? value) => text.AppendLine($"  {name,-26} {value}");
 

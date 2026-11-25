@@ -28,7 +28,7 @@ public class DebugDumpTests(ITestOutputHelper output)
         Assert.Contains("== Screens", dump);
         Assert.Contains("screen 1", dump);
         Assert.Contains("== The bar", dump);
-        Assert.Contains($"0x{bar.DumpHandle:X}", dump);
+        Assert.Contains($"0x{bar.Hwnd:X}", dump);
         Assert.Contains("fullscreen notices         none since the bar started", dump);
         Assert.Contains("strip held by work area    n/a (not docked on an edge)", dump);
         // The bar's own line in the window list, marked, and topmost as it always is.

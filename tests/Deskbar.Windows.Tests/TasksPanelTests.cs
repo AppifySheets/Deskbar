@@ -70,6 +70,8 @@ public class TasksPanelTests
         public nint Overflow;
         // The window covering the panel's screen full screen (TopLevelWindows.CoveringWindow), or 0.
         public nint Cover;
+        // The bar's own window (FloatingBar.Hwnd), or 0 for no bar.
+        public nint BarHwnd;
         public readonly Window Window = new()
         {
             WindowStyle = WindowStyle.None,
@@ -97,6 +99,7 @@ public class TasksPanelTests
                 Trace = Lines.Add,
                 OverflowInFront = () => Overflow,
                 CoveringWindow = _ => Cover,
+                BarWindow = () => BarHwnd,
             };
 
         // Runs whatever the panel queued on its dispatcher (see the top of this file).
@@ -581,6 +584,77 @@ public class TasksPanelTests
         Assert.True(Above(cover, panel));
 
         video.Close();
+        rig.Close();
+    });
+
+    // Task 4836eca2, "Undocked bar sits behind its own tasks' window": a floating bar parked on the edge the panel docks on
+    // overlaps it, and the 1 s timer re-asserts the bar first and the panel after it, so the panel landed over the bar on
+    // every tick. The panel's place is directly BEHIND the bar instead, still in the topmost band. A bar that is hidden
+    // (minimized) is no place to stand behind, and the panel takes the top of the band as before. The "bar" is a real
+    // topmost window over the panel's inner edge on the made-up screen, shown without the focus.
+    [Fact]
+    public void The_panel_stays_behind_a_floating_bar_over_it_and_takes_the_top_while_the_bar_is_hidden() => StaThread.Run(() =>
+    {
+        var rig = new Rig().Open();
+        var panel = new WindowInteropHelper(rig.Window).Handle;
+        var at = RectOf(rig.Window);
+        var barWindow = new Window
+        {
+            WindowStyle = WindowStyle.None,
+            ResizeMode = ResizeMode.NoResize,
+            ShowInTaskbar = false,
+            ShowActivated = false,
+            Topmost = true,
+        };
+        barWindow.Show();
+        var bar = new WindowInteropHelper(barWindow).Handle;
+        NativeMethods.SetWindowPos(bar, NativeMethods.HWND_TOPMOST, at.Left - 200, at.Top + 100, 400, 300, NativeMethods.SWP_NOACTIVATE);
+        rig.BarHwnd = bar;
+
+        // The timer's order: the bar re-asserts, then the panel. The bar stays on top, the panel right behind it.
+        rig.Panel.ReclaimTopmost();
+        Assert.Equal(panel, NativeMethods.GetWindow(bar, GwHwndNext));
+        Assert.True(IsTopmost(rig.Window));
+
+        // The panel clicked (it climbs to the top of the band), the bar's re-assert, then the panel's: behind the bar again.
+        NativeMethods.SetWindowPos(panel, NativeMethods.HWND_TOPMOST, 0, 0, 0, 0,
+            NativeMethods.SWP_NOMOVE | NativeMethods.SWP_NOSIZE | NativeMethods.SWP_NOACTIVATE);
+        Assert.True(Above(panel, bar));
+        NativeMethods.SetWindowPos(bar, NativeMethods.HWND_TOPMOST, 0, 0, 0, 0,
+            NativeMethods.SWP_NOMOVE | NativeMethods.SWP_NOSIZE | NativeMethods.SWP_NOACTIVATE);
+        rig.Panel.ReclaimTopmost();
+        Assert.Equal(panel, NativeMethods.GetWindow(bar, GwHwndNext));
+        Assert.True(IsTopmost(rig.Window));
+
+        // The bar hidden: the panel takes the top of the band again.
+        barWindow.Hide();
+        rig.Panel.ReclaimTopmost();
+        Assert.True(IsTopmost(rig.Window));
+
+        barWindow.Close();
+        rig.Close();
+    });
+
+    // A bar out of the topmost band (stepped below a full-screen window on its own screen) is no place for the panel
+    // either: inserting behind a window outside the band would take the panel out of it too.
+    [Fact]
+    public void A_bar_outside_the_topmost_band_does_not_take_the_panel_out_of_it() => StaThread.Run(() =>
+    {
+        var rig = new Rig().Open();
+        var barWindow = new Window
+        {
+            WindowStyle = WindowStyle.None,
+            ResizeMode = ResizeMode.NoResize,
+            ShowInTaskbar = false,
+            ShowActivated = false,
+        };
+        barWindow.Show();
+        rig.BarHwnd = new WindowInteropHelper(barWindow).Handle;
+
+        rig.Panel.ReclaimTopmost();
+        Assert.True(IsTopmost(rig.Window));
+
+        barWindow.Close();
         rig.Close();
     });
 

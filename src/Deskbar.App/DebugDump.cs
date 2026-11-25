@@ -72,7 +72,7 @@ static class DebugDump
         // taken it back (ScreenStrip.Describe). Right after the bar, whose docked strip shares the screens' edges.
         Section(text, "Screen strips (the window list along the top of each screen)", () =>
             string.Concat((strips?.Describe() ?? ["none (compatibility mode)"]).Select(line => $"  {line}\n")));
-        Section(text, "Visible top-level windows, top of the z-order first", () => DescribeZOrder(screens, bar?.DumpHandle ?? 0));
+        Section(text, "Visible top-level windows, top of the z-order first", () => DescribeZOrder(screens, bar?.Hwnd ?? 0));
         Section(text, "Workspaces", () => DescribeWorkspaces(manager));
         Section(text, "Active window (what the focus marker on the bar is drawn from)", () => DescribeActiveWindow(bar, manager));
         Section(text, $"Trace log, last {TraceLines} lines ({ClickTrace.LogPath})", TraceTail);
