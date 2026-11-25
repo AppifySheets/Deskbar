@@ -330,6 +330,26 @@ public sealed class JsonTaskStoreTests : IDisposable
         Assert.Contains("\"parentId\": null", text);
     }
 
+    // Task links (2026-11-25-task-links-design.md): duplicateOf and related round-trip, and a task without links writes
+    // null for both, so a file without links reads the same.
+    [Fact]
+    public void Duplicate_and_related_links_round_trip()
+    {
+        var store = new JsonTaskStore(dir);
+        var board = Sample();
+        var first = board.Tasks[0].Id;
+        board = new TaskBoard(board.Tasks.Select((t, i) => i == 1 ? t with { Status = TaskStatus.Closed, DuplicateOf = first, Related = [first] } : t).ToArray());
+
+        Assert.True(store.Save(board).IsSuccess);
+        var loaded = store.Load().Value;
+
+        Assert.Equal(board.Tasks.Select(t => t.DuplicateOf), loaded.Tasks.Select(t => t.DuplicateOf));
+        Assert.Equal(board.Tasks.Select(t => string.Join(",", t.Related)), loaded.Tasks.Select(t => string.Join(",", t.Related)));
+        var text = File.ReadAllText(TasksPath);
+        Assert.Contains($"\"duplicateOf\": \"{first}\"", text);
+        Assert.Contains("\"related\": null", text);
+    }
+
     // A file written before subtasks has no parentId: every task reads as having no parent.
     [Fact]
     public void A_file_without_parent_ids_reads_as_no_parent()

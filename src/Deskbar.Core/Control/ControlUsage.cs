@@ -136,8 +136,15 @@ public static class ControlUsage
                 "a pull request the session opened, on its own task, so the tasks panel's search finds the task by its\n"
                 + "      number. A `gh pr create` is recorded by itself; this is for one opened another way"),
             new("task", "family --session <session>",
-                "the parent, the siblings and their sessions (with transcript files) of the session's own task, as the\n"
-                + "      task join reply gives them; read it again when the siblings may have moved on"),
+                "the parent, the siblings, the linked tasks and their sessions (with transcript files) of the session's own\n"
+                + "      task, as the task join reply gives them; read it again when they may have moved on"),
+            // Task links (docs/superpowers/specs/2026-11-25-task-links-design.md): a session links its own task.
+            new("task", "duplicate-of <id> --session <session>",
+                "the session's own task is the same work as task <id>: it closes as that task's duplicate, which the\n"
+                + "      tasks panel shows as Duplicate; reopening it drops the link"),
+            new("task", "relate <id> --session <session>",
+                "link the session's own task to task <id> as related; both show the link, and a session joining either reads it"),
+            new("task", "unrelate <id> --session <session>", "remove the related link between the session's own task and task <id>"),
             new("task", "comment-settle <comment-id> --session <session>",
                 "settle one of the session's own comments: it stays but folds away in the tasks window. task answered\n"
                 + "      settles the session's comments written since its question was asked; another session's is refused"),
@@ -158,8 +165,13 @@ public static class ControlUsage
                 "make a task a subtask of another, or a plain task again (none). One level: a subtask cannot have\n"
                 + "      subtasks, and a task with subtasks cannot become one"),
             new("task", "family <id>",
-                "what a Claude session on the task reads about its family: the parent, the siblings or its subtasks, and\n"
-                + "      their sessions with transcript files; plain text"),
+                "what a Claude session on the task reads about the tasks around it: the parent, the siblings or its\n"
+                + "      subtasks, the tasks it duplicates or is related to, and their sessions with transcript files; plain text"),
+            new("task", "duplicate <id> <of-id>",
+                "close a task as a duplicate of another, as the tasks panel's \"Duplicate of...\" does; a duplicate of a\n"
+                + "      duplicate names the original. The rules of close hold (task close)"),
+            new("task", "relate <id> <other-id>", "link two tasks as related, as the tasks panel's \"Related to...\" does"),
+            new("task", "unrelate <id> <other-id>", "remove the related link between two tasks"),
             new("task", "goal <id> <goal-id>|none",
                 "count a task toward an open goal of any period, as the tasks window's \"...\" menu \"Goal\" does, or toward none"),
             new("task", "snooze <id> 1h|3h|tomorrow|monday|<n>m|<n>h|<n>d",

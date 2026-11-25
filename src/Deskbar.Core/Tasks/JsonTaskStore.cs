@@ -36,6 +36,10 @@ namespace Deskbar.Core.Tasks;
 // 2, a Guid or null, the task this one is a subtask of. A missing one is no parent. An older version 2 build ignores it
 // and drops it on its next save, which costs the links and never a task, as with `goalId`.
 //
+// TASK LINKS (docs/superpowers/specs/2026-11-25-task-links-design.md). `duplicateOf` (a Guid or null) and `related` (an
+// array of Guids, null for none) are optional fields of version 2 as well; an older build drops them on its next save,
+// which costs the links and never a task.
+//
 // THE ASSIGNEE (Ruling 57). `assignee` is an optional object of version 2 too, `{"kind":"me|claude|colleague","id":..,"name":..}`,
 // so no version bump. A missing or unreadable one is DERIVED on load (Assignee.DerivedFor): a task with sessions that is
 // in progress or in the backlog goes to Claude, everything else to Petre. An older build ignores the field and drops it
@@ -133,7 +137,12 @@ public sealed class JsonTaskStore(string baseDirectory, Action<string>? trace = 
         // entry that is not a GitHub pull request link is skipped (FromDto). Still version 2; an older build ignores the
         // field and drops it on its next save, which costs the links and never a task.
         [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull), JsonConverter(typeof(TolerantStringListConverter))]
-        IReadOnlyList<string>? PullRequests = null);
+        IReadOnlyList<string>? PullRequests = null,
+        // Task links (2026-11-25-task-links-design.md): TaskItem.DuplicateOf, the original's id or null, and
+        // TaskItem.Related, the ids linked from this task or null for none (so a file without links is unchanged).
+        // Still version 2.
+        Guid? DuplicateOf = null,
+        IReadOnlyList<Guid>? Related = null);
 
     // One status change (TaskItem.StatusLog). Both statuses go through the tolerant converter, like the task's own.
     sealed record StatusChangeDto(DateTimeOffset At, TaskStatus From, TaskStatus To);
@@ -235,7 +244,9 @@ public sealed class JsonTaskStore(string baseDirectory, Action<string>? trace = 
             t.SnoozedUntil.HasValue ? t.SnoozedUntil.Value.ToUniversalTime() : null,
             t.Pin,
             t.StatusLog.Count > 0 ? t.StatusLog.Select(c => new StatusChangeDto(c.At.ToUniversalTime(), c.From, c.To)).ToArray() : null,
-            t.PullRequests.Count > 0 ? t.PullRequests.Select(p => p.Url).ToArray() : null);
+            t.PullRequests.Count > 0 ? t.PullRequests.Select(p => p.Url).ToArray() : null,
+            t.DuplicateOf.HasValue ? t.DuplicateOf.Value : null,
+            t.Related.Count > 0 ? t.Related : null);
 
     static TaskItem FromDto(TaskDto d) =>
         new(d.Id, d.Title ?? "",
@@ -271,6 +282,8 @@ public sealed class JsonTaskStore(string baseDirectory, Action<string>? trace = 
             // Each stored URL read back as a link; a hand-edited entry that is no pull request link is dropped, and two
             // spellings of one pull request are one.
             PullRequests = (d.PullRequests ?? []).SelectMany(AskedPullRequests.In).DistinctBy(p => p.Key).ToArray(),
+            DuplicateOf = d.DuplicateOf is { } original ? original : Maybe<Guid>.None,
+            Related = (d.Related ?? []).Distinct().ToArray(),
         };
 
     // A pin for a task saved before pins existed: the later raised, the higher (smaller is higher), so the pinned block

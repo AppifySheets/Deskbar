@@ -286,6 +286,26 @@ public sealed record TaskItem(
     /// </summary>
     public IReadOnlyList<PullRequestLink> PullRequests { get; init; } = [];
 
+    /// <summary>
+    /// The task this one duplicates, or none (task links, docs/superpowers/specs/2026-11-25-task-links-design.md; Petre:
+    /// "introduce a duplicate status in tasks"). Set only together with Closed, by TaskBoard.MarkDuplicate: a duplicate is
+    /// a kind of close, so every rule about closed tasks holds for it unchanged, and the views say "Duplicate" where they
+    /// would say "Closed" (<see cref="IsDuplicate"/>). Any change that opens the task again drops it (TaskBoard.Unmarked).
+    /// An init property like ParentId, stored as an optional `duplicateOf`; a link naming a task that no longer exists
+    /// reads as a plain close.
+    /// </summary>
+    public Maybe<Guid> DuplicateOf { get; init; }
+
+    /// <summary>
+    /// The tasks this one was linked to as related (task links spec; Petre: "also introduce related to"). Stored on the
+    /// task the link was made FROM only, and read both ways by TaskBoard.RelatedOf, so a link never has two copies to
+    /// disagree. An init property, stored as an optional `related` array; absent in a file means none.
+    /// </summary>
+    public IReadOnlyList<Guid> Related { get; init; } = [];
+
+    /// <summary>A closed task that duplicates another: the views call it "Duplicate", not "Closed".</summary>
+    public bool IsDuplicate => Status == TaskStatus.Closed && DuplicateOf.HasValue;
+
     /// <summary>Covey's quadrant the two flags name (TaskOrder.cs).</summary>
     public Quadrant Quadrant => QuadrantOf.Flags(Important, Urgent);
 

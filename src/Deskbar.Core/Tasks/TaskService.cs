@@ -152,6 +152,19 @@ public sealed class TaskService(ITaskStore store, Func<DateTimeOffset> now, Func
     /// <summary>Makes a task a subtask of another, or (none) a plain task again (TaskBoard.SetParent).</summary>
     public Result SetParent(Guid id, Maybe<Guid> parent) => ApplyIfChanged(Board.SetParent(id, parent, now()));
 
+    // Task links (docs/superpowers/specs/2026-11-25-task-links-design.md). A link that is already there, or one already
+    // gone, saves and pulses nothing.
+
+    /// <summary>
+    /// Closes a task as a duplicate of another (TaskBoard.MarkDuplicate). `stoppingClaude` is the session's own form: the
+    /// session asking is the one working, and it is done.
+    /// </summary>
+    public Result MarkDuplicate(Guid id, Guid of, bool stoppingClaude = false) => ApplyIfChanged(Board.MarkDuplicate(id, of, now(), stoppingClaude));
+
+    public Result Relate(Guid id, Guid other) => ApplyIfChanged(Board.Relate(id, other, now()));
+
+    public Result Unrelate(Guid id, Guid other) => ApplyIfChanged(Board.Unrelate(id, other, now()));
+
     void DeleteImages(Guid id)
     {
         if (filesRoot is null) return;
