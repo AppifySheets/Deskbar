@@ -1195,12 +1195,12 @@ MG8. From any terminal, `$ts task overview` prints one line per open task.
 Manager event wakes (docs/superpowers/specs/2026-11-25-manager-event-wakes-design.md):
 
 MW1. Open the manager, close its window, and leave a Claude task's session idle for 15 minutes without `task ask` or
-     `task done`. Within about half an hour of the manager's start, the Manager button shows an orange dot, the task's
-     thread has one manager comment, and the session took a turn on it.
-MW2. Open the manager: the dot goes, and the window's last reply lists what waits on you, oldest first, with a
-     suggested answer each.
-MW3. Leave a question unanswered for two hours on a day the manager is open: the manager is woken once for it (the dot
-     comes back), and not again for the same question.
+     `task done`. Within about half an hour of the manager's start, the task's thread has one manager comment and the
+     session took a turn on it. The Manager button shows no dot (task 6a87df67: a first nudge is not news for you).
+MW2. Let the same session stop again the same way: the next wake lights the orange dot. Open the manager: the dot goes,
+     and its last reply names that task in a line, without listing the questions or merges the bar already shows.
+MW3. Leave a question unanswered for two hours on a day the manager is open: the manager is not woken for it, and no
+     dot appears (task 6a87df67).
 MW4. On a day the manager was never opened, nothing wakes it and no dot appears, whatever is handed back.
 MW5. While you are typing to the manager (a turn in progress), no wake lands in the middle; it comes after the turn.
 

@@ -7,7 +7,8 @@ using TaskStatus = Deskbar.Core.Tasks.TaskStatus;
 namespace Deskbar.Core.Tests.Tasks;
 
 // DESKBAR WAKES THE MANAGER (docs/superpowers/specs/2026-11-25-manager-event-wakes-design.md): batched, at most once per
-// 30 minutes, only for a hand-back or a question two hours old, never while the manager is busy, only today's manager.
+// 30 minutes, only for a hand-back (task 6a87df67 dropped the questions), never while the manager is busy, only today's
+// manager.
 public sealed class ManagerWakesTests
 {
     static readonly DateOnly today = new(2026, 11, 25);
@@ -96,29 +97,18 @@ public sealed class ManagerWakesTests
     public void An_idle_listed_manager_is_woken() =>
         Assert.IsType<ManagerWake.Wake>(Plan(Record(), Board(HandedBack(id1, At(10))), At(90), [Agent(busy: false)]));
 
+    // Task 6a87df67: "tasks do it themselves already on the bar". A waiting task's question is on the bar and in the tasks
+    // panel, so a question never wakes the manager, however old, and is not carried along with a hand-back either.
     [Fact]
-    public void A_question_two_hours_old_wakes_once()
-    {
-        // Asked at 08:00; since is 09:00; it turns two hours old at 10:00.
-        var board = Board(Waiting(id2, At(-60)));
-        Assert.IsType<ManagerWake.Nothing>(Plan(Record(), board, At(59)));
-        var wake = Assert.IsType<ManagerWake.Wake>(Plan(Record(), board, At(60)));
-        Assert.Contains("Unanswered for 2 hours or more", wake.Message);
-        Assert.Contains("Merge PR 512?", wake.Message);
-        // The next tick counts from this wake: the same question does not wake it again.
-        Assert.IsType<ManagerWake.Nothing>(Plan(wake.Record, board, At(120)));
-    }
+    public void A_question_never_wakes_however_old() =>
+        Assert.IsType<ManagerWake.Nothing>(Plan(Record(), Board(Waiting(id2, At(-600)), Waiting(id1, At(10))), At(600)));
 
     [Fact]
-    public void A_new_question_alone_does_not_wake() =>
-        Assert.IsType<ManagerWake.Nothing>(Plan(Record(), Board(Waiting(id2, At(10))), At(60)));
-
-    [Fact]
-    public void A_new_question_rides_along_with_a_trigger()
+    public void A_question_is_not_carried_along_with_a_hand_back()
     {
-        var wake = Assert.IsType<ManagerWake.Wake>(Plan(Record(), Board(HandedBack(id1, At(10)), Waiting(id2, At(20))), At(60)));
-        Assert.Contains("New questions for the user", wake.Message);
-        Assert.Contains("22222222 \"Bar blink\"", wake.Message);
+        var wake = Assert.IsType<ManagerWake.Wake>(Plan(Record(), Board(HandedBack(id1, At(10)), Waiting(id2, At(-600))), At(60)));
+        Assert.DoesNotContain("22222222", wake.Message);
+        Assert.DoesNotContain("Merge PR 512?", wake.Message);
     }
 
     [Fact]
@@ -134,10 +124,22 @@ public sealed class ManagerWakesTests
         Assert.IsType<ManagerWake.Nothing>(Plan(Record(), Board(HandedBack(id1, At(10)) with { SnoozedUntil = At(600) }), At(60)));
 
     [Fact]
-    public void A_wake_moves_since_marks_it_unread_and_remembers_the_hand_back()
+    public void A_first_hand_back_moves_since_and_remembers_it_without_the_dot()
     {
+        // The nudge is the manager's own work, with nothing for the user, so the Manager button gets no dot.
         var wake = Assert.IsType<ManagerWake.Wake>(Plan(Record(), Board(HandedBack(id1, At(10))), At(45)));
-        Assert.Equal(Record(At(45), [id1]) with { Unread = true }, wake.Record);
+        Assert.Equal(Record(At(45), [id1]), wake.Record);
+    }
+
+    [Fact]
+    public void A_repeat_hand_back_lights_the_dot_and_a_lit_dot_stays()
+    {
+        var again = Assert.IsType<ManagerWake.Wake>(Plan(Record(handedBack: [id1]), Board(HandedBack(id1, At(10))), At(45)));
+        Assert.True(again.Record.Unread);
+        // A later first hand-back does not put out a dot the user has not seen yet.
+        var lit = Record(handedBack: [id1]) with { Unread = true };
+        var next = Assert.IsType<ManagerWake.Wake>(Plan(lit, Board(HandedBack(id2, At(10))), At(45)));
+        Assert.True(next.Record.Unread);
     }
 
     [Fact]

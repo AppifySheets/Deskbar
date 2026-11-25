@@ -228,7 +228,8 @@ public class ManagerActionsTests
     static ClaudeAgent ListedManager(Rig rig, bool busy = false) => new(Earlier, Earlier[..8], rig.Folder, true, busy, ManagerSession.Name);
 
     // A running, idle manager with a live waiter: the wake goes into its inbox, where the waiter wakes it; nothing is
-    // started or resumed, and the record moves Since and sets the dot.
+    // started or resumed, and the record moves Since. A first hand-back sets no dot (task 6a87df67: the nudge is the
+    // manager's own work); ManagerWakesTests covers the repeat hand-back that does.
     [Fact]
     public void A_hand_back_wakes_a_running_manager_through_its_inbox()
     {
@@ -246,7 +247,7 @@ public class ManagerActionsTests
         Assert.Contains("51a11ed0 \"Tasks redesign\"", message);
         Assert.Empty(rig.Cli.Acts);
         var stored = rig.Harness.Manager.State.Manager!;
-        Assert.True(stored.Unread);
+        Assert.False(stored.Unread);
         Assert.Equal(Origin, stored.Since);
         Assert.Equal([Stalled], stored.HandedBack);
     }
@@ -266,7 +267,8 @@ public class ManagerActionsTests
         Assert.Equal(["--bg", "--resume", Earlier, "--"], resume.Arguments.Take(4));
         Assert.StartsWith("Deskbar wake.", resume.Arguments[4]);
         Assert.Equal(rig.Folder, resume.Folder);
-        Assert.True(rig.Harness.Manager.State.Manager!.Unread);
+        // A first hand-back: the record moved on (Since), with no dot (task 6a87df67).
+        Assert.Equal(Origin, rig.Harness.Manager.State.Manager!.Since);
     }
 
     // Post-merge review of #557: the poll's list can be stale (a click resumed the manager after it was read). A fresh read
