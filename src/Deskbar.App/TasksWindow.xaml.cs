@@ -1451,8 +1451,8 @@ public partial class TasksWindow : Window
     //
     // A press on a link is the link's: a Hyperlink takes the mouse on its press and marks it handled, so the line under
     // it (a Button) never presses and does not pick the task, and the click opens the address in the default browser.
-    // A press anywhere else on the text still falls through to the line as before. Only web addresses become links (the
-    // MarkdownBlocks header): a session's text never runs a program from a click.
+    // A press anywhere else on the text still falls through to the line as before. Web addresses and local files become
+    // links (the MarkdownBlocks header): a session's text never runs a program from a click, a file link included.
     TextBlock DetailText(TaskRowView row)
     {
         var text = new TextBlock

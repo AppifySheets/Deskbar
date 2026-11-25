@@ -330,7 +330,9 @@ static class ClaudeSkill
           ("Merge [PR 512](https://github.com/owner/repo/pull/512): CI is green"): the task waits on the user, moves to
           the top of their list, and your workspace blinks. Give whatever they must open (the pull request, a published
           page or artifact, a release) as a markdown link `[text](https://...)` or a bare address: the tasks panel
-          makes it clickable, and the bar shows the link's words.
+          makes it clickable, and the bar shows the link's words. A file on this machine is a link too,
+          `[text](file:///C:/path/page.html)`: a page, picture, PDF or text file opens, anything else is shown in
+          Explorer.
           A pull request ready to merge is an ask, never a comment and `task done`: done sits below the waiting
           tasks, so the merge would wait where the user does not look. A reply finishing is not an ask; do not ask for
           routine progress.

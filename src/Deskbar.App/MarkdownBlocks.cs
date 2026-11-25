@@ -2,6 +2,8 @@ using System.Text.RegularExpressions;
 using System.Windows;
 using System.Windows.Documents;
 using System.Windows.Media;
+using CSharpFunctionalExtensions;
+using Deskbar.Core.Tasks;
 
 namespace Deskbar.App;
 
@@ -15,9 +17,13 @@ namespace Deskbar.App;
 //   **bold**, *italic*
 //   `inline code`     nothing inside it is read as markdown
 //   ```fenced code``` kept line for line in a monospace block; the language word after the fence is dropped
-//   [text](url)       and bare http(s) addresses: links. ONLY web addresses become links. A comment may come from a
-//                     session, and a click must never run a program, so file:, ms-settings: and every other scheme
-//                     stay the text they were written as.
+//   [text](url)       and bare http(s) and file:/// addresses: links. Web addresses, and files and folders on a drive
+//                     of this machine (task f9f25172, Petre: "when giving file links, they should be clickable too").
+//                     A comment may come from a session, and a click must never run a program, so a file link opens
+//                     only a document; any other file is shown in Explorer, never started (FileLink in Core has the
+//                     rules and the reasons). A share, ms-settings: and every other scheme stay the text they were
+//                     written as. An address with spaces goes in angle brackets, [page](<C:\My Files\a.html>), as
+//                     markdown has it.
 //   - item / * item   a bullet list; 1. item, a numbered list starting at its first number
 //   # .. ###### title a heading: one line, semibold, with a little room above it. Every level looks the same, because
 //                     the text is 11 or 12 points in a narrow column and sizes there would only jump about. Added
@@ -27,7 +33,8 @@ namespace Deskbar.App;
 // construct this does not know.
 //
 // A link opens through `open`, which the window hands in; left null it opens the way `deskbar.cmd open` opens a link
-// "as usual" (RemoteControl.Open's last branch): the shell hands it to the default browser, on the desktop in front.
+// "as usual" (RemoteControl.Open's last branch): the shell hands it to the default browser, on the desktop in front
+// (a file link goes by FileLink's plan instead, see OpenFile).
 // That is the right branch here, because Petre clicked it on the desktop he is looking at; the background-workspace
 // branch of `open` is for a session working somewhere else.
 internal static class MarkdownBlocks
@@ -61,17 +68,17 @@ internal static class MarkdownBlocks
         @"(?<code>`[^`\n]+`)" +
         @"|(?<bold>\*\*(?=\S)(?<boldText>.+?)(?<=\S)\*\*)" +
         @"|(?<italic>\*(?=[^\s*])(?<italicText>.+?)(?<=[^\s*])\*)" +
-        @"|(?<link>\[(?<linkText>[^\]\n]+)\]\((?<linkUrl>[^)\s]+)\))" +
-        @"|(?<bare>https?://[^\s<>()\[\]]*[^\s<>()\[\].,;:!?'""])",
+        @"|(?<link>\[(?<linkText>[^\]\n]+)\]\((?:<(?<linkUrl>[^>\n]+)>|(?<linkUrl>[^)\s]+))\))" +
+        @"|(?<bare>(?:https?://|file:///)[^\s<>()\[\]]*[^\s<>()\[\].,;:!?'""])",
         RegexOptions.Compiled);
 
     /// <summary>
     /// The comment as a document, ready for a read-only RichTextBox. <paramref name="open"/> is what a click on a link
-    /// does; left null, the default browser opens it (see the header).
+    /// does; left null, the default browser opens it, or a file link's plan is followed (see the header).
     /// </summary>
     public static FlowDocument Render(string markdown, Action<Uri>? open = null)
     {
-        var opener = open ?? OpenInBrowser;
+        var opener = open ?? Open;
         var document = new FlowDocument { PagePadding = new Thickness(0), FontFamily = TextFont, TextAlignment = TextAlignment.Left };
         Blocks((markdown ?? "").Replace("\r\n", "\n").Split('\n'), opener).ToList().ForEach(document.Blocks.Add);
         return document;
@@ -83,10 +90,10 @@ internal static class MarkdownBlocks
     /// run, so a TextBlock shows it exactly as it showed the plain text. For a task line's question and status line in
     /// the tasks window (task 08cdb052: "when asking for action, prs should have links, or artifacts; make that
     /// clickable"), where a session names the pull request to merge as [Deskbar #490](https://...) and the link has to
-    /// be one click away. Links are web addresses only, as in a comment (see the header).
+    /// be one click away. Links are web addresses and local files, as in a comment (see the header).
     /// </summary>
     public static IReadOnlyList<Inline> InlinesOf(string text, Action<Uri>? open = null) =>
-        Inlines(text ?? "", open ?? OpenInBrowser).ToArray();
+        Inlines(text ?? "", open ?? Open).ToArray();
 
     // --- blocks --------------------------------------------------------------------------------------------------
 
@@ -212,17 +219,18 @@ internal static class MarkdownBlocks
         if (match.Groups["italic"].Success)
             return new Italic().With(Inlines(match.Groups["italicText"].Value, open));
         if (match.Groups["link"].Success)
-            return WebAddress(match.Groups["linkUrl"].Value) is { } uri
+            return Address(match.Groups["linkUrl"].Value) is { } uri
                 ? Link(Inlines(match.Groups["linkText"].Value, open), uri, open)
                 : new Run(match.Value);
-        return WebAddress(match.Value) is { } bare ? Link([new Run(match.Value)], bare, open) : new Run(match.Value);
+        return Address(match.Value) is { } bare ? Link([new Run(match.Value)], bare, open) : new Run(match.Value);
     }
 
     // A hyperlink whose click goes to the opener. Click rather than RequestNavigate: there is no navigation host in a
     // RichTextBox, and Click is raised on a press in a read-only box with IsDocumentEnabled set.
     static Hyperlink Link(IEnumerable<Inline> content, Uri uri, Action<Uri> open)
     {
-        var link = new Hyperlink { NavigateUri = uri, ToolTip = uri.ToString(), Foreground = LinkInk }.With(content);
+        // The hover text is what the click goes to: a file's path as Windows writes it, an address as it is.
+        var link = new Hyperlink { NavigateUri = uri, ToolTip = FileLink.LocalPath(uri).GetValueOrDefault(uri.ToString()), Foreground = LinkInk }.With(content);
         link.Click += (_, e) =>
         {
             e.Handled = true;
@@ -231,9 +239,10 @@ internal static class MarkdownBlocks
         return link;
     }
 
-    // Only absolute http and https addresses are links (see the header).
-    static Uri? WebAddress(string text) =>
-        Uri.TryCreate(text, UriKind.Absolute, out var uri) && (uri.Scheme == Uri.UriSchemeHttp || uri.Scheme == Uri.UriSchemeHttps) ? uri : null;
+    // Only absolute http and https addresses, and files on a drive of this machine, are links (see the header).
+    static Uri? Address(string text) =>
+        Uri.TryCreate(text, UriKind.Absolute, out var uri)
+        && (uri.Scheme == Uri.UriSchemeHttp || uri.Scheme == Uri.UriSchemeHttps || FileLink.LocalPath(uri).HasValue) ? uri : null;
 
     static T With<T>(this T span, IEnumerable<Inline> inlines) where T : Span
     {
@@ -241,17 +250,36 @@ internal static class MarkdownBlocks
         return span;
     }
 
-    // The default opener: the shell hands the address to the default browser. A refusal (no browser registered) is
-    // traced, never thrown: a click on a comment must not take the app down.
-    static void OpenInBrowser(Uri uri)
+    // The default opener: the shell hands a web address to the default browser, and a file link goes by its plan.
+    static void Open(Uri uri) =>
+        FileLink.LocalPath(uri).Match(OpenFile, () => Start(new System.Diagnostics.ProcessStartInfo(uri.AbsoluteUri) { UseShellExecute = true }, uri.ToString()));
+
+    // A file link's click, by FileLink.Plan: a document opens in its own program; a folder opens in Explorer; any
+    // other file is selected in Explorer and never started; a path that is gone opens the nearest folder above it.
+    // Explorer gets the path in quotes, which a path cannot contain (FileLink.LocalPath refuses one that does).
+    static void OpenFile(string path)
+    {
+        var (action, target) = FileLink.Plan(path, System.IO.File.Exists, System.IO.Directory.Exists);
+        if (action == FileLinkAction.Nothing) ClickTrace.Write($"tasks window: nothing to open at {path}");
+        else Start(action switch
+        {
+            FileLinkAction.Open => new System.Diagnostics.ProcessStartInfo(target) { UseShellExecute = true },
+            FileLinkAction.Reveal => new System.Diagnostics.ProcessStartInfo("explorer.exe", $"/select,\"{target}\""),
+            _ => new System.Diagnostics.ProcessStartInfo("explorer.exe", $"\"{target}\""),
+        }, target);
+    }
+
+    // A refusal (no browser registered, no program for the type) is traced, never thrown: a click on a comment must
+    // not take the app down.
+    static void Start(System.Diagnostics.ProcessStartInfo start, string what)
     {
         try
         {
-            System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(uri.AbsoluteUri) { UseShellExecute = true })?.Dispose();
+            System.Diagnostics.Process.Start(start)?.Dispose();
         }
         catch (Exception e) when (e is System.ComponentModel.Win32Exception or InvalidOperationException)
         {
-            ClickTrace.Write($"tasks window: could not open {uri}: {e.Message}");
+            ClickTrace.Write($"tasks window: could not open {what}: {e.Message}");
         }
     }
 

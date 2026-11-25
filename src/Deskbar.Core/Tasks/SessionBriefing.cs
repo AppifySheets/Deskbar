@@ -250,7 +250,7 @@ public static class SessionBriefing
         "Never put free text with quotes or & | < > on the command line.",
         "While you work on it:",
         $"  {Shim} task status-line - --session {sessionId}   (keep it current, one short line)",
-        $"  {Shim} task ask - --session {sessionId}   (when the next move is the user's (a pull request to merge, something to try live before it merges, a decision): what they must do in the first words, with whatever they must open (the pull request, a published page) as a markdown link [text](https://...), which the tasks panel makes clickable; the task waits on them and moves to the top. Once they have done it (the pull request is merged), run {Shim} task answered --session {sessionId}, then task done)",
+        $"  {Shim} task ask - --session {sessionId}   (when the next move is the user's (a pull request to merge, something to try live before it merges, a decision): what they must do in the first words, with whatever they must open (the pull request, a published page) as a markdown link [text](https://...), which the tasks panel makes clickable (a file on this machine too: [text](file:///C:/path/page.html)); the task waits on them and moves to the top. Once they have done it (the pull request is merged), run {Shim} task answered --session {sessionId}, then task done)",
         // A MERGED PULL REQUEST IS DONE (task b326761d, Petre: "when a pr is merged and a session is waiting for me to
         // check it, it should say the task is done and i will only close it if i test it and it works"). Sessions read
         // "something to try live" as a reason to ask again after the merge, so the task sat in Waiting on you with "Try

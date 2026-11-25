@@ -117,14 +117,44 @@ public class MarkdownBlocksTests
         Assert.Equal(new Uri("https://github.com/AppifySheets/Deskbar/actions/runs/1"), link.NavigateUri);
     });
 
-    // A comment can come from a session, so a click must never run a program: only web links are links.
-    [Fact]
-    public void A_link_that_is_not_a_web_address_stays_text() => StaThread.Run(() =>
+    // A comment can come from a session, so a click must never run a program: a share (opening one signs in to its
+    // server) and a scheme that starts a program stay text. What a local file's click does is FileLink's, in Core.
+    [Theory]
+    [InlineData("[setup](file://server/share/setup.html)")]
+    [InlineData("[settings](ms-settings:display)")]
+    [InlineData("[stream](file:///C:/docs/page.html:run.exe)")]
+    public void A_link_that_is_neither_a_web_address_nor_a_local_file_stays_text(string markdown) => StaThread.Run(() =>
     {
-        var document = MarkdownBlocks.Render("[setup](file:///C:/Windows/System32/cmd.exe)");
+        var document = MarkdownBlocks.Render(markdown);
 
         Assert.Empty(InlinesOf(document).OfType<Hyperlink>());
-        Assert.Equal("[setup](file:///C:/Windows/System32/cmd.exe)", TextOf(document).Trim());
+        Assert.Equal(markdown, TextOf(document).Trim());
+    });
+
+    // Task f9f25172 ("when giving file links, they should be clickable too"): his screenshot's question named a mockup
+    // page as a file link and the panel showed the markdown written out.
+    [Theory]
+    [InlineData("the page: [soft blue variants](file:///C:/Projects/design/light/index.html)", @"C:\Projects\design\light\index.html")]
+    [InlineData(@"the page: [soft blue variants](C:\Projects\design\light\index.html)", @"C:\Projects\design\light\index.html")]
+    [InlineData(@"the page: [soft blue variants](<C:\My Projects\light\index.html>)", @"C:\My Projects\light\index.html")]
+    public void A_link_to_a_local_file_is_a_link(string markdown, string path) => StaThread.Run(() =>
+    {
+        var opened = new List<Uri>();
+        var document = MarkdownBlocks.Render(markdown, opened.Add);
+
+        var link = Assert.Single(InlinesOf(document).OfType<Hyperlink>());
+        Assert.Equal("soft blue variants", TextOf(link));
+        Assert.Equal(path, link.ToolTip);
+        link.RaiseEvent(new RoutedEventArgs(Hyperlink.ClickEvent));
+        Assert.Equal(path, Assert.Single(opened).LocalPath);
+    });
+
+    [Fact]
+    public void A_bare_file_address_is_a_link() => StaThread.Run(() =>
+    {
+        var document = MarkdownBlocks.Render("It is at file:///C:/Projects/design/index.html.");
+
+        Assert.Equal(@"C:\Projects\design\index.html", Assert.Single(InlinesOf(document).OfType<Hyperlink>()).NavigateUri.LocalPath);
     });
 
     [Fact]
