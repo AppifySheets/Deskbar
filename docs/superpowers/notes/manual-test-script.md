@@ -1077,9 +1077,9 @@ one-word title.
 
 NT1. Drag the panel to its narrowest (360 DIP). Every title reads across the line in words, never one letter per line,
      and the line's buttons (squares, age, workspace chip, comments, Open Claude, "⋯") sit in a row under it.
-NT2. Widen it to the default 460: the one-word task is a single row with its buttons to the right of the title. The long
-     one wraps across the whole line, and its buttons sit at the right end of its last line, or in a row under it when
-     that line runs into them.
+NT2. Widen it to the default 460 (task 50667e10): on both tasks, the one-word one too, the buttons sit on a row of their
+     own under the title, starting at the title's left edge, each at the same x on every line. A waiting task's question
+     comes under that row.
 NT3. Hover a line: the flag toggles and the moon light up just before the comments, never over the title's text.
 NT4. Press F2 on a narrow line: the editor takes the whole line. Press Esc: the buttons come back.
 
