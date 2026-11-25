@@ -101,7 +101,11 @@ public static class ManagerSession
     // What `task join` answers when the caller is the manager: it coordinates, it never owns a task.
     public const string JoinRefusal = "The manager session does not take a task of its own.";
 
-    public const string FirstMessage = "What needs me now, and what is stuck? Run the overview once and answer in a few lines.";
+    // Task 6a87df67: the first turn asks only for what the bar cannot show (the briefing's reporting rule), not "what
+    // needs me now", which every task's own question and pull request already answer on the bar.
+    public const string FirstMessage =
+        "Run the overview once. Tell me only what the bar does not show: sessions that collide or duplicate each other, "
+        + "work stuck on something else, one decision blocking several tasks. One line if there is none.";
 
     // The manager lives in its own folder under the state directory (so DESKBAR_APPDATA moves it too), which keeps its
     // cwd out of every repo and lets its sessions be told apart from the user's by folder alone.
@@ -197,10 +201,17 @@ public static class ManagerSession
         $"- Each handed-back task not marked AGAIN: one comment ({shim} task comment <id> -) to wake its session.",
         "  If its status line says the next move is the user's, tell it to run task ask with that move.",
         "  Otherwise tell it to finish with task done, or carry on with the work.",
-        "- A task marked AGAIN gets no comment: it goes on your list.",
-        "- Then list what waits on the user, oldest and most blocking first, each with your suggested answer, a few lines.",
+        "- A task marked AGAIN gets no comment: its session stopped twice, so name it to the user in one line.",
         "- Run the overview only if the wake does not tell you enough.",
-        "Answer in a few lines. Say what needs the user now, then what is stuck.",
+        // Task 6a87df67: the user, on the manager listing every merge and question after each wake: "manager doesn't have
+        // to tell me each merge and needs you now", "tasks do it themselves already on the bar". Every task already shows
+        // its own question, pull request and status line on the bar and in the tasks panel, so a manager that lists them
+        // again only adds a second copy to read. It reports what no single task can show: how tasks bear on each other.
+        "The bar already shows every task's question, pull request to merge and status line. Never repeat them to the user:",
+        "  no list of what waits on the user, no merge reminders, no \"needs you now\".",
+        "Report only what the bar cannot show: sessions that collide or do the same work, work stuck on another task or person,",
+        "  one decision that blocks several tasks, a session that stopped twice. If there is none, say so in one line.",
+        "Answer in full only when the user asks you directly, and then answer what they asked.",
         "Name a task by its title and short id, so the user can find it.");
 
     /// <summary>
