@@ -1158,6 +1158,18 @@ MG7. With nothing stored, have a manager session already running in the manager 
      listed late). The next click attaches to it and never starts a second one.
 MG8. From any terminal, `$ts task overview` prints one line per open task.
 
+Manager event wakes (docs/superpowers/specs/2026-11-25-manager-event-wakes-design.md):
+
+MW1. Open the manager, close its window, and leave a Claude task's session idle for 15 minutes without `task ask` or
+     `task done`. Within about half an hour of the manager's start, the Manager button shows an orange dot, the task's
+     thread has one manager comment, and the session took a turn on it.
+MW2. Open the manager: the dot goes, and the window's last reply lists what waits on you, oldest first, with a
+     suggested answer each.
+MW3. Leave a question unanswered for two hours on a day the manager is open: the manager is woken once for it (the dot
+     comes back), and not again for the same question.
+MW4. On a day the manager was never opened, nothing wakes it and no dot appears, whatever is handed back.
+MW5. While you are typing to the manager (a turn in progress), no wake lands in the middle; it comes after the turn.
+
 ## Results (2026-08-01)
 
 Status: **pending human execution.** An agent cannot observe the desktop, Task View,

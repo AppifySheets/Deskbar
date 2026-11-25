@@ -523,6 +523,12 @@ task that is waiting on you. It cannot close, delete or finish a task, and only 
 counts as you. Click again to bring its window forward; the next day a click ends yesterday's and starts a new one.
 `deskbar.cmd task show <id>` prints one task in full and `deskbar.cmd task manager` does what the button does.
 
+On a day you have opened it, Deskbar also wakes the manager when something needs a look: a Claude task handed back to
+you because its session stopped without asking or finishing, or a question that has waited on you for two hours. New
+questions come along with those but never wake it alone, and it is woken at most once every half hour, never in the
+middle of a turn. On a wake it nudges each stopped session once with a comment, then lists what waits on you, oldest
+first, with a suggested answer for each. A dot on the Manager button says it has news; opening the manager clears it.
+
 The tasks screencast shows the old floating window and needs filming again for the panel.
 
 More in [Tasks](docs/features/tasks.md).
