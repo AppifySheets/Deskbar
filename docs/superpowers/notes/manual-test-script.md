@@ -1070,6 +1070,19 @@ TW8. With one task window open, open a second task: the second opens a little do
 TW9. A subtask in the side column opens in a window of its own. "Delete for good" from the window's "⋯" menu closes
      the window with the task.
 
+## The narrow panel's titles
+
+(Task 65ab598d.) The tasks panel docked, a Claude task with a long title (two lines or more at 460 DIP) and one with a
+one-word title.
+
+NT1. Drag the panel to its narrowest (360 DIP). Every title reads across the line in words, never one letter per line,
+     and the line's buttons (squares, age, workspace chip, comments, Open Claude, "⋯") sit in a row under it.
+NT2. Widen it to the default 460: the one-word task is a single row with its buttons to the right of the title. The long
+     one wraps across the whole line, and its buttons sit at the right end of its last line, or in a row under it when
+     that line runs into them.
+NT3. Hover a line: the flag toggles and the moon light up at the left end of the buttons, never over the title's text.
+NT4. Press F2 on a narrow line: the editor takes the whole line. Press Esc: the buttons come back.
+
 ## Results (2026-08-01)
 
 Status: **pending human execution.** An agent cannot observe the desktop, Task View,

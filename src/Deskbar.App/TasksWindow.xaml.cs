@@ -721,11 +721,19 @@ public partial class TasksWindow : Window
         // Every column but the title's is a fixed width, the same on every line of every group, so each sits at the
         // same x, flush to the right edge; the title takes the star column and trims first.
         var grid = new Grid();
-        (compactLines ? CompactColumns : slimLines ? SlimColumns(slimSquaresWidth, slimOpenWidth) : LineColumns).ToList()
-            .ForEach(width => grid.ColumnDefinitions.Add(new ColumnDefinition { Width = width }));
+        var columns = compactLines ? CompactColumns : slimLines ? SlimColumns(slimSquaresWidth, slimOpenWidth) : LineColumns;
+        columns.ToList().ForEach(width => grid.ColumnDefinitions.Add(new ColumnDefinition { Width = width }));
         // Only the full line has the session words, the assignee and the Reopen button. The age is on the slim line too.
         var full = !compactLines && !slimLines;
-        Cell(grid, 0, LeftOf(row));
+        // WHERE THE CONTROLS GO (task 65ab598d): on a full or a Matrix line, the line's own grid, in the columns beside the
+        // title; on a slim line, a strip of their own that sits on the title's last line (SlimControls, below).
+        var tucked = slimLines;
+        var controls = tucked ? SlimControls(columns) : grid;
+        void Control(int column, UIElement? part) => Cell(controls, tucked ? column - FirstControlColumn : column, part);
+        var left = LeftOf(row);
+        // On a slim line the tick stays beside the title's first line while a long title wraps under it.
+        if (tucked && left is FrameworkElement tick) tick.VerticalAlignment = VerticalAlignment.Top;
+        Cell(grid, 0, left);
         // TWO ROWS: THE TITLE WITH EVERY CONTROL BESIDE IT, THEN WHAT IS UNDER THE TITLE ACROSS THE LINE (task d560f3eb,
         // "misaligned text", Petre's screenshot of a waiting task whose question stood in a column a few letters wide, two
         // or three letters to a line, with the tick, the toggles and the chip floating half way down it). The question,
@@ -745,35 +753,36 @@ public partial class TasksWindow : Window
             Grid.SetColumnSpan(below, grid.ColumnDefinitions.Count - 1);
             Cell(grid, 1, below);
         }
+        if (tucked) TuckUnderTitle(grid, text.Title, controls);
         var flags = FlagsOf(row);
-        Cell(grid, 2, flags);
+        Control(2, flags);
         // A Matrix line (compact) has no column for the sessions, the age or the close button, so they are not made at
         // all (whole-PR review, minor 5): no element in a zero-width column, and no age for the minute's tick to rewrite.
         // The status in words (Petre, 2026-11-23: "i can't currently see statuses"; TaskStatusMarks.Chip), in its own
         // column so it sits at the same x on every line. Only on a full line: none in a Matrix line (no room there; its
         // Done tick still shows) and none on a slim one (the tick still shows, and the status is named in its tooltip,
         // SlimTip), and none on a line in its undo window (it is closed).
-        Cell(grid, 3, full && !row.Closing ? TaskStatusMarks.Chip(row.Status) : null);
+        Control(3, full && !row.Closing ? TaskStatusMarks.Chip(row.Status) : null);
         // A slim line has the sessions as squares alone, and no assignee or Reopen (Task 8): those are in its tooltip
         // and its "⋯" menu (SlimTip, OpenMenuFor).
-        Cell(grid, 4, compactLines ? null : slimLines ? SquaresOf(row) : SessionsOf(row));
+        Control(4, compactLines ? null : slimLines ? SquaresOf(row) : SessionsOf(row));
         // Who the task is on (Ruling 57): "Me" or "Claude", dim; none in a Matrix line (no column there).
-        Cell(grid, 5, full ? AssigneeOf(row) : null);
+        Control(5, full ? AssigneeOf(row) : null);
         // THE AGE ON EVERY LIST LINE, THE SLIM ONE INCLUDED (Petre, 2026-11-24, of the bar's "26m": "move the time from
         // here to the proper tasks window"). The bar's lines lost theirs that day, so the panel at its usual slim width
         // must show it, not only its tooltip. None in a Matrix line (no column there).
-        Cell(grid, 6, compactLines ? null : AgeOf(row));
-        Cell(grid, 7, Chip(row.Place));
+        Control(6, compactLines ? null : AgeOf(row));
+        Control(7, Chip(row.Place));
         var comments = CommentsButton(row);
-        Cell(grid, 8, comments);
+        Control(8, comments);
         // The action column: Reopen on a closed task (full line only), else Open Claude on a Claude task (task 7f61af2e,
         // OpenClaudeButton), on the full and the slim line. The two never meet: a closed task has no Open Claude.
         var openClaude = compactLines ? null : OpenClaudeButton(row);
-        Cell(grid, 9, (full ? ActionOf(row) : null) ?? openClaude);
+        Control(9, (full ? ActionOf(row) : null) ?? openClaude);
         var more = Small(new TextBlock { Text = "", FontFamily = IconFont, FontSize = 12, Foreground = Ink }, "More",
             () => OpenMenuFor(row.Id), "Edit, status, move, delete");
         menuButtons[row.Id] = more;
-        Cell(grid, 10, more);
+        Control(10, more);
         if (row.Closing)
             grid.Children.OfType<UIElement>().Where(part => Grid.GetColumn(part) != 0).ToList().ForEach(part => part.Opacity = 0.45);
         // The comments and "…" buttons are quiet until the pointer is on their line, like the bar's quiet controls.
@@ -918,6 +927,82 @@ public partial class TasksWindow : Window
 
     static IReadOnlyList<GridLength> SlimColumns(GridLength squares, GridLength open) =>
         [new(22), new(1, GridUnitType.Star), new(FlagsColumn), new(0), squares, new(0), new(SlimAgeColumn), new(88), new(40), open, new(24)];
+
+    // THE SLIM LINE'S TITLE HAS THE WHOLE LINE, AND THE CONTROLS SIT ON ITS LAST LINE (task 65ab598d). The slim line's
+    // fixed columns come to about 300 DIP, so with the title in a column of its own beside them a 360 DIP panel left the
+    // title about 15 DIP and it broke one letter per line, and the default 460 left it about 110. Petre, shown a mockup:
+    // "b, but so that the buttons are on the same line as the text; let's not waste space". So on a slim line the title
+    // spans from its column to the line's right end and wraps at that width, and the controls (toggles, squares, age,
+    // workspace chip, comments, Open Claude, "⋯") are one strip at the right end of the title's LAST line, the way a chat
+    // bubble puts its time after the text. A title short enough to leave the strip room beside it looks as it did, one
+    // row; a longer one wraps under the strip and the strip sits beside its last line; and when that last line runs into
+    // the strip's place, the strip drops to a row of its own under the text (TuckUnderTitle). The strip keeps the slim
+    // columns' fixed widths, so each control still sits at the same x on every line.
+    //
+    // The first control column of a line (the toggles'); the tick and the title come before it.
+    const int FirstControlColumn = 2;
+
+    // The least room left between the end of the title's last line and the strip.
+    const double TuckGap = 6;
+
+    // The strip of a slim line's controls: the slim columns from the toggles on, at the bottom right of the title's row.
+    static Grid SlimControls(IReadOnlyList<GridLength> columns)
+    {
+        var strip = new Grid { Tag = ControlsTag, VerticalAlignment = VerticalAlignment.Bottom, HorizontalAlignment = HorizontalAlignment.Right };
+        columns.Skip(FirstControlColumn).ToList().ForEach(width => strip.ColumnDefinitions.Add(new ColumnDefinition { Width = width }));
+        return strip;
+    }
+
+    // Tagged for tests: the strip of a slim line's controls.
+    internal const string ControlsTag = "task-controls";
+
+    // Puts the title across the whole slim line and the controls' strip on its last line (see FirstControlColumn above).
+    // Whether the strip fits beside the last line is known only once the title is laid out at its width, so it is
+    // checked after every size change of the title or the strip: the end of the title's text (its content end, in the
+    // line's coordinates) against the strip's left edge. When it does not fit, the title gets a bottom margin as tall as
+    // the strip, which makes the row that much taller and puts the strip, bottom-aligned, under the text. The margin never
+    // changes the title's width, so the check cannot feed back into the wrapping it measures.
+    // While the line is being renamed there is no title block, only the editor, which then gets the whole line and its
+    // own Save and Cancel; the strip stays out of its way until the rename ends and the line is drawn again.
+    void TuckUnderTitle(Grid line, UIElement title, Grid strip)
+    {
+        Grid.SetColumnSpan(title, line.ColumnDefinitions.Count - 1);
+        Grid.SetColumn(strip, FirstControlColumn);
+        Grid.SetColumnSpan(strip, line.ColumnDefinitions.Count - FirstControlColumn);
+        line.Children.Add(strip);
+        if (TitleBlockIn(title) is not { } block || title is not FrameworkElement room)
+        {
+            strip.Visibility = Visibility.Collapsed;
+            return;
+        }
+
+        // The strip's width is the sum of its fixed columns, known before any layout, and the strip is right-aligned at the
+        // title's own right end (the title spans to the line's last column, less its right margin). So where the strip
+        // starts is worked out in the title's coordinates rather than read from the strip's arranged position, which can
+        // still be the previous pass's while the title's size changes.
+        var stripWidth = strip.ColumnDefinitions.Sum(column => column.Width.Value);
+        void Fit()
+        {
+            // Not laid out yet (or no longer in a window): nothing to measure, and the next size change checks again.
+            if (PresentationSource.FromVisual(block) is null) return;
+            var end = block.ContentEnd.GetCharacterRect(LogicalDirection.Backward);
+            if (end.IsEmpty) return;
+            var endX = block.TranslatePoint(new Point(end.Right, 0), room).X;
+            var stripX = room.ActualWidth + room.Margin.Right - stripWidth;
+            var bottom = endX + TuckGap <= stripX ? 0 : strip.ActualHeight;
+            if (Math.Abs(room.Margin.Bottom - bottom) > 0.5) room.Margin = room.Margin with { Bottom = bottom };
+        }
+        block.SizeChanged += (_, _) => Fit();
+        strip.SizeChanged += (_, _) => Fit();
+    }
+
+    // The title's own text block inside what TextOf made: the block itself, or inside the Done tick's row.
+    static TextBlock? TitleBlockIn(UIElement part) => part switch
+    {
+        TextBlock block when Equals(block.Tag, TitleTag) => block,
+        Panel panel => panel.Children.OfType<UIElement>().Select(TitleBlockIn).FirstOrDefault(block => block is not null),
+        _ => null,
+    };
 
     // The slim line's Open Claude column (task 7f61af2e): the glyph's 12 DIP and the small button's 4 DIP each side, plus
     // a little air before the comments. Zero while no line shown has the button (see Present).
