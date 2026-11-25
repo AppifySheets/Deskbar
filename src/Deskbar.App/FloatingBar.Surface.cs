@@ -28,8 +28,9 @@ namespace Deskbar.App;
 // height (the -4 margins pay for the bleed), because the bar is SizeToContent: a layer that asked for 4 DIP more
 // would grow the bar, which would grow the layer, every pass.
 //
-// A fourth layer, FrostSurface, lies under all three while the bar is docked: the wallpaper behind it, blurred
-// (FloatingBar.Frost.cs). The band then lays a lighter veil over it (BarSurface.FrostVeil) instead of the 85%.
+// A fourth layer, FrostSurface, lies under all three: the wallpaper behind the bar, blurred (FloatingBar.Frost.cs),
+// docked and, since task b971ca3f, floating too. The band then lays a lighter veil over it (BarSurface.FrostVeil)
+// instead of the 85%. It takes the Root's corners (FloatingBar.xaml), so a floating bar's frost is round like the bar.
 //
 // The setting (AppState.SeeThrough, on by default): off, the rows band is as flat as the rest, frost or not.
 public partial class FloatingBar
@@ -58,8 +59,10 @@ public partial class FloatingBar
     void PaintBand()
     {
         var frosted = manager.State.SeeThrough && frostSource is not null;
-        // Over a frost the veil eases in from the inner edge with the frost itself (BarSurface.FrostVeilFrom).
+        // Over a docked frost the veil eases in from the inner edge with the frost itself (BarSurface.FrostVeilFrom).
+        // A floating frost has no inner edge (task b971ca3f), so its veil is the plain half all the way across.
         RowsSurface.Background = !manager.State.SeeThrough ? BarSurface.Solid
+            : frostSource is { Floating: true } && frosted ? BarSurface.FrostVeil
             : frostSource is { } source && frosted ? BarSurface.FrostVeilFrom(source.FromLeft, source.Ease)
             : BarSurface.SeeThrough;
         FrostSurface.Visibility = frosted ? Visibility.Visible : Visibility.Collapsed;

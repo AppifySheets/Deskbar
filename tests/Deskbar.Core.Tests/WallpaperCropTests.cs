@@ -76,4 +76,25 @@ public class WallpaperCropTests
     [Fact]
     public void A_picture_with_no_size_is_not_frosted() =>
         Assert.True(WallpaperCrop.SourceOf(WallpaperFit.Fill, Screen, Desktop, 0, 0, Bar).HasNoValue);
+
+    // The floating bar's slice of its screen's frost (task b971ca3f): a 316 x 1080 bar a quarter of the way across
+    // and a quarter of the way down Petre's left screen is that share of the screen, whatever the screen's origin.
+    [Fact]
+    public void A_floating_bar_is_its_share_of_the_screen() =>
+        Near(new(0.25, 0.25, 316.0 / 3840, 0.5), WallpaperCrop.ShareOf(Screen, new(-2880, 826, -2564, 1906)).Value);
+
+    // The whole screen is the whole frost.
+    [Fact]
+    public void A_bar_as_big_as_its_screen_is_all_of_it() =>
+        Near(new(0, 0, 1, 1), WallpaperCrop.ShareOf(Screen, Screen).Value);
+
+    // Dragged partly onto the next screen, the slice would run off the picture, so there is none.
+    [Fact]
+    public void A_floating_bar_across_two_screens_has_no_share() =>
+        Assert.True(WallpaperCrop.ShareOf(Screen, new(-100, 826, 216, 1906)).HasNoValue);
+
+    // A screen with no size is not divided by.
+    [Fact]
+    public void A_screen_with_no_size_has_no_share() =>
+        Assert.True(WallpaperCrop.ShareOf(new(0, 0, 0, 0), Bar).HasNoValue);
 }
