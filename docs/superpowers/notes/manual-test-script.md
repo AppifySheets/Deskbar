@@ -404,6 +404,12 @@ Tasks 7 to 9). Needs Claude Code installed and both Claude boxes in Manage ticke
     still has it, in progress). Before that, switch to its workspace and to the session's window, and click and
     double-click the line: it stays on the bar. Ask again: it is back at the top of the bar. Tick an in-progress Claude
     task in the tasks panel, then Undo: it comes back to the panel, not to the bar.
+68a. Ask the session to put a multiple-choice question to you in Claude Code's own dialog (the AskUserQuestion tool,
+    task 493b7ba9). Before you answer: the task is at the top as Waiting on you, its question starts "Answer in the
+    session's terminal:" and names the question and its options, and the workspace blinks. Pick an answer in the
+    terminal: the task goes back to in progress and the question goes. Do it again and press Esc instead: record
+    whether the question stays until the session runs `task answered` (Claude Code's docs do not say whether a
+    dismissed dialog runs the hook).
 69. Ask the session to finish and mark its task done: the line has the same tick box as the rest. Send the session another
     message: the task is in progress again. Mark it done again and close it yourself, then send a message: the
     session says its task was closed and makes a new one only for new work.

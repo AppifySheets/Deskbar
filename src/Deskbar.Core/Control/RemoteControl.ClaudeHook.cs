@@ -43,7 +43,9 @@ namespace Deskbar.Core.Control;
 //   SessionEnd           the session is marked ended; its task stays open ("no live session"). Nothing to read.
 //   PostToolUse          only for a Bash or PowerShell command matching `gh pr create*` (the entries' `if` filter,
 //                        ClaudeHooks): the pull request it opened goes on the session's own task (task e7aa49b1,
-//                        TaskPullRequests). Nothing to read.
+//                        TaskPullRequests). Nothing to read. Also for AskUserQuestion (DialogAnswered, below).
+//   PreToolUse           only for AskUserQuestion, Claude Code's multiple-choice dialog: its questions become the task's
+//                        question, as `task ask` would make them (task 493b7ba9, DialogQuestion). Nothing to read.
 //
 // The three task events do nothing at all, and print nothing, for a HEADLESS session (`claude -p`, SDK runs, scheduled
 // agents; ClaudeHookEvent's rule), when sessions do not keep tasks (AppState.ClaudeTasksInEffect: a hook entry left
@@ -108,9 +110,38 @@ public sealed partial class RemoteControl
         "SessionStart" => Said(SessionStarted(Attended(service, hook), hook, folder)),
         "UserPromptSubmit" => Said(Prompted(Attended(service, hook), hook.SessionId)),
         "SessionEnd" => Ended(service, hook),
+        "PreToolUse" => DialogAsked(service, hook, folder),
+        "PostToolUse" when hook.ToolName == DialogQuestion.Tool => DialogAnswered(service, hook),
         "PostToolUse" => PullRequestsOpened(service, hook),
         _ => Quiet,
     };
+
+    // PRETOOLUSE, only for AskUserQuestion (the entry's matcher, ClaudeHooks; task 493b7ba9). The session is about to open
+    // Claude Code's multiple-choice dialog, which blocks it on Petre exactly as `task ask` would, so its own open task
+    // takes the dialog's questions as its question (DialogQuestion): Waiting on you, Petre's, at the top, and the
+    // workspace asks for him as `task ask` makes it do. A session with no task, or a tool_input with no question,
+    // changes nothing. Silent either way: whatever a PreToolUse hook prints could be read as a decision on the tool.
+    ControlReply DialogAsked(TaskService service, ClaudeHookEvent hook, string? folder)
+    {
+        if (hook.ToolName != DialogQuestion.Tool || hook.DialogQuestion.HasNoValue) return Quiet;
+        service.Board.TaskOf(hook.SessionId)
+            .Tap(t => service.Ask(t.Id, hook.DialogQuestion.Value).Tap(() => Attention(folder)));
+        return Quiet;
+    }
+
+    // POSTTOOLUSE for AskUserQuestion: the dialog returned, so Petre answered it in the terminal, and the task goes back
+    // to In progress as `task answered` takes it (Resolve). ONLY when the task still waits on the very question the
+    // dialog put there: a question the session asked some other way is the session's to settle. A dialog dismissed with
+    // Esc may not run this hook at all (Claude Code's docs do not say; PostToolUseFailure is documented not to fire for
+    // an interruption), and then the task keeps waiting until the session runs `task answered`, which the next prompt's
+    // reminder line asks it to do (SessionBriefing.Prompt), as for any open question.
+    ControlReply DialogAnswered(TaskService service, ClaudeHookEvent hook)
+    {
+        service.Board.TaskOf(hook.SessionId)
+            .Where(t => t.Status == TaskStatus.WaitingOnYou && hook.DialogQuestion.HasValue && t.Question == hook.DialogQuestion)
+            .Tap(t => Resolve(service, t, hook.SessionId));
+        return Quiet;
+    }
 
     // PostToolUse (task e7aa49b1): the pull requests a `gh pr create` printed go on the session's own open task, or on the
     // task it was last on when that is closed (a session can open a pull request after Petre closed its task, and the

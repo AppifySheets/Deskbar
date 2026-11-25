@@ -372,8 +372,9 @@ public sealed class ClaudeSkillTests : IDisposable
 
         ClaudeSkill.Sync(true, true, home, Deskbar);
         var on = System.Text.Json.Nodes.JsonNode.Parse(File.ReadAllText(Settings))!["hooks"]!["PostToolUse"]!.AsArray();
-        Assert.Equal(["Bash", "PowerShell"], on.Select(e => (string)e!["matcher"]!));
-        Assert.Equal(["Bash(gh pr create*)", "PowerShell(gh pr create*)"], on.Select(e => (string)e!["hooks"]![0]!["if"]!));
+        // The two shell entries, then the dialog's (task 493b7ba9), which has no `if`: its matcher is the tool itself.
+        Assert.Equal(["Bash", "PowerShell", "AskUserQuestion"], on.Select(e => (string)e!["matcher"]!));
+        Assert.Equal(["Bash(gh pr create*)", "PowerShell(gh pr create*)", null], on.Select(e => (string?)e!["hooks"]![0]!["if"]));
         Assert.All(on, e => Assert.Contains("claude-task-hook.cmd", (string)e!["hooks"]![0]!["command"]!));
 
         var before = File.ReadAllText(Settings);
@@ -382,6 +383,22 @@ public sealed class ClaudeSkillTests : IDisposable
 
         ClaudeSkill.Sync(true, false, home, Deskbar);
         Assert.Null(System.Text.Json.Nodes.JsonNode.Parse(File.ReadAllText(Settings))!["hooks"]!["PostToolUse"]);
+    }
+
+    // A QUESTION IN CLAUDE CODE'S DIALOG (task 493b7ba9): with the task events comes one PreToolUse entry for the
+    // AskUserQuestion tool on the task script, and it goes with them.
+    [Fact]
+    public void The_dialog_hook_comes_and_goes_with_the_task_events()
+    {
+        Settled(WithABellAndAStartHook);
+
+        ClaudeSkill.Sync(true, true, home, Deskbar);
+        var on = System.Text.Json.Nodes.JsonNode.Parse(File.ReadAllText(Settings))!["hooks"]!["PreToolUse"]!.AsArray();
+        Assert.Equal(["AskUserQuestion"], on.Select(e => (string)e!["matcher"]!));
+        Assert.Contains("claude-task-hook.cmd", (string)on.Single()!["hooks"]![0]!["command"]!);
+
+        ClaudeSkill.Sync(true, false, home, Deskbar);
+        Assert.Null(System.Text.Json.Nodes.JsonNode.Parse(File.ReadAllText(Settings))!["hooks"]!["PreToolUse"]);
     }
 
     // "Teach Claude Code about Deskbar" off takes every entry of Deskbar's, the task ones included, whatever the task
