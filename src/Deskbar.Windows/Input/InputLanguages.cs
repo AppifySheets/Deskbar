@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Runtime.InteropServices;
+using System.Text;
 using CSharpFunctionalExtensions;
 
 namespace Deskbar.Windows.Input;
@@ -49,7 +50,7 @@ public sealed class InputLanguages : IInputLanguages
     public Maybe<InputLanguage> Of(nint window)
     {
         if (window == 0) return Maybe<InputLanguage>.None;
-        var thread = GetWindowThreadProcessId(window, out _);
+        var thread = InputThreadOf(window);
         if (thread == 0) return Maybe<InputLanguage>.None;
         var layout = GetKeyboardLayout(thread);
         return layout == 0 ? Maybe<InputLanguage>.None : Describe(layout);
@@ -64,6 +65,33 @@ public sealed class InputLanguages : IInputLanguages
         return PostMessage(window, WM_INPUTLANGCHANGEREQUEST, 0, language.Layout)
             ? Result.Success()
             : Result.Failure($"Could not switch the input language (error {Marshal.GetLastWin32Error()}).");
+    }
+
+    // The thread that takes the window's keyboard input, whose layout is the language you are typing in.
+    //
+    // For almost every window that is the window's own thread. A CLASSIC CONSOLE (ConsoleWindowClass: cmd, PowerShell
+    // or claude started outside Windows Terminal) is the exception: conhost draws the window and takes its keys, yet
+    // GetWindowThreadProcessId names the program running in it, and that program's thread never sees a language
+    // change. Measured 2026-11-25 with a hidden console: after a switch posted to the window, cmd's thread still
+    // reported no layout at all while conhost's thread followed every switch. The bar then read nothing, painted the
+    // first installed language and stepped from there, which a colleague reported as "it goes from ka to en and
+    // immediately returns to ka" with a claude console in front.
+    //
+    // conhost's thread is found through the console's default IME window: every GUI thread has one, and conhost's
+    // belongs to conhost. The switch itself needs no such care, because a message posted to the console window goes
+    // to the thread that really owns it, conhost's (measured the same day). Where there is no IME window (IMM turned
+    // off), the window's own thread is still the answer, as before.
+    static uint InputThreadOf(nint window)
+    {
+        var ime = IsConsole(window) ? ImmGetDefaultIMEWnd(window) : 0;
+        var imeThread = ime == 0 ? 0 : GetWindowThreadProcessId(ime, out _);
+        return imeThread != 0 ? imeThread : GetWindowThreadProcessId(window, out _);
+    }
+
+    static bool IsConsole(nint window)
+    {
+        var name = new StringBuilder(32);
+        return GetClassNameW(window, name, name.Capacity) > 0 && name.ToString() == "ConsoleWindowClass";
     }
 
     // The code is the TWO letter ISO name, upper case: "KA", "EN", "RU". It was the three letter one first,
@@ -91,5 +119,7 @@ public sealed class InputLanguages : IInputLanguages
     [DllImport("user32.dll")] static extern int GetKeyboardLayoutList(int count, [Out] nint[]? layouts);
     [DllImport("user32.dll")] static extern nint GetKeyboardLayout(uint threadId);
     [DllImport("user32.dll")] static extern uint GetWindowThreadProcessId(nint window, out uint processId);
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern int GetClassNameW(nint window, StringBuilder name, int capacity);
+    [DllImport("imm32.dll")] static extern nint ImmGetDefaultIMEWnd(nint window);
     [DllImport("user32.dll", SetLastError = true, CharSet = CharSet.Unicode)] static extern bool PostMessage(nint window, uint message, nint wParam, nint lParam);
 }
