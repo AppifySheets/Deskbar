@@ -431,6 +431,12 @@ public static class TaskViews
     /// <summary>What goes between a title and its subtask count: " ·" and a no-break space, so the dot stays with the count.</summary>
     public const string SubtaskCountSeparator = " ·\u00A0";
 
+    /// <summary>
+    /// What a closed duplicate is called where a closed task says "Closed" (task links,
+    /// docs/superpowers/specs/2026-11-25-task-links-design.md): it is stored as Closed plus a link, never as a status.
+    /// </summary>
+    public const string DuplicateName = "Duplicate";
+
     /// <summary>The words of each status, as the spec spells them.</summary>
     public static string StatusName(TaskStatus status) => status switch
     {

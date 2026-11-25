@@ -422,6 +422,8 @@ public partial class TasksWindow : Window
         drawn = signature;
         Rebuilds++;
         drawing = true;
+        // The link picker (TasksWindow.Links.cs) is rebuilt with the rows; whether its box had the keyboard is noted first.
+        ForgetLinkBox();
         try
         {
             DrawRows(view);
@@ -442,6 +444,7 @@ public partial class TasksWindow : Window
         }
         renameBox?.Focus();
         commentEditor?.Focus();
+        RefocusLink();
         // A view that arrived during the draw is drawn now.
         Flush();
     }
@@ -561,7 +564,7 @@ public partial class TasksWindow : Window
             $"{view.ShowsSubtasks}",
             string.Join('|', view.Places.Select(p => $"{p.IsGroup}{p.Workspace}{p.Name}{(p.Colour as SolidColorBrush)?.Color}")),
             view.EmptyText,
-            $"{renaming}{editingComment}{string.Join(",", settledOpen.Order())}|{string.Join(",", earlierOpen.Order())}|{string.Join(",", longOpen.Order())}",
+            $"{renaming}{editingComment}{linking}{string.Join(",", settledOpen.Order())}|{string.Join(",", earlierOpen.Order())}|{string.Join(",", longOpen.Order())}",
             // The two width flags (Task 8): which line is drawn and whether the view switch shows. Not the width itself, so
             // a grip drag that crosses neither threshold redraws nothing.
             $"{view.Matrix}{view.MatrixAllowed}{view.Slim}",
@@ -577,6 +580,8 @@ public partial class TasksWindow : Window
                 $"{r.Id}|{r.Title}|{r.Detail}|{r.Description}|{r.Status}|{r.Claudes}|{r.Assignee.Id}|{r.Sessions}|{r.SessionCount}|{r.LiveCount}|{PlaceSignature(r.Place)}|{r.CommentCount}|" +
                 $"{r.Expanded}|{r.Closing}|{r.Important}|{r.Urgent}|{r.WorkingCount}|{r.ParentTitle}|{r.ParentId}|{r.SubtaskCount}|{r.ClaudeWorking}|{r.Nested}|" +
                 string.Join('\u0004', r.Subtasks.Select(c => $"{c.Id}{c.Title}{c.Status}{c.StatusLine}")) + "|" + string.Join('\u0004', r.SessionList.Select(s => $"{s.Id}{s.Joined}{s.State}")) + "|" +
+                // Task links: the thread's link lines, and the status words of a closed duplicate.
+                string.Join('\u0004', r.Links.Select(l => $"{l.Kind}{l.Id}{l.Title}{l.Status}")) + $"|{r.DuplicateOfTitle}|" +
                 string.Join('\u0004', r.Comments.Select(c => $"{c.Id}{c.Author}{c.When}{c.Markdown}{c.Settled}")))))));
 
     static string PlaceSignature(TaskPlaceChoice place) => $"{place.Workspace}{place.Name}{(place.Colour as SolidColorBrush)?.Color}";
@@ -1076,7 +1081,11 @@ public partial class TasksWindow : Window
 
     // What a line's tooltip says: its status and title, or that it was just closed.
     static string LineTip(TaskRowView row) =>
-        row.Closing ? "Closed. Undo brings it back." : $"{TaskViews.StatusName(row.Status)}: {row.Title}";
+        row.Closing ? "Closed. Undo brings it back." : $"{StatusWords(row)}: {row.Title}";
+
+    // A line's status in words: "Duplicate of <title>" for a closed duplicate (task links), the status's name otherwise.
+    static string StatusWords(TaskRowView row) =>
+        row.DuplicateOfTitle is { } original ? $"{TaskViews.DuplicateName} of {original}" : TaskViews.StatusName(row.Status);
 
     // A slim line's tooltip: its title (or that it was just closed), then what the line has no columns for: the status the
     // full line shows in its chip, the age and the assignee ("Done · 5h · Claude"). The title alone heads it, without the
@@ -1090,7 +1099,7 @@ public partial class TasksWindow : Window
     TextBlock SlimTip(TaskRowView row, string head)
     {
         var tip = new TextBlock { Tag = "task-line-tip" };
-        slimTips[row.Id] = (tip, row.SessionCount > SlimSquares ? $"{head}\n{row.Sessions}" : head, TaskViews.StatusName(row.Status),
+        slimTips[row.Id] = (tip, row.SessionCount > SlimSquares ? $"{head}\n{row.Sessions}" : head, StatusWords(row),
             row.Created, row.Assignee.Name);
         WriteSlimTip(slimTips[row.Id], Now());
         return tip;
@@ -1634,6 +1643,8 @@ public partial class TasksWindow : Window
     string ThreadLayoutKey(TaskRowView row) =>
         !row.Expanded ? ""
         : string.Join(',', row.SessionList.Select(s => s.Id)) + "/" + string.Join(',', row.Subtasks.Select(c => c.Id)) + "/"
+          // Task links: the link lines and an open picker sit above the comments, so each moves them.
+          + string.Join(',', row.Links.Select(l => $"{l.Kind}{l.Id}")) + (linking is { } l && l.Task == row.Id ? $"picker{l.Duplicate}" : "") + "/"
           + string.Join(',', ThreadComments(row).Shown.Select(c => $"{c.Id}{(longOpen.Contains(c.Id) ? "+" : "")}"))
           + $"{settledOpen.Contains(row.Id)}{earlierOpen.Contains(row.Id)}";
 
@@ -1679,6 +1690,12 @@ public partial class TasksWindow : Window
             add.Margin = new Thickness(0, 0, 0, 8);
             panel.Children.Add(add);
         }
+        // TASK LINKS (docs/superpowers/specs/2026-11-25-task-links-design.md): what the task duplicates, its duplicates and
+        // its related tasks, each a button that shows that task, then the link picker while "Duplicate of…" or "Related
+        // to…" has it open on this task.
+        row.Links.ToList().ForEach(link => panel.Children.Add(LinkEntry(row.Id, link)));
+        if (row.Links.Count > 0) ((FrameworkElement)panel.Children[^1]).Margin = new Thickness(0, 0, 0, 8);
+        if (linking is { } picking && picking.Task == row.Id) panel.Children.Add(LinkPicker(row.Id, picking.Duplicate));
         var settledCount = row.Comments.Count(c => c.Settled);
         var unfolded = settledOpen.Contains(row.Id);
         var (shown, earlier) = ThreadComments(row);
@@ -2346,6 +2363,16 @@ public partial class TasksWindow : Window
         menu.Items.Add(assign);
         menu.Items.Add(Item("Move to…", () => Dispatcher.BeginInvoke(() => OpenMoveMenu(id, row.Place.Workspace),
             System.Windows.Threading.DispatcherPriority.Input)));
+        // TASK LINKS (Petre's pick: a menu item with a search picker; TasksWindow.Links.cs). Each opens the picker in the
+        // task's thread once this menu has closed, so its box can take the keyboard. "Duplicate of…" on any line not
+        // waiting out its undo, closed ones too (a closed task can still turn out to be a duplicate); a task already a
+        // duplicate is reopened, not re-pointed, so it has none.
+        if (Actions?.LinkCandidates is not null && !row.Closing)
+        {
+            if (row.DuplicateOfTitle is null)
+                menu.Items.Add(Item(DuplicateOfText, () => Dispatcher.BeginInvoke(() => BeginLink(id, duplicate: true), System.Windows.Threading.DispatcherPriority.Input)));
+            menu.Items.Add(Item(RelatedToText, () => Dispatcher.BeginInvoke(() => BeginLink(id, duplicate: false), System.Windows.Threading.DispatcherPriority.Input)));
+        }
         // The goal the task counts toward (goals plan, Task 6): a plain submenu, only while goals exist (ruling G1).
         if (latest?.ShowsGoals == true)
         {

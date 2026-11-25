@@ -498,6 +498,11 @@ description into large boxes, with a Preview tab for the markdown; Ctrl+S or Ctr
 posts a comment. Each task has one window, which opens on the desktop you are on, and every task window opens where you
 last left one, at the size you gave it. A script opens one with `deskbar.cmd task open <id>`.
 
+Tasks can be linked. "Duplicate of…" on a task's menu in the tasks panel closes it as a duplicate of another task
+you pick by typing part of its title, and the closed list says "Duplicate of" that task; "Related to…" links two
+tasks, and both threads list the link. A Claude session looks for the same or related work before it starts, reads
+what the linked tasks' sessions did, and closes its own task as a duplicate when the work is already done elsewhere.
+
 A task you cannot do anything about yet can be snoozed. In the tasks panel, the moon beside a line's two toggles
 (or "Snooze" on its menu) hides it for 1 hour, 3 hours, until 09:00 tomorrow or until 09:00 next Monday. A snoozed
 task leaves the bar and the panel's lists and waits under the panel's "Snoozed" chip, which says when each one
