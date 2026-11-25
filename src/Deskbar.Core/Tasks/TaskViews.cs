@@ -147,6 +147,16 @@ public static class TaskViews
         .ToArray();
 
     /// <summary>
+    /// Every task on the board in the section it belongs to, whatever its status: the open view's groups (Waiting on you,
+    /// then the quadrants), then Snoozed, then Closed, empty groups left out. No filter applies. The search by id's view
+    /// (TaskSearch.Found, task 6e4dc116): a task found by its id is shown wherever it is, closed included.
+    /// </summary>
+    public static IReadOnlyList<TaskGroup> Everywhere(TaskBoard board) =>
+        new[] { TaskFilter.Open, TaskFilter.Snoozed, TaskFilter.Closed }
+            .SelectMany(filter => Grouped(board, filter, TaskWorkspaceFilter.All))
+            .ToArray();
+
+    /// <summary>
     /// The Matrix (Ruling 28): Covey's four cells, I to IV, always all four. Each lists its quadrant's open tasks in
     /// their order, the pinned ones first (waiting on Petre, then Done; TaskBoard.Pinned), on top of their own
     /// quadrant's cell, the questions drawn orange as everywhere, then the ones Claude is at work on (task 93fa0b9b),
